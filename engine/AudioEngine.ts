@@ -1,4 +1,5 @@
 
+
 import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad } from '../types';
 import { ReverbNode } from '../plugins/ReverbPlugin';
 import { SyncDelayNode } from '../plugins/DelayPlugin';
@@ -18,6 +19,8 @@ import { AudioSampler } from './AudioSampler';
 import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { DrumRackNode } from './DrumRackNode'; // NEW
+// FIX: Import novaBridge to manage VST audio streaming.
+import { novaBridge } from '../services/NovaBridge';
 
 interface TrackDSP {
   input: GainNode;          
@@ -103,6 +106,8 @@ export class AudioEngine {
   public sampleRate: number = 44100;
   public latency: number = 0;
   private currentBpm: number = 120;
+  // FIX: Add property to track active VST plugin for streaming management.
+  private activeVSTPlugin: { trackId: string, pluginId: string } | null = null;
 
   constructor() {}
 
@@ -601,8 +606,9 @@ export class AudioEngine {
       case 'REVERB':
         node = new ReverbNode(this.ctx);
         break;
+      // FIX: Pass the current BPM to the SyncDelayNode constructor for accurate tempo-synced delays.
       case 'DELAY':
-        node = new SyncDelayNode(this.ctx);
+        node = new SyncDelayNode(this.ctx, bpm);
         break;
       case 'COMPRESSOR':
         node = new CompressorNode(this.ctx);
@@ -781,6 +787,81 @@ export class AudioEngine {
     let sum = 0;
     for (let i = 0; i < data.length; i++) { const sample = (data[i] - 128) / 128; sum += sample * sample; }
     return Math.sqrt(sum / data.length);
+  }
+  // FIX: Implement missing methods for VST streaming and atomic updates.
+  public async enableVSTAudioStreaming(trackId: string, pluginId: string) {
+    if (!this.ctx) await this.init();
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp) {
+        console.error(`[AudioEngine] VST Streaming: DSP for track ${trackId} not found.`);
+        return;
+    }
+    
+    const pluginEntry = dsp.pluginChain.get(pluginId);
+    if (!pluginEntry) {
+        console.error(`[AudioEngine] VST Streaming: Plugin ${pluginId} not found on track ${trackId}.`);
+        return;
+    }
+
+    if (this.activeVSTPlugin && (this.activeVSTPlugin.trackId !== trackId || this.activeVSTPlugin.pluginId !== pluginId)) {
+        this.disableVSTAudioStreaming();
+    }
+    
+    // Disconnect bypass
+    try {
+        pluginEntry.input.disconnect(pluginEntry.output);
+    } catch(e) { /* might not be connected if already disconnected */ }
+
+    await novaBridge.initAudioStreaming(this.ctx!, pluginEntry.input, pluginEntry.output);
+    this.activeVSTPlugin = { trackId, pluginId };
+  }
+
+  public disableVSTAudioStreaming() {
+    if (!this.activeVSTPlugin) return;
+
+    const { trackId, pluginId } = this.activeVSTPlugin;
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp || !dsp.pluginChain.has(pluginId)) {
+        this.activeVSTPlugin = null;
+        return;
+    }
+    const pluginEntry = dsp.pluginChain.get(pluginId)!;
+
+    novaBridge.stopAudioStreaming();
+    
+    // Restore bypass
+    try {
+        pluginEntry.input.disconnect(); // Disconnect from worklet
+    } catch(e) {}
+    pluginEntry.input.connect(pluginEntry.output);
+
+    this.activeVSTPlugin = null;
+  }
+
+  public setBpm(bpm: number) {
+    this.currentBpm = bpm;
+    this.tracksDSP.forEach(dsp => {
+        dsp.pluginChain.forEach(p => {
+            if (p.instance && typeof p.instance.updateParams === 'function') {
+                p.instance.updateParams({ bpm: this.currentBpm });
+            }
+        });
+    });
+  }
+
+  public setTrackVolume(trackId: string, volume: number, isMuted: boolean) {
+    const dsp = this.tracksDSP.get(trackId);
+    if (dsp && this.ctx) {
+        const targetGain = isMuted ? 0 : volume;
+        dsp.gain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.015);
+    }
+  }
+
+  public setTrackPan(trackId: string, pan: number) {
+    const dsp = this.tracksDSP.get(trackId);
+    if (dsp && this.ctx) {
+        dsp.panner.pan.setTargetAtTime(pan, this.ctx.currentTime, 0.015);
+    }
   }
 }
 
