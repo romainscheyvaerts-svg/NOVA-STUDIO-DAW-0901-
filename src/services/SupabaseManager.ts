@@ -1,9 +1,9 @@
 
-import { supabase } from '../../services/supabase';
+import { supabase } from './supabase';
 import { User, DAWState, PendingUpload, Instrument } from '../types';
-import { audioBufferToWav } from '../../services/AudioUtils';
+import { audioBufferToWav } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
-import { SessionSerializer } from '../../services/SessionSerializer';
+import { SessionSerializer } from './SessionSerializer';
 
 export class SupabaseManager {
   private static instance: SupabaseManager;
@@ -40,8 +40,28 @@ export class SupabaseManager {
   public getPublicInstrumentUrl(pathOrUrl: string): string {
     if (!pathOrUrl) return '';
     
-    // Si c'est déjà une URL complète (Blob local ou HTTPS externe comme Drive/Edge Function), on la retourne telle quelle
-    if (pathOrUrl.startsWith('http') || pathOrUrl.startsWith('blob:')) {
+    // Si c'est un blob local, le retourner tel quel
+    if (pathOrUrl.startsWith('blob:')) {
+        return pathOrUrl;
+    }
+    
+    // ==== GESTION DES URLs GOOGLE DRIVE ====
+    // Détecter les URLs Google Drive et les convertir vers l'Edge Function proxy
+    if (pathOrUrl.includes('drive.google.com')) {
+        const fileId = this.extractDriveFileId(pathOrUrl);
+        if (fileId) {
+            // Utiliser l'Edge Function Supabase comme proxy
+            const proxyUrl = `https://sqduhfckgvyezdiubeei.supabase.co/functions/v1/stream-drive-audio?id=${fileId}`;
+            console.log("[SupabaseManager] URL Google Drive convertie:", proxyUrl);
+            return proxyUrl;
+        } else {
+            console.warn("[SupabaseManager] Impossible d'extraire l'ID du fichier Drive:", pathOrUrl);
+            return pathOrUrl;
+        }
+    }
+    
+    // Si c'est déjà une URL HTTPS (autre que Drive), la retourner telle quelle
+    if (pathOrUrl.startsWith('http')) {
         return pathOrUrl;
     }
 
@@ -52,6 +72,25 @@ export class SupabaseManager {
     }
 
     return pathOrUrl;
+  }
+
+  /**
+   * Extrait l'ID du fichier depuis une URL Google Drive
+   */
+  private extractDriveFileId(url: string): string | null {
+    // Format: /file/d/FILE_ID/
+    const fileMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (fileMatch) return fileMatch[1];
+    
+    // Format: ?id=FILE_ID
+    const idMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (idMatch) return idMatch[1];
+    
+    // Format: /folders/FILE_ID
+    const folderMatch = url.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    if (folderMatch) return folderMatch[1];
+    
+    return null;
   }
 
   /**

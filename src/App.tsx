@@ -21,7 +21,7 @@ import ExportModal from './components/ExportModal';
 import AudioSettingsPanel from './components/AudioSettingsPanel'; 
 import PluginManager from './components/PluginManager'; 
 import { supabaseManager } from './services/SupabaseManager';
-import { SessionSerializer } from '../services/SessionSerializer';
+import { SessionSerializer } from './services/SessionSerializer';
 import { getAIProductionAssistance } from './services/AIService';
 import { novaBridge } from './services/NovaBridge';
 import { ProjectIO } from './services/ProjectIO';
@@ -171,7 +171,7 @@ export default function App() {
 
   const initialState: DAWState = {
     id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM, isPlaying: false, isRecording: false, currentTime: 0,
-    isLoopActive: false, loopStart: 0, loopEnd: 0,
+    isLoopActive: false, loopStart: 0, loopEnd: 8,
     tracks: [
       { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
       { id: 'track-rec-main', name: 'REC', type: TrackType.AUDIO, color: '#ff0000', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#ff0000')], totalLatency: 0 },
@@ -194,21 +194,14 @@ export default function App() {
   const stateRef = useRef(state); 
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks)); }, [state.tracks]); 
+  useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
   
   useEffect(() => {
     let animId: number;
     const updateLoop = () => {
       if (stateRef.current.isPlaying) {
          const time = audioEngine.getCurrentTime();
-         const { isLoopActive, loopStart, loopEnd, tracks } = stateRef.current;
-         
-         if (isLoopActive && loopEnd > loopStart && time >= loopEnd) {
-           audioEngine.seekTo(loopStart, tracks, true);
-           setVisualState({ currentTime: loopStart });
-         } else {
-           setVisualState({ currentTime: time });
-         }
-         
+         setVisualState({ currentTime: time });
          animId = requestAnimationFrame(updateLoop);
       }
     };
@@ -421,7 +414,18 @@ export default function App() {
   }, [setState]);
 
   const handleUniversalAudioImport = async (source: string | File, name: string) => { /* ... */ };
-  useEffect(() => { (window as any).DAW_CORE = { handleAudioImport: (url: string, name: string) => handleUniversalAudioImport(url, name) }; }, []);
+  useEffect(() => { 
+      (window as any).DAW_CORE = { 
+          handleAudioImport: (url: string, name: string) => handleUniversalAudioImport(url, name)
+      }; 
+      // EXPOSE STATE GETTER
+      (window as any).DAW_CONTROL = {
+          // ... (Existing)
+          loadDrumSample: handleLoadDrumSample,
+          // NEW: SAFE ACCESSOR
+          getState: () => stateRef.current
+      };
+  }, []);
 
   const handleMoveClip = useCallback((sourceTrackId: string, destTrackId: string, clipId: string) => { /* ... */ }, [setState]);
   const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => { /* ... */ }, [setState]);
@@ -435,7 +439,8 @@ export default function App() {
   useEffect(() => {
     (window as any).DAW_CONTROL = {
       // ... (All functions mapped) ...
-      loadDrumSample: handleLoadDrumSample
+      loadDrumSample: handleLoadDrumSample,
+      getState: () => stateRef.current
     };
   }, [handleUpdateBpm, handleUpdateTrack, handleTogglePlay, handleStop, handleSeek, handleDuplicateTrack, handleCreateTrack, handleDeleteTrack, handleToggleBypass, handleLoadDrumSample, handleEditClip]);
 
@@ -455,14 +460,7 @@ export default function App() {
           onBpmChange={handleUpdateBpm}
           isRecording={state.isRecording}
           isLoopActive={state.isLoopActive}
-          onToggleLoop={() => setState(p => {
-            const newLoopActive = !p.isLoopActive;
-            if (newLoopActive && p.loopEnd <= p.loopStart) {
-              const barDuration = (60 / p.bpm) * 4;
-              return { ...p, isLoopActive: true, loopStart: 0, loopEnd: barDuration * 4 };
-            }
-            return { ...p, isLoopActive: newLoopActive };
-          })}
+          onToggleLoop={() => setState(p => ({...p, isLoopActive: !p.isLoopActive}))}
           onStop={handleStop}
           onTogglePlay={handleTogglePlay}
           onToggleRecord={handleToggleRecord}

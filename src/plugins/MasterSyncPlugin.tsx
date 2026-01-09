@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { AudioAnalysisEngine } from '../engine/AudioAnalysisEngine';
-import { NOTES } from '../utils/constants';
+import { NOTES } from './AutoTunePlugin';
 
 /**
  * MODULE FX_14 : MASTER SYNC (ANALYSE & INJECTION)
@@ -87,6 +86,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
   useEffect(() => {
     const interval = setInterval(() => {
       const current = node.getParams();
+      // On compare superficiellement pour éviter les updates infinis si identiques
       if (JSON.stringify(current) !== JSON.stringify(params)) {
           setParams({ ...current });
           if (onParamsChange) onParamsChange(current);
@@ -98,6 +98,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
   const handleStartAnalysis = async () => {
     if (!window.DAW_CONTROL) return;
     
+    // Récupérer le buffer de la piste INSTRUMENTAL ou de la piste actuelle
     const buffer = window.DAW_CONTROL.getInstrumentalBuffer();
     
     if (!buffer) {
@@ -112,20 +113,29 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
   const applyFullSync = () => {
     if (!window.DAW_CONTROL || !params.hasResult) return;
 
+    // 1. Appliquer BPM
     window.DAW_CONTROL.setBpm(params.detectedBpm);
 
+    // 2. Appliquer Auto-Tune Scale
     const scale = params.isMinor ? 'MINOR' : 'MAJOR';
     window.DAW_CONTROL.syncAutoTuneScale(params.detectedKey, scale);
 
+    // 3. Calculer l'alignement sur la grille (Auto-Align Drop)
+    // On veut caler le 'detectedTransient' sur le début d'une mesure forte (5, 9, 13, 17)
+    // Mesure 1 = 0s
+    // Durée d'une mesure (4 temps)
     const secondsPerBar = (60 / params.detectedBpm) * 4;
     
+    // Cibles logiques (Début Mesure 5, 9, 13, 17)
+    // On assume un intro de 4, 8, 12 ou 16 mesures
     const targets = [
-        secondsPerBar * 4,
-        secondsPerBar * 8,
-        secondsPerBar * 12,
-        secondsPerBar * 16
+        secondsPerBar * 4,  // Mesure 5
+        secondsPerBar * 8,  // Mesure 9
+        secondsPerBar * 12, // Mesure 13
+        secondsPerBar * 16  // Mesure 17
     ];
-    
+
+    // Trouver la cible la plus proche du transient détecté
     let bestTarget = targets[0];
     let minDiff = Infinity;
 
@@ -138,17 +148,26 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
     });
 
     const newStartTime = bestTarget - params.detectedTransient;
+    
+    // On applique le déplacement du clip
+    // Note: trackId doit être passé au composant, sinon on assume 'instrumental'
     const targetTrackId = trackId || 'instrumental';
     
-    const dawState = window.DAW_CONTROL.getState();
-    const track = dawState.tracks.find(t => t.id === targetTrackId);
+    // On récupère l'ID du clip (supposé unique ou premier) via le state global
+    const dawState = window.DAW_CONTROL?.getState?.() || { tracks: [] };
+    const track = dawState.tracks?.find((t: any) => t.id === targetTrackId);
     
     if (track && track.clips.length > 0) {
+        // On aligne le premier clip
         const clipId = track.clips[0].id;
+        
+        // Si le calcul donne un start négatif (le drop est trop tôt), on le met à 0 ou on crop
+        // Ici on déplace simplement le start time
         if ((window.DAW_CONTROL as any).editClip) {
             (window.DAW_CONTROL as any).editClip(targetTrackId, clipId, 'UPDATE_PROPS', { start: Math.max(0, newStartTime) });
         }
         
+        // Update UI info
         const barNumber = Math.round(bestTarget / secondsPerBar) + 1;
         node.updateParams({ alignmentApplied: `Drop calé Mesure ${barNumber}` });
     }
@@ -168,6 +187,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
         </div>
       </div>
 
+      {/* ZONE D'ANALYSE PRINCIPALE */}
       <div className="relative group">
         <div className="grid grid-cols-2 gap-6">
           <div className="bg-black/60 rounded-[32px] border border-white/5 p-6 flex flex-col items-center justify-center space-y-2 group-hover:border-cyan-500/30 transition-all min-h-[140px]">
@@ -186,6 +206,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
           </div>
         </div>
 
+        {/* BOUTON DE DÉTECTION CENTRAL */}
         {(!params.hasResult || params.isAnalyzing) && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#0c0d10]/40 backdrop-blur-sm rounded-[32px] animate-in fade-in duration-300">
             {params.isAnalyzing ? (
@@ -206,6 +227,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
         )}
       </div>
 
+      {/* BARRE DE PROGRESSION */}
       {(params.isAnalyzing || params.analysisProgress > 0) && !params.hasResult && (
         <div className="space-y-3 px-2">
           <div className="flex justify-between items-end">
@@ -218,6 +240,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
         </div>
       )}
 
+      {/* MESSAGE D'ERREUR */}
       {params.error && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-center space-x-4 animate-in slide-in-from-top-2">
           <i className="fas fa-exclamation-triangle text-red-500 text-sm"></i>
@@ -225,6 +248,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
         </div>
       )}
 
+      {/* RESULTAT ALIGNEMENT */}
       {params.alignmentApplied && (
          <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4 flex items-center justify-center space-x-4 animate-in slide-in-from-top-2">
             <i className="fas fa-check-circle text-green-500 text-sm"></i>
@@ -232,6 +256,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
          </div>
       )}
 
+      {/* BOUTON D'INJECTION GLOBAL */}
       <div className="flex flex-col space-y-4">
         <button 
           onClick={applyFullSync}
