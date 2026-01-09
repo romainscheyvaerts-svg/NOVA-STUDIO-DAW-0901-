@@ -1,0 +1,7 @@
+{
+  "name": "NOVA STUDIO DAW 0901",
+  "description": "A professional-grade Digital Audio Workstation simulation featuring real-time Web Audio DSP, multi-track arrangement, a full console mixer, and AI-assisted production tools.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
