@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
 import { audioEngine } from './engine/AudioEngine';
@@ -20,7 +21,7 @@ import ExportModal from './components/ExportModal';
 import AudioSettingsPanel from './components/AudioSettingsPanel'; 
 import PluginManager from './components/PluginManager'; 
 import { supabaseManager } from './services/SupabaseManager';
-import { SessionSerializer } from './services/SessionSerializer';
+import { SessionSerializer } from '../services/SessionSerializer';
 import { getAIProductionAssistance } from './services/AIService';
 import { novaBridge } from './services/NovaBridge';
 import { ProjectIO } from './services/ProjectIO';

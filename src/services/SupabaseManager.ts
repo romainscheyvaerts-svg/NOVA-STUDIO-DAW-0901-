@@ -1,9 +1,9 @@
 
-import { supabase } from './supabase';
+import { supabase } from '../../services/supabase';
 import { User, DAWState, PendingUpload, Instrument } from '../types';
-import { audioBufferToWav } from './AudioUtils';
+import { audioBufferToWav } from '../../services/AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
-import { SessionSerializer } from './SessionSerializer';
+import { SessionSerializer } from '../../services/SessionSerializer';
 
 export class SupabaseManager {
   private static instance: SupabaseManager;
@@ -48,10 +48,6 @@ export class SupabaseManager {
     // Sinon, on génère l'URL publique depuis le bucket 'instruments'
     if (supabase) {
         const { data } = supabase.storage.from('instruments').getPublicUrl(pathOrUrl);
-        
-        // DEBUG: Vérifiez cette ligne dans la console si l'erreur persiste
-        // console.log("Generated Supabase URL:", data.publicUrl);
-        
         return data.publicUrl;
     }
 
@@ -424,8 +420,6 @@ export class SupabaseManager {
 
     return data;
   }
-
-  // ... (Reste des méthodes inchangées : listUserSessions, loadUserSession, hydrateAudioBuffers, etc.)
 
   public async listUserSessions() {
     if (!supabase || !this.currentUser) return [];

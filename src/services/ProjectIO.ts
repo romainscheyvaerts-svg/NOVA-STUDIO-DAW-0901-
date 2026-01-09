@@ -1,7 +1,9 @@
+
 import JSZip from 'jszip';
 import { DAWState, Clip } from '../types';
-import { audioBufferToWav } from './AudioUtils';
+import { audioBufferToWav } from '../../services/AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
+import { SessionSerializer } from '../../services/SessionSerializer';
 
 export class ProjectIO {
   
@@ -13,7 +15,7 @@ export class ProjectIO {
     const zip = new JSZip();
     
     // 1. Clonage de l'état pour modification (on retire les buffers lourds du JSON)
-    const serializableState = JSON.parse(JSON.stringify(state));
+    const serializableState = JSON.parse(JSON.stringify(SessionSerializer.serializeSession(state)));
     
     const audioFolder = zip.folder("audio");
     

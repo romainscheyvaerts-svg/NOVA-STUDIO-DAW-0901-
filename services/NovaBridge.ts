@@ -1,3 +1,4 @@
+
 import { PluginMetadata } from '../types';
 
 export interface NovaStatus {
@@ -19,6 +20,7 @@ class NovaBridgeService {
   private listeners: ((status: NovaStatus) => void)[] = [];
   private pluginListeners: ((plugins: PluginMetadata[]) => void)[] = [];
   private uiListeners: Set<(image: string) => void> = new Set();
+  private audioProcessedListeners: Set<(channels: Float32Array[]) => void> = new Set();
   
   // Paramètres VST
   private paramListeners: Set<(params: PluginParameter[]) => void> = new Set();
@@ -27,6 +29,10 @@ class NovaBridgeService {
   
   private pingInterval: number | null = null;
   private reconnectTimer: number | null = null;
+
+  // --- AUDIO STREAMING ---
+  private audioWorkletNode: AudioWorkletNode | null = null;
+  private audioCtx: AudioContext | null = null;
 
   private state: NovaStatus = {
     isConnected: false,
@@ -76,9 +82,7 @@ class NovaBridgeService {
         }
       };
 
-      // FIX: The `onerror` handler was logging the error event object directly, resulting in an unhelpful "[object Object]" message. It has been updated to log a clear, informative warning instead, improving debuggability.
       this.ws.onerror = () => {
-        // Ne rien logger d'intrusif ici, la déconnexion sera gérée par onclose
         if (this.state.isConnected) {
             console.warn('❌ [Nova Bridge] Erreur de communication.');
         }
@@ -86,7 +90,6 @@ class NovaBridgeService {
       };
 
     } catch (e) {
-      // Erreur synchrone lors de la création
       console.error('❌ [Nova Bridge] Init Exception');
     }
   }
@@ -120,7 +123,6 @@ class NovaBridgeService {
                 this.loadedPluginName = msg.name || '';
                 this.updateState({ lastMessage: `Chargé: ${msg.name}` });
                 
-                // Gérer les paramètres reçus avec le chargement
                 if (Array.isArray(msg.parameters)) {
                     this.currentParams = msg.parameters;
                     this.notifyParams();
@@ -139,7 +141,6 @@ class NovaBridgeService {
             break;
         
         case 'PARAM_CHANGED':
-            // Mettre à jour la valeur locale
             const param = this.currentParams.find(p => p.name === msg.name);
             if (param) {
                 param.value = msg.value;
@@ -157,6 +158,25 @@ class NovaBridgeService {
         case 'UI_FRAME':
             if (msg.image) {
                 this.notifyUI(msg.image);
+            }
+            break;
+        
+        case 'AUDIO_PROCESSED':
+            if (Array.isArray(msg.channels)) {
+                const processedChannels = msg.channels.map(
+                    (ch: number[]) => new Float32Array(ch)
+                );
+                
+                // 1. Notify generic listeners
+                this.notifyAudioProcessed(processedChannels);
+
+                // 2. Send to AudioWorklet if active (DAW streaming)
+                if (this.audioWorkletNode) {
+                    this.audioWorkletNode.port.postMessage({
+                        type: 'processed',
+                        channels: msg.channels
+                    });
+                }
             }
             break;
 
@@ -186,6 +206,68 @@ class NovaBridgeService {
         this.ws.send(JSON.stringify(msg));
     }
   }
+
+  // --- AUDIO STREAMING METHODS ---
+
+  public processAudio(channels: Float32Array[], sampleRate: number = 44100): void {
+      const channelsData = channels.map(ch => Array.from(ch));
+      this.send({
+          action: 'PROCESS_AUDIO',
+          channels: channelsData,
+          sampleRate: sampleRate
+      });
+  }
+
+  public subscribeToAudioProcessed(callback: (channels: Float32Array[]) => void) {
+      this.audioProcessedListeners.add(callback);
+      return () => { this.audioProcessedListeners.delete(callback); };
+  }
+
+  private notifyAudioProcessed(channels: Float32Array[]) {
+      this.audioProcessedListeners.forEach(cb => cb(channels));
+  }
+
+  public async initAudioStreaming(
+    audioContext: AudioContext,
+    trackDSPInput: AudioNode,
+    trackDSPOutput: AudioNode
+  ): Promise<void> {
+    this.audioCtx = audioContext;
+    
+    try {
+      // Assuming VSTBridgeProcessor is available at this path
+      await this.audioCtx.audioWorklet.addModule('/worklets/VSTBridgeProcessor.js');
+      
+      this.audioWorkletNode = new AudioWorkletNode(this.audioCtx, 'vst-bridge-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2]
+      });
+      
+      trackDSPInput.connect(this.audioWorkletNode);
+      this.audioWorkletNode.connect(trackDSPOutput);
+      
+      this.audioWorkletNode.port.onmessage = (event) => {
+        if (event.data.type === 'audio') {
+          this.processAudio(event.data.samples, this.audioCtx?.sampleRate || 44100);
+        }
+      };
+      
+      console.log('✅ [Nova Bridge] Audio streaming initialized');
+    } catch (error) {
+      console.error('❌ [Nova Bridge] Failed to init audio streaming:', error);
+    }
+  }
+
+  public stopAudioStreaming() {
+    if (this.audioWorkletNode) {
+      this.audioWorkletNode.disconnect();
+      this.audioWorkletNode = null;
+    }
+    console.log('🛑 [Nova Bridge] Audio streaming stopped');
+  }
+
+  // --- API PUBLIQUE COMMANDES ---
 
   public loadPlugin(path: string, sampleRate: number = 44100) {
       this.send({ action: 'LOAD_PLUGIN', path, sample_rate: sampleRate });
@@ -220,10 +302,10 @@ class NovaBridgeService {
   public setParam(name: string, value: number) {
       this.send({ action: 'SET_PARAM', name, value });
       
-      // Mise à jour optimiste locale
       const param = this.currentParams.find(p => p.name === name);
       if (param) {
           param.value = value;
+          this.notifyParams();
       }
   }
 

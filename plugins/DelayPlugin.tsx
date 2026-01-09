@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 import { PluginParameter } from '../types';
 
@@ -40,8 +41,8 @@ export class SyncDelayNode {
 
   private params: DelayParams;
 
-  // FIX: Constructor updated to take only one argument (AudioContext) as required by the call site in AudioEngine.
-  constructor(ctx: AudioContext) {
+  // FIX: Constructor updated to take bpm argument as required by the call site in AudioEngine.
+  constructor(ctx: AudioContext, bpm: number) {
     this.ctx = ctx;
     this.params = {
       division: '1/4',
@@ -49,7 +50,7 @@ export class SyncDelayNode {
       damping: 5000,
       mix: 0.3,
       pingPong: false,
-      bpm: 120, // Default BPM
+      bpm: bpm || 120, // Default BPM from argument
       isEnabled: true,
     };
 

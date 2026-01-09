@@ -1,3 +1,4 @@
+
 import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad } from '../types';
 import { ReverbNode } from '../plugins/ReverbPlugin';
 import { SyncDelayNode } from '../plugins/DelayPlugin';
@@ -17,6 +18,7 @@ import { AudioSampler } from './AudioSampler';
 import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { DrumRackNode } from './DrumRackNode'; // NEW
+import { novaBridge } from '../services/NovaBridge';
 
 interface TrackDSP {
   input: GainNode;          
@@ -91,12 +93,18 @@ export class AudioEngine {
   
   private armingPromise: Promise<void> | null = null;
 
+  // --- LOOP MANAGEMENT ---
+  private isLoopActive: boolean = false;
+  private loopStart: number = 0;
+  private loopEnd: number = 0;
+
   // --- DEVICE MANAGEMENT ---
   private currentInputDeviceId: string = 'default';
   private currentOutputDeviceId: string = 'default';
   public sampleRate: number = 44100;
   public latency: number = 0;
   private currentBpm: number = 120;
+  private activeVSTPlugin: { trackId: string, pluginId: string } | null = null;
 
   constructor() {}
 
@@ -179,6 +187,12 @@ export class AudioEngine {
   }
 
   public setDelayCompensation(enabled: boolean) { this.isDelayCompEnabled = enabled; }
+  
+  public setLoop(active: boolean, start: number, end: number) {
+    this.isLoopActive = active;
+    this.loopStart = start;
+    this.loopEnd = end;
+  }
   
   public playTestTone() { /* ... */ }
 
@@ -408,7 +422,20 @@ export class AudioEngine {
   public getCurrentTime(): number {
     if (!this.ctx) return 0;
     if (this.isPlaying) {
-      return Math.max(0, this.ctx.currentTime - this.playbackStartTime);
+      let time = this.ctx.currentTime - this.playbackStartTime;
+      
+      // Handle loop
+      if (this.isLoopActive && this.loopEnd > this.loopStart) {
+        const loopDuration = this.loopEnd - this.loopStart;
+        if (time >= this.loopEnd) {
+          const overflow = time - this.loopStart;
+          const wrappedTime = this.loopStart + (overflow % loopDuration);
+          this.playbackStartTime = this.ctx.currentTime - wrappedTime;
+          return wrappedTime;
+        }
+      }
+      
+      return Math.max(0, time);
     }
     return this.pausedAt;
   }
@@ -754,6 +781,82 @@ export class AudioEngine {
     let sum = 0;
     for (let i = 0; i < data.length; i++) { const sample = (data[i] - 128) / 128; sum += sample * sample; }
     return Math.sqrt(sum / data.length);
+  }
+
+  // FIX: Added missing methods for BPM, Track Volume, Track Pan, and VST Audio Streaming to resolve errors in consuming components.
+  public setBpm(bpm: number) {
+    this.currentBpm = bpm;
+    this.tracksDSP.forEach(dsp => {
+        dsp.pluginChain.forEach(p => {
+            if (p.instance && typeof p.instance.updateParams === 'function') {
+                p.instance.updateParams({ bpm: this.currentBpm });
+            }
+        });
+    });
+  }
+
+  public setTrackVolume(trackId: string, volume: number, isMuted: boolean) {
+    const dsp = this.tracksDSP.get(trackId);
+    if (dsp && this.ctx) {
+        const targetGain = isMuted ? 0 : volume;
+        dsp.gain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.015);
+    }
+  }
+
+  public setTrackPan(trackId: string, pan: number) {
+    const dsp = this.tracksDSP.get(trackId);
+    if (dsp && this.ctx) {
+        dsp.panner.pan.setTargetAtTime(pan, this.ctx.currentTime, 0.015);
+    }
+  }
+
+  public async enableVSTAudioStreaming(trackId: string, pluginId: string) {
+    if (!this.ctx) await this.init();
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp) {
+        console.error(`[AudioEngine] VST Streaming: DSP for track ${trackId} not found.`);
+        return;
+    }
+    
+    const pluginEntry = dsp.pluginChain.get(pluginId);
+    if (!pluginEntry) {
+        console.error(`[AudioEngine] VST Streaming: Plugin ${pluginId} not found on track ${trackId}.`);
+        return;
+    }
+
+    if (this.activeVSTPlugin && (this.activeVSTPlugin.trackId !== trackId || this.activeVSTPlugin.pluginId !== pluginId)) {
+        this.disableVSTAudioStreaming();
+    }
+    
+    // Disconnect bypass
+    try {
+        pluginEntry.input.disconnect(pluginEntry.output);
+    } catch(e) { /* might not be connected if already disconnected */ }
+
+    await novaBridge.initAudioStreaming(this.ctx!, pluginEntry.input, pluginEntry.output);
+    this.activeVSTPlugin = { trackId, pluginId };
+  }
+
+  public disableVSTAudioStreaming() {
+    if (!this.activeVSTPlugin) return;
+
+    const { trackId, pluginId } = this.activeVSTPlugin;
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp || !dsp.pluginChain.has(pluginId)) {
+        this.activeVSTPlugin = null;
+        return;
+    }
+    const pluginEntry = dsp.pluginChain.get(pluginId)!;
+
+    novaBridge.stopAudioStreaming();
+    
+    // Restore bypass
+    try {
+        pluginEntry.input.disconnect(); // Disconnect from worklet
+    } catch(e) {}
+    pluginEntry.input.connect(pluginEntry.output);
+
+    this.activeVSTPlugin = null;
   }
 }
 
