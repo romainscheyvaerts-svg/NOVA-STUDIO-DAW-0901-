@@ -19,19 +19,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     errorInfo: null,
   };
 
-  // FIX: Converted class field arrow functions to regular methods and added a constructor
-  // to bind `handleReset`. This ensures `this` is correctly bound for the event handler,
-  // resolving context-related errors.
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.handleReset = this.handleReset.bind(this);
-  }
-
   public static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { hasError: true, error };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  // FIX: Converted to an arrow function to ensure `this` is correctly bound.
+  public componentDidCatch = (error: Error, errorInfo: ErrorInfo) => {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
     this.setState({
@@ -43,7 +36,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
   }
 
-  public handleReset() {
+  // FIX: Converted to an arrow function to ensure `this` is correctly bound.
+  public handleReset = () => {
     this.setState({
       hasError: false,
       error: null,
