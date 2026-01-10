@@ -1,5 +1,6 @@
+
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { produce } from 'immer';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
@@ -29,6 +30,7 @@ import PianoRoll from './components/PianoRoll';
 import { midiManager } from './services/MidiManager';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
+import { produce } from 'immer';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -244,7 +246,7 @@ export default function App() {
 
   const initialState: DAWState = {
     id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM, isPlaying: false, isRecording: false, currentTime: 0,
-    isLoopActive: false, loopStart: 0, loopEnd: 8,
+    isLoopActive: false, loopStart: 0, loopEnd: 0,
     tracks: [
       { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
       { id: 'track-rec-main', name: 'REC', type: TrackType.AUDIO, color: '#ff0000', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#ff0000')], totalLatency: 0 },
@@ -277,17 +279,13 @@ export default function App() {
   useEffect(() => {
     let animId: number;
     const updateLoop = () => {
-        if (!stateRef.current.isPlaying) return;
-        
-        const time = audioEngine.getCurrentTime();
-        setVisualState({ currentTime: time });
-        
-        animId = requestAnimationFrame(updateLoop);
+      if (stateRef.current.isPlaying) {
+         const time = audioEngine.getCurrentTime();
+         setVisualState({ currentTime: time });
+         animId = requestAnimationFrame(updateLoop);
+      }
     };
-
-    if (state.isPlaying) { 
-        animId = requestAnimationFrame(updateLoop); 
-    }
+    if (state.isPlaying) { animId = requestAnimationFrame(updateLoop); }
     return () => cancelAnimationFrame(animId);
   }, [state.isPlaying, setVisualState]);
 
@@ -332,7 +330,7 @@ export default function App() {
       if (!track) return;
       let newClips = [...track.clips];
       const idx = newClips.findIndex(c => c.id === clipId);
-      if (idx === -1 && !['PASTE'].includes(action)) return;
+      if (idx === -1 && action !== 'PASTE') return;
       switch(action) {
         case 'UPDATE_PROPS': if(idx > -1) newClips[idx] = { ...newClips[idx], ...payload }; break;
         case 'DELETE': if(idx > -1) newClips.splice(idx, 1); break;
@@ -350,39 +348,6 @@ export default function App() {
                   newClips.push({ ...clip, id: `clip-split-${Date.now()}`, start: splitTime, duration: secondDuration, offset: clip.offset + firstDuration });
               }
             }
-            break;
-        case 'COPY': 
-            if(idx > -1) {
-                (window as any).__clipboardClip = { ...newClips[idx], sourceTrackId: trackId };
-            }
-            break;
-        case 'PASTE':
-            const clipboardClip = (window as any).__clipboardClip;
-            if (clipboardClip) {
-                newClips.push({ 
-                    ...clipboardClip, 
-                    id: `clip-paste-${Date.now()}`,
-                    start: payload?.time || draft.currentTime 
-                });
-            }
-            break;
-        case 'CUT':
-            if(idx > -1) {
-                (window as any).__clipboardClip = { ...newClips[idx], sourceTrackId: trackId };
-                newClips.splice(idx, 1);
-            }
-            break;
-        case 'REVERSE':
-            if(idx > -1) newClips[idx] = { ...newClips[idx], isReversed: !newClips[idx].isReversed };
-            break;
-        case 'SET_GAIN':
-            if(idx > -1) newClips[idx] = { ...newClips[idx], gain: payload.gain };
-            break;
-        case 'NORMALIZE':
-            if(idx > -1) newClips[idx] = { ...newClips[idx], gain: 1.0 };
-            break;
-        case 'SET_COLOR':
-            if(idx > -1) newClips[idx] = { ...newClips[idx], color: payload.color };
             break;
       }
       track.clips = newClips;
@@ -440,15 +405,6 @@ export default function App() {
       }
   }, [setVisualState]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ( e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement ) return;
-      if (e.code === 'Space') { e.preventDefault(); handleTogglePlay(); }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => { window.removeEventListener('keydown', handleKeyDown); };
-  }, [handleTogglePlay]);
-
   const handleStop = useCallback(async () => {
     audioEngine.stopAll();
     audioEngine.seekTo(0, stateRef.current.tracks, false);
@@ -493,99 +449,6 @@ export default function App() {
     }
   }, [setState]);
 
-  const handleUniversalAudioImport = async (source: string | File, name: string, targetTrackId?: string, startTime?: number) => {
-    try {
-        // Ensure audio engine is ready
-        await ensureAudioEngine();
-        
-        if (!audioEngine.ctx) {
-            console.error('[AudioImport] AudioContext not available');
-            return;
-        }
-        
-        let arrayBuffer: ArrayBuffer;
-        let audioRef: string;
-        
-        // Handle File vs URL
-        if (source instanceof File) {
-            console.log(`[AudioImport] Loading local file: ${name}`);
-            arrayBuffer = await source.arrayBuffer();
-            audioRef = URL.createObjectURL(source);
-        } else {
-            console.log(`[AudioImport] Fetching URL: ${source}`);
-            audioRef = source;
-            
-            const response = await fetch(source, {
-                mode: 'cors',
-                credentials: 'omit'
-            });
-            
-            if (!response.ok) {
-                throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
-            }
-            
-            arrayBuffer = await response.arrayBuffer();
-        }
-        
-        // Decode audio data
-        console.log(`[AudioImport] Decoding audio (${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)} MB)...`);
-        const audioBuffer = await audioEngine.ctx.decodeAudioData(arrayBuffer);
-        console.log(`[AudioImport] Decoded: ${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.numberOfChannels}ch, ${audioBuffer.sampleRate}Hz`);
-        
-        // Find target track
-        const finalTrackId = targetTrackId || 
-                             stateRef.current.selectedTrackId || 
-                             stateRef.current.tracks.find(t => t.id === 'instrumental')?.id ||
-                             stateRef.current.tracks.find(t => t.type === TrackType.AUDIO)?.id;
-        
-        if (!finalTrackId) {
-            console.error('[AudioImport] No target track found');
-            return;
-        }
-        
-        // Create new clip
-        const newClip: Clip = {
-            id: `clip-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-            start: startTime ?? stateRef.current.currentTime,
-            duration: audioBuffer.duration,
-            offset: 0,
-            fadeIn: 0,
-            fadeOut: 0,
-            name: name.replace(/\.[^/.]+$/, ''), // Remove file extension
-            color: '#a855f7',
-            type: TrackType.AUDIO,
-            buffer: audioBuffer,
-            audioRef: audioRef,
-            isMuted: false,
-            gain: 1,
-            isReversed: false
-        };
-        
-        // Add clip to track
-        setState(produce((draft: DAWState) => {
-            const track = draft.tracks.find(t => t.id === finalTrackId);
-            if (track) {
-                track.clips.push(newClip);
-                console.log(`[AudioImport] Added clip "${newClip.name}" to track "${track.name}"`);
-            }
-        }));
-        
-        // Select the track
-        setState(prev => ({ ...prev, selectedTrackId: finalTrackId }));
-        
-    } catch (error) {
-        console.error('[AudioImport] Error:', error);
-        
-        // Show user-friendly error
-        if (error instanceof Error) {
-            if (error.message.includes('Fetch failed')) {
-                console.error('[AudioImport] Could not load audio from URL. Check CORS settings.');
-            } else if (error.message.includes('Unable to decode')) {
-                console.error('[AudioImport] Invalid audio format. Supported: MP3, WAV, OGG, FLAC');
-            }
-        }
-    }
-};
 
   const handleDuplicateTrack = useCallback((trackId: string) => { /* ... */ }, [setState]);
 
@@ -641,6 +504,91 @@ export default function App() {
         }, 50);
     }
   }, [setState]);
+
+  // FIX: Added optional startTime parameter to handle drops at specific times from ArrangementView.
+  const handleUniversalAudioImport = async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
+      setExternalImportNotice(`Chargement: ${name}...`);
+      try {
+          await ensureAudioEngine();
+          
+          let audioBuffer: AudioBuffer;
+          let audioRef: string;
+          
+          if (source instanceof File) {
+              audioRef = URL.createObjectURL(source);
+              const arrayBuffer = await source.arrayBuffer();
+              audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+          } else {
+              audioRef = source;
+              const response = await fetch(source);
+              if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+              const arrayBuffer = await response.arrayBuffer();
+              audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+          }
+          
+          const newClip: Clip = {
+              id: `clip-${Date.now()}`,
+              name: name.replace(/\.[^/.]+$/, ''),
+              type: TrackType.AUDIO,
+              // FIX: Use provided startTime, fallback to currentTime.
+              start: startTime ?? stateRef.current.currentTime,
+              duration: audioBuffer.duration,
+              offset: 0,
+              buffer: audioBuffer,
+              audioRef,
+              color: UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length],
+              fadeIn: 0,
+              fadeOut: 0,
+              gain: 1.0,
+              isMuted: false
+          };
+
+          setState(produce((draft: DAWState) => {
+              let targetTrackId: string | null = null;
+              let isNewTrackNeeded = false;
+  
+              if (forcedTrackId) {
+                  targetTrackId = forcedTrackId;
+              } else {
+                  const beatTrack = draft.tracks.find(t => t.id === 'instrumental');
+                  if (beatTrack && beatTrack.clips.length === 0) {
+                      targetTrackId = 'instrumental';
+                  } else {
+                      isNewTrackNeeded = true;
+                      targetTrackId = `track-audio-${Date.now()}`;
+                  }
+              }
+  
+              if (isNewTrackNeeded) {
+                  const newTrack: Track = {
+                      id: targetTrackId!,
+                      name: name.substring(0, 20),
+                      type: TrackType.AUDIO,
+                      color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
+                      isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+                      volume: 1.0, pan: 0, outputTrackId: 'master',
+                      sends: [], clips: [newClip], plugins: [], automationLanes: [], totalLatency: 0
+                  };
+                  draft.tracks.splice(1, 0, newTrack); // Insère la nouvelle piste après la piste 'BEAT'
+                  draft.selectedTrackId = targetTrackId;
+              } else {
+                  const track = draft.tracks.find(t => t.id === targetTrackId);
+                  if (track) {
+                      track.clips.push(newClip);
+                      draft.selectedTrackId = targetTrackId;
+                  }
+              }
+          }));
+  
+          setExternalImportNotice(`✅ Importé: ${newClip.name}`);
+  
+      } catch (e: any) {
+          console.error("[Import Error]", e);
+          setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
+      } finally {
+          setTimeout(() => setExternalImportNotice(null), 3000);
+      }
+  };
 
   useEffect(() => { 
       (window as any).DAW_CORE = { 

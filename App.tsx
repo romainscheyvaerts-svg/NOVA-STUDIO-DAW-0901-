@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
 import { audioEngine } from './engine/AudioEngine';
@@ -504,7 +505,8 @@ export default function App() {
     }
   }, [setState]);
 
-  const handleUniversalAudioImport = async (source: string | File, name: string, forcedTrackId?: string) => {
+  // FIX: Added optional startTime parameter to handle drops at specific times from ArrangementView.
+  const handleUniversalAudioImport = async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
       setExternalImportNotice(`Chargement: ${name}...`);
       try {
           await ensureAudioEngine();
@@ -528,7 +530,8 @@ export default function App() {
               id: `clip-${Date.now()}`,
               name: name.replace(/\.[^/.]+$/, ''),
               type: TrackType.AUDIO,
-              start: stateRef.current.currentTime,
+              // FIX: Use provided startTime, fallback to currentTime.
+              start: startTime ?? stateRef.current.currentTime,
               duration: audioBuffer.duration,
               offset: 0,
               buffer: audioBuffer,
@@ -695,6 +698,7 @@ export default function App() {
                onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
                onCreatePattern={handleCreatePatternAndOpen}
                onSwapInstrument={handleSwapInstrument}
+               onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
             /> 
           )}
           
