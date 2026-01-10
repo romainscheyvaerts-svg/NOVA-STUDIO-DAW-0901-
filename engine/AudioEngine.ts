@@ -160,7 +160,6 @@ export class AudioEngine {
     this.audioBuffers.set(clipId, buffer);
   }
 
-  // FIX: Added public getter for audio buffers to be used in App.tsx, resolving private property access error.
   public getAudioBuffer(clipId: string): AudioBuffer | undefined {
     return this.audioBuffers.get(clipId);
   }
@@ -329,7 +328,7 @@ export class AudioEngine {
     }
   }
 
-  public async stopRecording(): Promise<{ clip: Omit<Clip, 'buffer'>, buffer: AudioBuffer, trackId: string } | null> {
+  public async stopRecording(): Promise<{ clip: Omit<Clip, 'buffer'> & { buffer?: AudioBuffer }, trackId: string } | null> {
     if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive' || !this.recordingTrackId) {
       return null;
     }
@@ -344,7 +343,7 @@ export class AudioEngine {
         try {
           const arrayBuffer = await blob.arrayBuffer();
           const audioBuffer = await this.ctx!.decodeAudioData(arrayBuffer);
-          const clipData: Omit<Clip, 'buffer'> = {
+          const clipData: Omit<Clip, 'buffer'> & { buffer?: AudioBuffer } = {
             id: `rec-${Date.now()}`,
             name: `Vocal Take ${new Date().toLocaleTimeString()}`,
             start: this.recStartTime,
@@ -355,9 +354,10 @@ export class AudioEngine {
             type: TrackType.AUDIO,
             color: '#ff0000',
             audioRef: URL.createObjectURL(blob),
+            buffer: audioBuffer, // Return buffer here to be cached by App.tsx
           };
           console.log("[AudioEngine] Recording stopped. New clip created:", clipData);
-          resolve({ clip: clipData, buffer: audioBuffer, trackId });
+          resolve({ clip: clipData, trackId });
         } catch (e) {
           console.error("Error processing recorded audio:", e);
           resolve(null);

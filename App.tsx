@@ -213,19 +213,20 @@ const useUndoRedo = (initialState: DAWState) => {
   const MAX_HISTORY = 100;
   
   const cleanStateForHistory = (stateToClean: DAWState): DAWState => {
-    // Crée une nouvelle version de l'état sans les AudioBuffers pour l'historique
-    const cleanedState = JSON.parse(JSON.stringify(stateToClean));
-    cleanedState.tracks.forEach((track: any) => {
-        track.clips.forEach((clip: any) => {
-            delete clip.buffer;
-        });
-        if (track.drumPads) {
-            track.drumPads.forEach((pad: any) => {
-                delete pad.buffer;
+    // FIX: Replaced brittle JSON.stringify with immer for safer deep cloning.
+    // This prevents crashes when non-serializable objects like AudioBuffers are present.
+    return produce(stateToClean, draft => {
+        draft.tracks.forEach(track => {
+            track.clips.forEach(clip => {
+                delete clip.buffer;
             });
-        }
+            if (track.drumPads) {
+                track.drumPads.forEach(pad => {
+                    delete pad.buffer;
+                });
+            }
+        });
     });
-    return cleanedState;
   };
 
   const setState = useCallback((updater: DAWState | ((prev: DAWState) => DAWState)) => {
@@ -344,25 +345,35 @@ export default function App() {
   const handleSaveLocal = async (n: string) => { SessionSerializer.downloadLocalJSON(stateRef.current, n); };
   
   const handleLoadProject = useCallback((loadedState: DAWState) => {
-    loadedState.tracks.forEach(track => {
-      track.clips.forEach(clip => {
-        if (clip.buffer) {
-          audioEngine.cacheAudioBuffer(clip.id, clip.buffer);
-          delete (clip as Partial<Clip>).buffer;
-        }
-      });
-      track.drumPads?.forEach(pad => {
-        if (pad.buffer) {
-          audioEngine.loadDrumRackSample(track.id, pad.id, pad.buffer);
-          delete (pad as Partial<DrumPad>).buffer;
-        }
-      });
+    // Ensure the audio engine is ready
+    ensureAudioEngine().then(() => {
+        // Now that engine is ready, start populating it
+        // FIX: Cache audio buffers in the engine and remove them from the state before setting it.
+        // This prevents non-serializable AudioBuffer objects from entering React/Immer state.
+        loadedState.tracks.forEach(track => {
+            track.clips.forEach(clip => {
+                if (clip.buffer) {
+                    audioEngine.cacheAudioBuffer(clip.id, clip.buffer);
+                    delete (clip as Partial<Clip>).buffer;
+                }
+            });
+            track.drumPads?.forEach(pad => {
+                if (pad.buffer) {
+                    audioEngine.loadDrumRackSample(track.id, pad.id, pad.buffer);
+                    delete (pad as Partial<DrumPad>).buffer;
+                }
+            });
+        });
+
+        // Update the state
+        setState(loadedState);
+        audioEngine.setBpm(loadedState.bpm);
+
+        // Schedule a final graph update to ensure all routing is correct after state update
+        setTimeout(() => {
+            loadedState.tracks.forEach(t => audioEngine.updateTrack(t, loadedState.tracks));
+        }, 100);
     });
-    setState(loadedState);
-    audioEngine.setBpm(loadedState.bpm);
-    setTimeout(() => {
-        loadedState.tracks.forEach(t => audioEngine.updateTrack(t, loadedState.tracks));
-    }, 100);
   }, [setState]);
 
   const handleLoadLocalFile = useCallback(async (file: File) => {
@@ -498,17 +509,18 @@ export default function App() {
     if (currentState.isRecording) {
       audioEngine.stopAll();
       const result = await audioEngine.stopRecording();
-      if(result) {
-        audioEngine.cacheAudioBuffer(result.clip.id, result.buffer);
-      }
+      
       setState(produce(draft => {
         draft.isRecording = false;
         draft.isPlaying = false;
         draft.recStartTime = null;
         if (result) {
+          // The clip returned here now has a buffer. We must cache it and remove it.
+          audioEngine.cacheAudioBuffer(result.clip.id, result.clip.buffer!);
+          delete result.clip.buffer;
           const track = draft.tracks.find(t => t.id === result.trackId);
           if (track) {
-            track.clips.push(result.clip as Clip);
+            track.clips.push(result.clip);
           }
         }
       }));
@@ -645,9 +657,11 @@ export default function App() {
         }
 
         const newClipId = `clip-${Date.now()}`;
+        // FIX: Cache the AudioBuffer in the audio engine instead of putting it in React state.
         audioEngine.cacheAudioBuffer(newClipId, audioBuffer);
 
         setState(produce((draft: DAWState) => {
+            // FIX: Create a clip object WITHOUT the `buffer` property to prevent Immer/JSON errors.
             const newClip: Omit<Clip, 'buffer'> = {
                 id: newClipId,
                 name: name.replace(/\.[^/.]+$/, ''),
@@ -688,7 +702,7 @@ export default function App() {
                     volume: 1.0, pan: 0, outputTrackId: 'master',
                     sends: [], clips: [newClip as Clip], plugins: [], automationLanes: [], totalLatency: 0
                 };
-                draft.tracks.splice(1, 0, newTrack);
+                draft.tracks.splice(1, 0, newTrack); // Insère la nouvelle piste après la piste 'BEAT'
                 draft.selectedTrackId = targetTrackId;
             } else {
                 const track = draft.tracks.find(t => t.id === targetTrackId);
@@ -765,6 +779,7 @@ export default function App() {
     setAutomationMenu(null);
   }, [automationMenu, setState]);
   const handleToggleDelayComp = useCallback(() => { /* ... */ }, [state.isDelayCompEnabled, setState]);
+  
   const handleLoadDrumSample = useCallback(async (trackId: string, padId: number, file: File) => {
     try {
         await ensureAudioEngine();
@@ -773,8 +788,10 @@ export default function App() {
         const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
         const audioRef = URL.createObjectURL(file);
         
+        // Load into engine
         audioEngine.loadDrumRackSample(trackId, padId, audioBuffer);
         
+        // Update state WITHOUT buffer
         setState(produce((draft: DAWState) => {
             const track = draft.tracks.find(t => t.id === trackId);
             if (!track || !track.drumPads) return;
@@ -783,6 +800,7 @@ export default function App() {
             if (pad) {
                 pad.sampleName = file.name.replace(/\.[^/.]+$/, '');
                 pad.audioRef = audioRef;
+                delete pad.buffer; // Ensure buffer is not in state
             }
         }));
         
@@ -799,7 +817,6 @@ export default function App() {
       getInstrumentalBuffer: () => {
           const instru = stateRef.current.tracks.find(t => t.id === 'instrumental');
           const clip = instru?.clips[0];
-          // FIX: Accessing private property 'audioBuffers'. Switched to public getter 'getAudioBuffer'.
           if(clip) return audioEngine.getAudioBuffer(clip.id) || null;
           return null;
       },
