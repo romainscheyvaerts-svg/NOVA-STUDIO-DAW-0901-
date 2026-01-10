@@ -518,7 +518,7 @@ const drawTimeline = useCallback(() => {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative select-none" onContextMenu={e => e.preventDefault()}>
-      <div className="h-12 border-b flex items-center px-4 gap-4 z-30 shrink-0">
+      <div className="h-12 flex items-center px-4 gap-4 z-30 shrink-0">
         <div className="flex items-center space-x-4 shrink-0">
           <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
             <button onClick={() => setActiveTool('SELECT')} className={`w-8 h-8 rounded-md flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black' : 'text-slate-500 hover:text-white'}`} title="Smart Tool (1)"><i className="fas fa-mouse-pointer text-[10px]"></i></button>
@@ -547,7 +547,7 @@ const drawTimeline = useCallback(() => {
             ref={sidebarContainerRef} 
             onScroll={handleScroll} 
             onWheel={handleSidebarWheel}
-            className="flex-shrink-0 border-r z-40 flex flex-col overflow-y-auto overflow-x-hidden transition-colors relative sidebar-no-scroll" 
+            className="flex-shrink-0 z-40 flex flex-col overflow-y-auto overflow-x-hidden transition-colors relative sidebar-no-scroll" 
             style={{ width: `${headerWidth}px`, scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           <style>{`.sidebar-no-scroll::-webkit-scrollbar { display: none; }`}</style>

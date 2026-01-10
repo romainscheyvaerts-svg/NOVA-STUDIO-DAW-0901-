@@ -246,7 +246,7 @@ export default function App() {
 
   const initialState: DAWState = {
     id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM, isPlaying: false, isRecording: false, currentTime: 0,
-    isLoopActive: false, loopStart: 0, loopEnd: 0,
+    isLoopActive: false, loopStart: 0, loopEnd: 8,
     tracks: [
       { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
       { id: 'track-rec-main', name: 'REC', type: TrackType.AUDIO, color: '#ff0000', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#ff0000')], totalLatency: 0 },
@@ -450,7 +450,30 @@ export default function App() {
   }, [setState]);
 
 
-  const handleDuplicateTrack = useCallback((trackId: string) => { /* ... */ }, [setState]);
+  const handleDuplicateTrack = useCallback((trackId: string) => {
+    setState(produce((draft: DAWState) => {
+        const track = draft.tracks.find(t => t.id === trackId);
+        if (!track) return;
+        
+        const newTrack: Track = {
+            ...track,
+            id: `track-${Date.now()}`,
+            name: `${track.name} (Copy)`,
+            clips: track.clips.map(clip => ({
+                ...clip,
+                id: `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+            })),
+            plugins: track.plugins.map(plugin => ({
+                ...plugin,
+                id: `plugin-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+            })),
+            automationLanes: []
+        };
+        
+        const index = draft.tracks.findIndex(t => t.id === trackId);
+        draft.tracks.splice(index + 1, 0, newTrack);
+    }));
+  }, [setState]);
 
   const handleCreateTrack = useCallback((type: TrackType, name?: string, initialPluginType?: PluginType) => {
       setState(produce((draft: DAWState) => {
@@ -485,7 +508,21 @@ export default function App() {
     }));
   }, [setState]);
   
-  const handleRemovePlugin = useCallback((tid: string, pid: string) => { /* ... */ }, [setState, activePlugin]);
+  const handleRemovePlugin = useCallback((tid: string, pid: string) => {
+    setState(produce((draft: DAWState) => {
+        const track = draft.tracks.find(t => t.id === tid);
+        if (!track) return;
+        
+        const index = track.plugins.findIndex(p => p.id === pid);
+        if (index !== -1) {
+            track.plugins.splice(index, 1);
+        }
+    }));
+    
+    if (activePlugin?.plugin.id === pid) {
+        setActivePlugin(null);
+    }
+  }, [setState, activePlugin]);
   
   const handleAddPluginFromContext = useCallback(async (tid: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => {
     const newPlugin = createDefaultPlugins(type, 0.5, stateRef.current.bpm, metadata);
@@ -505,112 +542,199 @@ export default function App() {
     }
   }, [setState]);
 
-  // FIX: Added optional startTime parameter to handle drops at specific times from ArrangementView.
-  const handleUniversalAudioImport = async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
-      setExternalImportNotice(`Chargement: ${name}...`);
-      try {
-          await ensureAudioEngine();
-          
-          let audioBuffer: AudioBuffer;
-          let audioRef: string;
-          
-          if (source instanceof File) {
-              audioRef = URL.createObjectURL(source);
-              const arrayBuffer = await source.arrayBuffer();
-              audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
-          } else {
-              audioRef = source;
-              const response = await fetch(source);
-              if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-              const arrayBuffer = await response.arrayBuffer();
-              audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
-          }
-          
-          const newClip: Clip = {
-              id: `clip-${Date.now()}`,
-              name: name.replace(/\.[^/.]+$/, ''),
-              type: TrackType.AUDIO,
-              // FIX: Use provided startTime, fallback to currentTime.
-              start: startTime ?? stateRef.current.currentTime,
-              duration: audioBuffer.duration,
-              offset: 0,
-              buffer: audioBuffer,
-              audioRef,
-              color: UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length],
-              fadeIn: 0,
-              fadeOut: 0,
-              gain: 1.0,
-              isMuted: false
-          };
+  const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
+    setExternalImportNotice(`Chargement: ${name}...`);
+    try {
+        await ensureAudioEngine();
+        
+        let audioBuffer: AudioBuffer;
+        let audioRef: string;
+        
+        if (source instanceof File) {
+            audioRef = URL.createObjectURL(source);
+            const arrayBuffer = await source.arrayBuffer();
+            audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+        } else {
+            audioRef = source;
+            const response = await fetch(source);
+            if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+            const arrayBuffer = await response.arrayBuffer();
+            audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+        }
 
-          setState(produce((draft: DAWState) => {
-              let targetTrackId: string | null = null;
-              let isNewTrackNeeded = false;
-  
-              if (forcedTrackId) {
-                  targetTrackId = forcedTrackId;
-              } else {
-                  const beatTrack = draft.tracks.find(t => t.id === 'instrumental');
-                  if (beatTrack && beatTrack.clips.length === 0) {
-                      targetTrackId = 'instrumental';
-                  } else {
-                      isNewTrackNeeded = true;
-                      targetTrackId = `track-audio-${Date.now()}`;
-                  }
-              }
-  
-              if (isNewTrackNeeded) {
-                  const newTrack: Track = {
-                      id: targetTrackId!,
-                      name: name.substring(0, 20),
-                      type: TrackType.AUDIO,
-                      color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
-                      isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
-                      volume: 1.0, pan: 0, outputTrackId: 'master',
-                      sends: [], clips: [newClip], plugins: [], automationLanes: [], totalLatency: 0
-                  };
-                  draft.tracks.splice(1, 0, newTrack); // Insère la nouvelle piste après la piste 'BEAT'
-                  draft.selectedTrackId = targetTrackId;
-              } else {
-                  const track = draft.tracks.find(t => t.id === targetTrackId);
-                  if (track) {
-                      track.clips.push(newClip);
-                      draft.selectedTrackId = targetTrackId;
-                  }
-              }
-          }));
-  
-          setExternalImportNotice(`✅ Importé: ${newClip.name}`);
-  
-      } catch (e: any) {
-          console.error("[Import Error]", e);
-          setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
-      } finally {
-          setTimeout(() => setExternalImportNotice(null), 3000);
-      }
-  };
+        setState(produce((draft: DAWState) => {
+            const newClip: Clip = {
+                id: `clip-${Date.now()}`,
+                name: name.replace(/\.[^/.]+$/, ''),
+                type: TrackType.AUDIO,
+                start: startTime ?? draft.currentTime,
+                duration: audioBuffer.duration,
+                offset: 0,
+                buffer: audioBuffer, // Assign buffer directly inside produce
+                audioRef: audioRef,
+                color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
+                fadeIn: 0,
+                fadeOut: 0,
+                gain: 1.0,
+                isMuted: false
+            };
+
+            let targetTrackId: string | null = null;
+            let isNewTrackNeeded = false;
+
+            if (forcedTrackId) {
+                targetTrackId = forcedTrackId;
+            } else {
+                const beatTrack = draft.tracks.find(t => t.id === 'instrumental');
+                if (beatTrack && beatTrack.clips.length === 0) {
+                    targetTrackId = 'instrumental';
+                } else {
+                    isNewTrackNeeded = true;
+                    targetTrackId = `track-audio-${Date.now()}`;
+                }
+            }
+
+            if (isNewTrackNeeded) {
+                const newTrack: Track = {
+                    id: targetTrackId!,
+                    name: name.substring(0, 20),
+                    type: TrackType.AUDIO,
+                    color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
+                    isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+                    volume: 1.0, pan: 0, outputTrackId: 'master',
+                    sends: [], clips: [newClip], plugins: [], automationLanes: [], totalLatency: 0
+                };
+                draft.tracks.splice(1, 0, newTrack);
+                draft.selectedTrackId = targetTrackId;
+            } else {
+                const track = draft.tracks.find(t => t.id === targetTrackId);
+                if (track) {
+                    track.clips.push(newClip);
+                    draft.selectedTrackId = targetTrackId;
+                }
+            }
+        }));
+
+        setExternalImportNotice(`✅ Importé: ${name.replace(/\.[^/.]+$/, '')}`);
+
+    } catch (e: any) {
+        console.error("[Import Error]", e);
+        setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
+    } finally {
+        setTimeout(() => setExternalImportNotice(null), 3000);
+    }
+  }, [setState]);
 
   useEffect(() => { 
       (window as any).DAW_CORE = { 
-          handleAudioImport: (url: string | File, name: string, trackId?: string) => handleUniversalAudioImport(url, name, trackId) 
+          handleAudioImport: (url: string | File, name: string, trackId?: string, startTime?: number) => handleUniversalAudioImport(url, name, trackId, startTime) 
       }; 
   }, [handleUniversalAudioImport]);
 
-  const handleMoveClip = useCallback((sourceTrackId: string, destTrackId: string, clipId: string) => { /* ... */ }, [setState]);
+  const handleMoveClip = useCallback((sourceTrackId: string, destTrackId: string, clipId: string) => {
+    setState(produce((draft: DAWState) => {
+        const sourceTrack = draft.tracks.find(t => t.id === sourceTrackId);
+        const destTrack = draft.tracks.find(t => t.id === destTrackId);
+        if (!sourceTrack || !destTrack) return;
+        
+        const clipIndex = sourceTrack.clips.findIndex(c => c.id === clipId);
+        if (clipIndex === -1) return;
+        
+        const [clip] = sourceTrack.clips.splice(clipIndex, 1);
+        destTrack.clips.push(clip);
+    }));
+  }, [setState]);
   const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => { /* ... */ }, [setState]);
   const handleSwapInstrument = useCallback((trackId: string) => { /* ... */ }, []);
   const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, "Group Bus"); }, [handleCreateTrack]);
-  const handleToggleBypass = useCallback((trackId: string, pluginId: string) => { /* ... */ }, [setState]);
-  const handleCreateAutomationLane = useCallback(() => { /* ... */ }, [automationMenu, setState]);
+  const handleToggleBypass = useCallback((trackId: string, pluginId: string) => {
+    setState(produce((draft: DAWState) => {
+        const track = draft.tracks.find(t => t.id === trackId);
+        if (!track) return;
+        
+        const plugin = track.plugins.find(p => p.id === pluginId);
+        if (plugin) {
+            plugin.isEnabled = !plugin.isEnabled;
+        }
+    }));
+  }, [setState]);
+  const handleCreateAutomationLane = useCallback(() => {
+    if (!automationMenu) return;
+    
+    setState(produce((draft: DAWState) => {
+        const track = draft.tracks.find(t => t.id === automationMenu.trackId);
+        if (!track) return;
+        
+        const newLane: AutomationLane = {
+            id: `lane-${Date.now()}`,
+            parameterName: automationMenu.paramName || 'volume',
+            points: [],
+            color: '#00f2ff',
+            isExpanded: true,
+            min: automationMenu.min,
+            max: automationMenu.max,
+        };
+        
+        track.automationLanes.push(newLane);
+    }));
+    
+    setAutomationMenu(null);
+  }, [automationMenu, setState]);
   const handleToggleDelayComp = useCallback(() => { /* ... */ }, [state.isDelayCompEnabled, setState]);
-  const handleLoadDrumSample = useCallback(async (trackId: string, padId: number, file: File) => { /* ... */ }, [setState]);
+  const handleLoadDrumSample = useCallback(async (trackId: string, padId: number, file: File) => {
+    try {
+        await ensureAudioEngine();
+        
+        const arrayBuffer = await file.arrayBuffer();
+        const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+        const audioRef = URL.createObjectURL(file);
+        
+        setState(produce((draft: DAWState) => {
+            const track = draft.tracks.find(t => t.id === trackId);
+            if (!track || !track.drumPads) return;
+            
+            const pad = track.drumPads.find(p => p.id === padId);
+            if (pad) {
+                pad.sampleName = file.name.replace(/\.[^/.]+$/, '');
+                pad.buffer = audioBuffer;
+                pad.audioRef = audioRef;
+            }
+        }));
+        
+        // Also update the DrumRack node in AudioEngine
+        audioEngine.loadDrumRackSample(trackId, padId, audioBuffer);
+        
+        console.log(`[DrumSample] Loaded ${file.name} on pad ${padId}`);
+    } catch (error) {
+        console.error('[DrumSample] Error loading sample:', error);
+    }
+}, [setState]);
 
   useEffect(() => {
     (window as any).DAW_CONTROL = {
       // ... (All functions mapped) ...
-      loadDrumSample: handleLoadDrumSample
+      loadDrumSample: handleLoadDrumSample,
+      getState: () => stateRef.current,
+      getInstrumentalBuffer: () => {
+          const instru = stateRef.current.tracks.find(t => t.id === 'instrumental');
+          return instru?.clips[0]?.buffer || null;
+      },
+      editClip: handleEditClip,
+      setBpm: handleUpdateBpm,
+      syncAutoTuneScale: (rootKey: number, scale: string) => {
+          setState(produce((draft: DAWState) => {
+              draft.tracks.forEach(t => {
+                  t.plugins.forEach(p => {
+                      if (p.type === 'AUTOTUNE') {
+                          p.params.rootKey = rootKey;
+                          p.params.scale = scale;
+                      }
+                  });
+              });
+          }));
+      }
     };
-  }, [handleUpdateBpm, handleUpdateTrack, handleTogglePlay, handleStop, handleSeek, handleDuplicateTrack, handleCreateTrack, handleDeleteTrack, handleToggleBypass, handleLoadDrumSample, handleEditClip]);
+  }, [handleUpdateBpm, handleUpdateTrack, handleTogglePlay, handleStop, handleSeek, handleDuplicateTrack, handleCreateTrack, handleDeleteTrack, handleToggleBypass, handleLoadDrumSample, handleEditClip, setState]);
 
   const executeAIAction = (a: AIAction) => { /* ... */ };
 
@@ -628,7 +752,20 @@ export default function App() {
           onBpmChange={handleUpdateBpm}
           isRecording={state.isRecording}
           isLoopActive={state.isLoopActive}
-          onToggleLoop={() => setState(p => ({...p, isLoopActive: !p.isLoopActive}))}
+          onToggleLoop={() => setState(p => {
+              const newLoopActive = !p.isLoopActive;
+              // Si on active le loop et qu'il n'y a pas de région définie, créer une région de 4 mesures
+              if (newLoopActive && p.loopEnd <= p.loopStart) {
+                  const barDuration = (60 / p.bpm) * 4; // Durée d'une mesure
+                  return {
+                      ...p,
+                      isLoopActive: true,
+                      loopStart: 0,
+                      loopEnd: barDuration * 4 // 4 mesures
+                  };
+              }
+              return { ...p, isLoopActive: newLoopActive };
+          })}
           onStop={handleStop}
           onTogglePlay={handleTogglePlay}
           onToggleRecord={handleToggleRecord}
@@ -670,7 +807,7 @@ export default function App() {
                     user={user}
                     activeTab={activeSideBrowserTab}
                     onTabChange={setActiveSideBrowserTab}
-                    onLocalImport={(file) => handleUniversalAudioImport(file, file.name)}
+                    onLocalImport={handleUniversalAudioImport}
                     onAddPlugin={handleAddPluginFromContext}
                     onPurchase={handleBuyLicense}
                     selectedTrackId={state.selectedTrackId}

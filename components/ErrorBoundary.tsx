@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -12,19 +12,26 @@ interface ErrorBoundaryState {
   errorInfo: ErrorInfo | null;
 }
 
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = {
-    hasError: false,
-    error: null,
-    errorInfo: null,
-  };
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  // FIX: Refactored to use a constructor for state initialization and method binding.
+  // This is a more traditional and widely supported pattern for React class components,
+  // which can resolve issues with `this` context and property initialization in some environments.
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null,
+      errorInfo: null,
+    };
 
-  public static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
+    this.handleReset = this.handleReset.bind(this);
+  }
+
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { hasError: true, error };
   }
 
-  // FIX: Converted to an arrow function to ensure `this` is correctly bound.
-  public componentDidCatch = (error: Error, errorInfo: ErrorInfo) => {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
     this.setState({
@@ -36,8 +43,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
   }
 
-  // FIX: Converted to an arrow function to ensure `this` is correctly bound.
-  public handleReset = () => {
+  handleReset() {
     this.setState({
       hasError: false,
       error: null,
