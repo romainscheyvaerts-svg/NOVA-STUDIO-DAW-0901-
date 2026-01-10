@@ -5,6 +5,8 @@ import react from '@vitejs/plugin-react';
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
+      // Base URL pour GitHub Pages (nom du repo)
+      base: mode === 'production' ? '/NOVA-STUDIO-DAW-0901-/' : '/',
       server: {
         port: 3000,
         host: '0.0.0.0',
@@ -18,6 +20,11 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      build: {
+        outDir: 'dist',
+        sourcemap: false,
+        minify: 'esbuild'
       }
     };
 });

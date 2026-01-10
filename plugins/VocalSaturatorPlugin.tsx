@@ -317,4 +317,74 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
       <div className="flex justify-between items-start">
         <div className="flex items-center space-x-5">
           <div className="w-14 h-14 rounded-2xl bg-yellow-500/10 flex items-center justify-center text-yellow-400 border border-yellow-500/20 shadow-lg shadow-yellow-500/5">
-            <i className="fas fa
+            <i className="fas fa-fire text-2xl"></i>
+          </div>
+          <div>
+            <h2 className="text-2xl font-black italic uppercase tracking-tighter leading-none">Vocal <span className="text-yellow-400">Saturator</span></h2>
+            <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mt-2">Analog Coloration Engine</p>
+          </div>
+        </div>
+        <button
+          onClick={togglePower}
+          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border-2 ${params.isEnabled ? 'bg-yellow-500 border-yellow-400 text-black shadow-lg shadow-yellow-500/30' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
+        >
+          <i className="fas fa-power-off text-lg"></i>
+        </button>
+      </div>
+
+      <div className="h-36 bg-black/60 rounded-[32px] border border-white/5 relative overflow-hidden flex items-center justify-center shadow-inner">
+        <div className="absolute top-4 left-8 text-[8px] font-black text-slate-600 uppercase tracking-widest z-10">Transfer Curve</div>
+        <canvas ref={canvasRef} width={440} height={144} className="w-full h-full opacity-80" />
+        <div className="absolute inset-0 bg-gradient-to-t from-yellow-500/5 to-transparent pointer-events-none" />
+      </div>
+
+      <div className="flex justify-center space-x-3">
+        {(['TAPE', 'TUBE', 'SOFT_CLIP'] as SaturationMode[]).map(mode => (
+          <button
+            key={mode}
+            onClick={() => setMode(mode)}
+            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${params.mode === mode ? 'bg-yellow-500 text-black' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            {mode.replace('_', ' ')}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-4 gap-4">
+        <SatKnob label="Drive" value={(params.drive - 1) / 9} onMouseDown={(e) => handleMouseDown('drive', e)} color="#facc15" suffix="" displayVal={Math.round(params.drive * 10)} />
+        <SatKnob label="Tone" value={(params.tone + 1) / 2} onMouseDown={(e) => handleMouseDown('tone', e)} color="#facc15" suffix="" displayVal={Math.round(params.tone * 100)} />
+        <SatKnob label="Mix" value={params.mix} onMouseDown={(e) => handleMouseDown('mix', e)} color="#facc15" suffix="%" displayVal={Math.round(params.mix * 100)} />
+        <SatKnob label="Output" value={params.outputGain / 2} onMouseDown={(e) => handleMouseDown('outputGain', e)} color="#facc15" suffix="dB" displayVal={Math.round((params.outputGain - 1) * 12)} />
+      </div>
+
+      <div className="pt-6 border-t border-white/5 flex justify-between items-center">
+        <div className="flex flex-col">
+          <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Saturation Mode</span>
+          <span className="text-[11px] font-mono font-bold text-yellow-400/60 mt-1">{params.mode}</span>
+        </div>
+        <div className="flex items-center space-x-3">
+          <div className={`w-2.5 h-2.5 rounded-full ${params.isEnabled ? 'bg-yellow-500 shadow-[0_0_10px_#facc15] animate-pulse' : 'bg-slate-800'}`} />
+          <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em]">Analog Engine v2.0</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SatKnob: React.FC<{ label: string, value: number, onMouseDown: (e: React.MouseEvent) => void, color: string, suffix: string, displayVal: number }> = ({ label, value, onMouseDown, color, suffix, displayVal }) => {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  const rotation = (safeValue * 270) - 135;
+  return (
+    <div className="flex flex-col items-center space-y-3 group touch-none">
+      <div onMouseDown={onMouseDown} className="w-14 h-14 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-yellow-500/50 transition-all shadow-xl relative">
+        <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
+        <div className="absolute top-1/2 left-1/2 w-1.5 h-6 -ml-0.75 -mt-6 origin-bottom rounded-full transition-transform duration-75" style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: color, boxShadow: `0 0 8px ${color}66` }} />
+        <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />
+      </div>
+      <div className="text-center">
+        <span className="block text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1.5">{label}</span>
+        <div className="bg-black/60 px-2 py-0.5 rounded border border-white/5 min-w-[45px]"><span className="text-[9px] font-mono font-bold text-white">{displayVal}{suffix}</span></div>
+      </div>
+    </div>
+  );
+};
