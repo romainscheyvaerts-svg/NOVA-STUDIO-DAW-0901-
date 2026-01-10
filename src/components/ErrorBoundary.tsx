@@ -23,20 +23,25 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { hasError: true, error };
   }
 
-  // FIX: Converted to an arrow function property to explicitly bind `this` and resolve context-related errors where `this.props` and `this.setState` were not found.
-  componentDidCatch = (error: Error, errorInfo: ErrorInfo) => {
+  // FIX: Converted to a standard class method for lifecycle hooks.
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
+    // FIX: Class properties and methods must be accessed with `this`.
     this.setState({
       errorInfo: errorInfo,
     });
 
+    // FIX: Class properties and methods must be accessed with `this`.
     if (this.props.onError) {
+      // FIX: Class properties and methods must be accessed with `this`.
       this.props.onError(error, errorInfo);
     }
   }
 
+  // FIX: Kept as an arrow function to automatically bind `this` for event handlers.
   handleReset = () => {
+    // FIX: Class properties and methods must be accessed with `this`.
     this.setState({
       hasError: false,
       error: null,
@@ -44,9 +49,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     });
   };
 
-  // FIX: Converted to an arrow function property to explicitly bind `this` and resolve context-related errors where `this.props` was not found.
-  render = () => {
+  // FIX: Converted to a standard class method for lifecycle hooks.
+  render() {
+    // FIX: Class properties and methods must be accessed with `this`.
     if (this.state.hasError) {
+      // FIX: Class properties and methods must be accessed with `this`.
       if (this.props.fallback) {
         return this.props.fallback;
       }
@@ -71,6 +78,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       );
     }
 
+    // FIX: Class properties and methods must be accessed with `this`.
     return this.props.children;
   }
 }
