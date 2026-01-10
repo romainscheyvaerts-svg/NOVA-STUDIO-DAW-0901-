@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Track, TrackType, TrackSend, PluginType, PluginInstance } from '../types';
+import { Track, TrackType, PluginType, PluginInstance, TrackSend } from '../types';
 
 interface TrackHeaderProps {
   track: Track;
@@ -12,10 +12,12 @@ interface TrackHeaderProps {
   onRemovePlugin?: (trackId: string, pluginId: string) => void;
   onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
   onContextMenu: (e: React.MouseEvent, trackId: string) => void;
+  // Drag & Drop Piste
   onDragStartTrack: (trackId: string) => void;
   onDragOverTrack: (trackId: string) => void;
   onDropTrack: () => void;
   isDraggingOver?: boolean;
+  // Swap Instrument
   onSwapInstrument?: (trackId: string) => void;
 }
 
@@ -40,7 +42,7 @@ const HorizontalSendFader: React.FC<{
     const onMouseUp = () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
     window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
   };
-
+  
   const handleTouchStart = (e: React.TouchEvent) => {
     e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
@@ -59,15 +61,15 @@ const HorizontalSendFader: React.FC<{
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
-      className="relative h-5 bg-black/60 rounded-md overflow-hidden border border-white/5 cursor-ew-resize group/fader mb-1 last:mb-0 transition-all hover:border-white/20 touch-none"
+      className="relative h-5 bg-black/60 rounded-md overflow-hidden border border-white/5 cursor-ew-resize group/fader transition-all hover:border-white/20 touch-none"
     >
       <div 
         className="absolute inset-y-0 left-0 transition-all duration-75"
-        style={{ width: `${percent}%`, backgroundColor: color, opacity: 0.25 }}
+        style={{ width: `${percent}%`, backgroundColor: color, opacity: 0.3 }}
       />
       <div 
-        className="absolute inset-y-0 left-0 border-r-2 transition-all duration-75"
-        style={{ width: `${percent}%`, borderColor: color, boxShadow: send.level > 0.05 ? `0 0 10px ${color}` : 'none' }}
+        className="absolute inset-y-0 left-0 border-r transition-all duration-75"
+        style={{ width: `${percent}%`, borderColor: color, boxShadow: send.level > 0.05 ? `0 0 8px ${color}` : 'none' }}
       />
       <div className="absolute inset-0 flex items-center justify-between px-2 pointer-events-none">
         <span className="text-[7px] font-black text-white/80 uppercase tracking-tighter">{label}</span>
@@ -77,16 +79,25 @@ const HorizontalSendFader: React.FC<{
   );
 };
 
+
 const TrackHeader: React.FC<TrackHeaderProps> = ({ 
   track, onUpdate, isSelected, onSelect, onDropPlugin, onMovePlugin, onSelectPlugin, onRemovePlugin, onRequestAddPlugin, onContextMenu,
   onDragStartTrack, onDragOverTrack, onDropTrack, isDraggingOver, onSwapInstrument
 }) => {
   const [isDragOverFX, setIsDragOverFX] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
-  const [showSends, setShowSends] = useState(false);
   const [isAdjustingVolume, setIsAdjustingVolume] = useState(false);
+  const [showSends, setShowSends] = useState(false);
   const [newName, setNewName] = useState(track.name);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const [sendsTop, setSendsTop] = useState(95);
+
+  useEffect(() => {
+    if (controlsRef.current) {
+        setSendsTop(controlsRef.current.offsetTop + controlsRef.current.offsetHeight);
+    }
+  }, []); 
 
   useEffect(() => {
     if (isRenaming) {
@@ -161,7 +172,25 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     e.stopPropagation();
     setIsDragOverFX(false);
 
-    // 1. Plugins
+    // Audio Import (Catalog)
+    const audioUrl = e.dataTransfer.getData('audio-url');
+    if (audioUrl) {
+        const audioName = e.dataTransfer.getData('audio-name');
+        if ((window as any).DAW_CORE) {
+            (window as any).DAW_CORE.handleAudioImport(audioUrl, audioName || 'Audio', track.id);
+        }
+        return;
+    }
+
+    // Audio Import (Files)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0];
+        if ((window as any).DAW_CORE) {
+            (window as any).DAW_CORE.handleAudioImport(file, file.name, track.id);
+        }
+        return;
+    }
+
     const pluginType = e.dataTransfer.getData('pluginType') as PluginType;
     const pluginName = e.dataTransfer.getData('pluginName');
     const pluginVendor = e.dataTransfer.getData('pluginVendor');
@@ -172,7 +201,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       return;
     } 
     
-    // 2. Move Plugin
     const pluginId = e.dataTransfer.getData('pluginId');
     const sourceTrackId = e.dataTransfer.getData('sourceTrackId');
     if (pluginId && sourceTrackId && onMovePlugin) {
@@ -180,26 +208,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       return;
     } 
     
-    // 3. Audio Import (Catalog)
-    const audioUrl = e.dataTransfer.getData('audio-url');
-    if (audioUrl) {
-        const audioName = e.dataTransfer.getData('audio-name');
-        if ((window as any).DAW_CORE) {
-            (window as any).DAW_CORE.handleAudioImport(audioUrl, audioName || 'Audio', track.id);
-        }
-        return;
-    }
-
-    // 4. Audio Import (Files)
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-        const file = e.dataTransfer.files[0];
-         if ((window as any).DAW_CORE) {
-            (window as any).DAW_CORE.handleAudioImport(file, file.name, track.id);
-        }
-        return;
-    }
-    
-    // 5. Reorder Track
     if (e.dataTransfer.getData('trackId')) {
       onDropTrack();
     }
@@ -385,11 +393,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           
           {canHaveSends && (
             <button 
-              onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }} 
-              onTouchStart={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
-              className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
+                onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }} 
+                onTouchStart={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
+                className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
             >
-              <i className="fas fa-sliders-h text-[10px]"></i>
+                <i className="fas fa-sliders-h text-[10px]"></i>
             </button>
           )}
 
@@ -407,17 +415,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       </div>
       
-      {/* Horizontal Sends Panel */}
-      {canHaveSends && showSends && (
-        <div className="my-2 p-2 bg-[#0c0d10] rounded-lg border border-cyan-500/20 shadow-lg space-y-1.5 animate-in fade-in duration-150">
-          <HorizontalSendFader trackId={track.id} label="Delay 1/4" color="#00f2ff" send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-delay', lvl)} />
-          <HorizontalSendFader trackId={track.id} label="Verb Pro" color="#10b981" send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-short', lvl)} />
-          <HorizontalSendFader trackId={track.id} label="Hall Space" color="#a855f7" send={track.sends.find(s => s.id === 'send-verb-long') || { id: 'send-verb-long', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-long', lvl)} />
-        </div>
-      )}
-
-      {/* ZONE DES CONTRÔLES : Panoramique et Volume */}
-      <div className="flex items-center space-x-3 mt-1 bg-black/20 p-2 rounded-lg border border-white/5 relative z-10">
+      {/* ZONE DES CONTRÔLES : Panoramique, Volume */}
+      <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-2 rounded-lg border border-white/5 relative z-10">
         <div 
           onMouseDown={handlePanMouseDown}
           onTouchStart={handlePanTouchStart}
@@ -450,6 +449,18 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           </div>
         </div>
       </div>
+      
+      {/* SENDS PANEL (OVERLAY) */}
+      {canHaveSends && showSends && (
+        <div 
+          className="absolute left-3 right-3 mt-1 p-2 bg-[#08090b] rounded-lg border border-cyan-500/30 shadow-2xl space-y-1 animate-in fade-in duration-150 z-20"
+          style={{ top: `${sendsTop}px` }}
+        >
+            <HorizontalSendFader trackId={track.id} label="Delay 1/4" color="#00f2ff" send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-delay', lvl)} />
+            <HorizontalSendFader trackId={track.id} label="Verb Pro" color="#10b981" send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-short', lvl)} />
+            <HorizontalSendFader trackId={track.id} label="Hall Space" color="#a855f7" send={track.sends.find(s => s.id === 'send-verb-long') || { id: 'send-verb-long', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-long', lvl)} />
+        </div>
+      )}
       
       {/* INSTRUMENT SLOT (For Sampler/MIDI/DrumRack Tracks) */}
       {instrumentPlugin && (

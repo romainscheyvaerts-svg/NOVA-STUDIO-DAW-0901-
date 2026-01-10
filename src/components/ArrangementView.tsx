@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint } from '../types';
 import TrackHeader from './TrackHeader';
@@ -26,7 +25,6 @@ interface ArrangementViewProps {
   onSelectPlugin?: (trackId: string, plugin: PluginInstance) => void;
   onRemovePlugin?: (trackId: string, pluginId: string) => void;
   onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
-  // FIX: Updated onAddTrack to match the signature in App.tsx
   onAddTrack?: (type: TrackType, name?: string, initialPluginType?: PluginType) => void;
   onDuplicateTrack?: (trackId: string) => void;
   onDeleteTrack?: (trackId: string) => void;
@@ -38,6 +36,7 @@ interface ArrangementViewProps {
   onCreatePattern?: (trackId: string, time: number) => void;
   onSwapInstrument?: (trackId: string) => void; 
   onEditMidi?: (trackId: string, clipId: string) => void;
+  onAudioDrop?: (trackId: string, url: string, name: string) => void;
 }
 
 // Zones d'interaction intelligentes
@@ -61,7 +60,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   isLoopActive, loopStart, loopEnd, onSetLoop, onSeek, bpm, 
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip, isRecording, recStartTime,
-  onCreatePattern, onSwapInstrument, onEditMidi
+  onCreatePattern, onSwapInstrument, onEditMidi, onAudioDrop
 }) => {
   const [activeTool, setActiveTool] = useState<EditorTool>('SELECT');
   const [zoomV, setZoomV] = useState(120); 
@@ -175,7 +174,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   };
 
   const visibleTracks = useMemo(() => {
-    return tracks.filter(t => t.id === 'instrumental' || t.id === 'track-rec-main' || t.type === TrackType.AUDIO || t.type === TrackType.MIDI || t.type === TrackType.BUS || t.type === TrackType.SEND || t.type === TrackType.SAMPLER);
+    return tracks.filter(t => t.type !== TrackType.SEND);
   }, [tracks]);
 
   const projectDuration = useMemo(() => {
@@ -365,14 +364,22 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
   const handleTrackContextMenu = (e: React.MouseEvent, trackId: string) => {
     e.preventDefault();
+    
+    const menuItems: (ContextMenuItem | 'separator')[] = [
+      { label: 'Duplicate Track', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' },
+    ];
+
+    // La piste REC ne peut pas être supprimée
+    if (trackId !== 'track-rec-main') {
+      menuItems.push({ label: 'Delete Track', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
+    }
+
+    menuItems.push({ label: 'Freeze Track', onClick: () => onFreezeTrack?.(trackId), icon: 'fa-snowflake' });
+    
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
-      items: [
-        { label: 'Duplicate Track', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' },
-        { label: 'Delete Track', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' },
-        { label: 'Freeze Track', onClick: () => onFreezeTrack?.(trackId), icon: 'fa-snowflake' }
-      ]
+      items: menuItems
     });
   };
 
@@ -1126,11 +1133,17 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                    isSelected={selectedTrackId === track.id} 
                    onSelect={() => onSelectTrack(track.id)} 
                    onUpdate={onUpdateTrack} 
+                   onDropPlugin={onDropPluginOnTrack} 
+                   onMovePlugin={onMovePlugin} 
+                   onSelectPlugin={onSelectPlugin} 
+                   onRemovePlugin={onRemovePlugin} 
+                   onRequestAddPlugin={onRequestAddPlugin} 
                    onContextMenu={handleTrackContextMenu} 
                    onDragStartTrack={() => {}} 
                    onDragOverTrack={() => {}} 
                    onDropTrack={() => {}}
                    onSwapInstrument={onSwapInstrument}
+                   onAudioDrop={onAudioDrop}
                 />
               </div>
               {track.automationLanes.map(lane => {

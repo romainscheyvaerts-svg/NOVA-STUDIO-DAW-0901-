@@ -13,35 +13,33 @@ interface ErrorBoundaryState {
 }
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = {
+  public state: ErrorBoundaryState = {
     hasError: false,
     error: null,
     errorInfo: null,
   };
 
-  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
+  public static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { hasError: true, error };
   }
 
-  // FIX: Converted to a standard class method for lifecycle hooks.
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  // FIX: Lifecycle methods like componentDidCatch are called by React with the correct `this` context.
+  // Using `this.setState` and `this.props` is the correct way to access state and props here.
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
-    // FIX: Class properties and methods must be accessed with `this`.
     this.setState({
       errorInfo: errorInfo,
     });
 
-    // FIX: Class properties and methods must be accessed with `this`.
     if (this.props.onError) {
-      // FIX: Class properties and methods must be accessed with `this`.
       this.props.onError(error, errorInfo);
     }
   }
 
-  // FIX: Kept as an arrow function to automatically bind `this` for event handlers.
-  handleReset = () => {
-    // FIX: Class properties and methods must be accessed with `this`.
+  // FIX: Event handlers defined as arrow functions automatically bind `this`,
+  // ensuring that `this.setState` refers to the component instance when called from an event like `onClick`.
+  public handleReset = (): void => {
     this.setState({
       hasError: false,
       error: null,
@@ -49,11 +47,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     });
   };
 
-  // FIX: Converted to a standard class method for lifecycle hooks.
-  render() {
-    // FIX: Class properties and methods must be accessed with `this`.
+  // FIX: The render method must also use `this` to access state and props.
+  public render(): ReactNode {
     if (this.state.hasError) {
-      // FIX: Class properties and methods must be accessed with `this`.
       if (this.props.fallback) {
         return this.props.fallback;
       }
@@ -78,7 +74,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       );
     }
 
-    // FIX: Class properties and methods must be accessed with `this`.
     return this.props.children;
   }
 }

@@ -292,7 +292,7 @@ export const VocalSaturatorUI: React.FC<{ node: VocalSaturatorNode, initialParam
            <SatKnob label="Post-High" value={(params.eqHigh + 12)/24} onMouseDown={(e) => handleMouseDown('eqHigh', e)} suffix="dB" factor={24} offset={-12} color="#fff" displayVal={Math.round(params.eqHigh)} />
         </div>
         <div className="flex justify-between items-center pt-4 border-t border-white/5 px-2">
-          <div className="flex flex-col"><span className="text-[7px] font-black text-slate-700 uppercase tracking-widest">Signal Path</span><span className="text-[8px] font-black text-slate-500 uppercase">Drive &gt; Tilt &gt; 3-Band EQ</span></div>
+          <div className="flex flex-col"><span className="text-[7px] font-black text-slate-700 uppercase tracking-widest">Signal Path</span><span className="text-[8px] font-black text-slate-500 uppercase">Drive > Tilt > 3-Band EQ</span></div>
           <div className="flex space-x-6"><div className="flex flex-col items-end"><span className="text-[7px] font-black text-slate-700 uppercase">Wet Mix</span><span className="text-[10px] font-mono text-emerald-500 font-bold">{Math.round(params.mix * 100)}%</span></div><input type="range" min="0" max="1" step="0.01" value={params.mix} onChange={(e) => updateParam('mix', parseFloat(e.target.value))} className="w-24 h-1 bg-white/5 accent-emerald-500 rounded-full" /></div>
         </div>
     </div>

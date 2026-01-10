@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useEffect } from 'react';
 import { AIChatMessage, AIAction } from '../types';
 
@@ -31,7 +32,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     }
   }, [messages, isTyping, isOpen]);
 
-  // FIX: Correction de la boucle de réouverture infinie
+  // FIX: An infinite reopening loop occurred because `isOpen` was in the dependency array. It has been removed to ensure the notification effect only runs when the notification content changes, not when the chat window's visibility state changes.
   useEffect(() => {
     if (externalNotification) {
       const assistantMsg: AIChatMessage = {
@@ -41,13 +42,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, assistantMsg]);
-      
-      // MODIFICATION : On ne force PLUS l'ouverture automatique (intrusive)
-      // Si l'utilisateur veut voir le log, il ouvrira le chat.
-      // if (!isOpen && !isMobile) setIsOpen(true); 
     }
-    // IMPORTANT : On retire 'isOpen' et 'isMobile' des dépendances pour éviter 
-    // que la fermeture de la fenêtre ne redéclenche ce code si la notification est toujours présente.
   }, [externalNotification]); 
 
   const handleSend = async (customMsg?: string) => {
@@ -117,9 +112,6 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     ? "w-full h-full flex flex-col"
     : "w-[440px] h-[600px] bg-[#0c0d10]/90 border border-cyan-500/20 rounded-[40px] shadow-[0_0_100px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden mb-4 animate-in slide-in-from-bottom-4 duration-500 backdrop-blur-3xl";
 
-  // Note: On mobile, closing via button will set isOpen=false, making this return null, 
-  // effectively hiding the content even if the tab is still technically 'NOVA' for a split second 
-  // until the onClose callback updates the parent state.
   if (isMobile && !isOpen) return null;
 
   return (
@@ -140,7 +132,6 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
               </div>
             </div>
             
-            {/* CLOSE BUTTON - NOW VISIBLE ON MOBILE TOO */}
             <button 
               onClick={(e) => { 
                   e.stopPropagation(); 

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { produce } from 'immer';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
@@ -249,6 +248,10 @@ export default function App() {
     tracks: [
       { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
       { id: 'track-rec-main', name: 'REC', type: TrackType.AUDIO, color: '#ff0000', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#ff0000')], totalLatency: 0 },
+      { id: 'lead-couplet', name: 'LEAD COUPLET', type: TrackType.AUDIO, color: '#3b82f6', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#3b82f6')], totalLatency: 0 },
+      { id: 'lead-refrain', name: 'LEAD REFRAIN', type: TrackType.AUDIO, color: '#60a5fa', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#60a5fa')], totalLatency: 0 },
+      { id: 'back-1', name: 'BACK 1', type: TrackType.AUDIO, color: '#a855f7', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#a855f7')], totalLatency: 0 },
+      { id: 'back-2', name: 'BACK 2', type: TrackType.AUDIO, color: '#c084fc', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#c084fc')], totalLatency: 0 },
       createBusVox(createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), AUDIO_CONFIG.DEFAULT_BPM), 
       createBusFx(),
       ...createInitialSends(AUDIO_CONFIG.DEFAULT_BPM, 'bus-fx')
@@ -444,6 +447,106 @@ export default function App() {
     }
   }, [setState]);
 
+  const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string) => {
+    setExternalImportNotice(`Chargement: ${name}...`);
+    try {
+      await ensureAudioEngine();
+      
+      let audioBuffer: AudioBuffer;
+      let audioRef: string;
+      
+      if (source instanceof File) {
+        audioRef = URL.createObjectURL(source);
+        const arrayBuffer = await source.arrayBuffer();
+        audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+      } else {
+        audioRef = source;
+        const response = await fetch(source);
+        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+        const arrayBuffer = await response.arrayBuffer();
+        audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+      }
+      
+      const newClip: Clip = {
+        id: `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: name.replace(/\.[^/.]+$/, ''),
+        type: TrackType.AUDIO,
+        start: stateRef.current.currentTime,
+        duration: audioBuffer.duration,
+        offset: 0,
+        buffer: audioBuffer,
+        audioRef,
+        color: UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length],
+        fadeIn: 0,
+        fadeOut: 0,
+        gain: 1.0,
+        isMuted: false
+      };
+
+      setState(produce((draft: DAWState) => {
+        let targetTrackId: string | null = null;
+        let isNewTrackNeeded = false;
+
+        // Priority 1: Track where file was dropped
+        if (forcedTrackId) {
+            const targetTrack = draft.tracks.find(t => t.id === forcedTrackId);
+            if (targetTrack && targetTrack.type === TrackType.AUDIO) {
+                targetTrackId = forcedTrackId;
+            }
+        }
+        
+        // Priority 2: Currently selected track
+        if (!targetTrackId && draft.selectedTrackId) {
+            const selectedTrack = draft.tracks.find(t => t.id === draft.selectedTrackId);
+            if (selectedTrack && selectedTrack.type === TrackType.AUDIO) {
+                targetTrackId = draft.selectedTrackId;
+            }
+        }
+        
+        // Priority 3: Instrumental track if empty
+        if (!targetTrackId) {
+            const beatTrack = draft.tracks.find(t => t.id === 'instrumental');
+            if (beatTrack && beatTrack.clips.length === 0) {
+                targetTrackId = 'instrumental';
+            }
+        }
+
+        if (targetTrackId) {
+            const track = draft.tracks.find(t => t.id === targetTrackId);
+            if (track) {
+                track.clips.push(newClip);
+                draft.selectedTrackId = targetTrackId;
+            }
+        } else {
+            // Priority 4: Create new track
+            isNewTrackNeeded = true;
+        }
+
+        if (isNewTrackNeeded) {
+            targetTrackId = `track-audio-${Date.now()}`;
+            const newTrack: Track = {
+                id: targetTrackId!,
+                name: name.substring(0, 20),
+                type: TrackType.AUDIO,
+                color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
+                isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+                volume: 1.0, pan: 0, outputTrackId: 'master',
+                sends: [], clips: [newClip], plugins: [], automationLanes: [], totalLatency: 0
+            };
+            draft.tracks.splice(1, 0, newTrack);
+            draft.selectedTrackId = targetTrackId;
+        }
+      }));
+
+      setExternalImportNotice(`✅ Importé: ${newClip.name}`);
+
+    } catch (e: any) {
+      console.error("[Import Error]", e);
+      setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
+    } finally {
+      setTimeout(() => setExternalImportNotice(null), 3000);
+    }
+  }, [setState]);
 
   const handleDuplicateTrack = useCallback((trackId: string) => { /* ... */ }, [setState]);
 
@@ -499,89 +602,6 @@ export default function App() {
         }, 50);
     }
   }, [setState]);
-
-  const handleUniversalAudioImport = async (source: string | File, name: string, forcedTrackId?: string) => {
-      setExternalImportNotice(`Chargement: ${name}...`);
-      try {
-          await ensureAudioEngine();
-          
-          let audioBuffer: AudioBuffer;
-          let audioRef: string;
-          
-          if (source instanceof File) {
-              audioRef = URL.createObjectURL(source);
-              const arrayBuffer = await source.arrayBuffer();
-              audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
-          } else {
-              audioRef = source;
-              const response = await fetch(source);
-              if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-              const arrayBuffer = await response.arrayBuffer();
-              audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
-          }
-          
-          const newClip: Clip = {
-              id: `clip-${Date.now()}`,
-              name: name.replace(/\.[^/.]+$/, ''),
-              type: TrackType.AUDIO,
-              start: stateRef.current.currentTime,
-              duration: audioBuffer.duration,
-              offset: 0,
-              buffer: audioBuffer,
-              audioRef,
-              color: UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length],
-              fadeIn: 0,
-              fadeOut: 0,
-              gain: 1.0,
-              isMuted: false
-          };
-
-          setState(produce((draft: DAWState) => {
-              let targetTrackId: string | null = null;
-              let isNewTrackNeeded = false;
-  
-              if (forcedTrackId) {
-                  targetTrackId = forcedTrackId;
-              } else {
-                  const beatTrack = draft.tracks.find(t => t.id === 'instrumental');
-                  if (beatTrack && beatTrack.clips.length === 0) {
-                      targetTrackId = 'instrumental';
-                  } else {
-                      isNewTrackNeeded = true;
-                      targetTrackId = `track-audio-${Date.now()}`;
-                  }
-              }
-  
-              if (isNewTrackNeeded) {
-                  const newTrack: Track = {
-                      id: targetTrackId!,
-                      name: name.substring(0, 20),
-                      type: TrackType.AUDIO,
-                      color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
-                      isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
-                      volume: 1.0, pan: 0, outputTrackId: 'master',
-                      sends: [], clips: [newClip], plugins: [], automationLanes: [], totalLatency: 0
-                  };
-                  draft.tracks.splice(1, 0, newTrack); // Insère la nouvelle piste après la piste 'BEAT'
-                  draft.selectedTrackId = targetTrackId;
-              } else {
-                  const track = draft.tracks.find(t => t.id === targetTrackId);
-                  if (track) {
-                      track.clips.push(newClip);
-                      draft.selectedTrackId = targetTrackId;
-                  }
-              }
-          }));
-  
-          setExternalImportNotice(`✅ Importé: ${newClip.name}`);
-  
-      } catch (e: any) {
-          console.error("[Import Error]", e);
-          setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
-      } finally {
-          setTimeout(() => setExternalImportNotice(null), 3000);
-      }
-  };
 
   useEffect(() => { 
       (window as any).DAW_CORE = { 
@@ -691,6 +711,7 @@ export default function App() {
                onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
                onCreatePattern={handleCreatePatternAndOpen}
                onSwapInstrument={handleSwapInstrument}
+               onAudioDrop={(trackId, url, name) => handleUniversalAudioImport(url, name, trackId)}
             /> 
           )}
           

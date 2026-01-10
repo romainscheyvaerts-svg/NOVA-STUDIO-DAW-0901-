@@ -1,4 +1,5 @@
 
+
 /**
  * Simple Polyphonic Synthesizer
  * Uses native Web Audio Oscillators to replace Tone.PolySynth
@@ -7,8 +8,8 @@ export class Synthesizer {
   private ctx: AudioContext;
   public output: GainNode;
   
-  // Active voices: MIDI Pitch -> Oscillator/Nodes
-  private activeVoices: Map<number, { osc: OscillatorNode, env: GainNode }> = new Map();
+  // FIX: The `activeVoices` map now includes the `filter` node to ensure it can be properly disconnected upon note release, preventing memory leaks.
+  private activeVoices: Map<number, { osc: OscillatorNode, env: GainNode, filter: BiquadFilterNode }> = new Map();
   
   private params = {
     attack: 0.01,
@@ -56,7 +57,7 @@ export class Synthesizer {
 
     osc.start(t);
 
-    this.activeVoices.set(pitch, { osc, env });
+    this.activeVoices.set(pitch, { osc, env, filter });
   }
 
   public triggerRelease(pitch: number, time: number = 0) {
@@ -69,6 +70,14 @@ export class Synthesizer {
         voice.env.gain.setValueAtTime(voice.env.gain.value, t);
         voice.env.gain.exponentialRampToValueAtTime(0.001, t + this.params.release);
         voice.osc.stop(t + this.params.release + 0.1); // Stop after release
+        
+        // FIX: Added a delayed disconnection for all nodes in the voice. This prevents memory leaks by ensuring audio nodes are cleaned up after they have finished playing.
+        setTimeout(() => {
+            try { voice.filter.disconnect(); } catch(e) {}
+            try { voice.osc.disconnect(); } catch(e) {}
+            try { voice.env.disconnect(); } catch(e) {}
+        }, (this.params.release + 0.2) * 1000);
+
       } catch (e) {
           // Ignore scheduling errors
       }
@@ -78,12 +87,16 @@ export class Synthesizer {
 
   public releaseAll() {
     const now = this.ctx.currentTime;
-    this.activeVoices.forEach((voice) => {
+    this.activeVoices.forEach((voice, pitch) => {
         try {
             voice.env.gain.cancelScheduledValues(now);
             voice.env.gain.setValueAtTime(voice.env.gain.value, now);
             voice.env.gain.linearRampToValueAtTime(0, now + 0.05);
             voice.osc.stop(now + 0.05);
+            // FIX: Added a delayed disconnection for all nodes during `releaseAll`. This ensures a clean shutdown of all voices without causing audio artifacts from immediate disconnection.
+            setTimeout(() => {
+                try { voice.filter.disconnect(); voice.osc.disconnect(); voice.env.disconnect(); } catch(e) {}
+            }, 100);
         } catch(e) {}
     });
     this.activeVoices.clear();

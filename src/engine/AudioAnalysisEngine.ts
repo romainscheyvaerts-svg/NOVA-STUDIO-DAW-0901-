@@ -1,4 +1,5 @@
 
+
 import { NOTES } from '../utils/constants';
 
 /**
@@ -170,10 +171,14 @@ export class AudioAnalysisEngine {
   }
 
   public static async detectFirstHeavyTransient(buffer: AudioBuffer, scanDuration: number): Promise<number> {
-    const offlineCtx = new OfflineAudioContext(1, Math.min(buffer.duration, scanDuration) * 10000, 10000); 
+    const targetSampleRate = 8000;
+    const actualDuration = Math.min(buffer.duration, scanDuration);
+    
+    const offlineCtx = new OfflineAudioContext(1, actualDuration * targetSampleRate, targetSampleRate);
     const source = offlineCtx.createBufferSource();
     source.buffer = buffer;
     
+    // Filtre passe-bas pour les basses (kick/drop)
     const lowpass = offlineCtx.createBiquadFilter();
     lowpass.type = 'lowpass';
     lowpass.frequency.value = 120; 

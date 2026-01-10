@@ -1,4 +1,5 @@
 
+
 /**
  * Simple Polyphonic Synthesizer
  * Uses native Web Audio Oscillators to replace Tone.PolySynth
@@ -75,7 +76,7 @@ export class Synthesizer {
             try { voice.filter.disconnect(); } catch(e) {}
             try { voice.osc.disconnect(); } catch(e) {}
             try { voice.env.disconnect(); } catch(e) {}
-        }, (this.params.release + 0.1) * 1000);
+        }, (this.params.release + 0.2) * 1000);
 
       } catch (e) {
           // Ignore scheduling errors

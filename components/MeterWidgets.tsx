@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useRef } from 'react';
 import { audioEngine } from '../engine/AudioEngine';
 
@@ -44,7 +45,7 @@ class MeterManager {
       let rms = 0;
 
       if (data.type === 'MASTER_L' || data.type === 'MASTER_R') {
-        // CORRECTION: Si le transport est arrêté, on force le niveau à 0 pour éviter le freeze du dernier buffer
+        // FIX: The master meters would freeze on the last audio buffer value when playback was stopped. This check ensures the meter resets to zero when the transport is not playing.
         if (isPlaying) {
             rms = audioEngine.getRMS(data.type === 'MASTER_L' ? audioEngine.masterAnalyzerL : audioEngine.masterAnalyzerR);
         } else {
