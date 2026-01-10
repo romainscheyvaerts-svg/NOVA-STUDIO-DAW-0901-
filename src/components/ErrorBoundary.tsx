@@ -23,23 +23,23 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { hasError: true, error };
   }
 
-  componentDidCatch = (error: Error, errorInfo: ErrorInfo) => {
+  // FIX: Converted to an arrow function to ensure `this` is correctly bound.
+  // This resolves errors where `this.setState` and `this.props` were not found on the component instance.
+  public componentDidCatch = (error: Error, errorInfo: ErrorInfo) => {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
-    // FIX: Property 'setState' does not exist on type 'ErrorBoundary'. In class components, use 'this.setState' to update state.
     this.setState({
       errorInfo: errorInfo,
     });
 
-    // FIX: Property 'props' does not exist on type 'ErrorBoundary'. In class components, use 'this.props' to access props.
     if (this.props.onError) {
-      // FIX: Property 'props' does not exist on type 'ErrorBoundary'. In class components, use 'this.props' to access props.
       this.props.onError(error, errorInfo);
     }
   }
 
-  handleReset = () => {
-    // FIX: Property 'setState' does not exist on type 'ErrorBoundary'. In class components, use 'this.setState' to update state.
+  // FIX: Converted to an arrow function to ensure `this` is correctly bound without needing a constructor.
+  // This resolves errors where `this.setState` was not found on the component instance.
+  public handleReset = () => {
     this.setState({
       hasError: false,
       error: null,
@@ -49,9 +49,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   render(): ReactNode {
     if (this.state.hasError) {
-      // FIX: Property 'props' does not exist on type 'ErrorBoundary'. In class components, use 'this.props' to access props.
       if (this.props.fallback) {
-        // FIX: Property 'props' does not exist on type 'ErrorBoundary'. In class components, use 'this.props' to access props.
         return this.props.fallback;
       }
 
@@ -75,7 +73,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       );
     }
 
-    // FIX: Property 'props' does not exist on type 'ErrorBoundary'. In class components, use 'this.props' to access props.
     return this.props.children;
   }
 }

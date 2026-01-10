@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint } from '../types';
 import TrackHeader from './TrackHeader';
@@ -127,14 +128,22 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     return () => observer.disconnect();
   }, []);
 
+  const isSyncingScroll = useRef(false);
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
-    const scrollTop = target.scrollTop;
-    const scrollLeftVal = target.scrollLeft;
-    if (target === scrollContainerRef.current) { setScrollLeft(scrollLeftVal); }
-    if (sidebarContainerRef.current) { sidebarContainerRef.current.scrollTop = scrollTop; }
+    if (isSyncingScroll.current) return;
+    
+    isSyncingScroll.current = true;
+    if (target === scrollContainerRef.current) {
+        setScrollLeft(target.scrollLeft);
+        if (sidebarContainerRef.current) sidebarContainerRef.current.scrollTop = target.scrollTop;
+    } else if (target === sidebarContainerRef.current) {
+        if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = target.scrollTop;
+    }
+    
+    requestAnimationFrame(() => { isSyncingScroll.current = false; });
   };
-
+  
   const handleSidebarWheel = (e: React.WheelEvent) => {
     if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && scrollContainerRef.current) {
         scrollContainerRef.current.scrollLeft += e.deltaX;
@@ -317,6 +326,12 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         currentY += zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
     }
     
+    if (e.button === 2) {
+      e.preventDefault();
+      setGridMenu({ x: e.clientX, y: e.clientY });
+      return;
+    }
+
     onSeek(getSnappedTime(time, bpm, gridSize, useSnap));
     setDragAction('SCRUB');
 };
@@ -365,6 +380,105 @@ const handleMouseUp = () => {
     setInitialClipState(null);
 };
 
+const drawTimeline = useCallback(() => {
+    const canvas = canvasRef.current;
+    const scroll = scrollContainerRef.current;
+    if (!canvas || !scroll) return;
+    
+    if (canvas.width !== viewportSize.width || canvas.height !== viewportSize.height) {
+        canvas.width = viewportSize.width;
+        canvas.height = viewportSize.height;
+    }
+
+    const ctx = canvas.getContext('2d')!;
+    const w = canvas.width;
+    const h = canvas.height;
+    const scrollX = scroll.scrollLeft;
+    
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0c0d10';
+    ctx.fillRect(0, 0, w, h);
+    
+    const beatPx = (60 / bpm) * zoomH;
+    const startTime = pixelsToTime(scrollX);
+    const endTime = pixelsToTime(scrollX + w);
+    const startBar = Math.floor(startTime * (bpm / 60) / 4);
+    const endBar = Math.ceil(endTime * (bpm / 60) / 4);
+
+    let subDivisionsPerBar = 4;
+    if (gridSize === '1/1') subDivisionsPerBar = 1;
+    else if (gridSize === '1/8') subDivisionsPerBar = 8;
+    else if (gridSize === '1/16') subDivisionsPerBar = 16;
+    
+    const barDurationPx = 4 * beatPx;
+    const subStepPx = barDurationPx / subDivisionsPerBar;
+    const showSubdivisions = subStepPx > 8;
+
+    for (let i = startBar; i <= endBar; i++) {
+      const time = i * 4 * (60 / bpm);
+      const x = timeToPixels(time) - scrollX;
+      
+      // Bar lines
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+      
+      // Beat lines
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      for(let j=1; j<4; j++) {
+         const bx = x + j * beatPx;
+         if (bx > 0 && bx < w) {
+             ctx.beginPath(); ctx.moveTo(bx, 0); ctx.lineTo(bx, h); ctx.stroke();
+         }
+      }
+
+      // Subdivisions
+      if (showSubdivisions) {
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+          for (let j = 1; j < subDivisionsPerBar; j++) {
+              if (j % (subDivisionsPerBar / 4) !== 0) { // Avoid overdrawing on beat lines
+                  const sx = x + j * subStepPx;
+                  if (sx > 0 && sx < w) {
+                      ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, h); ctx.stroke();
+                  }
+              }
+          }
+      }
+    }
+    
+    ctx.fillStyle = '#14161a';
+    ctx.fillRect(0, 0, w, 40);
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.beginPath(); ctx.moveTo(0, 40); ctx.lineTo(w, 40); ctx.stroke();
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 10px Inter';
+    for (let i = startBar; i <= endBar; i++) {
+        const time = i * 4 * (60 / bpm);
+        const x = timeToPixels(time) - scrollX;
+        if (x >= -50) ctx.fillText((i+1).toString(), x + 4, 24);
+    }
+
+    const phX = timeToPixels(currentTime) - scrollX;
+    if (phX >= 0 && phX <= w) {
+      ctx.strokeStyle = isRecording ? '#ef4444' : '#00f2ff';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(phX, 0); ctx.lineTo(phX, h); ctx.stroke();
+      ctx.fillStyle = isRecording ? '#ef4444' : '#00f2ff';
+      ctx.beginPath(); ctx.moveTo(phX-5, 0); ctx.lineTo(phX+5, 0); ctx.lineTo(phX, 10); ctx.fill();
+    }
+  }, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize, gridSize]);
+
+  useEffect(() => {
+    let animId: number;
+    const loop = () => {
+        drawTimeline();
+        animId = requestAnimationFrame(loop);
+    };
+    animId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animId);
+  }, [drawTimeline]);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative select-none" onContextMenu={e => e.preventDefault()}>
       <div className="h-12 border-b flex items-center px-4 gap-4 z-30 shrink-0">
@@ -399,6 +513,7 @@ const handleMouseUp = () => {
             className="flex-shrink-0 border-r z-40 flex flex-col overflow-y-auto overflow-x-hidden transition-colors relative sidebar-no-scroll" 
             style={{ width: `${headerWidth}px`, scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
+          <style>{`.sidebar-no-scroll::-webkit-scrollbar { display: none; }`}</style>
           <div style={{ height: 40, flexShrink: 0 }} />
           {visibleTracks.map((track) => (
             <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>
@@ -406,7 +521,7 @@ const handleMouseUp = () => {
                 <TrackHeader 
                    track={track} isSelected={selectedTrackId === track.id} onSelect={() => onSelectTrack(track.id)} onUpdate={onUpdateTrack} 
                    onDropPlugin={onDropPluginOnTrack} onMovePlugin={onMovePlugin} onSelectPlugin={onSelectPlugin} onRemovePlugin={onRemovePlugin} onRequestAddPlugin={onRequestAddPlugin} 
-                   onContextMenu={handleTrackContextMenu} onDragStartTrack={() => {}} onDragOverTrack={() => {}} onDropTrack={() => {}} onSwapInstrument={onSwapInstrument} onAudioDrop={(url, name) => onAudioDrop?.(track.id, url, name, 0)}
+                   onContextMenu={handleTrackContextMenu} onDragStartTrack={() => {}} onDragOverTrack={() => {}} onDropTrack={() => {}} onSwapInstrument={onSwapInstrument}
                 />
               </div>
               {track.automationLanes.map(lane => lane.isExpanded && (
@@ -443,7 +558,7 @@ const handleMouseUp = () => {
         </div>
       </div>
       {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
-      {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled(!snapEnabled)} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => {}} />}
+      {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled(!snapEnabled)} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: currentTime })} />}
       {hoverTime !== null && dragAction !== null && <div className="fixed z-[200] px-3 py-1.5 bg-black/90 border border-cyan-500/30 rounded-lg shadow-2xl pointer-events-none text-[10px] font-black text-cyan-400 font-mono" style={{ left: tooltipPos.x + 15, top: tooltipPos.y }}>{hoverTime.toFixed(3)}s {dragAction && <span className="ml-2 text-white opacity-50">[{dragAction}]</span>}</div>}
       {clipContextMenu && (
         <ContextMenu

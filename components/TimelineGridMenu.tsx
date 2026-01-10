@@ -28,7 +28,6 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
         onClose();
       }
     };
-    // Petit délai pour éviter que le clic d'ouverture ne ferme immédiatement le menu
     const timer = setTimeout(() => {
       document.addEventListener('mousedown', handleClickOutside);
     }, 10);
@@ -38,7 +37,6 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
     };
   }, [onClose]);
 
-  // Garde-fou pour ne pas sortir de l'écran
   const adjustedX = Math.min(x, window.innerWidth - 240);
   const adjustedY = Math.min(y, window.innerHeight - 300);
 
@@ -56,7 +54,6 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
       style={{ left: adjustedX, top: adjustedY }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {/* HEADER */}
       <div className="px-4 py-2 border-b border-white/5 bg-white/[0.02]">
         <div className="flex items-center space-x-2">
           <i className="fas fa-th text-[10px] text-cyan-500"></i>
@@ -65,7 +62,6 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
       </div>
 
       <div className="p-1">
-        {/* SECTION 1: GRID SIZE */}
         <div className="px-3 py-1.5 mt-1 text-[8px] font-black uppercase text-slate-600 tracking-widest">Quantization (Grid)</div>
         <div className="flex flex-col space-y-0.5">
           {GRID_OPTIONS.map((opt) => (
@@ -82,7 +78,6 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
 
         <div className="h-px bg-white/5 my-2 mx-2" />
 
-        {/* SECTION 2: EDIT MODE */}
         <div className="px-3 py-1.5 text-[8px] font-black uppercase text-slate-600 tracking-widest">Mode d'Édition</div>
         <button
           onClick={() => { onToggleSnap(); onClose(); }}
@@ -99,7 +94,6 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
 
         <div className="h-px bg-white/5 my-2 mx-2" />
 
-        {/* SECTION 3: GLOBAL TOOLS */}
         <div className="flex flex-col space-y-0.5">
           <button onClick={() => { onAddTrack(); onClose(); }} className="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/5 text-slate-300">
             <i className="fas fa-plus-circle w-4 text-center text-slate-500"></i>
