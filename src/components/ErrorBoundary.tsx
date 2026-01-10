@@ -19,32 +19,27 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     errorInfo: null,
   };
 
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.handleReset = this.handleReset.bind(this);
-  }
-
   public static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  componentDidCatch = (error: Error, errorInfo: ErrorInfo) => {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
-    // FIX: Add `this.` to access setState
+    // FIX: Added 'this.' to access 'setState' on the class instance.
     this.setState({
       errorInfo: errorInfo,
     });
 
-    // FIX: Add `this.` to access props
+    // FIX: Added 'this.' to access 'props' on the class instance.
     if (this.props.onError) {
-      // FIX: Add `this.` to access props
+      // FIX: Added 'this.' to access 'props' on the class instance.
       this.props.onError(error, errorInfo);
     }
   }
 
-  handleReset() {
-    // FIX: Add `this.` to access setState
+  handleReset = () => {
+    // FIX: Added 'this.' to access 'setState' on the class instance.
     this.setState({
       hasError: false,
       error: null,
@@ -53,11 +48,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   render(): ReactNode {
-    // FIX: Add `this.` to access state
     if (this.state.hasError) {
-      // FIX: Add `this.` to access props
+      // FIX: Added 'this.' to access 'props' on the class instance.
       if (this.props.fallback) {
-        // FIX: Add `this.` to access props
+        // FIX: Added 'this.' to access 'props' on the class instance.
         return this.props.fallback;
       }
 
@@ -81,7 +75,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       );
     }
 
-    // FIX: Add `this.` to access props
+    // FIX: Added 'this.' to access 'props' on the class instance.
     return this.props.children;
   }
 }

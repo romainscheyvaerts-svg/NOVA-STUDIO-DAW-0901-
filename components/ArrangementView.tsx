@@ -772,7 +772,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     }
 
     requestRef.current = requestAnimationFrame(drawTimeline);
-  }, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize, hoveredTrackId, dragAction, hoverTime, dragStartX, gridSize, snapEnabled]);
+  }, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize, hoveredTrackId, dragAction, hoverTime, dragStartX, gridSize, snapEnabled, drawClip, pixelsToTime, timeToPixels]);
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(drawTimeline);
@@ -813,7 +813,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     }
   };
 
-  const handlePointerDown = (clientX: number, clientY: number, button: number, shiftKey: boolean, target: EventTarget | null, detail: number = 1) => {
+  // FIX: Refactored handlePointerDown to accept the full MouseEvent object.
+  // This allows passing the event to context menu handlers and fixes 'e is not defined' errors.
+  const handlePointerDown = (e: React.MouseEvent) => {
+    const { clientX, clientY, button, shiftKey, target, detail } = e;
     if (!scrollContainerRef.current) return;
     if (target instanceof Element && target.closest('.automation-lane-container')) return;
     if (target === minimapRef.current) return;
@@ -858,9 +861,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
               return;
           }
 
-          if (button === 2) { handleClipContextMenu({ clientX, clientY } as any, t.id, clip.id); return; }
+          if (button === 2) { handleClipContextMenu(e, t.id, clip.id); return; }
           
-          const clipStartPx = timeToPixels(clip.start);
           const clickRelY = absY - currentY;
           const zone = getInteractionZone(absX, clickRelY, clip, zoomV);
 
@@ -1068,7 +1070,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     document.body.style.cursor = 'default';
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => handlePointerDown(e.clientX, e.clientY, e.button, e.shiftKey, e.target, e.detail);
+  const handleMouseDown = (e: React.MouseEvent) => handlePointerDown(e);
   const handleMouseMove = (e: React.MouseEvent) => handlePointerMove(e.clientX, e.clientY, e.shiftKey);
   const handleMouseUp = () => handlePointerUp();
 
