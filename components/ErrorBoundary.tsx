@@ -1,4 +1,3 @@
-
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 
 interface ErrorBoundaryProps {
@@ -14,25 +13,22 @@ interface ErrorBoundaryState {
 }
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = {
-      hasError: false,
-      error: null,
-      errorInfo: null,
-    };
-  }
+  state: ErrorBoundaryState = {
+    hasError: false,
+    error: null,
+    errorInfo: null,
+  };
 
-  public static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { hasError: true, error };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  // FIX: Converted to an arrow function property to explicitly bind `this` and resolve context-related errors where `this.props` and `this.setState` were not found.
+  componentDidCatch = (error: Error, errorInfo: ErrorInfo) => {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
     this.setState({
-      error,
-      errorInfo,
+      errorInfo: errorInfo,
     });
 
     if (this.props.onError) {
@@ -40,7 +36,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
   }
 
-  public handleReset = () => {
+  handleReset = () => {
     this.setState({
       hasError: false,
       error: null,
@@ -48,7 +44,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     });
   };
 
-  public render() {
+  // FIX: Converted to an arrow function property to explicitly bind `this` and resolve context-related errors where `this.props` was not found.
+  render = () => {
     if (this.state.hasError) {
       if (this.props.fallback) {
         return this.props.fallback;

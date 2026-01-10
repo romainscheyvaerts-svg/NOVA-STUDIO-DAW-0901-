@@ -42,7 +42,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
 
   const [stemsFile, setStemsFile] = useState<File | null>(null);
 
-  // External URLs (From Drive Import - Will be converted)
+  // External URLs (From Drive Import)
   const [importedPreviewUrl, setImportedPreviewUrl] = useState<string | null>(null);
   const [importedStemsUrl, setImportedStemsUrl] = useState<string | null>(null);
   const [importSourceIds, setImportSourceIds] = useState<number[]>([]);
@@ -54,6 +54,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
 
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>('');
+  const [isSyncing, setIsSyncing] = useState(false); // New state for Drive Sync
   
   // Inventory Management State
   const [inventory, setInventory] = useState<Instrument[]>(existingInstruments);
@@ -93,6 +94,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
   const fetchPendingUploads = async () => {
       const data = await supabaseManager.getPendingUploads();
       processPendingUploads(data);
+  };
+
+  const handleSyncDrive = async () => {
+      setIsSyncing(true);
+      setStatus("📡 Scan du Google Drive en cours...");
+      try {
+          const count = await supabaseManager.syncDriveFiles();
+          setStatus(`✅ Sync terminée : ${count} fichiers ajoutés.`);
+          await fetchPendingUploads();
+      } catch (e: any) {
+          console.error(e);
+          setStatus(`❌ Erreur Sync: ${e.message}`);
+      } finally {
+          setIsSyncing(false);
+      }
   };
 
   const processPendingUploads = (uploads: PendingUpload[]) => {
@@ -143,7 +159,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
 
   // --- AUDIO PREVIEW LOGIC ---
   const togglePreview = (url: string) => {
-      // FIX: Utilisation directe de l'URL Supabase
       const fullUrl = supabaseManager.getPublicInstrumentUrl(url);
 
       if (playingUrl === fullUrl) {
@@ -176,7 +191,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
           let sourceBlob: Blob;
 
           if (typeof fileOrUrl === 'string') {
-              // C'est une URL (Import Drive ou Supabase), on télécharge d'abord
               const fullUrl = supabaseManager.getPublicInstrumentUrl(fileOrUrl);
               const res = await fetch(fullUrl);
               if (!res.ok) throw new Error("Impossible de télécharger le fichier source");
@@ -185,14 +199,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
               sourceBlob = fileOrUrl;
           }
 
-          // Appel au convertisseur
           const mp3Blob = await AudioConverter.convertToMp3(sourceBlob);
           
-          // Mise à jour state
           setPreviewFile(mp3Blob);
           setPreviewFileName(originalName.replace(/\.(wav|mp3)$/i, '') + '.mp3');
           
-          // Création URL locale pour écoute immédiate
           const objUrl = URL.createObjectURL(mp3Blob);
           setLocalPreviewUrl(objUrl);
           
@@ -247,7 +258,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
       setName(cleanName);
       setImportSourceIds([group.instru.id]);
       
-      // Auto-trigger conversion for imported file
       await handleWavConversion(group.instru.download_url, group.instru.filename);
       
       if (group.stems) {
@@ -277,7 +287,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
       setPriceExclusive(inst.price_exclusive);
       setCoverPreviewUrl(inst.image_url);
       
-      // On load la preview existante pour lecture
       setLocalPreviewUrl(supabaseManager.getPublicInstrumentUrl(inst.preview_url));
       
       setStatus("✏️ Mode Édition activé.");
@@ -357,7 +366,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
           setCoverFile(file);
           setCoverPreviewUrl(URL.createObjectURL(file));
       } else if (type === 'preview') {
-          // AUTO CONVERT TO MP3
           setImportedPreviewUrl(null); 
           await handleWavConversion(file, file.name);
       } else if (type === 'stems') {
@@ -369,7 +377,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Check if we have audio
     const hasAudio = !!previewFile || !!importedPreviewUrl || (editingId !== null);
 
     if (!editingId && (!name || !coverFile || !hasAudio)) {
@@ -385,7 +392,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
       let previewUrl = '';
       let stemsUrl = '';
 
-      // Upload Cover
       if (coverFile) {
           setStatus("📸 Upload Cover...");
           coverUrl = await supabaseManager.uploadStoreFile(coverFile, 'covers');
@@ -394,7 +400,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
            if (original) coverUrl = original.image_url;
       }
 
-      // Upload MP3 Preview (Converted Blob)
       if (previewFile) {
           setStatus("🎵 Upload Preview Optimisée (MP3)...");
           const mp3File = new File([previewFile], previewFileName, { type: 'audio/mp3' });
@@ -406,7 +411,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
           if (original) previewUrl = original.preview_url;
       }
 
-      // Upload Stems
       if (stemsFile) {
           setStatus("🗂️ Upload Stems...");
           stemsUrl = await supabaseManager.uploadStoreFile(stemsFile, 'stems');
@@ -486,7 +490,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                 </div>
                 <div>
                     <h2 className="text-sm font-black uppercase tracking-[0.2em] text-white">Admin Dashboard</h2>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Store Manager v2.3 (MP3 Encoder)</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Store Manager v2.4 (Drive Sync)</p>
                 </div>
             </div>
             <button 
@@ -530,34 +534,47 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                 
                 <div className="flex-1 overflow-y-auto p-6 custom-scroll">
                     
-                    {/* ... (Pending Uploads) ... */}
-                    {!editingId && pendingUploads.length > 0 && (
+                    {/* --- PENDING UPLOADS SECTION (DRIVE) --- */}
+                    {!editingId && (
                         <div className="mb-6 bg-blue-500/5 border border-blue-500/20 rounded-xl overflow-hidden">
                             <div className="px-4 py-2 bg-blue-500/10 border-b border-blue-500/10 flex justify-between items-center">
                                 <span className="text-[9px] font-black uppercase text-blue-400 tracking-widest">
                                     <i className="fab fa-google-drive mr-2"></i>Inbox Drive ({pendingUploads.length})
                                 </span>
-                                <button onClick={fetchPendingUploads} className="text-blue-400 hover:text-white"><i className="fas fa-sync-alt text-[9px]"></i></button>
+                                <div className="flex items-center space-x-2">
+                                    <button 
+                                        onClick={handleSyncDrive}
+                                        disabled={isSyncing} 
+                                        className="text-[9px] px-2 py-1 bg-blue-500/20 hover:bg-blue-500/40 text-blue-300 rounded font-bold uppercase transition-all"
+                                    >
+                                        <i className={`fas ${isSyncing ? 'fa-spin fa-spinner' : 'fa-cloud-download-alt'} mr-1`}></i>
+                                        {isSyncing ? 'Scanning...' : 'Scan Drive'}
+                                    </button>
+                                </div>
                             </div>
                             <div className="max-h-40 overflow-y-auto custom-scroll">
-                                {pendingUploads.map((group) => (
-                                    <div key={group.identifier} className="p-3 border-b border-white/5 flex items-center justify-between hover:bg-white/5 transition-colors group">
-                                        <div className="flex flex-col min-w-0 pr-2">
-                                            <div className="text-[10px] font-bold text-white truncate" title={group.instru.filename}>{group.instru.filename}</div>
-                                            <div className="flex items-center space-x-2 mt-1">
-                                                <span className={`text-[8px] font-mono px-1.5 rounded ${group.stems ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
-                                                    {group.stems ? '✅ STEMS' : '🎵 AUDIO'}
-                                                </span>
+                                {pendingUploads.length === 0 ? (
+                                    <div className="p-4 text-center text-slate-500 text-[9px] italic">Aucun fichier en attente. Cliquez sur "Scan Drive" pour synchroniser.</div>
+                                ) : (
+                                    pendingUploads.map((group) => (
+                                        <div key={group.identifier} className="p-3 border-b border-white/5 flex items-center justify-between hover:bg-white/5 transition-colors group">
+                                            <div className="flex flex-col min-w-0 pr-2">
+                                                <div className="text-[10px] font-bold text-white truncate" title={group.instru.filename}>{group.instru.filename}</div>
+                                                <div className="flex items-center space-x-2 mt-1">
+                                                    <span className={`text-[8px] font-mono px-1.5 rounded ${group.stems ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
+                                                        {group.stems ? '✅ STEMS' : '🎵 AUDIO'}
+                                                    </span>
+                                                </div>
                                             </div>
+                                            <button 
+                                                onClick={() => handleImport(group)}
+                                                className="px-3 py-1.5 bg-blue-500 hover:bg-blue-400 text-black text-[9px] font-black uppercase rounded shadow-lg transition-transform active:scale-95"
+                                            >
+                                                Convertir & Import
+                                            </button>
                                         </div>
-                                        <button 
-                                            onClick={() => handleImport(group)}
-                                            className="px-3 py-1.5 bg-blue-500 hover:bg-blue-400 text-black text-[9px] font-black uppercase rounded shadow-lg transition-transform active:scale-95"
-                                        >
-                                            Convertir & Import
-                                        </button>
-                                    </div>
-                                ))}
+                                    ))
+                                )}
                             </div>
                         </div>
                     )}

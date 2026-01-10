@@ -253,12 +253,14 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
       return user?.owned_instruments?.includes(instId);
   };
 
-  const handleStripeBuy = async (licenseType: 'BASIC' | 'PREMIUM' | 'EXCLUSIVE') => {
+  const handleStripeBuy = async () => {
       if (!user || !selectedBeat) return;
-      if (licenseType === 'BASIC' && selectedBeat.stripe_link_basic) window.open(selectedBeat.stripe_link_basic, '_blank');
-      else if (licenseType === 'PREMIUM' && selectedBeat.stripe_link_premium) window.open(selectedBeat.stripe_link_premium, '_blank');
-      else if (licenseType === 'EXCLUSIVE' && selectedBeat.stripe_link_exclusive) window.open(selectedBeat.stripe_link_exclusive, '_blank');
-      else setPaymentError(`Lien de paiement ${licenseType} non configuré.`);
+      
+      if (selectedBeat.stripe_link_basic) {
+          window.open(selectedBeat.stripe_link_basic, '_blank');
+      } else {
+          setPaymentError(`Lien de paiement BASIC non configuré.`);
+      }
   };
 
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -279,6 +281,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
         />
       )}
 
+      {/* Header Compact */}
       <div className="p-4 border-b border-white/5 bg-[#08090b] sticky top-0 z-20 space-y-3">
         <div className="flex justify-between items-center">
           <div>
@@ -294,6 +297,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
         </div>
       </div>
 
+      {/* WAVEFORM VISUALIZER (STUDIO MODE ONLY) */}
       {audioMode === 'STUDIO' && playingId && (
          <div className="h-12 bg-black/20 border-b border-white/5 relative overflow-hidden">
              <canvas ref={canvasRef} width={300} height={48} className="w-full h-full opacity-60" />
@@ -301,6 +305,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
          </div>
       )}
 
+      {/* List View Compact */}
       <div className="flex-1 overflow-y-auto custom-scroll">
         {loading ? (
           <div className="flex justify-center items-center py-10">
@@ -315,6 +320,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                 onDragStart={(e) => handleDragStart(e, inst)}
                 className={`group flex items-center p-3 border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-grab active:cursor-grabbing relative ${playingId === inst.id ? 'bg-white/[0.05]' : ''}`}
               >
+                {/* Cover & Play */}
                 <div className="relative w-10 h-10 shrink-0 mr-3">
                     <img src={inst.image_url} alt={inst.name} className="w-full h-full object-cover rounded-md opacity-80 group-hover:opacity-100" />
                     <button 
@@ -329,6 +335,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                     </button>
                 </div>
 
+                {/* Info */}
                 <div className="flex-1 min-w-0 pr-2">
                     <div className="flex items-center space-x-2">
                         <h3 className={`text-[10px] font-bold truncate ${playingId === inst.id ? 'text-cyan-400' : 'text-white'}`}>{inst.name}</h3>
@@ -341,6 +348,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                     </div>
                 </div>
 
+                {/* Actions */}
                 <div className="flex flex-col items-end space-y-1">
                     <span className="text-[9px] font-mono text-cyan-400">${inst.price_basic}</span>
                     <button 
@@ -361,6 +369,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
         )}
       </div>
 
+      {/* LICENSE MODAL (Fixed Overlay) */}
       {selectedBeat && (
         createPortal(
             <div 
@@ -371,6 +380,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                     className="bg-[#14161a] border border-white/10 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row relative"
                     onClick={(e) => e.stopPropagation()}
                 >
+                    {/* BOUTON FERMETURE AVEC Z-INDEX ÉLEVÉ */}
                     <button 
                         onClick={() => { if(!processingPayment) setSelectedBeat(null); }} 
                         className="absolute top-4 right-4 z-50 w-8 h-8 flex items-center justify-center bg-black/50 rounded-full text-slate-400 hover:text-white hover:bg-red-500/80 transition-all"
@@ -406,22 +416,8 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                                 name="Basic Lease" 
                                 price={selectedBeat.price_basic} 
                                 feat="MP3 • Tagged" 
-                                onBuy={() => handleStripeBuy('BASIC')} 
+                                onBuy={handleStripeBuy} 
                                 disabled={processingPayment} 
-                            />
-                            <LicenseOption 
-                                name="Premium Lease" 
-                                price={selectedBeat.price_premium} 
-                                feat="WAV • Untagged" 
-                                onBuy={() => handleStripeBuy('PREMIUM')} 
-                                disabled={processingPayment} 
-                            />
-                            <LicenseOption 
-                                name="Exclusive" 
-                                price={selectedBeat.price_exclusive} 
-                                feat="STEMS • Full Rights" 
-                                onBuy={() => handleStripeBuy('EXCLUSIVE')} 
-                                disabled={processingPayment || !selectedBeat.stems_url} 
                             />
                         </div>
                         <div className="mt-4 flex items-center justify-center text-[9px] text-slate-500 space-x-2">

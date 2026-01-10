@@ -33,6 +33,25 @@ export class SupabaseManager {
   }
 
   /**
+   * Appelle l'Edge Function pour synchroniser l'index Drive -> Supabase
+   * Retourne le nombre de fichiers ajoutés
+   */
+  public async syncDriveFiles(): Promise<number> {
+    if (!supabase) return 0;
+    
+    console.log("[Sync] Lancement de la synchronisation Drive...");
+    const { data, error } = await supabase.functions.invoke('sync-drive-index');
+    
+    if (error) {
+        console.error("Erreur Sync Drive:", error);
+        throw new Error(error.message);
+    }
+    
+    console.log(`[Sync] Terminé. Fichiers ajoutés: ${data.addedCount}`);
+    return data.addedCount || 0;
+  }
+
+  /**
    * ACCÈS DIRECT STORAGE SUPABASE
    * Récupère l'URL publique d'un fichier dans le bucket 'instruments'.
    * Gère les chemins relatifs (stockés en DB) ou les URLs complètes.
@@ -52,7 +71,6 @@ export class SupabaseManager {
         if (fileId) {
             // Utiliser l'Edge Function Supabase comme proxy
             const proxyUrl = `https://sqduhfckgvyezdiubeei.supabase.co/functions/v1/stream-drive-audio?id=${fileId}`;
-            console.log("[SupabaseManager] URL Google Drive convertie:", proxyUrl);
             return proxyUrl;
         } else {
             console.warn("[SupabaseManager] Impossible d'extraire l'ID du fichier Drive:", pathOrUrl);
@@ -559,7 +577,15 @@ export class SupabaseManager {
   
   public async getPendingUploads(): Promise<PendingUpload[]> {
     if (!supabase) return [];
-    const { data, error } = await supabase.from('pending_uploads').select('*').eq('is_processed', false).order('created_at', { ascending: false });
+    // Note: suppression du filtre is_processed pour voir tous les fichiers pour le debug si besoin
+    // ou bien on garde le comportement normal.
+    // Pour l'instant, on garde .eq('is_processed', false) car c'est le flux normal.
+    // Le bouton SYNC s'occupera de rajouter les manquants.
+    const { data, error } = await supabase.from('pending_uploads')
+        .select('*')
+        .eq('is_processed', false)
+        .order('created_at', { ascending: false });
+        
     if (error) { console.error("Erreur récupération pending uploads:", error); return []; }
     return data as PendingUpload[];
   }

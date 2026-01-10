@@ -43,7 +43,7 @@ const HorizontalSendFader: React.FC<{
     const onMouseUp = () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
     window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
   };
-
+  
   const handleTouchStart = (e: React.TouchEvent) => {
     e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
@@ -62,15 +62,15 @@ const HorizontalSendFader: React.FC<{
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
-      className="relative h-5 bg-black/60 rounded-md overflow-hidden border border-white/5 cursor-ew-resize group/fader mb-1 last:mb-0 transition-all hover:border-white/20 touch-none"
+      className="relative h-5 bg-black/60 rounded-md overflow-hidden border border-white/5 cursor-ew-resize group/fader transition-all hover:border-white/20 touch-none"
     >
       <div 
         className="absolute inset-y-0 left-0 transition-all duration-75"
-        style={{ width: `${percent}%`, backgroundColor: color, opacity: 0.25 }}
+        style={{ width: `${percent}%`, backgroundColor: color, opacity: 0.3 }}
       />
       <div 
-        className="absolute inset-y-0 left-0 border-r-2 transition-all duration-75"
-        style={{ width: `${percent}%`, borderColor: color, boxShadow: send.level > 0.05 ? `0 0 10px ${color}` : 'none' }}
+        className="absolute inset-y-0 left-0 border-r transition-all duration-75"
+        style={{ width: `${percent}%`, borderColor: color, boxShadow: send.level > 0.05 ? `0 0 8px ${color}` : 'none' }}
       />
       <div className="absolute inset-0 flex items-center justify-between px-2 pointer-events-none">
         <span className="text-[7px] font-black text-white/80 uppercase tracking-tighter">{label}</span>
@@ -80,16 +80,25 @@ const HorizontalSendFader: React.FC<{
   );
 };
 
+
 const TrackHeader: React.FC<TrackHeaderProps> = ({ 
   track, onUpdate, isSelected, onSelect, onDropPlugin, onMovePlugin, onSelectPlugin, onRemovePlugin, onRequestAddPlugin, onContextMenu,
   onDragStartTrack, onDragOverTrack, onDropTrack, isDraggingOver, onSwapInstrument
 }) => {
   const [isDragOverFX, setIsDragOverFX] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
-  const [showSends, setShowSends] = useState(false);
   const [isAdjustingVolume, setIsAdjustingVolume] = useState(false);
+  const [showSends, setShowSends] = useState(false);
   const [newName, setNewName] = useState(track.name);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const [sendsTop, setSendsTop] = useState(95);
+
+  useEffect(() => {
+    if (controlsRef.current) {
+        setSendsTop(controlsRef.current.offsetTop + controlsRef.current.offsetHeight);
+    }
+  }, []); 
 
   useEffect(() => {
     if (isRenaming) {
@@ -285,7 +294,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   };
 
   // --- SEPARATE INSTRUMENT FROM INSERTS ---
-  // If track is DRUM_RACK, we fake a plugin instance to render the slot
   const drumRackFakePlugin: PluginInstance | null = track.type === TrackType.DRUM_RACK ? {
       id: 'internal-drum-rack',
       name: 'Drum Rack',
@@ -364,11 +372,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           
           {canHaveSends && (
             <button 
-              onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }} 
-              onTouchStart={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
-              className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
+                onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }} 
+                onTouchStart={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
+                className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
             >
-              <i className="fas fa-sliders-h text-[10px]"></i>
+                <i className="fas fa-sliders-h text-[10px]"></i>
             </button>
           )}
 
@@ -386,17 +394,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       </div>
       
-      {/* Horizontal Sends Panel */}
-      {canHaveSends && showSends && (
-        <div className="flex flex-col bg-black/40 rounded-lg p-2 border border-cyan-500/20 mb-2 animate-in slide-in-from-top-1 space-y-1">
-          <HorizontalSendFader trackId={track.id} label="Delay 1/4" color="#00f2ff" send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-delay', lvl)} />
-          <HorizontalSendFader trackId={track.id} label="Verb Pro" color="#10b981" send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-short', lvl)} />
-          <HorizontalSendFader trackId={track.id} label="Hall Space" color="#a855f7" send={track.sends.find(s => s.id === 'send-verb-long') || { id: 'send-verb-long', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-long', lvl)} />
-        </div>
-      )}
-
-      {/* ZONE DES CONTRÔLES : Panoramique et Volume */}
-      <div className="flex items-center space-x-3 mt-1 bg-black/20 p-2 rounded-lg border border-white/5 relative z-10">
+      {/* ZONE DES CONTRÔLES : Panoramique, Volume */}
+      <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-2 rounded-lg border border-white/5 relative z-10">
         <div 
           onMouseDown={handlePanMouseDown}
           onTouchStart={handlePanTouchStart}
@@ -429,6 +428,18 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           </div>
         </div>
       </div>
+      
+      {/* SENDS PANEL (OVERLAY) */}
+      {canHaveSends && showSends && (
+        <div 
+          className="absolute left-3 right-3 mt-1 p-2 bg-[#08090b] rounded-lg border border-cyan-500/30 shadow-2xl space-y-1 animate-in fade-in duration-150 z-20"
+          style={{ top: `${sendsTop}px` }}
+        >
+            <HorizontalSendFader trackId={track.id} label="Delay 1/4" color="#00f2ff" send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-delay', lvl)} />
+            <HorizontalSendFader trackId={track.id} label="Verb Pro" color="#10b981" send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-short', lvl)} />
+            <HorizontalSendFader trackId={track.id} label="Hall Space" color="#a855f7" send={track.sends.find(s => s.id === 'send-verb-long') || { id: 'send-verb-long', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-long', lvl)} />
+        </div>
+      )}
       
       {/* INSTRUMENT SLOT (For Sampler/MIDI/DrumRack Tracks) */}
       {instrumentPlugin && (
@@ -489,7 +500,16 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <button onClick={(e) => handleRemoveFX(e, p.id)} onTouchStart={(e) => handleRemoveFX(e, p.id)} className="delete-fx"><i className="fas fa-times"></i></button>
           </div>
         ))}
-        {/* Empty slots removed */}
+        {!track.isFrozen && Array.from({ length: Math.max(0, 4 - insertPlugins.length) }).map((_, i) => (
+          <button 
+            key={i} 
+            onClick={handleEmptySlotClick}
+            onTouchStart={handleEmptySlotClick}
+            className="h-6 rounded-md border border-dashed border-white/10 bg-black/5 opacity-30 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
+          >
+            <i className="fas fa-plus text-[6px]"></i>
+          </button>
+        ))}
       </div>
     </div>
   );

@@ -175,7 +175,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   };
 
   const visibleTracks = useMemo(() => {
-    return tracks.filter(t => t.id === 'instrumental' || t.id === 'track-rec-main' || t.type === TrackType.AUDIO || t.type === TrackType.MIDI || t.type === TrackType.BUS || t.type === TrackType.SEND || t.type === TrackType.SAMPLER);
+    return tracks.filter(t => t.type !== TrackType.SEND);
   }, [tracks]);
 
   const projectDuration = useMemo(() => {
@@ -365,14 +365,22 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
   const handleTrackContextMenu = (e: React.MouseEvent, trackId: string) => {
     e.preventDefault();
+    
+    const menuItems: (ContextMenuItem | 'separator')[] = [
+      { label: 'Duplicate Track', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' },
+    ];
+
+    // La piste REC ne peut pas être supprimée
+    if (trackId !== 'track-rec-main') {
+      menuItems.push({ label: 'Delete Track', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
+    }
+
+    menuItems.push({ label: 'Freeze Track', onClick: () => onFreezeTrack?.(trackId), icon: 'fa-snowflake' });
+    
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
-      items: [
-        { label: 'Duplicate Track', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' },
-        { label: 'Delete Track', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' },
-        { label: 'Freeze Track', onClick: () => onFreezeTrack?.(trackId), icon: 'fa-snowflake' }
-      ]
+      items: menuItems
     });
   };
 

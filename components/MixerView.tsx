@@ -64,24 +64,26 @@ const IOSection: React.FC<{ track: Track, allTracks: Track[], onUpdate: (t: Trac
     
     return (
         <div className="flex flex-col space-y-1 mb-2 px-1">
-            {/* INPUT SELECTOR */}
-            <div className="relative group/io">
-                <div className="h-6 bg-black/60 rounded flex items-center px-2 border border-white/5 cursor-pointer hover:border-white/20">
-                    <span className="text-[8px] font-black text-slate-500 mr-2">IN</span>
-                    <span className="text-[8px] font-mono text-cyan-400 truncate flex-1">
-                        {track.inputDeviceId === 'mic-default' ? 'MIC 1' : (track.inputDeviceId ? 'EXT' : 'NO IN')}
-                    </span>
-                    <i className="fas fa-caret-down text-[8px] text-slate-600"></i>
+            {/* INPUT SELECTOR - Uniquement visible pour la piste REC */}
+            {track.id === 'track-rec-main' && (
+                <div className="relative group/io">
+                    <div className="h-6 bg-black/60 rounded flex items-center px-2 border border-white/5 cursor-pointer hover:border-white/20">
+                        <span className="text-[8px] font-black text-slate-500 mr-2">IN</span>
+                        <span className="text-[8px] font-mono text-cyan-400 truncate flex-1">
+                            {track.inputDeviceId === 'mic-default' ? 'MIC 1' : (track.inputDeviceId ? 'EXT' : 'NO IN')}
+                        </span>
+                        <i className="fas fa-caret-down text-[8px] text-slate-600"></i>
+                    </div>
+                    <select 
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        value={track.inputDeviceId || 'none'}
+                        onChange={(e) => onUpdate({ ...track, inputDeviceId: e.target.value === 'none' ? undefined : e.target.value })}
+                    >
+                        <option value="none">No Input</option>
+                        <option value="mic-default">Mic / Line 1</option>
+                    </select>
                 </div>
-                <select 
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                    value={track.inputDeviceId || 'none'}
-                    onChange={(e) => onUpdate({ ...track, inputDeviceId: e.target.value === 'none' ? undefined : e.target.value })}
-                >
-                    <option value="none">No Input</option>
-                    <option value="mic-default">Mic / Line 1</option>
-                </select>
-            </div>
+            )}
 
             {/* OUTPUT SELECTOR */}
             <div className="relative group/io">

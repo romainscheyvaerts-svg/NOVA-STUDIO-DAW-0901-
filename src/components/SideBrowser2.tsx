@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { PluginType, User, Instrument, PluginMetadata } from '../types';
 import { novaBridge } from '../services/NovaBridge';
@@ -102,26 +101,43 @@ const BridgeTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, met
 // --- Onglet Local ---
 const LocalTab: React.FC<{ onLocalImport: (file: File) => void }> = ({ onLocalImport }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
+    
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files.length > 0) {
+            console.log("Fichier local sélectionné:", e.target.files[0].name);
+            onLocalImport(e.target.files[0]);
+            // Réinitialiser la valeur pour permettre de sélectionner le même fichier à nouveau
+            e.target.value = '';
+        }
+    };
+
     return (
         <div className="h-full flex flex-col items-center justify-center p-8 text-center opacity-60">
             <i className="fas fa-file-audio text-4xl text-slate-700 mb-6"></i>
             <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4">Import Local</h3>
             <p className="text-xs text-slate-500 mb-6">Importez n'importe quel fichier audio (MP3, WAV, etc.) depuis votre appareil.</p>
             <button 
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => {
+                    console.log("Clic bouton parcourir");
+                    fileInputRef.current?.click();
+                }}
                 className="px-8 py-3 bg-white/10 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-cyan-500 hover:text-black transition-colors"
             >
                 Parcourir
             </button>
-            <input type="file" ref={fileInputRef} className="hidden" accept="audio/*" onChange={(e) => {
-                if (e.target.files?.[0]) onLocalImport(e.target.files[0]);
-            }} />
+            <input 
+                type="file" 
+                ref={fileInputRef} 
+                className="hidden" 
+                accept="audio/*,.wav,.mp3,.aif,.aiff,.ogg,.m4a" 
+                onChange={handleFileChange} 
+            />
         </div>
     );
 };
 
 // --- Onglet FW (Future Wave - Native Plugins) ---
-const FWTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadata: any, options: { openUI: boolean }) => void, selectedTrackId: string | null }> = ({ onAddPlugin, selectedTrackId }) => {
+const FWTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => void, selectedTrackId: string | null }> = ({ onAddPlugin, selectedTrackId }) => {
     const [searchTerm, setSearchTerm] = useState('');
     
     const handleDragStart = (e: React.DragEvent, p: typeof INTERNAL_PLUGINS[0]) => {

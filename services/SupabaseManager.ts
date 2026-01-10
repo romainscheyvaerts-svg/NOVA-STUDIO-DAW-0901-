@@ -32,7 +32,66 @@ export class SupabaseManager {
     }
     return SupabaseManager.instance;
   }
+  // FIX: Added missing 'getPublicInstrumentUrl' method to resolve errors in InstrumentCatalog component.
+  /**
+   * ACCÈS DIRECT STORAGE SUPABASE
+   * Récupère l'URL publique d'un fichier dans le bucket 'instruments'.
+   * Gère les chemins relatifs (stockés en DB) ou les URLs complètes.
+   */
+  public getPublicInstrumentUrl(pathOrUrl: string): string {
+    if (!pathOrUrl) return '';
+    
+    // Si c'est un blob local, le retourner tel quel
+    if (pathOrUrl.startsWith('blob:')) {
+        return pathOrUrl;
+    }
+    
+    // ==== GESTION DES URLs GOOGLE DRIVE ====
+    // Détecter les URLs Google Drive et les convertir vers l'Edge Function proxy
+    if (pathOrUrl.includes('drive.google.com')) {
+        const fileId = this.extractDriveFileId(pathOrUrl);
+        if (fileId) {
+            // Utiliser l'Edge Function Supabase comme proxy
+            const proxyUrl = `https://sqduhfckgvyezdiubeei.supabase.co/functions/v1/stream-drive-audio?id=${fileId}`;
+            return proxyUrl;
+        } else {
+            console.warn("[SupabaseManager] Impossible d'extraire l'ID du fichier Drive:", pathOrUrl);
+            return pathOrUrl;
+        }
+    }
+    
+    // Si c'est déjà une URL HTTPS (autre que Drive), la retourner telle quelle
+    if (pathOrUrl.startsWith('http')) {
+        return pathOrUrl;
+    }
 
+    // Sinon, on génère l'URL publique depuis le bucket 'instruments'
+    if (supabase) {
+        const { data } = supabase.storage.from('instruments').getPublicUrl(pathOrUrl);
+        return data.publicUrl;
+    }
+
+    return pathOrUrl;
+  }
+
+  /**
+   * Extrait l'ID du fichier depuis une URL Google Drive
+   */
+  private extractDriveFileId(url: string): string | null {
+    // Format: /file/d/FILE_ID/
+    const fileMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (fileMatch) return fileMatch[1];
+    
+    // Format: ?id=FILE_ID
+    const idMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (idMatch) return idMatch[1];
+    
+    // Format: /folders/FILE_ID
+    const folderMatch = url.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    if (folderMatch) return folderMatch[1];
+    
+    return null;
+  }
   /**
    * Nettoie une chaîne pour en faire un nom de fichier sûr pour le Storage.
    * Minuscules, alphanumérique et tirets uniquement.

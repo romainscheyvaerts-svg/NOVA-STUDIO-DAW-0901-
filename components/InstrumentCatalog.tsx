@@ -53,8 +53,8 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
       const data = await supabaseManager.getInstruments();
       setAllInstruments(data);
       setDisplayedInstruments(data.filter(i => i.is_visible));
-    } catch (error) {
-      console.error("Failed to load catalog", error);
+    } catch (error: any) {
+      console.error("Failed to load catalog", error.message || error);
     } finally {
       setLoading(false);
     }
@@ -75,7 +75,6 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
   const stopAllPlayback = () => {
     if (audioRef.current) {
         const audio = audioRef.current;
-        // Safe Pause Handling
         if (playPromiseRef.current) {
             playPromiseRef.current.then(() => {
                 audio.pause();
@@ -109,10 +108,12 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
         return;
     }
 
+    const url = supabaseManager.getPublicInstrumentUrl(beat.preview_url);
+
     setPlayingId(beat.id);
 
     if (audioMode === 'STANDARD') {
-        const audio = new Audio(beat.preview_url);
+        const audio = new Audio(url);
         audio.volume = 0.8;
         audio.crossOrigin = "anonymous"; 
         audioRef.current = audio;
@@ -129,15 +130,14 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
         }
     } else {
         try {
-            await audioEngine.playHighResPreview(beat.preview_url);
+            await audioEngine.playHighResPreview(url, () => setPlayingId(null));
             startVisualizer();
         } catch (err) {
             console.error("Studio Mode failed, falling back to Standard", err);
             
-            // Fallback to Standard
             setAudioMode('STANDARD');
             
-            const audio = new Audio(beat.preview_url);
+            const audio = new Audio(url);
             audioRef.current = audio;
             audio.onended = () => setPlayingId(null);
             
@@ -201,7 +201,8 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
   };
 
   const handleDragStart = (e: React.DragEvent, inst: Instrument) => {
-      e.dataTransfer.setData('audio-url', inst.preview_url); // Uses full URL from 'instruments' bucket
+      const safeUrl = supabaseManager.getPublicInstrumentUrl(inst.preview_url);
+      e.dataTransfer.setData('audio-url', safeUrl); 
       e.dataTransfer.setData('audio-name', inst.name);
       e.dataTransfer.setData('instrument-id', inst.id.toString());
       e.dataTransfer.setData('audio-bpm', inst.bpm.toString());
@@ -231,13 +232,14 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
       return user?.owned_instruments?.includes(instId);
   };
 
-  const handleStripeBuy = async (licenseType: 'BASIC' | 'PREMIUM' | 'EXCLUSIVE') => {
+  const handleStripeBuy = async () => {
       if (!user || !selectedBeat) return;
       
-      if (licenseType === 'BASIC' && selectedBeat.stripe_link_basic) window.open(selectedBeat.stripe_link_basic, '_blank');
-      else if (licenseType === 'PREMIUM' && selectedBeat.stripe_link_premium) window.open(selectedBeat.stripe_link_premium, '_blank');
-      else if (licenseType === 'EXCLUSIVE' && selectedBeat.stripe_link_exclusive) window.open(selectedBeat.stripe_link_exclusive, '_blank');
-      else setPaymentError(`Lien de paiement ${licenseType} non configuré.`);
+      if (selectedBeat.stripe_link_basic) {
+          window.open(selectedBeat.stripe_link_basic, '_blank');
+      } else {
+          setPaymentError(`Lien de paiement BASIC non configuré.`);
+      }
   };
 
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -393,23 +395,24 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                                 name="Basic Lease" 
                                 price={selectedBeat.price_basic} 
                                 feat="MP3 • Tagged" 
-                                onBuy={() => handleStripeBuy('BASIC')} 
+                                onBuy={handleStripeBuy} 
                                 disabled={processingPayment} 
                             />
-                            <LicenseOption 
-                                name="Premium Lease" 
-                                price={selectedBeat.price_premium} 
-                                feat="WAV • Untagged" 
-                                onBuy={() => handleStripeBuy('PREMIUM')} 
-                                disabled={processingPayment} 
-                            />
-                            <LicenseOption 
-                                name="Exclusive" 
-                                price={selectedBeat.price_exclusive} 
-                                feat="STEMS • Full Rights" 
-                                onBuy={() => handleStripeBuy('EXCLUSIVE')} 
-                                disabled={processingPayment || !selectedBeat.stems_url} 
-                            />
+                            <a
+                                href="https://studiomakemusic.com/instrumentals"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center justify-between p-3 rounded-lg border transition-all border-amber-500/20 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 cursor-pointer"
+                            >
+                                <div>
+                                    <div className="text-xs font-bold text-white uppercase">Licence Premium ou Exclusive</div>
+                                    <div className="text-[9px] text-slate-400">WAV • Stems • Full Rights</div>
+                                </div>
+                                <div className="flex items-center space-x-2 text-sm">
+                                    <span className="text-[9px] font-black uppercase">Voir</span>
+                                    <i className="fas fa-arrow-right text-xs"></i>
+                                </div>
+                            </a>
                         </div>
                         <div className="mt-4 flex items-center justify-center text-[9px] text-slate-500 space-x-2">
                             <i className="fas fa-lock"></i>

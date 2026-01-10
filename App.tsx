@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
 import { audioEngine } from './engine/AudioEngine';
@@ -89,10 +90,84 @@ const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number =
   return { id: `pl-${Date.now()}-${Math.random()}`, name, type, isEnabled: true, params, latency: 0 };
 };
 
-const createInitialSends = (bpm: number): Track[] => [];
+const createInitialSends = (bpm: number, outputId: string = 'master'): Track[] => [
+  { 
+    id: 'send-delay', 
+    name: 'DELAY 1/4', 
+    type: TrackType.SEND, 
+    color: '#00f2ff', 
+    isMuted: false, 
+    isSolo: false, 
+    isTrackArmed: false, 
+    isFrozen: false, 
+    volume: 0.8, 
+    pan: 0, 
+    outputTrackId: outputId, 
+    sends: [], 
+    clips: [], 
+    plugins: [createDefaultPlugins('DELAY', 1.0, bpm)], 
+    automationLanes: [createDefaultAutomation('volume', '#00f2ff')], 
+    totalLatency: 0 
+  },
+  { 
+    id: 'send-verb-short', 
+    name: 'VERB PRO', 
+    type: TrackType.SEND, 
+    color: '#10b981', 
+    isMuted: false, 
+    isSolo: false, 
+    isTrackArmed: false, 
+    isFrozen: false, 
+    volume: 0.7, 
+    pan: 0, 
+    outputTrackId: outputId, 
+    sends: [], 
+    clips: [], 
+    plugins: [createDefaultPlugins('REVERB', 1.0, bpm, { decay: 1.2, preDelay: 0.01, size: 0.4, mode: 'PLATE' })], 
+    automationLanes: [createDefaultAutomation('volume', '#10b981')], 
+    totalLatency: 0 
+  },
+  { 
+    id: 'send-verb-long', 
+    name: 'HALL SPACE', 
+    type: TrackType.SEND, 
+    color: '#a855f7', 
+    isMuted: false, 
+    isSolo: false, 
+    isTrackArmed: false, 
+    isFrozen: false, 
+    volume: 0.6, 
+    pan: 0, 
+    outputTrackId: outputId, 
+    sends: [], 
+    clips: [], 
+    plugins: [createDefaultPlugins('REVERB', 1.0, bpm, { decay: 3.5, preDelay: 0.05, size: 0.9, mode: 'HALL' })], 
+    automationLanes: [createDefaultAutomation('volume', '#a855f7')], 
+    totalLatency: 0 
+  }
+];
 
 const createBusVox = (defaultSends: TrackSend[], bpm: number): Track => ({
   id: 'bus-vox', name: 'BUS VOX', type: TrackType.BUS, color: '#fbbf24', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'master', sends: [...defaultSends], clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#fbbf24')], totalLatency: 0
+});
+
+const createBusFx = (): Track => ({
+  id: 'bus-fx',
+  name: 'BUS FX',
+  type: TrackType.BUS,
+  color: '#ec4899', // Pink
+  isMuted: false,
+  isSolo: false,
+  isTrackArmed: false,
+  isFrozen: false,
+  volume: 1.0,
+  pan: 0,
+  outputTrackId: 'master',
+  sends: [],
+  clips: [],
+  plugins: [],
+  automationLanes: [createDefaultAutomation('volume', '#ec4899')],
+  totalLatency: 0
 });
 
 const SaveOverlay: React.FC<{ progress: number; message: string }> = ({ progress, message }) => (
@@ -174,8 +249,13 @@ export default function App() {
     tracks: [
       { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
       { id: 'track-rec-main', name: 'REC', type: TrackType.AUDIO, color: '#ff0000', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#ff0000')], totalLatency: 0 },
+      { id: 'lead-couplet', name: 'LEAD COUPLET', type: TrackType.AUDIO, color: '#3b82f6', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#3b82f6')], totalLatency: 0 },
+      { id: 'lead-refrain', name: 'LEAD REFRAIN', type: TrackType.AUDIO, color: '#60a5fa', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#60a5fa')], totalLatency: 0 },
+      { id: 'back-1', name: 'BACK 1', type: TrackType.AUDIO, color: '#a855f7', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#a855f7')], totalLatency: 0 },
+      { id: 'back-2', name: 'BACK 2', type: TrackType.AUDIO, color: '#c084fc', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#c084fc')], totalLatency: 0 },
       createBusVox(createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), AUDIO_CONFIG.DEFAULT_BPM), 
-      ...createInitialSends(AUDIO_CONFIG.DEFAULT_BPM)
+      createBusFx(),
+      ...createInitialSends(AUDIO_CONFIG.DEFAULT_BPM, 'bus-fx')
     ],
     selectedTrackId: 'track-rec-main', currentView: 'ARRANGEMENT', projectPhase: ProjectPhase.SETUP, isLowLatencyMode: false, isRecModeActive: false, systemMaxLatency: 0, recStartTime: null,
     isDelayCompEnabled: false
@@ -278,11 +358,9 @@ export default function App() {
   const handleUpdateTrack = useCallback((updatedTrack: Track) => {
     const previousTrack = stateRef.current.tracks.find(t => t.id === updatedTrack.id);
 
-    // Handle Arm/Disarm side effect
     if (previousTrack && previousTrack.isTrackArmed !== updatedTrack.isTrackArmed) {
         if (updatedTrack.isTrackArmed) {
             audioEngine.armTrack(updatedTrack.id);
-            // Disarm all other tracks
             setState(produce(draft => {
                 draft.tracks.forEach(t => {
                     if (t.id !== updatedTrack.id) t.isTrackArmed = false;
@@ -336,7 +414,6 @@ export default function App() {
     await ensureAudioEngine();
     const currentState = stateRef.current;
     
-    // Stop recording
     if (currentState.isRecording) {
       audioEngine.stopAll();
       const result = await audioEngine.stopRecording();
@@ -354,12 +431,10 @@ export default function App() {
       return;
     }
   
-    // Start recording
     const armedTrack = currentState.tracks.find(t => t.isTrackArmed);
     if (armedTrack) {
       const success = await audioEngine.startRecording(currentState.currentTime, armedTrack.id);
       if (success) {
-        // Auto-start playback when recording begins
         audioEngine.startPlayback(currentState.currentTime, currentState.tracks);
         setState(produce(draft => {
           draft.isRecording = true;
@@ -391,7 +466,24 @@ export default function App() {
       }));
   }, [setState]);
 
-  const handleDeleteTrack = useCallback((trackId: string) => { /* ... */ }, [setState]);
+  const handleDeleteTrack = useCallback((trackId: string) => {
+    if (trackId === 'track-rec-main') {
+        console.warn("La piste d'enregistrement principale ne peut pas être supprimée.");
+        setAiNotification(`⚠️ La piste "REC" est protégée et ne peut être supprimée.`);
+        setTimeout(() => setAiNotification(null), 3000);
+        return;
+    }
+    setState(produce((draft: DAWState) => {
+        const trackIndex = draft.tracks.findIndex(t => t.id === trackId);
+        if (trackIndex > -1) {
+            draft.tracks.splice(trackIndex, 1);
+            if (draft.selectedTrackId === trackId) {
+                draft.selectedTrackId = draft.tracks[0]?.id || null;
+            }
+        }
+    }));
+  }, [setState]);
+  
   const handleRemovePlugin = useCallback((tid: string, pid: string) => { /* ... */ }, [setState, activePlugin]);
   
   const handleAddPluginFromContext = useCallback(async (tid: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => {
@@ -412,8 +504,94 @@ export default function App() {
     }
   }, [setState]);
 
-  const handleUniversalAudioImport = async (source: string | File, name: string) => { /* ... */ };
-  useEffect(() => { (window as any).DAW_CORE = { handleAudioImport: (url: string, name: string) => handleUniversalAudioImport(url, name) }; }, []);
+  const handleUniversalAudioImport = async (source: string | File, name: string, forcedTrackId?: string) => {
+      setExternalImportNotice(`Chargement: ${name}...`);
+      try {
+          await ensureAudioEngine();
+          
+          let audioBuffer: AudioBuffer;
+          let audioRef: string;
+          
+          if (source instanceof File) {
+              audioRef = URL.createObjectURL(source);
+              const arrayBuffer = await source.arrayBuffer();
+              audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+          } else {
+              audioRef = source;
+              const response = await fetch(source);
+              if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+              const arrayBuffer = await response.arrayBuffer();
+              audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+          }
+          
+          const newClip: Clip = {
+              id: `clip-${Date.now()}`,
+              name: name.replace(/\.[^/.]+$/, ''),
+              type: TrackType.AUDIO,
+              start: stateRef.current.currentTime,
+              duration: audioBuffer.duration,
+              offset: 0,
+              buffer: audioBuffer,
+              audioRef,
+              color: UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length],
+              fadeIn: 0,
+              fadeOut: 0,
+              gain: 1.0,
+              isMuted: false
+          };
+
+          setState(produce((draft: DAWState) => {
+              let targetTrackId: string | null = null;
+              let isNewTrackNeeded = false;
+  
+              if (forcedTrackId) {
+                  targetTrackId = forcedTrackId;
+              } else {
+                  const beatTrack = draft.tracks.find(t => t.id === 'instrumental');
+                  if (beatTrack && beatTrack.clips.length === 0) {
+                      targetTrackId = 'instrumental';
+                  } else {
+                      isNewTrackNeeded = true;
+                      targetTrackId = `track-audio-${Date.now()}`;
+                  }
+              }
+  
+              if (isNewTrackNeeded) {
+                  const newTrack: Track = {
+                      id: targetTrackId!,
+                      name: name.substring(0, 20),
+                      type: TrackType.AUDIO,
+                      color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
+                      isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+                      volume: 1.0, pan: 0, outputTrackId: 'master',
+                      sends: [], clips: [newClip], plugins: [], automationLanes: [], totalLatency: 0
+                  };
+                  draft.tracks.splice(1, 0, newTrack); // Insère la nouvelle piste après la piste 'BEAT'
+                  draft.selectedTrackId = targetTrackId;
+              } else {
+                  const track = draft.tracks.find(t => t.id === targetTrackId);
+                  if (track) {
+                      track.clips.push(newClip);
+                      draft.selectedTrackId = targetTrackId;
+                  }
+              }
+          }));
+  
+          setExternalImportNotice(`✅ Importé: ${newClip.name}`);
+  
+      } catch (e: any) {
+          console.error("[Import Error]", e);
+          setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
+      } finally {
+          setTimeout(() => setExternalImportNotice(null), 3000);
+      }
+  };
+
+  useEffect(() => { 
+      (window as any).DAW_CORE = { 
+          handleAudioImport: (url: string | File, name: string, trackId?: string) => handleUniversalAudioImport(url, name, trackId) 
+      }; 
+  }, [handleUniversalAudioImport]);
 
   const handleMoveClip = useCallback((sourceTrackId: string, destTrackId: string, clipId: string) => { /* ... */ }, [setState]);
   const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => { /* ... */ }, [setState]);
@@ -472,7 +650,7 @@ export default function App() {
           onOpenAuth={() => setIsAuthOpen(true)}
           onLogout={handleLogout}
           isSidebarOpen={isSidebarOpen}
-          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+          onToggleSidebar={toggleSidebar}
         >
           <div className="ml-4 border-l border-white/5 pl-4"><ViewModeSwitcher currentMode={viewMode} onChange={handleViewModeChange} /></div>
         </TransportBar>
