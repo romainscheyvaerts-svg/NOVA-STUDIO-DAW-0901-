@@ -6,6 +6,7 @@ import ContextMenu from './ContextMenu';
 import TimelineGridMenu from './TimelineGridMenu'; 
 import LiveRecordingClip from './LiveRecordingClip'; 
 import AutomationLaneComponent from './AutomationLane';
+import WaveformRenderer from './WaveformRenderer';
 
 interface ArrangementViewProps {
   tracks: Track[];
@@ -40,7 +41,6 @@ interface ArrangementViewProps {
   onAudioDrop?: (trackId: string, url: string, name: string, time: number) => void;
 }
 
-// Zones d'interaction intelligentes
 type DragAction = 'MOVE' | 'SCRUB' | null;
 type LoopDragMode = 'START' | 'END' | 'BODY' | null;
 
@@ -286,7 +286,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = Math.max(0, (currentX / scale) - (viewportW / 2));
       };
       const onUp = () => { setIsDraggingMinimap(false); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-      window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
   };
 
   const handleTrackContextMenu = (e: React.MouseEvent, trackId: string) => {
@@ -391,6 +392,30 @@ const handleMouseUp = () => {
     setInitialClipState(null);
 };
 
+const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string, x: number, y: number, w: number, h: number, isSelected: boolean) => {
+    if (x + w < 0 || x > ctx.canvas.width) return;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 6);
+    ctx.clip();
+
+    ctx.fillStyle = clip.isMuted ? '#111' : '#1e2229';
+    ctx.fill();
+    ctx.fillStyle = (clip.color || trackColor) + (clip.isMuted ? '11' : '33');
+    ctx.fill();
+
+    ctx.strokeStyle = isSelected ? '#fff' : (clip.color || trackColor);
+    ctx.lineWidth = isSelected ? 1.5 : 1;
+    ctx.stroke();
+
+    ctx.restore();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 9px Inter';
+    ctx.fillText(clip.name, x + 8, y + 14, w - 16);
+};
+
 const drawTimeline = useCallback(() => {
     const canvas = canvasRef.current;
     const scroll = scrollContainerRef.current;
@@ -405,84 +430,80 @@ const drawTimeline = useCallback(() => {
     const w = canvas.width;
     const h = canvas.height;
     const scrollX = scroll.scrollLeft;
+    const scrollTop = scroll.scrollTop;
     
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#0c0d10';
-    ctx.fillRect(0, 0, w, h);
     
     const beatPx = (60 / bpm) * zoomH;
     const startTime = pixelsToTime(scrollX);
     const endTime = pixelsToTime(scrollX + w);
     const startBar = Math.floor(startTime * (bpm / 60) / 4);
     const endBar = Math.ceil(endTime * (bpm / 60) / 4);
-
+    
     let subDivisionsPerBar = 4;
     if (gridSize === '1/1') subDivisionsPerBar = 1;
     else if (gridSize === '1/8') subDivisionsPerBar = 8;
     else if (gridSize === '1/16') subDivisionsPerBar = 16;
-    
-    const barDurationPx = 4 * beatPx;
-    const subStepPx = barDurationPx / subDivisionsPerBar;
-    const showSubdivisions = subStepPx > 8;
+    const subStepPx = (4 * beatPx) / subDivisionsPerBar;
 
+    ctx.lineWidth = 1;
     for (let i = startBar; i <= endBar; i++) {
-      const time = i * 4 * (60 / bpm);
-      const x = timeToPixels(time) - scrollX;
-      
-      // Bar lines
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-      
-      // Beat lines
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-      for(let j=1; j<4; j++) {
-         const bx = x + j * beatPx;
-         if (bx > 0 && bx < w) {
-             ctx.beginPath(); ctx.moveTo(bx, 0); ctx.lineTo(bx, h); ctx.stroke();
-         }
-      }
-
-      // Subdivisions
-      if (showSubdivisions) {
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
-          for (let j = 1; j < subDivisionsPerBar; j++) {
-              if (j % (subDivisionsPerBar / 4) !== 0) { // Avoid overdrawing on beat lines
-                  const sx = x + j * subStepPx;
-                  if (sx > 0 && sx < w) {
-                      ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, h); ctx.stroke();
-                  }
-              }
-          }
-      }
+        const time = i * 4 * (60 / bpm);
+        const x = timeToPixels(time) - scrollX;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        
+        if (subStepPx > 5 && subDivisionsPerBar > 1) {
+            for (let j = 1; j < subDivisionsPerBar; j++) {
+                const subX = x + j * subStepPx;
+                if (j % (subDivisionsPerBar / 4) === 0) {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+                } else {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+                }
+                ctx.beginPath(); ctx.moveTo(subX, 0); ctx.lineTo(subX, h); ctx.stroke();
+            }
+        }
     }
 
     if (isLoopActive && loopEnd > loopStart) {
         const loopStartX = timeToPixels(loopStart) - scrollX;
         const loopWidth = timeToPixels(loopEnd - loopStart);
-        
         if (loopStartX + loopWidth > 0 && loopStartX < w) {
             ctx.fillStyle = 'rgba(0, 242, 255, 0.05)';
             ctx.fillRect(loopStartX, 40, loopWidth, h - 40);
-            
-            ctx.fillStyle = 'rgba(0, 242, 255, 0.2)';
-            ctx.fillRect(loopStartX, 0, loopWidth, 40);
-
-            ctx.strokeStyle = '#00f2ff';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([4, 4]);
-            ctx.beginPath();
-            ctx.moveTo(loopStartX, 0);
-            ctx.lineTo(loopStartX, h);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(loopStartX + loopWidth, 0);
-            ctx.lineTo(loopStartX + loopWidth, h);
-            ctx.stroke();
-            ctx.setLineDash([]);
         }
     }
     
+    ctx.save();
+    ctx.translate(0, -scrollTop);
+
+    let currentY = 40;
+    visibleTracks.forEach((track) => {
+        const trackH = zoomV;
+        const totalAutomationHeight = track.automationLanes.filter(l => l.isExpanded).length * 80;
+
+        if (currentY + trackH > scrollTop && currentY < scrollTop + h) {
+            track.clips.forEach(clip => {
+                const cx = timeToPixels(clip.start) - scrollX;
+                const cw = timeToPixels(clip.duration);
+                if (cx + cw > 0 && cx < w) {
+                    drawClip(ctx, clip, track.color, cx, currentY + 2, cw, trackH - 4, activeClip?.clip.id === clip.id);
+                }
+            });
+        }
+        
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, currentY + trackH + totalAutomationHeight);
+        ctx.lineTo(w + scrollX, currentY + trackH + totalAutomationHeight);
+        ctx.stroke();
+
+        currentY += trackH + totalAutomationHeight;
+    });
+    ctx.restore();
+
     ctx.fillStyle = '#14161a';
     ctx.fillRect(0, 0, w, 40);
     ctx.strokeStyle = 'rgba(255,255,255,0.1)';
@@ -504,17 +525,12 @@ const drawTimeline = useCallback(() => {
       ctx.fillStyle = isRecording ? '#ef4444' : '#00f2ff';
       ctx.beginPath(); ctx.moveTo(phX-5, 0); ctx.lineTo(phX+5, 0); ctx.lineTo(phX, 10); ctx.fill();
     }
-  }, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize, gridSize]);
+}, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, gridSize, scrollLeft, onEditClip, onSelectTrack]);
 
-  useEffect(() => {
-    let animId: number;
-    const loop = () => {
-        drawTimeline();
-        animId = requestAnimationFrame(loop);
-    };
-    animId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(animId);
-  }, [drawTimeline]);
+useEffect(() => {
+    requestRef.current = requestAnimationFrame(drawTimeline);
+    return () => cancelAnimationFrame(requestRef.current);
+}, [drawTimeline]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative select-none" onContextMenu={e => e.preventDefault()}>
@@ -609,13 +625,6 @@ const drawTimeline = useCallback(() => {
                 { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: currentTime }); setClipContextMenu(null); }},
                 { label: 'separator' },
                 { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
-                { label: clipContextMenu.clip.isReversed ? 'Annuler Reverse' : 'Inverser (Reverse)', icon: 'fa-backward', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'REVERSE'); setClipContextMenu(null); }},
-                { label: 'separator' },
-                { label: 'Gain +3 dB', icon: 'fa-plus', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SET_GAIN', { gain: Math.min(2, (clipContextMenu.clip.gain || 1) * 1.41) }); setClipContextMenu(null); }},
-                { label: 'Gain -3 dB', icon: 'fa-minus', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SET_GAIN', { gain: Math.max(0.1, (clipContextMenu.clip.gain || 1) / 1.41) }); setClipContextMenu(null); }},
-                { label: 'Normaliser', icon: 'fa-compress-arrows-alt', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE'); setClipContextMenu(null); }},
-                { label: 'separator' },
-                { label: 'Renommer...', icon: 'fa-i-cursor', shortcut: 'F2', onClick: () => { const newName = prompt('Nouveau nom:', clipContextMenu.clip.name); if (newName) onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'RENAME', { name: newName }); setClipContextMenu(null); }},
                 { label: 'separator' },
                 { label: 'Supprimer', icon: 'fa-trash', shortcut: 'Suppr', danger: true, onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DELETE'); setClipContextMenu(null); }}
             ]}

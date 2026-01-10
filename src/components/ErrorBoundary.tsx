@@ -1,3 +1,4 @@
+
 import React, { ErrorInfo, ReactNode } from 'react';
 
 interface ErrorBoundaryProps {
@@ -13,19 +14,12 @@ interface ErrorBoundaryState {
 }
 
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  // FIX: Refactored to use a constructor for state initialization and method binding.
-  // This is a more traditional and widely supported pattern for React class components,
-  // which can resolve issues with `this` context and property initialization in some environments.
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = {
-      hasError: false,
-      error: null,
-      errorInfo: null,
-    };
-
-    this.handleReset = this.handleReset.bind(this);
-  }
+  // FIX: Using class property syntax for state initialization. This is more concise and avoids potential 'this' context issues in constructors, resolving the reported type errors.
+  state: ErrorBoundaryState = {
+    hasError: false,
+    error: null,
+    errorInfo: null,
+  };
 
   static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { hasError: true, error };
@@ -43,7 +37,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     }
   }
 
-  handleReset() {
+  handleReset = () => {
     this.setState({
       hasError: false,
       error: null,
