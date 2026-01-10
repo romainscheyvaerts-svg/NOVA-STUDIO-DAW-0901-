@@ -272,12 +272,8 @@ export default function App() {
   const stateRef = useRef(state); 
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks)); }, [state.tracks]); 
+  useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
   
-  // Synchroniser le loop avec l'AudioEngine
-  useEffect(() => {
-      audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd);
-  }, [state.isLoopActive, state.loopStart, state.loopEnd]);
-
   useEffect(() => {
     let animId: number;
     const updateLoop = () => {
@@ -493,7 +489,7 @@ export default function App() {
     }
   }, [setState]);
 
-  const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, targetTrackId?: string, startTime?: number) => {
+  const handleUniversalAudioImport = async (source: string | File, name: string, targetTrackId?: string, startTime?: number) => {
     try {
       await ensureAudioEngine();
       
@@ -547,7 +543,7 @@ export default function App() {
     } catch (error) {
       console.error("[AudioImport] Erreur:", error);
     }
-  }, [setState]);
+  };
 
   const handleDuplicateTrack = useCallback((trackId: string) => { /* ... */ }, [setState]);
 

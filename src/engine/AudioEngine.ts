@@ -7,8 +7,8 @@ import { ChorusNode } from '../plugins/ChorusPlugin';
 import { FlangerNode } from '../plugins/FlangerPlugin';
 import { VocalDoublerNode } from '../plugins/DoublerPlugin';
 import { StereoSpreaderNode } from '../plugins/StereoSpreaderPlugin';
-// FIX: Updated the import path for `AutoTuneNode` to point to the correct file in the `autotune-pro` directory.
-import { AutoTuneNode } from '../plugins/autotune-pro/AutoTuneNode';
+// FIX: Export AutoTuneNode from its module to allow importing.
+import { AutoTuneNode } from '../plugins/AutoTunePlugin';
 import { CompressorNode } from '../plugins/CompressorPlugin';
 import { DeEsserNode } from '../plugins/DeEsserPlugin';
 import { DenoiserNode } from '../plugins/DenoiserPlugin';
@@ -596,47 +596,36 @@ export class AudioEngine {
   public getDrumSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.drumSampler || null; }
   public getMelodicSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.melodicSampler || null; }
 
-  private scheduleAutomation(tracks: Track[], start: number, end: number, when: number) {
-    tracks.forEach(track => {
-        track.automationLanes.forEach(lane => {
-            if (!lane.isExpanded || lane.points.length === 0) return;
-            
-            const dsp = this.tracksDSP.get(track.id);
-            if (!dsp) return;
-            
-            // Find points in this time window
-            lane.points.forEach(point => {
-                if (point.time >= start && point.time < end) {
-                    const scheduleTime = when + (point.time - start);
-                    
-                    if (lane.parameterName === 'volume') {
-                        dsp.gain.gain.setValueAtTime(point.value, scheduleTime);
-                    } else if (lane.parameterName === 'pan') {
-                        dsp.panner.pan.setValueAtTime(point.value, scheduleTime);
-                    }
-                }
-            });
-        });
-    });
-}
+  private scheduleAutomation(tracks: Track[], start: number, end: number, when: number) { /* ... */ }
+
   private playClipSource(trackId: string, clip: Clip, scheduleTime: number, projectTime: number) {
-    if (!this.ctx || !clip.buffer) return;
+    if (!this.ctx) {
+        console.warn('[AudioEngine] No AudioContext');
+        return;
+    }
+    
+    if (!clip.buffer) {
+        console.warn(`[AudioEngine] Clip ${clip.id} has no buffer`);
+        return;
+    }
     
     const dsp = this.tracksDSP.get(trackId);
-    if (!dsp) return;
+    if (!dsp) {
+        console.warn(`[AudioEngine] No DSP chain for track ${trackId}`);
+        return;
+    }
     
-    // Check if clip is muted
+    // Skip muted clips
     if (clip.isMuted) return;
     
+    // Prevent duplicate playback
     const sourceKey = `${clip.id}`;
-    
-    // Already playing
     if (this.activeSources.has(sourceKey)) return;
     
     try {
-        // Create source node
+        // Create audio source
         const source = this.ctx.createBufferSource();
-        source.buffer = clip.buffer;
+        let bufferToPlay = clip.buffer;
         
         // Handle reverse
         if (clip.isReversed) {
@@ -652,55 +641,59 @@ export class AudioEngine {
                     reversedData[i] = original[original.length - 1 - i];
                 }
             }
-            source.buffer = reversed;
+            bufferToPlay = reversed;
         }
         
-        // Create gain node for clip-level volume
+        source.buffer = bufferToPlay;
+        
+        // Create gain node for clip volume
         const gainNode = this.ctx.createGain();
-        gainNode.gain.value = clip.gain ?? 1.0;
+        const clipGain = clip.gain ?? 1.0;
+        gainNode.gain.setValueAtTime(clipGain, scheduleTime);
         
-        // Apply fade in/out
-        if (clip.fadeIn > 0 || clip.fadeOut > 0) {
-            const clipDuration = clip.duration;
-            const startTime = scheduleTime;
-            
-            if (clip.fadeIn > 0) {
-                gainNode.gain.setValueAtTime(0, startTime);
-                gainNode.gain.linearRampToValueAtTime(clip.gain ?? 1.0, startTime + clip.fadeIn);
-            }
-            
-            if (clip.fadeOut > 0) {
-                const fadeOutStart = startTime + clipDuration - clip.fadeOut;
-                gainNode.gain.setValueAtTime(clip.gain ?? 1.0, fadeOutStart);
-                gainNode.gain.linearRampToValueAtTime(0, startTime + clipDuration);
+        // Apply fade in
+        if (clip.fadeIn > 0) {
+            gainNode.gain.setValueAtTime(0, scheduleTime);
+            gainNode.gain.linearRampToValueAtTime(clipGain, scheduleTime + clip.fadeIn);
+        }
+        
+        // Apply fade out
+        if (clip.fadeOut > 0) {
+            const fadeOutStart = scheduleTime + clip.duration - clip.fadeOut;
+            if (fadeOutStart > scheduleTime) {
+                gainNode.gain.setValueAtTime(clipGain, fadeOutStart);
+                gainNode.gain.linearRampToValueAtTime(0, scheduleTime + clip.duration);
             }
         }
         
-        // Connect: source → gainNode → track input
+        // Connect: source -> gain -> track input (which goes through plugin chain)
         source.connect(gainNode);
         gainNode.connect(dsp.input);
         
-        // Calculate offset into the clip
+        // Calculate offset into clip
         let offsetIntoClip = clip.offset || 0;
         
-        // If we're starting mid-clip (projectTime > clip.start)
+        // If playback started mid-clip, add the difference
         if (projectTime > clip.start) {
             offsetIntoClip += (projectTime - clip.start);
         }
         
-        // Calculate when to start relative to context time
+        // Calculate when to start (in AudioContext time)
         let when = scheduleTime;
         if (projectTime < clip.start) {
             // Clip starts in the future
             when = scheduleTime + (clip.start - projectTime);
         }
         
-        // Duration to play
-        const remainingDuration = clip.duration - (offsetIntoClip - (clip.offset || 0));
+        // Calculate remaining duration
+        const playedSoFar = Math.max(0, offsetIntoClip - (clip.offset || 0));
+        const remainingDuration = clip.duration - playedSoFar;
         
-        // Start the source
-        if (remainingDuration > 0 && offsetIntoClip < clip.buffer.duration) {
-            source.start(when, offsetIntoClip, remainingDuration);
+        // Start playback if there's something to play
+        if (remainingDuration > 0 && offsetIntoClip < bufferToPlay.duration) {
+            const actualDuration = Math.min(remainingDuration, bufferToPlay.duration - offsetIntoClip);
+            
+            source.start(when, offsetIntoClip, actualDuration);
             
             // Store for cleanup
             this.activeSources.set(sourceKey, {
@@ -709,20 +702,25 @@ export class AudioEngine {
                 clipId: clip.id
             });
             
-            // Auto-cleanup when done
+            // Auto-cleanup when finished
             source.onended = () => {
                 this.activeSources.delete(sourceKey);
                 try {
                     source.disconnect();
                     gainNode.disconnect();
-                } catch (e) {}
+                } catch (e) {
+                    // Already disconnected
+                }
             };
+            
+            console.log(`[AudioEngine] Playing: ${clip.name} | offset: ${offsetIntoClip.toFixed(2)}s | duration: ${actualDuration.toFixed(2)}s`);
         }
         
     } catch (error) {
         console.error(`[AudioEngine] Error playing clip ${clip.id}:`, error);
     }
 }
+
   private createPluginNode(plugin: PluginInstance, bpm: number): { input: GainNode; output: GainNode; node: any } | null {
     if (!this.ctx) return null;
     

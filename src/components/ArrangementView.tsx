@@ -1,5 +1,3 @@
-
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint } from '../types';
 import TrackHeader from './TrackHeader';
@@ -27,7 +25,6 @@ interface ArrangementViewProps {
   onSelectPlugin?: (trackId: string, plugin: PluginInstance) => void;
   onRemovePlugin?: (trackId: string, pluginId: string) => void;
   onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
-  // FIX: Updated onAddTrack to match the signature in App.tsx
   onAddTrack?: (type: TrackType, name?: string, initialPluginType?: PluginType) => void;
   onDuplicateTrack?: (trackId: string) => void;
   onDeleteTrack?: (trackId: string) => void;
@@ -39,6 +36,7 @@ interface ArrangementViewProps {
   onCreatePattern?: (trackId: string, time: number) => void;
   onSwapInstrument?: (trackId: string) => void; 
   onEditMidi?: (trackId: string, clipId: string) => void;
+  onAudioDrop?: (trackId: string, url: string, name: string, time: number) => void;
 }
 
 // Zones d'interaction intelligentes
@@ -62,7 +60,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   isLoopActive, loopStart, loopEnd, onSetLoop, onSeek, bpm, 
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip, isRecording, recStartTime,
-  onCreatePattern, onSwapInstrument, onEditMidi
+  onCreatePattern, onSwapInstrument, onEditMidi, onAudioDrop
 }) => {
   const [activeTool, setActiveTool] = useState<EditorTool>('SELECT');
   const [zoomV, setZoomV] = useState(120); 
@@ -88,6 +86,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: (ContextMenuItem | 'separator')[] } | null>(null);
+  const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip; } | null>(null);
 
   const [headerWidth, setHeaderWidth] = useState(256);
   const [isResizingHeader, setIsResizingHeader] = useState(false);
@@ -221,33 +220,6 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       document.addEventListener('mouseup', onUp);
   };
 
-  // --- HANDLE DROP ON TIMELINE (Catalog or File) ---
-  const handleTimelineDragOver = (e: React.DragEvent) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-  };
-
-  const handleTimelineDrop = (e: React.DragEvent) => {
-      e.preventDefault();
-      
-      // 1. Check for Internal Audio from Catalog
-      const audioUrl = e.dataTransfer.getData('audio-url');
-      if (audioUrl) {
-          const audioName = e.dataTransfer.getData('audio-name');
-          if ((window as any).DAW_CORE) {
-              (window as any).DAW_CORE.handleAudioImport(audioUrl, audioName || 'Beat');
-          }
-          return;
-      }
-
-      // 2. Check for External Files
-      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-          if (onImportFile) {
-              onImportFile(e.dataTransfer.files[0]);
-          }
-      }
-  };
-
   // --- PRO MINIMAP RENDERING ---
   useEffect(() => {
     const canvas = minimapRef.current;
@@ -378,76 +350,6 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
     menuItems.push({ label: 'Freeze Track', onClick: () => onFreezeTrack?.(trackId), icon: 'fa-snowflake' });
     
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      items: menuItems
-    });
-  };
-
-  const handleClipContextMenu = (e: React.MouseEvent, trackId: string, clipId: string) => {
-    e.preventDefault();
-    const track = tracks.find(t => t.id === trackId);
-    const clip = track?.clips.find(c => c.id === clipId);
-    if (!clip || !track) return;
-    
-    const menuItems: (ContextMenuItem | 'separator')[] = [
-        { label: 'Renommer', icon: 'fa-pen', shortcut: 'Ctrl+R', onClick: () => { const name = prompt("Nouveau nom :", clip.name); if(name) onEditClip?.(trackId, clipId, 'RENAME', { name }); } },
-        { 
-            label: 'Couleur', 
-            icon: 'fa-palette', 
-            onClick: () => {}, 
-            component: (
-                <div className="grid grid-cols-5 gap-1 p-1">
-                    {['#ff0000', '#f97316', '#eab308', '#22c55e', '#00f2ff', '#3b82f6', '#a855f7', '#ec4899', '#ffffff', '#64748b'].map(color => (
-                        <div 
-                            key={color} 
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onEditClip?.(trackId, clipId, 'UPDATE_PROPS', { color });
-                                setContextMenu(null);
-                            }}
-                            className="w-4 h-4 rounded-sm cursor-pointer hover:scale-125 transition-transform border border-white/20"
-                            style={{ backgroundColor: color }}
-                        />
-                    ))}
-                </div>
-            )
-        },
-        'separator',
-        ...(track.type === TrackType.MIDI ? [
-            { label: 'Quantifier', icon: 'fa-magnet', shortcut: 'Q', onClick: () => onEditClip?.(trackId, clipId, 'QUANTIZE') },
-            { label: 'Transposer +1', icon: 'fa-arrow-up', onClick: () => onEditClip?.(trackId, clipId, 'TRANSPOSE', { amount: 1 }) },
-            { label: 'Transposer -1', icon: 'fa-arrow-down', onClick: () => onEditClip?.(trackId, clipId, 'TRANSPOSE', { amount: -1 }) },
-            { label: 'Transposer Octave', icon: 'fa-level-up-alt', onClick: () => onEditClip?.(trackId, clipId, 'TRANSPOSE', { amount: 12 }) },
-            { label: 'Export MIDI', icon: 'fa-file-export', onClick: () => {
-                const midiData = JSON.stringify(clip.notes);
-                const blob = new Blob([midiData], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${clip.name}.mid.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-            } },
-            'separator' as const
-        ] : []),
-        { label: 'Couper', icon: 'fa-cut', shortcut: 'Ctrl+X', onClick: () => onEditClip?.(trackId, clipId, 'CUT') },
-        { label: 'Copier', icon: 'fa-copy', shortcut: 'Ctrl+C', onClick: () => onEditClip?.(trackId, clipId, 'COPY') },
-        { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => onEditClip?.(trackId, clipId, 'DUPLICATE') },
-        'separator',
-        { label: clip.isMuted ? 'Unmute Clip' : 'Mute Clip', icon: clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', onClick: () => onEditClip?.(trackId, clipId, 'MUTE') },
-        { label: 'Scinder (Split)', icon: 'fa-cut', shortcut: 'Ctrl+E', onClick: () => onEditClip?.(trackId, clipId, 'SPLIT', { time: currentTime }) },
-        { label: 'Consolider', icon: 'fa-link', shortcut: 'Ctrl+J', onClick: () => onEditClip?.(trackId, clipId, 'MERGE') },
-        'separator',
-        ...(track.type === TrackType.AUDIO ? [
-             { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => onEditClip?.(trackId, clipId, 'NORMALIZE') },
-             { label: 'Renverser (Reverse)', icon: 'fa-history', onClick: () => onEditClip?.(trackId, clipId, 'REVERSE') },
-             'separator' as const
-        ] : []),
-        { label: 'Supprimer', icon: 'fa-trash', danger: true, shortcut: 'Del', onClick: () => onEditClip?.(trackId, clipId, 'DELETE') },
-    ];
-
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
@@ -813,8 +715,6 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     }
   };
 
-  // FIX: Refactored handlePointerDown to accept the full MouseEvent object.
-  // This allows passing the event to context menu handlers and fixes 'e is not defined' errors.
   const handlePointerDown = (e: React.MouseEvent) => {
     const { clientX, clientY, button, shiftKey, target, detail } = e;
     if (!scrollContainerRef.current) return;
@@ -861,8 +761,18 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
               return;
           }
 
-          if (button === 2) { handleClipContextMenu(e, t.id, clip.id); return; }
+          if (button === 2) {
+            e.preventDefault();
+            setClipContextMenu({
+                x: e.clientX,
+                y: e.clientY,
+                trackId: t.id,
+                clip: clip
+            });
+            return;
+          }
           
+          const clipStartPx = timeToPixels(clip.start);
           const clickRelY = absY - currentY;
           const zone = getInteractionZone(absX, clickRelY, clip, zoomV);
 
@@ -1074,6 +984,60 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const handleMouseMove = (e: React.MouseEvent) => handlePointerMove(e.clientX, e.clientY, e.shiftKey);
   const handleMouseUp = () => handlePointerUp();
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('audio-url') || 
+        e.dataTransfer.types.includes('Files')) {
+        e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      if (!scrollContainerRef.current) return;
+      
+      const rect = scrollContainerRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left + scrollContainerRef.current.scrollLeft;
+      const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
+      const dropTime = x / zoomH;
+      
+      let targetTrackId: string | null = null;
+      let currentY = 40;
+      for (const t of visibleTracks) {
+          if (y >= currentY && y < currentY + zoomV) {
+              targetTrackId = t.id;
+              break;
+          }
+          currentY += zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+      }
+      
+      if (!targetTrackId) {
+          targetTrackId = visibleTracks.find(t => t.id === 'instrumental')?.id || 
+                          visibleTracks.find(t => t.type === TrackType.AUDIO)?.id || 
+                          null;
+      }
+      
+      if (!targetTrackId) return;
+      
+      const audioUrl = e.dataTransfer.getData('audio-url');
+      if (audioUrl && onAudioDrop) {
+          const audioName = e.dataTransfer.getData('audio-name') || 'Imported Audio';
+          onAudioDrop(targetTrackId, audioUrl, audioName, dropTime);
+          return;
+      }
+      
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          const file = e.dataTransfer.files[0];
+          if (file.type.startsWith('audio/') && onAudioDrop) {
+              const blobUrl = URL.createObjectURL(file);
+              onAudioDrop(targetTrackId, blobUrl, file.name, dropTime);
+          }
+      }
+  };
+
   const containerStyle = { backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)', cursor: isResizingHeader ? 'col-resize' : 'default' };
   const headerStyle = { backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' };
   const sidebarStyle = { backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' };
@@ -1164,15 +1128,16 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         </div>
 
         <div 
-            ref={scrollContainerRef} 
-            className="flex-1 overflow-auto relative custom-scroll scroll-smooth touch-pan-x touch-pan-y" 
-            onMouseDown={handleMouseDown} 
-            onMouseMove={handleMouseMove} 
-            onMouseUp={handleMouseUp} 
-            onMouseLeave={handleMouseUp} 
+            ref={scrollContainerRef}
+            className="flex-1 overflow-auto relative custom-scroll"
             onScroll={handleScroll}
-            onDragOver={handleTimelineDragOver}
-            onDrop={handleTimelineDrop}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            onContextMenu={(e) => e.preventDefault()}
         >
           <div style={{ width: totalContentWidth, height: totalArrangementHeight }} className="absolute top-0 left-0 pointer-events-none" />
           <canvas ref={canvasRef} className="sticky top-0 left-0" style={{ display: 'block' }} />
@@ -1197,6 +1162,32 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
            {hoverTime.toFixed(3)}s {dragAction && <span className="ml-2 text-white opacity-50">[{dragAction}]</span>}
         </div>
       )}
+      {clipContextMenu && (
+        <ContextMenu
+            x={clipContextMenu.x}
+            y={clipContextMenu.y}
+            onClose={() => setClipContextMenu(null)}
+            items={[
+                { label: 'Couper', icon: 'fa-cut', shortcut: 'Ctrl+X', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'CUT'); setClipContextMenu(null); }},
+                { label: 'Copier', icon: 'fa-copy', shortcut: 'Ctrl+C', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'COPY'); setClipContextMenu(null); }},
+                { label: 'Coller', icon: 'fa-paste', shortcut: 'Ctrl+V', onClick: () => { onEditClip?.(clipContextMenu.trackId, '', 'PASTE', { time: currentTime }); setClipContextMenu(null); }},
+                { label: 'separator' },
+                { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE'); setClipContextMenu(null); }},
+                { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: currentTime }); setClipContextMenu(null); }},
+                { label: 'separator' },
+                { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
+                { label: clipContextMenu.clip.isReversed ? 'Annuler Reverse' : 'Inverser (Reverse)', icon: 'fa-backward', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'REVERSE'); setClipContextMenu(null); }},
+                { label: 'separator' },
+                { label: 'Gain +3 dB', icon: 'fa-plus', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SET_GAIN', { gain: Math.min(2, (clipContextMenu.clip.gain || 1) * 1.41) }); setClipContextMenu(null); }},
+                { label: 'Gain -3 dB', icon: 'fa-minus', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SET_GAIN', { gain: Math.max(0.1, (clipContextMenu.clip.gain || 1) / 1.41) }); setClipContextMenu(null); }},
+                { label: 'Normaliser', icon: 'fa-compress-arrows-alt', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE'); setClipContextMenu(null); }},
+                { label: 'separator' },
+                { label: 'Renommer...', icon: 'fa-i-cursor', shortcut: 'F2', onClick: () => { const newName = prompt('Nouveau nom:', clipContextMenu.clip.name); if (newName) onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'RENAME', { name: newName }); setClipContextMenu(null); }},
+                { label: 'separator' },
+                { label: 'Supprimer', icon: 'fa-trash', shortcut: 'Suppr', danger: true, onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DELETE'); setClipContextMenu(null); }}
+            ]}
+        />
+    )}
     </div>
   );
 };
