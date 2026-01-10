@@ -34,7 +34,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (this.props.onError) {
       this.props.onError(error, errorInfo);
     }
-  }
+  };
 
   // FIX: Converted to an arrow function to ensure `this` is correctly bound without needing a constructor. This resolves errors where `this.setState` was not found on the component instance.
   public handleReset = () => {
@@ -43,7 +43,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       error: null,
       errorInfo: null,
     });
-  }
+  };
 
   render(): ReactNode {
     if (this.state.hasError) {
@@ -61,10 +61,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               An unexpected error occurred.
             </p>
             <button
-                onClick={this.handleReset}
-                className="w-full px-6 py-3 bg-cyan-500 hover:bg-cyan-600 text-black font-black rounded uppercase transition-colors"
-              >
-                Try Again
+              onClick={this.handleReset}
+              className="w-full px-6 py-3 bg-cyan-500 hover:bg-cyan-600 text-black font-black rounded uppercase transition-colors"
+            >
+              Try Again
             </button>
           </div>
         </div>

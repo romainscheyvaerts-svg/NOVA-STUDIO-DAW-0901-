@@ -249,6 +249,17 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         });
         ctx.globalAlpha = 1.0;
     });
+
+    if (isLoopActive && loopEnd > loopStart) {
+        const loopX = (loopStart * zoomH) * scale;
+        const loopW = ((loopEnd - loopStart) * zoomH) * scale;
+        ctx.fillStyle = 'rgba(0, 242, 255, 0.2)';
+        ctx.fillRect(loopX, 0, loopW, h);
+        ctx.strokeStyle = '#00f2ff';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(loopX, 0, loopW, h);
+    }
+    
     const phX = (currentTime * zoomH) * scale;
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(phX, 0); ctx.lineTo(phX, h); ctx.stroke();
     const viewportWidth = viewportSize.width;
@@ -257,7 +268,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, vx, h); ctx.fillRect(vx + vw, 0, w - (vx + vw), h);
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.strokeRect(vx, 0, vw, h);
     ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(vx, 0, vw, h);
-  }, [visibleTracks, totalContentWidth, scrollLeft, viewportSize, zoomH, currentTime]);
+  }, [visibleTracks, totalContentWidth, scrollLeft, viewportSize, zoomH, currentTime, isLoopActive, loopStart, loopEnd]);
 
   const handleMinimapMouseDown = (e: React.MouseEvent) => {
       const canvas = minimapRef.current; if (!canvas || !scrollContainerRef.current) return;
@@ -444,6 +455,32 @@ const drawTimeline = useCallback(() => {
               }
           }
       }
+    }
+
+    if (isLoopActive && loopEnd > loopStart) {
+        const loopStartX = timeToPixels(loopStart) - scrollX;
+        const loopWidth = timeToPixels(loopEnd - loopStart);
+        
+        if (loopStartX + loopWidth > 0 && loopStartX < w) {
+            ctx.fillStyle = 'rgba(0, 242, 255, 0.05)';
+            ctx.fillRect(loopStartX, 40, loopWidth, h - 40);
+            
+            ctx.fillStyle = 'rgba(0, 242, 255, 0.2)';
+            ctx.fillRect(loopStartX, 0, loopWidth, 40);
+
+            ctx.strokeStyle = '#00f2ff';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(loopStartX, 0);
+            ctx.lineTo(loopStartX, h);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(loopStartX + loopWidth, 0);
+            ctx.lineTo(loopStartX + loopWidth, h);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
     }
     
     ctx.fillStyle = '#14161a';
