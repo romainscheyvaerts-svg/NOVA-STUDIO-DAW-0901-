@@ -27,18 +27,22 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
     // FIX: Added 'this.' to access 'setState' on the class instance.
+    // FIX: Added 'this.' to access 'setState' on the class instance.
     this.setState({
       errorInfo: errorInfo,
     });
 
     // FIX: Added 'this.' to access 'props' on the class instance.
+    // FIX: Added 'this.' to access 'props' on the class instance.
     if (this.props.onError) {
+      // FIX: Added 'this.' to access 'props' on the class instance.
       // FIX: Added 'this.' to access 'props' on the class instance.
       this.props.onError(error, errorInfo);
     }
   }
 
   handleReset = () => {
+    // FIX: Added 'this.' to access 'setState' on the class instance.
     // FIX: Added 'this.' to access 'setState' on the class instance.
     this.setState({
       hasError: false,
@@ -50,7 +54,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   render(): ReactNode {
     if (this.state.hasError) {
       // FIX: Added 'this.' to access 'props' on the class instance.
+      // FIX: Added 'this.' to access 'props' on the class instance.
       if (this.props.fallback) {
+        // FIX: Added 'this.' to access 'props' on the class instance.
         // FIX: Added 'this.' to access 'props' on the class instance.
         return this.props.fallback;
       }
@@ -75,6 +81,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       );
     }
 
+    // FIX: Added 'this.' to access 'props' on the class instance.
     // FIX: Added 'this.' to access 'props' on the class instance.
     return this.props.children;
   }

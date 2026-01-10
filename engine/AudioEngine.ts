@@ -597,7 +597,128 @@ export class AudioEngine {
   public getMelodicSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.melodicSampler || null; }
 
   private scheduleAutomation(tracks: Track[], start: number, end: number, when: number) { /* ... */ }
-  private playClipSource(trackId: string, clip: Clip, scheduleTime: number, projectTime: number) { /* ... */ }
+  private playClipSource(trackId: string, clip: Clip, scheduleTime: number, projectTime: number) {
+    if (!this.ctx) {
+        console.warn('[AudioEngine] No AudioContext');
+        return;
+    }
+    
+    if (!clip.buffer) {
+        console.warn(`[AudioEngine] Clip ${clip.id} has no buffer`);
+        return;
+    }
+    
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp) {
+        console.warn(`[AudioEngine] No DSP chain for track ${trackId}`);
+        return;
+    }
+    
+    // Skip muted clips
+    if (clip.isMuted) return;
+    
+    // Prevent duplicate playback
+    const sourceKey = `${clip.id}`;
+    if (this.activeSources.has(sourceKey)) return;
+    
+    try {
+        // Create audio source
+        const source = this.ctx.createBufferSource();
+        let bufferToPlay = clip.buffer;
+        
+        // Handle reverse
+        if (clip.isReversed) {
+            const reversed = this.ctx.createBuffer(
+                clip.buffer.numberOfChannels,
+                clip.buffer.length,
+                clip.buffer.sampleRate
+            );
+            for (let ch = 0; ch < clip.buffer.numberOfChannels; ch++) {
+                const original = clip.buffer.getChannelData(ch);
+                const reversedData = reversed.getChannelData(ch);
+                for (let i = 0; i < original.length; i++) {
+                    reversedData[i] = original[original.length - 1 - i];
+                }
+            }
+            bufferToPlay = reversed;
+        }
+        
+        source.buffer = bufferToPlay;
+        
+        // Create gain node for clip volume
+        const gainNode = this.ctx.createGain();
+        const clipGain = clip.gain ?? 1.0;
+        gainNode.gain.setValueAtTime(clipGain, scheduleTime);
+        
+        // Apply fade in
+        if (clip.fadeIn > 0) {
+            gainNode.gain.setValueAtTime(0, scheduleTime);
+            gainNode.gain.linearRampToValueAtTime(clipGain, scheduleTime + clip.fadeIn);
+        }
+        
+        // Apply fade out
+        if (clip.fadeOut > 0) {
+            const fadeOutStart = scheduleTime + clip.duration - clip.fadeOut;
+            if (fadeOutStart > scheduleTime) {
+                gainNode.gain.setValueAtTime(clipGain, fadeOutStart);
+                gainNode.gain.linearRampToValueAtTime(0, scheduleTime + clip.duration);
+            }
+        }
+        
+        // Connect: source -> gain -> track input (which goes through plugin chain)
+        source.connect(gainNode);
+        gainNode.connect(dsp.input);
+        
+        // Calculate offset into clip
+        let offsetIntoClip = clip.offset || 0;
+        
+        // If playback started mid-clip, add the difference
+        if (projectTime > clip.start) {
+            offsetIntoClip += (projectTime - clip.start);
+        }
+        
+        // Calculate when to start (in AudioContext time)
+        let when = scheduleTime;
+        if (projectTime < clip.start) {
+            // Clip starts in the future
+            when = scheduleTime + (clip.start - projectTime);
+        }
+        
+        // Calculate remaining duration
+        const playedSoFar = Math.max(0, offsetIntoClip - (clip.offset || 0));
+        const remainingDuration = clip.duration - playedSoFar;
+        
+        // Start playback if there's something to play
+        if (remainingDuration > 0 && offsetIntoClip < bufferToPlay.duration) {
+            const actualDuration = Math.min(remainingDuration, bufferToPlay.duration - offsetIntoClip);
+            
+            source.start(when, offsetIntoClip, actualDuration);
+            
+            // Store for cleanup
+            this.activeSources.set(sourceKey, {
+                source,
+                gain: gainNode,
+                clipId: clip.id
+            });
+            
+            // Auto-cleanup when finished
+            source.onended = () => {
+                this.activeSources.delete(sourceKey);
+                try {
+                    source.disconnect();
+                    gainNode.disconnect();
+                } catch (e) {
+                    // Already disconnected
+                }
+            };
+            
+            console.log(`[AudioEngine] Playing: ${clip.name} | offset: ${offsetIntoClip.toFixed(2)}s | duration: ${actualDuration.toFixed(2)}s`);
+        }
+        
+    } catch (error) {
+        console.error(`[AudioEngine] Error playing clip ${clip.id}:`, error);
+    }
+}
   private createPluginNode(plugin: PluginInstance, bpm: number): { input: GainNode; output: GainNode; node: any } | null {
     if (!this.ctx) return null;
     
