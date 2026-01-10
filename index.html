@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,189 +7,21 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Nova DAW | Pro Workstation</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://js.stripe.com/v3/"></script> <!-- STRIPE SDK AJOUTÉ -->
-  <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script> <!-- LAMEJS POUR MP3 ENCODING -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
-    :root {
-      /* DARK MODE (DEFAULT) - "Cyber Studio" */
-      --bg-main: #0c0d10;
-      --bg-surface: #14161a;
-      --bg-panel: #08090b;
-      --bg-item: rgba(0, 0, 0, 0.4);
-      --border-dim: rgba(255, 255, 255, 0.05);
-      --border-highlight: rgba(255, 255, 255, 0.1);
-      --text-primary: #e2e8f0;
-      --text-secondary: #64748b;
-      --accent-neon: #00f2ff;
-      --grid-line: rgba(255, 255, 255, 0.08);
-      --grid-sub: rgba(255, 255, 255, 0.03);
-      --safe-area-bottom: env(safe-area-inset-bottom);
-      
-      /* Standard Desktop Sizes */
-      --btn-height: 2.5rem; /* 40px */
-      --track-header-width: 17rem; /* 272px (Desktop default) */
-      --fader-width: 2.5rem;
-    }
-
-    /* LIGHT MODE OVERRIDES - "Navy Pro" (Blue Tones) */
-    [data-theme="light"] {
-      --bg-main: #334155;       /* Slate 700 - Fond Timeline (Bleu Intermédiaire) */
-      --bg-surface: #0f172a;    /* Slate 900 - Headers (Bleu Profond) */
-      --bg-panel: #1e293b;      /* Slate 800 - Sidebars */
-      --bg-item: #475569;       /* Slate 600 - Elements UI */
-      --border-dim: #64748b;    /* Slate 500 */
-      --border-highlight: #94a3b8;
-      --text-primary: #f8fafc;  /* White Text on Blue */
-      --text-secondary: #cbd5e1; /* Light Grey Text */
-      --accent-neon: #38bdf8;   /* Sky Blue */
-      
-      /* Grille Timeline (Claire sur fond bleu) */
-      --grid-line: rgba(255, 255, 255, 0.1); 
-      --grid-sub: rgba(255, 255, 255, 0.05);
-    }
-
-    /* --- THEME MAPPING & OVERRIDES --- */
-    
-    body { background-color: var(--bg-main); color: var(--text-primary); transition: background-color 0.3s ease, color 0.3s ease; }
-
-    /* Surcharges Tailwind pour le thème Navy */
-    [data-theme="light"] .bg-\[\#0c0d10\] { background-color: var(--bg-main) !important; } 
-    [data-theme="light"] .bg-\[\#08090b\] { background-color: var(--bg-panel) !important; border-right-color: var(--border-dim) !important; } 
-    [data-theme="light"] .bg-\[\#14161a\] { background-color: var(--bg-surface) !important; border-color: var(--border-dim) !important; } 
-    [data-theme="light"] .bg-\[\#0f1115\] { background-color: #1e293b !important; border-color: var(--border-dim) !important; } 
-    [data-theme="light"] .bg-\[\#1a1c22\] { background-color: #334155 !important; border-color: var(--border-dim) !important; } 
-    [data-theme="light"] .bg-\[\#16191f\] { background-color: #334155 !important; }
-    [data-theme="light"] .bg-\[\#0c0e12\] { background-color: #1e293b !important; border-right-color: var(--border-dim) !important; } 
-    [data-theme="light"] .bg-black\/40 { background-color: #1e293b !important; border-color: #64748b !important; color: #f1f5f9 !important; }
-    [data-theme="light"] .bg-black\/60 { background-color: #0f172a !important; color: #f1f5f9 !important; }
-    [data-theme="light"] .bg-black\/20 { background-color: #334155 !important; border-color: #64748b !important; }
-    [data-theme="light"] .bg-black { background-color: #020617 !important; color: #fff; border-color: #475569 !important; } 
-    [data-theme="light"] .bg-white\/5 { background-color: rgba(255, 255, 255, 0.1) !important; color: #cbd5e1; }
-    [data-theme="light"] .bg-white\/10 { background-color: rgba(255, 255, 255, 0.15) !important; color: #fff; }
-    [data-theme="light"] .border-white\/5 { border-color: rgba(255, 255, 255, 0.1) !important; }
-    [data-theme="light"] .border-white\/10 { border-color: rgba(255, 255, 255, 0.15) !important; }
-    [data-theme="light"] .border-white\/20 { border-color: rgba(255, 255, 255, 0.25) !important; }
-    [data-theme="light"] .text-white { color: #f8fafc !important; }
-    [data-theme="light"] .text-slate-300 { color: #e2e8f0 !important; }
-    [data-theme="light"] .text-slate-400 { color: #cbd5e1 !important; }
-    [data-theme="light"] .text-slate-500 { color: #94a3b8 !important; }
-    [data-theme="light"] .text-slate-600 { color: #94a3b8 !important; } 
-    [data-theme="light"] .text-cyan-400 { color: var(--accent-neon) !important; }
-    [data-theme="light"] .text-cyan-500 { color: var(--accent-neon) !important; }
-    [data-theme="light"] .hover\:text-white:hover { color: #fff !important; }
-    [data-theme="light"] input[type="range"] { background: #64748b; }
-
-    /* --- MODE TABLETTE OPTIMISÉ --- */
-    body[data-view-mode="TABLET"] {
-      --btn-height: 3.5rem; /* 56px pour le tactile */
-      --track-header-width: 19rem; /* 304px - Plus large pour les doigts */
-      --fader-width: 3.5rem; /* Faders plus larges */
-      font-size: 115%; /* Texte plus lisible */
-    }
-    
-    /* Cacher le texte des boutons secondaires sur tablette pour clarté */
-    body[data-view-mode="TABLET"] .hide-on-tablet-text span { display: none; }
-    
-    /* Boutons plus gros sur tablette */
-    body[data-view-mode="TABLET"] button { min-height: 44px; min-width: 44px; }
-    
-    /* Scrollbars invisibles sur tactile */
-    body[data-view-mode="TABLET"] ::-webkit-scrollbar { width: 0px; background: transparent; }
-
-    /* --- MODE MOBILE --- */
-    body[data-view-mode="MOBILE"] {
-      --btn-height: 3rem;
-      --track-header-width: 100%; 
-    }
-    body[data-view-mode="MOBILE"] ::-webkit-scrollbar { width: 0px; background: transparent; }
-
-    html, body {
-      height: 100vh;
-      height: 100dvh;
-      width: 100vw;
-      margin: 0;
-      padding: 0;
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #root { width: 100%; height: 100%; }
+    body {
+      background: #0c0d10;
+      color: #e2e8f0;
       font-family: 'Inter', sans-serif;
       overflow: hidden;
-      overscroll-behavior: none;
-      touch-action: none;
-      -webkit-tap-highlight-color: transparent;
-      -webkit-user-select: none;
-      user-select: none;
-    }
-
-    #root {
-      height: 100%;
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .mono { font-family: 'JetBrains Mono', monospace; }
-
-    /* Scrollbar Desktop */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: var(--bg-main); }
-    ::-webkit-scrollbar-thumb { background: var(--border-highlight); border-radius: 10px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--accent-neon); }
-
-    .fx-slot { transition: all 0.1s ease; cursor: grab; }
-    .delete-fx {
-      position: absolute; top: -6px; right: -6px; width: 18px; height: 18px;
-      background: #ef4444; color: white; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 10px; opacity: 0; transition: all 0.2s ease; z-index: 50;
-      cursor: pointer;
-    }
-    .fx-slot:hover .delete-fx { opacity: 1; }
-
-    input[type="range"] { appearance: none; background: var(--border-highlight); border-radius: 10px; height: 4px; }
-    input[type="range"]::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; background: var(--accent-neon); border-radius: 50%; cursor: pointer; transition: transform 0.1s; }
-    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
-    
-    /* Gros sliders pour Tablette/Mobile */
-    body[data-view-mode="TABLET"] input[type="range"]::-webkit-slider-thumb,
-    body[data-view-mode="MOBILE"] input[type="range"]::-webkit-slider-thumb {
-        width: 24px; height: 24px; box-shadow: 0 0 10px rgba(0,0,0,0.5);
-    }
-    
-    .touch-manipulation { touch-action: manipulation; }
-    .touch-none { touch-action: none; }
-
-    .automation-lane-container {
-        width: 100%;
-        height: 80px;
-        background-color: #16191f;
-        transition: height 0.3s ease;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        overflow: hidden;
-        position: relative;
-    }
-    [data-theme="light"] .automation-lane-container {
-        background-color: #334155 !important;
-        border-bottom: 1px solid #64748b;
     }
   </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.0",
-    "jszip": "https://esm.sh/jszip@3.10.1",
-    "react-dom": "https://esm.sh/react-dom@^19.2.3",
-    "zustand": "https://esm.sh/zustand@^5.0.9",
-    "immer": "https://esm.sh/immer@^11.1.3"
-  }
-}
-</script>
 </head>
 <body>
   <div id="root"></div>
+  <script type="module" src="./index.tsx"></script>
 </body>
 </html>
