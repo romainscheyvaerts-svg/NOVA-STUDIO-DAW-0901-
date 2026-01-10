@@ -244,7 +244,7 @@ export default function App() {
 
   const initialState: DAWState = {
     id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM, isPlaying: false, isRecording: false, currentTime: 0,
-    isLoopActive: false, loopStart: 0, loopEnd: 0,
+    isLoopActive: false, loopStart: 0, loopEnd: 8,
     tracks: [
       { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
       { id: 'track-rec-main', name: 'REC', type: TrackType.AUDIO, color: '#ff0000', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#ff0000')], totalLatency: 0 },
@@ -272,8 +272,12 @@ export default function App() {
   const stateRef = useRef(state); 
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks)); }, [state.tracks]); 
-  useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
   
+  // Synchroniser le loop avec l'AudioEngine
+  useEffect(() => {
+      audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd);
+  }, [state.isLoopActive, state.loopStart, state.loopEnd]);
+
   useEffect(() => {
     let animId: number;
     const updateLoop = () => {
@@ -328,7 +332,7 @@ export default function App() {
       if (!track) return;
       let newClips = [...track.clips];
       const idx = newClips.findIndex(c => c.id === clipId);
-      if (idx === -1 && action !== 'PASTE') return;
+      if (idx === -1 && !['PASTE'].includes(action)) return;
       switch(action) {
         case 'UPDATE_PROPS': if(idx > -1) newClips[idx] = { ...newClips[idx], ...payload }; break;
         case 'DELETE': if(idx > -1) newClips.splice(idx, 1); break;
@@ -379,25 +383,6 @@ export default function App() {
             break;
         case 'SET_COLOR':
             if(idx > -1) newClips[idx] = { ...newClips[idx], color: payload.color };
-            break;
-        case 'TRIM_START':
-            if(idx > -1) {
-                const clip = newClips[idx];
-                const trimAmount = payload.amount || 0.1;
-                newClips[idx] = { 
-                    ...clip, 
-                    start: clip.start + trimAmount,
-                    duration: clip.duration - trimAmount,
-                    offset: clip.offset + trimAmount
-                };
-            }
-            break;
-        case 'TRIM_END':
-            if(idx > -1) {
-                const clip = newClips[idx];
-                const trimAmount = payload.amount || 0.1;
-                newClips[idx] = { ...clip, duration: clip.duration - trimAmount };
-            }
             break;
       }
       track.clips = newClips;

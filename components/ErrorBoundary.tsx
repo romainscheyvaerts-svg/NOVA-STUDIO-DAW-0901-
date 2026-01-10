@@ -1,3 +1,4 @@
+
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 
 interface ErrorBoundaryProps {
@@ -19,25 +20,32 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     errorInfo: null,
   };
 
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.handleReset = this.handleReset.bind(this);
+  }
+
   public static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { hasError: true, error };
   }
 
-  // FIX: Converted to an arrow function to ensure 'this' is correctly bound. The original implementation as a standard method was causing 'this' context issues, leading to errors like "property 'setState' does not exist".
-  componentDidCatch = (error: Error, errorInfo: ErrorInfo) => {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
+    // FIX: Add `this.` to access setState
     this.setState({
       errorInfo: errorInfo,
     });
 
+    // FIX: Add `this.` to access props
     if (this.props.onError) {
+      // FIX: Add `this.` to access props
       this.props.onError(error, errorInfo);
     }
   }
 
-  // FIX: Converted to an arrow function for automatic 'this' binding. This is a modern and cleaner approach than binding in the constructor and resolves context issues.
-  handleReset = () => {
+  handleReset() {
+    // FIX: Add `this.` to access setState
     this.setState({
       hasError: false,
       error: null,
@@ -46,8 +54,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   render(): ReactNode {
+    // FIX: Add `this.` to access state
     if (this.state.hasError) {
+      // FIX: Add `this.` to access props
       if (this.props.fallback) {
+        // FIX: Add `this.` to access props
         return this.props.fallback;
       }
 
@@ -71,6 +82,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       );
     }
 
+    // FIX: Add `this.` to access props
     return this.props.children;
   }
 }

@@ -1072,6 +1072,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const handleMouseMove = (e: React.MouseEvent) => handlePointerMove(e.clientX, e.clientY, e.shiftKey);
   const handleMouseUp = () => handlePointerUp();
 
+  // FIX: Define missing style variables.
   const containerStyle = { backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)', cursor: isResizingHeader ? 'col-resize' : 'default' };
   const headerStyle = { backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' };
   const sidebarStyle = { backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' };
