@@ -426,25 +426,48 @@ export class AudioEngine {
   public getCurrentTime(): number {
     if (!this.ctx) return 0;
     if (this.isPlaying) {
-      let time = this.ctx.currentTime - this.playbackStartTime;
-      
-      // Handle loop
-      if (this.isLoopActive && this.loopEnd > this.loopStart) {
-        const loopDuration = this.loopEnd - this.loopStart;
-        if (time >= this.loopEnd) {
-          // Calculate how far past the loop end we are and wrap
-          const overflow = time - this.loopStart;
-          const wrappedTime = this.loopStart + (overflow % loopDuration);
-          // Adjust playbackStartTime to reflect the loop
-          this.playbackStartTime = this.ctx.currentTime - wrappedTime;
-          return wrappedTime;
+        let time = this.ctx.currentTime - this.playbackStartTime;
+        
+        // Handle loop wrapping
+        if (this.isLoopActive && this.loopEnd > this.loopStart && time >= this.loopEnd) {
+            const loopDuration = this.loopEnd - this.loopStart;
+            // Calculate how many complete loops have passed
+            const timePastLoopStart = time - this.loopStart;
+            const wrappedTime = this.loopStart + (timePastLoopStart % loopDuration);
+            return wrappedTime;
         }
-      }
-      
-      return Math.max(0, time);
+        
+        return Math.max(0, time);
     }
     return this.pausedAt;
-  }
+}
+
+public checkAndHandleLoop(tracks: Track[]): boolean {
+    if (!this.ctx || !this.isPlaying) return false;
+    
+    if (this.isLoopActive && this.loopEnd > this.loopStart) {
+        const time = this.ctx.currentTime - this.playbackStartTime;
+        
+        if (time >= this.loopEnd) {
+            // Stop all current sources
+            this.activeSources.forEach((src) => {
+                try { 
+                    src.source.stop(); 
+                    src.source.disconnect(); 
+                    src.gain.disconnect(); 
+                } catch (e) {}
+            });
+            this.activeSources.clear();
+            
+            // Reset playback to loop start
+            this.playbackStartTime = this.ctx.currentTime - this.loopStart;
+            this.nextScheduleTime = this.ctx.currentTime + 0.01;
+            
+            return true; // Loop occurred
+        }
+    }
+    return false;
+}
   
   public getIsPlaying(): boolean { return this.isPlaying; }
 
@@ -455,6 +478,10 @@ export class AudioEngine {
   // ... (Scheduler & internal methods) ...
   private scheduler(tracks: Track[]) {
     if (!this.ctx) return;
+    
+    // Check for loop boundary
+    this.checkAndHandleLoop(tracks);
+    
     // PDC Logic omitted
     while (this.nextScheduleTime < this.ctx.currentTime + this.SCHEDULE_AHEAD_SEC) {
       const scheduleUntil = this.nextScheduleTime + this.SCHEDULE_AHEAD_SEC;

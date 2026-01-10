@@ -277,13 +277,17 @@ export default function App() {
   useEffect(() => {
     let animId: number;
     const updateLoop = () => {
-      if (stateRef.current.isPlaying) {
-         const time = audioEngine.getCurrentTime();
-         setVisualState({ currentTime: time });
-         animId = requestAnimationFrame(updateLoop);
-      }
+        if (!stateRef.current.isPlaying) return;
+        
+        const time = audioEngine.getCurrentTime();
+        setVisualState({ currentTime: time });
+        
+        animId = requestAnimationFrame(updateLoop);
     };
-    if (state.isPlaying) { animId = requestAnimationFrame(updateLoop); }
+
+    if (state.isPlaying) { 
+        animId = requestAnimationFrame(updateLoop); 
+    }
     return () => cancelAnimationFrame(animId);
   }, [state.isPlaying, setVisualState]);
 
@@ -491,59 +495,97 @@ export default function App() {
 
   const handleUniversalAudioImport = async (source: string | File, name: string, targetTrackId?: string, startTime?: number) => {
     try {
-      await ensureAudioEngine();
-      
-      let arrayBuffer: ArrayBuffer;
-      let audioRef: string;
-      
-      if (source instanceof File) {
-        arrayBuffer = await source.arrayBuffer();
-        audioRef = URL.createObjectURL(source);
-      } else {
-        audioRef = source;
-        const response = await fetch(source);
-        if (!response.ok) throw new Error(`Fetch failed: ${response.statusText}`);
-        arrayBuffer = await response.arrayBuffer();
-      }
-      
-      const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
-      
-      const finalTrackId = targetTrackId || 
-                           stateRef.current.selectedTrackId || 
-                           stateRef.current.tracks.find(t => t.id === 'instrumental')?.id ||
-                           stateRef.current.tracks.find(t => t.type === TrackType.AUDIO)?.id;
-      
-      if (!finalTrackId) {
-        console.error("[AudioImport] Aucune piste cible");
-        return;
-      }
-      
-      const newClip: Clip = {
-        id: `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        start: startTime ?? stateRef.current.currentTime,
-        duration: audioBuffer.duration,
-        offset: 0,
-        fadeIn: 0,
-        fadeOut: 0,
-        name: name,
-        color: '#a855f7',
-        type: TrackType.AUDIO,
-        buffer: audioBuffer,
-        audioRef: audioRef,
-        isMuted: false,
-        gain: 1
-      };
-      
-      setState(produce((draft: DAWState) => {
-        const track = draft.tracks.find(t => t.id === finalTrackId);
-        if (track) track.clips.push(newClip);
-      }));
-      
-      console.log(`[AudioImport] Importé: ${name} sur ${finalTrackId}`);
+        // Ensure audio engine is ready
+        await ensureAudioEngine();
+        
+        if (!audioEngine.ctx) {
+            console.error('[AudioImport] AudioContext not available');
+            return;
+        }
+        
+        let arrayBuffer: ArrayBuffer;
+        let audioRef: string;
+        
+        // Handle File vs URL
+        if (source instanceof File) {
+            console.log(`[AudioImport] Loading local file: ${name}`);
+            arrayBuffer = await source.arrayBuffer();
+            audioRef = URL.createObjectURL(source);
+        } else {
+            console.log(`[AudioImport] Fetching URL: ${source}`);
+            audioRef = source;
+            
+            const response = await fetch(source, {
+                mode: 'cors',
+                credentials: 'omit'
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
+            }
+            
+            arrayBuffer = await response.arrayBuffer();
+        }
+        
+        // Decode audio data
+        console.log(`[AudioImport] Decoding audio (${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)} MB)...`);
+        const audioBuffer = await audioEngine.ctx.decodeAudioData(arrayBuffer);
+        console.log(`[AudioImport] Decoded: ${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.numberOfChannels}ch, ${audioBuffer.sampleRate}Hz`);
+        
+        // Find target track
+        const finalTrackId = targetTrackId || 
+                             stateRef.current.selectedTrackId || 
+                             stateRef.current.tracks.find(t => t.id === 'instrumental')?.id ||
+                             stateRef.current.tracks.find(t => t.type === TrackType.AUDIO)?.id;
+        
+        if (!finalTrackId) {
+            console.error('[AudioImport] No target track found');
+            return;
+        }
+        
+        // Create new clip
+        const newClip: Clip = {
+            id: `clip-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+            start: startTime ?? stateRef.current.currentTime,
+            duration: audioBuffer.duration,
+            offset: 0,
+            fadeIn: 0,
+            fadeOut: 0,
+            name: name.replace(/\.[^/.]+$/, ''), // Remove file extension
+            color: '#a855f7',
+            type: TrackType.AUDIO,
+            buffer: audioBuffer,
+            audioRef: audioRef,
+            isMuted: false,
+            gain: 1,
+            isReversed: false
+        };
+        
+        // Add clip to track
+        setState(produce((draft: DAWState) => {
+            const track = draft.tracks.find(t => t.id === finalTrackId);
+            if (track) {
+                track.clips.push(newClip);
+                console.log(`[AudioImport] Added clip "${newClip.name}" to track "${track.name}"`);
+            }
+        }));
+        
+        // Select the track
+        setState(prev => ({ ...prev, selectedTrackId: finalTrackId }));
+        
     } catch (error) {
-      console.error("[AudioImport] Erreur:", error);
+        console.error('[AudioImport] Error:', error);
+        
+        // Show user-friendly error
+        if (error instanceof Error) {
+            if (error.message.includes('Fetch failed')) {
+                console.error('[AudioImport] Could not load audio from URL. Check CORS settings.');
+            } else if (error.message.includes('Unable to decode')) {
+                console.error('[AudioImport] Invalid audio format. Supported: MP3, WAV, OGG, FLAC');
+            }
+        }
     }
-  };
+};
 
   const handleDuplicateTrack = useCallback((trackId: string) => { /* ... */ }, [setState]);
 
