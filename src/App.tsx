@@ -680,7 +680,34 @@ export default function App() {
     setAutomationMenu(null);
   }, [automationMenu, setState]);
   const handleToggleDelayComp = useCallback(() => { /* ... */ }, [state.isDelayCompEnabled, setState]);
-  const handleLoadDrumSample = useCallback(async (trackId: string, padId: number, file: File) => { /* ... */ }, [setState]);
+  const handleLoadDrumSample = useCallback(async (trackId: string, padId: number, file: File) => {
+    try {
+        await ensureAudioEngine();
+        
+        const arrayBuffer = await file.arrayBuffer();
+        const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+        const audioRef = URL.createObjectURL(file);
+        
+        setState(produce((draft: DAWState) => {
+            const track = draft.tracks.find(t => t.id === trackId);
+            if (!track || !track.drumPads) return;
+            
+            const pad = track.drumPads.find(p => p.id === padId);
+            if (pad) {
+                pad.sampleName = file.name.replace(/\.[^/.]+$/, '');
+                pad.buffer = audioBuffer;
+                pad.audioRef = audioRef;
+            }
+        }));
+        
+        // Also update the DrumRack node in AudioEngine
+        audioEngine.loadDrumRackSample(trackId, padId, audioBuffer);
+        
+        console.log(`[DrumSample] Loaded ${file.name} on pad ${padId}`);
+    } catch (error) {
+        console.error('[DrumSample] Error loading sample:', error);
+    }
+}, [setState, ensureAudioEngine]);
 
   useEffect(() => {
     (window as any).DAW_CONTROL = {
