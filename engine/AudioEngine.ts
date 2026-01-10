@@ -19,6 +19,7 @@ import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { DrumRackNode } from './DrumRackNode'; // NEW
 import { novaBridge } from '../services/NovaBridge';
+import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
 interface TrackDSP {
   input: GainNode;          
@@ -59,7 +60,6 @@ export class AudioEngine {
   private tracksDSP: Map<string, TrackDSP> = new Map();
   private activeSources: Map<string, ScheduledSource> = new Map();
   private scrubbingSources: Map<string, ScheduledSource> = new Map();
-  private audioBuffers: Map<string, AudioBuffer> = new Map(); // NOUVEAU CACHE CENTRAL
   
   // MIDI State
   private activeMidiNotes: Set<string> = new Set(); // Key: "trackId-noteId"
@@ -81,8 +81,8 @@ export class AudioEngine {
   private isRecMode: boolean = false;
   private isDelayCompEnabled: boolean = false;
 
-  private LOOKAHEAD_MS = 25.0; 
-  private SCHEDULE_AHEAD_SEC = 0.1; 
+  private LOOKAHEAD_MS = 10.0; 
+  private SCHEDULE_AHEAD_SEC = 0.05; 
 
   private mediaRecorder: MediaRecorder | null = null;
   private audioChunks: Blob[] = [];
@@ -156,12 +156,8 @@ export class AudioEngine {
     this.previewAnalyzer.connect(this.ctx.destination);
   }
 
-  public cacheAudioBuffer(clipId: string, buffer: AudioBuffer) {
-    this.audioBuffers.set(clipId, buffer);
-  }
-
   public getAudioBuffer(clipId: string): AudioBuffer | undefined {
-    return this.audioBuffers.get(clipId);
+    return audioBufferRegistry.get(clipId);
   }
 
   public async setOutputDevice(deviceId: string) {
@@ -254,10 +250,12 @@ export class AudioEngine {
     
     let dsp = this.tracksDSP.get(trackId);
     
-    if (!dsp) {
-      console.log("[AudioEngine] DSP not ready, waiting 150ms...");
-      await new Promise(r => setTimeout(r, 150));
-      dsp = this.tracksDSP.get(trackId);
+    let attempts = 0;
+    const maxAttempts = 10;
+    while (!dsp && attempts < maxAttempts) {
+        await new Promise(r => setTimeout(r, 15)); // 15ms entre checks
+        dsp = this.tracksDSP.get(trackId);
+        attempts++;
     }
     
     if (!dsp) {
@@ -328,7 +326,7 @@ export class AudioEngine {
     }
   }
 
-  public async stopRecording(): Promise<{ clip: Omit<Clip, 'buffer'> & { buffer?: AudioBuffer }, trackId: string } | null> {
+  public async stopRecording(): Promise<{ clip: Clip, trackId: string } | null> {
     if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive' || !this.recordingTrackId) {
       return null;
     }
@@ -343,7 +341,7 @@ export class AudioEngine {
         try {
           const arrayBuffer = await blob.arrayBuffer();
           const audioBuffer = await this.ctx!.decodeAudioData(arrayBuffer);
-          const clipData: Omit<Clip, 'buffer'> & { buffer?: AudioBuffer } = {
+          const clipData: Clip = {
             id: `rec-${Date.now()}`,
             name: `Vocal Take ${new Date().toLocaleTimeString()}`,
             start: this.recStartTime,
@@ -354,7 +352,7 @@ export class AudioEngine {
             type: TrackType.AUDIO,
             color: '#ff0000',
             audioRef: URL.createObjectURL(blob),
-            buffer: audioBuffer, // Return buffer here to be cached by App.tsx
+            buffer: audioBuffer, 
           };
           console.log("[AudioEngine] Recording stopped. New clip created:", clipData);
           resolve({ clip: clipData, trackId });
@@ -377,7 +375,7 @@ export class AudioEngine {
 
     this.isPlaying = true;
     this.pausedAt = startOffset;
-    this.nextScheduleTime = this.ctx.currentTime + 0.05; 
+    this.nextScheduleTime = this.ctx.currentTime + 0.01; 
     this.playbackStartTime = this.ctx.currentTime - startOffset; 
 
     this.schedulerTimer = window.setInterval(() => {
@@ -529,8 +527,10 @@ export class AudioEngine {
   }
 
   public previewMidiNote(trackId: string, pitch: number, duration: number = 0.5) {
-      this.triggerTrackAttack(trackId, pitch, 0.8);
-      setTimeout(() => this.triggerTrackRelease(trackId, pitch), duration * 1000);
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      this.triggerTrackAttack(trackId, pitch, 0.8, now);
+      this.triggerTrackRelease(trackId, pitch, now + duration);
   }
   
   public loadSamplerBuffer(trackId: string, buffer: AudioBuffer) {
@@ -587,10 +587,14 @@ export class AudioEngine {
 }
   private playClipSource(trackId: string, clip: Clip, scheduleTime: number, projectTime: number) {
     if (!this.ctx) return;
+
+    let buffer = clip.buffer;
+    if (!buffer && clip.bufferId) {
+        buffer = audioBufferRegistry.get(clip.bufferId);
+    }
     
-    const buffer = this.audioBuffers.get(clip.id);
     if (!buffer) {
-        console.warn(`[AudioEngine] Buffer for clip ${clip.id} not found in cache. AudioRef: ${clip.audioRef}`);
+        // console.warn(`[AudioEngine] Buffer for clip ${clip.id} not found. AudioRef: ${clip.audioRef}`);
         return;
     }
     

@@ -1,4 +1,5 @@
 import React, { ErrorInfo, ReactNode } from 'react';
+import { ContextMenuItem } from '../types';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -12,7 +13,7 @@ interface ErrorBoundaryState {
   errorInfo: ErrorInfo | null;
 }
 
-// FIX: Explicitly extend `React.Component` to resolve typing issues where `this.props` and `this.setState` were not being recognized on the class instance.
+// FIX: Correctly extend React's Component class to resolve issues with 'this.props' and 'this.setState'.
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = {
     hasError: false,

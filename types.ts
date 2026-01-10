@@ -122,6 +122,7 @@ export interface Clip {
   color: string;
   type: TrackType;
   buffer?: AudioBuffer;
+  bufferId?: string; 
   notes?: MidiNote[]; 
   isMuted?: boolean;
   gain?: number;
