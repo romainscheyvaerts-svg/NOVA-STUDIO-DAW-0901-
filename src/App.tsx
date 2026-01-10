@@ -347,6 +347,58 @@ export default function App() {
               }
             }
             break;
+        case 'COPY': 
+            if(idx > -1) {
+                (window as any).__clipboardClip = { ...newClips[idx], sourceTrackId: trackId };
+            }
+            break;
+        case 'PASTE':
+            const clipboardClip = (window as any).__clipboardClip;
+            if (clipboardClip) {
+                newClips.push({ 
+                    ...clipboardClip, 
+                    id: `clip-paste-${Date.now()}`,
+                    start: payload?.time || draft.currentTime 
+                });
+            }
+            break;
+        case 'CUT':
+            if(idx > -1) {
+                (window as any).__clipboardClip = { ...newClips[idx], sourceTrackId: trackId };
+                newClips.splice(idx, 1);
+            }
+            break;
+        case 'REVERSE':
+            if(idx > -1) newClips[idx] = { ...newClips[idx], isReversed: !newClips[idx].isReversed };
+            break;
+        case 'SET_GAIN':
+            if(idx > -1) newClips[idx] = { ...newClips[idx], gain: payload.gain };
+            break;
+        case 'NORMALIZE':
+            if(idx > -1) newClips[idx] = { ...newClips[idx], gain: 1.0 };
+            break;
+        case 'SET_COLOR':
+            if(idx > -1) newClips[idx] = { ...newClips[idx], color: payload.color };
+            break;
+        case 'TRIM_START':
+            if(idx > -1) {
+                const clip = newClips[idx];
+                const trimAmount = payload.amount || 0.1;
+                newClips[idx] = { 
+                    ...clip, 
+                    start: clip.start + trimAmount,
+                    duration: clip.duration - trimAmount,
+                    offset: clip.offset + trimAmount
+                };
+            }
+            break;
+        case 'TRIM_END':
+            if(idx > -1) {
+                const clip = newClips[idx];
+                const trimAmount = payload.amount || 0.1;
+                newClips[idx] = { ...clip, duration: clip.duration - trimAmount };
+            }
+            break;
       }
       track.clips = newClips;
     }));
@@ -402,6 +454,29 @@ export default function App() {
         setVisualState({ isPlaying: true });
       }
   }, [setVisualState]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handleTogglePlay();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleTogglePlay]);
 
   const handleStop = useCallback(async () => {
     audioEngine.stopAll();

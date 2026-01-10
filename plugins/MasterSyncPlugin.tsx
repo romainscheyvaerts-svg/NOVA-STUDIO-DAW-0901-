@@ -1,6 +1,8 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { AudioAnalysisEngine } from '../engine/AudioAnalysisEngine';
+// FIX: Centralized music theory constants by importing `NOTES` from the `AutoTunePlugin` module.
 import { NOTES } from './AutoTunePlugin';
 
 /**

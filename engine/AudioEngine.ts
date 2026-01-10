@@ -7,6 +7,7 @@ import { ChorusNode } from '../plugins/ChorusPlugin';
 import { FlangerNode } from '../plugins/FlangerPlugin';
 import { VocalDoublerNode } from '../plugins/DoublerPlugin';
 import { StereoSpreaderNode } from '../plugins/StereoSpreaderPlugin';
+// FIX: Export AutoTuneNode from its module to allow importing.
 import { AutoTuneNode } from '../plugins/AutoTunePlugin';
 import { CompressorNode } from '../plugins/CompressorPlugin';
 import { DeEsserNode } from '../plugins/DeEsserPlugin';

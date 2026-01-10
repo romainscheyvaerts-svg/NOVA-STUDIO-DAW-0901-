@@ -86,6 +86,12 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: (ContextMenuItem | 'separator')[] } | null>(null);
+  const [clipContextMenu, setClipContextMenu] = useState<{
+    x: number;
+    y: number;
+    trackId: string;
+    clip: Clip;
+  } | null>(null);
 
   const [headerWidth, setHeaderWidth] = useState(256);
   const [isResizingHeader, setIsResizingHeader] = useState(false);
@@ -376,76 +382,6 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
     menuItems.push({ label: 'Freeze Track', onClick: () => onFreezeTrack?.(trackId), icon: 'fa-snowflake' });
     
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      items: menuItems
-    });
-  };
-
-  const handleClipContextMenu = (e: React.MouseEvent, trackId: string, clipId: string) => {
-    e.preventDefault();
-    const track = tracks.find(t => t.id === trackId);
-    const clip = track?.clips.find(c => c.id === clipId);
-    if (!clip || !track) return;
-    
-    const menuItems: (ContextMenuItem | 'separator')[] = [
-        { label: 'Renommer', icon: 'fa-pen', shortcut: 'Ctrl+R', onClick: () => { const name = prompt("Nouveau nom :", clip.name); if(name) onEditClip?.(trackId, clipId, 'RENAME', { name }); } },
-        { 
-            label: 'Couleur', 
-            icon: 'fa-palette', 
-            onClick: () => {}, 
-            component: (
-                <div className="grid grid-cols-5 gap-1 p-1">
-                    {['#ff0000', '#f97316', '#eab308', '#22c55e', '#00f2ff', '#3b82f6', '#a855f7', '#ec4899', '#ffffff', '#64748b'].map(color => (
-                        <div 
-                            key={color} 
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onEditClip?.(trackId, clipId, 'UPDATE_PROPS', { color });
-                                setContextMenu(null);
-                            }}
-                            className="w-4 h-4 rounded-sm cursor-pointer hover:scale-125 transition-transform border border-white/20"
-                            style={{ backgroundColor: color }}
-                        />
-                    ))}
-                </div>
-            )
-        },
-        'separator',
-        ...(track.type === TrackType.MIDI ? [
-            { label: 'Quantifier', icon: 'fa-magnet', shortcut: 'Q', onClick: () => onEditClip?.(trackId, clipId, 'QUANTIZE') },
-            { label: 'Transposer +1', icon: 'fa-arrow-up', onClick: () => onEditClip?.(trackId, clipId, 'TRANSPOSE', { amount: 1 }) },
-            { label: 'Transposer -1', icon: 'fa-arrow-down', onClick: () => onEditClip?.(trackId, clipId, 'TRANSPOSE', { amount: -1 }) },
-            { label: 'Transposer Octave', icon: 'fa-level-up-alt', onClick: () => onEditClip?.(trackId, clipId, 'TRANSPOSE', { amount: 12 }) },
-            { label: 'Export MIDI', icon: 'fa-file-export', onClick: () => {
-                const midiData = JSON.stringify(clip.notes);
-                const blob = new Blob([midiData], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${clip.name}.mid.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-            } },
-            'separator' as const
-        ] : []),
-        { label: 'Couper', icon: 'fa-cut', shortcut: 'Ctrl+X', onClick: () => onEditClip?.(trackId, clipId, 'CUT') },
-        { label: 'Copier', icon: 'fa-copy', shortcut: 'Ctrl+C', onClick: () => onEditClip?.(trackId, clipId, 'COPY') },
-        { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => onEditClip?.(trackId, clipId, 'DUPLICATE') },
-        'separator',
-        { label: clip.isMuted ? 'Unmute Clip' : 'Mute Clip', icon: clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', onClick: () => onEditClip?.(trackId, clipId, 'MUTE') },
-        { label: 'Scinder (Split)', icon: 'fa-cut', shortcut: 'Ctrl+E', onClick: () => onEditClip?.(trackId, clipId, 'SPLIT', { time: currentTime }) },
-        { label: 'Consolider', icon: 'fa-link', shortcut: 'Ctrl+J', onClick: () => onEditClip?.(trackId, clipId, 'MERGE') },
-        'separator',
-        ...(track.type === TrackType.AUDIO ? [
-             { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => onEditClip?.(trackId, clipId, 'NORMALIZE') },
-             { label: 'Renverser (Reverse)', icon: 'fa-history', onClick: () => onEditClip?.(trackId, clipId, 'REVERSE') },
-             'separator' as const
-        ] : []),
-        { label: 'Supprimer', icon: 'fa-trash', danger: true, shortcut: 'Del', onClick: () => onEditClip?.(trackId, clipId, 'DELETE') },
-    ];
-
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
@@ -856,7 +792,15 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
               return;
           }
 
-          if (button === 2) { handleClipContextMenu({ clientX, clientY } as any, t.id, clip.id); return; }
+          if (button === 2) {
+            setClipContextMenu({
+                x: clientX,
+                y: clientY,
+                trackId: t.id,
+                clip: clip
+            });
+            return;
+          }
           
           const clipStartPx = timeToPixels(clip.start);
           const clickRelY = absY - currentY;
@@ -1193,6 +1137,117 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         <div className="fixed z-[200] px-3 py-1.5 bg-black/90 border border-cyan-500/30 rounded-lg shadow-2xl pointer-events-none text-[10px] font-black text-cyan-400 font-mono" style={{ left: tooltipPos.x + 15, top: tooltipPos.y }}>
            {hoverTime.toFixed(3)}s {dragAction && <span className="ml-2 text-white opacity-50">[{dragAction}]</span>}
         </div>
+      )}
+      {clipContextMenu && (
+        <ContextMenu
+            x={clipContextMenu.x}
+            y={clipContextMenu.y}
+            onClose={() => setClipContextMenu(null)}
+            items={[
+                { 
+                    label: 'Couper', 
+                    icon: 'fa-cut', 
+                    shortcut: 'Ctrl+X',
+                    onClick: () => onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'CUT')
+                },
+                { 
+                    label: 'Copier', 
+                    icon: 'fa-copy', 
+                    shortcut: 'Ctrl+C',
+                    onClick: () => onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'COPY')
+                },
+                { 
+                    label: 'Coller', 
+                    icon: 'fa-paste', 
+                    shortcut: 'Ctrl+V',
+                    onClick: () => onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'PASTE', { time: currentTime }),
+                    disabled: !(window as any).__clipboardClip
+                },
+                'separator',
+                { 
+                    label: 'Dupliquer', 
+                    icon: 'fa-clone', 
+                    shortcut: 'Ctrl+D',
+                    onClick: () => onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE')
+                },
+                { 
+                    label: 'Diviser à la tête de lecture', 
+                    icon: 'fa-scissors', 
+                    shortcut: 'S',
+                    onClick: () => onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: currentTime })
+                },
+                'separator',
+                { 
+                    label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', 
+                    icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute',
+                    shortcut: 'M',
+                    onClick: () => onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE')
+                },
+                { 
+                    label: clipContextMenu.clip.isReversed ? 'Annuler Reverse' : 'Inverser (Reverse)', 
+                    icon: 'fa-backward',
+                    onClick: () => onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'REVERSE')
+                },
+                'separator',
+                { 
+                    label: 'Gain +3 dB', 
+                    icon: 'fa-plus',
+                    onClick: () => onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SET_GAIN', { 
+                        gain: Math.min(2, (clipContextMenu.clip.gain || 1) * 1.41) 
+                    })
+                },
+                { 
+                    label: 'Gain -3 dB', 
+                    icon: 'fa-minus',
+                    onClick: () => onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SET_GAIN', { 
+                        gain: Math.max(0.1, (clipContextMenu.clip.gain || 1) / 1.41) 
+                    })
+                },
+                { 
+                    label: 'Normaliser (0 dB)', 
+                    icon: 'fa-compress-arrows-alt',
+                    onClick: () => onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE')
+                },
+                'separator',
+                {
+                    label: 'Couleur',
+                    icon: 'fa-palette',
+                    onClick: () => {},
+                    component: (
+                        <div className="flex gap-1 flex-wrap">
+                            {['#00f2ff', '#f97316', '#22c55e', '#ef4444', '#a855f7', '#eab308', '#ec4899', '#6366f1'].map(color => (
+                                <button
+                                    key={color}
+                                    className="w-6 h-6 rounded border border-white/20 hover:scale-110 transition-transform"
+                                    style={{ backgroundColor: color }}
+                                    onClick={() => {
+                                        onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SET_COLOR', { color });
+                                        setClipContextMenu(null);
+                                    }}
+                                />
+                            ))}
+                        </div>
+                    )
+                },
+                {
+                    label: 'Renommer...',
+                    icon: 'fa-i-cursor',
+                    shortcut: 'F2',
+                    onClick: () => {
+                        const newName = prompt('Nouveau nom:', clipContextMenu.clip.name);
+                        if (newName) onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'RENAME', { name: newName });
+                    }
+                },
+                'separator',
+                { 
+                    label: 'Supprimer', 
+                    icon: 'fa-trash', 
+                    shortcut: 'Del',
+                    danger: true,
+                    onClick: () => onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DELETE')
+                }
+            ]}
+        />
       )}
     </div>
   );

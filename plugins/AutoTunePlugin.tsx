@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 // Export constants for use in other plugins (MasterSync)
@@ -303,7 +304,7 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
 
       if (vizData.detectedFreq > 50) {
         const offset = Math.max(-100, Math.min(100, vizData.correctionCents));
-        const x = (w / 2) + (offset / 100) * (w / 2); 
+        const x = (w / 2) + (offset / 100) * (w / 2 * 0.8); 
 
         ctx.strokeStyle = '#00f2ff';
         ctx.lineWidth = 2;
@@ -462,22 +463,18 @@ const TuneKnob: React.FC<{ label: string, value: number, onMouseDown: (e: React.
   }
 
   return (
-    <div className="flex flex-col items-center space-y-3 group">
-      <div 
-        onMouseDown={onMouseDown} 
-        className="w-16 h-16 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-cyan-500/50 transition-all shadow-xl relative"
-      >
+    <div className="flex flex-col items-center space-y-3 group cursor-ns-resize" onMouseDown={onMouseDown}>
+      <div className="relative w-16 h-16 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center shadow-lg group-hover:border-cyan-500/50 transition-colors">
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div 
-          className="absolute top-1/2 left-1/2 w-1.5 h-6 -ml-0.75 -mt-6 origin-bottom rounded-full transition-transform duration-75" 
-          style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: '#00f2ff', boxShadow: '0 0 10px #00f2ff' }} 
+          className="absolute w-1.5 h-6 bg-current rounded-full origin-bottom bottom-1/2 transition-transform duration-75"
+          style={{ transform: `rotate(${rotation}deg)`, color: '#00f2ff', boxShadow: `0 0 10px #00f2ff` }}
         />
-        <div className="absolute inset-5 rounded-full bg-[#1c1f26] border border-white/5" />
       </div>
       <div className="text-center">
-        <span className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1.5">{label}</span>
-        <div className="bg-black/60 px-3 py-1 rounded-lg border border-white/5 min-w-[55px]">
-          <span className="text-[10px] font-mono font-bold text-cyan-400">{displayValue}</span>
+        <span className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</span>
+        <div className="bg-black/60 px-2 py-0.5 rounded border border-white/5 min-w-[50px]">
+          <span className="text-[9px] font-mono font-bold text-white">{displayValue}</span>
         </div>
       </div>
     </div>

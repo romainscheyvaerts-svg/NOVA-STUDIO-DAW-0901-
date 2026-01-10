@@ -1,4 +1,5 @@
 
+
 import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad } from '../types';
 import { ReverbNode } from '../plugins/ReverbPlugin';
 import { SyncDelayNode } from '../plugins/DelayPlugin';
@@ -6,7 +7,8 @@ import { ChorusNode } from '../plugins/ChorusPlugin';
 import { FlangerNode } from '../plugins/FlangerPlugin';
 import { VocalDoublerNode } from '../plugins/DoublerPlugin';
 import { StereoSpreaderNode } from '../plugins/StereoSpreaderPlugin';
-import { AutoTuneNode } from '../plugins/AutoTunePlugin';
+// FIX: Updated the import path for `AutoTuneNode` to point to the correct file in the `autotune-pro` directory.
+import { AutoTuneNode } from '../plugins/autotune-pro/AutoTuneNode';
 import { CompressorNode } from '../plugins/CompressorPlugin';
 import { DeEsserNode } from '../plugins/DeEsserPlugin';
 import { DenoiserNode } from '../plugins/DenoiserPlugin';
@@ -18,6 +20,7 @@ import { AudioSampler } from './AudioSampler';
 import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { DrumRackNode } from './DrumRackNode'; // NEW
+// FIX: Import novaBridge to manage VST audio streaming.
 import { novaBridge } from '../services/NovaBridge';
 
 interface TrackDSP {
@@ -104,6 +107,7 @@ export class AudioEngine {
   public sampleRate: number = 44100;
   public latency: number = 0;
   private currentBpm: number = 120;
+  // FIX: Add property to track active VST plugin for streaming management.
   private activeVSTPlugin: { trackId: string, pluginId: string } | null = null;
 
   constructor() {}
@@ -428,8 +432,10 @@ export class AudioEngine {
       if (this.isLoopActive && this.loopEnd > this.loopStart) {
         const loopDuration = this.loopEnd - this.loopStart;
         if (time >= this.loopEnd) {
+          // Calculate how far past the loop end we are and wrap
           const overflow = time - this.loopStart;
           const wrappedTime = this.loopStart + (overflow % loopDuration);
+          // Adjust playbackStartTime to reflect the loop
           this.playbackStartTime = this.ctx.currentTime - wrappedTime;
           return wrappedTime;
         }
@@ -590,8 +596,133 @@ export class AudioEngine {
   public getDrumSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.drumSampler || null; }
   public getMelodicSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.melodicSampler || null; }
 
-  private scheduleAutomation(tracks: Track[], start: number, end: number, when: number) { /* ... */ }
-  private playClipSource(trackId: string, clip: Clip, scheduleTime: number, projectTime: number) { /* ... */ }
+  private scheduleAutomation(tracks: Track[], start: number, end: number, when: number) {
+    tracks.forEach(track => {
+        track.automationLanes.forEach(lane => {
+            if (!lane.isExpanded || lane.points.length === 0) return;
+            
+            const dsp = this.tracksDSP.get(track.id);
+            if (!dsp) return;
+            
+            // Find points in this time window
+            lane.points.forEach(point => {
+                if (point.time >= start && point.time < end) {
+                    const scheduleTime = when + (point.time - start);
+                    
+                    if (lane.parameterName === 'volume') {
+                        dsp.gain.gain.setValueAtTime(point.value, scheduleTime);
+                    } else if (lane.parameterName === 'pan') {
+                        dsp.panner.pan.setValueAtTime(point.value, scheduleTime);
+                    }
+                }
+            });
+        });
+    });
+}
+  private playClipSource(trackId: string, clip: Clip, scheduleTime: number, projectTime: number) {
+    if (!this.ctx || !clip.buffer) return;
+    
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp) return;
+    
+    // Check if clip is muted
+    if (clip.isMuted) return;
+    
+    const sourceKey = `${clip.id}`;
+    
+    // Already playing
+    if (this.activeSources.has(sourceKey)) return;
+    
+    try {
+        // Create source node
+        const source = this.ctx.createBufferSource();
+        source.buffer = clip.buffer;
+        
+        // Handle reverse
+        if (clip.isReversed) {
+            const reversed = this.ctx.createBuffer(
+                clip.buffer.numberOfChannels,
+                clip.buffer.length,
+                clip.buffer.sampleRate
+            );
+            for (let ch = 0; ch < clip.buffer.numberOfChannels; ch++) {
+                const original = clip.buffer.getChannelData(ch);
+                const reversedData = reversed.getChannelData(ch);
+                for (let i = 0; i < original.length; i++) {
+                    reversedData[i] = original[original.length - 1 - i];
+                }
+            }
+            source.buffer = reversed;
+        }
+        
+        // Create gain node for clip-level volume
+        const gainNode = this.ctx.createGain();
+        gainNode.gain.value = clip.gain ?? 1.0;
+        
+        // Apply fade in/out
+        if (clip.fadeIn > 0 || clip.fadeOut > 0) {
+            const clipDuration = clip.duration;
+            const startTime = scheduleTime;
+            
+            if (clip.fadeIn > 0) {
+                gainNode.gain.setValueAtTime(0, startTime);
+                gainNode.gain.linearRampToValueAtTime(clip.gain ?? 1.0, startTime + clip.fadeIn);
+            }
+            
+            if (clip.fadeOut > 0) {
+                const fadeOutStart = startTime + clipDuration - clip.fadeOut;
+                gainNode.gain.setValueAtTime(clip.gain ?? 1.0, fadeOutStart);
+                gainNode.gain.linearRampToValueAtTime(0, startTime + clipDuration);
+            }
+        }
+        
+        // Connect: source → gainNode → track input
+        source.connect(gainNode);
+        gainNode.connect(dsp.input);
+        
+        // Calculate offset into the clip
+        let offsetIntoClip = clip.offset || 0;
+        
+        // If we're starting mid-clip (projectTime > clip.start)
+        if (projectTime > clip.start) {
+            offsetIntoClip += (projectTime - clip.start);
+        }
+        
+        // Calculate when to start relative to context time
+        let when = scheduleTime;
+        if (projectTime < clip.start) {
+            // Clip starts in the future
+            when = scheduleTime + (clip.start - projectTime);
+        }
+        
+        // Duration to play
+        const remainingDuration = clip.duration - (offsetIntoClip - (clip.offset || 0));
+        
+        // Start the source
+        if (remainingDuration > 0 && offsetIntoClip < clip.buffer.duration) {
+            source.start(when, offsetIntoClip, remainingDuration);
+            
+            // Store for cleanup
+            this.activeSources.set(sourceKey, {
+                source,
+                gain: gainNode,
+                clipId: clip.id
+            });
+            
+            // Auto-cleanup when done
+            source.onended = () => {
+                this.activeSources.delete(sourceKey);
+                try {
+                    source.disconnect();
+                    gainNode.disconnect();
+                } catch (e) {}
+            };
+        }
+        
+    } catch (error) {
+        console.error(`[AudioEngine] Error playing clip ${clip.id}:`, error);
+    }
+}
   private createPluginNode(plugin: PluginInstance, bpm: number): { input: GainNode; output: GainNode; node: any } | null {
     if (!this.ctx) return null;
     
@@ -601,6 +732,7 @@ export class AudioEngine {
       case 'REVERB':
         node = new ReverbNode(this.ctx);
         break;
+      // FIX: Pass the current BPM to the SyncDelayNode constructor for accurate tempo-synced delays.
       case 'DELAY':
         node = new SyncDelayNode(this.ctx, bpm);
         break;
@@ -782,34 +914,7 @@ export class AudioEngine {
     for (let i = 0; i < data.length; i++) { const sample = (data[i] - 128) / 128; sum += sample * sample; }
     return Math.sqrt(sum / data.length);
   }
-
-  // FIX: Added missing methods for BPM, Track Volume, Track Pan, and VST Audio Streaming to resolve errors in consuming components.
-  public setBpm(bpm: number) {
-    this.currentBpm = bpm;
-    this.tracksDSP.forEach(dsp => {
-        dsp.pluginChain.forEach(p => {
-            if (p.instance && typeof p.instance.updateParams === 'function') {
-                p.instance.updateParams({ bpm: this.currentBpm });
-            }
-        });
-    });
-  }
-
-  public setTrackVolume(trackId: string, volume: number, isMuted: boolean) {
-    const dsp = this.tracksDSP.get(trackId);
-    if (dsp && this.ctx) {
-        const targetGain = isMuted ? 0 : volume;
-        dsp.gain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.015);
-    }
-  }
-
-  public setTrackPan(trackId: string, pan: number) {
-    const dsp = this.tracksDSP.get(trackId);
-    if (dsp && this.ctx) {
-        dsp.panner.pan.setTargetAtTime(pan, this.ctx.currentTime, 0.015);
-    }
-  }
-
+  // FIX: Implement missing methods for VST streaming and atomic updates.
   public async enableVSTAudioStreaming(trackId: string, pluginId: string) {
     if (!this.ctx) await this.init();
     const dsp = this.tracksDSP.get(trackId);
@@ -857,6 +962,32 @@ export class AudioEngine {
     pluginEntry.input.connect(pluginEntry.output);
 
     this.activeVSTPlugin = null;
+  }
+
+  public setBpm(bpm: number) {
+    this.currentBpm = bpm;
+    this.tracksDSP.forEach(dsp => {
+        dsp.pluginChain.forEach(p => {
+            if (p.instance && typeof p.instance.updateParams === 'function') {
+                p.instance.updateParams({ bpm: this.currentBpm });
+            }
+        });
+    });
+  }
+
+  public setTrackVolume(trackId: string, volume: number, isMuted: boolean) {
+    const dsp = this.tracksDSP.get(trackId);
+    if (dsp && this.ctx) {
+        const targetGain = isMuted ? 0 : volume;
+        dsp.gain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.015);
+    }
+  }
+
+  public setTrackPan(trackId: string, pan: number) {
+    const dsp = this.tracksDSP.get(trackId);
+    if (dsp && this.ctx) {
+        dsp.panner.pan.setTargetAtTime(pan, this.ctx.currentTime, 0.015);
+    }
   }
 }
 

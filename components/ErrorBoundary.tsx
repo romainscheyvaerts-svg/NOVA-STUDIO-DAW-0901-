@@ -23,9 +23,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { hasError: true, error };
   }
 
-  // FIX: Lifecycle methods like componentDidCatch are called by React with the correct `this` context.
-  // Using `this.setState` and `this.props` is the correct way to access state and props here.
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+  // FIX: Converted to an arrow function to ensure 'this' is correctly bound. The original implementation as a standard method was causing 'this' context issues, leading to errors like "property 'setState' does not exist".
+  componentDidCatch = (error: Error, errorInfo: ErrorInfo) => {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
     this.setState({
@@ -37,18 +36,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
   }
 
-  // FIX: Event handlers defined as arrow functions automatically bind `this`,
-  // ensuring that `this.setState` refers to the component instance when called from an event like `onClick`.
-  public handleReset = (): void => {
+  // FIX: Converted to an arrow function for automatic 'this' binding. This is a modern and cleaner approach than binding in the constructor and resolves context issues.
+  handleReset = () => {
     this.setState({
       hasError: false,
       error: null,
       errorInfo: null,
     });
-  };
+  }
 
-  // FIX: The render method must also use `this` to access state and props.
-  public render(): ReactNode {
+  render(): ReactNode {
     if (this.state.hasError) {
       if (this.props.fallback) {
         return this.props.fallback;

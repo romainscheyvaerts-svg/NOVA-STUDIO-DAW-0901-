@@ -1,4 +1,3 @@
-
 import JSZip from 'jszip';
 import { DAWState, Clip } from '../types';
 import { audioBufferToWav } from './AudioUtils';
@@ -74,7 +73,16 @@ export class ProjectIO {
     if (!jsonFile) throw new Error("Fichier project.json manquant dans l'archive.");
     
     const jsonContent = await jsonFile.async("string");
-    const loadedState: any = JSON.parse(jsonContent); // Type 'any' temporaire pour manipulation
+    // FIX: Added a try-catch block for robust JSON parsing. This prevents application crashes if the project file is corrupted or invalid by throwing a user-friendly error.
+    let loadedState: any;
+    try {
+        loadedState = JSON.parse(jsonContent);
+    } catch (e) {
+        throw new Error("Fichier projet corrompu");
+    }
+    if (!loadedState.tracks || !Array.isArray(loadedState.tracks)) {
+        throw new Error("Format de projet invalide");
+    }
     
     // Initialisation moteur si nécessaire
     await audioEngine.init();

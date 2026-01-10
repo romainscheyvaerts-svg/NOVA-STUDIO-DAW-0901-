@@ -1,6 +1,10 @@
+
+
+
 import React, { useState, useEffect } from 'react';
 import { AudioAnalysisEngine } from '../engine/AudioAnalysisEngine';
-import { NOTES } from './AutoTunePlugin';
+// FIX: Centralized music theory constants by importing `NOTES` from the `../utils/constants` module.
+import { NOTES } from '../utils/constants';
 
 /**
  * MODULE FX_14 : MASTER SYNC (ANALYSE & INJECTION)
