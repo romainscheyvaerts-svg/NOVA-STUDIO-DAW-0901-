@@ -26,20 +26,20 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   componentDidCatch = (error: Error, errorInfo: ErrorInfo) => {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
-    // FIX: Added 'this.' to access 'setState' on the class instance.
+    // FIX: Property 'setState' does not exist on type 'ErrorBoundary'.
     this.setState({
       errorInfo: errorInfo,
     });
 
-    // FIX: Added 'this.' to access 'props' on the class instance.
+    // FIX: Property 'props' does not exist on type 'ErrorBoundary'.
     if (this.props.onError) {
-      // FIX: Added 'this.' to access 'props' on the class instance.
+      // FIX: Property 'props' does not exist on type 'ErrorBoundary'.
       this.props.onError(error, errorInfo);
     }
   }
 
   handleReset = () => {
-    // FIX: Added 'this.' to access 'setState' on the class instance.
+    // FIX: Property 'setState' does not exist on type 'ErrorBoundary'.
     this.setState({
       hasError: false,
       error: null,
@@ -49,9 +49,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   render(): ReactNode {
     if (this.state.hasError) {
-      // FIX: Added 'this.' to access 'props' on the class instance.
+      // FIX: Property 'props' does not exist on type 'ErrorBoundary'.
       if (this.props.fallback) {
-        // FIX: Added 'this.' to access 'props' on the class instance.
+        // FIX: Property 'props' does not exist on type 'ErrorBoundary'.
         return this.props.fallback;
       }
 
@@ -75,7 +75,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       );
     }
 
-    // FIX: Added 'this.' to access 'props' on the class instance.
+    // FIX: Property 'props' does not exist on type 'ErrorBoundary'.
     return this.props.children;
   }
 }
