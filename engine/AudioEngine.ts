@@ -1,6 +1,4 @@
 
-
-
 import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad } from '../types';
 import { ReverbNode } from '../plugins/ReverbPlugin';
 import { SyncDelayNode } from '../plugins/DelayPlugin';
@@ -596,7 +594,40 @@ export class AudioEngine {
   public getDrumSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.drumSampler || null; }
   public getMelodicSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.melodicSampler || null; }
 
-  private scheduleAutomation(tracks: Track[], start: number, end: number, when: number) { /* ... */ }
+  private scheduleAutomation(tracks: Track[], start: number, end: number, when: number) {
+    tracks.forEach(track => {
+        const dsp = this.tracksDSP.get(track.id);
+        if (!dsp) return;
+        
+        track.automationLanes.forEach(lane => {
+            if (lane.points.length === 0) return;
+            
+            // Find points in this time window
+            lane.points.forEach((point, index) => {
+                if (point.time >= start && point.time < end) {
+                    const scheduleTime = when + (point.time - start);
+                    
+                    if (lane.parameterName === 'volume') {
+                        dsp.gain.gain.setValueAtTime(point.value, scheduleTime);
+                    } else if (lane.parameterName === 'pan') {
+                        dsp.panner.pan.setValueAtTime(point.value, scheduleTime);
+                    }
+                    
+                    // Linear ramp to next point if exists
+                    const nextPoint = lane.points[index + 1];
+                    if (nextPoint && nextPoint.time < end) {
+                        const nextScheduleTime = when + (nextPoint.time - start);
+                        if (lane.parameterName === 'volume') {
+                            dsp.gain.gain.linearRampToValueAtTime(nextPoint.value, nextScheduleTime);
+                        } else if (lane.parameterName === 'pan') {
+                            dsp.panner.pan.linearRampToValueAtTime(nextPoint.value, nextScheduleTime);
+                        }
+                    }
+                }
+            });
+        });
+    });
+}
   private playClipSource(trackId: string, clip: Clip, scheduleTime: number, projectTime: number) {
     if (!this.ctx) {
         console.warn('[AudioEngine] No AudioContext');
@@ -904,7 +935,45 @@ export class AudioEngine {
     dsp.output.connect(destNode);
   }
 
-  private applyAutomation(track: Track, time: number) { /* ... */ }
+  private applyAutomation(track: Track, time: number) {
+    const dsp = this.tracksDSP.get(track.id);
+    if (!dsp || !this.ctx) return;
+    
+    track.automationLanes.forEach(lane => {
+        if (lane.points.length === 0) return;
+        
+        // Find the two points surrounding current time
+        let prevPoint = lane.points[0];
+        let nextPoint = lane.points[lane.points.length - 1];
+        
+        for (let i = 0; i < lane.points.length - 1; i++) {
+            if (lane.points[i].time <= time && lane.points[i + 1].time >= time) {
+                prevPoint = lane.points[i];
+                nextPoint = lane.points[i + 1];
+                break;
+            }
+        }
+        
+        // Interpolate value
+        let value: number;
+        if (time <= prevPoint.time) {
+            value = prevPoint.value;
+        } else if (time >= nextPoint.time) {
+            value = nextPoint.value;
+        } else {
+            const ratio = (time - prevPoint.time) / (nextPoint.time - prevPoint.time);
+            value = prevPoint.value + (nextPoint.value - prevPoint.value) * ratio;
+        }
+        
+        // Apply to parameter
+        const now = this.ctx.currentTime;
+        if (lane.parameterName === 'volume') {
+            dsp.gain.gain.setValueAtTime(value, now);
+        } else if (lane.parameterName === 'pan') {
+            dsp.panner.pan.setValueAtTime(value, now);
+        }
+    });
+}
 
   public getTrackPluginParameters(trackId: string): { pluginId: string, pluginName: string, params: PluginParameter[] }[] { return []; }
   public getMasterAnalyzer() { return this.masterAnalyzer; }
