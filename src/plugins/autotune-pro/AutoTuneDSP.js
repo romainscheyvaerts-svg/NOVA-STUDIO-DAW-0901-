@@ -1,4 +1,3 @@
-
 /**
  * AutoTunePro Processor (DSP) v2.0
  * --------------------------------
@@ -78,8 +77,8 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       }
     }
 
-    if (bestCorrelation > 0.5 && bestOffset > 0) {
-      return currentFrame >= 0 ? (globalThis.sampleRate || 44100) / bestOffset : 44100 / bestOffset;
+    if (bestCorrelation > 0.3 && bestOffset > 0) {
+      return bestOffset > 0 ? (globalThis.sampleRate || 44100) / bestOffset : 0;
     }
     return 0;
   }
