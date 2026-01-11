@@ -1,5 +1,6 @@
 
 import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad } from '../types';
+import { audioBufferRegistry } from '../services/AudioBufferRegistry';
 import { ReverbNode } from '../plugins/ReverbPlugin';
 import { SyncDelayNode } from '../plugins/DelayPlugin';
 import { ChorusNode } from '../plugins/ChorusPlugin';
@@ -469,14 +470,17 @@ export class AudioEngine {
   private scheduleClips(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number, maxLatency: number, latencies: Map<string, number>) {
       // Existing logic for audio clips
       tracks.forEach(track => {
-      if (track.isMuted) return; 
+      if (track.isMuted) return;
       if (track.type !== TrackType.AUDIO && track.type !== TrackType.SAMPLER && track.type !== TrackType.BUS && track.type !== TrackType.SEND) return;
 
       track.clips.forEach(clip => {
-        if (!clip.buffer) return;
-        const sourceKey = `${clip.id}`; 
+        // Check for buffer (legacy) OR bufferId (new registry approach)
+        const hasBuffer = clip.buffer || (clip.bufferId && audioBufferRegistry.has(clip.bufferId));
+        if (!hasBuffer) return;
+
+        const sourceKey = `${clip.id}`;
         if (this.activeSources.has(sourceKey)) return;
-        
+
         const clipEnd = clip.start + clip.duration;
         const overlapsWindow = clip.start < projectWindowEnd && clipEnd > projectWindowStart;
         if (overlapsWindow) {
@@ -631,39 +635,45 @@ export class AudioEngine {
         console.warn('[AudioEngine] No AudioContext');
         return;
     }
-    
-    if (!clip.buffer) {
-        console.warn(`[AudioEngine] Clip ${clip.id} has no buffer`);
+
+    // Get buffer from clip directly OR from registry
+    let clipBuffer = clip.buffer;
+    if (!clipBuffer && clip.bufferId) {
+        clipBuffer = audioBufferRegistry.get(clip.bufferId);
+    }
+
+    if (!clipBuffer) {
+        console.warn(`[AudioEngine] Clip ${clip.id} has no buffer (bufferId: ${clip.bufferId})`);
         return;
     }
-    
+
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp) {
         console.warn(`[AudioEngine] No DSP chain for track ${trackId}`);
         return;
     }
-    
+
     // Skip muted clips
     if (clip.isMuted) return;
-    
+
     // Prevent duplicate playback
     const sourceKey = `${clip.id}`;
     if (this.activeSources.has(sourceKey)) return;
-    
+
     try {
         // Create audio source
         const source = this.ctx.createBufferSource();
-        let bufferToPlay = clip.buffer;
+        let bufferToPlay = clipBuffer;
         
         // Handle reverse
         if (clip.isReversed) {
             const reversed = this.ctx.createBuffer(
-                clip.buffer.numberOfChannels,
-                clip.buffer.length,
-                clip.buffer.sampleRate
+                clipBuffer.numberOfChannels,
+                clipBuffer.length,
+                clipBuffer.sampleRate
             );
-            for (let ch = 0; ch < clip.buffer.numberOfChannels; ch++) {
-                const original = clip.buffer.getChannelData(ch);
+            for (let ch = 0; ch < clipBuffer.numberOfChannels; ch++) {
+                const original = clipBuffer.getChannelData(ch);
                 const reversedData = reversed.getChannelData(ch);
                 for (let i = 0; i < original.length; i++) {
                     reversedData[i] = original[original.length - 1 - i];
