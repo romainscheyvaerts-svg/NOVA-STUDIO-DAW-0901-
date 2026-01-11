@@ -291,6 +291,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
   const handleTrackContextMenu = (e: React.MouseEvent, trackId: string) => {
     e.preventDefault();
+    e.stopPropagation();
+    // Close other menus first
+    setClipContextMenu(null);
+    setGridMenu(null);
     const menuItems: (ContextMenuItem | 'separator')[] = [ { label: 'Duplicate Track', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' }, ];
     if (trackId !== 'track-rec-main') menuItems.push({ label: 'Delete Track', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
     menuItems.push({ label: 'Freeze Track', onClick: () => onFreezeTrack?.(trackId), icon: 'fa-snowflake' });
@@ -325,7 +329,15 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         if (y >= currentY && y < currentY + zoomV) {
             const clip = t.clips.find(c => time >= c.start && time <= c.start + c.duration);
             if (clip) {
-                if (e.button === 2) { e.preventDefault(); setClipContextMenu({ x: e.clientX, y: e.clientY, trackId: t.id, clip }); return; }
+                if (e.button === 2) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  // Close other menus first
+                  setContextMenu(null);
+                  setGridMenu(null);
+                  setClipContextMenu({ x: e.clientX, y: e.clientY, trackId: t.id, clip });
+                  return;
+                }
                 setActiveClip({ trackId: t.id, clip });
                 setDragStartX(x); setDragStartY(y);
                 setInitialClipState({ ...clip });
@@ -339,6 +351,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     
     if (e.button === 2) {
       e.preventDefault();
+      e.stopPropagation();
+      // Close other menus first
+      setContextMenu(null);
+      setClipContextMenu(null);
       setGridMenu({ x: e.clientX, y: e.clientY });
       return;
     }
