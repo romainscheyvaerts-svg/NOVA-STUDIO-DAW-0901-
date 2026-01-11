@@ -4,6 +4,8 @@ import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, M
 import { audioEngine } from './engine/AudioEngine';
 import { audioBufferRegistry } from './services/AudioBufferRegistry';
 import TransportBar from './components/TransportBar';
+import MobilePinchZoomContainer from './components/MobilePinchZoomContainer';
+import MobileTransportFloating from './components/MobileTransportFloating';
 import ArrangementView from './components/ArrangementView';
 import MixerView from './components/MixerView';
 import PluginEditor from './components/PluginEditor';
@@ -1294,9 +1296,10 @@ export default function App() {
             />
           )}
 
-          {/* Mobile: Mix View */}
+          {/* Mobile: Mix View with Pinch-to-Zoom */}
           {isMobile && activeMobileTab === 'MIX' && (
-             <MixerView
+            <MobilePinchZoomContainer className="flex-1">
+              <MixerView
                 tracks={state.tracks}
                 onUpdateTrack={handleUpdateTrack}
                 onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
@@ -1305,7 +1308,8 @@ export default function App() {
                 onAddBus={handleAddBus}
                 onToggleBypass={handleToggleBypass}
                 onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
-             />
+              />
+            </MobilePinchZoomContainer>
           )}
 
           {/* Mobile: Record View */}
@@ -1344,6 +1348,18 @@ export default function App() {
         </main>
       </div>
       
+      {/* Mobile: Floating Transport (visible on all tabs except REC) */}
+      {isMobile && activeMobileTab !== 'REC' && (
+        <MobileTransportFloating
+          isPlaying={state.isPlaying}
+          isRecording={state.isRecording}
+          currentTime={state.currentTime}
+          onTogglePlay={handleTogglePlay}
+          onStop={handleStop}
+          onToggleRecord={handleToggleRecord}
+        />
+      )}
+
       {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} />}
 
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}
