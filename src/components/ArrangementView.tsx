@@ -88,6 +88,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [headerWidth, setHeaderWidth] = useState(256);
   const [isResizingHeader, setIsResizingHeader] = useState(false);
   const [isDraggingMinimap, setIsDraggingMinimap] = useState(false);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
 
   const isShiftDownRef = useRef(false);
   
@@ -566,59 +567,74 @@ const drawTimeline = useCallback(() => {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative select-none" onContextMenu={e => e.preventDefault()}>
-      <div className="h-12 flex items-center px-4 gap-4 z-30 shrink-0">
-        <div className="flex items-center space-x-4 shrink-0">
+      {/* Toolbar - scrollable on mobile */}
+      <div className="h-12 flex items-center px-2 md:px-4 gap-2 md:gap-4 z-30 shrink-0 overflow-x-auto scrollbar-hide">
+        {/* Toggle Sidebar Button */}
+        <button
+          onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all shrink-0 ${isSidebarVisible ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-500'}`}
+          title={isSidebarVisible ? 'Masquer les pistes' : 'Afficher les pistes'}
+        >
+          <i className={`fas ${isSidebarVisible ? 'fa-chevron-left' : 'fa-chevron-right'} text-[10px]`}></i>
+        </button>
+
+        <div className="flex items-center space-x-2 md:space-x-4 shrink-0">
           <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
             <button onClick={() => setActiveTool('SELECT')} className={`w-8 h-8 rounded-md flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black' : 'text-slate-500 hover:text-white'}`} title="Smart Tool (1)"><i className="fas fa-mouse-pointer text-[10px]"></i></button>
             <button onClick={() => setActiveTool('SPLIT')} className={`w-8 h-8 rounded-md flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black' : 'text-slate-500 hover:text-white'}`} title="Split Tool (2)"><i className="fas fa-cut text-[10px]"></i></button>
             <button onClick={() => setActiveTool('ERASE')} className={`w-8 h-8 rounded-md flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Erase Tool (3)"><i className="fas fa-eraser text-[10px]"></i></button>
           </div>
-          <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 py-2 rounded-xl border transition-all text-[9px] font-black uppercase tracking-widest ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-white/5 border-white/10 text-slate-500'}`}>
-            <i className="fas fa-magnet mr-2"></i> {snapEnabled ? 'Snap ON' : 'Snap OFF'}
+          <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-3 md:px-4 py-2 rounded-xl border transition-all text-[9px] font-black uppercase tracking-widest whitespace-nowrap ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-white/5 border-white/10 text-slate-500'}`}>
+            <i className="fas fa-magnet mr-1 md:mr-2"></i> <span className="hidden sm:inline">{snapEnabled ? 'Snap ON' : 'Snap OFF'}</span><span className="sm:hidden">Snap</span>
           </button>
         </div>
-        <div className="flex-1 h-full py-2 px-4 flex items-center min-w-0 justify-center">
-            <div 
+        <div className="flex-1 h-full py-2 px-2 md:px-4 flex items-center min-w-[100px] justify-center">
+            <div
               className={`w-full h-full max-w-4xl bg-black/40 border border-white/10 rounded overflow-hidden relative group ${isDraggingMinimap ? 'cursor-grabbing' : 'cursor-grab'}`}
               onMouseDown={handleMinimapMouseDown}
             >
                  <canvas ref={minimapRef} className="w-full h-full block" />
             </div>
         </div>
-        <div className="flex items-center space-x-3 shrink-0">
-             <i className="fas fa-search-plus text-[10px]"></i>
-             <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
+        <div className="flex items-center space-x-2 md:space-x-3 shrink-0">
+             <i className="fas fa-search-plus text-[10px] text-slate-500"></i>
+             <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-16 md:w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
         </div>
       </div>
+      {/* Add CSS for hiding scrollbar */}
+      <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
       <div className="flex-1 flex overflow-hidden relative">
-        <div 
-            ref={sidebarContainerRef} 
-            onScroll={handleScroll} 
-            onWheel={handleSidebarWheel}
-            className="flex-shrink-0 z-40 flex flex-col overflow-y-auto overflow-x-hidden transition-colors relative sidebar-no-scroll" 
-            style={{ width: `${headerWidth}px`, scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-        >
-          <style>{`.sidebar-no-scroll::-webkit-scrollbar { display: none; }`}</style>
-          <div style={{ height: 40, flexShrink: 0 }} />
-          {visibleTracks.map((track) => (
-            <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>
-              <div style={{ height: `${zoomV}px` }}>
-                <TrackHeader 
-                   track={track} isSelected={selectedTrackId === track.id} onSelect={() => onSelectTrack(track.id)} onUpdate={onUpdateTrack} 
-                   onDropPlugin={onDropPluginOnTrack} onMovePlugin={onMovePlugin} onSelectPlugin={onSelectPlugin} onRemovePlugin={onRemovePlugin} onRequestAddPlugin={onRequestAddPlugin} 
-                   onContextMenu={handleTrackContextMenu} onDragStartTrack={() => {}} onDragOverTrack={() => {}} onDropTrack={() => {}} onSwapInstrument={onSwapInstrument}
-                />
+        {/* Sidebar - Track Headers */}
+        {isSidebarVisible && (
+          <div
+              ref={sidebarContainerRef}
+              onScroll={handleScroll}
+              onWheel={handleSidebarWheel}
+              className="flex-shrink-0 z-40 flex flex-col overflow-y-auto overflow-x-hidden transition-all relative sidebar-no-scroll"
+              style={{ width: `${headerWidth}px`, scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          >
+            <style>{`.sidebar-no-scroll::-webkit-scrollbar { display: none; }`}</style>
+            <div style={{ height: 40, flexShrink: 0 }} />
+            {visibleTracks.map((track) => (
+              <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>
+                <div style={{ height: `${zoomV}px` }}>
+                  <TrackHeader
+                     track={track} isSelected={selectedTrackId === track.id} onSelect={() => onSelectTrack(track.id)} onUpdate={onUpdateTrack}
+                     onDropPlugin={onDropPluginOnTrack} onMovePlugin={onMovePlugin} onSelectPlugin={onSelectPlugin} onRemovePlugin={onRemovePlugin} onRequestAddPlugin={onRequestAddPlugin}
+                     onContextMenu={handleTrackContextMenu} onDragStartTrack={() => {}} onDragOverTrack={() => {}} onDropTrack={() => {}} onSwapInstrument={onSwapInstrument}
+                  />
+                </div>
+                {track.automationLanes.map(lane => lane.isExpanded && (
+                     <div key={lane.id} style={{ height: '80px', position: 'relative' }}>
+                       <AutomationLaneComponent trackId={track.id} lane={lane} width={0} zoomH={zoomH} scrollLeft={0} onUpdatePoints={() => {}} onRemoveLane={() => onUpdateTrack({ ...track, automationLanes: track.automationLanes.map(l => l.id === lane.id ? { ...l, isExpanded: false } : l) })} variant="header" />
+                     </div>
+                ))}
               </div>
-              {track.automationLanes.map(lane => lane.isExpanded && (
-                   <div key={lane.id} style={{ height: '80px', position: 'relative' }}>
-                     <AutomationLaneComponent trackId={track.id} lane={lane} width={0} zoomH={zoomH} scrollLeft={0} onUpdatePoints={() => {}} onRemoveLane={() => onUpdateTrack({ ...track, automationLanes: track.automationLanes.map(l => l.id === lane.id ? { ...l, isExpanded: false } : l) })} variant="header" />
-                   </div>
-              ))}
-            </div>
-          ))}
-          <div style={{ height: 500 }} />
-          <div className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-cyan-500/50 active:bg-cyan-500 z-50 flex items-center justify-center group" onMouseDown={handleHeaderResizeStart}><div className="w-0.5 h-8 bg-white/20 rounded-full group-hover:bg-white/50 pointer-events-none" /></div>
-        </div>
+            ))}
+            <div style={{ height: 500 }} />
+            <div className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-cyan-500/50 active:bg-cyan-500 z-50 flex items-center justify-center group" onMouseDown={handleHeaderResizeStart}><div className="w-0.5 h-8 bg-white/20 rounded-full group-hover:bg-white/50 pointer-events-none" /></div>
+          </div>
+        )}
         <div 
             ref={scrollContainerRef} 
             className="flex-1 overflow-auto relative custom-scroll scroll-smooth touch-pan-x touch-pan-y" 
