@@ -109,7 +109,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   }, [isEditingBpm]);
 
   return (
-    <div className="h-16 border-b flex items-center px-2 md:px-4 justify-between z-50 shadow-sm relative shrink-0 transition-all" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}>
+    <div className="h-16 flex items-center px-2 md:px-4 justify-between z-50 shadow-sm relative shrink-0 transition-all" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}>
       {noArmedTrackError && (
         <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-4 py-2 bg-red-600 text-white text-[10px] font-black uppercase rounded-lg shadow-2xl animate-bounce z-[100]">
           <i className="fas fa-exclamation-triangle mr-2"></i> Record Error

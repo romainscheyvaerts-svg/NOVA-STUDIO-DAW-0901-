@@ -87,7 +87,7 @@ export class Synthesizer {
 
   public releaseAll() {
     const now = this.ctx.currentTime;
-    this.activeVoices.forEach((voice, pitch) => {
+    this.activeVoices.forEach((voice) => {
         try {
             voice.env.gain.cancelScheduledValues(now);
             voice.env.gain.setValueAtTime(voice.env.gain.value, now);

@@ -1,4 +1,5 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
+import { ContextMenuItem } from '../types';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -12,19 +13,19 @@ interface ErrorBoundaryState {
   errorInfo: ErrorInfo | null;
 }
 
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = {
+// FIX: Correctly extend React's Component class to resolve issues with 'this.props' and 'this.setState'.
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = {
     hasError: false,
     error: null,
     errorInfo: null,
   };
 
-  public static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { hasError: true, error };
   }
 
-  // FIX: Converted to an arrow function to ensure `this` is correctly bound.
-  public componentDidCatch = (error: Error, errorInfo: ErrorInfo) => {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
     this.setState({
@@ -36,8 +37,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
   }
 
-  // FIX: Converted to an arrow function to ensure `this` is correctly bound.
-  public handleReset = () => {
+  handleReset = () => {
     this.setState({
       hasError: false,
       error: null,

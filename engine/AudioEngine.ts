@@ -19,6 +19,7 @@ import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { DrumRackNode } from './DrumRackNode'; // NEW
 import { novaBridge } from '../services/NovaBridge';
+import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
 interface TrackDSP {
   input: GainNode;          
@@ -80,8 +81,8 @@ export class AudioEngine {
   private isRecMode: boolean = false;
   private isDelayCompEnabled: boolean = false;
 
-  private LOOKAHEAD_MS = 25.0; 
-  private SCHEDULE_AHEAD_SEC = 0.1; 
+  private LOOKAHEAD_MS = 10.0; 
+  private SCHEDULE_AHEAD_SEC = 0.05; 
 
   private mediaRecorder: MediaRecorder | null = null;
   private audioChunks: Blob[] = [];
@@ -104,7 +105,6 @@ export class AudioEngine {
   public sampleRate: number = 44100;
   public latency: number = 0;
   private currentBpm: number = 120;
-  // FIX: Add property to track active VST plugin for streaming management.
   private activeVSTPlugin: { trackId: string, pluginId: string } | null = null;
 
   constructor() {}
@@ -121,10 +121,7 @@ export class AudioEngine {
     this.sampleRate = this.ctx.sampleRate;
     this.latency = this.ctx.baseLatency;
 
-    // 1. Master Volume
     this.masterOutput = this.ctx.createGain();
-    
-    // 2. Master Limiter (Safety & Glue)
     this.masterLimiter = this.ctx.createDynamicsCompressor();
     this.masterLimiter.threshold.value = -1.0;
     this.masterLimiter.knee.value = 0.0;
@@ -132,12 +129,10 @@ export class AudioEngine {
     this.masterLimiter.attack.value = 0.005; 
     this.masterLimiter.release.value = 0.1;
 
-    // 3. Analyzer (Visualizer)
     this.masterAnalyzer = this.ctx.createAnalyser();
     this.masterAnalyzer.fftSize = 2048;
     this.masterAnalyzer.smoothingTimeConstant = 0.8;
     
-    // 4. Stereo Splitters for Meters
     this.masterSplitter = this.ctx.createChannelSplitter(2);
     this.masterAnalyzerL = this.ctx.createAnalyser();
     this.masterAnalyzerR = this.ctx.createAnalyser();
@@ -146,17 +141,14 @@ export class AudioEngine {
     this.masterAnalyzerL.smoothingTimeConstant = 0.5;
     this.masterAnalyzerR.smoothingTimeConstant = 0.5;
 
-    // Routing Chain: MasterGain -> Limiter -> Analyzer -> Destination
     this.masterOutput.connect(this.masterLimiter);
     this.masterLimiter.connect(this.masterAnalyzer);
     this.masterAnalyzer.connect(this.ctx.destination);
     
-    // Side-chain for Stereo Meters
     this.masterAnalyzer.connect(this.masterSplitter);
     this.masterSplitter.connect(this.masterAnalyzerL, 0);
     this.masterSplitter.connect(this.masterAnalyzerR, 1);
 
-    // Init Preview System
     this.previewGain = this.ctx.createGain();
     this.previewAnalyzer = this.ctx.createAnalyser();
     this.previewAnalyzer.fftSize = 256; 
@@ -164,7 +156,10 @@ export class AudioEngine {
     this.previewAnalyzer.connect(this.ctx.destination);
   }
 
-  // --- DEVICE MANAGEMENT METHODS ---
+  public getAudioBuffer(clipId: string): AudioBuffer | undefined {
+    return audioBufferRegistry.get(clipId);
+  }
+
   public async setOutputDevice(deviceId: string) {
       if (!this.ctx) return;
       this.currentOutputDeviceId = deviceId;
@@ -197,7 +192,6 @@ export class AudioEngine {
   
   public playTestTone() { /* ... */ }
 
-  // --- PREVIEW & UTILS ---
   public async playHighResPreview(url: string, onEnded?: () => void): Promise<void> { 
       await this.init(); 
       if (this.ctx?.state === 'suspended') await this.ctx.resume(); 
@@ -237,10 +231,7 @@ export class AudioEngine {
   public getPreviewAnalyzer() { return this.previewAnalyzer; }
   public async resume() { if (this.ctx && this.ctx.state === 'suspended') { await this.ctx.resume(); } }
   
-  // --- OFFLINE RENDER ENGINE ---
   public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void): Promise<AudioBuffer> {
-    // ... (Offline Render Logic Omitted for Brevity - Keeping Existing Logic) ...
-    // Note: For DrumRack, we would need to replicate logic in Offline context.
     return this.ctx!.createBuffer(2, 44100, 44100); // Dummy return
   }
 
@@ -259,11 +250,12 @@ export class AudioEngine {
     
     let dsp = this.tracksDSP.get(trackId);
     
-    // Si DSP n'existe pas, attendre un peu et réessayer (race condition fix)
-    if (!dsp) {
-      console.log("[AudioEngine] DSP not ready, waiting 150ms...");
-      await new Promise(r => setTimeout(r, 150));
-      dsp = this.tracksDSP.get(trackId);
+    let attempts = 0;
+    const maxAttempts = 10;
+    while (!dsp && attempts < maxAttempts) {
+        await new Promise(r => setTimeout(r, 15)); // 15ms entre checks
+        dsp = this.tracksDSP.get(trackId);
+        attempts++;
     }
     
     if (!dsp) {
@@ -349,7 +341,7 @@ export class AudioEngine {
         try {
           const arrayBuffer = await blob.arrayBuffer();
           const audioBuffer = await this.ctx!.decodeAudioData(arrayBuffer);
-          const clip: Clip = {
+          const clipData: Clip = {
             id: `rec-${Date.now()}`,
             name: `Vocal Take ${new Date().toLocaleTimeString()}`,
             start: this.recStartTime,
@@ -359,11 +351,11 @@ export class AudioEngine {
             fadeOut: 0.01,
             type: TrackType.AUDIO,
             color: '#ff0000',
-            buffer: audioBuffer,
             audioRef: URL.createObjectURL(blob),
+            buffer: audioBuffer, 
           };
-          console.log("[AudioEngine] Recording stopped. New clip created:", clip);
-          resolve({ clip, trackId });
+          console.log("[AudioEngine] Recording stopped. New clip created:", clipData);
+          resolve({ clip: clipData, trackId });
         } catch (e) {
           console.error("Error processing recorded audio:", e);
           resolve(null);
@@ -383,7 +375,7 @@ export class AudioEngine {
 
     this.isPlaying = true;
     this.pausedAt = startOffset;
-    this.nextScheduleTime = this.ctx.currentTime + 0.05; 
+    this.nextScheduleTime = this.ctx.currentTime + 0.01; 
     this.playbackStartTime = this.ctx.currentTime - startOffset; 
 
     this.schedulerTimer = window.setInterval(() => {
@@ -425,15 +417,11 @@ export class AudioEngine {
     if (this.isPlaying) {
       let time = this.ctx.currentTime - this.playbackStartTime;
       
-      // Handle loop
       if (this.isLoopActive && this.loopEnd > this.loopStart) {
         const loopDuration = this.loopEnd - this.loopStart;
         if (time >= this.loopEnd) {
-          // Calculate how much time has passed since the loop start
           const timeSinceLoopStart = time - this.loopStart;
-          // Wrap the time back into the loop duration
           const wrappedTime = this.loopStart + (timeSinceLoopStart % loopDuration);
-          // Adjust playbackStartTime to prevent time jumps on subsequent calls
           this.playbackStartTime = this.ctx.currentTime - wrappedTime;
           return wrappedTime;
         }
@@ -446,14 +434,11 @@ export class AudioEngine {
   
   public getIsPlaying(): boolean { return this.isPlaying; }
 
-  // ... (Scrubbing) ...
   public scrub(tracks: Track[], time: number, velocity: number) { /* ... */ }
   public stopScrubbing() { /* ... */ }
 
-  // ... (Scheduler & internal methods) ...
   private scheduler(tracks: Track[]) {
     if (!this.ctx) return;
-    // PDC Logic omitted
     while (this.nextScheduleTime < this.ctx.currentTime + this.SCHEDULE_AHEAD_SEC) {
       const scheduleUntil = this.nextScheduleTime + this.SCHEDULE_AHEAD_SEC;
       const projectTimeStart = this.nextScheduleTime - this.playbackStartTime;
@@ -467,13 +452,11 @@ export class AudioEngine {
   }
 
   private scheduleClips(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number, maxLatency: number, latencies: Map<string, number>) {
-      // Existing logic for audio clips
       tracks.forEach(track => {
       if (track.isMuted) return; 
       if (track.type !== TrackType.AUDIO && track.type !== TrackType.SAMPLER && track.type !== TrackType.BUS && track.type !== TrackType.SEND) return;
 
       track.clips.forEach(clip => {
-        if (!clip.buffer) return;
         const sourceKey = `${clip.id}`; 
         if (this.activeSources.has(sourceKey)) return;
         
@@ -487,7 +470,6 @@ export class AudioEngine {
   }
 
   private scheduleMidi(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number) {
-      // Loop over tracks with MIDI clips (including DRUM_RACK)
       tracks.forEach(track => {
         if (track.isMuted) return;
         if (track.type !== TrackType.MIDI && track.type !== TrackType.SAMPLER && track.type !== TrackType.DRUM_RACK) return;
@@ -495,39 +477,28 @@ export class AudioEngine {
         track.clips.forEach(clip => {
            if (clip.type !== TrackType.MIDI || !clip.notes) return;
            
-           // Determine clip overlap
            const clipEnd = clip.start + clip.duration;
            if (clip.start >= projectWindowEnd || clipEnd <= projectWindowStart) return;
 
-           // For each note in clip
            clip.notes.forEach(note => {
-               // Calculate note absolute start time
                const noteAbsStart = clip.start + note.start;
                const noteAbsEnd = noteAbsStart + note.duration;
 
-               // Schedule Note On
                if (noteAbsStart >= projectWindowStart && noteAbsStart < projectWindowEnd) {
-                   // Time delta from scheduling window start
                    const timeOffset = noteAbsStart - projectWindowStart;
                    const scheduleTime = contextScheduleTime + timeOffset;
-                   
                    this.triggerTrackAttack(track.id, note.pitch, note.velocity, scheduleTime);
                }
 
-               // Schedule Note Off
                if (noteAbsEnd >= projectWindowStart && noteAbsEnd < projectWindowEnd) {
                    const timeOffset = noteAbsEnd - projectWindowStart;
                    const scheduleTime = contextScheduleTime + timeOffset;
-                   
                    this.triggerTrackRelease(track.id, note.pitch, scheduleTime);
                }
            });
         });
       });
   }
-  
-  // --- REAL-TIME MIDI METHODS ---
-  // These are called by MidiManager for live input (Latency Critical) or by Scheduler
   
   public triggerTrackAttack(trackId: string, pitch: number, velocity: number, time: number = 0) {
       if (!this.ctx) return;
@@ -536,19 +507,11 @@ export class AudioEngine {
       
       const now = Math.max(time, this.ctx.currentTime);
       
-      if (dsp.synth) {
-          dsp.synth.triggerAttack(pitch, velocity, now);
-      } else if (dsp.melodicSampler) {
-          dsp.melodicSampler.triggerAttack(pitch, velocity, now);
-      } else if (dsp.drumSampler) {
-          dsp.drumSampler.trigger(velocity, now);
-      } else if (dsp.drumRack) {
-          // New Drum Rack Trigger
-          // Map Pitch 60 -> Pad 1
-          dsp.drumRack.trigger(pitch, velocity, now);
-      } else if (dsp.sampler) {
-          dsp.sampler.triggerAttack(pitch, velocity, now);
-      }
+      if (dsp.synth) dsp.synth.triggerAttack(pitch, velocity, now);
+      else if (dsp.melodicSampler) dsp.melodicSampler.triggerAttack(pitch, velocity, now);
+      else if (dsp.drumSampler) dsp.drumSampler.trigger(velocity, now);
+      else if (dsp.drumRack) dsp.drumRack.trigger(pitch, velocity, now);
+      else if (dsp.sampler) dsp.sampler.triggerAttack(pitch, velocity, now);
   }
 
   public triggerTrackRelease(trackId: string, pitch: number, time: number = 0) {
@@ -558,19 +521,16 @@ export class AudioEngine {
       
       const now = Math.max(time, this.ctx.currentTime);
       
-      if (dsp.synth) {
-          dsp.synth.triggerRelease(pitch, now);
-      } else if (dsp.melodicSampler) {
-          dsp.melodicSampler.triggerRelease(pitch, now);
-      } else if (dsp.sampler) {
-          dsp.sampler.triggerRelease(pitch, now);
-      }
-      // Drum Rack is usually one-shot, no release needed unless choke or ADSR is added later
+      if (dsp.synth) dsp.synth.triggerRelease(pitch, now);
+      else if (dsp.melodicSampler) dsp.melodicSampler.triggerRelease(pitch, now);
+      else if (dsp.sampler) dsp.sampler.triggerRelease(pitch, now);
   }
 
   public previewMidiNote(trackId: string, pitch: number, duration: number = 0.5) {
-      this.triggerTrackAttack(trackId, pitch, 0.8);
-      setTimeout(() => this.triggerTrackRelease(trackId, pitch), duration * 1000);
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      this.triggerTrackAttack(trackId, pitch, 0.8, now);
+      this.triggerTrackRelease(trackId, pitch, now + duration);
   }
   
   public loadSamplerBuffer(trackId: string, buffer: AudioBuffer) {
@@ -582,7 +542,6 @@ export class AudioEngine {
       }
   }
 
-  // --- DRUM RACK SPECIFIC METHODS ---
   public loadDrumRackSample(trackId: string, padId: number, buffer: AudioBuffer) {
       const dsp = this.tracksDSP.get(trackId);
       if (dsp && dsp.drumRack) {
@@ -602,7 +561,6 @@ export class AudioEngine {
         track.automationLanes.forEach(lane => {
             if (lane.points.length === 0) return;
             
-            // Find points in this time window
             lane.points.forEach((point, index) => {
                 if (point.time >= start && point.time < end) {
                     const scheduleTime = when + (point.time - start);
@@ -613,7 +571,6 @@ export class AudioEngine {
                         dsp.panner.pan.setValueAtTime(point.value, scheduleTime);
                     }
                     
-                    // Linear ramp to next point if exists
                     const nextPoint = lane.points[index + 1];
                     if (nextPoint && nextPoint.time < end) {
                         const nextScheduleTime = when + (nextPoint.time - start);
@@ -629,43 +586,34 @@ export class AudioEngine {
     });
 }
   private playClipSource(trackId: string, clip: Clip, scheduleTime: number, projectTime: number) {
-    if (!this.ctx) {
-        console.warn('[AudioEngine] No AudioContext');
-        return;
+    if (!this.ctx) return;
+
+    let buffer = clip.buffer;
+    if (!buffer && clip.bufferId) {
+        buffer = audioBufferRegistry.get(clip.bufferId);
     }
     
-    if (!clip.buffer) {
-        console.warn(`[AudioEngine] Clip ${clip.id} has no buffer`);
+    if (!buffer) {
+        // console.warn(`[AudioEngine] Buffer for clip ${clip.id} not found. AudioRef: ${clip.audioRef}`);
         return;
     }
     
     const dsp = this.tracksDSP.get(trackId);
-    if (!dsp) {
-        console.warn(`[AudioEngine] No DSP chain for track ${trackId}`);
-        return;
-    }
+    if (!dsp) return;
     
-    // Skip muted clips
     if (clip.isMuted) return;
     
-    // Prevent duplicate playback
     const sourceKey = `${clip.id}`;
     if (this.activeSources.has(sourceKey)) return;
     
     try {
-        // Create audio source
         const source = this.ctx.createBufferSource();
-        let bufferToPlay = clip.buffer;
+        let bufferToPlay = buffer;
         
-        // Handle reverse
         if (clip.isReversed) {
-            const reversed = this.ctx.createBuffer(
-                clip.buffer.numberOfChannels,
-                clip.buffer.length,
-                clip.buffer.sampleRate
-            );
-            for (let ch = 0; ch < clip.buffer.numberOfChannels; ch++) {
-                const original = clip.buffer.getChannelData(ch);
+            const reversed = this.ctx.createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+            for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+                const original = buffer.getChannelData(ch);
                 const reversedData = reversed.getChannelData(ch);
                 for (let i = 0; i < original.length; i++) {
                     reversedData[i] = original[original.length - 1 - i];
@@ -676,18 +624,15 @@ export class AudioEngine {
         
         source.buffer = bufferToPlay;
         
-        // Create gain node for clip volume
         const gainNode = this.ctx.createGain();
         const clipGain = clip.gain ?? 1.0;
         gainNode.gain.setValueAtTime(clipGain, scheduleTime);
         
-        // Apply fade in
         if (clip.fadeIn > 0) {
             gainNode.gain.setValueAtTime(0, scheduleTime);
             gainNode.gain.linearRampToValueAtTime(clipGain, scheduleTime + clip.fadeIn);
         }
         
-        // Apply fade out
         if (clip.fadeOut > 0) {
             const fadeOutStart = scheduleTime + clip.duration - clip.fadeOut;
             if (fadeOutStart > scheduleTime) {
@@ -696,54 +641,32 @@ export class AudioEngine {
             }
         }
         
-        // Connect: source -> gain -> track input (which goes through plugin chain)
         source.connect(gainNode);
         gainNode.connect(dsp.input);
         
-        // Calculate offset into clip
         let offsetIntoClip = clip.offset || 0;
-        
-        // If playback started mid-clip, add the difference
         if (projectTime > clip.start) {
             offsetIntoClip += (projectTime - clip.start);
         }
         
-        // Calculate when to start (in AudioContext time)
         let when = scheduleTime;
         if (projectTime < clip.start) {
-            // Clip starts in the future
             when = scheduleTime + (clip.start - projectTime);
         }
         
-        // Calculate remaining duration
         const playedSoFar = Math.max(0, offsetIntoClip - (clip.offset || 0));
         const remainingDuration = clip.duration - playedSoFar;
         
-        // Start playback if there's something to play
         if (remainingDuration > 0 && offsetIntoClip < bufferToPlay.duration) {
             const actualDuration = Math.min(remainingDuration, bufferToPlay.duration - offsetIntoClip);
-            
             source.start(when, offsetIntoClip, actualDuration);
             
-            // Store for cleanup
-            this.activeSources.set(sourceKey, {
-                source,
-                gain: gainNode,
-                clipId: clip.id
-            });
+            this.activeSources.set(sourceKey, { source, gain: gainNode, clipId: clip.id });
             
-            // Auto-cleanup when finished
             source.onended = () => {
                 this.activeSources.delete(sourceKey);
-                try {
-                    source.disconnect();
-                    gainNode.disconnect();
-                } catch (e) {
-                    // Already disconnected
-                }
+                try { source.disconnect(); gainNode.disconnect(); } catch (e) {}
             };
-            
-            console.log(`[AudioEngine] Playing: ${clip.name} | offset: ${offsetIntoClip.toFixed(2)}s | duration: ${actualDuration.toFixed(2)}s`);
         }
         
     } catch (error) {
@@ -756,62 +679,24 @@ export class AudioEngine {
     let node: any = null;
     
     switch (plugin.type) {
-      case 'REVERB':
-        node = new ReverbNode(this.ctx);
-        break;
-      // FIX: Pass the current BPM to the SyncDelayNode constructor for accurate tempo-synced delays.
-      case 'DELAY':
-        node = new SyncDelayNode(this.ctx, bpm);
-        break;
-      case 'COMPRESSOR':
-        node = new CompressorNode(this.ctx);
-        break;
-      case 'AUTOTUNE':
-        node = new AutoTuneNode(this.ctx);
-        break;
-      case 'CHORUS':
-        node = new ChorusNode(this.ctx);
-        break;
-      case 'FLANGER':
-        node = new FlangerNode(this.ctx);
-        break;
-      case 'DOUBLER':
-        node = new VocalDoublerNode(this.ctx);
-        break;
-      case 'STEREOSPREADER':
-        node = new StereoSpreaderNode(this.ctx);
-        break;
-      case 'DEESSER':
-        node = new DeEsserNode(this.ctx);
-        break;
-      case 'DENOISER':
-        node = new DenoiserNode(this.ctx);
-        break;
+      case 'REVERB': node = new ReverbNode(this.ctx); break;
+      case 'DELAY': node = new SyncDelayNode(this.ctx, bpm); break;
+      case 'COMPRESSOR': node = new CompressorNode(this.ctx); break;
+      case 'AUTOTUNE': node = new AutoTuneNode(this.ctx); break;
+      case 'CHORUS': node = new ChorusNode(this.ctx); break;
+      case 'FLANGER': node = new FlangerNode(this.ctx); break;
+      case 'DOUBLER': node = new VocalDoublerNode(this.ctx); break;
+      case 'STEREOSPREADER': node = new StereoSpreaderNode(this.ctx); break;
+      case 'DEESSER': node = new DeEsserNode(this.ctx); break;
+      case 'DENOISER': node = new DenoiserNode(this.ctx); break;
       case 'PROEQ12':
-        const eqDefaultParams = {
-          isEnabled: true,
-          masterGain: 1.0,
-          bands: Array.from({ length: 12 }, (_, i) => ({
-            id: i,
-            type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking',
-            frequency: [80, 150, 300, 500, 1000, 2000, 4000, 6000, 8000, 10000, 12000, 18000][i],
-            gain: 0,
-            q: 1.0,
-            isEnabled: true,
-            isSolo: false
-          }))
-        };
+        const eqDefaultParams = { isEnabled: true, masterGain: 1.0, bands: Array.from({ length: 12 }, (_, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency: [80,150,300,500,1000,2000,4000,6000,8000,10000,12000,18000][i], gain: 0, q: 1.0, isEnabled: true, isSolo: false })) };
         const eqParams = plugin.params && plugin.params.bands ? plugin.params : eqDefaultParams;
         node = new ProEQ12Node(this.ctx, eqParams as any);
         break;
-      case 'VOCALSATURATOR':
-        node = new VocalSaturatorNode(this.ctx);
-        break;
-      case 'MASTERSYNC':
-        node = new MasterSyncNode(this.ctx);
-        break;
+      case 'VOCALSATURATOR': node = new VocalSaturatorNode(this.ctx); break;
+      case 'MASTERSYNC': node = new MasterSyncNode(this.ctx); break;
       default:
-        // Plugin type not supported, create bypass
         const bypassIn = this.ctx.createGain();
         const bypassOut = this.ctx.createGain();
         bypassIn.connect(bypassOut);
@@ -819,16 +704,13 @@ export class AudioEngine {
     }
     
     if (node && node.input && node.output) {
-      if (node.updateParams) {
-        node.updateParams({ ...plugin.params, isEnabled: plugin.isEnabled });
-      }
+      if (node.updateParams) node.updateParams({ ...plugin.params, isEnabled: plugin.isEnabled });
       return { input: node.input, output: node.output, node };
     }
     
     return null;
   }
 
-  // --- UPDATE TRACK ---
   public updateTrack(track: Track, allTracks: Track[]) {
     if (!this.ctx) return;
     let dsp = this.tracksDSP.get(track.id);
@@ -864,11 +746,9 @@ export class AudioEngine {
       dsp.drumRack.updatePadsState(track.drumPads);
     }
     
-    // Disconnect for rebuild
     dsp.input.disconnect();
     let head: AudioNode = dsp.input;
     
-    // ===== PLUGIN CHAIN CREATION =====
     const currentPluginIds = new Set<string>();
     
     track.plugins.forEach(plugin => {
@@ -878,11 +758,7 @@ export class AudioEngine {
       if (!pEntry) {
         const instance = this.createPluginNode(plugin, this.currentBpm);
         if (instance) {
-          pEntry = {
-            input: instance.input,
-            output: instance.output,
-            instance: instance.node
-          };
+          pEntry = { input: instance.input, output: instance.output, instance: instance.node };
           dsp!.pluginChain.set(plugin.id, pEntry);
         }
       } else if (pEntry.instance && pEntry.instance.updateParams) {
@@ -893,15 +769,10 @@ export class AudioEngine {
         if (plugin.isEnabled) {
             head.connect(pEntry.input);
             head = pEntry.output;
-        } else {
-            // If bypassed, we connect the input of the plugin to its output to maintain the chain.
-            // Assuming input/output are simple GainNodes, this is safe.
-            // For complex nodes, a separate bypass path might be better.
         }
       }
     });
     
-    // Remove old plugins
     dsp.pluginChain.forEach((val, id) => {
       if (!currentPluginIds.has(id)) {
         try {
@@ -914,9 +785,7 @@ export class AudioEngine {
         dsp!.pluginChain.delete(id);
       }
     });
-    // ===== END PLUGIN CHAIN =====
     
-    // Continue routing
     head.connect(dsp.gain);
     dsp.gain.connect(dsp.panner);
     dsp.panner.connect(dsp.analyzer);
@@ -942,7 +811,6 @@ export class AudioEngine {
     track.automationLanes.forEach(lane => {
         if (lane.points.length === 0) return;
         
-        // Find the two points surrounding current time
         let prevPoint = lane.points[0];
         let nextPoint = lane.points[lane.points.length - 1];
         
@@ -954,24 +822,17 @@ export class AudioEngine {
             }
         }
         
-        // Interpolate value
         let value: number;
-        if (time <= prevPoint.time) {
-            value = prevPoint.value;
-        } else if (time >= nextPoint.time) {
-            value = nextPoint.value;
-        } else {
+        if (time <= prevPoint.time) value = prevPoint.value;
+        else if (time >= nextPoint.time) value = nextPoint.value;
+        else {
             const ratio = (time - prevPoint.time) / (nextPoint.time - prevPoint.time);
             value = prevPoint.value + (nextPoint.value - prevPoint.value) * ratio;
         }
         
-        // Apply to parameter
         const now = this.ctx.currentTime;
-        if (lane.parameterName === 'volume') {
-            dsp.gain.gain.setValueAtTime(value, now);
-        } else if (lane.parameterName === 'pan') {
-            dsp.panner.pan.setValueAtTime(value, now);
-        }
+        if (lane.parameterName === 'volume') dsp.gain.gain.setValueAtTime(value, now);
+        else if (lane.parameterName === 'pan') dsp.panner.pan.setValueAtTime(value, now);
     });
 }
 
@@ -988,7 +849,6 @@ export class AudioEngine {
     for (let i = 0; i < data.length; i++) { const sample = (data[i] - 128) / 128; sum += sample * sample; }
     return Math.sqrt(sum / data.length);
   }
-  // FIX: Implement missing methods for VST streaming and atomic updates.
   public async enableVSTAudioStreaming(trackId: string, pluginId: string) {
     if (!this.ctx) await this.init();
     const dsp = this.tracksDSP.get(trackId);
@@ -1007,12 +867,9 @@ export class AudioEngine {
         this.disableVSTAudioStreaming();
     }
     
-    // Disconnect bypass
     try {
         const a = pluginEntry.input;
         const b = pluginEntry.output;
-        // Find the connection from head to the input of this plugin entry and disconnect it
-        // This is complex. Assuming a simple chain for now.
     } catch(e) { /* might not be connected if already disconnected */ }
 
     await novaBridge.initAudioStreaming(this.ctx!, pluginEntry.input, pluginEntry.output);
@@ -1032,14 +889,10 @@ export class AudioEngine {
 
     novaBridge.stopAudioStreaming();
     
-    // Restore connection
     try {
         pluginEntry.input.disconnect(); // Disconnect from worklet
     } catch(e) {}
     
-    // This is tricky because we don't know what was connected to what before.
-    // The safest is to trigger a full `updateTrack` for this track.
-    // For now, let's assume a simple bypass restore.
     pluginEntry.input.connect(pluginEntry.output);
 
     this.activeVSTPlugin = null;

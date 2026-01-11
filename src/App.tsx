@@ -2,7 +2,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
 import { audioEngine } from './engine/AudioEngine';
+import { audioBufferRegistry } from './services/AudioBufferRegistry';
 import TransportBar from './components/TransportBar';
+import MobilePinchZoomContainer from './components/MobilePinchZoomContainer';
+import MobileTransportFloating from './components/MobileTransportFloating';
 import ArrangementView from './components/ArrangementView';
 import MixerView from './components/MixerView';
 import PluginEditor from './components/PluginEditor';
@@ -183,28 +186,430 @@ const SaveOverlay: React.FC<{ progress: number; message: string }> = ({ progress
   </div>
 );
 
-const MobileBottomNav: React.FC<{ activeTab: MobileTab, onTabChange: (tab: MobileTab) => void }> = ({ activeTab, onTabChange }) => (
-    <div className="h-16 bg-[#0c0d10] border-t border-white/10 flex items-center justify-around z-50">
-        <button onClick={() => onTabChange('PROJECT')} className={`flex flex-col items-center space-y-1 ${activeTab === 'PROJECT' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-project-diagram text-lg"></i>
-            <span className="text-[9px] font-black uppercase">Arrangement</span>
+const MobileBottomNav: React.FC<{ activeTab: MobileTab, onTabChange: (tab: MobileTab) => void }> = ({ activeTab, onTabChange }) => {
+  const tabs: { id: MobileTab; icon: string; label: string }[] = [
+    { id: 'TRACKS', icon: 'fa-layer-group', label: 'Pistes' },
+    { id: 'MIX', icon: 'fa-sliders-h', label: 'Mix' },
+    { id: 'REC', icon: 'fa-microphone', label: 'Rec' },
+    { id: 'BROWSER', icon: 'fa-folder-open', label: 'Sons' },
+    { id: 'NOVA', icon: 'fa-robot', label: 'AI' },
+    { id: 'SETTINGS', icon: 'fa-cog', label: 'Config' },
+  ];
+
+  return (
+    <div className="h-16 bg-[#08090b] border-t border-white/10 flex items-center justify-around z-50 px-1" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      {tabs.map(tab => (
+        <button
+          key={tab.id}
+          onClick={() => onTabChange(tab.id)}
+          className={`flex flex-col items-center justify-center flex-1 py-2 rounded-lg transition-all ${
+            activeTab === tab.id
+              ? 'text-cyan-400 bg-cyan-500/10'
+              : 'text-slate-500 active:bg-white/5'
+          }`}
+        >
+          <i className={`fas ${tab.icon} text-base`}></i>
+          <span className="text-[8px] font-bold mt-1 uppercase tracking-wide">{tab.label}</span>
         </button>
-        <button onClick={() => onTabChange('MIXER')} className={`flex flex-col items-center space-y-1 ${activeTab === 'MIXER' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-sliders-h text-lg"></i>
-            <span className="text-[9px] font-black uppercase">Mixer</span>
-        </button>
-        <button onClick={() => onTabChange('NOVA')} className={`flex flex-col items-center space-y-1 ${activeTab === 'NOVA' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/30 -mt-6 border-4 border-[#0c0d10]">
-                <i className="fas fa-robot text-white text-lg"></i>
-            </div>
-            <span className="text-[9px] font-black uppercase">AI Nova</span>
-        </button>
-        <button onClick={() => onTabChange('AUTOMATION')} className={`flex flex-col items-center space-y-1 ${activeTab === 'AUTOMATION' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-wave-square text-lg"></i>
-            <span className="text-[9px] font-black uppercase">Auto</span>
-        </button>
+      ))}
     </div>
-);
+  );
+};
+
+// Helper function pour formater le temps
+const formatTime = (seconds: number): string => {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 100);
+  return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+};
+
+// Vue mobile des pistes
+const MobileTracksView: React.FC<{
+  tracks: Track[];
+  selectedTrackId: string | null;
+  onSelectTrack: (id: string) => void;
+  onUpdateTrack: (track: Track) => void;
+  isPlaying: boolean;
+  currentTime: number;
+}> = ({ tracks, selectedTrackId, onSelectTrack, onUpdateTrack, isPlaying, currentTime }) => {
+  const mainTracks = tracks.filter(t =>
+    t.type === TrackType.AUDIO || t.type === TrackType.MIDI || t.type === TrackType.DRUM_RACK
+  );
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-[#0c0d10]">
+      <div className="sticky top-0 z-10 bg-[#08090b] border-b border-white/10 p-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`w-3 h-3 rounded-full ${isPlaying ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`} />
+          <span className="font-mono text-lg text-white">{formatTime(currentTime)}</span>
+        </div>
+        <span className="text-xs text-slate-500">{mainTracks.length} pistes</span>
+      </div>
+
+      <div className="p-3 space-y-2">
+        {mainTracks.map(track => (
+          <div
+            key={track.id}
+            onClick={() => onSelectTrack(track.id)}
+            className={`p-4 rounded-xl border transition-all active:scale-[0.98] ${
+              selectedTrackId === track.id
+                ? 'bg-white/10 border-cyan-500/50'
+                : 'bg-white/5 border-white/5'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-10 h-10 rounded-lg flex items-center justify-center"
+                  style={{ backgroundColor: track.color + '30' }}
+                >
+                  <i className={`fas ${
+                    track.type === TrackType.AUDIO ? 'fa-waveform' :
+                    track.type === TrackType.DRUM_RACK ? 'fa-drum' : 'fa-music'
+                  } text-white`}></i>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">{track.name}</h3>
+                  <p className="text-[10px] text-slate-500">{track.clips.length} clips</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...track, isMuted: !track.isMuted }); }}
+                  className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                    track.isMuted ? 'bg-red-500/20 text-red-400' : 'bg-white/5 text-slate-500'
+                  }`}
+                >
+                  <i className="fas fa-volume-mute text-sm"></i>
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...track, isSolo: !track.isSolo }); }}
+                  className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                    track.isSolo ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/5 text-slate-500'
+                  }`}
+                >
+                  <span className="text-xs font-black">S</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 flex items-center gap-3">
+              <i className="fas fa-volume-up text-slate-500 text-xs"></i>
+              <input
+                type="range"
+                min="0"
+                max="1.5"
+                step="0.01"
+                value={track.volume}
+                onChange={(e) => onUpdateTrack({ ...track, volume: parseFloat(e.target.value) })}
+                onClick={(e) => e.stopPropagation()}
+                className="flex-1 h-2 rounded-full appearance-none bg-white/10"
+                style={{ accentColor: track.color }}
+              />
+              <span className="text-[10px] font-mono text-slate-400 w-8">{Math.round(track.volume * 100)}%</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Vue mobile d'enregistrement
+const MobileRecordView: React.FC<{
+  tracks: Track[];
+  isRecording: boolean;
+  isPlaying: boolean;
+  currentTime: number;
+  onToggleRecord: () => void;
+  onTogglePlay: () => void;
+  onStop: () => void;
+  onUpdateTrack: (track: Track) => void;
+}> = ({ tracks, isRecording, isPlaying, currentTime, onToggleRecord, onTogglePlay, onStop, onUpdateTrack }) => {
+  const armedTrack = tracks.find(t => t.isTrackArmed);
+  const recordableTracks = tracks.filter(t => t.type === TrackType.AUDIO || t.type === TrackType.MIDI);
+
+  return (
+    <div className="flex-1 flex flex-col bg-[#0c0d10] overflow-hidden">
+      <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-8">
+        <div className="text-center">
+          <span className="font-mono text-4xl font-bold text-white">{formatTime(currentTime)}</span>
+          <p className="text-xs text-slate-500 mt-2">
+            {isRecording ? '● ENREGISTREMENT EN COURS' : 'Prêt à enregistrer'}
+          </p>
+        </div>
+
+        <button
+          onClick={onToggleRecord}
+          className={`w-32 h-32 rounded-full flex items-center justify-center transition-all shadow-2xl ${
+            isRecording
+              ? 'bg-red-500 shadow-red-500/50 animate-pulse'
+              : armedTrack
+                ? 'bg-gradient-to-br from-red-600 to-red-700 shadow-red-500/30 active:scale-95'
+                : 'bg-slate-700 cursor-not-allowed'
+          }`}
+          disabled={!armedTrack && !isRecording}
+        >
+          <i className={`fas ${isRecording ? 'fa-stop' : 'fa-circle'} text-white text-4xl`}></i>
+        </button>
+
+        <div className="flex items-center gap-4">
+          <button
+            onClick={onStop}
+            className="w-14 h-14 rounded-full bg-white/10 flex items-center justify-center active:bg-white/20"
+          >
+            <i className="fas fa-stop text-white"></i>
+          </button>
+          <button
+            onClick={onTogglePlay}
+            className={`w-14 h-14 rounded-full flex items-center justify-center ${
+              isPlaying ? 'bg-cyan-500' : 'bg-white/10'
+            } active:scale-95`}
+          >
+            <i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-white`}></i>
+          </button>
+        </div>
+
+        {!armedTrack && !isRecording && (
+          <p className="text-center text-sm text-amber-400 bg-amber-500/10 px-4 py-2 rounded-xl">
+            <i className="fas fa-exclamation-triangle mr-2"></i>
+            Sélectionnez une piste ci-dessous
+          </p>
+        )}
+      </div>
+
+      <div className="bg-[#08090b] border-t border-white/10 p-4">
+        <p className="text-[10px] font-bold text-slate-500 uppercase mb-3">Piste à enregistrer</p>
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          {recordableTracks.map(track => (
+            <button
+              key={track.id}
+              onClick={() => {
+                recordableTracks.forEach(t => {
+                  if (t.id === track.id) {
+                    onUpdateTrack({ ...t, isTrackArmed: !t.isTrackArmed });
+                  } else if (t.isTrackArmed) {
+                    onUpdateTrack({ ...t, isTrackArmed: false });
+                  }
+                });
+              }}
+              className={`flex-shrink-0 px-4 py-3 rounded-xl border transition-all ${
+                track.isTrackArmed
+                  ? 'bg-red-500/20 border-red-500 text-red-400'
+                  : 'bg-white/5 border-white/10 text-slate-400'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: track.color }}></div>
+                <span className="text-xs font-bold whitespace-nowrap">{track.name}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Vue mobile du navigateur de sons
+const MobileBrowserView: React.FC<{
+  onImportAudio: (file: File) => void;
+  onAddPlugin: (trackId: string, type: PluginType) => void;
+  selectedTrackId: string | null;
+}> = ({ onImportAudio, onAddPlugin, selectedTrackId }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeSection, setActiveSection] = useState<'SAMPLES' | 'FX'>('SAMPLES');
+
+  const fxList = [
+    { type: 'REVERB', name: 'Reverb', icon: 'fa-mountain-sun', color: '#10b981' },
+    { type: 'DELAY', name: 'Delay', icon: 'fa-history', color: '#3b82f6' },
+    { type: 'COMPRESSOR', name: 'Compressor', icon: 'fa-compress-alt', color: '#f59e0b' },
+    { type: 'AUTOTUNE', name: 'Auto-Tune', icon: 'fa-microphone-alt', color: '#ec4899' },
+    { type: 'VOCALSATURATOR', name: 'Saturator', icon: 'fa-fire', color: '#ef4444' },
+    { type: 'PROEQ12', name: 'EQ Pro', icon: 'fa-wave-square', color: '#8b5cf6' },
+    { type: 'CHORUS', name: 'Chorus', icon: 'fa-layer-group', color: '#06b6d4' },
+    { type: 'DEESSER', name: 'De-Esser', icon: 'fa-scissors', color: '#84cc16' },
+  ];
+
+  return (
+    <div className="flex-1 flex flex-col bg-[#0c0d10] overflow-hidden">
+      <div className="flex border-b border-white/10">
+        <button
+          onClick={() => setActiveSection('SAMPLES')}
+          className={`flex-1 py-4 text-sm font-bold transition-all ${
+            activeSection === 'SAMPLES' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-500'
+          }`}
+        >
+          <i className="fas fa-file-audio mr-2"></i>Samples
+        </button>
+        <button
+          onClick={() => setActiveSection('FX')}
+          className={`flex-1 py-4 text-sm font-bold transition-all ${
+            activeSection === 'FX' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-500'
+          }`}
+        >
+          <i className="fas fa-magic mr-2"></i>Effets
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {activeSection === 'SAMPLES' ? (
+          <div className="space-y-4">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/*,.mp3,.wav,.ogg,.flac"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) onImportAudio(file);
+                e.target.value = '';
+              }}
+            />
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full py-6 rounded-2xl border-2 border-dashed border-cyan-500/30 bg-cyan-500/5 flex flex-col items-center justify-center gap-2 active:bg-cyan-500/10"
+            >
+              <i className="fas fa-cloud-upload-alt text-3xl text-cyan-400"></i>
+              <span className="text-sm font-bold text-cyan-400">Importer un fichier audio</span>
+              <span className="text-[10px] text-slate-500">MP3, WAV, OGG, FLAC</span>
+            </button>
+
+            <div className="text-center py-8">
+              <i className="fas fa-folder-open text-4xl text-slate-700 mb-3"></i>
+              <p className="text-sm text-slate-500">Les samples cloud arrivent bientôt...</p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {fxList.map(fx => (
+              <button
+                key={fx.type}
+                onClick={() => {
+                  if (selectedTrackId) {
+                    onAddPlugin(selectedTrackId, fx.type as PluginType);
+                  }
+                }}
+                disabled={!selectedTrackId}
+                className={`p-4 rounded-xl border transition-all ${
+                  selectedTrackId
+                    ? 'bg-white/5 border-white/10 active:bg-white/10'
+                    : 'bg-white/2 border-white/5 opacity-50'
+                }`}
+              >
+                <div
+                  className="w-12 h-12 rounded-xl mb-3 flex items-center justify-center mx-auto"
+                  style={{ backgroundColor: fx.color + '20' }}
+                >
+                  <i className={`fas ${fx.icon} text-xl`} style={{ color: fx.color }}></i>
+                </div>
+                <span className="text-xs font-bold text-white block">{fx.name}</span>
+              </button>
+            ))}
+
+            {!selectedTrackId && (
+              <div className="col-span-2 text-center py-4">
+                <p className="text-xs text-amber-400">
+                  <i className="fas fa-info-circle mr-1"></i>
+                  Sélectionnez une piste dans l'onglet Pistes
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Vue mobile des paramètres
+const MobileSettingsView: React.FC<{
+  bpm: number;
+  onBpmChange: (bpm: number) => void;
+  theme: Theme;
+  onToggleTheme: () => void;
+  onOpenAudioSettings: () => void;
+}> = ({ bpm, onBpmChange, theme, onToggleTheme, onOpenAudioSettings }) => {
+  return (
+    <div className="flex-1 overflow-y-auto bg-[#0c0d10] p-4 space-y-4">
+      <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-bold text-white">Tempo</h3>
+            <p className="text-[10px] text-slate-500">Vitesse du projet</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onBpmChange(Math.max(20, bpm - 1))}
+              className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center active:bg-white/20"
+            >
+              <i className="fas fa-minus text-white text-sm"></i>
+            </button>
+            <span className="font-mono text-2xl font-bold text-cyan-400 w-16 text-center">{bpm}</span>
+            <button
+              onClick={() => onBpmChange(Math.min(999, bpm + 1))}
+              className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center active:bg-white/20"
+            >
+              <i className="fas fa-plus text-white text-sm"></i>
+            </button>
+          </div>
+        </div>
+        <input
+          type="range"
+          min="20"
+          max="300"
+          value={bpm}
+          onChange={(e) => onBpmChange(parseInt(e.target.value))}
+          className="w-full h-2 rounded-full appearance-none bg-white/10"
+        />
+      </div>
+
+      <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-white">Thème</h3>
+            <p className="text-[10px] text-slate-500">{theme === 'dark' ? 'Mode sombre' : 'Mode clair'}</p>
+          </div>
+          <button
+            onClick={onToggleTheme}
+            className={`w-14 h-8 rounded-full transition-all ${
+              theme === 'light' ? 'bg-cyan-500' : 'bg-white/20'
+            } relative`}
+          >
+            <div className={`absolute top-1 w-6 h-6 rounded-full bg-white shadow transition-all ${
+              theme === 'light' ? 'right-1' : 'left-1'
+            }`}>
+              <i className={`fas ${theme === 'light' ? 'fa-sun' : 'fa-moon'} text-xs text-slate-700 absolute inset-0 flex items-center justify-center`}></i>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <button
+        onClick={onOpenAudioSettings}
+        className="w-full bg-white/5 rounded-2xl p-5 border border-white/10 flex items-center justify-between active:bg-white/10"
+      >
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center">
+            <i className="fas fa-cog text-purple-400"></i>
+          </div>
+          <div className="text-left">
+            <h3 className="text-sm font-bold text-white">Paramètres Audio</h3>
+            <p className="text-[10px] text-slate-500">Carte son, latence, buffer</p>
+          </div>
+        </div>
+        <i className="fas fa-chevron-right text-slate-500"></i>
+      </button>
+
+      <div className="text-center py-6">
+        <p className="text-[10px] text-slate-600">Nova DAW v2.0 - Mobile Edition</p>
+      </div>
+    </div>
+  );
+};
 
 const useUndoRedo = (initialState: DAWState) => {
   const [history, setHistory] = useState<{ past: DAWState[]; present: DAWState; future: DAWState[]; }>({ past: [], present: initialState, future: [] });
@@ -270,7 +675,8 @@ export default function App() {
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
 
   useEffect(() => { novaBridge.connect(); }, []);
-  const stateRef = useRef(state); 
+  const stateRef = useRef(state);
+  const globalFileInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks)); }, [state.tracks]); 
   useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
@@ -289,6 +695,7 @@ export default function App() {
   }, [state.isPlaying, setVisualState]);
 
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
+  const [clipboardClip, setClipboardClip] = useState<{ clip: Clip; sourceTrackId: string } | null>(null);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);
   const [aiNotification, setAiNotification] = useState<string | null>(null);
   const [addPluginMenu, setAddPluginMenu] = useState<{ trackId: string, x: number, y: number } | null>(null);
@@ -299,7 +706,7 @@ export default function App() {
     if (saved) return saved as ViewMode;
     return window.innerWidth < 768 ? 'MOBILE' : (window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP');
   });
-  const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('PROJECT');
+  const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('TRACKS');
   const handleViewModeChange = (mode: ViewMode) => { setViewMode(mode); localStorage.setItem('nova_view_mode', mode); };
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
@@ -324,30 +731,107 @@ export default function App() {
   const handleExportMix = async () => { setIsExportMenuOpen(true); };
 
   const handleEditClip = (trackId: string, clipId: string, action: string, payload?: any) => {
+    // Handle CUT and COPY outside of produce to access setClipboardClip
+    if (action === 'CUT' || action === 'COPY') {
+      const track = state.tracks.find(t => t.id === trackId);
+      if (!track) return;
+      const clip = track.clips.find(c => c.id === clipId);
+      if (!clip) return;
+
+      // Store clip in clipboard
+      setClipboardClip({ clip: { ...clip }, sourceTrackId: trackId });
+      setAiNotification(`📋 Clip "${clip.name}" copié`);
+      setTimeout(() => setAiNotification(null), 2000);
+
+      // If CUT, also delete the clip
+      if (action === 'CUT') {
+        setState(produce((draft: DAWState) => {
+          const t = draft.tracks.find(tr => tr.id === trackId);
+          if (t) {
+            t.clips = t.clips.filter(c => c.id !== clipId);
+          }
+        }));
+      }
+      return;
+    }
+
+    // Handle PASTE - needs clipboard access
+    if (action === 'PASTE') {
+      if (!clipboardClip) {
+        setAiNotification(`⚠️ Rien à coller`);
+        setTimeout(() => setAiNotification(null), 2000);
+        return;
+      }
+
+      setState(produce((draft: DAWState) => {
+        const track = draft.tracks.find(t => t.id === trackId);
+        if (!track) return;
+
+        const pasteTime = payload?.time ?? stateRef.current.currentTime;
+        const newClip: Clip = {
+          ...clipboardClip.clip,
+          id: `clip-paste-${Date.now()}`,
+          start: pasteTime,
+        };
+        track.clips.push(newClip);
+      }));
+
+      setAiNotification(`✅ Clip collé à ${payload?.time?.toFixed(2) ?? stateRef.current.currentTime.toFixed(2)}s`);
+      setTimeout(() => setAiNotification(null), 2000);
+      return;
+    }
+
     setState(produce((draft: DAWState) => {
       const track = draft.tracks.find(t => t.id === trackId);
       if (!track) return;
       let newClips = [...track.clips];
       const idx = newClips.findIndex(c => c.id === clipId);
-      if (idx === -1 && action !== 'PASTE') return;
+      if (idx === -1) return;
+
       switch(action) {
-        case 'UPDATE_PROPS': if(idx > -1) newClips[idx] = { ...newClips[idx], ...payload }; break;
-        case 'DELETE': if(idx > -1) newClips.splice(idx, 1); break;
-        case 'MUTE': if(idx > -1) newClips[idx] = { ...newClips[idx], isMuted: !newClips[idx].isMuted }; break;
-        case 'DUPLICATE': if(idx > -1) newClips.push({ ...newClips[idx], id: `clip-dup-${Date.now()}`, start: newClips[idx].start + newClips[idx].duration + 0.1 }); break;
-        case 'RENAME': if(idx > -1) newClips[idx] = { ...newClips[idx], name: payload.name }; break;
-        case 'SPLIT': 
-            if(idx > -1) {
-              const clip = newClips[idx];
-              const splitTime = payload.time;
-              if (splitTime > clip.start && splitTime < clip.start + clip.duration) {
-                  const firstDuration = splitTime - clip.start;
-                  const secondDuration = clip.duration - firstDuration;
-                  newClips[idx] = { ...clip, duration: firstDuration };
-                  newClips.push({ ...clip, id: `clip-split-${Date.now()}`, start: splitTime, duration: secondDuration, offset: clip.offset + firstDuration });
-              }
+        case 'UPDATE_PROPS':
+          if(idx > -1) newClips[idx] = { ...newClips[idx], ...payload };
+          break;
+        case 'DELETE':
+          if(idx > -1) newClips.splice(idx, 1);
+          break;
+        case 'MUTE':
+          if(idx > -1) newClips[idx] = { ...newClips[idx], isMuted: !newClips[idx].isMuted };
+          break;
+        case 'DUPLICATE':
+          if(idx > -1) newClips.push({ ...newClips[idx], id: `clip-dup-${Date.now()}`, start: newClips[idx].start + newClips[idx].duration + 0.1 });
+          break;
+        case 'RENAME':
+          if(idx > -1) newClips[idx] = { ...newClips[idx], name: payload.name };
+          break;
+        case 'SPLIT':
+          if(idx > -1) {
+            const clip = newClips[idx];
+            const splitTime = payload.time;
+            if (splitTime > clip.start && splitTime < clip.start + clip.duration) {
+              const firstDuration = splitTime - clip.start;
+              const secondDuration = clip.duration - firstDuration;
+              newClips[idx] = { ...clip, duration: firstDuration };
+              newClips.push({ ...clip, id: `clip-split-${Date.now()}`, start: splitTime, duration: secondDuration, offset: (clip.offset || 0) + firstDuration });
             }
-            break;
+          }
+          break;
+        case 'REVERSE':
+          if(idx > -1) {
+            newClips[idx] = { ...newClips[idx], isReversed: !newClips[idx].isReversed };
+          }
+          break;
+        case 'SET_GAIN':
+          if(idx > -1 && payload?.gain !== undefined) {
+            newClips[idx] = { ...newClips[idx], gain: payload.gain };
+          }
+          break;
+        case 'NORMALIZE':
+          if(idx > -1) {
+            // Reset gain to 1.0 (normalized)
+            newClips[idx] = { ...newClips[idx], gain: 1.0 };
+          }
+          break;
       }
       track.clips = newClips;
     }));
@@ -545,10 +1029,10 @@ export default function App() {
       setExternalImportNotice(`Chargement: ${name}...`);
       try {
           await ensureAudioEngine();
-          
+
           let audioBuffer: AudioBuffer;
           let audioRef: string;
-          
+
           if (source instanceof File) {
               audioRef = URL.createObjectURL(source);
               const arrayBuffer = await source.arrayBuffer();
@@ -560,27 +1044,21 @@ export default function App() {
               const arrayBuffer = await response.arrayBuffer();
               audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
           }
-          
-          const newClip: Clip = {
-              id: `clip-${Date.now()}`,
-              name: name.replace(/\.[^/.]+$/, ''),
-              type: TrackType.AUDIO,
-              start: startTime ?? stateRef.current.currentTime,
-              duration: audioBuffer.duration,
-              offset: 0,
-              buffer: audioBuffer,
-              audioRef,
-              color: UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length],
-              fadeIn: 0,
-              fadeOut: 0,
-              gain: 1.0,
-              isMuted: false
-          };
+
+          // IMPORTANT: Register buffer in registry OUTSIDE of React state
+          // This avoids Immer proxy issues with native AudioBuffer objects
+          const bufferId = audioBufferRegistry.register(audioBuffer, audioRef);
+
+          const clipName = name.replace(/\.[^/.]+$/, '');
+          const clipId = `clip-${Date.now()}`;
+          const clipDuration = audioBuffer.duration;
+          const clipStart = startTime ?? stateRef.current.currentTime;
+          const clipColor = UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length];
 
           setState(produce((draft: DAWState) => {
               let targetTrackId: string | null = null;
               let isNewTrackNeeded = false;
-  
+
               if (forcedTrackId) {
                   targetTrackId = forcedTrackId;
               } else {
@@ -592,7 +1070,24 @@ export default function App() {
                       targetTrackId = `track-audio-${Date.now()}`;
                   }
               }
-  
+
+              // Create clip WITHOUT AudioBuffer - only bufferId reference
+              const newClip: Clip = {
+                  id: clipId,
+                  name: clipName,
+                  type: TrackType.AUDIO,
+                  start: clipStart,
+                  duration: clipDuration,
+                  offset: 0,
+                  bufferId: bufferId,  // Reference to registry, NOT the actual buffer
+                  audioRef,
+                  color: clipColor,
+                  fadeIn: 0,
+                  fadeOut: 0,
+                  gain: 1.0,
+                  isMuted: false
+              };
+
               if (isNewTrackNeeded) {
                   const newTrack: Track = {
                       id: targetTrackId!,
@@ -603,7 +1098,7 @@ export default function App() {
                       volume: 1.0, pan: 0, outputTrackId: 'master',
                       sends: [], clips: [newClip], plugins: [], automationLanes: [], totalLatency: 0
                   };
-                  draft.tracks.splice(1, 0, newTrack); // Insère la nouvelle piste après la piste 'BEAT'
+                  draft.tracks.splice(1, 0, newTrack);
                   draft.selectedTrackId = targetTrackId;
               } else {
                   const track = draft.tracks.find(t => t.id === targetTrackId);
@@ -613,9 +1108,10 @@ export default function App() {
                   }
               }
           }));
-  
-          setExternalImportNotice(`✅ Importé: ${newClip.name}`);
-  
+
+          setExternalImportNotice(`✅ Importé: ${clipName}`);
+          console.log(`[AudioImport] Successfully imported: ${clipName} (bufferId: ${bufferId})`);
+
       } catch (e: any) {
           console.error("[Import Error]", e);
           setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
@@ -780,6 +1276,30 @@ export default function App() {
       <TouchInteractionManager />
       <GlobalClipMenu />
 
+      {/* Floating Import Audio Button */}
+      <div className="fixed top-20 right-4 z-[100]">
+        <input
+          ref={globalFileInputRef}
+          type="file"
+          accept="audio/*,.mp3,.wav,.ogg,.flac,.aac,.m4a"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              handleUniversalAudioImport(file, file.name);
+              e.target.value = '';
+            }
+          }}
+        />
+        <button
+          onClick={() => globalFileInputRef.current?.click()}
+          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-500/25 transition-all hover:scale-105 active:scale-95 border border-emerald-400/30"
+        >
+          <i className="fas fa-file-audio"></i>
+          <span className={isMobile ? 'hidden' : ''}>Importer Audio</span>
+        </button>
+      </div>
+
       <div className="flex-1 flex overflow-hidden relative">
         {isSidebarOpen && !isMobile && (
             <aside className="shrink-0 z-10">
@@ -795,20 +1315,21 @@ export default function App() {
             </aside>
         )}
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
-          {((!isMobile && state.currentView === 'ARRANGEMENT') || (isMobile && activeMobileTab === 'PROJECT')) && (
-            <ArrangementView 
-               tracks={state.tracks} currentTime={state.currentTime} 
+          {/* Desktop: ArrangementView */}
+          {!isMobile && state.currentView === 'ARRANGEMENT' && (
+            <ArrangementView
+               tracks={state.tracks} currentTime={state.currentTime}
                isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
-               onSetLoop={(start, end) => setState(prev => ({ ...prev, loopStart: start, loopEnd: end, isLoopActive: true }))} 
-               onSeek={handleSeek} bpm={state.bpm} 
-               selectedTrackId={state.selectedTrackId} onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))} 
-               onUpdateTrack={handleUpdateTrack} onReorderTracks={() => {}} 
-               onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })} 
-               onSelectPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }} 
-               onRemovePlugin={handleRemovePlugin} 
-               onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })} 
-               onAddTrack={handleCreateTrack} onDuplicateTrack={handleDuplicateTrack} onDeleteTrack={handleDeleteTrack} 
-               onFreezeTrack={(tid) => {}} 
+               onSetLoop={(start, end) => setState(prev => ({ ...prev, loopStart: start, loopEnd: end, isLoopActive: true }))}
+               onSeek={handleSeek} bpm={state.bpm}
+               selectedTrackId={state.selectedTrackId} onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
+               onUpdateTrack={handleUpdateTrack} onReorderTracks={() => {}}
+               onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
+               onSelectPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
+               onRemovePlugin={handleRemovePlugin}
+               onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
+               onAddTrack={handleCreateTrack} onDuplicateTrack={handleDuplicateTrack} onDeleteTrack={handleDeleteTrack}
+               onFreezeTrack={(tid) => {}}
                onImportFile={(file) => handleUniversalAudioImport(file, file.name)}
                onEditClip={handleEditClip} isRecording={state.isRecording} recStartTime={state.recStartTime}
                onMoveClip={handleMoveClip}
@@ -816,14 +1337,15 @@ export default function App() {
                onCreatePattern={handleCreatePatternAndOpen}
                onSwapInstrument={handleSwapInstrument}
                onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
-            /> 
+            />
           )}
-          
-          {((!isMobile && state.currentView === 'MIXER') || (isMobile && activeMobileTab === 'MIXER')) && (
-             <MixerView 
-                tracks={state.tracks} 
-                onUpdateTrack={handleUpdateTrack} 
-                onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }} 
+
+          {/* Desktop: MixerView */}
+          {!isMobile && state.currentView === 'MIXER' && (
+             <MixerView
+                tracks={state.tracks}
+                onUpdateTrack={handleUpdateTrack}
+                onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
                 onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
                 onRemovePlugin={handleRemovePlugin}
                 onAddBus={handleAddBus}
@@ -832,15 +1354,90 @@ export default function App() {
              />
           )}
 
-          {((!isMobile && state.currentView === 'AUTOMATION') || (isMobile && activeMobileTab === 'AUTOMATION')) && (
-             <AutomationEditorView 
-               tracks={state.tracks} currentTime={state.currentTime} bpm={state.bpm} zoomH={40} 
+          {/* Desktop: AutomationView */}
+          {!isMobile && state.currentView === 'AUTOMATION' && (
+             <AutomationEditorView
+               tracks={state.tracks} currentTime={state.currentTime} bpm={state.bpm} zoomH={40}
                onUpdateTrack={handleUpdateTrack} onSeek={handleSeek}
              />
+          )}
+
+          {/* Mobile: Tracks View */}
+          {isMobile && activeMobileTab === 'TRACKS' && (
+            <MobileTracksView
+              tracks={state.tracks}
+              selectedTrackId={state.selectedTrackId}
+              onSelectTrack={(id) => setState(p => ({ ...p, selectedTrackId: id }))}
+              onUpdateTrack={handleUpdateTrack}
+              isPlaying={state.isPlaying}
+              currentTime={state.currentTime}
+            />
+          )}
+
+          {/* Mobile: Mix View with Pinch-to-Zoom */}
+          {isMobile && activeMobileTab === 'MIX' && (
+            <MobilePinchZoomContainer className="flex-1">
+              <MixerView
+                tracks={state.tracks}
+                onUpdateTrack={handleUpdateTrack}
+                onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
+                onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
+                onRemovePlugin={handleRemovePlugin}
+                onAddBus={handleAddBus}
+                onToggleBypass={handleToggleBypass}
+                onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
+              />
+            </MobilePinchZoomContainer>
+          )}
+
+          {/* Mobile: Record View */}
+          {isMobile && activeMobileTab === 'REC' && (
+            <MobileRecordView
+              tracks={state.tracks}
+              isRecording={state.isRecording}
+              isPlaying={state.isPlaying}
+              currentTime={state.currentTime}
+              onToggleRecord={handleToggleRecord}
+              onTogglePlay={handleTogglePlay}
+              onStop={handleStop}
+              onUpdateTrack={handleUpdateTrack}
+            />
+          )}
+
+          {/* Mobile: Browser View */}
+          {isMobile && activeMobileTab === 'BROWSER' && (
+            <MobileBrowserView
+              onImportAudio={(file) => handleUniversalAudioImport(file, file.name)}
+              onAddPlugin={(tid, type) => handleAddPluginFromContext(tid, type, {}, { openUI: true })}
+              selectedTrackId={state.selectedTrackId}
+            />
+          )}
+
+          {/* Mobile: Settings View */}
+          {isMobile && activeMobileTab === 'SETTINGS' && (
+            <MobileSettingsView
+              bpm={state.bpm}
+              onBpmChange={handleUpdateBpm}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              onOpenAudioSettings={() => setIsAudioSettingsOpen(true)}
+            />
           )}
         </main>
       </div>
       
+      {/* Mobile: Floating Transport (visible on all tabs except REC) */}
+      {isMobile && activeMobileTab !== 'REC' && (
+        <MobileTransportFloating
+          isPlaying={state.isPlaying}
+          isRecording={state.isRecording}
+          currentTime={state.currentTime}
+          onTogglePlay={handleTogglePlay}
+          onStop={handleStop}
+          onToggleRecord={handleToggleRecord}
+        />
+      )}
+
       {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} />}
 
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}
@@ -869,7 +1466,7 @@ export default function App() {
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
       
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
-        <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('PROJECT')} />
+        <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('TRACKS')} />
       </div>
       
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}

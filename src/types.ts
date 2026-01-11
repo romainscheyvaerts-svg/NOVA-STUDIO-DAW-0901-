@@ -13,7 +13,7 @@ export enum TrackType {
 }
 
 export type ViewType = 'ARRANGEMENT' | 'MIXER' | 'AUTOMATION' | 'PIANO_ROLL';
-export type MobileTab = 'PROJECT' | 'MIXER' | 'NOVA' | 'BROWSER' | 'AUTOMATION'; 
+export type MobileTab = 'TRACKS' | 'MIX' | 'REC' | 'BROWSER' | 'NOVA' | 'SETTINGS'; 
 export type EditorTool = 'SELECT' | 'SPLIT' | 'ERASE' | 'AUTOMATION' | 'DRAW';
 export type ViewMode = 'DESKTOP' | 'TABLET' | 'MOBILE';
 export type Theme = 'dark' | 'light';
@@ -133,19 +133,20 @@ export interface Clip {
   id: string;
   start: number;
   duration: number;
-  offset: number; 
-  fadeIn: number; 
-  fadeOut: number; 
+  offset: number;
+  fadeIn: number;
+  fadeOut: number;
   name: string;
   color: string;
   type: TrackType;
-  buffer?: AudioBuffer;
-  notes?: MidiNote[]; 
+  buffer?: AudioBuffer;      // Legacy - kept for backwards compatibility
+  bufferId?: string;         // NEW: Reference to AudioBufferRegistry (preferred)
+  notes?: MidiNote[];
   isMuted?: boolean;
   gain?: number;
-  isReversed?: boolean; 
+  isReversed?: boolean;
   audioRef?: string;
-  isUnlicensed?: boolean; 
+  isUnlicensed?: boolean;
 }
 
 export interface AutomationPoint {

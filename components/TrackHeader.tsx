@@ -13,12 +13,10 @@ interface TrackHeaderProps {
   onRemovePlugin?: (trackId: string, pluginId: string) => void;
   onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
   onContextMenu: (e: React.MouseEvent, trackId: string) => void;
-  // Drag & Drop Piste
   onDragStartTrack: (trackId: string) => void;
   onDragOverTrack: (trackId: string) => void;
   onDropTrack: () => void;
   isDraggingOver?: boolean;
-  // Swap Instrument
   onSwapInstrument?: (trackId: string) => void;
 }
 
@@ -155,6 +153,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     
     const isPlugin = e.dataTransfer.types.includes('application/nova-plugin') || e.dataTransfer.types.includes('pluginid');
     const isTrack = e.dataTransfer.types.includes('trackid');
+    const isAudio = e.dataTransfer.types.includes('audio-url') || e.dataTransfer.types.includes('Files');
 
     if (isPlugin) {
         setIsDragOverFX(true);
@@ -162,6 +161,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     } else if (isTrack) {
         onDragOverTrack(track.id);
         e.dataTransfer.dropEffect = 'move';
+    } else if (isAudio) {
+        e.dataTransfer.dropEffect = 'copy';
     }
   };
 
@@ -169,6 +170,25 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     e.preventDefault();
     e.stopPropagation();
     setIsDragOverFX(false);
+
+    // Audio Import (Catalog)
+    const audioUrl = e.dataTransfer.getData('audio-url');
+    if (audioUrl) {
+        const audioName = e.dataTransfer.getData('audio-name');
+        if ((window as any).DAW_CORE) {
+            (window as any).DAW_CORE.handleAudioImport(audioUrl, audioName || 'Audio', track.id);
+        }
+        return;
+    }
+
+    // Audio Import (Files)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0];
+        if ((window as any).DAW_CORE) {
+            (window as any).DAW_CORE.handleAudioImport(file, file.name, track.id);
+        }
+        return;
+    }
 
     const pluginType = e.dataTransfer.getData('pluginType') as PluginType;
     const pluginName = e.dataTransfer.getData('pluginName');
@@ -192,7 +212,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     }
   };
 
-  // --- PAN CONTROL ---
   const handlePanMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
     const startY = e.clientY;
@@ -209,7 +228,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       e.stopPropagation();
   };
 
-  // --- VOLUME CONTROL ---
   const handleVolumeInteraction = (clientX: number, rect: DOMRect) => {
       const x = clientX - rect.left;
       const progress = Math.max(0, Math.min(1, x / rect.width));
@@ -283,7 +301,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const isMidiOrSampler = track.type === TrackType.MIDI || track.type === TrackType.SAMPLER || track.type === TrackType.DRUM_RACK;
   const isAudio = track.type === TrackType.AUDIO;
 
-  // Track Icon Logic
   const getTrackIcon = () => {
       if (track.type === TrackType.MIDI) return 'fa-music';
       if (track.type === TrackType.SAMPLER) return 'fa-wave-square';
@@ -293,7 +310,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       return 'fa-wave-square';
   };
 
-  // --- SEPARATE INSTRUMENT FROM INSERTS ---
   const drumRackFakePlugin: PluginInstance | null = track.type === TrackType.DRUM_RACK ? {
       id: 'internal-drum-rack',
       name: 'Drum Rack',
@@ -316,12 +332,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={() => { setIsDragOverFX(false); }}
       onDrop={handleOnDrop}
-      className={`group border-b border-white/[0.03] p-3 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${track.isFrozen ? 'opacity-60 grayscale' : ''} ${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
+      className={`group border-b border-white/10 p-3 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${track.isFrozen ? 'opacity-60 grayscale' : ''} ${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
       style={{ borderLeft: `4px solid ${track.color}` }}
     >
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center truncate flex-1 pr-2">
-          {/* Drag Handle & Type Icon */}
           <div 
             draggable 
             onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('trackId', track.id); onDragStartTrack(track.id); }}
@@ -353,7 +368,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           </div>
         </div>
         
-        {/* BOUTONS ACTIONS (M/S/A/R/P) */}
         <div className="flex space-x-1 shrink-0">
           <button 
             onClick={handleMuteToggle}
@@ -380,7 +394,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             </button>
           )}
 
-          {/* REC BUTTON - Available for Audio AND MIDI now */}
           {(isAudio || isMidiOrSampler) && (
               <button 
                 onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }} 
@@ -394,7 +407,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       </div>
       
-      {/* ZONE DES CONTRÔLES : Panoramique, Volume */}
       <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-2 rounded-lg border border-white/5 relative z-10">
         <div 
           onMouseDown={handlePanMouseDown}
@@ -413,7 +425,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             onTouchEnd={handleVolumeTouchEnd}
             className="h-3 bg-black/60 rounded-full overflow-hidden relative cursor-ew-resize group/vol touch-none"
           >
-            {/* Jauge de volume visuelle */}
             <div 
               className={`h-full transition-all duration-75 ${isAdjustingVolume ? 'brightness-150' : 'brightness-100'}`} 
               style={{ 
@@ -429,7 +440,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       </div>
       
-      {/* SENDS PANEL (OVERLAY) */}
       {canHaveSends && showSends && (
         <div 
           className="absolute left-3 right-3 mt-1 p-2 bg-[#08090b] rounded-lg border border-cyan-500/30 shadow-2xl space-y-1 animate-in fade-in duration-150 z-20"
@@ -441,16 +451,12 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       )}
       
-      {/* INSTRUMENT SLOT (For Sampler/MIDI/DrumRack Tracks) */}
       {instrumentPlugin && (
           <div className="mt-2 relative group/inst">
               <div className="flex w-full overflow-hidden rounded-md border border-cyan-500/30 bg-cyan-500/5 shadow-[0_0_10px_rgba(0,242,255,0.05)]">
-                  {/* ICON */}
                   <div className="w-8 flex items-center justify-center bg-cyan-500/10 border-r border-cyan-500/20 pointer-events-none">
                       <i className={`fas ${instrumentPlugin.type === 'DRUM_RACK_UI' || instrumentPlugin.type === 'DRUM_SAMPLER' ? 'fa-drum' : 'fa-music'} text-[10px] text-cyan-400`}></i>
                   </div>
-
-                  {/* DISPLAY AREA (READ ONLY) */}
                   <div className="flex-1 h-8 relative border-r border-cyan-500/20 hover:bg-white/5 transition-colors">
                       <div className="absolute inset-0 flex flex-col justify-center px-2 pointer-events-none">
                           <span className="text-[9px] font-black uppercase text-cyan-100 truncate">
@@ -459,8 +465,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                           <span className="text-[7px] text-slate-500 font-mono">Instrument</span>
                       </div>
                   </div>
-
-                  {/* EDITOR BUTTON */}
                   <button
                       onClick={(e) => handleFXClick(e, instrumentPlugin)}
                       className="w-8 flex items-center justify-center bg-black/20 hover:bg-cyan-500/20 text-slate-500 hover:text-cyan-400 transition-colors"
@@ -472,7 +476,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           </div>
       )}
 
-      {/* PLUGINS GRID (Inserts) */}
       <div className="mt-2 grid grid-cols-4 gap-1">
         {insertPlugins.map(p => (
           <div 
