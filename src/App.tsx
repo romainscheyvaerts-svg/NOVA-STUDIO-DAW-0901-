@@ -695,6 +695,7 @@ export default function App() {
   }, [state.isPlaying, setVisualState]);
 
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
+  const [clipboardClip, setClipboardClip] = useState<{ clip: Clip; sourceTrackId: string } | null>(null);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);
   const [aiNotification, setAiNotification] = useState<string | null>(null);
   const [addPluginMenu, setAddPluginMenu] = useState<{ trackId: string, x: number, y: number } | null>(null);
@@ -730,30 +731,107 @@ export default function App() {
   const handleExportMix = async () => { setIsExportMenuOpen(true); };
 
   const handleEditClip = (trackId: string, clipId: string, action: string, payload?: any) => {
+    // Handle CUT and COPY outside of produce to access setClipboardClip
+    if (action === 'CUT' || action === 'COPY') {
+      const track = state.tracks.find(t => t.id === trackId);
+      if (!track) return;
+      const clip = track.clips.find(c => c.id === clipId);
+      if (!clip) return;
+
+      // Store clip in clipboard
+      setClipboardClip({ clip: { ...clip }, sourceTrackId: trackId });
+      setAiNotification(`📋 Clip "${clip.name}" copié`);
+      setTimeout(() => setAiNotification(null), 2000);
+
+      // If CUT, also delete the clip
+      if (action === 'CUT') {
+        setState(produce((draft: DAWState) => {
+          const t = draft.tracks.find(tr => tr.id === trackId);
+          if (t) {
+            t.clips = t.clips.filter(c => c.id !== clipId);
+          }
+        }));
+      }
+      return;
+    }
+
+    // Handle PASTE - needs clipboard access
+    if (action === 'PASTE') {
+      if (!clipboardClip) {
+        setAiNotification(`⚠️ Rien à coller`);
+        setTimeout(() => setAiNotification(null), 2000);
+        return;
+      }
+
+      setState(produce((draft: DAWState) => {
+        const track = draft.tracks.find(t => t.id === trackId);
+        if (!track) return;
+
+        const pasteTime = payload?.time ?? stateRef.current.currentTime;
+        const newClip: Clip = {
+          ...clipboardClip.clip,
+          id: `clip-paste-${Date.now()}`,
+          start: pasteTime,
+        };
+        track.clips.push(newClip);
+      }));
+
+      setAiNotification(`✅ Clip collé à ${payload?.time?.toFixed(2) ?? stateRef.current.currentTime.toFixed(2)}s`);
+      setTimeout(() => setAiNotification(null), 2000);
+      return;
+    }
+
     setState(produce((draft: DAWState) => {
       const track = draft.tracks.find(t => t.id === trackId);
       if (!track) return;
       let newClips = [...track.clips];
       const idx = newClips.findIndex(c => c.id === clipId);
-      if (idx === -1 && action !== 'PASTE') return;
+      if (idx === -1) return;
+
       switch(action) {
-        case 'UPDATE_PROPS': if(idx > -1) newClips[idx] = { ...newClips[idx], ...payload }; break;
-        case 'DELETE': if(idx > -1) newClips.splice(idx, 1); break;
-        case 'MUTE': if(idx > -1) newClips[idx] = { ...newClips[idx], isMuted: !newClips[idx].isMuted }; break;
-        case 'DUPLICATE': if(idx > -1) newClips.push({ ...newClips[idx], id: `clip-dup-${Date.now()}`, start: newClips[idx].start + newClips[idx].duration + 0.1 }); break;
-        case 'RENAME': if(idx > -1) newClips[idx] = { ...newClips[idx], name: payload.name }; break;
-        case 'SPLIT': 
-            if(idx > -1) {
-              const clip = newClips[idx];
-              const splitTime = payload.time;
-              if (splitTime > clip.start && splitTime < clip.start + clip.duration) {
-                  const firstDuration = splitTime - clip.start;
-                  const secondDuration = clip.duration - firstDuration;
-                  newClips[idx] = { ...clip, duration: firstDuration };
-                  newClips.push({ ...clip, id: `clip-split-${Date.now()}`, start: splitTime, duration: secondDuration, offset: clip.offset + firstDuration });
-              }
+        case 'UPDATE_PROPS':
+          if(idx > -1) newClips[idx] = { ...newClips[idx], ...payload };
+          break;
+        case 'DELETE':
+          if(idx > -1) newClips.splice(idx, 1);
+          break;
+        case 'MUTE':
+          if(idx > -1) newClips[idx] = { ...newClips[idx], isMuted: !newClips[idx].isMuted };
+          break;
+        case 'DUPLICATE':
+          if(idx > -1) newClips.push({ ...newClips[idx], id: `clip-dup-${Date.now()}`, start: newClips[idx].start + newClips[idx].duration + 0.1 });
+          break;
+        case 'RENAME':
+          if(idx > -1) newClips[idx] = { ...newClips[idx], name: payload.name };
+          break;
+        case 'SPLIT':
+          if(idx > -1) {
+            const clip = newClips[idx];
+            const splitTime = payload.time;
+            if (splitTime > clip.start && splitTime < clip.start + clip.duration) {
+              const firstDuration = splitTime - clip.start;
+              const secondDuration = clip.duration - firstDuration;
+              newClips[idx] = { ...clip, duration: firstDuration };
+              newClips.push({ ...clip, id: `clip-split-${Date.now()}`, start: splitTime, duration: secondDuration, offset: (clip.offset || 0) + firstDuration });
             }
-            break;
+          }
+          break;
+        case 'REVERSE':
+          if(idx > -1) {
+            newClips[idx] = { ...newClips[idx], isReversed: !newClips[idx].isReversed };
+          }
+          break;
+        case 'SET_GAIN':
+          if(idx > -1 && payload?.gain !== undefined) {
+            newClips[idx] = { ...newClips[idx], gain: payload.gain };
+          }
+          break;
+        case 'NORMALIZE':
+          if(idx > -1) {
+            // Reset gain to 1.0 (normalized)
+            newClips[idx] = { ...newClips[idx], gain: 1.0 };
+          }
+          break;
       }
       track.clips = newClips;
     }));
