@@ -2,7 +2,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
 import { audioEngine } from './engine/AudioEngine';
+import { audioBufferRegistry } from './services/AudioBufferRegistry';
 import TransportBar from './components/TransportBar';
+import MobilePinchZoomContainer from './components/MobilePinchZoomContainer';
+import MobileTransportFloating from './components/MobileTransportFloating';
 import ArrangementView from './components/ArrangementView';
 import MixerView from './components/MixerView';
 import PluginEditor from './components/PluginEditor';
@@ -672,7 +675,8 @@ export default function App() {
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
 
   useEffect(() => { novaBridge.connect(); }, []);
-  const stateRef = useRef(state); 
+  const stateRef = useRef(state);
+  const globalFileInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks)); }, [state.tracks]); 
   useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
@@ -947,10 +951,10 @@ export default function App() {
       setExternalImportNotice(`Chargement: ${name}...`);
       try {
           await ensureAudioEngine();
-          
+
           let audioBuffer: AudioBuffer;
           let audioRef: string;
-          
+
           if (source instanceof File) {
               audioRef = URL.createObjectURL(source);
               const arrayBuffer = await source.arrayBuffer();
@@ -962,27 +966,21 @@ export default function App() {
               const arrayBuffer = await response.arrayBuffer();
               audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
           }
-          
-          const newClip: Clip = {
-              id: `clip-${Date.now()}`,
-              name: name.replace(/\.[^/.]+$/, ''),
-              type: TrackType.AUDIO,
-              start: startTime ?? stateRef.current.currentTime,
-              duration: audioBuffer.duration,
-              offset: 0,
-              buffer: audioBuffer,
-              audioRef,
-              color: UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length],
-              fadeIn: 0,
-              fadeOut: 0,
-              gain: 1.0,
-              isMuted: false
-          };
+
+          // IMPORTANT: Register buffer in registry OUTSIDE of React state
+          // This avoids Immer proxy issues with native AudioBuffer objects
+          const bufferId = audioBufferRegistry.register(audioBuffer, audioRef);
+
+          const clipName = name.replace(/\.[^/.]+$/, '');
+          const clipId = `clip-${Date.now()}`;
+          const clipDuration = audioBuffer.duration;
+          const clipStart = startTime ?? stateRef.current.currentTime;
+          const clipColor = UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length];
 
           setState(produce((draft: DAWState) => {
               let targetTrackId: string | null = null;
               let isNewTrackNeeded = false;
-  
+
               if (forcedTrackId) {
                   targetTrackId = forcedTrackId;
               } else {
@@ -994,7 +992,24 @@ export default function App() {
                       targetTrackId = `track-audio-${Date.now()}`;
                   }
               }
-  
+
+              // Create clip WITHOUT AudioBuffer - only bufferId reference
+              const newClip: Clip = {
+                  id: clipId,
+                  name: clipName,
+                  type: TrackType.AUDIO,
+                  start: clipStart,
+                  duration: clipDuration,
+                  offset: 0,
+                  bufferId: bufferId,  // Reference to registry, NOT the actual buffer
+                  audioRef,
+                  color: clipColor,
+                  fadeIn: 0,
+                  fadeOut: 0,
+                  gain: 1.0,
+                  isMuted: false
+              };
+
               if (isNewTrackNeeded) {
                   const newTrack: Track = {
                       id: targetTrackId!,
@@ -1005,7 +1020,7 @@ export default function App() {
                       volume: 1.0, pan: 0, outputTrackId: 'master',
                       sends: [], clips: [newClip], plugins: [], automationLanes: [], totalLatency: 0
                   };
-                  draft.tracks.splice(1, 0, newTrack); // Insère la nouvelle piste après la piste 'BEAT'
+                  draft.tracks.splice(1, 0, newTrack);
                   draft.selectedTrackId = targetTrackId;
               } else {
                   const track = draft.tracks.find(t => t.id === targetTrackId);
@@ -1015,9 +1030,10 @@ export default function App() {
                   }
               }
           }));
-  
-          setExternalImportNotice(`✅ Importé: ${newClip.name}`);
-  
+
+          setExternalImportNotice(`✅ Importé: ${clipName}`);
+          console.log(`[AudioImport] Successfully imported: ${clipName} (bufferId: ${bufferId})`);
+
       } catch (e: any) {
           console.error("[Import Error]", e);
           setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
@@ -1182,6 +1198,30 @@ export default function App() {
       <TouchInteractionManager />
       <GlobalClipMenu />
 
+      {/* Floating Import Audio Button */}
+      <div className="fixed top-20 right-4 z-[100]">
+        <input
+          ref={globalFileInputRef}
+          type="file"
+          accept="audio/*,.mp3,.wav,.ogg,.flac,.aac,.m4a"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              handleUniversalAudioImport(file, file.name);
+              e.target.value = '';
+            }
+          }}
+        />
+        <button
+          onClick={() => globalFileInputRef.current?.click()}
+          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-500/25 transition-all hover:scale-105 active:scale-95 border border-emerald-400/30"
+        >
+          <i className="fas fa-file-audio"></i>
+          <span className={isMobile ? 'hidden' : ''}>Importer Audio</span>
+        </button>
+      </div>
+
       <div className="flex-1 flex overflow-hidden relative">
         {isSidebarOpen && !isMobile && (
             <aside className="shrink-0 z-10">
@@ -1256,9 +1296,10 @@ export default function App() {
             />
           )}
 
-          {/* Mobile: Mix View */}
+          {/* Mobile: Mix View with Pinch-to-Zoom */}
           {isMobile && activeMobileTab === 'MIX' && (
-             <MixerView
+            <MobilePinchZoomContainer className="flex-1">
+              <MixerView
                 tracks={state.tracks}
                 onUpdateTrack={handleUpdateTrack}
                 onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
@@ -1267,7 +1308,8 @@ export default function App() {
                 onAddBus={handleAddBus}
                 onToggleBypass={handleToggleBypass}
                 onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
-             />
+              />
+            </MobilePinchZoomContainer>
           )}
 
           {/* Mobile: Record View */}
@@ -1306,6 +1348,18 @@ export default function App() {
         </main>
       </div>
       
+      {/* Mobile: Floating Transport (visible on all tabs except REC) */}
+      {isMobile && activeMobileTab !== 'REC' && (
+        <MobileTransportFloating
+          isPlaying={state.isPlaying}
+          isRecording={state.isRecording}
+          currentTime={state.currentTime}
+          onTogglePlay={handleTogglePlay}
+          onStop={handleStop}
+          onToggleRecord={handleToggleRecord}
+        />
+      )}
+
       {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} />}
 
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}

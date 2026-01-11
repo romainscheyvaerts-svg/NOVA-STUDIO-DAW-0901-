@@ -496,13 +496,45 @@ const drawTimeline = useCallback(() => {
         if (x >= -50) ctx.fillText((i+1).toString(), x + 4, 24);
     }
 
+    // Draw playhead cursor
     const phX = timeToPixels(currentTime) - scrollX;
     if (phX >= 0 && phX <= w) {
-      ctx.strokeStyle = isRecording ? '#ef4444' : '#00f2ff';
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(phX, 0); ctx.lineTo(phX, h); ctx.stroke();
-      ctx.fillStyle = isRecording ? '#ef4444' : '#00f2ff';
-      ctx.beginPath(); ctx.moveTo(phX-5, 0); ctx.lineTo(phX+5, 0); ctx.lineTo(phX, 10); ctx.fill();
+      const playheadColor = isRecording ? '#ef4444' : '#00f2ff';
+
+      // Glow effect
+      ctx.save();
+      ctx.shadowColor = playheadColor;
+      ctx.shadowBlur = 8;
+
+      // Main line
+      ctx.strokeStyle = playheadColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(phX, 0);
+      ctx.lineTo(phX, h);
+      ctx.stroke();
+
+      // Playhead head (diamond shape)
+      ctx.fillStyle = playheadColor;
+      ctx.beginPath();
+      ctx.moveTo(phX, 0);
+      ctx.lineTo(phX - 8, 8);
+      ctx.lineTo(phX, 16);
+      ctx.lineTo(phX + 8, 8);
+      ctx.closePath();
+      ctx.fill();
+
+      // Inner highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.beginPath();
+      ctx.moveTo(phX, 2);
+      ctx.lineTo(phX - 4, 8);
+      ctx.lineTo(phX, 14);
+      ctx.lineTo(phX + 4, 8);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
     }
   }, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize, gridSize]);
 
