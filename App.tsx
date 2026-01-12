@@ -1100,8 +1100,7 @@ export default function App() {
 
       // ===== HELP =====
       {
-        key: '?',
-        shift: true,
+        key: 'h',
         action: () => setIsShortcutsModalOpen(true),
         description: 'Show Keyboard Shortcuts',
         category: 'Help',
@@ -1110,7 +1109,6 @@ export default function App() {
     ];
   }, [
     state, 
-    selectedTrack, 
     handleTogglePlay, 
     handleStop, 
     handleSeek, 

@@ -108,7 +108,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
     { id: 'bpm-down', key: 'ArrowDown', ctrl: true, description: 'BPM -1', category: 'Metronome & BPM' },
     
     // Help
-    { id: 'help', key: '?', description: 'Show This Help', category: 'Help' },
+    { id: 'help', key: 'h', description: 'Show This Help', category: 'Help' },
   ];
 
   const categories = [
@@ -176,7 +176,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
 
         <div className="mt-6 pt-4 border-t border-white/10 text-center">
           <p className="text-xs text-white/40">
-            Press <kbd className="px-2 py-0.5 text-xs bg-white/10 rounded">?</kbd> to toggle this window
+            Press <kbd className="px-2 py-0.5 text-xs bg-white/10 rounded">H</kbd> to toggle this window
           </p>
         </div>
       </div>
