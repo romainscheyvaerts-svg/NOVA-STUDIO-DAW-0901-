@@ -1212,7 +1212,429 @@ export default function App() {
     };
   }, [handleUpdateBpm, handleUpdateTrack, handleTogglePlay, handleStop, handleSeek, handleDuplicateTrack, handleCreateTrack, handleDeleteTrack, handleToggleBypass, handleLoadDrumSample, handleEditClip]);
 
-  const executeAIAction = (a: AIAction) => { /* ... */ };
+  const executeAIAction = useCallback((a: AIAction) => {
+    console.log('[AI Action]', a.action, a.payload);
+
+    switch (a.action) {
+      // === TRANSPORT ===
+      case 'PLAY':
+        handleTogglePlay();
+        break;
+      case 'STOP':
+        handleStop();
+        break;
+      case 'RECORD':
+        handleToggleRecord();
+        break;
+      case 'SEEK':
+        if (a.payload?.time !== undefined) handleSeek(a.payload.time);
+        break;
+      case 'SET_BPM':
+        if (a.payload?.bpm) handleUpdateBpm(a.payload.bpm);
+        break;
+      case 'SET_LOOP':
+        setState(prev => ({
+          ...prev,
+          isLoopActive: true,
+          loopStart: a.payload?.start ?? prev.loopStart,
+          loopEnd: a.payload?.end ?? prev.loopEnd
+        }));
+        break;
+      case 'TOGGLE_LOOP':
+        setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive }));
+        break;
+
+      // === TRACK MANAGEMENT ===
+      case 'SET_VOLUME':
+        if (a.payload?.trackId) {
+          const track = stateRef.current.tracks.find(t => t.id === a.payload.trackId);
+          if (track) handleUpdateTrack({ ...track, volume: a.payload.volume ?? track.volume });
+        }
+        break;
+      case 'SET_PAN':
+        if (a.payload?.trackId) {
+          const track = stateRef.current.tracks.find(t => t.id === a.payload.trackId);
+          if (track) handleUpdateTrack({ ...track, pan: a.payload.pan ?? track.pan });
+        }
+        break;
+      case 'MUTE_TRACK':
+        if (a.payload?.trackId) {
+          const track = stateRef.current.tracks.find(t => t.id === a.payload.trackId);
+          if (track) handleUpdateTrack({ ...track, isMuted: a.payload.isMuted ?? !track.isMuted });
+        }
+        break;
+      case 'SOLO_TRACK':
+        if (a.payload?.trackId) {
+          const track = stateRef.current.tracks.find(t => t.id === a.payload.trackId);
+          if (track) handleUpdateTrack({ ...track, isSolo: a.payload.isSolo ?? !track.isSolo });
+        }
+        break;
+      case 'RENAME_TRACK':
+        if (a.payload?.trackId && a.payload?.name) {
+          const track = stateRef.current.tracks.find(t => t.id === a.payload.trackId);
+          if (track) handleUpdateTrack({ ...track, name: a.payload.name });
+        }
+        break;
+      case 'DUPLICATE_TRACK':
+        if (a.payload?.trackId) handleDuplicateTrack(a.payload.trackId);
+        break;
+      case 'DELETE_TRACK':
+        if (a.payload?.trackId) handleDeleteTrack(a.payload.trackId);
+        break;
+      case 'ADD_TRACK':
+      case 'CREATE_TRACK':
+        handleCreateTrack(
+          a.payload?.type || TrackType.AUDIO,
+          a.payload?.name,
+          a.payload?.pluginType
+        );
+        break;
+      case 'ARM_TRACK':
+        if (a.payload?.trackId) {
+          const track = stateRef.current.tracks.find(t => t.id === a.payload.trackId);
+          if (track) handleUpdateTrack({ ...track, isTrackArmed: a.payload.isArmed ?? true });
+        }
+        break;
+      case 'SELECT_TRACK':
+        if (a.payload?.trackId) {
+          setState(prev => ({ ...prev, selectedTrackId: a.payload.trackId }));
+        }
+        break;
+
+      // === PLUGIN MANAGEMENT ===
+      case 'ADD_PLUGIN':
+      case 'OPEN_PLUGIN':
+        if (a.payload?.trackId && a.payload?.type) {
+          handleAddPluginFromContext(
+            a.payload.trackId,
+            a.payload.type as PluginType,
+            a.payload.params || {},
+            { openUI: a.action === 'OPEN_PLUGIN' }
+          );
+        }
+        break;
+      case 'REMOVE_PLUGIN':
+        if (a.payload?.trackId && a.payload?.pluginId) {
+          handleRemovePlugin(a.payload.trackId, a.payload.pluginId);
+        }
+        break;
+      case 'BYPASS_PLUGIN':
+        if (a.payload?.trackId && a.payload?.pluginId) {
+          handleToggleBypass(a.payload.trackId, a.payload.pluginId);
+        }
+        break;
+      case 'SET_PLUGIN_PARAM':
+      case 'UPDATE_PLUGIN':
+        if (a.payload?.trackId && a.payload?.pluginId && a.payload?.params) {
+          handleUpdatePluginParams(a.payload.trackId, a.payload.pluginId, a.payload.params);
+        }
+        break;
+      case 'CLOSE_PLUGIN':
+        setActivePlugin(null);
+        break;
+
+      // === CLIP OPERATIONS ===
+      case 'NORMALIZE_CLIP':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          handleEditClip(a.payload.trackId, a.payload.clipId, 'NORMALIZE');
+        }
+        break;
+      case 'SPLIT_CLIP':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          handleEditClip(a.payload.trackId, a.payload.clipId, 'SPLIT', { time: a.payload.time ?? stateRef.current.currentTime });
+        }
+        break;
+      case 'MUTE_CLIP':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          handleEditClip(a.payload.trackId, a.payload.clipId, 'MUTE');
+        }
+        break;
+      case 'DELETE_CLIP':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          handleEditClip(a.payload.trackId, a.payload.clipId, 'DELETE');
+        }
+        break;
+      case 'DUPLICATE_CLIP':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          handleEditClip(a.payload.trackId, a.payload.clipId, 'DUPLICATE');
+        }
+        break;
+      case 'SET_CLIP_GAIN':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          handleEditClip(a.payload.trackId, a.payload.clipId, 'SET_GAIN', { gain: a.payload.gain });
+        }
+        break;
+      case 'REVERSE_CLIP':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          handleEditClip(a.payload.trackId, a.payload.clipId, 'REVERSE');
+        }
+        break;
+      case 'CUT_CLIP':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          handleEditClip(a.payload.trackId, a.payload.clipId, 'CUT');
+        }
+        break;
+      case 'COPY_CLIP':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          handleEditClip(a.payload.trackId, a.payload.clipId, 'COPY');
+        }
+        break;
+      case 'PASTE_CLIP':
+        if (a.payload?.trackId) {
+          handleEditClip(a.payload.trackId, '', 'PASTE', { time: a.payload.time ?? stateRef.current.currentTime });
+        }
+        break;
+
+      // === SEND/BUS MANAGEMENT ===
+      case 'SET_SEND_LEVEL':
+        if (a.payload?.trackId && a.payload?.sendId) {
+          setState(produce((draft: DAWState) => {
+            const track = draft.tracks.find(t => t.id === a.payload.trackId);
+            if (track) {
+              const send = track.sends.find(s => s.id === a.payload.sendId);
+              if (send) {
+                send.level = a.payload.level ?? send.level;
+                send.isEnabled = a.payload.isEnabled ?? send.isEnabled;
+              }
+            }
+          }));
+        }
+        break;
+      case 'CREATE_BUS':
+        handleCreateTrack(TrackType.BUS, a.payload?.name || 'New Bus');
+        break;
+
+      // === VIEW CONTROL ===
+      case 'CHANGE_VIEW':
+        if (a.payload?.view) {
+          setState(prev => ({ ...prev, currentView: a.payload.view }));
+        }
+        break;
+
+      // === MIX PRESETS ===
+      case 'APPLY_VOCAL_CHAIN':
+        applyVocalChainPreset(a.payload?.trackId, a.payload?.preset || 'default');
+        break;
+      case 'APPLY_MIX_PRESET':
+        applyMixPreset(a.payload?.preset || 'balanced');
+        break;
+      case 'CLEAN_MIX':
+        cleanMix();
+        break;
+      case 'RESET_FX':
+        resetAllFx(a.payload?.trackId);
+        break;
+      case 'PREPARE_REC':
+        prepareForRecording(a.payload?.trackId);
+        break;
+
+      // === ANALYSIS ===
+      case 'RUN_MASTER_SYNC':
+      case 'ANALYZE_INSTRU':
+        // These would trigger the MasterSync plugin analysis
+        const instruTrack = stateRef.current.tracks.find(t => t.id === 'instrumental');
+        if (instruTrack) {
+          handleAddPluginFromContext('instrumental', 'MASTERSYNC', {}, { openUI: true });
+        }
+        break;
+
+      // === EXPORT ===
+      case 'EXPORT_MIX':
+        setIsExportMenuOpen(true);
+        break;
+
+      default:
+        console.warn('[AI Action] Unhandled action:', a.action);
+    }
+  }, [handleTogglePlay, handleStop, handleToggleRecord, handleSeek, handleUpdateBpm, setState, handleUpdateTrack, handleDuplicateTrack, handleDeleteTrack, handleCreateTrack, handleAddPluginFromContext, handleRemovePlugin, handleToggleBypass, handleUpdatePluginParams, handleEditClip]);
+
+  // === MIX PRESET FUNCTIONS ===
+  const applyVocalChainPreset = useCallback((trackId?: string, preset: string = 'default') => {
+    const targetTrackId = trackId || state.selectedTrackId || 'track-rec-main';
+    const track = stateRef.current.tracks.find(t => t.id === targetTrackId);
+    if (!track) return;
+
+    // Remove existing plugins first
+    track.plugins.forEach(p => handleRemovePlugin(targetTrackId, p.id));
+
+    // Define presets
+    const presets: Record<string, { plugins: { type: PluginType; params: Record<string, any> }[] }> = {
+      'default': {
+        plugins: [
+          { type: 'DENOISER', params: { threshold: -40, reduction: 0.7, release: 0.15 } },
+          { type: 'COMPRESSOR', params: { threshold: -18, ratio: 4, knee: 8, attack: 0.005, release: 0.15, makeupGain: 1.2 } },
+          { type: 'PROEQ12', params: { bands: [
+            { id: 0, type: 'highpass', frequency: 80, isEnabled: true, gain: 0, q: 0.7 },
+            { id: 3, type: 'peaking', frequency: 250, isEnabled: true, gain: -3, q: 1.5 },
+            { id: 6, type: 'peaking', frequency: 3000, isEnabled: true, gain: 2, q: 1.2 },
+            { id: 9, type: 'peaking', frequency: 8000, isEnabled: true, gain: 1.5, q: 1.0 }
+          ]}},
+          { type: 'DEESSER', params: { threshold: -25, frequency: 6500, q: 1.0, reduction: 0.5 } }
+        ]
+      },
+      'telephone': {
+        plugins: [
+          { type: 'PROEQ12', params: { bands: [
+            { id: 0, type: 'highpass', frequency: 400, isEnabled: true, gain: 0, q: 1.0 },
+            { id: 11, type: 'lowpass', frequency: 3500, isEnabled: true, gain: 0, q: 1.0 },
+            { id: 5, type: 'peaking', frequency: 1500, isEnabled: true, gain: 6, q: 0.8 }
+          ]}},
+          { type: 'VOCALSATURATOR', params: { drive: 40, mix: 0.6, tone: 0.3, mode: 'TUBE' } }
+        ]
+      },
+      'radio': {
+        plugins: [
+          { type: 'PROEQ12', params: { bands: [
+            { id: 0, type: 'highpass', frequency: 200, isEnabled: true, gain: 0, q: 0.7 },
+            { id: 11, type: 'lowpass', frequency: 8000, isEnabled: true, gain: 0, q: 0.7 },
+            { id: 4, type: 'peaking', frequency: 800, isEnabled: true, gain: 3, q: 1.0 }
+          ]}},
+          { type: 'COMPRESSOR', params: { threshold: -12, ratio: 6, attack: 0.001, release: 0.1 } }
+        ]
+      },
+      'aggressive': {
+        plugins: [
+          { type: 'COMPRESSOR', params: { threshold: -15, ratio: 8, knee: 4, attack: 0.001, release: 0.08, makeupGain: 1.5 } },
+          { type: 'VOCALSATURATOR', params: { drive: 50, mix: 0.4, tone: 0.2, mode: 'TAPE' } },
+          { type: 'PROEQ12', params: { bands: [
+            { id: 0, type: 'highpass', frequency: 100, isEnabled: true, gain: 0, q: 0.7 },
+            { id: 5, type: 'peaking', frequency: 2500, isEnabled: true, gain: 4, q: 1.2 },
+            { id: 8, type: 'peaking', frequency: 5000, isEnabled: true, gain: 2, q: 1.0 }
+          ]}}
+        ]
+      },
+      'soft': {
+        plugins: [
+          { type: 'DENOISER', params: { threshold: -35, reduction: 0.6, release: 0.2 } },
+          { type: 'COMPRESSOR', params: { threshold: -24, ratio: 2, knee: 20, attack: 0.02, release: 0.3 } },
+          { type: 'REVERB', params: { mix: 0.15, decay: 1.5, preDelay: 0.02, mode: 'PLATE' } },
+          { type: 'CHORUS', params: { rate: 0.8, depth: 0.2, mix: 0.15 } }
+        ]
+      },
+      'autotune': {
+        plugins: [
+          { type: 'AUTOTUNE', params: { speed: 0.0, humanize: 0.1, mix: 1.0, scale: 'CHROMATIC' } },
+          { type: 'COMPRESSOR', params: { threshold: -18, ratio: 4, attack: 0.005, release: 0.15 } },
+          { type: 'DELAY', params: { division: '1/8', feedback: 0.2, mix: 0.15 } }
+        ]
+      }
+    };
+
+    const selectedPreset = presets[preset] || presets['default'];
+
+    // Add plugins with delay to ensure proper initialization
+    selectedPreset.plugins.forEach((p, i) => {
+      setTimeout(() => {
+        handleAddPluginFromContext(targetTrackId, p.type, p.params, { openUI: false });
+      }, i * 100);
+    });
+
+    setAiNotification(`Preset vocal "${preset}" appliqué sur ${track.name}`);
+    setTimeout(() => setAiNotification(null), 3000);
+  }, [state.selectedTrackId, handleRemovePlugin, handleAddPluginFromContext]);
+
+  const applyMixPreset = useCallback((preset: string = 'balanced') => {
+    const presets: Record<string, { description: string; settings: { trackPattern: RegExp; volume: number; pan: number; sends: { id: string; level: number }[] }[] }> = {
+      'balanced': {
+        description: 'Mix équilibré standard',
+        settings: [
+          { trackPattern: /instrumental|beat/i, volume: 0.7, pan: 0, sends: [{ id: 'send-delay', level: 0.1 }, { id: 'send-verb-short', level: 0.15 }] },
+          { trackPattern: /rec|lead|main/i, volume: 1.0, pan: 0, sends: [{ id: 'send-delay', level: 0.2 }, { id: 'send-verb-short', level: 0.25 }] },
+          { trackPattern: /back|double|harm/i, volume: 0.6, pan: 0, sends: [{ id: 'send-verb-long', level: 0.3 }] }
+        ]
+      },
+      'vocal_forward': {
+        description: 'Voix en avant, instru en retrait',
+        settings: [
+          { trackPattern: /instrumental|beat/i, volume: 0.55, pan: 0, sends: [{ id: 'send-delay', level: 0.05 }] },
+          { trackPattern: /rec|lead|main/i, volume: 1.2, pan: 0, sends: [{ id: 'send-delay', level: 0.15 }, { id: 'send-verb-short', level: 0.2 }] },
+          { trackPattern: /back|double|harm/i, volume: 0.5, pan: 0, sends: [{ id: 'send-verb-short', level: 0.2 }] }
+        ]
+      },
+      'wide_stereo': {
+        description: 'Mix large et spatial',
+        settings: [
+          { trackPattern: /instrumental|beat/i, volume: 0.7, pan: 0, sends: [{ id: 'send-verb-long', level: 0.25 }] },
+          { trackPattern: /rec|lead|main/i, volume: 0.95, pan: 0, sends: [{ id: 'send-delay', level: 0.25 }, { id: 'send-verb-short', level: 0.3 }, { id: 'send-verb-long', level: 0.15 }] },
+          { trackPattern: /back.*1|double.*1|left/i, volume: 0.55, pan: -0.6, sends: [{ id: 'send-verb-long', level: 0.4 }] },
+          { trackPattern: /back.*2|double.*2|right/i, volume: 0.55, pan: 0.6, sends: [{ id: 'send-verb-long', level: 0.4 }] }
+        ]
+      }
+    };
+
+    const selectedPreset = presets[preset] || presets['balanced'];
+
+    setState(produce((draft: DAWState) => {
+      selectedPreset.settings.forEach(setting => {
+        draft.tracks.forEach(track => {
+          if (setting.trackPattern.test(track.name)) {
+            track.volume = setting.volume;
+            track.pan = setting.pan;
+            setting.sends.forEach(sendSetting => {
+              const send = track.sends.find(s => s.id === sendSetting.id);
+              if (send) {
+                send.level = sendSetting.level;
+                send.isEnabled = true;
+              }
+            });
+          }
+        });
+      });
+    }));
+
+    setAiNotification(`Preset mix "${preset}" appliqué: ${selectedPreset.description}`);
+    setTimeout(() => setAiNotification(null), 3000);
+  }, [setState]);
+
+  const cleanMix = useCallback(() => {
+    setState(produce((draft: DAWState) => {
+      draft.tracks.forEach(track => {
+        if (track.type === TrackType.AUDIO || track.type === TrackType.MIDI) {
+          track.isMuted = false;
+          track.isSolo = false;
+          track.volume = 1.0;
+          track.pan = 0;
+        }
+      });
+    }));
+    setAiNotification('Mix nettoyé: volumes et panoramiques réinitialisés');
+    setTimeout(() => setAiNotification(null), 3000);
+  }, [setState]);
+
+  const resetAllFx = useCallback((trackId?: string) => {
+    if (trackId) {
+      const track = stateRef.current.tracks.find(t => t.id === trackId);
+      if (track) {
+        track.plugins.forEach(p => handleRemovePlugin(trackId, p.id));
+        setAiNotification(`Tous les effets supprimés de ${track.name}`);
+      }
+    } else {
+      stateRef.current.tracks.forEach(track => {
+        track.plugins.forEach(p => handleRemovePlugin(track.id, p.id));
+      });
+      setAiNotification('Tous les effets supprimés de toutes les pistes');
+    }
+    setTimeout(() => setAiNotification(null), 3000);
+  }, [handleRemovePlugin]);
+
+  const prepareForRecording = useCallback((trackId?: string) => {
+    const targetTrackId = trackId || 'track-rec-main';
+    setState(produce((draft: DAWState) => {
+      // Désarmer toutes les pistes
+      draft.tracks.forEach(t => { t.isTrackArmed = false; });
+      // Armer la piste cible
+      const track = draft.tracks.find(t => t.id === targetTrackId);
+      if (track) {
+        track.isTrackArmed = true;
+        draft.selectedTrackId = targetTrackId;
+      }
+      // Mettre le curseur au début
+      draft.currentTime = 0;
+    }));
+    audioEngine.armTrack(targetTrackId);
+    setAiNotification(`Prêt à enregistrer sur ${targetTrackId}`);
+    setTimeout(() => setAiNotification(null), 3000);
+  }, [setState]);
 
   if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 

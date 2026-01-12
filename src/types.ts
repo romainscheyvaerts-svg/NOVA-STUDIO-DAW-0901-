@@ -245,39 +245,69 @@ export interface AIChatMessage {
   executedAction?: string;
 }
 
-export type AIActionType = 
-  | 'UPDATE_PLUGIN' 
-  | 'UPDATE_TRACK' 
+export type AIActionType =
+  // Track Management
+  | 'UPDATE_TRACK'
   | 'ADD_TRACK'
-  | 'CREATE_TRACK' 
-  | 'DELETE_TRACK' 
+  | 'CREATE_TRACK'
+  | 'DELETE_TRACK'
   | 'SET_VOLUME'
   | 'SET_PAN'
   | 'MUTE_TRACK'
   | 'SOLO_TRACK'
   | 'RENAME_TRACK'
+  | 'DUPLICATE_TRACK'
+  | 'ARM_TRACK'
+  // Plugin Management
+  | 'UPDATE_PLUGIN'
   | 'OPEN_PLUGIN'
   | 'CLOSE_PLUGIN'
   | 'SET_PLUGIN_PARAM'
   | 'BYPASS_PLUGIN'
+  | 'REMOVE_PLUGIN'
+  | 'ADD_PLUGIN'
+  // Send/Bus Management
   | 'SET_SEND_LEVEL'
-  | 'PREPARE_REC' 
-  | 'CLEAN_MIX'
-  | 'RESET_FX'
+  | 'CREATE_BUS'
+  | 'ROUTE_TO_BUS'
+  // Clip Operations
   | 'NORMALIZE_CLIP'
   | 'SPLIT_CLIP'
   | 'MUTE_CLIP'
+  | 'DELETE_CLIP'
+  | 'DUPLICATE_CLIP'
+  | 'SET_CLIP_GAIN'
+  | 'REVERSE_CLIP'
+  | 'CUT_CLIP'
+  | 'COPY_CLIP'
+  | 'PASTE_CLIP'
+  // Transport
   | 'PLAY'
   | 'STOP'
   | 'RECORD'
   | 'SEEK'
   | 'SET_LOOP'
+  | 'TOGGLE_LOOP'
   | 'SET_BPM'
+  // Automation
   | 'SET_AUTOMATION'
+  | 'ADD_AUTOMATION_LANE'
+  | 'ADD_AUTOMATION_POINT'
+  // Analysis & AI
   | 'RUN_MASTER_SYNC'
   | 'ANALYZE_INSTRU'
-  | 'DUPLICATE_TRACK'
-  | 'REMOVE_SILENCE'; 
+  | 'REMOVE_SILENCE'
+  // Mix Presets
+  | 'APPLY_VOCAL_CHAIN'
+  | 'APPLY_MIX_PRESET'
+  | 'CLEAN_MIX'
+  | 'RESET_FX'
+  | 'PREPARE_REC'
+  // View Control
+  | 'CHANGE_VIEW'
+  | 'SELECT_TRACK'
+  // Export
+  | 'EXPORT_MIX'; 
 
 export interface AIAction {
   action: AIActionType;
