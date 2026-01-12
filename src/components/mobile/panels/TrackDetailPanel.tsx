@@ -23,7 +23,7 @@ const TrackDetailPanel: React.FC<TrackDetailPanelProps> = ({
     );
   }
   
-  const isAudioTrack = track.type === TrackType.AUDIO || track.type.toString().includes('VOCAL');
+  const isAudioTrack = track.type === TrackType.AUDIO;
   
   return (
     <div className="p-4 pb-safe space-y-6">

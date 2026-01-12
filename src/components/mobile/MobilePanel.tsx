@@ -74,7 +74,7 @@ const MobilePanel: React.FC<MobilePanelProps> = ({
     >
       {/* Handle de drag */}
       <div 
-        className="h-8 flex items-center justify-center cursor-grab active:cursor-grabbing"
+        className="h-8 flex items-center justify-center touch-manipulation"
         onTouchStart={handleDragStart}
         onTouchMove={handleDrag}
         onTouchEnd={handleDragEnd}

@@ -8,7 +8,7 @@ interface MixerPanelProps {
 
 const MixerPanel: React.FC<MixerPanelProps> = ({ tracks, onUpdateTrack }) => {
   // Filter out send tracks for cleaner mixer view
-  const visibleTracks = tracks.filter(t => t.type !== 'SEND');
+  const visibleTracks = tracks.filter(t => t.type !== TrackType.SEND);
   
   return (
     <div className="p-4 pb-safe">

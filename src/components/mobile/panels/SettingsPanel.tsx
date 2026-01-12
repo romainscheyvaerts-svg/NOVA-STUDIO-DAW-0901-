@@ -41,7 +41,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ bpm, onBpmChange }) => {
           </div>
           <button 
             onClick={() => onBpmChange(Math.min(240, bpm + 1))}
-            className="w-14 h-14 rounded-xl bg-white/10 text-white text-2xl hover:bg-white/20 transition-colors"
+            className="w-14 h-14 rounded-xl bg-white/10 text-white text-2xl hover:bg-white/20 transition-colors active:scale-95"
           >
             +
           </button>
