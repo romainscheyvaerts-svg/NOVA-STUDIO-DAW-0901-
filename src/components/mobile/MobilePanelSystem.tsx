@@ -32,22 +32,26 @@ const MobilePanelSystem: React.FC<MobilePanelSystemProps> = ({
   const activeConfig = panels.find(p => p.id === activePanel);
   
   return (
-    <div className="fixed inset-0 flex flex-col bg-[#0a0b0d]">
+    <>
       {/* Main content - dimmed when panel is open */}
       <div 
-        className={`flex-1 transition-opacity duration-300 ${
+        className={`flex-1 flex flex-col transition-opacity duration-300 ${
           activePanel ? 'opacity-30 pointer-events-none' : 'opacity-100'
         }`}
+        style={{ 
+          marginBottom: '128px' // Space for panel bar (64px) + bottom nav (64px)
+        }}
       >
         {children}
       </div>
       
-      {/* Panel buttons bar (always visible above bottom nav) */}
+      {/* Panel buttons bar (fixed above bottom nav) */}
       <div 
-        className="h-16 bg-black/80 border-t border-white/10 flex items-center justify-around px-4 z-50"
+        className="fixed left-0 right-0 h-16 bg-black/80 border-t border-white/10 flex items-center justify-around px-4 z-50"
         style={{
-          paddingBottom: 'max(0px, env(safe-area-inset-bottom))',
-          marginBottom: '64px' // Space for bottom nav
+          bottom: '64px', // Height of bottom nav
+          paddingLeft: 'max(16px, env(safe-area-inset-left))',
+          paddingRight: 'max(16px, env(safe-area-inset-right))',
         }}
       >
         {panels.map(panel => (
@@ -61,7 +65,7 @@ const MobilePanelSystem: React.FC<MobilePanelSystemProps> = ({
             }`}
           >
             <i className={`fas ${panel.icon} text-lg`}></i>
-            <span className="text-[9px] mt-1 font-bold">{panel.title}</span>
+            <span className="text-[9px] mt-1 font-bold uppercase">{panel.title}</span>
           </button>
         ))}
       </div>
@@ -76,7 +80,7 @@ const MobilePanelSystem: React.FC<MobilePanelSystemProps> = ({
           componentProps={panelProps[activePanel] || {}}
         />
       )}
-    </div>
+    </>
   );
 };
 
