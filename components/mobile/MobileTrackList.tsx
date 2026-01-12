@@ -8,7 +8,7 @@ interface MobileTrackListProps {
 
 const MobileTrackList: React.FC<MobileTrackListProps> = ({ tracks, onSelectTrack }) => {
   // Filter out send and bus tracks for cleaner mobile view
-  const displayTracks = tracks.filter(t => t.type !== 'SEND' && t.type !== 'BUS' || t.id === 'bus-vox');
+  const displayTracks = tracks.filter(t => (t.type !== 'SEND' && t.type !== 'BUS') || t.id === 'bus-vox');
 
   return (
     <div className="flex flex-col gap-2 p-4 overflow-y-auto">

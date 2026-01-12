@@ -8,7 +8,7 @@ interface MobileBottomNavProps {
 
 const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onChangeTab }) => {
   const tabs: Array<{ id: MobileTab; icon: string; label: string }> = [
-    { id: 'PROJECT', icon: 'fa-layer-group', label: 'Pistes' },
+    { id: 'PROJECT', icon: 'fa-layer-group', label: 'Tracks' },
     { id: 'MIXER', icon: 'fa-sliders-h', label: 'Mix' },
     { id: 'NOVA', icon: 'fa-robot', label: 'AI' },
     { id: 'AUTOMATION', icon: 'fa-wave-square', label: 'Auto' },

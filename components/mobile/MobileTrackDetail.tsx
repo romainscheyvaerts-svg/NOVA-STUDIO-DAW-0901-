@@ -65,9 +65,6 @@ const MobileTrackDetail: React.FC<MobileTrackDetailProps> = ({ track, onClose, o
             value={track.volume}
             onChange={(e) => onUpdate({ ...track, volume: parseFloat(e.target.value) })}
             className="w-full h-12 appearance-none bg-white/10 rounded-full cursor-pointer"
-            style={{
-              WebkitAppearance: 'none',
-            }}
           />
           <div className="text-center text-white text-2xl font-bold mt-2">
             {Math.round(track.volume * 100)}%
@@ -85,9 +82,6 @@ const MobileTrackDetail: React.FC<MobileTrackDetailProps> = ({ track, onClose, o
             value={track.pan}
             onChange={(e) => onUpdate({ ...track, pan: parseFloat(e.target.value) })}
             className="w-full h-12 appearance-none bg-white/10 rounded-full cursor-pointer"
-            style={{
-              WebkitAppearance: 'none',
-            }}
           />
           <div className="text-center text-white text-lg font-bold mt-2">
             {track.pan === 0 
@@ -125,7 +119,7 @@ const MobileTrackDetail: React.FC<MobileTrackDetailProps> = ({ track, onClose, o
               </div>
             ))}
             {track.plugins.length === 0 && (
-              <div className="text-white/30 text-center py-4">Aucun plugin</div>
+              <div className="text-white/30 text-center py-4">No plugins</div>
             )}
           </div>
         </div>
