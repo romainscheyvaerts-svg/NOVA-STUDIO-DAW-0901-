@@ -414,12 +414,7 @@ export class AudioEngine {
       if (dsp.sampler) dsp.sampler.stopAll();
       if (dsp.drumSampler) dsp.drumSampler.stop();
       if (dsp.melodicSampler) dsp.melodicSampler.stopAll();
-      if (dsp.drumRack) {
-        // DrumRack typically doesn't need release, but stop any hanging notes
-        for (let i = 0; i < 30; i++) {
-          // If DrumRack has a stop method for individual pads, call it
-        }
-      }
+      // DrumRack is typically one-shot and doesn't need explicit panic
     });
   }
 

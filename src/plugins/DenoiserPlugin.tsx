@@ -37,6 +37,9 @@ export class DenoiserNode {
   private processingInterval: number | null = null;
   private timeDomainData: Uint8Array;
 
+  private static readonly PROCESSING_INTERVAL_MS = 20;
+  private static readonly PROCESSING_INTERVAL_SEC = 0.02;
+
   private params: DenoiserParams = {
     threshold: -40,
     range: -40,
@@ -88,12 +91,12 @@ export class DenoiserNode {
 
   private startProcessing() {
     // Use setInterval instead of deprecated ScriptProcessorNode
-    this.processingInterval = window.setInterval(() => this.process(), 20);
+    this.processingInterval = window.setInterval(() => this.process(), DenoiserNode.PROCESSING_INTERVAL_MS);
   }
 
   private process() {
     if (!this.params.isEnabled) {
-      this.gainNode.gain.setTargetAtTime(1.0, this.ctx.currentTime, 0.02);
+      this.gainNode.gain.setTargetAtTime(1.0, this.ctx.currentTime, DenoiserNode.PROCESSING_INTERVAL_SEC);
       this.currentGain = 1.0;
       return;
     }
@@ -118,15 +121,15 @@ export class DenoiserNode {
     }
     
     const timeConstant = targetGain < this.currentGain ? this.params.attack : this.params.release;
-    const alpha = 1 - Math.exp(-0.02 / timeConstant);
+    const alpha = 1 - Math.exp(-DenoiserNode.PROCESSING_INTERVAL_SEC / timeConstant);
     this.currentGain += (targetGain - this.currentGain) * alpha;
     
-    this.gainNode.gain.setTargetAtTime(this.currentGain, this.ctx.currentTime, 0.02);
+    this.gainNode.gain.setTargetAtTime(this.currentGain, this.ctx.currentTime, DenoiserNode.PROCESSING_INTERVAL_SEC);
   }
 
   public updateParams(p: Partial<DenoiserParams>) {
     this.params = { ...this.params, ...p };
-    this.sideChainFilter.frequency.setTargetAtTime(this.params.scFreq, this.ctx.currentTime, 0.02);
+    this.sideChainFilter.frequency.setTargetAtTime(this.params.scFreq, this.ctx.currentTime, DenoiserNode.PROCESSING_INTERVAL_SEC);
   }
 
   public getStatus() {

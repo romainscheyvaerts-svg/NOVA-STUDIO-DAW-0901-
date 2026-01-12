@@ -123,16 +123,27 @@ export class ProjectIO {
    * Validate and provide default values for project state to prevent crashes
    */
   private static validateProjectState(state: any): DAWState {
-    const validatedState: any = {
+    const validatedState: DAWState = {
+      id: typeof state.id === 'string' ? state.id : `project-${Date.now()}`,
+      name: typeof state.name === 'string' ? state.name : 'Untitled Project',
       tracks: Array.isArray(state.tracks) ? state.tracks : [],
       bpm: typeof state.bpm === 'number' && state.bpm > 0 ? state.bpm : 120,
+      projectKey: typeof state.projectKey === 'number' ? state.projectKey : undefined,
+      projectScale: typeof state.projectScale === 'string' ? state.projectScale : undefined,
       currentTime: typeof state.currentTime === 'number' ? state.currentTime : 0,
       isPlaying: typeof state.isPlaying === 'boolean' ? state.isPlaying : false,
-      masterVolume: typeof state.masterVolume === 'number' ? state.masterVolume : 0.8,
-      projectName: typeof state.projectName === 'string' ? state.projectName : 'Untitled Project',
+      isRecording: typeof state.isRecording === 'boolean' ? state.isRecording : false,
       isLoopActive: typeof state.isLoopActive === 'boolean' ? state.isLoopActive : false,
       loopStart: typeof state.loopStart === 'number' ? state.loopStart : 0,
       loopEnd: typeof state.loopEnd === 'number' ? state.loopEnd : 8,
+      selectedTrackId: typeof state.selectedTrackId === 'string' ? state.selectedTrackId : null,
+      currentView: state.currentView || 'ARRANGER',
+      projectPhase: state.projectPhase || 'MIXING',
+      isLowLatencyMode: typeof state.isLowLatencyMode === 'boolean' ? state.isLowLatencyMode : false,
+      isRecModeActive: typeof state.isRecModeActive === 'boolean' ? state.isRecModeActive : false,
+      systemMaxLatency: typeof state.systemMaxLatency === 'number' ? state.systemMaxLatency : 0.1,
+      recStartTime: typeof state.recStartTime === 'number' ? state.recStartTime : null,
+      isDelayCompEnabled: typeof state.isDelayCompEnabled === 'boolean' ? state.isDelayCompEnabled : false,
     };
 
     // Validate tracks
