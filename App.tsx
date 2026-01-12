@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
@@ -20,6 +20,7 @@ import LoadProjectModal from './components/LoadProjectModal';
 import ExportModal from './components/ExportModal'; 
 import AudioSettingsPanel from './components/AudioSettingsPanel'; 
 import PluginManager from './components/PluginManager'; 
+import KeyboardShortcutsModal from './src/components/KeyboardShortcutsModal';
 import { supabaseManager } from './services/SupabaseManager';
 import { SessionSerializer } from './services/SessionSerializer';
 import { getAIProductionAssistance } from './services/AIService';
@@ -31,6 +32,7 @@ import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
+import { useKeyboardShortcuts, ShortcutAction } from './src/hooks/useKeyboardShortcuts';
 
 // ... (Les fonctions `AVAILABLE_FX_MENU`, `createDefaultAutomation`, `createDefaultPlugins`, etc. restent identiques)
 
@@ -260,6 +262,7 @@ export default function App() {
   const [midiEditorOpen, setMidiEditorOpen] = useState<{trackId: string, clipId: string} | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeSideBrowserTab, setActiveSideBrowserTab] = useState<'STORE' | 'LOCAL' | 'FW' | 'BRIDGE'>('STORE');
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
 
   useEffect(() => {
       const u = supabaseManager.getUser();
@@ -857,6 +860,284 @@ export default function App() {
 
   const executeAIAction = (a: AIAction) => { /* ... */ };
 
+  // Keyboard Shortcuts Configuration
+  const shortcuts = useMemo<ShortcutAction[]>(() => {
+    const selectedTrack = state.tracks.find(t => t.id === state.selectedTrackId);
+    const selectedTrackIndex = state.tracks.findIndex(t => t.id === state.selectedTrackId);
+
+    return [
+      // ===== TRANSPORT =====
+      {
+        key: ' ',
+        action: handleTogglePlay,
+        description: 'Play/Pause',
+        category: 'Transport'
+      },
+      {
+        key: 'Enter',
+        action: () => {
+          handleStop();
+          handleSeek(0);
+        },
+        description: 'Stop & Return to Start',
+        category: 'Transport'
+      },
+      {
+        key: 'r',
+        action: handleToggleRecord,
+        description: 'Toggle Record',
+        category: 'Transport'
+      },
+      {
+        key: 'l',
+        action: () => setState(p => ({ ...p, isLoopActive: !p.isLoopActive })),
+        description: 'Toggle Loop',
+        category: 'Transport'
+      },
+      {
+        key: 'Home',
+        action: () => handleSeek(0),
+        description: 'Go to Start',
+        category: 'Transport'
+      },
+      {
+        key: 'End',
+        action: () => {
+          // Go to the end of the longest clip
+          const maxDuration = Math.max(...state.tracks.flatMap(t => t.clips.map(c => c.start + c.duration)), state.loopEnd, 16);
+          handleSeek(maxDuration);
+        },
+        description: 'Go to End',
+        category: 'Transport'
+      },
+
+      // ===== ZOOM & NAVIGATION =====
+      // Note: Zoom functionality would need to be implemented in ArrangementView
+      
+      // ===== TRACKS =====
+      {
+        key: 'n',
+        ctrl: true,
+        shift: true,
+        action: () => handleCreateTrack(TrackType.AUDIO),
+        description: 'New Audio Track',
+        category: 'Tracks'
+      },
+      {
+        key: 'm',
+        ctrl: true,
+        shift: true,
+        action: () => handleCreateTrack(TrackType.MIDI),
+        description: 'New MIDI Track',
+        category: 'Tracks'
+      },
+      {
+        key: 'd',
+        ctrl: true,
+        action: () => {
+          if (selectedTrack) handleDuplicateTrack(selectedTrack.id);
+        },
+        description: 'Duplicate Track',
+        category: 'Tracks'
+      },
+      {
+        key: 'Delete',
+        action: () => {
+          if (selectedTrack) handleDeleteTrack(selectedTrack.id);
+        },
+        description: 'Delete Track',
+        category: 'Tracks'
+      },
+      {
+        key: 'm',
+        action: () => {
+          if (selectedTrack) {
+            handleUpdateTrack({ ...selectedTrack, isMuted: !selectedTrack.isMuted });
+          }
+        },
+        description: 'Mute Track',
+        category: 'Tracks'
+      },
+      {
+        key: 's',
+        action: () => {
+          if (selectedTrack) {
+            handleUpdateTrack({ ...selectedTrack, isSolo: !selectedTrack.isSolo });
+          }
+        },
+        description: 'Solo Track',
+        category: 'Tracks'
+      },
+      {
+        key: 'r',
+        shift: true,
+        action: () => {
+          if (selectedTrack) {
+            handleUpdateTrack({ ...selectedTrack, isTrackArmed: !selectedTrack.isTrackArmed });
+          }
+        },
+        description: 'Arm Track',
+        category: 'Tracks'
+      },
+      {
+        key: 'ArrowUp',
+        action: () => {
+          if (selectedTrackIndex > 0) {
+            setState(p => ({ ...p, selectedTrackId: state.tracks[selectedTrackIndex - 1].id }));
+          }
+        },
+        description: 'Previous Track',
+        category: 'Tracks'
+      },
+      {
+        key: 'ArrowDown',
+        action: () => {
+          if (selectedTrackIndex < state.tracks.length - 1) {
+            setState(p => ({ ...p, selectedTrackId: state.tracks[selectedTrackIndex + 1].id }));
+          }
+        },
+        description: 'Next Track',
+        category: 'Tracks'
+      },
+
+      // ===== EDITING =====
+      {
+        key: 'z',
+        ctrl: true,
+        action: undo,
+        description: 'Undo',
+        category: 'Editing'
+      },
+      {
+        key: 'z',
+        ctrl: true,
+        shift: true,
+        action: redo,
+        description: 'Redo',
+        category: 'Editing'
+      },
+      {
+        key: 'Escape',
+        action: () => {
+          // Close active plugin or deselect
+          if (activePlugin) {
+            setActivePlugin(null);
+          }
+        },
+        description: 'Close/Deselect',
+        category: 'Editing'
+      },
+
+      // ===== VIEWS =====
+      {
+        key: '1',
+        action: () => setState(s => ({ ...s, currentView: 'ARRANGEMENT' })),
+        description: 'Arrangement View',
+        category: 'Views'
+      },
+      {
+        key: '2',
+        action: () => setState(s => ({ ...s, currentView: 'MIXER' })),
+        description: 'Mixer View',
+        category: 'Views'
+      },
+      {
+        key: '3',
+        action: () => setState(s => ({ ...s, currentView: 'AUTOMATION' })),
+        description: 'Automation View',
+        category: 'Views'
+      },
+      {
+        key: 'x',
+        action: () => {
+          const newView = state.currentView === 'MIXER' ? 'ARRANGEMENT' : 'MIXER';
+          setState(s => ({ ...s, currentView: newView }));
+        },
+        description: 'Toggle Mixer',
+        category: 'Views'
+      },
+
+      // ===== FILES & PROJECT =====
+      {
+        key: 's',
+        ctrl: true,
+        action: () => setIsSaveMenuOpen(true),
+        description: 'Save Project',
+        category: 'Files'
+      },
+      {
+        key: 's',
+        ctrl: true,
+        shift: true,
+        action: () => setIsSaveMenuOpen(true),
+        description: 'Save As',
+        category: 'Files'
+      },
+      {
+        key: 'e',
+        ctrl: true,
+        shift: true,
+        action: () => setIsExportMenuOpen(true),
+        description: 'Export Audio',
+        category: 'Files'
+      },
+
+      // ===== METRONOME & BPM =====
+      {
+        key: 'ArrowUp',
+        ctrl: true,
+        action: () => handleUpdateBpm(state.bpm + 1),
+        description: 'BPM +1',
+        category: 'BPM'
+      },
+      {
+        key: 'ArrowDown',
+        ctrl: true,
+        action: () => handleUpdateBpm(state.bpm - 1),
+        description: 'BPM -1',
+        category: 'BPM'
+      },
+
+      // ===== HELP =====
+      {
+        key: '?',
+        shift: true,
+        action: () => setIsShortcutsModalOpen(true),
+        description: 'Show Keyboard Shortcuts',
+        category: 'Help',
+        preventBrowserDefault: true
+      }
+    ];
+  }, [
+    state, 
+    selectedTrack, 
+    handleTogglePlay, 
+    handleStop, 
+    handleSeek, 
+    handleToggleRecord, 
+    handleCreateTrack, 
+    handleDuplicateTrack, 
+    handleDeleteTrack, 
+    handleUpdateTrack, 
+    handleUpdateBpm, 
+    setState, 
+    undo, 
+    redo, 
+    activePlugin, 
+    setActivePlugin,
+    setIsSaveMenuOpen,
+    setIsExportMenuOpen,
+    setIsShortcutsModalOpen
+  ]);
+
+  // Enable shortcuts only when no modals are open
+  const shortcutsEnabled = !isSaveMenuOpen && !isLoadMenuOpen && !isExportMenuOpen && 
+                           !isAuthOpen && !isShareModalOpen && !isPluginManagerOpen && 
+                           !isAudioSettingsOpen && !midiEditorOpen && !isShortcutsModalOpen;
+  
+  useKeyboardShortcuts(shortcuts, shortcutsEnabled);
+
+
   if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 
   return (
@@ -967,6 +1248,8 @@ export default function App() {
       </div>
       
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
+      
+      {isShortcutsModalOpen && <KeyboardShortcutsModal isOpen={isShortcutsModalOpen} onClose={() => setIsShortcutsModalOpen(false)} />}
     </div>
   );
 }
