@@ -90,6 +90,12 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [isDraggingMinimap, setIsDraggingMinimap] = useState(false);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
 
+  // Modular toolbar state
+  const [showTools, setShowTools] = useState(true);
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [showZoom, setShowZoom] = useState(true);
+  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
+
   const isShiftDownRef = useRef(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -567,8 +573,8 @@ const drawTimeline = useCallback(() => {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative select-none" onContextMenu={e => e.preventDefault()}>
-      {/* Toolbar - scrollable on mobile */}
-      <div className="h-12 flex items-center px-2 md:px-4 gap-2 md:gap-4 z-30 shrink-0 overflow-x-auto scrollbar-hide">
+      {/* Toolbar - scrollable on mobile with modular sections */}
+      <div className="h-12 flex items-center px-2 md:px-4 gap-2 md:gap-3 z-30 shrink-0 overflow-x-auto scrollbar-hide">
         {/* Toggle Sidebar Button */}
         <button
           onClick={() => setIsSidebarVisible(!isSidebarVisible)}
@@ -578,27 +584,84 @@ const drawTimeline = useCallback(() => {
           <i className={`fas ${isSidebarVisible ? 'fa-chevron-left' : 'fa-chevron-right'} text-[10px]`}></i>
         </button>
 
-        <div className="flex items-center space-x-2 md:space-x-4 shrink-0">
-          <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
-            <button onClick={() => setActiveTool('SELECT')} className={`w-8 h-8 rounded-md flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black' : 'text-slate-500 hover:text-white'}`} title="Smart Tool (1)"><i className="fas fa-mouse-pointer text-[10px]"></i></button>
-            <button onClick={() => setActiveTool('SPLIT')} className={`w-8 h-8 rounded-md flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black' : 'text-slate-500 hover:text-white'}`} title="Split Tool (2)"><i className="fas fa-cut text-[10px]"></i></button>
-            <button onClick={() => setActiveTool('ERASE')} className={`w-8 h-8 rounded-md flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Erase Tool (3)"><i className="fas fa-eraser text-[10px]"></i></button>
-          </div>
-          <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-3 md:px-4 py-2 rounded-xl border transition-all text-[9px] font-black uppercase tracking-widest whitespace-nowrap ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-white/5 border-white/10 text-slate-500'}`}>
-            <i className="fas fa-magnet mr-1 md:mr-2"></i> <span className="hidden sm:inline">{snapEnabled ? 'Snap ON' : 'Snap OFF'}</span><span className="sm:hidden">Snap</span>
-          </button>
-        </div>
-        <div className="flex-1 h-full py-2 px-2 md:px-4 flex items-center min-w-[100px] justify-center">
-            <div
-              className={`w-full h-full max-w-4xl bg-black/40 border border-white/10 rounded overflow-hidden relative group ${isDraggingMinimap ? 'cursor-grabbing' : 'cursor-grab'}`}
-              onMouseDown={handleMinimapMouseDown}
-            >
-                 <canvas ref={minimapRef} className="w-full h-full block" />
+        {/* Tools Section - Collapsible */}
+        {showTools && (
+          <div className="flex items-center space-x-2 shrink-0">
+            <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
+              <button onClick={() => setActiveTool('SELECT')} className={`w-8 h-8 rounded-md flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black' : 'text-slate-500 hover:text-white'}`} title="Smart Tool (1)"><i className="fas fa-mouse-pointer text-[10px]"></i></button>
+              <button onClick={() => setActiveTool('SPLIT')} className={`w-8 h-8 rounded-md flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black' : 'text-slate-500 hover:text-white'}`} title="Split Tool (2)"><i className="fas fa-cut text-[10px]"></i></button>
+              <button onClick={() => setActiveTool('ERASE')} className={`w-8 h-8 rounded-md flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Erase Tool (3)"><i className="fas fa-eraser text-[10px]"></i></button>
             </div>
-        </div>
-        <div className="flex items-center space-x-2 md:space-x-3 shrink-0">
-             <i className="fas fa-search-plus text-[10px] text-slate-500"></i>
-             <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-16 md:w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
+            <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-2 py-1.5 rounded-lg border transition-all text-[9px] font-black uppercase whitespace-nowrap ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-white/5 border-white/10 text-slate-500'}`}>
+              <i className="fas fa-magnet"></i>
+            </button>
+          </div>
+        )}
+
+        {/* Minimap Section - Collapsible */}
+        {showMinimap && (
+          <div className="flex-1 h-full py-2 px-1 flex items-center min-w-[80px] justify-center">
+              <div
+                className={`w-full h-full max-w-4xl bg-black/40 border border-white/10 rounded overflow-hidden relative group ${isDraggingMinimap ? 'cursor-grabbing' : 'cursor-grab'}`}
+                onMouseDown={handleMinimapMouseDown}
+              >
+                   <canvas ref={minimapRef} className="w-full h-full block" />
+              </div>
+          </div>
+        )}
+
+        {/* Zoom Section - Collapsible */}
+        {showZoom && (
+          <div className="flex items-center space-x-2 shrink-0">
+               <i className="fas fa-search-plus text-[10px] text-slate-500"></i>
+               <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-14 md:w-20 accent-cyan-500 h-1 bg-white/5 rounded-full" />
+          </div>
+        )}
+
+        {/* Toolbar Settings Menu */}
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setToolbarMenuOpen(!toolbarMenuOpen)}
+            className="w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 transition-all"
+            title="Afficher/Masquer modules"
+          >
+            <i className="fas fa-ellipsis-v text-[10px]"></i>
+          </button>
+          {toolbarMenuOpen && (
+            <div className="absolute top-10 right-0 bg-[#14161a] border border-white/10 rounded-xl shadow-2xl p-2 min-w-[160px] z-50">
+              <div className="text-[8px] font-black uppercase text-slate-500 px-2 py-1 tracking-wider">Modules</div>
+              <button
+                onClick={() => setShowTools(!showTools)}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-medium transition-all ${showTools ? 'text-cyan-400 bg-cyan-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+              >
+                <span><i className="fas fa-tools mr-2"></i>Outils</span>
+                <i className={`fas ${showTools ? 'fa-eye' : 'fa-eye-slash'} text-[8px]`}></i>
+              </button>
+              <button
+                onClick={() => setShowMinimap(!showMinimap)}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-medium transition-all ${showMinimap ? 'text-cyan-400 bg-cyan-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+              >
+                <span><i className="fas fa-map mr-2"></i>Minimap</span>
+                <i className={`fas ${showMinimap ? 'fa-eye' : 'fa-eye-slash'} text-[8px]`}></i>
+              </button>
+              <button
+                onClick={() => setShowZoom(!showZoom)}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-medium transition-all ${showZoom ? 'text-cyan-400 bg-cyan-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+              >
+                <span><i className="fas fa-search-plus mr-2"></i>Zoom</span>
+                <i className={`fas ${showZoom ? 'fa-eye' : 'fa-eye-slash'} text-[8px]`}></i>
+              </button>
+              <div className="border-t border-white/5 mt-2 pt-2">
+                <button
+                  onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-medium transition-all ${isSidebarVisible ? 'text-cyan-400 bg-cyan-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+                >
+                  <span><i className="fas fa-columns mr-2"></i>Sidebar</span>
+                  <i className={`fas ${isSidebarVisible ? 'fa-eye' : 'fa-eye-slash'} text-[8px]`}></i>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       {/* Add CSS for hiding scrollbar */}

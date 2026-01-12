@@ -96,10 +96,14 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
   };
 
   const QUICK_ACTIONS = [
-    { label: 'Caler Instru', icon: 'fa-sync-alt', msg: 'Analyse mon instru et cale le BPM' },
-    { label: 'Effet Téléphone', icon: 'fa-phone', msg: 'Donne un effet téléphone à ma voix' },
-    { label: 'Nettoyer Voix', icon: 'fa-broom', msg: 'Nettoie ma voix, enlève la boue' },
-    { label: 'Reset Mix', icon: 'fa-undo', msg: 'Reset tous mes effets' },
+    { label: 'Prépare Session', icon: 'fa-layer-group', msg: 'Prépare-moi une session complète avec doubles, backs, ad-libs' },
+    { label: 'Auto Mix', icon: 'fa-magic', msg: 'Applique un mix équilibré automatique' },
+    { label: 'Nettoyer Voix', icon: 'fa-broom', msg: 'Nettoie ma voix: enlève le souffle et la boue' },
+    { label: 'Autotune', icon: 'fa-microphone', msg: 'Applique un autotune style T-Pain sur ma voix' },
+    { label: 'Coach moi', icon: 'fa-user-graduate', msg: 'Je viens de finir mon lead, guide-moi pour la suite' },
+    { label: 'Téléphone', icon: 'fa-phone', msg: 'Donne un effet téléphone vintage à ma voix' },
+    { label: 'Voix Agressive', icon: 'fa-fire', msg: 'Rends ma voix plus agressive et percutante' },
+    { label: 'Export', icon: 'fa-download', msg: 'Exporte mon mix final' },
   ];
 
   const containerClass = isMobile 
