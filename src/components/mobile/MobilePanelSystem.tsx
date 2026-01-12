@@ -34,16 +34,17 @@ const MobilePanelSystem: React.FC<MobilePanelSystemProps> = ({
   return (
     <>
       {/* Main content - dimmed when panel is open */}
-      <div 
-        className={`flex-1 flex flex-col transition-opacity duration-300 ${
-          activePanel ? 'opacity-30 pointer-events-none' : 'opacity-100'
-        }`}
-        style={{ 
-          marginBottom: '128px' // Space for panel bar (64px) + bottom nav (64px)
-        }}
-      >
-        {children}
-      </div>
+      {/* Masquer complètement le contenu principal si un panneau est ouvert */}
+      {!activePanel && (
+        <div 
+          className="flex-1 flex flex-col"
+          style={{ 
+            marginBottom: '128px' // Space for panel bar (64px) + bottom nav (64px)
+          }}
+        >
+          {children}
+        </div>
+      )}
       
       {/* Panel buttons bar (fixed above bottom nav) */}
       <div 
