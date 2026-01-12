@@ -34,7 +34,11 @@ export class DenoiserNode {
   private gainNode: GainNode;
   private sideChainFilter: BiquadFilterNode;
   private analyzer: AnalyserNode;
-  private processor: ScriptProcessorNode;
+  private processingInterval: number | null = null;
+  private timeDomainData: Uint8Array;
+
+  private static readonly PROCESSING_INTERVAL_MS = 20;
+  private static readonly PROCESSING_INTERVAL_SEC = 0.02;
 
   private params: DenoiserParams = {
     threshold: -40,
@@ -68,10 +72,12 @@ export class DenoiserNode {
     
     // Analyzer for level detection
     this.analyzer = ctx.createAnalyser();
-    this.analyzer.fftSize = 512;
-    this.processor = ctx.createScriptProcessor(2048, 1, 1);
-    this.processor.onaudioprocess = (e) => this.process(e);
+    this.analyzer.fftSize = 2048;
+    this.analyzer.smoothingTimeConstant = 0.8;
+    this.timeDomainData = new Uint8Array(this.analyzer.frequencyBinCount);
+    
     this.setupChain();
+    this.startProcessing();
   }
 
   private setupChain() {
@@ -81,23 +87,30 @@ export class DenoiserNode {
     
     this.input.connect(this.sideChainFilter);
     this.sideChainFilter.connect(this.analyzer);
-    this.sideChainFilter.connect(this.processor);
-    
-    // FIX: Connect processor to the plugin's output instead of the global destination
-    this.processor.connect(this.output);
   }
 
-  private process(e: AudioProcessingEvent) {
-    const input = e.inputBuffer.getChannelData(0);
+  private startProcessing() {
+    // Use setInterval instead of deprecated ScriptProcessorNode
+    this.processingInterval = window.setInterval(() => this.process(), DenoiserNode.PROCESSING_INTERVAL_MS);
+  }
+
+  private process() {
     if (!this.params.isEnabled) {
-      this.gainNode.gain.setTargetAtTime(1.0, this.ctx.currentTime, 0.01);
+      this.gainNode.gain.setTargetAtTime(1.0, this.ctx.currentTime, DenoiserNode.PROCESSING_INTERVAL_SEC);
       this.currentGain = 1.0;
       return;
     }
     
+    // Get audio data from analyzer
+    this.analyzer.getByteTimeDomainData(this.timeDomainData);
+    
+    // Calculate RMS from time domain data
     let sum = 0;
-    for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
-    const rms = Math.sqrt(sum / input.length);
+    for (let i = 0; i < this.timeDomainData.length; i++) {
+      const normalized = (this.timeDomainData[i] - 128) / 128;
+      sum += normalized * normalized;
+    }
+    const rms = Math.sqrt(sum / this.timeDomainData.length);
     const db = 20 * Math.log10(Math.max(rms, 0.00001));
     this.noiseLevel = db;
     
@@ -107,16 +120,16 @@ export class DenoiserNode {
       targetGain = Math.max(0.01, 1.0 - (this.params.reduction * (diff / 20))); 
     }
     
-    const timeConstant = targetGain < this.currentGain ? 0.005 : this.params.release;
-    const alpha = 1 - Math.exp(-input.length / (this.ctx.sampleRate * timeConstant));
+    const timeConstant = targetGain < this.currentGain ? this.params.attack : this.params.release;
+    const alpha = 1 - Math.exp(-DenoiserNode.PROCESSING_INTERVAL_SEC / timeConstant);
     this.currentGain += (targetGain - this.currentGain) * alpha;
     
-    this.gainNode.gain.setTargetAtTime(this.currentGain, this.ctx.currentTime, 0.01);
+    this.gainNode.gain.setTargetAtTime(this.currentGain, this.ctx.currentTime, DenoiserNode.PROCESSING_INTERVAL_SEC);
   }
 
   public updateParams(p: Partial<DenoiserParams>) {
     this.params = { ...this.params, ...p };
-    this.sideChainFilter.frequency.setTargetAtTime(this.params.scFreq, this.ctx.currentTime, 0.01);
+    this.sideChainFilter.frequency.setTargetAtTime(this.params.scFreq, this.ctx.currentTime, DenoiserNode.PROCESSING_INTERVAL_SEC);
   }
 
   public getStatus() {
@@ -126,11 +139,15 @@ export class DenoiserNode {
   public getParams() { return { ...this.params }; }
 
   public dispose() {
+    if (this.processingInterval !== null) {
+      clearInterval(this.processingInterval);
+      this.processingInterval = null;
+    }
     try {
-      this.processor.disconnect();
       this.input.disconnect();
       this.gainNode.disconnect();
       this.sideChainFilter.disconnect();
+      this.analyzer.disconnect();
     } catch(e) {}
   }
 }

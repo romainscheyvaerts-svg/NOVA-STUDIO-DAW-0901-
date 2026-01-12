@@ -142,10 +142,10 @@ export class AudioEngine {
     this.masterSplitter = this.ctx.createChannelSplitter(2);
     this.masterAnalyzerL = this.ctx.createAnalyser();
     this.masterAnalyzerR = this.ctx.createAnalyser();
-    this.masterAnalyzerL.fftSize = 1024; 
-    this.masterAnalyzerR.fftSize = 1024;
-    this.masterAnalyzerL.smoothingTimeConstant = 0.5;
-    this.masterAnalyzerR.smoothingTimeConstant = 0.5;
+    this.masterAnalyzerL.fftSize = 2048; 
+    this.masterAnalyzerR.fftSize = 2048;
+    this.masterAnalyzerL.smoothingTimeConstant = 0.8;
+    this.masterAnalyzerR.smoothingTimeConstant = 0.8;
 
     // Routing Chain: MasterGain -> Limiter -> Analyzer -> Destination
     this.masterOutput.connect(this.masterLimiter);
@@ -160,7 +160,8 @@ export class AudioEngine {
     // Init Preview System
     this.previewGain = this.ctx.createGain();
     this.previewAnalyzer = this.ctx.createAnalyser();
-    this.previewAnalyzer.fftSize = 256; 
+    this.previewAnalyzer.fftSize = 2048; 
+    this.previewAnalyzer.smoothingTimeConstant = 0.8;
     this.previewGain.connect(this.previewAnalyzer);
     this.previewAnalyzer.connect(this.ctx.destination);
   }
@@ -441,6 +442,20 @@ export class AudioEngine {
     this.stopScrubbing();
   }
 
+  /**
+   * Panic - Stop all MIDI notes immediately to prevent stuck notes
+   */
+  public panic(): void {
+    this.activeMidiNotes.clear();
+    this.tracksDSP.forEach(dsp => {
+      if (dsp.synth) dsp.synth.releaseAll();
+      if (dsp.sampler) dsp.sampler.stopAll();
+      if (dsp.drumSampler) dsp.drumSampler.stop();
+      if (dsp.melodicSampler) dsp.melodicSampler.stopAll();
+      // DrumRack is typically one-shot and doesn't need explicit panic
+    });
+  }
+
   public seekTo(time: number, tracks: Track[], wasPlaying: boolean) {
     this.stopAll();
     this.pausedAt = time;
@@ -455,16 +470,14 @@ export class AudioEngine {
     if (this.isPlaying) {
       let time = this.ctx.currentTime - this.playbackStartTime;
       
-      // Handle loop
+      // Handle loop - use pure calculation without modifying playbackStartTime
       if (this.isLoopActive && this.loopEnd > this.loopStart) {
         const loopDuration = this.loopEnd - this.loopStart;
         if (time >= this.loopEnd) {
           // Calculate how much time has passed since the loop start
           const timeSinceLoopStart = time - this.loopStart;
-          // Wrap the time back into the loop duration
+          // Wrap the time back into the loop duration without state mutation
           const wrappedTime = this.loopStart + (timeSinceLoopStart % loopDuration);
-          // Adjust playbackStartTime to prevent time jumps on subsequent calls
-          this.playbackStartTime = this.ctx.currentTime - wrappedTime;
           return wrappedTime;
         }
       }
@@ -484,48 +497,53 @@ export class AudioEngine {
   private scheduler(tracks: Track[]) {
     if (!this.ctx) return;
 
-    while (this.nextScheduleTime < this.ctx.currentTime + this.SCHEDULE_AHEAD_SEC) {
-      const scheduleUntil = this.nextScheduleTime + this.SCHEDULE_AHEAD_SEC;
-      let projectTimeStart = this.nextScheduleTime - this.playbackStartTime;
-      let projectTimeEnd = scheduleUntil - this.playbackStartTime;
+    try {
+      while (this.nextScheduleTime < this.ctx.currentTime + this.SCHEDULE_AHEAD_SEC) {
+        const scheduleUntil = this.nextScheduleTime + this.SCHEDULE_AHEAD_SEC;
+        let projectTimeStart = this.nextScheduleTime - this.playbackStartTime;
+        let projectTimeEnd = scheduleUntil - this.playbackStartTime;
 
-      // Handle loop wrapping in scheduler
-      if (this.isLoopActive && this.loopEnd > this.loopStart) {
-        const loopDuration = this.loopEnd - this.loopStart;
+        // Handle loop wrapping in scheduler
+        if (this.isLoopActive && this.loopEnd > this.loopStart) {
+          const loopDuration = this.loopEnd - this.loopStart;
 
-        // If we've gone past the loop end, wrap back
-        if (projectTimeStart >= this.loopEnd) {
-          const overflow = projectTimeStart - this.loopStart;
-          projectTimeStart = this.loopStart + (overflow % loopDuration);
-          projectTimeEnd = projectTimeStart + this.SCHEDULE_AHEAD_SEC;
+          // If we've gone past the loop end, wrap back
+          if (projectTimeStart >= this.loopEnd) {
+            const overflow = projectTimeStart - this.loopStart;
+            projectTimeStart = this.loopStart + (overflow % loopDuration);
+            projectTimeEnd = projectTimeStart + this.SCHEDULE_AHEAD_SEC;
 
-          // Also update playbackStartTime to keep things in sync
-          this.playbackStartTime = this.nextScheduleTime - projectTimeStart;
+            // Also update playbackStartTime to keep things in sync
+            this.playbackStartTime = this.nextScheduleTime - projectTimeStart;
+          }
+
+          // If the window crosses the loop boundary, split it
+          if (projectTimeStart < this.loopEnd && projectTimeEnd > this.loopEnd) {
+            // Schedule up to loop end
+            this.scheduleClips(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime, 0, new Map());
+            this.scheduleMidi(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime);
+            this.scheduleAutomation(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime);
+
+            // Then schedule from loop start for the remainder
+            const remainingTime = projectTimeEnd - this.loopEnd;
+            const loopStartScheduleTime = this.nextScheduleTime + (this.loopEnd - projectTimeStart);
+            this.scheduleClips(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime, 0, new Map());
+            this.scheduleMidi(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime);
+            this.scheduleAutomation(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime);
+
+            this.nextScheduleTime += this.SCHEDULE_AHEAD_SEC;
+            continue;
+          }
         }
 
-        // If the window crosses the loop boundary, split it
-        if (projectTimeStart < this.loopEnd && projectTimeEnd > this.loopEnd) {
-          // Schedule up to loop end
-          this.scheduleClips(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime, 0, new Map());
-          this.scheduleMidi(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime);
-          this.scheduleAutomation(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime);
-
-          // Then schedule from loop start for the remainder
-          const remainingTime = projectTimeEnd - this.loopEnd;
-          const loopStartScheduleTime = this.nextScheduleTime + (this.loopEnd - projectTimeStart);
-          this.scheduleClips(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime, 0, new Map());
-          this.scheduleMidi(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime);
-          this.scheduleAutomation(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime);
-
-          this.nextScheduleTime += this.SCHEDULE_AHEAD_SEC;
-          continue;
-        }
+        this.scheduleClips(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime, 0, new Map());
+        this.scheduleMidi(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
+        this.scheduleAutomation(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
+        this.nextScheduleTime += this.SCHEDULE_AHEAD_SEC;
       }
-
-      this.scheduleClips(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime, 0, new Map());
-      this.scheduleMidi(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
-      this.scheduleAutomation(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
-      this.nextScheduleTime += this.SCHEDULE_AHEAD_SEC;
+    } catch (error) {
+      console.error('[AudioEngine] Scheduler error:', error);
+      // Continue playback despite error
     }
   }
 

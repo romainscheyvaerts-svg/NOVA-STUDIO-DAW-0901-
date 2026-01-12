@@ -67,7 +67,8 @@ export class GraphManager {
     // Preview Channel (Browser/Store)
     this.previewGain = this.ctx.createGain();
     this.previewAnalyzer = this.ctx.createAnalyser();
-    this.previewAnalyzer.fftSize = 256; 
+    this.previewAnalyzer.fftSize = 2048; 
+    this.previewAnalyzer.smoothingTimeConstant = 0.8;
     this.previewGain.connect(this.previewAnalyzer);
     this.previewAnalyzer.connect(this.ctx.destination);
   }
@@ -235,12 +236,10 @@ export class GraphManager {
         }
     });
     
-    // Cleanup removed plugins
+    // Cleanup removed plugins with proper termination
     dsp.pluginChain.forEach((val, id) => {
         if (!currentPluginIds.has(id)) {
-            val.input.disconnect();
-            val.output.disconnect();
-            if (val.instance.dispose) val.instance.dispose();
+            this.terminatePlugin(val);
             dsp.pluginChain.delete(id);
         }
     });
@@ -250,6 +249,28 @@ export class GraphManager {
     dsp.gain.connect(dsp.panner); 
     dsp.panner.connect(dsp.analyzer); 
     dsp.analyzer.connect(dsp.output);
+  }
+
+  /**
+   * Properly terminate a plugin to prevent memory leaks
+   */
+  private terminatePlugin(pluginEntry: { input: AudioNode; output: AudioNode; instance: any }) {
+    try {
+      // Disconnect audio nodes
+      pluginEntry.input.disconnect();
+      pluginEntry.output.disconnect();
+      
+      // Call plugin-specific cleanup if available
+      if (pluginEntry.instance) {
+        if (typeof pluginEntry.instance.dispose === 'function') {
+          pluginEntry.instance.dispose();
+        } else if (typeof pluginEntry.instance.terminate === 'function') {
+          pluginEntry.instance.terminate();
+        }
+      }
+    } catch (e) {
+      console.warn('[GraphManager] Error terminating plugin:', e);
+    }
   }
 
   private updateRouting(track: Track, dsp: TrackDSP) {
