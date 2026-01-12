@@ -1491,12 +1491,20 @@ export default function App() {
       },
       'telephone': {
         plugins: [
+          // Aggressive EQ: narrow bandwidth (300-3000Hz) with resonant peaks for classic phone sound
           { type: 'PROEQ12', params: { bands: [
-            { id: 0, type: 'highpass', frequency: 400, isEnabled: true, gain: 0, q: 1.0 },
-            { id: 11, type: 'lowpass', frequency: 3500, isEnabled: true, gain: 0, q: 1.0 },
-            { id: 5, type: 'peaking', frequency: 1500, isEnabled: true, gain: 6, q: 0.8 }
+            { id: 0, type: 'highpass', frequency: 300, isEnabled: true, gain: 0, q: 1.5 },  // Sharp HP
+            { id: 11, type: 'lowpass', frequency: 3000, isEnabled: true, gain: 0, q: 1.5 },  // Sharp LP
+            { id: 2, type: 'peaking', frequency: 800, isEnabled: true, gain: 5, q: 1.5 },   // Low-mid resonance
+            { id: 4, type: 'peaking', frequency: 1200, isEnabled: true, gain: 8, q: 2.0 },  // Nasal honk
+            { id: 6, type: 'peaking', frequency: 2000, isEnabled: true, gain: 4, q: 1.2 },  // Upper-mid presence
+            { id: 8, type: 'peaking', frequency: 200, isEnabled: true, gain: -8, q: 0.7 },  // Cut low rumble
+            { id: 9, type: 'peaking', frequency: 4000, isEnabled: true, gain: -12, q: 0.5 } // Cut highs harshly
           ]}},
-          { type: 'VOCALSATURATOR', params: { drive: 40, mix: 0.6, tone: 0.3, mode: 'TUBE' } }
+          // Hard compression for that squashed phone dynamic
+          { type: 'COMPRESSOR', params: { threshold: -20, ratio: 12, knee: 0, attack: 0.001, release: 0.05, makeupGain: 1.2 } },
+          // Heavy saturation for distortion/crunch
+          { type: 'VOCALSATURATOR', params: { drive: 70, mix: 0.8, tone: 0.2, mode: 'TAPE' } }
         ]
       },
       'radio': {

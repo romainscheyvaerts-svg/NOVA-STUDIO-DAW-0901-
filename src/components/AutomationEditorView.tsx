@@ -26,6 +26,10 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
   const [paramMenuOpen, setParamMenuOpen] = useState<string | null>(null);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
 
+  // Modular toolbar state
+  const [showZoom, setShowZoom] = useState(true);
+  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
+
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const sidebarContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -167,9 +171,9 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden" style={{ backgroundColor: 'var(--bg-main)' }}>
-      {/* TOOLBAR - scrollable on mobile */}
+      {/* TOOLBAR - scrollable on mobile with modular sections */}
       <div className="h-10 border-b flex items-center justify-between px-2 md:px-4 overflow-x-auto scrollbar-hide" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}>
-         <div className="flex items-center space-x-2 md:space-x-4 shrink-0">
+         <div className="flex items-center space-x-2 md:space-x-3 shrink-0">
             {/* Toggle Sidebar Button */}
             <button
               onClick={() => setIsSidebarVisible(!isSidebarVisible)}
@@ -179,13 +183,54 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
               <i className={`fas ${isSidebarVisible ? 'fa-chevron-left' : 'fa-chevron-right'} text-[10px]`}></i>
             </button>
             <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap" style={{ color: 'var(--accent-neon)' }}>Automation</span>
-            <div className="h-4 w-px bg-white/10 hidden md:block"></div>
-            <div className="flex items-center space-x-2">
-                <i className="fas fa-search-plus text-[10px]" style={{ color: 'var(--text-secondary)' }}></i>
-                <input type="range" min="10" max="200" value={zoomH} onChange={e => setZoomH(Number(e.target.value))} className="w-16 md:w-20 h-1 bg-white/10 rounded-full accent-cyan-500" />
+
+            {/* Zoom Section - Collapsible */}
+            {showZoom && (
+              <>
+                <div className="h-4 w-px bg-white/10"></div>
+                <div className="flex items-center space-x-2">
+                    <i className="fas fa-search-plus text-[10px]" style={{ color: 'var(--text-secondary)' }}></i>
+                    <input type="range" min="10" max="200" value={zoomH} onChange={e => setZoomH(Number(e.target.value))} className="w-14 md:w-20 h-1 bg-white/10 rounded-full accent-cyan-500" />
+                </div>
+              </>
+            )}
+         </div>
+
+         <div className="flex items-center space-x-2 shrink-0">
+            <div className="text-[9px] font-mono hidden md:block" style={{ color: 'var(--text-secondary)' }}>SHIFT + Click to snap</div>
+
+            {/* Toolbar Settings Menu */}
+            <div className="relative">
+              <button
+                onClick={() => setToolbarMenuOpen(!toolbarMenuOpen)}
+                className="w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 transition-all"
+                title="Afficher/Masquer modules"
+              >
+                <i className="fas fa-ellipsis-v text-[10px]"></i>
+              </button>
+              {toolbarMenuOpen && (
+                <div className="absolute top-10 right-0 bg-[#14161a] border border-white/10 rounded-xl shadow-2xl p-2 min-w-[160px] z-50">
+                  <div className="text-[8px] font-black uppercase text-slate-500 px-2 py-1 tracking-wider">Modules</div>
+                  <button
+                    onClick={() => setShowZoom(!showZoom)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-medium transition-all ${showZoom ? 'text-cyan-400 bg-cyan-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+                  >
+                    <span><i className="fas fa-search-plus mr-2"></i>Zoom</span>
+                    <i className={`fas ${showZoom ? 'fa-eye' : 'fa-eye-slash'} text-[8px]`}></i>
+                  </button>
+                  <div className="border-t border-white/5 mt-2 pt-2">
+                    <button
+                      onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-medium transition-all ${isSidebarVisible ? 'text-cyan-400 bg-cyan-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+                    >
+                      <span><i className="fas fa-columns mr-2"></i>Sidebar</span>
+                      <i className={`fas ${isSidebarVisible ? 'fa-eye' : 'fa-eye-slash'} text-[8px]`}></i>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
          </div>
-         <div className="text-[9px] font-mono hidden md:block" style={{ color: 'var(--text-secondary)' }}>SHIFT + Click to snap</div>
       </div>
       {/* Add CSS for hiding scrollbar */}
       <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
