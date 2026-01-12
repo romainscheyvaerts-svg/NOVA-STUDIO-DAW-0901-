@@ -460,11 +460,22 @@ const MobileBrowserView: React.FC<{
             <input
               ref={fileInputRef}
               type="file"
-              accept="audio/*,.mp3,.wav,.ogg,.flac"
+              accept="audio/*,video/*,.mp3,.wav,.ogg,.flac,.aac,.m4a,.webm,.mp4,.aif,.aiff"
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
-                if (file) onImportAudio(file);
+                if (file) {
+                  // Check if file seems like audio (by extension or MIME type)
+                  const audioExtensions = ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.webm', '.aif', '.aiff', '.mp4'];
+                  const isAudio = file.type.startsWith('audio/') ||
+                                  file.type.startsWith('video/') ||
+                                  audioExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+                  if (isAudio) {
+                    onImportAudio(file);
+                  } else {
+                    alert('Format non supporté. Utilisez MP3, WAV, OGG, FLAC, AAC ou M4A.');
+                  }
+                }
                 e.target.value = '';
               }}
             />
@@ -1114,9 +1125,17 @@ export default function App() {
 
       } catch (e: any) {
           console.error("[Import Error]", e);
-          setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
+          let errorMsg = "Import échoué";
+          if (e.message?.includes('decode') || e.name === 'EncodingError') {
+            errorMsg = "Format audio non supporté par ce navigateur";
+          } else if (e.message?.includes('network') || e.message?.includes('fetch')) {
+            errorMsg = "Erreur réseau lors du chargement";
+          } else if (e.message) {
+            errorMsg = e.message;
+          }
+          setExternalImportNotice(`❌ Erreur: ${errorMsg}`);
       } finally {
-          setTimeout(() => setExternalImportNotice(null), 3000);
+          setTimeout(() => setExternalImportNotice(null), 4000);
       }
   };
 
@@ -1793,12 +1812,22 @@ export default function App() {
         <input
           ref={globalFileInputRef}
           type="file"
-          accept="audio/*,.mp3,.wav,.ogg,.flac,.aac,.m4a"
+          accept="audio/*,video/*,.mp3,.wav,.ogg,.flac,.aac,.m4a,.webm,.mp4,.aif,.aiff"
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) {
-              handleUniversalAudioImport(file, file.name);
+              // Check if file seems like audio (by extension or MIME type)
+              const audioExtensions = ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.webm', '.aif', '.aiff', '.mp4'];
+              const isAudio = file.type.startsWith('audio/') ||
+                              file.type.startsWith('video/') ||
+                              audioExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+              if (isAudio) {
+                handleUniversalAudioImport(file, file.name);
+              } else {
+                setExternalImportNotice('❌ Format non supporté. Utilisez MP3, WAV, OGG, FLAC, AAC ou M4A.');
+                setTimeout(() => setExternalImportNotice(null), 3000);
+              }
               e.target.value = '';
             }
           }}

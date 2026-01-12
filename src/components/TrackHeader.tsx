@@ -299,8 +299,22 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     return map[type] || type.substring(0, 4);
   };
 
-  const handleMuteToggle = (e: React.MouseEvent | React.TouchEvent) => { e.stopPropagation(); onUpdate({ ...track, isMuted: !track.isMuted }); };
-  const handleSoloToggle = (e: React.MouseEvent | React.TouchEvent) => { e.stopPropagation(); onUpdate({ ...track, isSolo: !track.isSolo }); };
+  // Unified touch/click handler to prevent double-triggering on mobile
+  const handleMuteToggle = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onUpdate({ ...track, isMuted: !track.isMuted });
+  };
+  const handleSoloToggle = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onUpdate({ ...track, isSolo: !track.isSolo });
+  };
+  const handleRecArmToggle = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onUpdate({ ...track, isTrackArmed: !track.isTrackArmed });
+  };
 
   const canHaveSends = (track.type === TrackType.AUDIO || track.type === TrackType.BUS || track.type === TrackType.MIDI || track.type === TrackType.SAMPLER || track.type === TrackType.DRUM_RACK) && track.id !== 'instrumental' && track.id !== 'master';
   const isMidiOrSampler = track.type === TrackType.MIDI || track.type === TrackType.SAMPLER || track.type === TrackType.DRUM_RACK;
@@ -380,14 +394,12 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         <div className={`flex ${compact ? 'space-x-0.5' : 'space-x-1'} shrink-0`}>
           <button
             onClick={handleMuteToggle}
-            onTouchStart={handleMuteToggle}
             className={`${compact ? 'w-5 h-5' : 'w-7 h-7'} rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
             <span className={`${compact ? 'text-[7px]' : 'text-[9px]'} font-black`}>M</span>
           </button>
           <button
             onClick={handleSoloToggle}
-            onTouchStart={handleSoloToggle}
             className={`${compact ? 'w-5 h-5' : 'w-7 h-7'} rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
             <span className={`${compact ? 'text-[7px]' : 'text-[9px]'} font-black`}>S</span>
@@ -395,8 +407,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
 
           {canHaveSends && !compact && (
             <button
-                onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
-                onTouchStart={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
+                onClick={(e) => { e.stopPropagation(); e.preventDefault(); setShowSends(!showSends); }}
                 className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
             >
                 <i className="fas fa-sliders-h text-[10px]"></i>
@@ -406,8 +417,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {/* REC BUTTON - Available for Audio AND MIDI now */}
           {(isAudio || isMidiOrSampler) && (
               <button
-                onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
-                onTouchStart={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
+                onClick={handleRecArmToggle}
                 className={`${compact ? 'w-5 h-5' : 'w-7 h-7'} rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
                 title="Arm Track for Recording"
               >
