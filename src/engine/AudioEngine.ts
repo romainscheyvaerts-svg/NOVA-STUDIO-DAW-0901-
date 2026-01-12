@@ -107,6 +107,9 @@ export class AudioEngine {
   private currentBpm: number = 120;
   // FIX: Add property to track active VST plugin for streaming management.
   private activeVSTPlugin: { trackId: string, pluginId: string } | null = null;
+  
+  // Memory leak fix: Track object URLs for cleanup
+  private objectURLs: string[] = [];
 
   constructor() {}
 
@@ -263,7 +266,7 @@ export class AudioEngine {
     
     // Si DSP n'existe pas, attendre un peu et réessayer (race condition fix)
     if (!dsp) {
-      console.log("[AudioEngine] DSP not ready, waiting 150ms...");
+      // console.log("[AudioEngine] DSP not ready, waiting 150ms...");
       await new Promise(r => setTimeout(r, 150));
       dsp = this.tracksDSP.get(trackId);
     }
@@ -284,7 +287,7 @@ export class AudioEngine {
       });
       this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
       this.monitorSource.connect(dsp.input);
-      console.log("[AudioEngine] Track armed OK:", trackId);
+      // console.log("[AudioEngine] Track armed OK:", trackId);
     } catch (e) {
       console.error("[AudioEngine] ARM ERROR:", e);
       this.monitoringTrackId = null;
@@ -305,7 +308,7 @@ export class AudioEngine {
   }
 
   public async startRecording(currentTime: number, trackId: string): Promise<boolean> {
-    console.log("[AudioEngine] startRecording called - stream:", !!this.activeMonitorStream, "recording:", this.recordingTrackId);
+    // console.log("[AudioEngine] startRecording called - stream:", !!this.activeMonitorStream, "recording:", this.recordingTrackId);
 
     // Check if we have an active monitor stream
     if (!this.activeMonitorStream) {
@@ -351,7 +354,7 @@ export class AudioEngine {
         console.error("[AudioEngine] MediaRecorder error:", event);
       };
       this.mediaRecorder.start(100); // Collect data every 100ms for better reliability
-      console.log("[AudioEngine] Recording started OK on track:", trackId);
+      // console.log("[AudioEngine] Recording started OK on track:", trackId);
       return true;
     } catch (e) {
       console.error("[AudioEngine] REC ERROR:", e);
@@ -376,6 +379,9 @@ export class AudioEngine {
           const arrayBuffer = await blob.arrayBuffer();
           const audioBuffer = await this.ctx!.decodeAudioData(arrayBuffer);
           const audioRef = URL.createObjectURL(blob);
+          
+          // Track blob URL for memory cleanup to prevent leaks
+          this.objectURLs.push(audioRef);
 
           // Register buffer in registry to avoid Immer proxy issues
           const bufferId = audioBufferRegistry.register(audioBuffer, audioRef);
@@ -393,7 +399,7 @@ export class AudioEngine {
             bufferId: bufferId,  // Use registry reference instead of direct buffer
             audioRef: audioRef,
           };
-          console.log("[AudioEngine] Recording stopped. New clip created:", clip.id, "bufferId:", bufferId);
+          // console.log("[AudioEngine] Recording stopped. New clip created:", clip.id, "bufferId:", bufferId);
           resolve({ clip, trackId });
         } catch (e) {
           console.error("Error processing recorded audio:", e);
@@ -440,6 +446,12 @@ export class AudioEngine {
     });
     this.activeMidiNotes.clear();
     this.stopScrubbing();
+  }
+  
+  // Memory leak fix: Dispose of object URLs
+  public dispose() {
+    this.objectURLs.forEach(url => URL.revokeObjectURL(url));
+    this.objectURLs = [];
   }
 
   /**
@@ -831,7 +843,7 @@ export class AudioEngine {
                 }
             };
             
-            console.log(`[AudioEngine] Playing: ${clip.name} | offset: ${offsetIntoClip.toFixed(2)}s | duration: ${actualDuration.toFixed(2)}s`);
+            // console.log(`[AudioEngine] Playing: ${clip.name} | offset: ${offsetIntoClip.toFixed(2)}s | duration: ${actualDuration.toFixed(2)}s`);
         }
         
     } catch (error) {

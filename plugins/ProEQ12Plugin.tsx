@@ -29,6 +29,7 @@ const MAX_FREQ = 20000;
 const DB_SCALE = 30; 
 const MAX_GAIN = DB_SCALE;
 const MIN_GAIN = -DB_SCALE; // Added missing constant
+const MIN_Q_VALUE = 0.1;
 
 export class ProEQ12Node {
   private ctx: AudioContext;
@@ -105,20 +106,40 @@ export class ProEQ12Node {
   }
 
   public updateParams(p: Partial<ProEQ12Params>) {
-    const reconnectNeeded = p.isEnabled !== undefined || p.bands?.some((b, i) => b.isEnabled !== this.params.bands[i].isEnabled || b.isSolo !== this.params.bands[i].isSolo || b.type !== this.params.bands[i].type);
+    const oldParams = this.params;
     this.params = { ...this.params, ...p };
     
+    // Only reconnect if TYPE changes or enable/solo changes
+    const reconnectNeeded = p.isEnabled !== undefined && p.isEnabled !== oldParams.isEnabled ||
+      p.bands?.some((b, i) => {
+        const old = oldParams.bands[i];
+        return b.type !== old.type || b.isEnabled !== old.isEnabled || b.isSolo !== old.isSolo;
+      });
+
     if (reconnectNeeded) {
-      this.setupFilters();
-    } else {
+      // Crossfade to avoid clicks
+      const fadeTime = 0.02;
+      const now = this.ctx.currentTime;
+      this.output.gain.setValueAtTime(this.output.gain.value, now);
+      this.output.gain.linearRampToValueAtTime(0.001, now + fadeTime);
+      
+      setTimeout(() => {
+        this.setupFilters();
+        const now2 = this.ctx.currentTime;
+        this.output.gain.setValueAtTime(0.001, now2);
+        this.output.gain.linearRampToValueAtTime(1, now2 + fadeTime);
+      }, fadeTime * 1000 + 5);
+    } else if (p.bands) {
+      // Smooth update without reconstruction
       const now = this.ctx.currentTime;
       const safe = (v: number) => Number.isFinite(v) ? v : 0;
-      this.params.bands.forEach((band, i) => {
+      p.bands.forEach((band, i) => {
         const f = this.filters[i];
         if (f) {
-          f.frequency.setTargetAtTime(safe(band.frequency), now, 0.04);
-          f.gain.setTargetAtTime(safe(band.gain), now, 0.04);
-          f.Q.setTargetAtTime(safe(band.q), now, 0.04);
+          // Longer smoothing time to avoid artifacts
+          f.frequency.setTargetAtTime(safe(band.frequency), now, 0.08);
+          f.gain.setTargetAtTime(safe(band.gain), now, 0.08);
+          f.Q.setTargetAtTime(Math.max(MIN_Q_VALUE, safe(band.q)), now, 0.08);
         }
       });
     }
