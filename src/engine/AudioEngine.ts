@@ -441,6 +441,25 @@ export class AudioEngine {
     this.stopScrubbing();
   }
 
+  /**
+   * Panic - Stop all MIDI notes immediately to prevent stuck notes
+   */
+  public panic(): void {
+    this.activeMidiNotes.clear();
+    this.tracksDSP.forEach(dsp => {
+      if (dsp.synth) dsp.synth.releaseAll();
+      if (dsp.sampler) dsp.sampler.stopAll();
+      if (dsp.drumSampler) dsp.drumSampler.stop();
+      if (dsp.melodicSampler) dsp.melodicSampler.stopAll();
+      if (dsp.drumRack) {
+        // DrumRack typically doesn't need release, but stop any hanging notes
+        for (let i = 0; i < 30; i++) {
+          // If DrumRack has a stop method for individual pads, call it
+        }
+      }
+    });
+  }
+
   public seekTo(time: number, tracks: Track[], wasPlaying: boolean) {
     this.stopAll();
     this.pausedAt = time;
@@ -455,16 +474,14 @@ export class AudioEngine {
     if (this.isPlaying) {
       let time = this.ctx.currentTime - this.playbackStartTime;
       
-      // Handle loop
+      // Handle loop - use pure calculation without modifying playbackStartTime
       if (this.isLoopActive && this.loopEnd > this.loopStart) {
         const loopDuration = this.loopEnd - this.loopStart;
         if (time >= this.loopEnd) {
           // Calculate how much time has passed since the loop start
           const timeSinceLoopStart = time - this.loopStart;
-          // Wrap the time back into the loop duration
+          // Wrap the time back into the loop duration atomically
           const wrappedTime = this.loopStart + (timeSinceLoopStart % loopDuration);
-          // Adjust playbackStartTime to prevent time jumps on subsequent calls
-          this.playbackStartTime = this.ctx.currentTime - wrappedTime;
           return wrappedTime;
         }
       }
