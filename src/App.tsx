@@ -6,6 +6,9 @@ import { audioBufferRegistry } from './services/AudioBufferRegistry';
 import TransportBar from './components/TransportBar';
 import MobilePinchZoomContainer from './components/MobilePinchZoomContainer';
 import MobileTransportFloating from './components/MobileTransportFloating';
+import MobileLayout from './components/mobile/MobileLayout';
+import MobileArrangementView from './components/mobile/MobileArrangementView';
+import MobileMixerView from './components/mobile/MobileMixerView';
 import ArrangementView from './components/ArrangementView';
 import MixerView from './components/MixerView';
 import PluginEditor from './components/PluginEditor';
@@ -1874,84 +1877,74 @@ export default function App() {
              />
           )}
 
-          {/* Mobile: Tracks View */}
-          {isMobile && activeMobileTab === 'TRACKS' && (
-            <MobileTracksView
-              tracks={state.tracks}
-              selectedTrackId={state.selectedTrackId}
-              onSelectTrack={(id) => setState(p => ({ ...p, selectedTrackId: id }))}
-              onUpdateTrack={handleUpdateTrack}
+          {/* Mobile: Layout wrapper with new components */}
+          {isMobile && (
+            <MobileLayout
               isPlaying={state.isPlaying}
-              currentTime={state.currentTime}
-            />
-          )}
-
-          {/* Mobile: Mix View with Pinch-to-Zoom */}
-          {isMobile && activeMobileTab === 'MIX' && (
-            <MobilePinchZoomContainer className="flex-1">
-              <MixerView
-                tracks={state.tracks}
-                onUpdateTrack={handleUpdateTrack}
-                onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
-                onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
-                onRemovePlugin={handleRemovePlugin}
-                onAddBus={handleAddBus}
-                onToggleBypass={handleToggleBypass}
-                onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
-              />
-            </MobilePinchZoomContainer>
-          )}
-
-          {/* Mobile: Record View */}
-          {isMobile && activeMobileTab === 'REC' && (
-            <MobileRecordView
-              tracks={state.tracks}
               isRecording={state.isRecording}
-              isPlaying={state.isPlaying}
               currentTime={state.currentTime}
-              onToggleRecord={handleToggleRecord}
               onTogglePlay={handleTogglePlay}
               onStop={handleStop}
-              onUpdateTrack={handleUpdateTrack}
-            />
-          )}
+              onToggleRecord={handleToggleRecord}
+              activeTab={activeMobileTab}
+              onTabChange={setActiveMobileTab}
+              onCreateTrack={handleCreateTrack}
+              onOpenSettings={() => setActiveMobileTab('SETTINGS')}
+            >
+              {/* Arrangement View */}
+              {activeMobileTab === 'TRACKS' && (
+                <MobileArrangementView
+                  tracks={state.tracks}
+                  currentTime={state.currentTime}
+                  isPlaying={state.isPlaying}
+                  selectedTrackId={state.selectedTrackId}
+                  onSelectTrack={(id) => setState(p => ({ ...p, selectedTrackId: id }))}
+                  onUpdateTrack={handleUpdateTrack}
+                  onDeleteTrack={handleDeleteTrack}
+                />
+              )}
 
-          {/* Mobile: Browser View */}
-          {isMobile && activeMobileTab === 'BROWSER' && (
-            <MobileBrowserView
-              onImportAudio={(file) => handleUniversalAudioImport(file, file.name)}
-              onAddPlugin={(tid, type) => handleAddPluginFromContext(tid, type, {}, { openUI: true })}
-              selectedTrackId={state.selectedTrackId}
-            />
-          )}
+              {/* Mixer View */}
+              {activeMobileTab === 'MIX' && (
+                <MobilePinchZoomContainer className="flex-1">
+                  <MobileMixerView
+                    tracks={state.tracks}
+                    onUpdateTrack={handleUpdateTrack}
+                    onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
+                    onDeleteTrack={handleDeleteTrack}
+                  />
+                </MobilePinchZoomContainer>
+              )}
 
-          {/* Mobile: Settings View */}
-          {isMobile && activeMobileTab === 'SETTINGS' && (
-            <MobileSettingsView
-              bpm={state.bpm}
-              onBpmChange={handleUpdateBpm}
-              theme={theme}
-              onToggleTheme={toggleTheme}
-              onOpenAudioSettings={() => setIsAudioSettingsOpen(true)}
-            />
+              {/* AI Nova View */}
+              {activeMobileTab === 'NOVA' && (
+                <div className="flex-1 overflow-hidden">
+                  <ChatAssistant 
+                    onSendMessage={(msg) => getAIProductionAssistance(state, msg)} 
+                    onExecuteAction={executeAIAction} 
+                    externalNotification={aiNotification} 
+                    isMobile={isMobile} 
+                    forceOpen={true}
+                    onClose={() => setActiveMobileTab('TRACKS')}
+                  />
+                </div>
+              )}
+
+              {/* Settings View */}
+              {activeMobileTab === 'SETTINGS' && (
+                <MobileSettingsView
+                  bpm={state.bpm}
+                  onBpmChange={handleUpdateBpm}
+                  theme={theme}
+                  onToggleTheme={toggleTheme}
+                  onOpenAudioSettings={() => setIsAudioSettingsOpen(true)}
+                />
+              )}
+            </MobileLayout>
           )}
         </main>
       </div>
       
-      {/* Mobile: Floating Transport (visible on all tabs except REC) */}
-      {isMobile && activeMobileTab !== 'REC' && (
-        <MobileTransportFloating
-          isPlaying={state.isPlaying}
-          isRecording={state.isRecording}
-          currentTime={state.currentTime}
-          onTogglePlay={handleTogglePlay}
-          onStop={handleStop}
-          onToggleRecord={handleToggleRecord}
-        />
-      )}
-
-      {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} />}
-
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}
       {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
       {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} user={user} onOpenAuth={() => setIsAuthOpen(true)} />}
@@ -1977,9 +1970,15 @@ export default function App() {
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
       
-      <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
-        <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('TRACKS')} />
-      </div>
+      {/* Desktop only: ChatAssistant */}
+      {!isMobile && (
+        <ChatAssistant 
+          onSendMessage={(msg) => getAIProductionAssistance(state, msg)} 
+          onExecuteAction={executeAIAction} 
+          externalNotification={aiNotification} 
+          isMobile={false} 
+        />
+      )}
       
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
     </div>
