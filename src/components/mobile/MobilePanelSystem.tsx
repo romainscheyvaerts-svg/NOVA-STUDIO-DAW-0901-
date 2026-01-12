@@ -71,15 +71,19 @@ const MobilePanelSystem: React.FC<MobilePanelSystemProps> = ({
         ))}
       </div>
       
-      {/* Active panel (slide from bottom) */}
+      {/* Backdrop + Active panel (slide from bottom) */}
       {activePanel && activeConfig && (
-        <MobilePanel
-          config={activeConfig}
-          height={panelHeight}
-          onChangeHeight={setPanelHeight}
-          onClose={handleClosePanel}
-          componentProps={panelProps[activePanel] || {}}
-        />
+        <>
+          {/* Backdrop pour masquer le contenu principal */}
+          <div className="fixed inset-0 z-[9998] bg-black/60 backdrop-blur-sm transition-opacity duration-300" />
+          <MobilePanel
+            config={activeConfig}
+            height={panelHeight}
+            onChangeHeight={setPanelHeight}
+            onClose={handleClosePanel}
+            componentProps={panelProps[activePanel] || {}}
+          />
+        </>
       )}
     </>
   );
