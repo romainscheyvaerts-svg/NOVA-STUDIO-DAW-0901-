@@ -110,8 +110,8 @@ const MobileArrangementView: React.FC<MobileArrangementViewProps> = ({
                   <div className="flex-1 min-w-0">
                     <h3 className="text-base font-bold text-white truncate">{track.name}</h3>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-slate-500">{track.clips.length} clips</span>
-                      {track.plugins.length > 0 && (
+                      <span className="text-xs text-slate-500">{track.clips?.length || 0} clips</span>
+                      {(track.plugins?.length || 0) > 0 && (
                         <>
                           <span className="text-slate-700">•</span>
                           <span className="text-xs text-slate-500">{track.plugins.length} FX</span>

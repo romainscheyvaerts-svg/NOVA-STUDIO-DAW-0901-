@@ -116,7 +116,7 @@ const MobileMixerView: React.FC<MobileMixerViewProps> = ({
                   </div>
 
                   {/* FX Indicator */}
-                  {track.plugins.length > 0 && (
+                  {(track.plugins?.length || 0) > 0 && (
                     <div className="absolute top-2 right-2">
                       <div className="w-4 h-4 rounded bg-purple-500/80 flex items-center justify-center">
                         <span className="text-[8px] font-bold text-white">{track.plugins.length}</span>
@@ -141,7 +141,7 @@ const MobileMixerView: React.FC<MobileMixerViewProps> = ({
                 <span className="text-xs font-bold text-white block truncate">{track.name}</span>
                 
                 {/* Clips Count */}
-                {track.clips && track.clips.length > 0 && (
+                {(track.clips?.length || 0) > 0 && (
                   <span className="text-[9px] text-slate-500 block">{track.clips.length} clips</span>
                 )}
               </button>
