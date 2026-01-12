@@ -31,6 +31,11 @@ import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
+import MobileLayout from './components/mobile/MobileLayout';
+import MobileTransportBar from './components/mobile/MobileTransportBar';
+import MobileTrackList from './components/mobile/MobileTrackList';
+import MobileTrackDetail from './components/mobile/MobileTrackDetail';
+import MobileBottomNav from './components/mobile/MobileBottomNav';
 
 // ... (Les fonctions `AVAILABLE_FX_MENU`, `createDefaultAutomation`, `createDefaultPlugins`, etc. restent identiques)
 
@@ -186,29 +191,6 @@ const SaveOverlay: React.FC<{ progress: number; message: string }> = ({ progress
   </div>
 );
 
-const MobileBottomNav: React.FC<{ activeTab: MobileTab, onTabChange: (tab: MobileTab) => void }> = ({ activeTab, onTabChange }) => (
-    <div className="h-16 bg-[#0c0d10] border-t border-white/10 flex items-center justify-around z-50">
-        <button onClick={() => onTabChange('PROJECT')} className={`flex flex-col items-center space-y-1 ${activeTab === 'PROJECT' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-project-diagram text-lg"></i>
-            <span className="text-[9px] font-black uppercase">Arrangement</span>
-        </button>
-        <button onClick={() => onTabChange('MIXER')} className={`flex flex-col items-center space-y-1 ${activeTab === 'MIXER' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-sliders-h text-lg"></i>
-            <span className="text-[9px] font-black uppercase">Mixer</span>
-        </button>
-        <button onClick={() => onTabChange('NOVA')} className={`flex flex-col items-center space-y-1 ${activeTab === 'NOVA' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/30 -mt-6 border-4 border-[#0c0d10]">
-                <i className="fas fa-robot text-white text-lg"></i>
-            </div>
-            <span className="text-[9px] font-black uppercase">AI Nova</span>
-        </button>
-        <button onClick={() => onTabChange('AUTOMATION')} className={`flex flex-col items-center space-y-1 ${activeTab === 'AUTOMATION' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-wave-square text-lg"></i>
-            <span className="text-[9px] font-black uppercase">Auto</span>
-        </button>
-    </div>
-);
-
 const useUndoRedo = (initialState: DAWState) => {
   const [history, setHistory] = useState<{ past: DAWState[]; present: DAWState; future: DAWState[]; }>({ past: [], present: initialState, future: [] });
   const MAX_HISTORY = 100;
@@ -323,6 +305,7 @@ export default function App() {
     return window.innerWidth < 768 ? 'MOBILE' : (window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP');
   });
   const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('PROJECT');
+  const [selectedTrackForDetail, setSelectedTrackForDetail] = useState<string | null>(null);
   const handleViewModeChange = (mode: ViewMode) => { setViewMode(mode); localStorage.setItem('nova_view_mode', mode); };
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
@@ -859,6 +842,113 @@ export default function App() {
 
   if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 
+  // Rendu mobile avec nouveau layout
+  if (isMobile) {
+    return (
+      <MobileLayout>
+        {saveState.isSaving && <SaveOverlay progress={saveState.progress} message={saveState.message} />}
+        
+        <MobileTransportBar 
+          isPlaying={state.isPlaying}
+          isRecording={state.isRecording}
+          currentTime={state.currentTime}
+          onPlay={handleTogglePlay}
+          onStop={handleStop}
+          onRecord={handleToggleRecord}
+        />
+        
+        <div className="flex-1 overflow-hidden">
+          {activeMobileTab === 'PROJECT' && (
+            <MobileTrackList 
+              tracks={state.tracks} 
+              onSelectTrack={(id) => setSelectedTrackForDetail(id)}
+            />
+          )}
+          {activeMobileTab === 'MIXER' && (
+            <MixerView 
+              tracks={state.tracks} 
+              onUpdateTrack={handleUpdateTrack} 
+              onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }} 
+              onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
+              onRemovePlugin={handleRemovePlugin} 
+              onAddBus={handleAddBus} 
+              onToggleBypass={handleToggleBypass}
+              onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
+            />
+          )}
+          {activeMobileTab === 'AUTOMATION' && (
+            <AutomationEditorView 
+              tracks={state.tracks} 
+              currentTime={state.currentTime} 
+              bpm={state.bpm} 
+              zoomH={40} 
+              onUpdateTrack={handleUpdateTrack} 
+              onSeek={handleSeek}
+            />
+          )}
+        </div>
+        
+        {/* FAB pour ajouter piste */}
+        {activeMobileTab === 'PROJECT' && (
+          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-40">
+            <button 
+              onClick={() => handleCreateTrack(TrackType.AUDIO)}
+              className="w-14 h-14 rounded-full bg-cyan-500 shadow-lg shadow-cyan-500/30 flex items-center justify-center active:scale-95 transition-transform"
+            >
+              <i className="fas fa-plus text-black text-xl"></i>
+            </button>
+          </div>
+        )}
+        
+        <MobileBottomNav activeTab={activeMobileTab} onChangeTab={setActiveMobileTab} />
+        
+        {/* Panneau détail piste */}
+        {selectedTrackForDetail && state.tracks.find(t => t.id === selectedTrackForDetail) && (
+          <MobileTrackDetail 
+            track={state.tracks.find(t => t.id === selectedTrackForDetail)!}
+            onClose={() => setSelectedTrackForDetail(null)}
+            onUpdate={handleUpdateTrack}
+          />
+        )}
+        
+        {/* Plugin Editor pour mobile */}
+        {activePlugin && (
+          <div className="fixed inset-0 bg-[#0c0d10] z-[200]">
+            <div className="w-full h-full p-4 overflow-y-auto">
+              <PluginEditor 
+                plugin={activePlugin.plugin} 
+                trackId={activePlugin.trackId} 
+                onClose={() => setActivePlugin(null)} 
+                onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} 
+                isMobile={true} 
+                track={state.tracks.find(t => t.id === activePlugin.trackId)} 
+                onUpdateTrack={handleUpdateTrack} 
+              />
+            </div>
+          </div>
+        )}
+        
+        {/* Chat Assistant pour mobile */}
+        <div className={activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
+          <ChatAssistant 
+            onSendMessage={(msg) => getAIProductionAssistance(state, msg)} 
+            onExecuteAction={executeAIAction} 
+            externalNotification={aiNotification} 
+            isMobile={true} 
+            forceOpen={activeMobileTab === 'NOVA'} 
+            onClose={() => setActiveMobileTab('PROJECT')} 
+          />
+        </div>
+        
+        {/* Modals */}
+        {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}
+        {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
+        {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} />}
+      </MobileLayout>
+    );
+  }
+
+  // Rendu desktop (inchangé)
   return (
     <div className="flex flex-col h-screen w-full overflow-hidden relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
       {saveState.isSaving && <SaveOverlay progress={saveState.progress} message={saveState.message} />}
@@ -934,8 +1024,6 @@ export default function App() {
           )}
         </main>
       </div>
-      
-      {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} />}
 
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}
       {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
@@ -952,9 +1040,9 @@ export default function App() {
       )}
       
       {activePlugin && (
-        <div className={`fixed inset-0 flex items-center justify-center z-[200] ${isMobile ? 'bg-[#0c0d10]' : 'bg-black/60 backdrop-blur-sm'}`} onMouseDown={() => !isMobile && setActivePlugin(null)}>
-           <div className={`relative ${isMobile ? 'w-full h-full p-4 overflow-y-auto' : ''}`} onMouseDown={e => e.stopPropagation()}>
-              <PluginEditor plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} />
+        <div className="fixed inset-0 flex items-center justify-center z-[200] bg-black/60 backdrop-blur-sm" onMouseDown={() => setActivePlugin(null)}>
+           <div className="relative" onMouseDown={e => e.stopPropagation()}>
+              <PluginEditor plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={false} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} />
            </div>
         </div>
       )}
@@ -962,9 +1050,7 @@ export default function App() {
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
       
-      <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
-        <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('PROJECT')} />
-      </div>
+      <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={false} forceOpen={false} onClose={() => {}} />
       
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
     </div>
