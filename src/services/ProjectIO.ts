@@ -84,9 +84,9 @@ export class ProjectIO {
     } catch (e) {
         throw new Error("Fichier projet corrompu");
     }
-    if (!loadedState.tracks || !Array.isArray(loadedState.tracks)) {
-        throw new Error("Format de projet invalide");
-    }
+    
+    // Validate and sanitize project state
+    loadedState = this.validateProjectState(loadedState);
     
     // Initialisation moteur si nécessaire
     await audioEngine.init();
@@ -117,5 +117,44 @@ export class ProjectIO {
     }
     
     return loadedState as DAWState;
+  }
+
+  /**
+   * Validate and provide default values for project state to prevent crashes
+   */
+  private static validateProjectState(state: any): DAWState {
+    const validatedState: any = {
+      tracks: Array.isArray(state.tracks) ? state.tracks : [],
+      bpm: typeof state.bpm === 'number' && state.bpm > 0 ? state.bpm : 120,
+      currentTime: typeof state.currentTime === 'number' ? state.currentTime : 0,
+      isPlaying: typeof state.isPlaying === 'boolean' ? state.isPlaying : false,
+      masterVolume: typeof state.masterVolume === 'number' ? state.masterVolume : 0.8,
+      projectName: typeof state.projectName === 'string' ? state.projectName : 'Untitled Project',
+      isLoopActive: typeof state.isLoopActive === 'boolean' ? state.isLoopActive : false,
+      loopStart: typeof state.loopStart === 'number' ? state.loopStart : 0,
+      loopEnd: typeof state.loopEnd === 'number' ? state.loopEnd : 8,
+    };
+
+    // Validate tracks
+    validatedState.tracks = validatedState.tracks.map((track: any) => ({
+      id: track.id || `track-${Date.now()}-${Math.random()}`,
+      name: track.name || 'Untitled Track',
+      type: track.type || 'AUDIO',
+      volume: typeof track.volume === 'number' ? track.volume : 0.8,
+      pan: typeof track.pan === 'number' ? track.pan : 0,
+      isMuted: typeof track.isMuted === 'boolean' ? track.isMuted : false,
+      isSolo: typeof track.isSolo === 'boolean' ? track.isSolo : false,
+      isArmed: typeof track.isArmed === 'boolean' ? track.isArmed : false,
+      color: track.color || '#3b82f6',
+      clips: Array.isArray(track.clips) ? track.clips : [],
+      plugins: Array.isArray(track.plugins) ? track.plugins : [],
+      automationLanes: Array.isArray(track.automationLanes) ? track.automationLanes : [],
+      sends: Array.isArray(track.sends) ? track.sends : [],
+      outputTrackId: track.outputTrackId || 'master',
+      drumPads: track.drumPads || undefined,
+      instrumentId: track.instrumentId || undefined,
+    }));
+
+    return validatedState;
   }
 }
