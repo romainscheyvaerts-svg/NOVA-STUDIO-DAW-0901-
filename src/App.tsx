@@ -731,14 +731,6 @@ export default function App() {
       canResize: true 
     },
     { 
-      id: 'keys', 
-      title: 'Clavier', 
-      icon: 'fa-piano-keyboard', 
-      component: KeysPanel, 
-      defaultHeight: 'full', 
-      canResize: true 
-    },
-    { 
       id: 'plugins', 
       title: 'Plugins', 
       icon: 'fa-puzzle-piece', 
