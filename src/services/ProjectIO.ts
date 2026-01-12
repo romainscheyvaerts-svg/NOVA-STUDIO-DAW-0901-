@@ -142,7 +142,7 @@ export class ProjectIO {
       isLowLatencyMode: typeof state.isLowLatencyMode === 'boolean' ? state.isLowLatencyMode : false,
       isRecModeActive: typeof state.isRecModeActive === 'boolean' ? state.isRecModeActive : false,
       systemMaxLatency: typeof state.systemMaxLatency === 'number' ? state.systemMaxLatency : 0.1,
-      recStartTime: typeof state.recStartTime === 'number' ? state.recStartTime : null,
+      recStartTime: (typeof state.recStartTime === 'number' || state.recStartTime === null) ? state.recStartTime : null,
       isDelayCompEnabled: typeof state.isDelayCompEnabled === 'boolean' ? state.isDelayCompEnabled : false,
     };
 

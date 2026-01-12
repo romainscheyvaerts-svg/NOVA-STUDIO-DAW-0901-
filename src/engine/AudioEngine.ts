@@ -476,7 +476,7 @@ export class AudioEngine {
         if (time >= this.loopEnd) {
           // Calculate how much time has passed since the loop start
           const timeSinceLoopStart = time - this.loopStart;
-          // Wrap the time back into the loop duration atomically
+          // Wrap the time back into the loop duration without state mutation
           const wrappedTime = this.loopStart + (timeSinceLoopStart % loopDuration);
           return wrappedTime;
         }
