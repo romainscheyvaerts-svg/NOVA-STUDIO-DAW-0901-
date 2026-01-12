@@ -493,27 +493,28 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           </div>
       )}
 
-      {/* PLUGINS GRID (Inserts) */}
-      <div className="mt-2 grid grid-cols-4 gap-1">
-        {insertPlugins.map(p => (
+      {/* PLUGINS GRID (Inserts) - with z-index correct */}
+      <div className="mt-2 space-y-1 relative z-20 bg-black/20 rounded-lg p-1">
+        {insertPlugins.map((p, index) => (
           <div 
             key={p.id} 
             draggable={!track.isFrozen}
             onDragStart={(e) => { if (track.isFrozen) return; e.stopPropagation(); handleFXDragStart(e, p.id); }}
             className={`relative group/fxitem flex flex-col items-center fx-slot ${track.isFrozen ? 'pointer-events-none opacity-40' : ''}`}
+            style={{ zIndex: 20 - index }}
           >
-            <div className="flex w-full overflow-hidden rounded-md border border-white/5 bg-black/40">
+            <div className="h-6 rounded-md bg-black/60 backdrop-blur-sm border border-white/20 hover:border-cyan-500/50 transition-all shadow-sm flex items-center justify-between px-2 cursor-pointer w-full overflow-hidden">
               <button 
                 onClick={(e) => handleFXClick(e, p)}
                 onTouchStart={(e) => handleFXClick(e, p)}
-                className={`flex-1 h-6 text-[7px] font-black uppercase truncate px-1 text-center flex items-center justify-center transition-all ${p.isEnabled ? 'text-cyan-400' : 'text-slate-700 bg-black/20'}`}
+                className={`flex-1 h-full text-[7px] font-black uppercase truncate text-left transition-all ${p.isEnabled ? 'text-cyan-400' : 'text-slate-700'}`}
               >
                 {getAbbr(p.type, p.name)}
               </button>
               <button 
                 onClick={(e) => togglePluginBypass(e, p)}
                 onTouchStart={(e) => togglePluginBypass(e, p)}
-                className={`w-4 h-6 flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/40' : 'bg-white/5 text-slate-800'}`}
+                className={`w-4 h-full flex items-center justify-center transition-all ${p.isEnabled ? 'text-cyan-400 hover:text-cyan-300' : 'text-slate-800'}`}
               >
                 <i className="fas fa-power-off text-[6px]"></i>
               </button>
@@ -521,14 +522,16 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <button onClick={(e) => handleRemoveFX(e, p.id)} onTouchStart={(e) => handleRemoveFX(e, p.id)} className="delete-fx"><i className="fas fa-times"></i></button>
           </div>
         ))}
+        
+        {/* Empty slots with better style */}
         {!track.isFrozen && Array.from({ length: Math.max(0, 4 - insertPlugins.length) }).map((_, i) => (
           <button 
-            key={i} 
+            key={`empty-${i}`}
             onClick={handleEmptySlotClick}
             onTouchStart={handleEmptySlotClick}
-            className="h-6 rounded-md border border-dashed border-white/10 bg-black/5 opacity-30 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
+            className="h-6 w-full rounded-md border border-dashed border-white/20 bg-black/30 opacity-50 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
           >
-            <i className="fas fa-plus text-[6px]"></i>
+            <i className="fas fa-plus text-[8px] text-white/50"></i>
           </button>
         ))}
       </div>

@@ -731,7 +731,7 @@ export default function App() {
         }));
 
         setExternalImportNotice(`✅ Importé: ${newClip.name}`);
-        console.log(`[Import] Succès: ${newClip.name} (${audioBuffer.duration.toFixed(2)}s)`);
+        // console.log(`[Import] Succès: ${newClip.name} (${audioBuffer.duration.toFixed(2)}s)`);
 
     } catch (e: any) {
         console.error("[Import Error]", e);
@@ -822,7 +822,7 @@ export default function App() {
             }
         }));
         
-        console.log(`[DrumSample] Loaded ${file.name} on pad ${padId}`);
+        // console.log(`[DrumSample] Loaded ${file.name} on pad ${padId}`);
     } catch (error) {
         console.error('[DrumSample] Error loading sample:', error);
     }
@@ -959,7 +959,7 @@ export default function App() {
         </div>
       )}
 
-      {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
+      {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { /* console.log("Plugins refreshed:", plugins.length); */ setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
       
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
