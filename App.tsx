@@ -31,6 +31,15 @@ import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
+import MobilePanelSystem from './src/components/mobile/MobilePanelSystem';
+import { PanelConfig } from './src/components/mobile/MobilePanel';
+import MixerPanel from './src/components/mobile/panels/MixerPanel';
+import PluginsPanel from './src/components/mobile/panels/PluginsPanel';
+import KeysPanel from './src/components/mobile/panels/KeysPanel';
+import BrowserPanel from './src/components/mobile/panels/BrowserPanel';
+import SettingsPanel from './src/components/mobile/panels/SettingsPanel';
+import TrackDetailPanel from './src/components/mobile/panels/TrackDetailPanel';
+import AutomationPanel from './src/components/mobile/panels/AutomationPanel';
 
 // ... (Les fonctions `AVAILABLE_FX_MENU`, `createDefaultAutomation`, `createDefaultPlugins`, etc. restent identiques)
 
@@ -326,6 +335,51 @@ export default function App() {
   const handleViewModeChange = (mode: ViewMode) => { setViewMode(mode); localStorage.setItem('nova_view_mode', mode); };
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
+  
+  // Mobile Panel System Configuration
+  const MOBILE_PANELS: PanelConfig[] = [
+    { 
+      id: 'mixer', 
+      title: 'Mix', 
+      icon: 'fa-sliders-h', 
+      component: MixerPanel, 
+      defaultHeight: 'half', 
+      canResize: true 
+    },
+    { 
+      id: 'keys', 
+      title: 'Clavier', 
+      icon: 'fa-piano-keyboard', 
+      component: KeysPanel, 
+      defaultHeight: 'full', 
+      canResize: true 
+    },
+    { 
+      id: 'plugins', 
+      title: 'Plugins', 
+      icon: 'fa-puzzle-piece', 
+      component: PluginsPanel, 
+      defaultHeight: 'half', 
+      canResize: true 
+    },
+    { 
+      id: 'browser', 
+      title: 'Sons', 
+      icon: 'fa-folder', 
+      component: BrowserPanel, 
+      defaultHeight: 'half', 
+      canResize: true 
+    },
+    { 
+      id: 'settings', 
+      title: 'Options', 
+      icon: 'fa-cog', 
+      component: SettingsPanel, 
+      defaultHeight: 'half', 
+      canResize: false 
+    },
+  ];
+  
   const ensureAudioEngine = async () => {
     const wasUninitialized = !audioEngine.ctx;
     if (!audioEngine.ctx) await audioEngine.init();
@@ -898,7 +952,8 @@ export default function App() {
             </aside>
         )}
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
-          {((!isMobile && state.currentView === 'ARRANGEMENT') || (isMobile && activeMobileTab === 'PROJECT')) && (
+          {/* Desktop & Mobile: Project/Arrangement View */}
+          {!isMobile && state.currentView === 'ARRANGEMENT' && (
             <ArrangementView 
                tracks={state.tracks} currentTime={state.currentTime} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
                onSetLoop={(start, end) => setState(prev => ({ ...prev, loopStart: start, loopEnd: end, isLoopActive: true }))} 
@@ -914,6 +969,63 @@ export default function App() {
                onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
                onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
             /> 
+          )}
+          
+          {/* Mobile: Project View with Panel System */}
+          {isMobile && activeMobileTab === 'PROJECT' && (
+            <MobilePanelSystem 
+              panels={MOBILE_PANELS}
+              panelProps={{
+                mixer: {
+                  tracks: state.tracks,
+                  onUpdateTrack: handleUpdateTrack,
+                },
+                keys: {
+                  onNoteOn: (note: number) => {
+                    // TODO: Connect to MIDI engine
+                    console.log('Note On:', note);
+                  },
+                  onNoteOff: (note: number) => {
+                    // TODO: Connect to MIDI engine
+                    console.log('Note Off:', note);
+                  },
+                },
+                plugins: {
+                  selectedTrack: state.tracks.find(t => t.id === state.selectedTrackId) || null,
+                  onUpdateTrack: handleUpdateTrack,
+                  onOpenPlugin: async (trackId: string, plugin: PluginInstance) => {
+                    await ensureAudioEngine();
+                    setActivePlugin({ trackId, plugin });
+                  },
+                },
+                browser: {
+                  onSelectSample: (url: string, name: string) => {
+                    console.log('Sample selected:', name);
+                    // TODO: Add sample to selected track
+                  },
+                },
+                settings: {
+                  bpm: state.bpm,
+                  onBpmChange: handleUpdateBpm,
+                },
+              }}
+            >
+              <ArrangementView 
+                 tracks={state.tracks} currentTime={state.currentTime} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
+                 onSetLoop={(start, end) => setState(prev => ({ ...prev, loopStart: start, loopEnd: end, isLoopActive: true }))} 
+                 onSeek={handleSeek} bpm={state.bpm} selectedTrackId={state.selectedTrackId} onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))} 
+                 onUpdateTrack={handleUpdateTrack} onReorderTracks={() => {}} 
+                 onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })} 
+                 onSelectPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }} 
+                 onRemovePlugin={handleRemovePlugin} onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })} 
+                 onAddTrack={handleCreateTrack} onDuplicateTrack={handleDuplicateTrack} onDeleteTrack={handleDeleteTrack} 
+                 onFreezeTrack={(tid) => {}} onImportFile={(file) => handleUniversalAudioImport(file, file.name)}
+                 onEditClip={handleEditClip} isRecording={state.isRecording} recStartTime={state.recStartTime}
+                 onMoveClip={handleMoveClip} onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
+                 onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
+                 onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
+              /> 
+            </MobilePanelSystem>
           )}
           
           {((!isMobile && state.currentView === 'MIXER') || (isMobile && activeMobileTab === 'MIXER')) && (
