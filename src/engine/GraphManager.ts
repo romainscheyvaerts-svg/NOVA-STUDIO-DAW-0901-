@@ -67,7 +67,8 @@ export class GraphManager {
     // Preview Channel (Browser/Store)
     this.previewGain = this.ctx.createGain();
     this.previewAnalyzer = this.ctx.createAnalyser();
-    this.previewAnalyzer.fftSize = 256; 
+    this.previewAnalyzer.fftSize = 2048; 
+    this.previewAnalyzer.smoothingTimeConstant = 0.8;
     this.previewGain.connect(this.previewAnalyzer);
     this.previewAnalyzer.connect(this.ctx.destination);
   }
