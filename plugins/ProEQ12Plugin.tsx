@@ -29,6 +29,7 @@ const MAX_FREQ = 20000;
 const DB_SCALE = 30; 
 const MAX_GAIN = DB_SCALE;
 const MIN_GAIN = -DB_SCALE; // Added missing constant
+const MIN_Q_VALUE = 0.1;
 
 export class ProEQ12Node {
   private ctx: AudioContext;
@@ -138,7 +139,7 @@ export class ProEQ12Node {
           // Longer smoothing time to avoid artifacts
           f.frequency.setTargetAtTime(safe(band.frequency), now, 0.08);
           f.gain.setTargetAtTime(safe(band.gain), now, 0.08);
-          f.Q.setTargetAtTime(Math.max(0.1, safe(band.q)), now, 0.08);
+          f.Q.setTargetAtTime(Math.max(MIN_Q_VALUE, safe(band.q)), now, 0.08);
         }
       });
     }

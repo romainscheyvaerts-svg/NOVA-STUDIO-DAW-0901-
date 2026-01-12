@@ -379,7 +379,7 @@ export class AudioEngine {
           const audioBuffer = await this.ctx!.decodeAudioData(arrayBuffer);
           const audioRef = URL.createObjectURL(blob);
           
-          // Track URL for cleanup
+          // Track blob URL for memory cleanup to prevent leaks
           this.objectURLs.push(audioRef);
 
           // Register buffer in registry to avoid Immer proxy issues
