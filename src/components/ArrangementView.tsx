@@ -85,10 +85,30 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: (ContextMenuItem | 'separator')[] } | null>(null);
   const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
 
-  const [headerWidth, setHeaderWidth] = useState(256);
+  // Responsive sidebar width - smaller on mobile
+  const [headerWidth, setHeaderWidth] = useState(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      return 180; // Compact width for mobile
+    }
+    return 256;
+  });
   const [isResizingHeader, setIsResizingHeader] = useState(false);
   const [isDraggingMinimap, setIsDraggingMinimap] = useState(false);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+
+  // Detect mobile and adjust sidebar
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile && headerWidth > 200) {
+        setHeaderWidth(180);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [headerWidth]);
 
   // Modular toolbar state
   const [showTools, setShowTools] = useState(true);
@@ -168,8 +188,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       setIsResizingHeader(true);
       const startX = e.clientX;
       const startWidth = headerWidth;
+      // Responsive min/max width
+      const minWidth = isMobile ? 120 : 150;
+      const maxWidth = isMobile ? 250 : 600;
       const onMove = (moveEvent: MouseEvent) => {
-          const newWidth = Math.max(150, Math.min(600, startWidth + moveEvent.clientX - startX));
+          const newWidth = Math.max(minWidth, Math.min(maxWidth, startWidth + moveEvent.clientX - startX));
           setHeaderWidth(newWidth);
       };
       const onUp = () => {
@@ -666,6 +689,24 @@ const drawTimeline = useCallback(() => {
       </div>
       {/* Add CSS for hiding scrollbar */}
       <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
+
+      {/* Floating Toggle Button for Sidebar - Mobile */}
+      <button
+        onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+        className={`fixed md:hidden z-50 w-10 h-10 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 ${
+          isSidebarVisible
+            ? 'bg-cyan-500 text-black'
+            : 'bg-[#14161a] border-2 border-cyan-500 text-cyan-400'
+        }`}
+        style={{
+          top: '50%',
+          transform: 'translateY(-50%)',
+          left: isSidebarVisible ? `${headerWidth + 8}px` : '8px'
+        }}
+      >
+        <i className={`fas ${isSidebarVisible ? 'fa-chevron-left' : 'fa-list'} text-sm`}></i>
+      </button>
+
       <div className="flex-1 flex overflow-hidden relative">
         {/* Sidebar - Track Headers */}
         {isSidebarVisible && (
@@ -685,6 +726,7 @@ const drawTimeline = useCallback(() => {
                      track={track} isSelected={selectedTrackId === track.id} onSelect={() => onSelectTrack(track.id)} onUpdate={onUpdateTrack}
                      onDropPlugin={onDropPluginOnTrack} onMovePlugin={onMovePlugin} onSelectPlugin={onSelectPlugin} onRemovePlugin={onRemovePlugin} onRequestAddPlugin={onRequestAddPlugin}
                      onContextMenu={handleTrackContextMenu} onDragStartTrack={() => {}} onDragOverTrack={() => {}} onDropTrack={() => {}} onSwapInstrument={onSwapInstrument}
+                     compact={isMobile}
                   />
                 </div>
                 {track.automationLanes.map(lane => lane.isExpanded && (

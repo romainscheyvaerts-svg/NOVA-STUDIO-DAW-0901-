@@ -19,6 +19,8 @@ interface TrackHeaderProps {
   isDraggingOver?: boolean;
   // Swap Instrument
   onSwapInstrument?: (trackId: string) => void;
+  // Compact mode for mobile
+  compact?: boolean;
 }
 
 const HorizontalSendFader: React.FC<{ 
@@ -80,9 +82,9 @@ const HorizontalSendFader: React.FC<{
 };
 
 
-const TrackHeader: React.FC<TrackHeaderProps> = ({ 
+const TrackHeader: React.FC<TrackHeaderProps> = ({
   track, onUpdate, isSelected, onSelect, onDropPlugin, onMovePlugin, onSelectPlugin, onRemovePlugin, onRequestAddPlugin, onContextMenu,
-  onDragStartTrack, onDragOverTrack, onDropTrack, isDraggingOver, onSwapInstrument
+  onDragStartTrack, onDragOverTrack, onDropTrack, isDraggingOver, onSwapInstrument, compact = false
 }) => {
   const [isDragOverFX, setIsDragOverFX] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
@@ -331,69 +333,69 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const insertPlugins = track.plugins.filter(p => p.id !== instrumentPlugin?.id);
 
   return (
-    <div 
+    <div
       onClick={onSelect}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, track.id); }}
       onDragOver={handleDragOver}
       onDragLeave={() => { setIsDragOverFX(false); }}
       onDrop={handleOnDrop}
-      className={`group border-b border-white/[0.03] p-3 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${track.isFrozen ? 'opacity-60 grayscale' : ''} ${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
-      style={{ borderLeft: `4px solid ${track.color}` }}
+      className={`group border-b border-white/[0.03] ${compact ? 'p-1.5' : 'p-3'} flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${track.isFrozen ? 'opacity-60 grayscale' : ''} ${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
+      style={{ borderLeft: `${compact ? '3px' : '4px'} solid ${track.color}` }}
     >
-      <div className="flex justify-between items-start mb-2">
-        <div className="flex items-center truncate flex-1 pr-2">
+      <div className={`flex justify-between items-start ${compact ? 'mb-1' : 'mb-2'}`}>
+        <div className="flex items-center truncate flex-1 pr-1">
           {/* Drag Handle & Type Icon */}
-          <div 
-            draggable 
+          <div
+            draggable
             onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('trackId', track.id); onDragStartTrack(track.id); }}
-            className="cursor-grab active:cursor-grabbing text-slate-500 hover:text-cyan-500 mr-2 flex-shrink-0 transition-colors p-1 flex items-center space-x-2"
+            className={`cursor-grab active:cursor-grabbing text-slate-500 hover:text-cyan-500 ${compact ? 'mr-1' : 'mr-2'} flex-shrink-0 transition-colors p-1 flex items-center ${compact ? 'space-x-1' : 'space-x-2'}`}
           >
-            <i className="fas fa-grip-vertical text-[10px]"></i>
-            <i className={`fas ${getTrackIcon()} text-[10px] ${isSelected ? 'text-white' : ''}`}></i>
+            <i className={`fas fa-grip-vertical ${compact ? 'text-[8px]' : 'text-[10px]'}`}></i>
+            <i className={`fas ${getTrackIcon()} ${compact ? 'text-[8px]' : 'text-[10px]'} ${isSelected ? 'text-white' : ''}`}></i>
           </div>
 
           <div className="truncate">
             {isRenaming ? (
-              <input 
+              <input
                 ref={nameInputRef}
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onBlur={handleNameSubmit}
                 onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
-                className="bg-black/60 border border-cyan-500/50 rounded px-1 text-[10px] font-black uppercase text-white outline-none w-full"
+                className={`bg-black/60 border border-cyan-500/50 rounded px-1 ${compact ? 'text-[8px]' : 'text-[10px]'} font-black uppercase text-white outline-none w-full`}
               />
             ) : (
-              <span 
+              <span
                 onDoubleClick={(e) => { e.stopPropagation(); setIsRenaming(true); }}
-                className={`text-[10px] font-black uppercase tracking-widest truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-500'}`}
+                className={`${compact ? 'text-[8px]' : 'text-[10px]'} font-black uppercase ${compact ? 'tracking-wide' : 'tracking-widest'} truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-500'}`}
               >
-                {track.name} {track.isFrozen && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400"></i>}
+                {track.name} {track.isFrozen && <i className={`fas fa-snowflake ${compact ? 'text-[6px]' : 'text-[8px]'} ml-1 text-cyan-400`}></i>}
               </span>
             )}
           </div>
         </div>
-        
-        {/* BOUTONS ACTIONS (M/S/A/R/P) */}
-        <div className="flex space-x-1 shrink-0">
-          <button 
+
+        {/* BOUTONS ACTIONS (M/S/A/R/P) - Compact on mobile */}
+        <div className={`flex ${compact ? 'space-x-0.5' : 'space-x-1'} shrink-0`}>
+          <button
             onClick={handleMuteToggle}
             onTouchStart={handleMuteToggle}
-            className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
+            className={`${compact ? 'w-5 h-5' : 'w-7 h-7'} rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
-            <span className="text-[9px] font-black">M</span>
+            <span className={`${compact ? 'text-[7px]' : 'text-[9px]'} font-black`}>M</span>
           </button>
-          <button 
+          <button
             onClick={handleSoloToggle}
             onTouchStart={handleSoloToggle}
-            className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
+            className={`${compact ? 'w-5 h-5' : 'w-7 h-7'} rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
-            <span className="text-[9px] font-black">S</span>
+            <span className={`${compact ? 'text-[7px]' : 'text-[9px]'} font-black`}>S</span>
           </button>
-          
-          {canHaveSends && (
-            <button 
-                onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }} 
+
+          {canHaveSends && !compact && (
+            <button
+                onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
                 onTouchStart={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
                 className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
             >
@@ -403,47 +405,49 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
 
           {/* REC BUTTON - Available for Audio AND MIDI now */}
           {(isAudio || isMidiOrSampler) && (
-              <button 
-                onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }} 
-                onTouchStart={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }} 
-                className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
+              <button
+                onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
+                onTouchStart={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
+                className={`${compact ? 'w-5 h-5' : 'w-7 h-7'} rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
                 title="Arm Track for Recording"
               >
-                <span className="text-[9px] font-black">R</span>
+                <span className={`${compact ? 'text-[7px]' : 'text-[9px]'} font-black`}>R</span>
               </button>
           )}
         </div>
       </div>
       
       {/* ZONE DES CONTRÔLES : Panoramique, Volume */}
-      <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-2 rounded-lg border border-white/5 relative z-10">
-        <div 
-          onMouseDown={handlePanMouseDown}
-          onTouchStart={handlePanTouchStart}
-          onDoubleClick={(e) => { e.stopPropagation(); onUpdate({...track, pan: 0}); }}
-          className="relative w-7 h-7 rounded-full bg-black border border-white/10 flex items-center justify-center cursor-ns-resize shadow-lg hover:border-cyan-500/30 transition-all touch-none group/pan"
-        >
-          <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${track.pan * 140}deg) translateY(-1px)` }} />
-        </div>
-        
-        <div className="flex-1 flex flex-col justify-center h-6 relative">
-          <div 
+      <div ref={controlsRef} className={`flex items-center ${compact ? 'space-x-1.5 mt-0.5 p-1' : 'space-x-3 mt-1 p-2'} bg-black/20 rounded-lg border border-white/5 relative z-10`}>
+        {!compact && (
+          <div
+            onMouseDown={handlePanMouseDown}
+            onTouchStart={handlePanTouchStart}
+            onDoubleClick={(e) => { e.stopPropagation(); onUpdate({...track, pan: 0}); }}
+            className="relative w-7 h-7 rounded-full bg-black border border-white/10 flex items-center justify-center cursor-ns-resize shadow-lg hover:border-cyan-500/30 transition-all touch-none group/pan"
+          >
+            <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${track.pan * 140}deg) translateY(-1px)` }} />
+          </div>
+        )}
+
+        <div className={`flex-1 flex flex-col justify-center ${compact ? 'h-4' : 'h-6'} relative`}>
+          <div
             onMouseDown={handleVolumeMouseDown}
             onTouchStart={handleVolumeTouchStart}
             onTouchMove={handleVolumeTouchMove}
             onTouchEnd={handleVolumeTouchEnd}
-            className="h-3 bg-black/60 rounded-full overflow-hidden relative cursor-ew-resize group/vol touch-none"
+            className={`${compact ? 'h-2.5' : 'h-3'} bg-black/60 rounded-full overflow-hidden relative cursor-ew-resize group/vol touch-none`}
           >
             {/* Jauge de volume visuelle */}
-            <div 
-              className={`h-full transition-all duration-75 ${isAdjustingVolume ? 'brightness-150' : 'brightness-100'}`} 
-              style={{ 
-                width: `${(Math.sqrt(track.volume / 1.5)) * 100}%`, 
+            <div
+              className={`h-full transition-all duration-75 ${isAdjustingVolume ? 'brightness-150' : 'brightness-100'}`}
+              style={{
+                width: `${(Math.sqrt(track.volume / 1.5)) * 100}%`,
                 backgroundColor: track.color,
                 boxShadow: isAdjustingVolume ? `0 0 10px ${track.color}` : 'none'
-              }} 
+              }}
             />
-            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[7px] font-mono text-white/40 pointer-events-none group-hover/vol:text-white/80 transition-colors uppercase">
+            <span className={`absolute right-1 top-1/2 -translate-y-1/2 ${compact ? 'text-[6px]' : 'text-[7px]'} font-mono text-white/40 pointer-events-none group-hover/vol:text-white/80 transition-colors uppercase`}>
               {Math.round(track.volume * 100)}%
             </span>
           </div>
@@ -462,8 +466,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       )}
       
-      {/* INSTRUMENT SLOT (For Sampler/MIDI/DrumRack Tracks) */}
-      {instrumentPlugin && (
+      {/* INSTRUMENT SLOT (For Sampler/MIDI/DrumRack Tracks) - Hidden in compact mode */}
+      {instrumentPlugin && !compact && (
           <div className="mt-2 relative group/inst">
               <div className="flex w-full overflow-hidden rounded-md border border-cyan-500/30 bg-cyan-500/5 shadow-[0_0_10px_rgba(0,242,255,0.05)]">
                   {/* ICON */}
@@ -493,8 +497,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           </div>
       )}
 
-      {/* PLUGINS GRID (Inserts) */}
-      <div className="mt-2 grid grid-cols-4 gap-1">
+      {/* PLUGINS GRID (Inserts) - Hidden in compact mode */}
+      {!compact && <div className="mt-2 grid grid-cols-4 gap-1">
         {insertPlugins.map(p => (
           <div 
             key={p.id} 
@@ -531,7 +535,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <i className="fas fa-plus text-[6px]"></i>
           </button>
         ))}
-      </div>
+      </div>}
     </div>
   );
 };
