@@ -1,13 +1,12 @@
 import React from 'react';
+import type { ShortcutAction } from '../hooks/useKeyboardShortcuts';
 
-export interface ShortcutDefinition {
+/**
+ * Shortcut definition for display in the modal
+ * Extends ShortcutAction with a unique identifier
+ */
+export interface ShortcutDefinition extends Omit<ShortcutAction, 'action' | 'preventBrowserDefault'> {
   id: string;
-  key: string;
-  ctrl?: boolean;
-  shift?: boolean;
-  alt?: boolean;
-  description: string;
-  category: string;
 }
 
 interface KeyboardShortcutsModalProps {

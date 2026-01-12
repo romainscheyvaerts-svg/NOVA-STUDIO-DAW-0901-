@@ -1,21 +1,69 @@
 import { useEffect, useCallback } from 'react';
 
+/**
+ * Defines a keyboard shortcut action
+ */
 export interface ShortcutAction {
+  /** The key to trigger the shortcut (e.g., 'a', ' ', 'Enter', 'ArrowUp') */
   key: string;
+  
+  /** Whether Ctrl (Windows/Linux) or Cmd (Mac) key must be pressed */
   ctrl?: boolean;
+  
+  /** Whether Shift key must be pressed */
   shift?: boolean;
+  
+  /** Whether Alt key must be pressed */
   alt?: boolean;
+  
+  /** Reserved for future use - currently equivalent to ctrl */
   meta?: boolean;
+  
+  /** The function to execute when the shortcut is triggered */
   action: () => void;
+  
+  /** Human-readable description of what the shortcut does */
   description: string;
+  
+  /** Category for grouping shortcuts in UI (e.g., 'Transport', 'Editing') */
   category: string;
+  
+  /** Whether to prevent the browser's default behavior for this key combination. Defaults to true. */
   preventBrowserDefault?: boolean;
 }
 
 /**
  * Custom hook for handling keyboard shortcuts in the DAW
- * @param shortcuts Array of shortcut definitions
- * @param enabled Whether shortcuts should be active (disable when modals are open)
+ * 
+ * Features:
+ * - Automatically ignores shortcuts when typing in input/textarea elements
+ * - Treats Ctrl and Cmd (Meta) keys as equivalent for cross-platform support
+ * - Prevents default browser behavior for registered shortcuts
+ * - Can be disabled when modals are open
+ * 
+ * @param shortcuts Array of shortcut definitions to register
+ * @param enabled Whether shortcuts should be active (set to false when modals are open)
+ * 
+ * @example
+ * ```tsx
+ * const shortcuts = useMemo(() => [
+ *   {
+ *     key: ' ',
+ *     action: () => handlePlay(),
+ *     description: 'Play/Pause',
+ *     category: 'Transport'
+ *   },
+ *   {
+ *     key: 's',
+ *     ctrl: true,
+ *     action: () => handleSave(),
+ *     description: 'Save Project',
+ *     category: 'Files'
+ *   }
+ * ], [handlePlay, handleSave]);
+ * 
+ * useKeyboardShortcuts(shortcuts, !isModalOpen);
+ * ```
  */
 export const useKeyboardShortcuts = (shortcuts: ShortcutAction[], enabled: boolean = true) => {
   const handleKeyDown = useCallback((e: KeyboardEvent) => {

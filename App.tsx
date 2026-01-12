@@ -20,7 +20,7 @@ import LoadProjectModal from './components/LoadProjectModal';
 import ExportModal from './components/ExportModal'; 
 import AudioSettingsPanel from './components/AudioSettingsPanel'; 
 import PluginManager from './components/PluginManager'; 
-import KeyboardShortcutsModal from './src/components/KeyboardShortcutsModal';
+import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
 import { supabaseManager } from './services/SupabaseManager';
 import { SessionSerializer } from './services/SessionSerializer';
 import { getAIProductionAssistance } from './services/AIService';
@@ -32,7 +32,7 @@ import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
-import { useKeyboardShortcuts, ShortcutAction } from './src/hooks/useKeyboardShortcuts';
+import { useKeyboardShortcuts, ShortcutAction } from './hooks/useKeyboardShortcuts';
 
 // ... (Les fonctions `AVAILABLE_FX_MENU`, `createDefaultAutomation`, `createDefaultPlugins`, etc. restent identiques)
 
