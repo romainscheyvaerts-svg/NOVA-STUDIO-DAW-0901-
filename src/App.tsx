@@ -1403,6 +1403,23 @@ export default function App() {
       case 'CREATE_BUS':
         handleCreateTrack(TrackType.BUS, a.payload?.name || 'New Bus');
         break;
+      case 'ROUTE_TO_BUS':
+        if (a.payload?.trackId && a.payload?.busId) {
+          setState(produce((draft: DAWState) => {
+            const track = draft.tracks.find(t => t.id === a.payload.trackId);
+            if (track) {
+              track.outputTrackId = a.payload.busId;
+            }
+          }));
+          setAiNotification(`Piste routée vers ${a.payload.busId}`);
+          setTimeout(() => setAiNotification(null), 2000);
+        }
+        break;
+
+      // === SESSION TEMPLATES ===
+      case 'SETUP_SESSION':
+        setupSessionTemplate(a.payload?.template || 'vocal_full');
+        break;
 
       // === VIEW CONTROL ===
       case 'CHANGE_VIEW':
@@ -1633,6 +1650,71 @@ export default function App() {
     }));
     audioEngine.armTrack(targetTrackId);
     setAiNotification(`Prêt à enregistrer sur ${targetTrackId}`);
+    setTimeout(() => setAiNotification(null), 3000);
+  }, [setState]);
+
+  // === SESSION TEMPLATES ===
+  const setupSessionTemplate = useCallback((template: string = 'vocal_full') => {
+    const templates: Record<string, { tracks: { name: string; volume: number; pan: number; outputTrackId: string; sends: { id: string; level: number }[] }[] }> = {
+      'vocal_full': {
+        tracks: [
+          { name: 'DOUBLE L', volume: 0.5, pan: -0.65, outputTrackId: 'bus-vox', sends: [{ id: 'send-delay', level: 0.1 }] },
+          { name: 'DOUBLE R', volume: 0.5, pan: 0.65, outputTrackId: 'bus-vox', sends: [{ id: 'send-delay', level: 0.1 }] },
+          { name: 'BACKS', volume: 0.4, pan: 0, outputTrackId: 'bus-vox', sends: [{ id: 'send-verb-short', level: 0.3 }] },
+          { name: 'AD-LIBS', volume: 0.35, pan: 0, outputTrackId: 'bus-vox', sends: [{ id: 'send-delay', level: 0.2 }, { id: 'send-verb-short', level: 0.2 }] },
+          { name: 'AMBIANCE', volume: 0.25, pan: 0, outputTrackId: 'bus-vox', sends: [{ id: 'send-verb-long', level: 0.7 }] }
+        ]
+      },
+      'minimal': {
+        tracks: [
+          { name: 'BACK', volume: 0.45, pan: 0, outputTrackId: 'bus-vox', sends: [{ id: 'send-verb-short', level: 0.25 }] }
+        ]
+      },
+      'chorus_stack': {
+        tracks: [
+          { name: 'STACK 1 L', volume: 0.4, pan: -0.8, outputTrackId: 'bus-vox', sends: [{ id: 'send-verb-long', level: 0.4 }] },
+          { name: 'STACK 1 R', volume: 0.4, pan: 0.8, outputTrackId: 'bus-vox', sends: [{ id: 'send-verb-long', level: 0.4 }] },
+          { name: 'STACK 2 L', volume: 0.35, pan: -0.5, outputTrackId: 'bus-vox', sends: [{ id: 'send-verb-long', level: 0.5 }] },
+          { name: 'STACK 2 R', volume: 0.35, pan: 0.5, outputTrackId: 'bus-vox', sends: [{ id: 'send-verb-long', level: 0.5 }] }
+        ]
+      },
+      'adlibs_setup': {
+        tracks: [
+          { name: 'ADLIB CENTER', volume: 0.35, pan: 0, outputTrackId: 'bus-vox', sends: [{ id: 'send-delay', level: 0.3 }] },
+          { name: 'ADLIB LEFT', volume: 0.3, pan: -0.7, outputTrackId: 'bus-vox', sends: [{ id: 'send-delay', level: 0.25 }, { id: 'send-verb-short', level: 0.2 }] },
+          { name: 'ADLIB RIGHT', volume: 0.3, pan: 0.7, outputTrackId: 'bus-vox', sends: [{ id: 'send-delay', level: 0.25 }, { id: 'send-verb-short', level: 0.2 }] }
+        ]
+      }
+    };
+
+    const selectedTemplate = templates[template] || templates['vocal_full'];
+
+    setState(produce((draft: DAWState) => {
+      selectedTemplate.tracks.forEach((trackConfig, index) => {
+        const newTrackId = `track-${Date.now()}-${index}`;
+        const newTrack: Track = {
+          id: newTrackId,
+          name: trackConfig.name,
+          type: TrackType.AUDIO,
+          color: UI_CONFIG.TRACK_COLORS[(draft.tracks.length + index) % UI_CONFIG.TRACK_COLORS.length],
+          isMuted: false,
+          isSolo: false,
+          isTrackArmed: false,
+          isFrozen: false,
+          volume: trackConfig.volume,
+          pan: trackConfig.pan,
+          outputTrackId: trackConfig.outputTrackId,
+          sends: trackConfig.sends.map(s => ({ id: s.id, level: s.level, isEnabled: true })),
+          clips: [],
+          plugins: [],
+          automationLanes: [],
+          totalLatency: 0
+        };
+        draft.tracks.push(newTrack);
+      });
+    }));
+
+    setAiNotification(`Session "${template}" créée avec ${selectedTemplate.tracks.length} pistes ! 🎤`);
     setTimeout(() => setAiNotification(null), 3000);
   }, [setState]);
 

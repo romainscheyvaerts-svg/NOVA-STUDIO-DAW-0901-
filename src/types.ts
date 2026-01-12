@@ -270,6 +270,8 @@ export type AIActionType =
   | 'SET_SEND_LEVEL'
   | 'CREATE_BUS'
   | 'ROUTE_TO_BUS'
+  // Session Templates
+  | 'SETUP_SESSION'
   // Clip Operations
   | 'NORMALIZE_CLIP'
   | 'SPLIT_CLIP'
