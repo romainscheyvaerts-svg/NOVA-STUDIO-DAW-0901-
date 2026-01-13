@@ -107,9 +107,6 @@ export class AudioEngine {
   private currentBpm: number = 120;
   // FIX: Add property to track active VST plugin for streaming management.
   private activeVSTPlugin: { trackId: string, pluginId: string } | null = null;
-  
-  // Memory leak fix: Track object URLs for cleanup
-  private objectURLs: string[] = [];
 
   constructor() {}
 
@@ -145,10 +142,10 @@ export class AudioEngine {
     this.masterSplitter = this.ctx.createChannelSplitter(2);
     this.masterAnalyzerL = this.ctx.createAnalyser();
     this.masterAnalyzerR = this.ctx.createAnalyser();
-    this.masterAnalyzerL.fftSize = 2048; 
-    this.masterAnalyzerR.fftSize = 2048;
-    this.masterAnalyzerL.smoothingTimeConstant = 0.8;
-    this.masterAnalyzerR.smoothingTimeConstant = 0.8;
+    this.masterAnalyzerL.fftSize = 1024; 
+    this.masterAnalyzerR.fftSize = 1024;
+    this.masterAnalyzerL.smoothingTimeConstant = 0.5;
+    this.masterAnalyzerR.smoothingTimeConstant = 0.5;
 
     // Routing Chain: MasterGain -> Limiter -> Analyzer -> Destination
     this.masterOutput.connect(this.masterLimiter);
@@ -163,8 +160,7 @@ export class AudioEngine {
     // Init Preview System
     this.previewGain = this.ctx.createGain();
     this.previewAnalyzer = this.ctx.createAnalyser();
-    this.previewAnalyzer.fftSize = 2048; 
-    this.previewAnalyzer.smoothingTimeConstant = 0.8;
+    this.previewAnalyzer.fftSize = 256; 
     this.previewGain.connect(this.previewAnalyzer);
     this.previewAnalyzer.connect(this.ctx.destination);
   }
@@ -266,7 +262,7 @@ export class AudioEngine {
     
     // Si DSP n'existe pas, attendre un peu et réessayer (race condition fix)
     if (!dsp) {
-      // console.log("[AudioEngine] DSP not ready, waiting 150ms...");
+      console.log("[AudioEngine] DSP not ready, waiting 150ms...");
       await new Promise(r => setTimeout(r, 150));
       dsp = this.tracksDSP.get(trackId);
     }
@@ -287,7 +283,7 @@ export class AudioEngine {
       });
       this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
       this.monitorSource.connect(dsp.input);
-      // console.log("[AudioEngine] Track armed OK:", trackId);
+      console.log("[AudioEngine] Track armed OK:", trackId);
     } catch (e) {
       console.error("[AudioEngine] ARM ERROR:", e);
       this.monitoringTrackId = null;
@@ -308,7 +304,7 @@ export class AudioEngine {
   }
 
   public async startRecording(currentTime: number, trackId: string): Promise<boolean> {
-    // console.log("[AudioEngine] startRecording called - stream:", !!this.activeMonitorStream, "recording:", this.recordingTrackId);
+    console.log("[AudioEngine] startRecording called - stream:", !!this.activeMonitorStream, "recording:", this.recordingTrackId);
 
     // Check if we have an active monitor stream
     if (!this.activeMonitorStream) {
@@ -354,7 +350,7 @@ export class AudioEngine {
         console.error("[AudioEngine] MediaRecorder error:", event);
       };
       this.mediaRecorder.start(100); // Collect data every 100ms for better reliability
-      // console.log("[AudioEngine] Recording started OK on track:", trackId);
+      console.log("[AudioEngine] Recording started OK on track:", trackId);
       return true;
     } catch (e) {
       console.error("[AudioEngine] REC ERROR:", e);
@@ -379,9 +375,6 @@ export class AudioEngine {
           const arrayBuffer = await blob.arrayBuffer();
           const audioBuffer = await this.ctx!.decodeAudioData(arrayBuffer);
           const audioRef = URL.createObjectURL(blob);
-          
-          // Track blob URL for memory cleanup to prevent leaks
-          this.objectURLs.push(audioRef);
 
           // Register buffer in registry to avoid Immer proxy issues
           const bufferId = audioBufferRegistry.register(audioBuffer, audioRef);
@@ -399,7 +392,7 @@ export class AudioEngine {
             bufferId: bufferId,  // Use registry reference instead of direct buffer
             audioRef: audioRef,
           };
-          // console.log("[AudioEngine] Recording stopped. New clip created:", clip.id, "bufferId:", bufferId);
+          console.log("[AudioEngine] Recording stopped. New clip created:", clip.id, "bufferId:", bufferId);
           resolve({ clip, trackId });
         } catch (e) {
           console.error("Error processing recorded audio:", e);
@@ -447,26 +440,6 @@ export class AudioEngine {
     this.activeMidiNotes.clear();
     this.stopScrubbing();
   }
-  
-  // Memory leak fix: Dispose of object URLs
-  public dispose() {
-    this.objectURLs.forEach(url => URL.revokeObjectURL(url));
-    this.objectURLs = [];
-  }
-
-  /**
-   * Panic - Stop all MIDI notes immediately to prevent stuck notes
-   */
-  public panic(): void {
-    this.activeMidiNotes.clear();
-    this.tracksDSP.forEach(dsp => {
-      if (dsp.synth) dsp.synth.releaseAll();
-      if (dsp.sampler) dsp.sampler.stopAll();
-      if (dsp.drumSampler) dsp.drumSampler.stop();
-      if (dsp.melodicSampler) dsp.melodicSampler.stopAll();
-      // DrumRack is typically one-shot and doesn't need explicit panic
-    });
-  }
 
   public seekTo(time: number, tracks: Track[], wasPlaying: boolean) {
     this.stopAll();
@@ -482,14 +455,16 @@ export class AudioEngine {
     if (this.isPlaying) {
       let time = this.ctx.currentTime - this.playbackStartTime;
       
-      // Handle loop - use pure calculation without modifying playbackStartTime
+      // Handle loop
       if (this.isLoopActive && this.loopEnd > this.loopStart) {
         const loopDuration = this.loopEnd - this.loopStart;
         if (time >= this.loopEnd) {
           // Calculate how much time has passed since the loop start
           const timeSinceLoopStart = time - this.loopStart;
-          // Wrap the time back into the loop duration without state mutation
+          // Wrap the time back into the loop duration
           const wrappedTime = this.loopStart + (timeSinceLoopStart % loopDuration);
+          // Adjust playbackStartTime to prevent time jumps on subsequent calls
+          this.playbackStartTime = this.ctx.currentTime - wrappedTime;
           return wrappedTime;
         }
       }
@@ -509,53 +484,48 @@ export class AudioEngine {
   private scheduler(tracks: Track[]) {
     if (!this.ctx) return;
 
-    try {
-      while (this.nextScheduleTime < this.ctx.currentTime + this.SCHEDULE_AHEAD_SEC) {
-        const scheduleUntil = this.nextScheduleTime + this.SCHEDULE_AHEAD_SEC;
-        let projectTimeStart = this.nextScheduleTime - this.playbackStartTime;
-        let projectTimeEnd = scheduleUntil - this.playbackStartTime;
+    while (this.nextScheduleTime < this.ctx.currentTime + this.SCHEDULE_AHEAD_SEC) {
+      const scheduleUntil = this.nextScheduleTime + this.SCHEDULE_AHEAD_SEC;
+      let projectTimeStart = this.nextScheduleTime - this.playbackStartTime;
+      let projectTimeEnd = scheduleUntil - this.playbackStartTime;
 
-        // Handle loop wrapping in scheduler
-        if (this.isLoopActive && this.loopEnd > this.loopStart) {
-          const loopDuration = this.loopEnd - this.loopStart;
+      // Handle loop wrapping in scheduler
+      if (this.isLoopActive && this.loopEnd > this.loopStart) {
+        const loopDuration = this.loopEnd - this.loopStart;
 
-          // If we've gone past the loop end, wrap back
-          if (projectTimeStart >= this.loopEnd) {
-            const overflow = projectTimeStart - this.loopStart;
-            projectTimeStart = this.loopStart + (overflow % loopDuration);
-            projectTimeEnd = projectTimeStart + this.SCHEDULE_AHEAD_SEC;
+        // If we've gone past the loop end, wrap back
+        if (projectTimeStart >= this.loopEnd) {
+          const overflow = projectTimeStart - this.loopStart;
+          projectTimeStart = this.loopStart + (overflow % loopDuration);
+          projectTimeEnd = projectTimeStart + this.SCHEDULE_AHEAD_SEC;
 
-            // Also update playbackStartTime to keep things in sync
-            this.playbackStartTime = this.nextScheduleTime - projectTimeStart;
-          }
-
-          // If the window crosses the loop boundary, split it
-          if (projectTimeStart < this.loopEnd && projectTimeEnd > this.loopEnd) {
-            // Schedule up to loop end
-            this.scheduleClips(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime, 0, new Map());
-            this.scheduleMidi(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime);
-            this.scheduleAutomation(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime);
-
-            // Then schedule from loop start for the remainder
-            const remainingTime = projectTimeEnd - this.loopEnd;
-            const loopStartScheduleTime = this.nextScheduleTime + (this.loopEnd - projectTimeStart);
-            this.scheduleClips(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime, 0, new Map());
-            this.scheduleMidi(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime);
-            this.scheduleAutomation(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime);
-
-            this.nextScheduleTime += this.SCHEDULE_AHEAD_SEC;
-            continue;
-          }
+          // Also update playbackStartTime to keep things in sync
+          this.playbackStartTime = this.nextScheduleTime - projectTimeStart;
         }
 
-        this.scheduleClips(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime, 0, new Map());
-        this.scheduleMidi(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
-        this.scheduleAutomation(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
-        this.nextScheduleTime += this.SCHEDULE_AHEAD_SEC;
+        // If the window crosses the loop boundary, split it
+        if (projectTimeStart < this.loopEnd && projectTimeEnd > this.loopEnd) {
+          // Schedule up to loop end
+          this.scheduleClips(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime, 0, new Map());
+          this.scheduleMidi(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime);
+          this.scheduleAutomation(tracks, projectTimeStart, this.loopEnd, this.nextScheduleTime);
+
+          // Then schedule from loop start for the remainder
+          const remainingTime = projectTimeEnd - this.loopEnd;
+          const loopStartScheduleTime = this.nextScheduleTime + (this.loopEnd - projectTimeStart);
+          this.scheduleClips(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime, 0, new Map());
+          this.scheduleMidi(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime);
+          this.scheduleAutomation(tracks, this.loopStart, this.loopStart + remainingTime, loopStartScheduleTime);
+
+          this.nextScheduleTime += this.SCHEDULE_AHEAD_SEC;
+          continue;
+        }
       }
-    } catch (error) {
-      console.error('[AudioEngine] Scheduler error:', error);
-      // Continue playback despite error
+
+      this.scheduleClips(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime, 0, new Map());
+      this.scheduleMidi(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
+      this.scheduleAutomation(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
+      this.nextScheduleTime += this.SCHEDULE_AHEAD_SEC;
     }
   }
 
@@ -843,7 +813,7 @@ export class AudioEngine {
                 }
             };
             
-            // console.log(`[AudioEngine] Playing: ${clip.name} | offset: ${offsetIntoClip.toFixed(2)}s | duration: ${actualDuration.toFixed(2)}s`);
+            console.log(`[AudioEngine] Playing: ${clip.name} | offset: ${offsetIntoClip.toFixed(2)}s | duration: ${actualDuration.toFixed(2)}s`);
         }
         
     } catch (error) {

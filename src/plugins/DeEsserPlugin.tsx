@@ -42,8 +42,7 @@ export class DeEsserNode {
     this.compressor.release.value = 0.050;
     this.merger = ctx.createGain();
     this.analyzer = ctx.createAnalyser();
-    this.analyzer.fftSize = 2048;
-    this.analyzer.smoothingTimeConstant = 0.8;
+    this.analyzer.fftSize = 512;
     this.setupChain();
   }
 

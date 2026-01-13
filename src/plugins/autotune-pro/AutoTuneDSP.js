@@ -207,9 +207,9 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       const valB = this.buffer[idxB & this.bufferMask] * (1-fracB) + 
                    this.buffer[(idxB+1) & this.bufferMask] * fracB;
 
-      // Fenêtrage (Hann - smooth)
-      const winA = 0.5 * (1 - Math.cos(2 * Math.PI * this.phase));
-      const winB = 0.5 * (1 - Math.cos(2 * Math.PI * ((this.phase + 0.5) % 1)));
+      // Fenêtrage (Triangle)
+      const winA = 1 - 2 * Math.abs(this.phase - 0.5);
+      const winB = 1 - 2 * Math.abs(((this.phase + 0.5) % 1) - 0.5);
 
       const wet = (valA * winA) + (valB * winB);
       
