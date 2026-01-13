@@ -1037,7 +1037,8 @@ export default function App() {
     }
   }, [setState]);
 
-  const handleUniversalAudioImport = async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
+  const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
+      console.log('[handleUniversalAudioImport] Début import:', name);
       setExternalImportNotice(`Chargement: ${name}...`);
       try {
           await ensureAudioEngine();
@@ -1130,7 +1131,7 @@ export default function App() {
       } finally {
           setTimeout(() => setExternalImportNotice(null), 3000);
       }
-  };
+  }, [setState, ensureAudioEngine]);
 
   useEffect(() => { 
       (window as any).DAW_CORE = { 
