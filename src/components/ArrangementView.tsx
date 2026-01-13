@@ -711,7 +711,7 @@ const drawTimeline = useCallback(() => {
             onContextMenu={(e) => e.preventDefault()}
         >
           <div style={{ width: totalContentWidth, height: totalArrangementHeight }} className="absolute top-0 left-0 pointer-events-none" />
-          <canvas ref={canvasRef} className="sticky top-0 left-0" style={{ display: 'block' }} />
+          <canvas ref={canvasRef} className="absolute top-0 left-0" style={{ display: 'block', pointerEvents: 'none' }} />
           {isRecording && recStartTime !== null && (
              visibleTracks.map((track, idx) => {
                if (!track.isTrackArmed) return null;
