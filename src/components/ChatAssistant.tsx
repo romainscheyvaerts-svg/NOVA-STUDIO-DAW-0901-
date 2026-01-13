@@ -170,18 +170,16 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
             </div>
 
             <div className="flex items-center space-x-2">
-              {isAdmin && (
-                <button
-                  onClick={(e) => {
-                      e.stopPropagation();
-                      setShowApiKeyModal(true);
-                  }}
-                  className="w-10 h-10 rounded-full bg-purple-600/20 text-purple-400 hover:bg-purple-600 hover:text-white transition-all flex items-center justify-center border border-purple-500/30"
-                  title="[ADMIN] Modifier la clé API"
-                >
-                  <i className="fas fa-key text-sm"></i>
-                </button>
-              )}
+              <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setShowApiKeyModal(true);
+                }}
+                className="w-10 h-10 rounded-full bg-purple-600/20 text-purple-400 hover:bg-purple-600 hover:text-white transition-all flex items-center justify-center border border-purple-500/30"
+                title="Configurer la clé API"
+              >
+                <i className="fas fa-key text-sm"></i>
+              </button>
 
               <button
                 onClick={(e) => {
