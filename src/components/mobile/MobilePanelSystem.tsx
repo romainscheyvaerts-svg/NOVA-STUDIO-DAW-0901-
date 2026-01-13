@@ -75,7 +75,7 @@ const MobilePanelSystem: React.FC<MobilePanelSystemProps> = ({
       {activePanel && activeConfig && (
         <>
           {/* Backdrop pour masquer le contenu principal */}
-          <div className="fixed inset-0 z-[9998] bg-black/60 backdrop-blur-sm transition-opacity duration-300" />
+          <div className="fixed inset-0 z-[9998] bg-black/60 transition-opacity duration-300" />
           <MobilePanel
             config={activeConfig}
             height={panelHeight}
