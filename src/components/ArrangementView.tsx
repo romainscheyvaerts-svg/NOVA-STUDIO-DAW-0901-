@@ -544,11 +544,11 @@ const drawTimeline = useCallback(() => {
       </div>
       <div className="flex-1 flex overflow-hidden relative">
         <div 
-            ref={sidebarContainerRef} 
-            onScroll={handleScroll} 
-            onWheel={handleSidebarWheel}
-            className="flex-shrink-0 z-40 flex flex-col overflow-y-auto overflow-x-hidden transition-colors relative sidebar-no-scroll" 
-            style={{ width: `${headerWidth}px`, scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          ref={sidebarContainerRef} 
+          onScroll={handleScroll} 
+          onWheel={handleSidebarWheel}
+          className="flex-shrink-0 z-40 flex flex-col overflow-y-auto overflow-x-hidden transition-colors relative sidebar-no-scroll" 
+          style={{ width: `${headerWidth}px`, scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           <style>{`.sidebar-no-scroll::-webkit-scrollbar { display: none; }`}</style>
           <div style={{ height: 40, flexShrink: 0 }} />
