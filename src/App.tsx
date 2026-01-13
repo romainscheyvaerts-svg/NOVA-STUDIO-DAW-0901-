@@ -726,14 +726,14 @@ export default function App() {
   const handleViewModeChange = (mode: ViewMode) => { setViewMode(mode); localStorage.setItem('nova_view_mode', mode); };
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
-  const ensureAudioEngine = async () => {
+  const ensureAudioEngine = useCallback(async () => {
     const wasUninitialized = !audioEngine.ctx;
     if (!audioEngine.ctx) await audioEngine.init();
     if (audioEngine.ctx?.state === 'suspended') await audioEngine.ctx.resume();
     if (wasUninitialized && audioEngine.ctx) {
       stateRef.current.tracks.forEach(t => audioEngine.updateTrack(t, stateRef.current.tracks));
     }
-  };
+  }, []);
 
   const handleLogout = async () => { await supabaseManager.signOut(); setUser(null); };
   const handleBuyLicense = (instrumentId: number) => { if (!user) return; const updatedUser = { ...user, owned_instruments: [...(user.owned_instruments || []), instrumentId] }; setUser(updatedUser); setAiNotification(`✅ Licence achetée avec succès ! Export débloqué.`); };
@@ -2174,11 +2174,14 @@ export default function App() {
       <div className="flex-1 flex overflow-hidden relative">
         {isSidebarOpen && !isMobile && (
             <aside className="shrink-0 z-10">
-                <SideBrowser2 
+                <SideBrowser2
                     user={user}
                     activeTab={activeSideBrowserTab}
                     onTabChange={setActiveSideBrowserTab}
-                    onLocalImport={(file) => handleUniversalAudioImport(file, file.name)}
+                    onLocalImport={(file) => {
+                        console.log('[App.tsx onLocalImport] Received file:', file.name, file.type, file.size);
+                        handleUniversalAudioImport(file, file.name);
+                    }}
                     onAddPlugin={handleAddPluginFromContext}
                     onPurchase={handleBuyLicense}
                     selectedTrackId={state.selectedTrackId}
