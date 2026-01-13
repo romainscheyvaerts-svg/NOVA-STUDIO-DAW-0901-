@@ -278,7 +278,11 @@ User: [L'IA détecte automatiquement un problème]
 
 export const getAIProductionAssistance = async (currentState: DAWState, userMessage: string): Promise<{ text: string, actions: AIAction[] }> => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = import.meta.env.VITE_GOOGLE_AI_API_KEY;
+    if (!apiKey) {
+      throw new Error("Clé API Google AI non configurée");
+    }
+    const ai = new GoogleGenAI({ apiKey });
     const maxTime = Math.max(...currentState.tracks.flatMap(t => t.clips.map(c => c.start + c.duration)), 60);
     
     const keyName = (currentState.projectKey !== undefined) ? NOTES[currentState.projectKey] : 'Unknown';
@@ -336,7 +340,11 @@ export const getAIProductionAssistance = async (currentState: DAWState, userMess
 
 export const generateCreativeMetadata = async (category: string): Promise<{ name: string, prompt: string }> => {
     try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const apiKey = import.meta.env.VITE_GOOGLE_AI_API_KEY;
+        if (!apiKey) {
+          throw new Error("Clé API Google AI non configurée");
+        }
+        const ai = new GoogleGenAI({ apiKey });
         
         const systemPrompt = `You are a creative director for a top-tier Hip-Hop/Rap producer.
         Task:
@@ -378,7 +386,11 @@ export const generateCreativeMetadata = async (category: string): Promise<{ name
 
 export const generateCoverArt = async (beatName: string, category: string, vibe: string): Promise<string | null> => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = import.meta.env.VITE_GOOGLE_AI_API_KEY;
+    if (!apiKey) {
+      throw new Error("Clé API Google AI non configurée");
+    }
+    const ai = new GoogleGenAI({ apiKey });
     
     const prompt = `High quality Hip-Hop Album Cover Art for a beat named "${beatName}" (${category}).
     Visual Description: ${vibe || 'Dark moody street atmosphere'}.

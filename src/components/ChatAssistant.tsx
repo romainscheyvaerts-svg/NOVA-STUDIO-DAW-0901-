@@ -47,11 +47,11 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     const msgToSend = customMsg || inputValue;
     if (!msgToSend.trim()) return;
 
-    if (!process.env.API_KEY) {
+    if (!import.meta.env.VITE_GOOGLE_AI_API_KEY) {
         setMessages(prev => [...prev, {
             id: Date.now().toString(),
             role: 'assistant',
-            content: "⚠️ Clé API manquante. L'assistant ne peut pas répondre. Configurez votre API_KEY.",
+            content: "⚠️ Clé API manquante. L'assistant ne peut pas répondre. Configurez votre VITE_GOOGLE_AI_API_KEY dans le fichier .env",
             timestamp: Date.now()
         }]);
         return;
