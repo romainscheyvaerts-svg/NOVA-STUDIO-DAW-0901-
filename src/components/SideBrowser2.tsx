@@ -131,13 +131,22 @@ const LocalTab: React.FC<{ onLocalImport: (file: File) => void }> = ({ onLocalIm
                 style={{ display: 'none' }} // Sécurité si Tailwind n'est pas chargé
                 accept="audio/*" // Filtre pour fichiers audio
                 onChange={(e) => {
+                    console.log('[LocalTab] onChange déclenché', e.target.files);
                     // Vérification si un fichier a bien été sélectionné
                     if(e.target.files?.[0]) {
+                        console.log('[LocalTab] Fichier sélectionné:', e.target.files[0].name, e.target.files[0].size, 'bytes');
                         // Envoi du fichier au composant parent
-                        onLocalImport(e.target.files[0]);
+                        try {
+                            onLocalImport(e.target.files[0]);
+                            console.log('[LocalTab] onLocalImport appelé avec succès');
+                        } catch (error) {
+                            console.error('[LocalTab] Erreur lors de onLocalImport:', error);
+                        }
 
                         // Reset de la valeur pour permettre de ré-importer le même fichier si besoin
                         e.target.value = '';
+                    } else {
+                        console.warn('[LocalTab] Aucun fichier sélectionné');
                     }
                 }}
             />
