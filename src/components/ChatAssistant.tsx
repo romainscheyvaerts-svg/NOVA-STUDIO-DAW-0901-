@@ -52,26 +52,31 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     }
   }, [externalNotification]); 
 
-  const handleSaveApiKey = () => {
+  const handleSaveApiKey = async () => {
     if (apiKeyInput.trim()) {
-      setAdminApiKey(apiKeyInput.trim());
+      const success = await setAdminApiKey(apiKeyInput.trim(), user);
       setShowApiKeyModal(false);
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: "✅ Clé API admin mise à jour avec succès!",
-        timestamp: Date.now()
-      }]);
+
+      if (success) {
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: user
+            ? "✅ Clé API sauvegardée dans Supabase. Elle sera accessible depuis tous vos appareils."
+            : "✅ Clé API sauvegardée localement (mode invité).",
+          timestamp: Date.now()
+        }]);
+      }
     }
   };
 
-  const handleClearApiKey = () => {
-    clearAdminApiKey();
+  const handleClearApiKey = async () => {
+    await clearAdminApiKey(user);
     setApiKeyInput('');
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: 'assistant',
-      content: "✅ Clé API admin supprimée. Utilisation de la clé .env par défaut.",
+      content: "✅ Clé API supprimée. Utilisation de la clé .env par défaut.",
       timestamp: Date.now()
     }]);
   };
@@ -80,7 +85,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     const msgToSend = customMsg || inputValue;
     if (!msgToSend.trim()) return;
 
-    const activeKey = getActiveApiKey();
+    const activeKey = getActiveApiKey(user);
     if (!activeKey) {
         setMessages(prev => [...prev, {
             id: Date.now().toString(),
