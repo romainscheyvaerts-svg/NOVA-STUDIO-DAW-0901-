@@ -100,37 +100,46 @@ const BridgeTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, met
 
 // --- Onglet Local ---
 const LocalTab: React.FC<{ onLocalImport: (file: File) => void }> = ({ onLocalImport }) => {
+    // 1. Référence pour accéder à l'élément input caché du DOM
     const fileInputRef = useRef<HTMLInputElement>(null);
-    
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files.length > 0) {
-            console.log("Fichier local sélectionné:", e.target.files[0].name);
-            onLocalImport(e.target.files[0]);
-            // Réinitialiser la valeur pour permettre de sélectionner le même fichier à nouveau
-            e.target.value = '';
-        }
-    };
 
     return (
-        <div className="h-full flex flex-col items-center justify-center p-8 text-center opacity-60">
-            <i className="fas fa-file-audio text-4xl text-slate-700 mb-6"></i>
-            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4">Import Local</h3>
-            <p className="text-xs text-slate-500 mb-6">Importez n'importe quel fichier audio (MP3, WAV, etc.) depuis votre appareil.</p>
-            <button 
-                onClick={() => {
-                    console.log("Clic bouton parcourir");
-                    fileInputRef.current?.click();
+        <div className="h-full flex flex-col items-center justify-center space-y-8 opacity-40 px-6 text-center">
+            {/* Icône décorative */}
+            <i className="fas fa-file-audio text-4xl text-slate-700"></i>
+
+            <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6">
+                    Importation Locale
+                </p>
+
+                {/* 2. Le Bouton "Parcourir" Visible */}
+                {/* Au clic, il simule un clic sur l'input caché via la ref */}
+                <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-10 py-4 bg-white text-black rounded-xl text-[10px] font-black uppercase tracking-[0.2em] hover:bg-cyan-400 transition-all shadow-xl active:scale-95"
+                >
+                    Parcourir
+                </button>
+            </div>
+
+            {/* 3. L'Input Fichier Caché (C'est lui qui fait le travail réel) */}
+            <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden" // Classe Tailwind pour display: none
+                style={{ display: 'none' }} // Sécurité si Tailwind n'est pas chargé
+                accept="audio/*" // Filtre pour fichiers audio
+                onChange={(e) => {
+                    // Vérification si un fichier a bien été sélectionné
+                    if(e.target.files?.[0]) {
+                        // Envoi du fichier au composant parent
+                        onLocalImport(e.target.files[0]);
+
+                        // Reset de la valeur pour permettre de ré-importer le même fichier si besoin
+                        e.target.value = '';
+                    }
                 }}
-                className="px-8 py-3 bg-white/10 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-cyan-500 hover:text-black transition-colors"
-            >
-                Parcourir
-            </button>
-            <input 
-                type="file" 
-                ref={fileInputRef} 
-                className="hidden" 
-                accept="audio/*,.wav,.mp3,.aif,.aiff,.ogg,.m4a" 
-                onChange={handleFileChange} 
             />
         </div>
     );
