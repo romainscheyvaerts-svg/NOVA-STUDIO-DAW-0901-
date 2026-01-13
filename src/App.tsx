@@ -33,6 +33,7 @@ import { midiManager } from './services/MidiManager';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
+import { detectBreaths, reduceBreaths, detectClipping, detectPhaseIssues, detectSongStructure, LiveAudioMonitor } from './utils/AudioAnalyzer';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -700,6 +701,7 @@ export default function App() {
   const [aiNotification, setAiNotification] = useState<string | null>(null);
   const [addPluginMenu, setAddPluginMenu] = useState<{ trackId: string, x: number, y: number } | null>(null);
   const [automationMenu, setAutomationMenu] = useState<{ x: number, y: number, trackId: string, paramId: string, paramName: string, min: number, max: number } | null>(null);
+  const liveMonitorRef = useRef<LiveAudioMonitor | null>(null);
   const [noArmedTrackError, setNoArmedTrackError] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('nova_view_mode');
@@ -830,6 +832,16 @@ export default function App() {
           if(idx > -1) {
             // Reset gain to 1.0 (normalized)
             newClips[idx] = { ...newClips[idx], gain: 1.0 };
+          }
+          break;
+        case 'FADE_IN':
+          if(idx > -1 && payload?.duration !== undefined) {
+            newClips[idx] = { ...newClips[idx], fadeIn: payload.duration };
+          }
+          break;
+        case 'FADE_OUT':
+          if(idx > -1 && payload?.duration !== undefined) {
+            newClips[idx] = { ...newClips[idx], fadeOut: payload.duration };
           }
           break;
       }
@@ -1458,6 +1470,331 @@ export default function App() {
       // === EXPORT ===
       case 'EXPORT_MIX':
         setIsExportMenuOpen(true);
+        break;
+
+      // === NEW: FADES & TRANSITIONS ===
+      case 'FADE_IN_CLIP':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          handleEditClip(a.payload.trackId, a.payload.clipId, 'FADE_IN', { duration: a.payload.duration || 0.5 });
+        }
+        break;
+      case 'FADE_OUT_CLIP':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          handleEditClip(a.payload.trackId, a.payload.clipId, 'FADE_OUT', { duration: a.payload.duration || 0.5 });
+        }
+        break;
+      case 'CROSSFADE_CLIPS':
+        if (a.payload?.trackId && a.payload?.clipId1 && a.payload?.clipId2) {
+          // Apply fade out to first clip
+          handleEditClip(a.payload.trackId, a.payload.clipId1, 'FADE_OUT', { duration: a.payload.duration || 0.3 });
+          // Apply fade in to second clip
+          handleEditClip(a.payload.trackId, a.payload.clipId2, 'FADE_IN', { duration: a.payload.duration || 0.3 });
+          setAiNotification('Crossfade appliqué ! ✨');
+          setTimeout(() => setAiNotification(null), 2000);
+        }
+        break;
+      case 'AUTO_FADE':
+        if (a.payload?.clipId) {
+          const type = a.payload.type || 'BOTH';
+          const duration = a.payload.duration || 0.5;
+          // Find the track containing this clip
+          const track = stateRef.current.tracks.find(t =>
+            t.clips.some(c => c.id === a.payload.clipId)
+          );
+          if (track) {
+            if (type === 'IN' || type === 'BOTH') {
+              handleEditClip(track.id, a.payload.clipId, 'FADE_IN', { duration });
+            }
+            if (type === 'OUT' || type === 'BOTH') {
+              handleEditClip(track.id, a.payload.clipId, 'FADE_OUT', { duration });
+            }
+          }
+        }
+        break;
+
+      // === NEW: BREATH REDUCTION ===
+      case 'REDUCE_BREATHS':
+        if (a.payload?.trackId && a.payload?.clipId) {
+          setAiNotification('Analyse des respirations... 🫁');
+
+          (async () => {
+            try {
+              const track = stateRef.current.tracks.find(t => t.id === a.payload.trackId);
+              if (!track) return;
+
+              const clip = track.clips.find(c => c.id === a.payload.clipId);
+              if (!clip) return;
+
+              // Récupérer le buffer audio
+              let audioBuffer: AudioBuffer | null = null;
+              if (clip.bufferId) {
+                audioBuffer = audioBufferRegistry.get(clip.bufferId) || null;
+              } else if (clip.buffer) {
+                audioBuffer = clip.buffer;
+              }
+
+              if (!audioBuffer) {
+                setAiNotification('⚠️ Impossible de charger l\'audio');
+                setTimeout(() => setAiNotification(null), 2000);
+                return;
+              }
+
+              // Détecter les respirations
+              const threshold = a.payload.threshold || -40;
+              const breathResult = await detectBreaths(audioBuffer, threshold);
+
+              if (breathResult.totalBreaths === 0) {
+                setAiNotification('Aucune respiration détectée ! ✅');
+                setTimeout(() => setAiNotification(null), 2000);
+                return;
+              }
+
+              setAiNotification(`${breathResult.totalBreaths} respirations détectées, réduction...`);
+
+              // Appliquer la réduction
+              const reductionDb = a.payload.reduction || -9;
+              const processedBuffer = await reduceBreaths(audioBuffer, breathResult, reductionDb);
+
+              // Enregistrer le nouveau buffer
+              const newBufferId = `breath-reduced-${Date.now()}`;
+              audioBufferRegistry.set(newBufferId, processedBuffer);
+
+              // Mettre à jour le clip
+              setState(produce((draft: DAWState) => {
+                const t = draft.tracks.find(tr => tr.id === a.payload.trackId);
+                if (t) {
+                  const c = t.clips.find(cl => cl.id === a.payload.clipId);
+                  if (c) {
+                    c.bufferId = newBufferId;
+                    delete c.buffer; // Remove legacy buffer
+                  }
+                }
+              }));
+
+              setAiNotification(`✅ ${breathResult.totalBreaths} respirations réduites de ${reductionDb}dB !`);
+              setTimeout(() => setAiNotification(null), 3000);
+
+            } catch (error) {
+              console.error('Error reducing breaths:', error);
+              setAiNotification('⚠️ Erreur lors de la réduction des respirations');
+              setTimeout(() => setAiNotification(null), 2000);
+            }
+          })();
+        }
+        break;
+
+      // === NEW: LIVE COACHING ===
+      case 'START_LIVE_COACHING':
+        (async () => {
+          try {
+            // Initialiser l'audio engine si nécessaire
+            await ensureAudioEngine();
+
+            // Demander accès au microphone
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const audioContext = audioEngine.ctx;
+            if (!audioContext) {
+              setAiNotification('⚠️ Contexte audio non initialisé');
+              setTimeout(() => setAiNotification(null), 2000);
+              return;
+            }
+
+            const source = audioContext.createMediaStreamSource(stream);
+            const monitor = new LiveAudioMonitor(audioContext, source);
+
+            // Stocker la référence pour pouvoir l'arrêter plus tard
+            liveMonitorRef.current = monitor;
+
+            monitor.start((metrics) => {
+              // Feedback en temps réel basé sur les métriques
+              if (metrics.isClipping) {
+                setAiNotification('⚠️ CLIPPING ! Éloigne-toi du micro ou baisse le gain');
+              } else if (metrics.isTooLow) {
+                setAiNotification('📉 Niveau trop bas ! Rapproche-toi du micro');
+              } else if (metrics.hasPlosive) {
+                setAiNotification('💨 Plosive détectée ! Mets-toi légèrement de côté');
+              } else if (metrics.peak > 0.7 && metrics.peak < 0.95) {
+                // Niveau parfait
+                if (Math.random() < 0.05) { // 5% de chance pour ne pas spammer
+                  setAiNotification('✅ Parfait ton niveau ! Continue comme ça');
+                }
+              }
+
+              // Clear notification après 2s
+              setTimeout(() => setAiNotification(null), 2000);
+            });
+
+            setAiNotification('🎤 Mode coach activé ! Je te surveille en direct.');
+            setTimeout(() => setAiNotification(null), 3000);
+
+          } catch (error) {
+            console.error('Error starting live coaching:', error);
+            setAiNotification('⚠️ Erreur : accès micro refusé');
+            setTimeout(() => setAiNotification(null), 2000);
+          }
+        })();
+        break;
+
+      case 'STOP_LIVE_COACHING':
+        if (liveMonitorRef.current) {
+          liveMonitorRef.current.disconnect();
+          liveMonitorRef.current = null;
+        }
+        setAiNotification('Mode coach désactivé.');
+        setTimeout(() => setAiNotification(null), 2000);
+        break;
+
+      // === NEW: STRUCTURE DETECTION ===
+      case 'DETECT_SONG_STRUCTURE':
+        setAiNotification('Analyse de la structure en cours... 🎵');
+
+        (async () => {
+          try {
+            // Trouver la piste instrumental ou la première piste audio
+            const instrumentalTrack = stateRef.current.tracks.find(t => t.id === 'instrumental' || t.name.toLowerCase().includes('instru'));
+            const audioTrack = instrumentalTrack || stateRef.current.tracks.find(t => t.type === TrackType.AUDIO && t.clips.length > 0);
+
+            if (!audioTrack || audioTrack.clips.length === 0) {
+              setAiNotification('⚠️ Aucune piste audio trouvée pour l\'analyse');
+              setTimeout(() => setAiNotification(null), 2000);
+              return;
+            }
+
+            // Prendre le premier clip le plus long
+            const longestClip = audioTrack.clips.reduce((longest, current) =>
+              current.duration > longest.duration ? current : longest
+            );
+
+            // Récupérer le buffer audio
+            let audioBuffer: AudioBuffer | null = null;
+            if (longestClip.bufferId) {
+              audioBuffer = audioBufferRegistry.get(longestClip.bufferId) || null;
+            } else if (longestClip.buffer) {
+              audioBuffer = longestClip.buffer;
+            }
+
+            if (!audioBuffer) {
+              setAiNotification('⚠️ Impossible de charger l\'audio');
+              setTimeout(() => setAiNotification(null), 2000);
+              return;
+            }
+
+            // Analyser la structure
+            const structure = detectSongStructure(audioBuffer);
+
+            // Formater le résultat pour l'affichage
+            const sectionLabels: { [key: string]: string } = {
+              intro: 'Intro',
+              verse: 'Couplet',
+              chorus: 'Refrain',
+              bridge: 'Pont',
+              outro: 'Outro'
+            };
+
+            const structureText = structure.sections
+              .slice(0, 5) // Afficher max 5 sections
+              .map(s => `${sectionLabels[s.type]} (${s.start.toFixed(0)}-${s.end.toFixed(0)}s)`)
+              .join(', ');
+
+            setAiNotification(`🎵 Structure : ${structureText}`);
+            setTimeout(() => setAiNotification(null), 6000);
+
+            // Envoyer un message plus détaillé au chatbot si disponible
+            // (optionnel : on pourrait stocker ça dans le state pour que l'IA puisse l'utiliser)
+
+          } catch (error) {
+            console.error('Error detecting structure:', error);
+            setAiNotification('⚠️ Erreur lors de l\'analyse de structure');
+            setTimeout(() => setAiNotification(null), 2000);
+          }
+        })();
+        break;
+
+      // === NEW: ISSUE DETECTION ===
+      case 'DETECT_ISSUES':
+        if (a.payload?.trackId) {
+          setAiNotification('Détection des problèmes... ⚠️');
+
+          (async () => {
+            try {
+              const track = stateRef.current.tracks.find(t => t.id === a.payload.trackId);
+              if (!track) return;
+
+              const issues: string[] = [];
+
+              // Si clipId fourni, analyser ce clip spécifiquement
+              let clipsToAnalyze = a.payload.clipId
+                ? track.clips.filter(c => c.id === a.payload.clipId)
+                : track.clips;
+
+              if (clipsToAnalyze.length === 0) {
+                setAiNotification('⚠️ Aucun clip à analyser');
+                setTimeout(() => setAiNotification(null), 2000);
+                return;
+              }
+
+              for (const clip of clipsToAnalyze) {
+                // Récupérer le buffer
+                let audioBuffer: AudioBuffer | null = null;
+                if (clip.bufferId) {
+                  audioBuffer = audioBufferRegistry.get(clip.bufferId) || null;
+                } else if (clip.buffer) {
+                  audioBuffer = clip.buffer;
+                }
+
+                if (!audioBuffer) continue;
+
+                // Détecter le clipping
+                const clippingResult = detectClipping(audioBuffer);
+                if (clippingResult.hasClipping) {
+                  issues.push(`Clipping détecté (${clippingResult.clippingPoints.length} points, peak: ${(clippingResult.maxPeak * 100).toFixed(1)}%)`);
+
+                  // Correction automatique suggérée
+                  const reductionNeeded = clippingResult.maxPeak > 1.0
+                    ? Math.ceil(20 * Math.log10(clippingResult.maxPeak))
+                    : 0;
+
+                  if (reductionNeeded > 0) {
+                    // Appliquer automatiquement une réduction de gain
+                    const newGain = (clip.gain || 1.0) / Math.pow(10, reductionNeeded / 20);
+                    handleEditClip(track.id, clip.id, 'SET_GAIN', { gain: Math.max(0.1, newGain) });
+                    issues[issues.length - 1] += ` → Corrigé: gain réduit de ${reductionNeeded}dB ✅`;
+                  }
+                }
+
+                // Détecter les problèmes de phase (si stéréo)
+                if (audioBuffer.numberOfChannels >= 2) {
+                  const phaseResult = detectPhaseIssues(audioBuffer);
+                  if (phaseResult.hasPhaseIssues) {
+                    issues.push(`Problème de phase détecté (corrélation: ${(phaseResult.correlation * 100).toFixed(0)}%)`);
+
+                    if (phaseResult.problematicRanges.length > 0) {
+                      issues[issues.length - 1] += ` sur ${phaseResult.problematicRanges.length} zones`;
+                    }
+                  }
+                }
+              }
+
+              // Afficher les résultats
+              if (issues.length === 0) {
+                setAiNotification('✅ Aucun problème détecté !');
+                setTimeout(() => setAiNotification(null), 2000);
+              } else {
+                const issueText = issues.length > 2
+                  ? `${issues.length} problèmes : ${issues.slice(0, 2).join('; ')}...`
+                  : issues.join('; ');
+
+                setAiNotification(`⚠️ ${issueText}`);
+                setTimeout(() => setAiNotification(null), 6000);
+              }
+
+            } catch (error) {
+              console.error('Error detecting issues:', error);
+              setAiNotification('⚠️ Erreur lors de la détection');
+              setTimeout(() => setAiNotification(null), 2000);
+            }
+          })();
+        }
         break;
 
       default:
