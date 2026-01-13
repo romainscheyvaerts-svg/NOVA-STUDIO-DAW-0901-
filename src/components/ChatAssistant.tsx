@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { AIChatMessage, AIAction, User } from '../types';
 import { getActiveApiKey, setAdminApiKey, clearAdminApiKey, hasAdminApiKey } from '../services/ApiKeyManager';
 
+// API Key button is visible for all users (guest included)
 interface ChatAssistantProps {
   onSendMessage: (msg: string) => Promise<{ text: string, actions: AIAction[] }>;
   onExecuteAction: (action: AIAction) => void;
