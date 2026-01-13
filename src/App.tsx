@@ -33,15 +33,6 @@ import { midiManager } from './services/MidiManager';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
-import MobilePanelSystem from './components/mobile/MobilePanelSystem';
-import { PanelConfig } from './components/mobile/MobilePanel';
-import MixerPanel from './components/mobile/panels/MixerPanel';
-import PluginsPanel from './components/mobile/panels/PluginsPanel';
-import KeysPanel from './components/mobile/panels/KeysPanel';
-import BrowserPanel from './components/mobile/panels/BrowserPanel';
-import SettingsPanel from './components/mobile/panels/SettingsPanel';
-import TrackDetailPanel from './components/mobile/panels/TrackDetailPanel';
-import AutomationPanel from './components/mobile/panels/AutomationPanel';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -719,43 +710,6 @@ export default function App() {
   const handleViewModeChange = (mode: ViewMode) => { setViewMode(mode); localStorage.setItem('nova_view_mode', mode); };
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
-  
-  // Mobile Panel System Configuration
-  const MOBILE_PANELS: PanelConfig[] = [
-    { 
-      id: 'mixer', 
-      title: 'Mix', 
-      icon: 'fa-sliders-h', 
-      component: MixerPanel, 
-      defaultHeight: 'half', 
-      canResize: true 
-    },
-    { 
-      id: 'plugins', 
-      title: 'Plugins', 
-      icon: 'fa-puzzle-piece', 
-      component: PluginsPanel, 
-      defaultHeight: 'half', 
-      canResize: true 
-    },
-    { 
-      id: 'browser', 
-      title: 'Sons', 
-      icon: 'fa-folder', 
-      component: BrowserPanel, 
-      defaultHeight: 'half', 
-      canResize: true 
-    },
-    { 
-      id: 'settings', 
-      title: 'Options', 
-      icon: 'fa-cog', 
-      component: SettingsPanel, 
-      defaultHeight: 'half', 
-      canResize: false 
-    },
-  ];
-  
   const ensureAudioEngine = async () => {
     const wasUninitialized = !audioEngine.ctx;
     if (!audioEngine.ctx) await audioEngine.init();
@@ -1920,54 +1874,16 @@ export default function App() {
              />
           )}
 
-          {/* Mobile: Tracks View with Panel System */}
+          {/* Mobile: Tracks View */}
           {isMobile && activeMobileTab === 'TRACKS' && (
-            <MobilePanelSystem 
-              panels={MOBILE_PANELS}
-              panelProps={{
-                mixer: {
-                  tracks: state.tracks,
-                  onUpdateTrack: handleUpdateTrack,
-                },
-                keys: {
-                  onNoteOn: (note: number) => {
-                    // TODO: Connect to MIDI engine
-                    console.log('Note On:', note);
-                  },
-                  onNoteOff: (note: number) => {
-                    // TODO: Connect to MIDI engine
-                    console.log('Note Off:', note);
-                  },
-                },
-                plugins: {
-                  selectedTrack: state.tracks.find(t => t.id === state.selectedTrackId) || null,
-                  onUpdateTrack: handleUpdateTrack,
-                  onOpenPlugin: async (trackId: string, plugin: PluginInstance) => {
-                    await ensureAudioEngine();
-                    setActivePlugin({ trackId, plugin });
-                  },
-                },
-                browser: {
-                  onSelectSample: (url: string, name: string) => {
-                    console.log('Sample selected:', name);
-                    // TODO: Add sample to selected track
-                  },
-                },
-                settings: {
-                  bpm: state.bpm,
-                  onBpmChange: handleUpdateBpm,
-                },
-              }}
-            >
-              <MobileTracksView
-                tracks={state.tracks}
-                selectedTrackId={state.selectedTrackId}
-                onSelectTrack={(id) => setState(p => ({ ...p, selectedTrackId: id }))}
-                onUpdateTrack={handleUpdateTrack}
-                isPlaying={state.isPlaying}
-                currentTime={state.currentTime}
-              />
-            </MobilePanelSystem>
+            <MobileTracksView
+              tracks={state.tracks}
+              selectedTrackId={state.selectedTrackId}
+              onSelectTrack={(id) => setState(p => ({ ...p, selectedTrackId: id }))}
+              onUpdateTrack={handleUpdateTrack}
+              isPlaying={state.isPlaying}
+              currentTime={state.currentTime}
+            />
           )}
 
           {/* Mobile: Mix View with Pinch-to-Zoom */}

@@ -84,9 +84,9 @@ export class ProjectIO {
     } catch (e) {
         throw new Error("Fichier projet corrompu");
     }
-    
-    // Validate and sanitize project state
-    loadedState = this.validateProjectState(loadedState);
+    if (!loadedState.tracks || !Array.isArray(loadedState.tracks)) {
+        throw new Error("Format de projet invalide");
+    }
     
     // Initialisation moteur si nécessaire
     await audioEngine.init();
@@ -117,59 +117,5 @@ export class ProjectIO {
     }
     
     return loadedState as DAWState;
-  }
-
-  /**
-   * Validate and provide default values for project state to prevent crashes
-   */
-  private static validateProjectState(state: any): DAWState {
-    const validatedState: DAWState = {
-      id: typeof state.id === 'string' ? state.id : `project-${Date.now()}`,
-      name: typeof state.name === 'string' ? state.name : 'Untitled Project',
-      tracks: Array.isArray(state.tracks) ? state.tracks : [],
-      bpm: typeof state.bpm === 'number' && state.bpm > 0 ? state.bpm : 120,
-      projectKey: typeof state.projectKey === 'number' ? state.projectKey : undefined,
-      projectScale: typeof state.projectScale === 'string' ? state.projectScale : undefined,
-      currentTime: typeof state.currentTime === 'number' ? state.currentTime : 0,
-      isPlaying: typeof state.isPlaying === 'boolean' ? state.isPlaying : false,
-      isRecording: typeof state.isRecording === 'boolean' ? state.isRecording : false,
-      isLoopActive: typeof state.isLoopActive === 'boolean' ? state.isLoopActive : false,
-      loopStart: typeof state.loopStart === 'number' ? state.loopStart : 0,
-      loopEnd: typeof state.loopEnd === 'number' ? state.loopEnd : 8,
-      selectedTrackId: typeof state.selectedTrackId === 'string' ? state.selectedTrackId : null,
-      currentView: state.currentView || 'ARRANGER',
-      projectPhase: state.projectPhase || 'MIXING',
-      isLowLatencyMode: typeof state.isLowLatencyMode === 'boolean' ? state.isLowLatencyMode : false,
-      isRecModeActive: typeof state.isRecModeActive === 'boolean' ? state.isRecModeActive : false,
-      systemMaxLatency: typeof state.systemMaxLatency === 'number' ? state.systemMaxLatency : 0.1,
-      recStartTime: (typeof state.recStartTime === 'number' || state.recStartTime === null) ? state.recStartTime : null,
-      isDelayCompEnabled: typeof state.isDelayCompEnabled === 'boolean' ? state.isDelayCompEnabled : false,
-    };
-
-    // Validate tracks
-    validatedState.tracks = validatedState.tracks.map((track: any) => ({
-      id: track.id || `track-${Date.now()}-${Math.random()}`,
-      name: track.name || 'Untitled Track',
-      type: track.type || 'AUDIO',
-      volume: typeof track.volume === 'number' ? track.volume : 0.8,
-      pan: typeof track.pan === 'number' ? track.pan : 0,
-      isMuted: typeof track.isMuted === 'boolean' ? track.isMuted : false,
-      isSolo: typeof track.isSolo === 'boolean' ? track.isSolo : false,
-      isTrackArmed: typeof track.isTrackArmed === 'boolean' ? track.isTrackArmed : false,
-      isFrozen: typeof track.isFrozen === 'boolean' ? track.isFrozen : false,
-      color: track.color || '#3b82f6',
-      clips: Array.isArray(track.clips) ? track.clips : [],
-      plugins: Array.isArray(track.plugins) ? track.plugins : [],
-      automationLanes: Array.isArray(track.automationLanes) ? track.automationLanes : [],
-      sends: Array.isArray(track.sends) ? track.sends : [],
-      outputTrackId: track.outputTrackId || 'master',
-      inputDeviceId: track.inputDeviceId || undefined,
-      totalLatency: typeof track.totalLatency === 'number' ? track.totalLatency : 0,
-      events: Array.isArray(track.events) ? track.events : [],
-      drumPads: track.drumPads || undefined,
-      instrumentId: track.instrumentId || undefined,
-    }));
-
-    return validatedState;
   }
 }
