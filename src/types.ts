@@ -283,6 +283,11 @@ export type AIActionType =
   | 'CUT_CLIP'
   | 'COPY_CLIP'
   | 'PASTE_CLIP'
+  | 'FADE_IN_CLIP'
+  | 'FADE_OUT_CLIP'
+  | 'CROSSFADE_CLIPS'
+  | 'REDUCE_BREATHS'
+  | 'AUTO_FADE'
   // Transport
   | 'PLAY'
   | 'STOP'
@@ -299,6 +304,10 @@ export type AIActionType =
   | 'RUN_MASTER_SYNC'
   | 'ANALYZE_INSTRU'
   | 'REMOVE_SILENCE'
+  | 'DETECT_SONG_STRUCTURE'
+  | 'DETECT_ISSUES'
+  | 'START_LIVE_COACHING'
+  | 'STOP_LIVE_COACHING'
   // Mix Presets
   | 'APPLY_VOCAL_CHAIN'
   | 'APPLY_MIX_PRESET'
