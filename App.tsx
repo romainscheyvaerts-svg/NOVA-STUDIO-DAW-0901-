@@ -34,7 +34,6 @@ import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import MobileTracksPage from './components/MobileTracksPage';
 import MobileMixerPage from './components/MobileMixerPage';
 import MobileBrowserPage from './components/MobileBrowserPage';
-import MobilePluginsPage from './components/MobilePluginsPage';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -978,15 +977,6 @@ export default function App() {
                   onRemovePlugin={handleRemovePlugin}
                   onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); const plugin = state.tracks.find(t => t.id === tid)?.plugins.find(pl => pl.id === p); if (plugin) setActivePlugin({trackId: tid, plugin}); }}
                   onToggleBypass={handleToggleBypass}
-                />
-              )}
-
-              {activeMobileTab === 'PLUGINS' && (
-                <MobilePluginsPage
-                  tracks={state.tracks}
-                  onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); const plugin = state.tracks.find(t => t.id === tid)?.plugins.find(pl => pl.id === p); if (plugin) setActivePlugin({trackId: tid, plugin}); }}
-                  onToggleBypass={handleToggleBypass}
-                  onRemovePlugin={handleRemovePlugin}
                 />
               )}
 
