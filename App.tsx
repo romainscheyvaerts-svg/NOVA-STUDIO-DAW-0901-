@@ -264,7 +264,7 @@ export default function App() {
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [midiEditorOpen, setMidiEditorOpen] = useState<{trackId: string, clipId: string} | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [activeSideBrowserTab, setActiveSideBrowserTab] = useState<'STORE' | 'LOCAL' | 'FW' | 'BRIDGE'>('STORE');
+  const [activeSideBrowserTab, setActiveSideBrowserTab] = useState<'STORE' | 'FW' | 'BRIDGE'>('STORE');
 
   useEffect(() => {
       const u = supabaseManager.getUser();
@@ -648,105 +648,81 @@ export default function App() {
     }
   }, [setState]);
 
-  const handleUniversalAudioImport = async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
-    setExternalImportNotice(`Chargement: ${name}...`);
-    
+  // ANCIEN SYSTÈME D'IMPORT SUPPRIMÉ - Remplacé par handleNewAudioImport
+
+  // ✨ NOUVEAU SYSTÈME D'IMPORT AUDIO - Simple et fiable
+  const handleNewAudioImport = useCallback(async (file: File) => {
     try {
-        await ensureAudioEngine();
-        
-        let audioBuffer: AudioBuffer;
-        let audioRef: string;
-        let isLocalFile = source instanceof File;
-        
-        if (isLocalFile) {
-            audioRef = URL.createObjectURL(source);
-            const arrayBuffer = await source.arrayBuffer();
-            audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
-        } else {
-            audioRef = source;
-            const response = await fetch(source);
-            if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-            const arrayBuffer = await response.arrayBuffer();
-            audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
-        }
-        
-        const clipId = `clip-${Date.now()}`;
-        
-        if (isLocalFile) {
-            audioBufferRegistry.registerWithUrl(audioBuffer, audioRef, clipId);
-        } else {
-            audioBufferRegistry.register(audioBuffer, clipId);
-        }
-        
-        const newClip: Clip = {
-            id: clipId,
-            name: name.replace(/\.[^/.]+$/, ''),
-            type: TrackType.AUDIO,
-            start: startTime ?? stateRef.current.currentTime,
-            duration: audioBuffer.duration,
-            offset: 0,
-            bufferId: clipId,
-            audioRef,
-            color: UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length],
-            fadeIn: 0,
-            fadeOut: 0,
-            gain: 1.0,
-            isMuted: false
+      // 1. Initialiser l'audio engine
+      await ensureAudioEngine();
+      if (!audioEngine.ctx) {
+        alert('❌ Erreur: Audio engine non initialisé');
+        return;
+      }
+
+      // 2. Lire le fichier audio
+      const arrayBuffer = await file.arrayBuffer();
+      const audioBuffer = await audioEngine.ctx.decodeAudioData(arrayBuffer);
+
+      // 3. Créer un clip ID unique
+      const clipId = `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const audioRef = URL.createObjectURL(file);
+
+      // 4. Enregistrer dans le registry
+      audioBufferRegistry.registerWithUrl(audioBuffer, audioRef, clipId);
+
+      // 5. Créer le clip
+      const newClip: Clip = {
+        id: clipId,
+        name: file.name.replace(/\.[^/.]+$/, ''),
+        type: TrackType.AUDIO,
+        start: stateRef.current.currentTime,
+        duration: audioBuffer.duration,
+        offset: 0,
+        bufferId: clipId,
+        audioRef,
+        color: '#3b82f6',
+        fadeIn: 0,
+        fadeOut: 0,
+        gain: 1.0,
+        isMuted: false
+      };
+
+      // 6. Créer une nouvelle piste audio et ajouter le clip
+      setState(produce((draft: DAWState) => {
+        const trackId = `track-${Date.now()}`;
+        const newTrack: Track = {
+          id: trackId,
+          name: file.name.substring(0, 20),
+          type: TrackType.AUDIO,
+          color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
+          isMuted: false,
+          isSolo: false,
+          isTrackArmed: false,
+          isFrozen: false,
+          volume: 1.0,
+          pan: 0,
+          outputTrackId: 'master',
+          sends: [],
+          clips: [newClip],
+          plugins: [],
+          automationLanes: [],
+          totalLatency: 0
         };
 
-        setState(produce((draft: DAWState) => {
-            let targetTrackId: string | null = null;
-            let isNewTrackNeeded = false;
+        // Insérer la nouvelle piste juste après la piste master (position 1)
+        draft.tracks.splice(1, 0, newTrack);
+        draft.selectedTrackId = trackId;
+      }));
 
-            if (forcedTrackId) {
-                targetTrackId = forcedTrackId;
-            } else {
-                const beatTrack = draft.tracks.find(t => t.id === 'instrumental');
-                if (beatTrack && beatTrack.clips.length === 0) {
-                    targetTrackId = 'instrumental';
-                } else {
-                    isNewTrackNeeded = true;
-                    targetTrackId = `track-audio-${Date.now()}`;
-                }
-            }
+      console.log(`✅ [Import] Fichier importé: ${file.name} (${audioBuffer.duration.toFixed(2)}s)`);
+      alert(`✅ Importé: ${file.name}`);
 
-            if (isNewTrackNeeded) {
-                const newTrack: Track = {
-                    id: targetTrackId!,
-                    name: name.substring(0, 20),
-                    type: TrackType.AUDIO,
-                    color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
-                    isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
-                    volume: 1.0, pan: 0, outputTrackId: 'master',
-                    sends: [], clips: [newClip], plugins: [], automationLanes: [], totalLatency: 0
-                };
-                draft.tracks.splice(1, 0, newTrack);
-                draft.selectedTrackId = targetTrackId;
-            } else {
-                const track = draft.tracks.find(t => t.id === targetTrackId);
-                if (track) {
-                    track.clips.push(newClip);
-                    draft.selectedTrackId = targetTrackId;
-                }
-            }
-        }));
-
-        setExternalImportNotice(`✅ Importé: ${newClip.name}`);
-        console.log(`[Import] Succès: ${newClip.name} (${audioBuffer.duration.toFixed(2)}s)`);
-
-    } catch (e: any) {
-        console.error("[Import Error]", e);
-        setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
-    } finally {
-        setTimeout(() => setExternalImportNotice(null), 3000);
+    } catch (error: any) {
+      console.error('❌ [Import Error]', error);
+      alert(`❌ Erreur d'import: ${error.message || 'Fichier non valide'}`);
     }
-};
-
-  useEffect(() => { 
-      (window as any).DAW_CORE = { 
-          handleAudioImport: (url: string | File, name: string, trackId?: string, startTime?: number) => handleUniversalAudioImport(url, name, trackId, startTime) 
-      }; 
-  }, [handleUniversalAudioImport]);
+  }, [setState]);
 
   const handleMoveClip = useCallback((sourceTrackId: string, destTrackId: string, clipId: string) => {
     setState(produce((draft: DAWState) => {
@@ -906,6 +882,7 @@ export default function App() {
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo}
           user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
           isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar}
+          onImportAudio={handleNewAudioImport}
         >
           <div className="ml-4 border-l border-white/5 pl-4"><ViewModeSwitcher currentMode={viewMode} onChange={handleViewModeChange} /></div>
         </TransportBar>
@@ -918,9 +895,9 @@ export default function App() {
       <div className="flex-1 flex overflow-hidden relative">
         {isSidebarOpen && !isMobile && (
             <aside className="shrink-0 z-10">
-                <SideBrowser2 
+                <SideBrowser2
                     user={user} activeTab={activeSideBrowserTab} onTabChange={setActiveSideBrowserTab}
-                    onLocalImport={handleUniversalAudioImport} onAddPlugin={handleAddPluginFromContext}
+                    onAddPlugin={handleAddPluginFromContext}
                     onPurchase={handleBuyLicense} selectedTrackId={state.selectedTrackId}
                 />
             </aside>
@@ -939,11 +916,10 @@ export default function App() {
                    onSelectPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
                    onRemovePlugin={handleRemovePlugin} onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
                    onAddTrack={handleCreateTrack} onDuplicateTrack={handleDuplicateTrack} onDeleteTrack={handleDeleteTrack}
-                   onFreezeTrack={(tid) => {}} onImportFile={(file) => handleUniversalAudioImport(file, file.name)}
+                   onFreezeTrack={(tid) => {}}
                    onEditClip={handleEditClip} isRecording={state.isRecording} recStartTime={state.recStartTime}
                    onMoveClip={handleMoveClip} onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
-                   onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
                 />
               )}
 
