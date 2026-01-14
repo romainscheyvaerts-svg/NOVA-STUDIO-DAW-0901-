@@ -879,46 +879,27 @@ export default function App() {
     <div className="flex flex-col h-screen w-full overflow-hidden relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
       {saveState.isSaving && <SaveOverlay progress={saveState.progress} message={saveState.message} />}
 
-      {/* TransportBar Desktop/Tablet */}
-      {!isMobile && (
-        <div className="relative z-50">
-          <TransportBar
-            isPlaying={state.isPlaying} currentTime={state.currentTime} bpm={state.bpm} onBpmChange={handleUpdateBpm}
-            isRecording={state.isRecording} isLoopActive={state.isLoopActive}
-            onToggleLoop={() => setState(p => ({ ...p, isLoopActive: !p.isLoopActive }))}
-            onStop={handleStop} onTogglePlay={handleTogglePlay} onToggleRecord={handleToggleRecord}
-            currentView={state.currentView} onChangeView={v => setState(s => ({...s, currentView: v}))}
-            statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
-            currentTheme={theme} onToggleTheme={toggleTheme}
-            onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
-            onExportMix={handleExportMix} onShareProject={() => setIsShareModalOpen(true)}
-            onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
-            onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo}
-            user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
-            isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar}
-            onImportAudio={handleNewAudioImport}
-          >
-            <div className="ml-4 border-l border-white/5 pl-4"><ViewModeSwitcher currentMode={viewMode} onChange={handleViewModeChange} /></div>
-          </TransportBar>
-        </div>
-      )}
-
-      {/* TransportBar Mobile - Version compacte */}
-      {isMobile && (
-        <MobileTransport
-          isPlaying={state.isPlaying}
-          isRecording={state.isRecording}
-          isLoopActive={state.isLoopActive}
-          currentTime={state.currentTime}
-          bpm={state.bpm}
-          onTogglePlay={handleTogglePlay}
-          onStop={handleStop}
-          onToggleRecord={handleToggleRecord}
+      {/* TransportBar - Desktop, Tablet ET Mobile avec menu hamburger */}
+      <div className="relative z-50">
+        <TransportBar
+          isPlaying={state.isPlaying} currentTime={state.currentTime} bpm={state.bpm} onBpmChange={handleUpdateBpm}
+          isRecording={state.isRecording} isLoopActive={state.isLoopActive}
           onToggleLoop={() => setState(p => ({ ...p, isLoopActive: !p.isLoopActive }))}
-          onBpmChange={handleUpdateBpm}
-          onOpenSettings={() => setIsAudioSettingsOpen(true)}
-        />
-      )}
+          onStop={handleStop} onTogglePlay={handleTogglePlay} onToggleRecord={handleToggleRecord}
+          currentView={state.currentView} onChangeView={v => setState(s => ({...s, currentView: v}))}
+          statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
+          currentTheme={theme} onToggleTheme={toggleTheme}
+          onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
+          onExportMix={handleExportMix} onShareProject={() => setIsShareModalOpen(true)}
+          onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
+          onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo}
+          user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
+          isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar}
+          onImportAudio={handleNewAudioImport}
+        >
+          <div className="ml-4 border-l border-white/5 pl-4"><ViewModeSwitcher currentMode={viewMode} onChange={handleViewModeChange} /></div>
+        </TransportBar>
+      </div>
       
       <TrackCreationBar onCreateTrack={handleCreateTrack} />
       <TouchInteractionManager />
