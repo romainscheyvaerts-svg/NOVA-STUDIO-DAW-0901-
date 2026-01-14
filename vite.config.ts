@@ -4,9 +4,10 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    const isVercel = process.env.VERCEL === '1';
     return {
-      // Base URL pour GitHub Pages (nom du repo)
-      base: mode === 'production' ? '/NOVA-STUDIO-DAW-0901-/' : '/',
+      // Base: '/' sur Vercel, '/NOVA-STUDIO-DAW-0901-/' sur GitHub Pages
+      base: isVercel ? '/' : (mode === 'production' ? '/NOVA-STUDIO-DAW-0901-/' : '/'),
       server: {
         port: 3000,
         host: '0.0.0.0',
