@@ -1,7 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
-// Utilise la clé GOOGLE_API_KEY que tu as configurée sur Vercel
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "");
 
 export async function POST(req: Request) {
@@ -11,7 +10,7 @@ export async function POST(req: Request) {
 
     const prompt = `Tu es Nova, l'IA assistante de ce DAW. 
     Réponds de manière concise.
-    État du projet : ${JSON.stringify(state)}
+    État actuel du projet : ${JSON.stringify(state)}
     Utilisateur : ${message}`;
 
     const result = await model.generateContent(prompt);
