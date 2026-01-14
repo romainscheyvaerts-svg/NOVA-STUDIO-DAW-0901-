@@ -326,7 +326,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         if (y >= currentY && y < currentY + zoomV) {
             const clip = t.clips.find(c => time >= c.start && time <= c.start + c.duration);
             if (clip) {
-                if (e.button === 2) { e.preventDefault(); setClipContextMenu({ x: e.clientX, y: e.clientY, trackId: t.id, clip }); return; }
+                if (e.button === 2) { e.preventDefault(); e.stopPropagation(); setClipContextMenu({ x: e.clientX, y: e.clientY, trackId: t.id, clip }); return; }
                 setActiveClip({ trackId: t.id, clip });
                 setDragStartX(x); setDragStartY(y);
                 setInitialClipState({ ...clip });

@@ -745,7 +745,13 @@ export class AudioEngine {
     if (track.type === TrackType.DRUM_RACK && dsp.drumRack && track.drumPads) {
       dsp.drumRack.updatePadsState(track.drumPads);
     }
-    
+
+    // Fade out to prevent clicks/pops before rebuilding the audio graph
+    const now = this.ctx.currentTime;
+    const fadeTime = 0.015; // 15ms fade
+    dsp.gain.gain.setValueAtTime(dsp.gain.gain.value, now);
+    dsp.gain.gain.linearRampToValueAtTime(0, now + fadeTime);
+
     dsp.input.disconnect();
     let head: AudioNode = dsp.input;
     
@@ -790,10 +796,12 @@ export class AudioEngine {
     dsp.gain.connect(dsp.panner);
     dsp.panner.connect(dsp.analyzer);
     dsp.analyzer.connect(dsp.output);
-  
-    const now = this.ctx.currentTime;
-    dsp.gain.gain.setTargetAtTime(track.isMuted ? 0 : track.volume, now, 0.015);
-    dsp.panner.pan.setTargetAtTime(track.pan, now, 0.015);
+
+    // Fade in after rebuilding the audio graph
+    const targetVolume = track.isMuted ? 0 : track.volume;
+    dsp.gain.gain.setValueAtTime(0, now + fadeTime);
+    dsp.gain.gain.linearRampToValueAtTime(targetVolume, now + fadeTime * 2);
+    dsp.panner.pan.setTargetAtTime(track.pan, now + fadeTime, 0.015);
     
     dsp.output.disconnect();
     let destNode: AudioNode = this.masterOutput!;

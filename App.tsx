@@ -781,8 +781,106 @@ export default function App() {
     
     setAutomationMenu(null);
   }, [automationMenu, setState]);
-  const handleToggleDelayComp = useCallback(() => { }, [state.isDelayCompEnabled, setState]);
-  
+  const handleToggleDelayComp = useCallback(() => {
+    setState(prev => ({ ...prev, isDelayCompEnabled: !prev.isDelayCompEnabled }));
+  }, [setState]);
+
+  const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
+      console.log('[handleUniversalAudioImport] Début import:', name);
+      setExternalImportNotice(`Chargement: ${name}...`);
+      try {
+          await ensureAudioEngine();
+
+          let audioBuffer: AudioBuffer;
+          let audioRef: string;
+
+          if (source instanceof File) {
+              audioRef = URL.createObjectURL(source);
+              const arrayBuffer = await source.arrayBuffer();
+              audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+          } else {
+              audioRef = source;
+              const response = await fetch(source);
+              if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+              const arrayBuffer = await response.arrayBuffer();
+              audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+          }
+
+          // IMPORTANT: Register buffer in registry OUTSIDE of React state
+          // This avoids Immer proxy issues with native AudioBuffer objects
+          const bufferId = audioBufferRegistry.register(audioBuffer, audioRef);
+
+          const clipName = name.replace(/\.[^/.]+$/, '');
+          const clipId = `clip-${Date.now()}`;
+          const clipDuration = audioBuffer.duration;
+          const clipStart = startTime ?? stateRef.current.currentTime;
+          const clipColor = UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length];
+
+          setState(produce((draft: DAWState) => {
+              let targetTrackId: string | null = null;
+              let isNewTrackNeeded = false;
+
+              if (forcedTrackId) {
+                  targetTrackId = forcedTrackId;
+              } else {
+                  const beatTrack = draft.tracks.find(t => t.id === 'instrumental');
+                  if (beatTrack && beatTrack.clips.length === 0) {
+                      targetTrackId = 'instrumental';
+                  } else {
+                      isNewTrackNeeded = true;
+                      targetTrackId = `track-audio-${Date.now()}`;
+                  }
+              }
+
+              // Create clip WITHOUT AudioBuffer - only bufferId reference
+              const newClip: Clip = {
+                  id: clipId,
+                  name: clipName,
+                  type: TrackType.AUDIO,
+                  start: clipStart,
+                  duration: clipDuration,
+                  offset: 0,
+                  bufferId: bufferId,  // Reference to registry, NOT the actual buffer
+                  audioRef,
+                  color: clipColor,
+                  fadeIn: 0,
+                  fadeOut: 0,
+                  gain: 1.0,
+                  isMuted: false
+              };
+
+              if (isNewTrackNeeded) {
+                  const newTrack: Track = {
+                      id: targetTrackId!,
+                      name: name.substring(0, 20),
+                      type: TrackType.AUDIO,
+                      color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
+                      isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+                      volume: 1.0, pan: 0, outputTrackId: 'master',
+                      sends: [], clips: [newClip], plugins: [], automationLanes: [], totalLatency: 0
+                  };
+                  draft.tracks.splice(1, 0, newTrack);
+                  draft.selectedTrackId = targetTrackId;
+              } else {
+                  const track = draft.tracks.find(t => t.id === targetTrackId);
+                  if (track) {
+                      track.clips.push(newClip);
+                      draft.selectedTrackId = targetTrackId;
+                  }
+              }
+          }));
+
+          setExternalImportNotice(`✅ Importé: ${clipName}`);
+          console.log(`[AudioImport] Successfully imported: ${clipName} (bufferId: ${bufferId})`);
+
+      } catch (e: any) {
+          console.error("[Import Error]", e);
+          setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
+      } finally {
+          setTimeout(() => setExternalImportNotice(null), 3000);
+      }
+  }, [setState, ensureAudioEngine]);
+
   const handleLoadDrumSample = useCallback(async (trackId: string, padId: number, file: File) => {
     try {
         await ensureAudioEngine();
@@ -979,6 +1077,7 @@ export default function App() {
                   onRemovePlugin={handleRemovePlugin}
                   onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); const plugin = state.tracks.find(t => t.id === tid)?.plugins.find(pl => pl.id === p); if (plugin) setActivePlugin({trackId: tid, plugin}); }}
                   onToggleBypass={handleToggleBypass}
+                  onRequestAddPlugin={handleRequestAddPlugin}
                 />
               )}
 

@@ -10,6 +10,7 @@ interface MobileMixerPageProps {
   onRemovePlugin?: (trackId: string, pluginId: string) => void;
   onOpenPlugin?: (trackId: string, pluginId: string) => void;
   onToggleBypass?: (trackId: string, pluginId: string) => void;
+  onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
 }
 
 /**
@@ -23,7 +24,8 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
   onUpdateTrack,
   onRemovePlugin,
   onOpenPlugin,
-  onToggleBypass
+  onToggleBypass,
+  onRequestAddPlugin
 }) => {
   const visibleTracks = tracks.filter(t => t.id !== 'master');
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -224,7 +226,9 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  // onAddPlugin sera géré dans App.tsx pour ouvrir le PluginManager
+                  if (onRequestAddPlugin) {
+                    onRequestAddPlugin(currentTrack.id, e.clientX, e.clientY);
+                  }
                 }}
                 className="w-full py-3 rounded-lg border border-dashed border-white/10 text-slate-500 hover:border-cyan-500/50 hover:text-cyan-400 transition-all flex items-center justify-center gap-2"
               >
