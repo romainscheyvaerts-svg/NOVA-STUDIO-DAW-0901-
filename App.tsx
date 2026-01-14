@@ -21,7 +21,7 @@ import AudioSettingsPanel from './components/AudioSettingsPanel';
 import PluginManager from './components/PluginManager'; 
 import { supabaseManager } from './services/SupabaseManager';
 import { SessionSerializer } from './services/SessionSerializer';
-// import { getAIProductionAssistance } from './services/AIService'; // On n'utilise plus l'ancien service insécurisé pour le chat
+// import { getAIProductionAssistance } from './services/AIService'; 
 import { novaBridge } from './services/NovaBridge';
 import { ProjectIO } from './services/ProjectIO';
 import PianoRoll from './components/PianoRoll';
@@ -155,7 +155,7 @@ const createBusFx = (): Track => ({
   id: 'bus-fx',
   name: 'BUS FX',
   type: TrackType.BUS,
-  color: '#ec4899', // Pink
+  color: '#ec4899', 
   isMuted: false,
   isSolo: false,
   isTrackArmed: false,
@@ -288,8 +288,7 @@ export default function App() {
   const toggleTheme = () => { setTheme(prev => prev === 'dark' ? 'light' : 'dark'); };
 
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
-
-  useEffect(() => { novaBridge.connect(); }, []);
+    useEffect(() => { novaBridge.connect(); }, []);
   const stateRef = useRef(state); 
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks)); }, [state.tracks]); 
@@ -335,8 +334,8 @@ export default function App() {
   const handleLogout = async () => { await supabaseManager.signOut(); setUser(null); };
   const handleBuyLicense = (instrumentId: number) => { if (!user) return; const updatedUser = { ...user, owned_instruments: [...(user.owned_instruments || []), instrumentId] }; setUser(updatedUser); setAiNotification(`✅ Licence achetée avec succès ! Export débloqué.`); };
   
-  const handleSaveCloud = async (projectName: string) => { /* ... */ };
-  const handleSaveAsCopy = async (n: string) => { /* ... */ };
+  const handleSaveCloud = async (projectName: string) => { };
+  const handleSaveAsCopy = async (n: string) => { };
   const handleSaveLocal = async (n: string) => { SessionSerializer.downloadLocalJSON(stateRef.current, n); };
   
   const handleLoadProject = useCallback((loadedState: DAWState) => {
@@ -754,8 +753,8 @@ export default function App() {
         destTrack.clips.push(clip);
     }));
   }, [setState]);
-  const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => { /* ... */ }, [setState]);
-  const handleSwapInstrument = useCallback((trackId: string) => { /* ... */ }, []);
+  const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => { }, [setState]);
+  const handleSwapInstrument = useCallback((trackId: string) => { }, []);
   const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, "Group Bus"); }, [handleCreateTrack]);
   const handleToggleBypass = useCallback((trackId: string, pluginId: string) => {
     setState(produce((draft: DAWState) => {
@@ -790,7 +789,7 @@ export default function App() {
     
     setAutomationMenu(null);
   }, [automationMenu, setState]);
-  const handleToggleDelayComp = useCallback(() => { /* ... */ }, [state.isDelayCompEnabled, setState]);
+  const handleToggleDelayComp = useCallback(() => { }, [state.isDelayCompEnabled, setState]);
   
   const handleLoadDrumSample = useCallback(async (trackId: string, padId: number, file: File) => {
     try {
@@ -800,10 +799,8 @@ export default function App() {
         const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
         const audioRef = URL.createObjectURL(file);
         
-        // Load into engine
         audioEngine.loadDrumRackSample(trackId, padId, audioBuffer);
         
-        // Update state WITHOUT buffer
         setState(produce((draft: DAWState) => {
             const track = draft.tracks.find(t => t.id === trackId);
             if (!track || !track.drumPads) return;
@@ -812,7 +809,7 @@ export default function App() {
             if (pad) {
                 pad.sampleName = file.name.replace(/\.[^/.]+$/, '');
                 pad.audioRef = audioRef;
-                delete pad.buffer; // Ensure buffer is not in state
+                delete pad.buffer;
             }
         }));
         
@@ -849,33 +846,36 @@ export default function App() {
     };
   }, [handleUpdateBpm, handleUpdateTrack, handleTogglePlay, handleStop, handleSeek, handleDuplicateTrack, handleCreateTrack, handleDeleteTrack, handleToggleBypass, handleLoadDrumSample, handleEditClip, setState]);
 
-  const executeAIAction = (a: AIAction) => { /* ... */ };
+  const executeAIAction = (a: AIAction) => { };
 
-  // --- NOUVELLE FONCTION SÉCURISÉE POUR VERCEL ---
-  // Cette fonction remplace l'appel direct à Google. Elle passe par api/chat.js
   const envoyerAuChatbot = async (messageUtilisateur: string) => {
     try {
-        // On construit un petit contexte pour aider l'IA (optionnel mais recommandé)
-        const contextDAW = `Projet: ${state.name}, BPM: ${state.bpm}, Pistes: ${state.tracks.length}.`;
-        const promptComplet = `${contextDAW}\nQuestion utilisateur: ${messageUtilisateur}`;
-
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: promptComplet }),
+            body: JSON.stringify({ message: messageUtilisateur }),
         });
 
-        const data = await response.json();
-        if (data.error) throw new Error(data.error);
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Erreur serveur');
+        }
 
-        return data.text; // La réponse de l'IA via Vercel
+        const data = await response.json();
+        
+        return {
+            text: data.text || "J'ai bien reçu ton message.",
+            actions: data.actions || []
+        };
 
     } catch (error: any) {
         console.error("Erreur Chatbot:", error);
-        return "Désolé, je n'arrive pas à contacter le serveur sécurisé.";
+        return {
+            text: "Désolé, je n'arrive pas à contacter le serveur sécurisé. Vérifie ta clé API sur Vercel.",
+            actions: []
+        };
     }
   };
-  // ------------------------------------------------
 
   if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 
