@@ -31,6 +31,10 @@ import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
+import MobileTracksPage from './components/MobileTracksPage';
+import MobileMixerPage from './components/MobileMixerPage';
+import MobileBrowserPage from './components/MobileBrowserPage';
+import MobilePluginsPage from './components/MobilePluginsPage';
 
 // ... (Les fonctions `AVAILABLE_FX_MENU`, `createDefaultAutomation`, `createDefaultPlugins`, etc. restent identiques)
 
@@ -187,24 +191,28 @@ const SaveOverlay: React.FC<{ progress: number; message: string }> = ({ progress
 );
 
 const MobileBottomNav: React.FC<{ activeTab: MobileTab, onTabChange: (tab: MobileTab) => void }> = ({ activeTab, onTabChange }) => (
-    <div className="h-16 bg-[#0c0d10] border-t border-white/10 flex items-center justify-around z-50">
-        <button onClick={() => onTabChange('PROJECT')} className={`flex flex-col items-center space-y-1 ${activeTab === 'PROJECT' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-project-diagram text-lg"></i>
-            <span className="text-[9px] font-black uppercase">Arrangement</span>
+    <div className="h-20 bg-[#0c0d10] border-t border-white/10 flex items-center justify-around z-50 fixed bottom-0 left-0 right-0 safe-area-bottom">
+        <button onClick={() => onTabChange('TRACKS')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'TRACKS' ? 'text-cyan-400' : 'text-slate-500'}`}>
+            <i className="fas fa-align-justify text-xl"></i>
+            <span className="text-[10px] font-bold uppercase tracking-wide">Pistes</span>
         </button>
-        <button onClick={() => onTabChange('MIXER')} className={`flex flex-col items-center space-y-1 ${activeTab === 'MIXER' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-sliders-h text-lg"></i>
-            <span className="text-[9px] font-black uppercase">Mixer</span>
+        <button onClick={() => onTabChange('MIXER')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'MIXER' ? 'text-cyan-400' : 'text-slate-500'}`}>
+            <i className="fas fa-sliders-h text-xl"></i>
+            <span className="text-[10px] font-bold uppercase tracking-wide">Mixer</span>
         </button>
-        <button onClick={() => onTabChange('NOVA')} className={`flex flex-col items-center space-y-1 ${activeTab === 'NOVA' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/30 -mt-6 border-4 border-[#0c0d10]">
-                <i className="fas fa-robot text-white text-lg"></i>
+        <button onClick={() => onTabChange('PLUGINS')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'PLUGINS' ? 'text-cyan-400' : 'text-slate-500'}`}>
+            <i className="fas fa-plug text-xl"></i>
+            <span className="text-[10px] font-bold uppercase tracking-wide">Plugins</span>
+        </button>
+        <button onClick={() => onTabChange('BROWSER')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'BROWSER' ? 'text-cyan-400' : 'text-slate-500'}`}>
+            <i className="fas fa-folder-open text-xl"></i>
+            <span className="text-[10px] font-bold uppercase tracking-wide">Sons</span>
+        </button>
+        <button onClick={() => onTabChange('NOVA')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'NOVA' ? 'text-cyan-400' : 'text-slate-500'}`}>
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${activeTab === 'NOVA' ? 'bg-gradient-to-tr from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/50' : 'bg-white/5'}`}>
+                <i className={`fas fa-robot text-lg ${activeTab === 'NOVA' ? 'text-white' : 'text-slate-500'}`}></i>
             </div>
-            <span className="text-[9px] font-black uppercase">AI Nova</span>
-        </button>
-        <button onClick={() => onTabChange('AUTOMATION')} className={`flex flex-col items-center space-y-1 ${activeTab === 'AUTOMATION' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-wave-square text-lg"></i>
-            <span className="text-[9px] font-black uppercase">Auto</span>
+            <span className="text-[10px] font-bold uppercase tracking-wide">Nova</span>
         </button>
     </div>
 );
@@ -322,7 +330,7 @@ export default function App() {
     if (saved) return saved as ViewMode;
     return window.innerWidth < 768 ? 'MOBILE' : (window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP');
   });
-  const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('PROJECT');
+  const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('TRACKS');
   const handleViewModeChange = (mode: ViewMode) => { setViewMode(mode); localStorage.setItem('nova_view_mode', mode); };
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
@@ -898,39 +906,89 @@ export default function App() {
             </aside>
         )}
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
-          {((!isMobile && state.currentView === 'ARRANGEMENT') || (isMobile && activeMobileTab === 'PROJECT')) && (
-            <ArrangementView 
-               tracks={state.tracks} currentTime={state.currentTime} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
-               onSetLoop={(start, end) => setState(prev => ({ ...prev, loopStart: start, loopEnd: end, isLoopActive: true }))} 
-               onSeek={handleSeek} bpm={state.bpm} selectedTrackId={state.selectedTrackId} onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))} 
-               onUpdateTrack={handleUpdateTrack} onReorderTracks={() => {}} 
-               onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })} 
-               onSelectPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }} 
-               onRemovePlugin={handleRemovePlugin} onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })} 
-               onAddTrack={handleCreateTrack} onDuplicateTrack={handleDuplicateTrack} onDeleteTrack={handleDeleteTrack} 
-               onFreezeTrack={(tid) => {}} onImportFile={(file) => handleUniversalAudioImport(file, file.name)}
-               onEditClip={handleEditClip} isRecording={state.isRecording} recStartTime={state.recStartTime}
-               onMoveClip={handleMoveClip} onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
-               onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
-               onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
-            /> 
-          )}
-          
-          {((!isMobile && state.currentView === 'MIXER') || (isMobile && activeMobileTab === 'MIXER')) && (
-             <MixerView 
-                tracks={state.tracks} onUpdateTrack={handleUpdateTrack} 
-                onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }} 
-                onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
-                onRemovePlugin={handleRemovePlugin} onAddBus={handleAddBus} onToggleBypass={handleToggleBypass}
-                onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
-             />
+          {/* Mode Desktop/Tablet - Vues classiques */}
+          {!isMobile && (
+            <>
+              {state.currentView === 'ARRANGEMENT' && (
+                <ArrangementView
+                   tracks={state.tracks} currentTime={state.currentTime} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
+                   onSetLoop={(start, end) => setState(prev => ({ ...prev, loopStart: start, loopEnd: end, isLoopActive: true }))}
+                   onSeek={handleSeek} bpm={state.bpm} selectedTrackId={state.selectedTrackId} onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
+                   onUpdateTrack={handleUpdateTrack} onReorderTracks={() => {}}
+                   onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
+                   onSelectPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
+                   onRemovePlugin={handleRemovePlugin} onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
+                   onAddTrack={handleCreateTrack} onDuplicateTrack={handleDuplicateTrack} onDeleteTrack={handleDeleteTrack}
+                   onFreezeTrack={(tid) => {}} onImportFile={(file) => handleUniversalAudioImport(file, file.name)}
+                   onEditClip={handleEditClip} isRecording={state.isRecording} recStartTime={state.recStartTime}
+                   onMoveClip={handleMoveClip} onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
+                   onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
+                   onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
+                />
+              )}
+
+              {state.currentView === 'MIXER' && (
+                 <MixerView
+                    tracks={state.tracks} onUpdateTrack={handleUpdateTrack}
+                    onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
+                    onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
+                    onRemovePlugin={handleRemovePlugin} onAddBus={handleAddBus} onToggleBypass={handleToggleBypass}
+                    onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
+                 />
+              )}
+
+              {state.currentView === 'AUTOMATION' && (
+                 <AutomationEditorView
+                   tracks={state.tracks} currentTime={state.currentTime} bpm={state.bpm} zoomH={40}
+                   onUpdateTrack={handleUpdateTrack} onSeek={handleSeek}
+                 />
+              )}
+            </>
           )}
 
-          {((!isMobile && state.currentView === 'AUTOMATION') || (isMobile && activeMobileTab === 'AUTOMATION')) && (
-             <AutomationEditorView 
-               tracks={state.tracks} currentTime={state.currentTime} bpm={state.bpm} zoomH={40} 
-               onUpdateTrack={handleUpdateTrack} onSeek={handleSeek}
-             />
+          {/* Mode Mobile - Nouveau système de pages */}
+          {isMobile && (
+            <>
+              {activeMobileTab === 'TRACKS' && (
+                <MobileTracksPage
+                  tracks={state.tracks}
+                  currentTime={state.currentTime}
+                  isPlaying={state.isPlaying}
+                  isRecording={state.isRecording}
+                  selectedTrackId={state.selectedTrackId}
+                  onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
+                  onUpdateTrack={handleUpdateTrack}
+                  onRemovePlugin={handleRemovePlugin}
+                  onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); const plugin = state.tracks.find(t => t.id === tid)?.plugins.find(pl => pl.id === p); if (plugin) setActivePlugin({trackId: tid, plugin}); }}
+                  onToggleBypass={handleToggleBypass}
+                />
+              )}
+
+              {activeMobileTab === 'MIXER' && (
+                <MobileMixerPage
+                  tracks={state.tracks}
+                  selectedTrackId={state.selectedTrackId}
+                  onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
+                  onUpdateTrack={handleUpdateTrack}
+                  onRemovePlugin={handleRemovePlugin}
+                  onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); const plugin = state.tracks.find(t => t.id === tid)?.plugins.find(pl => pl.id === p); if (plugin) setActivePlugin({trackId: tid, plugin}); }}
+                  onToggleBypass={handleToggleBypass}
+                />
+              )}
+
+              {activeMobileTab === 'PLUGINS' && (
+                <MobilePluginsPage
+                  tracks={state.tracks}
+                  onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); const plugin = state.tracks.find(t => t.id === tid)?.plugins.find(pl => pl.id === p); if (plugin) setActivePlugin({trackId: tid, plugin}); }}
+                  onToggleBypass={handleToggleBypass}
+                  onRemovePlugin={handleRemovePlugin}
+                />
+              )}
+
+              {activeMobileTab === 'BROWSER' && (
+                <MobileBrowserPage />
+              )}
+            </>
           )}
         </main>
       </div>
@@ -963,7 +1021,7 @@ export default function App() {
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
       
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
-        <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('PROJECT')} />
+        <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('TRACKS')} />
       </div>
       
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
