@@ -1,10 +1,8 @@
-
-
 import React, { useState, useRef, useEffect } from 'react';
 import { AIChatMessage, AIAction } from '../types';
 
 interface ChatAssistantProps {
-  onSendMessage: (msg: string) => Promise<{ text: string, actions: AIAction[] }>;
+  onSendMessage: (msg: string) => Promise<any>;
   onExecuteAction: (action: AIAction) => void;
   externalNotification?: string | null;
   isMobile?: boolean;
@@ -49,16 +47,6 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     const msgToSend = customMsg || inputValue;
     if (!msgToSend.trim()) return;
 
-    if (!process.env.API_KEY) {
-        setMessages(prev => [...prev, {
-            id: Date.now().toString(),
-            role: 'assistant',
-            content: "⚠️ Clé API manquante. L'assistant ne peut pas répondre. Configurez votre API_KEY.",
-            timestamp: Date.now()
-        }]);
-        return;
-    }
-
     const userMsg: AIChatMessage = {
       id: Date.now().toString(),
       role: 'user',
@@ -74,10 +62,13 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       const response = await onSendMessage(msgToSend);
       setIsTyping(false);
       
-      if (response.actions && response.actions.length > 0) {
+      const responseText = typeof response === 'string' ? response : (response.text || "");
+      const responseActions = response.actions || [];
+
+      if (responseActions && responseActions.length > 0) {
         setIsSyncing(true);
         setTimeout(() => setIsSyncing(false), 1500);
-        response.actions.forEach(action => {
+        responseActions.forEach(action => {
             onExecuteAction(action);
         });
       }
@@ -85,15 +76,15 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       const assistantMsg: AIChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: response.text || "Réglages de mixage effectués.",
+        content: responseText || "Réglages de mixage effectués.",
         timestamp: Date.now(),
-        executedAction: response.actions?.map(a => a.description || a.action).join(', ')
+        executedAction: responseActions?.map((a: any) => a.description || a.action).join(', ')
       };
       
       setMessages(prev => [...prev, assistantMsg]);
     } catch (error: any) {
       setIsTyping(false);
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: "Erreur de liaison avec le DSP. Réessaie.", timestamp: Date.now() }]);
+      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: "Désolé, je n'arrive pas à contacter le serveur sécurisé.", timestamp: Date.now() }]);
     }
   };
 

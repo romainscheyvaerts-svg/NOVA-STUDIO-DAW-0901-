@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { AIChatMessage, AIAction } from '../types';
+import { AIChatMessage, AIAction, User } from '../types';
+import { getActiveApiKey, setAdminApiKey, clearAdminApiKey, hasAdminApiKey } from '../services/ApiKeyManager';
 
+// API Key button is visible for all users (guest included)
 interface ChatAssistantProps {
   onSendMessage: (msg: string) => Promise<{ text: string, actions: AIAction[] }>;
   onExecuteAction: (action: AIAction) => void;
@@ -8,12 +10,19 @@ interface ChatAssistantProps {
   isMobile?: boolean;
   forceOpen?: boolean;
   onClose?: () => void; // New prop for explicit close action
+  user?: User | null; // Pour détecter l'admin
 }
 
-const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, isMobile, forceOpen, onClose }) => {
+const ADMIN_EMAIL = 'romain.scheyvaerts@gmail.com';
+
+const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, isMobile, forceOpen, onClose, user }) => {
   const [isOpen, setIsOpen] = useState(forceOpen || false);
   const [inputValue, setInputValue] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+
+  const isAdmin = user && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
   const [messages, setMessages] = useState<AIChatMessage[]>([
     { id: '1', role: 'assistant', content: 'Studio Master Online. Je pilote ton mix, calage du BPM et chaîne FX.', timestamp: Date.now() }
   ]);
@@ -43,15 +52,47 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     }
   }, [externalNotification]); 
 
+  const handleSaveApiKey = async () => {
+    if (apiKeyInput.trim()) {
+      const success = await setAdminApiKey(apiKeyInput.trim(), user);
+      setShowApiKeyModal(false);
+
+      if (success) {
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: user
+            ? "✅ Clé API sauvegardée dans Supabase. Elle sera accessible depuis tous vos appareils."
+            : "✅ Clé API sauvegardée localement (mode invité).",
+          timestamp: Date.now()
+        }]);
+      }
+    }
+  };
+
+  const handleClearApiKey = async () => {
+    await clearAdminApiKey(user);
+    setApiKeyInput('');
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: "✅ Clé API supprimée. Utilisation de la clé .env par défaut.",
+      timestamp: Date.now()
+    }]);
+  };
+
   const handleSend = async (customMsg?: string) => {
     const msgToSend = customMsg || inputValue;
     if (!msgToSend.trim()) return;
 
-    if (!process.env.API_KEY) {
+    const activeKey = getActiveApiKey(user);
+    if (!activeKey) {
         setMessages(prev => [...prev, {
             id: Date.now().toString(),
             role: 'assistant',
-            content: "⚠️ Clé API manquante. L'assistant ne peut pas répondre. Configurez votre API_KEY.",
+            content: isAdmin
+              ? "⚠️ Clé API manquante. Cliquez sur l'icône ⚙️ en haut pour configurer une clé API."
+              : "⚠️ Clé API manquante. Contactez l'administrateur.",
             timestamp: Date.now()
         }]);
         return;
@@ -133,17 +174,30 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
                 </div>
               </div>
             </div>
-            
-            <button 
-              onClick={(e) => { 
-                  e.stopPropagation(); 
-                  setIsOpen(false);
-                  if (onClose) onClose(); 
-              }} 
-              className="w-10 h-10 rounded-full bg-white/5 text-slate-500 hover:text-white transition-all flex items-center justify-center border border-white/10 active:bg-red-500/20 active:text-red-500"
-            >
-              <i className="fas fa-times text-sm"></i>
-            </button>
+
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setShowApiKeyModal(true);
+                }}
+                className="w-10 h-10 rounded-full bg-purple-600/20 text-purple-400 hover:bg-purple-600 hover:text-white transition-all flex items-center justify-center border border-purple-500/30"
+                title="Configurer la clé API"
+              >
+                <i className="fas fa-key text-sm"></i>
+              </button>
+
+              <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setIsOpen(false);
+                    if (onClose) onClose();
+                }}
+                className="w-10 h-10 rounded-full bg-white/5 text-slate-500 hover:text-white transition-all flex items-center justify-center border border-white/10 active:bg-red-500/20 active:text-red-500"
+              >
+                <i className="fas fa-times text-sm"></i>
+              </button>
+            </div>
           </div>
 
           <div className="px-6 py-4 bg-black/40 flex space-x-3 border-b border-white/5 overflow-x-auto no-scrollbar">
@@ -217,7 +271,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       )}
 
       {!isMobile && (
-        <button 
+        <button
           onClick={() => setIsOpen(!isOpen)}
           className={`w-20 h-20 rounded-[32px] flex items-center justify-center shadow-[0_0_50px_rgba(0,242,255,0.2)] transition-all duration-500 hover:scale-110 active:scale-90 group relative ${
             isOpen ? 'bg-white text-black rotate-90' : 'bg-[#0f1115] border border-cyan-500/30 text-cyan-400'
@@ -230,6 +284,67 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
             </>
           )}
         </button>
+      )}
+
+      {/* Admin API Key Modal */}
+      {showApiKeyModal && isAdmin && (
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0c0d10] border border-purple-500/30 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-black uppercase tracking-wider text-white flex items-center space-x-2">
+                <i className="fas fa-crown text-purple-400"></i>
+                <span>Configuration API Admin</span>
+              </h3>
+              <button
+                onClick={() => setShowApiKeyModal(false)}
+                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white transition-all"
+              >
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  Clé API Google Gemini
+                </label>
+                <input
+                  type="text"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="AIzaSy..."
+                  className="w-full px-4 py-3 bg-black/40 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-purple-500/50 transition-all"
+                />
+                <p className="text-xs text-slate-500 mt-2">
+                  {hasAdminApiKey() ? '✅ Clé admin active' : '⚠️ Utilise la clé .env par défaut'}
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={handleSaveApiKey}
+                  disabled={!apiKeyInput.trim()}
+                  className="flex-1 px-4 py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-xs font-black uppercase rounded-lg transition-all"
+                >
+                  💾 Sauvegarder
+                </button>
+                {hasAdminApiKey() && (
+                  <button
+                    onClick={handleClearApiKey}
+                    className="px-4 py-3 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white text-xs font-black uppercase rounded-lg transition-all"
+                  >
+                    🗑️ Reset
+                  </button>
+                )}
+              </div>
+
+              <div className="text-xs text-slate-600 space-y-1">
+                <p>💡 <strong>Info:</strong> La clé admin remplace la clé .env</p>
+                <p>🔒 <strong>Sécurité:</strong> Stockée dans localStorage du navigateur</p>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

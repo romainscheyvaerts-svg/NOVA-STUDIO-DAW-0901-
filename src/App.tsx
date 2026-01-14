@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
 import { audioEngine } from './engine/AudioEngine';
 import { audioBufferRegistry } from './services/AudioBufferRegistry';
+import AdminTemplateButton, { loadDefaultTemplate } from './components/AdminTemplateButton';
 import TransportBar from './components/TransportBar';
 import MobilePinchZoomContainer from './components/MobilePinchZoomContainer';
 import MobileTransportFloating from './components/MobileTransportFloating';
@@ -25,7 +26,7 @@ import AudioSettingsPanel from './components/AudioSettingsPanel';
 import PluginManager from './components/PluginManager'; 
 import { supabaseManager } from './services/SupabaseManager';
 import { SessionSerializer } from './services/SessionSerializer';
-import { getAIProductionAssistance } from './services/AIService';
+// L'IA utilise maintenant le point d'accès sécurisé /api/chat
 import { novaBridge } from './services/NovaBridge';
 import { ProjectIO } from './services/ProjectIO';
 import PianoRoll from './components/PianoRoll';
@@ -649,23 +650,36 @@ export default function App() {
       if(u) setUser(u);
   }, []);
 
-  const initialState: DAWState = {
-    id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM, isPlaying: false, isRecording: false, currentTime: 0,
-    isLoopActive: false, loopStart: 0, loopEnd: 8,
-    tracks: [
-      { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
-      { id: 'track-rec-main', name: 'REC', type: TrackType.AUDIO, color: '#ff0000', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#ff0000')], totalLatency: 0 },
-      { id: 'lead-couplet', name: 'LEAD COUPLET', type: TrackType.AUDIO, color: '#3b82f6', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#3b82f6')], totalLatency: 0 },
-      { id: 'lead-refrain', name: 'LEAD REFRAIN', type: TrackType.AUDIO, color: '#60a5fa', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#60a5fa')], totalLatency: 0 },
-      { id: 'back-1', name: 'BACK 1', type: TrackType.AUDIO, color: '#a855f7', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#a855f7')], totalLatency: 0 },
-      { id: 'back-2', name: 'BACK 2', type: TrackType.AUDIO, color: '#c084fc', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#c084fc')], totalLatency: 0 },
-      createBusVox(createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), AUDIO_CONFIG.DEFAULT_BPM), 
-      createBusFx(),
-      ...createInitialSends(AUDIO_CONFIG.DEFAULT_BPM, 'bus-fx')
-    ],
-    selectedTrackId: 'track-rec-main', currentView: 'ARRANGEMENT', projectPhase: ProjectPhase.SETUP, isLowLatencyMode: false, isRecModeActive: false, systemMaxLatency: 0, recStartTime: null,
-    isDelayCompEnabled: false
+  // Fonction pour créer l'état initial (avec support du template admin)
+  const getInitialState = (): DAWState => {
+    // Charger le template admin s'il existe
+    const template = loadDefaultTemplate();
+    if (template) {
+      console.log('[APP] Loading admin template');
+      return template;
+    }
+
+    // Sinon, retourner l'état initial par défaut
+    return {
+      id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM, isPlaying: false, isRecording: false, currentTime: 0,
+      isLoopActive: false, loopStart: 0, loopEnd: 8,
+      tracks: [
+        { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
+        { id: 'track-rec-main', name: 'REC', type: TrackType.AUDIO, color: '#ff0000', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#ff0000')], totalLatency: 0 },
+        { id: 'lead-couplet', name: 'LEAD COUPLET', type: TrackType.AUDIO, color: '#3b82f6', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#3b82f6')], totalLatency: 0 },
+        { id: 'lead-refrain', name: 'LEAD REFRAIN', type: TrackType.AUDIO, color: '#60a5fa', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#60a5fa')], totalLatency: 0 },
+        { id: 'back-1', name: 'BACK 1', type: TrackType.AUDIO, color: '#a855f7', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#a855f7')], totalLatency: 0 },
+        { id: 'back-2', name: 'BACK 2', type: TrackType.AUDIO, color: '#c084fc', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#c084fc')], totalLatency: 0 },
+        createBusVox(createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), AUDIO_CONFIG.DEFAULT_BPM),
+        createBusFx(),
+        ...createInitialSends(AUDIO_CONFIG.DEFAULT_BPM, 'bus-fx')
+      ],
+      selectedTrackId: 'track-rec-main', currentView: 'ARRANGEMENT', projectPhase: ProjectPhase.SETUP, isLowLatencyMode: false, isRecModeActive: false, systemMaxLatency: 0, recStartTime: null,
+      isDelayCompEnabled: false
+    };
   };
+
+  const initialState: DAWState = getInitialState();
 
   const { state, setState, setVisualState, undo, redo, canUndo, canRedo } = useUndoRedo(initialState);
   
@@ -674,6 +688,13 @@ export default function App() {
   const toggleTheme = () => { setTheme(prev => prev === 'dark' ? 'light' : 'dark'); };
 
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
+
+  // 🚨 TEST DÉPLOIEMENT - LOGS VISIBLES
+  useEffect(() => {
+    console.log('%c🔴 TEST DÉPLOIEMENT - VERSION AVEC POINT ROUGE', 'color: red; font-size: 30px; font-weight: bold; background: yellow; padding: 10px;');
+    console.log('%cBuild timestamp:', 'font-size: 20px;', Date.now());
+    console.log('%cSi tu vois ce message mais pas le point rouge, il y a un problème React', 'font-size: 16px; color: orange;');
+  }, []);
 
   useEffect(() => { novaBridge.connect(); }, []);
   const stateRef = useRef(state);
@@ -712,14 +733,14 @@ export default function App() {
   const handleViewModeChange = (mode: ViewMode) => { setViewMode(mode); localStorage.setItem('nova_view_mode', mode); };
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
-  const ensureAudioEngine = async () => {
+  const ensureAudioEngine = useCallback(async () => {
     const wasUninitialized = !audioEngine.ctx;
     if (!audioEngine.ctx) await audioEngine.init();
     if (audioEngine.ctx?.state === 'suspended') await audioEngine.ctx.resume();
     if (wasUninitialized && audioEngine.ctx) {
       stateRef.current.tracks.forEach(t => audioEngine.updateTrack(t, stateRef.current.tracks));
     }
-  };
+  }, []);
 
   const handleLogout = async () => { await supabaseManager.signOut(); setUser(null); };
   const handleBuyLicense = (instrumentId: number) => { if (!user) return; const updatedUser = { ...user, owned_instruments: [...(user.owned_instruments || []), instrumentId] }; setUser(updatedUser); setAiNotification(`✅ Licence achetée avec succès ! Export débloqué.`); };
@@ -1028,6 +1049,7 @@ export default function App() {
             track.plugins.push(newPlugin);
         }
     }));
+      
 
     if (options?.openUI) {
         await ensureAudioEngine();
@@ -1036,6 +1058,30 @@ export default function App() {
         }, 50);
     }
   }, [setState]);
+    const envoyerAuChatbot = async (message: string) => {
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          message, 
+          state: stateRef.current 
+        }),
+      });
+      if (!response.ok) throw new Error('Erreur réseau');
+      const data = await response.json();
+      return {
+        text: data.text || "J'ai bien reçu ton message.",
+        actions: data.actions || []
+      };
+    } catch (error) {
+      console.error("Erreur Chatbot:", error);
+      return {
+        text: "Désolé, je n'arrive pas à contacter Nova.",
+        actions: []
+      };
+    }
+  };
 
   const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
       console.log('[handleUniversalAudioImport] Début import:', name);
@@ -2126,6 +2172,13 @@ export default function App() {
       <TouchInteractionManager />
       <GlobalClipMenu />
 
+      {/* Admin Template Button */}
+      {user && user.email.toLowerCase() === 'romain.scheyvaerts@gmail.com' && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100]">
+          <AdminTemplateButton user={user} currentState={state} />
+        </div>
+      )}
+
       {/* Floating Import Audio Button */}
       <div className="fixed top-20 right-4 z-[100]">
         <input
@@ -2153,11 +2206,14 @@ export default function App() {
       <div className="flex-1 flex overflow-hidden relative">
         {isSidebarOpen && !isMobile && (
             <aside className="shrink-0 z-10">
-                <SideBrowser2 
+                <SideBrowser2
                     user={user}
                     activeTab={activeSideBrowserTab}
                     onTabChange={setActiveSideBrowserTab}
-                    onLocalImport={(file) => handleUniversalAudioImport(file, file.name)}
+                    onLocalImport={(file) => {
+                        console.log('[App.tsx onLocalImport] Received file:', file.name, file.type, file.size);
+                        handleUniversalAudioImport(file, file.name);
+                    }}
                     onAddPlugin={handleAddPluginFromContext}
                     onPurchase={handleBuyLicense}
                     selectedTrackId={state.selectedTrackId}
@@ -2314,12 +2370,36 @@ export default function App() {
 
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
-      
+
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
-        <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('TRACKS')} />
+        <ChatAssistant onSendMessage={envoyerAuChatbot} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('TRACKS')} user={user} />
       </div>
-      
+
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
+
+      {/* 🔴 TEST DÉPLOIEMENT - GROS POINT ROUGE */}
+      <div style={{
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: '200px',
+        height: '200px',
+        backgroundColor: '#ff0000',
+        borderRadius: '50%',
+        zIndex: 9999999,
+        border: '10px solid yellow',
+        boxShadow: '0 0 50px rgba(255, 0, 0, 0.8)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '40px',
+        fontWeight: 'bold',
+        color: 'white',
+        textShadow: '2px 2px 4px black'
+      }}>
+        TEST
+      </div>
     </div>
   );
 }

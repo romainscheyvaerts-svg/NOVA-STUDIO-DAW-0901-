@@ -102,9 +102,9 @@ const ChannelStrip: React.FC<{
         onDrop={handleDrop}
         className={`flex-shrink-0 bg-[#0c0e12] border-r border-white/5 flex flex-col h-full ${isMaster ? 'w-64 border-l-2 border-cyan-500/20' : 'w-44'} ${isDragOver ? 'bg-cyan-500/20' : ''}`}
     >
-      
+
       {/* Plugin Rack */}
-      <div className="h-40 bg-black/20 border-b border-white/5 p-2 space-y-1.5 overflow-y-auto custom-scroll" onClick={handleEmptySlotClick}>
+      <div className="h-40 bg-black/20 border-b border-white/5 p-2 space-y-1.5 overflow-y-auto custom-scroll">
          {track.plugins.length === 0 && (
              <div className="h-full flex items-center justify-center text-slate-700 text-[8px] font-mono pointer-events-none">
                 EMPTY RACK
@@ -112,7 +112,7 @@ const ChannelStrip: React.FC<{
          )}
          {track.plugins.map(p => (
           <div key={p.id} className="relative group/fxslot w-full h-8 mb-1 fx-slot">
-            <button 
+            <button
               onClick={(e) => handleFXClick(e, p)}
               className={`w-full h-full bg-black/40 rounded border border-white/5 text-[9px] font-black hover:border-cyan-500/40 transition-all px-2 text-left truncate flex items-center pr-12 ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}
             >
@@ -123,6 +123,16 @@ const ChannelStrip: React.FC<{
             </div>
             <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx absolute -right-2 top-0 bottom-0 w-6 bg-red-500/80 text-white flex items-center justify-center opacity-0 group-hover/fxslot:opacity-100 transition-opacity z-10"><i className="fas fa-times text-[8px]"></i></button>
           </div>
+        ))}
+        {/* Boutons + pour ajouter des plugins */}
+        {Array.from({ length: Math.max(0, 6 - track.plugins.length) }).map((_, i) => (
+          <button
+            key={`empty-${i}`}
+            onClick={handleEmptySlotClick}
+            className="w-full h-8 rounded border border-dashed border-white/10 bg-black/5 opacity-40 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
+          >
+            <i className="fas fa-plus text-[8px] text-slate-600"></i>
+          </button>
         ))}
       </div>
 
