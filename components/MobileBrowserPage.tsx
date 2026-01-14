@@ -162,11 +162,10 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({ user, onAddPlugin
 
         {/* Contenu INSTRUMENTS */}
         {activeTab === 'INSTRUMENTS' && (
-          <div className="bg-[#14161a] rounded-xl border border-white/10 overflow-hidden">
+          <div className="rounded-xl overflow-hidden">
             <InstrumentCatalog
               user={user}
               onPurchase={onPurchase}
-              compact={true}
             />
           </div>
         )}
