@@ -26,7 +26,7 @@ import AudioSettingsPanel from './components/AudioSettingsPanel';
 import PluginManager from './components/PluginManager'; 
 import { supabaseManager } from './services/SupabaseManager';
 import { SessionSerializer } from './services/SessionSerializer';
-import { getAIProductionAssistance } from './services/AIService';
+// L'IA utilise maintenant le point d'accès sécurisé /api/chat
 import { novaBridge } from './services/NovaBridge';
 import { ProjectIO } from './services/ProjectIO';
 import PianoRoll from './components/PianoRoll';
@@ -1049,6 +1049,7 @@ export default function App() {
             track.plugins.push(newPlugin);
         }
     }));
+      
 
     if (options?.openUI) {
         await ensureAudioEngine();
@@ -1057,6 +1058,30 @@ export default function App() {
         }, 50);
     }
   }, [setState]);
+    const envoyerAuChatbot = async (message: string) => {
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          message, 
+          state: stateRef.current 
+        }),
+      });
+      if (!response.ok) throw new Error('Erreur réseau');
+      const data = await response.json();
+      return {
+        text: data.text || "J'ai bien reçu ton message.",
+        actions: data.actions || []
+      };
+    } catch (error) {
+      console.error("Erreur Chatbot:", error);
+      return {
+        text: "Désolé, je n'arrive pas à contacter Nova.",
+        actions: []
+      };
+    }
+  };
 
   const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
       console.log('[handleUniversalAudioImport] Début import:', name);
@@ -2347,7 +2372,7 @@ export default function App() {
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
 
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
-        <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg, user)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('TRACKS')} user={user} />
+        <ChatAssistant onSendMessage={envoyerAuChatbot} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('TRACKS')} user={user} />
       </div>
 
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}

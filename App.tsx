@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
 import { audioEngine } from './engine/AudioEngine';
@@ -22,7 +21,7 @@ import AudioSettingsPanel from './components/AudioSettingsPanel';
 import PluginManager from './components/PluginManager'; 
 import { supabaseManager } from './services/SupabaseManager';
 import { SessionSerializer } from './services/SessionSerializer';
-import { getAIProductionAssistance } from './services/AIService';
+// import { getAIProductionAssistance } from './services/AIService'; 
 import { novaBridge } from './services/NovaBridge';
 import { ProjectIO } from './services/ProjectIO';
 import PianoRoll from './components/PianoRoll';
@@ -31,8 +30,6 @@ import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
-
-// ... (Les fonctions `AVAILABLE_FX_MENU`, `createDefaultAutomation`, `createDefaultPlugins`, etc. restent identiques)
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -158,7 +155,7 @@ const createBusFx = (): Track => ({
   id: 'bus-fx',
   name: 'BUS FX',
   type: TrackType.BUS,
-  color: '#ec4899', // Pink
+  color: '#ec4899', 
   isMuted: false,
   isSolo: false,
   isTrackArmed: false,
@@ -291,8 +288,7 @@ export default function App() {
   const toggleTheme = () => { setTheme(prev => prev === 'dark' ? 'light' : 'dark'); };
 
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
-
-  useEffect(() => { novaBridge.connect(); }, []);
+    useEffect(() => { novaBridge.connect(); }, []);
   const stateRef = useRef(state); 
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks)); }, [state.tracks]); 
@@ -338,8 +334,8 @@ export default function App() {
   const handleLogout = async () => { await supabaseManager.signOut(); setUser(null); };
   const handleBuyLicense = (instrumentId: number) => { if (!user) return; const updatedUser = { ...user, owned_instruments: [...(user.owned_instruments || []), instrumentId] }; setUser(updatedUser); setAiNotification(`✅ Licence achetée avec succès ! Export débloqué.`); };
   
-  const handleSaveCloud = async (projectName: string) => { /* ... */ };
-  const handleSaveAsCopy = async (n: string) => { /* ... */ };
+  const handleSaveCloud = async (projectName: string) => { };
+  const handleSaveAsCopy = async (n: string) => { };
   const handleSaveLocal = async (n: string) => { SessionSerializer.downloadLocalJSON(stateRef.current, n); };
   
   const handleLoadProject = useCallback((loadedState: DAWState) => {
@@ -356,9 +352,6 @@ export default function App() {
             });
             track.drumPads?.forEach(pad => {
                 if (pad.buffer) {
-                    // Note: Drum pads do not use the registry yet.
-                    // This will need a fix if Immer is used on drum racks.
-                    // For now, we load it into engine directly.
                     audioEngine.loadDrumRackSample(track.id, pad.id, pad.buffer);
                     delete (pad as Partial<DrumPad>).buffer;
                 }
@@ -760,8 +753,8 @@ export default function App() {
         destTrack.clips.push(clip);
     }));
   }, [setState]);
-  const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => { /* ... */ }, [setState]);
-  const handleSwapInstrument = useCallback((trackId: string) => { /* ... */ }, []);
+  const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => { }, [setState]);
+  const handleSwapInstrument = useCallback((trackId: string) => { }, []);
   const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, "Group Bus"); }, [handleCreateTrack]);
   const handleToggleBypass = useCallback((trackId: string, pluginId: string) => {
     setState(produce((draft: DAWState) => {
@@ -796,7 +789,7 @@ export default function App() {
     
     setAutomationMenu(null);
   }, [automationMenu, setState]);
-  const handleToggleDelayComp = useCallback(() => { /* ... */ }, [state.isDelayCompEnabled, setState]);
+  const handleToggleDelayComp = useCallback(() => { }, [state.isDelayCompEnabled, setState]);
   
   const handleLoadDrumSample = useCallback(async (trackId: string, padId: number, file: File) => {
     try {
@@ -806,10 +799,8 @@ export default function App() {
         const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
         const audioRef = URL.createObjectURL(file);
         
-        // Load into engine
         audioEngine.loadDrumRackSample(trackId, padId, audioBuffer);
         
-        // Update state WITHOUT buffer
         setState(produce((draft: DAWState) => {
             const track = draft.tracks.find(t => t.id === trackId);
             if (!track || !track.drumPads) return;
@@ -818,7 +809,7 @@ export default function App() {
             if (pad) {
                 pad.sampleName = file.name.replace(/\.[^/.]+$/, '');
                 pad.audioRef = audioRef;
-                delete pad.buffer; // Ensure buffer is not in state
+                delete pad.buffer;
             }
         }));
         
@@ -855,7 +846,36 @@ export default function App() {
     };
   }, [handleUpdateBpm, handleUpdateTrack, handleTogglePlay, handleStop, handleSeek, handleDuplicateTrack, handleCreateTrack, handleDeleteTrack, handleToggleBypass, handleLoadDrumSample, handleEditClip, setState]);
 
-  const executeAIAction = (a: AIAction) => { /* ... */ };
+  const executeAIAction = (a: AIAction) => { };
+
+  const envoyerAuChatbot = async (messageUtilisateur: string) => {
+    try {
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: messageUtilisateur }),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Erreur serveur');
+        }
+
+        const data = await response.json();
+        
+        return {
+            text: data.text || "J'ai bien reçu ton message.",
+            actions: data.actions || []
+        };
+
+    } catch (error: any) {
+        console.error("Erreur Chatbot:", error);
+        return {
+            text: "Désolé, je n'arrive pas à contacter le serveur sécurisé. Vérifie ta clé API sur Vercel.",
+            actions: []
+        };
+    }
+  };
 
   if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 
@@ -963,7 +983,14 @@ export default function App() {
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
       
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
-        <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('PROJECT')} />
+        <ChatAssistant 
+            onSendMessage={envoyerAuChatbot} 
+            onExecuteAction={executeAIAction} 
+            externalNotification={aiNotification} 
+            isMobile={isMobile} 
+            forceOpen={isMobile && activeMobileTab === 'NOVA'} 
+            onClose={() => setActiveMobileTab('PROJECT')} 
+        />
       </div>
       
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
