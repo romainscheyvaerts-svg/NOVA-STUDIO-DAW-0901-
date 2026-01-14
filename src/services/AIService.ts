@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { DAWState, AIAction, User } from "../types";
 import { NOTES } from "../utils/constants";
 import { getActiveApiKey } from "./ApiKeyManager"; 
@@ -345,7 +345,7 @@ export const generateCreativeMetadata = async (category: string): Promise<{ name
         if (!apiKey) {
           throw new Error("Clé API Google AI non configurée");
         }
-        const ai = new GoogleGenAI({ apiKey });
+        const ai = new GoogleGenerativeAI({ apiKey });
         
         const systemPrompt = `You are a creative director for a top-tier Hip-Hop/Rap producer.
         Task:
@@ -369,10 +369,10 @@ export const generateCreativeMetadata = async (category: string): Promise<{ name
                 systemInstruction: systemPrompt,
                 responseMimeType: "application/json",
                 responseSchema: {
-                    type: Type.OBJECT,
+                    type: "object",
                     properties: {
-                        name: { type: Type.STRING },
-                        prompt: { type: Type.STRING }
+                        name: { type: "string" },
+                        prompt: { type: "string" }
                     }
                 }
             }
@@ -391,7 +391,7 @@ export const generateCoverArt = async (beatName: string, category: string, vibe:
     if (!apiKey) {
       throw new Error("Clé API Google AI non configurée");
     }
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenerativeAI({ apiKey });
     
     const prompt = `High quality Hip-Hop Album Cover Art for a beat named "${beatName}" (${category}).
     Visual Description: ${vibe || 'Dark moody street atmosphere'}.
