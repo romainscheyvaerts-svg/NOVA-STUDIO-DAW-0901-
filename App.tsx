@@ -253,7 +253,17 @@ const useUndoRedo = (initialState: DAWState) => {
 };
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null); 
+  // Utilisateur par défaut pour éviter l'écran noir (temporaire)
+  const defaultUser: User = {
+    id: 'guest',
+    email: 'guest@novastudio.app',
+    username: 'Guest User',
+    isVerified: true,
+    plan: 'FREE',
+    owned_instruments: []
+  };
+
+  const [user, setUser] = useState<User | null>(defaultUser);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [saveState, setSaveState] = useState<{ isSaving: boolean; progress: number; message: string }>({ isSaving: false, progress: 0, message: '' });
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -861,7 +871,8 @@ export default function App() {
     }
   };
 
-  if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
+  // Auth temporairement désactivée pour éviter écran noir
+  // if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 
   return (
     <div className="flex flex-col h-screen w-full overflow-hidden relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
