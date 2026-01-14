@@ -253,10 +253,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (isLoopActive && loopEnd > loopStart) {
         const loopX = (loopStart * zoomH) * scale;
         const loopW = ((loopEnd - loopStart) * zoomH) * scale;
-        ctx.fillStyle = 'rgba(0, 242, 255, 0.2)';
+        ctx.fillStyle = 'rgba(0, 242, 255, 0.3)';
         ctx.fillRect(loopX, 0, loopW, h);
         ctx.strokeStyle = '#00f2ff';
-        ctx.lineWidth = 0.5;
+        ctx.lineWidth = 1.5;
         ctx.strokeRect(loopX, 0, loopW, h);
     }
     
@@ -468,10 +468,44 @@ const drawTimeline = useCallback(() => {
 
     if (isLoopActive && loopEnd > loopStart) {
         const loopStartX = timeToPixels(loopStart) - scrollX;
+        const loopEndX = timeToPixels(loopEnd) - scrollX;
         const loopWidth = timeToPixels(loopEnd - loopStart);
         if (loopStartX + loopWidth > 0 && loopStartX < w) {
-            ctx.fillStyle = 'rgba(0, 242, 255, 0.05)';
+            // Zone de loop avec opacité augmentée
+            ctx.fillStyle = 'rgba(0, 242, 255, 0.15)';
             ctx.fillRect(loopStartX, 40, loopWidth, h - 40);
+
+            // Lignes verticales de début et fin de loop plus visibles
+            ctx.strokeStyle = '#00f2ff';
+            ctx.lineWidth = 3;
+
+            // Ligne de début
+            ctx.beginPath();
+            ctx.moveTo(loopStartX, 40);
+            ctx.lineTo(loopStartX, h);
+            ctx.stroke();
+
+            // Ligne de fin
+            ctx.beginPath();
+            ctx.moveTo(loopEndX, 40);
+            ctx.lineTo(loopEndX, h);
+            ctx.stroke();
+
+            // Poignées en haut pour mieux visualiser les curseurs
+            ctx.fillStyle = '#00f2ff';
+            // Poignée début (triangle)
+            ctx.beginPath();
+            ctx.moveTo(loopStartX - 8, 40);
+            ctx.lineTo(loopStartX + 8, 40);
+            ctx.lineTo(loopStartX, 55);
+            ctx.fill();
+
+            // Poignée fin (triangle)
+            ctx.beginPath();
+            ctx.moveTo(loopEndX - 8, 40);
+            ctx.lineTo(loopEndX + 8, 40);
+            ctx.lineTo(loopEndX, 55);
+            ctx.fill();
         }
     }
     
