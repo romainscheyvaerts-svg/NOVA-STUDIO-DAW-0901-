@@ -6,11 +6,10 @@ import InstrumentCatalog from './InstrumentCatalog';
 
 interface SideBrowser2Props {
   user: User | null;
-  onLocalImport: (file: File) => void;
   onAddPlugin: (trackId: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => void;
   onPurchase: (instrumentId: number) => void;
-  activeTab: 'STORE' | 'LOCAL' | 'FW' | 'BRIDGE';
-  onTabChange: (tab: 'STORE' | 'LOCAL' | 'FW' | 'BRIDGE') => void;
+  activeTab: 'STORE' | 'FW' | 'BRIDGE';
+  onTabChange: (tab: 'STORE' | 'FW' | 'BRIDGE') => void;
   selectedTrackId: string | null;
 }
 
@@ -99,26 +98,7 @@ const BridgeTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, met
     );
 };
 
-// --- Onglet Local ---
-const LocalTab: React.FC<{ onLocalImport: (file: File) => void }> = ({ onLocalImport }) => {
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    return (
-        <div className="h-full flex flex-col items-center justify-center p-8 text-center opacity-60">
-            <i className="fas fa-file-audio text-4xl text-slate-700 mb-6"></i>
-            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4">Import Local</h3>
-            <p className="text-xs text-slate-500 mb-6">Importez n'importe quel fichier audio (MP3, WAV, etc.) depuis votre appareil.</p>
-            <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="px-8 py-3 bg-white/10 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-cyan-500 hover:text-black transition-colors"
-            >
-                Parcourir
-            </button>
-            <input type="file" ref={fileInputRef} className="hidden" accept="audio/*" onChange={(e) => {
-                if (e.target.files?.[0]) onLocalImport(e.target.files[0]);
-            }} />
-        </div>
-    );
-};
+// --- Onglet Local SUPPRIMÉ - Import déplacé dans TransportBar ---
 
 // --- Onglet FW (Future Wave - Native Plugins) ---
 const FWTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => void, selectedTrackId: string | null }> = ({ onAddPlugin, selectedTrackId }) => {
@@ -186,9 +166,8 @@ const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onLocalImport, onAddP
   return (
     <div className="w-80 h-full flex flex-col bg-[#0c0d10] border-r border-white/5 shadow-2xl">
       {/* Tab Bar */}
-      <div className="grid grid-cols-4 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
+      <div className="grid grid-cols-3 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
         <TabButton icon="fa-store" label="Store" isActive={activeTab === 'STORE'} onClick={() => onTabChange('STORE')} />
-        <TabButton icon="fa-folder" label="Local" isActive={activeTab === 'LOCAL'} onClick={() => onTabChange('LOCAL')} />
         <TabButton icon="fa-atom" label="FW" isActive={activeTab === 'FW'} onClick={() => onTabChange('FW')} />
         <TabButton icon="fa-plug" label="Bridge" isActive={activeTab === 'BRIDGE'} onClick={() => onTabChange('BRIDGE')} />
       </div>
@@ -196,7 +175,6 @@ const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onLocalImport, onAddP
       {/* Content */}
       <div className="flex-1 overflow-y-auto custom-scroll">
         {activeTab === 'STORE' && <InstrumentCatalog user={user} onPurchase={onPurchase} />}
-        {activeTab === 'LOCAL' && <LocalTab onLocalImport={onLocalImport} />}
         {activeTab === 'FW' && <FWTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
         {activeTab === 'BRIDGE' && <BridgeTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
       </div>

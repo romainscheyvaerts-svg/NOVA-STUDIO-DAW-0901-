@@ -44,15 +44,19 @@ interface TransportProps {
 
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+
+  // Import Audio (nouveau système)
+  onImportAudio?: (file: File) => void;
 }
 
-const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({ 
-  isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, bpm, onBpmChange, currentTime, 
-  currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme, 
+const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
+  isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, bpm, onBpmChange, currentTime,
+  currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
   onOpenSaveMenu, onOpenLoadMenu, onExportMix, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
-  onUndo, onRedo, canUndo, canRedo, 
-  user, onOpenAuth, onLogout, 
+  onUndo, onRedo, canUndo, canRedo,
+  user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar,
+  onImportAudio,
   children
 }) => {
   const [isEditingBpm, setIsEditingBpm] = useState(false);
@@ -60,6 +64,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   const [midiActive, setMidiActive] = useState(false);
   const [midiDeviceName, setMidiDeviceName] = useState<string | null>(null);
   const bpmInputRef = useRef<HTMLInputElement>(null);
+  const audioImportInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
      // Check for MIDI device on mount
@@ -145,6 +150,34 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                     <i className="fas fa-save text-[10px]"></i>
                     <span className="hidden xl:inline text-[9px] font-black uppercase">Sauver</span>
                 </button>
+
+                {/* ✨ NOUVEAU IMPORT AUDIO */}
+                {onImportAudio && (
+                    <>
+                        <button
+                            onClick={() => audioImportInputRef.current?.click()}
+                            className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/5 hover:bg-cyan-500 hover:text-black text-cyan-400"
+                            title="Importer un fichier audio"
+                        >
+                            <i className="fas fa-file-import text-[10px]"></i>
+                            <span className="hidden xl:inline text-[9px] font-black uppercase">Import</span>
+                        </button>
+                        <input
+                            ref={audioImportInputRef}
+                            type="file"
+                            accept="audio/*"
+                            className="hidden"
+                            onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                    onImportAudio(file);
+                                    // Reset input pour permettre de réimporter le même fichier
+                                    e.target.value = '';
+                                }
+                            }}
+                        />
+                    </>
+                )}
              </div>
              
              {/* SHARE (Only if logged in) */}
