@@ -3,27 +3,28 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "homepage": "https://romainscheyvaerts-svg.github.io/NOVA-STUDIO-DAW-0901-/",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
     "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "2.39.0",
     "jszip": "3.10.1",
-    "zustand": "^5.0.0",
-    "immer": "^11.0.0"
+    "zustand": "^5.0.9",
+    "immer": "^11.1.3"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vercel/node": "^3.2.29",
-    "@vitejs/plugin-react": "^4.3.0",
-    "typescript": "~5.7.0",
-    "vite": "^6.0.0"
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
   }
 }

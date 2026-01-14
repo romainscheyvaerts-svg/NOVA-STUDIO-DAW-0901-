@@ -15,10 +15,9 @@ function buildVersionPlugin(): Plugin {
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
-    // Détecte si on est sur Vercel (VERCEL=1) ou GitHub Pages
     const isVercel = process.env.VERCEL === '1';
     return {
-      // Base URL pour GitHub Pages (nom du repo) - pas de base path pour Vercel
+      // Base URL: '/' pour Vercel, '/NOVA-STUDIO-DAW-0901-/' pour GitHub Pages
       base: isVercel ? '/' : (mode === 'production' ? '/NOVA-STUDIO-DAW-0901-/' : '/'),
       server: {
         port: 3000,
@@ -40,10 +39,7 @@ export default defineConfig(({ mode }) => {
       build: {
         outDir: 'dist',
         sourcemap: false,
-        minify: 'esbuild',
-        rollupOptions: {
-          external: [/^\/api\//]
-        }
+        minify: 'esbuild'
       }
     };
 });
