@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { AIChatMessage, AIAction } from '../types';
 
 interface ChatAssistantProps {
-  onSendMessage: (msg: string) => Promise<any>; // CHANGEMENT 1 : 'any' pour bypass l'erreur de build
+  onSendMessage: (msg: string) => Promise<any>;
   onExecuteAction: (action: AIAction) => void;
   externalNotification?: string | null;
   isMobile?: boolean;
@@ -47,8 +47,6 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     const msgToSend = customMsg || inputValue;
     if (!msgToSend.trim()) return;
 
-    // CHANGEMENT 2 : Suppression du bloc "if (!process.env.API_KEY)" qui bloquait tout en local.
-
     const userMsg: AIChatMessage = {
       id: Date.now().toString(),
       role: 'user',
@@ -64,14 +62,13 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       const response = await onSendMessage(msgToSend);
       setIsTyping(false);
       
-      // CHANGEMENT 3 : Gestion flexible de la réponse (texte ou objet)
-      const responseText = typeof response === 'string' ? response : (response.text || response.output || "");
+      const responseText = typeof response === 'string' ? response : (response.text || "");
       const responseActions = response.actions || [];
 
       if (responseActions && responseActions.length > 0) {
         setIsSyncing(true);
         setTimeout(() => setIsSyncing(false), 1500);
-        responseActions.forEach((action: any) => {
+        responseActions.forEach(action => {
             onExecuteAction(action);
         });
       }
@@ -87,7 +84,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       setMessages(prev => [...prev, assistantMsg]);
     } catch (error: any) {
       setIsTyping(false);
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: "Erreur de liaison avec le DSP. Réessaie.", timestamp: Date.now() }]);
+      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: "Désolé, je n'arrive pas à contacter le serveur sécurisé.", timestamp: Date.now() }]);
     }
   };
 
@@ -190,7 +187,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
           <div className="p-6 bg-[#08090b] border-t border-white/5">
             <div className="relative flex items-center">
               <input 
-                type="text" 
+                type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSend()}
