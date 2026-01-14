@@ -2338,12 +2338,36 @@ export default function App() {
 
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
-      
+
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
         <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg, user)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('TRACKS')} user={user} />
       </div>
-      
+
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
+
+      {/* 🔴 TEST DÉPLOIEMENT - GROS POINT ROUGE */}
+      <div style={{
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: '200px',
+        height: '200px',
+        backgroundColor: '#ff0000',
+        borderRadius: '50%',
+        zIndex: 9999999,
+        border: '10px solid yellow',
+        boxShadow: '0 0 50px rgba(255, 0, 0, 0.8)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '40px',
+        fontWeight: 'bold',
+        color: 'white',
+        textShadow: '2px 2px 4px black'
+      }}>
+        TEST
+      </div>
     </div>
   );
 }
