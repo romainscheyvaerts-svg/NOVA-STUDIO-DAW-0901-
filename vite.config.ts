@@ -15,9 +15,10 @@ function buildVersionPlugin(): Plugin {
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    const isVercel = process.env.VERCEL === '1';
     return {
-      // Base URL pour GitHub Pages (nom du repo)
-      base: mode === 'production' ? '/NOVA-STUDIO-DAW-0901-/' : '/',
+      // Base URL: '/' pour Vercel, '/NOVA-STUDIO-DAW-0901-/' pour GitHub Pages
+      base: isVercel ? '/' : (mode === 'production' ? '/NOVA-STUDIO-DAW-0901-/' : '/'),
       server: {
         port: 3000,
         host: '0.0.0.0',
