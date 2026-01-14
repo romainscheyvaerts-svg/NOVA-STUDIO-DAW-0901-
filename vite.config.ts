@@ -40,7 +40,10 @@ export default defineConfig(({ mode }) => {
       build: {
         outDir: 'dist',
         sourcemap: false,
-        minify: 'esbuild'
+        minify: 'esbuild',
+        rollupOptions: {
+          external: [/^\/api\//]
+        }
       }
     };
 });
