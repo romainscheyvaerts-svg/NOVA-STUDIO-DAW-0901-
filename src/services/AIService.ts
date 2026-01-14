@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { DAWState, AIAction } from "../types";
+import { DAWState, AIAction, User } from "../types";
 import { NOTES } from "../utils/constants";
 import { getActiveApiKey } from "./ApiKeyManager"; 
 
@@ -277,15 +277,10 @@ User: [L'IA détecte automatiquement un problème]
 ]}
 `;
 
-export const getAIProductionAssistance = async (currentState: DAWState, userMessage: string): Promise<{ text: string, actions: AIAction[] }> => {
+export const getAIProductionAssistance = async (currentState: DAWState, userMessage: string, user?: User | null): Promise<{ text: string, actions: AIAction[] }> => {
   try {
-    const apiKey = getActiveApiKey();
-    if (!apiKey) {
-      throw new Error("Clé API Google AI non configurée");
-    }
-    const ai = new GoogleGenAI({ apiKey });
     const maxTime = Math.max(...currentState.tracks.flatMap(t => t.clips.map(c => c.start + c.duration)), 60);
-    
+
     const keyName = (currentState.projectKey !== undefined) ? NOTES[currentState.projectKey] : 'Unknown';
     const scaleName = currentState.projectScale || 'Unknown';
 
@@ -315,20 +310,25 @@ export const getAIProductionAssistance = async (currentState: DAWState, userMess
       maxTime: maxTime
     };
 
-    const prompt = `User: ${userMessage}\nState: ${JSON.stringify(stateSummary)}`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTIONS,
-        responseMimeType: "application/json",
-      }
+    // Appel de l'API Vercel serverless au lieu d'appeler Google directement
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: userMessage,
+        state: stateSummary
+      })
     });
 
-    const rawText = response.text || "{}";
-    const result = JSON.parse(rawText);
-    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Erreur API');
+    }
+
+    const result = await response.json();
+
     return {
       text: result.text || "Réglages de mixage appliqués.",
       actions: result.actions || []

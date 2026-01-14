@@ -26,7 +26,7 @@ import AudioSettingsPanel from './components/AudioSettingsPanel';
 import PluginManager from './components/PluginManager'; 
 import { supabaseManager } from './services/SupabaseManager';
 import { SessionSerializer } from './services/SessionSerializer';
-import { getAIProductionAssistance } from './services/AIService';
+// L'IA utilise maintenant le point d'accès sécurisé /api/chat
 import { novaBridge } from './services/NovaBridge';
 import { ProjectIO } from './services/ProjectIO';
 import PianoRoll from './components/PianoRoll';
@@ -689,6 +689,13 @@ export default function App() {
 
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
 
+  // 🚨 TEST DÉPLOIEMENT - LOGS VISIBLES
+  useEffect(() => {
+    console.log('%c🔴 TEST DÉPLOIEMENT - VERSION AVEC POINT ROUGE', 'color: red; font-size: 30px; font-weight: bold; background: yellow; padding: 10px;');
+    console.log('%cBuild timestamp:', 'font-size: 20px;', Date.now());
+    console.log('%cSi tu vois ce message mais pas le point rouge, il y a un problème React', 'font-size: 16px; color: orange;');
+  }, []);
+
   useEffect(() => { novaBridge.connect(); }, []);
   const stateRef = useRef(state);
   const globalFileInputRef = useRef<HTMLInputElement>(null);
@@ -1042,6 +1049,7 @@ export default function App() {
             track.plugins.push(newPlugin);
         }
     }));
+      
 
     if (options?.openUI) {
         await ensureAudioEngine();
@@ -1050,6 +1058,30 @@ export default function App() {
         }, 50);
     }
   }, [setState]);
+    const envoyerAuChatbot = async (message: string) => {
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          message, 
+          state: stateRef.current 
+        }),
+      });
+      if (!response.ok) throw new Error('Erreur réseau');
+      const data = await response.json();
+      return {
+        text: data.text || "J'ai bien reçu ton message.",
+        actions: data.actions || []
+      };
+    } catch (error) {
+      console.error("Erreur Chatbot:", error);
+      return {
+        text: "Désolé, je n'arrive pas à contacter Nova.",
+        actions: []
+      };
+    }
+  };
 
   const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
       console.log('[handleUniversalAudioImport] Début import:', name);
@@ -2338,12 +2370,36 @@ export default function App() {
 
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
-      
+
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
-        <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('TRACKS')} user={user} />
+        <ChatAssistant onSendMessage={envoyerAuChatbot} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('TRACKS')} user={user} />
       </div>
-      
+
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
+
+      {/* 🔴 TEST DÉPLOIEMENT - GROS POINT ROUGE */}
+      <div style={{
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: '200px',
+        height: '200px',
+        backgroundColor: '#ff0000',
+        borderRadius: '50%',
+        zIndex: 9999999,
+        border: '10px solid yellow',
+        boxShadow: '0 0 50px rgba(255, 0, 0, 0.8)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '40px',
+        fontWeight: 'bold',
+        color: 'white',
+        textShadow: '2px 2px 4px black'
+      }}>
+        TEST
+      </div>
     </div>
   );
 }

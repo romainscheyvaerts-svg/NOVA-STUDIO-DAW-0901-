@@ -41,7 +41,8 @@ export interface User {
   isVerified: boolean;
   avatar?: string;
   plan: 'FREE' | 'PRO' | 'STUDIO';
-  owned_instruments?: number[]; 
+  owned_instruments?: number[];
+  google_ai_api_key?: string; // Clé API Google AI sauvegardée dans Supabase
 }
 
 export interface Instrument {
