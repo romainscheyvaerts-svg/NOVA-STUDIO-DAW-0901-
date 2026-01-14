@@ -179,6 +179,21 @@
 <body>
   <div id="root"></div>
   <script>
+    // Cache busting: Force reload si nouvelle version détectée
+    (function() {
+      const BUILD_VERSION = '__BUILD_VERSION__'; // Remplacé par Vite au build
+      const STORED_VERSION = localStorage.getItem('nova_build_version');
+
+      // Si nouvelle version, vider le cache et recharger
+      if (STORED_VERSION && STORED_VERSION !== BUILD_VERSION) {
+        console.log('[NOVA] Nouvelle version détectée, nettoyage du cache...');
+        localStorage.setItem('nova_build_version', BUILD_VERSION);
+        location.reload(true);
+      } else if (!STORED_VERSION) {
+        localStorage.setItem('nova_build_version', BUILD_VERSION);
+      }
+    })();
+
     // SPA redirect handler for GitHub Pages
     (function(){
       var redirect = sessionStorage.redirect;
