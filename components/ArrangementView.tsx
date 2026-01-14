@@ -352,8 +352,9 @@ const handleMouseMove = (e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
     const rect = scrollContainerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollContainerRef.current.scrollLeft;
+    const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
     const useSnap = snapEnabled && !isShiftDownRef.current;
-    
+
     if (loopDragMode && initialLoopState) {
         const dx = x - dragStartX;
         const dt = dx / zoomH;
@@ -370,14 +371,34 @@ const handleMouseMove = (e: React.MouseEvent) => {
         }
         return;
     }
-    
+
     const time = getSnappedTime(x / zoomH, bpm, gridSize, useSnap);
     if (dragAction === 'MOVE' && activeClip && initialClipState) {
         const dx = x - dragStartX;
         const dt = dx / zoomH;
         const newStart = Math.max(0, getSnappedTime(initialClipState.start + dt, bpm, gridSize, useSnap));
+
+        // Détecter la piste cible en fonction de la position Y
+        let targetTrackId = activeClip.trackId;
+        let currentY = 40;
+        for (const t of visibleTracks) {
+            const trackHeight = zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+            if (y >= currentY && y < currentY + trackHeight) {
+                targetTrackId = t.id;
+                break;
+            }
+            currentY += trackHeight;
+        }
+
+        // Si changement de piste, déplacer le clip vers la nouvelle piste
+        if (targetTrackId !== activeClip.trackId) {
+            onMoveClip?.(activeClip.trackId, targetTrackId, activeClip.clip.id);
+            setActiveClip({ trackId: targetTrackId, clip: activeClip.clip });
+        }
+
+        // Mettre à jour la position temporelle
         if (newStart !== activeClip.clip.start) {
-            onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', { start: newStart });
+            onEditClip?.(targetTrackId, activeClip.clip.id, 'UPDATE_PROPS', { start: newStart });
         }
     } else if (dragAction === 'SCRUB') {
         onSeek(time);

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
+import MobileTransport from './components/MobileTransport';
 import ArrangementView from './components/ArrangementView';
 import MixerView from './components/MixerView';
 import PluginEditor from './components/PluginEditor';
@@ -9,7 +10,7 @@ import ChatAssistant from './components/ChatAssistant';
 import ViewModeSwitcher from './components/ViewModeSwitcher';
 import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
-import GlobalClipMenu from './components/GlobalClipMenu'; 
+import GlobalClipMenu from './components/GlobalClipMenu';
 import TrackCreationBar from './components/TrackCreationBar';
 import AuthScreen from './components/AuthScreen';
 import AutomationEditorView from './components/AutomationEditorView';
@@ -253,7 +254,17 @@ const useUndoRedo = (initialState: DAWState) => {
 };
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null); 
+  // Utilisateur par défaut pour éviter l'écran noir (temporaire)
+  const defaultUser: User = {
+    id: 'guest',
+    email: 'guest@novastudio.app',
+    username: 'Guest User',
+    isVerified: true,
+    plan: 'FREE',
+    owned_instruments: []
+  };
+
+  const [user, setUser] = useState<User | null>(defaultUser);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [saveState, setSaveState] = useState<{ isSaving: boolean; progress: number; message: string }>({ isSaving: false, progress: 0, message: '' });
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -861,32 +872,53 @@ export default function App() {
     }
   };
 
-  if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
+  // Auth temporairement désactivée pour éviter écran noir
+  // if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 
   return (
     <div className="flex flex-col h-screen w-full overflow-hidden relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
       {saveState.isSaving && <SaveOverlay progress={saveState.progress} message={saveState.message} />}
 
-      <div className="relative z-50">
-        <TransportBar
-          isPlaying={state.isPlaying} currentTime={state.currentTime} bpm={state.bpm} onBpmChange={handleUpdateBpm}
-          isRecording={state.isRecording} isLoopActive={state.isLoopActive}
+      {/* TransportBar Desktop/Tablet */}
+      {!isMobile && (
+        <div className="relative z-50">
+          <TransportBar
+            isPlaying={state.isPlaying} currentTime={state.currentTime} bpm={state.bpm} onBpmChange={handleUpdateBpm}
+            isRecording={state.isRecording} isLoopActive={state.isLoopActive}
+            onToggleLoop={() => setState(p => ({ ...p, isLoopActive: !p.isLoopActive }))}
+            onStop={handleStop} onTogglePlay={handleTogglePlay} onToggleRecord={handleToggleRecord}
+            currentView={state.currentView} onChangeView={v => setState(s => ({...s, currentView: v}))}
+            statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
+            currentTheme={theme} onToggleTheme={toggleTheme}
+            onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
+            onExportMix={handleExportMix} onShareProject={() => setIsShareModalOpen(true)}
+            onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
+            onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo}
+            user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
+            isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar}
+            onImportAudio={handleNewAudioImport}
+          >
+            <div className="ml-4 border-l border-white/5 pl-4"><ViewModeSwitcher currentMode={viewMode} onChange={handleViewModeChange} /></div>
+          </TransportBar>
+        </div>
+      )}
+
+      {/* TransportBar Mobile - Version compacte */}
+      {isMobile && (
+        <MobileTransport
+          isPlaying={state.isPlaying}
+          isRecording={state.isRecording}
+          isLoopActive={state.isLoopActive}
+          currentTime={state.currentTime}
+          bpm={state.bpm}
+          onTogglePlay={handleTogglePlay}
+          onStop={handleStop}
+          onToggleRecord={handleToggleRecord}
           onToggleLoop={() => setState(p => ({ ...p, isLoopActive: !p.isLoopActive }))}
-          onStop={handleStop} onTogglePlay={handleTogglePlay} onToggleRecord={handleToggleRecord}
-          currentView={state.currentView} onChangeView={v => setState(s => ({...s, currentView: v}))}
-          statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
-          currentTheme={theme} onToggleTheme={toggleTheme}
-          onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
-          onExportMix={handleExportMix} onShareProject={() => setIsShareModalOpen(true)}
-          onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
-          onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo}
-          user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
-          isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar}
-          onImportAudio={handleNewAudioImport}
-        >
-          <div className="ml-4 border-l border-white/5 pl-4"><ViewModeSwitcher currentMode={viewMode} onChange={handleViewModeChange} /></div>
-        </TransportBar>
-      </div>
+          onBpmChange={handleUpdateBpm}
+          onOpenSettings={() => setIsAudioSettingsOpen(true)}
+        />
+      )}
       
       <TrackCreationBar onCreateTrack={handleCreateTrack} />
       <TouchInteractionManager />

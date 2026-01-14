@@ -9,10 +9,11 @@ interface MobileContainerProps {
 /**
  * Container mobile qui centre le contenu sans éléments sur les côtés
  * Inspiré de Logic Pro sur iPad
+ * Padding-top pour éviter que le contenu soit caché sous MobileTransport
  */
 const MobileContainer: React.FC<MobileContainerProps> = ({ children, title, headerAction }) => {
   return (
-    <div className="h-full w-full flex flex-col bg-[#0c0d10] overflow-hidden">
+    <div className="h-full w-full flex flex-col bg-[#0c0d10] overflow-hidden pt-16">
       {/* Header centré */}
       {title && (
         <div className="h-14 shrink-0 flex items-center justify-between px-6 border-b border-white/10 bg-[#14161a]">
