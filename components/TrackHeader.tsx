@@ -503,16 +503,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <button onClick={(e) => handleRemoveFX(e, p.id)} onTouchStart={(e) => handleRemoveFX(e, p.id)} className="delete-fx"><i className="fas fa-times"></i></button>
           </div>
         ))}
-        {!track.isFrozen && Array.from({ length: Math.max(0, 4 - insertPlugins.length) }).map((_, i) => (
-          <button 
-            key={i} 
-            onClick={handleEmptySlotClick}
-            onTouchStart={handleEmptySlotClick}
-            className="h-6 rounded-md border border-dashed border-white/10 bg-black/5 opacity-30 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
-          >
-            <i className="fas fa-plus text-[6px]"></i>
-          </button>
-        ))}
       </div>
     </div>
   );

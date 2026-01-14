@@ -222,7 +222,17 @@ const ChannelStrip: React.FC<{
             <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} onTouchStart={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx"><i className="fas fa-times"></i></button>
           </div>
         ))}
-        {/* Empty slots (+) removed */}
+        {/* Boutons + pour ajouter des plugins */}
+        {Array.from({ length: Math.max(0, 6 - track.plugins.length) }).map((_, i) => (
+          <button
+            key={`empty-${i}`}
+            onClick={handleEmptySlotClick}
+            onTouchStart={handleEmptySlotClick}
+            className="w-full h-8 rounded border border-dashed border-white/10 bg-black/5 opacity-40 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
+          >
+            <i className="fas fa-plus text-[8px] text-slate-600"></i>
+          </button>
+        ))}
       </div>
 
       <div className="flex-1 p-3 flex flex-col">
