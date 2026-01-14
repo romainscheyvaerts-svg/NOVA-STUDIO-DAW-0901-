@@ -981,7 +981,13 @@ export default function App() {
               )}
 
               {activeMobileTab === 'BROWSER' && (
-                <MobileBrowserPage />
+                <MobileBrowserPage
+                  user={user}
+                  onAddPlugin={handleAddPluginFromContext}
+                  onPurchase={handleBuyLicense}
+                  selectedTrackId={state.selectedTrackId}
+                  onLocalImport={handleUniversalAudioImport}
+                />
               )}
             </>
           )}
