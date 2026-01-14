@@ -394,8 +394,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             </button>
           )}
 
-          {/* REC BUTTON - Only for Audio tracks */}
-          {isAudio && (
+          {/* REC BUTTON - Uniquement pour la piste REC */}
+          {track.id === 'track-rec-main' && (
               <button
                 onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
                 onTouchStart={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
