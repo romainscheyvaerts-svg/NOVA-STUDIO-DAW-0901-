@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { AIChatMessage, AIAction } from '../types';
 
 interface ChatAssistantProps {
-  // CORRECTION: On accepte 'any' pour éviter le blocage Vercel si App.tsx renvoie juste un string
+  // Changement ici : on utilise 'any' pour éviter les erreurs de type strictes lors du build
   onSendMessage: (msg: string) => Promise<any>;
   onExecuteAction: (action: AIAction) => void;
   externalNotification?: string | null;
@@ -47,8 +47,6 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     const msgToSend = customMsg || inputValue;
     if (!msgToSend.trim()) return;
 
-    // Suppression définitive de la vérification API_KEY locale
-
     const userMsg: AIChatMessage = {
       id: Date.now().toString(),
       role: 'user',
@@ -61,22 +59,20 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     setIsTyping(true);
 
     try {
-      // Appel au serveur
+      // Appel vers ton nouveau serveur sécurisé
       const rawResponse = await onSendMessage(msgToSend);
       setIsTyping(false);
       
-      // --- CORRECTION INTELLIGENTE ---
-      // On vérifie si c'est juste du texte (ancienne version) ou un objet (nouvelle version)
       let responseText = "";
       let responseActions: AIAction[] = [];
 
+      // Analyse de la réponse (Texte seul ou Objet avec actions)
       if (typeof rawResponse === 'string') {
           responseText = rawResponse;
       } else if (rawResponse && typeof rawResponse === 'object') {
-          responseText = rawResponse.text || "";
+          responseText = rawResponse.text || rawResponse.output || "";
           responseActions = rawResponse.actions || [];
       }
-      // -------------------------------
 
       if (responseActions.length > 0) {
         setIsSyncing(true);
@@ -89,7 +85,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       const assistantMsg: AIChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: responseText || "Réglages effectués.",
+        content: responseText || "Traitement terminé.",
         timestamp: Date.now(),
         executedAction: responseActions.map(a => a.description || a.action).join(', ')
       };
@@ -97,7 +93,12 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       setMessages(prev => [...prev, assistantMsg]);
     } catch (error: any) {
       setIsTyping(false);
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: "Erreur serveur. Vérifiez que le déploiement Vercel est actif.", timestamp: Date.now() }]);
+      setMessages(prev => [...prev, { 
+        id: Date.now().toString(), 
+        role: 'assistant', 
+        content: "Erreur de connexion. Vérifiez que la GOOGLE_API_KEY est bien configurée dans Vercel.", 
+        timestamp: Date.now() 
+      }]);
     }
   };
 
@@ -124,4 +125,70 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         <div className={windowClass}>
           <div className="p-6 border-b border-white/5 flex justify-between items-center bg-gradient-to-br from-cyan-500/10 to-transparent">
             <div className="flex items-center space-x-5">
-              <div
+              <div className={`w-12 h-12 rounded-[18px] flex items-center justify-center transition-all duration-700 ${isSyncing ? 'bg-cyan-500 text-black shadow-[0_0_30px_#00f2ff]' : 'bg-white/5 text-cyan-400'}`}>
+                <i className={`fas ${isSyncing ? 'fa-sync fa-spin' : 'fa-wave-square'} text-xl`}></i>
+              </div>
+              <div>
+                <h3 className="text-[13px] font-black uppercase tracking-[0.3em] text-white">Studio Master AI</h3>
+                <div className="flex items-center space-x-2 mt-1">
+                  <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-cyan-400 animate-ping' : 'bg-green-500'}`}></div>
+                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{isSyncing ? 'Engine Sync...' : 'Direct DSP Link Active'}</span>
+                </div>
+              </div>
+            </div>
+            
+            <button 
+              onClick={(e) => { 
+                  e.stopPropagation(); 
+                  setIsOpen(false);
+                  if (onClose) onClose(); 
+              }} 
+              className="w-10 h-10 rounded-full bg-white/5 text-slate-500 hover:text-white transition-all flex items-center justify-center border border-white/10 active:bg-red-500/20 active:text-red-500"
+            >
+              <i className="fas fa-times text-sm"></i>
+            </button>
+          </div>
+
+          <div className="px-6 py-4 bg-black/40 flex space-x-3 border-b border-white/5 overflow-x-auto no-scrollbar">
+            {QUICK_ACTIONS.map((action, i) => (
+              <button 
+                key={i}
+                onClick={() => handleSend(action.msg)}
+                className="flex-shrink-0 px-4 py-2.5 bg-white/5 border border-white/10 rounded-2xl hover:bg-cyan-500 hover:text-black hover:border-cyan-400 transition-all flex items-center space-x-2 group"
+              >
+                <i className={`fas ${action.icon} text-[10px]`}></i>
+                <span className="text-[9px] font-black uppercase tracking-tighter">{action.label}</span>
+              </button>
+            ))}
+          </div>
+
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6 custom-scroll bg-[radial-gradient(circle_at_top,rgba(6,182,212,0.03),transparent)]">
+            {messages.map(msg => (
+              <div key={msg.id} className="animate-in fade-in slide-in-from-bottom-2">
+                <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] p-5 rounded-[24px] text-[12px] font-medium leading-relaxed shadow-xl ${
+                    msg.role === 'user' 
+                      ? 'bg-cyan-500 text-black rounded-tr-none' 
+                      : 'bg-white/[0.04] border border-white/10 text-slate-300 rounded-tl-none'
+                  }`}>
+                    {msg.content}
+                  </div>
+                </div>
+                {msg.executedAction && (
+                  <div className="flex justify-start pl-2 mt-3">
+                    <div className="flex items-center space-x-3 bg-cyan-500/5 border border-cyan-500/10 px-4 py-2 rounded-full shadow-inner">
+                      <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
+                      <span className="text-[10px] font-black text-cyan-500/80 uppercase tracking-tighter italic">{msg.executedAction}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+            {isTyping && (
+              <div className="flex justify-start">
+                <div className="bg-white/[0.02] p-5 rounded-2xl flex items-center space-x-3">
+                  <div className="flex space-x-1">
+                    <div className="w-1 h-1 bg-cyan-500/60 rounded-full animate-bounce"></div>
+                    <div className="w-1 h-1 bg-cyan-500/60 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                    <div className="w-1 h-1 bg-cyan-500/60 rounded-full animate-bounce [animation-delay:0.4s]"></div>
+                  </div>
