@@ -9,6 +9,17 @@ ADD COLUMN IF NOT EXISTS google_ai_api_key TEXT;
 -- Commentaire pour documenter la colonne
 COMMENT ON COLUMN public.users.google_ai_api_key IS 'Clé API Google Gemini AI pour le chatbot Studio Master AI';
 
--- Note: La clé n'est PAS chiffrée dans la base de données
--- Pour un environnement de production, il serait recommandé d'utiliser
--- une solution de chiffrement comme pgcrypto ou un vault externe
+-- Mettre la clé API par défaut pour tous les utilisateurs existants et futurs
+UPDATE public.users
+SET google_ai_api_key = 'AIzaSyCIRfnObPFke1qTGJTHeGS0GCXMfM41RH8'
+WHERE google_ai_api_key IS NULL OR google_ai_api_key = '';
+
+-- Afficher le résultat
+SELECT
+  id,
+  email,
+  CASE
+    WHEN google_ai_api_key IS NOT NULL THEN 'Clé API configurée ✅'
+    ELSE 'Pas de clé'
+  END as status
+FROM public.users;
