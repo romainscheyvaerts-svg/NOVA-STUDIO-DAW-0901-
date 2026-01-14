@@ -689,6 +689,13 @@ export default function App() {
 
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
 
+  // 🚨 TEST DÉPLOIEMENT - LOGS VISIBLES
+  useEffect(() => {
+    console.log('%c🔴 TEST DÉPLOIEMENT - VERSION AVEC POINT ROUGE', 'color: red; font-size: 30px; font-weight: bold; background: yellow; padding: 10px;');
+    console.log('%cBuild timestamp:', 'font-size: 20px;', Date.now());
+    console.log('%cSi tu vois ce message mais pas le point rouge, il y a un problème React', 'font-size: 16px; color: orange;');
+  }, []);
+
   useEffect(() => { novaBridge.connect(); }, []);
   const stateRef = useRef(state);
   const globalFileInputRef = useRef<HTMLInputElement>(null);
