@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
 import { audioEngine } from './engine/AudioEngine';
@@ -22,7 +21,7 @@ import AudioSettingsPanel from './components/AudioSettingsPanel';
 import PluginManager from './components/PluginManager'; 
 import { supabaseManager } from './services/SupabaseManager';
 import { SessionSerializer } from './services/SessionSerializer';
-import { getAIProductionAssistance } from './services/AIService';
+// import { getAIProductionAssistance } from './services/AIService'; // On n'utilise plus l'ancien service insécurisé pour le chat
 import { novaBridge } from './services/NovaBridge';
 import { ProjectIO } from './services/ProjectIO';
 import PianoRoll from './components/PianoRoll';
@@ -31,8 +30,6 @@ import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
-
-// ... (Les fonctions `AVAILABLE_FX_MENU`, `createDefaultAutomation`, `createDefaultPlugins`, etc. restent identiques)
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -356,9 +353,6 @@ export default function App() {
             });
             track.drumPads?.forEach(pad => {
                 if (pad.buffer) {
-                    // Note: Drum pads do not use the registry yet.
-                    // This will need a fix if Immer is used on drum racks.
-                    // For now, we load it into engine directly.
                     audioEngine.loadDrumRackSample(track.id, pad.id, pad.buffer);
                     delete (pad as Partial<DrumPad>).buffer;
                 }
@@ -857,6 +851,32 @@ export default function App() {
 
   const executeAIAction = (a: AIAction) => { /* ... */ };
 
+  // --- NOUVELLE FONCTION SÉCURISÉE POUR VERCEL ---
+  // Cette fonction remplace l'appel direct à Google. Elle passe par api/chat.js
+  const envoyerAuChatbot = async (messageUtilisateur: string) => {
+    try {
+        // On construit un petit contexte pour aider l'IA (optionnel mais recommandé)
+        const contextDAW = `Projet: ${state.name}, BPM: ${state.bpm}, Pistes: ${state.tracks.length}.`;
+        const promptComplet = `${contextDAW}\nQuestion utilisateur: ${messageUtilisateur}`;
+
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: promptComplet }),
+        });
+
+        const data = await response.json();
+        if (data.error) throw new Error(data.error);
+
+        return data.text; // La réponse de l'IA via Vercel
+
+    } catch (error: any) {
+        console.error("Erreur Chatbot:", error);
+        return "Désolé, je n'arrive pas à contacter le serveur sécurisé.";
+    }
+  };
+  // ------------------------------------------------
+
   if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 
   return (
@@ -963,7 +983,14 @@ export default function App() {
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
       
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
-        <ChatAssistant onSendMessage={(msg) => getAIProductionAssistance(state, msg)} onExecuteAction={executeAIAction} externalNotification={aiNotification} isMobile={isMobile} forceOpen={isMobile && activeMobileTab === 'NOVA'} onClose={() => setActiveMobileTab('PROJECT')} />
+        <ChatAssistant 
+            onSendMessage={envoyerAuChatbot} 
+            onExecuteAction={executeAIAction} 
+            externalNotification={aiNotification} 
+            isMobile={isMobile} 
+            forceOpen={isMobile && activeMobileTab === 'NOVA'} 
+            onClose={() => setActiveMobileTab('PROJECT')} 
+        />
       </div>
       
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
