@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS headers
+  // CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -20,21 +20,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return res.status(500).json({
-        text: "Clé API Gemini manquante. Configurez GEMINI_API_KEY dans Vercel.",
+        text: "Clé API Gemini manquante sur Vercel",
         error: "Missing API key"
       });
     }
 
     const { message, state } = req.body;
     if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
+      return res.status(400).json({ error: 'Message required' });
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const result = await model.generateContent(
-      `Tu es Nova, un assistant DAW. État: ${JSON.stringify(state)}. Message: ${message}`
+      `Tu es Nova. État DAW: ${JSON.stringify(state)}. Message: ${message}`
     );
 
     const response = await result.response;
@@ -42,10 +42,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({ text, actions: [] });
   } catch (error) {
-    console.error('Erreur Gemini:', error);
+    console.error('Erreur:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return res.status(500).json({
-      text: "Erreur lors de la communication avec Gemini",
+      text: "Erreur Gemini",
       error: errorMessage
     });
   }
