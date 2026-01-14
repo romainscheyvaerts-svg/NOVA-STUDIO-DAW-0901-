@@ -198,10 +198,6 @@ const MobileBottomNav: React.FC<{ activeTab: MobileTab, onTabChange: (tab: Mobil
             <i className="fas fa-sliders-h text-xl"></i>
             <span className="text-[10px] font-bold uppercase tracking-wide">Mixer</span>
         </button>
-        <button onClick={() => onTabChange('PLUGINS')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'PLUGINS' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-plug text-xl"></i>
-            <span className="text-[10px] font-bold uppercase tracking-wide">Plugins</span>
-        </button>
         <button onClick={() => onTabChange('BROWSER')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'BROWSER' ? 'text-cyan-400' : 'text-slate-500'}`}>
             <i className="fas fa-folder-open text-xl"></i>
             <span className="text-[10px] font-bold uppercase tracking-wide">Sons</span>

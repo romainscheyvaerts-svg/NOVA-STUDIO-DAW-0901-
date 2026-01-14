@@ -13,7 +13,7 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack }) =>
   ];
 
   return (
-    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl p-2 flex space-x-2 shadow-2xl">
+    <div className="absolute bottom-24 md:bottom-4 left-1/2 -translate-x-1/2 z-[60] bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl p-2 flex space-x-2 shadow-2xl">
       {trackTypes.map((item, idx) => (
         <button
           key={`${item.type}-${idx}`}
