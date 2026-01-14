@@ -9,10 +9,9 @@ interface MobileBrowserPageProps {
   onAddPlugin: (trackId: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => void;
   onPurchase: (instrumentId: number) => void;
   selectedTrackId: string | null;
-  onLocalImport?: (file: File, name: string) => void;
 }
 
-// Plugins natifs
+// Plugins natifs Nova
 const INTERNAL_PLUGINS = [
   { id: 'AUTOTUNE', name: 'Nova Tune Pro', category: 'Pitch Correction', icon: 'fa-microphone-alt', color: '#00f2ff' },
   { id: 'PROEQ12', name: 'Pro-EQ 12', category: 'Equalizer', icon: 'fa-wave-square', color: '#3b82f6' },
@@ -32,11 +31,19 @@ const INTERNAL_PLUGINS = [
   { id: 'DRUM_RACK_UI', name: 'Drum Rack', category: 'Instrument', icon: 'fa-th', color: '#f97316' }
 ];
 
-const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({ user, onAddPlugin, onPurchase, selectedTrackId, onLocalImport }) => {
-  const [activeTab, setActiveTab] = useState<'FX' | 'INSTRUMENTS' | 'VST3' | 'LOCAL'>('FX');
+/**
+ * Navigateur mobile - Réplique exacte du SideBrowser2 desktop
+ * Onglets: STORE (instruments), FW (plugins natifs), BRIDGE (VST3)
+ */
+const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
+  user,
+  onAddPlugin,
+  onPurchase,
+  selectedTrackId
+}) => {
+  const [activeTab, setActiveTab] = useState<'STORE' | 'FW' | 'BRIDGE'>('STORE');
   const [searchTerm, setSearchTerm] = useState('');
   const [vst3Plugins, setVst3Plugins] = useState<PluginMetadata[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Charger les plugins VST3
   useEffect(() => {
@@ -48,14 +55,6 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({ user, onAddPlugin
   const handleAddPlugin = (type: PluginType, metadata?: any) => {
     const targetTrackId = selectedTrackId || 'track-rec-main';
     onAddPlugin(targetTrackId, type, metadata, { openUI: true });
-  };
-
-  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && onLocalImport) {
-      onLocalImport(file, file.name);
-      e.target.value = '';
-    }
   };
 
   // Filtrer les plugins natifs
@@ -74,95 +73,47 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({ user, onAddPlugin
 
   return (
     <MobileContainer title="Navigateur">
-      <div className="space-y-4 pb-24">
-        {/* Onglets */}
-        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+      <div className="space-y-4 pb-20">
+        {/* Onglets - Même structure que SideBrowser2 */}
+        <div className="grid grid-cols-3 gap-2">
           <button
-            onClick={() => setActiveTab('FX')}
-            className={`shrink-0 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'FX' ? 'bg-cyan-500 text-black' : 'bg-[#14161a] text-slate-400'
+            onClick={() => setActiveTab('STORE')}
+            className={`py-4 rounded-xl text-xs font-black uppercase transition-all flex flex-col items-center gap-2 ${
+              activeTab === 'STORE'
+                ? 'bg-cyan-500 text-black'
+                : 'bg-[#14161a] text-slate-500'
             }`}
           >
-            <i className="fas fa-sliders-h mr-2"></i>
-            Effets
+            <i className="fas fa-store text-lg"></i>
+            Store
           </button>
           <button
-            onClick={() => setActiveTab('INSTRUMENTS')}
-            className={`shrink-0 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'INSTRUMENTS' ? 'bg-cyan-500 text-black' : 'bg-[#14161a] text-slate-400'
+            onClick={() => setActiveTab('FW')}
+            className={`py-4 rounded-xl text-xs font-black uppercase transition-all flex flex-col items-center gap-2 ${
+              activeTab === 'FW'
+                ? 'bg-cyan-500 text-black'
+                : 'bg-[#14161a] text-slate-500'
             }`}
           >
-            <i className="fas fa-guitar mr-2"></i>
-            Instruments
+            <i className="fas fa-atom text-lg"></i>
+            FW
           </button>
           <button
-            onClick={() => setActiveTab('VST3')}
-            className={`shrink-0 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'VST3' ? 'bg-cyan-500 text-black' : 'bg-[#14161a] text-slate-400'
+            onClick={() => setActiveTab('BRIDGE')}
+            className={`py-4 rounded-xl text-xs font-black uppercase transition-all flex flex-col items-center gap-2 ${
+              activeTab === 'BRIDGE'
+                ? 'bg-cyan-500 text-black'
+                : 'bg-[#14161a] text-slate-500'
             }`}
           >
-            <i className="fas fa-plug mr-2"></i>
-            VST3
-          </button>
-          <button
-            onClick={() => setActiveTab('LOCAL')}
-            className={`shrink-0 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'LOCAL' ? 'bg-cyan-500 text-black' : 'bg-[#14161a] text-slate-400'
-            }`}
-          >
-            <i className="fas fa-folder-open mr-2"></i>
-            Local
+            <i className="fas fa-plug text-lg"></i>
+            Bridge
           </button>
         </div>
 
-        {/* Barre de recherche */}
-        {(activeTab === 'FX' || activeTab === 'VST3') && (
-          <div className="relative">
-            <input
-              type="text"
-              placeholder={activeTab === 'FX' ? "Rechercher un effet..." : "Rechercher un VST3..."}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-[#14161a] border border-white/10 rounded-xl px-4 py-3 pl-10 text-white placeholder-slate-500 focus:border-cyan-500/50 focus:outline-none text-sm"
-            />
-            <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
-          </div>
-        )}
-
-        {/* Contenu FX */}
-        {activeTab === 'FX' && (
-          <div className="space-y-2">
-            {filteredInternalPlugins.map(plugin => (
-              <button
-                key={plugin.id}
-                onClick={() => handleAddPlugin(plugin.id as PluginType)}
-                className="w-full bg-[#14161a] rounded-xl p-4 border border-white/10 hover:border-cyan-500/30 transition-all active:scale-95 flex items-center gap-3"
-              >
-                <div
-                  className="w-12 h-12 rounded-lg flex items-center justify-center text-lg"
-                  style={{ backgroundColor: `${plugin.color}15`, color: plugin.color }}
-                >
-                  <i className={`fas ${plugin.icon}`}></i>
-                </div>
-                <div className="flex-1 text-left">
-                  <div className="text-white font-bold text-sm">{plugin.name}</div>
-                  <div className="text-xs text-slate-500">{plugin.category}</div>
-                </div>
-                <i className="fas fa-plus text-cyan-400"></i>
-              </button>
-            ))}
-            {filteredInternalPlugins.length === 0 && (
-              <div className="text-center py-12 text-slate-500">
-                <i className="fas fa-search text-4xl mb-4 opacity-30"></i>
-                <p>Aucun effet trouvé</p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Contenu INSTRUMENTS */}
-        {activeTab === 'INSTRUMENTS' && (
-          <div className="rounded-xl overflow-hidden">
+        {/* Contenu STORE - Catalogue d'instruments */}
+        {activeTab === 'STORE' && (
+          <div className="rounded-xl overflow-hidden -mx-2">
             <InstrumentCatalog
               user={user}
               onPurchase={onPurchase}
@@ -170,61 +121,99 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({ user, onAddPlugin
           </div>
         )}
 
-        {/* Contenu VST3 */}
-        {activeTab === 'VST3' && (
-          <div className="space-y-2">
-            {filteredVST3Plugins.map(plugin => (
-              <button
-                key={plugin.id}
-                onClick={() => handleAddPlugin('VST3', { name: plugin.name, localPath: plugin.localPath })}
-                className="w-full bg-[#14161a] rounded-xl p-4 border border-white/10 hover:border-cyan-500/30 transition-all active:scale-95 flex items-center gap-3"
-              >
-                <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400">
-                  <i className="fas fa-plug text-lg"></i>
+        {/* Contenu FW - Plugins natifs Nova */}
+        {activeTab === 'FW' && (
+          <div className="space-y-4">
+            {/* Barre de recherche */}
+            <div className="relative">
+              <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
+              <input
+                type="text"
+                placeholder="Chercher un effet..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-[#14161a] border border-white/10 rounded-xl pl-11 pr-4 py-3 text-white placeholder-slate-600 focus:border-cyan-500/50 focus:outline-none text-sm"
+              />
+            </div>
+
+            {/* Liste des plugins natifs */}
+            <div className="space-y-2">
+              <h3 className="text-[10px] font-black text-slate-600 uppercase tracking-widest px-1">
+                Nova Native Modules
+              </h3>
+              {filteredInternalPlugins.map(plugin => (
+                <button
+                  key={plugin.id}
+                  onClick={() => handleAddPlugin(plugin.id as PluginType)}
+                  className="w-full bg-[#14161a] rounded-xl p-4 border border-white/10 hover:border-cyan-500/30 hover:bg-white/5 transition-all active:scale-95 flex items-center gap-3"
+                >
+                  <div
+                    className="w-11 h-11 rounded-xl flex items-center justify-center text-lg border"
+                    style={{
+                      backgroundColor: `${plugin.color}15`,
+                      color: plugin.color,
+                      borderColor: `${plugin.color}20`
+                    }}
+                  >
+                    <i className={`fas ${plugin.icon}`}></i>
+                  </div>
+                  <div className="flex-1 text-left">
+                    <div className="text-white font-bold text-sm">{plugin.name}</div>
+                    <div className="text-xs text-slate-500 uppercase tracking-wide">{plugin.category}</div>
+                  </div>
+                  <i className="fas fa-plus text-slate-400 text-xs"></i>
+                </button>
+              ))}
+              {filteredInternalPlugins.length === 0 && (
+                <div className="text-center py-12 text-slate-500">
+                  <i className="fas fa-search text-4xl mb-4 opacity-30"></i>
+                  <p>Aucun effet trouvé</p>
                 </div>
-                <div className="flex-1 text-left">
-                  <div className="text-white font-bold text-sm">{plugin.name}</div>
-                  <div className="text-xs text-slate-500">{plugin.vendor}</div>
-                </div>
-                <i className="fas fa-plus text-cyan-400"></i>
-              </button>
-            ))}
-            {filteredVST3Plugins.length === 0 && (
-              <div className="text-center py-12 text-slate-500">
-                <i className="fas fa-plug text-4xl mb-4 opacity-30"></i>
-                <p className="text-sm">Aucun VST3 détecté</p>
-                <p className="text-xs mt-2">Vérifiez le Bridge</p>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 
-        {/* Contenu LOCAL */}
-        {activeTab === 'LOCAL' && (
+        {/* Contenu BRIDGE - Plugins VST3 */}
+        {activeTab === 'BRIDGE' && (
           <div className="space-y-4">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border-2 border-dashed border-cyan-500/30 rounded-xl p-8 hover:border-cyan-500/50 transition-all active:scale-95"
-            >
-              <div className="text-center">
-                <i className="fas fa-file-import text-4xl text-cyan-400 mb-4"></i>
-                <div className="text-white font-bold mb-2">Importer un fichier audio</div>
-                <div className="text-xs text-slate-400">MP3, WAV, OGG, FLAC...</div>
-              </div>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="audio/*"
-              className="hidden"
-              onChange={handleFileImport}
-            />
+            {/* Barre de recherche */}
+            <div className="relative">
+              <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
+              <input
+                type="text"
+                placeholder="Filtrer les plugins VST3..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-[#14161a] border border-white/10 rounded-xl pl-11 pr-4 py-3 text-white placeholder-slate-600 focus:border-cyan-500/50 focus:outline-none text-sm"
+              />
+            </div>
 
-            <div className="bg-[#14161a] rounded-xl p-4 border border-white/10">
-              <div className="text-xs text-slate-400 mb-2">
-                <i className="fas fa-info-circle mr-2"></i>
-                Les fichiers importés seront ajoutés à votre bibliothèque locale
-              </div>
+            {/* Liste des VST3 */}
+            <div className="space-y-2">
+              {filteredVST3Plugins.map(plugin => (
+                <button
+                  key={plugin.id}
+                  onClick={() => handleAddPlugin('VST3', { name: plugin.name, localPath: plugin.localPath })}
+                  className="w-full bg-[#14161a] rounded-xl p-4 border border-white/10 hover:border-cyan-500/30 hover:bg-white/5 transition-all active:scale-95 flex items-center gap-3"
+                >
+                  <div className="w-11 h-11 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20">
+                    <i className="fas fa-plug text-lg"></i>
+                  </div>
+                  <div className="flex-1 text-left">
+                    <div className="text-white font-bold text-sm">{plugin.name}</div>
+                    <div className="text-xs text-slate-500">{plugin.vendor}</div>
+                  </div>
+                  <i className="fas fa-plus text-slate-400 text-xs"></i>
+                </button>
+              ))}
+              {filteredVST3Plugins.length === 0 && (
+                <div className="text-center py-12 text-slate-500">
+                  <i className="fas fa-plug text-4xl mb-4 opacity-30"></i>
+                  <p className="text-sm">Aucun VST3 détecté</p>
+                  <p className="text-xs mt-2 text-slate-600">Vérifiez le Bridge</p>
+                </div>
+              )}
             </div>
           </div>
         )}
