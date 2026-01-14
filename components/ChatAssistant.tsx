@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { AIChatMessage, AIAction } from '../types';
 
 interface ChatAssistantProps {
-  onSendMessage: (msg: string) => Promise<{ text: string, actions: AIAction[] }>;
+  // CORRECTION: On accepte 'any' pour éviter le blocage Vercel si App.tsx renvoie juste un string
+  onSendMessage: (msg: string) => Promise<any>;
   onExecuteAction: (action: AIAction) => void;
   externalNotification?: string | null;
   isMobile?: boolean;
@@ -46,8 +47,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     const msgToSend = customMsg || inputValue;
     if (!msgToSend.trim()) return;
 
-    // --- CORRECTION : On a supprimé la vérification locale de l'API KEY ---
-    // On fait confiance au serveur Vercel pour gérer ça.
+    // Suppression définitive de la vérification API_KEY locale
 
     const userMsg: AIChatMessage = {
       id: Date.now().toString(),
@@ -61,14 +61,27 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     setIsTyping(true);
 
     try {
-      // On envoie le message à App.tsx (qui l'enverra à Vercel)
-      const response = await onSendMessage(msgToSend);
+      // Appel au serveur
+      const rawResponse = await onSendMessage(msgToSend);
       setIsTyping(false);
       
-      if (response.actions && response.actions.length > 0) {
+      // --- CORRECTION INTELLIGENTE ---
+      // On vérifie si c'est juste du texte (ancienne version) ou un objet (nouvelle version)
+      let responseText = "";
+      let responseActions: AIAction[] = [];
+
+      if (typeof rawResponse === 'string') {
+          responseText = rawResponse;
+      } else if (rawResponse && typeof rawResponse === 'object') {
+          responseText = rawResponse.text || "";
+          responseActions = rawResponse.actions || [];
+      }
+      // -------------------------------
+
+      if (responseActions.length > 0) {
         setIsSyncing(true);
         setTimeout(() => setIsSyncing(false), 1500);
-        response.actions.forEach(action => {
+        responseActions.forEach(action => {
             onExecuteAction(action);
         });
       }
@@ -76,16 +89,15 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       const assistantMsg: AIChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: response.text || "Réglages de mixage effectués.",
+        content: responseText || "Réglages effectués.",
         timestamp: Date.now(),
-        executedAction: response.actions?.map(a => a.description || a.action).join(', ')
+        executedAction: responseActions.map(a => a.description || a.action).join(', ')
       };
       
       setMessages(prev => [...prev, assistantMsg]);
     } catch (error: any) {
       setIsTyping(false);
-      // Si Vercel renvoie une erreur, on l'affiche ici
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: "Erreur de connexion IA. Vérifiez que le déploiement Vercel est actif.", timestamp: Date.now() }]);
+      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: "Erreur serveur. Vérifiez que le déploiement Vercel est actif.", timestamp: Date.now() }]);
     }
   };
 
@@ -112,22 +124,4 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         <div className={windowClass}>
           <div className="p-6 border-b border-white/5 flex justify-between items-center bg-gradient-to-br from-cyan-500/10 to-transparent">
             <div className="flex items-center space-x-5">
-              <div className={`w-12 h-12 rounded-[18px] flex items-center justify-center transition-all duration-700 ${isSyncing ? 'bg-cyan-500 text-black shadow-[0_0_30px_#00f2ff]' : 'bg-white/5 text-cyan-400'}`}>
-                <i className={`fas ${isSyncing ? 'fa-sync fa-spin' : 'fa-wave-square'} text-xl`}></i>
-              </div>
-              <div>
-                <h3 className="text-[13px] font-black uppercase tracking-[0.3em] text-white">Studio Master AI</h3>
-                <div className="flex items-center space-x-2 mt-1">
-                  <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-cyan-400 animate-ping' : 'bg-green-500'}`}></div>
-                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{isSyncing ? 'Engine Sync...' : 'Direct DSP Link Active'}</span>
-                </div>
-              </div>
-            </div>
-            
-            <button 
-              onClick={(e) => { 
-                  e.stopPropagation(); 
-                  setIsOpen(false);
-                  if (onClose) onClose(); 
-              }} 
-              className="w-10 h-10 rounded-full bg-white/5 text-slate-500 hover
+              <div
