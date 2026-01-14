@@ -394,10 +394,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             </button>
           )}
 
-          {(isAudio || isMidiOrSampler) && (
-              <button 
-                onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }} 
-                onTouchStart={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }} 
+          {/* REC BUTTON - Uniquement pour la piste REC */}
+          {track.id === 'track-rec-main' && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
+                onTouchStart={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
                 className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
                 title="Arm Track for Recording"
               >
