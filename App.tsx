@@ -305,9 +305,19 @@ export default function App() {
 
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
     useEffect(() => { novaBridge.connect(); }, []);
-  const stateRef = useRef(state); 
+  const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
-  useEffect(() => { if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks)); }, [state.tracks]); 
+
+  // Ref to track atomic updates (volume/pan only) to skip expensive graph rebuild
+  const skipEngineUpdateRef = useRef(false);
+
+  useEffect(() => {
+    if (skipEngineUpdateRef.current) {
+      skipEngineUpdateRef.current = false; // Reset flag
+      return; // Skip rebuild for atomic updates
+    }
+    if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks));
+  }, [state.tracks]); 
   useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
   
   useEffect(() => {
@@ -473,6 +483,33 @@ export default function App() {
             }));
         } else {
             audioEngine.disarmTrack();
+        }
+    }
+
+    // Detect atomic updates (volume/pan only) to avoid expensive graph rebuild
+    if (previousTrack) {
+        const isVolumeOnlyChange = previousTrack.volume !== updatedTrack.volume &&
+            previousTrack.pan === updatedTrack.pan &&
+            previousTrack.isMuted === updatedTrack.isMuted &&
+            previousTrack.isSolo === updatedTrack.isSolo &&
+            previousTrack.plugins.length === updatedTrack.plugins.length;
+
+        const isPanOnlyChange = previousTrack.pan !== updatedTrack.pan &&
+            previousTrack.volume === updatedTrack.volume &&
+            previousTrack.isMuted === updatedTrack.isMuted &&
+            previousTrack.isSolo === updatedTrack.isSolo &&
+            previousTrack.plugins.length === updatedTrack.plugins.length;
+
+        if (isVolumeOnlyChange || isPanOnlyChange) {
+            // Use atomic methods for better performance
+            if (isVolumeOnlyChange) {
+                audioEngine.setTrackVolume(updatedTrack.id, updatedTrack.volume);
+            }
+            if (isPanOnlyChange) {
+                audioEngine.setTrackPan(updatedTrack.id, updatedTrack.pan);
+            }
+            // Set flag to skip full graph rebuild in useEffect
+            skipEngineUpdateRef.current = true;
         }
     }
 
