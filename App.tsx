@@ -32,7 +32,7 @@ import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import MobileTracksPage from './components/MobileTracksPage';
-import MobileMixerPage from './components/MobileMixerPage';
+import MobileArrangementPage from './components/MobileArrangementPage';
 import MobilePluginsPage from './components/MobilePluginsPage';
 import MobileBrowserPage from './components/MobileBrowserPage';
 import MobileBottomNav from './components/MobileBottomNav';
@@ -195,9 +195,9 @@ const MobileBottomNav: React.FC<{ activeTab: MobileTab, onTabChange: (tab: Mobil
             <i className="fas fa-align-justify text-xl"></i>
             <span className="text-[10px] font-bold uppercase tracking-wide">Pistes</span>
         </button>
-        <button onClick={() => onTabChange('MIXER')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'MIXER' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-sliders-h text-xl"></i>
-            <span className="text-[10px] font-bold uppercase tracking-wide">Mixer</span>
+        <button onClick={() => onTabChange('ARRANGEMENT')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'ARRANGEMENT' ? 'text-cyan-400' : 'text-slate-500'}`}>
+            <i className="fas fa-waveform-lines text-xl"></i>
+            <span className="text-[10px] font-bold uppercase tracking-wide">Arrangement</span>
         </button>
         <button onClick={() => onTabChange('BROWSER')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'BROWSER' ? 'text-cyan-400' : 'text-slate-500'}`}>
             <i className="fas fa-compass text-xl"></i>
@@ -664,6 +664,17 @@ export default function App() {
         setTimeout(() => setAiNotification(null), 3000);
         return;
     }
+
+    // Clean up audio buffers before deleting track to prevent memory leaks
+    const track = stateRef.current.tracks.find(t => t.id === trackId);
+    if (track) {
+        track.clips.forEach(clip => {
+            if (clip.bufferId) {
+                audioBufferRegistry.remove(clip.bufferId);
+            }
+        });
+    }
+
     setState(produce((draft: DAWState) => {
         const trackIndex = draft.tracks.findIndex(t => t.id === trackId);
         if (trackIndex > -1) {
@@ -693,13 +704,18 @@ export default function App() {
   
   const handleAddPluginFromContext = useCallback(async (tid: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => {
     const newPlugin = createDefaultPlugins(type, 0.5, stateRef.current.bpm, metadata);
-    
+
     setState(produce((draft: DAWState) => {
         const track = draft.tracks.find(t => t.id === tid);
         if (track) {
             track.plugins.push(newPlugin);
         }
     }));
+
+    // Visual feedback for user
+    const pluginName = metadata?.name || type;
+    setAiNotification(`✅ Plugin "${pluginName}" ajouté avec succès`);
+    setTimeout(() => setAiNotification(null), 2000);
 
     if (options?.openUI) {
         await ensureAudioEngine();
@@ -1121,16 +1137,16 @@ export default function App() {
                 />
               )}
 
-              {activeMobileTab === 'MIXER' && (
-                <MobileMixerPage
+              {activeMobileTab === 'ARRANGEMENT' && (
+                <MobileArrangementPage
                   tracks={state.tracks}
+                  currentTime={state.currentTime}
+                  isPlaying={state.isPlaying}
                   selectedTrackId={state.selectedTrackId}
                   onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
-                  onUpdateTrack={handleUpdateTrack}
-                  onRemovePlugin={handleRemovePlugin}
-                  onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); const plugin = state.tracks.find(t => t.id === tid)?.plugins.find(pl => pl.id === p); if (plugin) setActivePlugin({trackId: tid, plugin}); }}
-                  onToggleBypass={handleToggleBypass}
-                  onRequestAddPlugin={handleRequestAddPlugin}
+                  onSeek={handleSeek}
+                  onUpdateClip={(trackId, clipId, updates) => handleClipAction(trackId, clipId, 'UPDATE', updates)}
+                  onSelectClip={(trackId, clip) => setState(p => ({ ...p, selectedTrackId: trackId }))}
                 />
               )}
 

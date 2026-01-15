@@ -13,7 +13,7 @@ export enum TrackType {
 }
 
 export type ViewType = 'ARRANGEMENT' | 'MIXER' | 'AUTOMATION' | 'PIANO_ROLL';
-export type MobileTab = 'TRACKS' | 'MIXER' | 'PLUGINS' | 'BROWSER' | 'NOVA';
+export type MobileTab = 'TRACKS' | 'ARRANGEMENT' | 'PLUGINS' | 'BROWSER' | 'NOVA';
 export type EditorTool = 'SELECT' | 'SPLIT' | 'ERASE' | 'AUTOMATION' | 'DRAW';
 export type ViewMode = 'DESKTOP' | 'TABLET' | 'MOBILE';
 export type Theme = 'dark' | 'light';
