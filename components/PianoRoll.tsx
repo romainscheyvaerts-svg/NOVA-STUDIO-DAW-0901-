@@ -3,6 +3,23 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Track, Clip, MidiNote, EditorTool, TrackType } from '../types';
 import { NOTES } from '../plugins/AutoTunePlugin';
 import { audioEngine } from '../engine/AudioEngine';
+import { midiEffectsService } from '../services/MidiEffectsService';
+
+// Quantize options (inspired by Ableton/Logic)
+type QuantizeStrength = 25 | 50 | 75 | 100;
+type QuantizeValue = '1/1' | '1/2' | '1/4' | '1/8' | '1/16' | '1/32' | '1/4T' | '1/8T' | '1/16T';
+
+const QUANTIZE_VALUES: { value: QuantizeValue; beats: number; label: string }[] = [
+  { value: '1/1', beats: 4, label: '1 Bar' },
+  { value: '1/2', beats: 2, label: '1/2' },
+  { value: '1/4', beats: 1, label: '1/4' },
+  { value: '1/8', beats: 0.5, label: '1/8' },
+  { value: '1/16', beats: 0.25, label: '1/16' },
+  { value: '1/32', beats: 0.125, label: '1/32' },
+  { value: '1/4T', beats: 1/1.5, label: '1/4T' },
+  { value: '1/8T', beats: 0.5/1.5, label: '1/8T' },
+  { value: '1/16T', beats: 0.25/1.5, label: '1/16T' },
+];
 
 interface PianoRollProps {
   track: Track;
@@ -30,7 +47,10 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, currentTime, 
 
   // --- STATE ---
   const [zoomX, setZoomX] = useState(100); 
-  const [quantize, setQuantize] = useState(0.25); 
+  const [quantize, setQuantize] = useState(0.25);
+  const [quantizeValue, setQuantizeValue] = useState<QuantizeValue>('1/16');
+  const [quantizeStrength, setQuantizeStrength] = useState<QuantizeStrength>(100);
+  const [showQuantizeMenu, setShowQuantizeMenu] = useState(false);
   const [tool, setTool] = useState<EditorTool>('DRAW');
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
   
@@ -291,6 +311,139 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, currentTime, 
          audioEngine.previewMidiNote(track.id, pitch, 0.5);
      }
   };
+  
+  // --- QUANTIZE FUNCTION (inspired by Ableton/Logic) ---
+  const applyQuantize = useCallback(() => {
+    if (selectedNoteIds.size === 0) return;
+    
+    const beatDuration = 60 / bpm;
+    const gridSize = beatDuration * (QUANTIZE_VALUES.find(q => q.value === quantizeValue)?.beats || 0.25);
+    const strength = quantizeStrength / 100;
+    
+    const quantizedNotes = (clip.notes || []).map(note => {
+      if (!selectedNoteIds.has(note.id)) return note;
+      
+      // Quantize start time
+      const nearestGridPoint = Math.round(note.start / gridSize) * gridSize;
+      const startOffset = nearestGridPoint - note.start;
+      const newStart = note.start + (startOffset * strength);
+      
+      // Optionally quantize duration (to grid)
+      const newDuration = Math.max(gridSize * 0.25, 
+        Math.round(note.duration / gridSize) * gridSize
+      );
+      
+      return {
+        ...note,
+        start: Math.max(0, newStart),
+        duration: strength === 1 ? newDuration : note.duration
+      };
+    });
+    
+    updateNotes(quantizedNotes);
+  }, [selectedNoteIds, quantizeValue, quantizeStrength, bpm, clip.notes]);
+  
+  // --- SELECT ALL ---
+  const selectAll = useCallback(() => {
+    const allIds = new Set((clip.notes || []).map(n => n.id));
+    setSelectedNoteIds(allIds);
+  }, [clip.notes]);
+  
+  // --- DOUBLE NOTES (inspired by Ableton) ---
+  const doubleNotes = useCallback(() => {
+    if (selectedNoteIds.size === 0) return;
+    
+    const selectedNotes = (clip.notes || []).filter(n => selectedNoteIds.has(n.id));
+    if (selectedNotes.length === 0) return;
+    
+    // Find the range of selected notes
+    const minStart = Math.min(...selectedNotes.map(n => n.start));
+    const maxEnd = Math.max(...selectedNotes.map(n => n.start + n.duration));
+    const range = maxEnd - minStart;
+    
+    // Create duplicates shifted by range
+    const duplicates: MidiNote[] = selectedNotes.map(n => ({
+      ...n,
+      id: `n-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      start: n.start + range
+    }));
+    
+    updateNotes([...(clip.notes || []), ...duplicates]);
+  }, [selectedNoteIds, clip.notes]);
+  
+  // --- TRANSPOSE (inspired by Logic Pro) ---
+  const transpose = useCallback((semitones: number) => {
+    if (selectedNoteIds.size === 0) return;
+    
+    const transposedNotes = (clip.notes || []).map(note => {
+      if (!selectedNoteIds.has(note.id)) return note;
+      const newPitch = note.pitch + semitones;
+      if (isDrumMode) {
+        return { ...note, pitch: Math.max(60, Math.min(89, newPitch)) };
+      }
+      return { ...note, pitch: Math.max(0, Math.min(127, newPitch)) };
+    });
+    
+    updateNotes(transposedNotes);
+  }, [selectedNoteIds, clip.notes, isDrumMode]);
+  
+  // --- HUMANIZE (inspired by Ableton) ---
+  const humanizeNotes = useCallback(() => {
+    if (selectedNoteIds.size === 0) return;
+    
+    const humanizedNotes = (clip.notes || []).map(note => {
+      if (!selectedNoteIds.has(note.id)) return note;
+      
+      const result = midiEffectsService.humanizer.humanize({
+        time: note.start,
+        velocity: note.velocity * 127
+      });
+      
+      return {
+        ...note,
+        start: Math.max(0, result.time),
+        velocity: result.velocity / 127
+      };
+    });
+    
+    updateNotes(humanizedNotes);
+  }, [selectedNoteIds, clip.notes]);
+  
+  // --- KEYBOARD SHORTCUTS ---
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
+      
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        deleteNotes(Array.from(selectedNoteIds));
+      }
+      if (e.ctrlKey && e.key === 'a') {
+        e.preventDefault();
+        selectAll();
+      }
+      if (e.ctrlKey && e.key === 'd') {
+        e.preventDefault();
+        doubleNotes();
+      }
+      if (e.key === 'ArrowUp' && !e.shiftKey) {
+        e.preventDefault();
+        transpose(e.ctrlKey ? 12 : 1);
+      }
+      if (e.key === 'ArrowDown' && !e.shiftKey) {
+        e.preventDefault();
+        transpose(e.ctrlKey ? -12 : -1);
+      }
+      if (e.key === 'q') {
+        applyQuantize();
+      }
+      if (e.key === 'h') {
+        humanizeNotes();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNoteIds, applyQuantize, selectAll, doubleNotes, transpose, humanizeNotes]);
 
   // --- DRUM ROW RENDERING ---
   const renderKeys = () => {
@@ -361,9 +514,9 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, currentTime, 
 
   return (
     <div className="w-full h-full flex flex-col bg-[#14161a] select-none text-white font-inter">
-       {/* TOOLBAR (Same as before) */}
-       <div className="h-12 border-b border-white/10 flex items-center justify-between px-4 bg-[#0c0d10] shrink-0">
-          <div className="flex items-center space-x-6">
+       {/* TOOLBAR (Enhanced with Quantize and Actions) */}
+       <div className="h-14 border-b border-white/10 flex items-center justify-between px-4 bg-[#0c0d10] shrink-0">
+          <div className="flex items-center space-x-4">
              <div className="flex items-center space-x-2">
                 <div className={`w-8 h-8 rounded flex items-center justify-center border ${isDrumMode ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>
                     <i className={`fas ${isDrumMode ? 'fa-drum' : 'fa-keyboard'}`}></i>
@@ -373,15 +526,141 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, currentTime, 
                     <p className="text-[9px] text-slate-500 font-mono">{clip.name}</p>
                 </div>
              </div>
-             {/* Tools... */}
+             
+             <div className="h-8 w-px bg-white/10"></div>
+             
+             {/* Tools */}
              <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
-                <button onClick={() => setTool('DRAW')} className={`w-8 h-8 rounded flex items-center justify-center ${tool === 'DRAW' ? 'bg-cyan-500 text-black' : 'text-slate-500'}`}><i className="fas fa-pencil-alt text-xs"></i></button>
-                <button onClick={() => setTool('SELECT')} className={`w-8 h-8 rounded flex items-center justify-center ${tool === 'SELECT' ? 'bg-cyan-500 text-black' : 'text-slate-500'}`}><i className="fas fa-mouse-pointer text-xs"></i></button>
-                <button onClick={() => setTool('ERASE')} className={`w-8 h-8 rounded flex items-center justify-center ${tool === 'ERASE' ? 'bg-red-500 text-black' : 'text-slate-500'}`}><i className="fas fa-eraser text-xs"></i></button>
+                <button onClick={() => setTool('DRAW')} className={`w-8 h-8 rounded flex items-center justify-center ${tool === 'DRAW' ? 'bg-cyan-500 text-black' : 'text-slate-500 hover:text-white'}`} title="Draw (D)"><i className="fas fa-pencil-alt text-xs"></i></button>
+                <button onClick={() => setTool('SELECT')} className={`w-8 h-8 rounded flex items-center justify-center ${tool === 'SELECT' ? 'bg-cyan-500 text-black' : 'text-slate-500 hover:text-white'}`} title="Select (S)"><i className="fas fa-mouse-pointer text-xs"></i></button>
+                <button onClick={() => setTool('ERASE')} className={`w-8 h-8 rounded flex items-center justify-center ${tool === 'ERASE' ? 'bg-red-500 text-black' : 'text-slate-500 hover:text-white'}`} title="Erase (E)"><i className="fas fa-eraser text-xs"></i></button>
              </div>
-             {/* Quantize... */}
+             
+             <div className="h-8 w-px bg-white/10"></div>
+             
+             {/* Quantize Controls (inspired by Ableton) */}
+             <div className="flex items-center space-x-2 relative">
+                <button
+                  onClick={() => setShowQuantizeMenu(!showQuantizeMenu)}
+                  className="h-8 px-3 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-400 hover:bg-purple-500/20 flex items-center space-x-2 text-[10px] font-bold"
+                >
+                  <i className="fas fa-th text-[9px]"></i>
+                  <span>{quantizeValue}</span>
+                  <i className="fas fa-chevron-down text-[8px]"></i>
+                </button>
+                
+                {/* Quantize Dropdown */}
+                {showQuantizeMenu && (
+                  <div className="absolute top-full left-0 mt-2 bg-[#1a1c22] border border-white/20 rounded-xl shadow-2xl z-[200] p-3 w-56">
+                    <div className="text-[9px] font-black uppercase text-slate-400 mb-2">Quantize Grid</div>
+                    <div className="grid grid-cols-3 gap-1 mb-3">
+                      {QUANTIZE_VALUES.map(q => (
+                        <button
+                          key={q.value}
+                          onClick={() => {
+                            setQuantizeValue(q.value);
+                            setQuantize(q.beats * (60 / bpm));
+                          }}
+                          className={`py-1.5 rounded text-[9px] font-bold ${quantizeValue === q.value ? 'bg-purple-500 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                        >
+                          {q.label}
+                        </button>
+                      ))}
+                    </div>
+                    
+                    <div className="text-[9px] font-black uppercase text-slate-400 mb-2">Strength</div>
+                    <div className="flex space-x-1 mb-3">
+                      {([25, 50, 75, 100] as QuantizeStrength[]).map(s => (
+                        <button
+                          key={s}
+                          onClick={() => setQuantizeStrength(s)}
+                          className={`flex-1 py-1.5 rounded text-[9px] font-bold ${quantizeStrength === s ? 'bg-purple-500 text-white' : 'bg-white/5 text-slate-400'}`}
+                        >
+                          {s}%
+                        </button>
+                      ))}
+                    </div>
+                    
+                    <button
+                      onClick={() => { applyQuantize(); setShowQuantizeMenu(false); }}
+                      disabled={selectedNoteIds.size === 0}
+                      className={`w-full py-2 rounded text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'bg-purple-500 text-white' : 'bg-white/5 text-slate-600'}`}
+                    >
+                      Quantize Selected (Q)
+                    </button>
+                  </div>
+                )}
+                
+                {/* Quick Quantize Button */}
+                <button
+                  onClick={applyQuantize}
+                  disabled={selectedNoteIds.size === 0}
+                  className={`h-8 px-3 rounded-lg flex items-center space-x-1 text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30' : 'bg-white/5 text-slate-600'}`}
+                  title="Apply Quantize (Q)"
+                >
+                  <i className="fas fa-magnet text-[9px]"></i>
+                  <span>Q</span>
+                </button>
+             </div>
+             
+             <div className="h-8 w-px bg-white/10"></div>
+             
+             {/* Edit Actions (inspired by Logic Pro) */}
+             <div className="flex items-center space-x-1">
+                <button
+                  onClick={() => transpose(1)}
+                  disabled={selectedNoteIds.size === 0}
+                  className={`h-8 px-2 rounded text-[10px] ${selectedNoteIds.size > 0 ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-600'}`}
+                  title="Transpose Up (↑)"
+                >
+                  <i className="fas fa-arrow-up"></i>
+                </button>
+                <button
+                  onClick={() => transpose(-1)}
+                  disabled={selectedNoteIds.size === 0}
+                  className={`h-8 px-2 rounded text-[10px] ${selectedNoteIds.size > 0 ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-600'}`}
+                  title="Transpose Down (↓)"
+                >
+                  <i className="fas fa-arrow-down"></i>
+                </button>
+                <button
+                  onClick={doubleNotes}
+                  disabled={selectedNoteIds.size === 0}
+                  className={`h-8 px-3 rounded text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'text-amber-400 hover:bg-amber-500/10' : 'text-slate-600'}`}
+                  title="Double Notes (Ctrl+D)"
+                >
+                  <i className="fas fa-clone mr-1"></i>2x
+                </button>
+                <button
+                  onClick={humanizeNotes}
+                  disabled={selectedNoteIds.size === 0}
+                  className={`h-8 px-3 rounded text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'text-green-400 hover:bg-green-500/10' : 'text-slate-600'}`}
+                  title="Humanize (H)"
+                >
+                  <i className="fas fa-random mr-1"></i>H
+                </button>
+             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/5 text-slate-400 hover:text-white flex items-center justify-center"><i className="fas fa-times"></i></button>
+          
+          {/* Right side: Info and Close */}
+          <div className="flex items-center space-x-4">
+             <div className="text-[9px] text-slate-500">
+                {selectedNoteIds.size > 0 && <span className="text-cyan-400">{selectedNoteIds.size} selected</span>}
+                {selectedNoteIds.size === 0 && <span>{(clip.notes || []).length} notes</span>}
+             </div>
+             <div className="flex items-center space-x-1">
+                <i className="fas fa-search-plus text-[10px] text-slate-500"></i>
+                <input
+                  type="range"
+                  min="50"
+                  max="300"
+                  value={zoomX}
+                  onChange={(e) => setZoomX(parseInt(e.target.value))}
+                  className="w-20 accent-cyan-500"
+                />
+             </div>
+             <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/5 text-slate-400 hover:text-white hover:bg-red-500/20 flex items-center justify-center"><i className="fas fa-times"></i></button>
+          </div>
        </div>
 
        <div className="flex-1 flex flex-col overflow-hidden">
