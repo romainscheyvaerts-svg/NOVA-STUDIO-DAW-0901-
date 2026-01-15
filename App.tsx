@@ -1147,11 +1147,16 @@ export default function App() {
                   tracks={state.tracks}
                   currentTime={state.currentTime}
                   isPlaying={state.isPlaying}
+                  bpm={state.bpm}
                   selectedTrackId={state.selectedTrackId}
                   onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
                   onSeek={handleSeek}
                   onUpdateClip={(trackId, clipId, updates) => handleEditClip(trackId, clipId, 'UPDATE_PROPS', updates)}
                   onSelectClip={(trackId, clip) => setState(p => ({ ...p, selectedTrackId: trackId }))}
+                  onTogglePlay={handleTogglePlay}
+                  onStop={handleStop}
+                  onUpdateTrack={handleUpdateTrack}
+                  onDeleteClip={(trackId, clipId) => handleEditClip(trackId, clipId, 'DELETE')}
                 />
               )}
 

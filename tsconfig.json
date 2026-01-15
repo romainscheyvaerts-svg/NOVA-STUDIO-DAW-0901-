@@ -32,8 +32,6 @@
   "include": [
     "*.ts",
     "*.tsx",
-    "src/**/*.ts",
-    "src/**/*.tsx",
     "components/**/*.ts",
     "components/**/*.tsx",
     "engine/**/*.ts",
@@ -41,10 +39,15 @@
     "plugins/**/*.ts",
     "plugins/**/*.tsx",
     "services/**/*.ts",
-    "services/**/*.tsx"
+    "services/**/*.tsx",
+    "api/**/*.ts",
+    "utils/**/*.ts",
+    "types/**/*.ts",
+    "hooks/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "src"
   ]
 }

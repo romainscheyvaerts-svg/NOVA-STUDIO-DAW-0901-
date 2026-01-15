@@ -330,14 +330,29 @@ export class AudioEngine {
     if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive' || !this.recordingTrackId) {
       return null;
     }
+    
+    const trackIdToRearm = this.monitoringTrackId; // Sauvegarder pour ré-armement
+    
     return new Promise((resolve) => {
       this.mediaRecorder!.onstop = async () => {
         const trackId = this.recordingTrackId!;
         const blob = new Blob(this.audioChunks, { type: this.mediaRecorder!.mimeType });
+        
+        // Reset recording state FIRST
+        this.audioChunks = [];
+        this.recordingTrackId = null;
+        this.recStartTime = 0;
+        this.mediaRecorder = null;
+        
         if (blob.size === 0) {
+          // Ré-armer la piste pour permettre un nouvel enregistrement
+          if (trackIdToRearm) {
+            await this.rearmTrackForNextRecording(trackIdToRearm);
+          }
           resolve(null);
           return;
         }
+        
         try {
           const arrayBuffer = await blob.arrayBuffer();
           const audioBuffer = await this.ctx!.decodeAudioData(arrayBuffer);
@@ -355,19 +370,68 @@ export class AudioEngine {
             buffer: audioBuffer, 
           };
           console.log("[AudioEngine] Recording stopped. New clip created:", clipData);
+          
+          // Ré-armer la piste pour permettre un nouvel enregistrement
+          if (trackIdToRearm) {
+            await this.rearmTrackForNextRecording(trackIdToRearm);
+          }
+          
           resolve({ clip: clipData, trackId });
         } catch (e) {
           console.error("Error processing recorded audio:", e);
+          // Ré-armer même en cas d'erreur
+          if (trackIdToRearm) {
+            await this.rearmTrackForNextRecording(trackIdToRearm);
+          }
           resolve(null);
-        } finally {
-          this.audioChunks = [];
-          this.recordingTrackId = null;
-          this.recStartTime = 0;
-          this.mediaRecorder = null; // CRITICAL: Reset MediaRecorder pour permettre un nouvel enregistrement
         }
       };
       this.mediaRecorder.stop();
     });
+  }
+
+  /**
+   * Ré-arme la piste avec un nouveau MediaStream pour permettre plusieurs enregistrements consécutifs.
+   * Le MediaRecorder ne peut pas être réutilisé après stop(), donc on doit recréer le stream.
+   */
+  private async rearmTrackForNextRecording(trackId: string): Promise<void> {
+    console.log("[AudioEngine] Re-arming track for next recording:", trackId);
+    
+    // Fermer l'ancien stream proprement
+    if (this.monitorSource) {
+      try { this.monitorSource.disconnect(); } catch (e) {}
+      this.monitorSource = null;
+    }
+    if (this.activeMonitorStream) {
+      this.activeMonitorStream.getTracks().forEach(track => track.stop());
+      this.activeMonitorStream = null;
+    }
+    
+    // Recréer un nouveau stream
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp) {
+      console.warn("[AudioEngine] Cannot rearm - DSP not found for track:", trackId);
+      this.monitoringTrackId = null;
+      return;
+    }
+    
+    try {
+      this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        }
+      });
+      this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
+      this.monitorSource.connect(dsp.input);
+      this.monitoringTrackId = trackId;
+      console.log("[AudioEngine] Track re-armed OK:", trackId);
+    } catch (e) {
+      console.error("[AudioEngine] Re-arm ERROR:", e);
+      this.monitoringTrackId = null;
+      this.activeMonitorStream = null;
+    }
   }
 
   public startPlayback(startOffset: number, tracks: Track[]) {

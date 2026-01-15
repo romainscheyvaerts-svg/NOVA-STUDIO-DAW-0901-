@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import MobileContainer from './MobileContainer';
 import { Track, Clip, TrackType } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
@@ -7,13 +7,19 @@ interface MobileArrangementPageProps {
   tracks: Track[];
   currentTime: number;
   isPlaying: boolean;
+  bpm?: number;
   selectedTrackId: string | null;
   onSelectTrack: (trackId: string) => void;
   onSeek: (time: number) => void;
   onUpdateClip?: (trackId: string, clipId: string, updates: Partial<Clip>) => void;
   onSelectClip?: (trackId: string, clip: Clip) => void;
+  onTogglePlay?: () => void;
+  onStop?: () => void;
+  onUpdateTrack?: (track: Track) => void;
+  onDeleteClip?: (trackId: string, clipId: string) => void;
 }
 
+type EditTool = 'SELECT' | 'TRIM' | 'SPLIT' | 'ERASE';
 type DragMode = 'move' | 'resize-start' | 'resize-end' | null;
 
 interface DragState {
@@ -26,657 +32,666 @@ interface DragState {
   startOffset: number;
 }
 
+// Constants - Logic Pro iPad inspired
+const TRACK_HEADER_WIDTH = 100;
+const TRACK_HEIGHT = 64;
+const TIMELINE_HEIGHT = 44;
+const MIN_ZOOM = 20;
+const MAX_ZOOM = 300;
+
 /**
- * Page mobile Arrangement - Timeline professionnelle complète
- * Features: Grille, Édition, Drag, Resize, Split, Menu contextuel
+ * Mobile Arrangement Page - Professional DAW Timeline
+ * Inspired by Logic Pro iPad, Cubasis, and GarageBand
  */
 const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   tracks,
   currentTime,
   isPlaying,
+  bpm = 120,
   selectedTrackId,
   onSelectTrack,
   onSeek,
   onUpdateClip,
-  onSelectClip
+  onSelectClip,
+  onTogglePlay,
+  onStop,
+  onUpdateTrack,
+  onDeleteClip
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  const [zoom, setZoom] = useState(60); // pixels per second
-  const [selectedClip, setSelectedClip] = useState<{ trackId: string, clip: Clip } | null>(null);
-  const [touchStart, setTouchStart] = useState<{ x: number, y: number, dist: number } | null>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  
+  // State
+  const [zoom, setZoom] = useState(80); // pixels per beat
+  const [scrollX, setScrollX] = useState(0);
+  const [selectedClip, setSelectedClip] = useState<{ trackId: string; clip: Clip } | null>(null);
+  const [activeTool, setActiveTool] = useState<EditTool>('SELECT');
   const [dragState, setDragState] = useState<DragState | null>(null);
-  const [snapEnabled, setSnapEnabled] = useState(true);
-  const [gridSize, setGridSize] = useState(1); // 1 second grid
-  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, trackId: string, clip: Clip } | null>(null);
+  const [pinchStart, setPinchStart] = useState<{ dist: number; zoom: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
+  const [snapToGrid, setSnapToGrid] = useState(true);
+  const [gridDivision, setGridDivision] = useState<number>(1); // 1 = beat, 0.5 = 1/8, 0.25 = 1/16
 
-  const animationRef = useRef<number>(0);
-  const isDraggingRef = useRef(false);
-
-  const visibleTracks = tracks.filter(t => t.id !== 'master');
-  const trackHeight = 80;
-  const timelineHeight = 50;
-  const trackSeparatorHeight = 2;
-  const totalHeight = visibleTracks.length * (trackHeight + trackSeparatorHeight) + timelineHeight;
-
-  // Calculate max duration
-  const maxDuration = Math.max(
-    120,
-    ...visibleTracks.flatMap(t => t.clips.map(c => c.start + c.duration))
+  // Derived values
+  const visibleTracks = useMemo(() => 
+    tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master'),
+    [tracks]
   );
+  
+  const beatsPerSecond = bpm / 60;
+  const pixelsPerSecond = zoom * beatsPerSecond;
+  
+  const maxDuration = useMemo(() => Math.max(
+    60,
+    ...visibleTracks.flatMap(t => t.clips.map(c => c.start + c.duration + 10))
+  ), [visibleTracks]);
 
-  const canvasWidth = Math.max(window.innerWidth, maxDuration * zoom);
+  const totalBeats = Math.ceil(maxDuration * beatsPerSecond);
+  const totalWidth = totalBeats * zoom;
 
-  // Snap to grid helper
-  const snapToGrid = useCallback((time: number): number => {
-    if (!snapEnabled) return time;
-    return Math.round(time / gridSize) * gridSize;
-  }, [snapEnabled, gridSize]);
+  // Convert time <-> beats
+  const timeToBeat = useCallback((time: number) => time * beatsPerSecond, [beatsPerSecond]);
+  const beatToTime = useCallback((beat: number) => beat / beatsPerSecond, [beatsPerSecond]);
+  const timeToX = useCallback((time: number) => time * pixelsPerSecond, [pixelsPerSecond]);
+  const xToTime = useCallback((x: number) => x / pixelsPerSecond, [pixelsPerSecond]);
 
-  /**
-   * Dessine une waveform professionnelle
-   */
-  const drawWaveform = (
-    ctx: CanvasRenderingContext2D,
-    buffer: AudioBuffer | undefined,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    color: string,
-    offset: number = 0
+  // Snap helper
+  const snapTime = useCallback((time: number): number => {
+    if (!snapToGrid) return time;
+    const beatTime = 60 / bpm;
+    const snapInterval = beatTime * gridDivision;
+    return Math.round(time / snapInterval) * snapInterval;
+  }, [snapToGrid, bpm, gridDivision]);
+
+  // Format time as bars:beats
+  const formatBarsBeat = useCallback((time: number): string => {
+    const totalBeats = time * beatsPerSecond;
+    const bars = Math.floor(totalBeats / 4) + 1;
+    const beats = Math.floor(totalBeats % 4) + 1;
+    return `${bars}.${beats}`;
+  }, [beatsPerSecond]);
+
+  // Auto-scroll to playhead
+  useEffect(() => {
+    if (isPlaying && scrollContainerRef.current) {
+      const playheadX = timeToX(currentTime);
+      const containerWidth = scrollContainerRef.current.clientWidth - TRACK_HEADER_WIDTH;
+      const scrollLeft = scrollContainerRef.current.scrollLeft;
+      
+      if (playheadX > scrollLeft + containerWidth - 100 || playheadX < scrollLeft + 50) {
+        scrollContainerRef.current.scrollLeft = Math.max(0, playheadX - containerWidth / 2);
+      }
+    }
+  }, [currentTime, isPlaying, timeToX]);
+
+  // Handle timeline tap to seek
+  const handleTimelineTap = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const x = clientX - rect.left + scrollX;
+    const time = xToTime(x);
+    onSeek(Math.max(0, time));
+  }, [scrollX, xToTime, onSeek]);
+
+  // Handle clip interaction
+  const handleClipTouchStart = useCallback((
+    e: React.TouchEvent | React.MouseEvent,
+    trackId: string,
+    clip: Clip
   ) => {
-    if (!buffer) {
-      ctx.fillStyle = color + '40';
-      ctx.fillRect(x, y, width, height);
+    e.stopPropagation();
+    
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const relativeX = clientX - rect.left;
+    const clipWidth = clip.duration * pixelsPerSecond;
+
+    setSelectedClip({ trackId, clip });
+    onSelectTrack(trackId);
+    if (onSelectClip) onSelectClip(trackId, clip);
+
+    // Tool-specific behavior
+    if (activeTool === 'ERASE' && onDeleteClip) {
+      onDeleteClip(trackId, clip.id);
+      setSelectedClip(null);
       return;
     }
 
-    const channelData = buffer.getChannelData(0);
-    const samples = channelData.length;
-    const step = Math.max(1, Math.floor(samples / width));
-    const offsetSamples = Math.floor(offset * buffer.sampleRate);
-
-    ctx.fillStyle = color + '20';
-    ctx.fillRect(x, y, width, height);
-
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-
-    const centerY = y + height / 2;
-
-    for (let i = 0; i < width; i++) {
-      const sampleIndex = offsetSamples + i * step;
-      if (sampleIndex >= samples) break;
-
-      let min = 1;
-      let max = -1;
-      for (let j = 0; j < step && sampleIndex + j < samples; j++) {
-        const sample = channelData[sampleIndex + j];
-        if (sample < min) min = sample;
-        if (sample > max) max = sample;
-      }
-
-      const minY = centerY + min * (height / 2) * 0.8;
-      const maxY = centerY + max * (height / 2) * 0.8;
-
-      if (i === 0) {
-        ctx.moveTo(x + i, minY);
-      }
-      ctx.lineTo(x + i, minY);
-      ctx.lineTo(x + i, maxY);
+    if (activeTool === 'SPLIT' && onUpdateClip) {
+      const splitTime = xToTime(relativeX) + clip.start;
+      // TODO: Implement split
+      return;
     }
 
-    ctx.stroke();
+    // Determine drag mode based on tool and click position
+    let mode: DragMode = 'move';
+    const isTrimTool = activeTool === 'TRIM';
+    if (isTrimTool || relativeX < 16) {
+      mode = 'resize-start';
+    } else if (relativeX > clipWidth - 16) {
+      mode = 'resize-end';
+    }
 
-    // Center line
-    ctx.strokeStyle = color + '30';
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(x, centerY);
-    ctx.lineTo(x + width, centerY);
-    ctx.stroke();
-  };
+    setDragState({
+      mode,
+      trackId,
+      clip,
+      startX: clientX,
+      startTime: clip.start,
+      startDuration: clip.duration,
+      startOffset: clip.offset || 0
+    });
+  }, [activeTool, pixelsPerSecond, xToTime, onSelectTrack, onSelectClip, onDeleteClip, onUpdateClip]);
 
-  // Draw everything
-  useEffect(() => {
-    const animate = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // === GRILLE VERTICALE ===
-      ctx.strokeStyle = '#1e293b40';
-      ctx.lineWidth = 1;
-      for (let sec = 0; sec <= maxDuration; sec += gridSize) {
-        const x = sec * zoom;
-        ctx.beginPath();
-        ctx.moveTo(x, timelineHeight);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-      }
-
-      // === TIMELINE RULER ===
-      ctx.fillStyle = '#0c0d10';
-      ctx.fillRect(0, 0, canvas.width, timelineHeight);
-
-      ctx.strokeStyle = '#22d3ee30';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(0, timelineHeight);
-      ctx.lineTo(canvas.width, timelineHeight);
-      ctx.stroke();
-
-      // Time markers
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = 'bold 11px Inter, sans-serif';
-
-      const secondsPerMark = zoom > 100 ? 1 : zoom > 50 ? 5 : 10;
-
-      for (let sec = 0; sec <= maxDuration; sec += secondsPerMark) {
-        const x = sec * zoom;
-
-        ctx.strokeStyle = sec % 10 === 0 ? '#22d3ee80' : '#475569';
-        ctx.lineWidth = sec % 10 === 0 ? 2 : 1;
-        ctx.beginPath();
-        ctx.moveTo(x, timelineHeight - (sec % 10 === 0 ? 15 : 10));
-        ctx.lineTo(x, timelineHeight);
-        ctx.stroke();
-
-        if (sec % secondsPerMark === 0) {
-          const minutes = Math.floor(sec / 60);
-          const seconds = sec % 60;
-          const label = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-          ctx.fillStyle = sec % 10 === 0 ? '#22d3ee' : '#94a3b8';
-          ctx.fillText(label, x + 4, timelineHeight - 20);
-        }
-      }
-
-      // === PLAYHEAD ===
-      const playheadX = currentTime * zoom;
-      ctx.save();
-
-      ctx.shadowColor = '#22d3ee';
-      ctx.shadowBlur = 8;
-
-      ctx.strokeStyle = '#22d3ee';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(playheadX, 0);
-      ctx.lineTo(playheadX, canvas.height);
-      ctx.stroke();
-
-      ctx.fillStyle = '#22d3ee';
-      ctx.beginPath();
-      ctx.moveTo(playheadX, timelineHeight);
-      ctx.lineTo(playheadX - 8, timelineHeight - 12);
-      ctx.lineTo(playheadX + 8, timelineHeight - 12);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.restore();
-
-      // === TRACKS ===
-      visibleTracks.forEach((track, index) => {
-        const y = timelineHeight + index * (trackHeight + trackSeparatorHeight);
-
-        // Track background
-        const isEven = index % 2 === 0;
-        ctx.fillStyle = isEven ? '#14161a' : '#1a1c21';
-        ctx.fillRect(0, y, canvas.width, trackHeight);
-
-        // Track separator
-        ctx.fillStyle = '#0a0b0d';
-        ctx.fillRect(0, y + trackHeight, canvas.width, trackSeparatorHeight);
-
-        // Track name gradient
-        const gradient = ctx.createLinearGradient(0, y, 0, y + 30);
-        gradient.addColorStop(0, track.color + '30');
-        gradient.addColorStop(1, track.color + '00');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, y, 150, 30);
-
-        // Track name
-        ctx.fillStyle = '#f1f5f9';
-        ctx.font = 'bold 12px Inter, sans-serif';
-        ctx.fillText(track.name.substring(0, 15), 12, y + 20);
-
-        // Track type badge
-        ctx.fillStyle = track.color + '40';
-        ctx.fillRect(12, y + 28, 8, 8);
-
-        // === CLIPS ===
-        track.clips.forEach(clip => {
-          const clipX = clip.start * zoom;
-          const clipWidth = clip.duration * zoom;
-          const clipY = y + 8;
-          const clipHeight = trackHeight - 16;
-
-          const isSelected = selectedClip?.trackId === track.id && selectedClip?.clip.id === clip.id;
-          const isDragging = dragState?.clip.id === clip.id;
-
-          // Clip shadow
-          if (isSelected || isDragging) {
-            ctx.save();
-            ctx.shadowColor = track.color || '#22d3ee';
-            ctx.shadowBlur = isDragging ? 20 : 12;
-            ctx.shadowOffsetX = 0;
-            ctx.shadowOffsetY = 4;
-          }
-
-          // Clip background gradient
-          const clipGradient = ctx.createLinearGradient(clipX, clipY, clipX, clipY + clipHeight);
-          clipGradient.addColorStop(0, (clip.color || track.color || '#22d3ee') + '40');
-          clipGradient.addColorStop(1, (clip.color || track.color || '#22d3ee') + '20');
-          ctx.fillStyle = clipGradient;
-          ctx.fillRect(clipX, clipY, clipWidth, clipHeight);
-
-          // Waveform
-          const buffer = clip.bufferId ? audioBufferRegistry.get(clip.bufferId) : clip.buffer;
-          drawWaveform(
-            ctx,
-            buffer,
-            clipX + 2,
-            clipY + 2,
-            clipWidth - 4,
-            clipHeight - 4,
-            clip.color || track.color || '#22d3ee',
-            clip.offset || 0
-          );
-
-          // Clip border
-          ctx.strokeStyle = isSelected ? '#22d3ee' : (clip.color || track.color || '#22d3ee');
-          ctx.lineWidth = isSelected ? 3 : 2;
-          ctx.strokeRect(clipX, clipY, clipWidth, clipHeight);
-
-          if (isSelected || isDragging) ctx.restore();
-
-          // Resize handles (only if selected)
-          if (isSelected && !isDragging && clipWidth > 40) {
-            // Left handle
-            ctx.fillStyle = '#22d3ee';
-            ctx.fillRect(clipX, clipY, 8, clipHeight);
-
-            // Right handle
-            ctx.fillRect(clipX + clipWidth - 8, clipY, 8, clipHeight);
-          }
-
-          // Clip name
-          if (clipWidth > 50) {
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 11px Inter, sans-serif';
-            ctx.fillText(clip.name.substring(0, Math.floor(clipWidth / 8)), clipX + 6, clipY + 16);
-          }
-
-          // Muted indicator
-          if (clip.isMuted) {
-            ctx.fillStyle = '#ef444480';
-            ctx.fillRect(clipX, clipY, clipWidth, clipHeight);
-            ctx.fillStyle = '#ef4444';
-            ctx.font = 'bold 10px Inter, sans-serif';
-            ctx.fillText('MUTED', clipX + 6, clipY + clipHeight / 2);
-          }
-        });
-
-        // Empty track indicator
-        if (track.clips.length === 0) {
-          ctx.fillStyle = '#475569';
-          ctx.font = '11px Inter, sans-serif';
-          ctx.fillText('Tap to add clips...', 12, y + trackHeight / 2 + 4);
-        }
-      });
-
-      animationRef.current = requestAnimationFrame(animate);
-    };
-
-    animate();
-    return () => {
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
-    };
-  }, [tracks, currentTime, zoom, selectedClip, maxDuration, visibleTracks, dragState, gridSize]);
-
-  // Handle touch/mouse down
-  const handleCanvasTouchStart = (e: React.TouchEvent<HTMLCanvasElement> | React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    const x = clientX - rect.left + (containerRef.current?.scrollLeft || 0);
-    const y = clientY - rect.top;
-
-    // Pinch zoom detection
+  // Handle drag
+  const handleTouchMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    // Pinch zoom
     if ('touches' in e && e.touches.length === 2) {
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
       const dist = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
-      setTouchStart({ x: (touch1.clientX + touch2.clientX) / 2, y: (touch1.clientY + touch2.clientY) / 2, dist });
-      return;
-    }
-
-    // Click on timeline = seek
-    if (y < timelineHeight) {
-      const newTime = x / zoom;
-      onSeek(newTime);
-      return;
-    }
-
-    // Find track and clip
-    const trackIndex = Math.floor((y - timelineHeight) / (trackHeight + trackSeparatorHeight));
-    const track = visibleTracks[trackIndex];
-    if (!track) return;
-
-    onSelectTrack(track.id);
-
-    const time = x / zoom;
-    const clip = track.clips.find(c => time >= c.start && time <= c.start + c.duration);
-
-    if (clip) {
-      const clipX = clip.start * zoom;
-      const clipWidth = clip.duration * zoom;
-      const relativeX = x - clipX;
-
-      setSelectedClip({ trackId: track.id, clip });
-      if (onSelectClip) {
-        onSelectClip(track.id, clip);
+      
+      if (pinchStart) {
+        const scale = dist / pinchStart.dist;
+        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, pinchStart.zoom * scale));
+        setZoom(newZoom);
+      } else {
+        setPinchStart({ dist, zoom });
       }
-
-      // Detect resize or move
-      let mode: DragMode = 'move';
-      if (relativeX < 8) {
-        mode = 'resize-start';
-      } else if (relativeX > clipWidth - 8) {
-        mode = 'resize-end';
-      }
-
-      setDragState({
-        mode,
-        trackId: track.id,
-        clip,
-        startX: x,
-        startTime: clip.start,
-        startDuration: clip.duration,
-        startOffset: clip.offset || 0
-      });
-      isDraggingRef.current = true;
-    } else {
-      setSelectedClip(null);
-    }
-  };
-
-  // Handle drag move
-  const handleCanvasTouchMove = (e: React.TouchEvent<HTMLCanvasElement> | React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    // Pinch zoom
-    if ('touches' in e && e.touches.length === 2 && touchStart) {
-      const touch1 = e.touches[0];
-      const touch2 = e.touches[1];
-      const dist = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
-      const delta = dist - touchStart.dist;
-      const newZoom = Math.max(10, Math.min(200, zoom + delta * 0.2));
-      setZoom(newZoom);
-      setTouchStart({ ...touchStart, dist });
       return;
     }
 
     if (!dragState || !onUpdateClip) return;
 
-    const rect = canvas.getBoundingClientRect();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const x = clientX - rect.left + (containerRef.current?.scrollLeft || 0);
-    const deltaX = x - dragState.startX;
-    const deltaTime = deltaX / zoom;
+    const deltaX = clientX - dragState.startX;
+    const deltaTime = deltaX / pixelsPerSecond;
 
     if (dragState.mode === 'move') {
-      const newStart = snapToGrid(dragState.startTime + deltaTime);
-      if (newStart >= 0) {
-        onUpdateClip(dragState.trackId, dragState.clip.id, { start: newStart });
-      }
+      const newStart = snapTime(Math.max(0, dragState.startTime + deltaTime));
+      onUpdateClip(dragState.trackId, dragState.clip.id, { start: newStart });
     } else if (dragState.mode === 'resize-start') {
-      const newStart = snapToGrid(dragState.startTime + deltaTime);
+      const newStart = snapTime(dragState.startTime + deltaTime);
       const newDuration = dragState.startDuration - deltaTime;
       const newOffset = dragState.startOffset + deltaTime;
       if (newDuration > 0.1 && newStart >= 0) {
         onUpdateClip(dragState.trackId, dragState.clip.id, {
           start: newStart,
           duration: newDuration,
-          offset: newOffset
+          offset: Math.max(0, newOffset)
         });
       }
     } else if (dragState.mode === 'resize-end') {
-      const newDuration = snapToGrid(dragState.startDuration + deltaTime);
-      if (newDuration > 0.1) {
-        onUpdateClip(dragState.trackId, dragState.clip.id, { duration: newDuration });
-      }
+      const newDuration = snapTime(Math.max(0.1, dragState.startDuration + deltaTime));
+      onUpdateClip(dragState.trackId, dragState.clip.id, { duration: newDuration });
     }
-  };
+  }, [dragState, pinchStart, zoom, pixelsPerSecond, snapTime, onUpdateClip]);
 
-  const handleCanvasTouchEnd = () => {
-    setTouchStart(null);
+  const handleTouchEnd = useCallback(() => {
     setDragState(null);
-    isDraggingRef.current = false;
-  };
+    setPinchStart(null);
+  }, []);
 
-  // Long press for context menu
-  const handleLongPress = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !selectedClip) return;
+  // Handle scroll
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    setScrollX(e.currentTarget.scrollLeft);
+  }, []);
 
-    e.preventDefault();
-    const touch = e.touches[0];
-    setContextMenu({
-      x: touch.clientX,
-      y: touch.clientY,
-      trackId: selectedClip.trackId,
-      clip: selectedClip.clip
-    });
-  };
+  // Render waveform
+  const renderWaveform = useCallback((
+    clip: Clip,
+    width: number,
+    height: number,
+    color: string
+  ) => {
+    const buffer = clip.bufferId ? audioBufferRegistry.get(clip.bufferId) : clip.buffer;
+    if (!buffer) return null;
 
-  const handleContextMenuAction = (action: string) => {
-    if (!contextMenu || !onUpdateClip) return;
+    const channelData = buffer.getChannelData(0);
+    const samples = channelData.length;
+    const step = Math.max(1, Math.floor(samples / width));
+    const offsetSamples = Math.floor((clip.offset || 0) * buffer.sampleRate);
+    
+    const points: string[] = [];
+    const pointsNeg: string[] = [];
+    const centerY = height / 2;
 
-    switch (action) {
-      case 'duplicate':
-        // Clone clip
-        const newClip = {
-          ...contextMenu.clip,
-          id: `clip-${Date.now()}`,
-          start: contextMenu.clip.start + contextMenu.clip.duration + 0.1
-        };
-        // Would need onAddClip callback
-        break;
-      case 'delete':
-        onUpdateClip(contextMenu.trackId, contextMenu.clip.id, { duration: 0 }); // Hack to delete
-        setSelectedClip(null);
-        break;
-      case 'mute':
-        onUpdateClip(contextMenu.trackId, contextMenu.clip.id, { isMuted: !contextMenu.clip.isMuted });
-        break;
-      case 'split':
-        // Would need split logic
-        break;
+    for (let i = 0; i < width; i++) {
+      const sampleIndex = offsetSamples + i * step;
+      if (sampleIndex >= samples) break;
+
+      let min = 1, max = -1;
+      for (let j = 0; j < step && sampleIndex + j < samples; j++) {
+        const sample = channelData[sampleIndex + j];
+        if (sample < min) min = sample;
+        if (sample > max) max = sample;
+      }
+
+      const y1 = centerY + max * centerY * 0.85;
+      const y2 = centerY + min * centerY * 0.85;
+      points.push(`${i},${y1}`);
+      pointsNeg.unshift(`${i},${y2}`);
     }
 
-    setContextMenu(null);
-  };
+    return (
+      <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id={`waveGrad-${clip.id}`} x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor={color} stopOpacity="0.8" />
+            <stop offset="50%" stopColor={color} stopOpacity="0.4" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.8" />
+          </linearGradient>
+        </defs>
+        <polygon
+          points={[...points, ...pointsNeg].join(' ')}
+          fill={`url(#waveGrad-${clip.id})`}
+        />
+        <line x1="0" y1={centerY} x2={width} y2={centerY} stroke={color} strokeOpacity="0.2" strokeWidth="1" />
+      </svg>
+    );
+  }, []);
+
+  // Tools config
+  const tools: { id: EditTool; icon: string; label: string }[] = [
+    { id: 'SELECT', icon: 'fa-arrow-pointer', label: 'Select' },
+    { id: 'TRIM', icon: 'fa-scissors', label: 'Trim' },
+    { id: 'SPLIT', icon: 'fa-cut', label: 'Split' },
+    { id: 'ERASE', icon: 'fa-eraser', label: 'Erase' },
+  ];
 
   return (
-    <MobileContainer title="Arrangement">
-      <div className="flex flex-col h-full bg-[#0c0d10]">
-        {/* Toolbar */}
-        <div className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-[#14161a] to-[#1a1c21] border-b border-cyan-500/20 shadow-lg">
-          {/* Zoom */}
+    <div className="flex flex-col h-full bg-[#0a0b0d] select-none">
+      {/* === TOP BAR - Mini Transport === */}
+      <div className="flex items-center h-12 px-3 bg-gradient-to-b from-[#1a1c21] to-[#14161a] border-b border-white/10 gap-2">
+        {/* Play/Stop */}
+        <div className="flex items-center gap-1">
           <button
-            onClick={() => setZoom(Math.max(10, zoom - 10))}
-            className="px-3 py-2 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/30 hover:to-blue-500/30 active:scale-95 transition-all text-xs font-bold border border-cyan-500/30"
+            onClick={onStop}
+            className="w-9 h-9 rounded-lg bg-white/5 hover:bg-white/10 active:bg-white/15 flex items-center justify-center transition-all"
           >
-            <i className="fas fa-minus"></i>
+            <i className="fas fa-stop text-white/70 text-sm"></i>
           </button>
-          <div className="flex-1 text-center">
-            <div className="text-xs text-cyan-400 font-bold">{zoom}px/s</div>
-          </div>
           <button
-            onClick={() => setZoom(Math.min(200, zoom + 10))}
-            className="px-3 py-2 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/30 hover:to-blue-500/30 active:scale-95 transition-all text-xs font-bold border border-cyan-500/30"
-          >
-            <i className="fas fa-plus"></i>
-          </button>
-
-          {/* Grid size */}
-          <select
-            value={gridSize}
-            onChange={(e) => setGridSize(Number(e.target.value))}
-            className="px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-[10px] font-bold text-cyan-400"
-          >
-            <option value={0.25}>1/4s</option>
-            <option value={0.5}>1/2s</option>
-            <option value={1}>1s</option>
-            <option value={2}>2s</option>
-          </select>
-
-          {/* Snap */}
-          <button
-            onClick={() => setSnapEnabled(!snapEnabled)}
-            className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
-              snapEnabled
-                ? 'bg-cyan-500/30 border-cyan-500/50 text-cyan-400'
-                : 'bg-white/5 border-white/10 text-slate-500'
+            onClick={onTogglePlay}
+            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+              isPlaying 
+                ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/30' 
+                : 'bg-white/5 hover:bg-white/10 text-white/70'
             }`}
           >
-            <i className="fas fa-magnet"></i>
+            <i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-sm`}></i>
           </button>
         </div>
 
-        {/* Selected clip info */}
-        {selectedClip && (
-          <div className="px-4 py-2 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-b border-cyan-500/30">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs font-bold text-cyan-400">{selectedClip.clip.name}</div>
-                <div className="text-[10px] text-slate-400">
-                  {selectedClip.clip.start.toFixed(2)}s · {selectedClip.clip.duration.toFixed(2)}s
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onTouchStart={handleLongPress}
-                  className="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-bold"
-                >
-                  <i className="fas fa-ellipsis-v"></i>
-                </button>
-                <button
-                  onClick={() => setSelectedClip(null)}
-                  className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center"
-                >
-                  <i className="fas fa-times text-[10px]"></i>
-                </button>
-              </div>
-            </div>
+        {/* Time Display */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="bg-black/40 rounded-lg px-3 py-1 border border-white/10">
+            <span className="text-cyan-400 font-mono text-sm font-bold tracking-wider">
+              {formatBarsBeat(currentTime)}
+            </span>
+            <span className="text-white/30 font-mono text-xs ml-2">
+              {currentTime.toFixed(1)}s
+            </span>
           </div>
-        )}
-
-        {/* Timeline canvas */}
-        <div
-          ref={containerRef}
-          className="flex-1 overflow-x-auto overflow-y-auto pb-20 relative"
-          style={{ maxHeight: 'calc(100vh - 200px)' }}
-        >
-          <canvas
-            ref={canvasRef}
-            width={canvasWidth}
-            height={totalHeight}
-            onTouchStart={handleCanvasTouchStart}
-            onTouchMove={handleCanvasTouchMove}
-            onTouchEnd={handleCanvasTouchEnd}
-            onMouseDown={handleCanvasTouchStart}
-            onMouseMove={handleCanvasTouchMove}
-            onMouseUp={handleCanvasTouchEnd}
-            className="cursor-pointer"
-            style={{ display: 'block', touchAction: 'none' }}
-          />
         </div>
 
-        {/* Context menu */}
-        {contextMenu && (
-          <div
-            className="fixed z-50 bg-[#1a1c21] border border-cyan-500/30 rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in duration-200"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
+        {/* BPM & Zoom */}
+        <div className="flex items-center gap-2">
+          <div className="text-[10px] font-bold text-white/50 bg-white/5 px-2 py-1 rounded">
+            {bpm} BPM
+          </div>
+          <button
+            onClick={() => setZoom(z => Math.max(MIN_ZOOM, z - 20))}
+            className="w-7 h-7 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
           >
-            <div className="p-2 space-y-1">
-              <button
-                onClick={() => handleContextMenuAction('duplicate')}
-                className="w-full px-4 py-3 text-left text-sm font-bold text-white hover:bg-cyan-500/20 rounded-xl flex items-center gap-3"
+            <i className="fas fa-minus text-white/50 text-[10px]"></i>
+          </button>
+          <button
+            onClick={() => setZoom(z => Math.min(MAX_ZOOM, z + 20))}
+            className="w-7 h-7 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
+          >
+            <i className="fas fa-plus text-white/50 text-[10px]"></i>
+          </button>
+        </div>
+      </div>
+
+      {/* === TOOL BAR === */}
+      <div className="flex items-center h-10 px-2 bg-[#0f1114] border-b border-white/5 gap-1">
+        {tools.map(tool => (
+          <button
+            key={tool.id}
+            onClick={() => setActiveTool(tool.id)}
+            className={`flex items-center gap-1.5 px-3 h-7 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all ${
+              activeTool === tool.id
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+                : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70'
+            }`}
+          >
+            <i className={`fas ${tool.icon}`}></i>
+            <span className="hidden sm:inline">{tool.label}</span>
+          </button>
+        ))}
+
+        <div className="flex-1" />
+
+        {/* Snap toggle */}
+        <button
+          onClick={() => setSnapToGrid(!snapToGrid)}
+          className={`flex items-center gap-1.5 px-3 h-7 rounded-md text-[10px] font-bold transition-all ${
+            snapToGrid
+              ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/40'
+              : 'bg-white/5 text-white/40'
+          }`}
+        >
+          <i className="fas fa-magnet"></i>
+          <span className="hidden sm:inline">Snap</span>
+        </button>
+
+        {/* Grid division */}
+        <select
+          value={gridDivision}
+          onChange={e => setGridDivision(Number(e.target.value))}
+          className="h-7 px-2 rounded-md bg-white/5 border border-white/10 text-[10px] font-bold text-white/70"
+        >
+          <option value={1}>1/4</option>
+          <option value={0.5}>1/8</option>
+          <option value={0.25}>1/16</option>
+          <option value={2}>1/2</option>
+          <option value={4}>1 Bar</option>
+        </select>
+      </div>
+
+      {/* === MAIN AREA === */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* === TRACK HEADERS (Fixed) === */}
+        <div className="flex-shrink-0 bg-[#0c0d10] border-r border-white/10 z-10" style={{ width: TRACK_HEADER_WIDTH }}>
+          {/* Timeline header spacer */}
+          <div 
+            className="flex items-center justify-center border-b border-white/10 bg-[#0f1114]"
+            style={{ height: TIMELINE_HEIGHT }}
+          >
+            <span className="text-[9px] font-bold text-white/30 uppercase">Tracks</span>
+          </div>
+
+          {/* Track headers */}
+          <div className="overflow-y-auto" style={{ height: `calc(100% - ${TIMELINE_HEIGHT}px)` }}>
+            {visibleTracks.map(track => (
+              <div
+                key={track.id}
+                onClick={() => onSelectTrack(track.id)}
+                className={`flex flex-col justify-center px-2 border-b border-white/5 cursor-pointer transition-all ${
+                  selectedTrackId === track.id
+                    ? 'bg-white/10'
+                    : 'bg-transparent hover:bg-white/5'
+                }`}
+                style={{ height: TRACK_HEIGHT }}
               >
-                <i className="fas fa-copy text-cyan-400 w-4"></i>
-                Dupliquer
-              </button>
-              <button
-                onClick={() => handleContextMenuAction('split')}
-                className="w-full px-4 py-3 text-left text-sm font-bold text-white hover:bg-cyan-500/20 rounded-xl flex items-center gap-3"
-              >
-                <i className="fas fa-scissors text-yellow-400 w-4"></i>
-                Couper
-              </button>
-              <button
-                onClick={() => handleContextMenuAction('mute')}
-                className="w-full px-4 py-3 text-left text-sm font-bold text-white hover:bg-cyan-500/20 rounded-xl flex items-center gap-3"
-              >
-                <i className={`fas fa-volume-${contextMenu.clip.isMuted ? 'up' : 'mute'} text-orange-400 w-4`}></i>
-                {contextMenu.clip.isMuted ? 'Activer' : 'Mute'}
-              </button>
-              <button
-                onClick={() => handleContextMenuAction('delete')}
-                className="w-full px-4 py-3 text-left text-sm font-bold text-red-400 hover:bg-red-500/20 rounded-xl flex items-center gap-3"
-              >
-                <i className="fas fa-trash w-4"></i>
-                Supprimer
-              </button>
-            </div>
-            <button
-              onClick={() => setContextMenu(null)}
-              className="w-full px-4 py-2 bg-white/5 text-xs font-bold text-slate-400 hover:bg-white/10"
+                {/* Track name */}
+                <div className="flex items-center gap-1.5 mb-1">
+                  <div 
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: track.color }}
+                  />
+                  <span className="text-[10px] font-bold text-white/90 truncate">
+                    {track.name}
+                  </span>
+                </div>
+
+                {/* Track controls M/S/R */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onUpdateTrack) onUpdateTrack({ ...track, isMuted: !track.isMuted });
+                    }}
+                    className={`w-6 h-5 rounded text-[8px] font-black transition-all ${
+                      track.isMuted
+                        ? 'bg-red-500 text-white'
+                        : 'bg-white/10 text-white/40 hover:bg-white/20'
+                    }`}
+                  >
+                    M
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onUpdateTrack) onUpdateTrack({ ...track, isSolo: !track.isSolo });
+                    }}
+                    className={`w-6 h-5 rounded text-[8px] font-black transition-all ${
+                      track.isSolo
+                        ? 'bg-yellow-500 text-black'
+                        : 'bg-white/10 text-white/40 hover:bg-white/20'
+                    }`}
+                  >
+                    S
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onUpdateTrack) onUpdateTrack({ ...track, isTrackArmed: !track.isTrackArmed });
+                    }}
+                    className={`w-6 h-5 rounded text-[8px] font-black transition-all ${
+                      track.isTrackArmed
+                        ? 'bg-red-600 text-white animate-pulse'
+                        : 'bg-white/10 text-white/40 hover:bg-white/20'
+                    }`}
+                  >
+                    R
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* === SCROLLABLE TIMELINE AREA === */}
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-auto"
+          onScroll={handleScroll}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onMouseMove={handleTouchMove}
+          onMouseUp={handleTouchEnd}
+          onMouseLeave={handleTouchEnd}
+          style={{ touchAction: 'pan-x pan-y' }}
+        >
+          <div style={{ width: totalWidth, minHeight: '100%' }}>
+            {/* === TIMELINE RULER === */}
+            <div
+              ref={timelineRef}
+              className="sticky top-0 z-20 bg-[#0f1114] border-b border-cyan-500/30 cursor-pointer"
+              style={{ height: TIMELINE_HEIGHT }}
+              onTouchStart={handleTimelineTap}
+              onMouseDown={handleTimelineTap}
             >
-              Annuler
-            </button>
-          </div>
-        )}
+              {/* Bar markers */}
+              {Array.from({ length: Math.ceil(totalBeats / 4) + 1 }, (_, bar) => {
+                const x = bar * 4 * zoom;
+                return (
+                  <React.Fragment key={bar}>
+                    {/* Bar line */}
+                    <div
+                      className="absolute top-0 bottom-0 border-l border-white/20"
+                      style={{ left: x }}
+                    />
+                    {/* Bar number */}
+                    <div
+                      className="absolute top-1 text-[10px] font-bold text-white/60"
+                      style={{ left: x + 4 }}
+                    >
+                      {bar + 1}
+                    </div>
+                    {/* Beat subdivisions */}
+                    {[1, 2, 3].map(beat => (
+                      <div
+                        key={beat}
+                        className="absolute bottom-0 border-l border-white/10"
+                        style={{ left: x + beat * zoom, height: 8 }}
+                      />
+                    ))}
+                  </React.Fragment>
+                );
+              })}
 
-        {/* Empty state */}
-        {visibleTracks.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pb-20 pointer-events-none">
-            <div className="text-center text-slate-500">
-              <i className="fas fa-waveform-lines text-5xl mb-4 opacity-20"></i>
-              <p className="font-bold">Aucune piste</p>
-              <p className="text-xs mt-2 opacity-70">Créez des pistes pour commencer</p>
+              {/* Playhead marker on ruler */}
+              <div
+                className="absolute top-0 bottom-0 w-0.5 bg-cyan-400 z-30"
+                style={{ left: timeToX(currentTime) }}
+              >
+                <div className="absolute -top-0 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-cyan-400" />
+              </div>
             </div>
-          </div>
-        )}
 
-        {/* Help overlay (first time) */}
-        <div className="absolute bottom-24 left-0 right-0 px-4 pointer-events-none">
-          <div className="bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/30 rounded-2xl p-4 backdrop-blur-sm">
-            <div className="text-[10px] text-cyan-400 font-bold uppercase tracking-wide mb-2">
-              <i className="fas fa-lightbulb mr-2"></i>Astuces
-            </div>
-            <div className="space-y-1 text-[10px] text-slate-300">
-              <div>• <span className="text-cyan-400">Pincer</span> pour zoomer</div>
-              <div>• <span className="text-cyan-400">Glisser</span> un clip pour le déplacer</div>
-              <div>• <span className="text-cyan-400">Bords</span> pour redimensionner</div>
-              <div>• <span className="text-cyan-400">Appui long</span> pour le menu</div>
+            {/* === TRACKS CONTENT === */}
+            <div className="relative">
+              {/* Grid lines */}
+              <div className="absolute inset-0 pointer-events-none">
+                {Array.from({ length: Math.ceil(totalBeats / 4) + 1 }, (_, bar) => (
+                  <div
+                    key={bar}
+                    className="absolute top-0 bottom-0 border-l border-white/5"
+                    style={{ left: bar * 4 * zoom }}
+                  />
+                ))}
+              </div>
+
+              {/* Playhead line */}
+              <div
+                className="absolute top-0 bottom-0 w-0.5 bg-cyan-400 z-20 pointer-events-none shadow-[0_0_8px_rgba(34,211,238,0.5)]"
+                style={{ left: timeToX(currentTime) }}
+              />
+
+              {/* Track rows */}
+              {visibleTracks.map((track, index) => (
+                <div
+                  key={track.id}
+                  className={`relative border-b border-white/5 ${
+                    index % 2 === 0 ? 'bg-[#0c0d10]' : 'bg-[#0e1013]'
+                  } ${selectedTrackId === track.id ? 'bg-white/5' : ''}`}
+                  style={{ height: TRACK_HEIGHT }}
+                  onClick={() => onSelectTrack(track.id)}
+                >
+                  {/* Clips */}
+                  {track.clips.map(clip => {
+                    const clipX = timeToX(clip.start);
+                    const clipWidth = Math.max(20, clip.duration * pixelsPerSecond);
+                    const isSelected = selectedClip?.clip.id === clip.id;
+                    const isDragging = dragState?.clip.id === clip.id;
+
+                    return (
+                      <div
+                        key={clip.id}
+                        className={`absolute top-1 bottom-1 rounded-md overflow-hidden cursor-pointer transition-shadow ${
+                          isSelected
+                            ? 'ring-2 ring-cyan-400 shadow-lg shadow-cyan-500/30'
+                            : 'ring-1 ring-white/20 hover:ring-white/40'
+                        } ${isDragging ? 'opacity-80 scale-[1.02]' : ''} ${
+                          clip.isMuted ? 'opacity-40' : ''
+                        }`}
+                        style={{
+                          left: clipX,
+                          width: clipWidth,
+                          backgroundColor: (clip.color || track.color) + '30',
+                        }}
+                        onTouchStart={(e) => handleClipTouchStart(e, track.id, clip)}
+                        onMouseDown={(e) => handleClipTouchStart(e, track.id, clip)}
+                      >
+                        {/* Waveform */}
+                        {renderWaveform(clip, clipWidth, TRACK_HEIGHT - 8, clip.color || track.color)}
+
+                        {/* Clip header */}
+                        <div 
+                          className="absolute top-0 left-0 right-0 h-4 px-1.5 flex items-center"
+                          style={{ backgroundColor: (clip.color || track.color) + '60' }}
+                        >
+                          <span className="text-[9px] font-bold text-white truncate drop-shadow">
+                            {clip.name}
+                          </span>
+                        </div>
+
+                        {/* Resize handles */}
+                        {isSelected && (
+                          <>
+                            <div className="absolute left-0 top-0 bottom-0 w-3 bg-cyan-400/50 cursor-ew-resize" />
+                            <div className="absolute right-0 top-0 bottom-0 w-3 bg-cyan-400/50 cursor-ew-resize" />
+                          </>
+                        )}
+
+                        {/* Muted overlay */}
+                        {clip.isMuted && (
+                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                            <i className="fas fa-volume-mute text-red-400 text-sm"></i>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Empty track hint */}
+                  {track.clips.length === 0 && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <span className="text-[10px] text-white/20 font-medium">Empty</span>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         </div>
       </div>
-    </MobileContainer>
+
+      {/* === SELECTED CLIP INFO BAR === */}
+      {selectedClip && (
+        <div className="h-12 px-3 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-t border-cyan-500/30 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div 
+              className="w-3 h-3 rounded"
+              style={{ backgroundColor: selectedClip.clip.color || '#22d3ee' }}
+            />
+            <div>
+              <div className="text-xs font-bold text-white">{selectedClip.clip.name}</div>
+              <div className="text-[10px] text-white/50">
+                {formatBarsBeat(selectedClip.clip.start)} · {selectedClip.clip.duration.toFixed(2)}s
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onUpdateClip?.(selectedClip.trackId, selectedClip.clip.id, { 
+                isMuted: !selectedClip.clip.isMuted 
+              })}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                selectedClip.clip.isMuted
+                  ? 'bg-red-500/20 text-red-400'
+                  : 'bg-white/10 text-white/50 hover:bg-white/20'
+              }`}
+            >
+              <i className={`fas ${selectedClip.clip.isMuted ? 'fa-volume-mute' : 'fa-volume-up'} text-sm`}></i>
+            </button>
+            <button
+              onClick={() => {
+                onDeleteClip?.(selectedClip.trackId, selectedClip.clip.id);
+                setSelectedClip(null);
+              }}
+              className="w-8 h-8 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center justify-center transition-all"
+            >
+              <i className="fas fa-trash text-sm"></i>
+            </button>
+            <button
+              onClick={() => setSelectedClip(null)}
+              className="w-8 h-8 rounded-lg bg-white/10 text-white/50 hover:bg-white/20 flex items-center justify-center transition-all"
+            >
+              <i className="fas fa-times text-sm"></i>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* === BOTTOM PADDING FOR NAV === */}
+      <div className="h-16 bg-[#0a0b0d]" />
+    </div>
   );
 };
 
