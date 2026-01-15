@@ -310,7 +310,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         if (isLoopActive && loopEnd > loopStart) {
             const loopStartX = loopStart * zoomH;
             const loopEndX = loopEnd * zoomH;
-            const hitZone = 10 * (zoomH / 40); // Scale hitzone with zoom
+            const hitZone = 20 * (zoomH / 40); // Scale hitzone with zoom (increased from 10 to 20 for better UX)
 
             if (Math.abs(x - loopStartX) < hitZone) { setLoopDragMode('START'); setInitialLoopState({ start: loopStart, end: loopEnd }); setDragStartX(x); return; }
             if (Math.abs(x - loopEndX) < hitZone) { setLoopDragMode('END'); setInitialLoopState({ start: loopStart, end: loopEnd }); setDragStartX(x); return; }

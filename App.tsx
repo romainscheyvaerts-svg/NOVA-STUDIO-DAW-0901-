@@ -215,7 +215,9 @@ const MobileBottomNav: React.FC<{ activeTab: MobileTab, onTabChange: (tab: Mobil
 const useUndoRedo = (initialState: DAWState) => {
   const [history, setHistory] = useState<{ past: DAWState[]; present: DAWState; future: DAWState[]; }>({ past: [], present: initialState, future: [] });
   const MAX_HISTORY = 100;
-  
+  const HISTORY_DEBOUNCE_MS = 300; // Debounce 300ms pour éviter trop d'entrées
+  const lastHistoryUpdateRef = useRef<number>(0);
+
   const cleanStateForHistory = (stateToClean: DAWState): DAWState => {
     return produce(stateToClean, draft => {
         draft.tracks.forEach(track => {
@@ -235,11 +237,25 @@ const useUndoRedo = (initialState: DAWState) => {
     setHistory(curr => {
       const newState = typeof updater === 'function' ? updater(curr.present) : updater;
       if (newState === curr.present) return curr;
+
+      // Skip history for time-only updates
       const isTimeUpdateOnly = newState.currentTime !== curr.present.currentTime && newState.tracks === curr.present.tracks && newState.isPlaying === curr.present.isPlaying;
       if (isTimeUpdateOnly) return { ...curr, present: newState };
-      
+
+      // Debounce rapid changes to prevent history pollution
+      const now = Date.now();
+      const timeSinceLastUpdate = now - lastHistoryUpdateRef.current;
+      const shouldDebounce = timeSinceLastUpdate < HISTORY_DEBOUNCE_MS;
+
+      if (shouldDebounce) {
+        // Update present without adding to history (rapid changes)
+        return { ...curr, present: newState };
+      }
+
+      // Add to history (debounced)
+      lastHistoryUpdateRef.current = now;
       const cleanedPresentForHistory = cleanStateForHistory(curr.present);
-      
+
       return { past: [...curr.past, cleanedPresentForHistory].slice(-MAX_HISTORY), present: newState, future: [] };
     });
   }, []);
