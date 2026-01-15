@@ -854,6 +854,10 @@ export default function App() {
     setState(prev => ({ ...prev, isDelayCompEnabled: !prev.isDelayCompEnabled }));
   }, [setState]);
 
+  const handleRequestAddPlugin = useCallback((trackId: string, x: number, y: number) => {
+    setAddPluginMenu({ trackId, x, y });
+  }, []);
+
   const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
       console.log('[handleUniversalAudioImport] Début import:', name);
       setExternalImportNotice(`Chargement: ${name}...`);
@@ -1146,7 +1150,7 @@ export default function App() {
                   selectedTrackId={state.selectedTrackId}
                   onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
                   onSeek={handleSeek}
-                  onUpdateClip={(trackId, clipId, updates) => handleClipAction(trackId, clipId, 'UPDATE', updates)}
+                  onUpdateClip={(trackId, clipId, updates) => handleEditClip(trackId, clipId, 'UPDATE_PROPS', updates)}
                   onSelectClip={(trackId, clip) => setState(p => ({ ...p, selectedTrackId: trackId }))}
                 />
               )}
