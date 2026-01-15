@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import MobileContainer from './MobileContainer';
 import { Track, Clip } from '../types';
 import TrackHeader from './TrackHeader';
+import { getValidDestinations, getRouteLabel } from './RoutingManager';
 
 interface MobileTracksPageProps {
   tracks: Track[];
@@ -94,6 +95,61 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                     </div>
                   ))
                 )}
+              </div>
+            </div>
+
+            {/* Section Routing/Connexions (I/O) */}
+            <div className="px-4 pb-3 border-t border-white/5 pt-3">
+              <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">
+                Connexions
+              </div>
+              <div className="space-y-2">
+                {/* INPUT - Uniquement pour la piste REC */}
+                {track.id === 'track-rec-main' && (
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-green-500/20 to-emerald-500/20 border border-green-500/30">
+                      <i className="fas fa-arrow-right text-green-400 text-sm"></i>
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-[10px] text-slate-500 mb-1 font-bold uppercase">Input</div>
+                      <select
+                        value={track.inputDeviceId || 'none'}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          onUpdateTrack({ ...track, inputDeviceId: e.target.value });
+                        }}
+                        className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-lg text-xs font-bold text-green-400 focus:border-green-500/50 focus:outline-none"
+                      >
+                        <option value="none">No Input</option>
+                        <option value="mic-default">Mic / Line 1</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {/* OUTPUT - Toutes les pistes */}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30">
+                    <i className="fas fa-arrow-left text-amber-400 text-sm"></i>
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[10px] text-slate-500 mb-1 font-bold uppercase">Output</div>
+                    <select
+                      value={track.outputTrackId || 'master'}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        onUpdateTrack({ ...track, outputTrackId: e.target.value });
+                      }}
+                      className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-lg text-xs font-bold text-amber-400 focus:border-amber-500/50 focus:outline-none"
+                    >
+                      {getValidDestinations(track.id, tracks).map(dest => (
+                        <option key={dest.id} value={dest.id}>
+                          {dest.id === 'master' ? 'STEREO OUT (MASTER)' : dest.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
             </div>
 
