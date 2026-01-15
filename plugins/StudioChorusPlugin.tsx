@@ -118,6 +118,20 @@ export class ChorusNode {
   public getStatus() {
     return { ...this.params };
   }
+
+  public dispose() {
+    // CRITICAL: Stop all LFO oscillators to prevent memory leak
+    this.voices.forEach(voice => {
+      try {
+        if (voice.lfo) {
+          voice.lfo.stop();
+          voice.lfo.disconnect();
+        }
+      } catch (e) {
+        // Oscillator may already be stopped
+      }
+    });
+  }
 }
 
 const ChorusKnob: React.FC<{ 

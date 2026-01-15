@@ -180,6 +180,18 @@ export class SyncDelayNode {
     }
   }
 
+  public dispose() {
+    // CRITICAL: Stop oscillator to prevent memory leak
+    try {
+      if (this.driftLFO) {
+        this.driftLFO.stop();
+        this.driftLFO.disconnect();
+      }
+    } catch (e) {
+      // Oscillator may already be stopped
+    }
+  }
+
   public getParams() { return this.params; }
 }
 

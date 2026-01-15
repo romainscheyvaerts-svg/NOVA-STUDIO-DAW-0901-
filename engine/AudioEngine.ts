@@ -363,6 +363,7 @@ export class AudioEngine {
           this.audioChunks = [];
           this.recordingTrackId = null;
           this.recStartTime = 0;
+          this.mediaRecorder = null; // CRITICAL: Reset MediaRecorder pour permettre un nouvel enregistrement
         }
       };
       this.mediaRecorder.stop();
