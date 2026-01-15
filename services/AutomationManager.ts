@@ -1,5 +1,5 @@
 
-import { AutomationPoint } from '../types';
+import { AutomationPoint, AutomationCurveType } from '../types';
 
 /**
  * AUTOMATION MANAGER (Observer Pattern)
@@ -7,6 +7,11 @@ import { AutomationPoint } from '../types';
  * Orchestre l'enregistrement et la lecture des automations pour:
  * 1. WebAudio (Natif) -> Haute fréquence (Sample accurate-ish)
  * 2. VST (Bridge Python) -> Basse fréquence (Throttled ~30ms)
+ * 
+ * INSPIRED BY: Reaper, Ableton Live, Logic Pro automation systems
+ * - Support for multiple curve types (LINEAR, EXPONENTIAL, S_CURVE, etc.)
+ * - Touch/Latch/Write modes
+ * - Automation snapshots
  */
 
 type ParamCallback = (value: number) => void;
@@ -20,7 +25,42 @@ interface RegisteredParam {
   lastUpdate: number; // Pour le throttling
 }
 
-export type AutomationMode = 'OFF' | 'READ' | 'WRITE' | 'LATCH';
+export type AutomationMode = 'OFF' | 'READ' | 'WRITE' | 'TOUCH' | 'LATCH';
+
+/**
+ * Curve interpolation functions (inspired by Ableton/Logic)
+ */
+const interpolateCurve = (
+  v1: number, 
+  v2: number, 
+  t: number, 
+  curveType: AutomationCurveType = 'LINEAR'
+): number => {
+  switch (curveType) {
+    case 'LINEAR':
+      return v1 + (v2 - v1) * t;
+      
+    case 'EXPONENTIAL':
+      // Fast start, slow end
+      return v1 + (v2 - v1) * (1 - Math.pow(1 - t, 3));
+      
+    case 'LOGARITHMIC':
+      // Slow start, fast end
+      return v1 + (v2 - v1) * Math.pow(t, 3);
+      
+    case 'S_CURVE':
+      // Smooth S-curve (slow-fast-slow)
+      const s = t * t * (3 - 2 * t); // Hermite interpolation
+      return v1 + (v2 - v1) * s;
+      
+    case 'HOLD':
+      // Step/hold - no interpolation
+      return t < 1 ? v1 : v2;
+      
+    default:
+      return v1 + (v2 - v1) * t;
+  }
+};
 
 class AutomationManager {
   private static instance: AutomationManager;
@@ -190,11 +230,72 @@ class AutomationManager {
 
       if (time >= p1.time && time < p2.time) {
         const ratio = (time - p1.time) / (p2.time - p1.time);
-        // Interpolation Linéaire
-        return p1.value + (p2.value - p1.value) * ratio;
+        // Use curve type from the point (or default to LINEAR)
+        const curveType = p1.curveType || 'LINEAR';
+        return interpolateCurve(p1.value, p2.value, ratio, curveType);
       }
     }
     return null;
+  }
+  
+  /**
+   * Create automation snapshot - capture current values (inspired by Pro Tools)
+   */
+  public takeSnapshot(): Record<string, number> {
+    const snapshot: Record<string, number> = {};
+    this.registry.forEach((param, id) => {
+      const points = this.automationData.get(id);
+      if (points && points.length > 0) {
+        snapshot[id] = points[points.length - 1].value;
+      } else {
+        snapshot[id] = param.defaultValue;
+      }
+    });
+    return snapshot;
+  }
+  
+  /**
+   * Apply automation snapshot
+   */
+  public applySnapshot(snapshot: Record<string, number>, time: number) {
+    Object.entries(snapshot).forEach(([paramId, value]) => {
+      this.addPoint(paramId, time, value);
+    });
+  }
+  
+  /**
+   * Clear all automation for a parameter
+   */
+  public clearAutomation(paramId: string) {
+    this.automationData.delete(paramId);
+  }
+  
+  /**
+   * Thin automation points (reduce density while preserving shape)
+   * Inspired by Pro Tools "Thin Automation" feature
+   */
+  public thinAutomation(paramId: string, threshold: number = 0.01) {
+    const points = this.automationData.get(paramId);
+    if (!points || points.length < 3) return;
+    
+    const thinned: AutomationPoint[] = [points[0]];
+    
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = thinned[thinned.length - 1];
+      const curr = points[i];
+      const next = points[i + 1];
+      
+      // Check if current point is significantly different from interpolated value
+      const expectedValue = prev.value + (next.value - prev.value) * 
+        ((curr.time - prev.time) / (next.time - prev.time));
+      
+      if (Math.abs(curr.value - expectedValue) > threshold * (Math.abs(next.value - prev.value) + 0.001)) {
+        thinned.push(curr);
+      }
+    }
+    
+    thinned.push(points[points.length - 1]);
+    this.automationData.set(paramId, thinned);
   }
 
   // Système simple pour notifier l'UI sans re-render React complet

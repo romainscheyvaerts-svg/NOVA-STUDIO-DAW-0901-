@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint } from '../types';
+import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint, Marker } from '../types';
 import TrackHeader from './TrackHeader';
 import ContextMenu from './ContextMenu';
 import TimelineGridMenu from './TimelineGridMenu'; 
@@ -21,6 +21,12 @@ interface ArrangementViewProps {
   onSetLoop: (start: number, end: number) => void;
   onSeek: (time: number) => void;
   bpm: number;
+  // NEW: Markers support (inspired by Pro Tools/Reaper)
+  markers?: Marker[];
+  onAddMarker?: (time: number, name?: string) => void;
+  onUpdateMarker?: (marker: Marker) => void;
+  onDeleteMarker?: (markerId: string) => void;
+  // Plugins
   onDropPluginOnTrack: (trackId: string, type: PluginType, metadata?: any) => void;
   onMovePlugin?: (sourceTrackId: string, destTrackId: string, pluginId: string) => void;
   onMoveClip?: (sourceTrackId: string, destTrackId: string, clipId: string) => void;
@@ -58,6 +64,7 @@ const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: bo
 const ArrangementView: React.FC<ArrangementViewProps> = ({ 
   tracks, selectedTrackId, onSelectTrack, onUpdateTrack, onReorderTracks, currentTime, 
   isLoopActive, loopStart, loopEnd, onSetLoop, onSeek, bpm, 
+  markers = [], onAddMarker, onUpdateMarker, onDeleteMarker,
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip, isRecording, recStartTime,
   onCreatePattern, onSwapInstrument, onEditMidi, onAudioDrop
@@ -84,6 +91,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: (ContextMenuItem | 'separator')[] } | null>(null);
   const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
+  const [markerContextMenu, setMarkerContextMenu] = useState<{ x: number; y: number; marker: Marker } | null>(null);
+  const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
 
   const [headerWidth, setHeaderWidth] = useState(256);
   const [isResizingHeader, setIsResizingHeader] = useState(false);
@@ -571,6 +580,52 @@ const drawTimeline = useCallback(() => {
         const x = timeToPixels(time) - scrollX;
         if (x >= -50) ctx.fillText((i+1).toString(), x + 4, 24);
     }
+    
+    // Draw Markers (inspired by Pro Tools/Reaper)
+    markers.forEach(marker => {
+        const markerX = timeToPixels(marker.time) - scrollX;
+        
+        if (markerX >= -20 && markerX <= w + 20) {
+            if (marker.type === 'REGION' && marker.endTime) {
+                // Region marker (like Pro Tools Memory Locations)
+                const endX = timeToPixels(marker.endTime) - scrollX;
+                ctx.fillStyle = marker.color + '22';
+                ctx.fillRect(markerX, 0, endX - markerX, 40);
+                ctx.strokeStyle = marker.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(markerX, 0); ctx.lineTo(markerX, 40);
+                ctx.moveTo(endX, 0); ctx.lineTo(endX, 40);
+                ctx.stroke();
+            }
+            
+            // Marker flag
+            ctx.fillStyle = marker.color;
+            ctx.beginPath();
+            ctx.moveTo(markerX, 0);
+            ctx.lineTo(markerX + 12, 0);
+            ctx.lineTo(markerX + 12, 8);
+            ctx.lineTo(markerX + 6, 12);
+            ctx.lineTo(markerX, 8);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Marker line
+            ctx.strokeStyle = marker.color;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(markerX, 12);
+            ctx.lineTo(markerX, h);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Marker name
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 8px Inter';
+            ctx.fillText(marker.name, markerX + 14, 10);
+        }
+    });
 
     const phX = timeToPixels(currentTime) - scrollX;
     if (phX >= 0 && phX <= w) {
@@ -580,7 +635,7 @@ const drawTimeline = useCallback(() => {
       ctx.fillStyle = isRecording ? '#ef4444' : '#00f2ff';
       ctx.beginPath(); ctx.moveTo(phX-5, 0); ctx.lineTo(phX+5, 0); ctx.lineTo(phX, 10); ctx.fill();
     }
-}, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, gridSize, scrollLeft, onEditClip, onSelectTrack]);
+}, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, gridSize, scrollLeft, onEditClip, onSelectTrack, markers]);
 
 useEffect(() => {
     requestRef.current = requestAnimationFrame(drawTimeline);
@@ -682,6 +737,24 @@ useEffect(() => {
                 { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
                 { label: 'separator' },
                 { label: 'Supprimer', icon: 'fa-trash', shortcut: 'Suppr', danger: true, onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DELETE'); setClipContextMenu(null); }}
+            ]}
+        />
+    )}
+    {/* Marker Context Menu (inspired by Pro Tools) */}
+    {markerContextMenu && (
+        <ContextMenu
+            x={markerContextMenu.x} y={markerContextMenu.y} onClose={() => setMarkerContextMenu(null)}
+            items={[
+                { label: 'Go to Marker', icon: 'fa-crosshairs', onClick: () => { onSeek(markerContextMenu.marker.time); setMarkerContextMenu(null); }},
+                { label: 'Rename', icon: 'fa-pen', onClick: () => { setEditingMarkerId(markerContextMenu.marker.id); setMarkerContextMenu(null); }},
+                { label: 'Change Color', icon: 'fa-palette', onClick: () => { 
+                    const colors = ['#f59e0b', '#10b981', '#3b82f6', '#ef4444', '#8b5cf6', '#ec4899'];
+                    const nextColor = colors[(colors.indexOf(markerContextMenu.marker.color) + 1) % colors.length];
+                    onUpdateMarker?.({ ...markerContextMenu.marker, color: nextColor });
+                    setMarkerContextMenu(null);
+                }},
+                { label: 'separator' },
+                { label: 'Delete Marker', icon: 'fa-trash', danger: true, onClick: () => { onDeleteMarker?.(markerContextMenu.marker.id); setMarkerContextMenu(null); }}
             ]}
         />
     )}

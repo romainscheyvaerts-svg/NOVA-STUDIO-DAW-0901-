@@ -1,6 +1,30 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { AutomationLane as IAutomationLane, AutomationPoint } from '../types';
+import { AutomationLane as IAutomationLane, AutomationPoint, AutomationCurveType } from '../types';
+
+// Curve interpolation for rendering (same as AutomationManager)
+const interpolateCurve = (
+  v1: number, 
+  v2: number, 
+  t: number, 
+  curveType: AutomationCurveType = 'LINEAR'
+): number => {
+  switch (curveType) {
+    case 'LINEAR':
+      return v1 + (v2 - v1) * t;
+    case 'EXPONENTIAL':
+      return v1 + (v2 - v1) * (1 - Math.pow(1 - t, 3));
+    case 'LOGARITHMIC':
+      return v1 + (v2 - v1) * Math.pow(t, 3);
+    case 'S_CURVE':
+      const s = t * t * (3 - 2 * t);
+      return v1 + (v2 - v1) * s;
+    case 'HOLD':
+      return t < 1 ? v1 : v2;
+    default:
+      return v1 + (v2 - v1) * t;
+  }
+};
 
 interface AutomationLaneProps {
   trackId: string;
@@ -22,12 +46,23 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
   // État local pour le drag
   const [draggingPointId, setDraggingPointId] = useState<string | null>(null);
   const [hoveredPointId, setHoveredPointId] = useState<string | null>(null);
+  const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
+  const [showCurveMenu, setShowCurveMenu] = useState<{ x: number, y: number } | null>(null);
   
   // Constantes visuelles "Haute Visibilité"
   const POINT_RADIUS = 6; 
   const POINT_HIT_RADIUS = 12;
   const LANE_HEIGHT = 80;
   const LINE_WIDTH = 3;
+  
+  // Curve type icons/labels
+  const CURVE_TYPES: { type: AutomationCurveType; label: string; icon: string }[] = [
+    { type: 'LINEAR', label: 'Linear', icon: '/' },
+    { type: 'EXPONENTIAL', label: 'Exponential', icon: '⌒' },
+    { type: 'LOGARITHMIC', label: 'Logarithmic', icon: '⌓' },
+    { type: 'S_CURVE', label: 'S-Curve', icon: '∿' },
+    { type: 'HOLD', label: 'Hold/Step', icon: '⌐' },
+  ];
 
   // --- HELPERS DE CONVERSION ---
   const timeToX = (time: number) => time * zoomH;
@@ -126,8 +161,7 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
     ctx.fillStyle = `${lineColor}33`; // 20% opacité
     ctx.fill();
 
-    // 2. Dessin de la LIGNE (Curve) - Haute Visibilité
-    ctx.beginPath();
+    // 2. Dessin de la LIGNE (Curve) - Haute Visibilité avec support des courbes
     ctx.strokeStyle = lineColor;
     ctx.lineWidth = LINE_WIDTH;
     ctx.lineJoin = 'round';
@@ -139,12 +173,38 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
         ctx.shadowColor = lineColor;
     }
 
-    // Premier segment (t=0 au premier point)
+    // Draw each segment with its curve type
+    ctx.beginPath();
     ctx.moveTo(0, valToY(sortedPoints[0].value));
+    ctx.lineTo(timeToX(sortedPoints[0].time), valToY(sortedPoints[0].value));
     
-    sortedPoints.forEach(p => {
-      ctx.lineTo(timeToX(p.time), valToY(p.value));
-    });
+    for (let i = 0; i < sortedPoints.length - 1; i++) {
+      const p1 = sortedPoints[i];
+      const p2 = sortedPoints[i + 1];
+      const curveType = p1.curveType || 'LINEAR';
+      
+      const x1 = timeToX(p1.time);
+      const x2 = timeToX(p2.time);
+      const y1 = valToY(p1.value);
+      const y2 = valToY(p2.value);
+      
+      if (curveType === 'LINEAR') {
+        ctx.lineTo(x2, y2);
+      } else if (curveType === 'HOLD') {
+        // Step function
+        ctx.lineTo(x2, y1);
+        ctx.lineTo(x2, y2);
+      } else {
+        // Draw curved segment with multiple points
+        const steps = Math.max(10, Math.floor((x2 - x1) / 3));
+        for (let j = 1; j <= steps; j++) {
+          const t = j / steps;
+          const interpValue = interpolateCurve(p1.value, p2.value, t, curveType);
+          const interpX = x1 + (x2 - x1) * t;
+          ctx.lineTo(interpX, valToY(interpValue));
+        }
+      }
+    }
     
     // Dernier segment (dernier point à infini)
     ctx.lineTo(canvas.width, valToY(lastPoint.value));
@@ -212,7 +272,16 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
 
     const existingPoint = getPointAtPos(x, y);
 
+    // Right-click for curve type menu (inspired by Logic Pro)
+    if (e.button === 2 && existingPoint) {
+      e.preventDefault();
+      setSelectedPointId(existingPoint.id);
+      setShowCurveMenu({ x: e.clientX, y: e.clientY });
+      return;
+    }
+
     if (existingPoint) {
+      setSelectedPointId(existingPoint.id);
       setDraggingPointId(existingPoint.id);
     } else {
       const newValue = yToVal(y);
@@ -221,13 +290,26 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
       const newPoint: AutomationPoint = {
         id: `pt-${Date.now()}`,
         time: newTime,
-        value: newValue
+        value: newValue,
+        curveType: 'LINEAR' // Default curve type
       };
       
       const newPoints = [...lane.points, newPoint].sort((a, b) => a.time - b.time);
       onUpdatePoints(newPoints);
       setDraggingPointId(newPoint.id);
+      setSelectedPointId(newPoint.id);
     }
+  };
+  
+  // Handle curve type change
+  const handleCurveTypeChange = (curveType: AutomationCurveType) => {
+    if (!selectedPointId) return;
+    
+    const updatedPoints = lane.points.map(p => 
+      p.id === selectedPointId ? { ...p, curveType } : p
+    );
+    onUpdatePoints(updatedPoints);
+    setShowCurveMenu(null);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -320,6 +402,7 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
           backgroundColor: 'var(--bg-main)', // Use CSS var instead of hardcoded hex
           borderColor: 'var(--border-dim)' 
       }}
+      onContextMenu={(e) => e.preventDefault()}
     >
       <canvas
         ref={canvasRef}
@@ -332,6 +415,34 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
         onDoubleClick={handleDoubleClick}
         className="absolute top-0 left-0"
       />
+      
+      {/* Curve Type Menu (inspired by Logic Pro/Ableton) */}
+      {showCurveMenu && (
+        <div 
+          className="fixed z-[200] bg-[#1a1c22] border border-white/20 rounded-lg shadow-2xl p-1 min-w-[140px]"
+          style={{ left: showCurveMenu.x, top: showCurveMenu.y }}
+          onMouseLeave={() => setShowCurveMenu(null)}
+        >
+          <div className="text-[8px] text-slate-500 uppercase font-black px-2 py-1 border-b border-white/10 mb-1">
+            Curve Type
+          </div>
+          {CURVE_TYPES.map(({ type, label, icon }) => {
+            const currentPoint = lane.points.find(p => p.id === selectedPointId);
+            const isActive = currentPoint?.curveType === type || (!currentPoint?.curveType && type === 'LINEAR');
+            
+            return (
+              <button
+                key={type}
+                onClick={() => handleCurveTypeChange(type)}
+                className={`w-full px-2 py-1.5 text-left flex items-center space-x-2 rounded transition-all ${isActive ? 'bg-cyan-500 text-black' : 'hover:bg-white/10 text-white'}`}
+              >
+                <span className="w-5 text-center font-mono text-sm">{icon}</span>
+                <span className="text-[10px] font-bold">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

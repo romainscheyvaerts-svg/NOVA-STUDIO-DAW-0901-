@@ -1,9 +1,16 @@
 
-import React, { useRef, useEffect, useState } from 'react';
-import { Track, TrackType, PluginInstance, TrackSend, PluginType } from '../types';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { SmartKnob } from './SmartKnob';
 import { getValidDestinations, getRouteLabel } from './RoutingManager';
+
+// Track Group Colors (inspired by Pro Tools)
+const GROUP_COLORS = [
+  '#ef4444', '#f97316', '#f59e0b', '#84cc16', 
+  '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6',
+  '#6366f1', '#8b5cf6', '#a855f7', '#ec4899'
+];
 
 const VUMeter: React.FC<{ analyzer: AnalyserNode | null }> = ({ analyzer }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -280,6 +287,107 @@ const ChannelStrip: React.FC<{
   );
 };
 
+// Track Group Header Panel (inspired by Pro Tools/Reaper)
+const TrackGroupHeader: React.FC<{
+  group: TrackGroup;
+  tracks: Track[];
+  onUpdate: (group: TrackGroup) => void;
+  onDelete: () => void;
+  onToggleCollapse: () => void;
+}> = ({ group, tracks, onUpdate, onDelete, onToggleCollapse }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [tempName, setTempName] = useState(group.name);
+  
+  const groupTracks = tracks.filter(t => group.trackIds.includes(t.id));
+  const isAnyMuted = groupTracks.some(t => t.isMuted);
+  const isAnySoloed = groupTracks.some(t => t.isSolo);
+  
+  return (
+    <div 
+      className="flex-shrink-0 w-10 flex flex-col h-full border-r transition-all"
+      style={{ 
+        backgroundColor: group.color + '15', 
+        borderColor: group.color + '40' 
+      }}
+    >
+      {/* Group Header */}
+      <div 
+        className="h-8 flex items-center justify-center cursor-pointer border-b"
+        style={{ backgroundColor: group.color, borderColor: group.color }}
+        onClick={onToggleCollapse}
+        title={group.isCollapsed ? 'Expand Group' : 'Collapse Group'}
+      >
+        <i className={`fas ${group.isCollapsed ? 'fa-chevron-right' : 'fa-chevron-down'} text-[10px] text-black`}></i>
+      </div>
+      
+      {/* Group Name (Vertical) */}
+      <div className="flex-1 flex items-center justify-center py-2">
+        {isEditing ? (
+          <input
+            value={tempName}
+            onChange={(e) => setTempName(e.target.value)}
+            onBlur={() => { onUpdate({ ...group, name: tempName }); setIsEditing(false); }}
+            onKeyDown={(e) => e.key === 'Enter' && (onUpdate({ ...group, name: tempName }), setIsEditing(false))}
+            className="w-full h-6 bg-black/50 border-none text-[9px] font-bold text-center text-white outline-none"
+            autoFocus
+          />
+        ) : (
+          <span 
+            className="writing-vertical rotate-180 text-[9px] font-black uppercase tracking-wider cursor-pointer"
+            style={{ color: group.color }}
+            onClick={() => setIsEditing(true)}
+          >
+            {group.name}
+          </span>
+        )}
+      </div>
+      
+      {/* Group Controls */}
+      <div className="space-y-1 p-1 border-t" style={{ borderColor: group.color + '40' }}>
+        {/* Linked Mute */}
+        <button
+          onClick={() => onUpdate({ ...group, linkedMute: !group.linkedMute })}
+          className={`w-full h-6 rounded text-[8px] font-black ${group.linkedMute ? 'text-black' : 'text-slate-600'}`}
+          style={{ backgroundColor: group.linkedMute ? group.color : 'transparent' }}
+          title="Link Mute"
+        >
+          M
+        </button>
+        
+        {/* Linked Solo */}
+        <button
+          onClick={() => onUpdate({ ...group, linkedSolo: !group.linkedSolo })}
+          className={`w-full h-6 rounded text-[8px] font-black ${group.linkedSolo ? 'text-black' : 'text-slate-600'}`}
+          style={{ backgroundColor: group.linkedSolo ? group.color : 'transparent' }}
+          title="Link Solo"
+        >
+          S
+        </button>
+        
+        {/* Linked Volume */}
+        <button
+          onClick={() => onUpdate({ ...group, linkedVolume: !group.linkedVolume })}
+          className={`w-full h-6 rounded text-[8px] font-black ${group.linkedVolume ? 'text-black' : 'text-slate-600'}`}
+          style={{ backgroundColor: group.linkedVolume ? group.color : 'transparent' }}
+          title="Link Volume"
+        >
+          V
+        </button>
+      </div>
+      
+      {/* Delete Group */}
+      <button
+        onClick={onDelete}
+        className="h-8 flex items-center justify-center text-slate-600 hover:text-red-500 transition-colors border-t"
+        style={{ borderColor: group.color + '40' }}
+        title="Delete Group"
+      >
+        <i className="fas fa-times text-[10px]"></i>
+      </button>
+    </div>
+  );
+};
+
 const MixerView: React.FC<{ 
   tracks: Track[], 
   onUpdateTrack: (t: Track) => void, 
@@ -288,25 +396,181 @@ const MixerView: React.FC<{
   onRemovePlugin?: (tid: string, pid: string) => void, 
   onDropPluginOnTrack?: (tid: string, type: PluginType, metadata?: any) => void, 
   onRequestAddPlugin?: (tid: string, x: number, y: number) => void,
-  onAddBus?: () => void
-}> = ({ tracks, onUpdateTrack, onOpenPlugin, onToggleBypass, onRemovePlugin, onDropPluginOnTrack, onRequestAddPlugin, onAddBus }) => {
+  onAddBus?: () => void,
+  // NEW: Track Groups (inspired by Pro Tools/Reaper)
+  trackGroups?: TrackGroup[],
+  onCreateGroup?: (trackIds: string[]) => void,
+  onUpdateGroup?: (group: TrackGroup) => void,
+  onDeleteGroup?: (groupId: string) => void
+}> = ({ 
+  tracks, onUpdateTrack, onOpenPlugin, onToggleBypass, onRemovePlugin, 
+  onDropPluginOnTrack, onRequestAddPlugin, onAddBus,
+  trackGroups = [], onCreateGroup, onUpdateGroup, onDeleteGroup
+}) => {
   const audioTracks = tracks.filter(t => t.type === TrackType.AUDIO || t.type === TrackType.SAMPLER || t.type === TrackType.MIDI);
   const busTracks = tracks.filter(t => t.type === TrackType.BUS && t.id !== 'master');
   const sendTracks = tracks.filter(t => t.type === TrackType.SEND);
   const masterTrack = tracks.find(t => t.id === 'master');
 
+  // Get selected tracks for grouping
+  const [selectedForGroup, setSelectedForGroup] = useState<Set<string>>(new Set());
+  const [showGroupMenu, setShowGroupMenu] = useState(false);
+  
+  // Handle linked group actions
+  const handleGroupedTrackUpdate = useCallback((track: Track, update: Partial<Track>) => {
+    const trackGroup = trackGroups.find(g => g.trackIds.includes(track.id));
+    
+    if (trackGroup) {
+      // Apply linked updates to all tracks in group
+      if (trackGroup.linkedVolume && 'volume' in update) {
+        const volumeRatio = (update.volume || 0) / track.volume;
+        trackGroup.trackIds.forEach(tid => {
+          const t = tracks.find(tr => tr.id === tid);
+          if (t) onUpdateTrack({ ...t, volume: Math.min(1.5, t.volume * volumeRatio) });
+        });
+        return;
+      }
+      if (trackGroup.linkedMute && 'isMuted' in update) {
+        trackGroup.trackIds.forEach(tid => {
+          const t = tracks.find(tr => tr.id === tid);
+          if (t) onUpdateTrack({ ...t, isMuted: update.isMuted! });
+        });
+        return;
+      }
+      if (trackGroup.linkedSolo && 'isSolo' in update) {
+        trackGroup.trackIds.forEach(tid => {
+          const t = tracks.find(tr => tr.id === tid);
+          if (t) onUpdateTrack({ ...t, isSolo: update.isSolo! });
+        });
+        return;
+      }
+    }
+    
+    // Default: just update the single track
+    onUpdateTrack({ ...track, ...update });
+  }, [trackGroups, tracks, onUpdateTrack]);
+  
   return (
     <div className="flex-1 flex overflow-x-auto bg-[#08090b] custom-scroll h-full snap-x snap-mandatory">
-      {audioTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} /></div>)}
+      {/* Track Groups Panel (inspired by Pro Tools) */}
+      {trackGroups.length > 0 && (
+        <div className="flex border-r border-white/10 bg-black/20">
+          {trackGroups.map(group => (
+            <TrackGroupHeader
+              key={group.id}
+              group={group}
+              tracks={tracks}
+              onUpdate={(g) => onUpdateGroup?.(g)}
+              onDelete={() => onDeleteGroup?.(group.id)}
+              onToggleCollapse={() => onUpdateGroup?.({ ...group, isCollapsed: !group.isCollapsed })}
+            />
+          ))}
+        </div>
+      )}
       
-      <div className="flex flex-col items-center justify-center px-2 border-r border-white/5 min-w-[60px] space-y-4">
-         <button onClick={onAddBus} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group">
+      {audioTracks.map(t => {
+        const trackGroup = trackGroups.find(g => g.trackIds.includes(t.id));
+        if (trackGroup?.isCollapsed) return null; // Hide if group is collapsed
+        
+        return (
+          <div key={t.id} className="snap-start relative">
+            {/* Group color indicator */}
+            {trackGroup && (
+              <div 
+                className="absolute top-0 left-0 w-1 h-full z-10"
+                style={{ backgroundColor: trackGroup.color }}
+              />
+            )}
+            <ChannelStrip 
+              track={t} 
+              allTracks={tracks} 
+              onUpdate={(updatedTrack) => handleGroupedTrackUpdate(t, updatedTrack)} 
+              onOpenPlugin={onOpenPlugin} 
+              onToggleBypass={onToggleBypass} 
+              onRemovePlugin={onRemovePlugin} 
+              onDropPlugin={onDropPluginOnTrack} 
+              onRequestAddPlugin={onRequestAddPlugin} 
+            />
+          </div>
+        );
+      })}
+      
+      {/* ADD BUS / CREATE GROUP Section */}
+      <div className="flex flex-col items-center justify-center px-2 border-r border-white/5 min-w-[60px] space-y-3">
+         <button onClick={onAddBus} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group" title="Add Bus Track">
             <i className="fas fa-plus group-hover:scale-125 transition-transform"></i>
          </button>
          <span className="text-[8px] font-black text-amber-600 uppercase writing-vertical rotate-180">ADD BUS</span>
+         
+         {/* Create Group Button (inspired by Pro Tools) */}
+         {onCreateGroup && (
+           <>
+             <div className="w-8 h-px bg-white/10 my-1"></div>
+             <button 
+               onClick={() => setShowGroupMenu(!showGroupMenu)}
+               className="w-10 h-10 rounded-xl border border-dashed border-purple-500/30 text-purple-400 hover:bg-purple-500/10 flex items-center justify-center transition-all relative"
+               title="Create Track Group"
+             >
+               <i className="fas fa-layer-group text-[11px]"></i>
+             </button>
+             <span className="text-[7px] font-black text-purple-500 uppercase writing-vertical rotate-180">GROUP</span>
+             
+             {/* Group Creation Menu */}
+             {showGroupMenu && (
+               <div className="absolute left-16 bottom-20 bg-[#1a1c22] border border-white/20 rounded-xl shadow-2xl z-[100] p-3 w-64">
+                 <div className="text-[10px] font-black uppercase text-slate-400 mb-3">Create Track Group</div>
+                 
+                 <div className="space-y-2 max-h-40 overflow-y-auto mb-3">
+                   {audioTracks.map(t => (
+                     <label 
+                       key={t.id}
+                       className={`flex items-center space-x-2 p-2 rounded cursor-pointer transition-all ${selectedForGroup.has(t.id) ? 'bg-purple-500/20' : 'hover:bg-white/5'}`}
+                     >
+                       <input
+                         type="checkbox"
+                         checked={selectedForGroup.has(t.id)}
+                         onChange={(e) => {
+                           const newSet = new Set(selectedForGroup);
+                           if (e.target.checked) newSet.add(t.id);
+                           else newSet.delete(t.id);
+                           setSelectedForGroup(newSet);
+                         }}
+                         className="accent-purple-500"
+                       />
+                       <div className="w-2 h-2 rounded-full" style={{ backgroundColor: t.color }}></div>
+                       <span className="text-[10px] font-bold text-white truncate">{t.name}</span>
+                     </label>
+                   ))}
+                 </div>
+                 
+                 <div className="flex space-x-2">
+                   <button
+                     onClick={() => setShowGroupMenu(false)}
+                     className="flex-1 py-2 rounded bg-white/5 text-slate-400 text-[10px] font-bold"
+                   >
+                     Cancel
+                   </button>
+                   <button
+                     onClick={() => {
+                       if (selectedForGroup.size >= 2) {
+                         onCreateGroup(Array.from(selectedForGroup));
+                         setSelectedForGroup(new Set());
+                         setShowGroupMenu(false);
+                       }
+                     }}
+                     disabled={selectedForGroup.size < 2}
+                     className={`flex-1 py-2 rounded text-[10px] font-bold ${selectedForGroup.size >= 2 ? 'bg-purple-500 text-white' : 'bg-white/5 text-slate-600'}`}
+                   >
+                     Create ({selectedForGroup.size})
+                   </button>
+                 </div>
+               </div>
+             )}
+           </>
+         )}
       </div>
 
-      {busTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} /></div>)}
+      {busTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={(updatedTrack) => onUpdateTrack(updatedTrack)} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} /></div>)}
       <div className="w-4 bg-black/30 border-r border-white/5" />
       {sendTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} /></div>)}
       <div className="w-10 bg-black/50 border-r border-white/5" />

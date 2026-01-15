@@ -111,6 +111,41 @@ export interface MidiNote {
   isSelected?: boolean;
 }
 
+// Crossfade curve types (inspired by Pro Tools)
+export type CrossfadeCurve = 'LINEAR' | 'EQUAL_POWER' | 'S_CURVE' | 'EXPONENTIAL';
+
+// Time stretch/Warp settings (inspired by Ableton)
+export type WarpMode = 'OFF' | 'BEATS' | 'TONES' | 'TEXTURE' | 'REPITCH' | 'COMPLEX';
+
+export interface WarpMarker {
+  id: string;
+  sampleTime: number;  // position in original audio
+  beatTime: number;    // position in beats
+}
+
+export interface WarpSettings {
+  enabled: boolean;
+  mode: WarpMode;
+  originalBpm?: number;
+  markers?: WarpMarker[];
+  preservePitch: boolean;
+  grainSize?: number;     // for granular modes
+}
+
+// Track Group (inspired by Reaper/Pro Tools)
+export interface TrackGroup {
+  id: string;
+  name: string;
+  color: string;
+  trackIds: string[];
+  isCollapsed: boolean;
+  // Linked parameters
+  linkedVolume: boolean;
+  linkedMute: boolean;
+  linkedSolo: boolean;
+  linkedPan: boolean;
+}
+
 export interface Clip {
   id: string;
   start: number;
@@ -118,6 +153,8 @@ export interface Clip {
   offset: number; 
   fadeIn: number; 
   fadeOut: number; 
+  fadeInCurve?: CrossfadeCurve;   // NEW: fade in curve type
+  fadeOutCurve?: CrossfadeCurve;  // NEW: fade out curve type
   name: string;
   color: string;
   type: TrackType;
@@ -128,13 +165,16 @@ export interface Clip {
   gain?: number;
   isReversed?: boolean; 
   audioRef?: string;
-  isUnlicensed?: boolean; 
+  isUnlicensed?: boolean;
+  warp?: WarpSettings;            // NEW: time stretch (Ableton-style)
+  groupId?: string;               // NEW: clip grouping
 }
 
 export interface AutomationPoint {
   id: string;
   time: number;
   value: number;
+  curveType?: AutomationCurveType; // NEW: curve to next point
 }
 
 export interface AutomationLane {
@@ -180,14 +220,57 @@ export interface Track {
   plugins: PluginInstance[];
   automationLanes: AutomationLane[];
   totalLatency: number;
-  events?: any[]; 
-  drumPads?: DrumPad[]; // Only for DRUM_RACK tracks
+  events?: any[];
+  drumPads?: DrumPad[];        // Only for DRUM_RACK tracks
+  groupId?: string;            // NEW: Track group reference
+  height?: number;             // NEW: Custom track height
+  isMinimized?: boolean;       // NEW: Collapsed state
 }
+
+// Time Signature type (inspired by Reaper/Ableton)
+export interface TimeSignature {
+  numerator: number;   // beats per bar (4 in 4/4)
+  denominator: number; // note value (4 = quarter note)
+}
+
+// Marker types (inspired by Pro Tools/Reaper)
+export type MarkerType = 'MARKER' | 'REGION';
+
+export interface Marker {
+  id: string;
+  name: string;
+  time: number;
+  type: MarkerType;
+  endTime?: number;  // Only for REGION type
+  color: string;
+}
+
+// Metronome settings
+export interface MetronomeSettings {
+  enabled: boolean;
+  volume: number;        // 0-1
+  countIn: number;       // bars before recording (0, 1, 2, 4)
+  accentDownbeat: boolean;
+  sound: 'CLICK' | 'WOODBLOCK' | 'BEEP' | 'CUSTOM';
+}
+
+// Punch recording settings (inspired by Pro Tools)
+export interface PunchSettings {
+  enabled: boolean;
+  punchIn: number;    // time in seconds
+  punchOut: number;   // time in seconds
+  preRoll: number;    // seconds before punch in
+  postRoll: number;   // seconds after punch out
+}
+
+// Automation curve types (inspired by Ableton/Logic)
+export type AutomationCurveType = 'LINEAR' | 'EXPONENTIAL' | 'LOGARITHMIC' | 'S_CURVE' | 'HOLD';
 
 export interface DAWState {
   id: string;
   name: string;
   bpm: number;
+  timeSignature: TimeSignature;  // NEW
   projectKey?: number; 
   projectScale?: string; 
   isPlaying: boolean;
@@ -197,6 +280,8 @@ export interface DAWState {
   loopStart: number;
   loopEnd: number;
   tracks: Track[];
+  trackGroups: TrackGroup[];      // NEW
+  markers: Marker[];              // NEW
   selectedTrackId: string | null;
   currentView: ViewType;
   projectPhase: ProjectPhase;
@@ -204,7 +289,9 @@ export interface DAWState {
   isRecModeActive: boolean;
   systemMaxLatency: number; 
   recStartTime: number | null;
-  isDelayCompEnabled: boolean; // PDC State
+  isDelayCompEnabled: boolean;
+  metronome: MetronomeSettings;   // NEW
+  punch: PunchSettings;           // NEW
 }
 
 export interface ContextMenuItem {
