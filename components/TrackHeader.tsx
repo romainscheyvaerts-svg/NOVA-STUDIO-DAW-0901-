@@ -379,25 +379,25 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
         
         <div className="flex space-x-1 shrink-0">
-          <button 
+          <button
             onClick={handleMuteToggle}
-            onTouchStart={handleMuteToggle}
+            onTouchStart={(e) => { e.preventDefault(); handleMuteToggle(e); }}
             className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
             <span className="text-[9px] font-black">M</span>
           </button>
-          <button 
+          <button
             onClick={handleSoloToggle}
-            onTouchStart={handleSoloToggle}
+            onTouchStart={(e) => { e.preventDefault(); handleSoloToggle(e); }}
             className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
             <span className="text-[9px] font-black">S</span>
           </button>
-          
+
           {canHaveSends && (
-            <button 
-                onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }} 
-                onTouchStart={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
+            <button
+                onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
+                onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); setShowSends(!showSends); }}
                 className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
             >
                 <i className="fas fa-sliders-h text-[10px]"></i>
@@ -408,7 +408,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {track.id === 'track-rec-main' && (
               <button
                 onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
-                onTouchStart={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
+                onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
                 className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
                 title="Arm Track for Recording"
               >
