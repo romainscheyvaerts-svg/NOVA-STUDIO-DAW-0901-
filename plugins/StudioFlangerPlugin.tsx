@@ -106,6 +106,18 @@ export class FlangerNode {
   public getStatus() {
     return { ...this.params };
   }
+
+  public dispose() {
+    // CRITICAL: Stop LFO oscillator to prevent memory leak
+    try {
+      if (this.lfo) {
+        this.lfo.stop();
+        this.lfo.disconnect();
+      }
+    } catch (e) {
+      // Oscillator may already be stopped
+    }
+  }
 }
 
 const FlangerKnob: React.FC<{ 
