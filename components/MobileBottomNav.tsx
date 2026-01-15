@@ -13,7 +13,7 @@ interface MobileBottomNavProps {
 const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChange }) => {
   const tabs: { id: MobileTab; icon: string; label: string }[] = [
     { id: 'TRACKS', icon: 'fa-bars-staggered', label: 'Pistes' },
-    { id: 'MIXER', icon: 'fa-sliders-h', label: 'Mixer' },
+    { id: 'ARRANGEMENT', icon: 'fa-waveform-lines', label: 'Arrangement' },
     { id: 'PLUGINS', icon: 'fa-plug', label: 'FX' },
     { id: 'BROWSER', icon: 'fa-folder-open', label: 'Sons' },
     { id: 'NOVA', icon: 'fa-sparkles', label: 'Nova' },
