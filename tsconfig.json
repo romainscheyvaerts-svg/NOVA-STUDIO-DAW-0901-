@@ -41,7 +41,8 @@
     "plugins/**/*.ts",
     "plugins/**/*.tsx",
     "services/**/*.ts",
-    "services/**/*.tsx"
+    "services/**/*.tsx",
+    "api/**/*.ts"
   ],
   "exclude": [
     "node_modules",
