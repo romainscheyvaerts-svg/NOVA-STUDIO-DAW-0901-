@@ -1134,6 +1134,7 @@ export default function App() {
                   onRemovePlugin={handleRemovePlugin}
                   onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); const plugin = state.tracks.find(t => t.id === tid)?.plugins.find(pl => pl.id === p); if (plugin) setActivePlugin({trackId: tid, plugin}); }}
                   onToggleBypass={handleToggleBypass}
+                  onRequestAddPlugin={handleRequestAddPlugin}
                 />
               )}
 
