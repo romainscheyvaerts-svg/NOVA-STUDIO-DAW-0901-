@@ -189,6 +189,7 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDragging = useRef(false);
   const activeParam = useRef<keyof SaturatorParams | null>(null);
+  const lastTouchY = useRef<number>(0);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -277,26 +278,69 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
     });
   }, [node]);
 
+  const handleTouchMove = useCallback((e: TouchEvent) => {
+    if (!isDragging.current || !activeParam.current || e.touches.length === 0) return;
+    e.preventDefault();
+
+    const currentY = e.touches[0].clientY;
+    const delta = -(currentY - lastTouchY.current) / 150;
+    lastTouchY.current = currentY;
+
+    setParams(prev => {
+      const current = prev[activeParam.current!];
+      if (typeof current !== 'number') return prev;
+
+      let min = 0, max = 1;
+      if (activeParam.current === 'drive') { min = 1; max = 10; }
+      if (activeParam.current === 'tone') { min = -1; max = 1; }
+      if (activeParam.current === 'outputGain') { min = 0; max = 2; }
+      if (['eqLow', 'eqMid', 'eqHigh'].includes(activeParam.current)) { min = -12; max = 12; }
+
+      const newVal = Math.max(min, Math.min(max, current + delta * (max - min)));
+      const newParams = { ...prev, [activeParam.current!]: newVal };
+      node.updateParams(newParams);
+      return newParams;
+    });
+  }, [node]);
+
   const handleMouseUp = useCallback(() => {
     isDragging.current = false;
     activeParam.current = null;
     document.body.style.cursor = 'default';
   }, []);
 
+  const handleTouchEnd = useCallback(() => {
+    isDragging.current = false;
+    activeParam.current = null;
+  }, []);
+
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd);
+    window.addEventListener('touchcancel', handleTouchEnd);
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [handleMouseMove, handleMouseUp]);
+  }, [handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd]);
 
   const handleMouseDown = (param: keyof SaturatorParams, e: React.MouseEvent) => {
     e.preventDefault();
     isDragging.current = true;
     activeParam.current = param;
     document.body.style.cursor = 'ns-resize';
+  };
+
+  const handleTouchStart = (param: keyof SaturatorParams, e: React.TouchEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    activeParam.current = param;
+    lastTouchY.current = e.touches[0].clientY;
   };
 
   const setMode = (mode: SaturationMode) => {
@@ -351,10 +395,10 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
       </div>
 
       <div className="grid grid-cols-4 gap-4">
-        <SatKnob label="Drive" value={(params.drive - 1) / 9} onMouseDown={(e) => handleMouseDown('drive', e)} color="#facc15" suffix="" displayVal={Math.round(params.drive * 10)} />
-        <SatKnob label="Tone" value={(params.tone + 1) / 2} onMouseDown={(e) => handleMouseDown('tone', e)} color="#facc15" suffix="" displayVal={Math.round(params.tone * 100)} />
-        <SatKnob label="Mix" value={params.mix} onMouseDown={(e) => handleMouseDown('mix', e)} color="#facc15" suffix="%" displayVal={Math.round(params.mix * 100)} />
-        <SatKnob label="Output" value={params.outputGain / 2} onMouseDown={(e) => handleMouseDown('outputGain', e)} color="#facc15" suffix="dB" displayVal={Math.round((params.outputGain - 1) * 12)} />
+        <SatKnob label="Drive" value={(params.drive - 1) / 9} onMouseDown={(e) => handleMouseDown('drive', e)} onTouchStart={(e) => handleTouchStart('drive', e)} color="#facc15" suffix="" displayVal={Math.round(params.drive * 10)} />
+        <SatKnob label="Tone" value={(params.tone + 1) / 2} onMouseDown={(e) => handleMouseDown('tone', e)} onTouchStart={(e) => handleTouchStart('tone', e)} color="#facc15" suffix="" displayVal={Math.round(params.tone * 100)} />
+        <SatKnob label="Mix" value={params.mix} onMouseDown={(e) => handleMouseDown('mix', e)} onTouchStart={(e) => handleTouchStart('mix', e)} color="#facc15" suffix="%" displayVal={Math.round(params.mix * 100)} />
+        <SatKnob label="Output" value={params.outputGain / 2} onMouseDown={(e) => handleMouseDown('outputGain', e)} onTouchStart={(e) => handleTouchStart('outputGain', e)} color="#facc15" suffix="dB" displayVal={Math.round((params.outputGain - 1) * 12)} />
       </div>
 
       <div className="pt-6 border-t border-white/5 flex justify-between items-center">
@@ -371,12 +415,20 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
   );
 };
 
-const SatKnob: React.FC<{ label: string, value: number, onMouseDown: (e: React.MouseEvent) => void, color: string, suffix: string, displayVal: number }> = ({ label, value, onMouseDown, color, suffix, displayVal }) => {
+const SatKnob: React.FC<{
+  label: string;
+  value: number;
+  onMouseDown: (e: React.MouseEvent) => void;
+  onTouchStart?: (e: React.TouchEvent) => void;
+  color: string;
+  suffix: string;
+  displayVal: number;
+}> = ({ label, value, onMouseDown, onTouchStart, color, suffix, displayVal }) => {
   const safeValue = Number.isFinite(value) ? value : 0;
   const rotation = (safeValue * 270) - 135;
   return (
     <div className="flex flex-col items-center space-y-3 group touch-none">
-      <div onMouseDown={onMouseDown} className="w-14 h-14 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-yellow-500/50 transition-all shadow-xl relative">
+      <div onMouseDown={onMouseDown} onTouchStart={onTouchStart} className="w-14 h-14 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-yellow-500/50 transition-all shadow-xl relative">
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div className="absolute top-1/2 left-1/2 w-1.5 h-6 -ml-0.75 -mt-6 origin-bottom rounded-full transition-transform duration-75" style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: color, boxShadow: `0 0 8px ${color}66` }} />
         <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />

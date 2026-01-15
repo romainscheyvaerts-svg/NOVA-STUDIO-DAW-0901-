@@ -66,9 +66,9 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     automationManager.touch(id);
-    
+
     const startY = e.clientY;
     const startVal = internalValueRef.current;
     const range = max - min;
@@ -76,9 +76,9 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaPixel = startY - moveEvent.clientY;
       const deltaVal = (deltaPixel / 150) * range; // Sensibilité
-      
+
       let newVal = Math.max(min, Math.min(max, startVal + deltaVal));
-      
+
       // Mise à jour visuelle locale
       setVisualValue(newVal);
       internalValueRef.current = newVal;
@@ -99,6 +99,46 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
     window.addEventListener('mouseup', handleMouseUp);
   };
 
+  // GESTION TACTILE (WRITE MODE)
+  const handleTouchStart = (e: React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    automationManager.touch(id);
+
+    const startY = e.touches[0].clientY;
+    const startVal = internalValueRef.current;
+    const range = max - min;
+
+    const handleTouchMove = (moveEvent: TouchEvent) => {
+      if (moveEvent.touches.length === 0) return;
+
+      const deltaPixel = startY - moveEvent.touches[0].clientY;
+      const deltaVal = (deltaPixel / 150) * range; // Même sensibilité que souris
+
+      let newVal = Math.max(min, Math.min(max, startVal + deltaVal));
+
+      // Mise à jour visuelle locale
+      setVisualValue(newVal);
+      internalValueRef.current = newVal;
+
+      // Envoi au moteur
+      const currentTime = window.DAW_CONTROL ? window.DAW_CONTROL.getState().currentTime : 0;
+      automationManager.setValue(id, newVal, currentTime);
+    };
+
+    const handleTouchEnd = () => {
+      automationManager.release(id);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('touchcancel', handleTouchEnd);
+    };
+
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd);
+    window.addEventListener('touchcancel', handleTouchEnd);
+  };
+
   // RENDER (CANVAS ou SVG simple)
   // On utilise un SVG pour la netteté et la performance CSS
   const norm = (visualValue - min) / (max - min);
@@ -106,9 +146,10 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
 
   return (
     <div className="flex flex-col items-center space-y-2 select-none group">
-      <div 
+      <div
         onMouseDown={handleMouseDown}
-        className="relative rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-white/30 transition-colors shadow-lg"
+        onTouchStart={handleTouchStart}
+        className="relative rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-white/30 transition-colors shadow-lg touch-none"
         style={{ width: size, height: size }}
       >
         {/* Fond interne */}

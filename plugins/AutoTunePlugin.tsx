@@ -337,11 +337,20 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
     if (onParamsChange) onParamsChange(newParams);
   };
 
+  const lastTouchY = useRef<number>(0);
+
   const handleMouseDown = (param: keyof AutoTuneParams, e: React.MouseEvent) => {
     e.preventDefault();
     isDragging.current = true;
     activeParam.current = param;
     document.body.style.cursor = 'ns-resize';
+  };
+
+  const handleTouchStart = (param: keyof AutoTuneParams, e: React.TouchEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    activeParam.current = param;
+    lastTouchY.current = e.touches[0].clientY;
   };
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -367,20 +376,55 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
     }
   }, [node, onParamsChange]);
 
+  const handleTouchMove = useCallback((e: TouchEvent) => {
+    if (!isDragging.current || !activeParam.current || e.touches.length === 0) return;
+    e.preventDefault();
+
+    const currentY = e.touches[0].clientY;
+    const delta = -(currentY - lastTouchY.current) / 150;
+    lastTouchY.current = currentY;
+
+    const currentParams = paramsRef.current;
+    const currentVal = currentParams[activeParam.current!];
+
+    if (typeof currentVal !== 'number') return;
+
+    const newVal = Math.max(0, Math.min(1, currentVal + delta));
+    const newParams = { ...currentParams, [activeParam.current!]: newVal };
+
+    setParams(newParams);
+    node.updateParams(newParams);
+
+    if (onParamsChange) {
+        onParamsChange(newParams);
+    }
+  }, [node, onParamsChange]);
+
   const handleMouseUp = useCallback(() => {
     isDragging.current = false;
     activeParam.current = null;
     document.body.style.cursor = 'default';
   }, []);
 
+  const handleTouchEnd = useCallback(() => {
+    isDragging.current = false;
+    activeParam.current = null;
+  }, []);
+
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd);
+    window.addEventListener('touchcancel', handleTouchEnd);
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [handleMouseMove, handleMouseUp]);
+  }, [handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd]);
 
   const getNoteName = (freq: number) => {
     if (freq <= 0) return '--';
@@ -445,28 +489,36 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
       </div>
 
       <div className="grid grid-cols-3 gap-8 pt-2">
-        <TuneKnob label="Retune Speed" value={params.speed} onMouseDown={(e) => handleMouseDown('speed', e)} factor={100} suffix="%" inverseLabel={true} />
-        <TuneKnob label="Humanize" value={params.humanize} onMouseDown={(e) => handleMouseDown('humanize', e)} factor={100} suffix="%" />
-        <TuneKnob label="Amount" value={params.mix} onMouseDown={(e) => handleMouseDown('mix', e)} factor={100} suffix="%" />
+        <TuneKnob label="Retune Speed" value={params.speed} onMouseDown={(e) => handleMouseDown('speed', e)} onTouchStart={(e) => handleTouchStart('speed', e)} factor={100} suffix="%" inverseLabel={true} />
+        <TuneKnob label="Humanize" value={params.humanize} onMouseDown={(e) => handleMouseDown('humanize', e)} onTouchStart={(e) => handleTouchStart('humanize', e)} factor={100} suffix="%" />
+        <TuneKnob label="Amount" value={params.mix} onMouseDown={(e) => handleMouseDown('mix', e)} onTouchStart={(e) => handleTouchStart('mix', e)} factor={100} suffix="%" />
       </div>
     </div>
   );
 };
 
-const TuneKnob: React.FC<{ label: string, value: number, onMouseDown: (e: React.MouseEvent) => void, factor: number, suffix: string, inverseLabel?: boolean }> = ({ label, value, onMouseDown, factor, suffix, inverseLabel }) => {
+const TuneKnob: React.FC<{
+  label: string;
+  value: number;
+  onMouseDown: (e: React.MouseEvent) => void;
+  onTouchStart?: (e: React.TouchEvent) => void;
+  factor: number;
+  suffix: string;
+  inverseLabel?: boolean
+}> = ({ label, value, onMouseDown, onTouchStart, factor, suffix, inverseLabel }) => {
   const rotation = (value * 270) - 135;
   let displayValue = `${Math.round(value * factor)}${suffix}`;
   if (inverseLabel) {
       if (value < 0.1) displayValue = "ROBOT";
       else if (value > 0.9) displayValue = "NATURAL";
-      else displayValue = `${Math.round((1-value) * 100)}ms`; 
+      else displayValue = `${Math.round((1-value) * 100)}ms`;
   }
 
   return (
-    <div className="flex flex-col items-center space-y-3 group cursor-ns-resize" onMouseDown={onMouseDown}>
+    <div className="flex flex-col items-center space-y-3 group cursor-ns-resize touch-none" onMouseDown={onMouseDown} onTouchStart={onTouchStart}>
       <div className="relative w-16 h-16 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center shadow-lg group-hover:border-cyan-500/50 transition-colors">
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
-        <div 
+        <div
           className="absolute w-1.5 h-6 bg-current rounded-full origin-bottom bottom-1/2 transition-transform duration-75"
           style={{ transform: `rotate(${rotation}deg)`, color: '#00f2ff', boxShadow: `0 0 10px #00f2ff` }}
         />
