@@ -163,11 +163,12 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       return;
     }
 
-    // Determine drag mode
+    // Determine drag mode based on tool and click position
     let mode: DragMode = 'move';
-    if (activeTool === 'TRIM' || relativeX < 16) {
+    const isTrimTool = activeTool === 'TRIM';
+    if (isTrimTool || relativeX < 16) {
       mode = 'resize-start';
-    } else if (activeTool === 'TRIM' || relativeX > clipWidth - 16) {
+    } else if (relativeX > clipWidth - 16) {
       mode = 'resize-end';
     }
 
