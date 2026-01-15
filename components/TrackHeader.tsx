@@ -175,6 +175,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     const audioUrl = e.dataTransfer.getData('audio-url');
     if (audioUrl) {
         const audioName = e.dataTransfer.getData('audio-name');
+        // Validate track type - only AUDIO, SAMPLER, and BUS tracks can receive audio
+        if (track.type !== TrackType.AUDIO && track.type !== TrackType.SAMPLER && track.type !== TrackType.BUS) {
+            console.warn(`Cannot drop audio on ${track.type} track`);
+            return;
+        }
         if ((window as any).DAW_CORE) {
             (window as any).DAW_CORE.handleAudioImport(audioUrl, audioName || 'Audio', track.id);
         }
@@ -184,6 +189,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     // Audio Import (Files)
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         const file = e.dataTransfer.files[0];
+        // Validate track type - only AUDIO, SAMPLER, and BUS tracks can receive audio
+        if (track.type !== TrackType.AUDIO && track.type !== TrackType.SAMPLER && track.type !== TrackType.BUS) {
+            console.warn(`Cannot drop audio file on ${track.type} track`);
+            return;
+        }
         if ((window as any).DAW_CORE) {
             (window as any).DAW_CORE.handleAudioImport(file, file.name, track.id);
         }

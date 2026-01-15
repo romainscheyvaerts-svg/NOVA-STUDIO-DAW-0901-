@@ -215,7 +215,9 @@ const MobileBottomNav: React.FC<{ activeTab: MobileTab, onTabChange: (tab: Mobil
 const useUndoRedo = (initialState: DAWState) => {
   const [history, setHistory] = useState<{ past: DAWState[]; present: DAWState; future: DAWState[]; }>({ past: [], present: initialState, future: [] });
   const MAX_HISTORY = 100;
-  
+  const HISTORY_DEBOUNCE_MS = 300; // Debounce 300ms pour éviter trop d'entrées
+  const lastHistoryUpdateRef = useRef<number>(0);
+
   const cleanStateForHistory = (stateToClean: DAWState): DAWState => {
     return produce(stateToClean, draft => {
         draft.tracks.forEach(track => {
@@ -235,11 +237,25 @@ const useUndoRedo = (initialState: DAWState) => {
     setHistory(curr => {
       const newState = typeof updater === 'function' ? updater(curr.present) : updater;
       if (newState === curr.present) return curr;
+
+      // Skip history for time-only updates
       const isTimeUpdateOnly = newState.currentTime !== curr.present.currentTime && newState.tracks === curr.present.tracks && newState.isPlaying === curr.present.isPlaying;
       if (isTimeUpdateOnly) return { ...curr, present: newState };
-      
+
+      // Debounce rapid changes to prevent history pollution
+      const now = Date.now();
+      const timeSinceLastUpdate = now - lastHistoryUpdateRef.current;
+      const shouldDebounce = timeSinceLastUpdate < HISTORY_DEBOUNCE_MS;
+
+      if (shouldDebounce) {
+        // Update present without adding to history (rapid changes)
+        return { ...curr, present: newState };
+      }
+
+      // Add to history (debounced)
+      lastHistoryUpdateRef.current = now;
       const cleanedPresentForHistory = cleanStateForHistory(curr.present);
-      
+
       return { past: [...curr.past, cleanedPresentForHistory].slice(-MAX_HISTORY), present: newState, future: [] };
     });
   }, []);
@@ -305,9 +321,19 @@ export default function App() {
 
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
     useEffect(() => { novaBridge.connect(); }, []);
-  const stateRef = useRef(state); 
+  const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
-  useEffect(() => { if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks)); }, [state.tracks]); 
+
+  // Ref to track atomic updates (volume/pan only) to skip expensive graph rebuild
+  const skipEngineUpdateRef = useRef(false);
+
+  useEffect(() => {
+    if (skipEngineUpdateRef.current) {
+      skipEngineUpdateRef.current = false; // Reset flag
+      return; // Skip rebuild for atomic updates
+    }
+    if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks));
+  }, [state.tracks]); 
   useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
   
   useEffect(() => {
@@ -473,6 +499,33 @@ export default function App() {
             }));
         } else {
             audioEngine.disarmTrack();
+        }
+    }
+
+    // Detect atomic updates (volume/pan only) to avoid expensive graph rebuild
+    if (previousTrack) {
+        const isVolumeOnlyChange = previousTrack.volume !== updatedTrack.volume &&
+            previousTrack.pan === updatedTrack.pan &&
+            previousTrack.isMuted === updatedTrack.isMuted &&
+            previousTrack.isSolo === updatedTrack.isSolo &&
+            previousTrack.plugins.length === updatedTrack.plugins.length;
+
+        const isPanOnlyChange = previousTrack.pan !== updatedTrack.pan &&
+            previousTrack.volume === updatedTrack.volume &&
+            previousTrack.isMuted === updatedTrack.isMuted &&
+            previousTrack.isSolo === updatedTrack.isSolo &&
+            previousTrack.plugins.length === updatedTrack.plugins.length;
+
+        if (isVolumeOnlyChange || isPanOnlyChange) {
+            // Use atomic methods for better performance
+            if (isVolumeOnlyChange) {
+                audioEngine.setTrackVolume(updatedTrack.id, updatedTrack.volume);
+            }
+            if (isPanOnlyChange) {
+                audioEngine.setTrackPan(updatedTrack.id, updatedTrack.pan);
+            }
+            // Set flag to skip full graph rebuild in useEffect
+            skipEngineUpdateRef.current = true;
         }
     }
 
