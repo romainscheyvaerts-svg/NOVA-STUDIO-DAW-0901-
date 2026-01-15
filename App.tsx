@@ -1013,15 +1013,34 @@ export default function App() {
 
   const envoyerAuChatbot = async (messageUtilisateur: string) => {
     try {
+        // Préparer un résumé de l'état du DAW pour le contexte
+        const currentState = stateRef.current;
+        const stateSummary = {
+            bpm: currentState.bpm,
+            isPlaying: currentState.isPlaying,
+            isRecording: currentState.isRecording,
+            trackCount: currentState.tracks.length,
+            tracks: currentState.tracks.slice(0, 10).map(t => ({
+                name: t.name,
+                type: t.type,
+                volume: Math.round(t.volume * 100),
+                isMuted: t.isMuted,
+                plugins: t.plugins.map(p => p.type)
+            }))
+        };
+
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: messageUtilisateur }),
+            body: JSON.stringify({ 
+                message: messageUtilisateur,
+                state: stateSummary
+            }),
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Erreur serveur');
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Erreur serveur: ${response.status}`);
         }
 
         const data = await response.json();
@@ -1034,7 +1053,7 @@ export default function App() {
     } catch (error: any) {
         console.error("Erreur Chatbot:", error);
         return {
-            text: "Désolé, je n'arrive pas à contacter le serveur sécurisé. Vérifie ta clé API sur Vercel.",
+            text: `Erreur de connexion: ${error.message || 'Serveur inaccessible'}`,
             actions: []
         };
     }
