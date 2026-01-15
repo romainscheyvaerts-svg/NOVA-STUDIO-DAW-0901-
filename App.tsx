@@ -1013,7 +1013,14 @@ export default function App() {
 
   const envoyerAuChatbot = async (messageUtilisateur: string) => {
     try {
-        const response = await fetch('/api/chat', {
+        // Détecter si on est sur GitHub Pages (pas d'API backend)
+        // Dans ce cas, utiliser l'API Vercel directement
+        const isGitHubPages = window.location.hostname.includes('github.io');
+        const apiBaseUrl = isGitHubPages 
+            ? 'https://nova-studio-daw-0901.vercel.app'  // URL Vercel
+            : '';  // URL relative (même domaine)
+        
+        const response = await fetch(`${apiBaseUrl}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: messageUtilisateur }),
@@ -1034,7 +1041,7 @@ export default function App() {
     } catch (error: any) {
         console.error("Erreur Chatbot:", error);
         return {
-            text: "Désolé, je n'arrive pas à contacter le serveur sécurisé. Vérifie ta clé API sur Vercel.",
+            text: "Désolé, je n'arrive pas à contacter le serveur. Vérifie que tu utilises le site Vercel ou que l'API est configurée.",
             actions: []
         };
     }
