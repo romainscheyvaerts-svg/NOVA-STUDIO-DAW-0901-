@@ -123,8 +123,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
       tapTimesRef.current = [];
     }, 2000);
     
-    // Play click preview
-    metronomeService.playPreviewClick();
+    // NOTE: Removed click preview sound to avoid unwanted audio feedback
   }, [onBpmChange]);
 
   useEffect(() => {

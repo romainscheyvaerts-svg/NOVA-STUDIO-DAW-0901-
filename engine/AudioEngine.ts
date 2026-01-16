@@ -209,8 +209,10 @@ export class AudioEngine {
               if (onEnded) onEnded();
           }; 
           this.previewSource.start(0); 
-          this.isPreviewPlaying = true; 
-          this.previewGain!.gain.value = 0.8; 
+          this.isPreviewPlaying = true;
+          // Use a ramp to avoid click
+          this.previewGain!.gain.setValueAtTime(0, this.ctx!.currentTime);
+          this.previewGain!.gain.linearRampToValueAtTime(0.8, this.ctx!.currentTime + 0.01); 
       } catch (e: any) { 
           console.error("[AudioEngine] Preview Error:", e.message); 
           this.isPreviewPlaying = false;

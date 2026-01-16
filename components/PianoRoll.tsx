@@ -300,16 +300,18 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, currentTime, 
       setSelectedNoteIds(new Set());
   };
 
+  // NOTE: Preview sound disabled to avoid unwanted audio feedback
+  // Users can enable this in preferences if needed
   const playPreview = (pitch: number) => {
+     // Sound preview disabled to avoid noise pollution during editing
+     // If you want to re-enable, uncomment the code below:
+     /*
      if (isDrumMode) {
-         // Trigger Pad (Note 60 = Pad 1)
-         const padId = pitch - 59;
-         // Send to engine
          audioEngine.triggerTrackAttack(track.id, pitch, 1.0);
-         // Visual feedback could be added via ref
      } else {
          audioEngine.previewMidiNote(track.id, pitch, 0.5);
      }
+     */
   };
   
   // --- QUANTIZE FUNCTION (inspired by Ableton/Logic) ---

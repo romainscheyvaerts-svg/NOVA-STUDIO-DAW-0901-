@@ -88,6 +88,10 @@ export class ChorusNode {
     this.dryGain = ctx.createGain();
     this.wetGain = ctx.createGain();
     
+    // Initialize with zero gain and ramp up to avoid click on creation
+    this.output.gain.setValueAtTime(0, ctx.currentTime);
+    this.output.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
+    
     // Filters
     this.lowCutFilter = ctx.createBiquadFilter();
     this.lowCutFilter.type = 'highpass';

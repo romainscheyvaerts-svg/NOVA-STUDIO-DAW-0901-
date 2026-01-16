@@ -141,6 +141,10 @@ export class SyncDelayNode {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     
+    // Initialize with zero gain and ramp up to avoid click on creation
+    this.output.gain.setValueAtTime(0, ctx.currentTime);
+    this.output.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
+    
     // Main delay lines (up to 4 seconds)
     this.delayNodeL = ctx.createDelay(4.0);
     this.delayNodeR = ctx.createDelay(4.0);
