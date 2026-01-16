@@ -1,9 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback, PropsWithChildren } from 'react';
-import { ViewType, Theme, User, TimeSignature, MetronomeSettings, PunchSettings } from '../types';
+import React, { useState, useRef, useEffect, PropsWithChildren } from 'react';
+import { ViewType, Theme, User } from '../types';
 import { MasterMeter } from './MeterWidgets';
 import MasterVisualizer from './MasterVisualizer';
 import { midiManager } from '../services/MidiManager';
-import { metronomeService } from '../services/MetronomeService';
 
 interface TransportProps {
   isPlaying: boolean;
@@ -22,22 +21,6 @@ interface TransportProps {
   statusMessage?: string | null;
   currentTheme?: Theme;
   onToggleTheme?: () => void;
-  
-  // NEW: Time Signature (inspired by Reaper/Ableton)
-  timeSignature?: TimeSignature;
-  onTimeSignatureChange?: (ts: TimeSignature) => void;
-  
-  // NEW: Metronome (inspired by Logic Pro)
-  metronome?: MetronomeSettings;
-  onMetronomeChange?: (settings: Partial<MetronomeSettings>) => void;
-  
-  // NEW: Punch In/Out (inspired by Pro Tools)
-  punch?: PunchSettings;
-  onPunchChange?: (settings: Partial<PunchSettings>) => void;
-  
-  // NEW: Markers
-  onAddMarker?: () => void;
-  onGoToMarker?: (direction: 'prev' | 'next') => void;
   
   // Modal Triggers
   onOpenSaveMenu?: () => void;
@@ -69,10 +52,6 @@ interface TransportProps {
 const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, bpm, onBpmChange, currentTime,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
-  timeSignature = { numerator: 4, denominator: 4 }, onTimeSignatureChange,
-  metronome, onMetronomeChange,
-  punch, onPunchChange,
-  onAddMarker, onGoToMarker,
   onOpenSaveMenu, onOpenLoadMenu, onExportMix, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo,
   user, onOpenAuth, onLogout,
@@ -85,46 +64,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   const [midiActive, setMidiActive] = useState(false);
   const [midiDeviceName, setMidiDeviceName] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [showTimeSigMenu, setShowTimeSigMenu] = useState(false);
-  const [showMetronomeMenu, setShowMetronomeMenu] = useState(false);
   const bpmInputRef = useRef<HTMLInputElement>(null);
   const audioImportInputRef = useRef<HTMLInputElement>(null);
-  
-  // TAP TEMPO STATE (inspired by Reaper/Ableton)
-  const tapTimesRef = useRef<number[]>([]);
-  const tapTimeoutRef = useRef<number | null>(null);
-
-  // TAP TEMPO FUNCTION
-  const handleTapTempo = useCallback(() => {
-    const now = performance.now();
-    tapTimesRef.current.push(now);
-    
-    // Keep only last 8 taps
-    if (tapTimesRef.current.length > 8) {
-      tapTimesRef.current.shift();
-    }
-    
-    // Calculate average interval
-    if (tapTimesRef.current.length >= 2) {
-      const intervals: number[] = [];
-      for (let i = 1; i < tapTimesRef.current.length; i++) {
-        intervals.push(tapTimesRef.current[i] - tapTimesRef.current[i - 1]);
-      }
-      const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-      const newBpm = Math.round(60000 / avgInterval);
-      if (newBpm >= 20 && newBpm <= 999) {
-        onBpmChange(newBpm);
-      }
-    }
-    
-    // Clear taps after 2 seconds of inactivity
-    if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
-    tapTimeoutRef.current = window.setTimeout(() => {
-      tapTimesRef.current = [];
-    }, 2000);
-    
-    // NOTE: Removed click preview sound to avoid unwanted audio feedback
-  }, [onBpmChange]);
 
   useEffect(() => {
      // Check for MIDI device on mount
@@ -141,23 +82,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
      return unsubscribe;
   }, []);
 
-  // Format time as MM:SS.cc
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     const cents = Math.floor((seconds % 1) * 100);
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${cents.toString().padStart(2, '0')}`;
-  };
-  
-  // Format time as Bars.Beats.Ticks (inspired by Pro Tools/Logic)
-  const formatBarsBeats = (seconds: number) => {
-    const beatsPerBar = timeSignature.numerator;
-    const beatDuration = 60 / bpm;
-    const totalBeats = seconds / beatDuration;
-    const bars = Math.floor(totalBeats / beatsPerBar) + 1;
-    const beats = Math.floor(totalBeats % beatsPerBar) + 1;
-    const ticks = Math.floor((totalBeats % 1) * 960); // 960 ticks per beat (standard MIDI)
-    return `${bars}.${beats}.${ticks.toString().padStart(3, '0')}`;
   };
 
   const handleBpmMouseDown = (e: React.MouseEvent) => {
@@ -290,122 +219,16 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
       <div className="flex flex-1 md:flex-none justify-center items-center space-x-2 md:space-x-4">
         <div className="hidden xl:block"><MasterMeter /></div>
         
-        {/* METRONOME BUTTON (inspired by Logic Pro) */}
-        <div className="relative hidden md:block">
-          <button 
-            onClick={() => setShowMetronomeMenu(!showMetronomeMenu)}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all border ${metronome?.enabled ? 'bg-purple-500/20 border-purple-500/50 text-purple-400' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
-            title="Metronome"
-          >
-            <i className="fas fa-drum text-xs"></i>
-          </button>
-          
-          {/* Metronome Dropdown Menu */}
-          {showMetronomeMenu && (
-            <div className="absolute top-full left-0 mt-2 w-56 bg-[#1a1c22] border border-white/10 rounded-xl shadow-2xl z-[100] p-3 space-y-3" style={{ backgroundColor: 'var(--bg-surface)' }}>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase text-slate-400">Metronome</span>
-                <button
-                  onClick={() => onMetronomeChange?.({ enabled: !metronome?.enabled })}
-                  className={`px-3 py-1 rounded text-[9px] font-black ${metronome?.enabled ? 'bg-purple-500 text-white' : 'bg-white/10 text-slate-400'}`}
-                >
-                  {metronome?.enabled ? 'ON' : 'OFF'}
-                </button>
-              </div>
-              
-              <div className="space-y-2">
-                <label className="text-[9px] text-slate-500 block">Volume</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={(metronome?.volume || 0.7) * 100}
-                  onChange={(e) => onMetronomeChange?.({ volume: parseInt(e.target.value) / 100 })}
-                  className="w-full accent-purple-500"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <label className="text-[9px] text-slate-500 block">Count-In (Bars)</label>
-                <div className="flex space-x-1">
-                  {[0, 1, 2, 4].map(n => (
-                    <button
-                      key={n}
-                      onClick={() => onMetronomeChange?.({ countIn: n })}
-                      className={`flex-1 py-2 rounded text-[10px] font-bold ${metronome?.countIn === n ? 'bg-purple-500 text-white' : 'bg-white/5 text-slate-400'}`}
-                    >
-                      {n === 0 ? 'Off' : n}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] text-slate-500">Accent Downbeat</span>
-                <button
-                  onClick={() => onMetronomeChange?.({ accentDownbeat: !metronome?.accentDownbeat })}
-                  className={`w-10 h-5 rounded-full transition-all ${metronome?.accentDownbeat ? 'bg-purple-500' : 'bg-white/10'}`}
-                >
-                  <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${metronome?.accentDownbeat ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
-                </button>
-              </div>
-              
-              <div className="space-y-2">
-                <label className="text-[9px] text-slate-500 block">Sound</label>
-                <div className="grid grid-cols-3 gap-1">
-                  {(['CLICK', 'WOODBLOCK', 'BEEP'] as const).map(sound => (
-                    <button
-                      key={sound}
-                      onClick={() => onMetronomeChange?.({ sound })}
-                      className={`py-2 rounded text-[8px] font-bold ${metronome?.sound === sound ? 'bg-purple-500 text-white' : 'bg-white/5 text-slate-400'}`}
-                    >
-                      {sound}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-        
         <div className="flex items-center space-x-2 md:space-x-3 bg-black/40 px-3 md:px-4 py-1.5 rounded-xl border border-white/5" style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}>
-          {/* MARKER NAVIGATION (inspired by Pro Tools) */}
-          <button 
-            onClick={() => onGoToMarker?.('prev')} 
-            className="hidden lg:flex w-7 h-7 rounded items-center justify-center text-slate-600 hover:text-amber-400 transition-colors"
-            title="Previous Marker"
-          >
-            <i className="fas fa-step-backward text-[10px]"></i>
-          </button>
-          
           <button onClick={onStop} className="w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
           <button onClick={onTogglePlay} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isPlaying ? 'text-black shadow-lg shadow-[#00f2ff]/30' : 'bg-white text-black hover:scale-105'}`} style={{ backgroundColor: isPlaying ? 'var(--accent-neon)' : '#fff' }}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-sm`}></i></button>
           <button onClick={onToggleLoop} className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
           <button onClick={onToggleRecord} className={`h-10 px-3 md:px-5 rounded-xl flex items-center space-x-2 md:space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white shadow-lg shadow-red-600/40 animate-pulse' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'var(--border-highlight)' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">Rec</span></button>
-          
-          {/* MARKER NAVIGATION (inspired by Pro Tools) */}
-          <button 
-            onClick={() => onGoToMarker?.('next')} 
-            className="hidden lg:flex w-7 h-7 rounded items-center justify-center text-slate-600 hover:text-amber-400 transition-colors"
-            title="Next Marker"
-          >
-            <i className="fas fa-step-forward text-[10px]"></i>
-          </button>
         </div>
         
-        {/* ADD MARKER BUTTON */}
-        <button
-          onClick={onAddMarker}
-          className="hidden lg:flex w-8 h-8 rounded-lg items-center justify-center bg-white/5 border border-white/10 text-amber-500 hover:bg-amber-500/20 transition-all"
-          title="Add Marker (M)"
-        >
-          <i className="fas fa-bookmark text-xs"></i>
-        </button>
-        
-        {/* TIME DISPLAY - Now shows Bars:Beats and MM:SS */}
-        <div className="flex flex-col items-center min-w-[80px] md:min-w-[100px]">
-             <span className="text-[10px] md:text-[12px] font-mono font-bold" style={{ color: 'var(--accent-neon)' }}>{formatBarsBeats(currentTime)}</span>
-             <span className="text-[8px] font-mono text-slate-500">{formatTime(currentTime)}</span>
+        <div className="flex flex-col items-center min-w-[60px] md:min-w-[80px]">
+             <span className="hidden md:block text-[7px] text-slate-600 font-black uppercase tracking-[0.3em] hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}>Timeline</span>
+             <span className="mono text-[11px] md:text-[14px] font-bold text-center" style={{ color: 'var(--accent-neon)' }}>{formatTime(currentTime)}</span>
         </div>
       </div>
 
@@ -434,59 +257,17 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             <i className={`fas ${currentTheme === 'dark' ? 'fa-sun text-amber-400' : 'fa-moon text-slate-300'}`}></i>
         </button>
 
-        {/* TIME SIGNATURE (inspired by Reaper/Ableton) */}
-        <div className="relative hidden lg:block">
-          <button 
-            onClick={() => setShowTimeSigMenu(!showTimeSigMenu)}
-            className="h-8 px-3 rounded-lg bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all flex items-center space-x-2"
-            title="Time Signature"
-          >
-            <span className="text-[11px] font-black">{timeSignature.numerator}/{timeSignature.denominator}</span>
-          </button>
-          
-          {/* Time Signature Dropdown */}
-          {showTimeSigMenu && (
-            <div className="absolute top-full right-0 mt-2 w-40 bg-[#1a1c22] border border-white/10 rounded-xl shadow-2xl z-[100] p-2" style={{ backgroundColor: 'var(--bg-surface)' }}>
-              <div className="text-[9px] text-slate-500 uppercase font-black mb-2 px-2">Time Signature</div>
-              {[
-                { n: 4, d: 4 }, { n: 3, d: 4 }, { n: 6, d: 8 }, 
-                { n: 2, d: 4 }, { n: 5, d: 4 }, { n: 7, d: 8 }, { n: 12, d: 8 }
-              ].map(ts => (
-                <button
-                  key={`${ts.n}/${ts.d}`}
-                  onClick={() => { 
-                    onTimeSignatureChange?.({ numerator: ts.n, denominator: ts.d }); 
-                    setShowTimeSigMenu(false); 
-                  }}
-                  className={`w-full px-3 py-2 text-left rounded text-[11px] font-bold transition-all ${timeSignature.numerator === ts.n && timeSignature.denominator === ts.d ? 'bg-cyan-500 text-black' : 'hover:bg-white/10 text-white'}`}
-                >
-                  {ts.n}/{ts.d}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        
-        {/* TAP TEMPO BUTTON (inspired by Ableton/Reaper) */}
-        <button
-          onClick={handleTapTempo}
-          className="hidden md:flex w-9 h-9 rounded-lg bg-white/5 border border-white/10 items-center justify-center text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/10 hover:border-cyan-500/30 transition-all active:scale-95"
-          title="Tap Tempo (T)"
-        >
-          <i className="fas fa-hand-pointer text-xs"></i>
-        </button>
-        
-        {/* BPM CONTROL - Enhanced */}
+        {/* BPM CONTROL */}
         <div className="hidden sm:flex flex-col items-end cursor-ns-resize group" onMouseDown={handleBpmMouseDown}>
            <div className="flex items-center space-x-2">
               {isEditingBpm ? (
-                <input ref={bpmInputRef} type="text" value={tempBpm} onChange={(e) => setTempBpm(e.target.value.replace(/[^0-9.]/g, ''))} onBlur={() => { setIsEditingBpm(false); onBpmChange(parseFloat(tempBpm) || 120); }} onKeyDown={(e) => e.key === 'Enter' && bpmInputRef.current?.blur()} className="w-14 bg-white/10 border border-cyan-500/50 rounded text-center text-[12px] font-black text-white outline-none py-1" />
+                <input ref={bpmInputRef} type="text" value={tempBpm} onChange={(e) => setTempBpm(e.target.value.replace(/[^0-9.]/g, ''))} onBlur={() => { setIsEditingBpm(false); onBpmChange(parseFloat(tempBpm) || 120); }} onKeyDown={(e) => e.key === 'Enter' && bpmInputRef.current?.blur()} className="w-10 md:w-12 bg-white/10 border border-cyan-500/50 rounded text-center text-[10px] md:text-[11px] font-black text-white outline-none" />
               ) : (
-                <span className="text-[14px] md:text-[16px] font-black transition-colors font-mono" style={{ color: 'var(--text-primary)' }}>{bpm.toFixed(1)}</span>
+                <span className="text-[10px] md:text-[11px] font-black transition-colors" style={{ color: 'var(--text-primary)' }}>{bpm}</span>
               )}
               <span className="text-[7px] text-slate-500 font-bold uppercase tracking-widest hide-on-tablet-text">BPM</span>
            </div>
-           <div className="hidden md:block w-16 h-1 rounded-full mt-1 overflow-hidden" style={{ backgroundColor: 'var(--border-dim)' }}><div className="h-full transition-all duration-300" style={{ width: `${Math.min(100, (bpm / 250) * 100)}%`, backgroundColor: 'var(--accent-neon)' }}></div></div>
+           <div className="hidden md:block w-14 h-1 rounded-full mt-1 overflow-hidden" style={{ backgroundColor: 'var(--border-dim)' }}><div className="h-full transition-all duration-300" style={{ width: `${Math.min(100, (bpm / 250) * 100)}%`, backgroundColor: 'var(--accent-neon)' }}></div></div>
         </div>
         
         {/* LOGIN / USER SECTION */}
