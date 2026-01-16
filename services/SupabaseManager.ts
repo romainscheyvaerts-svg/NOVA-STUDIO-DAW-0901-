@@ -49,11 +49,11 @@ export class SupabaseManager {
     
     // ==== GESTION DES URLs GOOGLE DRIVE ====
     // Détecter les URLs Google Drive et les convertir vers l'Edge Function proxy
-    if (pathOrUrl.includes('drive.google.com')) {
+    if (pathOrUrl.includes('drive.google.com') || pathOrUrl.includes('docs.google.com')) {
         const fileId = this.extractDriveFileId(pathOrUrl);
         if (fileId) {
-            // Utiliser l'Edge Function Supabase comme proxy (projet catalogue)
-            const proxyUrl = `https://mxdrxpzxbgybchzzvpkf.supabase.co/functions/v1/stream-drive-audio?id=${fileId}`;
+            // Utiliser l'Edge Function Supabase comme proxy
+            const proxyUrl = `https://sqduhfckgvyezdiubeei.supabase.co/functions/v1/stream-drive-audio?id=${fileId}`;
             return proxyUrl;
         } else {
             console.warn("[SupabaseManager] Impossible d'extraire l'ID du fichier Drive:", pathOrUrl);
@@ -83,13 +83,17 @@ export class SupabaseManager {
     const fileMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
     if (fileMatch) return fileMatch[1];
     
-    // Format: ?id=FILE_ID
+    // Format: ?id=FILE_ID (docs.google.com/uc?export=download&id=XXX)
     const idMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
     if (idMatch) return idMatch[1];
     
     // Format: /folders/FILE_ID
     const folderMatch = url.match(/\/folders\/([a-zA-Z0-9_-]+)/);
     if (folderMatch) return folderMatch[1];
+    
+    // Format: open?id=FILE_ID
+    const openMatch = url.match(/open\?id=([a-zA-Z0-9_-]+)/);
+    if (openMatch) return openMatch[1];
     
     return null;
   }
