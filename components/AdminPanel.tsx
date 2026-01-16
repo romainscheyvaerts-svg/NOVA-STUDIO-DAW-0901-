@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Instrument, Instrumental, User, PendingUpload } from '../types';
+import { Instrument, Instrumental, User } from '../types';
 import { supabaseManager } from '../services/SupabaseManager';
 import { generateCoverArt, generateCreativeMetadata } from '../services/AIService';
 import { audioEngine } from '../engine/AudioEngine';
@@ -16,8 +16,11 @@ interface AdminPanelProps {
 const ADMIN_EMAIL = 'romain.scheyvaerts@gmail.com';
 
 const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, existingInstruments }) => {
-  // Editing State
+  // Editing State (for old instruments table)
   const [editingId, setEditingId] = useState<number | string | null>(null);
+  
+  // Editing Instrumental State (for new instrumentals table)
+  const [editingInstrumental, setEditingInstrumental] = useState<Instrumental | null>(null);
 
   // Metadata Form
   const [name, setName] = useState('');
@@ -60,19 +63,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
   const [playingId, setPlayingId] = useState<number | string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Pending Uploads State
-  const [pendingUploads, setPendingUploads] = useState<{
-    instru: PendingUpload;
-    stems?: PendingUpload;
-    identifier: string;
-  }[]>([]);
-  
-  // Add Drive File Form
-  const [showAddDriveForm, setShowAddDriveForm] = useState(false);
-  const [newDriveFilename, setNewDriveFilename] = useState('');
-  const [newDriveUrl, setNewDriveUrl] = useState('');
-  const [addingDriveFile, setAddingDriveFile] = useState(false);
-
   // Refs for clearing inputs
   const coverInputRef = useRef<HTMLInputElement>(null);
   const previewInputRef = useRef<HTMLInputElement>(null);
@@ -98,83 +88,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
   useEffect(() => {
     fetchInstrumentals();
   }, []);
-
-  // Fetch pending uploads on mount
-  useEffect(() => {
-      fetchPendingUploads();
-  }, []);
-
-  const fetchPendingUploads = async () => {
-      const data = await supabaseManager.getPendingUploads();
-      processPendingUploads(data);
-  };
-
-  // Add a new Drive file to pending_uploads
-  const handleAddDriveFile = async () => {
-      if (!newDriveFilename.trim() || !newDriveUrl.trim()) {
-          setStatus("❌ Nom de fichier et URL requis");
-          return;
-      }
-      
-      setAddingDriveFile(true);
-      setStatus("📤 Ajout du fichier...");
-      
-      try {
-          await supabaseManager.addPendingUpload(newDriveFilename.trim(), newDriveUrl.trim());
-          setStatus("✅ Fichier ajouté à la file d'attente !");
-          setNewDriveFilename('');
-          setNewDriveUrl('');
-          setShowAddDriveForm(false);
-          await fetchPendingUploads();
-      } catch (err: any) {
-          setStatus(`❌ Erreur: ${err.message}`);
-      } finally {
-          setAddingDriveFile(false);
-      }
-  };
-
-  // Logic to group Instrus and Stems based on numbers in filename
-  const processPendingUploads = (uploads: PendingUpload[]) => {
-      const groups: Record<string, { instru?: PendingUpload, stems?: PendingUpload }> = {};
-      
-      uploads.forEach(item => {
-          // Extract first sequence of digits as identifier
-          const match = item.filename.match(/(\d+)/);
-          if (!match) return; // Skip files without numbers
-
-          const identifier = match[1];
-          const isPPP = item.filename.toLowerCase().includes('ppp');
-
-          if (!groups[identifier]) groups[identifier] = {};
-
-          if (isPPP) {
-              groups[identifier].stems = item;
-          } else {
-              groups[identifier].instru = item;
-          }
-      });
-
-      // Convert to array containing only groups with at least an instru
-      const groupedList = Object.entries(groups)
-          .filter(([_, grp]) => grp.instru)
-          .map(([key, grp]) => ({
-              instru: grp.instru!,
-              stems: grp.stems,
-              identifier: key
-          }));
-      
-      setPendingUploads(groupedList);
-  };
-
-  // AUTO-GENERATION ON MOUNT (Only if adding new)
-  const initialized = useRef(false);
-  useEffect(() => {
-      if (!initialized.current && !editingId) {
-          initialized.current = true;
-          // We don't auto-gen immediately if we might import from Drive, user can click "Auto-Gen" manually
-          // handleRegenerateAll(); 
-      }
-  }, [editingId]);
 
   // Security Check
   if (!user || user.email.toLowerCase() !== ADMIN_EMAIL) {
@@ -204,43 +117,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
       if (coverInputRef.current) coverInputRef.current.value = '';
       if (previewInputRef.current) previewInputRef.current.value = '';
       if (stemsInputRef.current) stemsInputRef.current.value = '';
-  };
-
-  // --- IMPORT FROM DRIVE ACTION ---
-  const handleImport = (group: { instru: PendingUpload, stems?: PendingUpload, identifier: string }) => {
-      resetForm();
-      
-      // 1. Clean Name (Remove extensions and common prefixes/suffixes)
-      let cleanName = group.instru.filename
-          .replace(/\.(mp3|wav|zip|rar)$/i, '')
-          .replace(/^\d+\s*[-_]?\s*/, '') // Remove leading numbers
-          .replace(/[-_]/g, ' ')
-          .trim();
-      
-      if (!cleanName) cleanName = `Beat #${group.identifier}`;
-
-      setName(cleanName);
-      setImportedPreviewUrl(group.instru.download_url);
-      setImportSourceIds([group.instru.id]);
-      
-      if (group.stems) {
-          setImportedStemsUrl(group.stems.download_url);
-          setImportSourceIds(prev => [...prev, group.stems!.id]);
-          // Auto-configure prices for full package
-          setPriceBasic(10);
-          setPricePremium(30);
-          setPriceExclusive(150);
-      } else {
-          // Standard pricing if no stems
-          setPriceBasic(29.99);
-          setPricePremium(79.99);
-          setPriceExclusive(299.99);
-      }
-
-      setStatus(`✅ Importé: ${cleanName}. Complétez les infos.`);
-      
-      // Trigger AI suggestions based on name
-      handleRegenerateName(cleanName); 
   };
 
   // --- START EDIT ---
@@ -426,7 +302,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
           // IMPORTANT: Mark imported files as processed
           if (importSourceIds.length > 0) {
               await supabaseManager.markUploadAsProcessed(importSourceIds);
-              await fetchPendingUploads(); // Refresh list
           }
       }
 
@@ -501,6 +376,66 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
       console.error("Failed to toggle instrumental active:", e);
       setStatus("❌ Erreur lors de la mise à jour");
     }
+  };
+
+  // Start editing an instrumental
+  const handleEditInstrumental = (inst: Instrumental) => {
+    setEditingInstrumental(inst);
+    setEditingId(null); // Clear old editing state
+    // Pre-fill the form
+    setName(inst.title);
+    setCategory((inst.genre as any) || 'Trap');
+    setBpm(inst.bpm || 140);
+    setMusicalKey(inst.key || 'C Minor');
+    setPriceBasic(inst.price_base || 100);
+    setPricePremium(inst.price_exclusive || 500);
+    setPriceExclusive(inst.price_stems || 500);
+    setCoverPreviewUrl(inst.cover_image_url || null);
+    setStatus(`✏️ Modification de: ${inst.title}`);
+  };
+
+  // Save instrumental modifications
+  const handleSaveInstrumental = async () => {
+    if (!editingInstrumental) return;
+    
+    setLoading(true);
+    setStatus("💾 Sauvegarde en cours...");
+    
+    try {
+      // Upload cover if changed
+      let coverUrl = editingInstrumental.cover_image_url;
+      if (coverFile) {
+        setStatus("📸 Upload de la cover...");
+        coverUrl = await supabaseManager.uploadStoreFile(coverFile, 'covers');
+      }
+      
+      await supabaseManager.updateInstrumental(editingInstrumental.id, {
+        title: name,
+        genre: category,
+        bpm: bpm,
+        key: musicalKey,
+        price_base: priceBasic,
+        price_exclusive: pricePremium,
+        price_stems: priceExclusive,
+        cover_image_url: coverUrl,
+      });
+      
+      setStatus("✅ Instrumental mis à jour !");
+      setEditingInstrumental(null);
+      resetForm();
+      await fetchInstrumentals();
+    } catch (err: any) {
+      setStatus(`❌ Erreur: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Cancel editing instrumental
+  const cancelEditInstrumental = () => {
+    setEditingInstrumental(null);
+    resetForm();
+    setStatus("");
   };
 
   const playInstrumentalPreview = async (inst: Instrumental) => {
@@ -618,93 +553,52 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                 
                 <div className="flex-1 overflow-y-auto p-6 custom-scroll">
                     
-                    {/* --- PENDING UPLOADS SECTION (DRIVE) --- */}
-                    {!editingId && (
-                        <div className="mb-6 bg-blue-500/5 border border-blue-500/20 rounded-xl overflow-hidden">
-                            <div className="px-4 py-2 bg-blue-500/10 border-b border-blue-500/10 flex justify-between items-center">
-                                <span className="text-[9px] font-black uppercase text-blue-400 tracking-widest">
-                                    <i className="fab fa-google-drive mr-2"></i>Inbox Drive ({pendingUploads.length})
+                    {/* --- EDITING INSTRUMENTAL INFO --- */}
+                    {editingInstrumental && (
+                        <div className="mb-6 bg-purple-500/10 border border-purple-500/30 rounded-xl p-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-[10px] font-black uppercase text-purple-400 tracking-widest">
+                                    <i className="fas fa-edit mr-2"></i>Modification de l'instrumental
                                 </span>
-                                <div className="flex items-center space-x-2">
-                                    <button 
-                                        onClick={() => setShowAddDriveForm(!showAddDriveForm)} 
-                                        className={`px-2 py-1 rounded text-[9px] font-bold transition-colors ${showAddDriveForm ? 'bg-red-500 text-white' : 'bg-green-500 text-black hover:bg-green-400'}`}
-                                    >
-                                        <i className={`fas ${showAddDriveForm ? 'fa-times' : 'fa-plus'} mr-1`}></i>
-                                        {showAddDriveForm ? 'Annuler' : 'Ajouter'}
-                                    </button>
-                                    <button onClick={fetchPendingUploads} className="text-blue-400 hover:text-white"><i className="fas fa-sync-alt text-[9px]"></i></button>
+                                <button 
+                                    onClick={cancelEditInstrumental}
+                                    className="text-[9px] bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white px-2 py-1 rounded transition-colors"
+                                >
+                                    <i className="fas fa-times mr-1"></i>Annuler
+                                </button>
+                            </div>
+                            <div className="flex items-center space-x-3 bg-black/30 rounded-lg p-3">
+                                <div className="w-12 h-12 bg-purple-600/30 rounded-lg flex items-center justify-center">
+                                    {editingInstrumental.cover_image_url ? (
+                                        <img src={editingInstrumental.cover_image_url} className="w-full h-full object-cover rounded-lg" />
+                                    ) : (
+                                        <i className="fas fa-music text-purple-400"></i>
+                                    )}
+                                </div>
+                                <div className="flex-1">
+                                    <div className="text-sm font-bold text-white">{editingInstrumental.title}</div>
+                                    <div className="text-[9px] text-slate-500">
+                                        {editingInstrumental.bpm} BPM • {editingInstrumental.key} • ID: {editingInstrumental.drive_file_id?.substring(0, 15)}...
+                                    </div>
                                 </div>
                             </div>
-                            
-                            {/* Formulaire d'ajout de fichier Drive */}
-                            {showAddDriveForm && (
-                                <div className="p-4 bg-green-500/5 border-b border-green-500/20 space-y-3">
-                                    <div className="text-[9px] font-black uppercase text-green-400 mb-2">
-                                        <i className="fas fa-cloud-upload-alt mr-2"></i>Ajouter un fichier Google Drive
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={newDriveFilename}
-                                        onChange={(e) => setNewDriveFilename(e.target.value)}
-                                        placeholder="Nom du fichier (ex: 01 - Mon Beat.mp3)"
-                                        className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:border-green-500 outline-none"
-                                    />
-                                    <input
-                                        type="text"
-                                        value={newDriveUrl}
-                                        onChange={(e) => setNewDriveUrl(e.target.value)}
-                                        placeholder="URL Google Drive (https://drive.google.com/file/d/...)"
-                                        className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:border-green-500 outline-none"
-                                    />
-                                    <button
-                                        onClick={handleAddDriveFile}
-                                        disabled={addingDriveFile || !newDriveFilename.trim() || !newDriveUrl.trim()}
-                                        className="w-full py-2 bg-green-500 hover:bg-green-400 text-black text-[10px] font-black uppercase rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        {addingDriveFile ? <i className="fas fa-spinner fa-spin"></i> : 'Ajouter à la file d\'attente'}
-                                    </button>
-                                    <p className="text-[8px] text-slate-500">
-                                        💡 Clic droit sur le fichier dans Google Drive → "Obtenir le lien" → Coller l'URL ici
-                                    </p>
-                                </div>
-                            )}
-                            
-                            {/* Liste des fichiers en attente */}
-                            {pendingUploads.length > 0 ? (
-                                <div className="max-h-48 overflow-y-auto custom-scroll">
-                                    {pendingUploads.map((group) => (
-                                        <div key={group.identifier} className="p-3 border-b border-white/5 flex items-center justify-between hover:bg-white/5 transition-colors group">
-                                            <div className="flex flex-col min-w-0 pr-2">
-                                                <div className="text-[10px] font-bold text-white truncate" title={group.instru.filename}>{group.instru.filename}</div>
-                                                <div className="flex items-center space-x-2 mt-1">
-                                                    <span className={`text-[8px] font-mono px-1.5 rounded ${group.stems ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
-                                                        {group.stems ? '✅ STEMS' : '⚠️ MP3 ONLY'}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            <button 
-                                                onClick={() => handleImport(group)}
-                                                className="px-3 py-1.5 bg-blue-500 hover:bg-blue-400 text-black text-[9px] font-black uppercase rounded shadow-lg transition-transform active:scale-95"
-                                            >
-                                                Importer
-                                            </button>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : !showAddDriveForm && (
-                                <div className="p-4 text-center">
-                                    <i className="fab fa-google-drive text-2xl text-blue-500/30 mb-2"></i>
-                                    <p className="text-[9px] text-slate-500 mb-2">Aucun fichier en attente</p>
-                                    <p className="text-[8px] text-slate-600">
-                                        Cliquez sur <span className="text-green-400 font-bold">+ Ajouter</span> pour importer un fichier depuis Google Drive
-                                    </p>
-                                </div>
-                            )}
+                        </div>
+                    )}
+                    
+                    {/* Message si aucun instrumental sélectionné */}
+                    {!editingInstrumental && !editingId && (
+                        <div className="mb-6 bg-slate-500/5 border border-slate-500/20 rounded-xl p-6 text-center">
+                            <i className="fas fa-mouse-pointer text-3xl text-slate-500/30 mb-3"></i>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                                Sélectionnez un instrumental à modifier
+                            </p>
+                            <p className="text-[9px] text-slate-600 mt-1">
+                                Cliquez sur le bouton <span className="text-amber-400">✏️</span> à côté d'un instrumental
+                            </p>
                         </div>
                     )}
 
-                    <form onSubmit={handleSubmit} className="space-y-6">
+                    <form onSubmit={(e) => { e.preventDefault(); editingInstrumental ? handleSaveInstrumental() : handleSubmit(e); }} className="space-y-6">
                         {/* METADATA */}
                         <div className="space-y-4 bg-white/5 p-4 rounded-xl border border-white/5">
                             <label className="text-[9px] font-black text-slate-500 uppercase block">1. Informations de base</label>
@@ -833,10 +727,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                             <span className="block text-[10px] text-center text-slate-400 mb-2">{status}</span>
                             <button 
                                 type="submit" 
-                                disabled={loading} 
-                                className={`w-full h-12 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg transition-all disabled:opacity-50 ${editingId ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-black shadow-amber-500/20' : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-cyan-500/20'}`}
+                                disabled={loading || (!editingInstrumental && !editingId && !previewFile && !importedPreviewUrl)} 
+                                className={`w-full h-12 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg transition-all disabled:opacity-50 ${editingInstrumental ? 'bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white shadow-purple-500/20' : editingId ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-black shadow-amber-500/20' : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-cyan-500/20'}`}
                             >
-                                {loading ? <i className="fas fa-spinner fa-spin"></i> : (editingId ? "Mettre à jour" : "Mettre en ligne")}
+                                {loading ? <i className="fas fa-spinner fa-spin"></i> : (editingInstrumental ? "💾 Sauvegarder les modifications" : editingId ? "Mettre à jour" : "Sélectionnez un instrumental →")}
                             </button>
                         </div>
                     </form>
@@ -930,6 +824,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                                         title={inst.is_active ? "Actif (visible)" : "Inactif (masqué)"}
                                     >
                                         <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-300 shadow ${inst.is_active ? 'translate-x-6' : 'translate-x-0'}`} />
+                                    </button>
+                                    
+                                    {/* Edit Button */}
+                                    <button
+                                        onClick={() => handleEditInstrumental(inst)}
+                                        className={`w-8 h-8 rounded-lg transition-all flex items-center justify-center shrink-0 ${editingInstrumental?.id === inst.id ? 'bg-amber-500 text-black' : 'bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-black'}`}
+                                        title="Modifier cet instrumental"
+                                    >
+                                        <i className="fas fa-pen text-xs"></i>
                                     </button>
                                     
                                     {/* Open in Drive */}
