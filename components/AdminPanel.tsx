@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { Instrument, User, PendingUpload } from '../types';
 import { supabaseManager } from '../services/SupabaseManager';
 import { generateCoverArt, generateCreativeMetadata } from '../services/AIService';
+import { audioEngine } from '../engine/AudioEngine';
 
 interface AdminPanelProps {
   user: User;
@@ -50,6 +51,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
   
   // Inventory Management State
   const [inventory, setInventory] = useState<Instrument[]>(existingInstruments);
+  
+  // Audio Preview State
+  const [playingId, setPlayingId] = useState<number | string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Pending Uploads State
   const [pendingUploads, setPendingUploads] = useState<{
@@ -386,6 +391,55 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
     }
   };
 
+  // --- AUDIO PREVIEW ---
+  const stopPreview = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    audioEngine.stopPreview();
+    setPlayingId(null);
+  };
+
+  const togglePreview = async (inst: Instrument) => {
+    if (playingId === inst.id) {
+      stopPreview();
+      return;
+    }
+    
+    stopPreview();
+    
+    if (!inst.preview_url) {
+      setStatus("❌ Pas d'URL de preview pour cet instrument");
+      return;
+    }
+    
+    const url = supabaseManager.getPublicInstrumentUrl(inst.preview_url);
+    setPlayingId(inst.id);
+    
+    try {
+      const audio = new Audio(url);
+      audio.volume = 0.8;
+      audio.crossOrigin = "anonymous";
+      audioRef.current = audio;
+      audio.onended = () => setPlayingId(null);
+      audio.onerror = () => {
+        setStatus("❌ Erreur de lecture audio");
+        setPlayingId(null);
+      };
+      await audio.play();
+    } catch (err) {
+      console.error("Playback error:", err);
+      setPlayingId(null);
+    }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => stopPreview();
+  }, []);
+
   // --- INVENTORY MANAGEMENT ---
   const toggleVisibility = async (id: number | string, current: boolean) => {
       try {
@@ -464,7 +518,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                 <div className="flex-1 overflow-y-auto p-6 custom-scroll">
                     
                     {/* --- PENDING UPLOADS SECTION (DRIVE) --- */}
-                    {!editingId && pendingUploads.length > 0 && (
+                    {!editingId && (
                         <div className="mb-6 bg-blue-500/5 border border-blue-500/20 rounded-xl overflow-hidden">
                             <div className="px-4 py-2 bg-blue-500/10 border-b border-blue-500/10 flex justify-between items-center">
                                 <span className="text-[9px] font-black uppercase text-blue-400 tracking-widest">
@@ -472,26 +526,46 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                                 </span>
                                 <button onClick={fetchPendingUploads} className="text-blue-400 hover:text-white"><i className="fas fa-sync-alt text-[9px]"></i></button>
                             </div>
-                            <div className="max-h-40 overflow-y-auto custom-scroll">
-                                {pendingUploads.map((group) => (
-                                    <div key={group.identifier} className="p-3 border-b border-white/5 flex items-center justify-between hover:bg-white/5 transition-colors group">
-                                        <div className="flex flex-col min-w-0 pr-2">
-                                            <div className="text-[10px] font-bold text-white truncate" title={group.instru.filename}>{group.instru.filename}</div>
-                                            <div className="flex items-center space-x-2 mt-1">
-                                                <span className={`text-[8px] font-mono px-1.5 rounded ${group.stems ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
-                                                    {group.stems ? '✅ STEMS' : '⚠️ MP3 ONLY'}
-                                                </span>
+                            
+                            {/* Liste des fichiers en attente */}
+                            {pendingUploads.length > 0 ? (
+                                <div className="max-h-40 overflow-y-auto custom-scroll">
+                                    {pendingUploads.map((group) => (
+                                        <div key={group.identifier} className="p-3 border-b border-white/5 flex items-center justify-between hover:bg-white/5 transition-colors group">
+                                            <div className="flex flex-col min-w-0 pr-2">
+                                                <div className="text-[10px] font-bold text-white truncate" title={group.instru.filename}>{group.instru.filename}</div>
+                                                <div className="flex items-center space-x-2 mt-1">
+                                                    <span className={`text-[8px] font-mono px-1.5 rounded ${group.stems ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
+                                                        {group.stems ? '✅ STEMS' : '⚠️ MP3 ONLY'}
+                                                    </span>
+                                                </div>
                                             </div>
+                                            <button 
+                                                onClick={() => handleImport(group)}
+                                                className="px-3 py-1.5 bg-blue-500 hover:bg-blue-400 text-black text-[9px] font-black uppercase rounded shadow-lg transition-transform active:scale-95"
+                                            >
+                                                Importer
+                                            </button>
                                         </div>
-                                        <button 
-                                            onClick={() => handleImport(group)}
-                                            className="px-3 py-1.5 bg-blue-500 hover:bg-blue-400 text-black text-[9px] font-black uppercase rounded shadow-lg transition-transform active:scale-95"
-                                        >
-                                            Importer
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="p-4 text-center">
+                                    <p className="text-[9px] text-slate-500 mb-3">Aucun fichier en attente dans la base.</p>
+                                    <p className="text-[8px] text-slate-600 mb-2">
+                                        Pour ajouter des fichiers depuis Google Drive, ajoutez-les dans la table <code className="bg-black/30 px-1 rounded">pending_uploads</code> de Supabase.
+                                    </p>
+                                    <a 
+                                        href="https://supabase.com/dashboard/project/sqduhfckgvyezdiubeei/editor/29577" 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center space-x-2 px-3 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-[9px] font-bold rounded transition-colors"
+                                    >
+                                        <i className="fas fa-external-link-alt"></i>
+                                        <span>Ouvrir Supabase Table Editor</span>
+                                    </a>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -648,6 +722,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                         <thead>
                             <tr className="border-b border-white/10 text-[9px] font-black uppercase text-slate-500 tracking-wider">
                                 <th className="py-3 pl-2">Cover</th>
+                                <th className="py-3 text-center">Preview</th>
                                 <th className="py-3">Nom</th>
                                 <th className="py-3">Infos</th>
                                 <th className="py-3">Prix (MP3)</th>
@@ -661,6 +736,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                                 <tr key={inst.id} className={`hover:bg-white/[0.02] transition-colors ${editingId === inst.id ? 'bg-amber-500/5' : ''}`}>
                                     <td className="py-3 pl-2">
                                         <img src={inst.image_url} alt="cover" className="w-10 h-10 rounded-md object-cover border border-white/10" />
+                                    </td>
+                                    <td className="py-3 text-center">
+                                        <button
+                                            onClick={() => togglePreview(inst)}
+                                            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${playingId === inst.id ? 'bg-cyan-500 text-black animate-pulse' : 'bg-white/10 text-white hover:bg-cyan-500/50'}`}
+                                            title={playingId === inst.id ? "Stop" : "Play Preview"}
+                                        >
+                                            <i className={`fas ${playingId === inst.id ? 'fa-stop' : 'fa-play'} text-[10px]`}></i>
+                                        </button>
                                     </td>
                                     <td className="py-3">
                                         <div className="text-xs font-bold text-white">{inst.name}</div>
