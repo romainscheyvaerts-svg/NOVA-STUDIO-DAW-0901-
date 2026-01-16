@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Instrument, User, PendingUpload } from '../types';
+import { Instrument, Instrumental, User, PendingUpload } from '../types';
 import { supabaseManager } from '../services/SupabaseManager';
 import { generateCoverArt, generateCreativeMetadata } from '../services/AIService';
 import { audioEngine } from '../engine/AudioEngine';
@@ -49,8 +49,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>('');
   
-  // Inventory Management State
+  // Inventory Management State (old instruments table)
   const [inventory, setInventory] = useState<Instrument[]>(existingInstruments);
+  
+  // NEW: Instrumentals from "instrumentals" table (Google Drive catalog)
+  const [instrumentals, setInstrumentals] = useState<Instrumental[]>([]);
+  const [loadingInstrumentals, setLoadingInstrumentals] = useState(true);
   
   // Audio Preview State
   const [playingId, setPlayingId] = useState<number | string | null>(null);
@@ -77,6 +81,23 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
   useEffect(() => {
       setInventory(existingInstruments);
   }, [existingInstruments]);
+
+  // Fetch instrumentals from the new table on mount
+  const fetchInstrumentals = async () => {
+    setLoadingInstrumentals(true);
+    try {
+      const data = await supabaseManager.getInstrumentals();
+      setInstrumentals(data);
+    } catch (err) {
+      console.error("Error fetching instrumentals:", err);
+    } finally {
+      setLoadingInstrumentals(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchInstrumentals();
+  }, []);
 
   // Fetch pending uploads on mount
   useEffect(() => {
@@ -470,7 +491,57 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
     return () => stopPreview();
   }, []);
 
-  // --- INVENTORY MANAGEMENT ---
+  // --- INSTRUMENTALS MANAGEMENT (New Table) ---
+  const toggleInstrumentalActive = async (id: string, current: boolean) => {
+    try {
+      await supabaseManager.updateInstrumentalActive(id, !current);
+      await fetchInstrumentals();
+      setStatus(`✅ Instrumental ${!current ? 'activé' : 'désactivé'}`);
+    } catch (e) {
+      console.error("Failed to toggle instrumental active:", e);
+      setStatus("❌ Erreur lors de la mise à jour");
+    }
+  };
+
+  const playInstrumentalPreview = async (inst: Instrumental) => {
+    if (playingId === inst.id) {
+      stopPreview();
+      return;
+    }
+    
+    stopPreview();
+    
+    // Use preview_url if available, otherwise construct from drive_file_id
+    let url = inst.preview_url;
+    if (!url && inst.drive_file_id) {
+      url = supabaseManager.getDriveDownloadUrl(inst.drive_file_id);
+    }
+    
+    if (!url) {
+      setStatus("❌ Pas d'URL de preview");
+      return;
+    }
+    
+    setPlayingId(inst.id);
+    
+    try {
+      const audio = new Audio(url);
+      audio.volume = 0.8;
+      audio.crossOrigin = "anonymous";
+      audioRef.current = audio;
+      audio.onended = () => setPlayingId(null);
+      audio.onerror = () => {
+        setStatus("❌ Erreur de lecture - essayez le lien direct");
+        setPlayingId(null);
+      };
+      await audio.play();
+    } catch (err) {
+      console.error("Playback error:", err);
+      setPlayingId(null);
+    }
+  };
+
+  // --- OLD INVENTORY MANAGEMENT ---
   const toggleVisibility = async (id: number | string, current: boolean) => {
       try {
           await supabaseManager.updateInstrumentVisibility(id, !current);
@@ -772,94 +843,115 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                 </div>
             </div>
 
-            {/* RIGHT COLUMN: INVENTORY LIST */}
+            {/* RIGHT COLUMN: INSTRUMENTALS LIST (from Supabase instrumentals table) */}
             <div className="flex-1 flex flex-col bg-[#14161a]">
                 <div className="p-6 border-b border-white/5 flex justify-between items-center">
                     <h3 className="text-xs font-black uppercase tracking-widest text-slate-300">
-                        <i className="fas fa-list mr-2"></i>Inventaire ({inventory.length})
+                        <i className="fab fa-google-drive mr-2 text-blue-400"></i>
+                        Catalogue Instrumentals ({instrumentals.length})
                     </h3>
-                    <div className="text-[9px] text-slate-500 font-mono">Gérez la visibilité publique</div>
+                    <div className="flex items-center space-x-3">
+                        <span className="text-[9px] text-slate-500 font-mono">Table: instrumentals</span>
+                        <button 
+                            onClick={fetchInstrumentals}
+                            className="text-cyan-400 hover:text-white transition-colors"
+                            title="Rafraîchir"
+                        >
+                            <i className={`fas fa-sync-alt text-xs ${loadingInstrumentals ? 'fa-spin' : ''}`}></i>
+                        </button>
+                    </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scroll p-6">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="border-b border-white/10 text-[9px] font-black uppercase text-slate-500 tracking-wider">
-                                <th className="py-3 pl-2">Cover</th>
-                                <th className="py-3 text-center">Preview</th>
-                                <th className="py-3">Nom</th>
-                                <th className="py-3">Infos</th>
-                                <th className="py-3">Prix (MP3)</th>
-                                <th className="py-3 text-center">Stems</th>
-                                <th className="py-3 text-center">Visible ?</th>
-                                <th className="py-3 text-right pr-2">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-white/5">
-                            {inventory.map((inst) => (
-                                <tr key={inst.id} className={`hover:bg-white/[0.02] transition-colors ${editingId === inst.id ? 'bg-amber-500/5' : ''}`}>
-                                    <td className="py-3 pl-2">
-                                        <img src={inst.image_url} alt="cover" className="w-10 h-10 rounded-md object-cover border border-white/10" />
-                                    </td>
-                                    <td className="py-3 text-center">
-                                        <button
-                                            onClick={() => togglePreview(inst)}
-                                            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${playingId === inst.id ? 'bg-cyan-500 text-black animate-pulse' : 'bg-white/10 text-white hover:bg-cyan-500/50'}`}
-                                            title={playingId === inst.id ? "Stop" : "Play Preview"}
-                                        >
-                                            <i className={`fas ${playingId === inst.id ? 'fa-stop' : 'fa-play'} text-[10px]`}></i>
-                                        </button>
-                                    </td>
-                                    <td className="py-3">
-                                        <div className="text-xs font-bold text-white">{inst.name}</div>
-                                        <div className="text-[9px] text-slate-500">{inst.category}</div>
-                                    </td>
-                                    <td className="py-3">
-                                        <span className="text-[9px] bg-white/5 px-2 py-1 rounded text-slate-400">{inst.bpm} BPM / {inst.musical_key}</span>
-                                    </td>
-                                    <td className="py-3">
-                                        <span className="text-xs font-mono text-green-400">${inst.price_basic}</span>
-                                    </td>
-                                    <td className="py-3 text-center">
-                                        {inst.stems_url ? (
-                                            <i className="fas fa-check text-green-500 text-[10px]" title="Stems Available"></i>
+                <div className="flex-1 overflow-y-auto custom-scroll">
+                    {loadingInstrumentals ? (
+                        <div className="flex items-center justify-center py-20">
+                            <div className="w-8 h-8 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
+                        </div>
+                    ) : instrumentals.length > 0 ? (
+                        <div className="divide-y divide-white/5">
+                            {instrumentals.map((inst) => (
+                                <div 
+                                    key={inst.id} 
+                                    className={`p-4 hover:bg-white/[0.02] transition-colors flex items-center space-x-4 ${inst.is_active ? '' : 'opacity-60'}`}
+                                >
+                                    {/* Cover / Icon */}
+                                    <div className="w-12 h-12 bg-gradient-to-br from-purple-600/30 to-blue-600/30 rounded-lg flex items-center justify-center border border-white/10 shrink-0">
+                                        {inst.cover_image_url ? (
+                                            <img src={inst.cover_image_url} alt="" className="w-full h-full object-cover rounded-lg" />
                                         ) : (
-                                            <i className="fas fa-times text-slate-600 text-[10px]" title="No Stems"></i>
+                                            <i className="fas fa-music text-purple-400"></i>
                                         )}
-                                    </td>
-                                    <td className="py-3 text-center">
-                                        <button 
-                                            onClick={() => toggleVisibility(inst.id, inst.is_visible)}
-                                            className={`w-10 h-5 rounded-full relative transition-colors duration-300 ${inst.is_visible ? 'bg-green-500' : 'bg-slate-700'}`}
+                                    </div>
+                                    
+                                    {/* Play Button */}
+                                    <button
+                                        onClick={() => playInstrumentalPreview(inst)}
+                                        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shrink-0 ${playingId === inst.id ? 'bg-cyan-500 text-black animate-pulse' : 'bg-white/10 text-white hover:bg-cyan-500/50'}`}
+                                        title={playingId === inst.id ? "Stop" : "Play"}
+                                    >
+                                        <i className={`fas ${playingId === inst.id ? 'fa-stop' : 'fa-play'} text-sm`}></i>
+                                    </button>
+                                    
+                                    {/* Info */}
+                                    <div className="flex-1 min-w-0">
+                                        <div className="text-sm font-bold text-white truncate">{inst.title}</div>
+                                        <div className="flex items-center space-x-2 mt-1">
+                                            <span className="text-[10px] bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">{inst.genre || 'Beat'}</span>
+                                            <span className="text-[10px] text-slate-500">{inst.bpm} BPM</span>
+                                            <span className="text-[10px] text-slate-500">{inst.key}</span>
+                                        </div>
+                                        {inst.drive_file_id && (
+                                            <div className="text-[8px] text-slate-600 mt-1 truncate">
+                                                <i className="fab fa-google-drive mr-1"></i>
+                                                {inst.drive_file_id}
+                                            </div>
+                                        )}
+                                    </div>
+                                    
+                                    {/* Prices */}
+                                    <div className="text-right shrink-0">
+                                        <div className="text-xs font-mono text-green-400">{inst.price_base}€</div>
+                                        <div className="text-[9px] text-amber-400">{inst.price_exclusive}€ exclu</div>
+                                    </div>
+                                    
+                                    {/* Stems indicator */}
+                                    <div className="shrink-0 w-12 text-center">
+                                        {inst.has_stems ? (
+                                            <span className="text-[8px] bg-green-500/20 text-green-400 px-2 py-1 rounded">STEMS</span>
+                                        ) : (
+                                            <span className="text-[8px] text-slate-600">-</span>
+                                        )}
+                                    </div>
+                                    
+                                    {/* Active Toggle */}
+                                    <button 
+                                        onClick={() => toggleInstrumentalActive(inst.id, inst.is_active)}
+                                        className={`w-12 h-6 rounded-full relative transition-colors duration-300 shrink-0 ${inst.is_active ? 'bg-green-500' : 'bg-slate-700'}`}
+                                        title={inst.is_active ? "Actif (visible)" : "Inactif (masqué)"}
+                                    >
+                                        <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-300 shadow ${inst.is_active ? 'translate-x-6' : 'translate-x-0'}`} />
+                                    </button>
+                                    
+                                    {/* Open in Drive */}
+                                    {inst.drive_file_id && (
+                                        <a
+                                            href={`https://drive.google.com/file/d/${inst.drive_file_id}/view`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="w-8 h-8 rounded-lg bg-blue-500/10 hover:bg-blue-500 text-blue-400 hover:text-white transition-all flex items-center justify-center shrink-0"
+                                            title="Ouvrir dans Google Drive"
                                         >
-                                            <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform duration-300 ${inst.is_visible ? 'translate-x-5' : 'translate-x-0'}`} />
-                                        </button>
-                                    </td>
-                                    <td className="py-3 text-right pr-2 space-x-2">
-                                        <button 
-                                            onClick={() => handleEditClick(inst)}
-                                            className="w-8 h-8 rounded-lg bg-amber-500/10 hover:bg-amber-500 text-amber-500 hover:text-black transition-all inline-flex items-center justify-center"
-                                            title="Modifier"
-                                        >
-                                            <i className="fas fa-pencil-alt text-xs"></i>
-                                        </button>
-                                        <button 
-                                            onClick={() => deleteInstrument(inst.id)}
-                                            className="w-8 h-8 rounded-lg bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white transition-all inline-flex items-center justify-center"
-                                            title="Supprimer"
-                                        >
-                                            <i className="fas fa-trash text-xs"></i>
-                                        </button>
-                                    </td>
-                                </tr>
+                                            <i className="fab fa-google-drive text-xs"></i>
+                                        </a>
+                                    )}
+                                </div>
                             ))}
-                        </tbody>
-                    </table>
-                    
-                    {inventory.length === 0 && (
+                        </div>
+                    ) : (
                         <div className="text-center py-20 opacity-40">
-                            <i className="fas fa-box-open text-4xl text-slate-600 mb-4"></i>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Aucun produit en stock.</p>
+                            <i className="fab fa-google-drive text-4xl text-blue-500/30 mb-4"></i>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Aucun instrumental dans la table.</p>
+                            <p className="text-[9px] text-slate-600 mt-2">Les instrumentaux sont gérés depuis Supabase.</p>
                         </div>
                     )}
                 </div>

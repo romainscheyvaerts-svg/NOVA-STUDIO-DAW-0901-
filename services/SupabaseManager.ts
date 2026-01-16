@@ -1,6 +1,6 @@
 
 import { supabase, catalogSupabase } from './supabase';
-import { User, DAWState, Clip, Instrument, PendingUpload, Track } from '../types';
+import { User, DAWState, Clip, Instrument, Instrumental, PendingUpload, Track } from '../types';
 import { audioBufferToWav } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
 import { SessionSerializer } from './SessionSerializer';
@@ -657,7 +657,84 @@ export class SupabaseManager {
   }
 
   // =============================================
-  // CATALOGUE INSTRUMENTS (Projet 2: mxdrxpzxbgybchzzvpkf)
+  // CATALOGUE INSTRUMENTALS (Projet 2: mxdrxpzxbgybchzzvpkf)
+  // Table: instrumentals (nouveau système avec Google Drive)
+  // =============================================
+
+  /**
+   * Récupère tous les instrumentaux depuis la table "instrumentals"
+   */
+  public async getInstrumentals(): Promise<Instrumental[]> {
+    if (!catalogSupabase) return [];
+    const { data, error } = await catalogSupabase
+      .from('instrumentals')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) { 
+      console.error("Erreur lecture instrumentals:", error); 
+      return []; 
+    }
+    return data as Instrumental[];
+  }
+
+  /**
+   * Récupère uniquement les instrumentaux actifs (is_active = true)
+   */
+  public async getActiveInstrumentals(): Promise<Instrumental[]> {
+    if (!catalogSupabase) return [];
+    const { data, error } = await catalogSupabase
+      .from('instrumentals')
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+    if (error) { 
+      console.error("Erreur lecture instrumentals actifs:", error); 
+      return []; 
+    }
+    return data as Instrumental[];
+  }
+
+  /**
+   * Met à jour le statut is_active d'un instrumental
+   */
+  public async updateInstrumentalActive(id: string, isActive: boolean): Promise<void> {
+    if (!catalogSupabase) throw new Error("Catalogue non configuré");
+    const { error } = await catalogSupabase
+      .from('instrumentals')
+      .update({ is_active: isActive, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
+  }
+
+  /**
+   * Met à jour un instrumental
+   */
+  public async updateInstrumental(id: string, updates: Partial<Instrumental>): Promise<void> {
+    if (!catalogSupabase) throw new Error("Catalogue non configuré");
+    const { error } = await catalogSupabase
+      .from('instrumentals')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
+  }
+
+  /**
+   * Construit l'URL de téléchargement Google Drive à partir du drive_file_id
+   */
+  public getDriveDownloadUrl(driveFileId: string): string {
+    return `https://drive.google.com/uc?export=download&id=${driveFileId}`;
+  }
+
+  /**
+   * Construit l'URL de preview Google Drive
+   */
+  public getDrivePreviewUrl(driveFileId: string): string {
+    // Utiliser l'Edge Function proxy si configurée, sinon URL directe
+    return `https://mxdrxpzxbgybchzzvpkf.supabase.co/functions/v1/stream-drive-audio?id=${driveFileId}`;
+  }
+
+  // =============================================
+  // ANCIENNE TABLE INSTRUMENTS (pour compatibilité)
   // =============================================
 
   public async addInstrument(instrument: Omit<Instrument, 'id' | 'created_at'>) {

@@ -64,6 +64,27 @@ export interface Instrument {
   stripe_link_recording?: string; 
 }
 
+// Type pour la table "instrumentals" du nouveau Supabase (catalogue Google Drive)
+export interface Instrumental {
+  id: string;                     // UUID unique
+  title: string;                  // Titre de l'instru (ex: "1248 F MIN 105 BPM")
+  description: string | null;     // Description optionnelle
+  genre: string | null;           // Genre musical (ex: "Trap", "Drill", "RnB")
+  bpm: number | null;             // Tempo en BPM (ex: 105)
+  key: string | null;             // Tonalité (ex: "F MIN", "C MIN")
+  preview_url: string | null;     // URL de preview audio
+  cover_image_url: string | null; // URL de l'image de couverture
+  drive_file_id: string;          // ID du fichier Google Drive
+  is_active: boolean;             // Si visible publiquement
+  price_base: number | null;      // Prix licence de base (€)
+  price_exclusive: number | null; // Prix licence exclusive (€)
+  price_stems: number | null;     // Prix avec stems (€)
+  has_stems: boolean | null;      // Si stems disponibles
+  stems_folder_id: string | null; // ID dossier Google Drive des stems
+  created_at: string;             // Date de création
+  updated_at: string;             // Dernière modification
+}
+
 export interface PendingUpload {
   id: number;
   filename: string;
