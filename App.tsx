@@ -1029,7 +1029,14 @@ export default function App() {
             }))
         };
 
-        const response = await fetch('/api/chat', {
+        // Détecter si on est sur GitHub Pages (pas d'API backend)
+        // Dans ce cas, utiliser l'API Vercel directement
+        const isGitHubPages = window.location.hostname.includes('github.io');
+        const apiBaseUrl = isGitHubPages 
+            ? 'https://nova-studio-daw-0901.vercel.app'  // URL Vercel
+            : '';  // URL relative (même domaine)
+        
+        const response = await fetch(`${apiBaseUrl}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
