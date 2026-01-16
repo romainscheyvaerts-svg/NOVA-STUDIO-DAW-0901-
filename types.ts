@@ -45,7 +45,7 @@ export interface User {
 }
 
 export interface Instrument {
-  id: number;
+  id: number | string;  // UUID in Supabase
   created_at: string;
   name: string;
   category: 'Trap' | 'Drill' | 'Boombap' | 'Afro' | 'RnB' | 'Pop' | 'Electro';

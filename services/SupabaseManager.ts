@@ -654,7 +654,7 @@ export class SupabaseManager {
     return data;
   }
 
-  public async updateInstrument(id: number, updates: Partial<Instrument>) {
+  public async updateInstrument(id: number | string, updates: Partial<Instrument>) {
     if (!catalogSupabase) throw new Error("Catalogue Supabase non configuré");
     const { data, error } = await catalogSupabase.from('instruments').update(updates).eq('id', id).select();
     if (error) { console.error("Erreur mise à jour beat:", error); throw error; }
@@ -668,20 +668,20 @@ export class SupabaseManager {
     return data as Instrument[];
   }
 
-  public async getInstrumentById(id: number): Promise<Instrument | null> {
+  public async getInstrumentById(id: number | string): Promise<Instrument | null> {
     if (!catalogSupabase) return null;
     const { data, error } = await catalogSupabase.from('instruments').select('*').eq('id', id).single();
     if (error) { console.error("Erreur lecture instrument:", error); return null; }
     return data as Instrument;
   }
 
-  public async updateInstrumentVisibility(id: number, isVisible: boolean) {
+  public async updateInstrumentVisibility(id: number | string, isVisible: boolean) {
     if (!catalogSupabase) throw new Error("Catalogue Supabase non configuré");
     const { error } = await catalogSupabase.from('instruments').update({ is_visible: isVisible }).eq('id', id);
     if (error) throw error;
   }
 
-  public async deleteInstrument(id: number) {
+  public async deleteInstrument(id: number | string) {
     if (!catalogSupabase) throw new Error("Catalogue Supabase non configuré");
     const { error } = await catalogSupabase.from('instruments').delete().eq('id', id);
     if (error) throw error;

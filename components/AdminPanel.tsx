@@ -16,7 +16,7 @@ const ADMIN_EMAIL = 'romain.scheyvaerts@gmail.com';
 
 const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, existingInstruments }) => {
   // Editing State
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | string | null>(null);
 
   // Metadata Form
   const [name, setName] = useState('');
@@ -387,7 +387,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
   };
 
   // --- INVENTORY MANAGEMENT ---
-  const toggleVisibility = async (id: number, current: boolean) => {
+  const toggleVisibility = async (id: number | string, current: boolean) => {
       try {
           await supabaseManager.updateInstrumentVisibility(id, !current);
           onSuccess(); 
@@ -396,7 +396,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
       }
   };
 
-  const deleteInstrument = async (id: number) => {
+  const deleteInstrument = async (id: number | string) => {
       if(!window.confirm("Êtes-vous sûr de vouloir supprimer ce beat définitivement ?")) return;
       try {
           await supabaseManager.deleteInstrument(id);
