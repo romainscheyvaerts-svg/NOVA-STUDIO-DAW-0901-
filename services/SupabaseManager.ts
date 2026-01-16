@@ -52,7 +52,7 @@ export class SupabaseManager {
         const fileId = this.extractDriveFileId(pathOrUrl);
         if (fileId) {
             // Utiliser l'Edge Function Supabase comme proxy
-            const proxyUrl = `https://sqduhfckgvyezdiubeei.supabase.co/functions/v1/stream-drive-audio?id=${fileId}`;
+            const proxyUrl = `https://mxdrxpzxbgybchzzvpkf.supabase.co/functions/v1/stream-drive-audio?id=${fileId}`;
             return proxyUrl;
         } else {
             console.warn("[SupabaseManager] Impossible d'extraire l'ID du fichier Drive:", pathOrUrl);
