@@ -1,5 +1,5 @@
 
-import { supabase } from './supabase';
+import { supabase, catalogSupabase } from './supabase';
 import { User, DAWState, Clip, Instrument, PendingUpload, Track } from '../types';
 import { audioBufferToWav } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
@@ -37,6 +37,7 @@ export class SupabaseManager {
    * ACCÈS DIRECT STORAGE SUPABASE
    * Récupère l'URL publique d'un fichier dans le bucket 'instruments'.
    * Gère les chemins relatifs (stockés en DB) ou les URLs complètes.
+   * Utilise le projet CATALOGUE (mxdrxpzxbgybchzzvpkf) pour les instruments.
    */
   public getPublicInstrumentUrl(pathOrUrl: string): string {
     if (!pathOrUrl) return '';
@@ -51,7 +52,7 @@ export class SupabaseManager {
     if (pathOrUrl.includes('drive.google.com')) {
         const fileId = this.extractDriveFileId(pathOrUrl);
         if (fileId) {
-            // Utiliser l'Edge Function Supabase comme proxy
+            // Utiliser l'Edge Function Supabase comme proxy (projet catalogue)
             const proxyUrl = `https://mxdrxpzxbgybchzzvpkf.supabase.co/functions/v1/stream-drive-audio?id=${fileId}`;
             return proxyUrl;
         } else {
@@ -65,9 +66,9 @@ export class SupabaseManager {
         return pathOrUrl;
     }
 
-    // Sinon, on génère l'URL publique depuis le bucket 'instruments'
-    if (supabase) {
-        const { data } = supabase.storage.from('instruments').getPublicUrl(pathOrUrl);
+    // Sinon, on génère l'URL publique depuis le bucket 'instruments' du projet CATALOGUE
+    if (catalogSupabase) {
+        const { data } = catalogSupabase.storage.from('instruments').getPublicUrl(pathOrUrl);
         return data.publicUrl;
     }
 
@@ -560,15 +561,17 @@ export class SupabaseManager {
   }
   
   public async getPendingUploads(): Promise<PendingUpload[]> {
-    if (!supabase) return [];
-    const { data, error } = await supabase.from('pending_uploads').select('*').eq('is_processed', false).order('created_at', { ascending: false });
+    // Utilise le projet catalogue pour les pending uploads
+    if (!catalogSupabase) return [];
+    const { data, error } = await catalogSupabase.from('pending_uploads').select('*').eq('is_processed', false).order('created_at', { ascending: false });
     if (error) { console.error("Erreur récupération pending uploads:", error); return []; }
     return data as PendingUpload[];
   }
 
   public async markUploadAsProcessed(ids: number[]) {
-      if (!supabase || ids.length === 0) return;
-      const { error } = await supabase.from('pending_uploads').update({ is_processed: true }).in('id', ids);
+      // Utilise le projet catalogue
+      if (!catalogSupabase || ids.length === 0) return;
+      const { error } = await catalogSupabase.from('pending_uploads').update({ is_processed: true }).in('id', ids);
       if (error) { console.error("Erreur mise à jour pending uploads:", error); throw error; }
   }
 
@@ -623,55 +626,60 @@ export class SupabaseManager {
   }
 
   public async uploadStoreFile(file: File, folder: 'covers' | 'previews' | 'stems'): Promise<string> {
-    if (!supabase) throw new Error("Supabase non configuré");
+    // Utilise le projet catalogue pour le bucket instruments
+    if (!catalogSupabase) throw new Error("Catalogue Supabase non configuré");
     const safeName = this.sanitizeFilename(file.name.replace(/\.[^/.]+$/, ""));
     const extension = file.name.split('.').pop() || '';
     const filename = `${Date.now()}-${safeName}.${extension}`;
     const path = `${folder}/${filename}`;
     const BUCKET_NAME = 'instruments'; 
-    const { data, error } = await supabase.storage.from(BUCKET_NAME).upload(path, file, { cacheControl: '3600', upsert: false });
+    const { data, error } = await catalogSupabase.storage.from(BUCKET_NAME).upload(path, file, { cacheControl: '3600', upsert: false });
     if (error) { console.error(`Erreur upload ${folder}:`, error); throw error; }
-    const { data: publicUrlData } = supabase.storage.from(BUCKET_NAME).getPublicUrl(path);
+    const { data: publicUrlData } = catalogSupabase.storage.from(BUCKET_NAME).getPublicUrl(path);
     return publicUrlData.publicUrl;
   }
 
+  // =============================================
+  // CATALOGUE INSTRUMENTS (Projet 2: mxdrxpzxbgybchzzvpkf)
+  // =============================================
+
   public async addInstrument(instrument: Omit<Instrument, 'id' | 'created_at'>) {
-    if (!supabase) throw new Error("Supabase non configuré");
-    const { data, error } = await supabase.from('instruments').insert([instrument]).select();
+    if (!catalogSupabase) throw new Error("Catalogue Supabase non configuré");
+    const { data, error } = await catalogSupabase.from('instruments').insert([instrument]).select();
     if (error) { console.error("Erreur insertion beat:", error); throw error; }
     return data;
   }
 
   public async updateInstrument(id: number, updates: Partial<Instrument>) {
-    if (!supabase) throw new Error("Supabase non configuré");
-    const { data, error } = await supabase.from('instruments').update(updates).eq('id', id).select();
+    if (!catalogSupabase) throw new Error("Catalogue Supabase non configuré");
+    const { data, error } = await catalogSupabase.from('instruments').update(updates).eq('id', id).select();
     if (error) { console.error("Erreur mise à jour beat:", error); throw error; }
     return data;
   }
 
   public async getInstruments(): Promise<Instrument[]> {
-    if (!supabase) return [];
-    const { data, error } = await supabase.from('instruments').select('*').order('created_at', { ascending: false });
+    if (!catalogSupabase) return [];
+    const { data, error } = await catalogSupabase.from('instruments').select('*').order('created_at', { ascending: false });
     if (error) { console.error("Erreur lecture catalogue:", error); throw error; }
     return data as Instrument[];
   }
 
   public async getInstrumentById(id: number): Promise<Instrument | null> {
-    if (!supabase) return null;
-    const { data, error } = await supabase.from('instruments').select('*').eq('id', id).single();
+    if (!catalogSupabase) return null;
+    const { data, error } = await catalogSupabase.from('instruments').select('*').eq('id', id).single();
     if (error) { console.error("Erreur lecture instrument:", error); return null; }
     return data as Instrument;
   }
 
   public async updateInstrumentVisibility(id: number, isVisible: boolean) {
-    if (!supabase) throw new Error("Supabase non configuré");
-    const { error } = await supabase.from('instruments').update({ is_visible: isVisible }).eq('id', id);
+    if (!catalogSupabase) throw new Error("Catalogue Supabase non configuré");
+    const { error } = await catalogSupabase.from('instruments').update({ is_visible: isVisible }).eq('id', id);
     if (error) throw error;
   }
 
   public async deleteInstrument(id: number) {
-    if (!supabase) throw new Error("Supabase non configuré");
-    const { error } = await supabase.from('instruments').delete().eq('id', id);
+    if (!catalogSupabase) throw new Error("Catalogue Supabase non configuré");
+    const { error } = await catalogSupabase.from('instruments').delete().eq('id', id);
     if (error) throw error;
   }
 }
