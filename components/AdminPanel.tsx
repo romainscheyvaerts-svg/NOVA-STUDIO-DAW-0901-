@@ -62,6 +62,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
     stems?: PendingUpload;
     identifier: string;
   }[]>([]);
+  
+  // Add Drive File Form
+  const [showAddDriveForm, setShowAddDriveForm] = useState(false);
+  const [newDriveFilename, setNewDriveFilename] = useState('');
+  const [newDriveUrl, setNewDriveUrl] = useState('');
+  const [addingDriveFile, setAddingDriveFile] = useState(false);
 
   // Refs for clearing inputs
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -80,6 +86,30 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
   const fetchPendingUploads = async () => {
       const data = await supabaseManager.getPendingUploads();
       processPendingUploads(data);
+  };
+
+  // Add a new Drive file to pending_uploads
+  const handleAddDriveFile = async () => {
+      if (!newDriveFilename.trim() || !newDriveUrl.trim()) {
+          setStatus("❌ Nom de fichier et URL requis");
+          return;
+      }
+      
+      setAddingDriveFile(true);
+      setStatus("📤 Ajout du fichier...");
+      
+      try {
+          await supabaseManager.addPendingUpload(newDriveFilename.trim(), newDriveUrl.trim());
+          setStatus("✅ Fichier ajouté à la file d'attente !");
+          setNewDriveFilename('');
+          setNewDriveUrl('');
+          setShowAddDriveForm(false);
+          await fetchPendingUploads();
+      } catch (err: any) {
+          setStatus(`❌ Erreur: ${err.message}`);
+      } finally {
+          setAddingDriveFile(false);
+      }
   };
 
   // Logic to group Instrus and Stems based on numbers in filename
@@ -524,12 +554,54 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                                 <span className="text-[9px] font-black uppercase text-blue-400 tracking-widest">
                                     <i className="fab fa-google-drive mr-2"></i>Inbox Drive ({pendingUploads.length})
                                 </span>
-                                <button onClick={fetchPendingUploads} className="text-blue-400 hover:text-white"><i className="fas fa-sync-alt text-[9px]"></i></button>
+                                <div className="flex items-center space-x-2">
+                                    <button 
+                                        onClick={() => setShowAddDriveForm(!showAddDriveForm)} 
+                                        className={`px-2 py-1 rounded text-[9px] font-bold transition-colors ${showAddDriveForm ? 'bg-red-500 text-white' : 'bg-green-500 text-black hover:bg-green-400'}`}
+                                    >
+                                        <i className={`fas ${showAddDriveForm ? 'fa-times' : 'fa-plus'} mr-1`}></i>
+                                        {showAddDriveForm ? 'Annuler' : 'Ajouter'}
+                                    </button>
+                                    <button onClick={fetchPendingUploads} className="text-blue-400 hover:text-white"><i className="fas fa-sync-alt text-[9px]"></i></button>
+                                </div>
                             </div>
+                            
+                            {/* Formulaire d'ajout de fichier Drive */}
+                            {showAddDriveForm && (
+                                <div className="p-4 bg-green-500/5 border-b border-green-500/20 space-y-3">
+                                    <div className="text-[9px] font-black uppercase text-green-400 mb-2">
+                                        <i className="fas fa-cloud-upload-alt mr-2"></i>Ajouter un fichier Google Drive
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={newDriveFilename}
+                                        onChange={(e) => setNewDriveFilename(e.target.value)}
+                                        placeholder="Nom du fichier (ex: 01 - Mon Beat.mp3)"
+                                        className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:border-green-500 outline-none"
+                                    />
+                                    <input
+                                        type="text"
+                                        value={newDriveUrl}
+                                        onChange={(e) => setNewDriveUrl(e.target.value)}
+                                        placeholder="URL Google Drive (https://drive.google.com/file/d/...)"
+                                        className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:border-green-500 outline-none"
+                                    />
+                                    <button
+                                        onClick={handleAddDriveFile}
+                                        disabled={addingDriveFile || !newDriveFilename.trim() || !newDriveUrl.trim()}
+                                        className="w-full py-2 bg-green-500 hover:bg-green-400 text-black text-[10px] font-black uppercase rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {addingDriveFile ? <i className="fas fa-spinner fa-spin"></i> : 'Ajouter à la file d\'attente'}
+                                    </button>
+                                    <p className="text-[8px] text-slate-500">
+                                        💡 Clic droit sur le fichier dans Google Drive → "Obtenir le lien" → Coller l'URL ici
+                                    </p>
+                                </div>
+                            )}
                             
                             {/* Liste des fichiers en attente */}
                             {pendingUploads.length > 0 ? (
-                                <div className="max-h-40 overflow-y-auto custom-scroll">
+                                <div className="max-h-48 overflow-y-auto custom-scroll">
                                     {pendingUploads.map((group) => (
                                         <div key={group.identifier} className="p-3 border-b border-white/5 flex items-center justify-between hover:bg-white/5 transition-colors group">
                                             <div className="flex flex-col min-w-0 pr-2">
@@ -549,21 +621,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                                         </div>
                                     ))}
                                 </div>
-                            ) : (
+                            ) : !showAddDriveForm && (
                                 <div className="p-4 text-center">
-                                    <p className="text-[9px] text-slate-500 mb-3">Aucun fichier en attente dans la base.</p>
-                                    <p className="text-[8px] text-slate-600 mb-2">
-                                        Pour ajouter des fichiers depuis Google Drive, ajoutez-les dans la table <code className="bg-black/30 px-1 rounded">pending_uploads</code> de Supabase.
+                                    <i className="fab fa-google-drive text-2xl text-blue-500/30 mb-2"></i>
+                                    <p className="text-[9px] text-slate-500 mb-2">Aucun fichier en attente</p>
+                                    <p className="text-[8px] text-slate-600">
+                                        Cliquez sur <span className="text-green-400 font-bold">+ Ajouter</span> pour importer un fichier depuis Google Drive
                                     </p>
-                                    <a 
-                                        href="https://supabase.com/dashboard/project/sqduhfckgvyezdiubeei/editor/29577" 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center space-x-2 px-3 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-[9px] font-bold rounded transition-colors"
-                                    >
-                                        <i className="fas fa-external-link-alt"></i>
-                                        <span>Ouvrir Supabase Table Editor</span>
-                                    </a>
                                 </div>
                             )}
                         </div>

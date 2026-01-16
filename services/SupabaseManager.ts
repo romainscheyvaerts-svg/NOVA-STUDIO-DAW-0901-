@@ -572,6 +572,19 @@ export class SupabaseManager {
     return data as PendingUpload[];
   }
 
+  public async addPendingUpload(filename: string, downloadUrl: string): Promise<void> {
+    if (!catalogSupabase) throw new Error("Supabase non configuré");
+    const { error } = await catalogSupabase.from('pending_uploads').insert({
+        filename,
+        download_url: downloadUrl,
+        is_processed: false
+    });
+    if (error) { 
+        console.error("Erreur ajout pending upload:", error); 
+        throw error; 
+    }
+  }
+
   public async markUploadAsProcessed(ids: number[]) {
       // Utilise le projet catalogue
       if (!catalogSupabase || ids.length === 0) return;
