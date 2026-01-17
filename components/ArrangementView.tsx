@@ -712,34 +712,44 @@ const drawTimeline = useCallback(() => {
         }
     }
     
-    ctx.save();
-    ctx.translate(0, -scrollTop);
-
-    let currentY = 40;
+    // Dessiner les clips SANS translate - coordonnées relatives au viewport
+    let currentY = 40; // Position absolue dans le document
     visibleTracks.forEach((track) => {
         const trackH = zoomV;
         const totalAutomationHeight = track.automationLanes.filter(l => l.isExpanded).length * 80;
+        
+        // Position Y relative au viewport (après scroll)
+        const viewportY = currentY - scrollTop;
 
-        if (currentY + trackH > scrollTop && currentY < scrollTop + h) {
+        // Vérifier si la piste est visible dans le viewport
+        if (viewportY + trackH > 40 && viewportY < h) {
             track.clips.forEach(clip => {
                 const cx = timeToPixels(clip.start) - scrollX;
                 const cw = timeToPixels(clip.duration);
                 if (cx + cw > 0 && cx < w) {
-                    drawClip(ctx, clip, track.color, cx, currentY + 2, cw, trackH - 4, activeClip?.clip.id === clip.id, zoomH);
+                    // Dessiner le clip à sa position relative dans le viewport
+                    const clipY = Math.max(viewportY + 2, 40); // Ne pas dessiner au-dessus du ruler
+                    const clipH = Math.min(trackH - 4, viewportY + trackH - 2 - clipY);
+                    if (clipH > 0) {
+                        drawClip(ctx, clip, track.color, cx, clipY, cw, clipH, activeClip?.clip.id === clip.id, zoomH);
+                    }
                 }
             });
         }
         
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, currentY + trackH + totalAutomationHeight);
-        ctx.lineTo(w + scrollX, currentY + trackH + totalAutomationHeight);
-        ctx.stroke();
+        // Dessiner les séparateurs de pistes (position relative au viewport)
+        if (viewportY + trackH + totalAutomationHeight > 40 && viewportY < h) {
+            const lineY = viewportY + trackH + totalAutomationHeight;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, lineY);
+            ctx.lineTo(w, lineY);
+            ctx.stroke();
+        }
 
         currentY += trackH + totalAutomationHeight;
     });
-    ctx.restore();
 
     ctx.fillStyle = '#14161a';
     ctx.fillRect(0, 0, w, 40);
@@ -841,58 +851,88 @@ useEffect(() => {
              <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
         </div>
       </div>
-      <div className="flex-1 flex overflow-hidden relative">
-        <div 
-            ref={sidebarContainerRef} 
-            onScroll={handleScroll} 
-            onWheel={handleSidebarWheel}
-            className="flex-shrink-0 z-40 flex flex-col overflow-y-auto overflow-x-hidden transition-colors relative sidebar-no-scroll" 
-            style={{ width: `${headerWidth}px`, scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-        >
-          <style>{`.sidebar-no-scroll::-webkit-scrollbar { display: none; }`}</style>
-          <div style={{ height: 40, flexShrink: 0 }} />
-          {visibleTracks.map((track) => (
-            <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>
-              <div style={{ height: `${zoomV}px` }}>
-                <TrackHeader 
-                   track={track} isSelected={selectedTrackId === track.id} onSelect={() => onSelectTrack(track.id)} onUpdate={onUpdateTrack} 
-                   onDropPlugin={onDropPluginOnTrack} onMovePlugin={onMovePlugin} onSelectPlugin={onSelectPlugin} onRemovePlugin={onRemovePlugin} onRequestAddPlugin={onRequestAddPlugin} 
-                   onContextMenu={handleTrackContextMenu} onDragStartTrack={() => {}} onDragOverTrack={() => {}} onDropTrack={() => {}} onSwapInstrument={onSwapInstrument}
-                />
+      {/* SINGLE SCROLL CONTAINER - sidebar is sticky left, canvas is sticky top */}
+      <div 
+          ref={scrollContainerRef} 
+          className="flex-1 overflow-auto relative custom-scroll"
+          onMouseDown={handleMouseDown} 
+          onMouseMove={handleMouseMove} 
+          onMouseUp={handleMouseUp} 
+          onMouseLeave={handleMouseUp} 
+          onScroll={(e) => { setScrollLeft(e.currentTarget.scrollLeft); setScrollTop(e.currentTarget.scrollTop); }}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          onContextMenu={(e) => e.preventDefault()}
+      >
+        {/* Container for all content with proper dimensions */}
+        <div style={{ width: totalContentWidth + headerWidth, minHeight: totalArrangementHeight, position: 'relative' }}>
+          
+          {/* SIDEBAR - sticky left only (scrolls vertically with content) */}
+          <div 
+              ref={sidebarContainerRef}
+              className="z-40 flex flex-col"
+              style={{ 
+                  position: 'sticky', 
+                  left: 0,
+                  width: `${headerWidth}px`, 
+                  height: 'fit-content',
+                  minHeight: totalArrangementHeight,
+                  backgroundColor: '#14161a',
+                  borderRight: '1px solid rgba(255,255,255,0.1)'
+              }}
+          >
+            {/* Ruler spacer */}
+            <div style={{ height: 40, flexShrink: 0, backgroundColor: '#14161a' }} />
+            {/* Track Headers */}
+            {visibleTracks.map((track) => (
+              <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>
+                <div style={{ height: `${zoomV}px` }}>
+                  <TrackHeader 
+                     track={track} isSelected={selectedTrackId === track.id} onSelect={() => onSelectTrack(track.id)} onUpdate={onUpdateTrack} 
+                     onDropPlugin={onDropPluginOnTrack} onMovePlugin={onMovePlugin} onSelectPlugin={onSelectPlugin} onRemovePlugin={onRemovePlugin} onRequestAddPlugin={onRequestAddPlugin} 
+                     onContextMenu={handleTrackContextMenu} onDragStartTrack={() => {}} onDragOverTrack={() => {}} onDropTrack={() => {}} onSwapInstrument={onSwapInstrument}
+                  />
+                </div>
+                {track.automationLanes.map(lane => lane.isExpanded && (
+                     <div key={lane.id} style={{ height: '80px', position: 'relative' }}>
+                       <AutomationLaneComponent trackId={track.id} lane={lane} width={0} zoomH={zoomH} scrollLeft={0} onUpdatePoints={() => {}} onRemoveLane={() => onUpdateTrack({ ...track, automationLanes: track.automationLanes.map(l => l.id === lane.id ? { ...l, isExpanded: false } : l) })} variant="header" />
+                     </div>
+                ))}
               </div>
-              {track.automationLanes.map(lane => lane.isExpanded && (
-                   <div key={lane.id} style={{ height: '80px', position: 'relative' }}>
-                     <AutomationLaneComponent trackId={track.id} lane={lane} width={0} zoomH={zoomH} scrollLeft={0} onUpdatePoints={() => {}} onRemoveLane={() => onUpdateTrack({ ...track, automationLanes: track.automationLanes.map(l => l.id === lane.id ? { ...l, isExpanded: false } : l) })} variant="header" />
-                   </div>
-              ))}
+            ))}
+            <div style={{ flexGrow: 1 }} />
+            {/* Resize handle */}
+            <div className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-cyan-500/50 active:bg-cyan-500 z-50 flex items-center justify-center group" onMouseDown={handleHeaderResizeStart}>
+              <div className="w-0.5 h-8 bg-white/20 rounded-full group-hover:bg-white/50 pointer-events-none" />
             </div>
-          ))}
-          <div style={{ height: 500 }} />
-          <div className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-cyan-500/50 active:bg-cyan-500 z-50 flex items-center justify-center group" onMouseDown={handleHeaderResizeStart}><div className="w-0.5 h-8 bg-white/20 rounded-full group-hover:bg-white/50 pointer-events-none" /></div>
-        </div>
-        <div 
-            ref={scrollContainerRef} 
-            className="flex-1 overflow-auto relative custom-scroll scroll-smooth touch-pan-x touch-pan-y" 
-            onMouseDown={handleMouseDown} 
-            onMouseMove={handleMouseMove} 
-            onMouseUp={handleMouseUp} 
-            onMouseLeave={handleMouseUp} 
-            onScroll={handleScroll}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-            onContextMenu={(e) => e.preventDefault()}
-        >
-          <div style={{ width: totalContentWidth, height: totalArrangementHeight }} className="absolute top-0 left-0 pointer-events-none" />
-          <canvas ref={canvasRef} className="sticky top-0 left-0" style={{ display: 'block' }} />
+          </div>
+          
+          
+          {/* Live recording clips */}
           {isRecording && recStartTime !== null && (
              visibleTracks.map((track, idx) => {
                if (!track.isTrackArmed) return null;
                let topY = 40; for (let i = 0; i < idx; i++) topY += zoomV + (visibleTracks[i].automationLanes.filter(l => l.isExpanded).length * 80);
-               return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, height: `${zoomV - 4}px`, left: 0, right: 0, pointerEvents: 'none' }}><LiveRecordingClip trackId={track.id} recStartTime={recStartTime} currentTime={currentTime} zoomH={zoomH} height={zoomV - 4} /></div>;
+               return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, left: headerWidth, height: `${zoomV - 4}px`, right: 0, pointerEvents: 'none' }}><LiveRecordingClip trackId={track.id} recStartTime={recStartTime} currentTime={currentTime} zoomH={zoomH} height={zoomV - 4} /></div>;
              })
           )}
         </div>
       </div>
+      {/* CANVAS - Overlay fixe pour la grille et la timeline */}
+      <canvas 
+          ref={canvasRef} 
+          style={{ 
+              position: 'absolute',
+              top: 48, // Hauteur de la toolbar
+              left: headerWidth,
+              right: 0,
+              bottom: 0,
+              width: `calc(100% - ${headerWidth}px)`,
+              height: 'calc(100% - 48px)',
+              pointerEvents: 'none',
+              zIndex: 20
+          }} 
+      />
       {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
       {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled(!snapEnabled)} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: currentTime })} />}
       {hoverTime !== null && dragAction !== null && <div className="fixed z-[200] px-3 py-1.5 bg-black/90 border border-cyan-500/30 rounded-lg shadow-2xl pointer-events-none text-[10px] font-black text-cyan-400 font-mono" style={{ left: tooltipPos.x + 15, top: tooltipPos.y }}>{hoverTime.toFixed(3)}s {dragAction && <span className="ml-2 text-white opacity-50">[{dragAction}]</span>}</div>}
@@ -903,12 +943,12 @@ useEffect(() => {
                 { label: 'Couper', icon: 'fa-cut', shortcut: 'Ctrl+X', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'CUT'); setClipContextMenu(null); }},
                 { label: 'Copier', icon: 'fa-copy', shortcut: 'Ctrl+C', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'COPY'); setClipContextMenu(null); }},
                 { label: 'Coller', icon: 'fa-paste', shortcut: 'Ctrl+V', onClick: () => { onEditClip?.(clipContextMenu.trackId, '', 'PASTE', { time: currentTime }); setClipContextMenu(null); }},
-                { label: 'separator' },
+                'separator',
                 { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE'); setClipContextMenu(null); }},
                 { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: currentTime }); setClipContextMenu(null); }},
-                { label: 'separator' },
+                'separator',
                 { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
-                { label: 'separator' },
+                'separator',
                 { label: 'Supprimer', icon: 'fa-trash', shortcut: 'Suppr', danger: true, onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DELETE'); setClipContextMenu(null); }}
             ]}
         />
@@ -926,7 +966,7 @@ useEffect(() => {
                     onUpdateMarker?.({ ...markerContextMenu.marker, color: nextColor });
                     setMarkerContextMenu(null);
                 }},
-                { label: 'separator' },
+                'separator',
                 { label: 'Delete Marker', icon: 'fa-trash', danger: true, onClick: () => { onDeleteMarker?.(markerContextMenu.marker.id); setMarkerContextMenu(null); }}
             ]}
         />
