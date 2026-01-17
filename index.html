@@ -185,6 +185,25 @@
   </div>
   <div id="root"></div>
   <script>
+    // Global error handler to show errors instead of black screen
+    function showError(msg, details) {
+      var loadingEl = document.getElementById('loading-screen');
+      if (loadingEl) {
+        loadingEl.innerHTML = '<div style="max-width:600px;padding:20px;text-align:center;">' +
+          '<h1 style="color:#ef4444;font-size:24px;margin-bottom:16px;">Erreur de chargement</h1>' +
+          '<p style="color:#94a3b8;margin-bottom:16px;">' + msg + '</p>' +
+          (details ? '<p style="color:#64748b;font-size:12px;">' + details + '</p>' : '') +
+          '<button onclick="location.reload()" style="margin-top:20px;padding:12px 24px;background:#00f2ff;color:#000;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Recharger</button>' +
+          '</div>';
+      }
+    }
+    window.onerror = function(msg, url, line) {
+      showError(msg, 'Ligne ' + line + ' dans ' + (url || 'unknown'));
+      return false;
+    };
+    window.onunhandledrejection = function(e) {
+      showError(e.reason?.message || 'Erreur async', e.reason?.stack?.split('\\n')[0] || '');
+    };
     // Cache busting: Force reload si nouvelle version détectée
     (function() {
       const BUILD_VERSION = '__BUILD_VERSION__'; // Remplacé par Vite au build

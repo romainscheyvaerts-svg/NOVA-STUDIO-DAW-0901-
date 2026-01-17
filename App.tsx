@@ -189,29 +189,6 @@ const SaveOverlay: React.FC<{ progress: number; message: string }> = ({ progress
   </div>
 );
 
-const MobileBottomNav: React.FC<{ activeTab: MobileTab, onTabChange: (tab: MobileTab) => void }> = ({ activeTab, onTabChange }) => (
-    <div className="h-20 bg-[#0c0d10] border-t border-white/10 flex items-center justify-around z-50 fixed bottom-0 left-0 right-0 safe-area-bottom">
-        <button onClick={() => onTabChange('TRACKS')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'TRACKS' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-align-justify text-xl"></i>
-            <span className="text-[10px] font-bold uppercase tracking-wide">Pistes</span>
-        </button>
-        <button onClick={() => onTabChange('ARRANGEMENT')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'ARRANGEMENT' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-waveform-lines text-xl"></i>
-            <span className="text-[10px] font-bold uppercase tracking-wide">Arrangement</span>
-        </button>
-        <button onClick={() => onTabChange('BROWSER')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'BROWSER' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <i className="fas fa-compass text-xl"></i>
-            <span className="text-[10px] font-bold uppercase tracking-wide">Browse</span>
-        </button>
-        <button onClick={() => onTabChange('NOVA')} className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${activeTab === 'NOVA' ? 'text-cyan-400' : 'text-slate-500'}`}>
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${activeTab === 'NOVA' ? 'bg-gradient-to-tr from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/50' : 'bg-white/5'}`}>
-                <i className={`fas fa-robot text-lg ${activeTab === 'NOVA' ? 'text-white' : 'text-slate-500'}`}></i>
-            </div>
-            <span className="text-[10px] font-bold uppercase tracking-wide">Nova</span>
-        </button>
-    </div>
-);
-
 const useUndoRedo = (initialState: DAWState) => {
   const [history, setHistory] = useState<{ past: DAWState[]; present: DAWState; future: DAWState[]; }>({ past: [], present: initialState, future: [] });
   const MAX_HISTORY = 100;
