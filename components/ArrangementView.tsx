@@ -7,6 +7,7 @@ import TimelineGridMenu from './TimelineGridMenu';
 import LiveRecordingClip from './LiveRecordingClip'; 
 import AutomationLaneComponent from './AutomationLane';
 import WaveformRenderer from './WaveformRenderer';
+import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
 interface ArrangementViewProps {
   tracks: Track[];
@@ -108,6 +109,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const requestRef = useRef<number>(0);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [scrollLeft, setScrollLeft] = useState(0);
+  const [scrollTop, setScrollTop] = useState(0);
 
   const timeToPixels = useCallback((time: number) => time * zoomH, [zoomH]);
   const pixelsToTime = useCallback((pixels: number) => pixels / zoomH, [zoomH]);
@@ -145,9 +147,13 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     isSyncingScroll.current = true;
     if (target === scrollContainerRef.current) {
         setScrollLeft(target.scrollLeft);
+        setScrollTop(target.scrollTop);
         if (sidebarContainerRef.current) sidebarContainerRef.current.scrollTop = target.scrollTop;
     } else if (target === sidebarContainerRef.current) {
-        if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = target.scrollTop;
+        if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = target.scrollTop;
+            setScrollTop(target.scrollTop);
+        }
     }
     
     requestAnimationFrame(() => { isSyncingScroll.current = false; });
@@ -196,12 +202,19 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       e.preventDefault();
       e.stopPropagation();
       
-      if (!scrollContainerRef.current) return;
+      console.log('[ArrangementView Drop] Drop détecté');
+      
+      if (!scrollContainerRef.current) {
+          console.warn('[ArrangementView Drop] scrollContainerRef.current est null');
+          return;
+      }
       
       const rect = scrollContainerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left + scrollContainerRef.current.scrollLeft;
       const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
       const dropTime = x / zoomH;
+      
+      console.log('[ArrangementView Drop] Position:', { x, y, dropTime });
       
       let targetTrackId: string | null = null;
       let currentY = 40;
@@ -217,19 +230,32 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           targetTrackId = visibleTracks.find(t => t.id === 'instrumental')?.id || 
                           visibleTracks.find(t => t.type === TrackType.AUDIO)?.id || 
                           null;
+          console.log('[ArrangementView Drop] Piste cible par défaut:', targetTrackId);
+      } else {
+          console.log('[ArrangementView Drop] Piste cible trouvée:', targetTrackId);
       }
       
-      if (!targetTrackId) return;
+      if (!targetTrackId) {
+          console.warn('[ArrangementView Drop] Aucune piste cible trouvée!');
+          return;
+      }
       
       const audioUrl = e.dataTransfer.getData('audio-url');
+      console.log('[ArrangementView Drop] audio-url récupérée:', audioUrl);
+      console.log('[ArrangementView Drop] onAudioDrop disponible:', !!onAudioDrop);
+      
       if (audioUrl && onAudioDrop) {
           const audioName = e.dataTransfer.getData('audio-name') || 'Imported Audio';
+          console.log('[ArrangementView Drop] Appel de onAudioDrop avec:', { targetTrackId, audioUrl, audioName, dropTime });
           onAudioDrop(targetTrackId, audioUrl, audioName, dropTime);
           return;
+      } else {
+          console.warn('[ArrangementView Drop] audioUrl vide ou onAudioDrop manquant');
       }
       
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
           const file = e.dataTransfer.files[0];
+          console.log('[ArrangementView Drop] Fichier détecté:', file.name, file.type);
           if (file.type.startsWith('audio/') && onAudioDrop) {
               const blobUrl = URL.createObjectURL(file);
               onAudioDrop(targetTrackId, blobUrl, file.name, dropTime);
@@ -422,28 +448,175 @@ const handleMouseUp = () => {
     setInitialClipState(null);
 };
 
-const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string, x: number, y: number, w: number, h: number, isSelected: boolean) => {
+const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string, x: number, y: number, w: number, h: number, isSelected: boolean, zoomH: number) => {
     if (x + w < 0 || x > ctx.canvas.width) return;
 
+    const clipColor = clip.color || trackColor;
+    
     ctx.save();
     ctx.beginPath();
-    ctx.roundRect(x, y, w, h, 6);
+    ctx.roundRect(x, y, w, h, 4);
     ctx.clip();
 
-    ctx.fillStyle = clip.isMuted ? '#111' : '#1e2229';
-    ctx.fill();
-    ctx.fillStyle = (clip.color || trackColor) + (clip.isMuted ? '11' : '33');
-    ctx.fill();
+    // Fond du clip
+    const gradient = ctx.createLinearGradient(x, y, x, y + h);
+    gradient.addColorStop(0, clip.isMuted ? '#0a0a0a' : '#1a1d24');
+    gradient.addColorStop(1, clip.isMuted ? '#050505' : '#12151a');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(x, y, w, h);
 
-    ctx.strokeStyle = isSelected ? '#fff' : (clip.color || trackColor);
-    ctx.lineWidth = isSelected ? 1.5 : 1;
-    ctx.stroke();
+    // Bordure colorée en haut (style Pro Tools)
+    ctx.fillStyle = clipColor + (clip.isMuted ? '44' : 'aa');
+    ctx.fillRect(x, y, w, 3);
+
+    // ========== WAVEFORM RENDERING (Pro Tools style) ==========
+    if (clip.bufferId) {
+        const buffer = audioBufferRegistry.get(clip.bufferId);
+        if (buffer) {
+            const data = buffer.getChannelData(0);
+            const sampleRate = buffer.sampleRate;
+            const offset = clip.offset || 0;
+            const clipDuration = clip.duration;
+            
+            // Calculer les samples à afficher
+            const startSample = Math.floor(offset * sampleRate);
+            const endSample = Math.min(data.length, Math.floor((offset + clipDuration) * sampleRate));
+            const totalSamples = endSample - startSample;
+            
+            // Waveform area (avec padding pour le nom du clip)
+            const waveY = y + 18;
+            const waveH = h - 22;
+            const centerY = waveY + waveH / 2;
+            
+            if (w > 2 && totalSamples > 0 && waveH > 4) {
+                const samplesPerPixel = totalSamples / w;
+                const waveColor = clip.isMuted ? '#333' : clipColor;
+                
+                // ===== STYLE PRO TOOLS: Filled waveform avec outline =====
+                ctx.fillStyle = waveColor + '55';  // Semi-transparent fill
+                ctx.strokeStyle = waveColor;
+                ctx.lineWidth = 0.5;
+                
+                ctx.beginPath();
+                ctx.moveTo(x, centerY);
+                
+                // Dessiner la partie supérieure
+                for (let px = 0; px < w; px++) {
+                    const sampleStart = startSample + Math.floor(px * samplesPerPixel);
+                    const sampleEnd = Math.min(startSample + Math.floor((px + 1) * samplesPerPixel), data.length);
+                    
+                    let max = 0;
+                    for (let s = sampleStart; s < sampleEnd; s++) {
+                        const val = Math.abs(data[s]);
+                        if (val > max) max = val;
+                    }
+                    
+                    // Amplifier pour meilleure visibilité
+                    max = Math.min(1, max * 1.3);
+                    const yTop = centerY - (max * waveH * 0.45);
+                    ctx.lineTo(x + px, yTop);
+                }
+                
+                // Dessiner la partie inférieure (miroir)
+                for (let px = w - 1; px >= 0; px--) {
+                    const sampleStart = startSample + Math.floor(px * samplesPerPixel);
+                    const sampleEnd = Math.min(startSample + Math.floor((px + 1) * samplesPerPixel), data.length);
+                    
+                    let max = 0;
+                    for (let s = sampleStart; s < sampleEnd; s++) {
+                        const val = Math.abs(data[s]);
+                        if (val > max) max = val;
+                    }
+                    
+                    max = Math.min(1, max * 1.3);
+                    const yBottom = centerY + (max * waveH * 0.45);
+                    ctx.lineTo(x + px, yBottom);
+                }
+                
+                ctx.closePath();
+                ctx.fill();
+                
+                // Dessiner l'outline de la waveform
+                ctx.strokeStyle = waveColor + 'aa';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                
+                for (let px = 0; px < w; px++) {
+                    const sampleStart = startSample + Math.floor(px * samplesPerPixel);
+                    const sampleEnd = Math.min(startSample + Math.floor((px + 1) * samplesPerPixel), data.length);
+                    
+                    let max = 0;
+                    for (let s = sampleStart; s < sampleEnd; s++) {
+                        const val = Math.abs(data[s]);
+                        if (val > max) max = val;
+                    }
+                    
+                    max = Math.min(1, max * 1.3);
+                    const yTop = centerY - (max * waveH * 0.45);
+                    
+                    if (px === 0) ctx.moveTo(x + px, yTop);
+                    else ctx.lineTo(x + px, yTop);
+                }
+                ctx.stroke();
+                
+                // Ligne inférieure
+                ctx.beginPath();
+                for (let px = 0; px < w; px++) {
+                    const sampleStart = startSample + Math.floor(px * samplesPerPixel);
+                    const sampleEnd = Math.min(startSample + Math.floor((px + 1) * samplesPerPixel), data.length);
+                    
+                    let max = 0;
+                    for (let s = sampleStart; s < sampleEnd; s++) {
+                        const val = Math.abs(data[s]);
+                        if (val > max) max = val;
+                    }
+                    
+                    max = Math.min(1, max * 1.3);
+                    const yBottom = centerY + (max * waveH * 0.45);
+                    
+                    if (px === 0) ctx.moveTo(x + px, yBottom);
+                    else ctx.lineTo(x + px, yBottom);
+                }
+                ctx.stroke();
+                
+                // Ligne centrale (0 dB)
+                ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([2, 4]);
+                ctx.beginPath();
+                ctx.moveTo(x, centerY);
+                ctx.lineTo(x + w, centerY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+        }
+    }
 
     ctx.restore();
+    
+    // Bordure extérieure du clip
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 4);
+    ctx.strokeStyle = isSelected ? '#fff' : (clipColor + '66');
+    ctx.lineWidth = isSelected ? 2 : 1;
+    ctx.stroke();
+    ctx.restore();
 
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 9px Inter';
-    ctx.fillText(clip.name, x + 8, y + 14, w - 16);
+    // Nom du clip avec fond
+    if (w > 30) {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(x + 4, y + 4, Math.min(ctx.measureText(clip.name).width + 8, w - 8), 12);
+        ctx.fillStyle = clip.isMuted ? '#666' : '#fff';
+        ctx.font = 'bold 9px Inter';
+        ctx.fillText(clip.name, x + 8, y + 13, w - 16);
+    }
+    
+    // Indicateur de mute
+    if (clip.isMuted) {
+        ctx.fillStyle = 'rgba(255,0,0,0.3)';
+        ctx.fillRect(x, y, w, h);
+    }
 };
 
 const drawTimeline = useCallback(() => {
@@ -552,7 +725,7 @@ const drawTimeline = useCallback(() => {
                 const cx = timeToPixels(clip.start) - scrollX;
                 const cw = timeToPixels(clip.duration);
                 if (cx + cw > 0 && cx < w) {
-                    drawClip(ctx, clip, track.color, cx, currentY + 2, cw, trackH - 4, activeClip?.clip.id === clip.id);
+                    drawClip(ctx, clip, track.color, cx, currentY + 2, cw, trackH - 4, activeClip?.clip.id === clip.id, zoomH);
                 }
             });
         }
@@ -635,7 +808,7 @@ const drawTimeline = useCallback(() => {
       ctx.fillStyle = isRecording ? '#ef4444' : '#00f2ff';
       ctx.beginPath(); ctx.moveTo(phX-5, 0); ctx.lineTo(phX+5, 0); ctx.lineTo(phX, 10); ctx.fill();
     }
-}, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, gridSize, scrollLeft, onEditClip, onSelectTrack, markers]);
+}, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, gridSize, scrollLeft, scrollTop, onEditClip, onSelectTrack, markers]);
 
 useEffect(() => {
     requestRef.current = requestAnimationFrame(drawTimeline);

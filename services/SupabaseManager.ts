@@ -665,57 +665,101 @@ export class SupabaseManager {
    * Récupère tous les instrumentaux depuis la table "instrumentals"
    */
   public async getInstrumentals(): Promise<Instrumental[]> {
-    if (!catalogSupabase) return [];
-    const { data, error } = await catalogSupabase
-      .from('instrumentals')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (error) { 
-      console.error("Erreur lecture instrumentals:", error); 
-      return []; 
+    console.log("[SupabaseManager] getInstrumentals() - catalogSupabase:", !!catalogSupabase);
+    if (!catalogSupabase) {
+      console.error("[SupabaseManager] catalogSupabase non initialisé!");
+      return [];
     }
-    return data as Instrumental[];
+    
+    try {
+      const { data, error } = await catalogSupabase
+        .from('instrumentals')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      console.log("[SupabaseManager] getInstrumentals() - data:", data?.length, "error:", error);
+      
+      if (error) { 
+        console.error("Erreur lecture instrumentals:", error); 
+        return []; 
+      }
+      return (data || []) as Instrumental[];
+    } catch (e) {
+      console.error("[SupabaseManager] Exception getInstrumentals:", e);
+      return [];
+    }
   }
 
   /**
    * Récupère uniquement les instrumentaux actifs (is_active = true)
    */
   public async getActiveInstrumentals(): Promise<Instrumental[]> {
-    if (!catalogSupabase) return [];
-    const { data, error } = await catalogSupabase
-      .from('instrumentals')
-      .select('*')
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
-    if (error) { 
-      console.error("Erreur lecture instrumentals actifs:", error); 
-      return []; 
+    console.log("[SupabaseManager] getActiveInstrumentals() - catalogSupabase:", !!catalogSupabase);
+    if (!catalogSupabase) {
+      console.error("[SupabaseManager] catalogSupabase non initialisé!");
+      return [];
     }
-    return data as Instrumental[];
+    
+    try {
+      const { data, error } = await catalogSupabase
+        .from('instrumentals')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+      
+      console.log("[SupabaseManager] getActiveInstrumentals() - data:", data?.length, "error:", error);
+      
+      if (error) { 
+        console.error("Erreur lecture instrumentals actifs:", error); 
+        return []; 
+      }
+      return (data || []) as Instrumental[];
+    } catch (e) {
+      console.error("[SupabaseManager] Exception getActiveInstrumentals:", e);
+      return [];
+    }
   }
 
   /**
    * Met à jour le statut is_active d'un instrumental
    */
   public async updateInstrumentalActive(id: string, isActive: boolean): Promise<void> {
+    console.log("[SupabaseManager] updateInstrumentalActive:", id, isActive);
     if (!catalogSupabase) throw new Error("Catalogue non configuré");
-    const { error } = await catalogSupabase
+    
+    const { data, error } = await catalogSupabase
       .from('instrumentals')
       .update({ is_active: isActive, updated_at: new Date().toISOString() })
-      .eq('id', id);
-    if (error) throw error;
+      .eq('id', id)
+      .select();
+    
+    console.log("[SupabaseManager] updateInstrumentalActive result:", { data, error });
+    
+    if (error) {
+      console.error("[SupabaseManager] Erreur updateInstrumentalActive:", error);
+      throw new Error(`Erreur mise à jour: ${error.message}. Vérifiez les politiques RLS sur la table instrumentals (UPDATE).`);
+    }
   }
 
   /**
    * Met à jour un instrumental
    */
   public async updateInstrumental(id: string, updates: Partial<Instrumental>): Promise<void> {
+    console.log("[SupabaseManager] updateInstrumental:", id, updates);
     if (!catalogSupabase) throw new Error("Catalogue non configuré");
-    const { error } = await catalogSupabase
+    
+    const { data, error } = await catalogSupabase
       .from('instrumentals')
       .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', id);
-    if (error) throw error;
+      .eq('id', id)
+      .select();
+    
+    console.log("[SupabaseManager] updateInstrumental result:", { data, error });
+    
+    if (error) {
+      console.error("[SupabaseManager] Erreur updateInstrumental:", error);
+      throw new Error(`Erreur mise à jour: ${error.message}. Vérifiez les politiques RLS sur la table instrumentals (UPDATE).`);
+    }
   }
 
   /**
@@ -726,11 +770,11 @@ export class SupabaseManager {
   }
 
   /**
-   * Construit l'URL de preview Google Drive
+   * Construit l'URL de preview Google Drive via l'Edge Function stream-instrumental
    */
   public getDrivePreviewUrl(driveFileId: string): string {
-    // Utiliser l'Edge Function proxy si configurée, sinon URL directe
-    return `https://mxdrxpzxbgybchzzvpkf.supabase.co/functions/v1/stream-drive-audio?id=${driveFileId}`;
+    // Utiliser l'Edge Function proxy pour streamer depuis Google Drive
+    return `https://mxdrxpzxbgybchzzvpkf.supabase.co/functions/v1/stream-instrumental?fileId=${driveFileId}`;
   }
 
   // =============================================
@@ -775,6 +819,57 @@ export class SupabaseManager {
     if (!catalogSupabase) throw new Error("Catalogue Supabase non configuré");
     const { error } = await catalogSupabase.from('instruments').delete().eq('id', id);
     if (error) throw error;
+  }
+
+  // ===== DEFAULT TEMPLATE MANAGEMENT =====
+  
+  public async saveDefaultTemplate(template: any): Promise<void> {
+    if (!supabase) throw new Error('Supabase not initialized');
+    
+    // Supprimer l'ancien template s'il existe
+    await supabase
+      .from('default_templates')
+      .delete()
+      .eq('id', 'default');
+    
+    // Insérer le nouveau template
+    const { error } = await supabase
+      .from('default_templates')
+      .insert({
+        id: 'default',
+        template_data: template,
+        updated_at: new Date().toISOString()
+      });
+    
+    if (error) {
+      console.error('[SupabaseManager] Error saving template:', error);
+      throw error;
+    }
+    
+    console.log('[SupabaseManager] Default template saved successfully');
+  }
+  
+  public async loadDefaultTemplate(): Promise<any | null> {
+    if (!supabase) return null;
+    
+    try {
+      const { data, error } = await supabase
+        .from('default_templates')
+        .select('template_data')
+        .eq('id', 'default')
+        .single();
+      
+      if (error || !data) {
+        console.log('[SupabaseManager] No default template found');
+        return null;
+      }
+      
+      console.log('[SupabaseManager] Default template loaded');
+      return data.template_data;
+    } catch (e) {
+      console.error('[SupabaseManager] Error loading template:', e);
+      return null;
+    }
   }
 }
 

@@ -28,3 +28,8 @@ export const supabase = isSupabaseConfigured()
 
 // Client catalogue (table instrumentals)
 export const catalogSupabase = createClient(CATALOG_SUPABASE_URL, CATALOG_SUPABASE_KEY);
+
+// Log de débogage au chargement du module
+console.log("[Supabase] Configuration chargée:");
+console.log("  - Main Supabase:", !!supabase, "(", SUPABASE_URL, ")");
+console.log("  - Catalog Supabase:", !!catalogSupabase, "(", CATALOG_SUPABASE_URL, ")");

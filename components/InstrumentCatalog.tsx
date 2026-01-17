@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Instrument, User } from '../types';
+import { Instrumental, User } from '../types';
 import { supabaseManager } from '../services/SupabaseManager';
 import { stripeManager } from '../services/StripeManager';
 import AdminPanel from './AdminPanel';
@@ -15,15 +15,15 @@ interface InstrumentCatalogProps {
 type AudioMode = 'STANDARD' | 'STUDIO';
 
 const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase }) => {
-  const [allInstruments, setAllInstruments] = useState<Instrument[]>([]);
-  const [displayedInstruments, setDisplayedInstruments] = useState<Instrument[]>([]);
+  const [allInstrumentals, setAllInstrumentals] = useState<Instrumental[]>([]);
+  const [displayedInstrumentals, setDisplayedInstrumentals] = useState<Instrumental[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   
   // Audio Player State
-  const [playingId, setPlayingId] = useState<number | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
   
   // Mode Standard (HTML5)
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -35,7 +35,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
   const animationRef = useRef<number>(0);
 
   // Modal State
-  const [selectedBeat, setSelectedBeat] = useState<Instrument | null>(null);
+  const [selectedBeat, setSelectedBeat] = useState<Instrumental | null>(null);
 
   const isAdmin = user?.email.toLowerCase() === 'romain.scheyvaerts@gmail.com';
 
@@ -47,12 +47,14 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
     }
   }, []);
 
-  const fetchInstruments = async () => {
+  const fetchInstrumentals = async () => {
     setLoading(true);
     try {
-      const data = await supabaseManager.getInstruments();
-      setAllInstruments(data);
-      setDisplayedInstruments(data.filter(i => i.is_visible));
+      // Récupère uniquement les instrumentaux actifs (is_active = true)
+      const data = await supabaseManager.getActiveInstrumentals();
+      console.log("[InstrumentCatalog] Données actives reçues:", data.length, "instruments");
+      setAllInstrumentals(data);
+      setDisplayedInstrumentals(data);
     } catch (error: any) {
       console.error("Failed to load catalog", error.message || error);
     } finally {
@@ -61,7 +63,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
   };
 
   useEffect(() => {
-    fetchInstruments();
+    fetchInstrumentals();
     return () => {
         stopAllPlayback();
         if (animationRef.current) cancelAnimationFrame(animationRef.current);
@@ -92,7 +94,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
     setPlayingId(null);
   };
 
-  const togglePlay = async (beat: Instrument, e: React.MouseEvent) => {
+  const togglePlay = async (beat: Instrumental, e: React.MouseEvent) => {
     e.stopPropagation();
     
     if (playingId === beat.id) {
@@ -103,12 +105,18 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
     // Stop previous track
     stopAllPlayback();
     
-    if (!beat.preview_url) {
-        console.warn("No preview URL for beat:", beat.name);
-        return;
+    // Construire l'URL de preview à partir de drive_file_id ou preview_url
+    let url = '';
+    if (beat.preview_url) {
+        url = supabaseManager.getPublicInstrumentUrl(beat.preview_url);
+    } else if (beat.drive_file_id) {
+        url = supabaseManager.getDrivePreviewUrl(beat.drive_file_id);
     }
 
-    const url = supabaseManager.getPublicInstrumentUrl(beat.preview_url);
+    if (!url) {
+        console.warn("No preview URL for beat:", beat.title);
+        return;
+    }
 
     setPlayingId(beat.id);
 
@@ -200,13 +208,29 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
       draw();
   };
 
-  const handleDragStart = (e: React.DragEvent, inst: Instrument) => {
-      const safeUrl = supabaseManager.getPublicInstrumentUrl(inst.preview_url);
-      e.dataTransfer.setData('audio-url', safeUrl); 
-      e.dataTransfer.setData('audio-name', inst.name);
-      e.dataTransfer.setData('instrument-id', inst.id.toString());
-      e.dataTransfer.setData('audio-bpm', inst.bpm.toString());
-      e.dataTransfer.setData('audio-key', inst.musical_key);
+  const handleDragStart = (e: React.DragEvent, inst: Instrumental) => {
+      // Construire l'URL pour le drag & drop
+      let audioUrl = '';
+      if (inst.preview_url) {
+          audioUrl = supabaseManager.getPublicInstrumentUrl(inst.preview_url);
+      } else if (inst.drive_file_id) {
+          audioUrl = supabaseManager.getDrivePreviewUrl(inst.drive_file_id);
+      }
+      
+      console.log('[DragStart] Instrumental:', inst.title);
+      console.log('[DragStart] preview_url:', inst.preview_url);
+      console.log('[DragStart] drive_file_id:', inst.drive_file_id);
+      console.log('[DragStart] audioUrl résultant:', audioUrl);
+      
+      if (!audioUrl) {
+          console.warn('[DragStart] ATTENTION: Pas d\'URL audio pour cet instrumental!');
+      }
+      
+      e.dataTransfer.setData('audio-url', audioUrl); 
+      e.dataTransfer.setData('audio-name', inst.title);
+      e.dataTransfer.setData('instrument-id', inst.id);
+      e.dataTransfer.setData('audio-bpm', (inst.bpm || 120).toString());
+      e.dataTransfer.setData('audio-key', inst.key || 'C Minor');
       e.dataTransfer.effectAllowed = 'copy';
       
       const dragIcon = document.createElement('div');
@@ -220,7 +244,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
       dragIcon.style.justifyContent = 'center';
       dragIcon.style.fontWeight = 'bold';
       dragIcon.style.fontSize = '10px';
-      dragIcon.textContent = inst.name;
+      dragIcon.textContent = inst.title;
       dragIcon.style.position = 'absolute';
       dragIcon.style.top = '-1000px';
       document.body.appendChild(dragIcon);
@@ -228,18 +252,17 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
       setTimeout(() => document.body.removeChild(dragIcon), 0);
   };
 
-  const hasLicense = (instId: number) => {
-      return user?.owned_instruments?.includes(instId);
+  const hasLicense = (instId: string) => {
+      // Pour les licences, on vérifie si l'ID existe dans owned_instruments
+      // Note: owned_instruments contient des numbers, il faudra peut-être adapter
+      return false; // À adapter selon votre système de licences
   };
 
   const handleStripeBuy = async () => {
       if (!user || !selectedBeat) return;
       
-      if (selectedBeat.stripe_link_basic) {
-          window.open(selectedBeat.stripe_link_basic, '_blank');
-      } else {
-          setPaymentError(`Lien de paiement BASIC non configuré.`);
-      }
+      // Rediriger vers le site de vente
+      window.open('https://studiomakemusic.com/instrumentals', '_blank');
   };
 
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -248,14 +271,19 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
       }
   };
 
+  // Récupérer l'image de couverture ou une image par défaut
+  const getCoverImage = (inst: Instrumental): string => {
+      return inst.cover_image_url || 'https://via.placeholder.com/150?text=No+Cover';
+  };
+
   return (
     <div className="h-full flex flex-col bg-[#08090b] relative">
       
       {showAdminModal && user && (
         <AdminPanel 
             user={user} 
-            existingInstruments={allInstruments} 
-            onSuccess={fetchInstruments} 
+            existingInstruments={[]} 
+            onSuccess={fetchInstrumentals} 
             onClose={() => setShowAdminModal(false)}
         />
       )}
@@ -292,7 +320,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
           </div>
         ) : (
           <div className="flex flex-col">
-            {displayedInstruments.map((inst) => (
+            {displayedInstrumentals.map((inst) => (
               <div 
                 key={inst.id} 
                 draggable
@@ -301,7 +329,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
               >
                 {/* Cover & Play */}
                 <div className="relative w-10 h-10 shrink-0 mr-3">
-                    <img src={inst.image_url} alt={inst.name} className="w-full h-full object-cover rounded-md opacity-80 group-hover:opacity-100" />
+                    <img src={getCoverImage(inst)} alt={inst.title} className="w-full h-full object-cover rounded-md opacity-80 group-hover:opacity-100" />
                     <button 
                         onClick={(e) => togglePlay(inst, e)}
                         className={`absolute inset-0 flex items-center justify-center bg-black/40 hover:bg-black/60 transition-all ${playingId === inst.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
@@ -317,19 +345,25 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                 {/* Info */}
                 <div className="flex-1 min-w-0 pr-2">
                     <div className="flex items-center space-x-2">
-                        <h3 className={`text-[10px] font-bold truncate ${playingId === inst.id ? 'text-cyan-400' : 'text-white'}`}>{inst.name}</h3>
+                        <h3 className={`text-[10px] font-bold truncate ${playingId === inst.id ? 'text-cyan-400' : 'text-white'}`}>{inst.title}</h3>
                         {hasLicense(inst.id) && <i className="fas fa-check-circle text-[8px] text-green-500" title="Purchased"></i>}
                     </div>
                     <div className="flex items-center text-[8px] text-slate-500 space-x-2">
-                        <span>{inst.bpm} BPM</span>
+                        <span>{inst.bpm || '?'} BPM</span>
                         <span>•</span>
-                        <span className="truncate">{inst.category}</span>
+                        <span className="truncate">{inst.genre || 'Beat'}</span>
+                        {inst.key && (
+                            <>
+                                <span>•</span>
+                                <span className="truncate">{inst.key}</span>
+                            </>
+                        )}
                     </div>
                 </div>
 
                 {/* Actions */}
                 <div className="flex flex-col items-end space-y-1">
-                    <span className="text-[9px] font-mono text-cyan-400">${inst.price_basic}</span>
+                    <span className="text-[9px] font-mono text-cyan-400">{inst.price_base ? `${inst.price_base}€` : 'N/A'}</span>
                     <button 
                         onClick={() => setSelectedBeat(inst)}
                         className="w-5 h-5 rounded bg-white/5 hover:bg-cyan-500 hover:text-black flex items-center justify-center transition-colors"
@@ -341,8 +375,12 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
               </div>
             ))}
             
-            {displayedInstruments.length === 0 && (
-                <div className="text-center py-10 text-[9px] text-slate-600">Aucun beat.</div>
+            {displayedInstrumentals.length === 0 && (
+                <div className="text-center py-10 text-[9px] text-slate-600">
+                    <i className="fas fa-music text-3xl text-slate-700 mb-3"></i>
+                    <p>Aucun beat disponible.</p>
+                    <p className="text-[8px] text-slate-700 mt-1">Revenez bientôt !</p>
+                </div>
             )}
           </div>
         )}
@@ -368,16 +406,16 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                     </button>
                     
                     <div className="w-full md:w-1/3 bg-[#0c0d10] p-6 flex flex-col items-center justify-center text-center">
-                        <img src={selectedBeat.image_url} className="w-32 h-32 rounded-lg shadow-lg mb-4" />
-                        <h2 className="text-lg font-black text-white uppercase">{selectedBeat.name}</h2>
-                        <p className="text-[10px] text-slate-500 mb-4">{selectedBeat.bpm} BPM • {selectedBeat.musical_key}</p>
+                        <img src={getCoverImage(selectedBeat)} className="w-32 h-32 rounded-lg shadow-lg mb-4" />
+                        <h2 className="text-lg font-black text-white uppercase">{selectedBeat.title}</h2>
+                        <p className="text-[10px] text-slate-500 mb-4">{selectedBeat.bpm || '?'} BPM • {selectedBeat.key || 'N/A'}</p>
                     </div>
 
                     <div className="w-full md:w-2/3 p-6 relative">
                         {processingPayment && (
                             <div className="absolute inset-0 bg-[#14161a]/90 z-20 flex flex-col items-center justify-center space-y-4">
                                 <div className="w-8 h-8 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
-                                <p className="text-xs font-black text-cyan-400 uppercase tracking-widest">Connexion Stripe...</p>
+                                <p className="text-xs font-black text-cyan-400 uppercase tracking-widest">Redirection...</p>
                             </div>
                         )}
 
@@ -391,13 +429,33 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                         )}
 
                         <div className="space-y-2">
-                            <LicenseOption 
-                                name="Basic Lease" 
-                                price={selectedBeat.price_basic} 
-                                feat="MP3 • Tagged" 
-                                onBuy={handleStripeBuy} 
-                                disabled={processingPayment} 
-                            />
+                            {selectedBeat.price_base && (
+                                <LicenseOption 
+                                    name="Licence MP3" 
+                                    price={selectedBeat.price_base} 
+                                    feat="MP3 • Tagged" 
+                                    onBuy={handleStripeBuy} 
+                                    disabled={processingPayment} 
+                                />
+                            )}
+                            {selectedBeat.price_exclusive && (
+                                <LicenseOption 
+                                    name="Licence WAV" 
+                                    price={selectedBeat.price_exclusive} 
+                                    feat="WAV • Untagged • Full Rights" 
+                                    onBuy={handleStripeBuy} 
+                                    disabled={processingPayment} 
+                                />
+                            )}
+                            {selectedBeat.has_stems && selectedBeat.price_stems && (
+                                <LicenseOption 
+                                    name="Licence STEMS" 
+                                    price={selectedBeat.price_stems} 
+                                    feat="STEMS • WAV • Full Production Rights" 
+                                    onBuy={handleStripeBuy} 
+                                    disabled={processingPayment} 
+                                />
+                            )}
                             <a
                                 href="https://studiomakemusic.com/instrumentals"
                                 target="_blank"
@@ -405,8 +463,8 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                                 className="flex items-center justify-between p-3 rounded-lg border transition-all border-amber-500/20 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 cursor-pointer"
                             >
                                 <div>
-                                    <div className="text-xs font-bold text-white uppercase">Licence Premium ou Exclusive</div>
-                                    <div className="text-[9px] text-slate-400">WAV • Stems • Full Rights</div>
+                                    <div className="text-xs font-bold text-white uppercase">Voir toutes les licences</div>
+                                    <div className="text-[9px] text-slate-400">Visitez notre boutique officielle</div>
                                 </div>
                                 <div className="flex items-center space-x-2 text-sm">
                                     <span className="text-[9px] font-black uppercase">Voir</span>
@@ -435,7 +493,7 @@ const LicenseOption = ({ name, price, feat, onBuy, disabled }: any) => (
             <div className="text-[9px] text-slate-400">{feat}</div>
         </div>
         <div className="flex items-center space-x-3">
-            <span className="text-sm font-black text-white">${price}</span>
+            <span className="text-sm font-black text-white">{price}€</span>
             <button onClick={onBuy} disabled={disabled} className="px-3 py-1.5 bg-cyan-500 text-black text-[9px] font-black uppercase tracking-wider rounded hover:bg-cyan-400 disabled:bg-slate-700 transition-colors">
                 ACHETER
             </button>

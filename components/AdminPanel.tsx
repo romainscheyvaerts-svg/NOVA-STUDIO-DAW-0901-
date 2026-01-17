@@ -446,32 +446,43 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
     
     stopPreview();
     
-    // Use preview_url if available, otherwise construct from drive_file_id
-    let url = inst.preview_url;
-    if (!url && inst.drive_file_id) {
-      url = supabaseManager.getDriveDownloadUrl(inst.drive_file_id);
+    // Construire l'URL de streaming via l'Edge Function
+    let url = '';
+    if (inst.drive_file_id) {
+      // Utiliser l'Edge Function proxy pour streamer depuis Google Drive
+      url = supabaseManager.getDrivePreviewUrl(inst.drive_file_id);
+    } else if (inst.preview_url) {
+      url = supabaseManager.getPublicInstrumentUrl(inst.preview_url);
     }
     
+    console.log("[AdminPanel] Playing instrumental:", inst.title, "URL:", url);
+    
     if (!url) {
-      setStatus("❌ Pas d'URL de preview");
+      setStatus("❌ Pas de fichier audio (drive_file_id manquant)");
       return;
     }
     
     setPlayingId(inst.id);
+    setStatus(`▶️ Lecture: ${inst.title}`);
     
     try {
       const audio = new Audio(url);
       audio.volume = 0.8;
       audio.crossOrigin = "anonymous";
       audioRef.current = audio;
-      audio.onended = () => setPlayingId(null);
-      audio.onerror = () => {
-        setStatus("❌ Erreur de lecture - essayez le lien direct");
+      audio.onended = () => {
+        setPlayingId(null);
+        setStatus("");
+      };
+      audio.onerror = (e) => {
+        console.error("[AdminPanel] Audio error:", e);
+        setStatus("❌ Erreur de lecture - vérifiez l'Edge Function stream-instrumental");
         setPlayingId(null);
       };
       await audio.play();
     } catch (err) {
-      console.error("Playback error:", err);
+      console.error("[AdminPanel] Playback error:", err);
+      setStatus("❌ Impossible de lire l'audio");
       setPlayingId(null);
     }
   };

@@ -3,6 +3,7 @@ import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, M
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
 import MobileTransport from './components/MobileTransport';
+import AdminTemplateButton from './components/AdminTemplateButton';
 import ArrangementView from './components/ArrangementView';
 import MixerView from './components/MixerView';
 import PluginEditor from './components/PluginEditor';
@@ -1072,6 +1073,13 @@ export default function App() {
         </TransportBar>
       </div>
       
+      {/* Admin Template Button - Visible uniquement pour l'admin */}
+      {user && user.email.toLowerCase() === 'romain.scheyvaerts@gmail.com' && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100]">
+          <AdminTemplateButton user={user} tracks={state.tracks} bpm={state.bpm} />
+        </div>
+      )}
+      
       <TrackCreationBar onCreateTrack={handleCreateTrack} />
       <TouchInteractionManager />
       <GlobalClipMenu />
@@ -1104,6 +1112,7 @@ export default function App() {
                    onEditClip={handleEditClip} isRecording={state.isRecording} recStartTime={state.recStartTime}
                    onMoveClip={handleMoveClip} onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
+                   onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
                 />
               )}
 
