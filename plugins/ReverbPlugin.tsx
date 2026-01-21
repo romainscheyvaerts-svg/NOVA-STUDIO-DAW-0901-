@@ -280,9 +280,8 @@ export class ReverbNode {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     
-    // Initialize with zero gain and ramp up to avoid click on creation
-    this.output.gain.setValueAtTime(0, ctx.currentTime);
-    this.output.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
+    // Start with full gain - the plugin manages dry/wet internally
+    this.output.gain.value = 1.0;
     
     // Metering
     this.inputAnalyzer = ctx.createAnalyser();
@@ -690,15 +689,70 @@ export class ReverbNode {
 
   public getParams() { return { ...this.params }; }
   
+  /**
+   * Properly dispose of all audio nodes and connections
+   * This is called when the plugin is removed from a track
+   */
+  public dispose() {
+    try {
+      // Stop ducking interval
+      if (this.duckingInterval) {
+        clearInterval(this.duckingInterval);
+        this.duckingInterval = null;
+      }
+      
+      // Stop LFOs safely
+      try { this.modLFO1.stop(); } catch (e) {}
+      try { this.modLFO2.stop(); } catch (e) {}
+      
+      // Disconnect all nodes to clean up the audio graph
+      try { this.input.disconnect(); } catch (e) {}
+      try { this.output.disconnect(); } catch (e) {}
+      try { this.dryGain.disconnect(); } catch (e) {}
+      try { this.wetGain.disconnect(); } catch (e) {}
+      try { this.inputFilter.disconnect(); } catch (e) {}
+      try { this.preDelayNode.disconnect(); } catch (e) {}
+      try { this.modDelay1.disconnect(); } catch (e) {}
+      try { this.modDelay2.disconnect(); } catch (e) {}
+      try { this.modLFO1.disconnect(); } catch (e) {}
+      try { this.modLFO2.disconnect(); } catch (e) {}
+      try { this.modGain1.disconnect(); } catch (e) {}
+      try { this.modGain2.disconnect(); } catch (e) {}
+      try { this.scriptProcessor?.disconnect(); } catch (e) {}
+      try { this.bassBoostFilter.disconnect(); } catch (e) {}
+      try { this.lowCutFilter.disconnect(); } catch (e) {}
+      try { this.highCutFilter.disconnect(); } catch (e) {}
+      try { this.splitter.disconnect(); } catch (e) {}
+      try { this.merger.disconnect(); } catch (e) {}
+      try { this.duckingGain.disconnect(); } catch (e) {}
+      try { this.duckingAnalyzer.disconnect(); } catch (e) {}
+      try { this.inputAnalyzer.disconnect(); } catch (e) {}
+      try { this.outputAnalyzer.disconnect(); } catch (e) {}
+      try { this.erMix.disconnect(); } catch (e) {}
+      
+      // Disconnect early reflections
+      for (const d of this.erDelays) { try { d.disconnect(); } catch (e) {} }
+      for (const g of this.erGains) { try { g.disconnect(); } catch (e) {} }
+      for (const p of this.erPanners) { try { p.disconnect(); } catch (e) {} }
+      
+      // Clear references
+      this.scriptProcessor = null;
+      this.combsL = [];
+      this.combsR = [];
+      this.allpassL = [];
+      this.allpassR = [];
+      this.erDelays = [];
+      this.erGains = [];
+      this.erPanners = [];
+      
+    } catch (e) {
+      console.error('[ReverbNode] Dispose error:', e);
+    }
+  }
+  
+  // Alias for backward compatibility
   public destroy() {
-    if (this.duckingInterval) {
-      clearInterval(this.duckingInterval);
-    }
-    this.modLFO1.stop();
-    this.modLFO2.stop();
-    if (this.scriptProcessor) {
-      this.scriptProcessor.disconnect();
-    }
+    this.dispose();
   }
 }
 
