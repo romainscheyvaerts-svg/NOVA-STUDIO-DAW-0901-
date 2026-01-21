@@ -630,6 +630,22 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   >
                     R
                   </button>
+                  {/* Send button - Opens sends panel */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedTrackForSends(track.id);
+                      setShowSendsPanel(true);
+                    }}
+                    className={`w-5 h-5 rounded text-[7px] font-black transition-all ${
+                      track.sends.some(s => s.level > 0 && s.isEnabled)
+                        ? 'bg-purple-500 text-white'
+                        : 'bg-white/10 text-white/40 hover:bg-white/20'
+                    }`}
+                    title="Sends"
+                  >
+                    <i className="fas fa-share-nodes text-[6px]"></i>
+                  </button>
                 </div>
               </div>
             ))}
