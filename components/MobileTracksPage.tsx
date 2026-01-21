@@ -18,6 +18,8 @@ interface MobileTracksPageProps {
   onOpenPlugin?: (trackId: string, pluginId: string) => void;
   onToggleBypass?: (trackId: string, pluginId: string) => void;
   onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
+  onImportAudioToBeat?: (file: File) => void;
+  onOpenCatalog?: () => void;
 }
 
 // Horizontal Send Fader Component - Touch optimized
@@ -78,9 +80,22 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
   onRemovePlugin,
   onOpenPlugin,
   onToggleBypass,
-  onRequestAddPlugin
+  onRequestAddPlugin,
+  onImportAudioToBeat,
+  onOpenCatalog
 }) => {
   const [expandedSends, setExpandedSends] = useState<Record<string, boolean>>({});
+  const [showBeatImportMenu, setShowBeatImportMenu] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onImportAudioToBeat) {
+      onImportAudioToBeat(file);
+      setShowBeatImportMenu(false);
+    }
+    if (e.target) e.target.value = '';
+  };
   
   const visibleTracks = tracks.filter(t => t.id !== 'master');
 
@@ -329,6 +344,60 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                       ))}
                     </select>
                   </div>
+                  
+                  {/* Bouton Import Audio - Uniquement pour la piste BEAT */}
+                  {track.id === 'instrumental' && (onImportAudioToBeat || onOpenCatalog) && (
+                    <div className="relative">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowBeatImportMenu(!showBeatImportMenu);
+                        }}
+                        className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 hover:bg-cyan-500/30 active:scale-95 transition-all"
+                      >
+                        <i className="fas fa-file-audio text-sm"></i>
+                      </button>
+                      
+                      {/* Menu dropdown import */}
+                      {showBeatImportMenu && (
+                        <div className="absolute right-0 top-12 z-50 w-48 bg-[#1a1d24] border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onOpenCatalog) {
+                                onOpenCatalog();
+                                setShowBeatImportMenu(false);
+                              }
+                            }}
+                            className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-white/5 active:bg-white/10 transition-all"
+                          >
+                            <i className="fas fa-music text-cyan-400"></i>
+                            <span className="text-sm text-white font-medium">Catalogue</span>
+                          </button>
+                          <div className="h-px bg-white/5"></div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              fileInputRef.current?.click();
+                            }}
+                            className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-white/5 active:bg-white/10 transition-all"
+                          >
+                            <i className="fas fa-folder-open text-amber-400"></i>
+                            <span className="text-sm text-white font-medium">Fichier local</span>
+                          </button>
+                        </div>
+                      )}
+                      
+                      {/* Input file caché */}
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="audio/*"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
