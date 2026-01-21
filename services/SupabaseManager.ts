@@ -465,7 +465,90 @@ export class SupabaseManager {
     return data;
   }
 
-  // ... (Reste des méthodes inchangées : listUserSessions, loadUserSession, hydrateAudioBuffers, etc.)
+  // --- RÉCUPÉRATION DU DERNIER BACKUP AUTOMATIQUE ---
+  
+  /**
+   * Charge le dernier backup automatique pour l'utilisateur connecté.
+   * Utilisé au démarrage pour récupérer le travail après un rafraîchissement.
+   */
+  public async loadLatestAutoBackup(): Promise<DAWState | null> {
+    if (!supabase) return null;
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    
+    try {
+      const { data, error } = await supabase
+        .from('project_backups')
+        .select('project_data, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (error || !data) {
+        console.log("[AutoBackup] Aucun backup trouvé pour cet utilisateur");
+        return null;
+      }
+      
+      // Vérifier que le backup n'est pas trop vieux (max 24h)
+      const backupDate = new Date(data.created_at);
+      const now = new Date();
+      const hoursOld = (now.getTime() - backupDate.getTime()) / (1000 * 60 * 60);
+      
+      if (hoursOld > 24) {
+        console.log(`[AutoBackup] Backup trop ancien (${hoursOld.toFixed(1)}h), ignoré`);
+        return null;
+      }
+      
+      console.log(`[AutoBackup] Backup trouvé (${hoursOld.toFixed(1)}h), chargement...`);
+      
+      const loadedState = data.project_data as DAWState;
+      await this.hydrateAudioBuffers(loadedState);
+      
+      return loadedState;
+    } catch (e) {
+      console.error("[AutoBackup] Erreur chargement backup:", e);
+      return null;
+    }
+  }
+  
+  /**
+   * Supprime les vieux backups (garde seulement les 5 derniers)
+   */
+  public async cleanOldBackups(): Promise<void> {
+    if (!supabase) return;
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    
+    try {
+      // Récupérer tous les backups triés par date
+      const { data: backups } = await supabase
+        .from('project_backups')
+        .select('id, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      
+      if (!backups || backups.length <= 5) return;
+      
+      // Supprimer tous sauf les 5 plus récents
+      const toDelete = backups.slice(5).map(b => b.id);
+      
+      if (toDelete.length > 0) {
+        const { error } = await supabase
+          .from('project_backups')
+          .delete()
+          .in('id', toDelete);
+        
+        if (!error) {
+          console.log(`[AutoBackup] ${toDelete.length} vieux backups supprimés`);
+        }
+      }
+    } catch (e) {
+      console.error("[AutoBackup] Erreur nettoyage:", e);
+    }
+  }
 
   public async listUserSessions() {
     if (!supabase || !this.currentUser) return [];

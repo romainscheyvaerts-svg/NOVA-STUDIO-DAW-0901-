@@ -301,6 +301,48 @@ export default function App() {
       if(u) setUser(u);
   }, []);
 
+  // Démarrer l'auto-save quand l'utilisateur est connecté (pas guest)
+  useEffect(() => {
+    if (user && user.id !== 'guest') {
+      // Démarrer le backup automatique
+      supabaseManager.startAutoSave(() => stateRef.current);
+      console.log("[AutoBackup] Système de backup automatique démarré pour", user.email);
+      
+      // Nettoyer les vieux backups (garder les 5 derniers)
+      supabaseManager.cleanOldBackups();
+      
+      return () => {
+        supabaseManager.stopAutoSave();
+      };
+    }
+  }, [user]);
+
+  // Charger le dernier backup automatique au démarrage si connecté
+  const [showBackupRecovery, setShowBackupRecovery] = useState(false);
+  const [pendingBackup, setPendingBackup] = useState<any>(null);
+  
+  useEffect(() => {
+    if (showLanding) return; // Pas encore entré dans le studio
+    if (!user || user.id === 'guest') return; // Pas connecté
+    
+    const checkForBackup = async () => {
+      try {
+        const backup = await supabaseManager.loadLatestAutoBackup();
+        if (backup) {
+          console.log("[AutoBackup] Backup récent trouvé, proposer restauration...");
+          setPendingBackup(backup);
+          setShowBackupRecovery(true);
+        }
+      } catch (e) {
+        console.error("[AutoBackup] Erreur vérification backup:", e);
+      }
+    };
+    
+    // Petit délai pour laisser le studio se charger
+    const timer = setTimeout(checkForBackup, 1000);
+    return () => clearTimeout(timer);
+  }, [showLanding, user]);
+
   // Charger les données pendantes de la landing page après l'entrée dans le studio
   useEffect(() => {
     if (showLanding) return; // Toujours sur la landing page
@@ -1433,6 +1475,55 @@ export default function App() {
       </div>
       
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
+      
+      {/* Modal Récupération de Backup Automatique */}
+      {showBackupRecovery && pendingBackup && (
+        <div className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#14161a] border border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-white/5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center">
+                  <i className="fas fa-clock-rotate-left text-amber-400 text-xl"></i>
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white">Backup trouvé !</h3>
+                  <p className="text-xs text-slate-500">Votre travail précédent a été récupéré</p>
+                </div>
+              </div>
+              <p className="text-sm text-slate-400">
+                Nous avons trouvé une sauvegarde automatique de votre session précédente. 
+                Voulez-vous restaurer ce projet ?
+              </p>
+            </div>
+            
+            <div className="p-4 bg-black/20 space-y-3">
+              <button
+                onClick={() => {
+                  handleLoadProject(pendingBackup);
+                  setShowBackupRecovery(false);
+                  setPendingBackup(null);
+                  setAiNotification("✅ Backup restauré avec succès !");
+                }}
+                className="w-full py-3 px-4 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-bold rounded-xl hover:opacity-90 transition-all flex items-center justify-center gap-2"
+              >
+                <i className="fas fa-check"></i>
+                Restaurer le backup
+              </button>
+              
+              <button
+                onClick={() => {
+                  setShowBackupRecovery(false);
+                  setPendingBackup(null);
+                }}
+                className="w-full py-3 px-4 bg-white/5 border border-white/10 text-slate-400 font-medium rounded-xl hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2"
+              >
+                <i className="fas fa-times"></i>
+                Ignorer et commencer un nouveau projet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
