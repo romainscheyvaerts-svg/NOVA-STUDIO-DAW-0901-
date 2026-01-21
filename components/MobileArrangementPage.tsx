@@ -23,6 +23,7 @@ interface MobileArrangementPageProps {
   onPasteClip?: (trackId: string, time: number) => void;
   onOpenSends?: (trackId: string) => void;
   onUpdateSend?: (trackId: string, sendId: string, level: number, isEnabled: boolean) => void;
+  onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
   sendTracks?: Track[]; // Send tracks for the sends panel
 }
 
@@ -70,6 +71,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   onPasteClip,
   onOpenSends,
   onUpdateSend,
+  onRequestAddPlugin,
   sendTracks
 }) => {
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -645,6 +647,24 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     title="Sends"
                   >
                     <i className="fas fa-share-nodes text-[6px]"></i>
+                  </button>
+                  {/* FX button - Opens plugin menu */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onRequestAddPlugin) {
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        onRequestAddPlugin(track.id, rect.right + 5, rect.top);
+                      }
+                    }}
+                    className={`w-5 h-5 rounded text-[7px] font-black transition-all ${
+                      track.plugins.length > 0
+                        ? 'bg-cyan-500 text-white'
+                        : 'bg-white/10 text-white/40 hover:bg-white/20'
+                    }`}
+                    title="Plugins"
+                  >
+                    <i className="fas fa-plug text-[6px]"></i>
                   </button>
                 </div>
               </div>
