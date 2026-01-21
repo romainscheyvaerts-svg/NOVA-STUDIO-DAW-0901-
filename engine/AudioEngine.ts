@@ -999,6 +999,51 @@ export class AudioEngine {
       if (destDSP) destNode = destDSP.input;
     }
     dsp.output.connect(destNode);
+    
+    // === SEND ROUTING - Connect to send/bus tracks ===
+    // First, disconnect all existing sends
+    dsp.sends.forEach((sendGain, sendId) => {
+      try { sendGain.disconnect(); } catch (e) {}
+    });
+    
+    // Process each send in the track's sends array
+    if (track.sends && track.sends.length > 0) {
+      track.sends.forEach(send => {
+        if (!send.id || !send.isEnabled) return;
+        
+        // Get or create the send gain node
+        let sendGain = dsp!.sends.get(send.id);
+        if (!sendGain) {
+          sendGain = this.ctx!.createGain();
+          dsp!.sends.set(send.id, sendGain);
+        }
+        
+        // Set the send level with smooth transition
+        const sendLevel = send.isEnabled ? send.level : 0;
+        sendGain.gain.setTargetAtTime(sendLevel, now + fadeTime, 0.015);
+        
+        // Connect from after panner (post-fader send) to send gain
+        dsp!.panner.connect(sendGain);
+        
+        // Find the destination send/bus track and connect
+        const destSendDSP = this.tracksDSP.get(send.id);
+        if (destSendDSP) {
+          sendGain.connect(destSendDSP.input);
+          // console.log(`[AudioEngine] Send connected: ${track.name} -> ${send.id} (level: ${sendLevel})`);
+        } else {
+          // console.warn(`[AudioEngine] Send destination not found: ${send.id}`);
+        }
+      });
+    }
+    
+    // Clean up sends that are no longer in the track's sends array
+    const currentSendIds = new Set(track.sends?.map(s => s.id) || []);
+    dsp.sends.forEach((sendGain, sendId) => {
+      if (!currentSendIds.has(sendId)) {
+        try { sendGain.disconnect(); } catch (e) {}
+        dsp!.sends.delete(sendId);
+      }
+    });
   }
 
   private applyAutomation(track: Track, time: number) {
