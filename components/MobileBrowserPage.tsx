@@ -33,7 +33,7 @@ const INTERNAL_PLUGINS = [
 
 /**
  * Navigateur mobile - Réplique exacte du SideBrowser2 desktop
- * Onglets: STORE (instruments), FW (plugins natifs), BRIDGE (VST3)
+ * Onglets: STORE (instruments), FX (plugins natifs), BRIDGE (VST3)
  */
 const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
   user,
@@ -41,7 +41,7 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
   onPurchase,
   selectedTrackId
 }) => {
-  const [activeTab, setActiveTab] = useState<'STORE' | 'FW' | 'BRIDGE'>('STORE');
+  const [activeTab, setActiveTab] = useState<'STORE' | 'FX' | 'BRIDGE'>('STORE');
   const [searchTerm, setSearchTerm] = useState('');
   const [vst3Plugins, setVst3Plugins] = useState<PluginMetadata[]>([]);
 
@@ -88,15 +88,15 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
             Store
           </button>
           <button
-            onClick={() => setActiveTab('FW')}
+            onClick={() => setActiveTab('FX')}
             className={`py-4 rounded-xl text-xs font-black uppercase transition-all flex flex-col items-center gap-2 ${
-              activeTab === 'FW'
+              activeTab === 'FX'
                 ? 'bg-cyan-500 text-black'
                 : 'bg-[#14161a] text-slate-500'
             }`}
           >
             <i className="fas fa-atom text-lg"></i>
-            FW
+            FX
           </button>
           <button
             onClick={() => setActiveTab('BRIDGE')}
@@ -121,8 +121,8 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
           </div>
         )}
 
-        {/* Contenu FW - Plugins natifs Nova */}
-        {activeTab === 'FW' && (
+        {/* Contenu FX - Plugins natifs Nova */}
+        {activeTab === 'FX' && (
           <div className="space-y-4">
             {/* Barre de recherche */}
             <div className="relative">

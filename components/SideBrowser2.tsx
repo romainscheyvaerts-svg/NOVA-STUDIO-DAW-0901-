@@ -8,8 +8,8 @@ interface SideBrowser2Props {
   user: User | null;
   onAddPlugin: (trackId: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => void;
   onPurchase: (instrumentId: number) => void;
-  activeTab: 'STORE' | 'FW' | 'BRIDGE';
-  onTabChange: (tab: 'STORE' | 'FW' | 'BRIDGE') => void;
+  activeTab: 'STORE' | 'FX' | 'BRIDGE';
+  onTabChange: (tab: 'STORE' | 'FX' | 'BRIDGE') => void;
   selectedTrackId: string | null;
 }
 
@@ -100,8 +100,8 @@ const BridgeTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, met
 
 // --- Onglet Local SUPPRIMÉ - Import déplacé dans TransportBar ---
 
-// --- Onglet FW (Future Wave - Native Plugins) ---
-const FWTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => void, selectedTrackId: string | null }> = ({ onAddPlugin, selectedTrackId }) => {
+// --- Onglet FX (Effects - Native Plugins) ---
+const FXTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => void, selectedTrackId: string | null }> = ({ onAddPlugin, selectedTrackId }) => {
     const [searchTerm, setSearchTerm] = useState('');
     
     const handleDragStart = (e: React.DragEvent, p: typeof INTERNAL_PLUGINS[0]) => {
@@ -168,14 +168,14 @@ const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onLocalImport, onAddP
       {/* Tab Bar */}
       <div className="grid grid-cols-3 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
         <TabButton icon="fa-store" label="Store" isActive={activeTab === 'STORE'} onClick={() => onTabChange('STORE')} />
-        <TabButton icon="fa-atom" label="FW" isActive={activeTab === 'FW'} onClick={() => onTabChange('FW')} />
+        <TabButton icon="fa-atom" label="FX" isActive={activeTab === 'FX'} onClick={() => onTabChange('FX')} />
         <TabButton icon="fa-plug" label="Bridge" isActive={activeTab === 'BRIDGE'} onClick={() => onTabChange('BRIDGE')} />
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto custom-scroll">
         {activeTab === 'STORE' && <InstrumentCatalog user={user} onPurchase={onPurchase} />}
-        {activeTab === 'FW' && <FWTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
+        {activeTab === 'FX' && <FXTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
         {activeTab === 'BRIDGE' && <BridgeTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
       </div>
     </div>
