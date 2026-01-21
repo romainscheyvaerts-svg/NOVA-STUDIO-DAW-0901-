@@ -222,14 +222,14 @@ export class ReverbNode {
   // Ducking (sidechain compression simulation)
   private duckingGain: GainNode;
   private duckingAnalyzer: AnalyserNode;
-  private duckingData: Float32Array<ArrayBuffer>;
+  private duckingData: Float32Array;
   private duckingInterval: number | null = null;
   
   // Metering
   public inputAnalyzer: AnalyserNode;
   public outputAnalyzer: AnalyserNode;
-  private inputData: Float32Array<ArrayBuffer>;
-  private outputData: Float32Array<ArrayBuffer>;
+  private inputData: Float32Array;
+  private outputData: Float32Array;
   
   // Early reflections (8 taps for realistic room simulation)
   private erDelays: DelayNode[];
@@ -531,7 +531,7 @@ export class ReverbNode {
   private startDuckingProcess() {
     this.duckingInterval = window.setInterval(() => {
       if (this.params.ducking > 0 && this.params.isEnabled) {
-        this.duckingAnalyzer.getFloatTimeDomainData(this.duckingData);
+        this.duckingAnalyzer.getFloatTimeDomainData(this.duckingData as any);
         let rms = 0;
         for (let i = 0; i < this.duckingData.length; i++) {
           rms += this.duckingData[i] * this.duckingData[i];
@@ -670,7 +670,7 @@ export class ReverbNode {
   }
 
   public getInputLevel(): number {
-    this.inputAnalyzer.getFloatTimeDomainData(this.inputData);
+    this.inputAnalyzer.getFloatTimeDomainData(this.inputData as any);
     let max = 0;
     for (let i = 0; i < this.inputData.length; i++) {
       const abs = Math.abs(this.inputData[i]);
@@ -680,7 +680,7 @@ export class ReverbNode {
   }
 
   public getOutputLevel(): number {
-    this.outputAnalyzer.getFloatTimeDomainData(this.outputData);
+    this.outputAnalyzer.getFloatTimeDomainData(this.outputData as any);
     let max = 0;
     for (let i = 0; i < this.outputData.length; i++) {
       const abs = Math.abs(this.outputData[i]);

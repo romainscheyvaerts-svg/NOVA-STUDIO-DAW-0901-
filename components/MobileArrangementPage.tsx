@@ -580,18 +580,38 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 }`}
                 style={{ height: TRACK_HEIGHT }}
               >
-                {/* Track name */}
+                {/* Track name + Volume fader */}
                 <div className="flex items-center gap-1.5 mb-1">
                   <div 
                     className="w-2 h-2 rounded-full flex-shrink-0"
                     style={{ backgroundColor: track.color }}
                   />
-                  <span className="text-[10px] font-bold text-white/90 truncate">
+                  <span className="text-[10px] font-bold text-white/90 truncate flex-1" style={{ maxWidth: '55px' }}>
                     {track.name}
                   </span>
+                  {/* Mini Volume Fader */}
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={(track.volume || 0.8) * 100}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        if (onUpdateTrack) {
+                          onUpdateTrack({ ...track, volume: Number(e.target.value) / 100 });
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-12 h-1.5 rounded-full appearance-none cursor-pointer"
+                      style={{
+                        background: `linear-gradient(to right, ${track.color || '#22d3ee'} ${(track.volume || 0.8) * 100}%, rgba(255,255,255,0.1) ${(track.volume || 0.8) * 100}%)`
+                      }}
+                    />
+                  </div>
                 </div>
 
-                {/* Track controls M/S/R/Send */}
+                {/* Track controls M/S/R/Send/FX */}
                 <div className="flex items-center gap-0.5">
                   <button
                     onClick={(e) => {
@@ -652,9 +672,15 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      console.log('[MobileArrangement] FX button clicked for track:', track.id, 'onRequestAddPlugin:', !!onRequestAddPlugin);
                       if (onRequestAddPlugin) {
                         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                         onRequestAddPlugin(track.id, rect.right + 5, rect.top);
+                      } else {
+                        // Fallback: Dispatch custom event if callback not provided
+                        window.dispatchEvent(new CustomEvent('request-add-plugin', {
+                          detail: { trackId: track.id, x: 150, y: 200 }
+                        }));
                       }
                     }}
                     className={`w-5 h-5 rounded text-[7px] font-black transition-all ${
