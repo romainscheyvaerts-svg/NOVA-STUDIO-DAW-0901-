@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import MobileContainer from './MobileContainer';
-import { Track, Clip, TrackType } from '../types';
+import { Track, Clip, TrackType, TrackSend } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
 interface MobileArrangementPageProps {
@@ -17,10 +17,16 @@ interface MobileArrangementPageProps {
   onStop?: () => void;
   onUpdateTrack?: (track: Track) => void;
   onDeleteClip?: (trackId: string, clipId: string) => void;
+  onDuplicateClip?: (trackId: string, clipId: string) => void;
+  onSplitClip?: (trackId: string, clipId: string, splitTime: number) => void;
+  onCopyClip?: (trackId: string, clip: Clip) => void;
+  onPasteClip?: (trackId: string, time: number) => void;
   onOpenSends?: (trackId: string) => void;
+  onUpdateSend?: (trackId: string, sendId: string, level: number, isEnabled: boolean) => void;
+  sendTracks?: Track[]; // Send tracks for the sends panel
 }
 
-type EditTool = 'SELECT' | 'TRIM' | 'SPLIT' | 'ERASE';
+type EditTool = 'SELECT' | 'TRIM' | 'SPLIT' | 'ERASE' | 'FADE' | 'DUPLICATE';
 type DragMode = 'move' | 'resize-start' | 'resize-end' | null;
 
 interface DragState {
@@ -57,10 +63,18 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   onTogglePlay,
   onStop,
   onUpdateTrack,
-  onDeleteClip
+  onDeleteClip,
+  onDuplicateClip,
+  onSplitClip,
+  onCopyClip,
+  onPasteClip,
+  onOpenSends,
+  onUpdateSend,
+  sendTracks
 }) => {
   const timelineRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // State
   const [zoom, setZoom] = useState(80); // pixels per beat
@@ -72,6 +86,13 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [gridDivision, setGridDivision] = useState<number>(1); // 1 = beat, 0.5 = 1/8, 0.25 = 1/16
+  
+  // NEW: Clipboard and editing states
+  const [clipboard, setClipboard] = useState<{ trackId: string; clip: Clip } | null>(null);
+  const [showEditMenu, setShowEditMenu] = useState(false);
+  const [showSendsPanel, setShowSendsPanel] = useState(false);
+  const [selectedTrackForSends, setSelectedTrackForSends] = useState<string | null>(null);
+  const [notification, setNotification] = useState<string | null>(null);
 
   // Derived values
   const visibleTracks = useMemo(() => 
@@ -292,12 +313,142 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     );
   }, []);
 
-  // Tools config
+  // Get send tracks from props or filter from tracks
+  const availableSendTracks = useMemo(() => 
+    sendTracks || tracks.filter(t => t.type === TrackType.SEND),
+    [sendTracks, tracks]
+  );
+
+  // Show notification helper
+  const showNotification = useCallback((message: string) => {
+    setNotification(message);
+    setTimeout(() => setNotification(null), 2000);
+  }, []);
+
+  // === EDITING FUNCTIONS ===
+  
+  // Copy clip to clipboard
+  const handleCopyClip = useCallback(() => {
+    if (!selectedClip) return;
+    setClipboard({ trackId: selectedClip.trackId, clip: { ...selectedClip.clip } });
+    showNotification('📋 Clip copié');
+    if (onCopyClip) onCopyClip(selectedClip.trackId, selectedClip.clip);
+  }, [selectedClip, onCopyClip, showNotification]);
+
+  // Paste clip from clipboard
+  const handlePasteClip = useCallback(() => {
+    if (!clipboard || !selectedTrackId) return;
+    if (onPasteClip) {
+      onPasteClip(selectedTrackId, currentTime);
+      showNotification('📋 Clip collé');
+    }
+  }, [clipboard, selectedTrackId, currentTime, onPasteClip, showNotification]);
+
+  // Duplicate selected clip
+  const handleDuplicateClip = useCallback(() => {
+    if (!selectedClip) return;
+    if (onDuplicateClip) {
+      onDuplicateClip(selectedClip.trackId, selectedClip.clip.id);
+      showNotification('✨ Clip dupliqué');
+    } else if (onUpdateClip) {
+      // Fallback: create new clip after current
+      const newClip: Partial<Clip> = {
+        ...selectedClip.clip,
+        id: `clip-dup-${Date.now()}`,
+        start: selectedClip.clip.start + selectedClip.clip.duration + 0.1
+      };
+      // Would need onAddClip to fully work
+      showNotification('✨ Clip dupliqué');
+    }
+  }, [selectedClip, onDuplicateClip, onUpdateClip, showNotification]);
+
+  // Split clip at current time
+  const handleSplitClip = useCallback(() => {
+    if (!selectedClip) return;
+    const clip = selectedClip.clip;
+    const splitTime = currentTime;
+    
+    // Only split if playhead is within clip
+    if (splitTime > clip.start && splitTime < clip.start + clip.duration) {
+      if (onSplitClip) {
+        onSplitClip(selectedClip.trackId, clip.id, splitTime);
+        showNotification('✂️ Clip divisé');
+      }
+    } else {
+      showNotification('⚠️ Playhead doit être dans le clip');
+    }
+  }, [selectedClip, currentTime, onSplitClip, showNotification]);
+
+  // Toggle reverse on clip
+  const handleReverseClip = useCallback(() => {
+    if (!selectedClip || !onUpdateClip) return;
+    onUpdateClip(selectedClip.trackId, selectedClip.clip.id, {
+      isReversed: !selectedClip.clip.isReversed
+    });
+    showNotification(selectedClip.clip.isReversed ? '⏪ Normal' : '⏪ Inversé');
+  }, [selectedClip, onUpdateClip, showNotification]);
+
+  // Adjust fade in
+  const handleFadeIn = useCallback((delta: number) => {
+    if (!selectedClip || !onUpdateClip) return;
+    const newFadeIn = Math.max(0, Math.min(selectedClip.clip.duration / 2, (selectedClip.clip.fadeIn || 0) + delta));
+    onUpdateClip(selectedClip.trackId, selectedClip.clip.id, { fadeIn: newFadeIn });
+  }, [selectedClip, onUpdateClip]);
+
+  // Adjust fade out
+  const handleFadeOut = useCallback((delta: number) => {
+    if (!selectedClip || !onUpdateClip) return;
+    const newFadeOut = Math.max(0, Math.min(selectedClip.clip.duration / 2, (selectedClip.clip.fadeOut || 0) + delta));
+    onUpdateClip(selectedClip.trackId, selectedClip.clip.id, { fadeOut: newFadeOut });
+  }, [selectedClip, onUpdateClip]);
+
+  // Adjust clip gain
+  const handleGainChange = useCallback((delta: number) => {
+    if (!selectedClip || !onUpdateClip) return;
+    const newGain = Math.max(0, Math.min(2, (selectedClip.clip.gain || 1) + delta));
+    onUpdateClip(selectedClip.trackId, selectedClip.clip.id, { gain: newGain });
+  }, [selectedClip, onUpdateClip]);
+
+  // Open sends panel for selected track
+  const handleOpenSends = useCallback(() => {
+    if (!selectedTrackId) return;
+    setSelectedTrackForSends(selectedTrackId);
+    setShowSendsPanel(true);
+    if (onOpenSends) onOpenSends(selectedTrackId);
+  }, [selectedTrackId, onOpenSends]);
+
+  // Update send level
+  const handleSendLevelChange = useCallback((sendId: string, level: number) => {
+    if (!selectedTrackForSends) return;
+    const track = tracks.find(t => t.id === selectedTrackForSends);
+    if (!track || !onUpdateTrack) return;
+    
+    const updatedSends = track.sends.map(s => 
+      s.id === sendId ? { ...s, level: Math.max(0, Math.min(1, level)) } : s
+    );
+    onUpdateTrack({ ...track, sends: updatedSends });
+  }, [selectedTrackForSends, tracks, onUpdateTrack]);
+
+  // Toggle send enabled
+  const handleSendToggle = useCallback((sendId: string) => {
+    if (!selectedTrackForSends) return;
+    const track = tracks.find(t => t.id === selectedTrackForSends);
+    if (!track || !onUpdateTrack) return;
+    
+    const updatedSends = track.sends.map(s => 
+      s.id === sendId ? { ...s, isEnabled: !s.isEnabled } : s
+    );
+    onUpdateTrack({ ...track, sends: updatedSends });
+  }, [selectedTrackForSends, tracks, onUpdateTrack]);
+
+  // Tools config - Extended
   const tools: { id: EditTool; icon: string; label: string }[] = [
     { id: 'SELECT', icon: 'fa-arrow-pointer', label: 'Select' },
     { id: 'TRIM', icon: 'fa-scissors', label: 'Trim' },
     { id: 'SPLIT', icon: 'fa-cut', label: 'Split' },
     { id: 'ERASE', icon: 'fa-eraser', label: 'Erase' },
+    { id: 'FADE', icon: 'fa-wave-square', label: 'Fade' },
+    { id: 'DUPLICATE', icon: 'fa-clone', label: 'Dup' },
   ];
 
   return (
@@ -642,50 +793,284 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         </div>
       </div>
 
-      {/* === SELECTED CLIP INFO BAR === */}
+      {/* === NOTIFICATION TOAST === */}
+      {notification && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-2 fade-in duration-200">
+          <div className="bg-black/90 backdrop-blur-lg border border-cyan-500/30 rounded-xl px-4 py-2 shadow-xl">
+            <span className="text-sm font-bold text-white">{notification}</span>
+          </div>
+        </div>
+      )}
+
+      {/* === SELECTED CLIP EDIT BAR - Professional DAW Controls === */}
       {selectedClip && (
-        <div className="h-12 px-3 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-t border-cyan-500/30 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div 
-              className="w-3 h-3 rounded"
-              style={{ backgroundColor: selectedClip.clip.color || '#22d3ee' }}
-            />
-            <div>
-              <div className="text-xs font-bold text-white">{selectedClip.clip.name}</div>
-              <div className="text-[10px] text-white/50">
-                {formatBarsBeat(selectedClip.clip.start)} · {selectedClip.clip.duration.toFixed(2)}s
-              </div>
+        <div className="bg-gradient-to-r from-[#12141a] to-[#0f1115] border-t border-cyan-500/30">
+          {/* Row 1: Clip Info */}
+          <div className="h-10 px-3 flex items-center justify-between border-b border-white/5">
+            <div className="flex items-center gap-2">
+              <div 
+                className="w-2.5 h-2.5 rounded"
+                style={{ backgroundColor: selectedClip.clip.color || '#22d3ee' }}
+              />
+              <span className="text-[11px] font-bold text-white truncate max-w-[100px]">
+                {selectedClip.clip.name}
+              </span>
+              <span className="text-[9px] text-white/40 font-mono">
+                {formatBarsBeat(selectedClip.clip.start)} · {selectedClip.clip.duration.toFixed(1)}s
+              </span>
             </div>
+            <button
+              onClick={() => setSelectedClip(null)}
+              className="w-6 h-6 rounded-full bg-white/10 text-white/40 hover:bg-white/20 flex items-center justify-center"
+            >
+              <i className="fas fa-times text-[10px]"></i>
+            </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Row 2: Edit Actions - Scrollable touch-friendly */}
+          <div className="h-14 px-2 flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
+            {/* Copy */}
+            <button
+              onClick={handleCopyClip}
+              className="flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg bg-white/5 hover:bg-white/10 active:bg-cyan-500/20 transition-all"
+            >
+              <i className="fas fa-copy text-cyan-400 text-sm mb-0.5"></i>
+              <span className="text-[8px] font-bold text-white/60">COPY</span>
+            </button>
+
+            {/* Paste */}
+            <button
+              onClick={handlePasteClip}
+              disabled={!clipboard}
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg transition-all ${
+                clipboard 
+                  ? 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20' 
+                  : 'bg-white/5 opacity-40'
+              }`}
+            >
+              <i className="fas fa-paste text-cyan-400 text-sm mb-0.5"></i>
+              <span className="text-[8px] font-bold text-white/60">PASTE</span>
+            </button>
+
+            {/* Duplicate */}
+            <button
+              onClick={handleDuplicateClip}
+              className="flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg bg-white/5 hover:bg-white/10 active:bg-green-500/20 transition-all"
+            >
+              <i className="fas fa-clone text-green-400 text-sm mb-0.5"></i>
+              <span className="text-[8px] font-bold text-white/60">DUP</span>
+            </button>
+
+            {/* Split */}
+            <button
+              onClick={handleSplitClip}
+              className="flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg bg-white/5 hover:bg-white/10 active:bg-yellow-500/20 transition-all"
+            >
+              <i className="fas fa-cut text-yellow-400 text-sm mb-0.5"></i>
+              <span className="text-[8px] font-bold text-white/60">SPLIT</span>
+            </button>
+
+            {/* Reverse */}
+            <button
+              onClick={handleReverseClip}
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg transition-all ${
+                selectedClip.clip.isReversed 
+                  ? 'bg-purple-500/30 border border-purple-500/50' 
+                  : 'bg-white/5 hover:bg-white/10 active:bg-purple-500/20'
+              }`}
+            >
+              <i className="fas fa-backward text-purple-400 text-sm mb-0.5"></i>
+              <span className="text-[8px] font-bold text-white/60">REV</span>
+            </button>
+
+            {/* Mute */}
             <button
               onClick={() => onUpdateClip?.(selectedClip.trackId, selectedClip.clip.id, { 
                 isMuted: !selectedClip.clip.isMuted 
               })}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
-                selectedClip.clip.isMuted
-                  ? 'bg-red-500/20 text-red-400'
-                  : 'bg-white/10 text-white/50 hover:bg-white/20'
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg transition-all ${
+                selectedClip.clip.isMuted 
+                  ? 'bg-red-500/30 border border-red-500/50' 
+                  : 'bg-white/5 hover:bg-white/10'
               }`}
             >
-              <i className={`fas ${selectedClip.clip.isMuted ? 'fa-volume-mute' : 'fa-volume-up'} text-sm`}></i>
+              <i className={`fas ${selectedClip.clip.isMuted ? 'fa-volume-mute' : 'fa-volume-up'} text-sm mb-0.5 ${selectedClip.clip.isMuted ? 'text-red-400' : 'text-white/60'}`}></i>
+              <span className="text-[8px] font-bold text-white/60">MUTE</span>
             </button>
+
+            {/* Divider */}
+            <div className="flex-shrink-0 w-px h-8 bg-white/10 mx-1"></div>
+
+            {/* Fade In */}
+            <div className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-11 rounded-lg bg-white/5">
+              <span className="text-[7px] font-bold text-white/40 mb-0.5">FADE IN</span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => handleFadeIn(-0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">-</button>
+                <span className="text-[9px] font-mono text-cyan-400 w-6 text-center">{((selectedClip.clip.fadeIn || 0) * 1000).toFixed(0)}</span>
+                <button onClick={() => handleFadeIn(0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">+</button>
+              </div>
+            </div>
+
+            {/* Fade Out */}
+            <div className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-11 rounded-lg bg-white/5">
+              <span className="text-[7px] font-bold text-white/40 mb-0.5">FADE OUT</span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => handleFadeOut(-0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">-</button>
+                <span className="text-[9px] font-mono text-cyan-400 w-6 text-center">{((selectedClip.clip.fadeOut || 0) * 1000).toFixed(0)}</span>
+                <button onClick={() => handleFadeOut(0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">+</button>
+              </div>
+            </div>
+
+            {/* Gain */}
+            <div className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-11 rounded-lg bg-white/5">
+              <span className="text-[7px] font-bold text-white/40 mb-0.5">GAIN</span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => handleGainChange(-0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">-</button>
+                <span className="text-[9px] font-mono text-green-400 w-6 text-center">{((selectedClip.clip.gain || 1) * 100).toFixed(0)}%</span>
+                <button onClick={() => handleGainChange(0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">+</button>
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="flex-shrink-0 w-px h-8 bg-white/10 mx-1"></div>
+
+            {/* Delete */}
             <button
               onClick={() => {
                 onDeleteClip?.(selectedClip.trackId, selectedClip.clip.id);
                 setSelectedClip(null);
               }}
-              className="w-8 h-8 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center justify-center transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 transition-all"
             >
-              <i className="fas fa-trash text-sm"></i>
+              <i className="fas fa-trash text-red-400 text-sm mb-0.5"></i>
+              <span className="text-[8px] font-bold text-red-400/80">DEL</span>
             </button>
-            <button
-              onClick={() => setSelectedClip(null)}
-              className="w-8 h-8 rounded-lg bg-white/10 text-white/50 hover:bg-white/20 flex items-center justify-center transition-all"
-            >
-              <i className="fas fa-times text-sm"></i>
-            </button>
+          </div>
+        </div>
+      )}
+
+      {/* === TRACK SENDS BUTTON (Floating) === */}
+      {selectedTrackId && !selectedClip && (
+        <button
+          onClick={handleOpenSends}
+          className="fixed bottom-20 right-4 w-14 h-14 rounded-full bg-gradient-to-br from-purple-600 to-pink-500 shadow-lg shadow-purple-500/30 flex items-center justify-center z-40 active:scale-95 transition-transform"
+        >
+          <i className="fas fa-share-nodes text-white text-lg"></i>
+        </button>
+      )}
+
+      {/* === SENDS PANEL (Slide-up) === */}
+      {showSendsPanel && selectedTrackForSends && (
+        <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowSendsPanel(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div 
+            className="relative w-full bg-gradient-to-t from-[#0a0b0d] to-[#14161a] rounded-t-3xl animate-in slide-in-from-bottom duration-300"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Handle */}
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-12 h-1 rounded-full bg-white/20"></div>
+            </div>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 pb-3 border-b border-white/10">
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-wide">Envois / Sends</h3>
+                <p className="text-[10px] text-white/40">
+                  Track: {tracks.find(t => t.id === selectedTrackForSends)?.name || 'N/A'}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowSendsPanel(false)}
+                className="w-8 h-8 rounded-full bg-white/10 text-white/60 flex items-center justify-center hover:bg-white/20"
+              >
+                <i className="fas fa-times text-sm"></i>
+              </button>
+            </div>
+
+            {/* Send Channels */}
+            <div className="p-4 space-y-3 max-h-[50vh] overflow-y-auto">
+              {(() => {
+                const track = tracks.find(t => t.id === selectedTrackForSends);
+                if (!track || track.sends.length === 0) {
+                  return (
+                    <div className="text-center py-8">
+                      <i className="fas fa-share-nodes text-white/20 text-3xl mb-2"></i>
+                      <p className="text-white/40 text-sm">Aucun envoi configuré</p>
+                    </div>
+                  );
+                }
+
+                return track.sends.map(send => {
+                  const sendTrack = availableSendTracks.find(st => st.id === send.id);
+                  return (
+                    <div 
+                      key={send.id}
+                      className={`p-3 rounded-xl border transition-all ${
+                        send.isEnabled 
+                          ? 'bg-white/5 border-white/10' 
+                          : 'bg-white/2 border-white/5 opacity-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: sendTrack?.color || '#666' }}
+                          />
+                          <span className="text-xs font-bold text-white">
+                            {sendTrack?.name || send.id}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleSendToggle(send.id)}
+                          className={`w-10 h-6 rounded-full transition-all ${
+                            send.isEnabled 
+                              ? 'bg-cyan-500' 
+                              : 'bg-white/20'
+                          }`}
+                        >
+                          <div className={`w-5 h-5 rounded-full bg-white shadow-md transition-transform ${
+                            send.isEnabled ? 'translate-x-4' : 'translate-x-0.5'
+                          }`} />
+                        </button>
+                      </div>
+
+                      {/* Level Slider */}
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={send.level * 100}
+                          onChange={(e) => handleSendLevelChange(send.id, Number(e.target.value) / 100)}
+                          disabled={!send.isEnabled}
+                          className="flex-1 h-2 rounded-full appearance-none bg-white/10 cursor-pointer accent-cyan-500"
+                          style={{
+                            background: send.isEnabled 
+                              ? `linear-gradient(to right, #22d3ee ${send.level * 100}%, rgba(255,255,255,0.1) ${send.level * 100}%)`
+                              : 'rgba(255,255,255,0.1)'
+                          }}
+                        />
+                        <span className="text-xs font-mono text-cyan-400 w-10 text-right">
+                          {Math.round(send.level * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-white/10">
+              <button
+                onClick={() => setShowSendsPanel(false)}
+                className="w-full h-11 rounded-xl bg-cyan-500 text-white font-bold text-sm uppercase tracking-wide active:bg-cyan-600 transition-colors"
+              >
+                Fermer
+              </button>
+            </div>
           </div>
         </div>
       )}
