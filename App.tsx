@@ -246,14 +246,30 @@ const useUndoRedo = (initialState: DAWState) => {
 };
 
 export default function App() {
-  // Landing Page state - Check localStorage to skip if already visited
-  const [showLanding, setShowLanding] = useState(() => {
-    const hasVisited = localStorage.getItem('nova_visited');
-    return !hasVisited;
-  });
+  // Landing Page state - Always show landing on startup
+  const [showLanding, setShowLanding] = useState(true);
+  
+  // Pending data from landing page to load after entering studio
+  const [pendingInstrumental, setPendingInstrumental] = useState<any>(null);
+  const [pendingAudioFile, setPendingAudioFile] = useState<File | null>(null);
+  const [pendingProject, setPendingProject] = useState<any>(null);
 
   const handleEnterStudio = () => {
-    localStorage.setItem('nova_visited', 'true');
+    setShowLanding(false);
+  };
+  
+  const handleEnterWithInstrumental = (instrumental: any) => {
+    setPendingInstrumental(instrumental);
+    setShowLanding(false);
+  };
+  
+  const handleEnterWithAudioFile = (file: File) => {
+    setPendingAudioFile(file);
+    setShowLanding(false);
+  };
+  
+  const handleEnterWithProject = (project: any) => {
+    setPendingProject(project);
     setShowLanding(false);
   };
 
@@ -284,6 +300,51 @@ export default function App() {
       const u = supabaseManager.getUser();
       if(u) setUser(u);
   }, []);
+
+  // Charger les données pendantes de la landing page après l'entrée dans le studio
+  useEffect(() => {
+    if (showLanding) return; // Toujours sur la landing page
+    
+    const loadPendingData = async () => {
+      // Charger un projet complet
+      if (pendingProject) {
+        handleLoadProject(pendingProject);
+        setPendingProject(null);
+        return;
+      }
+
+      // Charger un fichier audio local
+      if (pendingAudioFile) {
+        await handleNewAudioImport(pendingAudioFile);
+        setPendingAudioFile(null);
+        return;
+      }
+
+      // Charger un instrumental depuis le catalogue
+      if (pendingInstrumental) {
+        const inst = pendingInstrumental;
+        let audioUrl = '';
+        if (inst.preview_url) {
+          audioUrl = supabaseManager.getPublicInstrumentUrl(inst.preview_url);
+        } else if (inst.drive_file_id) {
+          audioUrl = supabaseManager.getDrivePreviewUrl(inst.drive_file_id);
+        }
+        
+        if (audioUrl) {
+          await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0);
+          // Mettre à jour le BPM si disponible
+          if (inst.bpm) {
+            handleUpdateBpm(inst.bpm);
+          }
+        }
+        setPendingInstrumental(null);
+      }
+    };
+
+    // Petit délai pour laisser le studio se charger
+    const timer = setTimeout(loadPendingData, 500);
+    return () => clearTimeout(timer);
+  }, [showLanding, pendingProject, pendingAudioFile, pendingInstrumental]);
 
   const initialState: DAWState = {
     id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM, isPlaying: false, isRecording: false, currentTime: 0,
@@ -888,6 +949,47 @@ export default function App() {
         }
     }));
   }, [setState]);
+
+  // ✨ Copy plugin to another track (with all parameters)
+  const handleCopyPluginToTrack = useCallback((sourceTrackId: string, plugin: PluginInstance, destTrackId: string) => {
+    setState(produce((draft: DAWState) => {
+        const destTrack = draft.tracks.find(t => t.id === destTrackId);
+        if (!destTrack) return;
+        
+        // Create new plugin copy with new ID but same params
+        const copiedPlugin: PluginInstance = {
+            ...plugin,
+            id: `pl-copy-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            params: { ...plugin.params }
+        };
+        
+        destTrack.plugins.push(copiedPlugin);
+    }));
+    
+    setAiNotification(`✅ Plugin "${plugin.type}" copié vers la piste`);
+    setTimeout(() => setAiNotification(null), 2000);
+  }, [setState]);
+
+  // ✨ Reorder plugins on a track (affects audio chain)
+  const handleReorderPlugins = useCallback((trackId: string, fromIndex: number, toIndex: number) => {
+    setState(produce((draft: DAWState) => {
+        const track = draft.tracks.find(t => t.id === trackId);
+        if (!track || fromIndex < 0 || toIndex < 0 || fromIndex >= track.plugins.length || toIndex >= track.plugins.length) return;
+        
+        // Remove plugin from original position
+        const [movedPlugin] = track.plugins.splice(fromIndex, 1);
+        // Insert at new position
+        track.plugins.splice(toIndex, 0, movedPlugin);
+    }));
+    
+    // Force audio engine rebuild for this track
+    setTimeout(() => {
+        const updatedTrack = stateRef.current.tracks.find(t => t.id === trackId);
+        if (updatedTrack) {
+            audioEngine.updateTrack(updatedTrack, stateRef.current.tracks);
+        }
+    }, 50);
+  }, [setState]);
   const handleCreateAutomationLane = useCallback(() => {
     if (!automationMenu) return;
     
@@ -1131,7 +1233,17 @@ export default function App() {
 
   // Afficher la Landing Page si c'est la première visite
   if (showLanding) {
-    return <LandingPage onEnterStudio={handleEnterStudio} />;
+    return (
+      <LandingPage 
+        user={user}
+        onEnterStudio={handleEnterStudio}
+        onEnterWithInstrumental={handleEnterWithInstrumental}
+        onEnterWithAudioFile={handleEnterWithAudioFile}
+        onEnterWithProject={handleEnterWithProject}
+        onLogin={(u) => setUser(u)}
+        onLogout={handleLogout}
+      />
+    );
   }
 
   return (
@@ -1275,7 +1387,6 @@ export default function App() {
                   onAddPlugin={handleAddPluginFromContext}
                   onPurchase={handleBuyLicense}
                   selectedTrackId={state.selectedTrackId}
-                  onLocalImport={handleUniversalAudioImport}
                 />
               )}
             </>

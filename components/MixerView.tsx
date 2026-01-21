@@ -124,8 +124,10 @@ const ChannelStrip: React.FC<{
   onToggleBypass?: (trackId: string, pluginId: string) => void,
   onRemovePlugin?: (trackId: string, pluginId: string) => void,
   onDropPlugin?: (trackId: string, type: PluginType, metadata?: any) => void,
-  onRequestAddPlugin?: (trackId: string, x: number, y: number) => void
-}> = ({ track, allTracks, onUpdate, isMaster = false, onOpenPlugin, onToggleBypass, onRemovePlugin, onDropPlugin, onRequestAddPlugin }) => {
+  onRequestAddPlugin?: (trackId: string, x: number, y: number) => void,
+  onCopyPluginToTrack?: (sourceTrackId: string, plugin: PluginInstance, destTrackId: string) => void,
+  onReorderPlugins?: (trackId: string, fromIndex: number, toIndex: number) => void
+}> = ({ track, allTracks, onUpdate, isMaster = false, onOpenPlugin, onToggleBypass, onRemovePlugin, onDropPlugin, onRequestAddPlugin, onCopyPluginToTrack, onReorderPlugins }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const faderTrackRef = useRef<HTMLDivElement>(null);
   
@@ -214,16 +216,78 @@ const ChannelStrip: React.FC<{
       
       <div className={`${track.type === TrackType.BUS ? 'h-52' : 'h-40'} bg-black/20 border-b border-white/5 p-2 space-y-1.5 overflow-y-auto custom-scroll`}>
         <span className="text-[7px] font-black text-slate-600 uppercase px-1 mb-1 block">{track.type === TrackType.BUS ? 'Bus Inserts' : (isMaster ? 'Master Chain' : 'Inserts')}</span>
-        {track.plugins.map(p => (
-          <div key={p.id} className="relative group/fxslot w-full h-8 mb-1 fx-slot">
+        {track.plugins.map((p, idx) => (
+          <div 
+            key={p.id} 
+            className="relative group/fxslot w-full h-8 mb-1 fx-slot"
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('pluginData', JSON.stringify(p));
+              e.dataTransfer.setData('sourceTrackId', track.id);
+              e.dataTransfer.setData('pluginIndex', String(idx));
+              e.dataTransfer.effectAllowed = 'copyMove';
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (e.dataTransfer.types.includes('plugindata') || e.dataTransfer.types.includes('sourcetrackid')) {
+                e.currentTarget.classList.add('border-cyan-500', 'border-2');
+              }
+            }}
+            onDragLeave={(e) => {
+              e.currentTarget.classList.remove('border-cyan-500', 'border-2');
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              e.currentTarget.classList.remove('border-cyan-500', 'border-2');
+              
+              const sourceTrackId = e.dataTransfer.getData('sourceTrackId');
+              const pluginDataStr = e.dataTransfer.getData('pluginData');
+              const fromIndex = parseInt(e.dataTransfer.getData('pluginIndex'), 10);
+              
+              if (pluginDataStr && sourceTrackId) {
+                const pluginData = JSON.parse(pluginDataStr) as PluginInstance;
+                
+                // Same track = reorder
+                if (sourceTrackId === track.id && onReorderPlugins) {
+                  onReorderPlugins(track.id, fromIndex, idx);
+                } 
+                // Different track = copy
+                else if (sourceTrackId !== track.id && onCopyPluginToTrack) {
+                  onCopyPluginToTrack(sourceTrackId, pluginData, track.id);
+                }
+              }
+            }}
+          >
             <button 
               onClick={(e) => handleFXClick(e, p)}
               onTouchStart={(e) => handleFXClick(e, p)}
-              className={`w-full h-full bg-black/40 rounded border border-white/5 text-[9px] font-black hover:border-cyan-500/40 transition-all px-2 text-left truncate flex items-center pr-12 ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}
+              className={`w-full h-full bg-black/40 rounded border border-white/5 text-[9px] font-black hover:border-cyan-500/40 transition-all px-2 text-left truncate flex items-center pr-20 cursor-grab active:cursor-grabbing ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}
             >
+               <i className="fas fa-grip-vertical text-slate-700 mr-2 text-[8px]"></i>
                {p.type}
             </button>
-            <div className="absolute right-1 top-0 bottom-0 flex items-center space-x-1">
+            <div className="absolute right-1 top-0 bottom-0 flex items-center space-x-0.5">
+               {/* Move Up/Down Buttons */}
+               <div className="flex flex-col opacity-0 group-hover/fxslot:opacity-100 transition-opacity">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); if (idx > 0 && onReorderPlugins) onReorderPlugins(track.id, idx, idx - 1); }}
+                    className={`w-4 h-3 rounded-t flex items-center justify-center text-[6px] ${idx > 0 ? 'text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/20' : 'text-slate-800 cursor-not-allowed'}`}
+                    disabled={idx === 0}
+                    title="Move Up"
+                  >
+                    <i className="fas fa-chevron-up"></i>
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); if (idx < track.plugins.length - 1 && onReorderPlugins) onReorderPlugins(track.id, idx, idx + 1); }}
+                    className={`w-4 h-3 rounded-b flex items-center justify-center text-[6px] ${idx < track.plugins.length - 1 ? 'text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/20' : 'text-slate-800 cursor-not-allowed'}`}
+                    disabled={idx === track.plugins.length - 1}
+                    title="Move Down"
+                  >
+                    <i className="fas fa-chevron-down"></i>
+                  </button>
+               </div>
                <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} onTouchStart={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} className={`w-5 h-5 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
             </div>
             <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} onTouchStart={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx"><i className="fas fa-times"></i></button>
