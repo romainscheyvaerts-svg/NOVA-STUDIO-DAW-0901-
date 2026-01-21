@@ -61,7 +61,7 @@ const createDefaultAutomation = (param: string, color: string): AutomationLane =
 
 const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number = AUDIO_CONFIG.DEFAULT_BPM, paramsOverride: any = {}): PluginInstance => {
   let params: any = { isEnabled: true };
-  let name: string = type;
+  let name: string = paramsOverride?.name || type;
 
   if (type === 'DELAY') params = { division: '1/4', feedback: 0.4, damping: 5000, mix, pingPong: false, bpm, isEnabled: true };
   if (type === 'REVERB') params = { decay: 2.5, preDelay: 0.02, damping: 12000, mix, size: 0.7, mode: 'HALL', isEnabled: true };
@@ -354,9 +354,79 @@ export default function App() {
   const handleLogout = async () => { await supabaseManager.signOut(); setUser(null); };
   const handleBuyLicense = (instrumentId: number) => { if (!user) return; const updatedUser = { ...user, owned_instruments: [...(user.owned_instruments || []), instrumentId] }; setUser(updatedUser); setAiNotification(`✅ Licence achetée avec succès ! Export débloqué.`); };
   
-  const handleSaveCloud = async (projectName: string) => { };
-  const handleSaveAsCopy = async (n: string) => { };
-  const handleSaveLocal = async (n: string) => { SessionSerializer.downloadLocalJSON(stateRef.current, n); };
+  const handleSaveCloud = async (projectName: string) => { 
+    if (!user) {
+      setAiNotification("⚠️ Connectez-vous pour sauvegarder dans le cloud");
+      return;
+    }
+    setSaveState({ isSaving: true, progress: 10, message: 'Préparation...' });
+    try {
+      setSaveState(s => ({ ...s, progress: 30, message: 'Sauvegarde cloud...' }));
+      const stateToSave = { ...stateRef.current, name: projectName };
+      await supabaseManager.saveUserSession(stateToSave, projectName);
+      setSaveState(s => ({ ...s, progress: 100, message: '✅ Sauvegardé !' }));
+      setState(prev => ({ ...prev, name: projectName }));
+      setAiNotification(`✅ Projet "${projectName}" sauvegardé dans le cloud`);
+    } catch (e: any) {
+      console.error('[Cloud Save Error]', e);
+      setAiNotification(`❌ Erreur: ${e.message}`);
+    } finally {
+      setTimeout(() => setSaveState({ isSaving: false, progress: 0, message: '' }), 1500);
+    }
+  };
+  
+  const handleSaveAsCopy = async (n: string) => { 
+    if (!user) {
+      setAiNotification("⚠️ Connectez-vous pour sauvegarder une copie");
+      return;
+    }
+    setSaveState({ isSaving: true, progress: 10, message: 'Création de la copie...' });
+    try {
+      const copyName = `${n} (Copy)`;
+      const stateToSave = { ...stateRef.current, id: `proj-${Date.now()}`, name: copyName };
+      setSaveState(s => ({ ...s, progress: 50, message: 'Sauvegarde...' }));
+      await supabaseManager.saveUserSession(stateToSave, copyName, true);
+      setSaveState(s => ({ ...s, progress: 100, message: '✅ Copie créée !' }));
+      setAiNotification(`✅ Copie "${copyName}" créée dans le cloud`);
+    } catch (e: any) {
+      console.error('[Cloud Copy Error]', e);
+      setAiNotification(`❌ Erreur: ${e.message}`);
+    } finally {
+      setTimeout(() => setSaveState({ isSaving: false, progress: 0, message: '' }), 1500);
+    }
+  };
+  
+  const handleSaveLocal = async (n: string) => { 
+    setSaveState({ isSaving: true, progress: 10, message: 'Préparation du projet...' });
+    try {
+      // Récupérer les IDs des instruments possédés (pour exclusion licence)
+      const ownedIds = user?.owned_instruments || [];
+      setSaveState(s => ({ ...s, progress: 40, message: 'Création du fichier ZIP...' }));
+      
+      // Utiliser ProjectIO pour créer un ZIP avec les audios
+      const zipBlob = await ProjectIO.saveProject(stateRef.current, ownedIds);
+      
+      setSaveState(s => ({ ...s, progress: 80, message: 'Téléchargement...' }));
+      
+      // Télécharger le fichier
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${n || 'NovaProject'}.novaproj.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      setSaveState(s => ({ ...s, progress: 100, message: '✅ Téléchargé !' }));
+      setAiNotification(`✅ Projet "${n}" exporté avec les audios`);
+    } catch (e: any) {
+      console.error('[Local Save Error]', e);
+      setAiNotification(`❌ Erreur: ${e.message}`);
+    } finally {
+      setTimeout(() => setSaveState({ isSaving: false, progress: 0, message: '' }), 1500);
+    }
+  };
   
   const handleLoadProject = useCallback((loadedState: DAWState) => {
     ensureAudioEngine().then(() => {

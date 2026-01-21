@@ -120,6 +120,24 @@ export class FlangerNode {
   public getStatus() {
     return { ...this.params };
   }
+
+  public dispose() {
+    try {
+      this.lfo.stop();
+      this.lfo.disconnect();
+    } catch (e) {
+      // LFO may already be stopped
+    }
+    try {
+      this.feedbackGain.disconnect();
+      this.delayNode.disconnect();
+      this.depthGain.disconnect();
+      this.dryGain.disconnect();
+      this.wetGain.disconnect();
+      this.input.disconnect();
+      this.output.disconnect();
+    } catch (e) {}
+  }
 }
 
 const FlangerKnob: React.FC<{ 

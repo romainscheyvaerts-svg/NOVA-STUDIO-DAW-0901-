@@ -2,6 +2,7 @@ import JSZip from 'jszip';
 import { DAWState, Clip } from '../types';
 import { audioBufferToWav } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
+import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
 export class ProjectIO {
   
@@ -31,18 +32,22 @@ export class ProjectIO {
             const clip = track.clips[cIndex];
             const sClip = sTrack.clips[cIndex];
             
-            if (clip.buffer) {
+            // Récupérer le buffer depuis le registry via bufferId
+            const buffer = clip.bufferId ? audioBufferRegistry.get(clip.bufferId) : clip.buffer;
+            
+            if (buffer) {
                 const filename = `${clip.id}.wav`;
                 
                 // On met à jour la référence dans le JSON quoi qu'il arrive
                 // (Comme ça la structure du projet reste intacte)
                 sClip.audioRef = `audio/${filename}`;
-                delete sClip.buffer; 
+                delete sClip.buffer;
+                delete sClip.bufferId; // On retire la référence au registry
 
                 // SAUVEGARDE CONDITIONNELLE DU FICHIER WAV
                 if (!isUnlicensedStoreBeat) {
                     // Conversion AudioBuffer -> WAV Blob
-                    const wavBlob = audioBufferToWav(clip.buffer);
+                    const wavBlob = audioBufferToWav(buffer);
                     if (audioFolder) {
                         audioFolder.file(filename, wavBlob);
                     }
@@ -87,7 +92,7 @@ export class ProjectIO {
     // Initialisation moteur si nécessaire
     await audioEngine.init();
     
-    // 2. Reconstruction des AudioBuffers
+    // 2. Reconstruction des AudioBuffers via Registry
     for (const track of loadedState.tracks) {
         for (const clip of track.clips) {
             if (clip.audioRef) {
@@ -96,7 +101,13 @@ export class ProjectIO {
                     const arrayBuffer = await audioFile.async("arraybuffer");
                     // Décodage WebAudio
                     const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
-                    clip.buffer = audioBuffer;
+                    
+                    // Enregistrer dans le registry et stocker l'ID
+                    const bufferId = audioBufferRegistry.register(audioBuffer, clip.id);
+                    clip.bufferId = bufferId;
+                    
+                    // NE PAS mettre le buffer directement sur le clip (Immer incompatible)
+                    delete clip.buffer;
                 } else {
                     console.warn(`[ProjectIO] Fichier audio manquant : ${clip.audioRef}`);
                     // Si le fichier manque (ex: non exporté car pas de licence), on laisse buffer undefined

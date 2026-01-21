@@ -234,7 +234,118 @@ export class AudioEngine {
   public async resume() { if (this.ctx && this.ctx.state === 'suspended') { await this.ctx.resume(); } }
   
   public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void): Promise<AudioBuffer> {
-    return this.ctx!.createBuffer(2, 44100, 44100); // Dummy return
+    // Create an OfflineAudioContext for rendering
+    const totalSamples = Math.ceil(totalDuration * targetSampleRate);
+    const offlineCtx = new OfflineAudioContext(2, totalSamples, targetSampleRate);
+    
+    // Create a master gain for the offline context
+    const masterGain = offlineCtx.createGain();
+    masterGain.connect(offlineCtx.destination);
+    
+    // Track progress
+    let processedClips = 0;
+    let totalClips = 0;
+    
+    // Count total clips for progress
+    tracks.forEach(track => {
+        if (track.type === TrackType.AUDIO && !track.isMuted) {
+            totalClips += track.clips.filter(c => !c.isMuted).length;
+        }
+    });
+
+    // Process each audio track
+    for (const track of tracks) {
+        if (track.isMuted) continue;
+        if (track.type !== TrackType.AUDIO) continue;
+        
+        // Check if any solo track exists (if so, only play solo tracks)
+        const hasSoloTrack = tracks.some(t => t.isSolo);
+        if (hasSoloTrack && !track.isSolo) continue;
+        
+        // Create track gain node
+        const trackGain = offlineCtx.createGain();
+        trackGain.gain.value = track.volume;
+        
+        // Create track panner
+        const trackPanner = offlineCtx.createStereoPanner();
+        trackPanner.pan.value = track.pan;
+        
+        trackGain.connect(trackPanner);
+        trackPanner.connect(masterGain);
+        
+        // Render each clip in this track
+        for (const clip of track.clips) {
+            if (clip.isMuted) continue;
+            
+            // Get buffer from registry
+            let buffer = clip.buffer;
+            if (!buffer && clip.bufferId) {
+                buffer = audioBufferRegistry.get(clip.bufferId);
+            }
+            
+            if (!buffer) {
+                console.warn(`[Render] Buffer not found for clip ${clip.id}`);
+                continue;
+            }
+            
+            // Calculate timing
+            const clipStartInProject = clip.start - startOffset;
+            if (clipStartInProject + clip.duration < 0) continue; // Clip is before render range
+            if (clipStartInProject > totalDuration) continue; // Clip is after render range
+            
+            // Create source
+            const source = offlineCtx.createBufferSource();
+            source.buffer = buffer;
+            
+            // Create clip gain for fades
+            const clipGain = offlineCtx.createGain();
+            clipGain.gain.value = clip.gain ?? 1.0;
+            
+            source.connect(clipGain);
+            clipGain.connect(trackGain);
+            
+            // Calculate when to start/stop
+            const playOffset = clip.offset || 0;
+            const startTime = Math.max(0, clipStartInProject);
+            const offsetIntoClip = clipStartInProject < 0 ? -clipStartInProject + playOffset : playOffset;
+            const remainingDuration = Math.min(clip.duration, totalDuration - startTime, buffer.duration - offsetIntoClip);
+            
+            if (remainingDuration > 0 && offsetIntoClip < buffer.duration) {
+                // Apply fades
+                if (clip.fadeIn > 0) {
+                    clipGain.gain.setValueAtTime(0, startTime);
+                    clipGain.gain.linearRampToValueAtTime(clip.gain ?? 1.0, startTime + clip.fadeIn);
+                }
+                if (clip.fadeOut > 0) {
+                    const fadeOutStart = startTime + remainingDuration - clip.fadeOut;
+                    if (fadeOutStart > startTime) {
+                        clipGain.gain.setValueAtTime(clip.gain ?? 1.0, fadeOutStart);
+                        clipGain.gain.linearRampToValueAtTime(0, startTime + remainingDuration);
+                    }
+                }
+                
+                source.start(startTime, offsetIntoClip, remainingDuration);
+            }
+            
+            processedClips++;
+            if (onProgress) {
+                onProgress(Math.round((processedClips / Math.max(1, totalClips)) * 80));
+            }
+        }
+    }
+    
+    // Render the audio
+    if (onProgress) onProgress(85);
+    
+    try {
+        const renderedBuffer = await offlineCtx.startRendering();
+        if (onProgress) onProgress(100);
+        return renderedBuffer;
+    } catch (error) {
+        console.error('[AudioEngine] Render failed:', error);
+        // Return an empty buffer on error
+        return offlineCtx.createBuffer(2, totalSamples, targetSampleRate);
+    }
   }
 
   public async armTrack(trackId: string) {
@@ -819,7 +930,18 @@ export class AudioEngine {
     dsp.gain.gain.setValueAtTime(dsp.gain.gain.value, now);
     dsp.gain.gain.linearRampToValueAtTime(0, now + fadeTime);
 
-    dsp.input.disconnect();
+    // CRITICAL FIX: Disconnect ALL track nodes to prevent signal accumulation
+    // Note: We only disconnect track-level nodes, NOT plugin internal connections
+    try { dsp.input.disconnect(); } catch (e) {}
+    try { dsp.gain.disconnect(); } catch (e) {}
+    try { dsp.panner.disconnect(); } catch (e) {}
+    try { dsp.analyzer.disconnect(); } catch (e) {}
+    try { dsp.output.disconnect(); } catch (e) {}
+    
+    // NOTE: We do NOT disconnect plugin inputs/outputs here as that would break
+    // the plugin's internal graph. The plugins manage their own internal connections.
+    // We only disconnect the chain between plugins below by rebuilding it.
+    
     let head: AudioNode = dsp.input;
     
     const currentPluginIds = new Set<string>();
