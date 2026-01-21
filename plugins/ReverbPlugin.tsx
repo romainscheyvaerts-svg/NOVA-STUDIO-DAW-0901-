@@ -182,70 +182,29 @@ export class ReverbNode {
   public input: GainNode;
   public output: GainNode;
   
-  // Pre-delay
+  // ConvolverNode approach - much more stable than ScriptProcessor
+  private convolver: ConvolverNode;
   private preDelayNode: DelayNode;
-  
-  // Freeverb comb filters (8 per channel, stereo = 16 total)
-  private combsL: CombFilter[] = [];
-  private combsR: CombFilter[] = [];
-  
-  // Allpass filters for diffusion (4 per channel)
-  private allpassL: AllpassFilter[] = [];
-  private allpassR: AllpassFilter[] = [];
   
   // EQ on wet signal
   private lowCutFilter: BiquadFilterNode;
   private highCutFilter: BiquadFilterNode;
   private bassBoostFilter: BiquadFilterNode;
   
-  // Input filter
-  private inputFilter: BiquadFilterNode;
-  
-  // Stereo width processing
-  private splitter: ChannelSplitterNode;
-  private merger: ChannelMergerNode;
-  private midGain: GainNode;
-  private sideGain: GainNode;
-  
-  // Modulation LFOs (for shimmer mode)
-  private modLFO1: OscillatorNode;
-  private modLFO2: OscillatorNode;
-  private modGain1: GainNode;
-  private modGain2: GainNode;
-  private modDelay1: DelayNode;
-  private modDelay2: DelayNode;
-  
   // Mix
   private wetGain: GainNode;
   private dryGain: GainNode;
   
-  // Ducking (sidechain compression simulation)
-  private duckingGain: GainNode;
-  private duckingAnalyzer: AnalyserNode;
-  private duckingData: Float32Array;
-  private duckingInterval: number | null = null;
+  // Early reflections (6 taps)
+  private erDelays: DelayNode[] = [];
+  private erGains: GainNode[] = [];
+  private erMix: GainNode;
   
   // Metering
   public inputAnalyzer: AnalyserNode;
   public outputAnalyzer: AnalyserNode;
   private inputData: Float32Array;
   private outputData: Float32Array;
-  
-  // Early reflections (8 taps for realistic room simulation)
-  private erDelays: DelayNode[];
-  private erGains: GainNode[];
-  private erPanners: StereoPannerNode[];
-  private erMix: GainNode;
-  
-  // Worklet for Freeverb processing
-  private workletNode: AudioWorkletNode | null = null;
-  private useWorklet: boolean = false;
-  
-  // Freeze state
-  private isFrozen: boolean = false;
-  
-  // ScriptProcessor fallback for browsers without worklet
-  private scriptProcessor: ScriptProcessorNode | null = null;
   
   private params: ReverbParams = {
     decay: 2.5,
@@ -267,20 +226,12 @@ export class ReverbNode {
     isEnabled: true
   };
 
-  // Freeverb tuning constants (prime-ish numbers to avoid resonances)
-  private static COMB_TUNINGS_L = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
-  private static COMB_TUNINGS_R = [1139, 1211, 1300, 1379, 1445, 1514, 1580, 1640];
-  private static ALLPASS_TUNINGS = [556, 441, 341, 225];
-  private static STEREO_SPREAD = 23;
-
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
     
     // I/O
     this.input = ctx.createGain();
     this.output = ctx.createGain();
-    
-    // Start with full gain - the plugin manages dry/wet internally
     this.output.gain.value = 1.0;
     
     // Metering
@@ -292,33 +243,15 @@ export class ReverbNode {
     this.outputAnalyzer.fftSize = 256;
     this.outputData = new Float32Array(this.outputAnalyzer.frequencyBinCount);
     
-    // Ducking analyzer
-    this.duckingAnalyzer = ctx.createAnalyser();
-    this.duckingAnalyzer.fftSize = 256;
-    this.duckingData = new Float32Array(this.duckingAnalyzer.frequencyBinCount);
-    this.duckingGain = ctx.createGain();
-    
-    // Pre-delay (up to 500ms)
+    // Pre-delay
     this.preDelayNode = ctx.createDelay(0.5);
+    this.preDelayNode.delayTime.value = 0.025;
     
-    // Initialize Freeverb comb filters (scaled for sample rate)
-    const scaleFactor = ctx.sampleRate / 44100;
-    for (let i = 0; i < 8; i++) {
-      this.combsL.push(new CombFilter(Math.floor(ReverbNode.COMB_TUNINGS_L[i] * scaleFactor)));
-      this.combsR.push(new CombFilter(Math.floor((ReverbNode.COMB_TUNINGS_R[i] + ReverbNode.STEREO_SPREAD) * scaleFactor)));
-    }
-    
-    // Initialize allpass filters
-    for (let i = 0; i < 4; i++) {
-      this.allpassL.push(new AllpassFilter(Math.floor(ReverbNode.ALLPASS_TUNINGS[i] * scaleFactor)));
-      this.allpassR.push(new AllpassFilter(Math.floor((ReverbNode.ALLPASS_TUNINGS[i] + ReverbNode.STEREO_SPREAD) * scaleFactor)));
-    }
+    // Convolver (main reverb)
+    this.convolver = ctx.createConvolver();
+    this.generateImpulseResponse();
     
     // EQ filters
-    this.inputFilter = ctx.createBiquadFilter();
-    this.inputFilter.type = 'highpass';
-    this.inputFilter.frequency.value = 80;
-    
     this.lowCutFilter = ctx.createBiquadFilter();
     this.lowCutFilter.type = 'highpass';
     this.lowCutFilter.frequency.value = 100;
@@ -334,53 +267,17 @@ export class ReverbNode {
     this.bassBoostFilter.frequency.value = 200;
     this.bassBoostFilter.gain.value = 0;
     
-    // Stereo width (mid-side processing)
-    this.splitter = ctx.createChannelSplitter(2);
-    this.merger = ctx.createChannelMerger(2);
-    this.midGain = ctx.createGain();
-    this.sideGain = ctx.createGain();
-    
-    // Modulation LFOs (dual for richer modulation)
-    this.modLFO1 = ctx.createOscillator();
-    this.modLFO1.type = 'sine';
-    this.modLFO1.frequency.value = 0.5;
-    this.modGain1 = ctx.createGain();
-    this.modGain1.gain.value = 0.002;
-    this.modDelay1 = ctx.createDelay(0.05);
-    this.modDelay1.delayTime.value = 0.01;
-    
-    this.modLFO2 = ctx.createOscillator();
-    this.modLFO2.type = 'triangle';
-    this.modLFO2.frequency.value = 0.37; // Different rate for complexity
-    this.modGain2 = ctx.createGain();
-    this.modGain2.gain.value = 0.0015;
-    this.modDelay2 = ctx.createDelay(0.05);
-    this.modDelay2.delayTime.value = 0.012;
-    
-    this.modLFO1.connect(this.modGain1);
-    this.modGain1.connect(this.modDelay1.delayTime);
-    this.modLFO1.start();
-    
-    this.modLFO2.connect(this.modGain2);
-    this.modGain2.connect(this.modDelay2.delayTime);
-    this.modLFO2.start();
-    
-    // Early reflections (8 taps with panning for 3D sound)
-    this.erDelays = [];
-    this.erGains = [];
-    this.erPanners = [];
+    // Early reflections
     this.erMix = ctx.createGain();
+    this.erMix.gain.value = 0.3;
     
-    // Realistic early reflection pattern (based on room acoustics research)
     const erConfig = [
-      { time: 0.011, gain: 0.85, pan: -0.6 },
-      { time: 0.017, gain: 0.75, pan: 0.4 },
-      { time: 0.023, gain: 0.65, pan: -0.3 },
-      { time: 0.031, gain: 0.55, pan: 0.7 },
-      { time: 0.041, gain: 0.45, pan: -0.8 },
-      { time: 0.053, gain: 0.38, pan: 0.2 },
-      { time: 0.067, gain: 0.30, pan: -0.5 },
-      { time: 0.083, gain: 0.22, pan: 0.6 }
+      { time: 0.012, gain: 0.6 },
+      { time: 0.022, gain: 0.5 },
+      { time: 0.035, gain: 0.4 },
+      { time: 0.048, gain: 0.3 },
+      { time: 0.065, gain: 0.2 },
+      { time: 0.085, gain: 0.15 }
     ];
     
     for (const er of erConfig) {
@@ -388,11 +285,8 @@ export class ReverbNode {
       delay.delayTime.value = er.time;
       const gain = ctx.createGain();
       gain.gain.value = er.gain;
-      const panner = ctx.createStereoPanner();
-      panner.pan.value = er.pan;
       this.erDelays.push(delay);
       this.erGains.push(gain);
-      this.erPanners.push(panner);
     }
     
     // Mix
@@ -400,152 +294,78 @@ export class ReverbNode {
     this.dryGain = ctx.createGain();
     
     this.setupChain();
-    this.startDuckingProcess();
+  }
+
+  /**
+   * Generate simple impulse response for the convolver
+   */
+  private generateImpulseResponse() {
+    const sampleRate = this.ctx.sampleRate;
+    const decay = this.params.decay;
+    const length = Math.min(sampleRate * decay, sampleRate * 8); // Max 8 seconds
+    const impulse = this.ctx.createBuffer(2, length, sampleRate);
+    
+    const leftChannel = impulse.getChannelData(0);
+    const rightChannel = impulse.getChannelData(1);
+    
+    const dampingFactor = 1 - (this.params.damping * 0.5);
+    
+    for (let i = 0; i < length; i++) {
+      const t = i / sampleRate;
+      const envelope = Math.exp(-3 * t / decay) * dampingFactor;
+      
+      // Random noise with envelope
+      const noiseL = (Math.random() * 2 - 1) * envelope;
+      const noiseR = (Math.random() * 2 - 1) * envelope;
+      
+      // Add some diffusion (feedback-like effect)
+      const diffusion = this.params.size * 0.5;
+      leftChannel[i] = noiseL * (1 + diffusion * Math.sin(i * 0.01));
+      rightChannel[i] = noiseR * (1 + diffusion * Math.cos(i * 0.01));
+    }
+    
+    this.convolver.buffer = impulse;
+    console.log('[ReverbNode] Generated IR:', decay, 's, length:', length);
   }
 
   private setupChain() {
-    // IMPORTANT: Initialize gains with valid values FIRST
-    this.dryGain.gain.value = 0.9; // Start with mostly dry
-    this.wetGain.gain.value = 0.3; // Some wet signal
-    this.erMix.gain.value = 0.3;
-    this.duckingGain.gain.value = 1.0;
+    console.log('[ReverbNode] Setting up simple chain...');
     
-    console.log('[ReverbNode] Setting up chain...');
+    // Initialize gains
+    this.dryGain.gain.value = 0.7;
+    this.wetGain.gain.value = 0.3;
     
     // Input metering
     this.input.connect(this.inputAnalyzer);
     
-    // Ducking analyzer
-    this.input.connect(this.duckingAnalyzer);
-    
-    // === DRY PATH (simple, direct) ===
+    // === DRY PATH ===
     this.input.connect(this.dryGain);
     this.dryGain.connect(this.output);
     
-    // === WET PATH (reverb effect) ===
-    this.input.connect(this.inputFilter);
-    
-    // Early reflections network
-    for (let i = 0; i < this.erDelays.length; i++) {
-      this.inputFilter.connect(this.erDelays[i]);
-      this.erDelays[i].connect(this.erGains[i]);
-      this.erGains[i].connect(this.erPanners[i]);
-      this.erPanners[i].connect(this.erMix);
-    }
-    
-    // Pre-delay for late reverb
-    this.inputFilter.connect(this.preDelayNode);
-    
-    // SIMPLIFIED APPROACH: Use delays with feedback instead of ScriptProcessor
-    // This is more stable across browsers and won't cause audio glitches
-    const bufferSize = 2048; // Smaller buffer for less latency
-    this.scriptProcessor = this.ctx.createScriptProcessor(bufferSize, 2, 2);
-    
-    // Keep reference to prevent garbage collection
-    const scriptProcessorRef = this.scriptProcessor;
-    
-    this.scriptProcessor.onaudioprocess = (e) => {
-      if (!this.combsL.length) return; // Safety check
-      
-      const inputL = e.inputBuffer.getChannelData(0);
-      const inputR = e.inputBuffer.getChannelData(1);
-      const outputL = e.outputBuffer.getChannelData(0);
-      const outputR = e.outputBuffer.getChannelData(1);
-      
-      const roomSize = this.params.size * 0.28 + 0.7;
-      const feedback = this.isFrozen ? 1.0 : Math.min(0.95, roomSize * 0.9);
-      const damp = this.params.damping;
-      const diffusion = this.params.diffusion * 0.5;
-      
-      for (let i = 0; i < bufferSize; i++) {
-        const mono = (inputL[i] + inputR[i]) * 0.5;
-        
-        let combOutL = 0;
-        let combOutR = 0;
-        
-        for (let j = 0; j < 8; j++) {
-          combOutL += this.combsL[j].process(mono, feedback, damp);
-          combOutR += this.combsR[j].process(mono, feedback, damp);
-        }
-        
-        combOutL *= 0.125;
-        combOutR *= 0.125;
-        
-        let apOutL = combOutL;
-        let apOutR = combOutR;
-        
-        for (let j = 0; j < 4; j++) {
-          apOutL = this.allpassL[j].process(apOutL, diffusion);
-          apOutR = this.allpassR[j].process(apOutR, diffusion);
-        }
-        
-        outputL[i] = apOutL;
-        outputR[i] = apOutR;
-      }
-    };
-    
-    // Connect modulation and script processor
-    this.preDelayNode.connect(this.modDelay1);
-    this.modDelay1.connect(this.modDelay2);
-    this.modDelay2.connect(scriptProcessorRef);
-    
-    // EQ chain on reverb output
-    scriptProcessorRef.connect(this.bassBoostFilter);
+    // === WET PATH ===
+    // Input -> PreDelay -> Convolver -> EQ -> WetGain -> Output
+    this.input.connect(this.preDelayNode);
+    this.preDelayNode.connect(this.convolver);
+    this.convolver.connect(this.bassBoostFilter);
     this.bassBoostFilter.connect(this.lowCutFilter);
     this.lowCutFilter.connect(this.highCutFilter);
+    this.highCutFilter.connect(this.wetGain);
     
-    // Merge ER and late reverb
-    const reverbMerger = this.ctx.createGain();
-    reverbMerger.gain.value = 1.0;
-    this.highCutFilter.connect(reverbMerger);
-    this.erMix.connect(reverbMerger);
+    // Early reflections
+    for (let i = 0; i < this.erDelays.length; i++) {
+      this.input.connect(this.erDelays[i]);
+      this.erDelays[i].connect(this.erGains[i]);
+      this.erGains[i].connect(this.erMix);
+    }
+    this.erMix.connect(this.wetGain);
     
-    // Stereo width processing
-    reverbMerger.connect(this.splitter);
-    
-    const leftGain = this.ctx.createGain();
-    const rightGain = this.ctx.createGain();
-    leftGain.gain.value = 1.0;
-    rightGain.gain.value = 1.0;
-    
-    this.splitter.connect(leftGain, 0);
-    this.splitter.connect(rightGain, 1);
-    
-    leftGain.connect(this.merger, 0, 0);
-    rightGain.connect(this.merger, 0, 1);
-    
-    // Through ducking to wet gain
-    this.merger.connect(this.duckingGain);
-    this.duckingGain.connect(this.wetGain);
     this.wetGain.connect(this.output);
     
     // Output metering
     this.output.connect(this.outputAnalyzer);
     
     console.log('[ReverbNode] Chain setup complete');
-    
-    // Apply initial routing
     this.updateRouting();
-  }
-
-  private startDuckingProcess() {
-    this.duckingInterval = window.setInterval(() => {
-      if (this.params.ducking > 0 && this.params.isEnabled) {
-        this.duckingAnalyzer.getFloatTimeDomainData(this.duckingData as any);
-        let rms = 0;
-        for (let i = 0; i < this.duckingData.length; i++) {
-          rms += this.duckingData[i] * this.duckingData[i];
-        }
-        rms = Math.sqrt(rms / this.duckingData.length);
-        
-        // Smooth ducking with attack/release
-        const duckAmount = Math.min(1, rms * 4) * this.params.ducking;
-        const targetGain = Math.max(0.1, 1 - duckAmount * 0.8);
-        this.duckingGain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.03);
-      } else {
-        this.duckingGain.gain.setTargetAtTime(1, this.ctx.currentTime, 0.05);
-      }
-    }, 1000 / 60);
   }
 
   private updateRouting() {
@@ -566,7 +386,9 @@ export class ReverbNode {
   }
 
   public updateParams(p: Partial<ReverbParams>) {
-    const wasFreeze = this.params.freeze;
+    const oldDecay = this.params.decay;
+    const oldDamping = this.params.damping;
+    const oldSize = this.params.size;
     
     this.params = { ...this.params, ...p };
     
@@ -583,87 +405,39 @@ export class ReverbNode {
     // Bass boost
     this.bassBoostFilter.gain.setTargetAtTime(safe(this.params.bassBoost, 0.2) * 12, now, 0.02);
     
-    // Modulation (adjust based on mode)
-    let modRate = safe(this.params.modRate, 0.5);
-    let modDepth = safe(this.params.modDepth, 0.1);
-    
-    // Mode-specific modulation
-    if (this.params.mode === 'SHIMMER') {
-      modRate *= 1.5;
-      modDepth *= 1.3;
-    } else if (this.params.mode === 'SPRING') {
-      modRate *= 2.5;
-      modDepth *= 1.8;
-    } else if (this.params.mode === 'PLATE') {
-      modDepth *= 0.7;
+    // Regenerate IR if decay/damping/size changed significantly
+    if (Math.abs(oldDecay - this.params.decay) > 0.3 ||
+        Math.abs(oldDamping - this.params.damping) > 0.2 ||
+        Math.abs(oldSize - this.params.size) > 0.2) {
+      this.generateImpulseResponse();
     }
     
-    this.modLFO1.frequency.setTargetAtTime(modRate, now, 0.02);
-    this.modLFO2.frequency.setTargetAtTime(modRate * 0.73, now, 0.02);
-    this.modGain1.gain.setTargetAtTime(modDepth * 0.005, now, 0.02);
-    this.modGain2.gain.setTargetAtTime(modDepth * 0.003, now, 0.02);
-    
-    // Adjust ER times based on mode
+    // Update ER timings based on mode
     this.updateERTimings();
     
     this.updateRouting();
-    
-    // Handle freeze toggle
-    if (this.params.freeze && !wasFreeze) {
-      this.isFrozen = true;
-    } else if (!this.params.freeze && wasFreeze) {
-      this.isFrozen = false;
-      // Clear comb filter buffers for clean restart
-      this.combsL.forEach(c => c.clear());
-      this.combsR.forEach(c => c.clear());
-    }
   }
 
   private updateERTimings() {
     // Adjust early reflection timings based on mode
     let timeMult = 1.0;
-    let panMult = 1.0;
     
     switch (this.params.mode) {
-      case 'ROOM':
-        timeMult = 0.6;
-        panMult = 0.5;
-        break;
-      case 'HALL':
-        timeMult = 1.0;
-        panMult = 0.8;
-        break;
-      case 'PLATE':
-        timeMult = 0.4;
-        panMult = 1.2;
-        break;
-      case 'CATHEDRAL':
-        timeMult = 1.8;
-        panMult = 1.0;
-        break;
-      case 'SHIMMER':
-        timeMult = 1.2;
-        panMult = 1.5;
-        break;
-      case 'SPRING':
-        timeMult = 0.3;
-        panMult = 0.3;
-        break;
+      case 'ROOM': timeMult = 0.6; break;
+      case 'HALL': timeMult = 1.0; break;
+      case 'PLATE': timeMult = 0.4; break;
+      case 'CATHEDRAL': timeMult = 1.8; break;
+      case 'SHIMMER': timeMult = 1.2; break;
+      case 'SPRING': timeMult = 0.3; break;
     }
     
-    const baseERTimes = [0.011, 0.017, 0.023, 0.031, 0.041, 0.053, 0.067, 0.083];
-    const baseERPans = [-0.6, 0.4, -0.3, 0.7, -0.8, 0.2, -0.5, 0.6];
-    
+    const baseERTimes = [0.012, 0.022, 0.035, 0.048, 0.065, 0.085];
     const now = this.ctx.currentTime;
-    for (let i = 0; i < this.erDelays.length; i++) {
+    
+    for (let i = 0; i < this.erDelays.length && i < baseERTimes.length; i++) {
       this.erDelays[i].delayTime.setTargetAtTime(
         baseERTimes[i] * timeMult * (0.8 + this.params.size * 0.4), 
         now, 
-        0.02
-      );
-      this.erPanners[i].pan.setTargetAtTime(
-        baseERPans[i] * panMult * this.params.width,
-        now,
         0.02
       );
     }
@@ -704,41 +478,19 @@ export class ReverbNode {
   
   /**
    * Properly dispose of all audio nodes and connections
-   * This is called when the plugin is removed from a track
    */
   public dispose() {
     try {
-      // Stop ducking interval
-      if (this.duckingInterval) {
-        clearInterval(this.duckingInterval);
-        this.duckingInterval = null;
-      }
-      
-      // Stop LFOs safely
-      try { this.modLFO1.stop(); } catch (e) {}
-      try { this.modLFO2.stop(); } catch (e) {}
-      
-      // Disconnect all nodes to clean up the audio graph
+      // Disconnect all nodes
       try { this.input.disconnect(); } catch (e) {}
       try { this.output.disconnect(); } catch (e) {}
       try { this.dryGain.disconnect(); } catch (e) {}
       try { this.wetGain.disconnect(); } catch (e) {}
-      try { this.inputFilter.disconnect(); } catch (e) {}
       try { this.preDelayNode.disconnect(); } catch (e) {}
-      try { this.modDelay1.disconnect(); } catch (e) {}
-      try { this.modDelay2.disconnect(); } catch (e) {}
-      try { this.modLFO1.disconnect(); } catch (e) {}
-      try { this.modLFO2.disconnect(); } catch (e) {}
-      try { this.modGain1.disconnect(); } catch (e) {}
-      try { this.modGain2.disconnect(); } catch (e) {}
-      try { this.scriptProcessor?.disconnect(); } catch (e) {}
+      try { this.convolver.disconnect(); } catch (e) {}
       try { this.bassBoostFilter.disconnect(); } catch (e) {}
       try { this.lowCutFilter.disconnect(); } catch (e) {}
       try { this.highCutFilter.disconnect(); } catch (e) {}
-      try { this.splitter.disconnect(); } catch (e) {}
-      try { this.merger.disconnect(); } catch (e) {}
-      try { this.duckingGain.disconnect(); } catch (e) {}
-      try { this.duckingAnalyzer.disconnect(); } catch (e) {}
       try { this.inputAnalyzer.disconnect(); } catch (e) {}
       try { this.outputAnalyzer.disconnect(); } catch (e) {}
       try { this.erMix.disconnect(); } catch (e) {}
@@ -746,17 +498,9 @@ export class ReverbNode {
       // Disconnect early reflections
       for (const d of this.erDelays) { try { d.disconnect(); } catch (e) {} }
       for (const g of this.erGains) { try { g.disconnect(); } catch (e) {} }
-      for (const p of this.erPanners) { try { p.disconnect(); } catch (e) {} }
       
-      // Clear references
-      this.scriptProcessor = null;
-      this.combsL = [];
-      this.combsR = [];
-      this.allpassL = [];
-      this.allpassR = [];
       this.erDelays = [];
       this.erGains = [];
-      this.erPanners = [];
       
     } catch (e) {
       console.error('[ReverbNode] Dispose error:', e);
