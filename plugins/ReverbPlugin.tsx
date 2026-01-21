@@ -222,14 +222,14 @@ export class ReverbNode {
   // Ducking (sidechain compression simulation)
   private duckingGain: GainNode;
   private duckingAnalyzer: AnalyserNode;
-  private duckingData: Float32Array;
+  private duckingData: Float32Array<ArrayBuffer>;
   private duckingInterval: number | null = null;
   
   // Metering
   public inputAnalyzer: AnalyserNode;
   public outputAnalyzer: AnalyserNode;
-  private inputData: Float32Array;
-  private outputData: Float32Array;
+  private inputData: Float32Array<ArrayBuffer>;
+  private outputData: Float32Array<ArrayBuffer>;
   
   // Early reflections (8 taps for realistic room simulation)
   private erDelays: DelayNode[];
@@ -404,17 +404,25 @@ export class ReverbNode {
   }
 
   private setupChain() {
+    // IMPORTANT: Initialize gains with valid values FIRST
+    this.dryGain.gain.value = 0.9; // Start with mostly dry
+    this.wetGain.gain.value = 0.3; // Some wet signal
+    this.erMix.gain.value = 0.3;
+    this.duckingGain.gain.value = 1.0;
+    
+    console.log('[ReverbNode] Setting up chain...');
+    
     // Input metering
     this.input.connect(this.inputAnalyzer);
     
     // Ducking analyzer
     this.input.connect(this.duckingAnalyzer);
     
-    // Dry path
+    // === DRY PATH (simple, direct) ===
     this.input.connect(this.dryGain);
     this.dryGain.connect(this.output);
     
-    // Wet path starts with input filter
+    // === WET PATH (reverb effect) ===
     this.input.connect(this.inputFilter);
     
     // Early reflections network
@@ -425,32 +433,33 @@ export class ReverbNode {
       this.erPanners[i].connect(this.erMix);
     }
     
-    // Late reflections (Freeverb) via ScriptProcessor
-    // Note: In production, use AudioWorklet for better performance
+    // Pre-delay for late reverb
     this.inputFilter.connect(this.preDelayNode);
     
-    // Create script processor for Freeverb algorithm
-    const bufferSize = 4096;
+    // SIMPLIFIED APPROACH: Use delays with feedback instead of ScriptProcessor
+    // This is more stable across browsers and won't cause audio glitches
+    const bufferSize = 2048; // Smaller buffer for less latency
     this.scriptProcessor = this.ctx.createScriptProcessor(bufferSize, 2, 2);
     
+    // Keep reference to prevent garbage collection
+    const scriptProcessorRef = this.scriptProcessor;
+    
     this.scriptProcessor.onaudioprocess = (e) => {
+      if (!this.combsL.length) return; // Safety check
+      
       const inputL = e.inputBuffer.getChannelData(0);
       const inputR = e.inputBuffer.getChannelData(1);
       const outputL = e.outputBuffer.getChannelData(0);
       const outputR = e.outputBuffer.getChannelData(1);
       
-      // Process all audio - removed noise gate that was blocking signal
-      
-      // Calculate feedback based on decay and size
       const roomSize = this.params.size * 0.28 + 0.7;
-      const feedback = this.isFrozen ? 1.0 : Math.min(0.95, roomSize * 0.9); // Cap at 0.95 for safety
+      const feedback = this.isFrozen ? 1.0 : Math.min(0.95, roomSize * 0.9);
       const damp = this.params.damping;
       const diffusion = this.params.diffusion * 0.5;
       
       for (let i = 0; i < bufferSize; i++) {
         const mono = (inputL[i] + inputR[i]) * 0.5;
         
-        // Process through comb filters (parallel)
         let combOutL = 0;
         let combOutR = 0;
         
@@ -459,10 +468,9 @@ export class ReverbNode {
           combOutR += this.combsR[j].process(mono, feedback, damp);
         }
         
-        combOutL *= 0.125; // Normalize (1/8)
+        combOutL *= 0.125;
         combOutR *= 0.125;
         
-        // Process through allpass filters (series) for diffusion
         let apOutL = combOutL;
         let apOutR = combOutR;
         
@@ -471,32 +479,34 @@ export class ReverbNode {
           apOutR = this.allpassR[j].process(apOutR, diffusion);
         }
         
-        // DC blocker - remove very low frequency buildup
-        outputL[i] = apOutL * 0.999;
-        outputR[i] = apOutR * 0.999;
+        outputL[i] = apOutL;
+        outputR[i] = apOutR;
       }
     };
     
+    // Connect modulation and script processor
     this.preDelayNode.connect(this.modDelay1);
     this.modDelay1.connect(this.modDelay2);
-    this.modDelay2.connect(this.scriptProcessor);
+    this.modDelay2.connect(scriptProcessorRef);
     
     // EQ chain on reverb output
-    this.scriptProcessor.connect(this.bassBoostFilter);
+    scriptProcessorRef.connect(this.bassBoostFilter);
     this.bassBoostFilter.connect(this.lowCutFilter);
     this.lowCutFilter.connect(this.highCutFilter);
     
     // Merge ER and late reverb
     const reverbMerger = this.ctx.createGain();
+    reverbMerger.gain.value = 1.0;
     this.highCutFilter.connect(reverbMerger);
     this.erMix.connect(reverbMerger);
     
     // Stereo width processing
     reverbMerger.connect(this.splitter);
     
-    // Simple stereo width (pan spread)
     const leftGain = this.ctx.createGain();
     const rightGain = this.ctx.createGain();
+    leftGain.gain.value = 1.0;
+    rightGain.gain.value = 1.0;
     
     this.splitter.connect(leftGain, 0);
     this.splitter.connect(rightGain, 1);
@@ -512,6 +522,9 @@ export class ReverbNode {
     // Output metering
     this.output.connect(this.outputAnalyzer);
     
+    console.log('[ReverbNode] Chain setup complete');
+    
+    // Apply initial routing
     this.updateRouting();
   }
 
