@@ -37,6 +37,7 @@ import MobileArrangementPage from './components/MobileArrangementPage';
 import MobilePluginsPage from './components/MobilePluginsPage';
 import MobileBrowserPage from './components/MobileBrowserPage';
 import MobileBottomNav from './components/MobileBottomNav';
+import LandingPage from './components/LandingPage';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -245,6 +246,17 @@ const useUndoRedo = (initialState: DAWState) => {
 };
 
 export default function App() {
+  // Landing Page state - Check localStorage to skip if already visited
+  const [showLanding, setShowLanding] = useState(() => {
+    const hasVisited = localStorage.getItem('nova_visited');
+    return !hasVisited;
+  });
+
+  const handleEnterStudio = () => {
+    localStorage.setItem('nova_visited', 'true');
+    setShowLanding(false);
+  };
+
   // Utilisateur par défaut pour éviter l'écran noir (temporaire)
   const defaultUser: User = {
     id: 'guest',
@@ -1116,6 +1128,11 @@ export default function App() {
 
   // Auth temporairement désactivée pour éviter écran noir
   // if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
+
+  // Afficher la Landing Page si c'est la première visite
+  if (showLanding) {
+    return <LandingPage onEnterStudio={handleEnterStudio} />;
+  }
 
   return (
     <div className="flex flex-col h-screen w-full overflow-hidden relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>

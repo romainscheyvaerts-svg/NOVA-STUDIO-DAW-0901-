@@ -125,9 +125,9 @@ export class SyncDelayNode {
       pingPong: false,
       ducking: 0,
       saturation: 0.3,
-      modRate: 0.5,
-      modDepth: 0.15,
-      mode: 'TAPE',
+      modRate: 0.3,       // Reduced from 0.5 - slower wobble
+      modDepth: 0.05,     // Reduced from 0.15 - much subtler
+      mode: 'DIGITAL',    // Start with DIGITAL mode (no modulation) for clean default
       freeze: false,
       multiTap: false,
       tap2Level: 0.5,
@@ -183,15 +183,15 @@ export class SyncDelayNode {
     // Modulation LFOs
     this.modLFO1 = ctx.createOscillator();
     this.modLFO1.type = 'sine';
-    this.modLFO1.frequency.value = 0.5;
+    this.modLFO1.frequency.value = 0.3;  // Slower default rate
     this.modGain1 = ctx.createGain();
-    this.modGain1.gain.value = 0.0008;
+    this.modGain1.gain.value = 0;  // Start at 0 to avoid initial "wou" sound
     
     this.modLFO2 = ctx.createOscillator();
     this.modLFO2.type = 'triangle';
-    this.modLFO2.frequency.value = 0.37;
+    this.modLFO2.frequency.value = 0.17;  // Much slower secondary
     this.modGain2 = ctx.createGain();
-    this.modGain2.gain.value = 0.0003;
+    this.modGain2.gain.value = 0;  // Start at 0
     
     this.modLFO1.connect(this.modGain1);
     this.modLFO2.connect(this.modGain2);
@@ -448,13 +448,14 @@ export class SyncDelayNode {
       this.feedbackHP.frequency.setTargetAtTime(safe(this.params.feedbackHP, 80), now, 0.02);
       this.feedbackLP.frequency.setTargetAtTime(safe(this.params.feedbackLP, 8000), now, 0.02);
       
-      // Modulation
+      // Modulation - reduced values to prevent "wou wou" artifacts
       const modEnabled = this.params.mode === 'TAPE' || this.params.mode === 'ANALOG';
-      const modDepth = modEnabled ? safe(this.params.modDepth, 0.15) : 0;
-      this.modLFO1.frequency.setTargetAtTime(safe(this.params.modRate, 0.5), now, 0.02);
-      this.modLFO2.frequency.setTargetAtTime(safe(this.params.modRate, 0.5) * 0.73, now, 0.02);
-      this.modGain1.gain.setTargetAtTime(modDepth * 0.002, now, 0.02);
-      this.modGain2.gain.setTargetAtTime(modDepth * 0.0008, now, 0.02);
+      const modDepth = modEnabled ? safe(this.params.modDepth, 0.05) : 0;  // Default reduced from 0.15 to 0.05
+      this.modLFO1.frequency.setTargetAtTime(Math.max(0.1, safe(this.params.modRate, 0.3)), now, 0.05);
+      this.modLFO2.frequency.setTargetAtTime(Math.max(0.05, safe(this.params.modRate, 0.3) * 0.5), now, 0.05);
+      // Much smaller modulation depth values to avoid pitch wobble
+      this.modGain1.gain.setTargetAtTime(modDepth * 0.0003, now, 0.1);  // Reduced from 0.002
+      this.modGain2.gain.setTargetAtTime(modDepth * 0.0001, now, 0.1);  // Reduced from 0.0008
       
       // Analog warmth based on mode
       const warmth = this.params.mode === 'TAPE' ? 3 : (this.params.mode === 'ANALOG' ? 4 : 0);
