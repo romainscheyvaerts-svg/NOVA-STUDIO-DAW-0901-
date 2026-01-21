@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import MobileContainer from './MobileContainer';
-import { Track, Clip } from '../types';
-import TrackHeader from './TrackHeader';
-import { getValidDestinations, getRouteLabel } from './RoutingManager';
+import { Track, Clip, TrackType, TrackSend } from '../types';
+import { getValidDestinations } from './RoutingManager';
 
 interface MobileTracksPageProps {
   tracks: Track[];
@@ -21,9 +20,52 @@ interface MobileTracksPageProps {
   onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
 }
 
+// Horizontal Send Fader Component - Touch optimized
+const MobileSendFader: React.FC<{
+  send: TrackSend;
+  label: string;
+  color: string;
+  onChange: (level: number) => void;
+}> = ({ send, label, color, onChange }) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onChange(parseFloat(e.target.value));
+  };
+
+  const percent = (send.level / 1.5) * 100;
+
+  return (
+    <div className="flex items-center gap-3 py-1">
+      <span className="text-[9px] font-bold text-white/70 w-16 truncate uppercase">{label}</span>
+      <div className="flex-1 relative">
+        <div className="h-6 bg-black/40 rounded-full overflow-hidden border border-white/10">
+          <div 
+            className="h-full transition-all duration-75"
+            style={{ 
+              width: `${percent}%`, 
+              backgroundColor: color,
+              opacity: 0.6,
+              boxShadow: send.level > 0.1 ? `0 0 10px ${color}` : 'none'
+            }}
+          />
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="1.5"
+          step="0.01"
+          value={send.level}
+          onChange={handleChange}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+        />
+      </div>
+      <span className="text-[9px] font-mono text-white/50 w-8 text-right">{Math.round(percent)}%</span>
+    </div>
+  );
+};
+
 /**
- * Page mobile pour gérer les pistes (arrangement)
- * Inspiré de Logic Pro iPad - Vue liste verticale
+ * Page mobile pour gérer les pistes
+ * Avec sections Sends toujours accessibles (pas de long press)
  */
 const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
   tracks,
@@ -34,12 +76,31 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
   onSelectTrack,
   onUpdateTrack,
   onRemovePlugin,
-  onAddPlugin,
   onOpenPlugin,
   onToggleBypass,
   onRequestAddPlugin
 }) => {
+  const [expandedSends, setExpandedSends] = useState<Record<string, boolean>>({});
+  
   const visibleTracks = tracks.filter(t => t.id !== 'master');
+
+  const toggleSends = (trackId: string) => {
+    setExpandedSends(prev => ({ ...prev, [trackId]: !prev[trackId] }));
+  };
+
+  const handleSendChange = (track: Track, sendId: string, level: number) => {
+    const newSends = track.sends.map(s => 
+      s.id === sendId ? { ...s, level } : s
+    );
+    onUpdateTrack({ ...track, sends: newSends });
+  };
+
+  const canHaveSends = (track: Track) => {
+    return (track.type === TrackType.AUDIO || track.type === TrackType.BUS || 
+            track.type === TrackType.MIDI || track.type === TrackType.SAMPLER || 
+            track.type === TrackType.DRUM_RACK) && 
+           track.id !== 'instrumental' && track.id !== 'master';
+  };
 
   return (
     <MobileContainer title="Pistes">
@@ -62,41 +123,158 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
             }`}
             onClick={() => onSelectTrack(track.id)}
           >
-            <TrackHeader
-              track={track}
-              isSelected={selectedTrackId === track.id}
-              onUpdate={onUpdateTrack}
-              onRemovePlugin={onRemovePlugin}
-              onAddPlugin={onAddPlugin}
-              onOpenPlugin={onOpenPlugin}
-              onToggleBypass={onToggleBypass}
-              onSelectTrack={onSelectTrack}
-            />
+            {/* Track Header */}
+            <div 
+              className="p-3 flex items-center justify-between"
+              style={{ borderLeft: `4px solid ${track.color}` }}
+            >
+              <div className="flex items-center gap-3">
+                <div 
+                  className="w-8 h-8 rounded-lg flex items-center justify-center"
+                  style={{ backgroundColor: `${track.color}30` }}
+                >
+                  <i className={`fas ${
+                    track.type === TrackType.MIDI ? 'fa-music' :
+                    track.type === TrackType.DRUM_RACK ? 'fa-th' :
+                    track.type === TrackType.BUS ? 'fa-layer-group' :
+                    track.type === TrackType.SEND ? 'fa-magic' :
+                    'fa-waveform-lines'
+                  } text-xs`} style={{ color: track.color }}></i>
+                </div>
+                <div>
+                  <span className="text-sm font-bold text-white">{track.name}</span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[9px] text-slate-500 uppercase">{track.type}</span>
+                    {track.isMuted && <span className="text-[8px] bg-red-500/20 text-red-400 px-1 rounded">M</span>}
+                    {track.isSolo && <span className="text-[8px] bg-yellow-500/20 text-yellow-400 px-1 rounded">S</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Controls */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...track, isMuted: !track.isMuted }); }}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                    track.isMuted ? 'bg-red-500 text-white' : 'bg-white/5 text-slate-500'
+                  }`}
+                >
+                  <span className="text-[10px] font-bold">M</span>
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...track, isSolo: !track.isSolo }); }}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                    track.isSolo ? 'bg-yellow-500 text-black' : 'bg-white/5 text-slate-500'
+                  }`}
+                >
+                  <span className="text-[10px] font-bold">S</span>
+                </button>
+                {canHaveSends(track) && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleSends(track.id); }}
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                      expandedSends[track.id] ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-500'
+                    }`}
+                  >
+                    <i className="fas fa-sliders-h text-[10px]"></i>
+                  </button>
+                )}
+                {track.id === 'track-rec-main' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...track, isTrackArmed: !track.isTrackArmed }); }}
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                      track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-500'
+                    }`}
+                  >
+                    <span className="text-[10px] font-bold">R</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Volume Fader */}
+            <div className="px-4 pb-2">
+              <div className="flex items-center gap-3">
+                <i className="fas fa-volume-up text-slate-500 text-xs"></i>
+                <div className="flex-1 relative">
+                  <div className="h-3 bg-black/40 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full transition-all"
+                      style={{ 
+                        width: `${(track.volume / 1.5) * 100}%`,
+                        backgroundColor: track.color 
+                      }}
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1.5"
+                    step="0.01"
+                    value={track.volume}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      onUpdateTrack({ ...track, volume: parseFloat(e.target.value) });
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                </div>
+                <span className="text-[10px] font-mono text-slate-400 w-10 text-right">
+                  {Math.round(track.volume * 100)}%
+                </span>
+              </div>
+            </div>
+
+            {/* Sends Section - Expands with simple tap */}
+            {canHaveSends(track) && expandedSends[track.id] && (
+              <div className="px-4 pb-3 border-t border-white/5 pt-3 bg-black/20">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">
+                  <i className="fas fa-share-alt mr-1"></i> Sends
+                </div>
+                <div className="space-y-1">
+                  <MobileSendFader
+                    send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }}
+                    label="Delay 1/4"
+                    color="#00f2ff"
+                    onChange={(lvl) => handleSendChange(track, 'send-delay', lvl)}
+                  />
+                  <MobileSendFader
+                    send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }}
+                    label="Verb Pro"
+                    color="#10b981"
+                    onChange={(lvl) => handleSendChange(track, 'send-verb-short', lvl)}
+                  />
+                  <MobileSendFader
+                    send={track.sends.find(s => s.id === 'send-verb-long') || { id: 'send-verb-long', level: 0, isEnabled: true }}
+                    label="Hall Space"
+                    color="#a855f7"
+                    onChange={(lvl) => handleSendChange(track, 'send-verb-long', lvl)}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Clips de la piste */}
-            <div className="px-4 pb-2">
-              <div className="flex items-center gap-2 overflow-x-auto">
-                {track.clips.length === 0 ? (
-                  <div className="text-xs text-slate-600 py-2">
-                    Aucun clip
-                  </div>
-                ) : (
-                  track.clips.map(clip => (
+            {track.clips.length > 0 && (
+              <div className="px-4 pb-2 border-t border-white/5 pt-2">
+                <div className="flex items-center gap-2 overflow-x-auto py-1">
+                  {track.clips.map(clip => (
                     <div
                       key={clip.id}
-                      className="shrink-0 h-12 rounded-lg px-3 flex items-center justify-center text-xs font-medium"
+                      className="shrink-0 h-10 rounded-lg px-3 flex items-center justify-center text-xs font-medium"
                       style={{
                         width: `${Math.max(80, clip.duration * 20)}px`,
                         backgroundColor: `${track.color}40`,
                         borderLeft: `3px solid ${track.color}`
                       }}
                     >
-                      <div className="truncate">{clip.name || 'Clip'}</div>
+                      <div className="truncate text-white/80">{clip.name || 'Clip'}</div>
                     </div>
-                  ))
-                )}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Section Routing/Connexions (I/O) */}
             <div className="px-4 pb-3 border-t border-white/5 pt-3">
@@ -118,6 +296,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                           e.stopPropagation();
                           onUpdateTrack({ ...track, inputDeviceId: e.target.value });
                         }}
+                        onClick={(e) => e.stopPropagation()}
                         className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-lg text-xs font-bold text-green-400 focus:border-green-500/50 focus:outline-none"
                       >
                         <option value="none">No Input</option>
@@ -140,6 +319,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                         e.stopPropagation();
                         onUpdateTrack({ ...track, outputTrackId: e.target.value });
                       }}
+                      onClick={(e) => e.stopPropagation()}
                       className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-lg text-xs font-bold text-amber-400 focus:border-amber-500/50 focus:outline-none"
                     >
                       {getValidDestinations(track.id, tracks).map(dest => (
@@ -172,23 +352,30 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                 )}
               </div>
 
-              {/* Liste des plugins */}
+              {/* Liste des plugins - CLICKABLE pour ouvrir */}
               {track.plugins.length === 0 ? (
-                <div className="text-xs text-slate-600 text-center py-3 bg-white/5 rounded-lg border border-dashed border-white/10">
+                <div 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onRequestAddPlugin) onRequestAddPlugin(track.id, 200, 400);
+                  }}
+                  className="text-xs text-slate-600 text-center py-4 bg-white/5 rounded-lg border border-dashed border-white/10 cursor-pointer hover:bg-white/10 transition-all"
+                >
                   <i className="fas fa-plug text-lg mb-1 opacity-30"></i>
                   <p>Aucun plugin</p>
-                  <p className="text-[10px] mt-1 opacity-70">Tap + pour ajouter</p>
+                  <p className="text-[10px] mt-1 opacity-70">Tap pour ajouter</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
                   {track.plugins.map(plugin => (
-                    <div
+                    <button
                       key={plugin.id}
                       onClick={(e) => {
                         e.stopPropagation();
+                        console.log('[MobileTracksPage] Opening plugin:', track.id, plugin.id);
                         if (onOpenPlugin) onOpenPlugin(track.id, plugin.id);
                       }}
-                      className={`p-2 rounded-lg border transition-all ${
+                      className={`p-3 rounded-lg border transition-all active:scale-95 ${
                         plugin.isEnabled
                           ? 'bg-gradient-to-br from-cyan-500/10 to-blue-500/10 border-cyan-500/30'
                           : 'bg-white/5 border-white/10 opacity-50'
@@ -199,7 +386,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                           {plugin.type}
                         </span>
                         {onToggleBypass && (
-                          <button
+                          <div
                             onClick={(e) => {
                               e.stopPropagation();
                               onToggleBypass(track.id, plugin.id);
@@ -210,10 +397,10 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                           />
                         )}
                       </div>
-                      <div className="text-[9px] text-slate-400 truncate">
+                      <div className="text-[9px] text-slate-400 truncate text-left">
                         Tap to edit
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}

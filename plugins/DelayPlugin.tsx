@@ -371,19 +371,9 @@ export class SyncDelayNode {
       }
       rms = Math.sqrt(rms / this.duckingData.length);
       
-      // CRITICAL FIX: Reduce feedback when no input signal to prevent noise accumulation
-      // This acts as a noise gate for the feedback loop
-      const noiseFloor = 0.001; // -60dB threshold
-      if (rms < noiseFloor && this.params.isEnabled && !this.params.freeze) {
-        // Gradually reduce feedback to let the delay tail die out naturally
-        this.feedbackGain.gain.setTargetAtTime(
-          Math.max(0, this.params.feedback * 0.5), 
-          this.ctx.currentTime, 
-          0.1
-        );
-      } else if (this.params.isEnabled) {
-        // Restore normal feedback when signal is present
-        const fb = this.params.freeze ? 0.95 : Math.min(0.9, this.params.feedback);
+      // Normal feedback control - noise gate removed to ensure audio passes through
+      if (this.params.isEnabled) {
+        const fb = this.params.freeze ? 0.95 : Math.min(0.95, this.params.feedback);
         this.feedbackGain.gain.setTargetAtTime(fb, this.ctx.currentTime, 0.02);
       }
       

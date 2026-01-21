@@ -440,24 +440,7 @@ export class ReverbNode {
       const outputL = e.outputBuffer.getChannelData(0);
       const outputR = e.outputBuffer.getChannelData(1);
       
-      // CRITICAL: Check if there's actual input signal to avoid processing noise
-      let hasSignal = false;
-      const noiseFloor = 0.0001; // -80dB noise gate
-      for (let i = 0; i < bufferSize; i += 64) { // Sample every 64 frames for efficiency
-        if (Math.abs(inputL[i]) > noiseFloor || Math.abs(inputR[i]) > noiseFloor) {
-          hasSignal = true;
-          break;
-        }
-      }
-      
-      // If no significant input and not frozen, output silence to prevent noise buildup
-      if (!hasSignal && !this.isFrozen) {
-        for (let i = 0; i < bufferSize; i++) {
-          outputL[i] = 0;
-          outputR[i] = 0;
-        }
-        return;
-      }
+      // Process all audio - removed noise gate that was blocking signal
       
       // Calculate feedback based on decay and size
       const roomSize = this.params.size * 0.28 + 0.7;

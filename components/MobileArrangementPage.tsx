@@ -17,6 +17,7 @@ interface MobileArrangementPageProps {
   onStop?: () => void;
   onUpdateTrack?: (track: Track) => void;
   onDeleteClip?: (trackId: string, clipId: string) => void;
+  onOpenSends?: (trackId: string) => void;
 }
 
 type EditTool = 'SELECT' | 'TRIM' | 'SPLIT' | 'ERASE';
@@ -437,14 +438,14 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   </span>
                 </div>
 
-                {/* Track controls M/S/R */}
-                <div className="flex items-center gap-1">
+                {/* Track controls M/S/R/Send */}
+                <div className="flex items-center gap-0.5">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       if (onUpdateTrack) onUpdateTrack({ ...track, isMuted: !track.isMuted });
                     }}
-                    className={`w-6 h-5 rounded text-[8px] font-black transition-all ${
+                    className={`w-5 h-5 rounded text-[7px] font-black transition-all ${
                       track.isMuted
                         ? 'bg-red-500 text-white'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
@@ -457,7 +458,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                       e.stopPropagation();
                       if (onUpdateTrack) onUpdateTrack({ ...track, isSolo: !track.isSolo });
                     }}
-                    className={`w-6 h-5 rounded text-[8px] font-black transition-all ${
+                    className={`w-5 h-5 rounded text-[7px] font-black transition-all ${
                       track.isSolo
                         ? 'bg-yellow-500 text-black'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
@@ -470,7 +471,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                       e.stopPropagation();
                       if (onUpdateTrack) onUpdateTrack({ ...track, isTrackArmed: !track.isTrackArmed });
                     }}
-                    className={`w-6 h-5 rounded text-[8px] font-black transition-all ${
+                    className={`w-5 h-5 rounded text-[7px] font-black transition-all ${
                       track.isTrackArmed
                         ? 'bg-red-600 text-white animate-pulse'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
