@@ -1239,6 +1239,7 @@ export default function App() {
                   onStop={handleStop}
                   onUpdateTrack={handleUpdateTrack}
                   onDeleteClip={(trackId, clipId) => handleEditClip(trackId, clipId, 'DELETE')}
+                  onRequestAddPlugin={handleRequestAddPlugin}
                 />
               )}
 
