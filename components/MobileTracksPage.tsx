@@ -368,39 +368,59 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
               ) : (
                 <div className="grid grid-cols-2 gap-2">
                   {track.plugins.map(plugin => (
-                    <button
+                    <div
                       key={plugin.id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        console.log('[MobileTracksPage] Opening plugin:', track.id, plugin.id);
-                        if (onOpenPlugin) onOpenPlugin(track.id, plugin.id);
-                      }}
-                      className={`p-3 rounded-lg border transition-all active:scale-95 ${
+                      className={`relative p-3 rounded-lg border transition-all ${
                         plugin.isEnabled
                           ? 'bg-gradient-to-br from-cyan-500/10 to-blue-500/10 border-cyan-500/30'
                           : 'bg-white/5 border-white/10 opacity-50'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-bold text-cyan-400 uppercase">
-                          {plugin.type}
-                        </span>
-                        {onToggleBypass && (
-                          <div
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onToggleBypass(track.id, plugin.id);
-                            }}
-                            className={`w-4 h-4 rounded-full ${
-                              plugin.isEnabled ? 'bg-cyan-500' : 'bg-slate-600'
-                            }`}
-                          />
-                        )}
-                      </div>
-                      <div className="text-[9px] text-slate-400 truncate text-left">
-                        Tap to edit
-                      </div>
-                    </button>
+                      {/* Bouton de suppression */}
+                      {onRemovePlugin && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`Supprimer ${plugin.name || plugin.type} ?`)) {
+                              onRemovePlugin(track.id, plugin.id);
+                            }
+                          }}
+                          className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 hover:bg-red-600 active:bg-red-700 flex items-center justify-center text-white shadow-lg z-10 transition-all"
+                        >
+                          <i className="fas fa-times text-[10px]"></i>
+                        </button>
+                      )}
+                      
+                      {/* Zone cliquable pour ouvrir le plugin */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          console.log('[MobileTracksPage] Opening plugin:', track.id, plugin.id);
+                          if (onOpenPlugin) onOpenPlugin(track.id, plugin.id);
+                        }}
+                        className="w-full text-left active:scale-95 transition-transform"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] font-bold text-cyan-400 uppercase">
+                            {plugin.type}
+                          </span>
+                          {onToggleBypass && (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleBypass(track.id, plugin.id);
+                              }}
+                              className={`w-4 h-4 rounded-full ${
+                                plugin.isEnabled ? 'bg-cyan-500' : 'bg-slate-600'
+                              }`}
+                            />
+                          )}
+                        </div>
+                        <div className="text-[9px] text-slate-400 truncate">
+                          {plugin.name || 'Tap to edit'}
+                        </div>
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
