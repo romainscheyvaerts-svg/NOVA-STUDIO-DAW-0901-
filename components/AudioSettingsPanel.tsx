@@ -1,8 +1,8 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { audioEngine } from '../engine/AudioEngine';
 import { midiManager } from '../services/MidiManager';
 import { MidiDevice } from '../types';
+import { AudioDevice as ASIODevice } from '../services/ASIOBridge';
 
 interface AudioSettingsPanelProps {
   onClose: () => void;
@@ -28,6 +28,16 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
   const [midiInputs, setMidiInputs] = useState<MidiDevice[]>([]);
   const [selectedMidiInput, setSelectedMidiInput] = useState<string>('');
   const [midiChannel, setMidiChannel] = useState<number>(0);
+
+  // ASIO Bridge State
+  const [asioConnected, setAsioConnected] = useState(false);
+  const [asioConnecting, setAsioConnecting] = useState(false);
+  const [asioDevices, setAsioDevices] = useState<ASIODevice[]>([]);
+  const [selectedAsioDevice, setSelectedAsioDevice] = useState<string>('');
+  const [asioStreamActive, setAsioStreamActive] = useState(false);
+  const [asioLatency, setAsioLatency] = useState(0);
+  const [asioBlockSize, setAsioBlockSize] = useState(256);
+  const [asioSampleRate, setAsioSampleRate] = useState(44100);
 
   // Status
   const [status, setStatus] = useState<string>('Initialisation...');
@@ -142,6 +152,77 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
       setTimeout(() => setIsPlayingTestTone(false), 500);
   };
 
+  // === ASIO BRIDGE HANDLERS ===
+  const handleAsioConnect = async () => {
+      if (asioConnected) {
+          // Disconnect
+          audioEngine.disconnectASIO();
+          setAsioConnected(false);
+          setAsioStreamActive(false);
+          setAsioDevices([]);
+          setSelectedAsioDevice('');
+          setStatus('ASIO Disconnected');
+      } else {
+          // Connect
+          setAsioConnecting(true);
+          setStatus('Connecting to ASIO Bridge...');
+          try {
+              const connected = await audioEngine.connectASIO();
+              if (connected) {
+                  setAsioConnected(true);
+                  // Wait a bit for devices to be fetched
+                  setTimeout(() => {
+                      const devices = audioEngine.getASIODevices();
+                      setAsioDevices(devices);
+                      if (devices.length > 0) {
+                          setSelectedAsioDevice(devices[0].name);
+                      }
+                      setStatus('ASIO Bridge Connected');
+                  }, 500);
+              } else {
+                  setStatus('Failed to connect to ASIO Bridge');
+              }
+          } catch (err) {
+              console.error('ASIO connection error:', err);
+              setStatus('ASIO Bridge not available');
+          }
+          setAsioConnecting(false);
+      }
+  };
+
+  const handleAsioDeviceChange = (deviceName: string) => {
+      setSelectedAsioDevice(deviceName);
+      audioEngine.configureASIO({ device_name: deviceName });
+  };
+
+  const handleAsioBlockSizeChange = (blockSize: number) => {
+      setAsioBlockSize(blockSize);
+      // Calculate approximate latency
+      const latency = (blockSize / asioSampleRate) * 1000 * 2; // Round trip
+      setAsioLatency(latency);
+      audioEngine.configureASIO({ block_size: blockSize });
+  };
+
+  const handleAsioSampleRateChange = (sampleRate: number) => {
+      setAsioSampleRate(sampleRate);
+      // Recalculate latency
+      const latency = (asioBlockSize / sampleRate) * 1000 * 2;
+      setAsioLatency(latency);
+      audioEngine.configureASIO({ sample_rate: sampleRate });
+  };
+
+  const handleAsioStreamToggle = async () => {
+      if (asioStreamActive) {
+          audioEngine.stopASIOStream();
+          setAsioStreamActive(false);
+          setStatus('ASIO Stream Stopped');
+      } else {
+          await audioEngine.startASIOStream();
+          setAsioStreamActive(audioEngine.isASIOStreamActive());
+          setStatus('ASIO Streaming Active');
+      }
+  };
+
   return (
     <div className="fixed inset-0 z-[700] bg-black/90 backdrop-blur-md flex items-center justify-center animate-in fade-in duration-200">
         <div className="w-[640px] bg-[#0c0d10] border border-white/10 rounded-3xl shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col font-inter max-h-[90vh]">
@@ -227,6 +308,158 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                 </p>
                             )}
                         </div>
+                    </div>
+                </div>
+
+                <div className="h-px bg-white/5 w-full"></div>
+
+                {/* ASIO BRIDGE SECTION */}
+                <div className="space-y-5">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black text-purple-500 uppercase tracking-widest bg-purple-500/10 px-2 py-0.5 rounded">
+                            <i className="fas fa-microchip mr-1"></i>ASIO Bridge
+                        </span>
+                        <div className="flex items-center space-x-2">
+                            <div className={`w-2 h-2 rounded-full ${asioConnected ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`}></div>
+                            <span className="text-[9px] font-mono text-slate-400">
+                                {asioConnected ? (asioStreamActive ? 'Streaming' : 'Connected') : 'Offline'}
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* Connection Button */}
+                    <div className="bg-[#14161a] border border-white/5 rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center space-x-3">
+                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${asioConnected ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-800 text-slate-500'}`}>
+                                    <i className="fas fa-plug"></i>
+                                </div>
+                                <div>
+                                    <p className="text-[11px] font-bold text-white">ASIO Native Driver</p>
+                                    <p className="text-[9px] text-slate-500">Low-latency audio via Python bridge (port 8766)</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleAsioConnect}
+                                disabled={asioConnecting}
+                                className={`px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                                    asioConnected 
+                                        ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' 
+                                        : 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
+                                } ${asioConnecting ? 'opacity-50 cursor-wait' : ''}`}
+                            >
+                                {asioConnecting ? (
+                                    <><i className="fas fa-spinner fa-spin mr-1"></i>Connecting...</>
+                                ) : asioConnected ? (
+                                    <><i className="fas fa-unlink mr-1"></i>Disconnect</>
+                                ) : (
+                                    <><i className="fas fa-link mr-1"></i>Connect</>
+                                )}
+                            </button>
+                        </div>
+
+                        {/* ASIO Device Selection - Only when connected */}
+                        {asioConnected && (
+                            <div className="space-y-4 pt-4 border-t border-white/5">
+                                <div className="grid grid-cols-2 gap-4">
+                                    {/* ASIO Device */}
+                                    <div className="space-y-2">
+                                        <label className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider">ASIO Device</label>
+                                        <div className="relative">
+                                            <select
+                                                value={selectedAsioDevice}
+                                                onChange={(e) => handleAsioDeviceChange(e.target.value)}
+                                                className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[11px] font-medium text-white focus:border-purple-500 outline-none appearance-none"
+                                            >
+                                                <option value="">Select ASIO Device</option>
+                                                {asioDevices.map(dev => (
+                                                    <option key={dev.id} value={dev.name}>
+                                                        {dev.name} ({dev.max_input_channels}in/{dev.max_output_channels}out)
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <i className="fas fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-[8px] text-slate-600"></i>
+                                        </div>
+                                        {asioDevices.length === 0 && (
+                                            <p className="text-[8px] text-yellow-400/80">
+                                                <i className="fas fa-exclamation-triangle mr-1"></i>
+                                                No ASIO devices found. Install ASIO drivers.
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    {/* Buffer Size */}
+                                    <div className="space-y-2">
+                                        <label className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider">Buffer Size</label>
+                                        <div className="relative">
+                                            <select
+                                                value={asioBlockSize}
+                                                onChange={(e) => handleAsioBlockSizeChange(parseInt(e.target.value))}
+                                                className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[11px] font-medium text-white focus:border-purple-500 outline-none appearance-none"
+                                            >
+                                                <option value="64">64 samples (~1.5ms)</option>
+                                                <option value="128">128 samples (~3ms)</option>
+                                                <option value="256">256 samples (~6ms)</option>
+                                                <option value="512">512 samples (~12ms)</option>
+                                                <option value="1024">1024 samples (~23ms)</option>
+                                            </select>
+                                            <i className="fas fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-[8px] text-slate-600"></i>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Sample Rate + Latency Info */}
+                                <div className="flex items-center justify-between bg-black/20 rounded-lg px-4 py-3">
+                                    <div className="flex items-center space-x-4">
+                                        <div className="flex items-center space-x-2">
+                                            <span className="text-[8px] text-slate-500 uppercase">Sample Rate:</span>
+                                            <select
+                                                value={asioSampleRate}
+                                                onChange={(e) => handleAsioSampleRateChange(parseInt(e.target.value))}
+                                                className="bg-transparent text-[10px] font-mono text-white outline-none cursor-pointer"
+                                            >
+                                                <option value="44100">44.1 kHz</option>
+                                                <option value="48000">48 kHz</option>
+                                                <option value="88200">88.2 kHz</option>
+                                                <option value="96000">96 kHz</option>
+                                            </select>
+                                        </div>
+                                        <div className="w-px h-4 bg-white/10"></div>
+                                        <div className="flex items-center space-x-2">
+                                            <span className="text-[8px] text-slate-500 uppercase">Latency:</span>
+                                            <span className="text-[10px] font-mono text-purple-400">{asioLatency.toFixed(1)}ms</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Start/Stop Stream Button */}
+                                    <button
+                                        onClick={handleAsioStreamToggle}
+                                        disabled={!selectedAsioDevice}
+                                        className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                                            asioStreamActive
+                                                ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+                                                : 'bg-slate-700 text-white hover:bg-slate-600'
+                                        } ${!selectedAsioDevice ? 'opacity-30 cursor-not-allowed' : ''}`}
+                                    >
+                                        {asioStreamActive ? (
+                                            <><i className="fas fa-stop mr-1"></i>Stop</>
+                                        ) : (
+                                            <><i className="fas fa-play mr-1"></i>Start</>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Instructions when not connected */}
+                        {!asioConnected && (
+                            <div className="mt-3 p-3 bg-black/20 rounded-lg">
+                                <p className="text-[9px] text-slate-400 leading-relaxed">
+                                    <i className="fas fa-info-circle text-purple-400 mr-1"></i>
+                                    Run <code className="bg-black/40 px-1 py-0.5 rounded text-purple-300">bridge-python/start_asio_bridge.bat</code> first, then connect.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
 
