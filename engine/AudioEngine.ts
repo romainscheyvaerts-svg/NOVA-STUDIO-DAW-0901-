@@ -1,5 +1,6 @@
 
 import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad } from '../types';
+import { getASIOBridge, ASIOBridgeClient, ASIOConfig, AudioDevice, ASIOStats } from '../services/ASIOBridge';
 import { ReverbNode } from '../plugins/ReverbPlugin';
 import { SyncDelayNode } from '../plugins/DelayPlugin';
 import { ChorusNode } from '../plugins/ChorusPlugin';
@@ -106,6 +107,15 @@ export class AudioEngine {
   public latency: number = 0;
   private currentBpm: number = 120;
   private activeVSTPlugin: { trackId: string, pluginId: string } | null = null;
+
+  // --- ASIO BRIDGE ---
+  private asioBridge: ASIOBridgeClient | null = null;
+  private asioConnected: boolean = false;
+  private asioStreamActive: boolean = false;
+  private asioDevices: AudioDevice[] = [];
+  private asioConfig: ASIOConfig | null = null;
+  private asioInputNode: MediaStreamAudioSourceNode | null = null;
+  private asioOutputProcessor: ScriptProcessorNode | null = null;
 
   constructor() {}
 
@@ -1138,6 +1148,177 @@ export class AudioEngine {
     pluginEntry.input.connect(pluginEntry.output);
 
     this.activeVSTPlugin = null;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ASIO BRIDGE INTEGRATION
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Connecter au bridge ASIO Python
+   * Lance la connexion WebSocket vers le serveur ASIO local
+   */
+  public async connectASIO(): Promise<boolean> {
+    if (this.asioConnected) return true;
+    
+    this.asioBridge = getASIOBridge();
+    
+    this.asioBridge.setHandlers({
+      onConnect: () => {
+        console.log('[AudioEngine] ASIO Bridge connecté');
+        this.asioConnected = true;
+        this.asioBridge?.getDevices();
+      },
+      onDisconnect: () => {
+        console.log('[AudioEngine] ASIO Bridge déconnecté');
+        this.asioConnected = false;
+        this.asioStreamActive = false;
+      },
+      onDevices: (devices, asioDevices) => {
+        this.asioDevices = asioDevices;
+        console.log('[AudioEngine] Périphériques ASIO détectés:', asioDevices.length);
+      },
+      onStreamStarted: (success, latency_ms) => {
+        if (success) {
+          this.asioStreamActive = true;
+          this.latency = latency_ms || 0;
+          console.log(`[AudioEngine] Stream ASIO démarré - Latence: ${latency_ms}ms`);
+        }
+      },
+      onStreamStopped: () => {
+        this.asioStreamActive = false;
+        console.log('[AudioEngine] Stream ASIO arrêté');
+      },
+      onAudioInput: (audioData, channels) => {
+        this.handleASIOInput(audioData, channels);
+      },
+      onStats: (stats) => {
+        this.latency = stats.latency_ms;
+      }
+    });
+
+    return await this.asioBridge.connect();
+  }
+
+  /**
+   * Déconnecter du bridge ASIO
+   */
+  public disconnectASIO(): void {
+    if (this.asioBridge) {
+      this.asioBridge.stopStream();
+      this.asioBridge.disconnect();
+      this.asioBridge = null;
+    }
+    this.asioConnected = false;
+    this.asioStreamActive = false;
+  }
+
+  /**
+   * Récupérer la liste des périphériques ASIO
+   */
+  public getASIODevices(): AudioDevice[] {
+    return this.asioDevices;
+  }
+
+  /**
+   * Vérifier si le bridge ASIO est connecté
+   */
+  public isASIOConnected(): boolean {
+    return this.asioConnected;
+  }
+
+  /**
+   * Vérifier si le stream ASIO est actif
+   */
+  public isASIOStreamActive(): boolean {
+    return this.asioStreamActive;
+  }
+
+  /**
+   * Configurer le périphérique ASIO
+   */
+  public async configureASIO(config: Partial<ASIOConfig>): Promise<void> {
+    if (!this.asioBridge || !this.asioConnected) {
+      console.warn('[AudioEngine] ASIO non connecté, impossible de configurer');
+      return;
+    }
+    this.asioBridge.setConfig(config);
+  }
+
+  /**
+   * Démarrer le streaming audio ASIO
+   */
+  public async startASIOStream(): Promise<void> {
+    if (!this.asioBridge || !this.asioConnected) {
+      console.warn('[AudioEngine] ASIO non connecté');
+      return;
+    }
+    
+    // Créer un ScriptProcessor pour envoyer l'audio vers ASIO
+    if (this.ctx && !this.asioOutputProcessor) {
+      this.asioOutputProcessor = this.ctx.createScriptProcessor(256, 2, 2);
+      this.asioOutputProcessor.onaudioprocess = (e) => {
+        if (this.asioStreamActive && this.asioBridge) {
+          const channelData = [
+            e.inputBuffer.getChannelData(0),
+            e.inputBuffer.getChannelData(1)
+          ];
+          this.asioBridge.sendAudioFromWorklet(channelData);
+        }
+        // Copier l'entrée vers la sortie pour le monitoring local
+        for (let ch = 0; ch < e.outputBuffer.numberOfChannels; ch++) {
+          e.outputBuffer.getChannelData(ch).set(e.inputBuffer.getChannelData(ch));
+        }
+      };
+      
+      // Connecter le master output au processeur ASIO
+      if (this.masterOutput) {
+        this.masterOutput.connect(this.asioOutputProcessor);
+        this.asioOutputProcessor.connect(this.ctx.destination);
+      }
+    }
+    
+    this.asioBridge.startStream();
+  }
+
+  /**
+   * Arrêter le streaming audio ASIO
+   */
+  public stopASIOStream(): void {
+    if (this.asioBridge) {
+      this.asioBridge.stopStream();
+    }
+    
+    if (this.asioOutputProcessor) {
+      try {
+        this.asioOutputProcessor.disconnect();
+      } catch (e) {}
+      this.asioOutputProcessor = null;
+    }
+    
+    this.asioStreamActive = false;
+  }
+
+  /**
+   * Gérer l'audio entrant du bridge ASIO (entrée micro/instrument)
+   */
+  private handleASIOInput(audioData: Float32Array, channels: number): void {
+    // L'audio d'entrée ASIO peut être routé vers les pistes armées
+    // Pour l'instant, on log simplement la réception
+    // Dans une version future, on créerait un MediaStream à partir des données
+    if (this.monitoringTrackId) {
+      // Route vers la piste armée
+      // TODO: Implémenter le routing de l'audio ASIO vers les pistes
+    }
+  }
+
+  /**
+   * Récupérer les statistiques ASIO
+   */
+  public getASIOStats(): void {
+    if (this.asioBridge && this.asioConnected) {
+      this.asioBridge.getStats();
+    }
   }
 
   public setBpm(bpm: number) {

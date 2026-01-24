@@ -1,0 +1,52 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║                    NOVA BRIDGE VST3 - Python Dependencies                    ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+#
+# Installation: pip install -r requirements.txt
+#
+
+# === CORE DEPENDENCIES ===
+
+# WebSocket server for DAW communication
+websockets>=12.0
+
+# Numerical computing for audio processing
+numpy>=1.24.0
+
+# === VST3 SUPPORT ===
+
+# Spotify's Pedalboard - Best VST3 support for Python (RECOMMENDED)
+# Supports VST3 and AU plugins with full audio processing
+pedalboard>=0.9.0
+
+# === ASIO AUDIO BRIDGE ===
+
+# Audio I/O with ASIO support (Windows)
+# Note: On Windows, you need ASIO drivers installed (e.g., ASIO4ALL or manufacturer drivers)
+sounddevice>=0.4.6
+
+# === OPTIONAL: UI CAPTURE (Windows) ===
+
+# Windows API access for plugin UI capture
+pywin32>=306; sys_platform == 'win32'
+
+# Image processing for UI capture and encoding
+Pillow>=10.0.0
+
+# === OPTIONAL: ALTERNATIVE VST LIBRARIES ===
+
+# PyVST - Lower level VST support (fallback)
+# pyvst>=0.5.0
+
+# === DEVELOPMENT ===
+
+# Type hints
+typing-extensions>=4.0.0
+
+# === PERFORMANCE MONITORING (optional) ===
+
+# Memory profiling
+# memory-profiler>=0.61.0
+
+# CPU profiling  
+# py-spy>=0.3.14
