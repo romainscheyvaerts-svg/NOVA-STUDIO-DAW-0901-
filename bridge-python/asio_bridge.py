@@ -18,10 +18,19 @@ import time
 import threading
 import struct
 import base64
+import sys
+import os
 from typing import Dict, Optional, Any, List, Callable
 from dataclasses import dataclass, field
 from collections import deque
 import numpy as np
+
+# Windows Registry pour détecter les drivers ASIO
+try:
+    import winreg
+    WINREG_AVAILABLE = True
+except ImportError:
+    WINREG_AVAILABLE = False
 
 # Audio backend - sounddevice supporte ASIO sur Windows
 try:
@@ -30,6 +39,13 @@ try:
 except ImportError:
     SOUNDDEVICE_AVAILABLE = False
     print("⚠️ sounddevice non installé. Installez-le avec: pip install sounddevice")
+
+# PyAudio comme alternative (supporte ASIO si compilé avec)
+try:
+    import pyaudio
+    PYAUDIO_AVAILABLE = True
+except ImportError:
+    PYAUDIO_AVAILABLE = False
 
 # WebSocket
 import websockets
@@ -72,17 +88,104 @@ class AudioStreamState:
 class ASIODeviceManager:
     """
     Gestionnaire des périphériques audio ASIO
+    
+    Lit le registre Windows pour trouver les drivers ASIO installés
     """
     
     def __init__(self):
         self.devices: List[Dict[str, Any]] = []
+        self.asio_drivers: List[Dict[str, Any]] = []
         self.current_device: Optional[str] = None
-        self._scan_devices()
+        self._scan_asio_registry()
+        self._scan_sounddevice_devices()
     
-    def _scan_devices(self):
-        """Scanner les périphériques audio disponibles"""
+    def _scan_asio_registry(self):
+        """
+        Scanner le registre Windows pour trouver les drivers ASIO
+        
+        Les drivers ASIO sont enregistrés dans:
+        HKEY_LOCAL_MACHINE\SOFTWARE\ASIO
+        """
+        self.asio_drivers = []
+        
+        if not WINREG_AVAILABLE:
+            logger.warning("winreg non disponible - impossible de lire le registre ASIO")
+            return
+        
+        try:
+            # Ouvrir la clé ASIO dans le registre
+            # Essayer d'abord la clé 64-bit, puis 32-bit
+            asio_key_paths = [
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\ASIO"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\ASIO"),
+            ]
+            
+            for hkey, path in asio_key_paths:
+                try:
+                    asio_key = winreg.OpenKey(hkey, path, 0, winreg.KEY_READ)
+                    
+                    # Énumérer les sous-clés (chaque sous-clé = un driver ASIO)
+                    i = 0
+                    while True:
+                        try:
+                            driver_name = winreg.EnumKey(asio_key, i)
+                            
+                            # Ouvrir la sous-clé du driver
+                            driver_key = winreg.OpenKey(asio_key, driver_name)
+                            
+                            # Lire les informations du driver
+                            try:
+                                clsid, _ = winreg.QueryValueEx(driver_key, "CLSID")
+                            except:
+                                clsid = None
+                            
+                            try:
+                                description, _ = winreg.QueryValueEx(driver_key, "Description")
+                            except:
+                                description = driver_name
+                            
+                            driver_info = {
+                                'id': i,
+                                'name': driver_name,
+                                'description': description or driver_name,
+                                'clsid': clsid,
+                                'is_asio': True,
+                                'max_input_channels': 2,  # Par défaut, sera mis à jour
+                                'max_output_channels': 2,
+                                'default_sample_rate': 44100,
+                                'hostapi': 'ASIO'
+                            }
+                            
+                            # Éviter les doublons
+                            if not any(d['name'] == driver_name for d in self.asio_drivers):
+                                self.asio_drivers.append(driver_info)
+                                logger.info(f"🎛️ ASIO Driver trouvé: {driver_name}")
+                            
+                            winreg.CloseKey(driver_key)
+                            i += 1
+                            
+                        except OSError:
+                            # Plus de sous-clés
+                            break
+                    
+                    winreg.CloseKey(asio_key)
+                    
+                except FileNotFoundError:
+                    # Cette clé n'existe pas
+                    continue
+                except PermissionError:
+                    logger.warning(f"Permission refusée pour accéder à {path}")
+                    continue
+            
+            logger.info(f"📊 {len(self.asio_drivers)} drivers ASIO trouvés dans le registre")
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la lecture du registre ASIO: {e}")
+    
+    def _scan_sounddevice_devices(self):
+        """Scanner les périphériques via sounddevice"""
         if not SOUNDDEVICE_AVAILABLE:
-            logger.error("sounddevice non disponible")
+            logger.warning("sounddevice non disponible")
             return
         
         self.devices = []
@@ -92,14 +195,17 @@ class ASIODeviceManager:
             devices = sd.query_devices()
             hostapis = sd.query_hostapis()
             
-            # Trouver l'API ASIO
+            # Trouver l'API ASIO si disponible
             asio_api_index = None
             for i, api in enumerate(hostapis):
-                if 'ASIO' in api['name']:
+                if 'ASIO' in api['name'].upper():
                     asio_api_index = i
+                    logger.info(f"✅ API ASIO détectée dans sounddevice: {api['name']}")
                     break
             
             for i, device in enumerate(devices):
+                is_asio = device['hostapi'] == asio_api_index if asio_api_index is not None else False
+                
                 device_info = {
                     'id': i,
                     'name': device['name'],
@@ -107,28 +213,94 @@ class ASIODeviceManager:
                     'max_output_channels': device['max_output_channels'],
                     'default_sample_rate': device['default_samplerate'],
                     'hostapi': hostapis[device['hostapi']]['name'],
-                    'is_asio': device['hostapi'] == asio_api_index if asio_api_index is not None else False
+                    'is_asio': is_asio
                 }
                 self.devices.append(device_info)
                 
-                if device_info['is_asio']:
-                    logger.info(f"🎛️ ASIO Device found: {device['name']}")
+                if is_asio:
+                    logger.info(f"🎛️ ASIO Device (sounddevice): {device['name']}")
+                    
+                    # Mettre à jour les infos du driver ASIO correspondant
+                    for asio_driver in self.asio_drivers:
+                        if asio_driver['name'].lower() in device['name'].lower() or \
+                           device['name'].lower() in asio_driver['name'].lower():
+                            asio_driver['max_input_channels'] = device['max_input_channels']
+                            asio_driver['max_output_channels'] = device['max_output_channels']
+                            asio_driver['default_sample_rate'] = device['default_samplerate']
+                            asio_driver['sounddevice_id'] = i
             
-            logger.info(f"📊 Found {len(self.devices)} audio devices")
+            logger.info(f"📊 {len(self.devices)} périphériques audio trouvés via sounddevice")
             
         except Exception as e:
-            logger.error(f"Error scanning devices: {e}")
+            logger.error(f"Erreur lors du scan sounddevice: {e}")
+    
+    def _scan_pyaudio_devices(self):
+        """Scanner les périphériques via PyAudio (alternative)"""
+        if not PYAUDIO_AVAILABLE:
+            return
+        
+        try:
+            p = pyaudio.PyAudio()
+            
+            # Chercher l'API ASIO
+            asio_host_index = None
+            for i in range(p.get_host_api_count()):
+                api_info = p.get_host_api_info_by_index(i)
+                if 'ASIO' in api_info['name'].upper():
+                    asio_host_index = i
+                    logger.info(f"✅ API ASIO trouvée dans PyAudio: {api_info['name']}")
+                    break
+            
+            if asio_host_index is not None:
+                api_info = p.get_host_api_info_by_index(asio_host_index)
+                for i in range(api_info['deviceCount']):
+                    device_index = p.get_host_api_info_by_index(asio_host_index)['defaultInputDevice']
+                    # ... récupérer les infos du device
+            
+            p.terminate()
+            
+        except Exception as e:
+            logger.error(f"Erreur PyAudio: {e}")
     
     def get_devices(self) -> List[Dict[str, Any]]:
-        """Récupérer la liste des périphériques"""
+        """Récupérer la liste de tous les périphériques"""
         return self.devices
     
     def get_asio_devices(self) -> List[Dict[str, Any]]:
-        """Récupérer uniquement les périphériques ASIO"""
-        return [d for d in self.devices if d['is_asio']]
+        """
+        Récupérer uniquement les périphériques ASIO
+        
+        Combine les drivers du registre et ceux détectés par sounddevice
+        """
+        # Commencer par les drivers ASIO du registre
+        asio_devices = list(self.asio_drivers)
+        
+        # Ajouter les devices ASIO détectés par sounddevice qui ne sont pas déjà dans la liste
+        for device in self.devices:
+            if device.get('is_asio'):
+                # Vérifier si ce device n'est pas déjà dans la liste
+                device_name_lower = device['name'].lower()
+                already_exists = False
+                
+                for asio in asio_devices:
+                    if asio['name'].lower() in device_name_lower or \
+                       device_name_lower in asio['name'].lower():
+                        already_exists = True
+                        break
+                
+                if not already_exists:
+                    asio_devices.append(device)
+        
+        return asio_devices
     
     def get_device_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """Trouver un périphérique par son nom"""
+        # Chercher d'abord dans les ASIO drivers
+        for driver in self.asio_drivers:
+            if name.lower() in driver['name'].lower() or driver['name'].lower() in name.lower():
+                return driver
+        
+        # Puis dans tous les devices
         for device in self.devices:
             if name.lower() in device['name'].lower():
                 return device
@@ -136,6 +308,9 @@ class ASIODeviceManager:
     
     def get_default_device(self) -> Optional[Dict[str, Any]]:
         """Récupérer le périphérique par défaut"""
+        if not SOUNDDEVICE_AVAILABLE:
+            return None
+            
         try:
             default_input = sd.query_devices(kind='input')
             default_output = sd.query_devices(kind='output')
@@ -146,6 +321,12 @@ class ASIODeviceManager:
         except Exception as e:
             logger.error(f"Error getting default device: {e}")
             return None
+    
+    def rescan(self):
+        """Rescanner tous les périphériques"""
+        logger.info("🔄 Rescanning audio devices...")
+        self._scan_asio_registry()
+        self._scan_sounddevice_devices()
 
 
 class ASIOAudioStream:
@@ -249,7 +430,8 @@ class ASIOAudioStream:
                 device_manager = ASIODeviceManager()
                 device_info = device_manager.get_device_by_name(self.config.device_name)
                 if device_info:
-                    device = device_info['id']
+                    # Utiliser l'ID sounddevice si disponible
+                    device = device_info.get('sounddevice_id', device_info.get('id'))
             
             # Créer le flux audio
             self.stream = sd.Stream(
@@ -374,8 +556,14 @@ class ASIOBridgeServer:
     async def start(self):
         """Démarrer le serveur"""
         logger.info("=" * 60)
-        logger.info("  NOVA ASIO BRIDGE SERVER v1.0")
+        logger.info("  NOVA ASIO BRIDGE SERVER v1.1")
         logger.info("=" * 60)
+        
+        # Afficher les drivers ASIO détectés
+        asio_devices = self.device_manager.get_asio_devices()
+        logger.info(f"🎛️ {len(asio_devices)} ASIO drivers détectés:")
+        for i, driver in enumerate(asio_devices):
+            logger.info(f"   [{i}] {driver['name']}")
         
         self.running = True
         
@@ -389,7 +577,6 @@ class ASIOBridgeServer:
             max_size=10 * 1024 * 1024  # 10MB max
         ):
             logger.info(f"✅ ASIO Bridge listening on ws://{self.host}:{self.port}")
-            logger.info(f"🎛️ {len(self.device_manager.get_asio_devices())} ASIO devices available")
             logger.info("=" * 60)
             
             # Maintenir actif
@@ -437,6 +624,7 @@ class ASIOBridgeServer:
             "STOP_STREAM": self._handle_stop_stream,
             "GET_STATS": self._handle_get_stats,
             "AUDIO_DATA": self._handle_audio_data,
+            "RESCAN_DEVICES": self._handle_rescan_devices,
         }
         
         handler = handlers.get(action)
@@ -522,7 +710,15 @@ class ASIOBridgeServer:
     
     async def _handle_get_devices(self, client_id: str, data: dict):
         """Envoyer la liste des périphériques"""
-        self.device_manager._scan_devices()  # Rescanner
+        await self._send(client_id, {
+            "action": "DEVICES",
+            "devices": self.device_manager.get_devices(),
+            "asio_devices": self.device_manager.get_asio_devices()
+        })
+    
+    async def _handle_rescan_devices(self, client_id: str, data: dict):
+        """Rescanner les périphériques"""
+        self.device_manager.rescan()
         
         await self._send(client_id, {
             "action": "DEVICES",
