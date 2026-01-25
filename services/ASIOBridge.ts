@@ -318,6 +318,21 @@ export class ASIOBridgeClient {
     this.send({ action: 'GET_STATS' });
   }
 
+  /**
+   * Ouvrir le panneau de configuration du driver ASIO
+   * Demande au bridge Python d'ouvrir le panneau natif du driver
+   */
+  openControlPanel(): void {
+    this.send({ action: 'OPEN_CONTROL_PANEL' });
+  }
+
+  /**
+   * Rescanner les périphériques audio
+   */
+  rescanDevices(): void {
+    this.send({ action: 'RESCAN_DEVICES' });
+  }
+
   // ─────────────────────────────────────────────────────────────
   // UTILITAIRES
   // ─────────────────────────────────────────────────────────────

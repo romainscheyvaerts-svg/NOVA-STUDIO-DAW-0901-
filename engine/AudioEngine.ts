@@ -1321,6 +1321,18 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Ouvrir le panneau de configuration du driver ASIO
+   * Envoie une commande au bridge Python pour ouvrir le panneau natif
+   */
+  public openASIOPanel(): void {
+    if (!this.asioBridge || !this.asioConnected) {
+      console.warn('[AudioEngine] ASIO non connecté, impossible d\'ouvrir le panneau');
+      return;
+    }
+    this.asioBridge.openControlPanel();
+  }
+
   public setBpm(bpm: number) {
     this.currentBpm = bpm;
     this.tracksDSP.forEach(dsp => {

@@ -625,6 +625,7 @@ class ASIOBridgeServer:
             "GET_STATS": self._handle_get_stats,
             "AUDIO_DATA": self._handle_audio_data,
             "RESCAN_DEVICES": self._handle_rescan_devices,
+            "OPEN_CONTROL_PANEL": self._handle_open_control_panel,
         }
         
         handler = handlers.get(action)
@@ -724,6 +725,107 @@ class ASIOBridgeServer:
             "action": "DEVICES",
             "devices": self.device_manager.get_devices(),
             "asio_devices": self.device_manager.get_asio_devices()
+        })
+    
+    async def _handle_open_control_panel(self, client_id: str, data: dict):
+        """
+        Ouvrir le panneau de configuration du driver ASIO
+        
+        Note: Sur Windows, chaque driver ASIO a son propre panneau de configuration.
+        Cette fonction tente d'ouvrir le panneau via différentes méthodes.
+        """
+        device_name = self.config.device_name or ""
+        logger.info(f"🎛️ Ouverture du panneau de contrôle ASIO: {device_name}")
+        
+        success = False
+        error_msg = ""
+        
+        try:
+            # Méthode 1: Essayer d'ouvrir via le registre Windows
+            if WINREG_AVAILABLE and device_name:
+                try:
+                    # Chercher le CLSID du driver dans le registre
+                    for path in [r"SOFTWARE\ASIO", r"SOFTWARE\WOW6432Node\ASIO"]:
+                        try:
+                            asio_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
+                            try:
+                                driver_key = winreg.OpenKey(asio_key, device_name)
+                                clsid, _ = winreg.QueryValueEx(driver_key, "CLSID")
+                                
+                                # Essayer de trouver l'exécutable du panneau de contrôle
+                                # via la clé InprocServer32
+                                com_path = f"SOFTWARE\\Classes\\CLSID\\{clsid}\\InprocServer32"
+                                try:
+                                    com_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, com_path)
+                                    dll_path, _ = winreg.QueryValueEx(com_key, "")
+                                    
+                                    if dll_path:
+                                        # Log le chemin trouvé
+                                        logger.info(f"   DLL ASIO: {dll_path}")
+                                        
+                                        # Certains drivers ont un panneau de config séparé
+                                        # à côté de la DLL avec le même nom mais .exe
+                                        import os
+                                        base_path = os.path.dirname(dll_path)
+                                        possible_panels = [
+                                            os.path.join(base_path, "ASIOControlPanel.exe"),
+                                            os.path.join(base_path, "ControlPanel.exe"),
+                                            dll_path.replace(".dll", "Panel.exe"),
+                                            dll_path.replace(".dll", ".exe"),
+                                        ]
+                                        
+                                        for panel_path in possible_panels:
+                                            if os.path.exists(panel_path):
+                                                import subprocess
+                                                subprocess.Popen([panel_path], shell=True)
+                                                success = True
+                                                logger.info(f"   ✅ Panneau ouvert: {panel_path}")
+                                                break
+                                    
+                                    winreg.CloseKey(com_key)
+                                except:
+                                    pass
+                                
+                                winreg.CloseKey(driver_key)
+                            except FileNotFoundError:
+                                pass
+                            winreg.CloseKey(asio_key)
+                        except FileNotFoundError:
+                            continue
+                except Exception as e:
+                    logger.warning(f"   Erreur registre: {e}")
+            
+            # Méthode 2: Pour certains drivers connus, ouvrir directement leur panneau
+            if not success:
+                known_panels = {
+                    "FL Studio ASIO": "C:\\Program Files\\Image-Line\\FL Studio\\FL64.exe",
+                    "ASIO4ALL": "C:\\Program Files (x86)\\ASIO4ALL v2\\ASIO4ALL v2.exe",
+                    "Focusrite USB ASIO": "C:\\Program Files\\Focusrite\\Focusrite Control 2\\Focusrite Control 2.exe",
+                }
+                
+                for driver_pattern, panel_path in known_panels.items():
+                    if driver_pattern.lower() in device_name.lower():
+                        import os
+                        if os.path.exists(panel_path):
+                            import subprocess
+                            subprocess.Popen([panel_path], shell=True)
+                            success = True
+                            logger.info(f"   ✅ Panneau connu ouvert: {panel_path}")
+                            break
+            
+            if not success:
+                error_msg = "Panneau de configuration ASIO non trouvé. Ouvrez-le manuellement depuis les paramètres de votre driver audio."
+                logger.warning(f"   ⚠️ {error_msg}")
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"   ❌ Erreur: {e}")
+        
+        await self._send(client_id, {
+            "action": "CONTROL_PANEL_RESULT",
+            "success": success,
+            "device": device_name,
+            "error": error_msg if not success else None
         })
     
     async def _handle_set_config(self, client_id: str, data: dict):

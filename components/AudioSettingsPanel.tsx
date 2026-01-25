@@ -259,10 +259,12 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
             {/* BODY */}
             <div className="p-8 space-y-8 bg-[#0c0d10] overflow-y-auto">
                 
-                {/* AUDIO I/O */}
+                {/* AUDIO I/O - Hidden when ASIO is active with a device selected */}
+                {!(asioConnected && selectedAsioDevice) && (
                 <div className="space-y-5">
                     <div className="flex items-center space-x-2 mb-2">
                         <span className="text-[10px] font-black text-orange-500 uppercase tracking-widest bg-orange-500/10 px-2 py-0.5 rounded">Audio I/O</span>
+                        <span className="text-[8px] text-slate-500">(System Drivers)</span>
                     </div>
 
                     <div className="grid grid-cols-2 gap-6">
@@ -310,8 +312,9 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                         </div>
                     </div>
                 </div>
+                )}
 
-                <div className="h-px bg-white/5 w-full"></div>
+                {!(asioConnected && selectedAsioDevice) && <div className="h-px bg-white/5 w-full"></div>}
 
                 {/* ASIO BRIDGE SECTION */}
                 <div className="space-y-5">
@@ -385,6 +388,16 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                                 <i className="fas fa-exclamation-triangle mr-1"></i>
                                                 No ASIO devices found. Install ASIO drivers.
                                             </p>
+                                        )}
+                                        {/* Open ASIO Control Panel Button */}
+                                        {selectedAsioDevice && (
+                                            <button
+                                                onClick={() => audioEngine.openASIOPanel()}
+                                                className="mt-2 w-full px-3 py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 rounded-lg text-[9px] font-bold text-purple-300 uppercase tracking-wider transition-all flex items-center justify-center space-x-2"
+                                            >
+                                                <i className="fas fa-cog"></i>
+                                                <span>Open {selectedAsioDevice} Panel</span>
+                                            </button>
                                         )}
                                     </div>
 
