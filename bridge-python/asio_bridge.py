@@ -822,19 +822,30 @@ class ASIOBridgeServer:
                         )
                         
                         if hr == 0 and p_driver:
-                            # L'interface IASIO a controlPanel() à l'offset 52 (13 * 4 bytes pour x86)
-                            # ou offset 104 (13 * 8 bytes pour x64)
-                            # Méthode simplifiée: appeler via vtable
+                            # Interface IASIO vtable (Steinberg ASIO SDK):
+                            # 0: QueryInterface, 1: AddRef, 2: Release
+                            # 3: init, 4: getDriverName, 5: getDriverVersion, 6: getErrorMessage
+                            # 7: start, 8: stop, 9: getChannels, 10: getLatencies
+                            # 11: getBufferSize, 12: canSampleRate, 13: getSampleRate
+                            # 14: setSampleRate, 15: getClockSources, 16: setClockSource
+                            # 17: getSamplePosition, 18: getChannelInfo, 19: createBuffers
+                            # 20: disposeBuffers, 21: controlPanel, 22: future, 23: outputReady
                             
                             vtable = ctypes.cast(p_driver, ctypes.POINTER(ctypes.c_void_p))[0]
                             vtable_ptr = ctypes.cast(vtable, ctypes.POINTER(ctypes.c_void_p))
                             
-                            # Index 13 = controlPanel dans l'interface IASIO
-                            # Note: Les indices peuvent varier selon le SDK ASIO
-                            import sys
-                            ptr_size = 8 if sys.maxsize > 2**32 else 4
+                            # D'abord initialiser le driver avec init(sysHandle)
+                            # sysHandle peut être NULL ou un handle de fenêtre
+                            init_func = ctypes.cast(
+                                vtable_ptr[3],  # init est à l'index 3
+                                ctypes.CFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)
+                            )
+                            init_result = init_func(p_driver, None)
+                            logger.info(f"   ASIO init() result: {init_result}")
+                            
+                            # Index 21 = controlPanel dans l'interface IASIO
                             control_panel_func = ctypes.cast(
-                                vtable_ptr[13],
+                                vtable_ptr[21],
                                 ctypes.CFUNCTYPE(ctypes.c_long, ctypes.c_void_p)
                             )
                             
