@@ -731,8 +731,8 @@ class ASIOBridgeServer:
         """
         Ouvrir le panneau de configuration du driver ASIO
         
-        Note: Sur Windows, chaque driver ASIO a son propre panneau de configuration.
-        Cette fonction tente d'ouvrir le panneau via différentes méthodes.
+        Utilise l'API ASIO native via COM pour ouvrir le panneau de configuration
+        du driver sélectionné.
         """
         device_name = self.config.device_name or ""
         logger.info(f"🎛️ Ouverture du panneau de contrôle ASIO: {device_name}")
@@ -741,91 +741,187 @@ class ASIOBridgeServer:
         error_msg = ""
         
         try:
-            # Méthode 1: Essayer d'ouvrir via le registre Windows
+            # Méthode 1: Utiliser l'API ASIO via ctypes pour appeler ASIOControlPanel()
             if WINREG_AVAILABLE and device_name:
-                try:
-                    # Chercher le CLSID du driver dans le registre
-                    for path in [r"SOFTWARE\ASIO", r"SOFTWARE\WOW6432Node\ASIO"]:
+                clsid = None
+                dll_path = None
+                
+                # Chercher le CLSID du driver dans le registre
+                for reg_path in [r"SOFTWARE\ASIO", r"SOFTWARE\WOW6432Node\ASIO"]:
+                    try:
+                        asio_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0, winreg.KEY_READ)
                         try:
-                            asio_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
-                            try:
-                                driver_key = winreg.OpenKey(asio_key, device_name)
-                                clsid, _ = winreg.QueryValueEx(driver_key, "CLSID")
-                                
-                                # Essayer de trouver l'exécutable du panneau de contrôle
-                                # via la clé InprocServer32
-                                com_path = f"SOFTWARE\\Classes\\CLSID\\{clsid}\\InprocServer32"
-                                try:
-                                    com_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, com_path)
-                                    dll_path, _ = winreg.QueryValueEx(com_key, "")
-                                    
-                                    if dll_path:
-                                        # Log le chemin trouvé
-                                        logger.info(f"   DLL ASIO: {dll_path}")
-                                        
-                                        # Certains drivers ont un panneau de config séparé
-                                        # à côté de la DLL avec le même nom mais .exe
-                                        import os
-                                        base_path = os.path.dirname(dll_path)
-                                        possible_panels = [
-                                            os.path.join(base_path, "ASIOControlPanel.exe"),
-                                            os.path.join(base_path, "ControlPanel.exe"),
-                                            dll_path.replace(".dll", "Panel.exe"),
-                                            dll_path.replace(".dll", ".exe"),
-                                        ]
-                                        
-                                        for panel_path in possible_panels:
-                                            if os.path.exists(panel_path):
-                                                import subprocess
-                                                subprocess.Popen([panel_path], shell=True)
-                                                success = True
-                                                logger.info(f"   ✅ Panneau ouvert: {panel_path}")
-                                                break
-                                    
-                                    winreg.CloseKey(com_key)
-                                except:
-                                    pass
-                                
-                                winreg.CloseKey(driver_key)
-                            except FileNotFoundError:
-                                pass
-                            winreg.CloseKey(asio_key)
-                        except FileNotFoundError:
+                            driver_key = winreg.OpenKey(asio_key, device_name)
+                            clsid, _ = winreg.QueryValueEx(driver_key, "CLSID")
+                            winreg.CloseKey(driver_key)
+                            logger.info(f"   CLSID trouvé: {clsid}")
+                        except:
+                            pass
+                        winreg.CloseKey(asio_key)
+                        if clsid:
+                            break
+                    except:
+                        continue
+                
+                # Trouver la DLL du driver
+                if clsid:
+                    for com_path in [f"SOFTWARE\\Classes\\CLSID\\{clsid}\\InprocServer32",
+                                    f"SOFTWARE\\WOW6432Node\\Classes\\CLSID\\{clsid}\\InprocServer32"]:
+                        try:
+                            com_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, com_path, 0, winreg.KEY_READ)
+                            dll_path, _ = winreg.QueryValueEx(com_key, "")
+                            winreg.CloseKey(com_key)
+                            if dll_path and os.path.exists(dll_path):
+                                logger.info(f"   DLL ASIO: {dll_path}")
+                                break
+                            dll_path = None
+                        except:
                             continue
-                except Exception as e:
-                    logger.warning(f"   Erreur registre: {e}")
+                
+                # Méthode COM: Charger le driver ASIO et appeler ASIOControlPanel
+                if clsid:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        
+                        # Initialiser COM
+                        ole32 = ctypes.windll.ole32
+                        ole32.CoInitialize(None)
+                        
+                        # Convertir CLSID string en structure
+                        class GUID(ctypes.Structure):
+                            _fields_ = [
+                                ("Data1", wintypes.DWORD),
+                                ("Data2", wintypes.WORD),
+                                ("Data3", wintypes.WORD),
+                                ("Data4", wintypes.BYTE * 8)
+                            ]
+                        
+                        # Parser le CLSID
+                        clsid_clean = clsid.strip('{}')
+                        parts = clsid_clean.split('-')
+                        guid = GUID()
+                        guid.Data1 = int(parts[0], 16)
+                        guid.Data2 = int(parts[1], 16)
+                        guid.Data3 = int(parts[2], 16)
+                        data4_hex = parts[3] + parts[4]
+                        for i in range(8):
+                            guid.Data4[i] = int(data4_hex[i*2:i*2+2], 16)
+                        
+                        # IID_IUnknown
+                        IID_NULL = GUID()
+                        
+                        # Créer l'instance COM du driver ASIO
+                        p_driver = ctypes.c_void_p()
+                        hr = ole32.CoCreateInstance(
+                            ctypes.byref(guid),
+                            None,
+                            1,  # CLSCTX_INPROC_SERVER
+                            ctypes.byref(IID_NULL),
+                            ctypes.byref(p_driver)
+                        )
+                        
+                        if hr == 0 and p_driver:
+                            # L'interface IASIO a controlPanel() à l'offset 52 (13 * 4 bytes pour x86)
+                            # ou offset 104 (13 * 8 bytes pour x64)
+                            # Méthode simplifiée: appeler via vtable
+                            
+                            vtable = ctypes.cast(p_driver, ctypes.POINTER(ctypes.c_void_p))[0]
+                            vtable_ptr = ctypes.cast(vtable, ctypes.POINTER(ctypes.c_void_p))
+                            
+                            # Index 13 = controlPanel dans l'interface IASIO
+                            # Note: Les indices peuvent varier selon le SDK ASIO
+                            import sys
+                            ptr_size = 8 if sys.maxsize > 2**32 else 4
+                            control_panel_func = ctypes.cast(
+                                vtable_ptr[13],
+                                ctypes.CFUNCTYPE(ctypes.c_long, ctypes.c_void_p)
+                            )
+                            
+                            # Appeler controlPanel()
+                            result = control_panel_func(p_driver)
+                            
+                            if result == 0:  # ASE_OK
+                                success = True
+                                logger.info(f"   ✅ Panneau ASIO ouvert via COM")
+                            else:
+                                logger.warning(f"   ASIOControlPanel retourné: {result}")
+                            
+                            # Release l'interface
+                            release_func = ctypes.cast(
+                                vtable_ptr[2],  # Release est à l'index 2
+                                ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)
+                            )
+                            release_func(p_driver)
+                        else:
+                            logger.warning(f"   CoCreateInstance échoué: {hr}")
+                        
+                        ole32.CoUninitialize()
+                        
+                    except Exception as e:
+                        logger.warning(f"   Méthode COM échouée: {e}")
             
-            # Méthode 2: Pour certains drivers connus, ouvrir directement leur panneau
+            # Méthode 2 de secours: Ouvrir des applications connues
             if not success:
-                known_panels = {
-                    "FL Studio ASIO": "C:\\Program Files\\Image-Line\\FL Studio\\FL64.exe",
-                    "ASIO4ALL": "C:\\Program Files (x86)\\ASIO4ALL v2\\ASIO4ALL v2.exe",
-                    "Focusrite USB ASIO": "C:\\Program Files\\Focusrite\\Focusrite Control 2\\Focusrite Control 2.exe",
+                import subprocess
+                
+                # Liste des applications à ouvrir selon le driver
+                known_apps = {
+                    "FL Studio ASIO": [
+                        r"C:\Program Files\Image-Line\FL Studio 21\FL64.exe",
+                        r"C:\Program Files\Image-Line\FL Studio 20\FL64.exe",
+                        r"C:\Program Files (x86)\Image-Line\FL Studio 21\FL.exe",
+                    ],
+                    "ASIO4ALL": [
+                        r"C:\Program Files (x86)\ASIO4ALL v2\ASIO4ALL v2 Control Panel.exe",
+                        r"C:\Program Files\ASIO4ALL v2\ASIO4ALL v2 Control Panel.exe",
+                    ],
+                    "Focusrite": [
+                        r"C:\Program Files\Focusrite\Focusrite Control 2\Focusrite Control 2.exe",
+                        r"C:\Program Files\Focusrite\Focusrite Control\Focusrite Control.exe",
+                    ],
+                    "Steinberg": [
+                        r"C:\Program Files\Steinberg\Cubase 12\Cubase12.exe",
+                    ],
+                    "RME": [
+                        r"C:\Program Files\RME\Fireface USB Settings\ffusbsettings.exe",
+                    ],
+                    "SSL": [
+                        r"C:\Program Files\SSL\SSL USB Audio Control Panel\SSL USB Audio Control Panel.exe",
+                    ],
                 }
                 
-                for driver_pattern, panel_path in known_panels.items():
-                    if driver_pattern.lower() in device_name.lower():
-                        import os
-                        if os.path.exists(panel_path):
-                            import subprocess
-                            subprocess.Popen([panel_path], shell=True)
-                            success = True
-                            logger.info(f"   ✅ Panneau connu ouvert: {panel_path}")
-                            break
+                for pattern, paths in known_apps.items():
+                    if pattern.lower() in device_name.lower():
+                        for app_path in paths:
+                            if os.path.exists(app_path):
+                                subprocess.Popen([app_path])
+                                success = True
+                                logger.info(f"   ✅ Application lancée: {app_path}")
+                                break
+                    if success:
+                        break
             
+            # Méthode 3: Ouvrir le panneau de son Windows comme fallback
             if not success:
-                error_msg = "Panneau de configuration ASIO non trouvé. Ouvrez-le manuellement depuis les paramètres de votre driver audio."
-                logger.warning(f"   ⚠️ {error_msg}")
+                import subprocess
+                # Ouvrir les paramètres de son Windows
+                subprocess.Popen(['control', 'mmsys.cpl', 'sounds'])
+                success = True
+                error_msg = "Panneau ASIO natif non disponible. Panneau de son Windows ouvert à la place."
+                logger.info(f"   ✅ Panneau de son Windows ouvert (fallback)")
             
         except Exception as e:
             error_msg = str(e)
             logger.error(f"   ❌ Erreur: {e}")
+            import traceback
+            traceback.print_exc()
         
         await self._send(client_id, {
             "action": "CONTROL_PANEL_RESULT",
             "success": success,
             "device": device_name,
-            "error": error_msg if not success else None
+            "error": error_msg if error_msg else None
         })
     
     async def _handle_set_config(self, client_id: str, data: dict):
