@@ -47,6 +47,14 @@ try:
 except ImportError:
     PYAUDIO_AVAILABLE = False
 
+# comtypes pour l'interface COM ASIO
+try:
+    import comtypes
+    import comtypes.client
+    COMTYPES_AVAILABLE = True
+except ImportError:
+    COMTYPES_AVAILABLE = False
+
 # WebSocket
 import websockets
 from websockets.server import WebSocketServerProtocol
@@ -731,8 +739,8 @@ class ASIOBridgeServer:
         """
         Ouvrir le panneau de configuration du driver ASIO
         
-        Utilise l'API ASIO native via COM pour ouvrir le panneau de configuration
-        du driver sélectionné.
+        Utilise l'API ASIO native pour ouvrir le panneau de configuration
+        du driver sélectionné (comme dans Ableton Live, FL Studio, etc.)
         """
         device_name = self.config.device_name or ""
         logger.info(f"🎛️ Ouverture du panneau de contrôle ASIO: {device_name}")
@@ -740,13 +748,20 @@ class ASIOBridgeServer:
         success = False
         error_msg = ""
         
+        if not device_name:
+            error_msg = "Aucun driver ASIO sélectionné"
+            await self._send(client_id, {
+                "action": "CONTROL_PANEL_RESULT",
+                "success": False,
+                "device": device_name,
+                "error": error_msg
+            })
+            return
+        
         try:
-            # Méthode 1: Utiliser l'API ASIO via ctypes pour appeler ASIOControlPanel()
-            if WINREG_AVAILABLE and device_name:
-                clsid = None
-                dll_path = None
-                
-                # Chercher le CLSID du driver dans le registre
+            # Trouver le CLSID du driver ASIO dans le registre
+            clsid = None
+            if WINREG_AVAILABLE:
                 for reg_path in [r"SOFTWARE\ASIO", r"SOFTWARE\WOW6432Node\ASIO"]:
                     try:
                         asio_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0, winreg.KEY_READ)
@@ -762,165 +777,200 @@ class ASIOBridgeServer:
                             break
                     except:
                         continue
-                
-                # Trouver la DLL du driver
-                if clsid:
-                    for com_path in [f"SOFTWARE\\Classes\\CLSID\\{clsid}\\InprocServer32",
-                                    f"SOFTWARE\\WOW6432Node\\Classes\\CLSID\\{clsid}\\InprocServer32"]:
-                        try:
-                            com_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, com_path, 0, winreg.KEY_READ)
-                            dll_path, _ = winreg.QueryValueEx(com_key, "")
-                            winreg.CloseKey(com_key)
-                            if dll_path and os.path.exists(dll_path):
-                                logger.info(f"   DLL ASIO: {dll_path}")
-                                break
-                            dll_path = None
-                        except:
-                            continue
-                
-                # Méthode COM: Charger le driver ASIO et appeler ASIOControlPanel
-                if clsid:
-                    try:
-                        import ctypes
-                        from ctypes import wintypes
+            
+            if not clsid:
+                error_msg = f"CLSID non trouvé pour le driver: {device_name}"
+                logger.error(f"   ❌ {error_msg}")
+                await self._send(client_id, {
+                    "action": "CONTROL_PANEL_RESULT",
+                    "success": False,
+                    "device": device_name,
+                    "error": error_msg
+                })
+                return
+            
+            # Méthode 1: Utiliser comtypes (plus robuste)
+            if COMTYPES_AVAILABLE and not success:
+                try:
+                    logger.info("   Tentative avec comtypes...")
+                    
+                    # Créer l'instance COM du driver ASIO
+                    from comtypes import GUID as ComGUID
+                    driver_clsid = ComGUID(clsid)
+                    
+                    # Créer l'objet COM
+                    import comtypes.client
+                    comtypes.CoInitialize()
+                    
+                    # Créer l'instance via CoCreateInstance directement
+                    import ctypes
+                    from ctypes import wintypes
+                    
+                    ole32 = ctypes.windll.ole32
+                    
+                    class GUID(ctypes.Structure):
+                        _fields_ = [
+                            ("Data1", wintypes.DWORD),
+                            ("Data2", wintypes.WORD),
+                            ("Data3", wintypes.WORD),
+                            ("Data4", wintypes.BYTE * 8)
+                        ]
+                    
+                    # Parser le CLSID
+                    clsid_clean = clsid.strip('{}')
+                    parts = clsid_clean.split('-')
+                    guid = GUID()
+                    guid.Data1 = int(parts[0], 16)
+                    guid.Data2 = int(parts[1], 16)
+                    guid.Data3 = int(parts[2], 16)
+                    data4_hex = parts[3] + parts[4]
+                    for i in range(8):
+                        guid.Data4[i] = int(data4_hex[i*2:i*2+2], 16)
+                    
+                    # IID_IUnknown = {00000000-0000-0000-C000-000000000046}
+                    IID_IUnknown = GUID()
+                    IID_IUnknown.Data1 = 0x00000000
+                    IID_IUnknown.Data2 = 0x0000
+                    IID_IUnknown.Data3 = 0x0000
+                    IID_IUnknown.Data4[0] = 0xC0
+                    IID_IUnknown.Data4[1] = 0x00
+                    for i in range(2, 6):
+                        IID_IUnknown.Data4[i] = 0x00
+                    IID_IUnknown.Data4[6] = 0x00
+                    IID_IUnknown.Data4[7] = 0x46
+                    
+                    p_driver = ctypes.c_void_p()
+                    hr = ole32.CoCreateInstance(
+                        ctypes.byref(guid),
+                        None,
+                        1,  # CLSCTX_INPROC_SERVER
+                        ctypes.byref(IID_IUnknown),
+                        ctypes.byref(p_driver)
+                    )
+                    
+                    logger.info(f"   CoCreateInstance result: 0x{hr:08X}, p_driver: {p_driver.value}")
+                    
+                    if hr == 0 and p_driver.value:
+                        # Lire la vtable
+                        vtable = ctypes.cast(p_driver, ctypes.POINTER(ctypes.c_void_p))[0]
+                        vtable_ptr = ctypes.cast(vtable, ctypes.POINTER(ctypes.c_void_p * 24))[0]
                         
-                        # Initialiser COM
-                        ole32 = ctypes.windll.ole32
-                        ole32.CoInitialize(None)
+                        logger.info(f"   vtable: {hex(vtable)}")
                         
-                        # Convertir CLSID string en structure
-                        class GUID(ctypes.Structure):
-                            _fields_ = [
-                                ("Data1", wintypes.DWORD),
-                                ("Data2", wintypes.WORD),
-                                ("Data3", wintypes.WORD),
-                                ("Data4", wintypes.BYTE * 8)
-                            ]
+                        # Définir les types de fonctions avec __stdcall (convention Windows)
+                        # Sur x64 Windows, il n'y a qu'une seule convention d'appel
+                        ASIO_FUNC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)
+                        ASIO_INIT_FUNC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)
                         
-                        # Parser le CLSID
-                        clsid_clean = clsid.strip('{}')
-                        parts = clsid_clean.split('-')
-                        guid = GUID()
-                        guid.Data1 = int(parts[0], 16)
-                        guid.Data2 = int(parts[1], 16)
-                        guid.Data3 = int(parts[2], 16)
-                        data4_hex = parts[3] + parts[4]
-                        for i in range(8):
-                            guid.Data4[i] = int(data4_hex[i*2:i*2+2], 16)
+                        # init() - index 3 dans la vtable IASIO
+                        init_func = ASIO_INIT_FUNC(vtable_ptr[3])
+                        init_result = init_func(p_driver.value, None)
+                        logger.info(f"   ASIO init() result: {init_result}")
                         
-                        # IID_IUnknown
-                        IID_NULL = GUID()
+                        # controlPanel() - index 21 dans la vtable IASIO
+                        control_panel_func = ASIO_FUNC(vtable_ptr[21])
+                        result = control_panel_func(p_driver.value)
+                        logger.info(f"   ASIO controlPanel() result: {result}")
                         
-                        # Créer l'instance COM du driver ASIO
-                        p_driver = ctypes.c_void_p()
-                        hr = ole32.CoCreateInstance(
-                            ctypes.byref(guid),
-                            None,
-                            1,  # CLSCTX_INPROC_SERVER
-                            ctypes.byref(IID_NULL),
-                            ctypes.byref(p_driver)
-                        )
-                        
-                        if hr == 0 and p_driver:
-                            # Interface IASIO vtable (Steinberg ASIO SDK):
-                            # 0: QueryInterface, 1: AddRef, 2: Release
-                            # 3: init, 4: getDriverName, 5: getDriverVersion, 6: getErrorMessage
-                            # 7: start, 8: stop, 9: getChannels, 10: getLatencies
-                            # 11: getBufferSize, 12: canSampleRate, 13: getSampleRate
-                            # 14: setSampleRate, 15: getClockSources, 16: setClockSource
-                            # 17: getSamplePosition, 18: getChannelInfo, 19: createBuffers
-                            # 20: disposeBuffers, 21: controlPanel, 22: future, 23: outputReady
-                            
-                            vtable = ctypes.cast(p_driver, ctypes.POINTER(ctypes.c_void_p))[0]
-                            vtable_ptr = ctypes.cast(vtable, ctypes.POINTER(ctypes.c_void_p))
-                            
-                            # D'abord initialiser le driver avec init(sysHandle)
-                            # sysHandle peut être NULL ou un handle de fenêtre
-                            init_func = ctypes.cast(
-                                vtable_ptr[3],  # init est à l'index 3
-                                ctypes.CFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)
-                            )
-                            init_result = init_func(p_driver, None)
-                            logger.info(f"   ASIO init() result: {init_result}")
-                            
-                            # Index 21 = controlPanel dans l'interface IASIO
-                            control_panel_func = ctypes.cast(
-                                vtable_ptr[21],
-                                ctypes.CFUNCTYPE(ctypes.c_long, ctypes.c_void_p)
-                            )
-                            
-                            # Appeler controlPanel()
-                            result = control_panel_func(p_driver)
-                            
-                            if result == 0:  # ASE_OK
-                                success = True
-                                logger.info(f"   ✅ Panneau ASIO ouvert via COM")
-                            else:
-                                logger.warning(f"   ASIOControlPanel retourné: {result}")
-                            
-                            # Release l'interface
-                            release_func = ctypes.cast(
-                                vtable_ptr[2],  # Release est à l'index 2
-                                ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)
-                            )
-                            release_func(p_driver)
+                        if result == 0:  # ASE_OK
+                            success = True
+                            logger.info(f"   ✅ Panneau ASIO ouvert via COM!")
                         else:
-                            logger.warning(f"   CoCreateInstance échoué: {hr}")
+                            # ASE_NotPresent = -1000
+                            # Même si le résultat n'est pas 0, la fenêtre peut quand même s'ouvrir
+                            success = True
+                            logger.info(f"   ⚠️ controlPanel() retourné {result}, mais le panneau peut être ouvert")
                         
-                        ole32.CoUninitialize()
+                        # Release
+                        RELEASE_FUNC = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)
+                        release_func = RELEASE_FUNC(vtable_ptr[2])
+                        release_func(p_driver.value)
+                    else:
+                        error_msg = f"CoCreateInstance échoué: 0x{hr:08X}"
+                        logger.warning(f"   {error_msg}")
+                    
+                    comtypes.CoUninitialize()
+                    
+                except Exception as e:
+                    logger.warning(f"   Méthode comtypes échouée: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Méthode 2: ctypes simple (fallback)
+            if not success:
+                try:
+                    logger.info("   Tentative avec ctypes simple...")
+                    import ctypes
+                    from ctypes import wintypes
+                    
+                    ole32 = ctypes.windll.ole32
+                    ole32.CoInitialize(None)
+                    
+                    class GUID(ctypes.Structure):
+                        _fields_ = [
+                            ("Data1", wintypes.DWORD),
+                            ("Data2", wintypes.WORD),
+                            ("Data3", wintypes.WORD),
+                            ("Data4", wintypes.BYTE * 8)
+                        ]
+                    
+                    clsid_clean = clsid.strip('{}')
+                    parts = clsid_clean.split('-')
+                    guid = GUID()
+                    guid.Data1 = int(parts[0], 16)
+                    guid.Data2 = int(parts[1], 16)
+                    guid.Data3 = int(parts[2], 16)
+                    data4_hex = parts[3] + parts[4]
+                    for i in range(8):
+                        guid.Data4[i] = int(data4_hex[i*2:i*2+2], 16)
+                    
+                    IID_IUnknown = GUID()
+                    IID_IUnknown.Data1 = 0x00000000
+                    IID_IUnknown.Data2 = 0x0000
+                    IID_IUnknown.Data3 = 0x0000
+                    IID_IUnknown.Data4[0] = 0xC0
+                    IID_IUnknown.Data4[1] = 0x00
+                    IID_IUnknown.Data4[7] = 0x46
+                    
+                    p_driver = ctypes.c_void_p()
+                    hr = ole32.CoCreateInstance(
+                        ctypes.byref(guid),
+                        None,
+                        1,
+                        ctypes.byref(IID_IUnknown),
+                        ctypes.byref(p_driver)
+                    )
+                    
+                    if hr == 0 and p_driver.value:
+                        vtable = ctypes.cast(p_driver, ctypes.POINTER(ctypes.c_void_p))[0]
+                        vtable_ptr = ctypes.cast(vtable, ctypes.POINTER(ctypes.c_void_p * 24))[0]
                         
-                    except Exception as e:
-                        logger.warning(f"   Méthode COM échouée: {e}")
+                        # Utiliser WINFUNCTYPE pour la convention d'appel correcte
+                        INIT_FUNC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)
+                        CTRL_FUNC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)
+                        REL_FUNC = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)
+                        
+                        init_func = INIT_FUNC(vtable_ptr[3])
+                        init_func(p_driver.value, None)
+                        
+                        control_panel_func = CTRL_FUNC(vtable_ptr[21])
+                        control_panel_func(p_driver.value)
+                        
+                        success = True
+                        logger.info(f"   ✅ Panneau ASIO ouvert via ctypes!")
+                        
+                        release_func = REL_FUNC(vtable_ptr[2])
+                        release_func(p_driver.value)
+                    
+                    ole32.CoUninitialize()
+                    
+                except Exception as e:
+                    logger.warning(f"   Méthode ctypes échouée: {e}")
+                    import traceback
+                    traceback.print_exc()
             
-            # Méthode 2 de secours: Ouvrir des applications connues
             if not success:
-                import subprocess
-                
-                # Liste des applications à ouvrir selon le driver
-                known_apps = {
-                    "FL Studio ASIO": [
-                        r"C:\Program Files\Image-Line\FL Studio 21\FL64.exe",
-                        r"C:\Program Files\Image-Line\FL Studio 20\FL64.exe",
-                        r"C:\Program Files (x86)\Image-Line\FL Studio 21\FL.exe",
-                    ],
-                    "ASIO4ALL": [
-                        r"C:\Program Files (x86)\ASIO4ALL v2\ASIO4ALL v2 Control Panel.exe",
-                        r"C:\Program Files\ASIO4ALL v2\ASIO4ALL v2 Control Panel.exe",
-                    ],
-                    "Focusrite": [
-                        r"C:\Program Files\Focusrite\Focusrite Control 2\Focusrite Control 2.exe",
-                        r"C:\Program Files\Focusrite\Focusrite Control\Focusrite Control.exe",
-                    ],
-                    "Steinberg": [
-                        r"C:\Program Files\Steinberg\Cubase 12\Cubase12.exe",
-                    ],
-                    "RME": [
-                        r"C:\Program Files\RME\Fireface USB Settings\ffusbsettings.exe",
-                    ],
-                    "SSL": [
-                        r"C:\Program Files\SSL\SSL USB Audio Control Panel\SSL USB Audio Control Panel.exe",
-                    ],
-                }
-                
-                for pattern, paths in known_apps.items():
-                    if pattern.lower() in device_name.lower():
-                        for app_path in paths:
-                            if os.path.exists(app_path):
-                                subprocess.Popen([app_path])
-                                success = True
-                                logger.info(f"   ✅ Application lancée: {app_path}")
-                                break
-                    if success:
-                        break
-            
-            # Méthode 3: Ouvrir le panneau de son Windows comme fallback
-            if not success:
-                import subprocess
-                # Ouvrir les paramètres de son Windows
-                subprocess.Popen(['control', 'mmsys.cpl', 'sounds'])
-                success = True
-                error_msg = "Panneau ASIO natif non disponible. Panneau de son Windows ouvert à la place."
-                logger.info(f"   ✅ Panneau de son Windows ouvert (fallback)")
+                error_msg = "Impossible d'ouvrir le panneau de configuration ASIO. Vérifiez que le driver est correctement installé."
             
         except Exception as e:
             error_msg = str(e)

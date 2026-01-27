@@ -25,6 +25,9 @@ pedalboard>=0.9.0
 # Note: On Windows, you need ASIO drivers installed (e.g., ASIO4ALL or manufacturer drivers)
 sounddevice>=0.4.6
 
+# COM interface for ASIO control panel
+comtypes>=1.2.0; sys_platform == 'win32'
+
 # === OPTIONAL: UI CAPTURE (Windows) ===
 
 # Windows API access for plugin UI capture
