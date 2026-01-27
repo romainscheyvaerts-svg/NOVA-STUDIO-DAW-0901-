@@ -391,6 +391,11 @@ export default function App() {
   const initialState: DAWState = {
     id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM, isPlaying: false, isRecording: false, currentTime: 0,
     isLoopActive: false, loopStart: 0, loopEnd: 8,
+    timeSignature: { numerator: 4, denominator: 4 },
+    trackGroups: [],
+    markers: [],
+    metronome: { enabled: false, volume: 0.5, countIn: 0, accentDownbeat: true, sound: 'CLICK' },
+    punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 },
     tracks: [
       { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
       { id: 'track-rec-main', name: 'REC', type: TrackType.AUDIO, color: '#ff0000', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#ff0000')], totalLatency: 0 },
