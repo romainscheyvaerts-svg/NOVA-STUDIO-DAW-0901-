@@ -1011,8 +1011,7 @@ class ASIOBridgeServer:
         """
         Ouvrir le panneau de configuration du driver ASIO
         
-        Utilise l'API ASIO native pour ouvrir le panneau de configuration
-        du driver sélectionné (comme dans Ableton Live, FL Studio, etc.)
+        Utilise le driver déjà chargé ou le charge si nécessaire
         """
         device_name = self.config.device_name or ""
         logger.info(f"🎛️ Ouverture du panneau de contrôle ASIO: {device_name}")
@@ -1031,6 +1030,34 @@ class ASIOBridgeServer:
             return
         
         try:
+            # Méthode 1: Utiliser le driver déjà chargé
+            if self.asio_driver.is_loaded:
+                if self.asio_driver.driver_name == device_name:
+                    logger.info("   Utilisation du driver déjà chargé...")
+                    success = self.asio_driver.open_control_panel()
+                else:
+                    # Le driver chargé n'est pas celui demandé, le recharger
+                    logger.info(f"   Rechargement du driver {device_name}...")
+                    if self.asio_driver.load(device_name):
+                        success = self.asio_driver.open_control_panel()
+            else:
+                # Charger le driver
+                logger.info(f"   Chargement du driver {device_name}...")
+                if self.asio_driver.load(device_name):
+                    success = self.asio_driver.open_control_panel()
+            
+            if success:
+                await self._send(client_id, {
+                    "action": "CONTROL_PANEL_RESULT",
+                    "success": True,
+                    "device": device_name,
+                    "error": None
+                })
+                return
+            
+            # Méthode 2 fallback: Créer une nouvelle instance COM temporaire
+            logger.info("   Fallback: création d'une nouvelle instance COM...")
+            
             # Trouver le CLSID du driver ASIO dans le registre
             clsid = None
             if WINREG_AVAILABLE:
