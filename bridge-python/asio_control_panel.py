@@ -19,15 +19,20 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(
 logger = logging.getLogger('ASIOPanel')
 
 # Windows API constants
-WS_OVERLAPPED = 0x00000000
 WS_POPUP = 0x80000000
-CW_USEDEFAULT = 0x80000000
 WM_QUIT = 0x0012
 PM_REMOVE = 0x0001
 SW_HIDE = 0
 CLSCTX_INPROC_SERVER = 1
 
-# Windows API structures
+# Fix: Use proper 64-bit types for window procedure
+LRESULT = ctypes.c_longlong
+WPARAM = ctypes.c_ulonglong
+LPARAM = ctypes.c_longlong
+
+# Window procedure type with correct 64-bit types
+WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, WPARAM, LPARAM)
+
 class WNDCLASSEXW(ctypes.Structure):
     _fields_ = [
         ("cbSize", wintypes.UINT),
@@ -48,8 +53,8 @@ class MSG(ctypes.Structure):
     _fields_ = [
         ("hwnd", wintypes.HWND),
         ("message", wintypes.UINT),
-        ("wParam", wintypes.WPARAM),
-        ("lParam", wintypes.LPARAM),
+        ("wParam", ctypes.c_ulonglong),
+        ("lParam", ctypes.c_longlong),
         ("time", wintypes.DWORD),
         ("pt", wintypes.POINT),
     ]
@@ -98,19 +103,23 @@ def find_driver_clsid(driver_name: str) -> str:
     return None
 
 
+# Global reference to prevent garbage collection
+_wnd_proc_ref = None
+
 def create_hidden_window() -> int:
     """Créer une fenêtre cachée pour servir de parent HWND au driver ASIO"""
+    global _wnd_proc_ref
+    
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
     
-    # Window procedure (défaut)
-    WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_long, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+    # Set correct return/param types for DefWindowProcW
+    user32.DefWindowProcW.restype = LRESULT
+    user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, WPARAM, LPARAM]
     
     def wnd_proc(hwnd, msg, wparam, lparam):
         return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
     
-    # Garder une référence pour éviter le garbage collection
-    global _wnd_proc_ref
     _wnd_proc_ref = WNDPROC(wnd_proc)
     
     class_name = "NovaASIOHiddenWindow"
@@ -128,24 +137,15 @@ def create_hidden_window() -> int:
         return user32.GetDesktopWindow()
     
     hwnd = user32.CreateWindowExW(
-        0,                    # dwExStyle
-        class_name,           # lpClassName
-        "Nova ASIO Host",     # lpWindowName
-        WS_POPUP,             # dwStyle (popup = pas de barre de titre)
-        0, 0, 1, 1,          # x, y, width, height
-        None,                 # hWndParent
-        None,                 # hMenu
-        h_instance,           # hInstance
-        None                  # lpParam
+        0, class_name, "Nova ASIO Host", WS_POPUP,
+        0, 0, 1, 1, None, None, h_instance, None
     )
     
     if not hwnd:
         logger.warning("CreateWindowExW failed, using desktop window")
         return user32.GetDesktopWindow()
     
-    # Cacher la fenêtre
     user32.ShowWindow(hwnd, SW_HIDE)
-    
     logger.info(f"   Fenêtre cachée créée: HWND={hwnd}")
     return hwnd
 
@@ -159,7 +159,6 @@ def run_message_pump(timeout_seconds: float = 30.0):
     logger.info(f"   Message pump démarré (timeout: {timeout_seconds}s)")
     
     while (time.time() - start_time) < timeout_seconds:
-        # PeekMessage au lieu de GetMessage pour ne pas bloquer
         if user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, PM_REMOVE):
             if msg.message == WM_QUIT:
                 logger.info("   WM_QUIT reçu, arrêt du message pump")
@@ -167,7 +166,6 @@ def run_message_pump(timeout_seconds: float = 30.0):
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
         else:
-            # Pas de message, dormir un peu pour ne pas consommer le CPU
             time.sleep(0.01)
     
     logger.info("   Message pump terminé")
@@ -177,11 +175,8 @@ def open_asio_control_panel(driver_name: str) -> bool:
     """
     Ouvrir le panneau de configuration ASIO
     
-    1. Initialise COM (STA)
-    2. Crée une fenêtre cachée (HWND)
-    3. Crée l'instance COM du driver ASIO
-    4. Appelle init(hwnd) puis controlPanel()
-    5. Exécute un message pump pour le dialogue
+    IMPORTANT: Le SDK ASIO utilise le CLSID du driver comme IID
+    (pas IID_IUnknown!) lors de CoCreateInstance.
     """
     ole32 = ctypes.windll.ole32
     
@@ -195,10 +190,9 @@ def open_asio_control_panel(driver_name: str) -> bool:
     
     logger.info(f"   CLSID: {clsid}")
     
-    # 2. Initialiser COM en mode STA (Single-Threaded Apartment)
-    # COINIT_APARTMENTTHREADED = 0x2
-    hr = ole32.CoInitializeEx(None, 0x2)
-    if hr < 0 and hr != 1:  # S_OK=0, S_FALSE=1 (déjà initialisé)
+    # 2. Initialiser COM en mode STA
+    hr = ole32.CoInitializeEx(None, 0x2)  # COINIT_APARTMENTTHREADED
+    if hr < 0 and hr != 1:
         logger.error(f"   ❌ CoInitializeEx échoué: 0x{hr & 0xFFFFFFFF:08X}")
         return False
     
@@ -209,23 +203,17 @@ def open_asio_control_panel(driver_name: str) -> bool:
         hwnd = create_hidden_window()
         
         # 4. Créer l'instance COM du driver
+        # IMPORTANT: Le SDK ASIO utilise le CLSID du driver AUSSI comme IID
+        # (comportement non-standard mais c'est comme ça que le SDK ASIO fonctionne)
         guid = parse_guid(clsid)
-        
-        IID_IUnknown = GUID()
-        IID_IUnknown.Data1 = 0x00000000
-        IID_IUnknown.Data2 = 0x0000
-        IID_IUnknown.Data3 = 0x0000
-        IID_IUnknown.Data4[0] = 0xC0
-        IID_IUnknown.Data4[1] = 0x00
-        IID_IUnknown.Data4[7] = 0x46
         
         p_driver = ctypes.c_void_p()
         hr = ole32.CoCreateInstance(
-            ctypes.byref(guid),
-            None,
-            CLSCTX_INPROC_SERVER,
-            ctypes.byref(IID_IUnknown),
-            ctypes.byref(p_driver)
+            ctypes.byref(guid),       # rclsid = driver CLSID
+            None,                       # pUnkOuter = NULL
+            CLSCTX_INPROC_SERVER,      # dwClsContext
+            ctypes.byref(guid),        # riid = SAME driver CLSID (ASIO SDK convention!)
+            ctypes.byref(p_driver)     # ppv
         )
         
         if hr != 0 or not p_driver.value:
@@ -238,26 +226,34 @@ def open_asio_control_panel(driver_name: str) -> bool:
         vtable_addr = ctypes.cast(p_driver, ctypes.POINTER(ctypes.c_void_p))[0]
         logger.info(f"   vtable addr: {hex(vtable_addr)}")
         
-        # Lire 24 entrées de la vtable
+        # Lire les entrées de la vtable (24 pour IASIO)
         vtable = ctypes.cast(vtable_addr, ctypes.POINTER(ctypes.c_void_p * 24))[0]
         
         # Debug: afficher les entrées critiques
-        logger.info(f"   vtable[3]  (init):         {hex(vtable[3]) if vtable[3] else 'NULL'}")
-        logger.info(f"   vtable[21] (controlPanel): {hex(vtable[21]) if vtable[21] else 'NULL'}")
+        for i in [0, 1, 2, 3, 21]:
+            val = vtable[i]
+            logger.info(f"   vtable[{i:2d}]: {hex(val) if val else 'NULL'}")
         
-        # Vérifier que controlPanel n'est pas invalide
-        if not vtable[21] or vtable[21] == 0xFFFFFFFFFFFFFFFF:
-            logger.error(f"   ❌ vtable[21] (controlPanel) est invalide!")
-            logger.info("   Essai avec d'autres index de vtable...")
-            
-            # Dump de la vtable pour debug
+        # Vérifier que les adresses sont dans une plage valide
+        # Sur 64-bit Windows, les adresses de code sont typiquement < 0x800000000000
+        def is_valid_addr(addr):
+            return addr and addr != 0xFFFFFFFFFFFFFFFF and addr < 0x800000000000
+        
+        if not is_valid_addr(vtable[3]):
+            logger.error("   ❌ vtable[3] (init) invalide!")
+            # Dump complet
             for i in range(24):
                 val = vtable[i]
-                status = "❌ INVALID" if (not val or val == 0xFFFFFFFFFFFFFFFF) else "✅"
-                logger.info(f"      vtable[{i:2d}]: {hex(val) if val else 'NULL'} {status}")
-            
-            # Chercher le bon index en tentant les index autour de 21
-            # Note: Ne pas essayer, juste reporter l'erreur
+                logger.info(f"      vtable[{i:2d}]: {hex(val) if val else 'NULL'}")
+            return False
+        
+        if not is_valid_addr(vtable[21]):
+            logger.error(f"   ❌ vtable[21] (controlPanel) invalide: {hex(vtable[21]) if vtable[21] else 'NULL'}")
+            logger.info("   Dump complet de la vtable:")
+            for i in range(24):
+                val = vtable[i]
+                valid = "✅" if is_valid_addr(val) else "❌"
+                logger.info(f"      vtable[{i:2d}]: {hex(val) if val else 'NULL'} {valid}")
             
             # Release
             RELEASE_FUNC = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)
@@ -269,10 +265,14 @@ def open_asio_control_panel(driver_name: str) -> bool:
         ASIO_INIT_FUNC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)
         init_func = ASIO_INIT_FUNC(vtable[3])
         
-        # Passer le HWND comme sysHandle
         hwnd_ptr = ctypes.c_void_p(hwnd)
         init_result = init_func(p_driver.value, hwnd_ptr)
         logger.info(f"   init(hwnd={hwnd}) result: {init_result}")
+        
+        if init_result == 1:  # ASIOTrue
+            logger.info("   ✅ Driver initialisé avec succès")
+        else:
+            logger.warning(f"   ⚠️ init() retourné {init_result} (attendu 1=ASIOTrue)")
         
         # 7. Appeler controlPanel()
         CTRL_FUNC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)
@@ -282,11 +282,15 @@ def open_asio_control_panel(driver_name: str) -> bool:
         result = control_panel(p_driver.value)
         logger.info(f"   controlPanel() result: {result}")
         
-        # 8. Exécuter le message pump pour gérer le dialogue
-        # Le panneau ASIO est une fenêtre modale qui a besoin d'un message pump
+        if result == 0:  # ASE_OK
+            logger.info("   ✅ Panneau ASIO ouvert!")
+        else:
+            logger.info(f"   ⚠️ controlPanel retourné {result}")
+        
+        # 8. Message pump pour le dialogue
         run_message_pump(timeout_seconds=60.0)
         
-        # 9. Release du driver
+        # 9. Release
         logger.info("   Release du driver COM...")
         RELEASE_FUNC = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)
         release = RELEASE_FUNC(vtable[2])
@@ -309,7 +313,7 @@ def open_asio_control_panel(driver_name: str) -> bool:
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python asio_control_panel.py <driver_name>")
-        print("Example: python asio_control_panel.py \"FL Studio ASIO\"")
+        print('Example: python asio_control_panel.py "FL Studio ASIO"')
         sys.exit(1)
     
     driver_name = sys.argv[1]
