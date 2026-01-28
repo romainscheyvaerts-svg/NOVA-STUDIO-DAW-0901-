@@ -93,6 +93,275 @@ class AudioStreamState:
     buffer_overruns: int = 0
 
 
+class ASIODriverInstance:
+    """
+    Instance d'un driver ASIO chargé en mémoire
+    
+    Garde le driver actif pour qu'il apparaisse dans la barre des tâches
+    et puisse être utilisé pour l'audio
+    """
+    
+    def __init__(self):
+        self.driver_name: Optional[str] = None
+        self.clsid: Optional[str] = None
+        self.p_driver: Optional[Any] = None  # Pointeur COM vers le driver
+        self.vtable_ptr: Optional[Any] = None
+        self.is_loaded: bool = False
+        self.is_initialized: bool = False
+        self._ole32 = None
+        self._lock = threading.Lock()
+        
+        # Info du driver chargé
+        self.sample_rate: int = 44100
+        self.input_channels: int = 2
+        self.output_channels: int = 2
+        self.buffer_size: int = 256
+    
+    def load(self, driver_name: str) -> bool:
+        """
+        Charger un driver ASIO par son nom
+        
+        Le driver restera actif jusqu'à ce qu'on appelle unload()
+        """
+        with self._lock:
+            # Si un driver est déjà chargé, le décharger d'abord
+            if self.is_loaded:
+                self._unload_internal()
+            
+            logger.info(f"🔌 Chargement du driver ASIO: {driver_name}")
+            
+            # Trouver le CLSID dans le registre
+            clsid = self._find_driver_clsid(driver_name)
+            if not clsid:
+                logger.error(f"   ❌ CLSID non trouvé pour: {driver_name}")
+                return False
+            
+            logger.info(f"   CLSID: {clsid}")
+            
+            try:
+                import ctypes
+                from ctypes import wintypes
+                
+                self._ole32 = ctypes.windll.ole32
+                self._ole32.CoInitialize(None)
+                
+                # Structures GUID
+                class GUID(ctypes.Structure):
+                    _fields_ = [
+                        ("Data1", wintypes.DWORD),
+                        ("Data2", wintypes.WORD),
+                        ("Data3", wintypes.WORD),
+                        ("Data4", wintypes.BYTE * 8)
+                    ]
+                
+                # Parser le CLSID
+                clsid_clean = clsid.strip('{}')
+                parts = clsid_clean.split('-')
+                guid = GUID()
+                guid.Data1 = int(parts[0], 16)
+                guid.Data2 = int(parts[1], 16)
+                guid.Data3 = int(parts[2], 16)
+                data4_hex = parts[3] + parts[4]
+                for i in range(8):
+                    guid.Data4[i] = int(data4_hex[i*2:i*2+2], 16)
+                
+                # IID_IUnknown
+                IID_IUnknown = GUID()
+                IID_IUnknown.Data1 = 0x00000000
+                IID_IUnknown.Data2 = 0x0000
+                IID_IUnknown.Data3 = 0x0000
+                IID_IUnknown.Data4[0] = 0xC0
+                IID_IUnknown.Data4[1] = 0x00
+                IID_IUnknown.Data4[7] = 0x46
+                
+                # Créer l'instance COM
+                p_driver = ctypes.c_void_p()
+                hr = self._ole32.CoCreateInstance(
+                    ctypes.byref(guid),
+                    None,
+                    1,  # CLSCTX_INPROC_SERVER
+                    ctypes.byref(IID_IUnknown),
+                    ctypes.byref(p_driver)
+                )
+                
+                if hr != 0 or not p_driver.value:
+                    logger.error(f"   ❌ CoCreateInstance échoué: 0x{hr:08X}")
+                    self._ole32.CoUninitialize()
+                    return False
+                
+                logger.info(f"   ✅ Driver COM créé: {hex(p_driver.value)}")
+                
+                # Lire la vtable
+                vtable = ctypes.cast(p_driver, ctypes.POINTER(ctypes.c_void_p))[0]
+                self.vtable_ptr = ctypes.cast(vtable, ctypes.POINTER(ctypes.c_void_p * 24))[0]
+                
+                # Initialiser le driver ASIO
+                ASIO_INIT_FUNC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)
+                init_func = ASIO_INIT_FUNC(self.vtable_ptr[3])
+                init_result = init_func(p_driver.value, None)
+                
+                logger.info(f"   ASIO init() result: {init_result}")
+                
+                if init_result != 1:  # ASIOTrue = 1
+                    logger.warning(f"   ⚠️ init() n'a pas retourné ASIOTrue, mais on continue...")
+                
+                # Stocker les références
+                self.p_driver = p_driver
+                self.driver_name = driver_name
+                self.clsid = clsid
+                self.is_loaded = True
+                self.is_initialized = True
+                
+                # Récupérer les infos du driver
+                self._query_driver_info()
+                
+                logger.info(f"   ✅ Driver ASIO chargé et actif!")
+                logger.info(f"   📊 Channels: {self.input_channels}in / {self.output_channels}out")
+                logger.info(f"   📊 Sample rate: {self.sample_rate}Hz")
+                
+                return True
+                
+            except Exception as e:
+                logger.error(f"   ❌ Erreur lors du chargement: {e}")
+                import traceback
+                traceback.print_exc()
+                if self._ole32:
+                    self._ole32.CoUninitialize()
+                return False
+    
+    def _find_driver_clsid(self, driver_name: str) -> Optional[str]:
+        """Trouver le CLSID d'un driver dans le registre"""
+        if not WINREG_AVAILABLE:
+            return None
+        
+        for reg_path in [r"SOFTWARE\ASIO", r"SOFTWARE\WOW6432Node\ASIO"]:
+            try:
+                asio_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0, winreg.KEY_READ)
+                try:
+                    driver_key = winreg.OpenKey(asio_key, driver_name)
+                    clsid, _ = winreg.QueryValueEx(driver_key, "CLSID")
+                    winreg.CloseKey(driver_key)
+                    winreg.CloseKey(asio_key)
+                    return clsid
+                except:
+                    pass
+                winreg.CloseKey(asio_key)
+            except:
+                continue
+        return None
+    
+    def _query_driver_info(self):
+        """Récupérer les informations du driver chargé"""
+        if not self.p_driver or not self.vtable_ptr:
+            return
+        
+        try:
+            import ctypes
+            
+            # getChannels() - index 9
+            GET_CHANNELS_FUNC = ctypes.WINFUNCTYPE(
+                ctypes.c_long, 
+                ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_long),
+                ctypes.POINTER(ctypes.c_long)
+            )
+            get_channels = GET_CHANNELS_FUNC(self.vtable_ptr[9])
+            
+            num_inputs = ctypes.c_long()
+            num_outputs = ctypes.c_long()
+            result = get_channels(self.p_driver.value, ctypes.byref(num_inputs), ctypes.byref(num_outputs))
+            
+            if result == 0:  # ASE_OK
+                self.input_channels = num_inputs.value
+                self.output_channels = num_outputs.value
+            
+            # getSampleRate() - index 13
+            GET_SAMPLERATE_FUNC = ctypes.WINFUNCTYPE(
+                ctypes.c_long,
+                ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_double)
+            )
+            get_samplerate = GET_SAMPLERATE_FUNC(self.vtable_ptr[13])
+            
+            sample_rate = ctypes.c_double()
+            result = get_samplerate(self.p_driver.value, ctypes.byref(sample_rate))
+            
+            if result == 0:
+                self.sample_rate = int(sample_rate.value)
+                
+        except Exception as e:
+            logger.warning(f"   Impossible de récupérer les infos du driver: {e}")
+    
+    def open_control_panel(self) -> bool:
+        """Ouvrir le panneau de configuration du driver"""
+        if not self.is_loaded or not self.p_driver:
+            logger.warning("Aucun driver chargé")
+            return False
+        
+        try:
+            import ctypes
+            
+            # controlPanel() - index 21
+            CTRL_FUNC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)
+            control_panel = CTRL_FUNC(self.vtable_ptr[21])
+            result = control_panel(self.p_driver.value)
+            
+            logger.info(f"   controlPanel() result: {result}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"   Erreur controlPanel: {e}")
+            return False
+    
+    def unload(self):
+        """Décharger le driver ASIO"""
+        with self._lock:
+            self._unload_internal()
+    
+    def _unload_internal(self):
+        """Déchargement interne (sans lock)"""
+        if not self.is_loaded:
+            return
+        
+        logger.info(f"🔌 Déchargement du driver ASIO: {self.driver_name}")
+        
+        try:
+            if self.p_driver and self.vtable_ptr:
+                import ctypes
+                
+                # Release() - index 2
+                RELEASE_FUNC = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)
+                release = RELEASE_FUNC(self.vtable_ptr[2])
+                release(self.p_driver.value)
+            
+            if self._ole32:
+                self._ole32.CoUninitialize()
+                
+        except Exception as e:
+            logger.error(f"   Erreur lors du déchargement: {e}")
+        
+        self.p_driver = None
+        self.vtable_ptr = None
+        self.driver_name = None
+        self.clsid = None
+        self.is_loaded = False
+        self.is_initialized = False
+        self._ole32 = None
+        
+        logger.info("   ✅ Driver déchargé")
+    
+    def get_info(self) -> Dict[str, Any]:
+        """Récupérer les informations du driver chargé"""
+        return {
+            "is_loaded": self.is_loaded,
+            "driver_name": self.driver_name,
+            "sample_rate": self.sample_rate,
+            "input_channels": self.input_channels,
+            "output_channels": self.output_channels,
+            "buffer_size": self.buffer_size
+        }
+
+
 class ASIODeviceManager:
     """
     Gestionnaire des périphériques audio ASIO
@@ -548,6 +817,9 @@ class ASIOBridgeServer:
         # Configuration par défaut
         self.config = ASIOConfig()
         
+        # Instance du driver ASIO chargé (reste actif)
+        self.asio_driver = ASIODriverInstance()
+        
         # Flux audio
         self.audio_stream: Optional[ASIOAudioStream] = None
         
@@ -986,10 +1258,21 @@ class ASIOBridgeServer:
         })
     
     async def _handle_set_config(self, client_id: str, data: dict):
-        """Configurer le flux audio"""
+        """
+        Configurer le flux audio
+        
+        Quand un driver ASIO est sélectionné, il est chargé immédiatement
+        pour qu'il apparaisse dans la barre des tâches Windows
+        """
         try:
-            if "device_name" in data:
-                self.config.device_name = data["device_name"]
+            driver_changed = False
+            new_device_name = data.get("device_name")
+            
+            # Vérifier si le driver a changé
+            if new_device_name and new_device_name != self.config.device_name:
+                driver_changed = True
+                self.config.device_name = new_device_name
+            
             if "sample_rate" in data:
                 self.config.sample_rate = int(data["sample_rate"])
             if "block_size" in data:
@@ -999,9 +1282,28 @@ class ASIOBridgeServer:
             if "output_channels" in data:
                 self.config.output_channels = int(data["output_channels"])
             
+            # Si le driver a changé, charger le nouveau driver ASIO
+            driver_loaded = False
+            driver_info = {}
+            
+            if driver_changed and self.config.device_name:
+                logger.info(f"🔄 Changement de driver ASIO: {self.config.device_name}")
+                
+                # Charger le driver (il restera actif et apparaîtra dans la barre des tâches)
+                driver_loaded = self.asio_driver.load(self.config.device_name)
+                
+                if driver_loaded:
+                    driver_info = self.asio_driver.get_info()
+                    # Mettre à jour la config avec les infos du driver
+                    self.config.input_channels = self.asio_driver.input_channels
+                    self.config.output_channels = self.asio_driver.output_channels
+                    self.config.sample_rate = self.asio_driver.sample_rate
+            
             await self._send(client_id, {
                 "action": "CONFIG_SET",
                 "success": True,
+                "driver_loaded": driver_loaded,
+                "driver_info": driver_info,
                 "config": {
                     "device_name": self.config.device_name,
                     "sample_rate": self.config.sample_rate,
@@ -1012,6 +1314,9 @@ class ASIOBridgeServer:
             })
             
         except Exception as e:
+            logger.error(f"Erreur SET_CONFIG: {e}")
+            import traceback
+            traceback.print_exc()
             await self._send(client_id, {
                 "action": "CONFIG_SET",
                 "success": False,

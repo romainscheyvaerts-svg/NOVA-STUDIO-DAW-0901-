@@ -15,11 +15,16 @@ dist-ssr
 # Environment variables
 .env
 
-# Local-only files (VST bridge, Python server - too large for GitHub)
-bridge-python/
-nova-vst-host/
+# Local-only files (VST native host - binary files too large for GitHub)
+nova-vst-host/build/
+nova-vst-host/JUCE/
+nova-vst-host/*.exe
 START_VST_BRIDGE.bat
 start_nova_vst_host.bat
+
+# Python cache
+bridge-python/__pycache__/
+bridge-python/*.pyc
 .env.local
 .env.production
 
