@@ -486,7 +486,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                             </p>
                                             <div className="flex items-center space-x-2">
                                                 <a
-                                                    href="https://github.com/romainscheyvaerts-svg/NOVA-STUDIO-DAW-0901-/releases/latest/download/NovaASIOBridge.exe"
+                                                    href="https://github.com/romainscheyvaerts-svg/NOVA-STUDIO-DAW-0901-/releases/download/v1.0.0-asio-bridge/NovaASIOBridge.exe"
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all flex items-center space-x-2"
