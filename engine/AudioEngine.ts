@@ -164,6 +164,63 @@ export class AudioEngine {
     this.previewAnalyzer.fftSize = 256; 
     this.previewGain.connect(this.previewAnalyzer);
     this.previewAnalyzer.connect(this.ctx.destination);
+
+    // Auto-connect to ASIO Bridge if available (Windows only)
+    // This allows users who have installed the bridge to have it connect automatically
+    this.tryAutoConnectASIO();
+  }
+
+  /**
+   * Tente de se connecter automatiquement au bridge ASIO si disponible.
+   * N'affiche pas d'erreur si le bridge n'est pas disponible.
+   * Sauvegarde/restaure l'état de connexion dans localStorage.
+   */
+  private async tryAutoConnectASIO(): Promise<void> {
+    // Check if user previously had ASIO connected
+    const wasASIOEnabled = localStorage.getItem('nova_asio_autoconnect') === 'true';
+    
+    if (!wasASIOEnabled) {
+      // User hasn't enabled auto-connect, skip
+      return;
+    }
+
+    try {
+      console.log('[AudioEngine] Tentative de connexion automatique au bridge ASIO...');
+      const connected = await this.connectASIO();
+      
+      if (connected) {
+        console.log('[AudioEngine] ✅ Auto-connexion ASIO réussie!');
+        
+        // Restore last selected device if any
+        const lastDevice = localStorage.getItem('nova_asio_device');
+        if (lastDevice) {
+          setTimeout(() => {
+            const devices = this.getASIODevices();
+            if (devices.some(d => d.name === lastDevice)) {
+              this.configureASIO({ device_name: lastDevice });
+              console.log(`[AudioEngine] Device ASIO restauré: ${lastDevice}`);
+            }
+          }, 1000);
+        }
+      }
+    } catch (e) {
+      // Silently fail - bridge is simply not running
+      console.log('[AudioEngine] Bridge ASIO non disponible (auto-connect ignoré)');
+    }
+  }
+
+  /**
+   * Active/désactive l'auto-connexion au bridge ASIO
+   */
+  public setASIOAutoConnect(enabled: boolean): void {
+    localStorage.setItem('nova_asio_autoconnect', enabled ? 'true' : 'false');
+  }
+
+  /**
+   * Sauvegarde le device ASIO sélectionné pour le restaurer au prochain démarrage
+   */
+  public saveASIODevice(deviceName: string): void {
+    localStorage.setItem('nova_asio_device', deviceName);
   }
 
   public getAudioBuffer(clipId: string): AudioBuffer | undefined {

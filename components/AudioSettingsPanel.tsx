@@ -157,6 +157,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
       if (asioConnected) {
           // Disconnect
           audioEngine.disconnectASIO();
+          audioEngine.setASIOAutoConnect(false); // Disable auto-connect when user disconnects
           setAsioConnected(false);
           setAsioStreamActive(false);
           setAsioDevices([]);
@@ -170,6 +171,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
               const connected = await audioEngine.connectASIO();
               if (connected) {
                   setAsioConnected(true);
+                  audioEngine.setASIOAutoConnect(true); // Enable auto-connect for next session
                   // Wait a bit for devices to be fetched
                   setTimeout(() => {
                       const devices = audioEngine.getASIODevices();
@@ -193,6 +195,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
   const handleAsioDeviceChange = (deviceName: string) => {
       setSelectedAsioDevice(deviceName);
       audioEngine.configureASIO({ device_name: deviceName });
+      audioEngine.saveASIODevice(deviceName); // Save for auto-restore on next session
   };
 
   const handleAsioBlockSizeChange = (blockSize: number) => {
@@ -466,11 +469,44 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
 
                         {/* Instructions when not connected */}
                         {!asioConnected && (
-                            <div className="mt-3 p-3 bg-black/20 rounded-lg">
-                                <p className="text-[9px] text-slate-400 leading-relaxed">
-                                    <i className="fas fa-info-circle text-purple-400 mr-1"></i>
-                                    Run <code className="bg-black/40 px-1 py-0.5 rounded text-purple-300">bridge-python/start_asio_bridge.bat</code> first, then connect.
-                                </p>
+                            <div className="mt-3 space-y-3">
+                                {/* Download Bridge Section */}
+                                <div className="p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20 rounded-xl">
+                                    <div className="flex items-start space-x-3">
+                                        <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center shrink-0">
+                                            <i className="fas fa-download text-purple-400"></i>
+                                        </div>
+                                        <div className="flex-1">
+                                            <h4 className="text-[11px] font-bold text-white mb-1">
+                                                Nova ASIO Bridge for Windows
+                                            </h4>
+                                            <p className="text-[9px] text-slate-400 leading-relaxed mb-3">
+                                                Install the ASIO Bridge for ultra-low latency audio. 
+                                                Once installed, it will start automatically when you open Nova Studio.
+                                            </p>
+                                            <div className="flex items-center space-x-2">
+                                                <a
+                                                    href="https://github.com/romainscheyvaerts-svg/NOVA-STUDIO-DAW-0901-/releases/latest/download/NovaASIOBridge.exe"
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all flex items-center space-x-2"
+                                                >
+                                                    <i className="fas fa-download"></i>
+                                                    <span>Download Bridge</span>
+                                                </a>
+                                                <span className="text-[8px] text-slate-500">~30 MB • Windows 10/11</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Manual run instructions */}
+                                <div className="p-3 bg-black/20 rounded-lg">
+                                    <p className="text-[9px] text-slate-400 leading-relaxed">
+                                        <i className="fas fa-terminal text-purple-400 mr-1"></i>
+                                        <strong className="text-slate-300">Already have it?</strong> Run <code className="bg-black/40 px-1 py-0.5 rounded text-purple-300">NovaASIOBridge.exe</code> then click Connect above.
+                                    </p>
+                                </div>
                             </div>
                         )}
                     </div>
