@@ -389,7 +389,13 @@ export default function App() {
   }, [showLanding, pendingProject, pendingAudioFile, pendingInstrumental]);
 
   const initialState: DAWState = {
-    id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM, isPlaying: false, isRecording: false, currentTime: 0,
+    id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM,
+    timeSignature: { numerator: 4, denominator: 4 },
+    trackGroups: [],
+    markers: [],
+    metronome: { enabled: false, volume: 0.6, countIn: 0, accentDownbeat: true, sound: 'CLICK' },
+    punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 },
+    isPlaying: false, isRecording: false, currentTime: 0,
     isLoopActive: false, loopStart: 0, loopEnd: 8,
     tracks: [
       { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
@@ -478,7 +484,7 @@ export default function App() {
     try {
       setSaveState(s => ({ ...s, progress: 30, message: 'Sauvegarde cloud...' }));
       const stateToSave = { ...stateRef.current, name: projectName };
-      await supabaseManager.saveUserSession(stateToSave, projectName);
+      await supabaseManager.saveUserSession(stateToSave);
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Sauvegardé !' }));
       setState(prev => ({ ...prev, name: projectName }));
       setAiNotification(`✅ Projet "${projectName}" sauvegardé dans le cloud`);
@@ -500,7 +506,7 @@ export default function App() {
       const copyName = `${n} (Copy)`;
       const stateToSave = { ...stateRef.current, id: `proj-${Date.now()}`, name: copyName };
       setSaveState(s => ({ ...s, progress: 50, message: 'Sauvegarde...' }));
-      await supabaseManager.saveUserSession(stateToSave, copyName, true);
+      await supabaseManager.saveUserSession(stateToSave);
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Copie créée !' }));
       setAiNotification(`✅ Copie "${copyName}" créée dans le cloud`);
     } catch (e: any) {
@@ -682,7 +688,7 @@ export default function App() {
         if (isVolumeOnlyChange || isPanOnlyChange) {
             // Use atomic methods for better performance
             if (isVolumeOnlyChange) {
-                audioEngine.setTrackVolume(updatedTrack.id, updatedTrack.volume);
+                audioEngine.setTrackVolume(updatedTrack.id, updatedTrack.volume, updatedTrack.isMuted);
             }
             if (isPanOnlyChange) {
                 audioEngine.setTrackPan(updatedTrack.id, updatedTrack.pan);
