@@ -617,13 +617,40 @@ export default function App() {
     if (action === 'OPEN_PITCH_EDITOR') {
       const targetTrack = stateRef.current.tracks.find(t => t.id === trackId);
       const targetClip = targetTrack?.clips.find(c => c.id === clipId);
-      if (!targetClip || !targetClip.bufferId) {
-        setAiNotification('⚠️ Aucun audio disponible pour ce clip.');
+      if (!targetClip) {
+        setAiNotification('⚠️ Clip introuvable.');
         return;
       }
-      ensureAudioEngine().then(() => {
-        setPitchEditorTarget({ trackId, clipId });
-      });
+      const openEditor = async () => {
+        await ensureAudioEngine();
+        let bufferId = targetClip.bufferId;
+        if (bufferId && audioBufferRegistry.has(bufferId)) {
+          setPitchEditorTarget({ trackId, clipId });
+          return;
+        }
+        // Fallback: try loading from audioRef into the registry
+        if (targetClip.audioRef && audioEngine.ctx) {
+          try {
+            const resp = await fetch(targetClip.audioRef);
+            const arr = await resp.arrayBuffer();
+            const decoded = await audioEngine.ctx.decodeAudioData(arr);
+            const newId = bufferId || `clip-buf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            audioBufferRegistry.register(decoded, newId);
+            setState(produce((draft: DAWState) => {
+              const t = draft.tracks.find(t => t.id === trackId);
+              const c = t?.clips.find(cl => cl.id === clipId);
+              if (c) c.bufferId = newId;
+            }));
+            setPitchEditorTarget({ trackId, clipId });
+            return;
+          } catch (e) {
+            console.error('[handleEditClip] decode audioRef failed', e);
+          }
+        }
+        setAiNotification('⚠️ Aucun audio disponible pour ce clip.');
+        setTimeout(() => setAiNotification(null), 2500);
+      };
+      openEditor();
       return;
     }
     setState(produce((draft: DAWState) => {
@@ -749,9 +776,33 @@ export default function App() {
   }, [setVisualState]);
 
   const handleStop = useCallback(async () => {
+    const wasRecording = stateRef.current.isRecording;
     audioEngine.stopAll();
+    if (wasRecording) {
+      // Save the take instead of dropping it when the user hits Stop
+      const result = await audioEngine.stopRecording();
+      if (result && result.clip.buffer) {
+        const clip = result.clip;
+        const clipId = clip.id;
+        audioBufferRegistry.registerWithUrl(clip.buffer, clip.audioRef!, clipId);
+        const newClip: Clip = { ...clip, bufferId: clipId };
+        delete newClip.buffer;
+        setState(produce(draft => {
+          const track = draft.tracks.find(t => t.id === result.trackId);
+          if (track) track.clips.push(newClip);
+          draft.isRecording = false;
+          draft.recStartTime = null;
+          draft.isPlaying = false;
+          draft.currentTime = 0;
+        }));
+        audioEngine.seekTo(0, stateRef.current.tracks, false);
+        return;
+      }
+      // No usable take – ensure recorder/state are flushed so REC works again
+      await audioEngine.cancelRecording();
+    }
     audioEngine.seekTo(0, stateRef.current.tracks, false);
-    setState(prev => ({ ...prev, isPlaying: false, currentTime: 0, isRecording: false }));
+    setState(prev => ({ ...prev, isPlaying: false, currentTime: 0, isRecording: false, recStartTime: null }));
   }, [setState]);
 
   const handleToggleRecord = useCallback(async () => {
@@ -785,7 +836,13 @@ export default function App() {
   
     const armedTrack = currentState.tracks.find(t => t.isTrackArmed);
     if (armedTrack) {
-      const success = await audioEngine.startRecording(currentState.currentTime, armedTrack.id);
+      let success = await audioEngine.startRecording(currentState.currentTime, armedTrack.id);
+      if (!success) {
+        // Engine got stuck in a recording state from a previous take – clean up and retry once
+        await audioEngine.cancelRecording();
+        await audioEngine.armTrack(armedTrack.id);
+        success = await audioEngine.startRecording(currentState.currentTime, armedTrack.id);
+      }
       if (success) {
         audioEngine.startPlayback(currentState.currentTime, currentState.tracks);
         setState(produce(draft => {
@@ -793,6 +850,9 @@ export default function App() {
           draft.isPlaying = true;
           draft.recStartTime = draft.currentTime;
         }));
+      } else {
+        setAiNotification("⚠️ Impossible de démarrer l'enregistrement. Réarmez la piste.");
+        setTimeout(() => setAiNotification(null), 3000);
       }
     } else {
       setNoArmedTrackError(true);

@@ -487,23 +487,37 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           </div>
       )}
 
-      <div className="mt-2 grid grid-cols-4 gap-1">
+      <div className="mt-2 flex items-center justify-between px-1">
+        <span className="text-[8px] font-black text-slate-600 uppercase tracking-[0.25em]">Inserts</span>
+        {onRequestAddPlugin && !track.isFrozen && (
+          <button
+            onClick={handleEmptySlotClick}
+            onTouchStart={(e) => { e.preventDefault(); handleEmptySlotClick(e); }}
+            className="text-[8px] uppercase font-black tracking-widest text-slate-500 hover:text-cyan-400 transition-colors flex items-center gap-1"
+            title="Ajouter un plugin"
+          >
+            <i className="fas fa-plus text-[7px]"></i>
+            <span>Ajouter</span>
+          </button>
+        )}
+      </div>
+      <div className="mt-1 grid grid-cols-4 gap-1">
         {insertPlugins.map(p => (
-          <div 
-            key={p.id} 
+          <div
+            key={p.id}
             draggable={!track.isFrozen}
             onDragStart={(e) => { if (track.isFrozen) return; e.stopPropagation(); handleFXDragStart(e, p.id); }}
             className={`relative group/fxitem flex flex-col items-center fx-slot ${track.isFrozen ? 'pointer-events-none opacity-40' : ''}`}
           >
             <div className="flex w-full overflow-hidden rounded-md border border-white/5 bg-black/40">
-              <button 
+              <button
                 onClick={(e) => handleFXClick(e, p)}
                 onTouchStart={(e) => handleFXClick(e, p)}
                 className={`flex-1 h-6 text-[7px] font-black uppercase truncate px-1 text-center flex items-center justify-center transition-all ${p.isEnabled ? 'text-cyan-400' : 'text-slate-700 bg-black/20'}`}
               >
                 {getAbbr(p.type, p.name)}
               </button>
-              <button 
+              <button
                 onClick={(e) => togglePluginBypass(e, p)}
                 onTouchStart={(e) => togglePluginBypass(e, p)}
                 className={`w-4 h-6 flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/40' : 'bg-white/5 text-slate-800'}`}
@@ -514,6 +528,17 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <button onClick={(e) => handleRemoveFX(e, p.id)} onTouchStart={(e) => handleRemoveFX(e, p.id)} className="delete-fx"><i className="fas fa-times"></i></button>
           </div>
         ))}
+        {/* Empty slot to add a plugin */}
+        {onRequestAddPlugin && !track.isFrozen && (
+          <button
+            onClick={handleEmptySlotClick}
+            onTouchStart={(e) => { e.preventDefault(); handleEmptySlotClick(e); }}
+            className="h-6 rounded-md border border-dashed border-white/10 hover:border-cyan-500/50 hover:bg-cyan-500/5 text-slate-600 hover:text-cyan-400 transition-all flex items-center justify-center"
+            title="Ajouter un plugin"
+          >
+            <i className="fas fa-plus text-[8px]"></i>
+          </button>
+        )}
       </div>
     </div>
   );

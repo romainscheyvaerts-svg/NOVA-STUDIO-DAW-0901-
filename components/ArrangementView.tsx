@@ -940,6 +940,10 @@ useEffect(() => {
         <ContextMenu
             x={clipContextMenu.x} y={clipContextMenu.y} onClose={() => setClipContextMenu(null)}
             items={[
+                ...(clipContextMenu.clip.type === TrackType.AUDIO ? [
+                    { label: 'Vocal Pitch (Melodyne)', icon: 'fa-microphone-alt', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'OPEN_PITCH_EDITOR'); setClipContextMenu(null); }},
+                    'separator' as const,
+                ] : []),
                 { label: 'Couper', icon: 'fa-cut', shortcut: 'Ctrl+X', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'CUT'); setClipContextMenu(null); }},
                 { label: 'Copier', icon: 'fa-copy', shortcut: 'Ctrl+C', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'COPY'); setClipContextMenu(null); }},
                 { label: 'Coller', icon: 'fa-paste', shortcut: 'Ctrl+V', onClick: () => { onEditClip?.(clipContextMenu.trackId, '', 'PASTE', { time: currentTime }); setClipContextMenu(null); }},
@@ -947,10 +951,6 @@ useEffect(() => {
                 { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE'); setClipContextMenu(null); }},
                 { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: currentTime }); setClipContextMenu(null); }},
                 'separator',
-                ...(clipContextMenu.clip.type === TrackType.AUDIO && (clipContextMenu.clip.bufferId || clipContextMenu.clip.audioRef) ? [
-                    { label: 'Éditeur de hauteur (Melodyne)', icon: 'fa-microphone-alt', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'OPEN_PITCH_EDITOR'); setClipContextMenu(null); }},
-                    'separator' as const,
-                ] : []),
                 { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
                 'separator',
                 { label: 'Supprimer', icon: 'fa-trash', shortcut: 'Suppr', danger: true, onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DELETE'); setClipContextMenu(null); }}
