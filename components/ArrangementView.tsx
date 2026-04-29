@@ -947,6 +947,10 @@ useEffect(() => {
                 { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE'); setClipContextMenu(null); }},
                 { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: currentTime }); setClipContextMenu(null); }},
                 'separator',
+                ...(clipContextMenu.clip.type === TrackType.AUDIO && (clipContextMenu.clip.bufferId || clipContextMenu.clip.audioRef) ? [
+                    { label: 'Éditeur de hauteur (Melodyne)', icon: 'fa-microphone-alt', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'OPEN_PITCH_EDITOR'); setClipContextMenu(null); }},
+                    'separator' as const,
+                ] : []),
                 { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
                 'separator',
                 { label: 'Supprimer', icon: 'fa-trash', shortcut: 'Suppr', danger: true, onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DELETE'); setClipContextMenu(null); }}

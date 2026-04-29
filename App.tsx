@@ -38,6 +38,7 @@ import MobilePluginsPage from './components/MobilePluginsPage';
 import MobileBrowserPage from './components/MobileBrowserPage';
 import MobileBottomNav from './components/MobileBottomNav';
 import LandingPage from './components/LandingPage';
+import VocalPitchEditor from './components/VocalPitchEditor';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -449,6 +450,7 @@ export default function App() {
   }, [state.isPlaying, setVisualState]);
 
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
+  const [pitchEditorTarget, setPitchEditorTarget] = useState<{ trackId: string; clipId: string } | null>(null);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);
   const [aiNotification, setAiNotification] = useState<string | null>(null);
   const [addPluginMenu, setAddPluginMenu] = useState<{ trackId: string, x: number, y: number } | null>(null);
@@ -612,6 +614,18 @@ export default function App() {
   const handleExportMix = async () => { setIsExportMenuOpen(true); };
 
   const handleEditClip = (trackId: string, clipId: string, action: string, payload?: any) => {
+    if (action === 'OPEN_PITCH_EDITOR') {
+      const targetTrack = stateRef.current.tracks.find(t => t.id === trackId);
+      const targetClip = targetTrack?.clips.find(c => c.id === clipId);
+      if (!targetClip || !targetClip.bufferId) {
+        setAiNotification('⚠️ Aucun audio disponible pour ce clip.');
+        return;
+      }
+      ensureAudioEngine().then(() => {
+        setPitchEditorTarget({ trackId, clipId });
+      });
+      return;
+    }
     setState(produce((draft: DAWState) => {
       const track = draft.tracks.find(t => t.id === trackId);
       if (!track) return;
@@ -1470,6 +1484,42 @@ export default function App() {
 
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
+
+      {pitchEditorTarget && (() => {
+        const targetTrack = state.tracks.find(t => t.id === pitchEditorTarget.trackId);
+        const targetClip = targetTrack?.clips.find(c => c.id === pitchEditorTarget.clipId);
+        if (!targetClip || !targetClip.bufferId) {
+          setTimeout(() => setPitchEditorTarget(null), 0);
+          return null;
+        }
+        return (
+          <VocalPitchEditor
+            clipName={targetClip.name}
+            bufferId={targetClip.bufferId}
+            bpm={state.bpm}
+            initialKey={state.projectKey ?? 0}
+            initialScale={state.projectScale ?? 'CHROMATIC'}
+            onClose={() => setPitchEditorTarget(null)}
+            onApply={(newBufferId, newAudioRef) => {
+              setState(produce((draft: DAWState) => {
+                const t = draft.tracks.find(t => t.id === pitchEditorTarget.trackId);
+                if (!t) return;
+                const c = t.clips.find(cl => cl.id === pitchEditorTarget.clipId);
+                if (!c) return;
+                if (c.bufferId && c.bufferId !== newBufferId) {
+                  audioBufferRegistry.remove(c.bufferId);
+                }
+                c.bufferId = newBufferId;
+                c.audioRef = newAudioRef;
+                c.name = `${c.name.replace(/\s*\(tuned\)$/i, '')} (tuned)`;
+              }));
+              setPitchEditorTarget(null);
+              setAiNotification('✅ Hauteur corrigée appliquée au clip');
+              setTimeout(() => setAiNotification(null), 2500);
+            }}
+          />
+        );
+      })()}
       
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
         <ChatAssistant
