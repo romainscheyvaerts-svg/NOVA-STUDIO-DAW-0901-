@@ -179,12 +179,13 @@ export class VocalSaturatorNode {
 interface VocalSaturationUIProps {
   node: VocalSaturatorNode;
   initialParams: SaturatorParams;
+  onParamsChange?: (params: Record<string, any>) => void;
 }
 
 /**
  * VOCAL SATURATION UI (Converted to Functional Component for fix)
  */
-export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initialParams }) => {
+export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initialParams, onParamsChange }) => {
   const [params, setParams] = useState<SaturatorParams>(initialParams);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDragging = useRef(false);
@@ -274,9 +275,10 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
       const newVal = Math.max(min, Math.min(max, current + delta * (max - min)));
       const newParams = { ...prev, [activeParam.current!]: newVal };
       node.updateParams(newParams);
+      onParamsChange?.({ [activeParam.current!]: newVal });
       return newParams;
     });
-  }, [node]);
+  }, [node, onParamsChange]);
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     if (!isDragging.current || !activeParam.current || e.touches.length === 0) return;
@@ -299,9 +301,10 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
       const newVal = Math.max(min, Math.min(max, current + delta * (max - min)));
       const newParams = { ...prev, [activeParam.current!]: newVal };
       node.updateParams(newParams);
+      onParamsChange?.({ [activeParam.current!]: newVal });
       return newParams;
     });
-  }, [node]);
+  }, [node, onParamsChange]);
 
   const handleMouseUp = useCallback(() => {
     isDragging.current = false;
@@ -347,6 +350,7 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
     const newParams = { ...params, mode };
     setParams(newParams);
     node.updateParams(newParams);
+    onParamsChange?.({ mode });
   };
 
   const togglePower = () => {
@@ -354,6 +358,7 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
     const newParams = { ...params, isEnabled };
     setParams(newParams);
     node.updateParams(newParams);
+    onParamsChange?.({ isEnabled });
   };
 
   return (

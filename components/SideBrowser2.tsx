@@ -162,7 +162,7 @@ const FXTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadat
 
 
 // --- Composant Principal ---
-const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onLocalImport, onAddPlugin, onPurchase, activeTab, onTabChange, selectedTrackId }) => {
+const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurchase, activeTab, onTabChange, selectedTrackId }) => {
   return (
     <div className="w-80 h-full flex flex-col bg-[#0c0d10] border-r border-white/5 shadow-2xl">
       {/* Tab Bar */}

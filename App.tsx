@@ -38,6 +38,7 @@ import MobilePluginsPage from './components/MobilePluginsPage';
 import MobileBrowserPage from './components/MobileBrowserPage';
 import MobileBottomNav from './components/MobileBottomNav';
 import LandingPage from './components/LandingPage';
+import VocalPitchEditor from './components/VocalPitchEditor';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -389,7 +390,13 @@ export default function App() {
   }, [showLanding, pendingProject, pendingAudioFile, pendingInstrumental]);
 
   const initialState: DAWState = {
-    id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM, isPlaying: false, isRecording: false, currentTime: 0,
+    id: 'proj-1', name: 'STUDIO_SESSION', bpm: AUDIO_CONFIG.DEFAULT_BPM,
+    timeSignature: { numerator: 4, denominator: 4 },
+    trackGroups: [],
+    markers: [],
+    metronome: { enabled: false, volume: 0.6, countIn: 0, accentDownbeat: true, sound: 'CLICK' },
+    punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 },
+    isPlaying: false, isRecording: false, currentTime: 0,
     isLoopActive: false, loopStart: 0, loopEnd: 8,
     tracks: [
       { id: 'instrumental', name: 'BEAT', type: TrackType.AUDIO, color: '#eab308', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.7, pan: 0, outputTrackId: 'master', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#eab308')], totalLatency: 0 },
@@ -443,6 +450,7 @@ export default function App() {
   }, [state.isPlaying, setVisualState]);
 
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
+  const [pitchEditorTarget, setPitchEditorTarget] = useState<{ trackId: string; clipId: string } | null>(null);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);
   const [aiNotification, setAiNotification] = useState<string | null>(null);
   const [addPluginMenu, setAddPluginMenu] = useState<{ trackId: string, x: number, y: number } | null>(null);
@@ -478,7 +486,7 @@ export default function App() {
     try {
       setSaveState(s => ({ ...s, progress: 30, message: 'Sauvegarde cloud...' }));
       const stateToSave = { ...stateRef.current, name: projectName };
-      await supabaseManager.saveUserSession(stateToSave, projectName);
+      await supabaseManager.saveUserSession(stateToSave);
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Sauvegardé !' }));
       setState(prev => ({ ...prev, name: projectName }));
       setAiNotification(`✅ Projet "${projectName}" sauvegardé dans le cloud`);
@@ -500,7 +508,7 @@ export default function App() {
       const copyName = `${n} (Copy)`;
       const stateToSave = { ...stateRef.current, id: `proj-${Date.now()}`, name: copyName };
       setSaveState(s => ({ ...s, progress: 50, message: 'Sauvegarde...' }));
-      await supabaseManager.saveUserSession(stateToSave, copyName, true);
+      await supabaseManager.saveUserSession(stateToSave);
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Copie créée !' }));
       setAiNotification(`✅ Copie "${copyName}" créée dans le cloud`);
     } catch (e: any) {
@@ -606,6 +614,45 @@ export default function App() {
   const handleExportMix = async () => { setIsExportMenuOpen(true); };
 
   const handleEditClip = (trackId: string, clipId: string, action: string, payload?: any) => {
+    if (action === 'OPEN_PITCH_EDITOR') {
+      const targetTrack = stateRef.current.tracks.find(t => t.id === trackId);
+      const targetClip = targetTrack?.clips.find(c => c.id === clipId);
+      if (!targetClip) {
+        setAiNotification('⚠️ Clip introuvable.');
+        return;
+      }
+      const openEditor = async () => {
+        await ensureAudioEngine();
+        let bufferId = targetClip.bufferId;
+        if (bufferId && audioBufferRegistry.has(bufferId)) {
+          setPitchEditorTarget({ trackId, clipId });
+          return;
+        }
+        // Fallback: try loading from audioRef into the registry
+        if (targetClip.audioRef && audioEngine.ctx) {
+          try {
+            const resp = await fetch(targetClip.audioRef);
+            const arr = await resp.arrayBuffer();
+            const decoded = await audioEngine.ctx.decodeAudioData(arr);
+            const newId = bufferId || `clip-buf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            audioBufferRegistry.register(decoded, newId);
+            setState(produce((draft: DAWState) => {
+              const t = draft.tracks.find(t => t.id === trackId);
+              const c = t?.clips.find(cl => cl.id === clipId);
+              if (c) c.bufferId = newId;
+            }));
+            setPitchEditorTarget({ trackId, clipId });
+            return;
+          } catch (e) {
+            console.error('[handleEditClip] decode audioRef failed', e);
+          }
+        }
+        setAiNotification('⚠️ Aucun audio disponible pour ce clip.');
+        setTimeout(() => setAiNotification(null), 2500);
+      };
+      openEditor();
+      return;
+    }
     setState(produce((draft: DAWState) => {
       const track = draft.tracks.find(t => t.id === trackId);
       if (!track) return;
@@ -682,7 +729,7 @@ export default function App() {
         if (isVolumeOnlyChange || isPanOnlyChange) {
             // Use atomic methods for better performance
             if (isVolumeOnlyChange) {
-                audioEngine.setTrackVolume(updatedTrack.id, updatedTrack.volume);
+                audioEngine.setTrackVolume(updatedTrack.id, updatedTrack.volume, updatedTrack.isMuted);
             }
             if (isPanOnlyChange) {
                 audioEngine.setTrackPan(updatedTrack.id, updatedTrack.pan);
@@ -729,9 +776,33 @@ export default function App() {
   }, [setVisualState]);
 
   const handleStop = useCallback(async () => {
+    const wasRecording = stateRef.current.isRecording;
     audioEngine.stopAll();
+    if (wasRecording) {
+      // Save the take instead of dropping it when the user hits Stop
+      const result = await audioEngine.stopRecording();
+      if (result && result.clip.buffer) {
+        const clip = result.clip;
+        const clipId = clip.id;
+        audioBufferRegistry.registerWithUrl(clip.buffer, clip.audioRef!, clipId);
+        const newClip: Clip = { ...clip, bufferId: clipId };
+        delete newClip.buffer;
+        setState(produce(draft => {
+          const track = draft.tracks.find(t => t.id === result.trackId);
+          if (track) track.clips.push(newClip);
+          draft.isRecording = false;
+          draft.recStartTime = null;
+          draft.isPlaying = false;
+          draft.currentTime = 0;
+        }));
+        audioEngine.seekTo(0, stateRef.current.tracks, false);
+        return;
+      }
+      // No usable take – ensure recorder/state are flushed so REC works again
+      await audioEngine.cancelRecording();
+    }
     audioEngine.seekTo(0, stateRef.current.tracks, false);
-    setState(prev => ({ ...prev, isPlaying: false, currentTime: 0, isRecording: false }));
+    setState(prev => ({ ...prev, isPlaying: false, currentTime: 0, isRecording: false, recStartTime: null }));
   }, [setState]);
 
   const handleToggleRecord = useCallback(async () => {
@@ -765,7 +836,13 @@ export default function App() {
   
     const armedTrack = currentState.tracks.find(t => t.isTrackArmed);
     if (armedTrack) {
-      const success = await audioEngine.startRecording(currentState.currentTime, armedTrack.id);
+      let success = await audioEngine.startRecording(currentState.currentTime, armedTrack.id);
+      if (!success) {
+        // Engine got stuck in a recording state from a previous take – clean up and retry once
+        await audioEngine.cancelRecording();
+        await audioEngine.armTrack(armedTrack.id);
+        success = await audioEngine.startRecording(currentState.currentTime, armedTrack.id);
+      }
       if (success) {
         audioEngine.startPlayback(currentState.currentTime, currentState.tracks);
         setState(produce(draft => {
@@ -773,6 +850,9 @@ export default function App() {
           draft.isPlaying = true;
           draft.recStartTime = draft.currentTime;
         }));
+      } else {
+        setAiNotification("⚠️ Impossible de démarrer l'enregistrement. Réarmez la piste.");
+        setTimeout(() => setAiNotification(null), 3000);
       }
     } else {
       setNoArmedTrackError(true);
@@ -1464,6 +1544,42 @@ export default function App() {
 
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
+
+      {pitchEditorTarget && (() => {
+        const targetTrack = state.tracks.find(t => t.id === pitchEditorTarget.trackId);
+        const targetClip = targetTrack?.clips.find(c => c.id === pitchEditorTarget.clipId);
+        if (!targetClip || !targetClip.bufferId) {
+          setTimeout(() => setPitchEditorTarget(null), 0);
+          return null;
+        }
+        return (
+          <VocalPitchEditor
+            clipName={targetClip.name}
+            bufferId={targetClip.bufferId}
+            bpm={state.bpm}
+            initialKey={state.projectKey ?? 0}
+            initialScale={state.projectScale ?? 'CHROMATIC'}
+            onClose={() => setPitchEditorTarget(null)}
+            onApply={(newBufferId, newAudioRef) => {
+              setState(produce((draft: DAWState) => {
+                const t = draft.tracks.find(t => t.id === pitchEditorTarget.trackId);
+                if (!t) return;
+                const c = t.clips.find(cl => cl.id === pitchEditorTarget.clipId);
+                if (!c) return;
+                if (c.bufferId && c.bufferId !== newBufferId) {
+                  audioBufferRegistry.remove(c.bufferId);
+                }
+                c.bufferId = newBufferId;
+                c.audioRef = newAudioRef;
+                c.name = `${c.name.replace(/\s*\(tuned\)$/i, '')} (tuned)`;
+              }));
+              setPitchEditorTarget(null);
+              setAiNotification('✅ Hauteur corrigée appliquée au clip');
+              setTimeout(() => setAiNotification(null), 2500);
+            }}
+          />
+        );
+      })()}
       
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
         <ChatAssistant

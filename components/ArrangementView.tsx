@@ -940,6 +940,10 @@ useEffect(() => {
         <ContextMenu
             x={clipContextMenu.x} y={clipContextMenu.y} onClose={() => setClipContextMenu(null)}
             items={[
+                ...(clipContextMenu.clip.type === TrackType.AUDIO ? [
+                    { label: 'Vocal Pitch (Melodyne)', icon: 'fa-microphone-alt', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'OPEN_PITCH_EDITOR'); setClipContextMenu(null); }},
+                    'separator' as const,
+                ] : []),
                 { label: 'Couper', icon: 'fa-cut', shortcut: 'Ctrl+X', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'CUT'); setClipContextMenu(null); }},
                 { label: 'Copier', icon: 'fa-copy', shortcut: 'Ctrl+C', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'COPY'); setClipContextMenu(null); }},
                 { label: 'Coller', icon: 'fa-paste', shortcut: 'Ctrl+V', onClick: () => { onEditClip?.(clipContextMenu.trackId, '', 'PASTE', { time: currentTime }); setClipContextMenu(null); }},

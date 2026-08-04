@@ -476,16 +476,38 @@ export class AudioEngine {
 
   public async startRecording(currentTime: number, trackId: string): Promise<boolean> {
     console.log("[AudioEngine] startRecording called - stream:", !!this.activeMonitorStream, "recording:", this.recordingTrackId);
-    
+
+    // Always guarantee a live, connected monitor stream on the requested track.
+    // Rebuilding the track graph (updateTrack) between takes disconnects the
+    // monitor node from dsp.input, so we defensively reconnect (or reacquire)
+    // right before every recording.
+    const streamUsable = this.activeMonitorStream
+      && this.activeMonitorStream.getAudioTracks().some(t => t.readyState === 'live');
+    if (!streamUsable || this.monitoringTrackId !== trackId) {
+      try {
+        await this.armTrack(trackId);
+      } catch (e) {
+        console.error("[AudioEngine] REC FAILED - could not re-arm:", e);
+        return false;
+      }
+    } else {
+      // Stream is fine – just make sure the monitor node is wired to the track
+      const dsp = this.tracksDSP.get(trackId);
+      if (dsp && this.monitorSource) {
+        try { this.monitorSource.disconnect(); } catch (e) {}
+        try { this.monitorSource.connect(dsp.input); } catch (e) {}
+      }
+    }
+
     if (!this.activeMonitorStream) {
-      console.error("[AudioEngine] REC FAILED - No monitor stream! Arm track first.");
+      console.error("[AudioEngine] REC FAILED - No monitor stream after arm!");
       return false;
     }
     if (this.recordingTrackId) {
       console.error("[AudioEngine] REC FAILED - Already recording on:", this.recordingTrackId);
       return false;
     }
-    
+
     try {
       this.mediaRecorder = new MediaRecorder(this.activeMonitorStream);
       this.audioChunks = [];
@@ -502,6 +524,7 @@ export class AudioEngine {
     } catch (e) {
       console.error("[AudioEngine] REC ERROR:", e);
       this.recordingTrackId = null;
+      this.mediaRecorder = null;
       return false;
     }
   }
@@ -510,20 +533,20 @@ export class AudioEngine {
     if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive' || !this.recordingTrackId) {
       return null;
     }
-    
+
     const trackIdToRearm = this.monitoringTrackId; // Sauvegarder pour ré-armement
-    
+
     return new Promise((resolve) => {
       this.mediaRecorder!.onstop = async () => {
         const trackId = this.recordingTrackId!;
         const blob = new Blob(this.audioChunks, { type: this.mediaRecorder!.mimeType });
-        
+
         // Reset recording state FIRST
         this.audioChunks = [];
         this.recordingTrackId = null;
         this.recStartTime = 0;
         this.mediaRecorder = null;
-        
+
         if (blob.size === 0) {
           // Ré-armer la piste pour permettre un nouvel enregistrement
           if (trackIdToRearm) {
@@ -532,7 +555,7 @@ export class AudioEngine {
           resolve(null);
           return;
         }
-        
+
         try {
           const arrayBuffer = await blob.arrayBuffer();
           const audioBuffer = await this.ctx!.decodeAudioData(arrayBuffer);
@@ -547,15 +570,15 @@ export class AudioEngine {
             type: TrackType.AUDIO,
             color: '#ff0000',
             audioRef: URL.createObjectURL(blob),
-            buffer: audioBuffer, 
+            buffer: audioBuffer,
           };
           console.log("[AudioEngine] Recording stopped. New clip created:", clipData);
-          
+
           // Ré-armer la piste pour permettre un nouvel enregistrement
           if (trackIdToRearm) {
             await this.rearmTrackForNextRecording(trackIdToRearm);
           }
-          
+
           resolve({ clip: clipData, trackId });
         } catch (e) {
           console.error("Error processing recorded audio:", e);
@@ -566,8 +589,48 @@ export class AudioEngine {
           resolve(null);
         }
       };
-      this.mediaRecorder.stop();
+      try {
+        this.mediaRecorder.stop();
+      } catch (e) {
+        console.warn('[AudioEngine] mediaRecorder.stop() threw, forcing cleanup', e);
+        // Best-effort cleanup so we don't stay stuck in "recording" state
+        const tid = this.recordingTrackId;
+        this.audioChunks = [];
+        this.recordingTrackId = null;
+        this.recStartTime = 0;
+        this.mediaRecorder = null;
+        if (trackIdToRearm) {
+          this.rearmTrackForNextRecording(trackIdToRearm).catch(() => {});
+        }
+        resolve(tid ? null : null);
+      }
     });
+  }
+
+  /**
+   * Force-cancel any active recording without producing a clip and re-arm
+   * the track so the user can record again. Safe to call when no recording
+   * is active.
+   */
+  public async cancelRecording(): Promise<void> {
+    if (!this.mediaRecorder && !this.recordingTrackId) return;
+    const trackIdToRearm = this.monitoringTrackId;
+    try {
+      if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+        // Replace onstop to avoid producing a clip when forcibly cancelled
+        this.mediaRecorder.onstop = () => {};
+        this.mediaRecorder.stop();
+      }
+    } catch (e) {
+      console.warn('[AudioEngine] cancelRecording: stop() threw', e);
+    }
+    this.audioChunks = [];
+    this.recordingTrackId = null;
+    this.recStartTime = 0;
+    this.mediaRecorder = null;
+    if (trackIdToRearm) {
+      try { await this.rearmTrackForNextRecording(trackIdToRearm); } catch {}
+    }
   }
 
   /**
@@ -1052,6 +1115,14 @@ export class AudioEngine {
     dsp.gain.connect(dsp.panner);
     dsp.panner.connect(dsp.analyzer);
     dsp.analyzer.connect(dsp.output);
+
+    // If this track is currently being monitored (armed for recording), the
+    // dsp.input.disconnect() above wiped the monitor node's audio-graph link.
+    // Reconnect it so the user keeps hearing themselves between takes.
+    if (this.monitoringTrackId === track.id && this.monitorSource) {
+      try { this.monitorSource.disconnect(); } catch (e) {}
+      try { this.monitorSource.connect(dsp.input); } catch (e) {}
+    }
 
     // Fade in after rebuilding the audio graph
     const targetVolume = track.isMuted ? 0 : track.volume;
