@@ -476,16 +476,38 @@ export class AudioEngine {
 
   public async startRecording(currentTime: number, trackId: string): Promise<boolean> {
     console.log("[AudioEngine] startRecording called - stream:", !!this.activeMonitorStream, "recording:", this.recordingTrackId);
-    
+
+    // Always guarantee a live, connected monitor stream on the requested track.
+    // Rebuilding the track graph (updateTrack) between takes disconnects the
+    // monitor node from dsp.input, so we defensively reconnect (or reacquire)
+    // right before every recording.
+    const streamUsable = this.activeMonitorStream
+      && this.activeMonitorStream.getAudioTracks().some(t => t.readyState === 'live');
+    if (!streamUsable || this.monitoringTrackId !== trackId) {
+      try {
+        await this.armTrack(trackId);
+      } catch (e) {
+        console.error("[AudioEngine] REC FAILED - could not re-arm:", e);
+        return false;
+      }
+    } else {
+      // Stream is fine – just make sure the monitor node is wired to the track
+      const dsp = this.tracksDSP.get(trackId);
+      if (dsp && this.monitorSource) {
+        try { this.monitorSource.disconnect(); } catch (e) {}
+        try { this.monitorSource.connect(dsp.input); } catch (e) {}
+      }
+    }
+
     if (!this.activeMonitorStream) {
-      console.error("[AudioEngine] REC FAILED - No monitor stream! Arm track first.");
+      console.error("[AudioEngine] REC FAILED - No monitor stream after arm!");
       return false;
     }
     if (this.recordingTrackId) {
       console.error("[AudioEngine] REC FAILED - Already recording on:", this.recordingTrackId);
       return false;
     }
-    
+
     try {
       this.mediaRecorder = new MediaRecorder(this.activeMonitorStream);
       this.audioChunks = [];
@@ -502,6 +524,7 @@ export class AudioEngine {
     } catch (e) {
       console.error("[AudioEngine] REC ERROR:", e);
       this.recordingTrackId = null;
+      this.mediaRecorder = null;
       return false;
     }
   }
@@ -1092,6 +1115,14 @@ export class AudioEngine {
     dsp.gain.connect(dsp.panner);
     dsp.panner.connect(dsp.analyzer);
     dsp.analyzer.connect(dsp.output);
+
+    // If this track is currently being monitored (armed for recording), the
+    // dsp.input.disconnect() above wiped the monitor node's audio-graph link.
+    // Reconnect it so the user keeps hearing themselves between takes.
+    if (this.monitoringTrackId === track.id && this.monitorSource) {
+      try { this.monitorSource.disconnect(); } catch (e) {}
+      try { this.monitorSource.connect(dsp.input); } catch (e) {}
+    }
 
     // Fade in after rebuilding the audio graph
     const targetVolume = track.isMuted ? 0 : track.volume;
