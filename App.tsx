@@ -471,6 +471,8 @@ export default function App() {
     if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks));
   }, [state.tracks]); 
   useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
+  // Le reglage de compensation n'etait jamais transmis au moteur.
+  useEffect(() => { audioEngine.setDelayCompensation(state.isDelayCompEnabled); }, [state.isDelayCompEnabled]);
 
   // Metronome : reglages, tempo et signature suivent l'etat du projet.
   useEffect(() => { metronomeService.setSettings(state.metronome); }, [state.metronome]);

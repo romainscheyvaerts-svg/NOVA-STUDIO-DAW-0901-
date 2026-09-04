@@ -283,6 +283,20 @@ export class AudioEngine {
   }
 
   public setDelayCompensation(enabled: boolean) { this.isDelayCompEnabled = enabled; }
+
+  /**
+   * Latence aller-retour estimee, en secondes : le retard avec lequel
+   * l'interprete a entendu la lecture, plus le retard de sa propre voix a
+   * l'entree. C'est de cette duree qu'une prise arrive en retard sur la grille.
+   */
+  public getRoundTripLatency(): number {
+    if (!this.ctx) return 0;
+    if (this.asioStreamActive && this.latency > 0) return this.latency;
+    const base = this.ctx.baseLatency || 0;
+    const output = (this.ctx as any).outputLatency || 0;
+    // Garde-fou : au-dela de 500 ms la mesure n'est pas credible.
+    return Math.min(0.5, base + output);
+  }
   
   public setLoop(active: boolean, start: number, end: number) {
     this.isLoopActive = active;
@@ -694,7 +708,10 @@ export class AudioEngine {
           const clipData: Clip = {
             id: `rec-${Date.now()}`,
             name: `Vocal Take ${new Date().toLocaleTimeString()}`,
-            start: recordedAt,
+            // Compensation de latence : la prise arrive en retard de la latence
+            // aller-retour, on la recale donc plus tot. Le bouton PDC de la barre
+            // de transport ne servait a rien jusqu'ici (drapeau jamais lu).
+            start: Math.max(0, recordedAt - (this.isDelayCompEnabled ? this.getRoundTripLatency() : 0)),
             duration: audioBuffer.duration,
             offset: 0,
             fadeIn: 0.01,
@@ -1613,7 +1630,9 @@ export class AudioEngine {
       onStreamStarted: (success, latency_ms) => {
         if (success) {
           this.asioStreamActive = true;
-          this.latency = latency_ms || 0;
+          // latency_ms est en millisecondes ; this.latency est en SECONDES,
+          // comme ctx.baseLatency. Sans conversion les deux se melangeaient.
+          this.latency = (latency_ms || 0) / 1000;
           console.log(`[AudioEngine] Stream ASIO démarré - Latence: ${latency_ms}ms`);
         }
       },
@@ -1625,7 +1644,7 @@ export class AudioEngine {
         this.handleASIOInput(audioData, channels);
       },
       onStats: (stats) => {
-        this.latency = stats.latency_ms;
+        this.latency = (stats.latency_ms || 0) / 1000;
       }
     });
 
