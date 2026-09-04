@@ -1088,6 +1088,7 @@ useEffect(() => {
                 'separator',
                 { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE'); setClipContextMenu(null); }},
                 { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: currentTime }); setClipContextMenu(null); }},
+                { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE'); setClipContextMenu(null); }},
                 'separator',
                 { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
                 'separator',

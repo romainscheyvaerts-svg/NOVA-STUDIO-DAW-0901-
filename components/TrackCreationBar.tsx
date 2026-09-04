@@ -8,8 +8,14 @@ interface TrackCreationBarProps {
 const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   
+  // MIDI et Drum Rack etaient absents : le piano roll, le synthe et les drum
+  // racks existent dans l'app mais aucune interface ne permettait de creer
+  // les pistes correspondantes.
   const trackTypes = [
     { type: TrackType.AUDIO, icon: 'fa-wave-square', label: 'Audio', name: 'New Audio', color: '#3b82f6' },
+    { type: TrackType.MIDI, icon: 'fa-music', label: 'MIDI', name: 'New MIDI', color: '#22c55e' },
+    { type: TrackType.DRUM_RACK, icon: 'fa-drum', label: 'Drums', name: 'New Drum Rack', color: '#ef4444' },
+    { type: TrackType.SAMPLER, icon: 'fa-sliders', label: 'Sampler', name: 'New Sampler', color: '#06b6d4' },
     { type: TrackType.BUS, icon: 'fa-layer-group', label: 'Bus', name: 'New Bus', color: '#fbbf24' },
     { type: TrackType.SEND, icon: 'fa-share-alt', label: 'Send', name: 'New Send', color: '#a855f7' },
   ];

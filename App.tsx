@@ -11,7 +11,6 @@ import ChatAssistant from './components/ChatAssistant';
 import ViewModeSwitcher from './components/ViewModeSwitcher';
 import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
-import GlobalClipMenu from './components/GlobalClipMenu';
 import TrackCreationBar from './components/TrackCreationBar';
 import AuthScreen from './components/AuthScreen';
 import AutomationEditorView from './components/AutomationEditorView';
@@ -678,6 +677,25 @@ export default function App() {
   }, []);
 
   const handleEditClip = (trackId: string, clipId: string, action: string, payload?: any) => {
+    if (action === 'NORMALIZE') {
+      const track = stateRef.current.tracks.find(t => t.id === trackId);
+      const clip = track?.clips.find(c => c.id === clipId);
+      const buffer = clip?.buffer || (clip?.bufferId ? audioBufferRegistry.get(clip.bufferId) : null);
+      if (!clip || !buffer) return;
+      let peak = 0;
+      for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+        const data = buffer.getChannelData(ch);
+        for (let i = 0; i < data.length; i++) {
+          const v = Math.abs(data[i]);
+          if (v > peak) peak = v;
+        }
+      }
+      if (peak <= 0) return;
+      // -0.3 dBFS de marge pour eviter l'ecretage.
+      action = 'UPDATE_PROPS';
+      payload = { gain: Math.min(8, 0.966 / peak) };
+    }
+
     if (action === 'COPY' || action === 'CUT') {
       const track = stateRef.current.tracks.find(t => t.id === trackId);
       const clip = track?.clips.find(c => c.id === clipId);
@@ -1746,22 +1764,8 @@ export default function App() {
       case 'NORMALIZE_CLIP': {
         const t = findTrack(p.trackId);
         if (!t || !p.clipId) return;
-        const clip = t.clips.find(c => c.id === p.clipId);
-        if (!clip) return;
-        const buffer = clip.buffer || (clip.bufferId ? audioBufferRegistry.get(clip.bufferId) : null);
-        if (!buffer) { notify("⚠️ Audio du clip introuvable"); return; }
-        let peak = 0;
-        for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
-          const data = buffer.getChannelData(ch);
-          for (let i = 0; i < data.length; i++) {
-            const v = Math.abs(data[i]);
-            if (v > peak) peak = v;
-          }
-        }
-        if (peak <= 0) return;
-        // -0.3 dBFS de marge pour éviter l'écrêtage à la lecture.
-        handleEditClip(t.id, clip.id, 'UPDATE_PROPS', { gain: Math.min(8, 0.966 / peak) });
-        notify(`📊 "${clip.name}" normalisé`);
+        handleEditClip(t.id, p.clipId, 'NORMALIZE');
+        notify('📊 Clip normalisé');
         break;
       }
 
@@ -1790,16 +1794,325 @@ export default function App() {
         break;
       }
 
+      // ---- Effets ----
+      case 'REMOVE_PLUGIN': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        const plugin = findPlugin(t, p.pluginId || p.pluginType);
+        if (!plugin) return;
+        handleRemovePlugin(t.id, plugin.id);
+        break;
+      }
+
+      case 'MOVE_PLUGIN': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        const plugin = findPlugin(t, p.pluginId || p.pluginType);
+        if (!plugin) return;
+        const from = t.plugins.findIndex(pl => pl.id === plugin.id);
+        const to = Math.max(0, Math.min(t.plugins.length - 1, Number(p.toIndex)));
+        if (from > -1 && Number.isFinite(to)) handleReorderPlugins(t.id, from, to);
+        break;
+      }
+
+      case 'COPY_PLUGIN': {
+        const src = findTrack(p.sourceTrackId);
+        const dest = findTrack(p.destTrackId);
+        if (!src || !dest) return;
+        const plugin = findPlugin(src, p.pluginId || p.pluginType);
+        if (!plugin) return;
+        handleCopyPluginToTrack(src.id, plugin, dest.id);
+        break;
+      }
+
+      // ---- Piste ----
+      case 'SET_TRACK_OUTPUT': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        const destId = p.outputTrackId === 'master' ? 'master' : (findTrack(p.outputTrackId)?.id || '');
+        if (!destId || destId === t.id) return;
+        patchTrack(t.id, tr => { tr.outputTrackId = destId; });
+        break;
+      }
+
+      case 'ARM_TRACK': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        const armed = p.armed === undefined ? !t.isTrackArmed : !!p.armed;
+        setState(produce((draft: DAWState) => {
+          draft.tracks.forEach(tr => { tr.isTrackArmed = tr.id === t.id ? armed : false; });
+        }));
+        break;
+      }
+
+      case 'FREEZE_TRACK': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        const wantFrozen = p.frozen === undefined ? !t.isFrozen : !!p.frozen;
+        if (wantFrozen !== t.isFrozen) handleFreezeTrack(t.id);
+        break;
+      }
+
+      // ---- Marqueurs ----
+      case 'ADD_MARKER':
+        handleAddMarker(Math.max(0, Number(p.time) ?? stateRef.current.currentTime), p.name);
+        break;
+
+      case 'DELETE_MARKER': {
+        const mk = stateRef.current.markers.find(m => m.id === p.markerId || m.name === p.name);
+        if (mk) handleDeleteMarker(mk.id);
+        break;
+      }
+
+      case 'GOTO_MARKER': {
+        const mk = stateRef.current.markers.find(m => m.id === p.markerId || m.name === p.name);
+        if (mk) handleSeek(mk.time);
+        break;
+      }
+
+      // ---- Métronome / signature ----
+      case 'SET_METRONOME': {
+        ensureAudioEngine().then(() => {
+          setState(prev => ({
+            ...prev,
+            metronome: {
+              ...prev.metronome,
+              ...(p.enabled !== undefined ? { enabled: !!p.enabled } : {}),
+              ...(p.volume !== undefined ? { volume: clamp(p.volume, 0, 1, prev.metronome.volume) } : {}),
+              ...(p.countIn !== undefined ? { countIn: clamp(p.countIn, 0, 4, prev.metronome.countIn) } : {}),
+              ...(p.accentDownbeat !== undefined ? { accentDownbeat: !!p.accentDownbeat } : {})
+            }
+          }));
+        });
+        break;
+      }
+
+      case 'SET_TIME_SIGNATURE': {
+        const num = clamp(p.numerator, 1, 32, stateRef.current.timeSignature.numerator);
+        const den = [1, 2, 4, 8, 16].includes(Number(p.denominator)) ? Number(p.denominator) : stateRef.current.timeSignature.denominator;
+        setState(prev => ({ ...prev, timeSignature: { numerator: num, denominator: den } }));
+        break;
+      }
+
+      // ---- Groupes ----
+      case 'CREATE_GROUP': {
+        const ids = (p.trackIds || []).map((id: string) => findTrack(id)?.id).filter(Boolean) as string[];
+        if (ids.length >= 2) handleCreateGroup(ids);
+        break;
+      }
+
+      case 'DELETE_GROUP': {
+        const g = stateRef.current.trackGroups.find(gr => gr.id === p.groupId || gr.name === p.name);
+        if (g) handleDeleteGroup(g.id);
+        break;
+      }
+
+      case 'UPDATE_GROUP': {
+        const g = stateRef.current.trackGroups.find(gr => gr.id === p.groupId || gr.name === p.name);
+        if (!g) return;
+        handleUpdateGroup({
+          ...g,
+          ...(p.name ? { name: String(p.name).slice(0, 40) } : {}),
+          ...(p.linkedVolume !== undefined ? { linkedVolume: !!p.linkedVolume } : {}),
+          ...(p.linkedMute !== undefined ? { linkedMute: !!p.linkedMute } : {}),
+          ...(p.linkedSolo !== undefined ? { linkedSolo: !!p.linkedSolo } : {}),
+          ...(p.linkedPan !== undefined ? { linkedPan: !!p.linkedPan } : {})
+        });
+        break;
+      }
+
+      // ---- Clips ----
+      case 'DELETE_CLIP': {
+        const t = findTrack(p.trackId);
+        if (t && p.clipId) handleEditClip(t.id, p.clipId, 'DELETE');
+        break;
+      }
+
+      case 'DUPLICATE_CLIP': {
+        const t = findTrack(p.trackId);
+        if (t && p.clipId) handleEditClip(t.id, p.clipId, 'DUPLICATE');
+        break;
+      }
+
+      case 'RENAME_CLIP': {
+        const t = findTrack(p.trackId);
+        if (t && p.clipId && p.name) handleEditClip(t.id, p.clipId, 'RENAME', { name: String(p.name).slice(0, 60) });
+        break;
+      }
+
+      case 'MOVE_CLIP': {
+        const t = findTrack(p.trackId);
+        if (!t || !p.clipId) return;
+        if (p.destTrackId && findTrack(p.destTrackId)?.id !== t.id) {
+          const dest = findTrack(p.destTrackId)!;
+          handleMoveClip(t.id, dest.id, p.clipId);
+          if (p.start !== undefined) handleEditClip(dest.id, p.clipId, 'UPDATE_PROPS', { start: Math.max(0, Number(p.start) || 0) });
+        } else if (p.start !== undefined) {
+          handleEditClip(t.id, p.clipId, 'UPDATE_PROPS', { start: Math.max(0, Number(p.start) || 0) });
+        }
+        break;
+      }
+
+      case 'SET_CLIP_GAIN': {
+        const t = findTrack(p.trackId);
+        if (!t || !p.clipId) return;
+        handleEditClip(t.id, p.clipId, 'UPDATE_PROPS', { gain: clamp(p.gain, 0, 4, 1) });
+        break;
+      }
+
+      case 'SET_CLIP_FADE': {
+        const t = findTrack(p.trackId);
+        if (!t || !p.clipId) return;
+        const clip = t.clips.find(c => c.id === p.clipId);
+        if (!clip) return;
+        handleEditClip(t.id, p.clipId, 'UPDATE_PROPS', {
+          ...(p.fadeIn !== undefined ? { fadeIn: clamp(p.fadeIn, 0, clip.duration, clip.fadeIn) } : {}),
+          ...(p.fadeOut !== undefined ? { fadeOut: clamp(p.fadeOut, 0, clip.duration, clip.fadeOut) } : {})
+        });
+        break;
+      }
+
+      // ---- MIDI ----
+      case 'CREATE_PATTERN': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        handleCreatePatternAndOpen(t.id, Math.max(0, Number(p.time) || stateRef.current.currentTime));
+        break;
+      }
+
+      case 'ADD_NOTES': {
+        const t = findTrack(p.trackId);
+        if (!t || !Array.isArray(p.notes) || p.notes.length === 0) return;
+        const notes = p.notes.slice(0, 512).map((n: any, i: number) => ({
+          id: `note-${Date.now()}-${i}`,
+          pitch: Math.round(clamp(n.pitch, 0, 127, 60)),
+          start: Math.max(0, Number(n.start) || 0),
+          duration: Math.max(0.01, Number(n.duration) || 0.25),
+          velocity: clamp(n.velocity, 0, 1, 0.8)
+        }));
+        setState(produce((draft: DAWState) => {
+          const tr = draft.tracks.find(x => x.id === t.id);
+          if (!tr) return;
+          let clip = p.clipId ? tr.clips.find(c => c.id === p.clipId) : tr.clips.find(c => c.type === TrackType.MIDI);
+          if (!clip) {
+            // Pas encore de pattern : on en cree un qui couvre les notes fournies.
+            const end = notes.reduce((m: number, n: any) => Math.max(m, n.start + n.duration), 0);
+            clip = {
+              id: `clip-midi-${Date.now()}`,
+              start: Math.max(0, Number(p.start) || 0),
+              duration: Math.max((60 / draft.bpm) * 4, end),
+              offset: 0, fadeIn: 0, fadeOut: 0,
+              name: 'Pattern', color: tr.color, type: TrackType.MIDI,
+              notes: [], isMuted: false, gain: 1
+            };
+            tr.clips.push(clip);
+          }
+          clip.notes = [...(clip.notes || []), ...notes];
+          const end = clip.notes.reduce((m, n) => Math.max(m, n.start + n.duration), 0);
+          clip.duration = Math.max(clip.duration, end);
+        }));
+        notify(`🎹 ${notes.length} note(s) ajoutée(s) sur ${t.name}`);
+        break;
+      }
+
+      case 'CLEAR_NOTES': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        patchTrack(t.id, tr => {
+          tr.clips.forEach(c => {
+            if (c.type === TrackType.MIDI && (!p.clipId || c.id === p.clipId)) c.notes = [];
+          });
+        });
+        break;
+      }
+
+      // ---- Automation ----
+      case 'SET_AUTOMATION': {
+        const t = findTrack(p.trackId);
+        const param = String(p.parameter || p.paramId || 'volume');
+        if (!t || !Array.isArray(p.points) || p.points.length === 0) return;
+        const isPan = param === 'pan';
+        const points = p.points
+          .slice(0, 256)
+          .map((pt: any, i: number) => ({
+            id: `ap-${Date.now()}-${i}`,
+            time: Math.max(0, Number(pt.time) || 0),
+            value: clamp(pt.value, isPan ? -1 : 0, isPan ? 1 : 1.5, isPan ? 0 : 1)
+          }))
+          .sort((a: any, b: any) => a.time - b.time);
+        patchTrack(t.id, tr => {
+          let lane = tr.automationLanes.find(l => l.parameterName === param);
+          if (!lane) {
+            lane = { id: `auto-${Date.now()}`, parameterName: param, points: [], color: tr.color, isExpanded: true, min: isPan ? -1 : 0, max: isPan ? 1 : 1.5 };
+            tr.automationLanes.push(lane);
+          }
+          lane.points = points;
+          lane.isExpanded = true;
+        });
+        notify(`📈 Automation ${param} écrite sur ${t.name}`);
+        break;
+      }
+
+      case 'CLEAR_AUTOMATION': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        const param = p.parameter ? String(p.parameter) : null;
+        patchTrack(t.id, tr => {
+          tr.automationLanes.forEach(l => { if (!param || l.parameterName === param) l.points = []; });
+        });
+        break;
+      }
+
+      // ---- Vue et projet ----
+      case 'SET_VIEW': {
+        const view = String(p.view || '').toUpperCase();
+        if (['ARRANGEMENT', 'MIXER', 'AUTOMATION'].includes(view)) {
+          setState(prev => ({ ...prev, currentView: view as any }));
+        }
+        break;
+      }
+
+      case 'TOGGLE_LOOP':
+        setState(prev => ({ ...prev, isLoopActive: p.active === undefined ? !prev.isLoopActive : !!p.active }));
+        break;
+
+      case 'SET_PROJECT_KEY':
+        setState(prev => ({
+          ...prev,
+          ...(p.key !== undefined ? { projectKey: Math.round(clamp(p.key, 0, 11, 0)) } : {}),
+          ...(p.scale ? { projectScale: String(p.scale) } : {})
+        }));
+        break;
+
+      case 'UNDO':
+        if (canUndo) undo();
+        break;
+
+      case 'REDO':
+        if (canRedo) redo();
+        break;
+
+      case 'SAVE_PROJECT':
+        handleSaveCloud(String(p.name || stateRef.current.name || 'STUDIO_SESSION'));
+        break;
+
+      case 'OPEN_EXPORT':
+        setIsExportMenuOpen(true);
+        break;
+
       default:
         // Actions non encore prises en charge (RUN_MASTER_SYNC, ANALYZE_INSTRU,
-        // REMOVE_SILENCE, SET_AUTOMATION) : on le dit plutôt que d'échouer en silence.
+        // REMOVE_SILENCE) : on le dit plutôt que d'échouer en silence.
         console.warn('[AI] Action non prise en charge :', a.action, a.payload);
         notify(`⚠️ Action "${a.action}" pas encore disponible`);
         break;
     }
   }, [setState, handleCreateTrack, handleDeleteTrack, handleDuplicateTrack, handleUpdateTrack,
       handleUpdatePluginParams, handleToggleBypass, handleTogglePlay, handleStop, handleToggleRecord,
-      handleSeek, handleUpdateBpm]);
+      handleSeek, handleUpdateBpm, handleRemovePlugin, handleReorderPlugins, handleCopyPluginToTrack,
+      handleFreezeTrack, handleAddMarker, handleDeleteMarker, handleCreateGroup, handleUpdateGroup,
+      handleDeleteGroup, handleCreatePatternAndOpen, handleMoveClip, handleSaveCloud, undo, redo,
+      canUndo, canRedo]);
 
   const envoyerAuChatbot = async (messageUtilisateur: string) => {
     try {
@@ -1812,6 +2125,16 @@ export default function App() {
             currentTime: Math.round(currentState.currentTime * 100) / 100,
             selectedTrackId: currentState.selectedTrackId,
             trackCount: currentState.tracks.length,
+            currentView: currentState.currentView,
+            timeSignature: currentState.timeSignature,
+            metronome: currentState.metronome,
+            isLoopActive: currentState.isLoopActive,
+            loopStart: currentState.loopStart,
+            loopEnd: currentState.loopEnd,
+            projectKey: currentState.projectKey,
+            projectScale: currentState.projectScale,
+            markers: currentState.markers.map(m => ({ id: m.id, name: m.name, time: m.time })),
+            trackGroups: currentState.trackGroups.map(g => ({ id: g.id, name: g.name, trackIds: g.trackIds })),
             // Les id sont indispensables : les actions de l'IA ciblent les pistes,
             // les clips et les effets par identifiant.
             tracks: currentState.tracks.map(t => ({
@@ -1822,10 +2145,13 @@ export default function App() {
                 pan: t.pan,
                 isMuted: t.isMuted,
                 isSolo: t.isSolo,
+                isTrackArmed: t.isTrackArmed,
+                isFrozen: t.isFrozen,
                 outputTrackId: t.outputTrackId,
                 sends: t.sends.map(s => ({ id: s.id, level: s.level, isEnabled: s.isEnabled })),
                 plugins: t.plugins.map(p => ({ id: p.id, type: p.type, isEnabled: p.isEnabled })),
-                clips: t.clips.map(c => ({ id: c.id, name: c.name, start: c.start, duration: c.duration, isMuted: c.isMuted }))
+                clips: t.clips.map(c => ({ id: c.id, name: c.name, type: c.type, start: c.start, duration: c.duration, isMuted: c.isMuted, noteCount: c.notes?.length || 0 })),
+                automation: t.automationLanes.filter(l => l.points.length > 0).map(l => ({ parameter: l.parameterName, pointCount: l.points.length }))
             }))
         };
 
@@ -1921,7 +2247,6 @@ export default function App() {
       
       <TrackCreationBar onCreateTrack={handleCreateTrack} />
       <TouchInteractionManager />
-      <GlobalClipMenu />
 
       <div className="flex-1 flex overflow-hidden relative">
         {isSidebarOpen && !isMobile && (

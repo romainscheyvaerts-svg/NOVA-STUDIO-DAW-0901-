@@ -6,34 +6,74 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
  * Doit rester aligné avec `executeAIAction` dans App.tsx et `AIActionType` dans types.ts.
  */
 const ACTION_CATALOG = `
-| action | payload | effet |
-|---|---|---|
-| SET_VOLUME | { trackId, volume }        | volume entre 0 et 1 |
-| SET_PAN | { trackId, pan }              | pan entre -1 (gauche) et 1 (droite) |
-| MUTE_TRACK | { trackId, isMuted }       | couper / rétablir la piste |
-| SOLO_TRACK | { trackId, isSolo }        | solo de la piste |
-| RENAME_TRACK | { trackId, name }        | renommer la piste |
-| CREATE_TRACK | { name, type }           | type : AUDIO, MIDI, BUS ou SEND |
-| DELETE_TRACK | { trackId }              | supprimer la piste |
-| DUPLICATE_TRACK | { trackId }           | dupliquer la piste |
-| UPDATE_PLUGIN | { trackId, pluginType, params } | ajoute l'effet s'il est absent puis applique les paramètres |
-| SET_PLUGIN_PARAM | { trackId, pluginType, param, value } | régler un paramètre précis |
-| BYPASS_PLUGIN | { trackId, pluginType, isEnabled } | activer / bypasser un effet |
-| OPEN_PLUGIN | { trackId, pluginType }   | ouvrir l'interface de l'effet |
-| CLOSE_PLUGIN | {}                       | fermer l'interface ouverte |
-| RESET_FX | { trackId }                  | retirer tous les effets (toutes les pistes si trackId absent) |
-| SET_SEND_LEVEL | { trackId, sendId, level } | niveau de départ (0 à 1) |
-| PLAY | {}                               | lancer la lecture |
-| STOP | {}                               | arrêter |
-| RECORD | {}                             | armer / lancer l'enregistrement |
-| SEEK | { time }                         | placer la tête de lecture (secondes) |
-| SET_LOOP | { start, end, active }        | boucle (secondes) |
-| SET_BPM | { bpm }                       | tempo du projet |
-| MUTE_CLIP | { trackId, clipId, isMuted } | couper un clip |
-| SPLIT_CLIP | { trackId, clipId, time }  | couper un clip à un instant donné |
-| NORMALIZE_CLIP | { trackId, clipId }    | normaliser le gain du clip |
-| PREPARE_REC | { trackId }               | armer la piste pour l'enregistrement |
-| CLEAN_MIX | {}                          | remettre volumes et pans à des valeurs neutres |
+TRANSPORT ET PROJET
+| PLAY / STOP / RECORD | {} | lecture, arrêt, enregistrement |
+| SEEK | { time } | placer la tête de lecture (secondes) |
+| SET_LOOP | { start, end, active } | boucle (secondes) |
+| TOGGLE_LOOP | { active } | activer/désactiver la boucle |
+| SET_BPM | { bpm } | tempo |
+| SET_TIME_SIGNATURE | { numerator, denominator } | signature rythmique |
+| SET_METRONOME | { enabled, volume, countIn, accentDownbeat } | métronome (countIn en mesures) |
+| SET_PROJECT_KEY | { key, scale } | key 0-11 (0=C), scale ex. "minor" |
+| SET_VIEW | { view } | ARRANGEMENT, MIXER ou AUTOMATION |
+| UNDO / REDO | {} | annuler / rétablir |
+| SAVE_PROJECT | { name } | sauvegarder dans le cloud |
+| OPEN_EXPORT | {} | ouvrir la fenêtre d'export |
+
+PISTES
+| SET_VOLUME | { trackId, volume } | 0 à 1 |
+| SET_PAN | { trackId, pan } | -1 (gauche) à 1 (droite) |
+| MUTE_TRACK | { trackId, isMuted } | |
+| SOLO_TRACK | { trackId, isSolo } | |
+| ARM_TRACK | { trackId, armed } | armer pour l'enregistrement |
+| RENAME_TRACK | { trackId, name } | |
+| CREATE_TRACK | { name, type } | type : AUDIO, MIDI, DRUM_RACK, SAMPLER, BUS, SEND |
+| DELETE_TRACK | { trackId } | |
+| DUPLICATE_TRACK | { trackId } | |
+| SET_TRACK_OUTPUT | { trackId, outputTrackId } | routage vers un bus ou "master" |
+| SET_SEND_LEVEL | { trackId, sendId, level } | 0 à 1 |
+| FREEZE_TRACK | { trackId, frozen } | gel (rendu figé, CPU libéré) |
+| PREPARE_REC | { trackId } | arme la piste et active le mode REC |
+| CLEAN_MIX | {} | volumes et pans neutres |
+
+EFFETS
+| UPDATE_PLUGIN | { trackId, pluginType, params } | ajoute l'effet s'il manque puis applique les paramètres |
+| SET_PLUGIN_PARAM | { trackId, pluginType, param, value } | un paramètre précis |
+| BYPASS_PLUGIN | { trackId, pluginType, isEnabled } | |
+| REMOVE_PLUGIN | { trackId, pluginType } | |
+| MOVE_PLUGIN | { trackId, pluginType, toIndex } | position dans la chaîne (0 = premier) |
+| COPY_PLUGIN | { sourceTrackId, pluginType, destTrackId } | |
+| OPEN_PLUGIN | { trackId, pluginType } | ouvrir l'interface |
+| CLOSE_PLUGIN | {} | |
+| RESET_FX | { trackId } | retire tous les effets (toutes les pistes si trackId absent) |
+
+CLIPS
+| MUTE_CLIP | { trackId, clipId, isMuted } | |
+| DELETE_CLIP | { trackId, clipId } | |
+| DUPLICATE_CLIP | { trackId, clipId } | |
+| RENAME_CLIP | { trackId, clipId, name } | |
+| MOVE_CLIP | { trackId, clipId, start, destTrackId } | destTrackId optionnel |
+| SPLIT_CLIP | { trackId, clipId, time } | couper à un instant |
+| NORMALIZE_CLIP | { trackId, clipId } | |
+| SET_CLIP_GAIN | { trackId, clipId, gain } | |
+| SET_CLIP_FADE | { trackId, clipId, fadeIn, fadeOut } | en secondes |
+
+MIDI
+| CREATE_PATTERN | { trackId, time } | crée un clip MIDI vide et ouvre le piano roll |
+| ADD_NOTES | { trackId, clipId, notes } | notes = [{ pitch, start, duration, velocity }] ; pitch MIDI (60 = do3), start et duration en secondes, velocity 0-1. Le clip est créé s'il n'existe pas. |
+| CLEAR_NOTES | { trackId, clipId } | vide le pattern |
+
+AUTOMATION
+| SET_AUTOMATION | { trackId, parameter, points } | parameter : volume ou pan ; points = [{ time, value }] |
+| CLEAR_AUTOMATION | { trackId, parameter } | |
+
+MARQUEURS ET GROUPES
+| ADD_MARKER | { time, name } | |
+| DELETE_MARKER | { markerId } ou { name } | |
+| GOTO_MARKER | { markerId } ou { name } | |
+| CREATE_GROUP | { trackIds } | au moins 2 pistes, volume/mute/solo liés |
+| UPDATE_GROUP | { groupId, name, linkedVolume, linkedMute, linkedSolo, linkedPan } | |
+| DELETE_GROUP | { groupId } | |
 
 Effets disponibles (pluginType) : AUTOTUNE, PROEQ12, COMPRESSOR, VOCALSATURATOR, REVERB,
 DELAY, CHORUS, FLANGER, DOUBLER, STEREOSPREADER, DEESSER, DENOISER, MASTERSYNC.
@@ -53,6 +93,11 @@ RÈGLES DE RÉPONSE
 - Utilise TOUJOURS les trackId exacts fournis dans l'état du projet. N'invente jamais d'identifiant.
 - "description" est une phrase courte décrivant l'action, affichée à l'utilisateur.
 - Reste dans les bornes indiquées (volume 0-1, pan -1 à 1, etc.).
+- Tu peux enchaîner plusieurs actions pour une seule demande : elles sont appliquées dans l'ordre.
+- Pour créer une mélodie ou une batterie, utilise CREATE_TRACK puis ADD_NOTES. Convertis les
+  durées musicales en secondes avec le BPM du projet (une noire = 60/BPM secondes).
+- Pour un fondu, une montée ou une descente de volume, utilise SET_AUTOMATION.
+- N'invente jamais d'identifiant : les trackId, clipId, sendId et pluginType figurent dans l'état.
 
 ACTIONS DISPONIBLES
 ${ACTION_CATALOG}`;
@@ -89,7 +134,7 @@ function sanitizeActions(actions: any[]): any[] {
   if (!Array.isArray(actions)) return [];
   return actions
     .filter(a => a && typeof a.action === 'string')
-    .slice(0, 12)
+    .slice(0, 24)
     .map(a => ({
       action: a.action.toUpperCase(),
       payload: (a.payload && typeof a.payload === 'object') ? a.payload : {},

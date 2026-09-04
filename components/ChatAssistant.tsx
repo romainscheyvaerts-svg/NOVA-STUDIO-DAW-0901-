@@ -67,10 +67,14 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
 
       if (responseActions && responseActions.length > 0) {
         setIsSyncing(true);
-        setTimeout(() => setIsSyncing(false), 1500);
-        responseActions.forEach(action => {
-            onExecuteAction(action);
-        });
+        // Les actions sont appliquees une par une avec une respiration : une
+        // action qui cible une piste ou un clip cree par la precedente ne les
+        // trouvait pas, l'etat React n'ayant pas encore ete commite.
+        for (const action of responseActions) {
+          onExecuteAction(action);
+          await new Promise(resolve => setTimeout(resolve, 40));
+        }
+        setIsSyncing(false);
       }
 
       const assistantMsg: AIChatMessage = {
