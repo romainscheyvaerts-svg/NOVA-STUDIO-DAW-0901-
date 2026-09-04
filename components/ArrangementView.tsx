@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint, Marker } from '../types';
 import TrackHeader from './TrackHeader';
 import ContextMenu from './ContextMenu';
@@ -41,6 +41,7 @@ interface ArrangementViewProps {
   onImportFile?: (file: File) => void;
   onEditClip?: (trackId: string, clipId: string, action: string, payload?: any) => void;
   isRecording?: boolean;
+  isPlaying?: boolean;
   recStartTime: number | null;
   onCreatePattern?: (trackId: string, time: number) => void;
   onSwapInstrument?: (trackId: string) => void; 
@@ -65,7 +66,7 @@ const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: bo
 const ArrangementView: React.FC<ArrangementViewProps> = ({ 
   tracks, selectedTrackId, onSelectTrack, onUpdateTrack, onReorderTracks, currentTime, 
   isLoopActive, loopStart, loopEnd, onSetLoop, onSeek, bpm, 
-  markers = [], onAddMarker, onUpdateMarker, onDeleteMarker,
+  markers = [], onAddMarker, onUpdateMarker, onDeleteMarker, isPlaying = false,
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip, isRecording, recStartTime,
   onCreatePattern, onSwapInstrument, onEditMidi, onAudioDrop
@@ -198,6 +199,76 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     return () => observer.disconnect();
   }, []);
 
+  /**
+   * Zoom au Ctrl/Cmd + molette, ancre sous le curseur.
+   * C'est le geste reflexe dans tous les DAW ; seul le curseur de la barre
+   * d'outils permettait de zoomer jusqu'ici.
+   * Listener non passif : indispensable pour pouvoir annuler le zoom natif
+   * du navigateur.
+   */
+  const pendingZoomAnchorRef = useRef<{ time: number; pointerX: number } | null>(null);
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+
+      const rect = el.getBoundingClientRect();
+      const pointerX = e.clientX - rect.left;
+      const timeUnderPointer = (el.scrollLeft + pointerX) / zoomH;
+
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      const nextZoom = Math.min(300, Math.max(10, zoomH * factor));
+      if (nextZoom === zoomH) return;
+
+      // Le repositionnement se fait apres le rendu (useLayoutEffect ci-dessous) :
+      // avant, la nouvelle largeur du contenu n'est pas encore appliquee.
+      pendingZoomAnchorRef.current = { time: timeUnderPointer, pointerX };
+      setZoomH(nextZoom);
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [zoomH]);
+
+  // Recale le defilement une fois la nouvelle largeur appliquee, pour garder
+  // le meme instant sous le curseur pendant le zoom.
+  useLayoutEffect(() => {
+    const anchor = pendingZoomAnchorRef.current;
+    const el = scrollContainerRef.current;
+    if (!anchor || !el) return;
+    pendingZoomAnchorRef.current = null;
+    el.scrollLeft = Math.max(0, anchor.time * zoomH - anchor.pointerX);
+    setScrollLeft(el.scrollLeft);
+  }, [zoomH]);
+
+  // --- Suivi du playhead pendant la lecture ---
+  // La tete de lecture sortait de l'ecran et il fallait defiler a la main.
+  const autoScrollRef = useRef(false);
+  const followSuspendedUntilRef = useRef(0);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    if (Date.now() < followSuspendedUntilRef.current) return;
+
+    const playheadX = currentTime * zoomH;
+    const viewStart = el.scrollLeft;
+    const viewEnd = viewStart + el.clientWidth;
+    const margin = el.clientWidth * 0.12;
+
+    // On avance d'une "page" plutot que de recentrer en continu : bien moins
+    // fatigant a l'oeil et c'est ce que font les DAW.
+    if (playheadX > viewEnd - margin || playheadX < viewStart) {
+      autoScrollRef.current = true;
+      el.scrollLeft = Math.max(0, playheadX - el.clientWidth * 0.15);
+    }
+  }, [currentTime, isPlaying, zoomH]);
+
   const isSyncingScroll = useRef(false);
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
@@ -205,6 +276,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     
     isSyncingScroll.current = true;
     if (target === scrollContainerRef.current) {
+        // Defilement a l'initiative de l'utilisateur : on laisse le suivi
+        // tranquille quelques secondes pour ne pas le ramener de force.
+        if (autoScrollRef.current) autoScrollRef.current = false;
+        else followSuspendedUntilRef.current = Date.now() + 3000;
         setScrollLeft(target.scrollLeft);
         setScrollTop(target.scrollTop);
         if (sidebarContainerRef.current) sidebarContainerRef.current.scrollTop = target.scrollTop;

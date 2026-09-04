@@ -2415,7 +2415,7 @@ export default function App() {
                    onRemovePlugin={handleRemovePlugin} onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
                    onAddTrack={handleCreateTrack} onDuplicateTrack={handleDuplicateTrack} onDeleteTrack={handleDeleteTrack}
                    onFreezeTrack={handleFreezeTrack}
-                   onEditClip={handleEditClip} isRecording={state.isRecording} recStartTime={state.recStartTime}
+                   onEditClip={handleEditClip} isRecording={state.isRecording} isPlaying={state.isPlaying} recStartTime={state.recStartTime}
                    onMoveClip={handleMoveClip} onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
                    onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
