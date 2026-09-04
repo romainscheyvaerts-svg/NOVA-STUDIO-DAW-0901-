@@ -546,6 +546,14 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 const inFadeRow = relY < zoomV * 0.35;
                 const edge = Math.min(10, Math.max(4, (clipEndX - clipStartX) * 0.15));
 
+                // Alt+glisser : on laisse une copie sur place et on deplace
+                // l'original, comme dans les DAW.
+                if (e.altKey) {
+                    onEditClip?.(t.id, clip.id, 'DUPLICATE', { start: clip.start });
+                    setDragAction('MOVE');
+                    return;
+                }
+
                 if (inFadeRow && x - clipStartX < FADE_HANDLE_PX) setDragAction('FADE_IN');
                 else if (inFadeRow && clipEndX - x < FADE_HANDLE_PX) setDragAction('FADE_OUT');
                 else if (x - clipStartX < edge) setDragAction('TRIM_START');
