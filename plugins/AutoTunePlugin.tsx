@@ -187,11 +187,18 @@ export class AutoTuneNode {
     isEnabled: true
   };
 
+  /**
+   * Le worklet se charge de maniere asynchrone : tant qu'il n'est pas pret,
+   * input n'est relie a rien. Le rendu offline doit attendre cette promesse,
+   * sinon la piste sort silencieuse dans l'export.
+   */
+  public readonly ready: Promise<void>;
+
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
     this.input = ctx.createGain();
     this.output = ctx.createGain();
-    this.initWorklet();
+    this.ready = this.initWorklet();
   }
 
   private async initWorklet() {

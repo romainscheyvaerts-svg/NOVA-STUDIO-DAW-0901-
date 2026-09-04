@@ -9,7 +9,8 @@ import { Track, TrackType } from '../types';
 
 export const getValidDestinations = (sourceTrackId: string, tracks: Track[]): Track[] => {
   // 1. Récupérer les bus existants
-  const busTracks = tracks.filter(t => t.type === TrackType.BUS);
+  // On exclut le master ici: il est ajoute explicitement plus bas (sinon doublon)
+  const busTracks = tracks.filter(t => t.type === TrackType.BUS && t.id !== 'master');
   
   // 2. Créer une liste de destinations potentielles
   // On injecte TOUJOURS le Master virtuellement s'il n'est pas dans la liste des pistes

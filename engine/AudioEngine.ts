@@ -300,118 +300,240 @@ export class AudioEngine {
   public getPreviewAnalyzer() { return this.previewAnalyzer; }
   public async resume() { if (this.ctx && this.ctx.state === 'suspended') { await this.ctx.resume(); } }
   
+  /**
+   * Rendu offline du projet.
+   *
+   * Reconstruit le graphe COMPLET dans un OfflineAudioContext : chaine de plugins
+   * de chaque piste, routage vers les bus, departs (sends) post-fader, pistes MIDI
+   * et drum racks. Avant, cette methode se contentait d'additionner les pistes
+   * AUDIO avec leur volume et leur pan : le fichier exporte ne contenait aucun
+   * effet et ne ressemblait pas a ce qu'on entend dans le studio.
+   */
   public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void): Promise<AudioBuffer> {
-    // Create an OfflineAudioContext for rendering
     const totalSamples = Math.ceil(totalDuration * targetSampleRate);
     const offlineCtx = new OfflineAudioContext(2, totalSamples, targetSampleRate);
-    
-    // Create a master gain for the offline context
+    // Les noeuds de plugins/instruments n'utilisent que l'API BaseAudioContext.
+    const renderCtx = offlineCtx as unknown as AudioContext;
+
     const masterGain = offlineCtx.createGain();
     masterGain.connect(offlineCtx.destination);
-    
-    // Track progress
+
+    const isSourceTrack = (t: Track) =>
+      t.type === TrackType.AUDIO || t.type === TrackType.MIDI ||
+      t.type === TrackType.SAMPLER || t.type === TrackType.DRUM_RACK;
+    // Solo : on garde les pistes soloees ET tout ce qui les alimente (sortie ou
+    // depart). Sans ca, exporter le stem d'un BUS donnait un fichier vide,
+    // puisque les pistes qui l'alimentent n'etaient pas soloees.
+    const audibleIds = new Set(tracks.filter(t => t.isSolo).map(t => t.id));
+    const hasSoloTrack = audibleIds.size > 0;
+    if (hasSoloTrack) {
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const t of tracks) {
+          if (audibleIds.has(t.id)) continue;
+          const feedsAudible =
+            (!!t.outputTrackId && audibleIds.has(t.outputTrackId)) ||
+            (t.sends || []).some(sd => sd.isEnabled && sd.level > 0 && audibleIds.has(sd.id));
+          if (feedsAudible) { audibleIds.add(t.id); changed = true; }
+        }
+      }
+    }
+
+    interface RenderTrack {
+      input: GainNode;
+      gain: GainNode;
+      panner: StereoPannerNode;
+      output: GainNode;
+      synth?: Synthesizer;
+      sampler?: AudioSampler;
+      drumRack?: DrumRackNode;
+    }
+    const rendered = new Map<string, RenderTrack>();
+    // Certains plugins (AutoTune) s'initialisent de maniere asynchrone : on
+    // attend qu'ils soient prets avant de lancer le rendu.
+    const pendingPlugins: Promise<unknown>[] = [];
+
+    // --- 1. Une chaine par piste : input -> [plugins] -> gain -> panner -> output
+    for (const track of tracks) {
+      const input = offlineCtx.createGain();
+      const gain = offlineCtx.createGain();
+      const panner = offlineCtx.createStereoPanner();
+      const output = offlineCtx.createGain();
+
+      let head: AudioNode = input;
+      const offlinePlugins = (track.isFrozen && track.frozenClip) ? [] : (track.plugins || []);
+      for (const plugin of offlinePlugins) {
+        if (!plugin.isEnabled) continue;
+        try {
+          const entry = this.createPluginNode(plugin, this.currentBpm, renderCtx);
+          if (!entry) continue;
+          if (entry.node?.ready instanceof Promise) pendingPlugins.push(entry.node.ready);
+          head.connect(entry.input);
+          head = entry.output;
+        } catch (e) {
+          console.warn(`[Render] Plugin ignore (${plugin.type}) :`, e);
+        }
+      }
+      head.connect(gain);
+      gain.connect(panner);
+      panner.connect(output);
+
+      // Le solo ne concerne que les pistes sources : un bus ne doit pas etre coupe.
+      const silenced = track.isMuted || (hasSoloTrack && isSourceTrack(track) && !audibleIds.has(track.id));
+      gain.gain.value = silenced ? 0 : track.volume;
+      panner.pan.value = track.pan;
+
+      const rt: RenderTrack = { input, gain, panner, output };
+
+      // Instruments (pistes MIDI / sampler / drum rack)
+      if (track.type === TrackType.MIDI) {
+        rt.synth = new Synthesizer(renderCtx);
+        rt.synth.output.connect(input);
+      } else if (track.type === TrackType.SAMPLER) {
+        rt.sampler = new AudioSampler(renderCtx, this.currentBpm);
+        const liveBuffer = this.tracksDSP.get(track.id)?.sampler?.getBuffer();
+        if (liveBuffer) rt.sampler.loadBuffer(liveBuffer);
+        rt.sampler.output.connect(input);
+      } else if (track.type === TrackType.DRUM_RACK) {
+        rt.drumRack = new DrumRackNode(renderCtx);
+        if (track.drumPads) rt.drumRack.updatePadsState(track.drumPads);
+        // Les buffers des pads ne sont pas conserves dans l'etat du projet :
+        // on les reprend sur le drum rack live.
+        const liveRack = this.tracksDSP.get(track.id)?.drumRack;
+        if (liveRack) {
+          liveRack.getBuffers().forEach((buf, padId) => rt.drumRack!.loadSample(padId, buf));
+        }
+        rt.drumRack.output.connect(input);
+      }
+
+      rendered.set(track.id, rt);
+    }
+
+    // --- 2. Routage : sortie de piste -> bus/master, et departs post-fader
+    for (const track of tracks) {
+      const rt = rendered.get(track.id)!;
+      const destId = track.outputTrackId;
+      const dest = destId && destId !== track.id ? rendered.get(destId) : undefined;
+      rt.output.connect(dest ? dest.input : masterGain);
+
+      (track.sends || []).forEach(send => {
+        if (!send.id || !send.isEnabled || send.level <= 0) return;
+        if (send.id === track.id) return;
+        const target = rendered.get(send.id);
+        if (!target) return;
+        const sendGain = offlineCtx.createGain();
+        sendGain.gain.value = send.level;
+        rt.panner.connect(sendGain);
+        sendGain.connect(target.input);
+      });
+    }
+
+    // --- 3. Comptage pour la progression
     let processedClips = 0;
     let totalClips = 0;
-    
-    // Count total clips for progress
     tracks.forEach(track => {
-        if (track.type === TrackType.AUDIO && !track.isMuted) {
-            totalClips += track.clips.filter(c => !c.isMuted).length;
-        }
+      totalClips += this.getPlayableClips(track).filter(c => !c.isMuted).length;
     });
 
-    // Process each audio track
+    // --- 4. Clips audio (toutes les pistes qui en portent, bus et sends inclus)
     for (const track of tracks) {
-        if (track.isMuted) continue;
-        if (track.type !== TrackType.AUDIO) continue;
-        
-        // Check if any solo track exists (if so, only play solo tracks)
-        const hasSoloTrack = tracks.some(t => t.isSolo);
-        if (hasSoloTrack && !track.isSolo) continue;
-        
-        // Create track gain node
-        const trackGain = offlineCtx.createGain();
-        trackGain.gain.value = track.volume;
-        
-        // Create track panner
-        const trackPanner = offlineCtx.createStereoPanner();
-        trackPanner.pan.value = track.pan;
-        
-        trackGain.connect(trackPanner);
-        trackPanner.connect(masterGain);
-        
-        // Render each clip in this track
-        for (const clip of track.clips) {
-            if (clip.isMuted) continue;
-            
-            // Get buffer from registry
-            let buffer = clip.buffer;
-            if (!buffer && clip.bufferId) {
-                buffer = audioBufferRegistry.get(clip.bufferId);
-            }
-            
-            if (!buffer) {
-                console.warn(`[Render] Buffer not found for clip ${clip.id}`);
-                continue;
-            }
-            
-            // Calculate timing
-            const clipStartInProject = clip.start - startOffset;
-            if (clipStartInProject + clip.duration < 0) continue; // Clip is before render range
-            if (clipStartInProject > totalDuration) continue; // Clip is after render range
-            
-            // Create source
-            const source = offlineCtx.createBufferSource();
-            source.buffer = buffer;
-            
-            // Create clip gain for fades
-            const clipGain = offlineCtx.createGain();
-            clipGain.gain.value = clip.gain ?? 1.0;
-            
-            source.connect(clipGain);
-            clipGain.connect(trackGain);
-            
-            // Calculate when to start/stop
-            const playOffset = clip.offset || 0;
-            const startTime = Math.max(0, clipStartInProject);
-            const offsetIntoClip = clipStartInProject < 0 ? -clipStartInProject + playOffset : playOffset;
-            const remainingDuration = Math.min(clip.duration, totalDuration - startTime, buffer.duration - offsetIntoClip);
-            
-            if (remainingDuration > 0 && offsetIntoClip < buffer.duration) {
-                // Apply fades
-                if (clip.fadeIn > 0) {
-                    clipGain.gain.setValueAtTime(0, startTime);
-                    clipGain.gain.linearRampToValueAtTime(clip.gain ?? 1.0, startTime + clip.fadeIn);
-                }
-                if (clip.fadeOut > 0) {
-                    const fadeOutStart = startTime + remainingDuration - clip.fadeOut;
-                    if (fadeOutStart > startTime) {
-                        clipGain.gain.setValueAtTime(clip.gain ?? 1.0, fadeOutStart);
-                        clipGain.gain.linearRampToValueAtTime(0, startTime + remainingDuration);
-                    }
-                }
-                
-                source.start(startTime, offsetIntoClip, remainingDuration);
-            }
-            
-            processedClips++;
-            if (onProgress) {
-                onProgress(Math.round((processedClips / Math.max(1, totalClips)) * 80));
-            }
+      const rt = rendered.get(track.id)!;
+
+      for (const clip of this.getPlayableClips(track)) {
+        if (clip.isMuted) continue;
+        if (clip.type === TrackType.MIDI) continue; // traite plus bas
+
+        let buffer = clip.buffer;
+        if (!buffer && clip.bufferId) buffer = audioBufferRegistry.get(clip.bufferId);
+        if (!buffer) {
+          console.warn(`[Render] Buffer introuvable pour le clip ${clip.id}`);
+          continue;
         }
+
+        const clipStartInProject = clip.start - startOffset;
+        if (clipStartInProject + clip.duration < 0) continue;
+        if (clipStartInProject > totalDuration) continue;
+
+        const source = offlineCtx.createBufferSource();
+        source.buffer = buffer;
+
+        const clipGain = offlineCtx.createGain();
+        clipGain.gain.value = clip.gain ?? 1.0;
+
+        source.connect(clipGain);
+        clipGain.connect(rt.input);
+
+        const playOffset = clip.offset || 0;
+        const startTime = Math.max(0, clipStartInProject);
+        const offsetIntoClip = clipStartInProject < 0 ? -clipStartInProject + playOffset : playOffset;
+        const remainingDuration = Math.min(clip.duration, totalDuration - startTime, buffer.duration - offsetIntoClip);
+
+        if (remainingDuration > 0 && offsetIntoClip < buffer.duration) {
+          if (clip.fadeIn > 0) {
+            clipGain.gain.setValueAtTime(0, startTime);
+            clipGain.gain.linearRampToValueAtTime(clip.gain ?? 1.0, startTime + clip.fadeIn);
+          }
+          if (clip.fadeOut > 0) {
+            const fadeOutStart = startTime + remainingDuration - clip.fadeOut;
+            if (fadeOutStart > startTime) {
+              clipGain.gain.setValueAtTime(clip.gain ?? 1.0, fadeOutStart);
+              clipGain.gain.linearRampToValueAtTime(0, startTime + remainingDuration);
+            }
+          }
+          source.start(startTime, offsetIntoClip, remainingDuration);
+        }
+
+        processedClips++;
+        if (onProgress) onProgress(Math.round((processedClips / Math.max(1, totalClips)) * 80));
+      }
     }
-    
-    // Render the audio
+
+    // --- 5. Clips MIDI : on rejoue les notes sur l'instrument de la piste
+    for (const track of tracks) {
+      const rt = rendered.get(track.id)!;
+      if (!rt.synth && !rt.sampler && !rt.drumRack) continue;
+      if (track.isFrozen && track.frozenClip) continue; // deja dans le rendu gele
+
+      for (const clip of track.clips || []) {
+        if (clip.isMuted || clip.type !== TrackType.MIDI || !clip.notes) continue;
+
+        for (const note of clip.notes) {
+          const noteStart = clip.start + note.start - startOffset;
+          const noteEnd = noteStart + note.duration;
+          if (noteEnd <= 0 || noteStart >= totalDuration) continue;
+
+          const attackAt = Math.max(0, noteStart);
+          const releaseAt = Math.min(totalDuration, noteEnd);
+
+          if (rt.synth) {
+            rt.synth.triggerAttack(note.pitch, note.velocity, attackAt);
+            rt.synth.triggerRelease(note.pitch, releaseAt);
+          } else if (rt.sampler) {
+            rt.sampler.triggerAttack(note.pitch, note.velocity, attackAt);
+            rt.sampler.triggerRelease(note.pitch, releaseAt);
+          } else if (rt.drumRack) {
+            rt.drumRack.trigger(note.pitch, note.velocity, attackAt);
+          }
+        }
+        processedClips++;
+        if (onProgress) onProgress(Math.round((processedClips / Math.max(1, totalClips)) * 80));
+      }
+    }
+
+    if (pendingPlugins.length > 0) {
+      await Promise.all(pendingPlugins.map(pr => pr.catch(() => undefined)));
+    }
+
     if (onProgress) onProgress(85);
-    
+
     try {
-        const renderedBuffer = await offlineCtx.startRendering();
-        if (onProgress) onProgress(100);
-        return renderedBuffer;
+      const renderedBuffer = await offlineCtx.startRendering();
+      if (onProgress) onProgress(100);
+      return renderedBuffer;
     } catch (error) {
-        console.error('[AudioEngine] Render failed:', error);
-        // Return an empty buffer on error
-        return offlineCtx.createBuffer(2, totalSamples, targetSampleRate);
+      console.error('[AudioEngine] Render failed:', error);
+      return offlineCtx.createBuffer(2, totalSamples, targetSampleRate);
     }
   }
 
@@ -696,12 +818,19 @@ export class AudioEngine {
     }
   }
 
+  /** Clips reellement joues : le rendu gele remplace les clips d'origine. */
+  private getPlayableClips(track: Track): Clip[] {
+    if (track.isFrozen && track.frozenClip) return [track.frozenClip];
+    return track.clips || [];
+  }
+
   private scheduleClips(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number, maxLatency: number, latencies: Map<string, number>) {
       tracks.forEach(track => {
       if (track.isMuted) return; 
-      if (track.type !== TrackType.AUDIO && track.type !== TrackType.SAMPLER && track.type !== TrackType.BUS && track.type !== TrackType.SEND) return;
+      const isFrozenRender = track.isFrozen && !!track.frozenClip;
+      if (!isFrozenRender && track.type !== TrackType.AUDIO && track.type !== TrackType.SAMPLER && track.type !== TrackType.BUS && track.type !== TrackType.SEND) return;
 
-      track.clips.forEach(clip => {
+      this.getPlayableClips(track).forEach(clip => {
         const sourceKey = `${clip.id}`; 
         if (this.activeSources.has(sourceKey)) return;
         
@@ -718,6 +847,7 @@ export class AudioEngine {
       tracks.forEach(track => {
         if (track.isMuted) return;
         if (track.type !== TrackType.MIDI && track.type !== TrackType.SAMPLER && track.type !== TrackType.DRUM_RACK) return;
+        if (track.isFrozen && track.frozenClip) return; // deja rendu dans le clip gele
 
         track.clips.forEach(clip => {
            if (clip.type !== TrackType.MIDI || !clip.notes) return;
@@ -918,32 +1048,37 @@ export class AudioEngine {
         console.error(`[AudioEngine] Error playing clip ${clip.id}:`, error);
     }
 }
-  private createPluginNode(plugin: PluginInstance, bpm: number): { input: GainNode; output: GainNode; node: any } | null {
-    if (!this.ctx) return null;
+  /**
+   * @param targetCtx contexte a utiliser (permet de reconstruire la meme chaine
+   *                  d'effets dans un OfflineAudioContext pour l'export).
+   */
+  private createPluginNode(plugin: PluginInstance, bpm: number, targetCtx?: AudioContext): { input: GainNode; output: GainNode; node: any } | null {
+    const ctx = targetCtx || this.ctx;
+    if (!ctx) return null;
     
     let node: any = null;
     
     switch (plugin.type) {
-      case 'REVERB': node = new ReverbNode(this.ctx); break;
-      case 'DELAY': node = new SyncDelayNode(this.ctx, bpm); break;
-      case 'COMPRESSOR': node = new CompressorNode(this.ctx); break;
-      case 'AUTOTUNE': node = new AutoTuneNode(this.ctx); break;
-      case 'CHORUS': node = new ChorusNode(this.ctx); break;
-      case 'FLANGER': node = new FlangerNode(this.ctx); break;
-      case 'DOUBLER': node = new VocalDoublerNode(this.ctx); break;
-      case 'STEREOSPREADER': node = new StereoSpreaderNode(this.ctx); break;
-      case 'DEESSER': node = new DeEsserNode(this.ctx); break;
-      case 'DENOISER': node = new DenoiserNode(this.ctx); break;
+      case 'REVERB': node = new ReverbNode(ctx); break;
+      case 'DELAY': node = new SyncDelayNode(ctx, bpm); break;
+      case 'COMPRESSOR': node = new CompressorNode(ctx); break;
+      case 'AUTOTUNE': node = new AutoTuneNode(ctx); break;
+      case 'CHORUS': node = new ChorusNode(ctx); break;
+      case 'FLANGER': node = new FlangerNode(ctx); break;
+      case 'DOUBLER': node = new VocalDoublerNode(ctx); break;
+      case 'STEREOSPREADER': node = new StereoSpreaderNode(ctx); break;
+      case 'DEESSER': node = new DeEsserNode(ctx); break;
+      case 'DENOISER': node = new DenoiserNode(ctx); break;
       case 'PROEQ12':
         const eqDefaultParams = { isEnabled: true, masterGain: 1.0, bands: Array.from({ length: 12 }, (_, i) => ({ id: i, type: i === 0 ? 'highpass' : i === 11 ? 'lowpass' : 'peaking', frequency: [80,150,300,500,1000,2000,4000,6000,8000,10000,12000,18000][i], gain: 0, q: 1.0, isEnabled: true, isSolo: false })) };
         const eqParams = plugin.params && plugin.params.bands ? plugin.params : eqDefaultParams;
-        node = new ProEQ12Node(this.ctx, eqParams as any);
+        node = new ProEQ12Node(ctx, eqParams as any);
         break;
-      case 'VOCALSATURATOR': node = new VocalSaturatorNode(this.ctx); break;
-      case 'MASTERSYNC': node = new MasterSyncNode(this.ctx); break;
+      case 'VOCALSATURATOR': node = new VocalSaturatorNode(ctx); break;
+      case 'MASTERSYNC': node = new MasterSyncNode(ctx); break;
       default:
-        const bypassIn = this.ctx.createGain();
-        const bypassOut = this.ctx.createGain();
+        const bypassIn = ctx.createGain();
+        const bypassOut = ctx.createGain();
         bypassIn.connect(bypassOut);
         return { input: bypassIn, output: bypassOut, node: { updateParams: () => {} } };
     }
@@ -956,36 +1091,53 @@ export class AudioEngine {
     return null;
   }
 
+  /**
+   * Cree (si besoin) la chaine DSP d'une piste sans la cabler.
+   * Appele pour TOUTES les pistes avant le cablage afin qu'une piste
+   * puisse toujours trouver la DSP de sa destination (bus / master),
+   * quel que soit l'ordre du tableau de pistes.
+   */
+  private ensureTrackDSP(track: Track) {
+    if (!this.ctx) return null;
+    let dsp = this.tracksDSP.get(track.id);
+    if (dsp) return dsp;
+
+    dsp = {
+      input: this.ctx.createGain(),
+      output: this.ctx.createGain(),
+      gain: this.ctx.createGain(),
+      panner: this.ctx.createStereoPanner(),
+      analyzer: this.ctx.createAnalyser(),
+      pluginChain: new Map(),
+      sends: new Map(),
+      inputAnalyzer: this.ctx.createAnalyser()
+    };
+
+    if (track.type === TrackType.MIDI) {
+      dsp.synth = new Synthesizer(this.ctx);
+      dsp.synth.output.connect(dsp.input);
+    }
+    if (track.type === TrackType.SAMPLER) {
+      dsp.sampler = new AudioSampler(this.ctx, this.currentBpm);
+      dsp.sampler.output.connect(dsp.input);
+    }
+    if (track.type === TrackType.DRUM_RACK) {
+      dsp.drumRack = new DrumRackNode(this.ctx);
+      dsp.drumRack.output.connect(dsp.input);
+    }
+    this.tracksDSP.set(track.id, dsp);
+    return dsp;
+  }
+
   public updateTrack(track: Track, allTracks: Track[]) {
     if (!this.ctx) return;
-    let dsp = this.tracksDSP.get(track.id);
-    
-    if (!dsp) {
-      dsp = {
-        input: this.ctx.createGain(),
-        output: this.ctx.createGain(),
-        gain: this.ctx.createGain(),
-        panner: this.ctx.createStereoPanner(),
-        analyzer: this.ctx.createAnalyser(),
-        pluginChain: new Map(),
-        sends: new Map(),
-        inputAnalyzer: this.ctx.createAnalyser()
-      };
-      
-      if (track.type === TrackType.MIDI) {
-        dsp.synth = new Synthesizer(this.ctx);
-        dsp.synth.output.connect(dsp.input);
-      }
-      if (track.type === TrackType.SAMPLER) {
-        dsp.sampler = new AudioSampler(this.ctx, this.currentBpm);
-        dsp.sampler.output.connect(dsp.input);
-      }
-      if (track.type === TrackType.DRUM_RACK) {
-        dsp.drumRack = new DrumRackNode(this.ctx);
-        dsp.drumRack.output.connect(dsp.input);
-      }
-      this.tracksDSP.set(track.id, dsp);
-    }
+
+    // Pre-cree les DSP de toutes les pistes: sinon une piste routee vers un bus
+    // declare APRES elle dans le tableau retombait silencieusement sur le master.
+    allTracks.forEach(t => this.ensureTrackDSP(t));
+
+    const dsp = this.ensureTrackDSP(track);
+    if (!dsp) return;
     
     if (track.type === TrackType.DRUM_RACK && dsp.drumRack && track.drumPads) {
       dsp.drumRack.updatePadsState(track.drumPads);
@@ -1012,8 +1164,11 @@ export class AudioEngine {
     let head: AudioNode = dsp.input;
     
     const currentPluginIds = new Set<string>();
+    // Piste gelee : le rendu contient deja les effets, on court-circuite la chaine
+    // (c'est precisement ce qui libere du CPU).
+    const pluginsToApply = (track.isFrozen && track.frozenClip) ? [] : track.plugins;
     
-    track.plugins.forEach(plugin => {
+    pluginsToApply.forEach(plugin => {
       currentPluginIds.add(plugin.id);
       let pEntry = dsp!.pluginChain.get(plugin.id);
       
@@ -1061,7 +1216,9 @@ export class AudioEngine {
     
     dsp.output.disconnect();
     let destNode: AudioNode = this.masterOutput!;
-    if (track.outputTrackId && track.outputTrackId !== 'master') {
+    if (track.outputTrackId && track.outputTrackId !== track.id) {
+      // 'master' est desormais une vraie piste (fader + inserts master).
+      // Si elle n'existe pas (ancien projet), on retombe sur la sortie master du moteur.
       const destDSP = this.tracksDSP.get(track.outputTrackId);
       if (destDSP) destNode = destDSP.input;
     }

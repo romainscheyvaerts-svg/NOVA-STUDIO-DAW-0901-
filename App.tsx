@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad } from './types';
+import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker } from './types';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
 import MobileTransport from './components/MobileTransport';
@@ -31,6 +31,7 @@ import { midiManager } from './services/MidiManager';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
+import { metronomeService } from './services/MetronomeService';
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import MobileTracksPage from './components/MobileTracksPage';
 import MobileArrangementPage from './components/MobileArrangementPage';
@@ -154,6 +155,34 @@ const createInitialSends = (bpm: number, outputId: string = 'master'): Track[] =
     totalLatency: 0 
   }
 ];
+
+/**
+ * Remet a niveau un projet sauvegarde avant l'ajout de la piste MASTER et des
+ * champs timeSignature / trackGroups / markers / metronome / punch.
+ * Sans ca, ouvrir un ancien projet laissait le fader master inerte et le
+ * metronome / les marqueurs sur des valeurs undefined.
+ */
+const migrateLoadedState = (loaded: DAWState): DAWState => {
+  const tracks = loaded.tracks ? [...loaded.tracks] : [];
+  if (!tracks.some(t => t.id === 'master')) tracks.push(createMasterTrack());
+  return {
+    ...loaded,
+    // Le rendu gele n'est pas persiste (il vit en memoire) : a l'ouverture on
+    // repasse sur la chaine normale plutot que de laisser une piste muette.
+    tracks: tracks.map(t => (t.isFrozen ? { ...t, isFrozen: false, frozenClip: undefined } : t)),
+    timeSignature: loaded.timeSignature || { numerator: 4, denominator: 4 },
+    trackGroups: loaded.trackGroups || [],
+    markers: loaded.markers || [],
+    metronome: loaded.metronome || { enabled: false, volume: 0.7, countIn: 0, accentDownbeat: true, sound: 'CLICK' },
+    punch: loaded.punch || { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 }
+  };
+};
+
+const createMasterTrack = (): Track => ({
+  id: 'master', name: 'MASTER BUS', type: TrackType.BUS, color: '#00f2ff', isMuted: false, isSolo: false,
+  isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: '', sends: [], clips: [],
+  plugins: [], automationLanes: [createDefaultAutomation('volume', '#00f2ff')], totalLatency: 0
+});
 
 const createBusVox = (defaultSends: TrackSend[], bpm: number): Track => ({
   id: 'bus-vox', name: 'BUS VOX', type: TrackType.BUS, color: '#fbbf24', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'master', sends: [...defaultSends], clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#fbbf24')], totalLatency: 0
@@ -400,10 +429,16 @@ export default function App() {
       { id: 'back-2', name: 'BACK 2', type: TrackType.AUDIO, color: '#c084fc', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: 'bus-vox', sends: createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), clips: [], plugins: [], automationLanes: [createDefaultAutomation('volume', '#c084fc')], totalLatency: 0 },
       createBusVox(createInitialSends(AUDIO_CONFIG.DEFAULT_BPM).map(s => ({ id: s.id, level: 0, isEnabled: true })), AUDIO_CONFIG.DEFAULT_BPM), 
       createBusFx(),
-      ...createInitialSends(AUDIO_CONFIG.DEFAULT_BPM, 'bus-fx')
+      ...createInitialSends(AUDIO_CONFIG.DEFAULT_BPM, 'bus-fx'),
+      createMasterTrack()
     ],
     selectedTrackId: 'track-rec-main', currentView: 'ARRANGEMENT', projectPhase: ProjectPhase.SETUP, isLowLatencyMode: false, isRecModeActive: false, systemMaxLatency: 0, recStartTime: null,
-    isDelayCompEnabled: false
+    isDelayCompEnabled: false,
+    timeSignature: { numerator: 4, denominator: 4 },
+    trackGroups: [],
+    markers: [],
+    metronome: { enabled: false, volume: 0.7, countIn: 0, accentDownbeat: true, sound: 'CLICK' },
+    punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 }
   };
 
   const { state, setState, setVisualState, undo, redo, canUndo, canRedo } = useUndoRedo(initialState);
@@ -414,6 +449,8 @@ export default function App() {
 
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
     useEffect(() => { novaBridge.connect(); }, []);
+  // Presse-papiers de clips (partage entre l'arrangement desktop et mobile).
+  const clipboardClipRef = useRef<Clip | null>(null);
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
 
@@ -428,6 +465,15 @@ export default function App() {
     if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks));
   }, [state.tracks]); 
   useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
+
+  // Metronome : reglages, tempo et signature suivent l'etat du projet.
+  useEffect(() => { metronomeService.setSettings(state.metronome); }, [state.metronome]);
+  useEffect(() => { metronomeService.setBpm(state.bpm); }, [state.bpm]);
+  useEffect(() => { metronomeService.setTimeSignature(state.timeSignature); }, [state.timeSignature]);
+  useEffect(() => {
+    if (state.isPlaying && state.metronome.enabled) metronomeService.start();
+    else metronomeService.stop();
+  }, [state.isPlaying, state.metronome.enabled]);
   
   useEffect(() => {
     let animId: number;
@@ -463,6 +509,11 @@ export default function App() {
     if (audioEngine.ctx?.state === 'suspended') await audioEngine.ctx.resume();
     if (wasUninitialized && audioEngine.ctx) {
       stateRef.current.tracks.forEach(t => audioEngine.updateTrack(t, stateRef.current.tracks));
+      // Le metronome partage le contexte audio du moteur.
+      metronomeService.init(audioEngine.ctx);
+      metronomeService.setSettings(stateRef.current.metronome);
+      metronomeService.setBpm(stateRef.current.bpm);
+      metronomeService.setTimeSignature(stateRef.current.timeSignature);
     }
   };
 
@@ -478,9 +529,13 @@ export default function App() {
     try {
       setSaveState(s => ({ ...s, progress: 30, message: 'Sauvegarde cloud...' }));
       const stateToSave = { ...stateRef.current, name: projectName };
-      await supabaseManager.saveUserSession(stateToSave, projectName);
+      const saved = await supabaseManager.saveUserSession(stateToSave, (percent, message) => {
+        setSaveState(s => ({ ...s, progress: Math.max(30, percent), message }));
+      });
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Sauvegardé !' }));
-      setState(prev => ({ ...prev, name: projectName }));
+      // On garde l'UUID renvoye par Supabase: les sauvegardes suivantes mettent a jour
+      // le meme projet au lieu d'en creer un nouveau a chaque fois.
+      setState(prev => ({ ...prev, name: projectName, id: saved?.id || prev.id }));
       setAiNotification(`✅ Projet "${projectName}" sauvegardé dans le cloud`);
     } catch (e: any) {
       console.error('[Cloud Save Error]', e);
@@ -500,7 +555,9 @@ export default function App() {
       const copyName = `${n} (Copy)`;
       const stateToSave = { ...stateRef.current, id: `proj-${Date.now()}`, name: copyName };
       setSaveState(s => ({ ...s, progress: 50, message: 'Sauvegarde...' }));
-      await supabaseManager.saveUserSession(stateToSave, copyName, true);
+      await supabaseManager.saveUserSession(stateToSave, (percent, message) => {
+        setSaveState(s => ({ ...s, progress: Math.max(50, percent), message }));
+      }, true);
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Copie créée !' }));
       setAiNotification(`✅ Copie "${copyName}" créée dans le cloud`);
     } catch (e: any) {
@@ -543,7 +600,8 @@ export default function App() {
     }
   };
   
-  const handleLoadProject = useCallback((loadedState: DAWState) => {
+  const handleLoadProject = useCallback((rawState: DAWState) => {
+    const loadedState = migrateLoadedState(rawState);
     ensureAudioEngine().then(() => {
         audioBufferRegistry.clear();
         
@@ -606,6 +664,15 @@ export default function App() {
   const handleExportMix = async () => { setIsExportMenuOpen(true); };
 
   const handleEditClip = (trackId: string, clipId: string, action: string, payload?: any) => {
+    if (action === 'COPY' || action === 'CUT') {
+      const track = stateRef.current.tracks.find(t => t.id === trackId);
+      const clip = track?.clips.find(c => c.id === clipId);
+      if (clip) clipboardClipRef.current = { ...clip };
+      if (action === 'COPY') return;
+      // CUT : on copie puis on supprime via la branche DELETE ci-dessous.
+      action = 'DELETE';
+    }
+
     setState(produce((draft: DAWState) => {
       const track = draft.tracks.find(t => t.id === trackId);
       if (!track) return;
@@ -614,6 +681,13 @@ export default function App() {
       if (idx === -1 && action !== 'PASTE') return;
       
       switch(action) {
+        case 'PASTE': {
+            const source = clipboardClipRef.current;
+            if (!source) return;
+            const start = Math.max(0, payload?.time ?? 0);
+            newClips.push({ ...source, id: `clip-paste-${Date.now()}`, start });
+            break;
+        }
         case 'UPDATE_PROPS': if(idx > -1) newClips[idx] = { ...newClips[idx], ...payload }; break;
         case 'DELETE': 
             if(idx > -1) {
@@ -682,7 +756,7 @@ export default function App() {
         if (isVolumeOnlyChange || isPanOnlyChange) {
             // Use atomic methods for better performance
             if (isVolumeOnlyChange) {
-                audioEngine.setTrackVolume(updatedTrack.id, updatedTrack.volume);
+                audioEngine.setTrackVolume(updatedTrack.id, updatedTrack.volume, updatedTrack.isMuted);
             }
             if (isPanOnlyChange) {
                 audioEngine.setTrackPan(updatedTrack.id, updatedTrack.pan);
@@ -729,6 +803,7 @@ export default function App() {
   }, [setVisualState]);
 
   const handleStop = useCallback(async () => {
+    metronomeService.stop();
     audioEngine.stopAll();
     audioEngine.seekTo(0, stateRef.current.tracks, false);
     setState(prev => ({ ...prev, isPlaying: false, currentTime: 0, isRecording: false }));
@@ -977,8 +1052,126 @@ export default function App() {
         destTrack.clips.push(clip);
     }));
   }, [setState]);
-  const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => { }, [setState]);
-  const handleSwapInstrument = useCallback((trackId: string) => { }, []);
+  /** Deplace la piste source juste avant la piste de destination. */
+  const handleReorderTracks = useCallback((sourceTrackId: string, destTrackId: string) => {
+    if (sourceTrackId === destTrackId) return;
+    setState(produce(draft => {
+      const from = draft.tracks.findIndex(t => t.id === sourceTrackId);
+      if (from === -1) return;
+      const [moved] = draft.tracks.splice(from, 1);
+      const to = draft.tracks.findIndex(t => t.id === destTrackId);
+      if (to === -1) { draft.tracks.splice(from, 0, moved); return; }
+      draft.tracks.splice(to, 0, moved);
+    }));
+  }, [setState]);
+
+  /**
+   * Gele / degele une piste : rend son audio avec ses effets, puis lit ce rendu
+   * a la place de la chaine complete (economie de CPU). Les clips et plugins
+   * d'origine ne sont jamais supprimes, degeler les reactive tels quels.
+   */
+  const handleFreezeTrack = useCallback(async (trackId: string) => {
+    const track = stateRef.current.tracks.find(t => t.id === trackId);
+    if (!track) return;
+
+    if (track.isFrozen) {
+      setState(produce((draft: DAWState) => {
+        const t = draft.tracks.find(tr => tr.id === trackId);
+        if (!t) return;
+        if (t.frozenClip?.bufferId) audioBufferRegistry.remove(t.frozenClip.bufferId);
+        t.isFrozen = false;
+        delete t.frozenClip;
+      }));
+      setAiNotification(`🔥 "${track.name}" dégelée`);
+      setTimeout(() => setAiNotification(null), 2500);
+      return;
+    }
+
+    const trackEnd = track.clips.reduce((max, c) => Math.max(max, c.start + c.duration), 0);
+    if (trackEnd <= 0) {
+      setAiNotification("⚠️ Rien à geler sur cette piste");
+      setTimeout(() => setAiNotification(null), 2500);
+      return;
+    }
+
+    await ensureAudioEngine();
+    setAiNotification(`❄️ Gel de "${track.name}"...`);
+    try {
+      // On rend la piste seule, sans son bus ni ses departs : le gel ne fige
+      // que ce que la piste produit elle-meme.
+      const isolated: Track = { ...track, isFrozen: false, outputTrackId: '', sends: [], isMuted: false, isSolo: false };
+      const buffer = await audioEngine.renderProject([isolated], trackEnd, 0, 44100);
+      const clipId = `frozen-${trackId}-${Date.now()}`;
+      audioBufferRegistry.register(buffer, clipId);
+
+      setState(produce((draft: DAWState) => {
+        const t = draft.tracks.find(tr => tr.id === trackId);
+        if (!t) return;
+        t.isFrozen = true;
+        t.frozenClip = {
+          id: clipId,
+          start: 0,
+          duration: trackEnd,
+          offset: 0,
+          fadeIn: 0,
+          fadeOut: 0,
+          name: `${t.name} (frozen)`,
+          color: t.color,
+          type: TrackType.AUDIO,
+          bufferId: clipId,
+          isMuted: false,
+          gain: 1
+        };
+      }));
+      setAiNotification(`❄️ "${track.name}" gelée`);
+    } catch (e: any) {
+      console.error('[Freeze]', e);
+      setAiNotification(`❌ Gel impossible : ${e?.message || 'erreur'}`);
+    } finally {
+      setTimeout(() => setAiNotification(null), 2500);
+    }
+  }, [setState]);
+
+  /** Cree un clip MIDI vide sur une piste instrument et ouvre le piano roll. */
+  const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => {
+    const track = stateRef.current.tracks.find(t => t.id === trackId);
+    if (!track) return;
+    const barDuration = (60 / stateRef.current.bpm) * 4; // 1 mesure en 4/4
+    const clipId = `clip-midi-${Date.now()}`;
+    setState(produce((draft: DAWState) => {
+      const t = draft.tracks.find(tr => tr.id === trackId);
+      if (!t) return;
+      t.clips.push({
+        id: clipId,
+        start: Math.max(0, time),
+        duration: barDuration,
+        offset: 0,
+        fadeIn: 0,
+        fadeOut: 0,
+        name: 'Pattern',
+        color: t.color,
+        type: TrackType.MIDI,
+        notes: [],
+        isMuted: false,
+        gain: 1
+      });
+      draft.selectedTrackId = trackId;
+    }));
+    setMidiEditorOpen({ trackId, clipId });
+  }, [setState]);
+
+  /** Ouvre le navigateur d'instruments sur la piste concernee. */
+  const handleSwapInstrument = useCallback((trackId: string) => {
+    setState(prev => ({ ...prev, selectedTrackId: trackId }));
+    if (isMobile) {
+      setActiveMobileTab('BROWSER');
+    } else {
+      setIsSidebarOpen(true);
+      setActiveSideBrowserTab('STORE');
+    }
+    setAiNotification("🎹 Choisis un instrument dans le navigateur");
+    setTimeout(() => setAiNotification(null), 2500);
+  }, [setState, isMobile]);
   const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, "Group Bus"); }, [handleCreateTrack]);
   const handleToggleBypass = useCallback((trackId: string, pluginId: string) => {
     setState(produce((draft: DAWState) => {
@@ -1054,6 +1247,43 @@ export default function App() {
     
     setAutomationMenu(null);
   }, [automationMenu, setState]);
+  // --- Marqueurs (l'affichage et le menu existaient dans ArrangementView,
+  // mais rien ne permettait d'en creer et les props n'etaient jamais passees).
+  const MARKER_COLORS = ['#00f2ff', '#f97316', '#22c55e', '#a855f7', '#ef4444', '#eab308'];
+
+  const handleAddMarker = useCallback((time: number, name?: string) => {
+    setState(produce((draft: DAWState) => {
+      const index = draft.markers.length;
+      draft.markers.push({
+        id: `mk-${Date.now()}-${index}`,
+        name: name || `Marqueur ${index + 1}`,
+        time: Math.max(0, time),
+        type: 'MARKER',
+        color: MARKER_COLORS[index % MARKER_COLORS.length]
+      });
+      draft.markers.sort((a, b) => a.time - b.time);
+    }));
+  }, [setState]);
+
+  const handleUpdateMarker = useCallback((marker: Marker) => {
+    setState(produce((draft: DAWState) => {
+      const idx = draft.markers.findIndex(m => m.id === marker.id);
+      if (idx > -1) draft.markers[idx] = marker;
+      draft.markers.sort((a, b) => a.time - b.time);
+    }));
+  }, [setState]);
+
+  const handleDeleteMarker = useCallback((markerId: string) => {
+    setState(produce((draft: DAWState) => {
+      draft.markers = draft.markers.filter(m => m.id !== markerId);
+    }));
+  }, [setState]);
+
+  const handleToggleMetronome = useCallback(async () => {
+    await ensureAudioEngine();
+    setState(prev => ({ ...prev, metronome: { ...prev.metronome, enabled: !prev.metronome.enabled } }));
+  }, [setState]);
+
   const handleToggleDelayComp = useCallback(() => {
     setState(prev => ({ ...prev, isDelayCompEnabled: !prev.isDelayCompEnabled }));
   }, [setState]);
@@ -1213,7 +1443,298 @@ export default function App() {
     };
   }, [handleUpdateBpm, handleUpdateTrack, handleTogglePlay, handleStop, handleSeek, handleDuplicateTrack, handleCreateTrack, handleDeleteTrack, handleToggleBypass, handleLoadDrumSample, handleEditClip, setState]);
 
-  const executeAIAction = (a: AIAction) => { };
+  /**
+   * Applique une action renvoyée par l'assistant IA.
+   * Le catalogue d'actions est décrit dans api/chat.ts : les deux doivent rester alignés.
+   */
+  const executeAIAction = useCallback((a: AIAction) => {
+    if (!a || !a.action) return;
+    const p = (a.payload || {}) as any;
+    const tracks = stateRef.current.tracks;
+
+    /** Retrouve une piste par id, à défaut par nom (l'IA peut se tromper de casse). */
+    const findTrack = (id?: string): Track | undefined => {
+      if (!id) return undefined;
+      return tracks.find(t => t.id === id)
+        || tracks.find(t => t.name.toLowerCase() === String(id).toLowerCase());
+    };
+
+    /** Retrouve un plugin par id ou par type sur une piste. */
+    const findPlugin = (track: Track, ref?: string) => {
+      if (!ref) return undefined;
+      return track.plugins.find(pl => pl.id === ref)
+        || track.plugins.find(pl => pl.type === String(ref).toUpperCase());
+    };
+
+    const clamp = (v: any, min: number, max: number, fallback: number) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.max(min, Math.min(max, n));
+    };
+
+    const notify = (msg: string) => {
+      setAiNotification(msg);
+      setTimeout(() => setAiNotification(null), 2500);
+    };
+
+    /** Mutation ciblée sur une piste, via son id. */
+    const patchTrack = (trackId: string, mutate: (t: Track) => void) => {
+      setState(produce((draft: DAWState) => {
+        const t = draft.tracks.find(tr => tr.id === trackId);
+        if (t) mutate(t);
+      }));
+    };
+
+    switch (a.action) {
+      case 'SET_VOLUME': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        patchTrack(t.id, tr => { tr.volume = clamp(p.volume, 0, 1.5, tr.volume); });
+        break;
+      }
+
+      case 'SET_PAN': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        patchTrack(t.id, tr => { tr.pan = clamp(p.pan, -1, 1, tr.pan); });
+        break;
+      }
+
+      case 'MUTE_TRACK': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        patchTrack(t.id, tr => { tr.isMuted = p.isMuted === undefined ? !tr.isMuted : !!p.isMuted; });
+        break;
+      }
+
+      case 'SOLO_TRACK': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        patchTrack(t.id, tr => { tr.isSolo = p.isSolo === undefined ? !tr.isSolo : !!p.isSolo; });
+        break;
+      }
+
+      case 'RENAME_TRACK': {
+        const t = findTrack(p.trackId);
+        if (!t || !p.name) return;
+        patchTrack(t.id, tr => { tr.name = String(p.name).slice(0, 40); });
+        break;
+      }
+
+      case 'ADD_TRACK':
+      case 'CREATE_TRACK': {
+        const type = (String(p.type || 'AUDIO').toUpperCase() as TrackType);
+        const valid = [TrackType.AUDIO, TrackType.MIDI, TrackType.BUS, TrackType.SEND];
+        handleCreateTrack(valid.includes(type) ? type : TrackType.AUDIO, p.name);
+        break;
+      }
+
+      case 'DELETE_TRACK': {
+        const t = findTrack(p.trackId);
+        if (t) handleDeleteTrack(t.id);
+        break;
+      }
+
+      case 'DUPLICATE_TRACK': {
+        const t = findTrack(p.trackId);
+        if (t) handleDuplicateTrack(t.id);
+        break;
+      }
+
+      case 'UPDATE_TRACK': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        handleUpdateTrack({
+          ...t,
+          ...(p.volume !== undefined ? { volume: clamp(p.volume, 0, 1.5, t.volume) } : {}),
+          ...(p.pan !== undefined ? { pan: clamp(p.pan, -1, 1, t.pan) } : {}),
+          ...(p.isMuted !== undefined ? { isMuted: !!p.isMuted } : {}),
+          ...(p.isSolo !== undefined ? { isSolo: !!p.isSolo } : {}),
+          ...(p.name ? { name: String(p.name).slice(0, 40) } : {})
+        });
+        break;
+      }
+
+      case 'UPDATE_PLUGIN': {
+        const t = findTrack(p.trackId);
+        const type = String(p.pluginType || p.type || '').toUpperCase() as PluginType;
+        if (!t || !type) return;
+        const existing = findPlugin(t, type);
+        if (existing) {
+          handleUpdatePluginParams(t.id, existing.id, { ...existing.params, ...(p.params || {}) });
+        } else {
+          // L'effet n'est pas encore sur la piste : on le crée avec les réglages demandés.
+          const plugin = createDefaultPlugins(type, 0.5, stateRef.current.bpm);
+          plugin.params = { ...plugin.params, ...(p.params || {}) };
+          patchTrack(t.id, tr => { tr.plugins.push(plugin); });
+          notify(`✅ ${type} ajouté sur ${t.name}`);
+        }
+        break;
+      }
+
+      case 'SET_PLUGIN_PARAM': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        const plugin = findPlugin(t, p.pluginId || p.pluginType);
+        if (!plugin || !p.param) return;
+        handleUpdatePluginParams(t.id, plugin.id, { ...plugin.params, [p.param]: p.value });
+        break;
+      }
+
+      case 'BYPASS_PLUGIN': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        const plugin = findPlugin(t, p.pluginId || p.pluginType);
+        if (!plugin) return;
+        const target = p.isEnabled === undefined ? !plugin.isEnabled : !!p.isEnabled;
+        if (target !== plugin.isEnabled) handleToggleBypass(t.id, plugin.id);
+        break;
+      }
+
+      case 'OPEN_PLUGIN': {
+        const t = findTrack(p.trackId);
+        if (!t) return;
+        const plugin = findPlugin(t, p.pluginId || p.pluginType);
+        if (!plugin) return;
+        ensureAudioEngine().then(() => setActivePlugin({ trackId: t.id, plugin }));
+        break;
+      }
+
+      case 'CLOSE_PLUGIN':
+        setActivePlugin(null);
+        break;
+
+      case 'RESET_FX': {
+        const target = findTrack(p.trackId);
+        setState(produce((draft: DAWState) => {
+          draft.tracks.forEach(tr => {
+            if (target && tr.id !== target.id) return;
+            tr.plugins = [];
+          });
+        }));
+        notify(target ? `🧹 Effets retirés sur ${target.name}` : '🧹 Tous les effets ont été retirés');
+        break;
+      }
+
+      case 'SET_SEND_LEVEL': {
+        const t = findTrack(p.trackId);
+        if (!t || !p.sendId) return;
+        patchTrack(t.id, tr => {
+          const send = tr.sends.find(s => s.id === p.sendId);
+          if (send) {
+            send.level = clamp(p.level, 0, 1, send.level);
+            send.isEnabled = true;
+          }
+        });
+        break;
+      }
+
+      case 'PLAY':
+        if (!stateRef.current.isPlaying) handleTogglePlay();
+        break;
+
+      case 'STOP':
+        handleStop();
+        break;
+
+      case 'RECORD':
+        handleToggleRecord();
+        break;
+
+      case 'SEEK':
+        handleSeek(Math.max(0, Number(p.time) || 0));
+        break;
+
+      case 'SET_LOOP': {
+        const start = Math.max(0, Number(p.start) || 0);
+        const end = Math.max(start + 0.1, Number(p.end) || start + 4);
+        setState(prev => ({
+          ...prev,
+          loopStart: start,
+          loopEnd: end,
+          isLoopActive: p.active === undefined ? true : !!p.active
+        }));
+        break;
+      }
+
+      case 'SET_BPM':
+        handleUpdateBpm(clamp(p.bpm, 20, 999, stateRef.current.bpm));
+        break;
+
+      case 'MUTE_CLIP': {
+        const t = findTrack(p.trackId);
+        if (!t || !p.clipId) return;
+        const clip = t.clips.find(c => c.id === p.clipId);
+        if (!clip) return;
+        const target = p.isMuted === undefined ? !clip.isMuted : !!p.isMuted;
+        if (target !== clip.isMuted) handleEditClip(t.id, clip.id, 'MUTE');
+        break;
+      }
+
+      case 'SPLIT_CLIP': {
+        const t = findTrack(p.trackId);
+        if (!t || !p.clipId) return;
+        handleEditClip(t.id, p.clipId, 'SPLIT', { time: Number(p.time) || 0 });
+        break;
+      }
+
+      case 'NORMALIZE_CLIP': {
+        const t = findTrack(p.trackId);
+        if (!t || !p.clipId) return;
+        const clip = t.clips.find(c => c.id === p.clipId);
+        if (!clip) return;
+        const buffer = clip.buffer || (clip.bufferId ? audioBufferRegistry.get(clip.bufferId) : null);
+        if (!buffer) { notify("⚠️ Audio du clip introuvable"); return; }
+        let peak = 0;
+        for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+          const data = buffer.getChannelData(ch);
+          for (let i = 0; i < data.length; i++) {
+            const v = Math.abs(data[i]);
+            if (v > peak) peak = v;
+          }
+        }
+        if (peak <= 0) return;
+        // -0.3 dBFS de marge pour éviter l'écrêtage à la lecture.
+        handleEditClip(t.id, clip.id, 'UPDATE_PROPS', { gain: Math.min(8, 0.966 / peak) });
+        notify(`📊 "${clip.name}" normalisé`);
+        break;
+      }
+
+      case 'PREPARE_REC': {
+        const t = findTrack(p.trackId) || tracks.find(tr => tr.id === stateRef.current.selectedTrackId);
+        if (!t) return;
+        setState(produce((draft: DAWState) => {
+          draft.tracks.forEach(tr => { tr.isTrackArmed = tr.id === t.id; });
+          draft.selectedTrackId = t.id;
+          draft.isRecModeActive = true;
+        }));
+        notify(`🔴 ${t.name} armée pour l'enregistrement`);
+        break;
+      }
+
+      case 'CLEAN_MIX': {
+        setState(produce((draft: DAWState) => {
+          draft.tracks.forEach(tr => {
+            tr.isMuted = false;
+            tr.isSolo = false;
+            tr.pan = 0;
+            if (tr.type === TrackType.AUDIO) tr.volume = 0.8;
+          });
+        }));
+        notify('🧼 Mix remis à plat');
+        break;
+      }
+
+      default:
+        // Actions non encore prises en charge (RUN_MASTER_SYNC, ANALYZE_INSTRU,
+        // REMOVE_SILENCE, SET_AUTOMATION) : on le dit plutôt que d'échouer en silence.
+        console.warn('[AI] Action non prise en charge :', a.action, a.payload);
+        notify(`⚠️ Action "${a.action}" pas encore disponible`);
+        break;
+    }
+  }, [setState, handleCreateTrack, handleDeleteTrack, handleDuplicateTrack, handleUpdateTrack,
+      handleUpdatePluginParams, handleToggleBypass, handleTogglePlay, handleStop, handleToggleRecord,
+      handleSeek, handleUpdateBpm]);
 
   const envoyerAuChatbot = async (messageUtilisateur: string) => {
     try {
@@ -1223,13 +1744,23 @@ export default function App() {
             bpm: currentState.bpm,
             isPlaying: currentState.isPlaying,
             isRecording: currentState.isRecording,
+            currentTime: Math.round(currentState.currentTime * 100) / 100,
+            selectedTrackId: currentState.selectedTrackId,
             trackCount: currentState.tracks.length,
-            tracks: currentState.tracks.slice(0, 10).map(t => ({
+            // Les id sont indispensables : les actions de l'IA ciblent les pistes,
+            // les clips et les effets par identifiant.
+            tracks: currentState.tracks.map(t => ({
+                id: t.id,
                 name: t.name,
                 type: t.type,
-                volume: Math.round(t.volume * 100),
+                volume: Math.round(t.volume * 100) / 100,
+                pan: t.pan,
                 isMuted: t.isMuted,
-                plugins: t.plugins.map(p => p.type)
+                isSolo: t.isSolo,
+                outputTrackId: t.outputTrackId,
+                sends: t.sends.map(s => ({ id: s.id, level: s.level, isEnabled: s.isEnabled })),
+                plugins: t.plugins.map(p => ({ id: p.id, type: p.type, isEnabled: p.isEnabled })),
+                clips: t.clips.map(c => ({ id: c.id, name: c.name, start: c.start, duration: c.duration, isMuted: c.isMuted }))
             }))
         };
 
@@ -1298,6 +1829,8 @@ export default function App() {
           isPlaying={state.isPlaying} currentTime={state.currentTime} bpm={state.bpm} onBpmChange={handleUpdateBpm}
           isRecording={state.isRecording} isLoopActive={state.isLoopActive}
           onToggleLoop={() => setState(p => ({ ...p, isLoopActive: !p.isLoopActive }))}
+          isMetronomeEnabled={state.metronome.enabled}
+          onToggleMetronome={handleToggleMetronome}
           onStop={handleStop} onTogglePlay={handleTogglePlay} onToggleRecord={handleToggleRecord}
           currentView={state.currentView} onChangeView={v => setState(s => ({...s, currentView: v}))}
           statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
@@ -1344,16 +1877,18 @@ export default function App() {
                    tracks={state.tracks} currentTime={state.currentTime} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
                    onSetLoop={(start, end) => setState(prev => ({ ...prev, loopStart: start, loopEnd: end, isLoopActive: true }))}
                    onSeek={handleSeek} bpm={state.bpm} selectedTrackId={state.selectedTrackId} onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
-                   onUpdateTrack={handleUpdateTrack} onReorderTracks={() => {}}
+                   onUpdateTrack={handleUpdateTrack} onReorderTracks={handleReorderTracks}
                    onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
                    onSelectPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
                    onRemovePlugin={handleRemovePlugin} onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
                    onAddTrack={handleCreateTrack} onDuplicateTrack={handleDuplicateTrack} onDeleteTrack={handleDeleteTrack}
-                   onFreezeTrack={(tid) => {}}
+                   onFreezeTrack={handleFreezeTrack}
                    onEditClip={handleEditClip} isRecording={state.isRecording} recStartTime={state.recStartTime}
                    onMoveClip={handleMoveClip} onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
                    onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
+                   markers={state.markers} onAddMarker={handleAddMarker}
+                   onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
                 />
               )}
 
@@ -1412,6 +1947,15 @@ export default function App() {
                   onStop={handleStop}
                   onUpdateTrack={handleUpdateTrack}
                   onDeleteClip={(trackId, clipId) => handleEditClip(trackId, clipId, 'DELETE')}
+                  onDuplicateClip={(trackId, clipId) => handleEditClip(trackId, clipId, 'DUPLICATE')}
+                  onSplitClip={(trackId, clipId, splitTime) => handleEditClip(trackId, clipId, 'SPLIT', { time: splitTime })}
+                  onCopyClip={(trackId, clip) => handleEditClip(trackId, clip.id, 'COPY')}
+                  onPasteClip={(trackId, time) => handleEditClip(trackId, '', 'PASTE', { time })}
+                  onUpdateSend={(trackId, sendId, level, isEnabled) => setState(produce((draft: DAWState) => {
+                    const t = draft.tracks.find(tr => tr.id === trackId);
+                    const send = t?.sends.find(sd => sd.id === sendId);
+                    if (send) { send.level = level; send.isEnabled = isEnabled; }
+                  }))}
                   onRequestAddPlugin={handleRequestAddPlugin}
                 />
               )}

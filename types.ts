@@ -243,6 +243,12 @@ export interface Track {
   totalLatency: number;
   events?: any[];
   drumPads?: DrumPad[];        // Only for DRUM_RACK tracks
+  /**
+   * Rendu audio de la piste quand elle est gelee (isFrozen).
+   * Les clips et plugins d'origine ne sont jamais supprimes : degeler
+   * consiste simplement a repasser sur la chaine normale.
+   */
+  frozenClip?: Clip;
   groupId?: string;            // NEW: Track group reference
   height?: number;             // NEW: Custom track height
   isMinimized?: boolean;       // NEW: Collapsed state

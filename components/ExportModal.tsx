@@ -117,7 +117,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
             // --- EXPORT STEMS (ZIP) ---
             const zip = new JSZip();
             const tracksToExport = projectState.tracks.filter(t => 
-                !t.isMuted && (t.clips.length > 0 || t.type === 'BUS' || t.type === 'SEND')
+                !t.isMuted && t.id !== 'master' && (t.clips.length > 0 || t.type === 'BUS' || t.type === 'SEND')
             );
             
             const totalSteps = tracksToExport.length;
@@ -130,26 +130,13 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                 setStatusText(`Export Stem ${i + 1}/${totalSteps} : ${track.name}`);
                 setProgress((i / totalSteps) * 100);
 
-                // Isolate Track: We pass ONLY this track to the renderer
-                // Note: If using buses/sends, logic is complex. 
-                // Simplified approach: Mute all others in a clone config.
-                
-                // Clone tracks and mute everyone except current
-                const stemTracks = projectState.tracks.map(t => ({
-                    ...t,
-                    isMuted: t.id !== track.id && t.type !== 'BUS' && t.type !== 'SEND' 
-                    // Note: Ideally we should keep routing logic, but simple solo works for now.
-                    // If track routes to bus, we should keep bus unmuted.
-                }));
-                
-                // Better approach: Solo the track in the engine logic.
-                // Since renderProject takes a list of tracks, we just pass the full list 
-                // but with modifications to isMuted.
+                // On soloe la piste : renderProject garde aussi tout ce qui
+                // l'alimente (pistes -> bus -> master) et ses departs.
                 const isolatedTracks = projectState.tracks.map(t => {
-                   if (t.id === track.id) return { ...t, isMuted: false, isSolo: true }; // Force solo
-                   return { ...t, isSolo: false }; // Others not solo
+                   if (t.id === track.id) return { ...t, isMuted: false, isSolo: true };
+                   return { ...t, isSolo: false };
                 });
-                
+
                 // Render Logic handles Solo implicitly
                 const blob = await renderTrackList(isolatedTracks, track.name);
                 zip.file(`${trackName}.wav`, blob);

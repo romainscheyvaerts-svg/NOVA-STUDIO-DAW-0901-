@@ -181,9 +181,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       return;
     }
 
-    if (activeTool === 'SPLIT' && onUpdateClip) {
+    if (activeTool === 'SPLIT') {
       const splitTime = xToTime(relativeX) + clip.start;
-      // TODO: Implement split
+      onSplitClip?.(trackId, clip.id, splitTime);
+      setSelectedClip(null);
       return;
     }
 

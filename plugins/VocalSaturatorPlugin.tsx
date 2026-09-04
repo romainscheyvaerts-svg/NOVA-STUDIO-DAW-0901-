@@ -179,13 +179,23 @@ export class VocalSaturatorNode {
 interface VocalSaturationUIProps {
   node: VocalSaturatorNode;
   initialParams: SaturatorParams;
+  // Remonte les reglages vers le projet (sans ca, les reglages du saturateur
+  // etaient perdus a la fermeture de l'UI et absents des sauvegardes).
+  onParamsChange?: (params: SaturatorParams) => void;
 }
 
 /**
  * VOCAL SATURATION UI (Converted to Functional Component for fix)
  */
-export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initialParams }) => {
+export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initialParams, onParamsChange }) => {
   const [params, setParams] = useState<SaturatorParams>(initialParams);
+  const hasMounted = useRef(false);
+
+  // Persiste les parametres dans l'etat du projet a chaque changement.
+  useEffect(() => {
+    if (!hasMounted.current) { hasMounted.current = true; return; }
+    onParamsChange?.(params);
+  }, [params, onParamsChange]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDragging = useRef(false);
   const activeParam = useRef<keyof SaturatorParams | null>(null);

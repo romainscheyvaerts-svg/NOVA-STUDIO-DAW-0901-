@@ -260,7 +260,11 @@ export class SupabaseManager {
 
   // --- GESTION DES SESSIONS UTILISATEUR (CLOUD SAVE MANUEL) ---
 
-  public async saveUserSession(state: DAWState, onProgress?: (percent: number, message: string) => void) {
+  public async saveUserSession(
+    state: DAWState,
+    onProgress?: (percent: number, message: string) => void,
+    forceNew: boolean = false
+  ) {
     if (!supabase) throw new Error("Supabase non configuré");
     
     // VERIFICATION STRICTE DE L'UTILISATEUR ACTUEL
@@ -287,7 +291,10 @@ export class SupabaseManager {
     
     if (onProgress) onProgress(90, "Sauvegarde de la session...");
 
-    const isNewProject = state.id === 'proj-1' || !state.id.includes('-');
+    // La colonne projects.id est un UUID: tout id local ('proj-1', 'proj-1738...')
+    // doit laisser Postgres generer un nouvel UUID, sinon l'upsert echoue.
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(state.id || '');
+    const isNewProject = forceNew || !isUuid;
 
     const payload: any = {
       user_id: user.id, // Use verified ID

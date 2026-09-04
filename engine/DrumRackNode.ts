@@ -35,6 +35,11 @@ export class DrumRackNode {
     });
   }
 
+  /** Expose les samples charges (utilise par l'export offline). */
+  public getBuffers(): Map<number, AudioBuffer> {
+    return this.buffers;
+  }
+
   public loadSample(padId: number, buffer: AudioBuffer) {
     this.buffers.set(padId, buffer);
   }

@@ -92,6 +92,27 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: (ContextMenuItem | 'separator')[] } | null>(null);
   const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
+  // Reordonnancement des pistes par glisser-deposer (le TrackHeader emettait
+  // deja les evenements, mais ArrangementView les ignorait).
+  const dragTrackIdRef = useRef<string | null>(null);
+  const [dragOverTrackId, setDragOverTrackId] = useState<string | null>(null);
+
+  const handleDragStartTrack = useCallback((trackId: string) => {
+    dragTrackIdRef.current = trackId;
+  }, []);
+
+  const handleDragOverTrack = useCallback((trackId: string) => {
+    setDragOverTrackId(prev => (prev === trackId ? prev : trackId));
+  }, []);
+
+  const handleDropTrack = useCallback(() => {
+    const source = dragTrackIdRef.current;
+    const dest = dragOverTrackId;
+    dragTrackIdRef.current = null;
+    setDragOverTrackId(null);
+    if (source && dest && source !== dest) onReorderTracks(source, dest);
+  }, [dragOverTrackId, onReorderTracks]);
+
   const [markerContextMenu, setMarkerContextMenu] = useState<{ x: number; y: number; marker: Marker } | null>(null);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
 
@@ -165,7 +186,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     }
   };
 
-  const visibleTracks = useMemo(() => tracks.filter(t => t.type !== TrackType.SEND), [tracks]);
+  const visibleTracks = useMemo(() => tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master'), [tracks]);
   const projectDuration = useMemo(() => Math.max(...tracks.flatMap(t => t.clips.map(c => c.start + c.duration)), 300), [tracks]);
   const totalContentWidth = useMemo(() => projectDuration * zoomH, [projectDuration, zoomH]);
   const totalArrangementHeight = useMemo(() => 40 + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80, 0), [visibleTracks, zoomV]);
@@ -210,9 +231,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       }
       
       const rect = scrollContainerRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left + scrollContainerRef.current.scrollLeft;
+      // headerWidth : le canvas commence apres la colonne des en-tetes de pistes.
+      const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
       const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
-      const dropTime = x / zoomH;
+      const dropTime = Math.max(0, x / zoomH);
       
       console.log('[ArrangementView Drop] Position:', { x, y, dropTime });
       
@@ -297,20 +319,20 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     
     const phX = (currentTime * zoomH) * scale;
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(phX, 0); ctx.lineTo(phX, h); ctx.stroke();
-    const viewportWidth = viewportSize.width;
+    const viewportWidth = Math.max(0, viewportSize.width - headerWidth);
     const vx = scrollLeft * scale;
     const vw = viewportWidth * scale;
     ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, vx, h); ctx.fillRect(vx + vw, 0, w - (vx + vw), h);
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.strokeRect(vx, 0, vw, h);
     ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(vx, 0, vw, h);
-  }, [visibleTracks, totalContentWidth, scrollLeft, viewportSize, zoomH, currentTime, isLoopActive, loopStart, loopEnd]);
+  }, [visibleTracks, totalContentWidth, scrollLeft, viewportSize, headerWidth, zoomH, currentTime, isLoopActive, loopStart, loopEnd]);
 
   const handleMinimapMouseDown = (e: React.MouseEvent) => {
       const canvas = minimapRef.current; if (!canvas || !scrollContainerRef.current) return;
       const rect = canvas.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
       const scale = canvas.width / Math.max(totalContentWidth, 1);
-      const viewportW = viewportSize.width;
+      const viewportW = Math.max(0, viewportSize.width - headerWidth);
       const vx = scrollLeft * scale;
       const vw = viewportW * scale;
       if (clickX >= vx && clickX <= vx + vw) { setIsDraggingMinimap(true); setDragStartX(clickX); }
@@ -329,19 +351,51 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     e.preventDefault();
     const menuItems: (ContextMenuItem | 'separator')[] = [ { label: 'Duplicate Track', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' }, ];
     if (trackId !== 'track-rec-main') menuItems.push({ label: 'Delete Track', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
-    menuItems.push({ label: 'Freeze Track', onClick: () => onFreezeTrack?.(trackId), icon: 'fa-snowflake' });
+    const target = tracks.find(t => t.id === trackId);
+    menuItems.push({
+      label: target?.isFrozen ? 'Dégeler la piste' : 'Geler la piste (freeze)',
+      onClick: () => onFreezeTrack?.(trackId),
+      icon: target?.isFrozen ? 'fa-fire' : 'fa-snowflake'
+    });
+    if (onSwapInstrument && target && (target.type === TrackType.MIDI || target.type === TrackType.SAMPLER || target.type === TrackType.DRUM_RACK)) {
+      menuItems.push({ label: "Changer d'instrument", onClick: () => onSwapInstrument(trackId), icon: 'fa-exchange-alt' });
+    }
     setContextMenu({ x: e.clientX, y: e.clientY, items: menuItems });
   };
   
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
     const rect = scrollContainerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left + scrollContainerRef.current.scrollLeft;
+    // La colonne des en-tetes gere ses propres evenements.
+    if (e.clientX - rect.left < headerWidth) return;
+    const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
     const time = (x / zoomH);
     const useSnap = snapEnabled && !isShiftDownRef.current;
 
     if (e.clientY - rect.top < 40) {
+        // --- Marqueurs (drapeaux dessines dans les 14 premiers pixels du ruler)
+        const localY = e.clientY - rect.top;
+        const hitMarker = localY < 16
+          ? markers.find(mk => { const mx = mk.time * zoomH; return x >= mx - 4 && x <= mx + 16; })
+          : undefined;
+
+        if (hitMarker) {
+            e.preventDefault();
+            if (e.button === 2) setMarkerContextMenu({ x: e.clientX, y: e.clientY, marker: hitMarker });
+            else onSeek(hitMarker.time);
+            return;
+        }
+
+        if (e.button === 2 && onAddMarker) {
+            e.preventDefault();
+            const markerTime = getSnappedTime(time, bpm, gridSize, useSnap);
+            setContextMenu({ x: e.clientX, y: e.clientY, items: [
+                { label: 'Ajouter un marqueur ici', icon: 'fa-map-pin', onClick: () => { onAddMarker(markerTime); setContextMenu(null); } }
+            ]});
+            return;
+        }
+
         if (isLoopActive && loopEnd > loopStart) {
             const loopStartX = loopStart * zoomH;
             const loopEndX = loopEnd * zoomH;
@@ -375,6 +429,22 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     
     if (e.button === 2) {
       e.preventDefault();
+      // Zone vide d'une piste instrument : proposer la creation d'un pattern MIDI.
+      let laneY = 40;
+      let laneTrack: Track | undefined;
+      for (const t of visibleTracks) {
+        const trackHeight = zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+        if (y >= laneY && y < laneY + trackHeight) { laneTrack = t; break; }
+        laneY += trackHeight;
+      }
+      const isInstrument = laneTrack && (laneTrack.type === TrackType.MIDI || laneTrack.type === TrackType.SAMPLER || laneTrack.type === TrackType.DRUM_RACK);
+      if (isInstrument && onCreatePattern) {
+        const patternTime = getSnappedTime(time, bpm, gridSize, useSnap);
+        setContextMenu({ x: e.clientX, y: e.clientY, items: [
+          { label: 'Créer un pattern MIDI ici', icon: 'fa-music', onClick: () => { onCreatePattern(laneTrack!.id, Math.max(0, patternTime)); setContextMenu(null); } }
+        ]});
+        return;
+      }
       setGridMenu({ x: e.clientX, y: e.clientY });
       return;
     }
@@ -386,7 +456,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 const handleMouseMove = (e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
     const rect = scrollContainerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left + scrollContainerRef.current.scrollLeft;
+    const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
     const useSnap = snapEnabled && !isShiftDownRef.current;
 
@@ -624,9 +694,13 @@ const drawTimeline = useCallback(() => {
     const scroll = scrollContainerRef.current;
     if (!canvas || !scroll) return;
     
-    if (canvas.width !== viewportSize.width || canvas.height !== viewportSize.height) {
-        canvas.width = viewportSize.width;
-        canvas.height = viewportSize.height;
+    // La resolution interne doit suivre la taille CSS reelle du canvas,
+    // sinon le contenu dessine est etire horizontalement.
+    const cssWidth = canvas.clientWidth;
+    const cssHeight = canvas.clientHeight;
+    if (cssWidth > 0 && cssHeight > 0 && (canvas.width !== cssWidth || canvas.height !== cssHeight)) {
+        canvas.width = cssWidth;
+        canvas.height = cssHeight;
     }
 
     const ctx = canvas.getContext('2d')!;
@@ -890,7 +964,8 @@ useEffect(() => {
                   <TrackHeader 
                      track={track} isSelected={selectedTrackId === track.id} onSelect={() => onSelectTrack(track.id)} onUpdate={onUpdateTrack} 
                      onDropPlugin={onDropPluginOnTrack} onMovePlugin={onMovePlugin} onSelectPlugin={onSelectPlugin} onRemovePlugin={onRemovePlugin} onRequestAddPlugin={onRequestAddPlugin} 
-                     onContextMenu={handleTrackContextMenu} onDragStartTrack={() => {}} onDragOverTrack={() => {}} onDropTrack={() => {}} onSwapInstrument={onSwapInstrument}
+                     onContextMenu={handleTrackContextMenu} onDragStartTrack={handleDragStartTrack} onDragOverTrack={handleDragOverTrack} onDropTrack={handleDropTrack}
+                     isDraggingOver={dragOverTrackId === track.id} onSwapInstrument={onSwapInstrument}
                   />
                 </div>
                 {track.automationLanes.map(lane => lane.isExpanded && (
@@ -933,6 +1008,33 @@ useEffect(() => {
               zIndex: 20
           }} 
       />
+      {editingMarkerId && (() => {
+        const mk = markers.find(m => m.id === editingMarkerId);
+        if (!mk) return null;
+        // Positionne le champ juste sous le drapeau du marqueur.
+        const box = scrollContainerRef.current?.getBoundingClientRect();
+        const left = (box?.left ?? 0) + headerWidth + (mk.time * zoomH) - scrollLeft;
+        const top = (box?.top ?? 0) + 16;
+        return (
+          <input
+            autoFocus
+            defaultValue={mk.name}
+            onFocus={(e) => e.target.select()}
+            onBlur={(e) => { onUpdateMarker?.({ ...mk, name: e.target.value.trim() || mk.name }); setEditingMarkerId(null); }}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                const value = (e.target as HTMLInputElement).value.trim();
+                onUpdateMarker?.({ ...mk, name: value || mk.name });
+                setEditingMarkerId(null);
+              }
+              if (e.key === 'Escape') setEditingMarkerId(null);
+            }}
+            className="fixed z-[300] px-2 py-1 text-[11px] font-bold bg-black border rounded outline-none"
+            style={{ left: Math.max((box?.left ?? 0) + headerWidth, left), top, width: 160, color: mk.color, borderColor: mk.color }}
+          />
+        );
+      })()}
       {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
       {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled(!snapEnabled)} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: currentTime })} />}
       {hoverTime !== null && dragAction !== null && <div className="fixed z-[200] px-3 py-1.5 bg-black/90 border border-cyan-500/30 rounded-lg shadow-2xl pointer-events-none text-[10px] font-black text-cyan-400 font-mono" style={{ left: tooltipPos.x + 15, top: tooltipPos.y }}>{hoverTime.toFixed(3)}s {dragAction && <span className="ml-2 text-white opacity-50">[{dragAction}]</span>}</div>}

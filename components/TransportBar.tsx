@@ -12,6 +12,8 @@ interface TransportProps {
   onToggleRecord: () => void;
   isLoopActive: boolean;
   onToggleLoop: () => void;
+  isMetronomeEnabled?: boolean;
+  onToggleMetronome?: () => void;
   bpm: number;
   onBpmChange: (newBpm: number) => void;
   currentTime: number;
@@ -50,7 +52,8 @@ interface TransportProps {
 }
 
 const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
-  isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, bpm, onBpmChange, currentTime,
+  isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop,
+  isMetronomeEnabled = false, onToggleMetronome, bpm, onBpmChange, currentTime,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
   onOpenSaveMenu, onOpenLoadMenu, onExportMix, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo,
@@ -223,6 +226,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           <button onClick={onStop} className="w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
           <button onClick={onTogglePlay} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isPlaying ? 'text-black shadow-lg shadow-[#00f2ff]/30' : 'bg-white text-black hover:scale-105'}`} style={{ backgroundColor: isPlaying ? 'var(--accent-neon)' : '#fff' }}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-sm`}></i></button>
           <button onClick={onToggleLoop} className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
+          <button onClick={onToggleMetronome} title="Métronome" className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
           <button onClick={onToggleRecord} className={`h-10 px-3 md:px-5 rounded-xl flex items-center space-x-2 md:space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white shadow-lg shadow-red-600/40 animate-pulse' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'var(--border-highlight)' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">Rec</span></button>
         </div>
         
