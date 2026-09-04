@@ -960,6 +960,10 @@ export default function App() {
         setTimeout(() => bufferIds.forEach(id => releaseBufferIfUnused(id, removedClipIds)), 0);
     }
 
+    // Libere la chaine audio : sans ca la piste supprimee restait cablee a sa
+    // destination et continuait de sonner (queues de reverb, bus d'effets...).
+    audioEngine.disposeTrack(trackId);
+
     setState(produce((draft: DAWState) => {
         const trackIndex = draft.tracks.findIndex(t => t.id === trackId);
         if (trackIndex > -1) {
@@ -968,6 +972,15 @@ export default function App() {
                 draft.selectedTrackId = draft.tracks[0]?.id || null;
             }
         }
+
+        // Nettoyage des references orphelines vers la piste supprimee.
+        draft.tracks.forEach(t => {
+            if (t.outputTrackId === trackId) t.outputTrackId = 'master';
+            if (t.sends) t.sends = t.sends.filter(sd => sd.id !== trackId);
+        });
+        draft.trackGroups = draft.trackGroups
+            .map(g => ({ ...g, trackIds: g.trackIds.filter(id => id !== trackId) }))
+            .filter(g => g.trackIds.length > 1);
     }));
   }, [setState]);
   

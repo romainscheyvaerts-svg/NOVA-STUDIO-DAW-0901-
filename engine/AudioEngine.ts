@@ -38,6 +38,10 @@ interface TrackDSP {
   drumSampler?: DrumSamplerNode; // Pro Drum Sampler (Single)
   melodicSampler?: MelodicSamplerNode; // New Pro Melodic Sampler
   drumRack?: DrumRackNode; // NEW: 30-Pad Drum Rack
+  // Empreinte du cablage (plugins, routage, departs) : permet d'eviter de
+  // reconstruire — et donc de couper brievement — le graphe quand rien de
+  // structurel n'a change.
+  graphSignature?: string;
 }
 
 interface ScheduledSource {
@@ -1274,6 +1278,46 @@ export class AudioEngine {
     return new Set(tracks.filter(t => this.isSourceTrackType(t) && !audible.has(t.id)).map(t => t.id));
   }
 
+  /** Tout ce qui impose de recabler le graphe de la piste. */
+  private graphSignatureOf(track: Track): string {
+    return [
+      track.type,
+      (track.isFrozen && track.frozenClip) ? 'frozen' : 'live',
+      track.outputTrackId || '',
+      track.plugins.map(p => `${p.id}:${p.isEnabled ? 1 : 0}`).join(','),
+      (track.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}`).join(',')
+    ].join('|');
+  }
+
+  /**
+   * Libere la chaine DSP d'une piste supprimee. Sans ca elle restait connectee a
+   * sa destination : une piste (ou un bus d'effet) supprimee continuait de sonner
+   * pour le reste de la session.
+   */
+  public disposeTrack(trackId: string) {
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp) return;
+
+    try { dsp.synth?.releaseAll(); } catch (e) {}
+    try { dsp.sampler?.stopAll(); } catch (e) {}
+    try { dsp.drumSampler?.stop(); } catch (e) {}
+    try { dsp.melodicSampler?.stopAll(); } catch (e) {}
+
+    dsp.pluginChain.forEach(entry => {
+      try { entry.input.disconnect(); entry.output.disconnect(); } catch (e) {}
+      try { entry.instance?.dispose?.(); } catch (e) {}
+    });
+    dsp.pluginChain.clear();
+
+    dsp.sends.forEach(g => { try { g.disconnect(); } catch (e) {} });
+    dsp.sends.clear();
+
+    [dsp.input, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer]
+      .forEach(n => { try { n?.disconnect(); } catch (e) {} });
+
+    this.tracksDSP.delete(trackId);
+  }
+
   public updateTrack(track: Track, allTracks: Track[]) {
     if (!this.ctx) return;
 
@@ -1288,6 +1332,33 @@ export class AudioEngine {
     if (track.type === TrackType.DRUM_RACK && dsp.drumRack && track.drumPads) {
       dsp.drumRack.updatePadsState(track.drumPads);
     }
+
+    // Le cablage n'a pas bouge (on a juste renomme la piste, deplace un clip,
+    // bouge un fader...) : on met a jour les valeurs sans reconstruire le graphe.
+    // Sinon la moindre edition provoquait un fondu a zero de 15 ms sur TOUTES
+    // les pistes, donc un decrochage audible pendant la lecture.
+    const signature = this.graphSignatureOf(track);
+    if (dsp.graphSignature === signature) {
+      const t = this.ctx.currentTime;
+      const target = (track.isMuted || this.soloSilencedIds.has(track.id)) ? 0 : track.volume;
+      dsp.gain.gain.setTargetAtTime(target, t, 0.015);
+      dsp.panner.pan.setTargetAtTime(track.pan, t, 0.015);
+
+      if (!(track.isFrozen && track.frozenClip)) {
+        track.plugins.forEach(p => {
+          const entry = dsp.pluginChain.get(p.id);
+          if (entry && entry.instance && typeof entry.instance.updateParams === 'function') {
+            entry.instance.updateParams(p.params);
+          }
+        });
+      }
+      (track.sends || []).forEach(send => {
+        const sendGain = dsp.sends.get(send.id);
+        if (sendGain) sendGain.gain.setTargetAtTime(send.isEnabled ? send.level : 0, t, 0.015);
+      });
+      return;
+    }
+    dsp.graphSignature = signature;
 
     // Fade out to prevent clicks/pops before rebuilding the audio graph
     const now = this.ctx.currentTime;
