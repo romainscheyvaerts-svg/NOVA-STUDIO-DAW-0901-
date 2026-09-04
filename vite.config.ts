@@ -103,7 +103,19 @@ export default defineConfig(({ mode }) => {
       build: {
         outDir: 'dist',
         sourcemap: false,
-        minify: 'esbuild'
+        minify: 'esbuild',
+        // Le bundle unique depassait 1,1 Mo : on isole les grosses dependances
+        // pour qu'elles soient mises en cache separement du code applicatif.
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              react: ['react', 'react-dom'],
+              supabase: ['@supabase/supabase-js'],
+              zip: ['jszip']
+            }
+          }
+        },
+        chunkSizeWarningLimit: 900
       }
     };
 });
