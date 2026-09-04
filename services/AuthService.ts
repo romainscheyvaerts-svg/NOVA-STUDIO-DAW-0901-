@@ -125,15 +125,20 @@ class AuthService {
     if (isSupabaseConfigured() && supabase) {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) return { success: false, message: error.message };
-        
+
         if (data.user) {
             this.currentUser = this.mapSupabaseUser(data.user);
             // Note: Supabase gère sa propre persistance interne via LocalStorage par défaut
             return { success: true, user: this.currentUser };
         }
+
+        // Supabase repond sans erreur mais sans utilisateur (email non confirme,
+        // reponse inattendue...) : on NE retombe PAS sur le mode simulation, qui
+        // accorderait un compte PRO a n'importe quel email de plus de 6 caracteres.
+        return { success: false, message: "Connexion impossible. Vérifiez vos identifiants ou confirmez votre email." };
     }
 
-    // --- MODE SIMULATION ---
+    // --- MODE SIMULATION (uniquement si Supabase n'est pas configuré) ---
     return new Promise((resolve) => {
       setTimeout(() => {
         if (password.length < 6) return resolve({ success: false, message: "Mot de passe incorrect." });

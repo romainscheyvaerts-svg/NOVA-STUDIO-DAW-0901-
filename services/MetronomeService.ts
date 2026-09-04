@@ -107,13 +107,28 @@ class MetronomeService {
   /**
    * Start metronome (normal playback)
    */
-  public start(startBeat: number = 0) {
+  /**
+   * Demarre le clic aligne sur la grille du projet.
+   * @param projectTime position du playhead au moment du demarrage (en secondes).
+   *        Sans ca le clic partait immediatement sur le temps 1 et tombait a
+   *        cote du beat des qu'on lancait la lecture ailleurs qu'a 0.
+   */
+  public start(projectTime: number = 0) {
     if (!this.ctx || !this.settings.enabled) return;
-    
+
     this.isPlaying = true;
-    this.currentBeat = startBeat;
-    this.nextClickTime = this.ctx.currentTime + 0.01;
-    
+
+    const beatDuration = 60 / this.bpm;
+    const beatsElapsed = Math.max(0, projectTime) / beatDuration;
+    let nextBeatIndex = Math.ceil(beatsElapsed - 1e-6);
+    let delay = (nextBeatIndex - beatsElapsed) * beatDuration;
+    // Trop proche pour etre programme proprement : on vise le beat suivant.
+    if (delay < 0.01) { nextBeatIndex += 1; delay += beatDuration; }
+
+    const n = this.timeSignature.numerator;
+    this.currentBeat = ((nextBeatIndex % n) + n) % n;
+    this.nextClickTime = this.ctx.currentTime + delay;
+
     this.startScheduler();
   }
 

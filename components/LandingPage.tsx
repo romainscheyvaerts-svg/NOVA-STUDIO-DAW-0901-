@@ -26,6 +26,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
 }) => {
   const [instrumentals, setInstrumentals] = useState<Instrumental[]>([]);
   const [loading, setLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [cloudProjects, setCloudProjects] = useState<any[]>([]);
@@ -41,11 +42,13 @@ const LandingPage: React.FC<LandingPageProps> = ({
   useEffect(() => {
     const fetchInstrumentals = async () => {
       setLoading(true);
+      setCatalogError(null);
       try {
         const data = await supabaseManager.getActiveInstrumentals();
         setInstrumentals(data);
-      } catch (error) {
+      } catch (error: any) {
         console.error('Failed to load instrumentals:', error);
+        setCatalogError(error?.message || 'Connexion au catalogue impossible');
       } finally {
         setLoading(false);
       }
@@ -297,6 +300,18 @@ const LandingPage: React.FC<LandingPageProps> = ({
             {loading ? (
               <div className="flex items-center justify-center h-full">
                 <div className="w-8 h-8 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
+              </div>
+            ) : catalogError ? (
+              <div className="flex flex-col items-center justify-center h-full text-slate-500">
+                <i className="fas fa-plug-circle-xmark text-4xl mb-4 text-red-500/60"></i>
+                <p className="text-sm text-slate-400">Catalogue injoignable</p>
+                <p className="text-xs mt-1 text-slate-600">{catalogError}</p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="mt-4 px-4 py-2 rounded-lg text-xs font-bold bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10"
+                >
+                  Réessayer
+                </button>
               </div>
             ) : instrumentals.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-500">

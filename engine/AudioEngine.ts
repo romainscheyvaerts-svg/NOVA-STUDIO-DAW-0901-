@@ -96,9 +96,18 @@ export class AudioEngine {
   private armingPromise: Promise<void> | null = null;
 
   // --- LOOP MANAGEMENT ---
+  // Solo : ids des pistes SOURCES rendues muettes par le solo d'une autre piste.
+  // Le solo n'etait gere que dans le chemin d'export ; en lecture live le bouton
+  // s'allumait mais aucune piste n'etait coupee.
+  private soloSilencedIds: Set<string> = new Set();
+
   private isLoopActive: boolean = false;
   private loopStart: number = 0;
   private loopEnd: number = 0;
+  // Un rebouclage est programme jusqu'a SCHEDULE_AHEAD_SEC a l'avance : on garde
+  // l'ancienne correspondance temps-contexte / temps-projet jusqu'a l'instant reel
+  // du bouclage, sinon le playhead reviendrait au debut avant que l'audio le fasse.
+  private pendingLoopWrap: { atContextTime: number; previousStartTime: number } | null = null;
 
   // --- DEVICE MANAGEMENT ---
   private currentInputDeviceId: string = 'default';
@@ -318,27 +327,8 @@ export class AudioEngine {
     const masterGain = offlineCtx.createGain();
     masterGain.connect(offlineCtx.destination);
 
-    const isSourceTrack = (t: Track) =>
-      t.type === TrackType.AUDIO || t.type === TrackType.MIDI ||
-      t.type === TrackType.SAMPLER || t.type === TrackType.DRUM_RACK;
-    // Solo : on garde les pistes soloees ET tout ce qui les alimente (sortie ou
-    // depart). Sans ca, exporter le stem d'un BUS donnait un fichier vide,
-    // puisque les pistes qui l'alimentent n'etaient pas soloees.
-    const audibleIds = new Set(tracks.filter(t => t.isSolo).map(t => t.id));
-    const hasSoloTrack = audibleIds.size > 0;
-    if (hasSoloTrack) {
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (const t of tracks) {
-          if (audibleIds.has(t.id)) continue;
-          const feedsAudible =
-            (!!t.outputTrackId && audibleIds.has(t.outputTrackId)) ||
-            (t.sends || []).some(sd => sd.isEnabled && sd.level > 0 && audibleIds.has(sd.id));
-          if (feedsAudible) { audibleIds.add(t.id); changed = true; }
-        }
-      }
-    }
+    // Meme regle de solo qu'en lecture live (source unique de verite).
+    const soloSilenced = this.computeSoloSilencedIds(tracks);
 
     interface RenderTrack {
       input: GainNode;
@@ -380,7 +370,7 @@ export class AudioEngine {
       panner.connect(output);
 
       // Le solo ne concerne que les pistes sources : un bus ne doit pas etre coupe.
-      const silenced = track.isMuted || (hasSoloTrack && isSourceTrack(track) && !audibleIds.has(track.id));
+      const silenced = track.isMuted || soloSilenced.has(track.id);
       gain.gain.value = silenced ? 0 : track.volume;
       panner.pan.value = track.pan;
 
@@ -639,7 +629,12 @@ export class AudioEngine {
       this.mediaRecorder!.onstop = async () => {
         const trackId = this.recordingTrackId!;
         const blob = new Blob(this.audioChunks, { type: this.mediaRecorder!.mimeType });
-        
+
+        // On MEMORISE la position de depart avant de reinitialiser l'etat : elle
+        // etait remise a 0 puis relue plus bas, et toutes les prises atterrissaient
+        // donc au tout debut de la timeline.
+        const recordedAt = this.recStartTime;
+
         // Reset recording state FIRST
         this.audioChunks = [];
         this.recordingTrackId = null;
@@ -661,7 +656,7 @@ export class AudioEngine {
           const clipData: Clip = {
             id: `rec-${Date.now()}`,
             name: `Vocal Take ${new Date().toLocaleTimeString()}`,
-            start: this.recStartTime,
+            start: recordedAt,
             duration: audioBuffer.duration,
             offset: 0,
             fadeIn: 0.01,
@@ -741,6 +736,7 @@ export class AudioEngine {
     if (this.isPlaying) this.stopAll();
 
     this.isPlaying = true;
+    this.pendingLoopWrap = null;
     this.pausedAt = startOffset;
     this.nextScheduleTime = this.ctx.currentTime + 0.01; 
     this.playbackStartTime = this.ctx.currentTime - startOffset; 
@@ -756,7 +752,11 @@ export class AudioEngine {
   }
 
   public stopAll() {
+    // On memorise la position reelle d'arret : sans ca getCurrentTime() renvoyait
+    // apres un stop la position de DEPART de la lecture, pas celle de l'arret.
+    if (this.isPlaying) this.pausedAt = this.getCurrentTime();
     this.isPlaying = false;
+    this.pendingLoopWrap = null;
     if (this.schedulerTimer) {
       clearInterval(this.schedulerTimer);
       this.schedulerTimer = null;
@@ -797,22 +797,18 @@ export class AudioEngine {
 
   public getCurrentTime(): number {
     if (!this.ctx) return 0;
-    if (this.isPlaying) {
-      let time = this.ctx.currentTime - this.playbackStartTime;
-      
-      if (this.isLoopActive && this.loopEnd > this.loopStart) {
-        const loopDuration = this.loopEnd - this.loopStart;
-        if (time >= this.loopEnd) {
-          const timeSinceLoopStart = time - this.loopStart;
-          const wrappedTime = this.loopStart + (timeSinceLoopStart % loopDuration);
-          this.playbackStartTime = this.ctx.currentTime - wrappedTime;
-          return wrappedTime;
-        }
+    if (!this.isPlaying) return this.pausedAt;
+
+    const now = this.ctx.currentTime;
+    let startTime = this.playbackStartTime;
+    if (this.pendingLoopWrap) {
+      if (now < this.pendingLoopWrap.atContextTime) {
+        startTime = this.pendingLoopWrap.previousStartTime;
+      } else {
+        this.pendingLoopWrap = null;
       }
-      
-      return Math.max(0, time);
     }
-    return this.pausedAt;
+    return Math.max(0, now - startTime);
   }
   
   public getIsPlaying(): boolean { return this.isPlaying; }
@@ -822,16 +818,77 @@ export class AudioEngine {
 
   private scheduler(tracks: Track[]) {
     if (!this.ctx) return;
-    while (this.nextScheduleTime < this.ctx.currentTime + this.SCHEDULE_AHEAD_SEC) {
-      const scheduleUntil = this.nextScheduleTime + this.SCHEDULE_AHEAD_SEC;
+    let guard = 0;
+    while (this.nextScheduleTime < this.ctx.currentTime + this.SCHEDULE_AHEAD_SEC && guard++ < 64) {
       const projectTimeStart = this.nextScheduleTime - this.playbackStartTime;
-      const projectTimeEnd = scheduleUntil - this.playbackStartTime;
-      
-      this.scheduleClips(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime, 0, new Map());
-      this.scheduleMidi(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
-      this.scheduleAutomation(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
-      this.nextScheduleTime += this.SCHEDULE_AHEAD_SEC; 
+      const loopActive = this.isLoopActive && this.loopEnd > this.loopStart;
+
+      // On tronque la fenetre d'ordonnancement au point de bouclage pour ne
+      // jamais programmer d'audio au-dela de la fin de boucle.
+      let windowSec = this.SCHEDULE_AHEAD_SEC;
+      let wrapAfterWindow = false;
+      if (loopActive && projectTimeStart >= this.loopEnd) {
+        windowSec = 0;            // deja au-dela (boucle activee en cours de lecture)
+        wrapAfterWindow = true;
+      } else if (loopActive && projectTimeStart + windowSec >= this.loopEnd) {
+        windowSec = this.loopEnd - projectTimeStart;
+        wrapAfterWindow = true;
+      }
+
+      if (windowSec > 0) {
+        const projectTimeEnd = projectTimeStart + windowSec;
+        this.scheduleClips(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime, 0, new Map());
+        this.scheduleMidi(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
+        this.scheduleAutomation(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
+        this.nextScheduleTime += windowSec;
+      }
+
+      if (wrapAfterWindow) this.wrapLoopAt(this.nextScheduleTime, tracks);
     }
+  }
+
+  /**
+   * Reboucle a l'instant contextuel donne : coupe proprement tout ce qui joue et
+   * recale la correspondance temps-contexte / temps-projet sur loopStart.
+   */
+  private wrapLoopAt(boundaryContextTime: number, tracks: Track[]) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    // Fondu de 5 ms avant la coupure pour eviter le clic.
+    this.activeSources.forEach(({ source, gain }) => {
+      try {
+        const fadeStart = Math.max(now, boundaryContextTime - 0.005);
+        gain.gain.cancelScheduledValues(fadeStart);
+        gain.gain.setValueAtTime(gain.gain.value, fadeStart);
+        gain.gain.linearRampToValueAtTime(0, boundaryContextTime);
+      } catch (e) {}
+      try { source.stop(boundaryContextTime); } catch (e) {}
+    });
+    this.activeSources.clear();
+
+    this.tracksDSP.forEach(dsp => {
+      if (dsp.synth) dsp.synth.releaseAll();
+      if (dsp.sampler) dsp.sampler.stopAll();
+      if (dsp.drumSampler) dsp.drumSampler.stop();
+      if (dsp.melodicSampler) dsp.melodicSampler.stopAll();
+    });
+    this.activeMidiNotes.clear();
+
+    // Les rampes d'automation programmees au-dela du point de bouclage doivent
+    // etre annulees, sinon elles continuent de piloter le gain apres le retour.
+    this.tracksDSP.forEach(dsp => {
+      try {
+        dsp.gain.gain.cancelScheduledValues(boundaryContextTime);
+        dsp.panner.pan.cancelScheduledValues(boundaryContextTime);
+      } catch (e) {}
+    });
+
+    const previousStartTime = this.playbackStartTime;
+    this.playbackStartTime = boundaryContextTime - this.loopStart;
+    this.pendingLoopWrap = { atContextTime: boundaryContextTime, previousStartTime };
+
+    tracks.forEach(track => this.applyAutomation(track, this.loopStart));
   }
 
   /** Clips reellement joues : le rendu gele remplace les clips d'origine. */
@@ -948,6 +1005,10 @@ export class AudioEngine {
     tracks.forEach(track => {
         const dsp = this.tracksDSP.get(track.id);
         if (!dsp) return;
+        // L'automation partage le noeud de gain avec le fader/mute/solo : sans ce
+        // garde-fou, une piste mutee (ou coupee par un solo) redevenait audible
+        // des qu'elle portait de l'automation de volume.
+        if (track.isMuted || this.soloSilencedIds.has(track.id)) return;
         
         track.automationLanes.forEach(lane => {
             if (lane.points.length === 0) return;
@@ -1057,7 +1118,10 @@ export class AudioEngine {
             this.activeSources.set(sourceKey, { source, gain: gainNode, clipId: clip.id });
             
             source.onended = () => {
-                this.activeSources.delete(sourceKey);
+                // Apres un bouclage la meme cle peut deja pointer vers une NOUVELLE
+                // source : on ne supprime que si l'entree correspond bien a celle-ci.
+                const current = this.activeSources.get(sourceKey);
+                if (current && current.source === source) this.activeSources.delete(sourceKey);
                 try { source.disconnect(); gainNode.disconnect(); } catch (e) {}
             };
         }
@@ -1147,12 +1211,42 @@ export class AudioEngine {
     return dsp;
   }
 
+  private isSourceTrackType(t: Track): boolean {
+    return t.type === TrackType.AUDIO || t.type === TrackType.MIDI ||
+           t.type === TrackType.SAMPLER || t.type === TrackType.DRUM_RACK;
+  }
+
+  /**
+   * Pistes sources a couper quand au moins une piste est soloee.
+   * On garde audibles les pistes soloees ET tout ce qui les alimente (sortie ou
+   * depart d'effet) ; les bus et departs ne sont jamais coupes, sinon soloer une
+   * piste audio couperait le bus par lequel elle passe.
+   */
+  private computeSoloSilencedIds(tracks: Track[]): Set<string> {
+    const audible = new Set(tracks.filter(t => t.isSolo).map(t => t.id));
+    if (audible.size === 0) return new Set();
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const t of tracks) {
+        if (audible.has(t.id)) continue;
+        const feedsAudible =
+          (!!t.outputTrackId && audible.has(t.outputTrackId)) ||
+          (t.sends || []).some(sd => sd.isEnabled && sd.level > 0 && audible.has(sd.id));
+        if (feedsAudible) { audible.add(t.id); changed = true; }
+      }
+    }
+    return new Set(tracks.filter(t => this.isSourceTrackType(t) && !audible.has(t.id)).map(t => t.id));
+  }
+
   public updateTrack(track: Track, allTracks: Track[]) {
     if (!this.ctx) return;
 
     // Pre-cree les DSP de toutes les pistes: sinon une piste routee vers un bus
     // declare APRES elle dans le tableau retombait silencieusement sur le master.
     allTracks.forEach(t => this.ensureTrackDSP(t));
+    this.soloSilencedIds = this.computeSoloSilencedIds(allTracks);
 
     const dsp = this.ensureTrackDSP(track);
     if (!dsp) return;
@@ -1227,7 +1321,7 @@ export class AudioEngine {
     dsp.analyzer.connect(dsp.output);
 
     // Fade in after rebuilding the audio graph
-    const targetVolume = track.isMuted ? 0 : track.volume;
+    const targetVolume = (track.isMuted || this.soloSilencedIds.has(track.id)) ? 0 : track.volume;
     dsp.gain.gain.setValueAtTime(0, now + fadeTime);
     dsp.gain.gain.linearRampToValueAtTime(targetVolume, now + fadeTime * 2);
     dsp.panner.pan.setTargetAtTime(track.pan, now + fadeTime, 0.015);
@@ -1291,6 +1385,7 @@ export class AudioEngine {
   private applyAutomation(track: Track, time: number) {
     const dsp = this.tracksDSP.get(track.id);
     if (!dsp || !this.ctx) return;
+    if (track.isMuted || this.soloSilencedIds.has(track.id)) return;
     
     track.automationLanes.forEach(lane => {
         if (lane.points.length === 0) return;
@@ -1579,7 +1674,7 @@ export class AudioEngine {
   public setTrackVolume(trackId: string, volume: number, isMuted: boolean) {
     const dsp = this.tracksDSP.get(trackId);
     if (dsp && this.ctx) {
-        const targetGain = isMuted ? 0 : volume;
+        const targetGain = (isMuted || this.soloSilencedIds.has(trackId)) ? 0 : volume;
         dsp.gain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.015);
     }
   }

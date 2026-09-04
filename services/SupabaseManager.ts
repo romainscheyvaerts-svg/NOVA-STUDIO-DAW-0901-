@@ -801,12 +801,14 @@ export class SupabaseManager {
       
       if (error) { 
         console.error("Erreur lecture instrumentals actifs:", error); 
-        return []; 
+        // On propage : un echec reseau doit etre distingue d'un catalogue vide,
+        // sinon l'utilisateur hors ligne lit "Aucun instrumental disponible".
+        throw new Error(error.message || "Catalogue injoignable");
       }
       return (data || []) as Instrumental[];
-    } catch (e) {
+    } catch (e: any) {
       console.error("[SupabaseManager] Exception getActiveInstrumentals:", e);
-      return [];
+      throw e instanceof Error ? e : new Error("Catalogue injoignable");
     }
   }
 

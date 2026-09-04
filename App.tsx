@@ -470,7 +470,8 @@ export default function App() {
   useEffect(() => { metronomeService.setBpm(state.bpm); }, [state.bpm]);
   useEffect(() => { metronomeService.setTimeSignature(state.timeSignature); }, [state.timeSignature]);
   useEffect(() => {
-    if (state.isPlaying && state.metronome.enabled) metronomeService.start();
+    // On aligne le clic sur la position reelle du playhead au demarrage.
+    if (state.isPlaying && state.metronome.enabled) metronomeService.start(audioEngine.getCurrentTime());
     else metronomeService.stop();
   }, [state.isPlaying, state.metronome.enabled]);
   
@@ -750,8 +751,11 @@ export default function App() {
   };
 
   const handleUpdateBpm = useCallback((newBpm: number) => { 
-    audioEngine.setBpm(newBpm);
-    setState(prev => ({ ...prev, bpm: Math.max(20, Math.min(999, newBpm)) })); 
+    // On borne AVANT d'informer le moteur : sinon un tempo hors limites etait
+    // envoye aux plugins synchronises alors que l'etat affichait la valeur bornee.
+    const bpm = Math.max(20, Math.min(999, Number.isFinite(newBpm) ? newBpm : 120));
+    audioEngine.setBpm(bpm);
+    setState(prev => ({ ...prev, bpm })); 
   }, [setState]);
   
   const handleUpdateTrack = useCallback((updatedTrack: Track) => {
@@ -820,6 +824,11 @@ export default function App() {
   const handleSeek = useCallback((time: number) => { 
     setVisualState({ currentTime: time });
     audioEngine.seekTo(time, stateRef.current.tracks, stateRef.current.isPlaying);
+    // Le clic doit repartir sur la grille a la nouvelle position.
+    if (stateRef.current.isPlaying && stateRef.current.metronome.enabled) {
+      metronomeService.stop();
+      metronomeService.start(time);
+    }
   }, [setVisualState]);
   
   const handleTogglePlay = useCallback(async () => {
@@ -1396,12 +1405,17 @@ export default function App() {
               audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
           }
 
-          // IMPORTANT: Register buffer in registry OUTSIDE of React state
-          // This avoids Immer proxy issues with native AudioBuffer objects
-          const bufferId = audioBufferRegistry.register(audioBuffer, audioRef);
-
           const clipName = name.replace(/\.[^/.]+$/, '');
           const clipId = `clip-${Date.now()}`;
+
+          // IMPORTANT: Register buffer in registry OUTSIDE of React state
+          // This avoids Immer proxy issues with native AudioBuffer objects.
+          // On indexe par clipId (et non par URL) et on confie l'Object URL au
+          // registre pour qu'il soit revoque a la suppression du clip : sinon
+          // chaque fichier importe fuitait une Object URL jusqu'au rechargement.
+          const bufferId = source instanceof File
+              ? audioBufferRegistry.registerWithUrl(audioBuffer, audioRef, clipId)
+              : audioBufferRegistry.register(audioBuffer, clipId);
           const clipDuration = audioBuffer.duration;
           const clipStart = startTime ?? stateRef.current.currentTime;
           const clipColor = UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length];
