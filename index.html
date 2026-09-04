@@ -193,6 +193,34 @@
     }
   </style>
   <!-- Import map removed - Vite bundles all dependencies -->
+
+  <!-- ====================================================================
+       Mode embarque
+
+       Le DAW est aussi une page de l'application Make Music. Dans ce cas
+       il ne doit pas se presenter comme un produit separe : on masque sa
+       marque « Nova Studio » et son bouton de connexion, l'utilisateur
+       etant deja connecte au studio. Le detachement se fait sur ?embed=1,
+       ou simplement sur le fait d'etre dans un cadre.
+
+       Aucun effet sur le DAW ouvert seul dans un navigateur.
+       ==================================================================== -->
+  <style>
+    html[data-embed] .nova-brandbar,
+    html[data-embed] .nova-signature { display: none !important; }
+  </style>
+  <script>
+    (function () {
+      try {
+        var embarque = new URLSearchParams(location.search).has('embed')
+                    || window.self !== window.top;
+        if (embarque) document.documentElement.setAttribute('data-embed', '1');
+      } catch (e) {
+        // Acces au parent refuse = on est bien dans un cadre
+        document.documentElement.setAttribute('data-embed', '1');
+      }
+    })();
+  </script>
 </head>
 <body>
   <!-- Loading screen visible until React mounts -->

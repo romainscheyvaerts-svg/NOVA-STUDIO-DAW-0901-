@@ -187,7 +187,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
       />
 
       {/* Header avec bouton connexion */}
-      <header className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-white/5 bg-[#0c0d10]">
+      <header className="nova-brandbar shrink-0 flex items-center justify-between px-6 py-4 border-b border-white/5 bg-[#0c0d10]">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center">
             <i className="fas fa-waveform-lines text-white text-sm"></i>
@@ -227,9 +227,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
       </header>
 
       {/* Contenu principal */}
-      <main className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Sidebar gauche - Actions principales */}
-        <aside className="w-72 shrink-0 border-r border-white/5 bg-[#0c0d10] flex flex-col">
+        <aside className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-white/5 bg-[#0c0d10] flex flex-col">
           <div className="p-4 space-y-3">
             <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Démarrer</h2>
             
@@ -277,7 +277,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
           </div>
 
           {/* Footer sidebar */}
-          <div className="mt-auto p-4 border-t border-white/5">
+          <div className="nova-signature mt-auto p-4 border-t border-white/5">
             <p className="text-[9px] text-slate-600 text-center">
               © 2026 Nova Studio • v1.0.0
             </p>
