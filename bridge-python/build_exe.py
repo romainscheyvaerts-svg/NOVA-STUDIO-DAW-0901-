@@ -22,14 +22,31 @@ def main():
     print("  NOVA ASIO BRIDGE - Build EXE")
     print("=" * 60)
     
-    # Check if PyInstaller is installed
+    # Install all required dependencies first
+    print("\n📦 Installing dependencies...")
+    dependencies = [
+        "pyinstaller",
+        "websockets",
+        "numpy",
+        "sounddevice",
+        "comtypes"
+    ]
+    
+    for dep in dependencies:
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", dep], 
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"  ✅ {dep}")
+        except subprocess.CalledProcessError:
+            print(f"  ⚠️ {dep} (may already be installed)")
+    
+    # Verify PyInstaller
     try:
         import PyInstaller
-        print(f"✅ PyInstaller version: {PyInstaller.__version__}")
+        print(f"\n✅ PyInstaller version: {PyInstaller.__version__}")
     except ImportError:
-        print("❌ PyInstaller not found. Installing...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
-        print("✅ PyInstaller installed")
+        print("❌ PyInstaller installation failed!")
+        return 1
     
     # Get the directory of this script
     script_dir = os.path.dirname(os.path.abspath(__file__))
