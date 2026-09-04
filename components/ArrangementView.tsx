@@ -49,7 +49,9 @@ interface ArrangementViewProps {
   onAudioDrop?: (trackId: string, url: string, name: string, time: number) => void;
 }
 
-type DragAction = 'MOVE' | 'SCRUB' | null;
+const FADE_HANDLE_PX = 14;
+
+type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | null;
 type LoopDragMode = 'START' | 'END' | 'BODY' | null;
 
 const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: boolean): number => {
@@ -533,8 +535,22 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 setSelectedClip({ trackId: t.id, clip });
                 setDragStartX(x); setDragStartY(y);
                 setInitialClipState({ ...clip });
-                setDragAction('MOVE');
                 onSelectTrack(t.id);
+
+                // Zones d'accroche : coins superieurs = fondus, bords = rognage,
+                // reste = deplacement. Jusqu'ici seul le deplacement existait sur
+                // desktop : impossible de rogner un clip ou de poser un fondu.
+                const clipStartX = clip.start * zoomH;
+                const clipEndX = (clip.start + clip.duration) * zoomH;
+                const relY = y - currentY;
+                const inFadeRow = relY < zoomV * 0.35;
+                const edge = Math.min(10, Math.max(4, (clipEndX - clipStartX) * 0.15));
+
+                if (inFadeRow && x - clipStartX < FADE_HANDLE_PX) setDragAction('FADE_IN');
+                else if (inFadeRow && clipEndX - x < FADE_HANDLE_PX) setDragAction('FADE_OUT');
+                else if (x - clipStartX < edge) setDragAction('TRIM_START');
+                else if (clipEndX - x < edge) setDragAction('TRIM_END');
+                else setDragAction('MOVE');
                 return;
             }
         }
@@ -620,6 +636,38 @@ const handleMouseMove = (e: React.MouseEvent) => {
         if (newStart !== activeClip.clip.start) {
             onEditClip?.(targetTrackId, activeClip.clip.id, 'UPDATE_PROPS', { start: newStart });
         }
+    } else if (dragAction === 'TRIM_START' && activeClip && initialClipState) {
+        // Rogner le debut : on avance le point de depart ET la lecture dans le
+        // buffer, pour que le contenu audio ne glisse pas.
+        const init = initialClipState;
+        const rawStart = getSnappedTime(init.start + (x - dragStartX) / zoomH, bpm, gridSize, useSnap);
+        const maxStart = init.start + init.duration - 0.05;
+        const minStart = init.start - (init.offset || 0);
+        const newStart = Math.min(maxStart, Math.max(0, Math.max(minStart, rawStart)));
+        const delta = newStart - init.start;
+        onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', {
+            start: newStart,
+            offset: Math.max(0, (init.offset || 0) + delta),
+            duration: Math.max(0.05, init.duration - delta),
+            fadeIn: Math.min(init.fadeIn || 0, Math.max(0, init.duration - delta))
+        });
+    } else if (dragAction === 'TRIM_END' && activeClip && initialClipState) {
+        const init = initialClipState;
+        const rawEnd = getSnappedTime(init.start + init.duration + (x - dragStartX) / zoomH, bpm, gridSize, useSnap);
+        const newDuration = Math.max(0.05, rawEnd - init.start);
+        onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', {
+            duration: newDuration,
+            fadeOut: Math.min(init.fadeOut || 0, newDuration)
+        });
+    } else if (dragAction === 'FADE_IN' && activeClip && initialClipState) {
+        const init = initialClipState;
+        const fadeIn = Math.min(init.duration, Math.max(0, (x - init.start * zoomH) / zoomH));
+        onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', { fadeIn });
+    } else if (dragAction === 'FADE_OUT' && activeClip && initialClipState) {
+        const init = initialClipState;
+        const clipEndX = (init.start + init.duration) * zoomH;
+        const fadeOut = Math.min(init.duration, Math.max(0, (clipEndX - x) / zoomH));
+        onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', { fadeOut });
     } else if (dragAction === 'SCRUB') {
         onSeek(time);
     }
@@ -797,6 +845,44 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
         ctx.fillText(clip.name, x + 8, y + 13, w - 16);
     }
     
+    // Fondus : zone assombrie + poignee dans le coin superieur.
+    // Ils etaient appliques a la lecture mais totalement invisibles et non
+    // reglables depuis l'arrangement.
+    const fadeInW = clip.duration > 0 ? Math.min(w, ((clip.fadeIn || 0) / clip.duration) * w) : 0;
+    const fadeOutW = clip.duration > 0 ? Math.min(w, ((clip.fadeOut || 0) / clip.duration) * w) : 0;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 4);
+    ctx.clip();
+
+    if (fadeInW > 1) {
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.beginPath();
+        ctx.moveTo(x, y); ctx.lineTo(x + fadeInW, y); ctx.lineTo(x, y + h);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x + fadeInW, y); ctx.stroke();
+    }
+    if (fadeOutW > 1) {
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.beginPath();
+        ctx.moveTo(x + w, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - fadeOutW, y);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x + w - fadeOutW, y); ctx.lineTo(x + w, y + h); ctx.stroke();
+    }
+    ctx.restore();
+
+    // Poignees de fondu (visibles sur le clip selectionne ou assez large)
+    if (isSelected || w > 60) {
+        ctx.fillStyle = isSelected ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)';
+        const hx = x + Math.max(0, fadeInW);
+        ctx.fillRect(Math.min(hx, x + w - 6), y + 2, 6, 6);
+        const hx2 = x + w - Math.max(0, fadeOutW) - 6;
+        ctx.fillRect(Math.max(hx2, x), y + 2, 6, 6);
+    }
+
     // Indicateur de mute
     if (clip.isMuted) {
         ctx.fillStyle = 'rgba(255,0,0,0.3)';
