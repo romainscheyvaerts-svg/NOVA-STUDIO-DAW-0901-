@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker } from './types';
+import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup } from './types';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
 import MobileTransport from './components/MobileTransport';
@@ -663,6 +663,20 @@ export default function App() {
   const handleShareProject = async (e: string) => { setIsShareModalOpen(false); };
   const handleExportMix = async () => { setIsExportMenuOpen(true); };
 
+  /**
+   * Libere un buffer uniquement si plus aucun clip ne l'utilise.
+   * Copier/coller et dupliquer partagent le meme bufferId : supprimer une copie
+   * supprimait l'audio de toutes les autres.
+   */
+  const releaseBufferIfUnused = useCallback((bufferId: string | undefined, excludeClipIds: string[]) => {
+    if (!bufferId) return;
+    const stillUsed = stateRef.current.tracks.some(t =>
+      [...t.clips, ...(t.frozenClip ? [t.frozenClip] : [])]
+        .some(c => c.bufferId === bufferId && !excludeClipIds.includes(c.id))
+    );
+    if (!stillUsed) audioBufferRegistry.remove(bufferId);
+  }, []);
+
   const handleEditClip = (trackId: string, clipId: string, action: string, payload?: any) => {
     if (action === 'COPY' || action === 'CUT') {
       const track = stateRef.current.tracks.find(t => t.id === trackId);
@@ -692,10 +706,9 @@ export default function App() {
         case 'DELETE': 
             if(idx > -1) {
                 const clipToDelete = newClips[idx];
-                if (clipToDelete.bufferId) {
-                    audioBufferRegistry.remove(clipToDelete.bufferId);
-                }
+                const bufferId = clipToDelete.bufferId;
                 newClips.splice(idx, 1);
+                if (bufferId) setTimeout(() => releaseBufferIfUnused(bufferId, []), 0);
             }
             break;
         case 'MUTE': if(idx > -1) newClips[idx] = { ...newClips[idx], isMuted: !newClips[idx].isMuted }; break;
@@ -802,12 +815,36 @@ export default function App() {
       }
   }, [setVisualState]);
 
+  /** Recupere la prise en cours et l'ajoute a la piste armee. */
+  const finalizeRecording = useCallback(async () => {
+    const result = await audioEngine.stopRecording();
+    setState(produce(draft => {
+      draft.isRecording = false;
+      draft.recStartTime = null;
+      if (result && result.clip.buffer) {
+        const clip = result.clip;
+        const clipId = clip.id;
+        audioBufferRegistry.registerWithUrl(clip.buffer, clip.audioRef!, clipId);
+
+        const newClip: Clip = { ...clip, bufferId: clipId };
+        delete newClip.buffer;
+
+        const track = draft.tracks.find(t => t.id === result.trackId);
+        if (track) track.clips.push(newClip);
+      }
+    }));
+    return result;
+  }, [setState]);
+
   const handleStop = useCallback(async () => {
     metronomeService.stop();
+    const wasRecording = stateRef.current.isRecording;
     audioEngine.stopAll();
+    // STOP pendant un enregistrement doit conserver la prise, pas la jeter.
+    if (wasRecording) await finalizeRecording();
     audioEngine.seekTo(0, stateRef.current.tracks, false);
     setState(prev => ({ ...prev, isPlaying: false, currentTime: 0, isRecording: false }));
-  }, [setState]);
+  }, [setState, finalizeRecording]);
 
   const handleToggleRecord = useCallback(async () => {
     await ensureAudioEngine();
@@ -815,26 +852,8 @@ export default function App() {
     
     if (currentState.isRecording) {
         audioEngine.stopAll();
-        const result = await audioEngine.stopRecording();
-        
-        setState(produce(draft => {
-            draft.isRecording = false;
-            draft.isPlaying = false;
-            draft.recStartTime = null;
-            if (result && result.clip.buffer) {
-                const clip = result.clip;
-                const clipId = clip.id;
-                audioBufferRegistry.registerWithUrl(clip.buffer, clip.audioRef!, clipId);
-                
-                const newClip: Clip = { ...clip, bufferId: clipId };
-                delete newClip.buffer;
-
-                const track = draft.tracks.find(t => t.id === result.trackId);
-                if (track) {
-                    track.clips.push(newClip);
-                }
-            }
-        }));
+        await finalizeRecording();
+        setState(prev => ({ ...prev, isPlaying: false }));
         return;
     }
   
@@ -853,7 +872,7 @@ export default function App() {
       setNoArmedTrackError(true);
       setTimeout(() => setNoArmedTrackError(false), 2000);
     }
-  }, [setState]);
+  }, [setState, finalizeRecording]);
 
   const handleDuplicateTrack = useCallback((trackId: string) => {
     setState(produce((draft: DAWState) => {
@@ -872,7 +891,9 @@ export default function App() {
                 ...plugin,
                 id: `plugin-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
             })),
-            automationLanes: []
+            automationLanes: [],
+            // La copie ne fait pas partie du groupe de l'originale.
+            groupId: undefined
         };
         
         const index = draft.tracks.findIndex(t => t.id === trackId);
@@ -906,11 +927,10 @@ export default function App() {
     // Clean up audio buffers before deleting track to prevent memory leaks
     const track = stateRef.current.tracks.find(t => t.id === trackId);
     if (track) {
-        track.clips.forEach(clip => {
-            if (clip.bufferId) {
-                audioBufferRegistry.remove(clip.bufferId);
-            }
-        });
+        const removedClipIds = track.clips.map(c => c.id);
+        const bufferIds = track.clips.map(c => c.bufferId).filter(Boolean) as string[];
+        // Apres la mise a jour du state, on ne libere que les buffers devenus orphelins.
+        setTimeout(() => bufferIds.forEach(id => releaseBufferIfUnused(id, removedClipIds)), 0);
     }
 
     setState(produce((draft: DAWState) => {
@@ -1075,13 +1095,15 @@ export default function App() {
     if (!track) return;
 
     if (track.isFrozen) {
+      let frozenBufferId: string | undefined;
       setState(produce((draft: DAWState) => {
         const t = draft.tracks.find(tr => tr.id === trackId);
         if (!t) return;
-        if (t.frozenClip?.bufferId) audioBufferRegistry.remove(t.frozenClip.bufferId);
+        frozenBufferId = t.frozenClip?.bufferId;
         t.isFrozen = false;
         delete t.frozenClip;
       }));
+      if (frozenBufferId) setTimeout(() => releaseBufferIfUnused(frozenBufferId, []), 0);
       setAiNotification(`🔥 "${track.name}" dégelée`);
       setTimeout(() => setAiNotification(null), 2500);
       return;
@@ -1225,6 +1247,49 @@ export default function App() {
         }
     }, 50);
   }, [setState]);
+  // --- Groupes de pistes (l'interface existait dans le mixer, sans aucun handler)
+  const GROUP_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e', '#14b8a6',
+                        '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#ec4899'];
+
+  const handleCreateGroup = useCallback((trackIds: string[]) => {
+    if (!trackIds || trackIds.length < 2) return;
+    setState(produce((draft: DAWState) => {
+      const index = draft.trackGroups.length;
+      const id = `grp-${Date.now()}`;
+      draft.trackGroups.push({
+        id,
+        name: `Groupe ${index + 1}`,
+        color: GROUP_COLORS[index % GROUP_COLORS.length],
+        trackIds: [...trackIds],
+        isCollapsed: false,
+        linkedVolume: true,
+        linkedMute: true,
+        linkedSolo: true,
+        linkedPan: false
+      });
+      // Une piste n'appartient qu'a un seul groupe.
+      draft.trackGroups.forEach(g => {
+        if (g.id !== id) g.trackIds = g.trackIds.filter(tid => !trackIds.includes(tid));
+      });
+      draft.trackGroups = draft.trackGroups.filter(g => g.id === id || g.trackIds.length > 0);
+      draft.tracks.forEach(t => { if (trackIds.includes(t.id)) t.groupId = id; });
+    }));
+  }, [setState]);
+
+  const handleUpdateGroup = useCallback((group: TrackGroup) => {
+    setState(produce((draft: DAWState) => {
+      const idx = draft.trackGroups.findIndex(g => g.id === group.id);
+      if (idx > -1) draft.trackGroups[idx] = group;
+    }));
+  }, [setState]);
+
+  const handleDeleteGroup = useCallback((groupId: string) => {
+    setState(produce((draft: DAWState) => {
+      draft.trackGroups = draft.trackGroups.filter(g => g.id !== groupId);
+      draft.tracks.forEach(t => { if (t.groupId === groupId) delete t.groupId; });
+    }));
+  }, [setState]);
+
   const handleCreateAutomationLane = useCallback(() => {
     if (!automationMenu) return;
     
@@ -1899,6 +1964,9 @@ export default function App() {
                     onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
                     onRemovePlugin={handleRemovePlugin} onAddBus={handleAddBus} onToggleBypass={handleToggleBypass}
                     onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
+                    onCopyPluginToTrack={handleCopyPluginToTrack} onReorderPlugins={handleReorderPlugins}
+                    trackGroups={state.trackGroups} onCreateGroup={handleCreateGroup}
+                    onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup}
                  />
               )}
 

@@ -80,6 +80,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
   const [dragAction, setDragAction] = useState<DragAction | null>(null);
   const [activeClip, setActiveClip] = useState<{trackId: string, clip: Clip} | null>(null);
+  // Selection qui survit au relachement de la souris (surlignage + raccourcis).
+  const [selectedClip, setSelectedClip] = useState<{trackId: string, clip: Clip} | null>(null);
   
   const [loopDragMode, setLoopDragMode] = useState<LoopDragMode>(null);
   const [initialLoopState, setInitialLoopState] = useState<{ start: number, end: number } | null>(null);
@@ -141,12 +143,48 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   }, [gridSize, snapEnabled]);
 
   useEffect(() => {
-    const handleKD = (e: KeyboardEvent) => { if (e.key === 'Shift') isShiftDownRef.current = true; };
+    const isTypingTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+    };
+
+    const handleKD = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') isShiftDownRef.current = true;
+      if (isTypingTarget(e.target)) return;
+
+      const mod = e.ctrlKey || e.metaKey;
+      const sel = selectedClip;
+
+      // Coller se fait sur la piste selectionnee, meme sans clip selectionne.
+      if (mod && (e.key === 'v' || e.key === 'V')) {
+        const target = sel?.trackId || selectedTrackId;
+        if (target) { e.preventDefault(); onEditClip?.(target, '', 'PASTE', { time: currentTime }); }
+        return;
+      }
+
+      if (!sel) return;
+
+      if (mod && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); onEditClip?.(sel.trackId, sel.clip.id, 'COPY'); return; }
+      if (mod && (e.key === 'x' || e.key === 'X')) { e.preventDefault(); onEditClip?.(sel.trackId, sel.clip.id, 'CUT'); setSelectedClip(null); return; }
+      if (mod && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); onEditClip?.(sel.trackId, sel.clip.id, 'DUPLICATE'); return; }
+      if (mod) return;
+
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); onEditClip?.(sel.trackId, sel.clip.id, 'DELETE'); setSelectedClip(null); return; }
+      if (e.key === 'm' || e.key === 'M') { e.preventDefault(); onEditClip?.(sel.trackId, sel.clip.id, 'MUTE'); return; }
+      if (e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        onEditClip?.(sel.trackId, sel.clip.id, 'SPLIT', { time: currentTime });
+        return;
+      }
+    };
+
     const handleKU = (e: KeyboardEvent) => { if (e.key === 'Shift') isShiftDownRef.current = false; };
     window.addEventListener('keydown', handleKD);
     window.addEventListener('keyup', handleKU);
     return () => { window.removeEventListener('keydown', handleKD); window.removeEventListener('keyup', handleKU); };
-  }, []);
+  }, [selectedClip, selectedTrackId, currentTime, onEditClip]);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -417,6 +455,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
             if (clip) {
                 if (e.button === 2) { e.preventDefault(); e.stopPropagation(); setClipContextMenu({ x: e.clientX, y: e.clientY, trackId: t.id, clip }); return; }
                 setActiveClip({ trackId: t.id, clip });
+                setSelectedClip({ trackId: t.id, clip });
                 setDragStartX(x); setDragStartY(y);
                 setInitialClipState({ ...clip });
                 setDragAction('MOVE');
@@ -449,6 +488,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       return;
     }
 
+    setSelectedClip(null);
     onSeek(getSnappedTime(time, bpm, gridSize, useSnap));
     setDragAction('SCRUB');
 };
@@ -805,7 +845,7 @@ const drawTimeline = useCallback(() => {
                     const clipY = Math.max(viewportY + 2, 40); // Ne pas dessiner au-dessus du ruler
                     const clipH = Math.min(trackH - 4, viewportY + trackH - 2 - clipY);
                     if (clipH > 0) {
-                        drawClip(ctx, clip, track.color, cx, clipY, cw, clipH, activeClip?.clip.id === clip.id, zoomH);
+                        drawClip(ctx, clip, track.color, cx, clipY, cw, clipH, (selectedClip?.clip.id === clip.id) || (activeClip?.clip.id === clip.id), zoomH);
                     }
                 }
             });
@@ -892,7 +932,7 @@ const drawTimeline = useCallback(() => {
       ctx.fillStyle = isRecording ? '#ef4444' : '#00f2ff';
       ctx.beginPath(); ctx.moveTo(phX-5, 0); ctx.lineTo(phX+5, 0); ctx.lineTo(phX, 10); ctx.fill();
     }
-}, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, gridSize, scrollLeft, scrollTop, onEditClip, onSelectTrack, markers]);
+}, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, gridSize, scrollLeft, scrollTop, onEditClip, onSelectTrack, markers]);
 
 useEffect(() => {
     requestRef.current = requestAnimationFrame(drawTimeline);

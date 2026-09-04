@@ -461,6 +461,8 @@ const MixerView: React.FC<{
   onDropPluginOnTrack?: (tid: string, type: PluginType, metadata?: any) => void, 
   onRequestAddPlugin?: (tid: string, x: number, y: number) => void,
   onAddBus?: () => void,
+  onCopyPluginToTrack?: (sourceTrackId: string, plugin: PluginInstance, destTrackId: string) => void,
+  onReorderPlugins?: (trackId: string, fromIndex: number, toIndex: number) => void,
   // NEW: Track Groups (inspired by Pro Tools/Reaper)
   trackGroups?: TrackGroup[],
   onCreateGroup?: (trackIds: string[]) => void,
@@ -469,6 +471,7 @@ const MixerView: React.FC<{
 }> = ({ 
   tracks, onUpdateTrack, onOpenPlugin, onToggleBypass, onRemovePlugin, 
   onDropPluginOnTrack, onRequestAddPlugin, onAddBus,
+  onCopyPluginToTrack, onReorderPlugins,
   trackGroups = [], onCreateGroup, onUpdateGroup, onDeleteGroup
 }) => {
   const audioTracks = tracks.filter(t => t.type === TrackType.AUDIO || t.type === TrackType.SAMPLER || t.type === TrackType.MIDI);
@@ -481,37 +484,34 @@ const MixerView: React.FC<{
   const [showGroupMenu, setShowGroupMenu] = useState(false);
   
   // Handle linked group actions
-  const handleGroupedTrackUpdate = useCallback((track: Track, update: Partial<Track>) => {
-    const trackGroup = trackGroups.find(g => g.trackIds.includes(track.id));
-    
-    if (trackGroup) {
-      // Apply linked updates to all tracks in group
-      if (trackGroup.linkedVolume && 'volume' in update) {
-        const volumeRatio = (update.volume || 0) / track.volume;
-        trackGroup.trackIds.forEach(tid => {
-          const t = tracks.find(tr => tr.id === tid);
-          if (t) onUpdateTrack({ ...t, volume: Math.min(1.5, t.volume * volumeRatio) });
-        });
-        return;
-      }
-      if (trackGroup.linkedMute && 'isMuted' in update) {
-        trackGroup.trackIds.forEach(tid => {
-          const t = tracks.find(tr => tr.id === tid);
-          if (t) onUpdateTrack({ ...t, isMuted: update.isMuted! });
-        });
-        return;
-      }
-      if (trackGroup.linkedSolo && 'isSolo' in update) {
-        trackGroup.trackIds.forEach(tid => {
-          const t = tracks.find(tr => tr.id === tid);
-          if (t) onUpdateTrack({ ...t, isSolo: update.isSolo! });
-        });
-        return;
-      }
+  const handleGroupedTrackUpdate = useCallback((previous: Track, updated: Track) => {
+    // La piste modifiee est toujours appliquee...
+    onUpdateTrack(updated);
+
+    const trackGroup = trackGroups.find(g => g.trackIds.includes(previous.id));
+    if (!trackGroup) return;
+
+    // ...puis on repercute sur le groupe uniquement ce qui a REELLEMENT change.
+    const others = trackGroup.trackIds
+      .filter(tid => tid !== previous.id)
+      .map(tid => tracks.find(tr => tr.id === tid))
+      .filter((t): t is Track => !!t);
+    if (others.length === 0) return;
+
+    if (trackGroup.linkedVolume && updated.volume !== previous.volume && previous.volume > 0) {
+      const ratio = updated.volume / previous.volume;
+      others.forEach(t => onUpdateTrack({ ...t, volume: Math.max(0, Math.min(1.5, t.volume * ratio)) }));
     }
-    
-    // Default: just update the single track
-    onUpdateTrack({ ...track, ...update });
+    if (trackGroup.linkedPan && updated.pan !== previous.pan) {
+      const delta = updated.pan - previous.pan;
+      others.forEach(t => onUpdateTrack({ ...t, pan: Math.max(-1, Math.min(1, t.pan + delta)) }));
+    }
+    if (trackGroup.linkedMute && updated.isMuted !== previous.isMuted) {
+      others.forEach(t => onUpdateTrack({ ...t, isMuted: updated.isMuted }));
+    }
+    if (trackGroup.linkedSolo && updated.isSolo !== previous.isSolo) {
+      others.forEach(t => onUpdateTrack({ ...t, isSolo: updated.isSolo }));
+    }
   }, [trackGroups, tracks, onUpdateTrack]);
   
   return (
@@ -554,6 +554,8 @@ const MixerView: React.FC<{
               onRemovePlugin={onRemovePlugin} 
               onDropPlugin={onDropPluginOnTrack} 
               onRequestAddPlugin={onRequestAddPlugin} 
+              onCopyPluginToTrack={onCopyPluginToTrack}
+              onReorderPlugins={onReorderPlugins}
             />
           </div>
         );
@@ -634,11 +636,11 @@ const MixerView: React.FC<{
          )}
       </div>
 
-      {busTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={(updatedTrack) => onUpdateTrack(updatedTrack)} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} /></div>)}
+      {busTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={(updatedTrack) => onUpdateTrack(updatedTrack)} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>)}
       <div className="w-4 bg-black/30 border-r border-white/5" />
-      {sendTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} /></div>)}
+      {sendTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>)}
       <div className="w-10 bg-black/50 border-r border-white/5" />
-      <div className="snap-start"><ChannelStrip track={masterTrack || { id: 'master', name: 'MASTER BUS', type: TrackType.BUS, color: '#00f2ff', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: '', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0 }} allTracks={tracks} onUpdate={onUpdateTrack} isMaster={true} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} /></div>
+      <div className="snap-start"><ChannelStrip track={masterTrack || { id: 'master', name: 'MASTER BUS', type: TrackType.BUS, color: '#00f2ff', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: '', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0 }} allTracks={tracks} onUpdate={onUpdateTrack} isMaster={true} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>
     </div>
   );
 };

@@ -745,6 +745,11 @@ export class AudioEngine {
     this.nextScheduleTime = this.ctx.currentTime + 0.01; 
     this.playbackStartTime = this.ctx.currentTime - startOffset; 
 
+    // Valeur correcte au demarrage : sans ca, une piste dont tous les points
+    // d'automation sont anterieurs au point de depart gardait la valeur du
+    // dernier rebuild du graphe au lieu de la valeur automatisee.
+    tracks.forEach(track => this.applyAutomation(track, startOffset));
+
     this.schedulerTimer = window.setInterval(() => {
       this.scheduler(tracks);
     }, this.LOOKAHEAD_MS);
@@ -767,6 +772,17 @@ export class AudioEngine {
         if (dsp.melodicSampler) dsp.melodicSampler.stopAll();
     });
     this.activeMidiNotes.clear();
+    if (this.ctx) {
+      const now = this.ctx.currentTime;
+      this.tracksDSP.forEach(dsp => {
+        try {
+          dsp.gain.gain.cancelScheduledValues(now);
+          dsp.gain.gain.setValueAtTime(dsp.gain.gain.value, now);
+          dsp.panner.pan.cancelScheduledValues(now);
+          dsp.panner.pan.setValueAtTime(dsp.panner.pan.value, now);
+        } catch (e) {}
+      });
+    }
     this.stopScrubbing();
   }
 
@@ -947,7 +963,9 @@ export class AudioEngine {
                     }
                     
                     const nextPoint = lane.points[index + 1];
-                    if (nextPoint && nextPoint.time < end) {
+                    if (nextPoint) {
+                        // On programme la rampe meme si le point suivant sort de la
+                        // fenetre : sinon la valeur restait en palier jusqu'a lui.
                         const nextScheduleTime = when + (nextPoint.time - start);
                         if (lane.parameterName === 'volume') {
                             dsp.gain.gain.linearRampToValueAtTime(nextPoint.value, nextScheduleTime);
