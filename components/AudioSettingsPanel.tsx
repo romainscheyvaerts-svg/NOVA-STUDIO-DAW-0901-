@@ -51,8 +51,10 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
         const savedOutput = localStorage.getItem('nova_audio_output');
         const savedLatency = localStorage.getItem('nova_audio_latency');
 
-        if (savedInput) setSelectedInput(savedInput);
-        if (savedOutput) setSelectedOutput(savedOutput);
+        // On resynchronise aussi le moteur : l'UI affichait le peripherique
+        // sauvegarde alors que le moteur etait reste sur l'entree par defaut.
+        if (savedInput) { setSelectedInput(savedInput); audioEngine.setInputDevice(savedInput); }
+        if (savedOutput) { setSelectedOutput(savedOutput); audioEngine.setOutputDevice(savedOutput); }
         if (savedLatency) {
              setLatencyHint(savedLatency);
              audioEngine.setLatencyMode(savedLatency as any);

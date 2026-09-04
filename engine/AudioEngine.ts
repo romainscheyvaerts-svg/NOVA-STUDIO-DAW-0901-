@@ -130,7 +130,21 @@ export class AudioEngine {
 
   public async init() {
     if (this.ctx) return;
-    
+
+    // Preferences audio persistees : elles n'etaient appliquees que si le
+    // panneau de reglages etait ouvert, et le peripherique d'entree n'etait
+    // jamais reinjecte dans le moteur au rechargement.
+    try {
+      const savedInput = localStorage.getItem('nova_audio_input');
+      const savedOutput = localStorage.getItem('nova_audio_output');
+      const savedLatency = localStorage.getItem('nova_audio_latency');
+      if (savedInput) this.currentInputDeviceId = savedInput;
+      if (savedOutput) this.currentOutputDeviceId = savedOutput;
+      if (savedLatency === 'low' || savedLatency === 'balanced' || savedLatency === 'high') {
+        this.setLatencyMode(savedLatency);
+      }
+    } catch (e) { /* localStorage indisponible (navigation privee) */ }
+
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     this.ctx = new AudioContextClass({ 
       latencyHint: 'interactive',
@@ -173,6 +187,12 @@ export class AudioEngine {
     this.previewAnalyzer.fftSize = 256; 
     this.previewGain.connect(this.previewAnalyzer);
     this.previewAnalyzer.connect(this.ctx.destination);
+
+    // La sortie sauvegardee necessite un contexte existant (setSinkId) : on
+    // l'applique une fois le graphe construit.
+    if (this.currentOutputDeviceId && this.currentOutputDeviceId !== 'default') {
+      this.setOutputDevice(this.currentOutputDeviceId).catch(() => {});
+    }
 
     // Auto-connect to ASIO Bridge if available (Windows only)
     // This allows users who have installed the bridge to have it connect automatically
@@ -557,13 +577,27 @@ export class AudioEngine {
     }
 
     try {
-      this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        }
-      });
+      // Le peripherique choisi dans les reglages audio n'etait jamais transmis :
+      // l'enregistrement utilisait toujours l'entree par defaut du systeme.
+      const audioConstraints: MediaTrackConstraints = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      };
+      if (this.currentInputDeviceId && this.currentInputDeviceId !== 'default') {
+        audioConstraints.deviceId = { exact: this.currentInputDeviceId };
+      }
+
+      try {
+        this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      } catch (deviceError) {
+        // Peripherique debranche ou refuse : on retombe sur l'entree par defaut
+        // plutot que d'echouer completement l'armement.
+        console.warn("[AudioEngine] Entree demandee indisponible, repli sur le peripherique par defaut", deviceError);
+        this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        });
+      }
       this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
       this.monitorSource.connect(dsp.input);
       console.log("[AudioEngine] Track armed OK:", trackId);
