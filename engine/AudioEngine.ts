@@ -63,6 +63,8 @@ export class AudioEngine {
   
   // Graph Audio
   private tracksDSP: Map<string, TrackDSP> = new Map();
+  /** Buffers inverses mis en cache (clip.isReversed). */
+  private reversedBufferCache: Map<string, AudioBuffer> = new Map();
   private activeSources: Map<string, ScheduledSource> = new Map();
   private scrubbingSources: Map<string, ScheduledSource> = new Map();
   
@@ -1120,13 +1122,21 @@ export class AudioEngine {
         let bufferToPlay = buffer;
         
         if (clip.isReversed) {
-            const reversed = this.ctx.createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
-            for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
-                const original = buffer.getChannelData(ch);
-                const reversedData = reversed.getChannelData(ch);
-                for (let i = 0; i < original.length; i++) {
-                    reversedData[i] = original[original.length - 1 - i];
+            // Le buffer inverse etait reconstruit a CHAQUE declenchement : sur un
+            // clip de plusieurs minutes cela recopiait des millions d'echantillons
+            // a chaque tour de boucle. On le met en cache.
+            const cacheKey = clip.bufferId || clip.id;
+            let reversed = this.reversedBufferCache.get(cacheKey);
+            if (!reversed || reversed.length !== buffer.length) {
+                reversed = this.ctx.createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+                for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+                    const original = buffer.getChannelData(ch);
+                    const reversedData = reversed.getChannelData(ch);
+                    for (let i = 0; i < original.length; i++) {
+                        reversedData[i] = original[original.length - 1 - i];
+                    }
                 }
+                this.reversedBufferCache.set(cacheKey, reversed);
             }
             bufferToPlay = reversed;
         }

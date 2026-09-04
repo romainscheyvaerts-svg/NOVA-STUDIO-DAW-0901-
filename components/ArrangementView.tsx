@@ -738,13 +738,22 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                 ctx.strokeStyle = waveColor;
                 ctx.lineWidth = 0.5;
                 
+                // Un clip inverse jouait a l'envers mais s'affichait a l'endroit :
+                // on lit la portion miroir du buffer pour que la forme d'onde
+                // corresponde a ce qu'on entend.
+                const fenetreEchantillons = (px: number): [number, number] => {
+                    const a = startSample + Math.floor(px * samplesPerPixel);
+                    const b = Math.min(startSample + Math.floor((px + 1) * samplesPerPixel), data.length);
+                    if (!clip.isReversed) return [a, b];
+                    return [Math.max(0, data.length - b), Math.max(0, data.length - a)];
+                };
+
                 ctx.beginPath();
                 ctx.moveTo(x, centerY);
                 
                 // Dessiner la partie supérieure
                 for (let px = 0; px < w; px++) {
-                    const sampleStart = startSample + Math.floor(px * samplesPerPixel);
-                    const sampleEnd = Math.min(startSample + Math.floor((px + 1) * samplesPerPixel), data.length);
+                    const [sampleStart, sampleEnd] = fenetreEchantillons(px);
                     
                     let max = 0;
                     for (let s = sampleStart; s < sampleEnd; s++) {
@@ -760,8 +769,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                 
                 // Dessiner la partie inférieure (miroir)
                 for (let px = w - 1; px >= 0; px--) {
-                    const sampleStart = startSample + Math.floor(px * samplesPerPixel);
-                    const sampleEnd = Math.min(startSample + Math.floor((px + 1) * samplesPerPixel), data.length);
+                    const [sampleStart, sampleEnd] = fenetreEchantillons(px);
                     
                     let max = 0;
                     for (let s = sampleStart; s < sampleEnd; s++) {
@@ -783,8 +791,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                 ctx.beginPath();
                 
                 for (let px = 0; px < w; px++) {
-                    const sampleStart = startSample + Math.floor(px * samplesPerPixel);
-                    const sampleEnd = Math.min(startSample + Math.floor((px + 1) * samplesPerPixel), data.length);
+                    const [sampleStart, sampleEnd] = fenetreEchantillons(px);
                     
                     let max = 0;
                     for (let s = sampleStart; s < sampleEnd; s++) {
@@ -803,8 +810,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                 // Ligne inférieure
                 ctx.beginPath();
                 for (let px = 0; px < w; px++) {
-                    const sampleStart = startSample + Math.floor(px * samplesPerPixel);
-                    const sampleEnd = Math.min(startSample + Math.floor((px + 1) * samplesPerPixel), data.length);
+                    const [sampleStart, sampleEnd] = fenetreEchantillons(px);
                     
                     let max = 0;
                     for (let s = sampleStart; s < sampleEnd; s++) {
@@ -1260,6 +1266,12 @@ useEffect(() => {
                 { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE'); setClipContextMenu(null); }},
                 'separator',
                 { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
+                { label: clipContextMenu.clip.isReversed ? 'Remettre à l’endroit' : 'Inverser', icon: 'fa-rotate-left', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { isReversed: !clipContextMenu.clip.isReversed }); setClipContextMenu(null); }},
+                { label: 'Gain +3 dB', icon: 'fa-volume-high', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { gain: Math.min(8, (clipContextMenu.clip.gain ?? 1) * 1.413) }); setClipContextMenu(null); }},
+                { label: 'Gain -3 dB', icon: 'fa-volume-low', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { gain: Math.max(0.01, (clipContextMenu.clip.gain ?? 1) / 1.413) }); setClipContextMenu(null); }},
+                ...((clipContextMenu.clip.fadeIn || clipContextMenu.clip.fadeOut) ? [
+                  { label: 'Effacer les fondus', icon: 'fa-eraser', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { fadeIn: 0, fadeOut: 0 }); setClipContextMenu(null); } }
+                ] : []),
                 'separator',
                 { label: 'Supprimer', icon: 'fa-trash', shortcut: 'Suppr', danger: true, onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DELETE'); setClipContextMenu(null); }}
             ]}
