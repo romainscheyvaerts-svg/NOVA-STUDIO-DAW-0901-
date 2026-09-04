@@ -2063,6 +2063,38 @@ export default function App() {
         break;
       }
 
+      // ---- Catalogue ----
+      case 'LOAD_BEAT': {
+        const query = String(p.name || p.title || '').trim().toLowerCase();
+        if (!query) return;
+        notify(`🔎 Recherche de "${p.name}"...`);
+        (async () => {
+          try {
+            const catalogue = await supabaseManager.getActiveInstrumentals();
+            const norm = (v: string) => v.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+            const q = norm(query);
+            const match = catalogue.find(i => norm(i.title || '') === q)
+              || catalogue.find(i => norm(i.title || '').includes(q))
+              || catalogue.find(i => q.includes(norm(i.title || '')));
+
+            if (!match) { notify(`❌ Aucun beat "${p.name}" dans le catalogue`); return; }
+
+            let audioUrl = '';
+            if (match.preview_url) audioUrl = supabaseManager.getPublicInstrumentUrl(match.preview_url);
+            else if (match.drive_file_id) audioUrl = supabaseManager.getDrivePreviewUrl(match.drive_file_id);
+            if (!audioUrl) { notify(`❌ "${match.title}" n'a pas de fichier audio`); return; }
+
+            await handleUniversalAudioImport(audioUrl, match.title, 'instrumental', 0);
+            if (match.bpm) handleUpdateBpm(match.bpm);
+            notify(`✅ "${match.title}" chargé sur la piste BEAT`);
+          } catch (e: any) {
+            console.error('[AI] LOAD_BEAT', e);
+            notify(`❌ Chargement impossible : ${e?.message || 'erreur'}`);
+          }
+        })();
+        break;
+      }
+
       // ---- Vue et projet ----
       case 'SET_VIEW': {
         const view = String(p.view || '').toUpperCase();
@@ -2112,7 +2144,7 @@ export default function App() {
       handleSeek, handleUpdateBpm, handleRemovePlugin, handleReorderPlugins, handleCopyPluginToTrack,
       handleFreezeTrack, handleAddMarker, handleDeleteMarker, handleCreateGroup, handleUpdateGroup,
       handleDeleteGroup, handleCreatePatternAndOpen, handleMoveClip, handleSaveCloud, undo, redo,
-      canUndo, canRedo]);
+      canUndo, canRedo, handleUniversalAudioImport]);
 
   const envoyerAuChatbot = async (messageUtilisateur: string) => {
     try {

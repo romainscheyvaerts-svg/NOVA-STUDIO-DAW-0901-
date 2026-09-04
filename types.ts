@@ -406,7 +406,8 @@ export type AIActionType =
   | 'UNDO'
   | 'REDO'
   | 'SAVE_PROJECT'
-  | 'OPEN_EXPORT'; 
+  | 'OPEN_EXPORT'
+  | 'LOAD_BEAT'; 
 
 export interface AIAction {
   action: AIActionType;

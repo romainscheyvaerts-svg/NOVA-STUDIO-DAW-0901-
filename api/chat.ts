@@ -19,6 +19,7 @@ TRANSPORT ET PROJET
 | UNDO / REDO | {} | annuler / rétablir |
 | SAVE_PROJECT | { name } | sauvegarder dans le cloud |
 | OPEN_EXPORT | {} | ouvrir la fenêtre d'export |
+| LOAD_BEAT | { name } | charge un beat du catalogue sur la piste BEAT et cale le BPM |
 
 PISTES
 | SET_VOLUME | { trackId, volume } | 0 à 1 |
