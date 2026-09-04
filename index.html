@@ -12,7 +12,25 @@
   <script src="https://js.stripe.com/v3/"></script> <!-- STRIPE SDK AJOUTÉ -->
   <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script> <!-- LAMEJS POUR MP3 ENCODING -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <!-- Polices embarquees : le DAW tourne aussi dans l'application iPhone,
+       ou dependre du reseau pour la typographie n'a pas de sens.
+       Inter et JetBrains Mono sont variables : un fichier chacune. -->
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 300 800;
+      font-display: swap;
+      src: url('/daw/fonts/inter-latin.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-style: normal;
+      font-weight: 400 700;
+      font-display: swap;
+      src: url('/daw/fonts/jetbrains-mono-latin.woff2') format('woff2');
+    }
+  </style>
   <style>
     :root {
       /* DARK MODE (DEFAULT) - "Cyber Studio" */
