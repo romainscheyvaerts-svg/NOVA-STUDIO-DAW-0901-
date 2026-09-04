@@ -453,6 +453,13 @@ export default function App() {
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
 
+  // --- Protection contre la perte de travail ---
+  // Fermer l'onglet ou recharger detruisait toute la session sans le moindre
+  // avertissement, alors que le projet ne vit qu'en memoire.
+  const hasUnsavedChangesRef = useRef(false);
+  const unsavedMountRef = useRef(false);
+
+
   // Ref to track atomic updates (volume/pan only) to skip expensive graph rebuild
   const skipEngineUpdateRef = useRef(false);
 
@@ -533,6 +540,7 @@ export default function App() {
         setSaveState(s => ({ ...s, progress: Math.max(30, percent), message }));
       });
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Sauvegardé !' }));
+      hasUnsavedChangesRef.current = false;
       // On garde l'UUID renvoye par Supabase: les sauvegardes suivantes mettent a jour
       // le meme projet au lieu d'en creer un nouveau a chaque fois.
       setState(prev => ({ ...prev, name: projectName, id: saved?.id || prev.id }));
@@ -559,6 +567,7 @@ export default function App() {
         setSaveState(s => ({ ...s, progress: Math.max(50, percent), message }));
       }, true);
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Copie créée !' }));
+      hasUnsavedChangesRef.current = false;
       setAiNotification(`✅ Copie "${copyName}" créée dans le cloud`);
     } catch (e: any) {
       console.error('[Cloud Copy Error]', e);
@@ -592,6 +601,7 @@ export default function App() {
       
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Téléchargé !' }));
       setAiNotification(`✅ Projet "${n}" exporté avec les audios`);
+      hasUnsavedChangesRef.current = false;
     } catch (e: any) {
       console.error('[Local Save Error]', e);
       setAiNotification(`❌ Erreur: ${e.message}`);
@@ -1392,6 +1402,79 @@ export default function App() {
   const handleToggleDelayComp = useCallback(() => {
     setState(prev => ({ ...prev, isDelayCompEnabled: !prev.isDelayCompEnabled }));
   }, [setState]);
+
+  useEffect(() => {
+    if (!unsavedMountRef.current) { unsavedMountRef.current = true; return; }
+    hasUnsavedChangesRef.current = true;
+  }, [state.tracks, state.bpm, state.name, state.trackGroups, state.markers]);
+
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!hasUnsavedChangesRef.current) return;
+      // On n'ennuie pas l'utilisateur si le projet est encore vide. Les pistes de
+      // depart (SEND) portent des effets par defaut : elles ne comptent pas comme
+      // du travail utilisateur.
+      const hasContent = stateRef.current.tracks.some(t =>
+        t.clips.length > 0 || (t.type !== TrackType.SEND && t.plugins.length > 0)
+      );
+      if (!hasContent) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
+
+  /**
+   * Raccourcis clavier globaux (transport, historique, sauvegarde).
+   * Ils manquaient entierement : impossible de lancer la lecture a la barre
+   * d'espace ou d'annuler au clavier, ce que fait n'importe quel DAW.
+   * Les raccourcis lies a un clip (S, M, Suppr, Ctrl+C/V/X/D) restent geres par
+   * ArrangementView / PianoRoll, on ne les intercepte pas ici.
+   */
+  useEffect(() => {
+    const isTypingTarget = (el: EventTarget | null) => {
+      const node = el as HTMLElement | null;
+      if (!node || !node.tagName) return false;
+      const tag = node.tagName.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || node.isContentEditable;
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      const mod = e.ctrlKey || e.metaKey;
+
+      // Lecture / pause : la barre d'espace ne doit ni defiler la page ni
+      // re-declencher le bouton qui a le focus.
+      if (e.code === 'Space' && !mod) {
+        e.preventDefault();
+        handleTogglePlay();
+        return;
+      }
+
+      if (mod && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
+      if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
+      if (mod && (e.key === 's' || e.key === 'S')) { e.preventDefault(); setIsSaveMenuOpen(true); return; }
+
+      if (mod) return; // on ne capture aucun autre raccourci systeme
+
+      if (e.key === 'r' || e.key === 'R') { e.preventDefault(); handleToggleRecord(); return; }
+      if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault();
+        setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive }));
+        return;
+      }
+      if (e.key === 'Home') { e.preventDefault(); handleSeek(0); return; }
+      if (e.key === 'Escape' && stateRef.current.isPlaying) { e.preventDefault(); handleStop(); return; }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, undo, redo, setState]);
 
   const handleRequestAddPlugin = useCallback((trackId: string, x: number, y: number) => {
     setAddPluginMenu({ trackId, x, y });
