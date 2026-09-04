@@ -45,15 +45,45 @@ export const getAIProductionAssistance = async (currentState: DAWState, userMess
   }
 };
 
+/** Sur GitHub Pages il n'y a pas de backend : on tape sur l'API Vercel. */
+const apiBase = (): string =>
+  (typeof window !== 'undefined' && window.location.hostname.includes('github.io'))
+    ? 'https://nova-studio-daw-0901.vercel.app'
+    : '';
+
+/**
+ * Nom + prompt de cover generes par l'IA.
+ * Renvoyait auparavant une valeur en dur, identique a chaque appel.
+ */
 export const generateCreativeMetadata = async (category: string): Promise<{ name: string, prompt: string }> => {
-  // TODO: Migrer vers API Vercel
-  return {
+  const fallback = {
     name: `${category.toUpperCase()} BEAT`,
     prompt: "Dark urban atmosphere with neon lights"
   };
+
+  try {
+    const response = await fetch(`${apiBase()}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category })
+    });
+
+    if (!response.ok) return fallback;
+    const data = await response.json();
+    if (!data || typeof data.name !== 'string') return fallback;
+    return { name: data.name, prompt: data.prompt || fallback.prompt };
+  } catch (error) {
+    console.error('[AI_SERVICE] generateCreativeMetadata :', error);
+    return fallback;
+  }
 };
 
-export const generateCoverArt = async (beatName: string, category: string, vibe: string): Promise<string | null> => {
-  // TODO: Migrer vers API Vercel
-  return null;
+/**
+ * Generation d'image : non disponible.
+ * Le backend n'expose aucun modele image, on le dit explicitement plutot que
+ * de renvoyer null en silence (l'UI affichait "Echec de la generation" sans
+ * expliquer que la fonctionnalite n'existe pas).
+ */
+export const generateCoverArt = async (_beatName: string, _category: string, _vibe: string): Promise<string | null> => {
+  throw new Error("Génération d'image non disponible — importe une cover manuellement.");
 };
