@@ -387,6 +387,11 @@ export class AudioEngine {
     // --- 1. Une chaine par piste : input -> [plugins] -> gain -> panner -> output
     for (const track of tracks) {
       const input = offlineCtx.createGain();
+      // Meme regle qu'en lecture : la chaine est stereo des l'entree, sinon une
+      // piste mono changeait de niveau selon qu'elle porte un plugin ou non.
+      input.channelCount = 2;
+      input.channelCountMode = 'explicit';
+      input.channelInterpretation = 'speakers';
       const gain = offlineCtx.createGain();
       const panner = offlineCtx.createStereoPanner();
       const output = offlineCtx.createGain();
@@ -1272,6 +1277,16 @@ export class AudioEngine {
       dsp.drumRack = new DrumRackNode(this.ctx);
       dsp.drumRack.output.connect(dsp.input);
     }
+    // Chaine forcee en stereo des l'entree de piste.
+    // Sans ca, une source MONO restait mono jusqu'au panoramique, qui lui
+    // appliquait sa loi equi-puissance (-3 dB au centre). Des qu'un plugin
+    // convertissait le signal en stereo, cette attenuation disparaissait : poser
+    // un effet, meme regle transparent, rendait la piste 3 dB plus forte.
+    // Mesure avant correction : mono 0.1225 sans plugin contre 0.1724 avec.
+    dsp.input.channelCount = 2;
+    dsp.input.channelCountMode = 'explicit';
+    dsp.input.channelInterpretation = 'speakers';
+
     this.tracksDSP.set(track.id, dsp);
     return dsp;
   }
