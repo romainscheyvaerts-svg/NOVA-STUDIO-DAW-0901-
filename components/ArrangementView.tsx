@@ -1385,6 +1385,10 @@ useEffect(() => {
                 { label: clipContextMenu.clip.isReversed ? 'Remettre à l’endroit' : 'Inverser', icon: 'fa-rotate-left', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { isReversed: !clipContextMenu.clip.isReversed }); setClipContextMenu(null); }},
                 { label: 'Gain +3 dB', icon: 'fa-volume-high', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { gain: Math.min(8, (clipContextMenu.clip.gain ?? 1) * 1.413) }); setClipContextMenu(null); }},
                 { label: 'Gain -3 dB', icon: 'fa-volume-low', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { gain: Math.max(0.01, (clipContextMenu.clip.gain ?? 1) / 1.413) }); setClipContextMenu(null); }},
+                ...(clipContextMenu.clip.warp?.originalBpm && Math.abs(clipContextMenu.clip.warp.originalBpm - bpm) > 0.5 ? [
+                  { label: `Caler sur le tempo (${Math.round(clipContextMenu.clip.warp.originalBpm)} → ${Math.round(bpm)} BPM)`, icon: 'fa-clock-rotate-left',
+                    onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'FIT_TEMPO'); setClipContextMenu(null); } }
+                ] : []),
                 ...((clipContextMenu.clip.fadeIn || clipContextMenu.clip.fadeOut) ? [
                   { label: 'Effacer les fondus', icon: 'fa-eraser', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { fadeIn: 0, fadeOut: 0 }); setClipContextMenu(null); } }
                 ] : []),

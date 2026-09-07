@@ -32,6 +32,7 @@ import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { metronomeService } from './services/MetronomeService';
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
+import { etirerBufferAsync, facteurPourTempo } from './utils/timeStretch';
 import MobileTracksPage from './components/MobileTracksPage';
 import MobileArrangementPage from './components/MobileArrangementPage';
 import MobilePluginsPage from './components/MobilePluginsPage';
@@ -415,7 +416,7 @@ export default function App() {
         }
         
         if (audioUrl) {
-          await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0);
+          await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0, inst.bpm);
           // Mettre à jour le BPM si disponible
           if (inst.bpm) {
             handleUpdateBpm(inst.bpm);
@@ -721,6 +722,46 @@ export default function App() {
       // -0.3 dBFS de marge pour eviter l'ecretage.
       action = 'UPDATE_PROPS';
       payload = { gain: Math.min(8, 0.966 / peak) };
+    }
+
+    if (action === 'FIT_TEMPO') {
+      const track = stateRef.current.tracks.find(t => t.id === trackId);
+      const clip = track?.clips.find(c => c.id === clipId);
+      const buffer = clip?.buffer || (clip?.bufferId ? audioBufferRegistry.get(clip.bufferId) : null);
+      const bpmOrigine = clip?.warp?.originalBpm;
+      if (!clip || !buffer || !bpmOrigine || !audioEngine.ctx) return;
+
+      const bpmCible = stateRef.current.bpm;
+      const facteur = facteurPourTempo(bpmOrigine, bpmCible);
+      if (Math.abs(facteur - 1) < 0.001) return;
+
+      // Le calcul dure plusieurs secondes sur un morceau entier : il part dans
+      // un worker pour ne pas figer l'interface.
+      setExternalImportNotice(`Calage sur ${Math.round(bpmCible)} BPM...`);
+      etirerBufferAsync(audioEngine.ctx, buffer, facteur)
+        .then(etire => {
+          const nouvelId = `stretch-${clipId}-${Date.now()}`;
+          audioBufferRegistry.register(etire, nouvelId);
+          setState(produce((draft: DAWState) => {
+            const t = draft.tracks.find(x => x.id === trackId);
+            const c = t?.clips.find(x => x.id === clipId);
+            if (!c) return;
+            // Tout ce qui est exprime en secondes suit le meme facteur.
+            c.bufferId = nouvelId;
+            c.duration = c.duration * facteur;
+            c.offset = (c.offset || 0) * facteur;
+            c.fadeIn = (c.fadeIn || 0) * facteur;
+            c.fadeOut = (c.fadeOut || 0) * facteur;
+            c.warp = { ...(c.warp || { mode: 'BEATS', preservePitch: true }), enabled: true, originalBpm: bpmCible };
+          }));
+          setExternalImportNotice(`✅ Calé sur ${Math.round(bpmCible)} BPM`);
+        })
+        .catch(e => {
+          console.error('[FIT_TEMPO]', e);
+          setExternalImportNotice(`❌ Calage impossible : ${e?.message || 'erreur'}`);
+        })
+        .finally(() => setTimeout(() => setExternalImportNotice(null), 2500));
+      return;
     }
 
     if (action === 'COPY' || action === 'CUT') {
@@ -1514,7 +1555,7 @@ export default function App() {
     setAddPluginMenu({ trackId, x, y });
   }, []);
 
-  const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number) => {
+  const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number, sourceBpm?: number) => {
       console.log('[handleUniversalAudioImport] Début import:', name);
       setExternalImportNotice(`Chargement: ${name}...`);
       try {
@@ -1576,6 +1617,11 @@ export default function App() {
                   offset: 0,
                   bufferId: bufferId,  // Reference to registry, NOT the actual buffer
                   audioRef,
+                  // Tempo d'origine du fichier : permet de proposer « Caler sur
+                  // le tempo » plus tard, sans redemander l'info a l'utilisateur.
+                  ...(sourceBpm && sourceBpm > 0
+                    ? { warp: { enabled: false, mode: 'BEATS' as const, originalBpm: sourceBpm, preservePitch: true } }
+                    : {}),
                   color: clipColor,
                   fadeIn: 0,
                   fadeOut: 0,
@@ -2228,7 +2274,7 @@ export default function App() {
             else if (match.drive_file_id) audioUrl = supabaseManager.getDrivePreviewUrl(match.drive_file_id);
             if (!audioUrl) { notify(`❌ "${match.title}" n'a pas de fichier audio`); return; }
 
-            await handleUniversalAudioImport(audioUrl, match.title, 'instrumental', 0);
+            await handleUniversalAudioImport(audioUrl, match.title, 'instrumental', 0, match.bpm);
             if (match.bpm) handleUpdateBpm(match.bpm);
             notify(`✅ "${match.title}" chargé sur la piste BEAT`);
           } catch (e: any) {
