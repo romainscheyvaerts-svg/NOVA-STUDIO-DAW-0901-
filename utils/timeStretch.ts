@@ -29,6 +29,9 @@ const fenetreHann = (n: number): Float32Array => {
  * Cherche, autour de `positionIdeale`, le décalage dont le début ressemble le
  * plus à `modele` (la continuation attendue de la trame précédente).
  */
+const PAS_GROSSIER = 8;   // balayage large, puis affinage autour du meilleur
+const PAS_TAPS = 8;       // un echantillon sur 8 dans la correlation
+
 const meilleurDecalage = (
   source: Float32Array,
   positionIdeale: number,
@@ -36,22 +39,32 @@ const meilleurDecalage = (
 ): number => {
   if (!modele) return 0;
 
+  const longueur = modele.length;
+  const scorePour = (d: number): number => {
+    const debut = positionIdeale + d;
+    if (debut < 0 || debut + longueur >= source.length) return -Infinity;
+    let score = 0;
+    for (let i = 0; i < longueur; i += PAS_TAPS) score += source[debut + i] * modele[i];
+    return score;
+  };
+
+  // Recherche en deux passes. Une passe unique au pas de 1 sur toute la
+  // tolerance coutait ~4 milliards d'operations sur un morceau entier
+  // (15,8 s mesurees) : la quasi-totalite du temps d'etirement.
   let meilleur = 0;
   let meilleurScore = -Infinity;
+  for (let d = -TOLERANCE; d <= TOLERANCE; d += PAS_GROSSIER) {
+    const sc = scorePour(d);
+    if (sc > meilleurScore) { meilleurScore = sc; meilleur = d; }
+  }
 
-  for (let d = -TOLERANCE; d <= TOLERANCE; d++) {
-    const debut = positionIdeale + d;
-    if (debut < 0 || debut + modele.length >= source.length) continue;
-
-    // Corrélation croisée simple : elle suffit et reste rapide.
-    let score = 0;
-    for (let i = 0; i < modele.length; i += 4) {
-      score += source[debut + i] * modele[i];
-    }
-    if (score > meilleurScore) {
-      meilleurScore = score;
-      meilleur = d;
-    }
+  // Affinage au pas de 1 autour du meilleur candidat : on retrouve la precision
+  // exacte du raccord sans payer le balayage complet.
+  const debutFin = Math.max(-TOLERANCE, meilleur - PAS_GROSSIER);
+  const finFin = Math.min(TOLERANCE, meilleur + PAS_GROSSIER);
+  for (let d = debutFin; d <= finFin; d++) {
+    const sc = scorePour(d);
+    if (sc > meilleurScore) { meilleurScore = sc; meilleur = d; }
   }
   return meilleur;
 };
