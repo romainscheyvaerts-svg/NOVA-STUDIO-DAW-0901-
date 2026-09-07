@@ -147,10 +147,22 @@ export interface WarpMarker {
 export interface WarpSettings {
   enabled: boolean;
   mode: WarpMode;
+  /** Tempo auquel le clip est actuellement cale. */
   originalBpm?: number;
   markers?: WarpMarker[];
   preservePitch: boolean;
   grainSize?: number;     // for granular modes
+
+  // --- Reference d'origine ---
+  // On garde le buffer intact et ses mesures pour toujours reetirer DEPUIS
+  // l'original. Sans ca, chaque changement de tempo etirerait un buffer deja
+  // etire et la qualite se degraderait a chaque fois.
+  sourceBufferId?: string;
+  sourceBpm?: number;
+  sourceDuration?: number;
+  sourceOffset?: number;
+  sourceFadeIn?: number;
+  sourceFadeOut?: number;
 }
 
 // Track Group (inspired by Reaper/Pro Tools)

@@ -704,6 +704,104 @@ export default function App() {
     if (!stillUsed) audioBufferRegistry.remove(bufferId);
   }, []);
 
+  /** Evite de lancer deux etirements concurrents sur le meme clip. */
+  const calagesEnCoursRef = useRef<Set<string>>(new Set());
+
+  /**
+   * Cale un clip sur un tempo donne. L'etirement part TOUJOURS du buffer
+   * d'origine : reetirer un buffer deja etire degraderait le son un peu plus a
+   * chaque changement de tempo.
+   */
+  const caleClipSurTempo = useCallback(async (
+    trackId: string, clipId: string, bpmCible: number, silencieux = false
+  ) => {
+    const cle = `${trackId}:${clipId}`;
+    if (calagesEnCoursRef.current.has(cle)) return;
+
+    const track = stateRef.current.tracks.find(t => t.id === trackId);
+    const clip = track?.clips.find(c => c.id === clipId);
+    if (!clip || !clip.warp || !audioEngine.ctx) return;
+
+    // Reference d'origine : figee au premier calage, reutilisee ensuite.
+    const sourceBufferId = clip.warp.sourceBufferId ?? clip.bufferId;
+    const sourceBpm = clip.warp.sourceBpm ?? clip.warp.originalBpm;
+    const sourceDuration = clip.warp.sourceDuration ?? clip.duration;
+    const sourceOffset = clip.warp.sourceOffset ?? (clip.offset || 0);
+    const sourceFadeIn = clip.warp.sourceFadeIn ?? (clip.fadeIn || 0);
+    const sourceFadeOut = clip.warp.sourceFadeOut ?? (clip.fadeOut || 0);
+    if (!sourceBufferId || !sourceBpm) return;
+
+    const buffer = audioBufferRegistry.get(sourceBufferId);
+    if (!buffer) return;
+
+    const facteur = facteurPourTempo(sourceBpm, bpmCible);
+    if (Math.abs(facteur - 1) < 0.001 && clip.bufferId === sourceBufferId) return;
+
+    calagesEnCoursRef.current.add(cle);
+    if (!silencieux) setExternalImportNotice(`Calage sur ${Math.round(bpmCible)} BPM...`);
+    try {
+      const etire = await etirerBufferAsync(audioEngine.ctx, buffer, facteur);
+      const nouvelId = `stretch-${clipId}-${Date.now()}`;
+      audioBufferRegistry.register(etire, nouvelId);
+
+      setState(produce((draft: DAWState) => {
+        const t = draft.tracks.find(x => x.id === trackId);
+        const c = t?.clips.find(x => x.id === clipId);
+        if (!c) return;
+        c.bufferId = nouvelId;
+        c.duration = sourceDuration * facteur;
+        c.offset = sourceOffset * facteur;
+        c.fadeIn = sourceFadeIn * facteur;
+        c.fadeOut = sourceFadeOut * facteur;
+        c.warp = {
+          ...(c.warp || { mode: 'BEATS', preservePitch: true }),
+          enabled: true,
+          originalBpm: bpmCible,
+          sourceBufferId, sourceBpm, sourceDuration, sourceOffset, sourceFadeIn, sourceFadeOut
+        };
+      }));
+      if (!silencieux) setExternalImportNotice(`✅ Calé sur ${Math.round(bpmCible)} BPM`);
+    } catch (e: any) {
+      console.error('[warp]', e);
+      if (!silencieux) setExternalImportNotice(`❌ Calage impossible : ${e?.message || 'erreur'}`);
+    } finally {
+      calagesEnCoursRef.current.delete(cle);
+      if (!silencieux) setTimeout(() => setExternalImportNotice(null), 2500);
+    }
+
+    // Le tempo a pu continuer de bouger pendant le calcul (glissement du
+    // controle de tempo). On ne peut pas se contenter d'ignorer les demandes
+    // arrivees entre-temps, sinon le clip reste cale sur un tempo perime : on
+    // relance sur la valeur courante.
+    const bpmCourant = stateRef.current.bpm;
+    const clipAJour = stateRef.current.tracks.find(t => t.id === trackId)?.clips.find(c => c.id === clipId);
+    if (clipAJour?.warp?.enabled && Math.abs((clipAJour.warp.originalBpm ?? bpmCourant) - bpmCourant) > 0.01) {
+      caleClipSurTempoRef.current?.(trackId, clipId, bpmCourant, true);
+    }
+  }, [setState]);
+
+  // Reference stable pour permettre la relance ci-dessus sans dependance circulaire.
+  const caleClipSurTempoRef = useRef<typeof caleClipSurTempo | null>(null);
+  useEffect(() => { caleClipSurTempoRef.current = caleClipSurTempo; }, [caleClipSurTempo]);
+
+  /**
+   * Suivi automatique du tempo : les clips deja cales se reetirent quand le
+   * tempo du projet change. On attend la fin du geste, sinon glisser le controle
+   * de tempo lancerait des dizaines d'etirements.
+   */
+  useEffect(() => {
+    const bpm = state.bpm;
+    const minuteur = setTimeout(() => {
+      stateRef.current.tracks.forEach(t => t.clips.forEach(c => {
+        if (c.warp?.enabled && c.warp.originalBpm !== undefined
+            && Math.abs(c.warp.originalBpm - bpm) > 0.01) {
+          caleClipSurTempo(t.id, c.id, bpm, true);
+        }
+      }));
+    }, 500);
+    return () => clearTimeout(minuteur);
+  }, [state.bpm, caleClipSurTempo]);
+
   const handleEditClip = (trackId: string, clipId: string, action: string, payload?: any) => {
     if (action === 'NORMALIZE') {
       const track = stateRef.current.tracks.find(t => t.id === trackId);
@@ -727,40 +825,10 @@ export default function App() {
     if (action === 'FIT_TEMPO') {
       const track = stateRef.current.tracks.find(t => t.id === trackId);
       const clip = track?.clips.find(c => c.id === clipId);
-      const buffer = clip?.buffer || (clip?.bufferId ? audioBufferRegistry.get(clip.bufferId) : null);
-      const bpmOrigine = clip?.warp?.originalBpm;
-      if (!clip || !buffer || !bpmOrigine || !audioEngine.ctx) return;
-
-      const bpmCible = stateRef.current.bpm;
-      const facteur = facteurPourTempo(bpmOrigine, bpmCible);
-      if (Math.abs(facteur - 1) < 0.001) return;
-
-      // Le calcul dure plusieurs secondes sur un morceau entier : il part dans
-      // un worker pour ne pas figer l'interface.
-      setExternalImportNotice(`Calage sur ${Math.round(bpmCible)} BPM...`);
-      etirerBufferAsync(audioEngine.ctx, buffer, facteur)
-        .then(etire => {
-          const nouvelId = `stretch-${clipId}-${Date.now()}`;
-          audioBufferRegistry.register(etire, nouvelId);
-          setState(produce((draft: DAWState) => {
-            const t = draft.tracks.find(x => x.id === trackId);
-            const c = t?.clips.find(x => x.id === clipId);
-            if (!c) return;
-            // Tout ce qui est exprime en secondes suit le meme facteur.
-            c.bufferId = nouvelId;
-            c.duration = c.duration * facteur;
-            c.offset = (c.offset || 0) * facteur;
-            c.fadeIn = (c.fadeIn || 0) * facteur;
-            c.fadeOut = (c.fadeOut || 0) * facteur;
-            c.warp = { ...(c.warp || { mode: 'BEATS', preservePitch: true }), enabled: true, originalBpm: bpmCible };
-          }));
-          setExternalImportNotice(`✅ Calé sur ${Math.round(bpmCible)} BPM`);
-        })
-        .catch(e => {
-          console.error('[FIT_TEMPO]', e);
-          setExternalImportNotice(`❌ Calage impossible : ${e?.message || 'erreur'}`);
-        })
-        .finally(() => setTimeout(() => setExternalImportNotice(null), 2500));
+      if (!clip?.warp?.originalBpm) return;
+      // Premier calage : on fige la reference d'origine pour pouvoir toujours
+      // reetirer depuis le buffer intact.
+      caleClipSurTempo(trackId, clipId, stateRef.current.bpm, true);
       return;
     }
 
