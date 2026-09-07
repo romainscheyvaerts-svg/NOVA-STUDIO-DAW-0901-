@@ -102,11 +102,18 @@ export class ProEQ12Node {
     }
     lastNode.connect(this.postAnalyzer);
     this.postAnalyzer.connect(this.output);
+    // masterGain etait declare et initialise mais jamais applique au son :
+    // le gain de sortie de l'egaliseur n'avait aucun effet.
+    this.output.gain.value = Number.isFinite(this.params.masterGain) ? this.params.masterGain : 1.0;
   }
 
   public updateParams(p: Partial<ProEQ12Params>) {
     const reconnectNeeded = p.isEnabled !== undefined || p.bands?.some((b, i) => b.isEnabled !== this.params.bands[i].isEnabled || b.isSolo !== this.params.bands[i].isSolo || b.type !== this.params.bands[i].type);
     this.params = { ...this.params, ...p };
+
+    if (p.masterGain !== undefined && Number.isFinite(p.masterGain)) {
+      this.output.gain.setTargetAtTime(p.masterGain, this.ctx.currentTime, 0.01);
+    }
     
     if (reconnectNeeded) {
       this.setupFilters();

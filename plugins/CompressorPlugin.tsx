@@ -112,8 +112,14 @@ export class CompressorNode {
     this.input.connect(this.dryGain);
     
     // Wet path (compressed)
-    this.input.connect(this.scHighpass);
-    this.scHighpass.connect(this.lookaheadDelay);
+    // NOTE: le passe-haut de sidechain etait insere ICI, dans le trajet audio
+    // principal. Il ne filtrait donc pas la detection mais le signal entendu :
+    // avec sa valeur par defaut de 80 Hz, poser un compresseur amputait les
+    // graves de la piste (un sinus 50 Hz perdait plus de la moitie de son
+    // niveau, et 31 dB a 300 Hz). Le signal va desormais directement au
+    // compresseur. Un vrai sidechain filtre demande un AudioWorklet, car
+    // DynamicsCompressorNode n'expose pas d'entree de detection separee.
+    this.input.connect(this.lookaheadDelay);
     this.lookaheadDelay.connect(this.compressor);
     this.compressor.connect(this.saturationNode);
     this.saturationNode.connect(this.makeupGainNode);
@@ -188,7 +194,6 @@ export class CompressorNode {
         : safe(this.params.makeupGain, 1.0);
       this.makeupGainNode.gain.setTargetAtTime(makeup, now, 0.01);
       
-      this.scHighpass.frequency.setTargetAtTime(safe(this.params.scHpFreq, 80), now, 0.01);
       
       this.lookaheadDelay.delayTime.setTargetAtTime(safe(this.params.lookahead, 0), now, 0.01);
       
@@ -582,7 +587,6 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
       {/* Advanced controls */}
       <div className="grid grid-cols-4 gap-4 pt-2 border-t border-white/5">
         <CompressorKnob label="Mix" value={params.mix} min={0} max={1} factor={100} suffix="%" color="#06b6d4" onChange={(v) => updateParam('mix', v)} displayVal={Math.round(params.mix * 100)} />
-        <CompressorKnob label="SC HP" value={params.scHpFreq} min={20} max={500} suffix="Hz" color="#06b6d4" onChange={(v) => updateParam('scHpFreq', v)} displayVal={Math.round(params.scHpFreq)} />
         <CompressorKnob label="Lookahead" value={params.lookahead} min={0} max={0.005} factor={1000} suffix="ms" color="#06b6d4" onChange={(v) => updateParam('lookahead', v)} displayVal={(params.lookahead * 1000).toFixed(1)} />
         
         {/* Auto Makeup toggle */}
