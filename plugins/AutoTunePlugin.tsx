@@ -208,6 +208,9 @@ export class AutoTuneNode {
       const url = URL.createObjectURL(blob);
       
       await this.ctx.audioWorklet.addModule(url);
+      // Une fois le module charge, l'URL d'objet ne sert plus : sans cette
+      // liberation chaque instance d'AutoTune laissait fuiter son blob.
+      URL.revokeObjectURL(url);
 
       this.worklet = new AudioWorkletNode(this.ctx, 'auto-tune-processor', {
         numberOfInputs: 1,

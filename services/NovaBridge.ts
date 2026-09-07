@@ -446,9 +446,12 @@ class NovaBridgeService {
     this.audioCtx = audioContext;
     
     try {
-      // Load worklet module if not already loaded
+      // Load worklet module if not already loaded.
+      // Chemin relatif a la base du build : en absolu ('/worklets/...') le
+      // fichier renvoyait un 404 des que l'application n'est pas servie a la
+      // racine, ce qui est le cas sur GitHub Pages.
       if (!this.workletReady) {
-        await this.audioCtx.audioWorklet.addModule('/worklets/VSTBridgeProcessor.js');
+        await this.audioCtx.audioWorklet.addModule(`${import.meta.env.BASE_URL}worklets/VSTBridgeProcessor.js`);
         this.workletReady = true;
       }
       
@@ -559,7 +562,7 @@ class NovaBridgeService {
     
     try {
       if (!this.workletReady) {
-        await this.audioCtx.audioWorklet.addModule('/worklets/VSTBridgeProcessor.js');
+        await this.audioCtx.audioWorklet.addModule(`${import.meta.env.BASE_URL}worklets/VSTBridgeProcessor.js`);
         this.workletReady = true;
       }
       
