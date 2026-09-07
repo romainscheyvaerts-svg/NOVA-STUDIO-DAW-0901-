@@ -1,3 +1,7 @@
+// Tailwind compile par le build (remplace le script CDN cdn.tailwindcss.com).
+// Le CDN etait un point de defaillance unique : une coupure reseau affichait
+// l'application entierement sans style.
+import './styles/tailwind.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
