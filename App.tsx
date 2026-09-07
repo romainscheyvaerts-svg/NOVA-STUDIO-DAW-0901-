@@ -241,26 +241,40 @@ const useUndoRedo = (initialState: DAWState) => {
   };
 
   const setState = useCallback((updater: DAWState | ((prev: DAWState) => DAWState)) => {
+    // L'anti-rebond est decide ICI, hors du reducer. Il etait calcule a
+    // l'interieur en mutant lastHistoryUpdateRef : sous StrictMode React invoque
+    // l'updater deux fois, la seconde passe voyait 0 ms ecoulee, repartait en
+    // anti-rebond et ecrasait l'entree d'historique. Resultat : Ctrl+Z ne
+    // restaurait presque jamais rien. Un reducer doit rester pur.
+    const maintenant = Date.now();
+    const antiRebond = maintenant - lastHistoryUpdateRef.current < HISTORY_DEBOUNCE_MS;
+    if (!antiRebond) lastHistoryUpdateRef.current = maintenant;
+
     setHistory(curr => {
       const newState = typeof updater === 'function' ? updater(curr.present) : updater;
       if (newState === curr.present) return curr;
 
-      // Skip history for time-only updates
-      const isTimeUpdateOnly = newState.currentTime !== curr.present.currentTime && newState.tracks === curr.present.tracks && newState.isPlaying === curr.present.isPlaying;
-      if (isTimeUpdateOnly) return { ...curr, present: newState };
+      // L'historique ne retient que les modifications reelles du projet.
+      // Auparavant, selectionner une piste ou changer de vue creait une entree :
+      // on obtenait des Ctrl+Z qui ne faisaient rien, puis un seul qui sautait
+      // par-dessus plusieurs editions. Immer ne recree que les references
+      // modifiees, une comparaison d'identite suffit donc.
+      const modificationReelle =
+        newState.tracks !== curr.present.tracks ||
+        newState.bpm !== curr.present.bpm ||
+        newState.name !== curr.present.name ||
+        newState.markers !== curr.present.markers ||
+        newState.trackGroups !== curr.present.trackGroups ||
+        newState.timeSignature !== curr.present.timeSignature ||
+        newState.isLoopActive !== curr.present.isLoopActive ||
+        newState.loopStart !== curr.present.loopStart ||
+        newState.loopEnd !== curr.present.loopEnd;
 
-      // Debounce rapid changes to prevent history pollution
-      const now = Date.now();
-      const timeSinceLastUpdate = now - lastHistoryUpdateRef.current;
-      const shouldDebounce = timeSinceLastUpdate < HISTORY_DEBOUNCE_MS;
+      if (!modificationReelle) return { ...curr, present: newState };
 
-      if (shouldDebounce) {
-        // Update present without adding to history (rapid changes)
-        return { ...curr, present: newState };
-      }
+      // Changements rapproches : on met a jour le present sans nouvelle entree.
+      if (antiRebond) return { ...curr, present: newState };
 
-      // Add to history (debounced)
-      lastHistoryUpdateRef.current = now;
       const cleanedPresentForHistory = cleanStateForHistory(curr.present);
 
       return { past: [...curr.past, cleanedPresentForHistory].slice(-MAX_HISTORY), present: newState, future: [] };
@@ -1127,6 +1141,22 @@ export default function App() {
     }));
   }, [setState]);
   /** Deplace la piste source juste avant la piste de destination. */
+  /**
+   * Decale d'un meme delta un ensemble de clips (deplacement d'une selection
+   * multiple). Une seule mise a jour d'etat pour tout le groupe : sinon chaque
+   * clip declenchait son propre rendu et sa propre entree d'historique.
+   */
+  const handleMoveClipsBy = useCallback((items: {trackId:string, clipId:string, start:number}[], delta: number) => {
+    if (!items.length) return;
+    setState(produce((draft: DAWState) => {
+      items.forEach(it => {
+        const track = draft.tracks.find(t => t.id === it.trackId);
+        const clip = track?.clips.find(c => c.id === it.clipId);
+        if (clip) clip.start = Math.max(0, it.start + delta);
+      });
+    }));
+  }, [setState]);
+
   const handleReorderTracks = useCallback((sourceTrackId: string, destTrackId: string) => {
     if (sourceTrackId === destTrackId) return;
     setState(produce(draft => {
@@ -2422,6 +2452,7 @@ export default function App() {
                    onEditClip={handleEditClip} isRecording={state.isRecording} isPlaying={state.isPlaying} recStartTime={state.recStartTime}
                    onMoveClip={handleMoveClip} onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
+                   onMoveClipsBy={handleMoveClipsBy}
                    onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
                    markers={state.markers} onAddMarker={handleAddMarker}
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
