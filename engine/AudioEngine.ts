@@ -1,5 +1,5 @@
 
-import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad } from '../types';
+import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad, AutomationPoint } from '../types';
 import { getASIOBridge, ASIOBridgeClient, ASIOConfig, AudioDevice, ASIOStats } from '../services/ASIOBridge';
 import { ReverbNode } from '../plugins/ReverbPlugin';
 import { SyncDelayNode } from '../plugins/DelayPlugin';
@@ -18,6 +18,7 @@ import { Synthesizer } from './Synthesizer';
 import { AudioSampler } from './AudioSampler';
 import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
+import { interpolateCurve } from '../services/AutomationManager';
 import { DrumRackNode } from './DrumRackNode'; // NEW
 import { novaBridge } from '../services/NovaBridge';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
@@ -418,6 +419,32 @@ export class AudioEngine {
       const silenced = track.isMuted || soloSilenced.has(track.id);
       gain.gain.value = silenced ? 0 : track.volume;
       panner.pan.value = track.pan;
+
+      // Automation. Elle etait purement ignoree au rendu : le volume et le pan
+      // restaient figes sur leur valeur de piste, donc un fondu automatise
+      // disparaissait a l'export alors qu'on l'entendait a la lecture.
+      if (!silenced) {
+        (track.automationLanes || []).forEach(lane => {
+          const cible = lane.parameterName === 'volume' ? gain.gain
+                      : lane.parameterName === 'pan' ? panner.pan : null;
+          if (!cible || !lane.points || lane.points.length === 0) return;
+
+          const points = [...lane.points].sort((a, b) => a.time - b.time);
+          // Valeur au tout debut du rendu : le rendu peut demarrer au milieu
+          // d'un segment (export d'une boucle, par exemple).
+          cible.setValueAtTime(this.valeurAutomationA(points, startOffset), 0);
+
+          points.forEach((pt, i) => {
+            const suivant = points[i + 1];
+            const tPoint = pt.time - startOffset;
+            if (tPoint >= 0 && tPoint <= totalDuration) cible.setValueAtTime(pt.value, tPoint);
+            if (!suivant) return;
+            const tSuivant = suivant.time - startOffset;
+            if (tSuivant <= 0 || tPoint >= totalDuration) return;
+            this.programmerSegment(cible, pt, suivant, Math.max(0, tPoint), Math.min(totalDuration, tSuivant));
+          });
+        });
+      }
 
       const rt: RenderTrack = { input, gain, panner, output };
 
@@ -1063,6 +1090,66 @@ export class AudioEngine {
   public getDrumSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.drumSampler || null; }
   public getMelodicSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.melodicSampler || null; }
 
+  /** Valeur d'une enveloppe d'automation a un instant donne, courbe comprise. */
+  private valeurAutomationA(points: AutomationPoint[], temps: number): number {
+    if (points.length === 0) return 1;
+    if (temps <= points[0].time) return points[0].value;
+    const dernier = points[points.length - 1];
+    if (temps >= dernier.time) return dernier.value;
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i], b = points[i + 1];
+      if (temps >= a.time && temps <= b.time) {
+        const duree = b.time - a.time;
+        const r = duree > 0 ? (temps - a.time) / duree : 0;
+        return interpolateCurve(a.value, b.value, r, a.curveType || 'LINEAR');
+      }
+    }
+    return dernier.value;
+  }
+
+  /**
+   * Programme un segment d'automation en suivant le type de courbe du point.
+   *
+   * Le moteur ne connaissait que la rampe lineaire : choisir « Exponential » ou
+   * « S-Curve » changeait le trace affiche dans la voie d'automation, mais pas
+   * le son. Les courbes non lineaires sont approchees par une suite de courtes
+   * rampes lineaires, ce qui se compose proprement avec le reste de la
+   * programmation (setValueCurveAtTime interdit tout autre evenement sur son
+   * intervalle).
+   */
+  private programmerSegment(
+    parametre: AudioParam,
+    point: AutomationPoint,
+    suivant: AutomationPoint,
+    tDebut: number,
+    tFin: number
+  ) {
+    const courbe = point.curveType || 'LINEAR';
+    const duree = tFin - tDebut;
+
+    // Palier : la valeur tient jusqu'au point suivant, ou elle saute.
+    if (courbe === 'HOLD') {
+      parametre.setValueAtTime(point.value, Math.max(tDebut, tFin - 0.001));
+      parametre.setValueAtTime(suivant.value, tFin);
+      return;
+    }
+
+    if (courbe === 'LINEAR' || duree <= 0) {
+      parametre.linearRampToValueAtTime(suivant.value, tFin);
+      return;
+    }
+
+    // Une marche toutes les 20 ms environ, borne pour rester raisonnable.
+    const marches = Math.max(2, Math.min(128, Math.ceil(duree / 0.02)));
+    for (let i = 1; i <= marches; i++) {
+      const r = i / marches;
+      parametre.linearRampToValueAtTime(
+        interpolateCurve(point.value, suivant.value, r, courbe),
+        tDebut + duree * r
+      );
+    }
+  }
+
   private scheduleAutomation(tracks: Track[], start: number, end: number, when: number) {
     tracks.forEach(track => {
         const dsp = this.tracksDSP.get(track.id);
@@ -1090,10 +1177,10 @@ export class AudioEngine {
                         // On programme la rampe meme si le point suivant sort de la
                         // fenetre : sinon la valeur restait en palier jusqu'a lui.
                         const nextScheduleTime = when + (nextPoint.time - start);
-                        if (lane.parameterName === 'volume') {
-                            dsp.gain.gain.linearRampToValueAtTime(nextPoint.value, nextScheduleTime);
-                        } else if (lane.parameterName === 'pan') {
-                            dsp.panner.pan.linearRampToValueAtTime(nextPoint.value, nextScheduleTime);
+                        const cible = lane.parameterName === 'volume' ? dsp.gain.gain
+                                    : lane.parameterName === 'pan' ? dsp.panner.pan : null;
+                        if (cible) {
+                            this.programmerSegment(cible, point, nextPoint, scheduleTime, nextScheduleTime);
                         }
                     }
                 }

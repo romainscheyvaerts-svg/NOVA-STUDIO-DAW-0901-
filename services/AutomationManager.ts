@@ -30,7 +30,7 @@ export type AutomationMode = 'OFF' | 'READ' | 'WRITE' | 'TOUCH' | 'LATCH';
 /**
  * Curve interpolation functions (inspired by Ableton/Logic)
  */
-const interpolateCurve = (
+export const interpolateCurve = (
   v1: number, 
   v2: number, 
   t: number, 
