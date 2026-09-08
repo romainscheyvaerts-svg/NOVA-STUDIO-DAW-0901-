@@ -900,12 +900,23 @@ export default function App() {
 
     if (previousTrack && previousTrack.isTrackArmed !== updatedTrack.isTrackArmed) {
         if (updatedTrack.isTrackArmed) {
-            audioEngine.armTrack(updatedTrack.id);
+            // Une seule piste armee a la fois
             setState(produce(draft => {
                 draft.tracks.forEach(t => {
                     if (t.id !== updatedTrack.id) t.isTrackArmed = false;
                 });
             }));
+            // Si le micro est refuse ou absent, on le dit et on desarme : sinon
+            // la piste paraissait prete et l'enregistrement echouait en silence.
+            audioEngine.armTrack(updatedTrack.id).then(erreur => {
+                if (!erreur) return;
+                setAiNotification(`🎤 ${erreur}`);
+                setTimeout(() => setAiNotification(null), 5000);
+                setState(produce(draft => {
+                    const t = draft.tracks.find(x => x.id === updatedTrack.id);
+                    if (t) t.isTrackArmed = false;
+                }));
+            });
         } else {
             audioEngine.disarmTrack();
         }

@@ -602,14 +602,27 @@ export class AudioEngine {
     }
   }
 
-  public async armTrack(trackId: string) {
+  /**
+   * Arme une piste pour l'enregistrement.
+   * @returns null si tout va bien, sinon un message explicable a l'utilisateur.
+   *
+   * L'echec etait avale : micro refuse ou absent, la methode se contentait d'un
+   * message en console. L'interface affichait la piste armee, puis
+   * l'enregistrement echouait sans rien dire.
+   */
+  public async armTrack(trackId: string): Promise<string | null> {
     if (!this.ctx) await this.init();
     if (this.ctx!.state === 'suspended') await this.ctx!.resume();
     if (this.armingPromise) await this.armingPromise;
     this.armingPromise = this._armTrackInternal(trackId);
     await this.armingPromise;
     this.armingPromise = null;
+    const erreur = this.derniereErreurArmement;
+    this.derniereErreurArmement = null;
+    return erreur;
   }
+
+  private derniereErreurArmement: string | null = null;
 
   private async _armTrackInternal(trackId: string) {
     this.disarmTrack();
@@ -628,6 +641,7 @@ export class AudioEngine {
     if (!dsp) {
       console.error("[AudioEngine] ARM FAILED - No DSP for track:", trackId);
       this.monitoringTrackId = null;
+      this.derniereErreurArmement = "Piste indisponible pour l'enregistrement.";
       return;
     }
 
@@ -656,10 +670,21 @@ export class AudioEngine {
       this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
       this.monitorSource.connect(dsp.input);
       console.log("[AudioEngine] Track armed OK:", trackId);
-    } catch (e) {
+    } catch (e: any) {
       console.error("[AudioEngine] ARM ERROR:", e);
       this.monitoringTrackId = null;
       this.activeMonitorStream = null;
+      // On traduit les cas courants plutot que de renvoyer un nom technique.
+      const nom = e?.name || '';
+      if (nom === 'NotAllowedError' || nom === 'SecurityError') {
+        this.derniereErreurArmement = "Micro refusé. Autorisez-le dans votre navigateur puis réessayez.";
+      } else if (nom === 'NotFoundError' || nom === 'OverconstrainedError') {
+        this.derniereErreurArmement = "Aucun micro détecté. Branchez-en un puis réessayez.";
+      } else if (nom === 'NotReadableError') {
+        this.derniereErreurArmement = "Micro déjà utilisé par une autre application.";
+      } else {
+        this.derniereErreurArmement = `Micro inaccessible : ${e?.message || 'erreur inconnue'}`;
+      }
     }
   }
 
