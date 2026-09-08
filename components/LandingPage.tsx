@@ -27,6 +27,10 @@ const LandingPage: React.FC<LandingPageProps> = ({
   const [instrumentals, setInstrumentals] = useState<Instrumental[]>([]);
   const [loading, setLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  // Ecoute d'un beat : le chargement peut prendre plusieurs secondes sur une
+  // grosse piste. Sans retour visuel, le clic donne l'impression de ne rien faire.
+  const [loadingPreviewId, setLoadingPreviewId] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [cloudProjects, setCloudProjects] = useState<any[]>([]);
@@ -84,6 +88,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
     }
     audioEngine.stopPreview();
     setPlayingId(null);
+    setLoadingPreviewId(null);
   };
 
   // Lecture preview d'un instrumental
@@ -104,14 +109,36 @@ const LandingPage: React.FC<LandingPageProps> = ({
       url = supabaseManager.getDrivePreviewUrl(inst.drive_file_id);
     }
 
-    if (!url) return;
+    // Aucun fichier associe : on le dit, au lieu de laisser le bouton inerte.
+    if (!url) {
+      setPreviewError(`« ${inst.title} » n'a pas de fichier audio`);
+      setTimeout(() => setPreviewError(null), 3500);
+      return;
+    }
 
-    setPlayingId(inst.id);
+    setPreviewError(null);
+    setLoadingPreviewId(inst.id);
+
     const audio = new Audio(url);
     audio.volume = 0.8;
     audioRef.current = audio;
-    audio.onended = () => setPlayingId(null);
-    audio.play().catch(() => setPlayingId(null));
+
+    // On n'affiche « en lecture » qu'au premier son reellement emis.
+    audio.onplaying = () => { setLoadingPreviewId(null); setPlayingId(inst.id); };
+    audio.onended = () => { setPlayingId(null); setLoadingPreviewId(null); };
+    audio.onerror = () => {
+      setLoadingPreviewId(null);
+      setPlayingId(null);
+      setPreviewError(`Lecture impossible : « ${inst.title} » est injoignable`);
+      setTimeout(() => setPreviewError(null), 3500);
+    };
+
+    audio.play().catch(() => {
+      setLoadingPreviewId(null);
+      setPlayingId(null);
+      setPreviewError(`Lecture impossible : « ${inst.title} »`);
+      setTimeout(() => setPreviewError(null), 3500);
+    });
   };
 
   // Sélectionner un instrumental et ouvrir le DAW
@@ -170,6 +197,16 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
   return (
     <div className="fixed inset-0 bg-[#0a0b0d] flex flex-col overflow-hidden">
+      {/* Echec d'ecoute : le bouton revenait a son etat initial sans rien dire */}
+      {previewError && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[2000] px-4 py-2.5 rounded-xl
+                        bg-red-500/15 border border-red-500/40 text-red-200 text-xs font-semibold
+                        shadow-2xl backdrop-blur-sm flex items-center gap-2">
+          <i className="fas fa-circle-exclamation"></i>
+          {previewError}
+        </div>
+      )}
+
       {/* Inputs cachés */}
       <input
         ref={fileInputRef}
@@ -345,12 +382,15 @@ const LandingPage: React.FC<LandingPageProps> = ({
                       <button
                         onClick={(e) => togglePlay(inst, e)}
                         className={`absolute bottom-2 right-2 w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                          playingId === inst.id
+                          playingId === inst.id || loadingPreviewId === inst.id
                             ? 'bg-cyan-500 text-black'
                             : 'bg-black/70 text-white hover:bg-cyan-500 hover:text-black'
                         }`}
                       >
-                        <i className={`fas ${playingId === inst.id ? 'fa-pause' : 'fa-play'} text-sm`}></i>
+                        <i className={`fas ${
+                          loadingPreviewId === inst.id ? 'fa-spinner fa-spin'
+                          : playingId === inst.id ? 'fa-pause' : 'fa-play'
+                        } text-sm`}></i>
                       </button>
                     </div>
 
