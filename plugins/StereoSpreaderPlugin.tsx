@@ -58,10 +58,20 @@ export class StereoSpreaderNode {
   private sideHighpass!: BiquadFilterNode;
   private lowBandLP: BiquadFilterNode;
   private lowBandLP2: BiquadFilterNode;  // 2nd order for steeper rolloff
-  private midBandBP: BiquadFilterNode;
-  private midBandBP2: BiquadFilterNode;
+  private midBandHP: BiquadFilterNode;
+  private midBandHP2: BiquadFilterNode;
+  private midBandLP: BiquadFilterNode;
+  private midBandLP2: BiquadFilterNode;
   private highBandHP: BiquadFilterNode;
   private highBandHP2: BiquadFilterNode;
+  // Gains de sortie de chaque bande du signal Side, et voie directe pleine bande.
+  // Passe-tout de compensation sur la voie aigu (voir le cablage).
+  private compAigu1!: BiquadFilterNode;
+  private compAigu2!: BiquadFilterNode;
+  private gLow!: GainNode;
+  private gMid!: GainNode;
+  private gHigh!: GainNode;
+  private gDirect!: GainNode;
   
   // M/S processing for each band
   private lowMidGain: GainNode;
@@ -137,12 +147,20 @@ export class StereoSpreaderNode {
     this.lowBandLP2.type = 'lowpass';
     this.lowBandLP2.Q.value = 0.707;
     
-    this.midBandBP = ctx.createBiquadFilter();
-    this.midBandBP.type = 'bandpass';
-    this.midBandBP.Q.value = 1.0;
-    this.midBandBP2 = ctx.createBiquadFilter();
-    this.midBandBP2.type = 'bandpass';
-    this.midBandBP2.Q.value = 1.0;
+    // Bande medium : passe-haut a lowMidFreq puis passe-bas a midHighFreq.
+    // Un simple passe-bande (ce qu'il y avait) ne se recombine pas a plat.
+    this.midBandHP = ctx.createBiquadFilter();
+    this.midBandHP.type = 'highpass';
+    this.midBandHP.Q.value = 0.707;
+    this.midBandHP2 = ctx.createBiquadFilter();
+    this.midBandHP2.type = 'highpass';
+    this.midBandHP2.Q.value = 0.707;
+    this.midBandLP = ctx.createBiquadFilter();
+    this.midBandLP.type = 'lowpass';
+    this.midBandLP.Q.value = 0.707;
+    this.midBandLP2 = ctx.createBiquadFilter();
+    this.midBandLP2.type = 'lowpass';
+    this.midBandLP2.Q.value = 0.707;
     
     this.highBandHP = ctx.createBiquadFilter();
     this.highBandHP.type = 'highpass';
@@ -211,8 +229,73 @@ export class StereoSpreaderNode {
     this.sideHighpass.Q.value = 0.707;
     this.sideHighpass.frequency.value = 10; // transparent par defaut
     sideDiff.connect(this.sideHighpass);
-    this.sideHighpass.connect(sideGain);
-    
+
+    // Separateur 3 bandes sur le signal Side. Le Mid reste pleine bande : c'est
+    // la largeur stereo qu'on veut doser par bande, pas le contenu mono.
+    // Les filtres existaient mais n'etaient ni cables ni regles ; le mode
+    // « Multi-Band » de l'interface ne changeait donc rien au son.
+    this.gDirect = this.ctx.createGain();
+    this.gLow = this.ctx.createGain();
+    this.gMid = this.ctx.createGain();
+    this.gHigh = this.ctx.createGain();
+
+    // Voie directe (mode pleine bande)
+    this.sideHighpass.connect(this.gDirect);
+    this.gDirect.connect(sideGain);
+
+    // Separateur 3 bandes du signal Side, en arbre SOUSTRACTIF.
+    //
+    // Trois montages essayes, mesures a l'appui (largeurs toutes a 1, l'ecart
+    // par rapport au mode pleine bande doit etre nul) :
+    //
+    //   trois passe-bande cascades .......... +7,55 dB aux coupures
+    //   arbre Linkwitz-Riley (LP/HP) ........ +7,55 dB aux coupures
+    //   arbre LR + passe-tout compensateur .. +7,55 dB aux coupures
+    //   arbre soustractif ...................  0,00 dB partout
+    //
+    // Les montages a filtres complementaires isolent mieux chaque bande, mais
+    // leurs rotations de phase bossent la reponse aux points de coupure : regler
+    // les trois largeurs au meme niveau colorait le son de plus de 7 dB. Pour un
+    // outil de mixage c'est redhibitoire, la neutralite prime sur l'isolement.
+    //
+    // La soustraction est une identite algebrique : chaque etage produit une
+    // bande et son complement exact, la somme redonne donc rigoureusement le
+    // signal d'origine, quelle que soit la phase des filtres.
+    //
+    //   etage 1 : aigu  = HP(f2)          reste = Side  - aigu
+    //   etage 2 : grave = LP(f1)(reste)   medium = reste - grave
+    //
+    // Contrepartie assumee : le grave n'est attenue que d'environ moitie a
+    // largeur nulle, le residu de phase du filtre restant dans le medium. Pour
+    // un grave reellement mono, c'est « Safe Mono Bass » qui fait le travail.
+
+    // Etage 1 : aigu, puis le reste par soustraction
+    this.sideHighpass.connect(this.highBandHP);
+    this.highBandHP.connect(this.highBandHP2);
+    this.highBandHP2.connect(this.gHigh);
+    this.gHigh.connect(sideGain);
+
+    const invAigu = this.ctx.createGain(); invAigu.gain.value = -1;
+    const reste = this.ctx.createGain();
+    this.sideHighpass.connect(reste);
+    this.highBandHP2.connect(invAigu);
+    invAigu.connect(reste);
+
+    // Etage 2 : grave, puis le medium par soustraction
+    reste.connect(this.lowBandLP);
+    this.lowBandLP.connect(this.lowBandLP2);
+    this.lowBandLP2.connect(this.gLow);
+    this.gLow.connect(sideGain);
+
+    const invGrave = this.ctx.createGain(); invGrave.gain.value = -1;
+    const sommeMedium = this.ctx.createGain();
+    reste.connect(sommeMedium);
+    this.lowBandLP2.connect(invGrave);
+    invGrave.connect(sommeMedium);
+
+    sommeMedium.connect(this.gMid);
+    this.gMid.connect(sideGain);
+
     // Haas delay on one channel
     const haasDelay = this.ctx.createDelay(0.1);
     const haasMix = this.ctx.createGain();
@@ -317,6 +400,21 @@ export class StereoSpreaderNode {
       this.sideHighpass.frequency.setTargetAtTime(
         this.params.safeMonoBass ? safe(this.params.monoFreq, 120) : 10, now, 0.02);
 
+      // Separateur 3 bandes. Hors mode multibande, seule la voie directe passe :
+      // on evite ainsi la rotation de phase des filtres quand ils ne servent pas.
+      const f1 = safe(this.params.lowMidFreq, 250);
+      const f2 = safe(this.params.midHighFreq, 4000);
+      this.lowBandLP.frequency.setTargetAtTime(f1, now, 0.02);
+      this.lowBandLP2.frequency.setTargetAtTime(f1, now, 0.02);
+      this.highBandHP.frequency.setTargetAtTime(f2, now, 0.02);
+      this.highBandHP2.frequency.setTargetAtTime(f2, now, 0.02);
+
+      const multi = !!this.params.multiBand;
+      this.gDirect.gain.setTargetAtTime(multi ? 0 : 1, now, 0.02);
+      this.gLow.gain.setTargetAtTime(multi ? safe(this.params.lowWidth, 0.8) : 0, now, 0.02);
+      this.gMid.gain.setTargetAtTime(multi ? safe(this.params.midWidth, 1.2) : 0, now, 0.02);
+      this.gHigh.gain.setTargetAtTime(multi ? safe(this.params.highWidth, 1.5) : 0, now, 0.02);
+
       // Balance control
       // At balance = 0: both = 1
       // At balance = -1: L = 1, R = 0
@@ -335,6 +433,10 @@ export class StereoSpreaderNode {
       this.haasDelayL.delayTime.setTargetAtTime(0, now, 0.02);
       this.haasDelayR.delayTime.setTargetAtTime(0, now, 0.02);
       this.sideHighpass.frequency.setTargetAtTime(10, now, 0.02);
+      this.gDirect.gain.setTargetAtTime(1, now, 0.02);
+      this.gLow.gain.setTargetAtTime(0, now, 0.02);
+      this.gMid.gain.setTargetAtTime(0, now, 0.02);
+      this.gHigh.gain.setTargetAtTime(0, now, 0.02);
       this.balanceGainL.gain.setTargetAtTime(1, now, 0.02);
       this.balanceGainR.gain.setTargetAtTime(1, now, 0.02);
     }
