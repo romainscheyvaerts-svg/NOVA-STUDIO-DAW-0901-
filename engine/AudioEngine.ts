@@ -376,6 +376,7 @@ export class AudioEngine {
       gain: GainNode;
       panner: StereoPannerNode;
       output: GainNode;
+      sends: Map<string, GainNode>;
       synth?: Synthesizer;
       sampler?: AudioSampler;
       drumRack?: DrumRackNode;
@@ -420,33 +421,7 @@ export class AudioEngine {
       gain.gain.value = silenced ? 0 : track.volume;
       panner.pan.value = track.pan;
 
-      // Automation. Elle etait purement ignoree au rendu : le volume et le pan
-      // restaient figes sur leur valeur de piste, donc un fondu automatise
-      // disparaissait a l'export alors qu'on l'entendait a la lecture.
-      if (!silenced) {
-        (track.automationLanes || []).forEach(lane => {
-          const cible = lane.parameterName === 'volume' ? gain.gain
-                      : lane.parameterName === 'pan' ? panner.pan : null;
-          if (!cible || !lane.points || lane.points.length === 0) return;
-
-          const points = [...lane.points].sort((a, b) => a.time - b.time);
-          // Valeur au tout debut du rendu : le rendu peut demarrer au milieu
-          // d'un segment (export d'une boucle, par exemple).
-          cible.setValueAtTime(this.valeurAutomationA(points, startOffset), 0);
-
-          points.forEach((pt, i) => {
-            const suivant = points[i + 1];
-            const tPoint = pt.time - startOffset;
-            if (tPoint >= 0 && tPoint <= totalDuration) cible.setValueAtTime(pt.value, tPoint);
-            if (!suivant) return;
-            const tSuivant = suivant.time - startOffset;
-            if (tSuivant <= 0 || tPoint >= totalDuration) return;
-            this.programmerSegment(cible, pt, suivant, Math.max(0, tPoint), Math.min(totalDuration, tSuivant));
-          });
-        });
-      }
-
-      const rt: RenderTrack = { input, gain, panner, output };
+      const rt: RenderTrack = { input, gain, panner, output, sends: new Map() };
 
       // Instruments (pistes MIDI / sampler / drum rack)
       if (track.type === TrackType.MIDI) {
@@ -488,6 +463,34 @@ export class AudioEngine {
         sendGain.gain.value = send.level;
         rt.panner.connect(sendGain);
         sendGain.connect(target.input);
+        rt.sends.set(send.id, sendGain);
+      });
+    }
+
+    // --- 2b. Automation (apres le cablage des departs, qu'elle peut piloter)
+    // Elle etait purement ignoree au rendu : volume et pan restaient figes sur
+    // leur valeur de piste, donc un fondu automatise disparaissait a l'export.
+    for (const track of tracks) {
+      const rt = rendered.get(track.id)!;
+      if (track.isMuted || soloSilenced.has(track.id)) continue;
+
+      (track.automationLanes || []).forEach(lane => {
+        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends);
+        if (!cible || !lane.points || lane.points.length === 0) return;
+
+        const points = [...lane.points].sort((a, b) => a.time - b.time);
+        // Le rendu peut demarrer au milieu d'un segment (export d'une boucle).
+        cible.setValueAtTime(this.valeurAutomationA(points, startOffset), 0);
+
+        points.forEach((pt, i) => {
+          const suivant = points[i + 1];
+          const tPoint = pt.time - startOffset;
+          if (tPoint >= 0 && tPoint <= totalDuration) cible.setValueAtTime(pt.value, tPoint);
+          if (!suivant) return;
+          const tSuivant = suivant.time - startOffset;
+          if (tSuivant <= 0 || tPoint >= totalDuration) return;
+          this.programmerSegment(cible, pt, suivant, Math.max(0, tPoint), Math.min(totalDuration, tSuivant));
+        });
       });
     }
 
@@ -1090,6 +1093,28 @@ export class AudioEngine {
   public getDrumSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.drumSampler || null; }
   public getMelodicSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.melodicSampler || null; }
 
+  /**
+   * Parametre audio pilote par une voie d'automation.
+   *
+   * L'editeur d'automation propose aussi les departs d'effets (« send::… »),
+   * mais le moteur ne connaissait que volume et pan : creer une voie de depart
+   * dessinait une enveloppe qui ne pilotait rien.
+   */
+  private cibleAutomation(
+    nomParametre: string,
+    gain: AudioParam,
+    pan: AudioParam,
+    sends: Map<string, GainNode>
+  ): AudioParam | null {
+    if (nomParametre === 'volume') return gain;
+    if (nomParametre === 'pan') return pan;
+    if (nomParametre.startsWith('send::')) {
+      const idDepart = nomParametre.slice('send::'.length);
+      return sends.get(idDepart)?.gain || null;
+    }
+    return null;
+  }
+
   /** Valeur d'une enveloppe d'automation a un instant donne, courbe comprise. */
   private valeurAutomationA(points: AutomationPoint[], temps: number): number {
     if (points.length === 0) return 1;
@@ -1166,19 +1191,15 @@ export class AudioEngine {
                 if (point.time >= start && point.time < end) {
                     const scheduleTime = when + (point.time - start);
                     
-                    if (lane.parameterName === 'volume') {
-                        dsp.gain.gain.setValueAtTime(point.value, scheduleTime);
-                    } else if (lane.parameterName === 'pan') {
-                        dsp.panner.pan.setValueAtTime(point.value, scheduleTime);
-                    }
+                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends);
+                    if (ancre) ancre.setValueAtTime(point.value, scheduleTime);
                     
                     const nextPoint = lane.points[index + 1];
                     if (nextPoint) {
                         // On programme la rampe meme si le point suivant sort de la
                         // fenetre : sinon la valeur restait en palier jusqu'a lui.
                         const nextScheduleTime = when + (nextPoint.time - start);
-                        const cible = lane.parameterName === 'volume' ? dsp.gain.gain
-                                    : lane.parameterName === 'pan' ? dsp.panner.pan : null;
+                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends);
                         if (cible) {
                             this.programmerSegment(cible, point, nextPoint, scheduleTime, nextScheduleTime);
                         }
@@ -1644,8 +1665,8 @@ export class AudioEngine {
         }
         
         const now = this.ctx.currentTime;
-        if (lane.parameterName === 'volume') dsp.gain.gain.setValueAtTime(value, now);
-        else if (lane.parameterName === 'pan') dsp.panner.pan.setValueAtTime(value, now);
+        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends);
+        if (cible) cible.setValueAtTime(value, now);
     });
 }
 
