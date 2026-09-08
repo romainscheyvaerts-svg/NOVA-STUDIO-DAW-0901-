@@ -72,6 +72,53 @@ export class AudioEncoder {
   }
 
   /**
+   * Encode un AudioBuffer en MP3.
+   *
+   * L'export « MP3 » ne faisait rien de tel : il produisait un WAV que l'on se
+   * contentait de renommer .mp3, donnant un fichier corrompu et dix fois trop
+   * lourd, pendant que l'interface affichait « Encodage MP3 ».
+   *
+   * @param kbps debit constant, 128 par defaut (bon compromis pour le web).
+   */
+  public static async encodeMP3(buffer: AudioBuffer, kbps: number = 192): Promise<Blob> {
+    // Import differe : l'encodeur ne pese sur le chargement que si on exporte.
+    const { Mp3Encoder } = await import('@breezystack/lamejs');
+
+    const nbCanaux = Math.min(2, buffer.numberOfChannels);
+    const encodeur = new Mp3Encoder(nbCanaux, buffer.sampleRate, kbps);
+
+    const gauche = buffer.getChannelData(0);
+    const droite = nbCanaux > 1 ? buffer.getChannelData(1) : null;
+
+    // lamejs attend du PCM 16 bits signe.
+    const versInt16 = (source: Float32Array, debut: number, taille: number): Int16Array => {
+      const out = new Int16Array(taille);
+      for (let i = 0; i < taille; i++) {
+        const v = Math.max(-1, Math.min(1, source[debut + i] || 0));
+        out[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+      }
+      return out;
+    };
+
+    const TAILLE_BLOC = 1152; // taille de trame MPEG
+    const morceaux: Uint8Array[] = [];
+
+    for (let i = 0; i < gauche.length; i += TAILLE_BLOC) {
+      const taille = Math.min(TAILLE_BLOC, gauche.length - i);
+      const g = versInt16(gauche, i, taille);
+      const encode = droite
+        ? encodeur.encodeBuffer(g, versInt16(droite, i, taille))
+        : encodeur.encodeBuffer(g);
+      if (encode.length > 0) morceaux.push(encode);
+    }
+
+    const reste = encodeur.flush();
+    if (reste.length > 0) morceaux.push(reste);
+
+    return new Blob(morceaux, { type: 'audio/mpeg' });
+  }
+
+  /**
    * Encode un AudioBuffer en fichier WAV
    */
   public static encodeWAV(buffer: AudioBuffer, bitDepth: BitDepth): Blob {

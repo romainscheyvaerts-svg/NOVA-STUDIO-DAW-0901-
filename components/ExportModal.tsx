@@ -99,6 +99,10 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
       const processedBuffer = processAudioBuffer(renderedBuffer);
 
       // Encodage
+      if (format === 'MP3') {
+        setStatusText('Encodage MP3 (192 kbps)...');
+        return await AudioEncoder.encodeMP3(processedBuffer, 192);
+      }
       setStatusText(`Encodage ${format} (${bitDepth}bit)...`);
       return AudioEncoder.encodeWAV(processedBuffer, bitDepth);
   };
