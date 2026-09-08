@@ -1,3 +1,4 @@
+import { figerGain } from './audioParamUtils';
 
 export interface DrumSamplerParams {
   gain: number;         // -60 to +12 dB
@@ -214,8 +215,7 @@ export class DrumSamplerNode {
               const now = Math.max(time, this.ctx.currentTime);
               // Quick fade out to avoid clicks (Choke)
               if (this.activeGain) {
-                  this.activeGain.gain.cancelScheduledValues(now);
-                  this.activeGain.gain.setValueAtTime(this.activeGain.gain.value, now);
+                  figerGain(this.activeGain.gain, now);
                   this.activeGain.gain.linearRampToValueAtTime(0, now + 0.005);
               }
               this.activeSource.stop(now + 0.01);

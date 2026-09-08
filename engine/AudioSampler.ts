@@ -1,3 +1,4 @@
+import { figerGain } from './audioParamUtils';
 export interface SamplerADSR {
   attack: number;
   decay: number;
@@ -122,12 +123,7 @@ export class AudioSampler {
     const { release } = this.adsr;
 
     // Cancel planned updates (sustain hold)
-    voice.gain.gain.cancelScheduledValues(now);
-    
-    // Current value check to avoid clicking
-    // (Web Audio automation handles interpolation from 'now', 
-    // but setValueAtTime is safer to anchor the ramp)
-    voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
+    figerGain(voice.gain.gain, now);
     
     // Release Ramp
     voice.gain.gain.exponentialRampToValueAtTime(0.0001, now + release);
@@ -143,8 +139,7 @@ export class AudioSampler {
     const now = this.ctx.currentTime;
     this.activeVoices.forEach(voice => {
         try {
-            voice.gain.gain.cancelScheduledValues(now);
-            voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
+            figerGain(voice.gain.gain, now);
             voice.gain.gain.linearRampToValueAtTime(0, now + 0.05);
             voice.source.stop(now + 0.05);
         } catch(e) {}

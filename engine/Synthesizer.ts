@@ -60,14 +60,35 @@ export class Synthesizer {
     this.activeVoices.set(pitch, { osc, env, filter });
   }
 
+  /**
+   * Fige l'enveloppe a sa valeur COURANTE avant le relachement.
+   *
+   * Le code lisait env.gain.value, qui renvoie la valeur intrinseque du
+   * parametre (1.0 par defaut) et non la valeur automatisee en cours. Au
+   * relachement, le gain sautait donc de son niveau de maintien a 1.0 : chaque
+   * note se terminait par un clic a pleine echelle, mesure cinq fois plus fort
+   * que la note elle-meme.
+   *
+   * cancelAndHoldAtTime conserve la valeur reellement atteinte par la rampe.
+   */
+  private figerEnveloppe(gain: AudioParam, t: number) {
+    const p = gain as AudioParam & { cancelAndHoldAtTime?: (t: number) => void };
+    if (typeof p.cancelAndHoldAtTime === 'function') {
+      p.cancelAndHoldAtTime(t);
+    } else {
+      // Repli pour les moteurs sans cancelAndHoldAtTime : on annule seulement
+      // les evenements a venir, sans reecrire la valeur courante.
+      gain.cancelScheduledValues(t);
+    }
+  }
+
   public triggerRelease(pitch: number, time: number = 0) {
     const voice = this.activeVoices.get(pitch);
     if (voice) {
       const t = Math.max(time, this.ctx.currentTime);
       // Release envelope
       try {
-        voice.env.gain.cancelScheduledValues(t);
-        voice.env.gain.setValueAtTime(voice.env.gain.value, t);
+        this.figerEnveloppe(voice.env.gain, t);
         voice.env.gain.exponentialRampToValueAtTime(0.001, t + this.params.release);
         voice.osc.stop(t + this.params.release + 0.1); // Stop after release
         
@@ -89,8 +110,7 @@ export class Synthesizer {
     const now = this.ctx.currentTime;
     this.activeVoices.forEach((voice) => {
         try {
-            voice.env.gain.cancelScheduledValues(now);
-            voice.env.gain.setValueAtTime(voice.env.gain.value, now);
+            this.figerEnveloppe(voice.env.gain, now);
             voice.env.gain.linearRampToValueAtTime(0, now + 0.05);
             voice.osc.stop(now + 0.05);
             // FIX: Added a delayed disconnection for all nodes during `releaseAll`. This ensures a clean shutdown of all voices without causing audio artifacts from immediate disconnection.
