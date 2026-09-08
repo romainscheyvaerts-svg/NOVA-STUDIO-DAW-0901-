@@ -52,6 +52,10 @@ export class StereoSpreaderNode {
   private inputSplitter: ChannelSplitterNode;
   
   // Multi-band crossover filters
+  // Passe-haut sur le signal Side : au-dessous de cette frequence il ne reste
+  // que le Mid, donc un grave strictement mono. C'est ce que promet le bouton
+  // « Safe Mono Bass », qui n'etait relie a rien.
+  private sideHighpass!: BiquadFilterNode;
   private lowBandLP: BiquadFilterNode;
   private lowBandLP2: BiquadFilterNode;  // 2nd order for steeper rolloff
   private midBandBP: BiquadFilterNode;
@@ -201,7 +205,13 @@ export class StereoSpreaderNode {
     
     // Width control on side signal
     const sideGain = this.ctx.createGain();
-    sideDiff.connect(sideGain);
+    // Grave mono : on retire le Side sous monoFreq avant le reglage de largeur.
+    this.sideHighpass = this.ctx.createBiquadFilter();
+    this.sideHighpass.type = 'highpass';
+    this.sideHighpass.Q.value = 0.707;
+    this.sideHighpass.frequency.value = 10; // transparent par defaut
+    sideDiff.connect(this.sideHighpass);
+    this.sideHighpass.connect(sideGain);
     
     // Haas delay on one channel
     const haasDelay = this.ctx.createDelay(0.1);
@@ -302,6 +312,11 @@ export class StereoSpreaderNode {
       this.haasDelayL.delayTime.setTargetAtTime(0, now, 0.02);
       this.haasDelayR.delayTime.setTargetAtTime(haasDelay * haasAmount, now, 0.02);
       
+      // Grave mono. Le bouton et sa frequence existaient dans l'interface mais
+      // n'etaient jamais lus : le grave restait stereo quel que soit le reglage.
+      this.sideHighpass.frequency.setTargetAtTime(
+        this.params.safeMonoBass ? safe(this.params.monoFreq, 120) : 10, now, 0.02);
+
       // Balance control
       // At balance = 0: both = 1
       // At balance = -1: L = 1, R = 0
@@ -319,6 +334,7 @@ export class StereoSpreaderNode {
       }
       this.haasDelayL.delayTime.setTargetAtTime(0, now, 0.02);
       this.haasDelayR.delayTime.setTargetAtTime(0, now, 0.02);
+      this.sideHighpass.frequency.setTargetAtTime(10, now, 0.02);
       this.balanceGainL.gain.setTargetAtTime(1, now, 0.02);
       this.balanceGainR.gain.setTargetAtTime(1, now, 0.02);
     }
