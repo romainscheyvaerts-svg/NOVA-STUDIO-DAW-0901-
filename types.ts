@@ -41,7 +41,10 @@ export interface User {
   isVerified: boolean;
   avatar?: string;
   plan: 'FREE' | 'PRO' | 'STUDIO';
-  owned_instruments?: number[]; 
+  // Identifiants des instrumentaux achetes. Le catalogue utilise des UUID
+  // (chaines) tandis que l'ancien schema de licences utilisait des entiers :
+  // on accepte les deux et la comparaison se fait sur la forme texte.
+  owned_instruments?: (string | number)[]; 
 }
 
 export interface Instrument {
@@ -247,7 +250,7 @@ export interface Track {
   pan: number;
   inputDeviceId?: string; 
   outputTrackId: string;  
-  instrumentId?: number; 
+  instrumentId?: string | number; 
   sends: TrackSend[];
   clips: Clip[];
   plugins: PluginInstance[];

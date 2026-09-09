@@ -56,6 +56,52 @@ const FADE_HANDLE_PX = 14;
 type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | null;
 type LoopDragMode = 'START' | 'END' | 'BODY' | null;
 
+/**
+ * Cache des cretes de forme d'onde.
+ *
+ * Elles etaient recalculees depuis les echantillons bruts a chaque image, et
+ * meme trois fois par image (remplissage superieur, miroir inferieur, contour).
+ * Sur un beat de trois minutes cela represente des dizaines de millions de
+ * lectures par seconde : c'est ce qui saccadait l'arrangement pendant la
+ * lecture. Le trace ne depend que du clip et de sa largeur a l'ecran, il suffit
+ * donc de le calculer une fois.
+ */
+const cacheCretes = new Map<string, Float32Array>();
+const CACHE_CRETES_MAX = 160;
+
+const cretesDuClip = (
+  data: Float32Array, debutEch: number, finEch: number,
+  largeur: number, inverse: boolean, cle: string
+): Float32Array => {
+  const dejaLa = cacheCretes.get(cle);
+  if (dejaLa && dejaLa.length === largeur) return dejaLa;
+
+  const cretes = new Float32Array(largeur);
+  const echParPixel = (finEch - debutEch) / largeur;
+  for (let px = 0; px < largeur; px++) {
+    let a = debutEch + Math.floor(px * echParPixel);
+    let b = Math.min(debutEch + Math.floor((px + 1) * echParPixel), data.length);
+    if (inverse) {
+      const na = Math.max(0, data.length - b);
+      const nb = Math.max(0, data.length - a);
+      a = na; b = nb;
+    }
+    let max = 0;
+    for (let sm = a; sm < b; sm++) {
+      const v = Math.abs(data[sm]);
+      if (v > max) max = v;
+    }
+    cretes[px] = Math.min(1, max * 1.3);
+  }
+
+  if (cacheCretes.size >= CACHE_CRETES_MAX) {
+    const plusAncien = cacheCretes.keys().next().value;
+    if (plusAncien !== undefined) cacheCretes.delete(plusAncien);
+  }
+  cacheCretes.set(cle, cretes);
+  return cretes;
+};
+
 const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: boolean): number => {
     if (!enabled) return time;
     const beatDuration = 60 / bpm;
@@ -844,67 +890,34 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                 // Un clip inverse jouait a l'envers mais s'affichait a l'endroit :
                 // on lit la portion miroir du buffer pour que la forme d'onde
                 // corresponde a ce qu'on entend.
-                const fenetreEchantillons = (px: number): [number, number] => {
-                    const a = startSample + Math.floor(px * samplesPerPixel);
-                    const b = Math.min(startSample + Math.floor((px + 1) * samplesPerPixel), data.length);
-                    if (!clip.isReversed) return [a, b];
-                    return [Math.max(0, data.length - b), Math.max(0, data.length - a)];
-                };
+                // Crêtes calculées une seule fois puis mémorisées : les trois
+                // tracés ci-dessous les relisent au lieu de rebalayer le buffer.
+                const largeurPx = Math.max(1, Math.round(w));
+                const cle = `${clip.bufferId}|${offset.toFixed(4)}|${clipDuration.toFixed(4)}|${largeurPx}|${clip.isReversed ? 'r' : 'n'}`;
+                const cretes = cretesDuClip(data, startSample, endSample, largeurPx, !!clip.isReversed, cle);
 
                 ctx.beginPath();
                 ctx.moveTo(x, centerY);
-                
-                // Dessiner la partie supérieure
-                for (let px = 0; px < w; px++) {
-                    const [sampleStart, sampleEnd] = fenetreEchantillons(px);
-                    
-                    let max = 0;
-                    for (let s = sampleStart; s < sampleEnd; s++) {
-                        const val = Math.abs(data[s]);
-                        if (val > max) max = val;
-                    }
-                    
-                    // Amplifier pour meilleure visibilité
-                    max = Math.min(1, max * 1.3);
-                    const yTop = centerY - (max * waveH * 0.45);
-                    ctx.lineTo(x + px, yTop);
+
+                // Partie supérieure
+                for (let px = 0; px < largeurPx; px++) {
+                    ctx.lineTo(x + px, centerY - (cretes[px] * waveH * 0.45));
                 }
-                
-                // Dessiner la partie inférieure (miroir)
-                for (let px = w - 1; px >= 0; px--) {
-                    const [sampleStart, sampleEnd] = fenetreEchantillons(px);
-                    
-                    let max = 0;
-                    for (let s = sampleStart; s < sampleEnd; s++) {
-                        const val = Math.abs(data[s]);
-                        if (val > max) max = val;
-                    }
-                    
-                    max = Math.min(1, max * 1.3);
-                    const yBottom = centerY + (max * waveH * 0.45);
-                    ctx.lineTo(x + px, yBottom);
+
+                // Partie inférieure (miroir)
+                for (let px = largeurPx - 1; px >= 0; px--) {
+                    ctx.lineTo(x + px, centerY + (cretes[px] * waveH * 0.45));
                 }
-                
+
                 ctx.closePath();
                 ctx.fill();
-                
-                // Dessiner l'outline de la waveform
+
+                // Contour
                 ctx.strokeStyle = waveColor + 'aa';
                 ctx.lineWidth = 1;
                 ctx.beginPath();
-                
-                for (let px = 0; px < w; px++) {
-                    const [sampleStart, sampleEnd] = fenetreEchantillons(px);
-                    
-                    let max = 0;
-                    for (let s = sampleStart; s < sampleEnd; s++) {
-                        const val = Math.abs(data[s]);
-                        if (val > max) max = val;
-                    }
-                    
-                    max = Math.min(1, max * 1.3);
-                    const yTop = centerY - (max * waveH * 0.45);
-                    
+                for (let px = 0; px < largeurPx; px++) {
+                    const yTop = centerY - (cretes[px] * waveH * 0.45);
                     if (px === 0) ctx.moveTo(x + px, yTop);
                     else ctx.lineTo(x + px, yTop);
                 }
@@ -912,18 +925,8 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                 
                 // Ligne inférieure
                 ctx.beginPath();
-                for (let px = 0; px < w; px++) {
-                    const [sampleStart, sampleEnd] = fenetreEchantillons(px);
-                    
-                    let max = 0;
-                    for (let s = sampleStart; s < sampleEnd; s++) {
-                        const val = Math.abs(data[s]);
-                        if (val > max) max = val;
-                    }
-                    
-                    max = Math.min(1, max * 1.3);
-                    const yBottom = centerY + (max * waveH * 0.45);
-                    
+                for (let px = 0; px < largeurPx; px++) {
+                    const yBottom = centerY + (cretes[px] * waveH * 0.45);
                     if (px === 0) ctx.moveTo(x + px, yBottom);
                     else ctx.lineTo(x + px, yBottom);
                 }

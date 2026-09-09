@@ -9,9 +9,24 @@ interface ExportModalProps {
   isOpen: boolean;
   onClose: () => void;
   projectState: DAWState;
+  /** Instrumentaux du catalogue achetes par l'utilisateur. */
+  ownedInstrumentIds?: (string | number)[];
 }
 
-const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState }) => {
+const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState, ownedInstrumentIds = [] }) => {
+
+  // Verrou de licence. Le DAW sert a essayer les instrumentaux : on ne peut
+  // sortir un fichier audio que si le beat du catalogue present dans le projet
+  // a ete achete. Ce controle n'existait pas du tout, l'export rendait le mix
+  // complet sans rien verifier.
+  const possedes = React.useMemo(() => ownedInstrumentIds.map(id => String(id)), [ownedInstrumentIds]);
+  const beatsNonAchetes = React.useMemo(
+    () => projectState.tracks.filter(
+      t => t.instrumentId !== undefined && !possedes.includes(String(t.instrumentId))
+    ),
+    [projectState.tracks, possedes]
+  );
+  const exportVerrouille = beatsNonAchetes.length > 0;
   // --- STATE ---
   const [filename, setFilename] = useState(projectState.name || 'Master');
   
@@ -108,6 +123,10 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   };
 
   const handleExport = async () => {
+    if (exportVerrouille) {
+      setStatusText("Achetez l'instrumental pour exporter votre morceau.");
+      return;
+    }
     setIsRendering(true);
     setProgress(0);
 
@@ -364,13 +383,31 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             </div>
                         )}
 
+                        {exportVerrouille && (
+                          <div className="mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200">
+                            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
+                              <i className="fas fa-lock"></i>
+                              Export verrouillé
+                            </div>
+                            <p className="mt-1.5 text-[10px] leading-relaxed text-amber-100/80">
+                              {beatsNonAchetes.length > 1
+                                ? `${beatsNonAchetes.length} instrumentaux du catalogue ne sont pas achetés.`
+                                : `L'instrumental « ${beatsNonAchetes[0]?.name} » n'est pas acheté.`}
+                              {' '}Le studio permet de l'essayer librement ; l'achat débloque l'export.
+                            </p>
+                          </div>
+                        )}
+
                         <button 
                             onClick={handleExport}
-                            disabled={isRendering}
+                            disabled={isRendering || exportVerrouille}
+                            title={exportVerrouille ? "Achetez l'instrumental pour exporter" : undefined}
                             className="w-full h-12 bg-cyan-500 hover:bg-cyan-400 text-black rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-cyan-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
                         >
-                            {isRendering ? <i className="fas fa-circle-notch fa-spin"></i> : <i className="fas fa-download"></i>}
-                            <span>EXPORTER</span>
+                            {exportVerrouille ? <i className="fas fa-lock"></i>
+                              : isRendering ? <i className="fas fa-circle-notch fa-spin"></i>
+                              : <i className="fas fa-download"></i>}
+                            <span>{exportVerrouille ? 'ACHETER POUR EXPORTER' : 'EXPORTER'}</span>
                         </button>
                     </div>
                 </div>

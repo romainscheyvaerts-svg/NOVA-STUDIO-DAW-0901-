@@ -10,7 +10,7 @@ export class ProjectIO {
    * Sauvegarde l'état actuel et les fichiers audio dans un ZIP.
    * EXCLUSION INTELLIGENTE : Les fichiers audio des instruments du store non achetés ne sont PAS inclus.
    */
-  public static async saveProject(state: DAWState, ownedInstrumentIds: number[] = []): Promise<Blob> {
+  public static async saveProject(state: DAWState, ownedInstrumentIds: (string | number)[] = []): Promise<Blob> {
     const zip = new JSZip();
     
     // 1. Clonage de l'état pour modification (on retire les buffers lourds du JSON)
@@ -26,7 +26,10 @@ export class ProjectIO {
         // VÉRIFICATION LICENCE : 
         // Si la piste est liée à un instrument du store (instrumentId présent)
         // ET que l'utilisateur ne possède pas cet ID, on n'exporte pas le fichier audio.
-        const isUnlicensedStoreBeat = track.instrumentId !== undefined && !ownedInstrumentIds.includes(track.instrumentId);
+        // Comparaison en texte : le catalogue utilise des UUID, l'ancien schema
+        // de licences des entiers.
+        const possedes = (ownedInstrumentIds || []).map(id => String(id));
+        const isUnlicensedStoreBeat = track.instrumentId !== undefined && !possedes.includes(String(track.instrumentId));
 
         for (let cIndex = 0; cIndex < track.clips.length; cIndex++) {
             const clip = track.clips[cIndex];

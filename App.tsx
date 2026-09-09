@@ -416,7 +416,7 @@ export default function App() {
         }
         
         if (audioUrl) {
-          await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0, inst.bpm);
+          await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0, inst.bpm, inst.id);
           // Mettre à jour le BPM si disponible
           if (inst.bpm) {
             handleUpdateBpm(inst.bpm);
@@ -542,7 +542,7 @@ export default function App() {
   };
 
   const handleLogout = async () => { await supabaseManager.signOut(); setUser(null); };
-  const handleBuyLicense = (instrumentId: number) => { if (!user) return; const updatedUser = { ...user, owned_instruments: [...(user.owned_instruments || []), instrumentId] }; setUser(updatedUser); setAiNotification(`✅ Licence achetée avec succès ! Export débloqué.`); };
+  const handleBuyLicense = (instrumentId: string | number) => { if (!user) return; const updatedUser = { ...user, owned_instruments: [...(user.owned_instruments || []), instrumentId] }; setUser(updatedUser); setAiNotification(`✅ Licence achetée avec succès ! Export débloqué.`); };
   
   const handleSaveCloud = async (projectName: string) => { 
     if (!user) {
@@ -1634,7 +1634,13 @@ export default function App() {
     setAddPluginMenu({ trackId, x, y });
   }, []);
 
-  const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number, sourceBpm?: number) => {
+  /**
+   * @param instrumentId identifiant de l'instrumental du catalogue, quand
+   *        l'audio en provient. Il marque la piste comme sous licence : sans
+   *        lui, rien ne relie le beat charge a l'achat et l'export ne peut pas
+   *        etre conditionne.
+   */
+  const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number, sourceBpm?: number, instrumentId?: string | number) => {
       console.log('[handleUniversalAudioImport] Début import:', name);
       setExternalImportNotice(`Chargement: ${name}...`);
       try {
@@ -1707,6 +1713,13 @@ export default function App() {
                   gain: 1.0,
                   isMuted: false
               };
+
+              // Marquage licence : la piste qui recoit un beat du catalogue porte
+              // son identifiant, ce qui permet de verifier l'achat a l'export.
+              if (instrumentId !== undefined && targetTrackId) {
+                  const pisteCible = draft.tracks.find(t => t.id === targetTrackId);
+                  if (pisteCible) pisteCible.instrumentId = instrumentId;
+              }
 
               if (isNewTrackNeeded) {
                   const newTrack: Track = {
@@ -2353,7 +2366,7 @@ export default function App() {
             else if (match.drive_file_id) audioUrl = supabaseManager.getDrivePreviewUrl(match.drive_file_id);
             if (!audioUrl) { notify(`❌ "${match.title}" n'a pas de fichier audio`); return; }
 
-            await handleUniversalAudioImport(audioUrl, match.title, 'instrumental', 0, match.bpm);
+            await handleUniversalAudioImport(audioUrl, match.title, 'instrumental', 0, match.bpm, match.id);
             if (match.bpm) handleUpdateBpm(match.bpm);
             notify(`✅ "${match.title}" chargé sur la piste BEAT`);
           } catch (e: any) {
@@ -2681,7 +2694,7 @@ export default function App() {
 
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}
       {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
-      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} />}
+      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} ownedInstrumentIds={user?.owned_instruments || []} />}
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />}
       
       {addPluginMenu && <ContextMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)} items={AVAILABLE_FX_MENU.map(fx => ({ label: fx.name, icon: fx.icon, onClick: () => handleAddPluginFromContext(addPluginMenu.trackId, fx.id as PluginType, {}, { openUI: true }) }))} />}
