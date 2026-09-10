@@ -57,7 +57,6 @@ const AVAILABLE_FX_MENU = [
     { id: 'CHORUS', name: 'Vocal Chorus', icon: 'fa-layer-group' },
     { id: 'FLANGER', name: 'Studio Flanger', icon: 'fa-wind' },
     { id: 'DOUBLER', name: 'Vocal Doubler', icon: 'fa-people-arrows' },
-    { id: 'STEREOSPREADER', name: 'Phase Guard', icon: 'fa-arrows-alt-h' },
     { id: 'DEESSER', name: 'S-Killer', icon: 'fa-scissors' }
 ];
 
