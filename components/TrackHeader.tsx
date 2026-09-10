@@ -343,7 +343,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       onDragLeave={() => { setIsDragOverFX(false); }}
       onDrop={handleOnDrop}
       className={`group border-b border-white/10 p-3 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${track.isFrozen ? 'opacity-60 grayscale' : ''} ${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
-      style={{ borderLeft: `4px solid ${track.color}` }}
+      style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined }}
     >
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center truncate flex-1 pr-2">

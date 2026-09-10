@@ -1234,15 +1234,15 @@ useEffect(() => {
 }, [drawTimeline]);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden relative select-none" onContextMenu={e => e.preventDefault()}>
+    <div className="nova-grille flex-1 flex flex-col overflow-hidden relative select-none" onContextMenu={e => e.preventDefault()}>
       <div className="h-12 flex items-center px-4 gap-4 z-30 shrink-0">
         <div className="flex items-center space-x-4 shrink-0">
           <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
-            <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black' : 'text-slate-500 hover:text-white'}`} title="Smart Tool (1)"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
-            <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black' : 'text-slate-500 hover:text-white'}`} title="Split Tool (2)"><i className="fas fa-cut text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Smart Tool (1)"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Split Tool (2)"><i className="fas fa-cut text-[12px]"></i></button>
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Erase Tool (3)"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
-          <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 h-9 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+          <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 h-9 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
             <i className="fas fa-magnet mr-2"></i> {snapEnabled ? 'Snap ON' : 'Snap OFF'}
           </button>
         </div>

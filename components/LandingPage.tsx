@@ -196,7 +196,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-[#0a0b0d] flex flex-col overflow-hidden">
+    <div className="nova-grille fixed inset-0 bg-[#0a0b0d] flex flex-col overflow-hidden">
       {/* Echec d'ecoute : le bouton revenait a son etat initial sans rien dire */}
       {previewError && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[2000] px-4 py-2.5 rounded-xl
