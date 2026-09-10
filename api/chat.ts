@@ -184,13 +184,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error('[API] GEMINI_API_KEY not configured');
+    // Deux fournisseurs possibles, selon la cle presente. Groq passe en premier
+    // s'il est configure : son offre gratuite est plus genereuse et son API est
+    // compatible OpenAI, donc appelee directement en fetch, sans dependance.
+    const cleGroq = process.env.GROQ_API_KEY;
+    const cleGemini = process.env.GEMINI_API_KEY;
+
+    if (!cleGroq && !cleGemini) {
+      console.error('[API] Aucune clé de modèle configurée');
       return res.status(500).json({
-        text: "⚠️ Clé API Gemini non configurée. Ajoute GEMINI_API_KEY dans les variables d'environnement (Vercel) ou dans .env.local en local.",
+        text: "⚠️ Aucune clé d'IA configurée. Ajoute GROQ_API_KEY ou GEMINI_API_KEY dans les variables d'environnement (Vercel) ou dans .env.local.",
         actions: [],
-        error: "GEMINI_API_KEY missing"
+        error: "API key missing"
       });
     }
 
@@ -211,49 +216,100 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       contextInfo = `\n\nÉTAT ACTUEL DU PROJET (JSON) :\n${JSON.stringify(state).slice(0, 12000)}`;
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const fullPrompt = `${SYSTEM_PROMPT}${contextInfo}\n\nDemande de l'utilisateur : ${message}`;
+    const fullPrompt = `${SYSTEM_PROMPT}${contextInfo}
 
-    // Modeles essayes dans l'ordre.
-    //
-    // Le code appelait gemini-1.5-flash, retire depuis : meme avec une cle
-    // valide l'assistant renvoyait une erreur de modele introuvable. Une liste
-    // de repli evite que le prochain retrait ne le casse a nouveau.
-    const MODELES = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"];
+Demande de l'utilisateur : ${message}`;
 
     let raw = '';
-    let derniereErreur: any = null;
     let modeleUtilise = '';
 
-    for (const nom of MODELES) {
-      try {
-        const model = genAI.getGenerativeModel({
-          model: nom,
-          generationConfig: {
-            temperature: 0.4,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 1024,
-            responseMimeType: "application/json"
+    if (cleGroq) {
+      // --- GROQ (API compatible OpenAI) ---
+      // Les modeles Llama ont ete retires en juin 2026 ; on vise gpt-oss, plus
+      // capable d'abord, plus rapide ensuite.
+      const MODELES_GROQ = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b"];
+      let derniere: any = null;
+
+      for (const nom of MODELES_GROQ) {
+        try {
+          const reponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${cleGroq}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              model: nom,
+              messages: [
+                { role: "system", content: SYSTEM_PROMPT },
+                { role: "user", content: `${contextInfo}
+
+Demande de l'utilisateur : ${message}` }
+              ],
+              temperature: 0.4,
+              max_tokens: 1024,
+              response_format: { type: "json_object" }
+            })
+          });
+
+          if (!reponse.ok) {
+            const detail = await reponse.text();
+            derniere = new Error(`Groq ${reponse.status} : ${detail.slice(0, 300)}`);
+            // Modele retire ou inconnu : on tente le suivant. Une cle invalide
+            // (401) ou un quota depasse (429) ne se resoudront pas ainsi.
+            if (reponse.status === 404 || reponse.status === 400) {
+              console.warn(`[API] Modele Groq ${nom} indisponible, essai du suivant.`);
+              continue;
+            }
+            throw derniere;
           }
-        });
-        const result = await model.generateContent(fullPrompt);
-        raw = (await result.response).text();
-        modeleUtilise = nom;
-        break;
-      } catch (e: any) {
-        derniereErreur = e;
-        const msg = String(e?.message || '');
-        // Modele inconnu ou retire : on tente le suivant. Toute autre erreur
-        // (quota, cle invalide, reseau) ne sera pas resolue par un changement
-        // de modele, on s'arrete.
-        const modeleIntrouvable = /not found|not supported|404|does not exist|unavailable/i.test(msg);
-        if (!modeleIntrouvable) throw e;
-        console.warn(`[API] Modele ${nom} indisponible, essai du suivant.`);
+
+          const json: any = await reponse.json();
+          raw = json?.choices?.[0]?.message?.content || '';
+          modeleUtilise = `groq:${nom}`;
+          break;
+        } catch (e: any) {
+          derniere = e;
+          if (!/404|400/.test(String(e?.message || ''))) throw e;
+        }
       }
+
+      if (!modeleUtilise) throw derniere || new Error('Aucun modèle Groq disponible');
+
+    } else {
+      // --- GEMINI ---
+      const genAI = new GoogleGenerativeAI(cleGemini!);
+      const MODELES = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"];
+      let derniere: any = null;
+
+      for (const nom of MODELES) {
+        try {
+          const model = genAI.getGenerativeModel({
+            model: nom,
+            generationConfig: {
+              temperature: 0.4,
+              topK: 40,
+              topP: 0.95,
+              maxOutputTokens: 1024,
+              responseMimeType: "application/json"
+            }
+          });
+          const result = await model.generateContent(fullPrompt);
+          raw = (await result.response).text();
+          modeleUtilise = `gemini:${nom}`;
+          break;
+        } catch (e: any) {
+          derniere = e;
+          const msg = String(e?.message || '');
+          const introuvable = /not found|not supported|404|does not exist|unavailable/i.test(msg);
+          if (!introuvable) throw e;
+          console.warn(`[API] Modele ${nom} indisponible, essai du suivant.`);
+        }
+      }
+
+      if (!modeleUtilise) throw derniere || new Error('Aucun modèle Gemini disponible');
     }
 
-    if (!modeleUtilise) throw derniereErreur || new Error('Aucun modèle disponible');
     console.log(`[API] Modèle utilisé : ${modeleUtilise}`);
 
     const parsed = parseModelJson(raw);
