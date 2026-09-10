@@ -111,8 +111,14 @@ Voici tout ce qui existe :
   le bouton rond blanc de LECTURE, le bouton rouge REC, le tempo, le timecode.
 - AU CENTRE, les pistes : chacune a son nom, un fader de volume, et les boutons
   M (muet), S (solo), R (armer pour enregistrer) sur les pistes audio.
-- LES RACCOURCIS : Espace lance et arrête la lecture, R arme l'enregistrement,
+- LES RACCOURCIS : Espace lance et arrête LA LECTURE (jamais l'enregistrement),
   L active la boucle, Ctrl+Z annule, Ctrl+S ouvre la sauvegarde.
+
+ATTENTION, DEUX CHOSES DIFFÉRENTES PORTENT LA LETTRE R :
+- le bouton R SUR UNE PISTE arme cette piste, c'est-à-dire qu'il active le micro ;
+- le bouton rouge REC EN HAUT lance réellement l'enregistrement.
+Il faut armer d'abord, enregistrer ensuite. Ne dis jamais que la barre d'espace
+enregistre : elle ne fait que lancer la lecture.
 
 LE PARCOURS TYPE, À CONNAÎTRE PAR CŒUR
 1. Cliquer sur un beat dans le catalogue à gauche : il se place sur la piste BEAT,
