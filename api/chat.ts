@@ -82,11 +82,32 @@ DELAY, CHORUS, FLANGER, DOUBLER, STEREOSPREADER, DEESSER, DENOISER, MASTERSYNC.
 
 const SYSTEM_PROMPT = `Tu es Nova, l'assistant IA intégré à Nova Studio DAW, un logiciel de production musicale.
 
-Tu aides sur le mixage, le mastering, les réglages d'effets et la production, ET tu peux agir
-directement sur le projet en renvoyant des actions.
+Le studio sert à des ARTISTES DÉBUTANTS qui viennent essayer un instrumental et poser leur voix
+dessus. La plupart n'ont jamais utilisé de logiciel de musique. Tu es leur guide : tu expliques,
+tu rassures, et tu agis à leur place quand c'est plus simple.
+
+Tu aides sur le mixage, les réglages d'effets et la production, ET tu peux agir directement sur le
+projet en renvoyant des actions.
+
+TON ET PÉDAGOGIE
+- Parle simplement, comme à quelqu'un qui découvre. Pas de jargon sans l'expliquer en trois mots :
+  écris « le panoramique, qui place le son à gauche ou à droite » plutôt que « le pan ».
+- Quand quelqu'un est perdu ou demande « je fais quoi ? », donne UNE seule étape suivante, concrète,
+  et propose de la faire à sa place.
+- Après avoir agi, dis en une phrase ce que tu viens de faire et ce que ça change à l'oreille.
+- Si une demande est vague, ne pose pas trois questions : propose ce qui est le plus probable et
+  dis comment revenir en arrière (Ctrl+Z annule tout).
+- N'écrase jamais le travail de quelqu'un sans prévenir.
+
+LE PARCOURS TYPE, À CONNAÎTRE PAR CŒUR
+1. Choisir un instrumental dans le catalogue à gauche : il se charge sur la piste BEAT.
+2. Appuyer sur la barre d'espace pour l'écouter.
+3. Armer la piste REC (le bouton R) puis appuyer sur Enregistrer pour poser sa voix.
+4. Régler le volume, ajouter un effet si besoin.
+5. L'export d'un fichier audio nécessite d'avoir acheté l'instrumental.
 
 RÈGLES DE RÉPONSE
-- Réponds en français, de manière concise et technique (2-3 phrases maximum pour "text").
+- Réponds en français, chaleureusement mais sans bavardage (2 à 4 phrases pour "text").
 - Tu réponds UNIQUEMENT avec un objet JSON valide, sans texte autour et sans bloc de code :
   { "text": "ta réponse à l'utilisateur", "actions": [ { "action": "...", "payload": { ... }, "description": "..." } ] }
 - "actions" peut être un tableau vide si la demande est une simple question ou un conseil.
@@ -191,21 +212,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        temperature: 0.4,
-        topK: 40,
-        topP: 0.95,
-        maxOutputTokens: 1024,
-        responseMimeType: "application/json"
-      }
-    });
-
     const fullPrompt = `${SYSTEM_PROMPT}${contextInfo}\n\nDemande de l'utilisateur : ${message}`;
 
-    const result = await model.generateContent(fullPrompt);
-    const raw = (await result.response).text();
+    // Modeles essayes dans l'ordre.
+    //
+    // Le code appelait gemini-1.5-flash, retire depuis : meme avec une cle
+    // valide l'assistant renvoyait une erreur de modele introuvable. Une liste
+    // de repli evite que le prochain retrait ne le casse a nouveau.
+    const MODELES = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"];
+
+    let raw = '';
+    let derniereErreur: any = null;
+    let modeleUtilise = '';
+
+    for (const nom of MODELES) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: nom,
+          generationConfig: {
+            temperature: 0.4,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 1024,
+            responseMimeType: "application/json"
+          }
+        });
+        const result = await model.generateContent(fullPrompt);
+        raw = (await result.response).text();
+        modeleUtilise = nom;
+        break;
+      } catch (e: any) {
+        derniereErreur = e;
+        const msg = String(e?.message || '');
+        // Modele inconnu ou retire : on tente le suivant. Toute autre erreur
+        // (quota, cle invalide, reseau) ne sera pas resolue par un changement
+        // de modele, on s'arrete.
+        const modeleIntrouvable = /not found|not supported|404|does not exist|unavailable/i.test(msg);
+        if (!modeleIntrouvable) throw e;
+        console.warn(`[API] Modele ${nom} indisponible, essai du suivant.`);
+      }
+    }
+
+    if (!modeleUtilise) throw derniereErreur || new Error('Aucun modèle disponible');
+    console.log(`[API] Modèle utilisé : ${modeleUtilise}`);
 
     const parsed = parseModelJson(raw);
 
