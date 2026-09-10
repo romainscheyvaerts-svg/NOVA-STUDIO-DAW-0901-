@@ -35,7 +35,7 @@ const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChang
             <i className={`fas ${tab.icon} text-xl mb-1 transition-transform ${
               activeTab === tab.id ? 'scale-110' : 'scale-100'
             }`}></i>
-            <span className={`text-[9px] font-bold uppercase tracking-wider transition-all ${
+            <span className={`text-[10px] font-semibold tracking-wide transition-all ${
               activeTab === tab.id ? 'opacity-100' : 'opacity-70'
             }`}>
               {tab.label}

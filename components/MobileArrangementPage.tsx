@@ -582,16 +582,21 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 style={{ height: TRACK_HEIGHT }}
               >
                 {/* Track name + Volume fader */}
+                {/* Nom sur sa propre ligne : il etait plafonne a 55 px et se
+                    reduisait a une lettre, on ne distinguait plus BEAT de BACK 1. */}
                 <div className="flex items-center gap-1.5 mb-1">
                   <div 
                     className="w-2 h-2 rounded-full flex-shrink-0"
                     style={{ backgroundColor: track.color }}
                   />
-                  <span className="text-[10px] font-bold text-white/90 truncate flex-1" style={{ maxWidth: '55px' }}>
+                  <span title={track.name} className="text-[11px] font-semibold text-white/90 truncate flex-1">
                     {track.name}
                   </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 mb-1.5">
                   {/* Mini Volume Fader */}
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 flex-1">
                     <input
                       type="range"
                       min="0"
@@ -604,7 +609,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                         }
                       }}
                       onClick={(e) => e.stopPropagation()}
-                      className="w-12 h-1.5 rounded-full appearance-none cursor-pointer"
+                      className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
                       style={{
                         background: `linear-gradient(to right, ${track.color || '#22d3ee'} ${(track.volume || 0.8) * 100}%, rgba(255,255,255,0.1) ${(track.volume || 0.8) * 100}%)`
                       }}
@@ -613,13 +618,13 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 </div>
 
                 {/* Track controls M/S/R/Send/FX */}
-                <div className="flex items-center gap-0.5">
+                <div className="flex items-center gap-1">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       if (onUpdateTrack) onUpdateTrack({ ...track, isMuted: !track.isMuted });
                     }}
-                    className={`w-5 h-5 rounded text-[7px] font-black transition-all ${
+                    className={`w-7 h-7 rounded-md text-[10px] font-bold transition-all ${
                       track.isMuted
                         ? 'bg-red-500 text-white'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
@@ -632,7 +637,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                       e.stopPropagation();
                       if (onUpdateTrack) onUpdateTrack({ ...track, isSolo: !track.isSolo });
                     }}
-                    className={`w-5 h-5 rounded text-[7px] font-black transition-all ${
+                    className={`w-7 h-7 rounded-md text-[10px] font-bold transition-all ${
                       track.isSolo
                         ? 'bg-yellow-500 text-black'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
@@ -645,7 +650,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                       e.stopPropagation();
                       if (onUpdateTrack) onUpdateTrack({ ...track, isTrackArmed: !track.isTrackArmed });
                     }}
-                    className={`w-5 h-5 rounded text-[7px] font-black transition-all ${
+                    className={`w-7 h-7 rounded-md text-[10px] font-bold transition-all ${
                       track.isTrackArmed
                         ? 'bg-red-600 text-white animate-pulse'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
@@ -660,7 +665,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                       setSelectedTrackForSends(track.id);
                       setShowSendsPanel(true);
                     }}
-                    className={`w-5 h-5 rounded text-[7px] font-black transition-all ${
+                    className={`w-7 h-7 rounded-md text-[10px] font-bold transition-all ${
                       track.sends.some(s => s.level > 0 && s.isEnabled)
                         ? 'bg-purple-500 text-white'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
@@ -684,7 +689,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                         }));
                       }
                     }}
-                    className={`w-5 h-5 rounded text-[7px] font-black transition-all ${
+                    className={`w-7 h-7 rounded-md text-[10px] font-bold transition-all ${
                       track.plugins.length > 0
                         ? 'bg-cyan-500 text-white'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
@@ -820,7 +825,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                           className="absolute top-0 left-0 right-0 h-4 px-1.5 flex items-center"
                           style={{ backgroundColor: (clip.color || track.color) + '60' }}
                         >
-                          <span className="text-[9px] font-bold text-white truncate drop-shadow">
+                          <span className="text-[11px] font-semibold text-white truncate drop-shadow">
                             {clip.name}
                           </span>
                         </div>
@@ -878,7 +883,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               <span className="text-[11px] font-bold text-white truncate max-w-[100px]">
                 {selectedClip.clip.name}
               </span>
-              <span className="text-[9px] text-white/40 font-mono">
+              <span className="text-[10px] text-white/50 font-mono">
                 {formatBarsBeat(selectedClip.clip.start)} · {selectedClip.clip.duration.toFixed(1)}s
               </span>
             </div>
@@ -895,55 +900,55 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             {/* Copy */}
             <button
               onClick={handleCopyClip}
-              className="flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg bg-white/5 hover:bg-white/10 active:bg-cyan-500/20 transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-cyan-500/20 transition-all"
             >
               <i className="fas fa-copy text-cyan-400 text-sm mb-0.5"></i>
-              <span className="text-[8px] font-bold text-white/60">COPY</span>
+              <span className="text-[10px] font-semibold text-white/70">COPY</span>
             </button>
 
             {/* Paste */}
             <button
               onClick={handlePasteClip}
               disabled={!clipboard}
-              className={`flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg transition-all ${
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
                 clipboard 
                   ? 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20' 
                   : 'bg-white/5 opacity-40'
               }`}
             >
               <i className="fas fa-paste text-cyan-400 text-sm mb-0.5"></i>
-              <span className="text-[8px] font-bold text-white/60">PASTE</span>
+              <span className="text-[10px] font-semibold text-white/70">PASTE</span>
             </button>
 
             {/* Duplicate */}
             <button
               onClick={handleDuplicateClip}
-              className="flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg bg-white/5 hover:bg-white/10 active:bg-green-500/20 transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-green-500/20 transition-all"
             >
               <i className="fas fa-clone text-green-400 text-sm mb-0.5"></i>
-              <span className="text-[8px] font-bold text-white/60">DUP</span>
+              <span className="text-[10px] font-semibold text-white/70">DUP</span>
             </button>
 
             {/* Split */}
             <button
               onClick={handleSplitClip}
-              className="flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg bg-white/5 hover:bg-white/10 active:bg-yellow-500/20 transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-white/5 hover:bg-white/10 active:bg-yellow-500/20 transition-all"
             >
               <i className="fas fa-cut text-yellow-400 text-sm mb-0.5"></i>
-              <span className="text-[8px] font-bold text-white/60">SPLIT</span>
+              <span className="text-[10px] font-semibold text-white/70">SPLIT</span>
             </button>
 
             {/* Reverse */}
             <button
               onClick={handleReverseClip}
-              className={`flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg transition-all ${
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
                 selectedClip.clip.isReversed 
                   ? 'bg-purple-500/30 border border-purple-500/50' 
                   : 'bg-white/5 hover:bg-white/10 active:bg-purple-500/20'
               }`}
             >
               <i className="fas fa-backward text-purple-400 text-sm mb-0.5"></i>
-              <span className="text-[8px] font-bold text-white/60">REV</span>
+              <span className="text-[10px] font-semibold text-white/70">REV</span>
             </button>
 
             {/* Mute */}
@@ -951,14 +956,14 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               onClick={() => onUpdateClip?.(selectedClip.trackId, selectedClip.clip.id, { 
                 isMuted: !selectedClip.clip.isMuted 
               })}
-              className={`flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg transition-all ${
+              className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
                 selectedClip.clip.isMuted 
                   ? 'bg-red-500/30 border border-red-500/50' 
                   : 'bg-white/5 hover:bg-white/10'
               }`}
             >
               <i className={`fas ${selectedClip.clip.isMuted ? 'fa-volume-mute' : 'fa-volume-up'} text-sm mb-0.5 ${selectedClip.clip.isMuted ? 'text-red-400' : 'text-white/60'}`}></i>
-              <span className="text-[8px] font-bold text-white/60">MUTE</span>
+              <span className="text-[10px] font-semibold text-white/70">MUTE</span>
             </button>
 
             {/* Divider */}
@@ -1003,7 +1008,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 onDeleteClip?.(selectedClip.trackId, selectedClip.clip.id);
                 setSelectedClip(null);
               }}
-              className="flex-shrink-0 flex flex-col items-center justify-center w-12 h-11 rounded-lg bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 transition-all"
+              className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 transition-all"
             >
               <i className="fas fa-trash text-red-400 text-sm mb-0.5"></i>
               <span className="text-[8px] font-bold text-red-400/80">DEL</span>

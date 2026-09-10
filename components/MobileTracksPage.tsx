@@ -160,8 +160,8 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                   <span className="text-sm font-bold text-white">{track.name}</span>
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-[9px] text-slate-500 uppercase">{track.type}</span>
-                    {track.isMuted && <span className="text-[8px] bg-red-500/20 text-red-400 px-1 rounded">M</span>}
-                    {track.isSolo && <span className="text-[8px] bg-yellow-500/20 text-yellow-400 px-1 rounded">S</span>}
+                    {track.isMuted && <span className="text-[10px] font-semibold bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded">M</span>}
+                    {track.isSolo && <span className="text-[10px] font-semibold bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">S</span>}
                   </div>
                 </div>
               </div>
