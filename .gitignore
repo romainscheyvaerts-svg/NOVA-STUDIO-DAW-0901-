@@ -39,3 +39,5 @@ bridge-python/*.pyc
 *.sln
 *.sw?
 .env
+.vercel
+.env*
