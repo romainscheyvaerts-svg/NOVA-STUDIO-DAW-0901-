@@ -2695,6 +2695,23 @@ export default function App() {
         </main>
       </div>
       
+      {/* Avancement des imports et des calages.
+          Le message existait deja mais n'etait affiche nulle part : il etait
+          passe a TransportBar en prop statusMessage, declaree et destructuree,
+          puis jamais rendue. Charger un beat ouvrait donc un studio vide
+          pendant plusieurs secondes, sans le moindre signe d'activite. */}
+      {externalImportNotice && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[1500] px-4 py-2.5 rounded-xl
+                        bg-[#14161a]/95 border border-white/10 shadow-2xl backdrop-blur-sm
+                        flex items-center gap-2.5 text-[12px] font-medium text-slate-200
+                        animate-in fade-in slide-in-from-top-2 duration-200">
+          {!/^[✅❌]/.test(externalImportNotice) && (
+            <i className="fas fa-circle-notch fa-spin text-cyan-400"></i>
+          )}
+          <span>{externalImportNotice}</span>
+        </div>
+      )}
+
       {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} />}
 
       <Suspense fallback={null}>

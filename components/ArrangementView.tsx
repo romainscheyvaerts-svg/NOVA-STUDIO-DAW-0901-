@@ -1263,7 +1263,13 @@ useEffect(() => {
       <div 
           ref={scrollContainerRef} 
           className="flex-1 overflow-auto relative custom-scroll"
-          onMouseDown={handleMouseDown} 
+          onMouseDown={handleMouseDown}
+          onDoubleClick={() => {
+            // Un clip MIDI etait une impasse : une fois le piano roll ferme,
+            // rien ne permettait de le rouvrir depuis l'arrangement.
+            const sel = selectedClip;
+            if (sel && sel.clip.type === TrackType.MIDI) onEditMidi?.(sel.trackId, sel.clip.id);
+          }} 
           onMouseMove={handleMouseMove} 
           onMouseUp={handleMouseUp} 
           onMouseLeave={handleMouseUp} 
@@ -1383,6 +1389,9 @@ useEffect(() => {
                 { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE'); setClipContextMenu(null); }},
                 { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: currentTime }); setClipContextMenu(null); }},
                 { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE'); setClipContextMenu(null); }},
+                ...(clipContextMenu.clip.type === TrackType.MIDI && onEditMidi ? [
+                  { label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); }}
+                ] : []),
                 'separator',
                 { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
                 { label: clipContextMenu.clip.isReversed ? 'Remettre à l’endroit' : 'Inverser', icon: 'fa-rotate-left', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { isReversed: !clipContextMenu.clip.isReversed }); setClipContextMenu(null); }},
