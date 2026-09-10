@@ -1,31 +1,36 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup } from './types';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
 import MobileTransport from './components/MobileTransport';
 import AdminTemplateButton from './components/AdminTemplateButton';
 import ArrangementView from './components/ArrangementView';
-import MixerView from './components/MixerView';
-import PluginEditor from './components/PluginEditor';
+const MixerView = lazy(() => import('./components/MixerView'));
+// Charge a la demande : PluginEditor tire les 13 interfaces de plugins,
+// soit plus de 8000 lignes qui ne servent qu'a l'ouverture d'un effet.
+const PluginEditor = lazy(() => import('./components/PluginEditor'));
 import ChatAssistant from './components/ChatAssistant';
 import ViewModeSwitcher from './components/ViewModeSwitcher';
 import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
-import AuthScreen from './components/AuthScreen';
-import AutomationEditorView from './components/AutomationEditorView';
-import ShareModal from './components/ShareModal';
-import SaveProjectModal from './components/SaveProjectModal';
-import LoadProjectModal from './components/LoadProjectModal';
-import ExportModal from './components/ExportModal'; 
-import AudioSettingsPanel from './components/AudioSettingsPanel'; 
-import PluginManager from './components/PluginManager'; 
+const AuthScreen = lazy(() => import('./components/AuthScreen'));
+const AutomationEditorView = lazy(() => import('./components/AutomationEditorView'));
+const ShareModal = lazy(() => import('./components/ShareModal'));
+const SaveProjectModal = lazy(() => import('./components/SaveProjectModal'));
+const LoadProjectModal = lazy(() => import('./components/LoadProjectModal'));
+const ExportModal = lazy(() => import('./components/ExportModal'));
+
+const AudioSettingsPanel = lazy(() => import('./components/AudioSettingsPanel'));
+
+const PluginManager = lazy(() => import('./components/PluginManager'));
+
 import { supabaseManager } from './services/SupabaseManager';
 import { SessionSerializer } from './services/SessionSerializer';
 // import { getAIProductionAssistance } from './services/AIService'; 
 import { novaBridge } from './services/NovaBridge';
 import { ProjectIO } from './services/ProjectIO';
-import PianoRoll from './components/PianoRoll';
+const PianoRoll = lazy(() => import('./components/PianoRoll'));
 import { midiManager } from './services/MidiManager';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
@@ -2598,7 +2603,7 @@ export default function App() {
               )}
 
               {state.currentView === 'MIXER' && (
-                 <MixerView
+                 <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><MixerView
                     tracks={state.tracks} onUpdateTrack={handleUpdateTrack}
                     onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
                     onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
@@ -2607,14 +2612,14 @@ export default function App() {
                     onCopyPluginToTrack={handleCopyPluginToTrack} onReorderPlugins={handleReorderPlugins}
                     trackGroups={state.trackGroups} onCreateGroup={handleCreateGroup}
                     onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup}
-                 />
+                 /></Suspense>
               )}
 
               {state.currentView === 'AUTOMATION' && (
-                 <AutomationEditorView
+                 <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><AutomationEditorView
                    tracks={state.tracks} currentTime={state.currentTime} bpm={state.bpm} zoomH={40}
                    onUpdateTrack={handleUpdateTrack} onSeek={handleSeek}
-                 />
+                 /></Suspense>
               )}
             </>
           )}
@@ -2692,30 +2697,38 @@ export default function App() {
       
       {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} />}
 
+      <Suspense fallback={null}>
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}
       {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
       {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} ownedInstrumentIds={user?.owned_instruments || []} />}
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />}
+      </Suspense>
       
       {addPluginMenu && <ContextMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)} items={AVAILABLE_FX_MENU.map(fx => ({ label: fx.name, icon: fx.icon, onClick: () => handleAddPluginFromContext(addPluginMenu.trackId, fx.id as PluginType, {}, { openUI: true }) }))} />}
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}
       
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
           <div className="fixed inset-0 z-[250] bg-[#0c0d10] flex flex-col animate-in slide-in-from-bottom-10 duration-200">
-             <PianoRoll track={state.tracks.find(t => t.id === midiEditorOpen.trackId)!} clipId={midiEditorOpen.clipId} bpm={state.bpm} currentTime={state.currentTime} onUpdateTrack={handleUpdateTrack} onClose={() => setMidiEditorOpen(null)} />
+             <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement de l'éditeur…</div>}>
+               <PianoRoll track={state.tracks.find(t => t.id === midiEditorOpen.trackId)!} clipId={midiEditorOpen.clipId} bpm={state.bpm} currentTime={state.currentTime} onUpdateTrack={handleUpdateTrack} onClose={() => setMidiEditorOpen(null)} />
+             </Suspense>
           </div>
       )}
       
       {activePlugin && (
         <div className={`fixed inset-0 flex items-center justify-center z-[200] ${isMobile ? 'bg-[#0c0d10]' : 'bg-black/60 backdrop-blur-sm'}`} onMouseDown={() => !isMobile && setActivePlugin(null)}>
            <div className={`relative ${isMobile ? 'w-full h-full p-4 overflow-y-auto' : ''}`} onMouseDown={e => e.stopPropagation()}>
+              <Suspense fallback={<div className="w-64 h-32 flex items-center justify-center text-slate-400 text-[11px] bg-[#14161a] border border-white/10 rounded-2xl"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}>
               <PluginEditor plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} />
+              </Suspense>
            </div>
         </div>
       )}
 
+      <Suspense fallback={null}>
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
+      </Suspense>
       
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
         <ChatAssistant
