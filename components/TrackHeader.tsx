@@ -71,8 +71,8 @@ const HorizontalSendFader: React.FC<{
         style={{ width: `${percent}%`, borderColor: color, boxShadow: send.level > 0.05 ? `0 0 8px ${color}` : 'none' }}
       />
       <div className="absolute inset-0 flex items-center justify-between px-2 pointer-events-none">
-        <span className="text-[7px] font-black text-white/80 uppercase tracking-tighter">{label}</span>
-        <span className="text-[7px] font-mono text-white/40">{Math.round((send.level / 1.5) * 100)}%</span>
+        <span className="text-[9px] font-bold text-white/70 uppercase tracking-tight">{label}</span>
+        <span className="text-[9px] font-mono text-white/40">{Math.round((send.level / 1.5) * 100)}%</span>
       </div>
     </div>
   );
@@ -369,8 +369,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               />
             ) : (
               <span 
+                title={track.name}
                 onDoubleClick={(e) => { e.stopPropagation(); setIsRenaming(true); }}
-                className={`text-[10px] font-black uppercase tracking-widest truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-500'}`}
+                className={`text-[12px] font-bold tracking-wide truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-400'}`}
               >
                 {track.name} {track.isFrozen && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400"></i>}
               </span>
@@ -384,14 +385,14 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             onTouchStart={(e) => { e.preventDefault(); handleMuteToggle(e); }}
             className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
-            <span className="text-[9px] font-black">M</span>
+            <span className="text-[11px] font-bold">M</span>
           </button>
           <button
             onClick={handleSoloToggle}
             onTouchStart={(e) => { e.preventDefault(); handleSoloToggle(e); }}
             className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
-            <span className="text-[9px] font-black">S</span>
+            <span className="text-[11px] font-bold">S</span>
           </button>
 
           {canHaveSends && (
@@ -412,7 +413,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
                 title="Arm Track for Recording"
               >
-                <span className="text-[9px] font-black">R</span>
+                <span className="text-[11px] font-bold">R</span>
               </button>
           )}
         </div>
@@ -444,7 +445,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 boxShadow: isAdjustingVolume ? `0 0 10px ${track.color}` : 'none'
               }} 
             />
-            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[7px] font-mono text-white/40 pointer-events-none group-hover/vol:text-white/80 transition-colors uppercase">
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/45 pointer-events-none group-hover/vol:text-white/80 transition-colors uppercase">
               {Math.round(track.volume * 100)}%
             </span>
           </div>
@@ -499,7 +500,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               <button 
                 onClick={(e) => handleFXClick(e, p)}
                 onTouchStart={(e) => handleFXClick(e, p)}
-                className={`flex-1 h-6 text-[7px] font-black uppercase truncate px-1 text-center flex items-center justify-center transition-all ${p.isEnabled ? 'text-cyan-400' : 'text-slate-700 bg-black/20'}`}
+                className={`flex-1 h-7 text-[9px] font-bold uppercase truncate px-1 text-center flex items-center justify-center transition-all ${p.isEnabled ? 'text-cyan-300' : 'text-slate-600 bg-black/20'}`}
               >
                 {getAbbr(p.type, p.name)}
               </button>

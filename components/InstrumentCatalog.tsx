@@ -345,10 +345,10 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                 {/* Info */}
                 <div className="flex-1 min-w-0 pr-2">
                     <div className="flex items-center space-x-2">
-                        <h3 className={`text-[10px] font-bold truncate ${playingId === inst.id ? 'text-cyan-400' : 'text-white'}`}>{inst.title}</h3>
+                        <h3 className={`text-[12px] font-semibold truncate ${playingId === inst.id ? 'text-cyan-400' : 'text-white'}`}>{inst.title}</h3>
                         {hasLicense(inst.id) && <i className="fas fa-check-circle text-[8px] text-green-500" title="Purchased"></i>}
                     </div>
-                    <div className="flex items-center text-[8px] text-slate-500 space-x-2">
+                    <div className="flex items-center text-[10px] text-slate-400 space-x-2 mt-0.5">
                         <span>{inst.bpm || '?'} BPM</span>
                         <span>•</span>
                         <span className="truncate">{inst.genre || 'Beat'}</span>
@@ -363,13 +363,13 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
 
                 {/* Actions */}
                 <div className="flex flex-col items-end space-y-1">
-                    <span className="text-[9px] font-mono text-cyan-400">{inst.price_base ? `${inst.price_base}€` : 'N/A'}</span>
+                    <span className="text-[11px] font-semibold text-cyan-300">{inst.price_base ? `${inst.price_base}€` : 'N/A'}</span>
                     <button 
                         onClick={() => setSelectedBeat(inst)}
-                        className="w-5 h-5 rounded bg-white/5 hover:bg-cyan-500 hover:text-black flex items-center justify-center transition-colors"
+                        className="w-7 h-7 rounded-md bg-white/5 hover:bg-cyan-500 hover:text-black flex items-center justify-center transition-colors"
                         title="Buy License"
                     >
-                        <i className="fas fa-shopping-cart text-[8px]"></i>
+                        <i className="fas fa-shopping-cart text-[10px]"></i>
                     </button>
                 </div>
               </div>
