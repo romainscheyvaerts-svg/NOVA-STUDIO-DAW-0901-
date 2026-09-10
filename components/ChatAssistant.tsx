@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { AIChatMessage, AIAction } from '../types';
+import { AIChatMessage, AIAction, DAWState } from '../types';
 
 interface ChatAssistantProps {
   onSendMessage: (msg: string) => Promise<any>;
@@ -8,14 +8,16 @@ interface ChatAssistantProps {
   isMobile?: boolean;
   forceOpen?: boolean;
   onClose?: () => void; // New prop for explicit close action
+  /** Etat du projet : sert a calculer l'etape suivante du guide. */
+  projectState?: DAWState;
 }
 
-const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, isMobile, forceOpen, onClose }) => {
+const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, isMobile, forceOpen, onClose, projectState }) => {
   const [isOpen, setIsOpen] = useState(forceOpen || false);
   const [inputValue, setInputValue] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [messages, setMessages] = useState<AIChatMessage[]>([
-    { id: '1', role: 'assistant', content: 'Studio Master Online. Je pilote ton mix, calage du BPM et chaîne FX.', timestamp: Date.now() }
+    { id: '1', role: 'assistant', content: "Salut ! Je suis Nova, je t'accompagne pas à pas. Suis l'étape affichée au-dessus, ou pose-moi une question quand tu veux.", timestamp: Date.now() }
   ]);
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -92,6 +94,56 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     }
   };
 
+  /**
+   * Etape suivante, deduite de l'etat reel du projet.
+   *
+   * Le guide est volontairement calcule ici et non demande au modele : il doit
+   * fonctionner meme sans cle API, et rester juste a la seconde pres. L'IA
+   * repond aux questions libres, elle ne porte pas le fil conducteur.
+   */
+  // « A-t-il deja ecoute ? » est un fait acquis, pas un etat instantane.
+  // S'appuyer sur currentTime rendait l'etape dependante du rafraichissement
+  // d'affichage : mettre en pause, ou jouer dans un onglet en arriere-plan,
+  // faisait reculer le guide.
+  const aDejaEcoute = React.useRef(false);
+  React.useEffect(() => {
+    if (projectState?.isPlaying || (projectState?.currentTime || 0) > 0.5) {
+      aDejaEcoute.current = true;
+    }
+  }, [projectState?.isPlaying, projectState?.currentTime]);
+
+  const etape = React.useMemo(() => {
+    const pistes = projectState?.tracks || [];
+    const beat = pistes.find(t => t.id === 'instrumental');
+    const rec = pistes.find(t => t.id === 'track-rec-main');
+
+    if (!beat || beat.clips.length === 0) return {
+      numero: 1, icone: 'fa-compact-disc',
+      titre: 'Choisis un instrumental',
+      detail: "Clique sur un beat dans le catalogue à gauche. Il se place tout seul sur la piste BEAT, et le studio se règle sur son tempo et sa tonalité."
+    };
+    if (!aDejaEcoute.current && !projectState?.isPlaying) return {
+      numero: 2, icone: 'fa-play',
+      titre: 'Écoute ton instru',
+      detail: "Appuie sur la barre d'espace pour lancer la lecture. Rappuie dessus pour mettre en pause."
+    };
+    if (rec && !rec.isTrackArmed) return {
+      numero: 3, icone: 'fa-microphone',
+      titre: 'Prépare ton micro',
+      detail: "Sur la piste REC, clique le bouton R. Ton navigateur va demander l'autorisation d'utiliser le micro : accepte-la."
+    };
+    if (rec && rec.clips.length === 0) return {
+      numero: 4, icone: 'fa-circle-dot',
+      titre: 'Enregistre ta voix',
+      detail: "Appuie sur le bouton rouge Rec, puis pose ta voix sur le beat. Réappuie pour arrêter."
+    };
+    return {
+      numero: 5, icone: 'fa-sliders',
+      titre: 'Peaufine ton morceau',
+      detail: "Règle les volumes, ajoute un effet sur ta voix. Ctrl+Z annule si besoin. Pour exporter un fichier audio, il faut acheter l'instrumental."
+    };
+  }, [projectState]);
+
   const QUICK_ACTIONS = [
     { label: 'Caler Instru', icon: 'fa-sync-alt', msg: 'Analyse mon instru et cale le BPM' },
     { label: 'Effet Téléphone', icon: 'fa-phone', msg: 'Donne un effet téléphone à ma voix' },
@@ -139,6 +191,24 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
             </button>
           </div>
 
+          {/* Fil conducteur : l'etape suivante, toujours visible.
+              Elle ne depend pas du modele et reste donc juste meme sans cle API. */}
+          <div className="px-5 py-4 border-b border-white/5 bg-gradient-to-b from-cyan-500/[0.07] to-transparent">
+            <div className="flex items-start gap-3">
+              <div className="nova-halo flex-shrink-0 w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-500/40
+                              flex items-center justify-center text-cyan-300">
+                <i className={`fas ${etape.icone} text-[13px]`}></i>
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-cyan-400/80 tracking-wide">ÉTAPE {etape.numero} / 5</span>
+                </div>
+                <h4 className="text-[14px] font-bold text-white mt-0.5">{etape.titre}</h4>
+                <p className="text-[12px] leading-relaxed text-slate-300/90 mt-1">{etape.detail}</p>
+              </div>
+            </div>
+          </div>
+
           <div className="px-6 py-4 bg-black/40 flex space-x-3 border-b border-white/5 overflow-x-auto no-scrollbar">
             {QUICK_ACTIONS.map((action, i) => (
               <button 
@@ -147,7 +217,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
                 className="flex-shrink-0 px-4 py-2.5 bg-white/5 border border-white/10 rounded-2xl hover:bg-cyan-500 hover:text-black hover:border-cyan-400 transition-all flex items-center space-x-2 group"
               >
                 <i className={`fas ${action.icon} text-[10px]`}></i>
-                <span className="text-[9px] font-black uppercase tracking-tighter">{action.label}</span>
+                <span className="text-[11px] font-semibold tracking-tight">{action.label}</span>
               </button>
             ))}
           </div>

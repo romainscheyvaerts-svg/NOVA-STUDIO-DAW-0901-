@@ -66,6 +66,45 @@ const createDefaultAutomation = (param: string, color: string): AutomationLane =
   parameterName: param, points: [], color: color, isExpanded: false, min: 0, max: 1.5
 });
 
+/**
+ * Lit la tonalite annoncee par le catalogue et la traduit pour l'AutoTune.
+ *
+ * Le catalogue melange les ecritures : « F# minor », « B MIN », « Bb min »,
+ * « C # minor », « B HAMONIC minor ». Cette information etait affichee sur la
+ * fiche du beat mais jamais exploitee : on chargeait un instrumental en fa#
+ * mineur et l'AutoTune restait en do chromatique, donc inutilisable tel quel
+ * pour quelqu'un qui ne connait pas la theorie.
+ *
+ * @returns null si la tonalite est absente ou illisible.
+ */
+const lireTonalite = (brut?: string | null): { rootKey: number; scale: string } | null => {
+  if (!brut) return null;
+  const texte = String(brut).trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!texte) return null;
+
+  // Note fondamentale : lettre, puis alteration eventuelle (# ou B/BEMOL),
+  // en tolerant une espace entre les deux (« C # minor »).
+  const m = texte.match(/^([A-G])\s*(#|B|♭)?/);
+  if (!m) return null;
+
+  const base: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  let root = base[m[1]];
+  if (root === undefined) return null;
+  if (m[2] === '#') root = (root + 1) % 12;
+  else if (m[2] === 'B' || m[2] === '♭') root = (root + 11) % 12;
+
+  // Mode. On teste l'harmonique avant le mineur simple, la chaine contenant les deux.
+  // « HAMONIC » est une faute presente telle quelle dans le catalogue.
+  let scale = 'MAJOR';
+  if (/HARMONIC|HAMONIC/.test(texte)) scale = 'MINOR_HARMONIC';
+  else if (/MIN|MINOR|M(?!AJ)/.test(texte)) scale = 'MINOR';
+  else if (/PENTA/.test(texte)) scale = 'PENTATONIC';
+  else if (/MAJ/.test(texte)) scale = 'MAJOR';
+  else scale = 'MINOR'; // le catalogue est massivement en mineur
+
+  return { rootKey: root, scale };
+};
+
 const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number = AUDIO_CONFIG.DEFAULT_BPM, paramsOverride: any = {}): PluginInstance => {
   let params: any = { isEnabled: true };
   let name: string = paramsOverride?.name || type;
@@ -422,9 +461,13 @@ export default function App() {
         
         if (audioUrl) {
           await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0, inst.bpm, inst.id);
-          // Mettre à jour le BPM si disponible
-          if (inst.bpm) {
-            handleUpdateBpm(inst.bpm);
+          // Le studio se cale sur l'instrumental : tempo et tonalite sont
+          // annonces par le catalogue, autant s'en servir plutot que de laisser
+          // un debutant les regler a la main.
+          if (inst.bpm) handleUpdateBpm(inst.bpm);
+          const tonalite = lireTonalite(inst.key);
+          if (tonalite) {
+            setState(prev => ({ ...prev, projectKey: tonalite.rootKey, projectScale: tonalite.scale }));
           }
         }
         setPendingInstrumental(null);
@@ -1154,7 +1197,17 @@ export default function App() {
   }, [setState, activePlugin]);
   
   const handleAddPluginFromContext = useCallback(async (tid: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => {
-    const newPlugin = createDefaultPlugins(type, 0.5, stateRef.current.bpm, metadata);
+    // L'AutoTune s'accorde d'office sur la tonalite du projet, deduite de
+    // l'instrumental charge. Sans ca il demarrait en do chromatique.
+    let reglages = metadata;
+    if (type === 'AUTOTUNE' && stateRef.current.projectKey !== undefined) {
+      reglages = {
+        ...(metadata || {}),
+        rootKey: stateRef.current.projectKey,
+        scale: stateRef.current.projectScale || 'MINOR'
+      };
+    }
+    const newPlugin = createDefaultPlugins(type, 0.5, stateRef.current.bpm, reglages);
 
     setState(produce((draft: DAWState) => {
         const track = draft.tracks.find(t => t.id === tid);
@@ -2373,6 +2426,10 @@ export default function App() {
 
             await handleUniversalAudioImport(audioUrl, match.title, 'instrumental', 0, match.bpm, match.id);
             if (match.bpm) handleUpdateBpm(match.bpm);
+            const tonaliteBeat = lireTonalite(match.key);
+            if (tonaliteBeat) {
+              setState(prev => ({ ...prev, projectKey: tonaliteBeat.rootKey, projectScale: tonaliteBeat.scale }));
+            }
             notify(`✅ "${match.title}" chargé sur la piste BEAT`);
           } catch (e: any) {
             console.error('[AI] LOAD_BEAT', e);
@@ -2751,6 +2808,7 @@ export default function App() {
         <ChatAssistant
             onSendMessage={envoyerAuChatbot}
             onExecuteAction={executeAIAction}
+            projectState={state}
             externalNotification={aiNotification}
             isMobile={isMobile}
             forceOpen={isMobile && activeMobileTab === 'NOVA'}
