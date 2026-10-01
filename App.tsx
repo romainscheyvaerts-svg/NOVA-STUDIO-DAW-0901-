@@ -1526,6 +1526,13 @@ export default function App() {
         ...(iss.fix ? [{ label: `✅ ${iss.fix.label}`, actions: iss.fix.actions }] : []),
       ]);
     });
+    // Plusieurs corrections possibles : un seul geste pour tout appliquer.
+    const allFixes = report.issues.filter(i => i.fix && i.fix.actions.every(a => a.action !== 'OPEN_MIX_STYLES')).flatMap(i => i.fix!.actions);
+    if (allFixes.length > 1) {
+      postNova("Je peux tout corriger d'un coup (Annuler pour revenir) :", [
+        { label: '✨ Tout corriger', actions: allFixes },
+      ]);
+    }
     return report;
   }, [postNova]);
 
