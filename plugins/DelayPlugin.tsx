@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { PluginParameter } from '../types';
+import { EnvelopeDucker, makeCurve, SMOOTH, setParamSmooth } from './vocalDspUtils';
 
 /**
  * PROFESSIONAL TAPE DELAY ENGINE v3.0
@@ -58,15 +59,42 @@ const DIVISION_FACTORS: Record<DelayDivision, number> = {
   '1/32': 0.125,
 };
 
+/**
+ * Une ligne de retard avec sa propre boucle de reinjection :
+ * delay -> passe-haut -> passe-bas -> saturation -> gain de feedback.
+ * Les deux lignes (G/D) sont independantes ; le mode ping-pong ne fait que
+ * croiser leurs reinjections via des gains (bascule douce, pas de recablage).
+ */
+interface DelayLine {
+  delay: DelayNode;
+  hp: BiquadFilterNode;
+  lp: BiquadFilterNode;
+  sat: WaveShaperNode;
+  fb: GainNode;
+  toSelf: GainNode;   // reinjection dans la meme ligne (mode stereo)
+  toOther: GainNode;  // reinjection dans l'autre ligne (mode ping-pong)
+}
+
 export class SyncDelayNode {
+  private readonly createdAt: number;
+  private setP(param: AudioParam, value: number, tau: number) {
+    setParamSmooth(param, value, this.ctx, this.createdAt, tau);
+  }
   private ctx: AudioContext;
   public input: GainNode;
   public output: GainNode;
-  
-  // Main delay lines
-  private delayNodeL: DelayNode;
-  private delayNodeR: DelayNode;
-  
+
+  // Entrees : stereo (mode stereo) et mono (premiere frappe du ping-pong, multi-tap)
+  private stereoIn: GainNode;
+  private monoIn: GainNode;
+  private inSplitter: ChannelSplitterNode;
+  private inL: GainNode;     // canal G -> ligne G (mode stereo)
+  private inR: GainNode;     // canal D -> ligne D (mode stereo)
+  private monoToL: GainNode; // mono -> ligne G (mode ping-pong)
+
+  private lineL: DelayLine;
+  private lineR: DelayLine;
+
   // Multi-tap delays
   private tap2Delay: DelayNode;
   private tap3Delay: DelayNode;
@@ -74,46 +102,38 @@ export class SyncDelayNode {
   private tap2Gain: GainNode;
   private tap3Gain: GainNode;
   private tap4Gain: GainNode;
-  
-  // Feedback network
-  private feedbackGain: GainNode;
-  private feedbackHP: BiquadFilterNode;
-  private feedbackLP: BiquadFilterNode;
-  
-  // Saturation/character
-  private tapeSaturator: WaveShaperNode;
-  private analogFilter: BiquadFilterNode;  // Adds analog warmth
-  
+
+  // Bus wet : fusion G/D -> largeur (matrice M/S) -> chaleur -> ducking -> wet
+  private wetMerger: ChannelMergerNode;
+  private widthSplitter: ChannelSplitterNode;
+  private widthMerger: ChannelMergerNode;
+  private wLL: GainNode; private wLR: GainNode; private wRL: GainNode; private wRR: GainNode;
+  private analogFilter: BiquadFilterNode;  // Adds analog warmth (hors boucle)
+
   // Modulation (wow/flutter)
   private modLFO1: OscillatorNode;
   private modLFO2: OscillatorNode;  // Secondary for complex modulation
   private modGain1: GainNode;
   private modGain2: GainNode;
-  
-  // Ducking
-  private duckingAnalyzer: AnalyserNode;
+
+  // Ducking (suiveur d'enveloppe natif : marche aussi a l'export)
   private duckingGain: GainNode;
-  private duckingData: Float32Array;
-  private duckingInterval: number | null = null;
-  
-  // Stereo processing
-  private panL: StereoPannerNode;
-  private panR: StereoPannerNode;
-  private stereoSplitter: ChannelSplitterNode;
-  private stereoMerger: ChannelMergerNode;
-  
+  private ducker: EnvelopeDucker;
+
   // Mix
   private wetGain: GainNode;
   private dryGain: GainNode;
-  
+
   // Metering
   public inputAnalyzer: AnalyserNode;
   public outputAnalyzer: AnalyserNode;
 
   private params: DelayParams;
+  private curveKey = '';
 
   constructor(ctx: AudioContext, bpm: number) {
     this.ctx = ctx;
+    this.createdAt = ctx.currentTime;
     this.params = {
       division: '1/4',
       divisionR: '1/4',
@@ -140,15 +160,29 @@ export class SyncDelayNode {
     // I/O
     this.input = ctx.createGain();
     this.output = ctx.createGain();
-    
+
     // Initialize with zero gain and ramp up to avoid click on creation
     this.output.gain.setValueAtTime(0, ctx.currentTime);
     this.output.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
-    
-    // Main delay lines (up to 4 seconds)
-    this.delayNodeL = ctx.createDelay(4.0);
-    this.delayNodeR = ctx.createDelay(4.0);
-    
+
+    // Entrees : on force la stereo (une source mono est recopiee sur G et D,
+    // sinon le separateur laisserait le canal droit muet).
+    this.stereoIn = ctx.createGain();
+    this.stereoIn.channelCount = 2;
+    this.stereoIn.channelCountMode = 'explicit';
+    this.stereoIn.channelInterpretation = 'speakers';
+    this.monoIn = ctx.createGain();
+    this.monoIn.channelCount = 1;
+    this.monoIn.channelCountMode = 'explicit';
+    this.monoIn.channelInterpretation = 'speakers';
+    this.inSplitter = ctx.createChannelSplitter(2);
+    this.inL = ctx.createGain();
+    this.inR = ctx.createGain();
+    this.monoToL = ctx.createGain();
+
+    this.lineL = this.createLine();
+    this.lineR = this.createLine();
+
     // Multi-tap delays
     this.tap2Delay = ctx.createDelay(4.0);
     this.tap3Delay = ctx.createDelay(4.0);
@@ -156,64 +190,51 @@ export class SyncDelayNode {
     this.tap2Gain = ctx.createGain();
     this.tap3Gain = ctx.createGain();
     this.tap4Gain = ctx.createGain();
-    
-    // Feedback network with filters
-    this.feedbackGain = ctx.createGain();
-    this.feedbackHP = ctx.createBiquadFilter();
-    this.feedbackHP.type = 'highpass';
-    this.feedbackHP.frequency.value = 80;
-    this.feedbackHP.Q.value = 0.5;
-    
-    this.feedbackLP = ctx.createBiquadFilter();
-    this.feedbackLP.type = 'lowpass';
-    this.feedbackLP.frequency.value = 8000;
-    this.feedbackLP.Q.value = 0.5;
-    
-    // Saturation
-    this.tapeSaturator = ctx.createWaveShaper();
-    this.tapeSaturator.oversample = '4x';
-    this.updateSaturationCurve();
-    
-    // Analog warmth filter
+    this.tap2Gain.gain.value = 0;
+    this.tap3Gain.gain.value = 0;
+    this.tap4Gain.gain.value = 0;
+
+    // Bus wet
+    this.wetMerger = ctx.createChannelMerger(2);
+    this.widthSplitter = ctx.createChannelSplitter(2);
+    this.widthMerger = ctx.createChannelMerger(2);
+    this.wLL = ctx.createGain(); this.wLR = ctx.createGain();
+    this.wRL = ctx.createGain(); this.wRR = ctx.createGain();
+
+    // Analog warmth filter : sorti de la boucle de feedback. Dedans, son
+    // +3/+4 dB dans le grave faisait depasser un gain de boucle de 1 et le
+    // delai partait en auto-oscillation des que le feedback montait.
     this.analogFilter = ctx.createBiquadFilter();
     this.analogFilter.type = 'lowshelf';
     this.analogFilter.frequency.value = 300;
-    this.analogFilter.gain.value = 2;
-    
+    this.analogFilter.gain.value = 0;
+
     // Modulation LFOs
     this.modLFO1 = ctx.createOscillator();
     this.modLFO1.type = 'sine';
     this.modLFO1.frequency.value = 0.3;  // Slower default rate
     this.modGain1 = ctx.createGain();
     this.modGain1.gain.value = 0;  // Start at 0 to avoid initial "wou" sound
-    
+
     this.modLFO2 = ctx.createOscillator();
     this.modLFO2.type = 'triangle';
     this.modLFO2.frequency.value = 0.17;  // Much slower secondary
     this.modGain2 = ctx.createGain();
     this.modGain2.gain.value = 0;  // Start at 0
-    
+
     this.modLFO1.connect(this.modGain1);
     this.modLFO2.connect(this.modGain2);
     this.modLFO1.start();
     this.modLFO2.start();
-    
+
     // Ducking
-    this.duckingAnalyzer = ctx.createAnalyser();
-    this.duckingAnalyzer.fftSize = 256;
-    this.duckingData = new Float32Array(this.duckingAnalyzer.frequencyBinCount);
     this.duckingGain = ctx.createGain();
-    
-    // Stereo processing
-    this.panL = ctx.createStereoPanner();
-    this.panR = ctx.createStereoPanner();
-    this.stereoSplitter = ctx.createChannelSplitter(2);
-    this.stereoMerger = ctx.createChannelMerger(2);
-    
+    this.duckingGain.gain.value = 1;
+
     // Mix
     this.wetGain = ctx.createGain();
     this.dryGain = ctx.createGain();
-    
+
     // Metering
     this.inputAnalyzer = ctx.createAnalyser();
     this.inputAnalyzer.fftSize = 256;
@@ -221,254 +242,234 @@ export class SyncDelayNode {
     this.outputAnalyzer.fftSize = 256;
 
     this.setupChain();
-    this.startDuckingProcess();
-  }
-
-  private updateSaturationCurve() {
-    const n_samples = 44100;
-    const curve = new Float32Array(n_samples);
-    const amount = this.params.saturation * 100 + 10;
-    
-    for (let i = 0; i < n_samples; ++i) {
-      const x = (i * 2) / n_samples - 1;
-      
-      switch (this.params.mode) {
-        case 'TAPE':
-          // Soft tape saturation with asymmetry
-          curve[i] = Math.tanh(x * (1 + amount * 0.02)) * 0.95;
-          break;
-        case 'ANALOG':
-          // Tube-like saturation
-          const k = amount * 0.5;
-          curve[i] = Math.sign(x) * (1 - Math.exp(-Math.abs(x) * k)) / (1 - Math.exp(-k));
-          break;
-        case 'DIGITAL':
-          // Clean digital (no saturation)
-          curve[i] = x;
-          break;
-        case 'DIFFUSE':
-          // Slight soft clipping for smearing effect
-          curve[i] = x - (Math.pow(x, 3) / 3);
-          break;
-        case 'REVERSE':
-          // Clean for reverse delay
-          curve[i] = x;
-          break;
-        default:
-          curve[i] = Math.tanh(x * 1.5);
-      }
-    }
-    
-    this.tapeSaturator.curve = curve;
-  }
-
-  private setupChain() {
-    this.input.disconnect();
-    
-    // Input metering
-    this.input.connect(this.inputAnalyzer);
-    
-    // Ducking analyzer
-    this.input.connect(this.duckingAnalyzer);
-    
-    // Dry path
-    this.input.connect(this.dryGain);
-    this.dryGain.connect(this.output);
-    
-    // Wet path - main tap
-    this.input.connect(this.delayNodeL);
-    
-    // Modulation connections
-    this.modGain1.connect(this.delayNodeL.delayTime);
-    this.modGain2.connect(this.delayNodeL.delayTime);
-    this.modGain1.connect(this.delayNodeR.delayTime);
-    this.modGain2.connect(this.delayNodeR.delayTime);
-    
-    // Multi-tap connections
-    this.input.connect(this.tap2Delay);
-    this.input.connect(this.tap3Delay);
-    this.input.connect(this.tap4Delay);
-    this.tap2Delay.connect(this.tap2Gain);
-    this.tap3Delay.connect(this.tap3Gain);
-    this.tap4Delay.connect(this.tap4Gain);
-    
-    // Feedback chain
-    this.feedbackHP.connect(this.feedbackLP);
-    this.feedbackLP.connect(this.analogFilter);
-    this.analogFilter.connect(this.tapeSaturator);
-    this.tapeSaturator.connect(this.feedbackGain);
-    
-    this.updateRouting();
-    
-    // Output through ducking
-    this.duckingGain.connect(this.wetGain);
-    this.wetGain.connect(this.output);
-    
-    // Output metering
-    this.output.connect(this.outputAnalyzer);
-    
+    this.ducker = new EnvelopeDucker(ctx, this.input, this.duckingGain.gain);
     this.applyParams();
   }
 
-  private updateRouting() {
-    // Disconnect existing routing
-    this.feedbackGain.disconnect();
-    this.delayNodeL.disconnect();
-    this.delayNodeR.disconnect();
-    this.panL.disconnect();
-    this.panR.disconnect();
-    
-    if (this.params.pingPong) {
-      // Ping-pong: L -> R -> L alternating
-      this.delayNodeL.connect(this.feedbackHP);
-      this.delayNodeL.connect(this.panL);
-      
-      this.feedbackGain.connect(this.delayNodeR);
-      this.delayNodeR.connect(this.feedbackHP);
-      this.delayNodeR.connect(this.panR);
-      
-      const width = this.params.stereoWidth;
-      this.panL.pan.value = -0.9 * width;
-      this.panR.pan.value = 0.9 * width;
-      
-      this.panL.connect(this.duckingGain);
-      this.panR.connect(this.duckingGain);
-      
-    } else {
-      // Stereo delay with independent L/R times
-      this.delayNodeL.connect(this.feedbackHP);
-      this.feedbackGain.connect(this.delayNodeL);
-      
-      // For stereo mode, also connect R
-      this.input.connect(this.delayNodeR);
-      this.delayNodeR.connect(this.feedbackHP);
-      
-      // Stereo width via panning
-      const width = this.params.stereoWidth;
-      this.delayNodeL.connect(this.panL);
-      this.delayNodeR.connect(this.panR);
-      this.panL.pan.value = -0.5 * width;
-      this.panR.pan.value = 0.5 * width;
-      
-      this.panL.connect(this.duckingGain);
-      this.panR.connect(this.duckingGain);
-    }
-    
-    // Connect multi-taps to ducking gain
-    if (this.params.multiTap) {
-      this.tap2Gain.connect(this.duckingGain);
-      this.tap3Gain.connect(this.duckingGain);
-      this.tap4Gain.connect(this.duckingGain);
-    }
+  private createLine(): DelayLine {
+    const ctx = this.ctx;
+    const delay = ctx.createDelay(4.0);
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 80;
+    // Q en dB pour ces filtres : -3 dB = Butterworth, aucune bosse de
+    // resonance qui pousserait la boucle au-dela de 1.
+    hp.Q.value = -3.01;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 8000;
+    lp.Q.value = -3.01;
+    const sat = ctx.createWaveShaper();
+    sat.oversample = '2x';
+    const fb = ctx.createGain();
+    fb.gain.value = 0;
+    const toSelf = ctx.createGain();
+    const toOther = ctx.createGain();
+    delay.connect(hp);
+    hp.connect(lp);
+    lp.connect(sat);
+    sat.connect(fb);
+    fb.connect(toSelf);
+    fb.connect(toOther);
+    toSelf.connect(delay);
+    return { delay, hp, lp, sat, fb, toSelf, toOther };
   }
 
-  private startDuckingProcess() {
-    this.duckingInterval = window.setInterval(() => {
-      this.duckingAnalyzer.getFloatTimeDomainData(this.duckingData);
-      let rms = 0;
-      for (let i = 0; i < this.duckingData.length; i++) {
-        rms += this.duckingData[i] * this.duckingData[i];
+  private updateSaturationCurve() {
+    const mode = this.params.mode;
+    const sat = Number.isFinite(this.params.saturation) ? Math.max(0, Math.min(1, this.params.saturation)) : 0.3;
+    const key = `${mode}:${sat.toFixed(3)}`;
+    if (key === this.curveKey) return;
+    this.curveKey = key;
+    // Toutes les courbes ont une pente 1 a l'origine : la saturation colore
+    // les repetitions fortes sans changer le niveau du feedback (avant, TAPE
+    // amplifiait x1,7 dans la boucle et partait en larsen des 60 % de feedback).
+    // Un limiteur doux borne aussi le mode DIGITAL : jamais d'emballement.
+    const soft = (x: number) => {
+      const a = Math.abs(x);
+      return a < 0.7 ? x : Math.sign(x) * (0.7 + 0.3 * Math.tanh((a - 0.7) / 0.3));
+    };
+    let fn: (x: number) => number;
+    switch (mode) {
+      case 'TAPE': {
+        const k = 1 + 2 * sat;
+        fn = x => Math.tanh(k * x) / k;
+        break;
       }
-      rms = Math.sqrt(rms / this.duckingData.length);
-      
-      // Normal feedback control - noise gate removed to ensure audio passes through
-      if (this.params.isEnabled) {
-        const fb = this.params.freeze ? 0.95 : Math.min(0.95, this.params.feedback);
-        this.feedbackGain.gain.setTargetAtTime(fb, this.ctx.currentTime, 0.02);
+      case 'ANALOG': {
+        // Asymetrique (harmoniques paires), normalisee en pente et en zero.
+        const k = 1 + 2.5 * sat, b = 0.2;
+        const t0 = Math.tanh(k * b), slope = k * (1 - t0 * t0);
+        fn = x => (Math.tanh(k * (x + b)) - t0) / slope;
+        break;
       }
-      
-      // Ducking processing (original functionality)
-      if (this.params.ducking > 0 && this.params.isEnabled) {
-        const duckAmount = Math.min(1, rms * 5) * this.params.ducking;
-        const targetGain = Math.max(0.05, 1 - duckAmount * 0.9);
-        this.duckingGain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.02);
-      } else {
-        this.duckingGain.gain.setTargetAtTime(1, this.ctx.currentTime, 0.05);
-      }
-    }, 1000 / 60);
+      case 'DIFFUSE':
+        fn = x => x - (x * x * x) / 3;
+        break;
+      default:
+        fn = soft;
+    }
+    const curve = makeCurve(4097, x => soft(fn(x)));
+    this.lineL.sat.curve = curve;
+    this.lineR.sat.curve = curve;
+  }
+
+  private setupChain() {
+    // Input metering
+    this.input.connect(this.inputAnalyzer);
+
+    // Dry path
+    this.input.connect(this.dryGain);
+    this.dryGain.connect(this.output);
+
+    // Entrees des lignes
+    this.input.connect(this.stereoIn);
+    this.input.connect(this.monoIn);
+    this.stereoIn.connect(this.inSplitter);
+    this.inSplitter.connect(this.inL, 0);
+    this.inSplitter.connect(this.inR, 1);
+    this.inL.connect(this.lineL.delay);
+    this.inR.connect(this.lineR.delay);
+    this.monoIn.connect(this.monoToL);
+    this.monoToL.connect(this.lineL.delay);
+
+    // Ping-pong : G -> D -> G ... (chaque repetition change de cote).
+    // L'ancien cablage renvoyait toutes les repetitions dans la ligne droite.
+    this.lineL.toOther.connect(this.lineR.delay);
+    this.lineR.toOther.connect(this.lineL.delay);
+
+    // Modulation connections
+    this.modGain1.connect(this.lineL.delay.delayTime);
+    this.modGain2.connect(this.lineL.delay.delayTime);
+    this.modGain1.connect(this.lineR.delay.delayTime);
+    this.modGain2.connect(this.lineR.delay.delayTime);
+
+    // Multi-tap (depuis le mono, au centre)
+    this.monoIn.connect(this.tap2Delay);
+    this.monoIn.connect(this.tap3Delay);
+    this.monoIn.connect(this.tap4Delay);
+    this.tap2Delay.connect(this.tap2Gain);
+    this.tap3Delay.connect(this.tap3Gain);
+    this.tap4Delay.connect(this.tap4Gain);
+    this.tap2Gain.connect(this.analogFilter);
+    this.tap3Gain.connect(this.analogFilter);
+    this.tap4Gain.connect(this.analogFilter);
+
+    // Sorties des lignes -> G / D, puis largeur stereo (matrice M/S)
+    this.lineL.delay.connect(this.wetMerger, 0, 0);
+    this.lineR.delay.connect(this.wetMerger, 0, 1);
+    this.wetMerger.connect(this.widthSplitter);
+    this.widthSplitter.connect(this.wLL, 0);
+    this.widthSplitter.connect(this.wLR, 0);
+    this.widthSplitter.connect(this.wRL, 1);
+    this.widthSplitter.connect(this.wRR, 1);
+    this.wLL.connect(this.widthMerger, 0, 0);
+    this.wRL.connect(this.widthMerger, 0, 0);
+    this.wLR.connect(this.widthMerger, 0, 1);
+    this.wRR.connect(this.widthMerger, 0, 1);
+    this.widthMerger.connect(this.analogFilter);
+
+    // Output through ducking
+    this.analogFilter.connect(this.duckingGain);
+    this.duckingGain.connect(this.wetGain);
+    this.wetGain.connect(this.output);
+
+    // Output metering
+    this.output.connect(this.outputAnalyzer);
   }
 
   public updateParams(p: Partial<DelayParams>) {
-    const oldPingPong = this.params.pingPong;
-    const oldMode = this.params.mode;
-    const oldMultiTap = this.params.multiTap;
-    
     this.params = { ...this.params, ...p };
-    
-    // Update routing if needed
-    if (p.pingPong !== undefined && p.pingPong !== oldPingPong) {
-      this.updateRouting();
-    }
-    if (p.multiTap !== undefined && p.multiTap !== oldMultiTap) {
-      this.updateRouting();
-    }
-    
-    // Update saturation curve if mode changed
-    if (p.mode !== undefined && p.mode !== oldMode) {
-      this.updateSaturationCurve();
-    }
-    if (p.saturation !== undefined) {
-      this.updateSaturationCurve();
-    }
-    
+    this.updateSaturationCurve();
     this.applyParams();
   }
 
   private applyParams() {
     const now = this.ctx.currentTime;
-    const beatDuration = 60 / (this.params.bpm || 120);
-    const delayL = beatDuration * DIVISION_FACTORS[this.params.division];
-    const delayR = beatDuration * DIVISION_FACTORS[this.params.divisionR || this.params.division];
     const safe = (v: number, def: number) => Number.isFinite(v) ? v : def;
+    const T = SMOOTH;
+    const bpm = Math.max(20, Math.min(400, safe(this.params.bpm, 120)));
+    const beatDuration = 60 / bpm;
+    const factor = (d: DelayDivision | undefined) => DIVISION_FACTORS[d as DelayDivision] ?? 1;
+    // 4 s max (taille des DelayNode)
+    const delayL = Math.min(3.99, beatDuration * factor(this.params.division));
+    const delayR = Math.min(3.99, beatDuration * factor(this.params.divisionR || this.params.division));
 
     if (this.params.isEnabled) {
-      // Main delay times
-      this.delayNodeL.delayTime.setTargetAtTime(delayL, now, 0.05);
-      this.delayNodeR.delayTime.setTargetAtTime(delayR, now, 0.05);
-      
+      // Main delay times (glissement doux facon bande, pas de clic)
+      this.setP(this.lineL.delay.delayTime, delayL, 0.05);
+      this.setP(this.lineR.delay.delayTime, delayR, 0.05);
+
       // Multi-tap times (fractions of main delay)
       if (this.params.multiTap) {
-        this.tap2Delay.delayTime.setTargetAtTime(delayL * 0.5, now, 0.05);
-        this.tap3Delay.delayTime.setTargetAtTime(delayL * 0.75, now, 0.05);
-        this.tap4Delay.delayTime.setTargetAtTime(delayL * 0.25, now, 0.05);
-        this.tap2Gain.gain.setTargetAtTime(safe(this.params.tap2Level, 0.5), now, 0.02);
-        this.tap3Gain.gain.setTargetAtTime(safe(this.params.tap3Level, 0.35), now, 0.02);
-        this.tap4Gain.gain.setTargetAtTime(safe(this.params.tap4Level, 0.2), now, 0.02);
+        this.setP(this.tap2Delay.delayTime, delayL * 0.5, 0.05);
+        this.setP(this.tap3Delay.delayTime, delayL * 0.75, 0.05);
+        this.setP(this.tap4Delay.delayTime, delayL * 0.25, 0.05);
+        this.setP(this.tap2Gain.gain, safe(this.params.tap2Level, 0.5), T);
+        this.setP(this.tap3Gain.gain, safe(this.params.tap3Level, 0.35), T);
+        this.setP(this.tap4Gain.gain, safe(this.params.tap4Level, 0.2), T);
       } else {
-        this.tap2Gain.gain.setTargetAtTime(0, now, 0.02);
-        this.tap3Gain.gain.setTargetAtTime(0, now, 0.02);
-        this.tap4Gain.gain.setTargetAtTime(0, now, 0.02);
+        this.setP(this.tap2Gain.gain, 0, T);
+        this.setP(this.tap3Gain.gain, 0, T);
+        this.setP(this.tap4Gain.gain, 0, T);
       }
-      
-      // Feedback with freeze mode
-      const fb = this.params.freeze ? 0.98 : safe(this.params.feedback, 0.4);
-      this.feedbackGain.gain.setTargetAtTime(fb, now, 0.02);
-      
+
+      // Feedback (borne a 0,95 ; freeze a 0,985 : le limiteur de boucle evite
+      // toute explosion meme si un filtre resonne un peu)
+      const fb = this.params.freeze ? 0.985 : Math.max(0, Math.min(0.95, safe(this.params.feedback, 0.4)));
+      this.setP(this.lineL.fb.gain, fb, T);
+      this.setP(this.lineR.fb.gain, fb, T);
+
+      // Routage stereo / ping-pong par gains (pas de recablage => pas de clic)
+      const pp = this.params.pingPong ? 1 : 0;
+      this.setP(this.inL.gain, 1 - pp, T);
+      this.setP(this.inR.gain, 1 - pp, T);
+      this.setP(this.monoToL.gain, pp, T);
+      this.setP(this.lineL.toSelf.gain, 1 - pp, T);
+      this.setP(this.lineR.toSelf.gain, 1 - pp, T);
+      this.setP(this.lineL.toOther.gain, pp, T);
+      this.setP(this.lineR.toOther.gain, pp, T);
+
+      // Largeur : 0 = mono, 1 = G/D separes
+      const w = Math.max(0, Math.min(1, safe(this.params.stereoWidth, 1)));
+      const a = (1 + w) / 2, b = (1 - w) / 2;
+      this.setP(this.wLL.gain, a, T);
+      this.setP(this.wRR.gain, a, T);
+      this.setP(this.wLR.gain, b, T);
+      this.setP(this.wRL.gain, b, T);
+
       // Feedback filters
-      this.feedbackHP.frequency.setTargetAtTime(safe(this.params.feedbackHP, 80), now, 0.02);
-      this.feedbackLP.frequency.setTargetAtTime(safe(this.params.feedbackLP, 8000), now, 0.02);
-      
+      const hpF = Math.max(20, Math.min(5000, safe(this.params.feedbackHP, 80)));
+      const lpF = Math.max(500, Math.min(20000, safe(this.params.feedbackLP, 8000)));
+      for (const line of [this.lineL, this.lineR]) {
+        this.setP(line.hp.frequency, hpF, T);
+        this.setP(line.lp.frequency, lpF, T);
+      }
+
       // Modulation - reduced values to prevent "wou wou" artifacts
       const modEnabled = this.params.mode === 'TAPE' || this.params.mode === 'ANALOG';
       const modDepth = modEnabled ? safe(this.params.modDepth, 0.05) : 0;  // Default reduced from 0.15 to 0.05
-      this.modLFO1.frequency.setTargetAtTime(Math.max(0.1, safe(this.params.modRate, 0.3)), now, 0.05);
-      this.modLFO2.frequency.setTargetAtTime(Math.max(0.05, safe(this.params.modRate, 0.3) * 0.5), now, 0.05);
+      this.setP(this.modLFO1.frequency, Math.max(0.1, safe(this.params.modRate, 0.3)), 0.05);
+      this.setP(this.modLFO2.frequency, Math.max(0.05, safe(this.params.modRate, 0.3) * 0.5), 0.05);
       // Much smaller modulation depth values to avoid pitch wobble
-      this.modGain1.gain.setTargetAtTime(modDepth * 0.0003, now, 0.1);  // Reduced from 0.002
-      this.modGain2.gain.setTargetAtTime(modDepth * 0.0001, now, 0.1);  // Reduced from 0.0008
-      
+      this.setP(this.modGain1.gain, modDepth * 0.0003, 0.1);  // Reduced from 0.002
+      this.setP(this.modGain2.gain, modDepth * 0.0001, 0.1);  // Reduced from 0.0008
+
       // Analog warmth based on mode
       const warmth = this.params.mode === 'TAPE' ? 3 : (this.params.mode === 'ANALOG' ? 4 : 0);
-      this.analogFilter.gain.setTargetAtTime(warmth, now, 0.02);
-      
+      this.setP(this.analogFilter.gain, warmth, T);
+
+      // Ducking : les echos s'effacent quand la voix chante, reviennent entre les phrases
+      this.ducker.setAmount(safe(this.params.ducking, 0));
+
       // Mix with equal-power crossfade
-      const mix = safe(this.params.mix, 0.3);
-      this.dryGain.gain.setTargetAtTime(Math.cos(mix * Math.PI * 0.5), now, 0.02);
-      this.wetGain.gain.setTargetAtTime(Math.sin(mix * Math.PI * 0.5), now, 0.02);
-      
+      const mix = Math.max(0, Math.min(1, safe(this.params.mix, 0.3)));
+      this.setP(this.dryGain.gain, Math.cos(mix * Math.PI * 0.5), T);
+      this.setP(this.wetGain.gain, Math.sin(mix * Math.PI * 0.5), T);
+
     } else {
-      this.dryGain.gain.setTargetAtTime(1, now, 0.02);
-      this.wetGain.gain.setTargetAtTime(0, now, 0.02);
+      this.setP(this.dryGain.gain, 1, T);
+      this.setP(this.wetGain.gain, 0, T);
     }
   }
 
@@ -482,10 +483,10 @@ export class SyncDelayNode {
 
   public getAudioParam(paramId: string): AudioParam | null {
     switch (paramId) {
-      case 'feedback': return this.feedbackGain.gain;
+      case 'feedback': return this.lineL.fb.gain;
       case 'mix': return this.wetGain.gain;
-      case 'feedbackLP': return this.feedbackLP.frequency;
-      case 'feedbackHP': return this.feedbackHP.frequency;
+      case 'feedbackLP': return this.lineL.lp.frequency;
+      case 'feedbackHP': return this.lineL.hp.frequency;
       default: return null;
     }
   }
@@ -500,9 +501,7 @@ export class SyncDelayNode {
         this.modLFO2.stop();
         this.modLFO2.disconnect();
       }
-      if (this.duckingInterval) {
-        clearInterval(this.duckingInterval);
-      }
+      this.ducker.disconnect();
     } catch (e) {
       // Oscillators may already be stopped
     }

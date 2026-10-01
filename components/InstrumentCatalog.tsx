@@ -6,15 +6,18 @@ import { supabaseManager } from '../services/SupabaseManager';
 import { stripeManager } from '../services/StripeManager';
 import AdminPanel from './AdminPanel';
 import { audioEngine } from '../engine/AudioEngine';
+import { setDraggedBeat } from '../utils/beatDrag';
 
 interface InstrumentCatalogProps {
   user: User | null;
   onPurchase?: (instrumentId: number) => void;
+  /** Charge le beat sur la piste BEAT (bouton « Essayer » / tap sur la ligne). */
+  onLoadBeat?: (inst: any) => void;
 }
 
 type AudioMode = 'STANDARD' | 'STUDIO';
 
-const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase }) => {
+const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase, onLoadBeat }) => {
   const [allInstrumentals, setAllInstrumentals] = useState<Instrumental[]>([]);
   const [displayedInstrumentals, setDisplayedInstrumentals] = useState<Instrumental[]>([]);
   const [loading, setLoading] = useState(true);
@@ -217,6 +220,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
           audioUrl = supabaseManager.getDrivePreviewUrl(inst.drive_file_id);
       }
       
+      setDraggedBeat(inst, audioUrl);
       console.log('[DragStart] Instrumental:', inst.title);
       console.log('[DragStart] preview_url:', inst.preview_url);
       console.log('[DragStart] drive_file_id:', inst.drive_file_id);
@@ -277,7 +281,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#08090b] relative">
+    <div className="h-full flex flex-col bg-[#08090b] relative" data-nova-target="beat-catalog">
       
       {showAdminModal && user && (
         <AdminPanel 
@@ -293,7 +297,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
         <div className="flex justify-between items-center">
           <div>
              <h2 className="text-xs font-black uppercase tracking-widest text-white">Beat <span className="text-cyan-500">Store</span></h2>
-             <p className="text-[8px] text-slate-500 font-mono">Drag & Drop to Try</p>
+             <p className="text-[11px] text-slate-400">Écoute ▶ puis « Essayer » pour poser ta voix</p>
           </div>
           
           {isAdmin && (
@@ -332,7 +336,8 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                     <img src={getCoverImage(inst)} alt={inst.title} className="w-full h-full object-cover rounded-md opacity-80 group-hover:opacity-100" />
                     <button 
                         onClick={(e) => togglePlay(inst, e)}
-                        className={`absolute inset-0 flex items-center justify-center bg-black/40 hover:bg-black/60 transition-all ${playingId === inst.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                        aria-label={playingId === inst.id ? `Pause ${inst.title}` : `Écouter ${inst.title}`}
+                        className={`absolute inset-0 flex items-center justify-center bg-black/40 hover:bg-black/60 transition-all ${playingId === inst.id ? 'opacity-100' : 'opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100'}`}
                     >
                         {playingId === inst.id ? (
                             <i className="fas fa-pause text-cyan-400 text-[10px]"></i>
@@ -362,6 +367,16 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase 
                 </div>
 
                 {/* Actions */}
+                {onLoadBeat && (
+                  <button
+                    type="button"
+                    onClick={() => onLoadBeat(inst)}
+                    className="mr-2 h-9 px-3 rounded-lg bg-cyan-500 text-black text-[11px] font-black uppercase hover:bg-cyan-400 active:scale-95 transition-all"
+                    title="Charger ce beat pour poser ta voix dessus"
+                  >
+                    Essayer
+                  </button>
+                )}
                 <div className="flex flex-col items-end space-y-1">
                     <span className="text-[11px] font-semibold text-cyan-300">{inst.price_base ? `${inst.price_base}€` : 'N/A'}</span>
                     <button 

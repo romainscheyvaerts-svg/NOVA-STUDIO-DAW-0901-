@@ -9,6 +9,8 @@ interface MobileBrowserPageProps {
   onAddPlugin: (trackId: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => void;
   onPurchase: (instrumentId: number) => void;
   selectedTrackId: string | null;
+  /** Charge le beat choisi sur la piste BEAT. */
+  onLoadBeat?: (inst: any) => void;
 }
 
 // Plugins natifs Nova
@@ -24,10 +26,8 @@ const INTERNAL_PLUGINS = [
   { id: 'DOUBLER', name: 'Vocal Doubler', category: 'Stereo', icon: 'fa-people-arrows', color: '#8b5cf6' },
   { id: 'DEESSER', name: 'S-Killer', category: 'Dynamics', icon: 'fa-scissors', color: '#ef4444' },
   { id: 'DENOISER', name: 'Denoiser X', category: 'Restoration', icon: 'fa-broom', color: '#14b8a6' },
-  { id: 'MASTERSYNC', name: 'Master Sync', category: 'Utility', icon: 'fa-sync-alt', color: '#ffffff' },
-  { id: 'MELODIC_SAMPLER', name: 'Melodic Sampler', category: 'Instrument', icon: 'fa-music', color: '#22d3ee' },
-  { id: 'DRUM_SAMPLER', name: 'Drum Sampler', category: 'Instrument', icon: 'fa-drum', color: '#f97316' },
-  { id: 'DRUM_RACK_UI', name: 'Drum Rack', category: 'Instrument', icon: 'fa-th', color: '#f97316' }
+  { id: 'MASTERSYNC', name: 'Master Sync', category: 'Utility', icon: 'fa-sync-alt', color: '#ffffff' }
+  // Instruments (samplers, drum rack) retirés : le DAW sert aux voix, pas à composer.
 ];
 
 /**
@@ -36,6 +36,7 @@ const INTERNAL_PLUGINS = [
  */
 const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
   user,
+  onLoadBeat,
   onAddPlugin,
   onPurchase,
   selectedTrackId
@@ -74,7 +75,8 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
     <MobileContainer title="Navigateur">
       <div className="space-y-4 pb-20">
         {/* Onglets - Même structure que SideBrowser2 */}
-        <div className="grid grid-cols-3 gap-2">
+        {/* Onglet Bridge (VST externes) retiré : inutile pour essayer sa voix */}
+        <div className="grid grid-cols-2 gap-2">
           <button
             onClick={() => setActiveTab('STORE')}
             className={`py-4 rounded-xl text-xs font-black uppercase transition-all flex flex-col items-center gap-2 ${
@@ -97,17 +99,6 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
             <i className="fas fa-atom text-lg"></i>
             FX
           </button>
-          <button
-            onClick={() => setActiveTab('BRIDGE')}
-            className={`py-4 rounded-xl text-xs font-black uppercase transition-all flex flex-col items-center gap-2 ${
-              activeTab === 'BRIDGE'
-                ? 'bg-cyan-500 text-black'
-                : 'bg-[#14161a] text-slate-500'
-            }`}
-          >
-            <i className="fas fa-plug text-lg"></i>
-            Bridge
-          </button>
         </div>
 
         {/* Contenu STORE - Catalogue d'instruments */}
@@ -116,6 +107,7 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
             <InstrumentCatalog
               user={user}
               onPurchase={onPurchase}
+              onLoadBeat={onLoadBeat}
             />
           </div>
         )}

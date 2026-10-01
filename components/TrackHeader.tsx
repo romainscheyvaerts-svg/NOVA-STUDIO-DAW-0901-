@@ -337,6 +337,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
 
   return (
     <div 
+      data-nova-target={`track-${track.id}`}
       onClick={onSelect}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, track.id); }}
       onDragOver={handleDragOver}
@@ -356,7 +357,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <i className={`fas ${getTrackIcon()} text-[10px] ${isSelected ? 'text-white' : ''}`}></i>
           </div>
 
-          <div className="truncate">
+          <div className="min-w-0 flex items-center gap-1.5">
             {isRenaming ? (
               <input 
                 ref={nameInputRef}
@@ -374,6 +375,16 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 className={`text-[12px] font-bold tracking-wide truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-400'}`}
               >
                 {track.name} {track.isFrozen && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400"></i>}
+              </span>
+            )}
+            {/* Les pastilles d effets ne tiennent pas quand la piste est basse :
+                ce badge indique toujours combien d effets sont actifs. */}
+            {!isRenaming && insertPlugins.length > 0 && (
+              <span
+                className="shrink-0 px-1 h-4 rounded bg-cyan-500/15 text-cyan-300 text-[9px] font-black leading-4"
+                title={insertPlugins.map(pl => pl.name).join(" → ")}
+              >
+                FX {insertPlugins.length}
               </span>
             )}
           </div>
@@ -407,13 +418,13 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             </button>
           )}
 
-          {/* REC BUTTON - Uniquement pour la piste REC */}
-          {track.id === 'track-rec-main' && (
+          {/* Bouton micro : sur toutes les pistes voix (pas le beat, pas les bus) */}
+          {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
               <button
                 onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
                 onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
                 className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
-                title={track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer" : "Activer le micro sur cette piste (à faire avant d'enregistrer)"}
+                title={track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer" : "Enregistrer sur cette piste (sinon REC choisit la piste sélectionnée)"}
               >
                 <span className="text-[11px] font-bold">R</span>
               </button>
@@ -437,6 +448,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             onTouchStart={handleVolumeTouchStart}
             onTouchMove={handleVolumeTouchMove}
             onTouchEnd={handleVolumeTouchEnd}
+            data-nova-target={`vol-${track.id}`}
             className="h-3 bg-black/60 rounded-full overflow-hidden relative cursor-ew-resize group/vol touch-none"
           >
             <div 
@@ -490,13 +502,15 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           </div>
       )}
 
-      <div className="mt-2 grid grid-cols-4 gap-1">
+      {/* Une seule ligne, défilante : avec un style de mix (5-6 effets) la grille
+          passait sur deux lignes et débordait sur la piste suivante. */}
+      <div className="mt-2 flex gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-h-0">
         {insertPlugins.map(p => (
           <div 
             key={p.id} 
             draggable={!track.isFrozen}
             onDragStart={(e) => { if (track.isFrozen) return; e.stopPropagation(); handleFXDragStart(e, p.id); }}
-            className={`relative group/fxitem flex flex-col items-center fx-slot ${track.isFrozen ? 'pointer-events-none opacity-40' : ''}`}
+            className={`relative group/fxitem flex flex-col items-center fx-slot shrink-0 basis-[calc(25%-3px)] ${track.isFrozen ? 'pointer-events-none opacity-40' : ''}`}
           >
             <div className="flex w-full overflow-hidden rounded-md border border-white/5 bg-black/40">
               <button 

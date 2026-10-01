@@ -4,13 +4,15 @@ import { MobileTab } from '../types';
 interface MobileBottomNavProps {
   activeTab: MobileTab;
   onTabChange: (tab: MobileTab) => void;
+  /** Point sur l'onglet Nova : un message t'attend (bilan de prise, conseil). */
+  novaBadge?: boolean;
 }
 
 /**
  * Barre de navigation mobile en bas d'écran
  * Inspiré de Logic Pro iPad
  */
-const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChange }) => {
+const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChange, novaBadge }) => {
   const tabs: { id: MobileTab; icon: string; label: string }[] = [
     { id: 'TRACKS', icon: 'fa-bars-staggered', label: 'Pistes' },
     { id: 'ARRANGEMENT', icon: 'fa-wave-square', label: 'Arrangement' },
@@ -43,6 +45,9 @@ const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChang
             </span>
             {activeTab === tab.id && (
               <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-1 bg-cyan-400 rounded-full"></div>
+            )}
+            {tab.id === 'NOVA' && novaBadge && activeTab !== 'NOVA' && (
+              <span className="absolute top-2 right-[calc(50%-18px)] w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-[#0c0d10]" aria-label="Nouveau message de Nova" />
             )}
           </button>
         ))}

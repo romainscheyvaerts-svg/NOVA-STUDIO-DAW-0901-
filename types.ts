@@ -315,6 +315,8 @@ export interface DAWState {
   timeSignature: TimeSignature;  // NEW
   projectKey?: number; 
   projectScale?: string; 
+  /** Dernier style de mix voix appliqué (utils/vocalPresets). */
+  vocalMixStyle?: string;
   isPlaying: boolean;
   isRecording: boolean;
   currentTime: number;
@@ -422,7 +424,16 @@ export type AIActionType =
   | 'REDO'
   | 'SAVE_PROJECT'
   | 'OPEN_EXPORT'
-  | 'LOAD_BEAT'; 
+  | 'LOAD_BEAT'
+  // Outils voix
+  | 'APPLY_MIX_STYLE'
+  | 'OPEN_MIX_STYLES'
+  | 'CLEAN_SILENCE'
+  | 'SET_AUTO_CLEAN'
+  // Ingé son : session guidée, écoute du mix, montrer un réglage
+  | 'PREPARE_PART'
+  | 'ANALYZE_MIX'
+  | 'HIGHLIGHT'; 
 
 export interface AIAction {
   action: AIActionType;

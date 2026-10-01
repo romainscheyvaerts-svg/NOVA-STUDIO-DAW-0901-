@@ -46,6 +46,16 @@ import MobileBrowserPage from './components/MobileBrowserPage';
 import MobileBottomNav from './components/MobileBottomNav';
 import LandingPage from './components/LandingPage';
 import { saveBlob } from './utils/saveBlob';
+import { stripSilenceFromClip, StripSilenceResult } from './utils/stripSilence';
+import { findVocalMixStyle } from './utils/vocalPresets';
+import { takeDraggedBeat } from './utils/beatDrag';
+import { detectKey } from './utils/keyDetect';
+import { AudioAnalysisEngine } from './engine/AudioAnalysisEngine';
+import { getVocalRole, findTrackForRole, ROLE_MIX, VocalRole } from './utils/vocalRoles';
+import { analyseMix, takeStats, levelsForAI } from './utils/mixAnalysis';
+import { novaSpotlight } from './utils/novaSpotlight';
+import RecordingCoach from './components/RecordingCoach';
+import VocalToolsPanel from './components/VocalToolsPanel';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -78,6 +88,29 @@ const createDefaultAutomation = (param: string, color: string): AutomationLane =
  *
  * @returns null si la tonalite est absente ou illisible.
  */
+/** Parties d'une session voix, dans l'ordre où un ingé son les fait poser. */
+export type SessionPart = 'lead' | 'back' | 'harmony' | 'adlib';
+const SESSION_LABEL: Record<SessionPart, string> = { lead: 'Voix principale', back: 'Backs', harmony: 'Harmonies', adlib: 'Ad-libs' };
+const SESSION_TRACK_NAME: Record<SessionPart, string> = { lead: 'VOIX', back: 'BACKS', harmony: 'HARMONIES', adlib: 'AD-LIBS' };
+const SESSION_BRIEF: Record<SessionPart, string> = {
+  lead: "🎤 On commence par ta voix principale (le lead) sur la piste {piste} : c'est elle qui porte le morceau. Pose ton couplet d'une traite, même si tu te trompes : on garde la meilleure prise. Appuie sur REC, décompte, et vas-y.",
+  back: "🎤 Les backs, sur la piste {piste} : rechante juste les fins de phrase et les punchlines par-dessus ton lead, avec la même énergie, pour les appuyer. Ton lead reste audible pour te caler. Je te remets 2 s avant ton premier passage.",
+  harmony: "🎶 Les harmonies, sur la piste {piste} : au refrain, chante la même mélodie un peu plus haut (ou plus bas). Si c'est dur, double simplement ton refrain plus doucement, ça marche aussi.",
+  adlib: "🔥 Les ad-libs, sur la piste {piste} : petits mots courts et pleins d'énergie (« yeah », « ok », « skrr »…) dans les trous entre tes phrases. Pas sur les mots du lead !",
+};
+/** Message de Nova poussé par le studio, avec boutons de réponse. */
+export interface NovaFeedMessage {
+  id: string;
+  content: string;
+  choices?: { label: string; action?: AIAction; actions?: AIAction[] }[];
+}
+
+const NOMS_NOTES = ['Do', 'Do#', 'Ré', 'Mi♭', 'Mi', 'Fa', 'Fa#', 'Sol', 'La♭', 'La', 'Si♭', 'Si'];
+const NOMS_GAMMES: Record<string, string> = { MAJOR: 'majeur', MINOR: 'mineur', MINOR_HARMONIC: 'mineur harmonique', PENTATONIC: 'pentatonique', CHROMATIC: 'chromatique' };
+/** « La mineur », pour les messages à l'artiste. */
+const nomTonalite = (rootKey?: number, scale?: string) =>
+  typeof rootKey === 'number' ? `${NOMS_NOTES[((rootKey % 12) + 12) % 12]} ${NOMS_GAMMES[scale || 'MINOR'] || ''}`.trim() : '';
+
 const lireTonalite = (brut?: string | null): { rootKey: number; scale: string } | null => {
   if (!brut) return null;
   const texte = String(brut).trim().toUpperCase().replace(/\s+/g, ' ');
@@ -110,8 +143,8 @@ const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number =
   let params: any = { isEnabled: true };
   let name: string = paramsOverride?.name || type;
 
-  if (type === 'DELAY') params = { division: '1/4', feedback: 0.4, damping: 5000, mix, pingPong: false, bpm, isEnabled: true };
-  if (type === 'REVERB') params = { decay: 2.5, preDelay: 0.02, damping: 12000, mix, size: 0.7, mode: 'HALL', isEnabled: true };
+  if (type === 'DELAY') params = { division: '1/4', feedback: 0.4, feedbackLP: 5000, feedbackHP: 150, mix, pingPong: false, bpm, isEnabled: true };
+  if (type === 'REVERB') params = { decay: 2.5, preDelay: 0.02, damping: 0.4, mix, size: 0.7, mode: 'HALL', isEnabled: true };
   if (type === 'COMPRESSOR') params = { threshold: -18, ratio: 4, knee: 12, attack: 0.003, release: 0.25, makeupGain: 1.0, isEnabled: true };
   if (type === 'AUTOTUNE') params = { speed: 0.1, humanize: 0.2, mix: 1.0, rootKey: 0, scale: 'CHROMATIC', isEnabled: true };
   if (type === 'CHORUS') params = { rate: 1.2, depth: 0.35, spread: 0.5, mix: 0.4, isEnabled: true };
@@ -119,7 +152,7 @@ const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number =
   if (type === 'DOUBLER') params = { detune: 0.4, width: 0.8, gainL: 0.7, gainR: 0.7, directOn: true, isEnabled: true };
   if (type === 'STEREOSPREADER') params = { width: 1.0, haasDelay: 0.015, lowBypass: 0.8, isEnabled: true };
   if (type === 'DEESSER') params = { threshold: -25, frequency: 6500, q: 1.0, reduction: 0.6, mode: 'BELL', isEnabled: true };
-  if (type === 'DENOISER') params = { threshold: -45, reduction: 0.8, release: 0.15, isEnabled: true };
+  if (type === 'DENOISER') params = { threshold: -45, range: -20, attack: 0.005, hold: 0.05, release: 0.15, scFreq: 1000, flip: false, isEnabled: true };
   if (type === 'VOCALSATURATOR') params = { drive: 20, mix: 0.5, tone: 0.0, eqLow: 0, eqMid: 0, eqHigh: 0, mode: 'TAPE', isEnabled: true, outputGain: 1.0 };
   if (type === 'MASTERSYNC') params = { detectedBpm: 120, detectedKey: 0, isMinor: false, isAnalyzing: false, analysisProgress: 0, isEnabled: true, hasResult: false };
   if (type === 'PROEQ12') {
@@ -339,6 +372,8 @@ export default function App() {
   
   // Pending data from landing page to load after entering studio
   const [pendingInstrumental, setPendingInstrumental] = useState<any>(null);
+  // Chargement d'un beat du catalogue (défini plus bas, appelé depuis l'accueil).
+  const loadCatalogBeatRef = useRef<((inst: any) => Promise<void>) | null>(null);
   const [pendingAudioFile, setPendingAudioFile] = useState<File | null>(null);
   const [pendingProject, setPendingProject] = useState<any>(null);
 
@@ -452,25 +487,7 @@ export default function App() {
 
       // Charger un instrumental depuis le catalogue
       if (pendingInstrumental) {
-        const inst = pendingInstrumental;
-        let audioUrl = '';
-        if (inst.preview_url) {
-          audioUrl = supabaseManager.getPublicInstrumentUrl(inst.preview_url);
-        } else if (inst.drive_file_id) {
-          audioUrl = supabaseManager.getDrivePreviewUrl(inst.drive_file_id);
-        }
-        
-        if (audioUrl) {
-          await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0, inst.bpm, inst.id);
-          // Le studio se cale sur l'instrumental : tempo et tonalite sont
-          // annonces par le catalogue, autant s'en servir plutot que de laisser
-          // un debutant les regler a la main.
-          if (inst.bpm) handleUpdateBpm(inst.bpm);
-          const tonalite = lireTonalite(inst.key);
-          if (tonalite) {
-            setState(prev => ({ ...prev, projectKey: tonalite.rootKey, projectScale: tonalite.scale }));
-          }
-        }
+        await loadCatalogBeatRef.current?.(pendingInstrumental);
         setPendingInstrumental(null);
       }
     };
@@ -496,7 +513,9 @@ export default function App() {
       createMasterTrack()
     ],
     selectedTrackId: 'track-rec-main', currentView: 'ARRANGEMENT', projectPhase: ProjectPhase.SETUP, isLowLatencyMode: false, isRecModeActive: false, systemMaxLatency: 0, recStartTime: null,
-    isDelayCompEnabled: false,
+    // Recalage de la prise sur le beat (latence de sortie) : actif par défaut,
+    // sans quoi la voix arrivait en retard.
+    isDelayCompEnabled: true,
     timeSignature: { numerator: 4, denominator: 4 },
     trackGroups: [],
     markers: [],
@@ -511,9 +530,9 @@ export default function App() {
   const toggleTheme = () => { setTheme(prev => prev === 'dark' ? 'light' : 'dark'); };
 
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
-    // Le bridge VST tourne sur un PC (ws://localhost) : inutile de le chercher
-    // depuis un téléphone ou une tablette.
-    useEffect(() => { if (window.matchMedia?.('(pointer: fine)').matches) novaBridge.connect(); }, []);
+    // Bridge VST (ws://localhost) plus connecté automatiquement : l'onglet
+    // Bridge est retiré (le DAW sert aux voix). La fenêtre VST, si un projet
+    // en contient une, se connecte elle-même.
   // Presse-papiers de clips (partage entre l'arrangement desktop et mobile).
   const clipboardClipRef = useRef<Clip | null>(null);
   const stateRef = useRef(state);
@@ -566,6 +585,35 @@ export default function App() {
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);
   const [aiNotification, setAiNotification] = useState<string | null>(null);
+
+  // Nettoyage automatique des blancs après chaque prise (réglable, mémorisé).
+  const [autoCleanSilence, setAutoCleanSilenceState] = useState<boolean>(() => {
+    try { return localStorage.getItem('nova_auto_clean') !== '0'; } catch { return true; }
+  });
+  const autoCleanRef = useRef(autoCleanSilence);
+
+  // Retour du micro dans le casque (réponse à « Tu as un casque ? », modifiable).
+  const [inputMonitoring, setInputMonitoringState] = useState<boolean>(() => {
+    try { return localStorage.getItem('nova_headphones') === '1'; } catch { return false; }
+  });
+  useEffect(() => { audioEngine.setInputMonitoring(inputMonitoring); }, [inputMonitoring]);
+  const setInputMonitoring = (on: boolean) => {
+    setInputMonitoringState(on);
+    try { localStorage.setItem('nova_headphones', on ? '1' : '0'); } catch { /* stockage indisponible */ }
+  };
+  const [countInEnabled, setCountInEnabledState] = useState<boolean>(() => {
+    try { return localStorage.getItem('nova_count_in') !== '0'; } catch { return true; }
+  });
+  const setCountInEnabled = (on: boolean) => {
+    setCountInEnabledState(on);
+    try { localStorage.setItem('nova_count_in', on ? '1' : '0'); } catch { /* stockage indisponible */ }
+  };
+  autoCleanRef.current = autoCleanSilence;
+  const setAutoCleanSilence = (on: boolean) => {
+    setAutoCleanSilenceState(on);
+    try { localStorage.setItem('nova_auto_clean', on ? '1' : '0'); } catch { /* stockage indisponible */ }
+    setAiNotification(on ? '🧹 Nettoyage auto des blancs activé' : 'Nettoyage auto des blancs désactivé');
+  };
   const [addPluginMenu, setAddPluginMenu] = useState<{ trackId: string, x: number, y: number } | null>(null);
   const [automationMenu, setAutomationMenu] = useState<{ x: number, y: number, trackId: string, paramId: string, paramName: string, min: number, max: number } | null>(null);
   const [noArmedTrackError, setNoArmedTrackError] = useState(false);
@@ -610,6 +658,22 @@ export default function App() {
   }, []);
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
+  const isMobileRef = useRef(isMobile); isMobileRef.current = isMobile;
+  const activeTabRef = useRef(activeMobileTab); activeTabRef.current = activeMobileTab;
+
+  // Messages de Nova (avec boutons de réponse) poussés dans le chat par le studio :
+  // bilan de prise, consignes de session, écoute du mix.
+  const [novaFeed, setNovaFeed] = useState<NovaFeedMessage[]>([]);
+  const [novaUnread, setNovaUnread] = useState(false);
+  const postNova = useCallback((content: string, choices?: NovaFeedMessage['choices']) => {
+    setNovaFeed(prev => [...prev.slice(-40), { id: `nova-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, content, choices }]);
+    if (isMobileRef.current && activeTabRef.current !== 'NOVA') setNovaUnread(true);
+  }, []);
+  useEffect(() => { if (activeMobileTab === 'NOVA') setNovaUnread(false); }, [activeMobileTab]);
+
+  // Partie de la session en cours : lead, backs, harmonies, ad-libs.
+  const [sessionPart, setSessionPart] = useState<SessionPart>('lead');
+  const coachAfterTakeRef = useRef<((trackId: string, buffer: AudioBuffer, takeName: string, start: number) => void) | null>(null);
   // Contexte audio déjà raccordé au métronome et aux pistes. Le moteur peut être
   // initialisé ailleurs (aperçu d'un beat du catalogue, armement, import…) :
   // l'ancien test « wasUninitialized » sautait alors le raccordement et le
@@ -1054,6 +1118,8 @@ export default function App() {
   }, [setState]);
 
   const handleSeek = useCallback((time: number) => { 
+    // Pendant une prise, déplacer la lecture la désynchroniserait.
+    if (stateRef.current.isRecording) return;
     setVisualState({ currentTime: time });
     audioEngine.seekTo(time, stateRef.current.tracks, stateRef.current.isPlaying);
     // Le clic doit repartir sur la grille a la nouvelle position.
@@ -1064,6 +1130,9 @@ export default function App() {
   }, [setVisualState]);
   
   const handleTogglePlay = useCallback(async () => {
+      // Pendant une prise, Lecture / Espace la terminent (sinon la lecture
+      // redémarrait alors que l'enregistreur continuait : prise décalée).
+      if (stateRef.current.isRecording) { await toggleRecordRef.current?.(); return; }
       await ensureAudioEngine();
       if (stateRef.current.isPlaying) {
         audioEngine.stopAll();
@@ -1074,9 +1143,30 @@ export default function App() {
       }
   }, [setVisualState]);
 
-  /** Recupere la prise en cours et l'ajoute a la piste armee. */
+  /**
+   * Récupère la prise en cours et l'ajoute à la piste armée :
+   * - nommée « Prise N » ;
+   * - les anciennes prises qu'elle recouvre sont coupées (mute), sinon une
+   *   nouvelle prise doublait la voix ;
+   * - blancs retirés si le nettoyage auto est actif (non destructif).
+   */
   const finalizeRecording = useCallback(async () => {
     const result = await audioEngine.stopRecording();
+    let cleaned: StripSilenceResult | null = null;
+    let takeName = '';
+    let mutedOld = 0;
+    if (result && result.clip.buffer) {
+      const track = stateRef.current.tracks.find(t => t.id === result.trackId);
+      const takeNumber = 1 + (track?.clips || []).reduce((max, c) => {
+        const m = /^Prise (\d+)/.exec(c.name || '');
+        return m ? Math.max(max, parseInt(m[1], 10)) : max;
+      }, 0);
+      takeName = `Prise ${takeNumber}`;
+      result.clip.name = takeName;
+      if (autoCleanRef.current) {
+        cleaned = stripSilenceFromClip({ ...result.clip, bufferId: result.clip.id }, result.clip.buffer);
+      }
+    }
     setState(produce(draft => {
       draft.isRecording = false;
       draft.recStartTime = null;
@@ -1085,52 +1175,396 @@ export default function App() {
         const clipId = clip.id;
         audioBufferRegistry.registerWithUrl(clip.buffer, clip.audioRef!, clipId);
 
-        const newClip: Clip = { ...clip, bufferId: clipId };
-        delete newClip.buffer;
-
+        const toStore = (c: Clip): Clip => { const x: Clip = { ...c, bufferId: clipId }; delete x.buffer; return x; };
         const track = draft.tracks.find(t => t.id === result.trackId);
-        if (track) track.clips.push(newClip);
+        if (track) {
+          const takeStart = clip.start;
+          const takeEnd = clip.start + clip.duration;
+          track.clips.forEach(c => {
+            if (!c.isMuted && c.start < takeEnd && c.start + c.duration > takeStart) { c.isMuted = true; mutedOld++; }
+          });
+          if (cleaned) track.clips.push(...cleaned.clips.map(toStore));
+          else track.clips.push(toStore(clip));
+        }
       }
     }));
+    if (result && result.clip.buffer) {
+      const parts: string[] = [`🎤 ${takeName} enregistrée`];
+      if (cleaned) parts.push(`${cleaned.removedSec.toFixed(1)} s de blanc retirées`);
+      if (mutedOld) parts.push(`l'ancienne prise est coupée`);
+      parts.push('▶ pour l\'écouter · Annuler pour revenir');
+      setAiNotification(parts.join(' — '));
+      const buf = result.clip.buffer;
+      const start = result.clip.start;
+      setTimeout(() => coachAfterTakeRef.current?.(result.trackId, buf, takeName, start), 120);
+    }
     return result;
   }, [setState]);
 
-  const handleStop = useCallback(async () => {
-    metronomeService.stop();
-    const wasRecording = stateRef.current.isRecording;
-    audioEngine.stopAll();
-    // STOP pendant un enregistrement doit conserver la prise, pas la jeter.
-    if (wasRecording) await finalizeRecording();
-    audioEngine.seekTo(0, stateRef.current.tracks, false);
-    setState(prev => ({ ...prev, isPlaying: false, currentTime: 0, isRecording: false }));
-  }, [setState, finalizeRecording]);
+  /** Retire les blancs d'un clip, ou de tous les clips audio d'une piste. */
+  const handleCleanSilences = useCallback((trackId: string, clipId?: string) => {
+    const track = stateRef.current.tracks.find(t => t.id === trackId);
+    if (!track) return;
+    let removed = 0;
+    let touched = 0;
+    const next: Clip[] = [];
+    for (const c of track.clips) {
+      const target = c.type === TrackType.AUDIO && (!clipId || c.id === clipId);
+      const buf = target ? (c.bufferId ? audioBufferRegistry.get(c.bufferId) : c.buffer) : undefined;
+      const res = buf ? stripSilenceFromClip(c, buf) : null;
+      if (res) { next.push(...res.clips); removed += res.removedSec; touched++; }
+      else next.push(c);
+    }
+    if (!touched) {
+      setAiNotification('🧹 Aucun blanc à retirer ici');
+      return;
+    }
+    setState(produce((draft: DAWState) => {
+      const tr = draft.tracks.find(t => t.id === trackId);
+      if (tr) tr.clips = next as any;
+    }));
+    setAiNotification(`🧹 ${removed.toFixed(1)} s de blanc retirées sur ${track.name} (Annuler pour revenir)`);
+  }, [setState]);
+
+  /**
+   * Mix automatique : applique un style (chaîne d'effets, envois, équilibre
+   * voix / beat) à toutes les pistes voix. L'Auto-Tune reçoit la tonalité du
+   * beat quand elle est connue, sinon il corrige en chromatique.
+   */
+  const handleApplyMixStyle = useCallback((styleId: string): boolean => {
+    const style = findVocalMixStyle(styleId);
+    if (!style) {
+      setAiNotification(`Style « ${styleId} » inconnu`);
+      return false;
+    }
+    const st = stateRef.current;
+    const keyKnown = typeof st.projectKey === 'number' && !!st.projectScale;
+    let voiceTracks = 0;
+    const sideCount: Record<string, number> = {};
+    setState(produce((draft: DAWState) => {
+      draft.vocalMixStyle = style.id;
+      draft.tracks.forEach(t => {
+        if (t.id === 'instrumental') { t.volume = style.beatVolume; return; }
+        if (t.type !== TrackType.AUDIO || t.instrumentId) return;
+        voiceTracks++;
+        // Comme un ingé son : le lead devant et au centre, les voix secondaires
+        // plus basses, ouvertes à gauche / à droite et un peu plus « loin ».
+        const role = getVocalRole(t as Track);
+        const rmRole = role === 'back' || role === 'harmony' || role === 'adlib' ? role : 'lead';
+        const rm = ROLE_MIX[rmRole];
+        const side = rmRole === 'lead' ? 0 : ((sideCount[rmRole] = (sideCount[rmRole] || 0) + 1) % 2 === 1 ? -1 : 1);
+        t.volume = Math.round(style.voiceVolume * rm.volume * 100) / 100;
+        t.pan = side * rm.pan;
+        t.plugins = style.chain.map(item => {
+          const extra = item.type === 'AUTOTUNE'
+            ? { rootKey: keyKnown ? st.projectKey : 0, scale: keyKnown ? st.projectScale : 'CHROMATIC' }
+            : {};
+          // Copie profonde : les réglages du style ne doivent jamais être partagés avec l'état (gelé par Immer).
+          const pl = createDefaultPlugins(item.type, item.params.mix ?? 0.3, st.bpm, { ...structuredClone(item.params), ...extra });
+          if (item.type === 'PROEQ12' && rm.highpass && pl.params.bands?.[0]) {
+            pl.params.bands[0].frequency = Math.max(pl.params.bands[0].frequency, rm.highpass);
+          }
+          return pl;
+        }) as any;
+        const fx = style.id === 'voix-brute' ? 0 : 1;
+        const levels: Record<string, number> = {
+          'send-delay': Math.min(1, style.sends.delay + fx * rm.delayAdd),
+          'send-verb-short': Math.min(1, style.sends.verbShort + fx * rm.verbAdd),
+          'send-verb-long': style.sends.verbLong,
+        };
+        Object.entries(levels).forEach(([id, level]) => {
+          const s = t.sends.find(x => x.id === id);
+          if (s) { s.level = level; s.isEnabled = true; }
+          else if (draft.tracks.some(x => x.id === id)) t.sends.push({ id, level, isEnabled: true });
+        });
+      });
+    }));
+    setAiNotification(`${style.emoji} Mix « ${style.name} » appliqué sur tes pistes voix — Annuler pour revenir`);
+    return true;
+  }, [setState]);
+
+  // Panneau « Outils voix » (styles de mix, nettoyage, options d'enregistrement)
+  const [vocalToolsOpen, setVocalToolsOpen] = useState(false);
+  // Incrémenté pour que Nova ouvre le chat et propose les styles de mix.
+  const [mixGuideRequest, setMixGuideRequest] = useState(0);
+
+  /** Piste voix visée par les outils : la sélectionnée, sinon la première avec des prises. */
+  const getTargetVoiceTrack = (): Track | undefined => {
+    const st = stateRef.current;
+    const isVoice = (t?: Track) => !!t && t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId;
+    const sel = st.tracks.find(t => t.id === st.selectedTrackId);
+    if (isVoice(sel) && sel!.clips.length) return sel;
+    return st.tracks.find(t => isVoice(t) && t.clips.length > 0) || (isVoice(sel) ? sel : undefined);
+  };
+
+  // Début de la dernière prise : à l'arrêt on y revient, pour la réécouter.
+  const recStartRef = useRef<number | null>(null);
+
+  /** Piste où l'on peut enregistrer une voix (pas le beat, pas un bus/send). */
+  const isVoiceTrack = (t?: Track | null): t is Track =>
+    !!t && t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId;
+
+  /** Arme une piste voix (une seule à la fois) ; false si le micro est inaccessible. */
+  const armForRecording = useCallback(async (trackId: string): Promise<boolean> => {
+    setState(produce(draft => {
+      draft.tracks.forEach(t => { t.isTrackArmed = t.id === trackId; });
+      draft.selectedTrackId = trackId;
+    }));
+    const erreur = await audioEngine.armTrack(trackId);
+    if (erreur) {
+      setAiNotification(`🎤 ${erreur}`);
+      setState(produce(draft => {
+        const t = draft.tracks.find(x => x.id === trackId);
+        if (t) t.isTrackArmed = false;
+      }));
+      return false;
+    }
+    return true;
+  }, [setState]);
+
+  /**
+   * L'ingé son prépare la partie suivante de la session : choisit (ou crée) la
+   * bonne piste, l'arme, se cale sur le début du lead et briefe l'artiste.
+   */
+  const prepareSessionPart = useCallback(async (part: SessionPart) => {
+    await ensureAudioEngine();
+    let track = findTrackForRole(stateRef.current.tracks, part);
+    if (!track) {
+      const id = `track-${part}-${Date.now()}`;
+      const st = stateRef.current;
+      const leadT = findTrackForRole(st.tracks, 'lead');
+      const rm = ROLE_MIX[part];
+      const color = part === 'harmony' ? '#ec4899' : part === 'adlib' ? '#f97316' : '#a855f7';
+      setState(produce((draft: DAWState) => {
+        const leadD = draft.tracks.find(t => t.id === leadT?.id);
+        const newTrack: Track = {
+          id, name: SESSION_TRACK_NAME[part], type: TrackType.AUDIO, color,
+          isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+          volume: rm.volume, pan: -rm.pan,
+          outputTrackId: draft.tracks.some(t => t.id === 'bus-vox') ? 'bus-vox' : 'master',
+          // Même traitement que le lead (style de mix), envois compris.
+          sends: leadD ? leadD.sends.map(s => ({ ...s })) : [],
+          clips: [],
+          plugins: leadD ? leadD.plugins.map(p => ({ ...JSON.parse(JSON.stringify(p)), id: `pl-${Date.now()}-${Math.random()}` })) : [],
+          automationLanes: [createDefaultAutomation('volume', color)],
+          totalLatency: 0,
+        };
+        let idx = -1;
+        draft.tracks.forEach((t, i) => { if (t.type === TrackType.AUDIO && !t.instrumentId) idx = i; });
+        draft.tracks.splice(idx + 1, 0, newTrack);
+      }));
+      await new Promise(r => setTimeout(r, 80));
+      track = stateRef.current.tracks.find(t => t.id === id);
+    }
+    if (!track) return;
+    setSessionPart(part);
+    const leadT = findTrackForRole(stateRef.current.tracks, 'lead');
+    const leadClips = leadT?.clips.filter(c => !c.isMuted) || [];
+    const leadStart = part !== 'lead' && leadClips.length ? Math.min(...leadClips.map(c => c.start)) : null;
+    if (leadStart !== null) handleSeek(Math.max(0, leadStart - 2));
+    const ok = await armForRecording(track.id);
+    if (!ok) return;
+    postNova(SESSION_BRIEF[part].replace('{piste}', track.name), [
+      { label: '🔴 Lancer la prise', action: { action: 'RECORD', payload: {} } },
+      ...(leadStart !== null ? [{ label: '▶ Réécouter mon lead', actions: [{ action: 'SEEK', payload: { time: leadStart } }, { action: 'PLAY', payload: {} }] as AIAction[] }] : []),
+    ]);
+    if (!isMobileRef.current) novaSpotlight('rec', 'Appuie ici quand tu es prêt', 5000);
+  }, [setState, handleSeek, armForRecording, postNova]);
+
+  /** Étape suivante de la session après une prise (bouton « continuer quand même »). */
+  const suiteSession = (role: VocalRole): NonNullable<NovaFeedMessage['choices']> => {
+    if (role === 'lead') return [{ label: '➡️ Continuer : les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } }];
+    if (role === 'back') return [{ label: '➡️ Continuer : harmonies', action: { action: 'PREPARE_PART', payload: { part: 'harmony' } } }];
+    return [{ label: '🎧 Écoute mon mix', action: { action: 'ANALYZE_MIX', payload: {} } }];
+  };
+
+  /** Bilan de l'ingé son juste après une prise, avec la suite de la session. */
+  coachAfterTakeRef.current = (trackId, buffer, takeName, start) => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t) return;
+    const role = getVocalRole(t);
+    const s = takeStats(buffer);
+    const replay = { label: '▶ Réécouter', actions: [{ action: 'SEEK', payload: { time: start } }, { action: 'PLAY', payload: {} }] as AIAction[] };
+    const redo = { label: '🔁 Refaire', actions: [{ action: 'SEEK', payload: { time: start } }, { action: 'RECORD', payload: {} }] as AIAction[] };
+    if (s.silent || s.rmsDb < -50) {
+      postNova(`🤔 ${takeName} : je n'ai presque rien entendu. Vérifie que ton micro est branché et autorisé, puis rapproche-toi.`, [redo]);
+      return;
+    }
+    if (s.peakDb > -0.3) {
+      postNova(`⚠️ ${takeName} sature par moments (ça grésille, ça ne se rattrape pas au mix). Recule d'une main du micro ou chante un peu moins fort, et refais-la.`, [replay, redo, ...suiteSession(role)]);
+      return;
+    }
+    if (s.rmsDb < -38) {
+      postNova(`🔉 ${takeName} est très faible : rapproche-toi du micro (une main de distance). Remontée au mix, elle ramènerait du souffle.`, [replay, redo, ...suiteSession(role)]);
+      return;
+    }
+    // Voix secondaire posée avec les réglages d'origine : on la place comme un ingé son.
+    let placed = '';
+    if (role !== 'lead' && role !== 'beat' && role !== 'other' && t.volume === 1 && t.pan === 0) {
+      const rm = ROLE_MIX[role];
+      handleUpdateTrack({ ...t, volume: rm.volume, pan: -rm.pan });
+      placed = ` Je l'ai baissée (${Math.round(rm.volume * 100)} %) et décalée à gauche pour qu'elle soutienne ton lead sans le couvrir.`;
+    }
+    const st = stateRef.current;
+    const next: NovaFeedMessage['choices'] = [replay];
+    let text = `✅ ${takeName} : bon niveau, prise propre.${placed}`;
+    if (role === 'lead') {
+      text += " Réécoute-la. Si elle te va, on passe aux backs pour appuyer tes fins de phrase ; sinon refais-en une, l'ancienne est gardée (coupée).";
+      next.push(redo, { label: '➡️ Faire les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } });
+      if (!st.vocalMixStyle) next.push({ label: '🎚️ Choisir un style', action: { action: 'OPEN_MIX_STYLES', payload: {} } });
+    } else if (role === 'back') {
+      text += ' On ajoute des harmonies au refrain, des ad-libs, ou j\'écoute ton mix ?';
+      next.push({ label: '➡️ Harmonies', action: { action: 'PREPARE_PART', payload: { part: 'harmony' } } },
+        { label: '➡️ Ad-libs', action: { action: 'PREPARE_PART', payload: { part: 'adlib' } } },
+        { label: '🎧 Écoute mon mix', action: { action: 'ANALYZE_MIX', payload: {} } });
+    } else if (role === 'harmony') {
+      text += ' Des ad-libs pour finir, ou j\'écoute ton mix ?';
+      next.push({ label: '➡️ Ad-libs', action: { action: 'PREPARE_PART', payload: { part: 'adlib' } } },
+        { label: '🎧 Écoute mon mix', action: { action: 'ANALYZE_MIX', payload: {} } });
+    } else {
+      next.push(redo, { label: '🎧 Écoute mon mix', action: { action: 'ANALYZE_MIX', payload: {} } });
+    }
+    postNova(text, next);
+  };
+
+  /** Nova « écoute » le mix et donne ses retours d'ingé son, réglage par réglage. */
+  const handleAnalyzeMix = useCallback(() => {
+    const st = stateRef.current;
+    const report = analyseMix(
+      st.tracks,
+      c => (c.bufferId ? audioBufferRegistry.get(c.bufferId) : undefined) || c.buffer || audioEngine.getAudioBuffer(c.id),
+      st.vocalMixStyle
+    );
+    postNova(report.summary);
+    report.issues.slice(0, 4).forEach(iss => {
+      const icon = iss.severity === 'bad' ? '🔴' : iss.severity === 'warn' ? '🟠' : '💡';
+      postNova(`${icon} ${iss.title}. ${iss.detail}`, [
+        ...(iss.target ? [{ label: '👉 Montre-moi', action: { action: 'HIGHLIGHT', payload: { target: iss.target, text: iss.spotlightText } } as AIAction }] : []),
+        ...(iss.fix ? [{ label: `✅ ${iss.fix.label}`, actions: iss.fix.actions }] : []),
+      ]);
+    });
+    return report;
+  }, [postNova]);
+
+  // Décompte : 4 temps au tempo du beat avant que la prise démarre.
+  const [countInBeat, setCountInBeat] = useState<number | null>(null);
+  const countInCancelRef = useRef(false);
+  const runCountIn = useCallback(async (bpm: number): Promise<boolean> => {
+    const ctx = audioEngine.ctx;
+    const beat = 60 / Math.max(40, Math.min(240, bpm || 120));
+    countInCancelRef.current = false;
+    if (ctx) {
+      const t0 = ctx.currentTime + 0.05;
+      for (let i = 0; i < 4; i++) {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.frequency.value = i === 0 ? 1500 : 1000;
+        g.gain.setValueAtTime(0.0001, t0 + i * beat);
+        g.gain.exponentialRampToValueAtTime(0.4, t0 + i * beat + 0.002);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * beat + 0.08);
+        osc.connect(g).connect(ctx.destination);
+        osc.start(t0 + i * beat);
+        osc.stop(t0 + i * beat + 0.1);
+      }
+    }
+    for (let i = 4; i >= 1; i--) {
+      if (countInCancelRef.current) { setCountInBeat(null); return false; }
+      setCountInBeat(i);
+      await new Promise(r => setTimeout(r, beat * 1000));
+    }
+    setCountInBeat(null);
+    return !countInCancelRef.current;
+  }, []);
+
+  // Casque : demandé une fois, avant la première prise. Avec casque on entend
+  // sa voix (retour) ; sur haut-parleurs le retour reste coupé (larsen).
+  const [headphonePromptOpen, setHeadphonePromptOpen] = useState(false);
+  const toggleRecordRef = useRef<(() => Promise<void>) | null>(null);
 
   const handleToggleRecord = useCallback(async () => {
     await ensureAudioEngine();
     const currentState = stateRef.current;
-    
+
+    // Pendant le décompte : REC l'annule.
+    if (countInBeat !== null) { countInCancelRef.current = true; return; }
+
     if (currentState.isRecording) {
         audioEngine.stopAll();
+        metronomeService.stop();
         await finalizeRecording();
-        setState(prev => ({ ...prev, isPlaying: false }));
+        // Retour au début de la prise : prêt à la réécouter.
+        const back = recStartRef.current ?? stateRef.current.currentTime;
+        audioEngine.seekTo(back, stateRef.current.tracks, false);
+        setState(prev => ({ ...prev, isPlaying: false, currentTime: back }));
         return;
     }
-  
-    const armedTrack = currentState.tracks.find(t => t.isTrackArmed);
-    if (armedTrack) {
-      const success = await audioEngine.startRecording(currentState.currentTime, armedTrack.id);
-      if (success) {
-        audioEngine.startPlayback(currentState.currentTime, currentState.tracks);
-        setState(produce(draft => {
-          draft.isRecording = true;
-          draft.isPlaying = true;
-          draft.recStartTime = draft.currentTime;
-        }));
+
+    // Armement automatique : plus besoin de trouver le bouton R d'abord.
+    let armedTrack = currentState.tracks.find(t => t.isTrackArmed);
+    if (!armedTrack) {
+      const selected = currentState.tracks.find(t => t.id === currentState.selectedTrackId);
+      const target = isVoiceTrack(selected)
+        ? selected
+        : currentState.tracks.find(t => t.id === 'track-rec-main') ?? currentState.tracks.find(t => isVoiceTrack(t));
+      if (!target) {
+        setNoArmedTrackError(true);
+        setTimeout(() => setNoArmedTrackError(false), 2000);
+        return;
       }
-    } else {
-      setNoArmedTrackError(true);
-      setTimeout(() => setNoArmedTrackError(false), 2000);
+      if (!(await armForRecording(target.id))) return;
+      armedTrack = target;
     }
+
+    // Première prise : question casque (la prise repart après la réponse).
+    let headphonesAsked = false;
+    try { headphonesAsked = localStorage.getItem('nova_headphones') !== null; } catch { headphonesAsked = true; }
+    if (!headphonesAsked) { setHeadphonePromptOpen(true); return; }
+
+    // Décompte (désactivable).
+    let countIn = true;
+    try { countIn = localStorage.getItem('nova_count_in') !== '0'; } catch { /* défaut : oui */ }
+    if (countIn && !(await runCountIn(currentState.bpm))) return;
+
+    const startAt = stateRef.current.currentTime;
+    const success = await audioEngine.startRecording(startAt, armedTrack.id);
+    if (success) {
+      recStartRef.current = startAt;
+      audioEngine.startPlayback(startAt, stateRef.current.tracks);
+      setState(produce(draft => {
+        draft.isRecording = true;
+        draft.isPlaying = true;
+        draft.recStartTime = draft.currentTime;
+      }));
+    } else {
+      setAiNotification("🎤 L'enregistrement n'a pas pu démarrer. Vérifie que le micro est autorisé, puis réessaie.");
+    }
+  }, [setState, finalizeRecording, armForRecording, runCountIn, countInBeat]);
+  toggleRecordRef.current = handleToggleRecord;
+
+  const answerHeadphones = useCallback((hasHeadphones: boolean) => {
+    try { localStorage.setItem('nova_headphones', hasHeadphones ? '1' : '0'); } catch { /* stockage indisponible */ }
+    audioEngine.setInputMonitoring(hasHeadphones);
+    setInputMonitoringState(hasHeadphones);
+    setHeadphonePromptOpen(false);
+    // On enchaîne sur la prise demandée.
+    setTimeout(() => { void toggleRecordRef.current?.(); }, 50);
+  }, []);
+
+  const handleStop = useCallback(async () => {
+    countInCancelRef.current = true;
+    metronomeService.stop();
+    const wasRecording = stateRef.current.isRecording;
+    audioEngine.stopAll();
+    // STOP pendant un enregistrement conserve la prise et revient à son début.
+    if (wasRecording) {
+      await finalizeRecording();
+      const back = recStartRef.current ?? 0;
+      audioEngine.seekTo(back, stateRef.current.tracks, false);
+      setState(prev => ({ ...prev, isPlaying: false, currentTime: back, isRecording: false }));
+      return;
+    }
+    audioEngine.seekTo(0, stateRef.current.tracks, false);
+    setState(prev => ({ ...prev, isPlaying: false, currentTime: 0, isRecording: false }));
   }, [setState, finalizeRecording]);
 
   const handleDuplicateTrack = useCallback((trackId: string) => {
@@ -1838,6 +2272,8 @@ export default function App() {
 
           setExternalImportNotice(`✅ Importé: ${clipName}`);
           console.log(`[AudioImport] Successfully imported: ${clipName} (bufferId: ${bufferId})`);
+          // Rendu pour l'appelant (analyse du beat : tonalité, BPM).
+          return audioBuffer;
 
       } catch (e: any) {
           console.error("[Import Error]", e);
@@ -1846,6 +2282,68 @@ export default function App() {
           setTimeout(() => setExternalImportNotice(null), 3000);
       }
   }, [setState, ensureAudioEngine]);
+
+  /**
+   * Charge un beat du catalogue sur la piste BEAT en REMPLAÇANT le précédent
+   * (avant, un glisser-déposer en ajoutait un second par-dessus), et cale le
+   * tempo et la tonalité annoncés (utiles à l'Auto-Tune).
+   */
+  /**
+   * Tonalité du projet ET de tous les Auto-Tune, en une seule étape d'historique :
+   * la gamme indiquée sur le beat règle la correction sans que l'artiste y touche.
+   */
+  const applyProjectKey = (rootKey: number, scale: string) => {
+    setState(produce((draft: DAWState) => {
+      draft.projectKey = rootKey;
+      draft.projectScale = scale;
+      draft.tracks.forEach(t => t.plugins.forEach(p => {
+        if (p.type === 'AUTOTUNE') { p.params.rootKey = rootKey; p.params.scale = scale; }
+      }));
+    }));
+  };
+
+  const handleLoadCatalogBeat = async (inst: any) => {
+    let audioUrl = '';
+    if (inst?.preview_url) audioUrl = supabaseManager.getPublicInstrumentUrl(inst.preview_url);
+    else if (inst?.drive_file_id) audioUrl = supabaseManager.getDrivePreviewUrl(inst.drive_file_id);
+    if (!audioUrl) {
+      setAiNotification("Ce beat n'a pas de fichier audio disponible.");
+      return;
+    }
+    if (stateRef.current.isPlaying) { audioEngine.stopAll(); setVisualState({ isPlaying: false }); }
+    setState(produce((draft: DAWState) => {
+      const beat = draft.tracks.find(t => t.id === 'instrumental');
+      if (beat) beat.clips = [];
+    }));
+    setAiNotification(`⏳ Chargement de « ${inst.title} »…`);
+    const beatBuffer = await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0, inst.bpm, inst.id);
+    if (inst.bpm) handleUpdateBpm(inst.bpm);
+    let tonalite = lireTonalite(inst.key);
+    let ecoute = false;
+    // Beat sans tonalité ou sans BPM dans le catalogue : on les détecte à l'écoute.
+    if (!tonalite || !inst.bpm) {
+      const buf = beatBuffer || undefined;
+      if (buf) {
+        if (!tonalite) {
+          const d = await detectKey(buf).catch(() => null);
+          if (d) { tonalite = { rootKey: d.rootKey, scale: d.scale }; ecoute = true; }
+        }
+        if (!inst.bpm) {
+          const debut = Math.min(10, buf.duration * 0.2);
+          const bpm = await AudioAnalysisEngine.detectBPMAdvanced(buf, debut, Math.min(30, buf.duration * 0.6)).catch(() => 0);
+          if (bpm >= 60 && bpm <= 200) handleUpdateBpm(bpm);
+        }
+      }
+    }
+    if (tonalite) applyProjectKey(tonalite.rootKey, tonalite.scale);
+    audioEngine.seekTo(0, stateRef.current.tracks, false);
+    setState(prev => ({ ...prev, currentTime: 0 }));
+    setAiNotification(tonalite
+      ? `🎵 « ${inst.title} » est prêt (${nomTonalite(tonalite.rootKey, tonalite.scale)}${ecoute ? ", détectée à l'écoute" : ''}) — l'Auto-Tune est réglé sur cette gamme. Appuie sur REC pour poser ta voix`
+      : `🎵 « ${inst.title} » est prêt — appuie sur REC pour poser ta voix (gamme inconnue : l'Auto-Tune corrige sur toutes les notes)`);
+    if (isMobile) setActiveMobileTab('TRACKS');
+  };
+  loadCatalogBeatRef.current = handleLoadCatalogBeat;
 
   const handleLoadDrumSample = useCallback(async (trackId: string, padId: number, file: File) => {
     try {
@@ -1887,20 +2385,18 @@ export default function App() {
       },
       editClip: handleEditClip,
       setBpm: handleUpdateBpm,
-      syncAutoTuneScale: (rootKey: number, scale: string) => {
-          setState(produce((draft: DAWState) => {
-              draft.tracks.forEach(t => {
-                  t.plugins.forEach(p => {
-                      if (p.type === 'AUTOTUNE') {
-                          p.params.rootKey = rootKey;
-                          p.params.scale = scale;
-                      }
-                  });
-              });
-          }));
+      syncAutoTuneScale: (rootKey: number, scale: string) => applyProjectKey(rootKey, scale)
+    };
+    // Dépôt d'un fichier ou d'un beat sur l'en-tête d'une piste (TrackHeader) :
+    // cet objet n'existait pas, le dépôt ne faisait rien.
+    (window as any).DAW_CORE = {
+      handleAudioImport: (source: string | File, name: string, trackId: string) => {
+        const beat = takeDraggedBeat(source);
+        if (beat) return loadCatalogBeatRef.current?.(beat);
+        return handleUniversalAudioImport(source, name, trackId);
       }
     };
-  }, [handleUpdateBpm, handleUpdateTrack, handleTogglePlay, handleStop, handleSeek, handleDuplicateTrack, handleCreateTrack, handleDeleteTrack, handleToggleBypass, handleLoadDrumSample, handleEditClip, setState]);
+  }, [handleUpdateBpm, handleUpdateTrack, handleTogglePlay, handleStop, handleSeek, handleDuplicateTrack, handleCreateTrack, handleDeleteTrack, handleToggleBypass, handleLoadDrumSample, handleEditClip, setState, handleUniversalAudioImport]);
 
   /**
    * Applique une action renvoyée par l'assistant IA.
@@ -1983,7 +2479,8 @@ export default function App() {
       case 'ADD_TRACK':
       case 'CREATE_TRACK': {
         const type = (String(p.type || 'AUDIO').toUpperCase() as TrackType);
-        const valid = [TrackType.AUDIO, TrackType.MIDI, TrackType.BUS, TrackType.SEND];
+        // Pas de piste MIDI : le DAW sert aux voix (aucun outil de composition).
+        const valid = [TrackType.AUDIO, TrackType.BUS, TrackType.SEND];
         handleCreateTrack(valid.includes(type) ? type : TrackType.AUDIO, p.name);
         break;
       }
@@ -2097,6 +2594,7 @@ export default function App() {
         break;
 
       case 'RECORD':
+        if (isMobileRef.current && activeTabRef.current === 'NOVA') setActiveMobileTab('TRACKS');
         handleToggleRecord();
         break;
 
@@ -2148,12 +2646,10 @@ export default function App() {
       case 'PREPARE_REC': {
         const t = findTrack(p.trackId) || tracks.find(tr => tr.id === stateRef.current.selectedTrackId);
         if (!t) return;
-        setState(produce((draft: DAWState) => {
-          draft.tracks.forEach(tr => { tr.isTrackArmed = tr.id === t.id; });
-          draft.selectedTrackId = t.id;
-          draft.isRecModeActive = true;
-        }));
-        notify(`🔴 ${t.name} armée pour l'enregistrement`);
+        // Vrai armement (micro ouvert) : avant, la piste paraissait armée sans
+        // micro, et l'enregistrement échouait en silence.
+        setState(produce((draft: DAWState) => { draft.isRecModeActive = true; }));
+        void armForRecording(t.id).then(ok => { if (ok) notify(`🔴 Micro prêt sur ${t.name} — appuie sur REC`); });
         break;
       }
 
@@ -2215,9 +2711,8 @@ export default function App() {
         const t = findTrack(p.trackId);
         if (!t) return;
         const armed = p.armed === undefined ? !t.isTrackArmed : !!p.armed;
-        setState(produce((draft: DAWState) => {
-          draft.tracks.forEach(tr => { tr.isTrackArmed = tr.id === t.id ? armed : false; });
-        }));
+        if (armed) void armForRecording(t.id);
+        else handleUpdateTrack({ ...t, isTrackArmed: false });
         break;
       }
 
@@ -2349,56 +2844,11 @@ export default function App() {
       }
 
       // ---- MIDI ----
-      case 'CREATE_PATTERN': {
-        const t = findTrack(p.trackId);
-        if (!t) return;
-        handleCreatePatternAndOpen(t.id, Math.max(0, Number(p.time) || stateRef.current.currentTime));
-        break;
-      }
-
-      case 'ADD_NOTES': {
-        const t = findTrack(p.trackId);
-        if (!t || !Array.isArray(p.notes) || p.notes.length === 0) return;
-        const notes = p.notes.slice(0, 512).map((n: any, i: number) => ({
-          id: `note-${Date.now()}-${i}`,
-          pitch: Math.round(clamp(n.pitch, 0, 127, 60)),
-          start: Math.max(0, Number(n.start) || 0),
-          duration: Math.max(0.01, Number(n.duration) || 0.25),
-          velocity: clamp(n.velocity, 0, 1, 0.8)
-        }));
-        setState(produce((draft: DAWState) => {
-          const tr = draft.tracks.find(x => x.id === t.id);
-          if (!tr) return;
-          let clip = p.clipId ? tr.clips.find(c => c.id === p.clipId) : tr.clips.find(c => c.type === TrackType.MIDI);
-          if (!clip) {
-            // Pas encore de pattern : on en cree un qui couvre les notes fournies.
-            const end = notes.reduce((m: number, n: any) => Math.max(m, n.start + n.duration), 0);
-            clip = {
-              id: `clip-midi-${Date.now()}`,
-              start: Math.max(0, Number(p.start) || 0),
-              duration: Math.max((60 / draft.bpm) * 4, end),
-              offset: 0, fadeIn: 0, fadeOut: 0,
-              name: 'Pattern', color: tr.color, type: TrackType.MIDI,
-              notes: [], isMuted: false, gain: 1
-            };
-            tr.clips.push(clip);
-          }
-          clip.notes = [...(clip.notes || []), ...notes];
-          const end = clip.notes.reduce((m, n) => Math.max(m, n.start + n.duration), 0);
-          clip.duration = Math.max(clip.duration, end);
-        }));
-        notify(`🎹 ${notes.length} note(s) ajoutée(s) sur ${t.name}`);
-        break;
-      }
-
+      case 'CREATE_PATTERN':
+      case 'ADD_NOTES':
       case 'CLEAR_NOTES': {
-        const t = findTrack(p.trackId);
-        if (!t) return;
-        patchTrack(t.id, tr => {
-          tr.clips.forEach(c => {
-            if (c.type === TrackType.MIDI && (!p.clipId || c.id === p.clipId)) c.notes = [];
-          });
-        });
+        // Composition MIDI retirée : le DAW sert à essayer sa voix sur les instrus.
+        setAiNotification("🎤 Nova Studio sert à enregistrer ta voix sur les instrus — pas de composition ici.");
         break;
       }
 
@@ -2460,13 +2910,7 @@ export default function App() {
             else if (match.drive_file_id) audioUrl = supabaseManager.getDrivePreviewUrl(match.drive_file_id);
             if (!audioUrl) { notify(`❌ "${match.title}" n'a pas de fichier audio`); return; }
 
-            await handleUniversalAudioImport(audioUrl, match.title, 'instrumental', 0, match.bpm, match.id);
-            if (match.bpm) handleUpdateBpm(match.bpm);
-            const tonaliteBeat = lireTonalite(match.key);
-            if (tonaliteBeat) {
-              setState(prev => ({ ...prev, projectKey: tonaliteBeat.rootKey, projectScale: tonaliteBeat.scale }));
-            }
-            notify(`✅ "${match.title}" chargé sur la piste BEAT`);
+            await loadCatalogBeatRef.current?.(match);
           } catch (e: any) {
             console.error('[AI] LOAD_BEAT', e);
             notify(`❌ Chargement impossible : ${e?.message || 'erreur'}`);
@@ -2492,13 +2936,16 @@ export default function App() {
         setState(prev => ({ ...prev, isLoopActive: p.active === undefined ? !prev.isLoopActive : !!p.active }));
         break;
 
-      case 'SET_PROJECT_KEY':
-        setState(prev => ({
-          ...prev,
-          ...(p.key !== undefined ? { projectKey: Math.round(clamp(p.key, 0, 11, 0)) } : {}),
-          ...(p.scale ? { projectScale: String(p.scale) } : {})
-        }));
+      case 'SET_PROJECT_KEY': {
+        const st = stateRef.current;
+        const key = p.key !== undefined ? Math.round(clamp(p.key, 0, 11, 0)) : (st.projectKey ?? 0);
+        const scaleIn = String(p.scale || st.projectScale || 'MINOR').toUpperCase().replace(/\s+/g, '_');
+        const scale = ['MAJOR', 'MINOR', 'MINOR_HARMONIC', 'PENTATONIC', 'CHROMATIC'].includes(scaleIn)
+          ? scaleIn : /MAJ/.test(scaleIn) ? 'MAJOR' : 'MINOR';
+        applyProjectKey(key, scale);
+        notify(`🎼 Tonalité : ${nomTonalite(key, scale)} — Auto-Tune réglé`);
         break;
+      }
 
       case 'UNDO':
         if (canUndo) undo();
@@ -2516,9 +2963,54 @@ export default function App() {
         setIsExportMenuOpen(true);
         break;
 
+      // ---- Outils voix ----
+      case 'APPLY_MIX_STYLE': {
+        handleApplyMixStyle(String(p.style || p.styleId || p.name || ''));
+        break;
+      }
+
+      case 'OPEN_MIX_STYLES':
+        setVocalToolsOpen(true);
+        break;
+
+      case 'REMOVE_SILENCE':
+      case 'CLEAN_SILENCE': {
+        const t = findTrack(p.trackId) || getTargetVoiceTrack();
+        if (!t) { notify("Il n'y a pas encore de prise à nettoyer"); return; }
+        handleCleanSilences(t.id, p.clipId);
+        break;
+      }
+
+      case 'SET_AUTO_CLEAN':
+        setAutoCleanSilence(p.enabled !== false);
+        break;
+
+      case 'PREPARE_PART': {
+        const part = String(p.part || '').toLowerCase();
+        const map: Record<string, SessionPart> = { lead: 'lead', back: 'back', backs: 'back', harmony: 'harmony', harmonies: 'harmony', harmonie: 'harmony', adlib: 'adlib', adlibs: 'adlib', 'ad-libs': 'adlib' };
+        void prepareSessionPart(map[part] || 'lead');
+        break;
+      }
+
+      case 'ANALYZE_MIX':
+        handleAnalyzeMix();
+        break;
+
+      case 'HIGHLIGHT': {
+        const target = String(p.target || '');
+        if (!target) return;
+        const show = () => { if (!novaSpotlight(target, p.text ? String(p.text) : undefined)) notify("Je ne trouve pas ce réglage à l'écran"); };
+        if (isMobileRef.current) {
+          // Le chat couvre l'écran sur téléphone : on va sur l'onglet où se trouve le réglage.
+          setActiveMobileTab(target.startsWith('vol-') ? 'MIXER' : 'TRACKS');
+          setTimeout(show, 400);
+        } else show();
+        break;
+      }
+
       default:
-        // Actions non encore prises en charge (RUN_MASTER_SYNC, ANALYZE_INSTRU,
-        // REMOVE_SILENCE) : on le dit plutôt que d'échouer en silence.
+        // Actions non encore prises en charge (RUN_MASTER_SYNC, ANALYZE_INSTRU) :
+        // on le dit plutôt que d'échouer en silence.
         console.warn('[AI] Action non prise en charge :', a.action, a.payload);
         notify(`⚠️ Action "${a.action}" pas encore disponible`);
         break;
@@ -2528,7 +3020,8 @@ export default function App() {
       handleSeek, handleUpdateBpm, handleRemovePlugin, handleReorderPlugins, handleCopyPluginToTrack,
       handleFreezeTrack, handleAddMarker, handleDeleteMarker, handleCreateGroup, handleUpdateGroup,
       handleDeleteGroup, handleCreatePatternAndOpen, handleMoveClip, handleSaveCloud, undo, redo,
-      canUndo, canRedo, handleUniversalAudioImport]);
+      canUndo, canRedo, handleUniversalAudioImport, handleApplyMixStyle, handleCleanSilences,
+      prepareSessionPart, handleAnalyzeMix]);
 
   const envoyerAuChatbot = async (messageUtilisateur: string) => {
     try {
@@ -2549,6 +3042,16 @@ export default function App() {
             loopEnd: currentState.loopEnd,
             projectKey: currentState.projectKey,
             projectScale: currentState.projectScale,
+            vocalMixStyle: currentState.vocalMixStyle || null,
+            autoCleanSilence: autoCleanRef.current,
+            sessionPart,
+            // Ce que « l'oreille » de Nova mesure : niveaux réels des prises et du beat.
+            mixLevels: (() => {
+              try {
+                const r = analyseMix(currentState.tracks, c => (c.bufferId ? audioBufferRegistry.get(c.bufferId) : undefined) || c.buffer || audioEngine.getAudioBuffer(c.id), currentState.vocalMixStyle);
+                return { levels: levelsForAI(r), issues: r.issues.map(i => ({ title: i.title, target: i.target, fix: i.fix?.actions })) };
+              } catch { return null; }
+            })(),
             markers: currentState.markers.map(m => ({ id: m.id, name: m.name, time: m.time })),
             trackGroups: currentState.trackGroups.map(g => ({ id: g.id, name: g.name, trackIds: g.trackIds })),
             // Les id sont indispensables : les actions de l'IA ciblent les pistes,
@@ -2556,6 +3059,7 @@ export default function App() {
             tracks: currentState.tracks.map(t => ({
                 id: t.id,
                 name: t.name,
+                role: getVocalRole(t),
                 type: t.type,
                 volume: Math.round(t.volume * 100) / 100,
                 pan: t.pan,
@@ -2665,7 +3169,11 @@ export default function App() {
       {/* Sur téléphone, le « + » ne sert que dans Pistes et Arrangement ; ailleurs
           il couvrait du contenu (saisie du chat Nova, liste des effets). */}
       {(!isMobile || activeMobileTab === 'TRACKS' || activeMobileTab === 'ARRANGEMENT') && (
-        <TrackCreationBar onCreateTrack={handleCreateTrack} />
+        <TrackCreationBar
+          onCreateTrack={handleCreateTrack}
+          onOpenVocalTools={() => setVocalToolsOpen(true)}
+          currentStyleId={state.vocalMixStyle}
+        />
       )}
       <TouchInteractionManager />
 
@@ -2676,6 +3184,7 @@ export default function App() {
                     user={user} activeTab={activeSideBrowserTab} onTabChange={setActiveSideBrowserTab}
                     onAddPlugin={handleAddPluginFromContext}
                     onPurchase={handleBuyLicense} selectedTrackId={state.selectedTrackId}
+                    onLoadBeat={handleLoadCatalogBeat}
                 />
             </aside>
         )}
@@ -2698,7 +3207,12 @@ export default function App() {
                    onMoveClip={handleMoveClip} onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
                    onMoveClipsBy={handleMoveClipsBy}
-                   onAudioDrop={(trackId, url, name, time) => handleUniversalAudioImport(url, name, trackId, time)}
+                   onAudioDrop={(trackId, url, name, time) => {
+                     // Beat du catalogue : même chemin que « Essayer » (remplace le beat, règle tempo et Auto-Tune).
+                     const beat = takeDraggedBeat(url);
+                     if (beat) return loadCatalogBeatRef.current?.(beat);
+                     return handleUniversalAudioImport(url, name, trackId, time);
+                   }}
                    markers={state.markers} onAddMarker={handleAddMarker}
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
                 />
@@ -2802,6 +3316,7 @@ export default function App() {
                   user={user}
                   onAddPlugin={handleAddPluginFromContext}
                   onPurchase={handleBuyLicense}
+                  onLoadBeat={handleLoadCatalogBeat}
                   selectedTrackId={state.selectedTrackId}
                 />
               )}
@@ -2827,7 +3342,68 @@ export default function App() {
         </div>
       )}
 
-      {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} />}
+      {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} novaBadge={novaUnread} />}
+
+      <VocalToolsPanel
+        open={vocalToolsOpen}
+        onClose={() => setVocalToolsOpen(false)}
+        currentStyleId={state.vocalMixStyle}
+        onApplyStyle={handleApplyMixStyle}
+        canClean={!!getTargetVoiceTrack()?.clips.length}
+        onCleanSilences={() => { const t = getTargetVoiceTrack(); if (t) handleCleanSilences(t.id); }}
+        autoClean={autoCleanSilence}
+        onAutoCleanChange={setAutoCleanSilence}
+        countIn={countInEnabled}
+        onCountInChange={setCountInEnabled}
+        monitoring={inputMonitoring}
+        onMonitoringChange={setInputMonitoring}
+        isPlaying={state.isPlaying}
+        onTogglePlay={handleTogglePlay}
+        onAskNova={() => { setVocalToolsOpen(false); if (isMobile) setActiveMobileTab('NOVA'); setMixGuideRequest(n => n + 1); }}
+      />
+
+      <RecordingCoach
+        isRecording={state.isRecording}
+        trackId={state.tracks.find(t => t.isTrackArmed)?.id || null}
+        trackName={state.tracks.find(t => t.isTrackArmed)?.name}
+        partLabel={SESSION_LABEL[sessionPart]}
+      />
+
+      {/* Décompte avant la prise (tap = annuler) */}
+      {countInBeat !== null && (
+        <button
+          type="button"
+          onClick={() => { countInCancelRef.current = true; }}
+          className="fixed inset-0 z-[600] flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm"
+          aria-label="Annuler le décompte"
+        >
+          <span className="text-[9rem] leading-none font-black text-white drop-shadow-[0_0_30px_rgba(239,68,68,0.6)]">{countInBeat}</span>
+          <span className="mt-4 text-sm font-bold text-red-300 uppercase tracking-widest">Prépare-toi… (touche pour annuler)</span>
+        </button>
+      )}
+
+      {/* Casque : demandé avant la première prise */}
+      {headphonePromptOpen && (
+        <div className="fixed inset-0 z-[600] flex items-end sm:items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="casque-titre">
+          <div className="w-full max-w-sm rounded-3xl bg-[#14161a] border border-white/10 p-6 text-center shadow-2xl">
+            <div className="text-5xl mb-3">🎧</div>
+            <h2 id="casque-titre" className="text-lg font-black text-white mb-2">Tu as un casque ou des écouteurs ?</h2>
+            <p className="text-sm text-slate-300 mb-5">
+              Avec un casque, tu entends ta voix pendant que tu enregistres. Sans casque, on coupe ce retour
+              pour éviter le larsen : tu entends seulement le beat.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button type="button" onClick={() => answerHeadphones(true)} className="h-12 rounded-xl bg-cyan-500 text-black font-black">
+                Oui, j'ai un casque
+              </button>
+              <button type="button" onClick={() => answerHeadphones(false)} className="h-12 rounded-xl bg-white/10 text-white font-bold">
+                Non, haut-parleurs
+              </button>
+            </div>
+            <p className="mt-3 text-xs text-slate-400">Conseil : un casque filaire donne le meilleur résultat (le Bluetooth ajoute du retard).</p>
+          </div>
+        </div>
+      )}
 
       <Suspense fallback={null}>
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}
@@ -2870,6 +3446,8 @@ export default function App() {
             externalNotification={aiNotification}
             isMobile={isMobile}
             forceOpen={isMobile && activeMobileTab === 'NOVA'}
+            mixGuideRequest={mixGuideRequest}
+            novaFeed={novaFeed}
             onClose={() => setActiveMobileTab('TRACKS')}
         />
       </div>

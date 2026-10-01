@@ -1,5 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { AIChatMessage, AIAction, DAWState } from '../types';
+import { AIChatMessage, AIAction, DAWState, TrackType } from '../types';
+import { VOCAL_MIX_STYLES } from '../utils/vocalPresets';
+import { getVocalRole } from '../utils/vocalRoles';
+import type { NovaFeedMessage } from '../App';
+
+/** Bouton de réponse rapide affiché sous un message de Nova. */
+interface ChatChoice { label: string; action?: AIAction; actions?: AIAction[]; message?: string }
+type ChatMessage = AIChatMessage & { choices?: ChatChoice[] };
+
+/** Les styles de mix, proposés en boutons : fonctionne même sans IA. */
+const MIX_STYLE_CHOICES: ChatChoice[] = VOCAL_MIX_STYLES.map(s => ({
+  label: `${s.emoji} ${s.name}`,
+  action: { action: 'APPLY_MIX_STYLE', payload: { style: s.id }, description: `Style « ${s.name} »` },
+}));
+
+const MIX_GUIDE_TEXT = "Quel son tu veux pour ta voix ? Choisis un style ci-dessous : je règle les effets, la réverb et le volume du beat. Lance la lecture et change de style pour comparer. Si tu hésites, dis-moi le genre de ton morceau (rap, trap, drill, chant…) et je te conseille.";
 
 interface ChatAssistantProps {
   onSendMessage: (msg: string) => Promise<any>;
@@ -10,15 +25,56 @@ interface ChatAssistantProps {
   onClose?: () => void; // New prop for explicit close action
   /** Etat du projet : sert a calculer l'etape suivante du guide. */
   projectState?: DAWState;
+  /** Incrémenté pour ouvrir le chat sur le choix du style de mix. */
+  mixGuideRequest?: number;
+  /** Messages poussés par le studio (bilan de prise, consignes, écoute du mix). */
+  novaFeed?: NovaFeedMessage[];
 }
 
-const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, isMobile, forceOpen, onClose, projectState }) => {
+const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, isMobile, forceOpen, onClose, projectState, mixGuideRequest, novaFeed }) => {
   const [isOpen, setIsOpen] = useState(forceOpen || false);
   const [inputValue, setInputValue] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
-  const [messages, setMessages] = useState<AIChatMessage[]>([
-    { id: '1', role: 'assistant', content: "Salut ! Je suis Nova, je t'accompagne pas à pas. Suis l'étape affichée au-dessus, ou pose-moi une question quand tu veux.", timestamp: Date.now() }
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { id: '1', role: 'assistant', content: "Salut ! Je suis Nova, ton ingé son. On fait ta session ensemble : ta voix principale d'abord, puis les backs et les harmonies, et je te dis quoi régler dans ton mix. Suis l'étape au-dessus, ou parle-moi quand tu veux.", timestamp: Date.now() }
   ]);
+
+  const pushMixGuide = () => {
+    setMessages(prev => [...prev, { id: `mix-${Date.now()}`, role: 'assistant', content: MIX_GUIDE_TEXT, timestamp: Date.now(), choices: MIX_STYLE_CHOICES }]);
+  };
+
+  // Demande explicite (bouton « demander à Nova » du panneau Mix auto).
+  useEffect(() => {
+    if (!mixGuideRequest) return;
+    setIsOpen(true);
+    pushMixGuide();
+  }, [mixGuideRequest]);
+
+  const runChoice = async (c: ChatChoice) => {
+    const list = c.actions || (c.action ? [c.action] : []);
+    if (list.length) {
+      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: c.label, timestamp: Date.now() }]);
+      // Une respiration entre deux actions : la seconde voit l'état de la première.
+      for (const a of list) { onExecuteAction(a); await new Promise(r => setTimeout(r, 60)); }
+    } else if (c.message) {
+      void handleSend(c.message);
+    }
+  };
+
+  // Messages du studio : ajoutés une seule fois, et le chat s'ouvre (ordinateur).
+  const feedSeen = useRef(new Set<string>());
+  useEffect(() => {
+    if (!novaFeed?.length) return;
+    const fresh = novaFeed.filter(m => !feedSeen.current.has(m.id));
+    if (!fresh.length) return;
+    fresh.forEach(m => feedSeen.current.add(m.id));
+    setMessages(prev => [...prev, ...fresh.map(m => ({ id: m.id, role: 'assistant' as const, content: m.content, timestamp: Date.now(), choices: m.choices }))]);
+    if (!isMobile) setIsOpen(true);
+  }, [novaFeed, isMobile]);
+
+  // Étapes de session que l'artiste a choisi de passer / déjà faites.
+  const [sautBacks, setSautBacks] = useState(false);
+  const [mixEcoute, setMixEcoute] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -35,7 +91,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
   // FIX: An infinite reopening loop occurred because `isOpen` was in the dependency array. It has been removed to ensure the notification effect only runs when the notification content changes, not when the chat window's visibility state changes.
   useEffect(() => {
     if (externalNotification) {
-      const assistantMsg: AIChatMessage = {
+      const assistantMsg: ChatMessage = {
         id: `notify-${Date.now()}`,
         role: 'assistant',
         content: externalNotification,
@@ -49,7 +105,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     const msgToSend = customMsg || inputValue;
     if (!msgToSend.trim()) return;
 
-    const userMsg: AIChatMessage = {
+    const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
       content: msgToSend,
@@ -79,7 +135,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         setIsSyncing(false);
       }
 
-      const assistantMsg: AIChatMessage = {
+      const assistantMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: responseText || "Réglages de mixage effectués.",
@@ -112,43 +168,75 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     }
   }, [projectState?.isPlaying, projectState?.currentTime]);
 
-  const etape = React.useMemo(() => {
+  const etape = React.useMemo((): { numero: number; icone: string; titre: string; detail: string; mix?: boolean; boutons?: ChatChoice[] } => {
     const pistes = projectState?.tracks || [];
     const beat = pistes.find(t => t.id === 'instrumental');
-    const rec = pistes.find(t => t.id === 'track-rec-main');
+    const aUnePrise = pistes.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0);
+    const aDesSecondaires = pistes.some(t => ['back', 'harmony', 'adlib'].includes(getVocalRole(t)) && t.clips.length > 0);
 
     if (!beat || beat.clips.length === 0) return {
       numero: 1, icone: 'fa-compact-disc',
       titre: 'Choisis un instrumental',
-      detail: "Clique sur un beat dans le catalogue à gauche. Il se place tout seul sur la piste BEAT, et le studio se règle sur son tempo et sa tonalité."
+      detail: isMobile
+        ? "Ouvre l'onglet « Sons » en bas, écoute les beats, puis appuie sur « Essayer » : le studio se règle tout seul sur son tempo et sa tonalité."
+        : "Dans le catalogue à gauche, écoute les beats puis clique « Essayer » : le studio se règle tout seul sur son tempo et sa tonalité."
     };
     if (!aDejaEcoute.current && !projectState?.isPlaying) return {
       numero: 2, icone: 'fa-play',
       titre: 'Écoute ton instru',
-      detail: "Appuie sur la barre d'espace pour lancer la lecture. Rappuie dessus pour mettre en pause."
+      detail: isMobile
+        ? "Appuie sur le bouton lecture ▶ en haut pour écouter le beat. Rappuie pour mettre en pause."
+        : "Appuie sur la barre d'espace (ou le bouton lecture ▶) pour écouter le beat. Rappuie pour mettre en pause."
     };
-    if (rec && !rec.isTrackArmed) return {
+    if (!aUnePrise) return {
       numero: 3, icone: 'fa-microphone',
-      titre: 'Prépare ton micro',
-      detail: "Sur la piste REC, clique le bouton R. Ton navigateur va demander l'autorisation d'utiliser le micro : accepte-la."
+      titre: 'Enregistre ta voix principale',
+      detail: "Appuie sur le bouton rouge REC : le micro s'active tout seul (accepte l'autorisation), un décompte 4-3-2-1 se lance, puis chante. Réappuie sur REC pour arrêter."
     };
-    if (rec && rec.clips.length === 0) return {
-      numero: 4, icone: 'fa-circle-dot',
-      titre: 'Enregistre ta voix',
-      detail: "Appuie sur le bouton rouge Rec, puis pose ta voix sur le beat. Réappuie pour arrêter."
+    if (!projectState?.vocalMixStyle) return {
+      numero: 4, icone: 'fa-sliders',
+      titre: 'Choisis un style de mix',
+      detail: "Appuie sur « Mix auto » et choisis un style : Rap clair, Trap autotune, Drill, Chant / R&B… Ou demande-moi conseil.",
+      mix: true,
+    };
+    if (!aDesSecondaires && !sautBacks) return {
+      numero: 5, icone: 'fa-layer-group',
+      titre: 'Ajoute des backs',
+      detail: "Comme en studio : rechante tes fins de phrase et tes punchlines sur une piste à part, pour les appuyer. Ensuite harmonies et ad-libs si tu veux.",
+      boutons: [
+        { label: '🎤 Préparer les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } },
+        { label: 'Pas de backs', message: '' },
+      ],
+    };
+    if (!mixEcoute) return {
+      numero: 6, icone: 'fa-headphones',
+      titre: "Fais écouter ton mix à Nova",
+      detail: "Je mesure tes niveaux (voix, beat, backs) et je te dis quoi réajuster, en te montrant où.",
+      boutons: [{ label: '🎧 Écoute mon mix', action: { action: 'ANALYZE_MIX', payload: {} } }],
     };
     return {
-      numero: 5, icone: 'fa-sliders',
-      titre: 'Peaufine ton morceau',
-      detail: "Règle les volumes, ajoute un effet sur ta voix. Ctrl+Z annule si besoin. Pour exporter un fichier audio, il faut acheter l'instrumental."
+      numero: 6, icone: 'fa-star',
+      titre: 'Ton morceau prend forme',
+      detail: "Refais une prise si besoin (l'ancienne est coupée, pas effacée), essaie un autre style, redemande-moi une écoute. Ctrl+Z annule. Pour exporter, il faut acheter l'instrumental."
     };
-  }, [projectState]);
+  }, [projectState, isMobile, sautBacks, mixEcoute]);
 
-  const QUICK_ACTIONS = [
-    { label: 'Caler Instru', icon: 'fa-sync-alt', msg: 'Analyse mon instru et cale le BPM' },
-    { label: 'Effet Téléphone', icon: 'fa-phone', msg: 'Donne un effet téléphone à ma voix' },
-    { label: 'Nettoyer Voix', icon: 'fa-broom', msg: 'Nettoie ma voix, enlève la boue' },
-    { label: 'Reset Mix', icon: 'fa-undo', msg: 'Reset tous mes effets' },
+  // Dès la première prise, Nova propose les styles de mix (une seule fois).
+  const mixGuideShown = useRef(false);
+  useEffect(() => {
+    if (etape.numero === 4 && !mixGuideShown.current) {
+      mixGuideShown.current = true;
+      pushMixGuide();
+    }
+  }, [etape.numero]);
+
+  // Raccourcis : les trois premiers agissent directement (même sans IA).
+  const QUICK_ACTIONS: { label: string; icon: string; run: () => void }[] = [
+    { label: 'Écoute mon mix', icon: 'fa-headphones', run: () => { setMixEcoute(true); void runChoice({ label: '🎧 Écoute mon mix', action: { action: 'ANALYZE_MIX', payload: {} } }); } },
+    { label: 'Mix auto', icon: 'fa-sliders', run: pushMixGuide },
+    { label: 'Faire les backs', icon: 'fa-layer-group', run: () => void runChoice({ label: '🎤 Faire les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } }) },
+    { label: 'Retirer les blancs', icon: 'fa-broom', run: () => void runChoice({ label: '🧹 Retirer les blancs', action: { action: 'CLEAN_SILENCE', payload: {}, description: 'Retirer les blancs' } }) },
+    { label: 'Conseille-moi', icon: 'fa-lightbulb', run: () => void handleSend("Écoute l'état de mon projet et conseille-moi le style de mix qui irait le mieux à ma voix sur ce beat.") },
   ];
 
   const containerClass = isMobile 
@@ -171,10 +259,10 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
                 <i className={`fas ${isSyncing ? 'fa-sync fa-spin' : 'fa-wave-square'} text-xl`}></i>
               </div>
               <div>
-                <h3 className="text-[13px] font-black uppercase tracking-[0.3em] text-white">Studio Master AI</h3>
+                <h3 className="text-[13px] font-black uppercase tracking-[0.3em] text-white">Nova</h3>
                 <div className="flex items-center space-x-2 mt-1">
                   <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-cyan-400 animate-ping' : 'bg-green-500'}`}></div>
-                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{isSyncing ? 'Engine Sync...' : 'Direct DSP Link Active'}</span>
+                  <span className="text-[10px] font-bold text-slate-400">{isSyncing ? 'Je règle ton projet…' : 'Ton ingé son'}</span>
                 </div>
               </div>
             </div>
@@ -201,10 +289,33 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-cyan-400/80 tracking-wide">ÉTAPE {etape.numero} / 5</span>
+                  <span className="text-[10px] font-bold text-cyan-400/80 tracking-wide">ÉTAPE {etape.numero} / 6</span>
                 </div>
                 <h4 className="text-[14px] font-bold text-white mt-0.5">{etape.titre}</h4>
                 <p className="text-[12px] leading-relaxed text-slate-300/90 mt-1">{etape.detail}</p>
+                {etape.mix && (
+                  <button type="button" onClick={pushMixGuide} className="mt-2 h-9 px-3 rounded-lg bg-cyan-500 text-black text-[11px] font-black">
+                    Voir les styles
+                  </button>
+                )}
+                {etape.boutons && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {etape.boutons.map((b, i) => (
+                      <button
+                        key={b.label}
+                        type="button"
+                        onClick={() => {
+                          if (b.label === 'Pas de backs') { setSautBacks(true); return; }
+                          if (b.action?.action === 'ANALYZE_MIX') setMixEcoute(true);
+                          void runChoice(b);
+                        }}
+                        className={`h-9 px-3 rounded-lg text-[11px] font-black ${i === 0 ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white'}`}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -213,7 +324,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
             {QUICK_ACTIONS.map((action, i) => (
               <button 
                 key={i}
-                onClick={() => handleSend(action.msg)}
+                onClick={action.run}
                 className="flex-shrink-0 px-4 py-2.5 bg-white/5 border border-white/10 rounded-2xl hover:bg-cyan-500 hover:text-black hover:border-cyan-400 transition-all flex items-center space-x-2 group"
               >
                 <i className={`fas ${action.icon} text-[10px]`}></i>
@@ -234,6 +345,24 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
                     {msg.content}
                   </div>
                 </div>
+                {msg.choices && msg.choices.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-3 pl-1">
+                    {msg.choices.map(c => (
+                      <button
+                        key={c.label}
+                        type="button"
+                        onClick={() => void runChoice(c)}
+                        className={`h-10 px-3.5 rounded-xl border text-[12px] font-bold transition-all active:scale-95 ${
+                          c.action?.payload?.style && c.action.payload.style === projectState?.vocalMixStyle
+                            ? 'bg-cyan-500 text-black border-cyan-400'
+                            : 'bg-white/5 border-white/15 text-white hover:border-cyan-500/60'
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {msg.executedAction && (
                   <div className="flex justify-start pl-2 mt-3">
                     <div className="flex items-center space-x-3 bg-cyan-500/5 border border-cyan-500/10 px-4 py-2 rounded-full shadow-inner">
@@ -265,7 +394,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Ex: 'Donne un effet téléphone à ma voix...'"
+                placeholder="Ex : « rends ma voix plus pro » ou « style trap »"
                 className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-4 pl-6 pr-16 text-[12px] text-white focus:outline-none focus:border-cyan-500/40 transition-all placeholder:text-slate-700"
               />
               <button 

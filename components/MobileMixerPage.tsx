@@ -131,6 +131,7 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
               return (
                 <div
                   key={t.id}
+                  data-nova-target={`vol-${t.id}`}
                   ref={(el) => { stripRefs.current[t.id] = el; }}
                   onClick={() => onSelectTrack(t.id)}
                   className={`snap-start shrink-0 w-[88px] rounded-xl border p-2 flex flex-col items-center gap-2 transition-colors ${

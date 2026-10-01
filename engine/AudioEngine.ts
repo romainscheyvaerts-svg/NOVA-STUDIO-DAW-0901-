@@ -30,7 +30,9 @@ interface TrackDSP {
   gain: GainNode;           
   analyzer: AnalyserNode;
   inputAnalyzer?: AnalyserNode; 
-  pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any }>; 
+  pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any }>;
+  /** Latence cumulée des effets actifs (s) : les clips de la piste partent d'autant plus tôt. */
+  pluginLatency?: number; 
   sends: Map<string, GainNode>; 
   inputStream?: MediaStreamAudioSourceNode | null;
   currentInputDeviceId?: string | null;
@@ -96,6 +98,12 @@ export class AudioEngine {
   private audioChunks: Blob[] = [];
   private activeMonitorStream: MediaStream | null = null;
   private monitorSource: MediaStreamAudioSourceNode | null = null;
+  // Retour casque : le micro passe par ce gain avant la piste. Coupé par défaut :
+  // sur haut-parleurs le retour provoquait un larsen, et en Bluetooth la voix
+  // revenait avec 150-300 ms de retard. L'enregistrement capte le flux brut,
+  // il n'est pas concerné.
+  private monitorGain: GainNode | null = null;
+  private inputMonitoring = false;
   private monitoringTrackId: string | null = null;
   private recordingTrackId: string | null = null;
   private recStartTime: number = 0;
@@ -389,6 +397,8 @@ export class AudioEngine {
     const soloSilenced = this.computeSoloSilencedIds(tracks);
 
     interface RenderTrack {
+      /** Latence cumulée des effets (s), compensée comme en lecture. */
+      latency?: number;
       input: GainNode;
       gain: GainNode;
       panner: StereoPannerNode;
@@ -417,6 +427,7 @@ export class AudioEngine {
 
       let head: AudioNode = input;
       const offlinePlugins = (track.isFrozen && track.frozenClip) ? [] : (track.plugins || []);
+      let offlineLatency = 0;
       for (const plugin of offlinePlugins) {
         if (!plugin.isEnabled) continue;
         try {
@@ -425,6 +436,8 @@ export class AudioEngine {
           if (entry.node?.ready instanceof Promise) pendingPlugins.push(entry.node.ready);
           head.connect(entry.input);
           head = entry.output;
+          const l = entry.node?.latency;
+          if (typeof l === 'number' && l > 0 && l < 0.5) offlineLatency += l;
         } catch (e) {
           console.warn(`[Render] Plugin ignore (${plugin.type}) :`, e);
         }
@@ -438,7 +451,7 @@ export class AudioEngine {
       gain.gain.value = silenced ? 0 : track.volume;
       panner.pan.value = track.pan;
 
-      const rt: RenderTrack = { input, gain, panner, output, sends: new Map() };
+      const rt: RenderTrack = { input, gain, panner, output, sends: new Map(), latency: offlineLatency };
 
       // Instruments (pistes MIDI / sampler / drum rack)
       if (track.type === TrackType.MIDI) {
@@ -533,7 +546,7 @@ export class AudioEngine {
           continue;
         }
 
-        const clipStartInProject = clip.start - startOffset;
+        const clipStartInProject = clip.start - startOffset - (rt.latency || 0);
         if (clipStartInProject + clip.duration < 0) continue;
         if (clipStartInProject > totalDuration) continue;
 
@@ -685,7 +698,7 @@ export class AudioEngine {
         });
       }
       this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
-      this.monitorSource.connect(dsp.input);
+      this.wireMonitor(dsp);
       console.log("[AudioEngine] Track armed OK:", trackId);
     } catch (e: any) {
       console.error("[AudioEngine] ARM ERROR:", e);
@@ -705,7 +718,30 @@ export class AudioEngine {
     }
   }
 
+  /** Micro → indicateur de niveau (toujours) et → piste via le gain de retour. */
+  private wireMonitor(dsp: { input: AudioNode; inputAnalyzer?: AnalyserNode }) {
+    if (!this.monitorSource || !this.ctx) return;
+    if (dsp.inputAnalyzer) this.monitorSource.connect(dsp.inputAnalyzer);
+    if (this.monitorGain) { try { this.monitorGain.disconnect(); } catch { /* déjà déconnecté */ } }
+    this.monitorGain = this.ctx.createGain();
+    this.monitorGain.gain.value = this.inputMonitoring ? 1 : 0;
+    this.monitorSource.connect(this.monitorGain);
+    this.monitorGain.connect(dsp.input);
+  }
+
+  /** Active / coupe le retour du micro dans le casque. */
+  public setInputMonitoring(on: boolean) {
+    this.inputMonitoring = on;
+    if (this.monitorGain && this.ctx) this.monitorGain.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.01);
+  }
+
+  public isInputMonitoring() { return this.inputMonitoring; }
+
   public disarmTrack() {
+    if (this.monitorGain) {
+      try { this.monitorGain.disconnect(); } catch { /* déjà déconnecté */ }
+      this.monitorGain = null;
+    }
     if (this.monitorSource) {
       this.monitorSource.disconnect();
       this.monitorSource = null;
@@ -861,7 +897,7 @@ export class AudioEngine {
         });
       }
       this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
-      this.monitorSource.connect(dsp.input);
+      this.wireMonitor(dsp);
       this.monitoringTrackId = trackId;
       console.log("[AudioEngine] Track re-armed OK:", trackId);
     } catch (e) {
@@ -1048,7 +1084,8 @@ export class AudioEngine {
         if (this.activeSources.has(sourceKey)) return;
         
         const clipEnd = clip.start + clip.duration;
-        const overlapsWindow = clip.start < projectWindowEnd && clipEnd > projectWindowStart;
+        const lat = this.tracksDSP.get(track.id)?.pluginLatency || 0;
+        const overlapsWindow = clip.start < projectWindowEnd + lat && clipEnd > projectWindowStart;
         if (overlapsWindow) {
            this.playClipSource(track.id, clip, contextScheduleTime, projectWindowStart);
         }
@@ -1324,14 +1361,17 @@ export class AudioEngine {
         source.connect(gainNode);
         gainNode.connect(dsp.input);
         
+        // Compensation de latence : sans elle, une voix passée dans l'Auto-Tune
+        // (~27 ms) arrivait en retard sur le beat.
+        const pt = projectTime + (dsp.pluginLatency || 0);
         let offsetIntoClip = clip.offset || 0;
-        if (projectTime > clip.start) {
-            offsetIntoClip += (projectTime - clip.start);
+        if (pt > clip.start) {
+            offsetIntoClip += (pt - clip.start);
         }
         
         let when = scheduleTime;
-        if (projectTime < clip.start) {
-            when = scheduleTime + (clip.start - projectTime);
+        if (pt < clip.start) {
+            when = scheduleTime + (clip.start - pt);
         }
         
         const playedSoFar = Math.max(0, offsetIntoClip - (clip.offset || 0));
@@ -1583,6 +1623,7 @@ export class AudioEngine {
     // (c'est precisement ce qui libere du CPU).
     const pluginsToApply = (track.isFrozen && track.frozenClip) ? [] : track.plugins;
     
+    let chainLatency = 0;
     pluginsToApply.forEach(plugin => {
       currentPluginIds.add(plugin.id);
       let pEntry = dsp!.pluginChain.get(plugin.id);
@@ -1601,9 +1642,12 @@ export class AudioEngine {
         if (plugin.isEnabled) {
             head.connect(pEntry.input);
             head = pEntry.output;
+            const l = pEntry.instance?.latency;
+            if (typeof l === 'number' && l > 0 && l < 0.5) chainLatency += l;
         }
       }
     });
+    dsp.pluginLatency = chainLatency;
     
     dsp.pluginChain.forEach((val, id) => {
       if (!currentPluginIds.has(id)) {

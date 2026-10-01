@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PluginParameter } from '../types';
+import { makeCurve } from './vocalDspUtils';
 
 export interface CompressorParams {
   threshold: number;      // -60 to 0 dB
@@ -37,6 +38,13 @@ export class CompressorNode {
   
   // Character/saturation
   private saturationNode: WaveShaperNode;
+  private dcBlock: BiquadFilterNode;
+  private modeTrim: GainNode;
+
+  // Le DynamicsCompressorNode retarde le son de 6 ms (sa pre-lecture
+  // interne). Sans le meme retard sur le sec, le mix parallele filtrait la
+  // voix en peigne (creux tous les ~170 Hz).
+  private dryDelay: DelayNode;
   
   // Metering
   private inputAnalyzer: AnalyserNode;
@@ -95,10 +103,17 @@ export class CompressorNode {
     // Makeup gain
     this.makeupGainNode = ctx.createGain();
     
-    // Saturation for character modes
+    // Saturation for character modes (sans surechantillonnage : il ajoute
+    // une latence non compensee, et les courbes douces aliasent tres peu)
     this.saturationNode = ctx.createWaveShaper();
-    this.saturationNode.oversample = '4x';
+    this.saturationNode.oversample = 'none';
     this.updateSaturationCurve('CLEAN');
+    this.dcBlock = ctx.createBiquadFilter();
+    this.dcBlock.type = 'highpass';
+    this.dcBlock.frequency.value = 8;
+    this.modeTrim = ctx.createGain();
+    this.dryDelay = ctx.createDelay(0.05);
+    this.dryDelay.delayTime.value = Math.floor(0.006 * ctx.sampleRate) / ctx.sampleRate;
     
     // Parallel compression mix
     this.dryGain = ctx.createGain();
@@ -108,8 +123,9 @@ export class CompressorNode {
     
     this.input.connect(this.inputAnalyzer);
     
-    // Dry path (for parallel compression)
-    this.input.connect(this.dryGain);
+    // Dry path (for parallel compression), aligne sur le compresseur
+    this.input.connect(this.dryDelay);
+    this.dryDelay.connect(this.dryGain);
     
     // Wet path (compressed)
     // NOTE: le passe-haut de sidechain etait insere ICI, dans le trajet audio
@@ -122,7 +138,9 @@ export class CompressorNode {
     this.input.connect(this.lookaheadDelay);
     this.lookaheadDelay.connect(this.compressor);
     this.compressor.connect(this.saturationNode);
-    this.saturationNode.connect(this.makeupGainNode);
+    this.saturationNode.connect(this.dcBlock);
+    this.dcBlock.connect(this.modeTrim);
+    this.modeTrim.connect(this.makeupGainNode);
     this.makeupGainNode.connect(this.wetGain);
     
     // Merge dry + wet
@@ -135,31 +153,65 @@ export class CompressorNode {
     this.applyParams();
   }
 
+  /**
+   * Couleur harmonique par mode. Toutes les courbes ont une pente 1 a
+   * l'origine : un signal faible garde son niveau. Avant, OPTO amplifiait
+   * x2,7 (+8,6 dB) et FET x1,7 : changer de mode changeait surtout le volume,
+   * avec une distorsion forte des signaux faibles en OPTO.
+   */
   private updateSaturationCurve(mode: 'CLEAN' | 'VCA' | 'OPTO' | 'FET') {
-    const samples = 44100;
-    const curve = new Float32Array(samples);
-    
-    for (let i = 0; i < samples; i++) {
-      const x = (i * 2) / samples - 1;
-      
-      switch (mode) {
-        case 'CLEAN':
-          curve[i] = x;
-          break;
-        case 'VCA':
-          curve[i] = Math.tanh(x * 1.2) * 0.95;
-          break;
-        case 'OPTO':
-          curve[i] = (3 * x) / (1 + 2 * Math.abs(x)) * 0.9;
-          break;
-        case 'FET':
-          const k = 2;
-          curve[i] = Math.sign(x) * (1 - Math.exp(-Math.abs(x) * k)) * 0.85;
-          break;
+    let fn: (x: number) => number;
+    switch (mode) {
+      case 'VCA':
+        // Legere compression des cretes (harmoniques impaires discretes)
+        fn = x => Math.tanh(1.4 * x) / 1.4;
+        break;
+      case 'OPTO': {
+        // Asymetrique douce : harmoniques paires, son « chaud »
+        const k = 1.2, b = 0.1;
+        const t0 = Math.tanh(k * b), slope = k * (1 - t0 * t0);
+        fn = x => (Math.tanh(k * (x + b)) - t0) / slope;
+        break;
       }
+      case 'FET':
+        // Plus mordant : arrondit franchement les cretes
+        fn = x => Math.tanh(1.8 * x) / 1.8;
+        break;
+      default:
+        fn = x => x;
     }
-    
-    this.saturationNode.curve = curve;
+    this.saturationNode.curve = makeCurve(8193, fn);
+  }
+
+  /**
+   * Caractere dynamique de chaque mode, applique aux reglages utilisateur :
+   * OPTO lent et doux, FET rapide et dur, VCA tel quel, CLEAN neutre.
+   * trimDb compense la perte de crete due a la saturation du mode.
+   */
+  private modeDynamics() {
+    const safe = (val: number, def: number) => Number.isFinite(val) ? val : def;
+    let attack = Math.max(0.0001, safe(this.params.attack, 0.003));
+    let release = Math.max(0.01, safe(this.params.release, 0.25));
+    let knee = Math.max(0, Math.min(40, safe(this.params.knee, 12)));
+    let trimDb = 0;
+    switch (this.params.mode) {
+      case 'VCA':
+        trimDb = 0.5;
+        break;
+      case 'OPTO':
+        attack = Math.max(0.01, attack * 1.5);
+        release = Math.max(0.12, release * 1.6);
+        knee = Math.max(knee, 12);
+        trimDb = 1.5;
+        break;
+      case 'FET':
+        attack = Math.max(0.0002, attack * 0.5);
+        release = Math.max(0.03, release * 0.75);
+        knee = Math.min(knee, 4);
+        trimDb = 1.5;
+        break;
+    }
+    return { attack: Math.min(1, attack), release: Math.min(1, release), knee, trim: Math.pow(10, trimDb / 20) };
   }
 
   private calculateAutoMakeup(): number {
@@ -185,9 +237,11 @@ export class CompressorNode {
     if (this.params.isEnabled) {
       this.compressor.threshold.setTargetAtTime(safe(this.params.threshold, -18), now, 0.01);
       this.compressor.ratio.setTargetAtTime(safe(this.params.ratio, 4), now, 0.01);
-      this.compressor.knee.setTargetAtTime(safe(this.params.knee, 12), now, 0.01);
-      this.compressor.attack.setTargetAtTime(safe(this.params.attack, 0.003), now, 0.01);
-      this.compressor.release.setTargetAtTime(safe(this.params.release, 0.25), now, 0.01);
+      const dyn = this.modeDynamics();
+      this.compressor.knee.setTargetAtTime(dyn.knee, now, 0.01);
+      this.compressor.attack.setTargetAtTime(dyn.attack, now, 0.01);
+      this.compressor.release.setTargetAtTime(dyn.release, now, 0.01);
+      this.modeTrim.gain.setTargetAtTime(dyn.trim, now, 0.01);
       
       const makeup = this.params.autoMakeup 
         ? this.calculateAutoMakeup() 
@@ -195,7 +249,9 @@ export class CompressorNode {
       this.makeupGainNode.gain.setTargetAtTime(makeup, now, 0.01);
       
       
-      this.lookaheadDelay.delayTime.setTargetAtTime(safe(this.params.lookahead, 0), now, 0.01);
+      const look = Math.max(0, Math.min(0.01, safe(this.params.lookahead, 0)));
+      this.lookaheadDelay.delayTime.setTargetAtTime(look, now, 0.01);
+      this.dryDelay.delayTime.setTargetAtTime(Math.floor(0.006 * this.ctx.sampleRate) / this.ctx.sampleRate + look, now, 0.01);
       
       const wet = safe(this.params.mix, 1);
       const dry = 1 - wet;

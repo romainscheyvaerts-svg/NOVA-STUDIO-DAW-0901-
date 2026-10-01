@@ -687,11 +687,14 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   >
                     S
                   </button>
+                  {/* Micro : seulement sur les pistes voix (pas le beat ni les bus) */}
+                  {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       if (onUpdateTrack) onUpdateTrack({ ...track, isTrackArmed: !track.isTrackArmed });
                     }}
+                    aria-label={track.isTrackArmed ? 'Couper le micro' : 'Activer le micro'}
                     className={`w-7 h-7 rounded-md text-[10px] font-bold transition-all ${
                       track.isTrackArmed
                         ? 'bg-red-600 text-white animate-pulse'
@@ -700,6 +703,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   >
                     R
                   </button>
+                  )}
                   {/* Send button - Opens sends panel */}
                   <button
                     onClick={(e) => {

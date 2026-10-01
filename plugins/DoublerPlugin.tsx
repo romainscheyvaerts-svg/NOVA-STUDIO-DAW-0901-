@@ -1,5 +1,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
+import { setParamSmooth } from './vocalDspUtils';
 
 /**
  * MODULE FX_10 : VOCAL DOUBLER
@@ -17,25 +18,35 @@ export interface DoublerParams {
   isEnabled: boolean;
 }
 
+/**
+ * Une voix doublee : retard court (10-30 ms) module par deux LFO de vitesses
+ * non multiples (derive lente + petite instabilite), comme un chanteur qui
+ * double sa prise : jamais exactement en place ni exactement juste.
+ */
+interface DoubleVoice {
+  delay: DelayNode;
+  hp: BiquadFilterNode;
+  lp: BiquadFilterNode;
+  gain: GainNode;
+  panner: StereoPannerNode;
+  lfoSlow: OscillatorNode;
+  lfoFast: OscillatorNode;
+  depthSlow: GainNode;
+  depthFast: GainNode;
+}
+
 export class VocalDoublerNode {
+  private readonly createdAt: number;
+  private setP(param: AudioParam, value: number, tau: number) {
+    setParamSmooth(param, value, this.ctx, this.createdAt, tau);
+  }
   private ctx: AudioContext;
   public input: GainNode;
   public output: GainNode;
   
   private dryGain: GainNode;
-  private wetGainL: GainNode;
-  private wetGainR: GainNode;
-  
-  private delayL: DelayNode;
-  private delayR: DelayNode;
-  
-  private modL: OscillatorNode;
-  private modR: OscillatorNode;
-  private modGainL: GainNode;
-  private modGainR: GainNode;
-  
-  private pannerL: StereoPannerNode;
-  private pannerR: StereoPannerNode;
+  private voiceL: DoubleVoice;
+  private voiceR: DoubleVoice;
 
   private params: DoublerParams = {
     detune: 0.4,
@@ -48,6 +59,7 @@ export class VocalDoublerNode {
 
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
+    this.createdAt = ctx.currentTime;
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     
@@ -56,21 +68,49 @@ export class VocalDoublerNode {
     this.output.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
     
     this.dryGain = ctx.createGain();
-    this.wetGainL = ctx.createGain();
-    this.wetGainR = ctx.createGain();
-    
-    this.delayL = ctx.createDelay(0.1);
-    this.delayR = ctx.createDelay(0.1);
-    
-    this.modL = ctx.createOscillator();
-    this.modR = ctx.createOscillator();
-    this.modGainL = ctx.createGain();
-    this.modGainR = ctx.createGain();
-    
-    this.pannerL = ctx.createStereoPanner();
-    this.pannerR = ctx.createStereoPanner();
+    // Temps de base et vitesses differents a gauche et a droite : les deux
+    // doublures ne se superposent jamais en peigne fixe.
+    this.voiceL = this.createVoice(0.016, 0.23, 1.7);
+    this.voiceR = this.createVoice(0.024, 0.31, 1.3);
 
     this.setupGraph();
+  }
+
+  private createVoice(baseDelay: number, slowHz: number, fastHz: number): DoubleVoice {
+    const ctx = this.ctx;
+    const delay = ctx.createDelay(0.1);
+    delay.delayTime.value = baseDelay;
+    // Doublure allegee dans le grave (pas d'empatement ni d'annulation de
+    // phase dans le bas) et un peu plus douce dans l'aigu : elle reste
+    // derriere la voix principale.
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 150;
+    hp.Q.value = -3.01;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 9000;
+    lp.Q.value = -3.01;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    const panner = ctx.createStereoPanner();
+    const lfoSlow = ctx.createOscillator();
+    lfoSlow.type = 'sine';
+    lfoSlow.frequency.value = slowHz;
+    const lfoFast = ctx.createOscillator();
+    lfoFast.type = 'triangle';
+    lfoFast.frequency.value = fastHz;
+    const depthSlow = ctx.createGain();
+    depthSlow.gain.value = 0;
+    const depthFast = ctx.createGain();
+    depthFast.gain.value = 0;
+    lfoSlow.connect(depthSlow);
+    lfoFast.connect(depthFast);
+    depthSlow.connect(delay.delayTime);
+    depthFast.connect(delay.delayTime);
+    lfoSlow.start();
+    lfoFast.start();
+    return { delay, hp, lp, gain, panner, lfoSlow, lfoFast, depthSlow, depthFast };
   }
 
   private setupGraph() {
@@ -78,32 +118,15 @@ export class VocalDoublerNode {
     this.input.connect(this.dryGain);
     this.dryGain.connect(this.output);
 
-    // 2. Left Path (Asymmetric Delay 12ms)
-    this.input.connect(this.delayL);
-    this.delayL.connect(this.wetGainL);
-    this.wetGainL.connect(this.pannerL);
-    this.pannerL.connect(this.output);
-
-    // 3. Right Path (Asymmetric Delay 28ms)
-    this.input.connect(this.delayR);
-    this.delayR.connect(this.wetGainR);
-    this.wetGainR.connect(this.pannerR);
-    this.pannerR.connect(this.output);
-
-    // 4. Modulation (Slow LFO for micro-pitch drift)
-    this.modL.type = 'sine';
-    this.modR.type = 'sine';
-    this.modL.frequency.value = 0.2; // Very slow drift
-    this.modR.frequency.value = 0.25;
-    
-    this.modL.connect(this.modGainL);
-    this.modGainL.connect(this.delayL.delayTime);
-    
-    this.modR.connect(this.modGainR);
-    this.modGainR.connect(this.delayR.delayTime);
-    
-    this.modL.start();
-    this.modR.start();
+    // 2. Doublures gauche et droite
+    for (const v of [this.voiceL, this.voiceR]) {
+      this.input.connect(v.delay);
+      v.delay.connect(v.hp);
+      v.hp.connect(v.lp);
+      v.lp.connect(v.gain);
+      v.gain.connect(v.panner);
+      v.panner.connect(this.output);
+    }
 
     this.applyParams();
   }
@@ -119,29 +142,44 @@ export class VocalDoublerNode {
     const { detune, width, gainL, gainR, directOn, isEnabled } = this.params;
 
     if (isEnabled) {
-      this.dryGain.gain.setTargetAtTime(directOn ? 1.0 : 0.0, now, 0.05);
-      this.wetGainL.gain.setTargetAtTime(safe(gainL), now, 0.05);
-      this.wetGainR.gain.setTargetAtTime(safe(gainR), now, 0.05);
+      this.setP(this.dryGain.gain, directOn ? 1.0 : 0.0, 0.05);
+      this.setP(this.voiceL.gain.gain, Math.max(0, safe(gainL)), 0.05);
+      this.setP(this.voiceR.gain.gain, Math.max(0, safe(gainR)), 0.05);
       
-      const sWidth = safe(width);
-      this.pannerL.pan.setTargetAtTime(-sWidth, now, 0.1);
-      this.pannerR.pan.setTargetAtTime(sWidth, now, 0.1);
+      const sWidth = Math.max(0, Math.min(1, safe(width)));
+      this.setP(this.voiceL.panner.pan, -sWidth, 0.1);
+      this.setP(this.voiceR.panner.pan, sWidth, 0.1);
       
-      const sDetune = safe(detune);
-      this.modGainL.gain.setTargetAtTime(0.0005 + (sDetune * 0.0015), now, 0.1);
-      this.modGainR.gain.setTargetAtTime(0.0005 + (sDetune * 0.0015), now, 0.1);
-      
-      this.delayL.delayTime.setTargetAtTime(0.012, now, 0.05);
-      this.delayR.delayTime.setTargetAtTime(0.028, now, 0.05);
+      // Detune 0..1 => ecart de hauteur crete d'environ 0..15 cents.
+      // L'ecart de hauteur d'un retard module vaut 2*pi*f*A : on calcule
+      // l'amplitude A pour chaque LFO a partir de l'ecart voulu (avant :
+      // 4 cents au maximum, alors que l'interface affiche 15).
+      const d = Math.max(0, Math.min(1, safe(detune)));
+      for (const v of [this.voiceL, this.voiceR]) {
+        const slowA = (d * 0.0065) / (2 * Math.PI * v.lfoSlow.frequency.value);
+        const fastA = (d * 0.0022) / (2 * Math.PI * v.lfoFast.frequency.value);
+        this.setP(v.depthSlow.gain, slowA, 0.1);
+        this.setP(v.depthFast.gain, fastA, 0.1);
+      }
     } else {
-      this.dryGain.gain.setTargetAtTime(1.0, now, 0.02);
-      this.wetGainL.gain.setTargetAtTime(0, now, 0.02);
-      this.wetGainR.gain.setTargetAtTime(0, now, 0.02);
+      this.setP(this.dryGain.gain, 1.0, 0.02);
+      this.setP(this.voiceL.gain.gain, 0, 0.02);
+      this.setP(this.voiceR.gain.gain, 0, 0.02);
     }
   }
 
   public getStatus() {
     return { ...this.params };
+  }
+
+  public dispose() {
+    for (const v of [this.voiceL, this.voiceR]) {
+      try { v.lfoSlow.stop(); v.lfoFast.stop(); } catch (e) {}
+      for (const n of [v.delay, v.hp, v.lp, v.gain, v.panner, v.lfoSlow, v.lfoFast, v.depthSlow, v.depthFast]) {
+        try { n.disconnect(); } catch (e) {}
+      }
+    }
+    try { this.dryGain.disconnect(); } catch (e) {}
   }
 }
 
@@ -316,7 +354,7 @@ export const VocalDoublerUI: React.FC<{ node: VocalDoublerNode, initialParams: D
       <div className="pt-6 border-t border-white/5 flex justify-between items-center text-slate-700">
         <div className="flex flex-col">
           <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">Haas Offset</span>
-          <span className="text-[9px] font-mono text-violet-400/60 mt-1">12ms / 28ms</span>
+          <span className="text-[9px] font-mono text-violet-400/60 mt-1">16ms / 24ms</span>
         </div>
         <div className="flex items-center space-x-2">
            <div className={`w-2 h-2 rounded-full ${params.isEnabled ? 'bg-violet-500 shadow-[0_0_8px_#a855f7]' : 'bg-slate-800'}`} />

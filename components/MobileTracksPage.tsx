@@ -194,7 +194,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                     <i className="fas fa-sliders-h text-[10px]"></i>
                   </button>
                 )}
-                {track.id === 'track-rec-main' && (
+                {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...track, isTrackArmed: !track.isTrackArmed }); }}
                     className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
@@ -208,7 +208,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
             </div>
 
             {/* Volume Fader */}
-            <div className="px-4 pb-2">
+            <div className="px-4 pb-2" data-nova-target={`vol-${track.id}`}>
               <div className="flex items-center gap-3">
                 <i className="fas fa-volume-up text-slate-500 text-xs"></i>
                 <div className="flex-1 relative">
@@ -297,29 +297,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                 Connexions
               </div>
               <div className="space-y-2">
-                {/* INPUT - Uniquement pour la piste REC */}
-                {track.id === 'track-rec-main' && (
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-green-500/20 to-emerald-500/20 border border-green-500/30">
-                      <i className="fas fa-arrow-right text-green-400 text-sm"></i>
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-[10px] text-slate-500 mb-1 font-bold uppercase">Input</div>
-                      <select
-                        value={track.inputDeviceId || 'none'}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          onUpdateTrack({ ...track, inputDeviceId: e.target.value });
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-lg text-xs font-bold text-green-400 focus:border-green-500/50 focus:outline-none"
-                      >
-                        <option value="none">No Input</option>
-                        <option value="mic-default">Mic / Line 1</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
+                {/* Sélecteur d entrée retiré : il n était relié à rien (« No Input » inquiétait). Le micro se choisit dans Réglages audio. */}
 
                 {/* OUTPUT - Toutes les pistes */}
                 <div className="flex items-center gap-2">

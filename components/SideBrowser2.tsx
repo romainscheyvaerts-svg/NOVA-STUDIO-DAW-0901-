@@ -11,6 +11,8 @@ interface SideBrowser2Props {
   activeTab: 'STORE' | 'FX' | 'BRIDGE';
   onTabChange: (tab: 'STORE' | 'FX' | 'BRIDGE') => void;
   selectedTrackId: string | null;
+  /** Charge le beat choisi sur la piste BEAT. */
+  onLoadBeat?: (inst: any) => void;
 }
 
 // --- DATA: NATIVE PLUGINS ---
@@ -26,10 +28,8 @@ const INTERNAL_PLUGINS = [
     { id: 'DOUBLER', name: 'Vocal Doubler', category: 'Stereo', icon: 'fa-people-arrows', color: '#8b5cf6' },
     { id: 'DEESSER', name: 'S-Killer', category: 'Dynamics', icon: 'fa-scissors', color: '#ef4444' },
     { id: 'DENOISER', name: 'Denoiser X', category: 'Restoration', icon: 'fa-broom', color: '#14b8a6' },
-    { id: 'MASTERSYNC', name: 'Master Sync', category: 'Utility', icon: 'fa-sync-alt', color: '#ffffff' },
-    { id: 'MELODIC_SAMPLER', name: 'Melodic Sampler', category: 'Instrument', icon: 'fa-music', color: '#22d3ee' },
-    { id: 'DRUM_SAMPLER', name: 'Drum Sampler', category: 'Instrument', icon: 'fa-drum', color: '#f97316' },
-    { id: 'DRUM_RACK_UI', name: 'Drum Rack', category: 'Instrument', icon: 'fa-th', color: '#f97316' }
+    { id: 'MASTERSYNC', name: 'Master Sync', category: 'Utility', icon: 'fa-sync-alt', color: '#ffffff' }
+    // Instruments (samplers, drum rack) retirés : le DAW sert aux voix, pas à composer.
 ];
 
 // --- Onglet Bridge (Plugins Externes) ---
@@ -161,21 +161,20 @@ const FXTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadat
 
 
 // --- Composant Principal ---
-const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurchase, activeTab, onTabChange, selectedTrackId }) => {
+const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurchase, activeTab, onTabChange, selectedTrackId, onLoadBeat }) => {
   return (
     <div className="w-80 h-full flex flex-col bg-[#0c0d10] border-r border-white/5 shadow-2xl">
       {/* Tab Bar */}
-      <div className="grid grid-cols-3 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
+      {/* Onglet Bridge (VST externes) retiré : inutile pour essayer sa voix */}
+      <div className="grid grid-cols-2 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
         <TabButton icon="fa-store" label="Store" isActive={activeTab === 'STORE'} onClick={() => onTabChange('STORE')} />
         <TabButton icon="fa-atom" label="FX" isActive={activeTab === 'FX'} onClick={() => onTabChange('FX')} />
-        <TabButton icon="fa-plug" label="Bridge" isActive={activeTab === 'BRIDGE'} onClick={() => onTabChange('BRIDGE')} />
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto custom-scroll">
-        {activeTab === 'STORE' && <InstrumentCatalog user={user} onPurchase={onPurchase} />}
+        {activeTab === 'STORE' && <InstrumentCatalog user={user} onPurchase={onPurchase} onLoadBeat={onLoadBeat} />}
         {activeTab === 'FX' && <FXTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
-        {activeTab === 'BRIDGE' && <BridgeTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
       </div>
     </div>
   );

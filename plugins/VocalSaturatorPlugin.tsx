@@ -29,6 +29,7 @@ export class VocalSaturatorNode {
   private driveGain: GainNode;
   private shaper: WaveShaperNode;
   private autoGain: GainNode;
+  private dcBlock: BiquadFilterNode;
   private tiltLow: BiquadFilterNode;
   private tiltHigh: BiquadFilterNode;
   private eqLowNode: BiquadFilterNode;
@@ -58,6 +59,10 @@ export class VocalSaturatorNode {
     this.shaper = ctx.createWaveShaper();
     this.shaper.oversample = '4x';
     this.autoGain = ctx.createGain();
+    // Une courbe asymetrique cree une composante continue : on la retire.
+    this.dcBlock = ctx.createBiquadFilter();
+    this.dcBlock.type = 'highpass';
+    this.dcBlock.frequency.value = 10;
     this.tiltLow = ctx.createBiquadFilter();
     this.tiltLow.type = 'lowshelf';
     this.tiltLow.frequency.value = 800;
@@ -91,7 +96,8 @@ export class VocalSaturatorNode {
     // -- WET PATH --
     this.input.connect(this.driveGain);
     this.driveGain.connect(this.shaper);
-    this.shaper.connect(this.autoGain);
+    this.shaper.connect(this.dcBlock);
+    this.dcBlock.connect(this.autoGain);
     this.autoGain.connect(this.tiltLow);
     this.tiltLow.connect(this.tiltHigh);
     this.tiltHigh.connect(this.eqLowNode);
@@ -129,12 +135,19 @@ export class VocalSaturatorNode {
         curve[i] = Math.tanh(x * drive) / Math.tanh(drive);
       } 
       else if (this.params.mode === 'TUBE') {
-        const absX = Math.abs(x);
-        if (x < 0) {
-          curve[i] = - (1 - Math.exp(-absX * drive)) / (1 - Math.exp(-drive));
-        } else {
-          curve[i] = (Math.pow(absX, 0.5) * (1 - Math.exp(-absX * drive))) / (1 - Math.exp(-drive));
-        }
+        // Asymetrie douce (harmoniques paires). L'ancienne alternance positive
+        // en racine carree ecrasait les petits signaux (pente nulle en 0) et
+        // sonnait comme une distorsion de croisement sur les fins de phrase.
+        const b = 0.1;
+        const t0 = Math.tanh(drive * b);
+        const norm = (Math.tanh(drive * (1 + b)) - Math.tanh(drive * (b - 1))) / 2;
+        curve[i] = (Math.tanh(drive * (x + b)) - t0) / norm;
+      } 
+      else if (this.params.mode === 'TRANSISTOR') {
+        // Ecretage plus dur et symetrique (harmoniques impaires). Ce mode n'avait
+        // pas de courbe : la voie saturee etait muette (presets Drill / Telephone).
+        const shape = (v: number) => (drive * v) / Math.pow(1 + Math.pow(Math.abs(drive * v), 2.5), 0.4);
+        curve[i] = shape(x) / shape(1);
       } 
       else if (this.params.mode === 'SOFT_CLIP') {
         const gainX = x * drive * 0.5;
@@ -222,7 +235,10 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
     ctx.stroke();
     ctx.setLineDash([]);
 
-    const { drive, mode } = params;
+    const { mode } = params;
+    // Meme echelle que generateCurve (1 + drive/10) : la courbe affichee est
+    // celle qu'on entend.
+    const drive = 1 + (Number.isFinite(params.drive) ? params.drive : 20) / 10;
 
     ctx.beginPath();
     ctx.strokeStyle = '#facc15';
@@ -237,12 +253,13 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
       if (mode === 'TAPE') {
         y = Math.tanh(x * drive) / Math.tanh(drive);
       } else if (mode === 'TUBE') {
-        const absX = Math.abs(x);
-        if (x < 0) {
-          y = - (1 - Math.exp(-absX * drive)) / (1 - Math.exp(-drive));
-        } else {
-          y = (Math.pow(absX, 0.5) * (1 - Math.exp(-absX * drive))) / (1 - Math.exp(-drive));
-        }
+        // Meme courbe que le moteur audio
+        const b = 0.1;
+        const norm = (Math.tanh(drive * (1 + b)) - Math.tanh(drive * (b - 1))) / 2;
+        y = (Math.tanh(drive * (x + b)) - Math.tanh(drive * b)) / norm;
+      } else if (mode === 'TRANSISTOR') {
+        const shape = (v: number) => (drive * v) / Math.pow(1 + Math.pow(Math.abs(drive * v), 2.5), 0.4);
+        y = shape(x) / shape(1);
       } else if (mode === 'SOFT_CLIP') {
         const gainX = x * drive * 0.5;
         y = Math.abs(gainX) < 1 ? gainX - (Math.pow(gainX, 3) / 3) : (gainX > 0 ? 0.66 : -0.66);
@@ -393,7 +410,7 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
       </div>
 
       <div className="flex justify-center space-x-3">
-        {(['TAPE', 'TUBE', 'SOFT_CLIP'] as SaturationMode[]).map(mode => (
+        {(['TAPE', 'TUBE', 'TRANSISTOR', 'SOFT_CLIP'] as SaturationMode[]).map(mode => (
           <button
             key={mode}
             onClick={() => setMode(mode)}

@@ -318,6 +318,7 @@ const ChannelStrip: React.FC<{
            <div className="flex-1 relative flex flex-col items-center">
               <div 
                 ref={faderTrackRef} 
+                data-nova-target={`vol-${track.id}`}
                 onMouseDown={onVolMouseDown}
                 onTouchStart={onVolTouchStart}
                 onTouchMove={onVolTouchMove}

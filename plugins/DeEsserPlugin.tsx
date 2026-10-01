@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createEnvelopeFollower, makeCurve } from './vocalDspUtils';
 
 /**
  * MODULE FX_12 : PRO VOCAL DE-ESSER (v2.0)
@@ -23,10 +24,21 @@ export class DeEsserNode {
   private ctx: AudioContext;
   public input: GainNode;
   public output: GainNode;
-  private dryPathFilter: BiquadFilterNode;
-  private wetPathFilter: BiquadFilterNode;
-  private compressor: DynamicsCompressorNode;
-  private merger: GainNode;
+  // EQ dynamique : une cloche (BELL) ou une etagere aigue (SHELF) dont le gain
+  // en dB est pilote par le detecteur. A 0 dB le filtre est strictement neutre.
+  // (L'ancienne version passait la bande dans un DynamicsCompressorNode : sa
+  // pre-lecture de 6 ms dephasait la bande et son gain de compensation
+  // automatique remontait les « s » faibles ; le mode SHELF, somme
+  // passe-bas + passe-haut, creusait en permanence la frequence choisie.)
+  private eqFilter: BiquadFilterNode;
+  // Detection : filtre de bande -> redressement + lissage -> courbe de gain (dB)
+  private detectFilter: BiquadFilterNode;
+  private follower: ReturnType<typeof createEnvelopeFollower>;
+  private gainComputer: WaveShaperNode;
+  private enableGain: GainNode;
+  private grMeter: AnalyserNode;
+  private grData: Float32Array;
+  private curveKey = '';
   public analyzer: AnalyserNode;
 
   private params: DeEsserParams = {
@@ -42,12 +54,18 @@ export class DeEsserNode {
     this.ctx = ctx;
     this.input = ctx.createGain();
     this.output = ctx.createGain();
-    this.dryPathFilter = ctx.createBiquadFilter();
-    this.wetPathFilter = ctx.createBiquadFilter();
-    this.compressor = ctx.createDynamicsCompressor();
-    this.compressor.attack.value = 0.002;
-    this.compressor.release.value = 0.050;
-    this.merger = ctx.createGain();
+    this.eqFilter = ctx.createBiquadFilter();
+    this.eqFilter.type = 'peaking';
+    this.eqFilter.gain.value = 0;
+    this.detectFilter = ctx.createBiquadFilter();
+    this.detectFilter.type = 'bandpass';
+    // Lissage ~60 Hz : reagit en quelques ms sur un « s » sans moduler la voix.
+    this.follower = createEnvelopeFollower(ctx, 60);
+    this.gainComputer = ctx.createWaveShaper();
+    this.enableGain = ctx.createGain();
+    this.grMeter = ctx.createAnalyser();
+    this.grMeter.fftSize = 256;
+    this.grData = new Float32Array(this.grMeter.fftSize);
     this.analyzer = ctx.createAnalyser();
     this.analyzer.fftSize = 512;
     this.setupChain();
@@ -55,14 +73,42 @@ export class DeEsserNode {
 
   private setupChain() {
     this.input.disconnect();
-    this.input.connect(this.dryPathFilter);
-    this.dryPathFilter.connect(this.merger);
-    this.input.connect(this.wetPathFilter);
-    this.wetPathFilter.connect(this.compressor);
-    this.compressor.connect(this.merger);
-    this.merger.connect(this.analyzer);
+    // Chemin audio
+    this.input.connect(this.eqFilter);
+    this.eqFilter.connect(this.analyzer);
     this.analyzer.connect(this.output);
+    // Chaine de commande (gain en dB ajoute au gain de base 0 dB du filtre)
+    this.input.connect(this.detectFilter);
+    this.detectFilter.connect(this.follower.input);
+    this.follower.output.connect(this.gainComputer);
+    this.gainComputer.connect(this.enableGain);
+    this.enableGain.connect(this.eqFilter.gain);
+    this.enableGain.connect(this.grMeter);
     this.applyParams();
+  }
+
+  /**
+   * Courbe enveloppe -> reduction en dB : seuil, ratio 1..20 et reduction
+   * maximale 4..18 dB selon « reduction », genou doux de 6 dB.
+   */
+  private updateGainCurve() {
+    const T = Number.isFinite(this.params.threshold) ? this.params.threshold : -25;
+    const r = Number.isFinite(this.params.reduction) ? Math.max(0, Math.min(1, this.params.reduction)) : 0.6;
+    const key = `${T.toFixed(2)}:${r.toFixed(3)}`;
+    if (key === this.curveKey) return;
+    this.curveKey = key;
+    const ratio = 1 + r * 19;
+    const maxRange = r > 0 ? 4 + 14 * r : 0;
+    const knee = 6;
+    const slope = 1 / ratio - 1;
+    this.gainComputer.curve = makeCurve(32769, x => {
+      if (x <= 0 || r <= 0) return 0;
+      const over = 20 * Math.log10(x) - T;
+      let gr = 0;
+      if (over >= knee / 2) gr = slope * over;
+      else if (over > -knee / 2) gr = slope * (over + knee / 2) * (over + knee / 2) / (2 * knee);
+      return Math.max(gr, -maxRange);
+    });
   }
 
   public updateParams(p: Partial<DeEsserParams>) {
@@ -72,33 +118,40 @@ export class DeEsserNode {
 
   private applyParams() {
     const now = this.ctx.currentTime;
-    const { threshold, frequency, q, reduction, mode, isEnabled } = this.params;
-    if (isEnabled) {
-      if (mode === 'SHELF') {
-        this.dryPathFilter.type = 'lowpass';
-        this.wetPathFilter.type = 'highpass';
-        this.dryPathFilter.Q.setTargetAtTime(0.707, now, 0.02);
-        this.wetPathFilter.Q.setTargetAtTime(0.707, now, 0.02);
-      } else {
-        this.dryPathFilter.type = 'notch';
-        this.wetPathFilter.type = 'bandpass';
-        this.dryPathFilter.Q.setTargetAtTime(q, now, 0.02);
-        this.wetPathFilter.Q.setTargetAtTime(q, now, 0.02);
-      }
-      this.dryPathFilter.frequency.setTargetAtTime(frequency, now, 0.02);
-      this.wetPathFilter.frequency.setTargetAtTime(frequency, now, 0.02);
-      this.compressor.threshold.setTargetAtTime(threshold, now, 0.02);
-      this.compressor.ratio.setTargetAtTime(1 + reduction * 19, now, 0.02);
+    const { frequency, q, mode, isEnabled } = this.params;
+    const freq = Number.isFinite(frequency) ? Math.max(1000, Math.min(16000, frequency)) : 6500;
+    const qv = Number.isFinite(q) ? Math.max(0.1, Math.min(10, q)) : 1;
+    if (mode === 'SHELF') {
+      if (this.eqFilter.type !== 'highshelf') this.eqFilter.type = 'highshelf';
+      if (this.detectFilter.type !== 'highpass') this.detectFilter.type = 'highpass';
+      this.detectFilter.Q.setTargetAtTime(-3.01, now, 0.02);
     } else {
-      this.dryPathFilter.type = 'allpass';
-      this.wetPathFilter.type = 'allpass';
-      this.compressor.threshold.setTargetAtTime(0, now, 0.02);
-      this.compressor.ratio.setTargetAtTime(1, now, 0.02);
+      if (this.eqFilter.type !== 'peaking') this.eqFilter.type = 'peaking';
+      if (this.detectFilter.type !== 'bandpass') this.detectFilter.type = 'bandpass';
+      this.eqFilter.Q.setTargetAtTime(qv, now, 0.02);
+      this.detectFilter.Q.setTargetAtTime(qv, now, 0.02);
     }
+    this.eqFilter.frequency.setTargetAtTime(freq, now, 0.02);
+    this.detectFilter.frequency.setTargetAtTime(freq, now, 0.02);
+    this.updateGainCurve();
+    this.enableGain.gain.setTargetAtTime(isEnabled ? 1 : 0, now, 0.02);
   }
 
-  public getReduction(): number { return this.compressor.reduction; }
+  /** Reduction de gain actuelle de la bande, en dB (valeur negative). */
+  public getReduction(): number {
+    this.grMeter.getFloatTimeDomainData(this.grData as any);
+    let min = 0;
+    for (let i = 0; i < this.grData.length; i++) if (this.grData[i] < min) min = this.grData[i];
+    return min;
+  }
+
   public getParams() { return { ...this.params }; }
+
+  public dispose() {
+    for (const n of [this.input, this.eqFilter, this.detectFilter, ...this.follower.nodes, this.gainComputer, this.enableGain, this.grMeter, this.analyzer]) {
+      try { n.disconnect(); } catch (e) {}
+    }
+  }
 }
 
 interface VocalDeEsserUIProps {
