@@ -317,6 +317,12 @@ export interface DAWState {
   projectScale?: string; 
   /** Dernier style de mix voix appliqué (utils/vocalPresets). */
   vocalMixStyle?: string;
+  /** Paroles de l'artiste (prompteur) : sauvegardées avec le projet. */
+  lyrics?: string;
+  /** Position (s) où la 1re ligne passe sur la ligne de lecture. */
+  lyricsStart?: number;
+  /** Vitesse de défilement (lignes / minute). */
+  lyricsSpeed?: number;
   isPlaying: boolean;
   isRecording: boolean;
   currentTime: number;
@@ -434,7 +440,8 @@ export type AIActionType =
   | 'PREPARE_PART'
   | 'ANALYZE_MIX'
   | 'HIGHLIGHT'
-  | 'OPEN_STUDIO_OFFER'; 
+  | 'OPEN_STUDIO_OFFER'
+  | 'OPEN_LYRICS'; 
 
 export interface AIAction {
   action: AIActionType;

@@ -4,6 +4,7 @@ import { supabaseManager } from '../services/SupabaseManager';
 import { audioEngine } from '../engine/AudioEngine';
 import { ProjectIO } from '../services/ProjectIO';
 import AuthScreen from './AuthScreen';
+import { SavedSessionMeta, formatAgo } from '../utils/sessionStore';
 
 interface LandingPageProps {
   user: User | null;
@@ -11,6 +12,9 @@ interface LandingPageProps {
   onEnterWithInstrumental: (instrumental: Instrumental) => void;
   onEnterWithAudioFile: (file: File) => void;
   onEnterWithProject: (project: DAWState) => void;
+  /** Session sauvegardée automatiquement sur l'appareil (null si aucune). */
+  savedSession?: SavedSessionMeta | null;
+  onResumeSession?: () => void;
   onLogin: (user: User) => void;
   onLogout: () => void;
 }
@@ -21,6 +25,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
   onEnterWithInstrumental, 
   onEnterWithAudioFile, 
   onEnterWithProject,
+  savedSession,
+  onResumeSession,
   onLogin,
   onLogout 
 }) => {
@@ -269,6 +275,25 @@ const LandingPage: React.FC<LandingPageProps> = ({
         <aside className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-white/5 bg-[#0c0d10] flex flex-col">
           <div className="p-4 space-y-3">
             <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Démarrer</h2>
+
+            {/* Reprise de la dernière session (sauvegarde automatique sur l'appareil) */}
+            {savedSession && onResumeSession && (
+              <button
+                onClick={onResumeSession}
+                className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-emerald-500/15 to-cyan-500/10 border border-emerald-400/40 rounded-xl hover:border-emerald-400/70 transition-all group"
+              >
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+                  <i className="fas fa-rotate-left text-emerald-300 text-lg"></i>
+                </div>
+                <div className="text-left min-w-0">
+                  <p className="text-sm font-bold text-white">Reprendre ma session</p>
+                  <p className="text-[11px] text-slate-300 truncate">
+                    {[savedSession.beatTitle, savedSession.takes ? `${savedSession.takes} prise${savedSession.takes > 1 ? "s" : ""}` : null, savedSession.hasLyrics ? "paroles" : null].filter(Boolean).join(" · ")}
+                  </p>
+                  <p className="text-[10px] text-slate-500">{formatAgo(savedSession.savedAt)}</p>
+                </div>
+              </button>
+            )}
             
             {/* Bouton Nouveau projet */}
             <button

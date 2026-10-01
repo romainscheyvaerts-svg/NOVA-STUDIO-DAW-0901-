@@ -17,6 +17,9 @@ export class ProjectIO {
     const serializableState = JSON.parse(JSON.stringify(state));
     
     const audioFolder = zip.folder("audio");
+    // Un même enregistrement peut porter plusieurs clips (prise découpée par le
+    // retrait des blancs) : on l'écrit une seule fois.
+    const written = new Set<string>();
     
     // 2. Itération sur les pistes et clips pour extraire l'audio
     for (let tIndex = 0; tIndex < state.tracks.length; tIndex++) {
@@ -39,7 +42,7 @@ export class ProjectIO {
             const buffer = clip.bufferId ? audioBufferRegistry.get(clip.bufferId) : clip.buffer;
             
             if (buffer) {
-                const filename = `${clip.id}.wav`;
+                const filename = `${clip.bufferId || clip.id}.wav`;
                 
                 // On met à jour la référence dans le JSON quoi qu'il arrive
                 // (Comme ça la structure du projet reste intacte)
@@ -49,10 +52,13 @@ export class ProjectIO {
 
                 // SAUVEGARDE CONDITIONNELLE DU FICHIER WAV
                 if (!isUnlicensedStoreBeat) {
-                    // Conversion AudioBuffer -> WAV Blob
-                    const wavBlob = audioBufferToWav(buffer);
-                    if (audioFolder) {
-                        audioFolder.file(filename, wavBlob);
+                    if (!written.has(filename)) {
+                        written.add(filename);
+                        // Conversion AudioBuffer -> WAV Blob
+                        const wavBlob = audioBufferToWav(buffer);
+                        if (audioFolder) {
+                            audioFolder.file(filename, wavBlob);
+                        }
                     }
                 } else {
                     console.log(`[ProjectIO] Exclusion audio (Licence manquante) pour : ${track.name}`);
@@ -95,12 +101,17 @@ export class ProjectIO {
     // Initialisation moteur si nécessaire
     await audioEngine.init();
     
-    // 2. Reconstruction des AudioBuffers via Registry
+    // 2. Reconstruction des AudioBuffers via Registry (un décodage par fichier)
+    const decoded = new Map<string, string>();
     for (const track of loadedState.tracks) {
         for (const clip of track.clips) {
             if (clip.audioRef) {
                 const audioFile = zip.file(clip.audioRef);
-                if (audioFile) {
+                const already = decoded.get(clip.audioRef);
+                if (already) {
+                    clip.bufferId = already;
+                    delete clip.buffer;
+                } else if (audioFile) {
                     const arrayBuffer = await audioFile.async("arraybuffer");
                     // Décodage WebAudio
                     const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
@@ -108,6 +119,7 @@ export class ProjectIO {
                     // Enregistrer dans le registry et stocker l'ID
                     const bufferId = audioBufferRegistry.register(audioBuffer, clip.id);
                     clip.bufferId = bufferId;
+                    decoded.set(clip.audioRef, bufferId);
                     
                     // NE PAS mettre le buffer directement sur le clip (Immer incompatible)
                     delete clip.buffer;

@@ -234,6 +234,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
   const QUICK_ACTIONS: { label: string; icon: string; run: () => void }[] = [
     { label: 'Écoute mon mix', icon: 'fa-headphones', run: () => { setMixEcoute(true); void runChoice({ label: '🎧 Écoute mon mix', action: { action: 'ANALYZE_MIX', payload: {} } }); } },
     { label: 'Mix auto', icon: 'fa-sliders', run: pushMixGuide },
+    { label: 'Mes paroles', icon: 'fa-align-left', run: () => void runChoice({ label: '📝 Mes paroles', action: { action: 'OPEN_LYRICS', payload: {} } }) },
     { label: 'Faire les backs', icon: 'fa-layer-group', run: () => void runChoice({ label: '🎤 Faire les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } }) },
     { label: 'Retirer les blancs', icon: 'fa-broom', run: () => void runChoice({ label: '🧹 Retirer les blancs', action: { action: 'CLEAN_SILENCE', payload: {}, description: 'Retirer les blancs' } }) },
     { label: 'Conseille-moi', icon: 'fa-lightbulb', run: () => void handleSend("Écoute l'état de mon projet et conseille-moi le style de mix qui irait le mieux à ma voix sur ce beat.") },

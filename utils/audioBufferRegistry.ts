@@ -43,6 +43,11 @@ class AudioBufferRegistry {
     has(id: string): boolean {
         return this.buffers.has(id);
     }
+
+    /** Identifiants enregistrés (pour libérer seulement ceux qui ne servent plus). */
+    ids(): string[] {
+        return Array.from(this.buffers.keys());
+    }
     
     /**
      * Supprime un buffer (libération mémoire)

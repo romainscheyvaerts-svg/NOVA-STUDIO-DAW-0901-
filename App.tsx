@@ -56,6 +56,8 @@ import { analyseMix, takeStats, levelsForAI } from './utils/mixAnalysis';
 import { novaSpotlight } from './utils/novaSpotlight';
 import { openBuyBeat, openProMix, getCatalogBeat } from './utils/studioLinks';
 import RecordingCoach from './components/RecordingCoach';
+import LyricsPrompter from './components/LyricsPrompter';
+import { saveSession, loadSession, getSessionMeta, SavedSessionMeta } from './utils/sessionStore';
 import VocalToolsPanel from './components/VocalToolsPanel';
 
 const AVAILABLE_FX_MENU = [
@@ -396,6 +398,38 @@ export default function App() {
     setPendingProject(project);
     setShowLanding(false);
   };
+
+  // Dernière session sauvegardée sur l'appareil (« Reprendre ma session »)
+  const [savedSessionMeta, setSavedSessionMeta] = useState<SavedSessionMeta | null>(null);
+  useEffect(() => { getSessionMeta().then(setSavedSessionMeta).catch(() => {}); }, []);
+  // Après une reprise : le beat du catalogue n'est pas dans la sauvegarde (licence),
+  // on le recharge depuis le catalogue.
+  const restoreBeatAfterResumeRef = useRef(false);
+
+  const handleResumeSession = async () => {
+    const saved = await loadSession();
+    if (!saved) { setSavedSessionMeta(null); return; }
+    try {
+      const project = await ProjectIO.loadProject(new File([saved.blob], 'session.novaproj.zip'));
+      restoreBeatAfterResumeRef.current = true;
+      handleEnterWithProject(project);
+    } catch (e) {
+      console.error('[Session] Reprise impossible', e);
+      setAiNotification("La session sauvegardée n'a pas pu être rouverte.");
+      setShowLanding(false);
+    }
+  };
+
+  // Ouverture depuis le site : /daw?beat=<id> → studio direct, beat chargé.
+  useEffect(() => {
+    let beatId: string | null = null;
+    try { beatId = new URLSearchParams(window.location.search).get('beat'); } catch { /* */ }
+    if (!beatId) return;
+    supabaseManager.getActiveInstrumentals().then(list => {
+      const inst = list.find((i: any) => String(i.id) === beatId);
+      if (inst) handleEnterWithInstrumental(inst);
+    }).catch(() => {});
+  }, []);
 
   // Utilisateur par défaut pour éviter l'écran noir (temporaire)
   const defaultUser: User = {
@@ -779,7 +813,12 @@ export default function App() {
   const handleLoadProject = useCallback((rawState: DAWState) => {
     const loadedState = migrateLoadedState(rawState);
     ensureAudioEngine().then(() => {
-        audioBufferRegistry.clear();
+        // On libère l'audio de l'ancien projet, mais pas celui que ProjectIO
+        // vient de décoder pour CE projet : clear() effaçait toutes les prises
+        // d'un projet ouvert depuis un fichier ou une session sauvegardée.
+        const keep = new Set<string>();
+        loadedState.tracks.forEach(t => t.clips.forEach(c => { if (c.bufferId) keep.add(c.bufferId); }));
+        audioBufferRegistry.removeMany(audioBufferRegistry.ids().filter(id => !keep.has(id)));
         
         loadedState.tracks.forEach(track => {
             track.clips.forEach(clip => {
@@ -2314,6 +2353,65 @@ export default function App() {
     }));
   };
 
+  // Reprise d'une session : on recharge le beat du catalogue (non sauvegardé).
+  useEffect(() => {
+    if (showLanding || !restoreBeatAfterResumeRef.current) return;
+    const timer = setTimeout(async () => {
+      restoreBeatAfterResumeRef.current = false;
+      const beat = stateRef.current.tracks.find(t => t.id === 'instrumental');
+      if (!beat || beat.instrumentId === undefined) return;
+      if (beat.clips.some(c => c.bufferId && audioBufferRegistry.get(c.bufferId))) return;
+      try {
+        const list = await supabaseManager.getActiveInstrumentals();
+        const inst = list.find((i: any) => String(i.id) === String(beat.instrumentId));
+        if (inst) await loadCatalogBeatRef.current?.(inst);
+      } catch { /* hors ligne : le beat reste à recharger à la main */ }
+      setAiNotification('💾 Session reprise : tes prises et tes paroles sont là.');
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [showLanding]);
+
+  // Sauvegarde automatique sur l'appareil, quelques secondes après chaque
+  // changement (jamais pendant la lecture ou une prise : ça couperait le son).
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+  const autosaveTimer = useRef<number | null>(null);
+  const autosaveNotified = useRef(false);
+  const autosaveNow = useCallback(async () => {
+    const st = stateRef.current;
+    if (st.isRecording) return;
+    const voiceTakes = st.tracks.filter(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId)
+      .reduce((n, t) => n + t.clips.filter(c => /^Prise \d+/.test(c.name || '')).length, 0);
+    const hasAudio = st.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0);
+    if (!hasAudio && !(st.lyrics || '').trim()) return; // rien à garder : on n'écrase pas une session précédente
+    try {
+      const blob = await ProjectIO.saveProject(st, user?.owned_instruments || []);
+      const beatClip = st.tracks.find(t => t.id === 'instrumental')?.clips[0];
+      await saveSession(blob, {
+        savedAt: Date.now(),
+        beatTitle: beatClip?.name?.replace(/^🚫\s*/, '').replace(/\s*\(Licence requise\)$/, '') || null,
+        takes: voiceTakes,
+        hasLyrics: !!(st.lyrics || '').trim(),
+      });
+      if (!autosaveNotified.current) {
+        autosaveNotified.current = true;
+        setAiNotification("💾 Ta session est sauvegardée automatiquement sur cet appareil : tu la retrouveras en revenant (« Reprendre ma session »).");
+      }
+    } catch (e) {
+      console.warn('[Session] Sauvegarde auto impossible', e);
+    }
+  }, [user]);
+  useEffect(() => {
+    if (showLanding || state.isPlaying || state.isRecording) return;
+    if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = window.setTimeout(() => { void autosaveNow(); }, 4000);
+    return () => { if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current); };
+  }, [state.tracks, state.lyrics, state.isPlaying, state.isRecording, showLanding, autosaveNow]);
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden' && !showLanding) void autosaveNow(); };
+    document.addEventListener('visibilitychange', onHide);
+    return () => document.removeEventListener('visibilitychange', onHide);
+  }, [autosaveNow, showLanding]);
+
   // Un extrait du catalogue démarre : le projet en lecture se met en pause
   // (sauf pendant une prise, qu'on ne coupe jamais).
   useEffect(() => {
@@ -2996,6 +3094,10 @@ export default function App() {
         break;
       }
 
+      case 'OPEN_LYRICS':
+        setLyricsOpen(true);
+        break;
+
       case 'OPEN_MIX_STYLES':
         setVocalToolsOpen(true);
         break;
@@ -3156,6 +3258,8 @@ export default function App() {
         onEnterWithInstrumental={handleEnterWithInstrumental}
         onEnterWithAudioFile={handleEnterWithAudioFile}
         onEnterWithProject={handleEnterWithProject}
+        savedSession={savedSessionMeta}
+        onResumeSession={handleResumeSession}
         onLogin={(u) => setUser(u)}
         onLogout={handleLogout}
       />
@@ -3204,6 +3308,8 @@ export default function App() {
         <TrackCreationBar
           onCreateTrack={handleCreateTrack}
           onOpenVocalTools={() => setVocalToolsOpen(true)}
+          onOpenLyrics={() => setLyricsOpen(o => !o)}
+          lyricsOpen={lyricsOpen}
           currentStyleId={state.vocalMixStyle}
         />
       )}
@@ -3395,6 +3501,20 @@ export default function App() {
         onBuyBeat={() => openBuyBeat(stateRef.current.tracks)}
         onProMix={openProMix}
         onAskNova={() => { setVocalToolsOpen(false); if (isMobile) setActiveMobileTab('NOVA'); setMixGuideRequest(n => n + 1); }}
+      />
+
+      <LyricsPrompter
+        open={lyricsOpen}
+        onClose={() => setLyricsOpen(false)}
+        lyrics={state.lyrics || ''}
+        onLyricsChange={text => setState(prev => ({ ...prev, lyrics: text }))}
+        start={state.lyricsStart ?? 0}
+        onStartChange={t => setState(prev => ({ ...prev, lyricsStart: Math.max(0, t) }))}
+        speed={state.lyricsSpeed ?? 16}
+        onSpeedChange={v => setState(prev => ({ ...prev, lyricsSpeed: v }))}
+        isPlaying={state.isPlaying}
+        isRecording={state.isRecording}
+        currentTime={state.currentTime}
       />
 
       <RecordingCoach

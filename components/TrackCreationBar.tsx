@@ -7,6 +7,9 @@ interface TrackCreationBarProps {
   /** Ouvre le panneau « Mix auto » (styles de mix, outils voix). */
   onOpenVocalTools?: () => void;
   currentStyleId?: string;
+  /** Ouvre / ferme le prompteur de paroles. */
+  onOpenLyrics?: () => void;
+  lyricsOpen?: boolean;
 }
 
 /**
@@ -14,7 +17,7 @@ interface TrackCreationBarProps {
  * pas. La barre flottante propose donc les deux gestes utiles : ajouter une
  * piste voix et choisir un style de mix.
  */
-const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOpenVocalTools, currentStyleId }) => {
+const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen }) => {
   const style = findVocalMixStyle(currentStyleId);
   return (
     <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[150] flex items-center gap-2">
@@ -29,6 +32,19 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOp
         <i className="fas fa-microphone text-sm text-cyan-400"></i>
         <span className="text-xs font-bold">Piste voix</span>
       </button>
+      {onOpenLyrics && (
+        <button
+          type="button"
+          onClick={onOpenLyrics}
+          aria-pressed={!!lyricsOpen}
+          data-nova-target="lyrics"
+          title="Tes paroles en prompteur qui défile pendant la prise"
+          className={`h-12 px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border ${lyricsOpen ? 'bg-white text-black border-white' : 'bg-[#1a1c21] border-white/20 text-white/80 hover:text-white'}`}
+        >
+          <span className="text-base leading-none">📝</span>
+          <span className="text-xs font-bold">Paroles</span>
+        </button>
+      )}
       {onOpenVocalTools && (
         <button
           type="button"
