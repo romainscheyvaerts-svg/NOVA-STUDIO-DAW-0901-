@@ -2314,6 +2314,19 @@ export default function App() {
     }));
   };
 
+  // Un extrait du catalogue démarre : le projet en lecture se met en pause
+  // (sauf pendant une prise, qu'on ne coupe jamais).
+  useEffect(() => {
+    const onPreview = () => {
+      if (stateRef.current.isPlaying && !stateRef.current.isRecording) {
+        audioEngine.stopAll();
+        setVisualState({ isPlaying: false });
+      }
+    };
+    window.addEventListener('nova:preview-start', onPreview);
+    return () => window.removeEventListener('nova:preview-start', onPreview);
+  }, [setVisualState]);
+
   const handleLoadCatalogBeat = async (inst: any) => {
     let audioUrl = '';
     if (inst?.preview_url) audioUrl = supabaseManager.getPublicInstrumentUrl(inst.preview_url);
@@ -2323,6 +2336,8 @@ export default function App() {
       return;
     }
     if (stateRef.current.isPlaying) { audioEngine.stopAll(); setVisualState({ isPlaying: false }); }
+    // L'extrait de ce beat (ou d'un autre) s'arrête : on passe au beat dans le projet.
+    window.dispatchEvent(new Event('nova:transport-start'));
     setState(produce((draft: DAWState) => {
       const beat = draft.tracks.find(t => t.id === 'instrumental');
       if (beat) beat.clips = [];

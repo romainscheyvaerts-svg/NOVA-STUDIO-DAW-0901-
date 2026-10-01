@@ -97,6 +97,13 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
     setPlayingId(null);
   };
 
+  // Le projet démarre (lecture, prise, beat chargé) : l'extrait s'arrête.
+  useEffect(() => {
+    const onTransport = () => stopAllPlayback();
+    window.addEventListener('nova:transport-start', onTransport);
+    return () => window.removeEventListener('nova:transport-start', onTransport);
+  });
+
   const togglePlay = async (beat: Instrumental, e: React.MouseEvent) => {
     e.stopPropagation();
     
@@ -107,6 +114,8 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
 
     // Stop previous track
     stopAllPlayback();
+    // Et le projet en lecture se met en pause (pas pendant une prise).
+    window.dispatchEvent(new Event('nova:preview-start'));
     
     // Construire l'URL de preview à partir de drive_file_id ou preview_url
     let url = '';

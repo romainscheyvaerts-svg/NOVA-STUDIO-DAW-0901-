@@ -919,6 +919,10 @@ export class AudioEngine {
   public startPlayback(startOffset: number, tracks: Track[]) {
     if (!this.ctx) return;
     if (this.isPlaying) this.stopAll();
+    // L'extrait du catalogue jouait en même temps que le projet : on le coupe
+    // (lecteur interne ici, lecteur <audio> du catalogue via l'événement).
+    this.stopPreview();
+    window.dispatchEvent(new Event('nova:transport-start'));
 
     this.isPlaying = true;
     this.pendingLoopWrap = null;
