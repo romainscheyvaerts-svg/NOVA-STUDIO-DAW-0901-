@@ -169,6 +169,19 @@ export const VOCAL_MIX_STYLES: VocalMixStyle[] = [
   },
 ];
 
+/**
+ * Style proposé d'office après la première prise, d'après le beat : la première
+ * réécoute doit déjà sonner « produite », c'est elle qui donne envie.
+ */
+export function suggestVocalMixStyle(bpm: number, genre?: string | null, title?: string | null): string {
+  const g = `${genre || ''} ${title || ''}`.toLowerCase();
+  if (/drill/.test(g)) return 'drill';
+  if (/r ?&? ?b|rnb|soul|love|chant|afro|zouk|pop|ballad/.test(g)) return 'chant-rnb';
+  if (/boom ?bap|old ?school|lofi|lo-fi|jazz/.test(g)) return 'rap-clair';
+  if (/trap|cloud|rage|plugg/.test(g) || bpm >= 125) return 'trap-autotune';
+  return 'rap-clair';
+}
+
 export const findVocalMixStyle = (idOrName?: string | null): VocalMixStyle | undefined => {
   if (!idOrName) return undefined;
   const q = String(idOrName).trim().toLowerCase();

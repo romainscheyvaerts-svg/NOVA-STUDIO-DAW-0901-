@@ -42,6 +42,11 @@ export function openBuyBeat(tracks: Track[]) {
   openStudioPage(`/instrumentals${qs}`);
 }
 
+/** Réservation d'une session d'enregistrement au studio, avec ingé son. */
+export function openStudioSession() {
+  openStudioPage('/reservation?service=with-engineer');
+}
+
 /** Réservation d'un mixage par un ingé son du studio. */
 export function openProMix() {
   openStudioPage('/reservation?service=mixing');

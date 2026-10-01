@@ -21,6 +21,7 @@ interface VocalToolsPanelProps {
   hasCatalogBeat: boolean;
   onBuyBeat: () => void;
   onProMix: () => void;
+  onBookSession: () => void;
 }
 
 const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }> = ({ checked, onChange, label, hint }) => (
@@ -133,6 +134,9 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
                 🎚️ Faire mixer par un pro
               </button>
             </div>
+            <button type="button" onClick={p.onBookSession} className="mt-2 w-full h-10 rounded-xl border border-white/15 text-white text-[12px] font-bold hover:bg-white/10">
+              🎙️ Enregistrer ce morceau au studio, avec un ingé son
+            </button>
           </div>
 
           {/* Outils */}

@@ -317,6 +317,10 @@ export interface DAWState {
   projectScale?: string; 
   /** Dernier style de mix voix appliqué (utils/vocalPresets). */
   vocalMixStyle?: string;
+  /** Genre du beat du catalogue (sert à proposer le style de mix adapté). */
+  beatGenre?: string;
+  /** Titre du beat du catalogue. */
+  beatTitle?: string;
   /** Paroles de l'artiste (prompteur) : sauvegardées avec le projet. */
   lyrics?: string;
   /** Position (s) où la 1re ligne passe sur la ligne de lecture. */

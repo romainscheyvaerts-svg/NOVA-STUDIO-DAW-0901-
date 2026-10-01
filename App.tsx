@@ -47,14 +47,15 @@ import MobileBottomNav from './components/MobileBottomNav';
 import LandingPage from './components/LandingPage';
 import { saveBlob } from './utils/saveBlob';
 import { stripSilenceFromClip, StripSilenceResult } from './utils/stripSilence';
-import { findVocalMixStyle } from './utils/vocalPresets';
+import { findVocalMixStyle, suggestVocalMixStyle, VOCAL_MIX_STYLES } from './utils/vocalPresets';
 import { takeDraggedBeat } from './utils/beatDrag';
 import { detectKey } from './utils/keyDetect';
 import { AudioAnalysisEngine } from './engine/AudioAnalysisEngine';
 import { getVocalRole, findTrackForRole, ROLE_MIX, VocalRole } from './utils/vocalRoles';
 import { analyseMix, takeStats, levelsForAI } from './utils/mixAnalysis';
 import { novaSpotlight } from './utils/novaSpotlight';
-import { openBuyBeat, openProMix, getCatalogBeat } from './utils/studioLinks';
+import { openBuyBeat, openProMix, openStudioSession, getCatalogBeat } from './utils/studioLinks';
+import { parseLocalCommand } from './utils/novaCommands';
 import RecordingCoach from './components/RecordingCoach';
 import LyricsPrompter from './components/LyricsPrompter';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta } from './utils/sessionStore';
@@ -1195,6 +1196,8 @@ export default function App() {
     let cleaned: StripSilenceResult | null = null;
     let takeName = '';
     let mutedOld = 0;
+    let takeGain = 1;
+    let takeGainDb = 0;
     if (result && result.clip.buffer) {
       const track = stateRef.current.tracks.find(t => t.id === result.trackId);
       const takeNumber = 1 + (track?.clips || []).reduce((max, c) => {
@@ -1206,6 +1209,15 @@ export default function App() {
       if (autoCleanRef.current) {
         cleaned = stripSilenceFromClip({ ...result.clip, bufferId: result.clip.id }, result.clip.buffer);
       }
+      // Niveau automatique : qu'on chante fort ou doucement, chaque prise arrive
+      // au même niveau dans le mix (-20 dBFS moyen sur la voix), sans saturer.
+      const lv = takeStats(result.clip.buffer);
+      if (!lv.silent && lv.rmsDb > -60) {
+        let g = -20 - lv.rmsDb;
+        g = Math.min(g, -1 - lv.peakDb);          // jamais au-dessus de -1 dBFS en crête
+        g = Math.max(-6, Math.min(12, g));
+        if (Math.abs(g) >= 1) { takeGain = Math.pow(10, g / 20); takeGainDb = g; }
+      }
     }
     setState(produce(draft => {
       draft.isRecording = false;
@@ -1215,7 +1227,7 @@ export default function App() {
         const clipId = clip.id;
         audioBufferRegistry.registerWithUrl(clip.buffer, clip.audioRef!, clipId);
 
-        const toStore = (c: Clip): Clip => { const x: Clip = { ...c, bufferId: clipId }; delete x.buffer; return x; };
+        const toStore = (c: Clip): Clip => { const x: Clip = { ...c, bufferId: clipId, gain: (c.gain ?? 1) * takeGain }; delete x.buffer; return x; };
         const track = draft.tracks.find(t => t.id === result.trackId);
         if (track) {
           const takeStart = clip.start;
@@ -1231,6 +1243,7 @@ export default function App() {
     if (result && result.clip.buffer) {
       const parts: string[] = [`🎤 ${takeName} enregistrée`];
       if (cleaned) parts.push(`${cleaned.removedSec.toFixed(1)} s de blanc retirées`);
+      if (takeGainDb) parts.push(`niveau ajusté (${takeGainDb > 0 ? '+' : ''}${Math.round(takeGainDb)} dB)`);
       if (mutedOld) parts.push(`l'ancienne prise est coupée`);
       parts.push('▶ pour l\'écouter · Annuler pour revenir');
       setAiNotification(parts.join(' — '));
@@ -1432,12 +1445,20 @@ export default function App() {
         : `🤔 ${takeName} : je n'ai presque rien entendu. Vérifie que ton micro est branché et autorisé, puis rapproche-toi.`, [redo]);
       return;
     }
+    // Première prise du lead : style appliqué même si la prise est à refaire,
+    // pour que l'artiste entende tout de suite le rendu « produit ».
+    let autoStyleNote = '';
+    if (role === 'lead' && !stateRef.current.vocalMixStyle && (s.peakDb > -0.3 || s.rmsDb < -38)) {
+      const sid = suggestVocalMixStyle(stateRef.current.bpm, stateRef.current.beatGenre, stateRef.current.beatTitle);
+      handleApplyMixStyle(sid);
+      autoStyleNote = ` J'ai quand même mis le style « ${findVocalMixStyle(sid)?.name} » pour que tu entendes le rendu.`;
+    }
     if (s.peakDb > -0.3) {
-      postNova(`⚠️ ${takeName} sature par moments (ça grésille, ça ne se rattrape pas au mix). Recule d'une main du micro ou chante un peu moins fort, et refais-la.`, [replay, redo, ...suiteSession(role)]);
+      postNova(`⚠️ ${takeName} sature par moments (ça grésille, ça ne se rattrape pas au mix). Recule d'une main du micro ou chante un peu moins fort, et refais-la.${autoStyleNote}`, [replay, redo, ...suiteSession(role)]);
       return;
     }
     if (s.rmsDb < -38) {
-      postNova(`🔉 ${takeName} est très faible : rapproche-toi du micro (une main de distance). Remontée au mix, elle ramènerait du souffle.`, [replay, redo, ...suiteSession(role)]);
+      postNova(`🔉 ${takeName} est très faible : rapproche-toi du micro (une main de distance). Remontée au mix, elle ramènerait du souffle.${autoStyleNote}`, [replay, redo, ...suiteSession(role)]);
       return;
     }
     // Voix secondaire posée avec les réglages d'origine : on la place comme un ingé son.
@@ -1450,10 +1471,20 @@ export default function App() {
     const st = stateRef.current;
     const next: NovaFeedMessage['choices'] = [replay];
     let text = `✅ ${takeName} : bon niveau, prise propre.${placed}`;
-    if (role === 'lead') {
+    if (role === 'lead' && !st.vocalMixStyle) {
+      // Première prise : on fait entendre tout de suite une voix « produite ».
+      const sid = suggestVocalMixStyle(st.bpm, st.beatGenre, st.beatTitle);
+      handleApplyMixStyle(sid);
+      const style = findVocalMixStyle(sid);
+      text += ` Pour que tu entendes ta voix comme sur un vrai son, j'ai mis le style « ${style?.name} », adapté à ce beat. Réécoute ! Tu peux en essayer un autre, ou passer aux backs.`;
+      const replayMix = { label: '▶ Réécouter avec le mix', actions: [{ action: 'SEEK', payload: { time: start } }, { action: 'PLAY', payload: {} }] as AIAction[] };
+      next.splice(0, next.length, replayMix);
+      VOCAL_MIX_STYLES.filter(s => s.id !== sid && s.id !== 'voix-brute').slice(0, 3)
+        .forEach(s => next.push({ label: `${s.emoji} ${s.name}`, action: { action: 'APPLY_MIX_STYLE', payload: { style: s.id } } }));
+      next.push(redo, { label: '➡️ Faire les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } });
+    } else if (role === 'lead') {
       text += " Réécoute-la. Si elle te va, on passe aux backs pour appuyer tes fins de phrase ; sinon refais-en une, l'ancienne est gardée (coupée).";
       next.push(redo, { label: '➡️ Faire les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } });
-      if (!st.vocalMixStyle) next.push({ label: '🎚️ Choisir un style', action: { action: 'OPEN_MIX_STYLES', payload: {} } });
     } else if (role === 'back') {
       text += ' On ajoute des harmonies au refrain, des ad-libs, ou j\'écoute ton mix ?';
       next.push({ label: '➡️ Harmonies', action: { action: 'PREPARE_PART', payload: { part: 'harmony' } } },
@@ -1483,6 +1514,7 @@ export default function App() {
       const beat = getCatalogBeat(stateRef.current.tracks);
       postNova("🎧 Le mix auto te donne un bon aperçu. Pour un son prêt à sortir, nos ingés son peuvent mixer ta voix sur l'instru." + (beat ? ` Et pour l'utiliser, il te faut la licence de « ${beat.title} ».` : ""), [
         { label: "🎚️ Faire mixer par un pro", action: { action: "OPEN_STUDIO_OFFER", payload: { offer: "mix" } } },
+        { label: "🎙️ L'enregistrer au studio", action: { action: "OPEN_STUDIO_OFFER", payload: { offer: "session" } } },
         ...(beat ? [{ label: "🛒 Acheter cette instru", action: { action: "OPEN_STUDIO_OFFER", payload: { offer: "beat" } } as AIAction }] : []),
       ]);
     }, 400);
@@ -2443,6 +2475,7 @@ export default function App() {
     setAiNotification(`⏳ Chargement de « ${inst.title} »…`);
     const beatBuffer = await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0, inst.bpm, inst.id);
     if (inst.bpm) handleUpdateBpm(inst.bpm);
+    setState(prev => ({ ...prev, beatGenre: inst.genre || undefined, beatTitle: inst.title || undefined }));
     let tonalite = lireTonalite(inst.key);
     let ecoute = false;
     // Beat sans tonalité ou sans BPM dans le catalogue : on les détecte à l'écoute.
@@ -3127,6 +3160,7 @@ export default function App() {
 
       case 'OPEN_STUDIO_OFFER':
         if (String(p.offer) === 'beat') openBuyBeat(stateRef.current.tracks);
+        else if (String(p.offer) === 'session') openStudioSession();
         else openProMix();
         break;
 
@@ -3158,6 +3192,10 @@ export default function App() {
       prepareSessionPart, handleAnalyzeMix]);
 
   const envoyerAuChatbot = async (messageUtilisateur: string) => {
+    // Ordres simples (« monte ma voix », « style trap », « refais la prise »…) :
+    // exécutés tout de suite, sans attendre l'IA ni dépendre du réseau.
+    const local = parseLocalCommand(messageUtilisateur, stateRef.current);
+    if (local) return { text: local.text, actions: local.actions };
     try {
         // Préparer un résumé de l'état du DAW pour le contexte
         const currentState = stateRef.current;
@@ -3216,21 +3254,26 @@ export default function App() {
             ? 'https://nova-studio-daw-0901.vercel.app'  // URL Vercel
             : '';  // URL relative (même domaine)
         
-        const response = await fetch(`${apiBaseUrl}/api/chat`, {
+        const body = JSON.stringify({ message: messageUtilisateur, state: stateSummary });
+        const ask = (base: string) => fetch(`${base}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                message: messageUtilisateur,
-                state: stateSummary
-            }),
+            body,
         });
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `Erreur serveur: ${response.status}`);
+        let response = await ask(apiBaseUrl).catch(() => null);
+        let data: any = response ? await response.clone().json().catch(() => ({})) : {};
+        // Déploiement sans clé d'IA (ou API injoignable) : on passe par le
+        // déploiement de référence, qui en a une. Sans ça Nova restait muet.
+        if (!response || !response.ok || data?.error === 'API key missing') {
+            const FALLBACK = 'https://nova-studio-daw-0901.vercel.app';
+            if (window.location.origin !== FALLBACK) {
+                response = await ask(FALLBACK).catch(() => null);
+                data = response ? await response.json().catch(() => ({})) : {};
+            }
         }
-
-        const data = await response.json();
+        if (!response || !response.ok) {
+            throw new Error(data?.error || `Erreur serveur: ${response?.status ?? 'réseau'}`);
+        }
         
         return {
             text: data.text || "J'ai bien reçu ton message.",
@@ -3500,6 +3543,7 @@ export default function App() {
         hasCatalogBeat={!!getCatalogBeat(state.tracks)}
         onBuyBeat={() => openBuyBeat(stateRef.current.tracks)}
         onProMix={openProMix}
+        onBookSession={openStudioSession}
         onAskNova={() => { setVocalToolsOpen(false); if (isMobile) setActiveMobileTab('NOVA'); setMixGuideRequest(n => n + 1); }}
       />
 

@@ -708,6 +708,7 @@ export class AudioEngine {
       }
       this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
       this.wireMonitor(dsp);
+      this.setTrackLowLatency(trackId, true);
       console.log("[AudioEngine] Track armed OK:", trackId);
     } catch (e: any) {
       console.error("[AudioEngine] ARM ERROR:", e);
@@ -746,7 +747,33 @@ export class AudioEngine {
 
   public isInputMonitoring() { return this.inputMonitoring; }
 
+  /** Tracks armées : leurs effets tournent en mode basse latence. */
+  private lowLatencyTracks = new Set<string>();
+
+  /**
+   * Bascule les effets d'une piste en mode basse latence (piste armée) ou
+   * pleine qualité, puis recalcule la compensation de lecture de la piste.
+   * La compensation ne retarde jamais l'entrée micro : elle n'avance que la
+   * lecture des prises déjà enregistrées.
+   */
+  private setTrackLowLatency(trackId: string, on: boolean) {
+    if (on) this.lowLatencyTracks.add(trackId); else this.lowLatencyTracks.delete(trackId);
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp) return;
+    let total = 0;
+    dsp.pluginChain.forEach(entry => {
+      const inst = entry.instance;
+      if (inst && typeof inst.updateParams === 'function' && 'latency' in inst) {
+        try { inst.updateParams({ lowLatency: on }); } catch { /* effet sans ce mode */ }
+      }
+      const l = inst?.latency;
+      if (typeof l === 'number' && l > 0 && l < 0.5) total += l;
+    });
+    dsp.pluginLatency = total;
+  }
+
   public disarmTrack() {
+    if (this.monitoringTrackId) this.setTrackLowLatency(this.monitoringTrackId, false);
     if (this.monitorGain) {
       try { this.monitorGain.disconnect(); } catch { /* déjà déconnecté */ }
       this.monitorGain = null;
@@ -1641,14 +1668,17 @@ export class AudioEngine {
       currentPluginIds.add(plugin.id);
       let pEntry = dsp!.pluginChain.get(plugin.id);
       
+      // Piste armée : effets en mode basse latence (retour casque sans retard).
+      const lowLatency = this.lowLatencyTracks.has(track.id);
       if (!pEntry) {
         const instance = this.createPluginNode(plugin, this.currentBpm);
         if (instance) {
           pEntry = { input: instance.input, output: instance.output, instance: instance.node };
           dsp!.pluginChain.set(plugin.id, pEntry);
+          if (lowLatency && instance.node?.updateParams) instance.node.updateParams({ ...plugin.params, lowLatency: true });
         }
       } else if (pEntry.instance && pEntry.instance.updateParams) {
-        pEntry.instance.updateParams(plugin.params);
+        pEntry.instance.updateParams({ ...plugin.params, lowLatency });
       }
       
       if (pEntry) {
