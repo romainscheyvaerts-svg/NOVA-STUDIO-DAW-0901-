@@ -1,5 +1,6 @@
 import { AIAction, DAWState, Track, TrackType } from '../types';
 import { findVocalMixStyle } from './vocalPresets';
+import { listTakes, selectTakeActions } from './takes';
 
 /**
  * Commandes de Nova comprises SANS l'IA : exécution immédiate, même hors
@@ -77,6 +78,18 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
     if (!last) return say("Il n'y a pas encore de prise à supprimer sur cette piste.");
     return say(`🗑 Dernière prise supprimée sur ${voice.name} (Annuler pour la récupérer).`,
       ...last.parts.map(c => ({ action: 'DELETE_CLIP', payload: { trackId: voice.id, clipId: c.id } } as AIAction)));
+  }
+  // « garde la prise 2 », « écoute la prise 1 » : choix de la meilleure prise
+  const takeCmd = msg.match(/\b(garde|prends|reprends|choisis|remets|ecoute|ecouter|joue|mets)\b.*\bprise (\d+)\b/);
+  if (takeCmd && voice) {
+    const n = parseInt(takeCmd[2], 10);
+    const acts = selectTakeActions(voice, n);
+    const take = listTakes(voice).find(t => t.n === n);
+    if (!acts || !take) return say(`Je ne trouve pas de prise ${n} sur ${voice.name}.`);
+    const listen = /ecoute|joue/.test(takeCmd[1]);
+    return say(listen ? `▶ J'écoute la prise ${n} (les autres prises au même endroit sont coupées).` : `✅ Prise ${n} gardée sur ${voice.name} (les autres sont coupées, pas effacées).`,
+      ...acts,
+      ...(listen ? [{ action: 'SEEK', payload: { time: take.start } } as AIAction, { action: 'PLAY', payload: {} } as AIAction] : []));
   }
   if (/\b(nettoie|nettoyer|retire|enleve|supprime)\b.*\b(blanc|silence|souffle)/.test(msg))
     return say('🧹 Je retire les blancs de ta voix.', { action: 'CLEAN_SILENCE', payload: voice ? { trackId: voice.id } : {} });

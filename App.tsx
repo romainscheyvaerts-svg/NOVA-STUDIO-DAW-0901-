@@ -56,6 +56,7 @@ import { analyseMix, takeStats, levelsForAI } from './utils/mixAnalysis';
 import { novaSpotlight } from './utils/novaSpotlight';
 import { openBuyBeat, openProMix, openStudioSession, getCatalogBeat } from './utils/studioLinks';
 import { parseLocalCommand } from './utils/novaCommands';
+import { listTakes, selectTakeActions } from './utils/takes';
 import RecordingCoach from './components/RecordingCoach';
 import LyricsPrompter from './components/LyricsPrompter';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta } from './utils/sessionStore';
@@ -3544,6 +3545,15 @@ export default function App() {
         onBuyBeat={() => openBuyBeat(stateRef.current.tracks)}
         onProMix={openProMix}
         onBookSession={openStudioSession}
+        takeGroups={state.tracks.filter(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId)
+          .map(t => ({ trackId: t.id, trackName: t.name, takes: listTakes(t) }))}
+        onSelectTake={(trackId, n, listen) => {
+          const t = stateRef.current.tracks.find(x => x.id === trackId);
+          if (!t) return;
+          (selectTakeActions(t, n) || []).forEach(a => executeAIAction(a));
+          const take = listTakes(t).find(x => x.n === n);
+          if (listen && take) { handleSeek(take.start); if (!stateRef.current.isPlaying) void handleTogglePlay(); }
+        }}
         onAskNova={() => { setVocalToolsOpen(false); if (isMobile) setActiveMobileTab('NOVA'); setMixGuideRequest(n => n + 1); }}
       />
 
