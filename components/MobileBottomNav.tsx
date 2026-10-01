@@ -14,6 +14,7 @@ const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChang
   const tabs: { id: MobileTab; icon: string; label: string }[] = [
     { id: 'TRACKS', icon: 'fa-bars-staggered', label: 'Pistes' },
     { id: 'ARRANGEMENT', icon: 'fa-wave-square', label: 'Arrangement' },
+    { id: 'MIXER', icon: 'fa-sliders', label: 'Mixer' },
     { id: 'PLUGINS', icon: 'fa-plug', label: 'FX' },
     { id: 'BROWSER', icon: 'fa-folder-open', label: 'Sons' },
     { id: 'NOVA', icon: 'fa-wand-magic-sparkles', label: 'Nova' },

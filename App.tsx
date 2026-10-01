@@ -41,6 +41,7 @@ import { etirerBufferAsync, facteurPourTempo } from './utils/timeStretch';
 import MobileTracksPage from './components/MobileTracksPage';
 import MobileArrangementPage from './components/MobileArrangementPage';
 import MobilePluginsPage from './components/MobilePluginsPage';
+import MobileMixerPage from './components/MobileMixerPage';
 import MobileBrowserPage from './components/MobileBrowserPage';
 import MobileBottomNav from './components/MobileBottomNav';
 import LandingPage from './components/LandingPage';
@@ -2479,6 +2480,10 @@ export default function App() {
         const view = String(p.view || '').toUpperCase();
         if (['ARRANGEMENT', 'MIXER', 'AUTOMATION'].includes(view)) {
           setState(prev => ({ ...prev, currentView: view as any }));
+          // Sur téléphone on navigue par onglets : currentView n'y est pas affiché.
+          if (document.body.getAttribute('data-view-mode') === 'MOBILE' && (view === 'MIXER' || view === 'ARRANGEMENT')) {
+            setActiveMobileTab(view as MobileTab);
+          }
         }
         break;
       }
@@ -2766,6 +2771,19 @@ export default function App() {
                     const send = t?.sends.find(sd => sd.id === sendId);
                     if (send) { send.level = level; send.isEnabled = isEnabled; }
                   }))}
+                  onRequestAddPlugin={handleRequestAddPlugin}
+                />
+              )}
+
+              {activeMobileTab === 'MIXER' && (
+                <MobileMixerPage
+                  tracks={state.tracks}
+                  selectedTrackId={state.selectedTrackId}
+                  onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
+                  onUpdateTrack={handleUpdateTrack}
+                  onRemovePlugin={handleRemovePlugin}
+                  onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); const plugin = state.tracks.find(t => t.id === tid)?.plugins.find(pl => pl.id === p); if (plugin) setActivePlugin({trackId: tid, plugin}); }}
+                  onToggleBypass={handleToggleBypass}
                   onRequestAddPlugin={handleRequestAddPlugin}
                 />
               )}
