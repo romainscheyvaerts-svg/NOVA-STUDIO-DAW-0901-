@@ -3,6 +3,19 @@ import MobileContainer from './MobileContainer';
 import { Track, Clip, TrackType, TrackSend } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
+// Cache des tracés de forme d'onde. Pendant la lecture, la page se ré-affiche à
+// chaque image (position de lecture) : recalculer les crêtes parcourait tout le
+// buffer (≈ 8 M d'échantillons pour 3 min) par clip et par image, de quoi faire
+// ramer un téléphone. Le tracé ne dépend que du buffer, du décalage et de la taille.
+const wavePointsCache = new Map<string, string>();
+const bufferKeys = new WeakMap<AudioBuffer, number>();
+let nextBufferKey = 1;
+const bufferKeyOf = (b: AudioBuffer) => {
+  let k = bufferKeys.get(b);
+  if (!k) { k = nextBufferKey++; bufferKeys.set(b, k); }
+  return k;
+};
+
 interface MobileArrangementPageProps {
   tracks: Track[];
   currentTime: number;
@@ -81,7 +94,18 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   // State
   const [zoom, setZoom] = useState(80); // pixels per beat
   const [scrollX, setScrollX] = useState(0);
-  const [selectedClip, setSelectedClip] = useState<{ trackId: string; clip: Clip } | null>(null);
+  const [selectedClipRaw, setSelectedClip] = useState<{ trackId: string; clip: Clip } | null>(null);
+  // La sélection garde une copie du clip au moment du tap ; on relit toujours
+  // la version actuelle (sinon fondus/gain repartaient de l'ancienne valeur,
+  // et Split/infos utilisaient la position d'avant un déplacement).
+  const selectedClip = useMemo(() => {
+    if (!selectedClipRaw) return null;
+    const live = tracks.find(t => t.id === selectedClipRaw.trackId)?.clips.find(c => c.id === selectedClipRaw.clip.id);
+    return live ? { trackId: selectedClipRaw.trackId, clip: live } : null;
+  }, [selectedClipRaw, tracks]);
+  // Horodatage du dernier toucher : le navigateur émule ensuite un mousedown,
+  // qui relançait la même action (double split, double effacement).
+  const lastTouchRef = useRef(0);
   const [activeTool, setActiveTool] = useState<EditTool>('SELECT');
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [pinchStart, setPinchStart] = useState<{ dist: number; zoom: number } | null>(null);
@@ -152,10 +176,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   const handleTimelineTap = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const x = clientX - rect.left + scrollX;
+    const x = clientX - rect.left; // rect.left tient déjà compte du défilement
     const time = xToTime(x);
     onSeek(Math.max(0, time));
-  }, [scrollX, xToTime, onSeek]);
+  }, [xToTime, onSeek]);
 
   // Handle clip interaction
   const handleClipTouchStart = useCallback((
@@ -164,11 +188,16 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     clip: Clip
   ) => {
     e.stopPropagation();
-    
+
+    const isTouch = 'touches' in e;
+    if (isTouch) lastTouchRef.current = Date.now();
+    else if (Date.now() - lastTouchRef.current < 700) return; // souris émulée après un toucher
+
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientX = isTouch ? e.touches[0].clientX : e.clientX;
     const relativeX = clientX - rect.left;
     const clipWidth = clip.duration * pixelsPerSecond;
+    const wasSelected = selectedClip?.clip.id === clip.id;
 
     setSelectedClip({ trackId, clip });
     onSelectTrack(trackId);
@@ -188,6 +217,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       return;
     }
 
+    // Au doigt, un premier tap sélectionne seulement : sans ça, chaque geste
+    // pour faire défiler la timeline déplaçait le clip touché.
+    if (isTouch && !wasSelected && activeTool === 'SELECT') return;
+
     // Determine drag mode based on tool and click position
     let mode: DragMode = 'move';
     const isTrimTool = activeTool === 'TRIM';
@@ -206,7 +239,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       startDuration: clip.duration,
       startOffset: clip.offset || 0
     });
-  }, [activeTool, pixelsPerSecond, xToTime, onSelectTrack, onSelectClip, onDeleteClip, onUpdateClip]);
+  }, [activeTool, pixelsPerSecond, xToTime, onSelectTrack, onSelectClip, onDeleteClip, onUpdateClip, selectedClip]);
 
   // Handle drag
   const handleTouchMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
@@ -272,6 +305,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     const buffer = clip.bufferId ? audioBufferRegistry.get(clip.bufferId) : clip.buffer;
     if (!buffer) return null;
 
+    const centerY = height / 2;
+    const cacheKey = `${bufferKeyOf(buffer)}|${clip.offset || 0}|${Math.round(width)}|${height}`;
+    let polygon = wavePointsCache.get(cacheKey);
+    if (polygon === undefined) {
     const channelData = buffer.getChannelData(0);
     const samples = channelData.length;
     const step = Math.max(1, Math.floor(samples / width));
@@ -279,7 +316,6 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     
     const points: string[] = [];
     const pointsNeg: string[] = [];
-    const centerY = height / 2;
 
     for (let i = 0; i < width; i++) {
       const sampleIndex = offsetSamples + i * step;
@@ -297,6 +333,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       points.push(`${i},${y1}`);
       pointsNeg.unshift(`${i},${y2}`);
     }
+    polygon = [...points, ...pointsNeg].join(' ');
+    if (wavePointsCache.size > 300) wavePointsCache.delete(wavePointsCache.keys().next().value as string);
+    wavePointsCache.set(cacheKey, polygon);
+    }
 
     return (
       <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
@@ -308,7 +348,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           </linearGradient>
         </defs>
         <polygon
-          points={[...points, ...pointsNeg].join(' ')}
+          points={polygon}
           fill={`url(#waveGrad-${clip.id})`}
         />
         <line x1="0" y1={centerY} x2={width} y2={centerY} stroke={color} strokeOpacity="0.2" strokeWidth="1" />
@@ -455,7 +495,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   ];
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0b0d] select-none">
+    // pb : la barre de navigation du bas (fixed, h-16) recouvrait la barre
+    // d'édition du clip sélectionné.
+    <div className="flex flex-col h-full bg-[#0a0b0d] select-none pb-[calc(4rem+env(safe-area-inset-bottom))]">
       {/* === TOP BAR - Mini Transport === */}
       <div className="flex items-center h-12 px-3 bg-gradient-to-b from-[#1a1c21] to-[#14161a] border-b border-white/10 gap-2">
         {/* Play/Stop */}
@@ -497,13 +539,13 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           </div>
           <button
             onClick={() => setZoom(z => Math.max(MIN_ZOOM, z - 20))}
-            className="w-7 h-7 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
+            className="w-9 h-9 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
           >
             <i className="fas fa-minus text-white/50 text-[10px]"></i>
           </button>
           <button
             onClick={() => setZoom(z => Math.min(MAX_ZOOM, z + 20))}
-            className="w-7 h-7 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
+            className="w-9 h-9 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
           >
             <i className="fas fa-plus text-white/50 text-[10px]"></i>
           </button>
@@ -711,6 +753,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           onScroll={handleScroll}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchEnd}
           onMouseMove={handleTouchMove}
           onMouseUp={handleTouchEnd}
           onMouseLeave={handleTouchEnd}
@@ -813,6 +856,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                           left: clipX,
                           width: clipWidth,
                           backgroundColor: (clip.color || track.color) + '30',
+                          // Clip sélectionné : le doigt le déplace au lieu de faire défiler
+                          touchAction: isSelected ? 'none' : undefined,
                         }}
                         onTouchStart={(e) => handleClipTouchStart(e, track.id, clip)}
                         onMouseDown={(e) => handleClipTouchStart(e, track.id, clip)}
@@ -973,9 +1018,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             <div className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-11 rounded-lg bg-white/5">
               <span className="text-[7px] font-bold text-white/40 mb-0.5">FADE IN</span>
               <div className="flex items-center gap-1">
-                <button onClick={() => handleFadeIn(-0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">-</button>
+                <button onClick={() => handleFadeIn(-0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
                 <span className="text-[9px] font-mono text-cyan-400 w-6 text-center">{((selectedClip.clip.fadeIn || 0) * 1000).toFixed(0)}</span>
-                <button onClick={() => handleFadeIn(0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">+</button>
+                <button onClick={() => handleFadeIn(0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
               </div>
             </div>
 
@@ -983,9 +1028,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             <div className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-11 rounded-lg bg-white/5">
               <span className="text-[7px] font-bold text-white/40 mb-0.5">FADE OUT</span>
               <div className="flex items-center gap-1">
-                <button onClick={() => handleFadeOut(-0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">-</button>
+                <button onClick={() => handleFadeOut(-0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
                 <span className="text-[9px] font-mono text-cyan-400 w-6 text-center">{((selectedClip.clip.fadeOut || 0) * 1000).toFixed(0)}</span>
-                <button onClick={() => handleFadeOut(0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">+</button>
+                <button onClick={() => handleFadeOut(0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
               </div>
             </div>
 
@@ -993,9 +1038,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             <div className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-11 rounded-lg bg-white/5">
               <span className="text-[7px] font-bold text-white/40 mb-0.5">GAIN</span>
               <div className="flex items-center gap-1">
-                <button onClick={() => handleGainChange(-0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">-</button>
+                <button onClick={() => handleGainChange(-0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
                 <span className="text-[9px] font-mono text-green-400 w-6 text-center">{((selectedClip.clip.gain || 1) * 100).toFixed(0)}%</span>
-                <button onClick={() => handleGainChange(0.1)} className="w-5 h-5 rounded bg-white/10 text-white/60 text-[10px] hover:bg-white/20">+</button>
+                <button onClick={() => handleGainChange(0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
               </div>
             </div>
 

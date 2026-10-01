@@ -57,6 +57,10 @@ class NovaBridgeService {
   
   private pingInterval: number | null = null;
   private reconnectTimer: number | null = null;
+  // Sans bridge lancé sur la machine, la reconnexion toutes les 5 s tournait à
+  // l'infini (erreurs console, réveils batterie). Trois essais, puis on attend
+  // une demande explicite (ouverture d'une fenêtre VST).
+  private autoReconnects = 0;
 
   // --- AUDIO STREAMING ---
   private audioWorkletNodes: Map<string, AudioWorkletNode> = new Map();
@@ -87,6 +91,7 @@ class NovaBridgeService {
       
       this.ws.onopen = () => {
         console.log('✅ [Nova Bridge] Connected');
+        this.autoReconnects = 0;
         this.updateState({ isConnected: true, lastMessage: 'Connecté' });
         this.startHeartbeat();
         
@@ -113,7 +118,8 @@ class NovaBridgeService {
         this.stopHeartbeat();
         this.updateState({ isConnected: false, lastMessage: 'Déconnecté' });
         
-        if (!this.reconnectTimer) {
+        if (!this.reconnectTimer && this.autoReconnects < 3) {
+            this.autoReconnects++;
             this.reconnectTimer = window.setTimeout(() => {
                 this.reconnectTimer = null;
                 this.connect();

@@ -4,6 +4,7 @@ import { DAWState, Track } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { AudioEncoder, BitDepth, AudioFormat } from '../services/AudioEncoder';
 import JSZip from 'jszip';
+import { saveBlob } from '../utils/saveBlob';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -183,20 +184,11 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
     }
   };
 
-  const downloadBlob = (blob: Blob, name: string) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-  };
+  const downloadBlob = (blob: Blob, name: string) => saveBlob(blob, name);
 
   return (
     <div className="fixed inset-0 z-[1200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-2xl bg-[#14161a] border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-2xl max-h-[90dvh] overflow-y-auto bg-[#14161a] border border-white/10 rounded-3xl shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         
         {/* Header */}
         <div className="p-6 border-b border-white/5 bg-gradient-to-r from-cyan-900/20 to-transparent flex justify-between items-center">
@@ -216,7 +208,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
         <div className="p-8 flex flex-col space-y-6">
             
-            <div className="flex space-x-8">
+            <div className="flex flex-col gap-6 md:flex-row md:gap-8">
                 {/* COLUMN 1: CONFIG */}
                 <div className="flex-1 space-y-6">
                     

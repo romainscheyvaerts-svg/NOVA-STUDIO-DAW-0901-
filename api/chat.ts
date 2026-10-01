@@ -232,6 +232,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    // Endpoint public facturé (Groq/Gemini) : un message de 2 000 caractères
+    // suffit à toute demande au DAW ; au-delà c'est de l'abus de quota.
+    if (message.length > 2000) {
+      return res.status(413).json({
+        text: "Message trop long (2 000 caractères maximum).",
+        actions: [],
+        error: 'Message too long'
+      });
+    }
+
     // Contexte projet : les trackId sont indispensables pour que les actions ciblent
     // la bonne piste, on envoie donc l'état sérialisé tel quel.
     let contextInfo = '';

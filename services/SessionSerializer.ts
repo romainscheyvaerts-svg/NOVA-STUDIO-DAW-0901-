@@ -1,5 +1,6 @@
 
 import { DAWState, Track, Clip } from '../types';
+import { saveBlob } from '../utils/saveBlob';
 
 /**
  * Service dédié à la sérialisation de la session pour sauvegarde
@@ -40,17 +41,8 @@ export class SessionSerializer {
     const jsonStr = JSON.stringify(data, null, 2);
     
     const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    
-    const a = document.createElement('a');
-    a.href = url;
     // Format demandé : session_nom_du_projet.json
     const safeName = filename.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-    a.download = `session_${safeName}.json`;
-    
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    void saveBlob(blob, `session_${safeName}.json`);
   }
 }

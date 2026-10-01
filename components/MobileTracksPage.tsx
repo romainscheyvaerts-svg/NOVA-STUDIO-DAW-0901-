@@ -153,7 +153,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                     track.type === TrackType.DRUM_RACK ? 'fa-th' :
                     track.type === TrackType.BUS ? 'fa-layer-group' :
                     track.type === TrackType.SEND ? 'fa-magic' :
-                    'fa-waveform-lines'
+                    'fa-wave-square'
                   } text-xs`} style={{ color: track.color }}></i>
                 </div>
                 <div>

@@ -46,6 +46,8 @@ interface TransportProps {
 
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  /** Mise en page téléphone (onglets) : les vues et le navigateur latéral n'y existent pas. */
+  isMobileLayout?: boolean;
 
   // Import Audio (nouveau système)
   onImportAudio?: (file: File) => void;
@@ -58,7 +60,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   onOpenSaveMenu, onOpenLoadMenu, onExportMix, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo,
   user, onOpenAuth, onLogout,
-  isSidebarOpen, onToggleSidebar,
+  isSidebarOpen, onToggleSidebar, isMobileLayout = false,
   onImportAudio,
   children
 }) => {
@@ -131,17 +133,17 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
       )}
 
       {/* LEFT CONTROLS */}
-      <div className="flex items-center space-x-3">
+      <div className="flex items-center space-x-2 2xl:space-x-3">
           {/* MOBILE HAMBURGER MENU BUTTON */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden w-10 h-10 rounded-lg flex items-center justify-center bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all"
+            className="xl:hidden w-10 h-10 rounded-lg flex items-center justify-center bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all"
             title="Menu"
           >
             <i className={`fas ${isMobileMenuOpen ? 'fa-times' : 'fa-bars'} text-lg`}></i>
           </button>
 
-          <div className="hidden md:flex items-center space-x-2">
+          <div className="hidden xl:flex items-center space-x-2">
             <button 
               onClick={onToggleSidebar} 
               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors border ${isSidebarOpen ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
@@ -160,13 +162,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 {/* OPEN / LOAD */}
                 <button onClick={onOpenLoadMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white" title="Ouvrir un projet">
                     <i className="fas fa-folder-open text-[10px]"></i>
-                    <span className="hidden xl:inline text-[10px] font-bold tracking-wide">Ouvrir</span>
+                    <span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Ouvrir</span>
                 </button>
 
                 {/* SAVE */}
                 <button onClick={onOpenSaveMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white" title="Sauvegarder">
                     <i className="fas fa-save text-[10px]"></i>
-                    <span className="hidden xl:inline text-[10px] font-bold tracking-wide">Sauver</span>
+                    <span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Sauver</span>
                 </button>
 
                 {/* ✨ NOUVEAU IMPORT AUDIO */}
@@ -178,7 +180,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                             title="Importer un fichier audio"
                         >
                             <i className="fas fa-file-import text-[10px]"></i>
-                            <span className="hidden xl:inline text-[10px] font-bold tracking-wide">Import</span>
+                            <span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Import</span>
                         </button>
                         <input
                             ref={audioImportInputRef}
@@ -200,14 +202,14 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              
              {/* SHARE (Only if logged in) */}
              {user && (
-                 <button onClick={onShareProject} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span className="hidden xl:inline text-[10px] font-bold tracking-wide">Share</span></button>
+                 <button onClick={onShareProject} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Share</span></button>
              )}
              
              {/* EXPORT BUTTON */}
-             <button onClick={onExportMix} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span className="hidden xl:inline text-[10px] font-bold tracking-wide">Export</span></button>
+             <button onClick={onExportMix} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Export</span></button>
              
              {/* ENGINE BUTTON */}
-             <button onClick={onOpenAudioEngine} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden xl:inline text-[10px] font-bold tracking-wide">Engine</span></button>
+             <button onClick={onOpenAudioEngine} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Engine</span></button>
              
              {/* PDC Toggle */}
              <button onClick={onToggleDelayComp} className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="Delay Compensation (PDC)">
@@ -218,14 +220,14 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              {/* MIDI INDICATOR */}
              <div className={`h-8 px-2 rounded-lg flex items-center justify-center space-x-2 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : 'bg-white/5 border-white/10 text-slate-600'}`} title={midiDeviceName || "No MIDI Device"}>
                  <i className="fas fa-plug text-[10px]"></i>
-                 {midiDeviceName && <span className="hidden xl:inline text-[8px] font-black uppercase max-w-[80px] truncate">{midiDeviceName}</span>}
+                 {midiDeviceName && <span className="hidden 2xl:inline text-[8px] font-black uppercase max-w-[80px] truncate">{midiDeviceName}</span>}
              </div>
           </div>
       </div>
 
       {/* CENTER: TRANSPORT */}
-      <div className="flex flex-1 md:flex-none justify-center items-center space-x-2 md:space-x-4">
-        <div className="hidden xl:block"><MasterMeter /></div>
+      <div className="flex flex-1 md:flex-none justify-center items-center space-x-2 md:space-x-3 2xl:space-x-4">
+        <div className="hidden 2xl:block"><MasterMeter /></div>
         
         <div className="flex items-center space-x-2 md:space-x-3 bg-black/40 px-3 md:px-4 py-1.5 rounded-xl border border-white/5" style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}>
           <button onClick={onStop} className="w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
@@ -242,7 +244,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
       </div>
 
       {/* RIGHT SIDE CONTROLS */}
-      <div className="flex items-center space-x-3 md:space-x-4">
+      <div className="flex items-center space-x-2 md:space-x-3 2xl:space-x-4">
         
         {/* VISUALIZER (Only on very large screens to save space) */}
         <div className="hidden 2xl:block opacity-80 hover:opacity-100 transition-opacity">
@@ -257,9 +259,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         </div>
 
         {/* THEME TOGGLE */}
+        {/* Sous 768 px, thème / compte / mode sont dans le menu : dans la barre ils
+            la faisaient déborder (déconnexion et mode hors de l'écran en 390 px). */}
         <button 
             onClick={onToggleTheme}
-            className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center transition-all"
+            className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 hidden md:flex items-center justify-center transition-all"
             title="Changer le thème"
             style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}
         >
@@ -281,24 +285,37 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         
         {/* LOGIN / USER SECTION */}
         {user ? (
-            <div className="flex items-center space-x-2 bg-black/30 rounded-full pl-1 pr-1 py-1 border border-white/10" style={{ backgroundColor: 'var(--bg-item)' }}>
+            <div className="hidden md:flex items-center space-x-2 bg-black/30 rounded-full pl-1 pr-1 py-1 border border-white/10" style={{ backgroundColor: 'var(--bg-item)' }}>
                 <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-[10px] font-black text-white shadow-lg shadow-cyan-500/20">{user.username.charAt(0).toUpperCase()}</div>
                 <button onClick={onLogout} className="w-7 h-7 rounded-full bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white flex items-center justify-center transition-all"><i className="fas fa-sign-out-alt text-[10px]"></i></button>
             </div>
         ) : (
-            <button onClick={onOpenAuth} className="h-8 px-4 rounded-full bg-white/10 hover:bg-cyan-500 hover:text-black text-white text-[9px] font-black uppercase tracking-widest transition-all border border-white/10 flex items-center space-x-2"><i className="fas fa-user-circle"></i></button>
+            <button onClick={onOpenAuth} aria-label="Connexion" className="h-8 px-4 rounded-full bg-white/10 hover:bg-cyan-500 hover:text-black text-white text-[9px] font-black uppercase tracking-widest transition-all border border-white/10 hidden md:flex items-center space-x-2"><i className="fas fa-user-circle"></i></button>
         )}
 
         {/* View Switcher for mobile/tablet injection from parent */}
-        {children}
+        <div className="hidden md:block">{children}</div>
       </div>
 
       {/* MOBILE DROPDOWN MENU */}
       {isMobileMenuOpen && (
-        <div className="md:hidden absolute top-full left-0 right-0 bg-[#0a0b0d] border-b border-white/10 shadow-2xl z-[100] max-h-[80vh] overflow-y-auto" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}>
+        <div className="xl:hidden absolute top-full left-0 right-0 bg-[#0a0b0d] border-b border-white/10 shadow-2xl z-[100] max-h-[80vh] overflow-y-auto" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}>
           <div className="p-4 space-y-3">
 
-            {/* VIEW SWITCHER */}
+            {/* Téléphone : métronome et boucle (masqués dans la barre sous 768 px) */}
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => onToggleMetronome?.()} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${isMetronomeEnabled ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300'}`}>
+                <i className="fas fa-drum block mb-1"></i>
+                Métronome
+              </button>
+              <button onClick={() => onToggleLoop?.()} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${isLoopActive ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300'}`}>
+                <i className="fas fa-sync-alt block mb-1"></i>
+                Boucle
+              </button>
+            </div>
+
+            {/* VIEW SWITCHER (inutile en mise en page téléphone : on navigue par onglets) */}
+            {!isMobileLayout && (
             <div className="space-y-2">
               <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Vues</div>
               <div className="grid grid-cols-3 gap-2">
@@ -316,6 +333,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 </button>
               </div>
             </div>
+            )}
 
             {/* VIEW MODE SWITCHER (PC/MOBILE) */}
             {children && (
@@ -381,10 +399,12 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <i className={`fas ${currentTheme === 'dark' ? 'fa-sun' : 'fa-moon'}`}></i>
                   <span>Changer le thème</span>
                 </button>
+                {!isMobileLayout && (
                 <button onClick={() => { onToggleSidebar?.(); setIsMobileMenuOpen(false); }} className={`w-full px-4 py-3 rounded-lg font-black transition-all flex items-center justify-center space-x-2 ${isSidebarOpen ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-400'}`}>
                   <i className="fas fa-columns"></i>
                   <span>{isSidebarOpen ? 'Masquer' : 'Afficher'} le navigateur</span>
                 </button>
+                )}
               </div>
             </div>
 

@@ -19,6 +19,7 @@ import SamplerEditor from './SamplerEditor';
 import DrumSamplerEditor from './DrumSamplerEditor';
 import MelodicSamplerEditor from './MelodicSamplerEditor';
 import DrumRack from './DrumRack';
+import FitToWidth from './FitToWidth';
 
 interface PluginEditorProps {
   plugin: PluginInstance;
@@ -81,8 +82,24 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
     setRetryCount(prev => prev + 1);
   };
   
+  // Téléphone : les éditeurs ont des largeurs fixes (480-900 px) et leur bouton
+  // de fermeture finissait hors écran, sans autre moyen de sortir. Plein écran
+  // défilable, barre de fermeture fixe, contenu ajusté à la largeur.
+  const mobileShell = (content: React.ReactNode) => (
+      <div className="fixed inset-0 z-[300] overflow-y-auto bg-[#0c0d10] pt-14 pb-8">
+          <div className="fixed top-0 left-0 right-0 z-[310] h-12 bg-black/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between pl-4 pr-1">
+              <span className="text-xs font-black text-white uppercase tracking-widest truncate">{plugin.name}</span>
+              <button onClick={onClose} aria-label="Fermer" className="w-11 h-11 rounded-full flex items-center justify-center text-white hover:bg-white/10">
+                  <i className="fas fa-times"></i>
+              </button>
+          </div>
+          <FitToWidth>{content}</FitToWidth>
+      </div>
+  );
+
   // --- SPECIAL CASE: VST3 EXTERNALS ---
   if (plugin.type === 'VST3') {
+      if (isMobile) return mobileShell(<VSTPluginWindow plugin={plugin} onClose={onClose} />);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
               <div className="pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-lg">
@@ -94,6 +111,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
 
   // --- SPECIAL CASE: INSTRUMENTS ---
   if (plugin.type === 'SAMPLER') {
+      if (isMobile) return mobileShell(<SamplerEditor plugin={plugin} trackId={trackId} onClose={onClose} />);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
               <div className="pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px]">
@@ -104,6 +122,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   }
 
   if (plugin.type === 'DRUM_SAMPLER') {
+      if (isMobile) return mobileShell(<DrumSamplerEditor plugin={plugin} trackId={trackId} onClose={onClose} />);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
               <div className="pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px]">
@@ -114,6 +133,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   }
 
   if (plugin.type === 'MELODIC_SAMPLER') {
+      if (isMobile) return mobileShell(<MelodicSamplerEditor plugin={plugin} trackId={trackId} onClose={onClose} />);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
               <div className="pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px]">
@@ -127,6 +147,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       if (!track || !onUpdateTrack) {
           return <div className="p-10 text-white bg-red-900 rounded">Error: Track Data Missing</div>;
       }
+      if (isMobile) return mobileShell(<DrumRack track={track} onUpdateTrack={onUpdateTrack} />);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
               <div className="pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px] relative">
@@ -189,6 +210,14 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       default: return <div className="p-20 text-white">Plugin UI Not Found</div>;
     }
   };
+
+  if (isMobile) {
+    return mobileShell(
+      <div className="shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden rounded-none">
+        {renderPluginUI()}
+      </div>
+    );
+  }
 
   return (
     <div className={`relative group/plugin ${isMobile ? 'w-full h-full flex flex-col items-center justify-center pt-16' : ''}`}>

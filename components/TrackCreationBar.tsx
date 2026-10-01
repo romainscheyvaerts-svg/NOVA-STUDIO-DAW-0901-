@@ -24,7 +24,7 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack }) =>
     <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[150] flex flex-col items-center gap-2">
       {/* Expanded panel with track creation buttons */}
       {isExpanded && (
-        <div className="bg-[#0c0d10]/95 backdrop-blur-xl border border-white/20 rounded-2xl p-3 flex gap-2 shadow-2xl animate-in slide-in-from-bottom-4 fade-in duration-200">
+        <div className="bg-[#0c0d10]/95 backdrop-blur-xl border border-white/20 rounded-2xl p-3 grid grid-cols-3 sm:grid-cols-6 gap-2 shadow-2xl animate-in slide-in-from-bottom-4 fade-in duration-200">
           {trackTypes.map((item, idx) => (
             <button
               key={`${item.type}-${idx}`}

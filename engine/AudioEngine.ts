@@ -160,6 +160,7 @@ export class AudioEngine {
     
     this.sampleRate = this.ctx.sampleRate;
     this.latency = this.ctx.baseLatency;
+    this.hookAutoResume();
 
     this.masterOutput = this.ctx.createGain();
     this.masterLimiter = this.ctx.createDynamicsCompressor();
@@ -311,7 +312,7 @@ export class AudioEngine {
 
   public async playHighResPreview(url: string, onEnded?: () => void): Promise<void> { 
       await this.init(); 
-      if (this.ctx?.state === 'suspended') await this.ctx.resume(); 
+      if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed') await this.ctx.resume(); 
       this.stopPreview(); 
       try { 
           const response = await fetch(url);
@@ -348,7 +349,23 @@ export class AudioEngine {
   }
   
   public getPreviewAnalyzer() { return this.previewAnalyzer; }
-  public async resume() { if (this.ctx && this.ctx.state === 'suspended') { await this.ctx.resume(); } }
+  // iOS : l'état peut aussi être « interrupted » (appel, Siri, changement d'app) —
+  // ne reprendre que sur « suspended » laissait l'audio muet jusqu'au rechargement.
+  public async resume() { if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed') { await this.ctx.resume(); } }
+
+  private autoResumeHooked = false;
+  /** Reprend le contexte au retour sur la page et au prochain geste de l'utilisateur. */
+  private hookAutoResume() {
+    if (this.autoResumeHooked || typeof document === 'undefined') return;
+    this.autoResumeHooked = true;
+    const tryResume = () => {
+      const c = this.ctx;
+      if (c && c.state !== 'running' && c.state !== 'closed') c.resume().catch(() => { /* attend un geste */ });
+    };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) tryResume(); });
+    window.addEventListener('pageshow', tryResume);
+    document.addEventListener('pointerdown', tryResume, { passive: true });
+  }
   
   /**
    * Rendu offline du projet.
@@ -612,7 +629,7 @@ export class AudioEngine {
    */
   public async armTrack(trackId: string): Promise<string | null> {
     if (!this.ctx) await this.init();
-    if (this.ctx!.state === 'suspended') await this.ctx!.resume();
+    if (this.ctx!.state !== 'running' && this.ctx!.state !== 'closed') await this.ctx!.resume();
     if (this.armingPromise) await this.armingPromise;
     this.armingPromise = this._armTrackInternal(trackId);
     await this.armingPromise;
@@ -830,13 +847,19 @@ export class AudioEngine {
     }
     
     try {
-      this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        }
-      });
+      // Même entrée que l'armement initial : sans deviceId, la 2e prise passait
+      // sur le micro par défaut au lieu de l'interface choisie.
+      const constraints: MediaTrackConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+      if (this.currentInputDeviceId && this.currentInputDeviceId !== 'default') {
+        constraints.deviceId = { exact: this.currentInputDeviceId };
+      }
+      try {
+        this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+      } catch {
+        this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        });
+      }
       this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
       this.monitorSource.connect(dsp.input);
       this.monitoringTrackId = trackId;

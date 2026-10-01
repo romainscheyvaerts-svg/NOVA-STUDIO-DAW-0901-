@@ -288,7 +288,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         >
           {isOpen ? <i className="fas fa-chevron-down text-xl"></i> : (
             <>
-              <i className="fas fa-sparkles text-2xl group-hover:animate-pulse"></i>
+              <i className="fas fa-wand-magic-sparkles text-2xl group-hover:animate-pulse"></i>
               {isSyncing && <div className="absolute inset-0 rounded-[32px] border-4 border-cyan-500 animate-ping"></div>}
             </>
           )}

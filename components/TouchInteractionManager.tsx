@@ -59,6 +59,9 @@ const TouchInteractionManager: React.FC = () => {
     const handleTouchStart = (e: TouchEvent) => {
       // On ignore le multitouch pour les interactions contextuelles
       if (e.touches.length > 1) return;
+      // Boutons et champs : deux taps rapides = deux actions (BPM +/+, zoom,
+      // fondus…), pas un clic droit qui avalait le second tap.
+      if ((e.target as HTMLElement)?.closest?.('button, input, select, textarea, a, [role="button"], [data-no-longpress]')) return;
 
       const touch = e.touches[0];
       const now = Date.now();

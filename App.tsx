@@ -44,6 +44,7 @@ import MobilePluginsPage from './components/MobilePluginsPage';
 import MobileBrowserPage from './components/MobileBrowserPage';
 import MobileBottomNav from './components/MobileBottomNav';
 import LandingPage from './components/LandingPage';
+import { saveBlob } from './utils/saveBlob';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -509,7 +510,9 @@ export default function App() {
   const toggleTheme = () => { setTheme(prev => prev === 'dark' ? 'light' : 'dark'); };
 
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
-    useEffect(() => { novaBridge.connect(); }, []);
+    // Le bridge VST tourne sur un PC (ws://localhost) : inutile de le chercher
+    // depuis un téléphone ou une tablette.
+    useEffect(() => { if (window.matchMedia?.('(pointer: fine)').matches) novaBridge.connect(); }, []);
   // Presse-papiers de clips (partage entre l'arrangement desktop et mobile).
   const clipboardClipRef = useRef<Clip | null>(null);
   const stateRef = useRef(state);
@@ -565,20 +568,60 @@ export default function App() {
   const [addPluginMenu, setAddPluginMenu] = useState<{ trackId: string, x: number, y: number } | null>(null);
   const [automationMenu, setAutomationMenu] = useState<{ x: number, y: number, trackId: string, paramId: string, paramName: string, min: number, max: number } | null>(null);
   const [noArmedTrackError, setNoArmedTrackError] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    const saved = localStorage.getItem('nova_view_mode');
-    if (saved) return saved as ViewMode;
-    return window.innerWidth < 768 ? 'MOBILE' : (window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP');
-  });
+  // Mode choisi par l'utilisateur (sélecteur) ; sinon déduit de l'écran.
+  // localStorage peut être bloqué (iframe, navigation stricte) : sans try/catch
+  // la lecture faisait planter le DAW avant même le premier affichage.
+  const readSavedViewMode = (): ViewMode | null => {
+    try {
+      const v = localStorage.getItem('nova_view_mode');
+      return v === 'MOBILE' || v === 'TABLET' || v === 'DESKTOP' ? v : null;
+    } catch { return null; }
+  };
+  // Un téléphone en paysage (≈ 844 px) passait en TABLET, dont les vues sont
+  // utilisables seulement à la souris : écran tactile + petit côté < 600 px = MOBILE.
+  const autoViewMode = (): ViewMode => {
+    const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+    const shortSide = Math.min(window.innerWidth, window.innerHeight);
+    if (window.innerWidth < 768 || (coarse && shortSide < 600)) return 'MOBILE';
+    return window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP';
+  };
+  const [viewMode, setViewMode] = useState<ViewMode>(() => readSavedViewMode() ?? autoViewMode());
   const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('TRACKS');
-  const handleViewModeChange = (mode: ViewMode) => { setViewMode(mode); localStorage.setItem('nova_view_mode', mode); };
+  const handleViewModeChange = (mode: ViewMode) => {
+    setViewMode(mode);
+    try { localStorage.setItem('nova_view_mode', mode); } catch { /* stockage indisponible */ }
+  };
+  // Sans choix manuel, le mode suit la rotation et le redimensionnement.
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const onResize = () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => { if (!readSavedViewMode()) setViewMode(autoViewMode()); }, 200);
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      if (t) clearTimeout(t);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
+  // Contexte audio déjà raccordé au métronome et aux pistes. Le moteur peut être
+  // initialisé ailleurs (aperçu d'un beat du catalogue, armement, import…) :
+  // l'ancien test « wasUninitialized » sautait alors le raccordement et le
+  // métronome restait muet toute la session.
+  const wiredCtxRef = useRef<AudioContext | null>(null);
   const ensureAudioEngine = async () => {
-    const wasUninitialized = !audioEngine.ctx;
     if (!audioEngine.ctx) await audioEngine.init();
-    if (audioEngine.ctx?.state === 'suspended') await audioEngine.ctx.resume();
-    if (wasUninitialized && audioEngine.ctx) {
+    // resume() ne se résout qu'après un geste reconnu par le navigateur : l'attendre
+    // sans limite bloquait l'ouverture des plugins (rien ne se passait au tap).
+    // L'audio reprendra au prochain toucher (AudioEngine.hookAutoResume).
+    await Promise.race([audioEngine.resume().catch(() => {}), new Promise(r => setTimeout(r, 300))]);
+    if (audioEngine.ctx && wiredCtxRef.current !== audioEngine.ctx) {
+      wiredCtxRef.current = audioEngine.ctx;
       stateRef.current.tracks.forEach(t => audioEngine.updateTrack(t, stateRef.current.tracks));
       // Le metronome partage le contexte audio du moteur.
       metronomeService.init(audioEngine.ctx);
@@ -653,15 +696,8 @@ export default function App() {
       
       setSaveState(s => ({ ...s, progress: 80, message: 'Téléchargement...' }));
       
-      // Télécharger le fichier
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${n || 'NovaProject'}.novaproj.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Télécharger le fichier (feuille de partage sur téléphone)
+      await saveBlob(zipBlob, `${n || 'NovaProject'}.novaproj.zip`);
       
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Téléchargé !' }));
       setAiNotification(`✅ Projet "${n}" exporté avec les audios`);
@@ -2586,7 +2622,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-full overflow-hidden relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
+    <div className="flex flex-col h-full w-full overflow-hidden relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
       {saveState.isSaving && <SaveOverlay progress={saveState.progress} message={saveState.message} />}
 
       {/* TransportBar - Desktop, Tablet ET Mobile avec menu hamburger */}
@@ -2608,6 +2644,7 @@ export default function App() {
           user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
           isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar}
           onImportAudio={handleNewAudioImport}
+          isMobileLayout={isMobile}
         >
           <div className="ml-4 border-l border-white/5 pl-4"><ViewModeSwitcher currentMode={viewMode} onChange={handleViewModeChange} /></div>
         </TransportBar>
@@ -2620,7 +2657,11 @@ export default function App() {
         </div>
       )}
       
-      <TrackCreationBar onCreateTrack={handleCreateTrack} />
+      {/* Sur téléphone, le « + » ne sert que dans Pistes et Arrangement ; ailleurs
+          il couvrait du contenu (saisie du chat Nova, liste des effets). */}
+      {(!isMobile || activeMobileTab === 'TRACKS' || activeMobileTab === 'ARRANGEMENT') && (
+        <TrackCreationBar onCreateTrack={handleCreateTrack} />
+      )}
       <TouchInteractionManager />
 
       <div className="flex-1 flex overflow-hidden relative">

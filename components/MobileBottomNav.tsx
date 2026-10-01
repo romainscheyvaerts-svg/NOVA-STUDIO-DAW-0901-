@@ -13,10 +13,10 @@ interface MobileBottomNavProps {
 const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChange }) => {
   const tabs: { id: MobileTab; icon: string; label: string }[] = [
     { id: 'TRACKS', icon: 'fa-bars-staggered', label: 'Pistes' },
-    { id: 'ARRANGEMENT', icon: 'fa-waveform-lines', label: 'Arrangement' },
+    { id: 'ARRANGEMENT', icon: 'fa-wave-square', label: 'Arrangement' },
     { id: 'PLUGINS', icon: 'fa-plug', label: 'FX' },
     { id: 'BROWSER', icon: 'fa-folder-open', label: 'Sons' },
-    { id: 'NOVA', icon: 'fa-sparkles', label: 'Nova' },
+    { id: 'NOVA', icon: 'fa-wand-magic-sparkles', label: 'Nova' },
   ];
 
   return (
@@ -29,13 +29,13 @@ const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChang
             className={`flex flex-col items-center justify-center flex-1 h-full transition-all relative ${
               activeTab === tab.id
                 ? 'text-cyan-400'
-                : 'text-slate-500 hover:text-slate-400 active:text-slate-300'
+                : 'text-slate-400 hover:text-slate-300 active:text-slate-200'
             }`}
           >
             <i className={`fas ${tab.icon} text-xl mb-1 transition-transform ${
               activeTab === tab.id ? 'scale-110' : 'scale-100'
             }`}></i>
-            <span className={`text-[10px] font-semibold tracking-wide transition-all ${
+            <span className={`text-[11px] font-semibold tracking-wide transition-all ${
               activeTab === tab.id ? 'opacity-100' : 'opacity-70'
             }`}>
               {tab.label}

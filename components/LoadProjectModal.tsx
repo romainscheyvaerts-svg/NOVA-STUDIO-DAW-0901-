@@ -55,7 +55,7 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[1200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-2xl h-[600px] bg-[#14161a] border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-2xl h-[600px] max-h-[90dvh] bg-[#14161a] border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         
         {/* Header */}
         <div className="p-6 border-b border-white/5 bg-gradient-to-r from-blue-900/20 to-transparent flex justify-between items-center shrink-0">

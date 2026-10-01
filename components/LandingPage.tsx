@@ -227,7 +227,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
       <header className="nova-brandbar shrink-0 flex items-center justify-between px-6 py-4 border-b border-white/5 bg-[#0c0d10]">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center">
-            <i className="fas fa-waveform-lines text-white text-sm"></i>
+            <i className="fas fa-wave-square text-white text-sm"></i>
           </div>
           <div>
             <h1 className="text-lg font-black text-white tracking-tight">

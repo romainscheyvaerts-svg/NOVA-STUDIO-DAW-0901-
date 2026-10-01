@@ -230,7 +230,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
 
   return (
     <div className="fixed inset-0 z-[700] bg-black/90 backdrop-blur-md flex items-center justify-center animate-in fade-in duration-200">
-        <div className="w-[640px] bg-[#0c0d10] border border-white/10 rounded-3xl shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col font-inter max-h-[90vh]">
+        <div className="w-full max-w-[640px] bg-[#0c0d10] border border-white/10 rounded-3xl shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col font-inter max-h-[90vh]">
             
             {/* HEADER */}
             <div className="h-16 bg-[#14161a] border-b border-white/5 flex items-center justify-between px-8 relative shrink-0">

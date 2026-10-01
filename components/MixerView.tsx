@@ -262,7 +262,6 @@ const ChannelStrip: React.FC<{
           >
             <button 
               onClick={(e) => handleFXClick(e, p)}
-              onTouchStart={(e) => handleFXClick(e, p)}
               className={`w-full h-full bg-black/40 rounded border border-white/5 text-[9px] font-black hover:border-cyan-500/40 transition-all px-2 text-left truncate flex items-center pr-20 cursor-grab active:cursor-grabbing ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}
             >
                <i className="fas fa-grip-vertical text-slate-700 mr-2 text-[8px]"></i>
@@ -288,9 +287,9 @@ const ChannelStrip: React.FC<{
                     <i className="fas fa-chevron-down"></i>
                   </button>
                </div>
-               <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} onTouchStart={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} className={`w-5 h-5 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
+               <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} className={`w-5 h-5 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} onTouchStart={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx"><i className="fas fa-times"></i></button>
+            <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx"><i className="fas fa-times"></i></button>
           </div>
         ))}
         {/* Boutons + pour ajouter des plugins */}
@@ -298,7 +297,6 @@ const ChannelStrip: React.FC<{
           <button
             key={`empty-${i}`}
             onClick={handleEmptySlotClick}
-            onTouchStart={handleEmptySlotClick}
             className="w-full h-8 rounded border border-dashed border-white/10 bg-black/5 opacity-40 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
           >
             <i className="fas fa-plus text-[8px] text-slate-600"></i>
@@ -338,8 +336,8 @@ const ChannelStrip: React.FC<{
         </div>
 
         <div className="mt-4 flex space-x-2">
-           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} onTouchStart={() => onUpdate({...track, isMuted: !track.isMuted})} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>MUTE</button>
-           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} onTouchStart={() => onUpdate({...track, isSolo: !track.isSolo})} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>SOLO</button>
+           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>MUTE</button>
+           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>SOLO</button>
         </div>
         
         <div className={`mt-3 h-10 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-black/40 border-white/10 text-white'}`}>

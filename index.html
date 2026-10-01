@@ -8,7 +8,6 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Nova DAW | Pro Workstation</title>
-  <script src="https://js.stripe.com/v3/"></script> <!-- STRIPE SDK AJOUTÉ -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Polices embarquees : le DAW tourne aussi dans l'application iPhone,
        ou dependre du reseau pour la typographie n'a pas de sens.
@@ -234,6 +233,24 @@
       cursor: pointer;
     }
     .fx-slot:hover .delete-fx { opacity: 1; }
+
+    /* Zones de sécurité iPhone (encoche, barre d'accueil) : ces classes étaient
+       utilisées par les composants mobiles mais définies nulle part. */
+    .safe-area-inset { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+    .safe-area-inset-bottom { padding-bottom: env(safe-area-inset-bottom); }
+    .safe-area-inset-left { padding-left: env(safe-area-inset-left); }
+    .safe-area-inset-right { padding-right: env(safe-area-inset-right); }
+    .safe-area-top { padding-top: env(safe-area-inset-top); }
+
+    /* Écrans tactiles : pas de survol, cibles plus grandes, pas de zoom iOS au
+       focus d'un champ (déclenché sous 16 px). */
+    @media (hover: none) { .delete-fx { opacity: 1; } }
+    @media (pointer: coarse) {
+      input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, select { font-size: 16px !important; }
+      input[type="range"] { height: 6px; }
+      input[type="range"]::-webkit-slider-thumb { width: 24px; height: 24px; }
+      input[type="range"]::-moz-range-thumb { width: 24px; height: 24px; }
+    }
 
     input[type="range"] { appearance: none; background: var(--border-highlight); border-radius: 10px; height: 4px; }
     input[type="range"]::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; background: var(--accent-neon); border-radius: 50%; cursor: pointer; transition: transform 0.1s; }
