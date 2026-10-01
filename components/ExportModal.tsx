@@ -5,6 +5,7 @@ import { audioEngine } from '../engine/AudioEngine';
 import { AudioEncoder, BitDepth, AudioFormat } from '../services/AudioEncoder';
 import JSZip from 'jszip';
 import { saveBlob } from '../utils/saveBlob';
+import { openBuyBeat, openProMix } from '../utils/studioLinks';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -384,9 +385,26 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             <p className="mt-1.5 text-[10px] leading-relaxed text-amber-100/80">
                               {beatsNonAchetes.length > 1
                                 ? `${beatsNonAchetes.length} instrumentaux du catalogue ne sont pas achetés.`
-                                : `L'instrumental « ${beatsNonAchetes[0]?.name} » n'est pas acheté.`}
+                                : `L'instrumental « ${beatsNonAchetes[0]?.clips[0]?.name || beatsNonAchetes[0]?.name} » n'est pas acheté.`}
                               {' '}Le studio permet de l'essayer librement ; l'achat débloque l'export.
                             </p>
+                            {/* Le moment où l'artiste veut son fichier : on lui donne les deux suites possibles. */}
+                            <div className="mt-3 flex flex-col sm:flex-row gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openBuyBeat(projectState.tracks)}
+                                className="flex-1 h-10 rounded-lg bg-amber-400 text-black text-[11px] font-black uppercase tracking-wide hover:bg-amber-300"
+                              >
+                                🛒 Acheter cette instru
+                              </button>
+                              <button
+                                type="button"
+                                onClick={openProMix}
+                                className="flex-1 h-10 rounded-lg bg-white/10 text-white text-[11px] font-bold hover:bg-white/20"
+                              >
+                                🎚️ Faire mixer par un pro
+                              </button>
+                            </div>
                           </div>
                         )}
 

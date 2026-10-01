@@ -17,6 +17,10 @@ interface VocalToolsPanelProps {
   monitoring: boolean;
   onMonitoringChange: (on: boolean) => void;
   onAskNova: () => void;
+  /** Un beat du catalogue est chargé (bouton « Acheter cette instru »). */
+  hasCatalogBeat: boolean;
+  onBuyBeat: () => void;
+  onProMix: () => void;
 }
 
 const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }> = ({ checked, onChange, label, hint }) => (
@@ -112,6 +116,24 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
           >
             <i className="fas fa-wand-magic-sparkles mr-2" />Je ne sais pas lequel choisir : demander à Nova
           </button>
+
+          {/* Le mix auto est une pré-écoute : le vrai rendu se fait au studio. */}
+          <div className="rounded-2xl border border-amber-400/30 bg-amber-400/5 p-4">
+            <p className="text-[13px] font-bold text-white">Ton son te plaît ? Passe au niveau pro.</p>
+            <p className="text-[11.5px] text-slate-300 mt-1">
+              Le mix auto te donne une idée. Nos ingés son mixent ta voix sur l'instru pour un rendu prêt à sortir.
+            </p>
+            <div className="mt-3 flex flex-col sm:flex-row gap-2">
+              {p.hasCatalogBeat && (
+                <button type="button" onClick={p.onBuyBeat} className="flex-1 h-10 rounded-xl bg-amber-400 text-black text-[12px] font-black hover:bg-amber-300">
+                  🛒 Acheter cette instru
+                </button>
+              )}
+              <button type="button" onClick={p.onProMix} className="flex-1 h-10 rounded-xl bg-white/10 text-white text-[12px] font-bold hover:bg-white/20">
+                🎚️ Faire mixer par un pro
+              </button>
+            </div>
+          </div>
 
           {/* Outils */}
           <div className="border-t border-white/5 pt-4">

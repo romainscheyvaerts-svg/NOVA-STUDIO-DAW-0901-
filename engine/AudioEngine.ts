@@ -1,6 +1,7 @@
 
 import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad, AutomationPoint } from '../types';
 import { getASIOBridge, ASIOBridgeClient, ASIOConfig, AudioDevice, ASIOStats } from '../services/ASIOBridge';
+import { ASIOInput } from './ASIOInput';
 import { ReverbNode } from '../plugins/ReverbPlugin';
 import { SyncDelayNode } from '../plugins/DelayPlugin';
 import { ChorusNode } from '../plugins/ChorusPlugin';
@@ -58,6 +59,7 @@ export class AudioEngine {
   
   // Master Section
   private masterOutput: GainNode | null = null;
+  private browserOutput: GainNode | null = null;
   private masterLimiter: DynamicsCompressorNode | null = null; // SAFETY LIMITER
   private masterAnalyzer: AnalyserNode | null = null; 
   private masterSplitter: ChannelSplitterNode | null = null;
@@ -139,6 +141,9 @@ export class AudioEngine {
   private asioDevices: AudioDevice[] = [];
   private asioConfig: ASIOConfig | null = null;
   private asioInputNode: MediaStreamAudioSourceNode | null = null;
+  /** Entrée de la carte son via le pont ASIO (remplace le micro du navigateur quand le flux est actif). */
+  private asioInput: ASIOInput | null = null;
+  private asioInputReceived = false;
   private asioOutputProcessor: ScriptProcessorNode | null = null;
 
   constructor() {}
@@ -192,7 +197,11 @@ export class AudioEngine {
 
     this.masterOutput.connect(this.masterLimiter);
     this.masterLimiter.connect(this.masterAnalyzer);
-    this.masterAnalyzer.connect(this.ctx.destination);
+    // Sortie « navigateur » coupée pendant le flux ASIO : le mix part alors par
+    // la carte, sinon l'artiste l'entendait deux fois (écho / effet de phase).
+    this.browserOutput = this.ctx.createGain();
+    this.masterAnalyzer.connect(this.browserOutput);
+    this.browserOutput.connect(this.ctx.destination);
     
     this.masterAnalyzer.connect(this.masterSplitter);
     this.masterSplitter.connect(this.masterAnalyzerL, 0);
@@ -688,7 +697,7 @@ export class AudioEngine {
       }
 
       try {
-        this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+        this.activeMonitorStream = await this.openInputStream(audioConstraints);
       } catch (deviceError) {
         // Peripherique debranche ou refuse : on retombe sur l'entree par defaut
         // plutot que d'echouer completement l'armement.
@@ -747,7 +756,7 @@ export class AudioEngine {
       this.monitorSource = null;
     }
     if (this.activeMonitorStream) {
-      this.activeMonitorStream.getTracks().forEach(track => track.stop());
+      this.stopInputStream(this.activeMonitorStream);
       this.activeMonitorStream = null;
     }
     this.monitoringTrackId = null;
@@ -870,7 +879,7 @@ export class AudioEngine {
       this.monitorSource = null;
     }
     if (this.activeMonitorStream) {
-      this.activeMonitorStream.getTracks().forEach(track => track.stop());
+      this.stopInputStream(this.activeMonitorStream);
       this.activeMonitorStream = null;
     }
     
@@ -890,7 +899,7 @@ export class AudioEngine {
         constraints.deviceId = { exact: this.currentInputDeviceId };
       }
       try {
-        this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+        this.activeMonitorStream = await this.openInputStream(constraints);
       } catch {
         this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
@@ -1764,6 +1773,9 @@ export class AudioEngine {
 
   public getTrackPluginParameters(trackId: string): { pluginId: string, pluginName: string, params: PluginParameter[] }[] { return []; }
   public getMasterAnalyzer() { return this.masterAnalyzer; }
+  /** Où envoyer les sons de service (décompte) : le master, pour qu'ils sortent aussi en ASIO. */
+  public getMonitorBus(): AudioNode | null { return this.masterOutput || this.ctx?.destination || null; }
+
   public getTrackAnalyzer(trackId: string) { const dsp = this.tracksDSP.get(trackId); if (!dsp) return null; if (this.monitoringTrackId === trackId && dsp.inputAnalyzer) return dsp.inputAnalyzer; return dsp.analyzer; }
   public getPluginNodeInstance(trackId: string, pluginId: string) { return this.tracksDSP.get(trackId)?.pluginChain.get(pluginId)?.instance || null; }
   public setRecMode(active: boolean) { this.isRecMode = active; }
@@ -1847,11 +1859,16 @@ export class AudioEngine {
         console.log('[AudioEngine] ASIO Bridge déconnecté');
         this.asioConnected = false;
         this.asioStreamActive = false;
+        this.restoreBrowserOutput();
       },
       onDevices: (devices, asioDevices) => {
         this.asioDevices = asioDevices;
         console.log('[AudioEngine] Périphériques ASIO détectés:', asioDevices.length);
       },
+      onConfigSet: (success, config) => {
+        if (success && config) this.applyASIOConfig(config);
+      },
+      onConfig: (config) => this.applyASIOConfig(config),
       onStreamStarted: (success, latency_ms) => {
         if (success) {
           this.asioStreamActive = true;
@@ -1859,17 +1876,27 @@ export class AudioEngine {
           // comme ctx.baseLatency. Sans conversion les deux se melangeaient.
           this.latency = (latency_ms || 0) / 1000;
           console.log(`[AudioEngine] Stream ASIO démarré - Latence: ${latency_ms}ms`);
+          // Piste déjà armée sur le micro du navigateur : elle bascule sur la carte.
+          if (this.monitoringTrackId && !this.isUsingASIOInput() && !this.recordingTrackId) {
+            void this.armTrack(this.monitoringTrackId);
+          }
         }
       },
       onStreamStopped: () => {
         this.asioStreamActive = false;
+        this.restoreBrowserOutput();
         console.log('[AudioEngine] Stream ASIO arrêté');
+        // Piste armée sur la carte : retour au micro du navigateur pour ne pas rester muet.
+        if (this.monitoringTrackId && this.isUsingASIOInput() && !this.recordingTrackId) {
+          void this.armTrack(this.monitoringTrackId);
+        }
       },
       onAudioInput: (audioData, channels) => {
         this.handleASIOInput(audioData, channels);
       },
       onStats: (stats) => {
         this.latency = (stats.latency_ms || 0) / 1000;
+        if (stats.sample_rate && this.asioInput) this.asioInput.sourceRate = stats.sample_rate;
       }
     });
 
@@ -1887,6 +1914,7 @@ export class AudioEngine {
     }
     this.asioConnected = false;
     this.asioStreamActive = false;
+    this.restoreBrowserOutput();
   }
 
   /**
@@ -1941,20 +1969,29 @@ export class AudioEngine {
           ];
           this.asioBridge.sendAudioFromWorklet(channelData);
         }
-        // Copier l'entrée vers la sortie pour le monitoring local
+        // Sortie du processeur silencieuse : le mix part par la carte. (Le copier
+        // ici le faisait aussi sortir par le navigateur, en double.)
         for (let ch = 0; ch < e.outputBuffer.numberOfChannels; ch++) {
-          e.outputBuffer.getChannelData(ch).set(e.inputBuffer.getChannelData(ch));
+          e.outputBuffer.getChannelData(ch).fill(0);
         }
       };
-      
-      // Connecter le master output au processeur ASIO
-      if (this.masterOutput) {
-        this.masterOutput.connect(this.asioOutputProcessor);
+
+      // Mix après le limiteur (ce que l'on entend) → carte. Le processeur doit
+      // être relié à la destination pour tourner, mais il n'y envoie que du silence.
+      const tap = this.masterAnalyzer || this.masterOutput;
+      if (tap) {
+        tap.connect(this.asioOutputProcessor);
         this.asioOutputProcessor.connect(this.ctx.destination);
       }
     }
-    
+    if (this.browserOutput && this.ctx) this.browserOutput.gain.setTargetAtTime(0, this.ctx.currentTime, 0.01);
+
     this.asioBridge.startStream();
+  }
+
+  /** Remet le son sur la sortie du navigateur (flux ASIO arrêté ou perdu). */
+  private restoreBrowserOutput() {
+    if (this.browserOutput && this.ctx) this.browserOutput.gain.setTargetAtTime(1, this.ctx.currentTime, 0.01);
   }
 
   /**
@@ -1966,12 +2003,15 @@ export class AudioEngine {
     }
     
     if (this.asioOutputProcessor) {
+      const tap = this.masterAnalyzer || this.masterOutput;
+      try { tap?.disconnect(this.asioOutputProcessor); } catch (e) {}
       try {
         this.asioOutputProcessor.disconnect();
       } catch (e) {}
       this.asioOutputProcessor = null;
     }
-    
+    this.restoreBrowserOutput();
+
     this.asioStreamActive = false;
   }
 
@@ -1979,13 +2019,62 @@ export class AudioEngine {
    * Gérer l'audio entrant du bridge ASIO (entrée micro/instrument)
    */
   private handleASIOInput(audioData: Float32Array, channels: number): void {
-    // L'audio d'entrée ASIO peut être routé vers les pistes armées
-    // Pour l'instant, on log simplement la réception
-    // Dans une version future, on créerait un MediaStream à partir des données
-    if (this.monitoringTrackId) {
-      // Route vers la piste armée
-      // TODO: Implémenter le routing de l'audio ASIO vers les pistes
+    // Le son de la carte arrive en continu ; il n'est entendu / enregistré que
+    // si une piste est armée (le flux sert alors de « micro »).
+    this.asioInputReceived = true;
+    this.asioInput?.push(audioData, channels);
+  }
+
+  /**
+   * Source d'entrée pour armer une piste : la carte son via le pont ASIO quand
+   * son flux tourne, sinon le micro du navigateur (getUserMedia).
+   */
+  private async openInputStream(constraints: MediaTrackConstraints): Promise<MediaStream> {
+    if (this.asioStreamActive && this.asioConnected && this.ctx) {
+      this.ensureASIOInput();
+      console.log('[AudioEngine] Entrée ASIO utilisée pour la piste armée');
+      return this.asioInput!.getStream();
     }
+    return navigator.mediaDevices.getUserMedia({ audio: constraints });
+  }
+
+  private ensureASIOInput() {
+    if (this.asioInput || !this.ctx) return;
+    this.asioInput = new ASIOInput(this.ctx, this.asioConfig?.sample_rate || 44100);
+    this.asioInput.setChannel(this.getASIOInputChannel());
+  }
+
+  /** Stoppe un flux d'entrée, sauf celui de l'ASIO (partagé et réutilisé à chaque prise). */
+  private stopInputStream(stream: MediaStream) {
+    if (this.asioInput?.owns(stream)) return;
+    stream.getTracks().forEach(track => track.stop());
+  }
+
+  /** Entrée de la carte utilisée : -1 = entrées 1+2 en mono (défaut), 0 = entrée 1, 1 = entrée 2… */
+  public setASIOInputChannel(channel: number) {
+    try { localStorage.setItem('nova_asio_input_channel', String(channel)); } catch { /* stockage indisponible */ }
+    this.ensureASIOInput();
+    this.asioInput?.setChannel(channel);
+  }
+
+  public getASIOInputChannel(): number {
+    try { const v = localStorage.getItem('nova_asio_input_channel'); if (v !== null) return parseInt(v, 10); } catch { /* défaut */ }
+    return -1;
+  }
+
+  /** Vrai si le pont a déjà envoyé du son de la carte (diagnostic « je ne m'entends pas »). */
+  public isASIOInputReceiving(): boolean {
+    return this.asioInputReceived;
+  }
+
+  /** La piste armée utilise-t-elle l'entrée ASIO ? */
+  public isUsingASIOInput(): boolean {
+    return !!this.asioInput && this.asioInput.owns(this.activeMonitorStream);
+  }
+
+  private applyASIOConfig(config: ASIOConfig) {
+    this.asioConfig = config;
+    if (this.asioInput && config.sample_rate) this.asioInput.sourceRate = config.sample_rate;
   }
 
   /**

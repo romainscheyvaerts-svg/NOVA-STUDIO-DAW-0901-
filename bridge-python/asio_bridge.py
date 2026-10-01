@@ -33,6 +33,10 @@ except ImportError:
     WINREG_AVAILABLE = False
 
 # Audio backend - sounddevice supporte ASIO sur Windows
+# Depuis sounddevice 0.5, la DLL PortAudio avec ASIO n'est chargée que si
+# SD_ENABLE_ASIO est défini AVANT l'import ; sans ça aucune carte n'est ouverte
+# en ASIO (seulement MME / WASAPI) et le pont perd son intérêt.
+os.environ.setdefault("SD_ENABLE_ASIO", "1")
 try:
     import sounddevice as sd
     SOUNDDEVICE_AVAILABLE = True

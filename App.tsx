@@ -54,6 +54,7 @@ import { AudioAnalysisEngine } from './engine/AudioAnalysisEngine';
 import { getVocalRole, findTrackForRole, ROLE_MIX, VocalRole } from './utils/vocalRoles';
 import { analyseMix, takeStats, levelsForAI } from './utils/mixAnalysis';
 import { novaSpotlight } from './utils/novaSpotlight';
+import { openBuyBeat, openProMix, getCatalogBeat } from './utils/studioLinks';
 import RecordingCoach from './components/RecordingCoach';
 import VocalToolsPanel from './components/VocalToolsPanel';
 
@@ -1387,7 +1388,9 @@ export default function App() {
     const replay = { label: '▶ Réécouter', actions: [{ action: 'SEEK', payload: { time: start } }, { action: 'PLAY', payload: {} }] as AIAction[] };
     const redo = { label: '🔁 Refaire', actions: [{ action: 'SEEK', payload: { time: start } }, { action: 'RECORD', payload: {} }] as AIAction[] };
     if (s.silent || s.rmsDb < -50) {
-      postNova(`🤔 ${takeName} : je n'ai presque rien entendu. Vérifie que ton micro est branché et autorisé, puis rapproche-toi.`, [redo]);
+      postNova(audioEngine.isUsingASIOInput()
+        ? `🤔 ${takeName} : je n'ai presque rien reçu de la carte son. Vérifie que le micro est sur la bonne entrée (Engine → Entrée du micro), que le gain de la carte est monté et, pour un micro statique, que l'48 V est activé.`
+        : `🤔 ${takeName} : je n'ai presque rien entendu. Vérifie que ton micro est branché et autorisé, puis rapproche-toi.`, [redo]);
       return;
     }
     if (s.peakDb > -0.3) {
@@ -1436,6 +1439,14 @@ export default function App() {
       st.vocalMixStyle
     );
     postNova(report.summary);
+    // Après les conseils : la suite logique pour un rendu pro.
+    setTimeout(() => {
+      const beat = getCatalogBeat(stateRef.current.tracks);
+      postNova("🎧 Le mix auto te donne un bon aperçu. Pour un son prêt à sortir, nos ingés son peuvent mixer ta voix sur l'instru." + (beat ? ` Et pour l'utiliser, il te faut la licence de « ${beat.title} ».` : ""), [
+        { label: "🎚️ Faire mixer par un pro", action: { action: "OPEN_STUDIO_OFFER", payload: { offer: "mix" } } },
+        ...(beat ? [{ label: "🛒 Acheter cette instru", action: { action: "OPEN_STUDIO_OFFER", payload: { offer: "beat" } } as AIAction }] : []),
+      ]);
+    }, 400);
     report.issues.slice(0, 4).forEach(iss => {
       const icon = iss.severity === 'bad' ? '🔴' : iss.severity === 'warn' ? '🟠' : '💡';
       postNova(`${icon} ${iss.title}. ${iss.detail}`, [
@@ -1462,7 +1473,8 @@ export default function App() {
         g.gain.setValueAtTime(0.0001, t0 + i * beat);
         g.gain.exponentialRampToValueAtTime(0.4, t0 + i * beat + 0.002);
         g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * beat + 0.08);
-        osc.connect(g).connect(ctx.destination);
+        // Par le master : le décompte sort aussi par la carte son en ASIO.
+        osc.connect(g).connect(audioEngine.getMonitorBus() || ctx.destination);
         osc.start(t0 + i * beat);
         osc.stop(t0 + i * beat + 0.1);
       }
@@ -2996,6 +3008,11 @@ export default function App() {
         handleAnalyzeMix();
         break;
 
+      case 'OPEN_STUDIO_OFFER':
+        if (String(p.offer) === 'beat') openBuyBeat(stateRef.current.tracks);
+        else openProMix();
+        break;
+
       case 'HIGHLIGHT': {
         const target = String(p.target || '');
         if (!target) return;
@@ -3359,6 +3376,9 @@ export default function App() {
         onMonitoringChange={setInputMonitoring}
         isPlaying={state.isPlaying}
         onTogglePlay={handleTogglePlay}
+        hasCatalogBeat={!!getCatalogBeat(state.tracks)}
+        onBuyBeat={() => openBuyBeat(stateRef.current.tracks)}
+        onProMix={openProMix}
         onAskNova={() => { setVocalToolsOpen(false); if (isMobile) setActiveMobileTab('NOVA'); setMixGuideRequest(n => n + 1); }}
       />
 

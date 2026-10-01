@@ -21,10 +21,12 @@ const RecordingCoach: React.FC<RecordingCoachProps> = ({ isRecording, trackId, t
   const [level, setLevel] = useState(0); // 0-1 pour l'affichage
   const [advice, setAdvice] = useState<Advice>({ text: '🎤 Vas-y, je t\'écoute', tone: 'idle' });
   const [elapsed, setElapsed] = useState(0);
+  const [viaAsio, setViaAsio] = useState(false);
   const raf = useRef(0);
 
   useEffect(() => {
     if (!isRecording || !trackId) return;
+    setViaAsio(audioEngine.isUsingASIOInput());
     const analyser = audioEngine.getTrackAnalyzer(trackId);
     const buf = new Float32Array(analyser ? analyser.fftSize : 2048);
     const start = performance.now();
@@ -86,7 +88,12 @@ const RecordingCoach: React.FC<RecordingCoachProps> = ({ isRecording, trackId, t
         <div className={`mt-2 text-[13px] font-semibold ${advice.tone === 'bad' ? 'text-red-300' : advice.tone === 'warn' ? 'text-amber-200' : 'text-white'}`}>
           {advice.text}
         </div>
-        <div className="mt-1 text-[10.5px] text-slate-400">Réappuie sur REC pour arrêter et réécouter.</div>
+        <div className="mt-1 flex items-center justify-between gap-2 text-[10.5px] text-slate-400">
+          <span>Réappuie sur REC pour arrêter et réécouter.</span>
+          <span data-nova-input={viaAsio ? "asio" : "browser"} className={viaAsio ? "text-purple-300 font-bold" : ""}>
+            {viaAsio ? "Entrée : carte son (ASIO)" : "Entrée : micro de l'ordinateur"}
+          </span>
+        </div>
       </div>
     </div>
   );

@@ -1,12 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_all
+
+datas = [('asio_control_panel.py', '.')]
+binaries = []
+hiddenimports = ['websockets', 'comtypes']
+datas += collect_data_files('_sounddevice_data')
+tmp_ret = collect_all('sounddevice')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['asio_bridge.py'],
     pathex=[],
-    binaries=[],
-    datas=[('asio_control_panel.py', '.')],
-    hiddenimports=['websockets', 'numpy', 'sounddevice', 'comtypes'],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

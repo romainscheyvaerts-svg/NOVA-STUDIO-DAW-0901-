@@ -35,6 +35,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
   const [asioDevices, setAsioDevices] = useState<ASIODevice[]>([]);
   const [selectedAsioDevice, setSelectedAsioDevice] = useState<string>('');
   const [asioStreamActive, setAsioStreamActive] = useState(false);
+  const [asioInputChannel, setAsioInputChannel] = useState<number>(() => audioEngine.getASIOInputChannel());
   const [asioLatency, setAsioLatency] = useState(0);
   const [asioBlockSize, setAsioBlockSize] = useState(256);
   const [asioSampleRate, setAsioSampleRate] = useState(44100);
@@ -223,8 +224,15 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
           setStatus('ASIO Stream Stopped');
       } else {
           await audioEngine.startASIOStream();
-          setAsioStreamActive(audioEngine.isASIOStreamActive());
-          setStatus('ASIO Streaming Active');
+          setStatus('Démarrage du flux ASIO…');
+          // Le pont confirme de façon asynchrone (STREAM_STARTED) : on attend sa réponse.
+          let ok = false;
+          for (let i = 0; i < 30 && !ok; i++) {
+              await new Promise(r => setTimeout(r, 100));
+              ok = audioEngine.isASIOStreamActive();
+          }
+          setAsioStreamActive(ok);
+          setStatus(ok ? 'ASIO actif : la carte son est utilisée' : "Le flux ASIO n'a pas démarré (vérifie la carte dans le pont)");
       }
   };
 
@@ -466,6 +474,29 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                         )}
                                     </button>
                                 </div>
+
+                                {/* Entrée du micro sur la carte : en cabine il est souvent seul
+                                    sur l'entrée 1 ; en stéréo la voix partirait à gauche. */}
+                                <div className="flex items-center justify-between bg-black/20 rounded-lg px-4 py-3">
+                                    <label htmlFor="asio-input-channel" className="text-[10px] font-bold text-slate-300">
+                                        <i className="fas fa-microphone mr-2 text-purple-400"></i>Entrée du micro
+                                    </label>
+                                    <select
+                                        id="asio-input-channel"
+                                        value={asioInputChannel}
+                                        onChange={(e) => { const v = parseInt(e.target.value, 10); setAsioInputChannel(v); audioEngine.setASIOInputChannel(v); }}
+                                        className="h-9 bg-black/40 border border-white/10 rounded-lg px-3 text-[11px] font-medium text-white outline-none"
+                                    >
+                                        <option value={-1}>Entrées 1 + 2 (mono, recommandé)</option>
+                                        {Array.from({ length: Math.max(2, asioDevices.find(d => d.name === selectedAsioDevice)?.max_input_channels || 2) }, (_, i) => (
+                                            <option key={i} value={i}>Entrée {i + 1} seule</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <p className="text-[10px] text-slate-400 leading-relaxed">
+                                    Quand le flux tourne (Start), le DAW enregistre depuis la carte son et le beat sort par la carte.
+                                    Arrête le flux pour revenir au micro et aux haut-parleurs de l'ordinateur.
+                                </p>
                             </div>
                         )}
 

@@ -433,7 +433,8 @@ export type AIActionType =
   // Ingé son : session guidée, écoute du mix, montrer un réglage
   | 'PREPARE_PART'
   | 'ANALYZE_MIX'
-  | 'HIGHLIGHT'; 
+  | 'HIGHLIGHT'
+  | 'OPEN_STUDIO_OFFER'; 
 
 export interface AIAction {
   action: AIActionType;
