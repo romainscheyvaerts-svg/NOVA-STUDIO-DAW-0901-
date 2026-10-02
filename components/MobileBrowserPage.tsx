@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import MobileContainer from './MobileContainer';
 import { PluginType, User, PluginMetadata } from '../types';
 import InstrumentCatalog from './InstrumentCatalog';
+import { useSimpleMode } from '../utils/simpleMode';
 
 interface MobileBrowserPageProps {
   user: User | null;
@@ -42,7 +43,10 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
   onPurchase,
   selectedTrackId
 }) => {
-  const [activeTab, setActiveTab] = useState<'STORE' | 'FX' | 'BRIDGE'>('STORE');
+  const [tabChoisi, setActiveTab] = useState<'STORE' | 'FX' | 'BRIDGE'>('STORE');
+  // Mode simple : le catalogue seul (effets en mode avancé).
+  const { simple } = useSimpleMode();
+  const activeTab = simple ? 'STORE' : tabChoisi;
   const [searchTerm, setSearchTerm] = useState('');
   // Pas d'onglet VST sur téléphone : le pont VST ne tourne que sur un PC.
 
@@ -61,11 +65,11 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
 
 
   return (
-    <MobileContainer title="Navigateur">
+    <MobileContainer title={simple ? 'Sons' : 'Navigateur'}>
       <div className="space-y-4 pb-20">
         {/* Onglets - Même structure que SideBrowser2 */}
         {/* Onglet Bridge (VST externes) retiré : inutile pour essayer sa voix */}
-        <div className="grid grid-cols-2 gap-2">
+        {!simple && <div className="grid grid-cols-2 gap-2">
           <button
             onClick={() => setActiveTab('STORE')}
             className={`py-4 rounded-xl text-xs font-black uppercase transition-all flex flex-col items-center gap-2 ${
@@ -88,7 +92,7 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
             <i className="fas fa-atom text-lg"></i>
             FX
           </button>
-        </div>
+        </div>}
 
         {/* Contenu STORE - Catalogue d'instruments */}
         {activeTab === 'STORE' && (

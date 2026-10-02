@@ -9,6 +9,10 @@ import JSZip from 'jszip';
 import { saveBlob } from '../utils/saveBlob';
 import { openBuyBeat, openProMix } from '../utils/studioLinks';
 import { prepareTracksForOffline } from '../services/VstFreeze';
+import { track } from '../utils/analytics';
+
+// Compte admin du studio (tout gratuit pour tester) : lu une fois par session.
+let adminCache: boolean | null = null;
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -20,9 +24,26 @@ interface ExportModalProps {
   onOpenShare?: () => void;
   /** Identifiant stable du projet (achat « mes pistes seules » rattaché au projet). */
   projectKey?: string;
+  /** Export terminé (carte « Et maintenant ? »). */
+  onExported?: (info: { source: 'vocals' | 'full' | 'stems'; paid: boolean }) => void;
 }
 
-const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState, ownedInstrumentIds = [], onOpenShare, projectKey }) => {
+const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState, ownedInstrumentIds = [], onOpenShare, projectKey, onExported }) => {
+  // Admin (patron, admins du studio) : export complet gratuit, sans licence ni
+  // paiement (le serveur le confirme aussi). null : vérification en cours.
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(adminCache);
+  useEffect(() => {
+    if (!isOpen || adminCache !== null) return;
+    let live = true;
+    const timeout = new Promise<null>(r => setTimeout(() => r(null), 4000));
+    void Promise.race([billingStatus(), timeout]).then(st => {
+      if (st) adminCache = !!st.admin;
+      if (live) setIsAdmin(st ? !!st.admin : false);
+    });
+    return () => { live = false; };
+  }, [isOpen]);
+  const admin = isAdmin === true;
+  const adminPending = isAdmin === null;
 
   // Verrou de licence. Le DAW sert a essayer les instrumentaux : on ne peut
   // sortir un fichier audio que si le beat du catalogue present dans le projet
@@ -35,7 +56,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
     ),
     [projectState.tracks, possedes]
   );
-  const exportVerrouille = beatsNonAchetes.length > 0;
+  const exportVerrouille = !admin && beatsNonAchetes.length > 0;
   // --- STATE ---
   const [filename, setFilename] = useState(projectState.name || 'Master');
   
@@ -45,6 +66,11 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   // seulement), l'instrumental ne peut donc pas sortir par là.
   const [source, setSource] = useState<'MASTER' | 'STEMS' | 'VOCALS'>(exportVerrouille ? 'VOCALS' : 'MASTER');
   const [vocalsDry, setVocalsDry] = useState(false);
+  // Admin confirmé après l'ouverture : mix complet proposé (sauf choix déjà fait).
+  const sourceTouched = React.useRef(false);
+  useEffect(() => {
+    if (admin && !sourceTouched.current) setSource('MASTER');
+  }, [admin]);
   const bloque = exportVerrouille && source !== 'VOCALS';
   // Mes pistes seules sans avoir acheté le beat / la mélodie : 2 € par projet.
   const [voicesUnlocked, setVoicesUnlocked] = useState<boolean | null>(null);
@@ -53,7 +79,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   // Export payant (2 €, ou un des 10 exports gratuits de Nova Pro) : mes pistes
   // seules sans le beat acheté, ou tout projet sans instru du catalogue (instru importée).
   const hasCatalogBeat = projectState.tracks.some(t => t.instrumentId !== undefined && t.instrumentId !== null && t.instrumentId !== '');
-  const paidExport = (source === 'VOCALS' && exportVerrouille) || !hasCatalogBeat;
+  const paidExport = !admin && ((source === 'VOCALS' && exportVerrouille) || !hasCatalogBeat);
   const needsVoicesPayment = paidExport && voicesUnlocked !== true;
   const [freeLeft, setFreeLeft] = useState<number | null>(null);
   React.useEffect(() => {
@@ -295,6 +321,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
         }
 
         setStatusText('✅ Export Terminé !');
+        const kind = source === 'VOCALS' ? 'vocals' : source === 'STEMS' ? 'stems' : 'full';
+        track('export_done', { source: kind, paid: paidExport, admin });
+        onExported?.({ source: kind, paid: paidExport });
         setTimeout(() => {
             onClose();
             setIsRendering(false);
@@ -347,7 +376,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                 <label className="text-[9px] font-bold text-slate-400">Source</label>
                                 <select 
                                     value={source} 
-                                    onChange={e => setSource(e.target.value as any)}
+                                    onChange={e => { sourceTouched.current = true; setSource(e.target.value as any); }}
                                     disabled={isRendering}
                                     className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
                                 >
@@ -512,7 +541,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                         )}
                         {loudnessReport && <p className="text-[10px] text-emerald-300 text-center" role="status">{loudnessReport}</p>}
 
-                        {exportVerrouille && (
+                        {exportVerrouille && !adminPending && (
                           <div className="mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200">
                             <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
                               <i className="fas fa-lock"></i>
@@ -526,7 +555,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             </p>
                             <button
                               type="button"
-                              onClick={() => setSource('VOCALS')}
+                              onClick={() => { sourceTouched.current = true; setSource('VOCALS'); }}
                               className={`mt-2 w-full min-h-10 py-2 leading-tight rounded-lg text-[11px] font-bold ${source === 'VOCALS' ? 'bg-emerald-500/25 text-emerald-100 border border-emerald-400/50' : 'border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/10'}`}
                             >
                               🎤 {source === 'VOCALS' ? 'Mes pistes seules sélectionnées : export possible' : 'Exporter mes pistes seules (voix, batterie), sans le beat ni la mélodie'}
@@ -560,16 +589,22 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                           </div>
                         )}
 
+                        {admin && (
+                          <p className="text-[10px] text-center font-bold text-emerald-300" role="status">
+                            <i className="fas fa-user-shield mr-1"></i>Admin : export gratuit
+                          </p>
+                        )}
+
                         <button 
                             onClick={bloque ? () => openBuyBeat(projectState.tracks) : handleExport}
-                            disabled={isRendering || payWait}
+                            disabled={isRendering || payWait || (adminPending && (bloque || needsVoicesPayment))}
                             title={bloque ? "Achetez l'instrumental pour exporter (ou choisissez « Voix seules »)" : undefined}
                             className="w-full min-h-12 py-3 whitespace-normal text-center leading-tight bg-cyan-500 hover:bg-cyan-400 text-black rounded-xl text-[10px] font-black uppercase tracking-[0.12em] shadow-lg shadow-cyan-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
                         >
                             {bloque ? <i className="fas fa-lock"></i>
                               : isRendering ? <i className="fas fa-circle-notch fa-spin"></i>
                               : <i className="fas fa-download"></i>}
-                            <span>{bloque ? "ACHETER L'INSTRU POUR EXPORTER" : payWait ? 'EN ATTENTE DU PAIEMENT…' : needsVoicesPayment ? (freeLeft !== null && freeLeft > 0 ? `EXPORTER (GRATUIT NOVA PRO · ${freeLeft} RESTANTS)` : 'PAYER 2 € ET EXPORTER') : source === 'VOCALS' ? 'EXPORTER MES PISTES' : 'EXPORTER'}</span>
+                            <span>{adminPending && (bloque || needsVoicesPayment) ? 'VÉRIFICATION…' : bloque ? "ACHETER L'INSTRU POUR EXPORTER" : payWait ? 'EN ATTENTE DU PAIEMENT…' : needsVoicesPayment ? (freeLeft !== null && freeLeft > 0 ? `EXPORTER (GRATUIT NOVA PRO · ${freeLeft} RESTANTS)` : 'PAYER 2 € ET EXPORTER') : source === 'VOCALS' ? 'EXPORTER MES PISTES' : 'EXPORTER'}</span>
                         </button>
                     </div>
                 </div>

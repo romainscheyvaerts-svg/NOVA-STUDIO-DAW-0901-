@@ -4,6 +4,7 @@ import { Track, Clip, TrackType, TrackSend } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore, usePlayheadTime } from '../utils/playheadStore';
 import { gainToDbText } from '../utils/db';
+import { useSimpleMode } from '../utils/simpleMode';
 
 /** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
 const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
@@ -142,10 +143,15 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   const [notification, setNotification] = useState<string | null>(null);
 
   // Derived values
+  // Mode simple : ni bus, ni effets, ni envois (Mix auto s'en charge).
+  const { simple } = useSimpleMode();
   const visibleTracks = useMemo(() => 
-    tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master'),
-    [tracks]
+    tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master' && !(simple && t.type === TrackType.BUS)),
+    [tracks, simple]
   );
+  useEffect(() => {
+    if (simple && activeTool !== 'SELECT' && activeTool !== 'SPLIT' && activeTool !== 'ERASE') setActiveTool('SELECT');
+  }, [simple, activeTool]);
   
   const beatsPerSecond = bpm / 60;
   const pixelsPerSecond = zoom * beatsPerSecond;
@@ -578,7 +584,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
       {/* === TOOL BAR === */}
       <div className="flex items-center h-10 px-2 bg-[#0f1114] border-b border-white/5 gap-2 overflow-x-auto scrollbar-hide">
-        {tools.map(tool => (
+        {/* Mode simple : sélection, couper, effacer (le reste en mode avancé). */}
+        {tools.filter(tool => !simple || tool.id === 'SELECT' || tool.id === 'SPLIT' || tool.id === 'ERASE').map(tool => (
           <button
             key={tool.id}
             onClick={() => setActiveTool(tool.id)}
@@ -599,7 +606,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         <div className="flex-1" />
 
         {/* Snap toggle */}
-        <button
+        {!simple && <><button
           onClick={() => setSnapToGrid(!snapToGrid)}
           aria-label="Magnétisme sur la grille"
           title="Magnétisme sur la grille"
@@ -626,7 +633,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           <option value={0.25}>1/16</option>
           <option value={2}>1/2</option>
           <option value={4}>1 Bar</option>
-        </select>
+        </select></>}
       </div>
 
       {/* === MAIN AREA === */}
@@ -673,6 +680,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     min="0"
                     max="100"
                     aria-label={`Volume ${track.name}`}
+                    data-nova-target={simple ? `vol-${track.id}` : undefined}
                     value={Math.min(1, track.volume ?? 0.8) * 100}
                     onChange={(e) => {
                       e.stopPropagation();
@@ -690,7 +698,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     }}
                   />
                   {/* FX : ouvre le menu des effets de la piste */}
-                  <button
+                  {!simple && <button
                     onClick={(e) => {
                       e.stopPropagation();
                       if (onRequestAddPlugin) {
@@ -711,7 +719,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     }`}
                   >
                     <i className="fas fa-plug text-[10px]"></i>
-                  </button>
+                  </button>}
                 </div>
 
                 {/* M / S / R : 32 px visibles au pas de 40 px, zone tactile 40 × 40 (envois : bouton flottant) */}
@@ -1090,7 +1098,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       )}
 
       {/* === TRACK SENDS BUTTON (Floating) === */}
-      {selectedTrackId && !selectedClip && (
+      {selectedTrackId && !selectedClip && !simple && (
         <button
           onClick={handleOpenSends}
           aria-label="Envois (delay, réverbes) de la piste sélectionnée"

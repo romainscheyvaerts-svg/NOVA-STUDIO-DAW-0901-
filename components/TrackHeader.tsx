@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useCollabRole, requestVolumeLock } from '../utils/collabStore';
+import { useSimpleMode } from '../utils/simpleMode';
 import { gainToDbText, panToText } from '../utils/db';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
@@ -373,6 +374,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const insertPlugins = track.plugins.filter(p => p.id !== instrumentPlugin?.id);
   const frozen = isTrackFrozen(track);
   const collabRole = useCollabRole();
+  // Mode simple : ni effets ni envois dans l'en-tête (Mix auto s'en charge).
+  const { simple } = useSimpleMode();
   const recFrozen = useRecFrozen(track.id);
   // Instrument VST du PC : son rendu suit les notes (pas un gel classique).
   const inst = track.vstInstrument;
@@ -436,7 +439,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             )}
             {/* Les pastilles d effets ne tiennent pas quand la piste est basse :
                 ce badge indique toujours combien d effets sont actifs. */}
-            {!isRenaming && insertPlugins.length > 0 && (
+            {!isRenaming && !simple && insertPlugins.length > 0 && (
               <span
                 className="shrink-0 px-1 h-4 rounded bg-cyan-500/15 text-cyan-300 text-[9px] font-black leading-4"
                 title={insertPlugins.map(pl => pl.name).join(" → ")}
@@ -449,7 +452,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         
         {/* Écran tactile en mode PC (iPad paysage) : boutons espacés au pas de 40 px, zones .nova-hit-tactile */}
         <div className="flex nova-hit-gap shrink-0">
-          {track.id !== 'master' && (
+          {track.id !== 'master' && !simple && (
             <div className="relative">
               <button
                 ref={fxBtnRef}
@@ -520,7 +523,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <span className="text-[11px] font-bold">S</span>
           </button>
 
-          {canHaveSends && (
+          {canHaveSends && !simple && (
             <button
                 onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
                 title="Envois (delay, réverbes)"
@@ -608,7 +611,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       </div>
       
-      {canHaveSends && showSends && (
+      {canHaveSends && showSends && !simple && (
         <div 
           className="absolute left-3 right-3 mt-1 p-2 bg-[#08090b] rounded-lg border border-cyan-500/30 shadow-2xl space-y-1 animate-in fade-in duration-150 z-20"
           style={{ top: `${sendsTop}px` }}
@@ -648,7 +651,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       {/* Une seule ligne, défilante : avec un style de mix (5-6 effets) la grille
           passait sur deux lignes et débordait sur la piste suivante. */}
       {/* Piste armée : la ligne vumètre / retour prend la place des pastilles (le bouton FX reste). */}
-      {!track.isTrackArmed && <div className="mt-2 flex gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-h-0">
+      {!track.isTrackArmed && !simple && <div className="mt-2 flex gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-h-0">
         {insertPlugins.map(p => {
           // Effet compris dans le rendu gelé : lecture seule. Un VST3 reste
           // ouvrable (son panneau explique « Rendu (VST du PC) » / Dégeler).

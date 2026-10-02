@@ -1,4 +1,5 @@
 import type { Track } from '../types';
+import { track } from './analytics';
 
 /**
  * Passerelles vers le site du studio : acheter l'instru, faire mixer par un pro.
@@ -38,12 +39,14 @@ export function getCatalogBeat(tracks: Track[]): { id: string; title: string } |
 /** Fiche d'achat du beat sur le site (licences et prix). */
 export function openBuyBeat(tracks: Track[]) {
   const beat = getCatalogBeat(tracks);
+  track('buy_beat_clicked', beat ? { beat_id: beat.id, title: beat.title } : undefined);
   const qs = beat ? `?beat=${encodeURIComponent(beat.id)}&q=${encodeURIComponent(beat.title)}` : '';
   openStudioPage(`/instrumentals${qs}`);
 }
 
 /** Réservation d'une session d'enregistrement au studio, avec ingé son. */
 export function openStudioSession() {
+  track('studio_booking_clicked');
   openStudioPage('/reservation?service=with-engineer');
 }
 
@@ -54,5 +57,6 @@ export function openBattle() {
 
 /** Réservation d'un mixage par un ingé son du studio. */
 export function openProMix() {
+  track('pro_mix_clicked');
   openStudioPage('/reservation?service=mixing');
 }

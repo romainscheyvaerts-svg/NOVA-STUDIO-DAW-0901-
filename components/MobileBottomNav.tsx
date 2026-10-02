@@ -1,19 +1,31 @@
 import React from 'react';
 import { MobileTab } from '../types';
+import { useSimpleMode } from '../utils/simpleMode';
 
 interface MobileBottomNavProps {
   activeTab: MobileTab;
   onTabChange: (tab: MobileTab) => void;
   /** Point sur l'onglet Nova : un message t'attend (bilan de prise, conseil). */
   novaBadge?: boolean;
+  /** Mode simple : « Paroles » ouvre le prompteur (pas un onglet). */
+  onToggleLyrics?: () => void;
+  lyricsOpen?: boolean;
 }
 
 /**
  * Barre de navigation mobile en bas d'écran
  * Inspiré de Logic Pro iPad
  */
-const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChange, novaBadge }) => {
-  const tabs: { id: MobileTab; icon: string; label: string }[] = [
+const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChange, novaBadge, onToggleLyrics, lyricsOpen }) => {
+  const { simple } = useSimpleMode();
+  // Mode simple : ce qui sert à poser sa voix. Pistes, Mixer et FX en mode avancé.
+  const simpleTabs: { id: MobileTab | 'LYRICS'; icon: string; label: string }[] = [
+    { id: 'ARRANGEMENT', icon: 'fa-wave-square', label: 'Morceau' },
+    { id: 'BROWSER', icon: 'fa-music', label: 'Sons' },
+    { id: 'LYRICS', icon: 'fa-align-left', label: 'Paroles' },
+    { id: 'NOVA', icon: 'fa-wand-magic-sparkles', label: 'Nova' },
+  ];
+  const fullTabs: { id: MobileTab | 'LYRICS'; icon: string; label: string }[] = [
     { id: 'ARRANGEMENT', icon: 'fa-wave-square', label: 'Morceau' },
     { id: 'TRACKS', icon: 'fa-bars-staggered', label: 'Pistes' },
     { id: 'MIXER', icon: 'fa-sliders', label: 'Mixer' },
@@ -21,6 +33,8 @@ const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChang
     { id: 'BROWSER', icon: 'fa-folder-open', label: 'Sons' },
     { id: 'NOVA', icon: 'fa-wand-magic-sparkles', label: 'Nova' },
   ];
+  const tabs = simple ? simpleTabs : fullTabs;
+  const isActive = (id: MobileTab | 'LYRICS') => id === 'LYRICS' ? !!lyricsOpen : activeTab === id;
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-[100] bg-[#08090b]/98 backdrop-blur-xl border-t border-white/10 safe-area-inset-bottom">
@@ -28,22 +42,24 @@ const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChang
         {tabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => onTabChange(tab.id)}
+            onClick={() => { if (tab.id === 'LYRICS') onToggleLyrics?.(); else onTabChange(tab.id); }}
+            aria-pressed={tab.id === 'LYRICS' ? !!lyricsOpen : undefined}
+            aria-current={tab.id !== 'LYRICS' && activeTab === tab.id ? 'page' : undefined}
             className={`flex flex-col items-center justify-center flex-1 h-full transition-all relative ${
-              activeTab === tab.id
+              isActive(tab.id)
                 ? 'text-cyan-400'
                 : 'text-slate-400 hover:text-slate-300 active:text-slate-200'
             }`}
           >
             <i className={`fas ${tab.icon} text-xl mb-1 transition-transform ${
-              activeTab === tab.id ? 'scale-110' : 'scale-100'
+              isActive(tab.id) ? 'scale-110' : 'scale-100'
             }`}></i>
             <span className={`text-[11px] font-semibold tracking-wide transition-all ${
-              activeTab === tab.id ? 'opacity-100' : 'opacity-70'
+              isActive(tab.id) ? 'opacity-100' : 'opacity-70'
             }`}>
               {tab.label}
             </span>
-            {activeTab === tab.id && (
+            {isActive(tab.id) && (
               <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-1 bg-cyan-400 rounded-full"></div>
             )}
             {tab.id === 'NOVA' && novaBadge && activeTab !== 'NOVA' && (

@@ -11,6 +11,7 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore } from '../utils/playheadStore';
 import { visibleEnvelope } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
+import { useSimpleMode } from '../utils/simpleMode';
 import { gainToDbText } from '../utils/db';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
@@ -370,7 +371,15 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     }
   };
 
-  const visibleTracks = useMemo(() => tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master'), [tracks]);
+  // Mode simple : ni bus ni lignes d'automation à l'écran (gardés dans le projet).
+  const { simple } = useSimpleMode();
+  const visibleTracks = useMemo(() => {
+    const list = tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master' && !(simple && t.type === TrackType.BUS));
+    if (!simple) return list;
+    return list.map(t => t.automationLanes.some(l => l.isExpanded)
+      ? { ...t, automationLanes: t.automationLanes.map(l => ({ ...l, isExpanded: false })) }
+      : t);
+  }, [tracks, simple]);
   const projectDuration = useMemo(() => Math.max(...tracks.flatMap(t => t.clips.map(c => c.start + c.duration)), 300), [tracks]);
   const totalContentWidth = useMemo(() => projectDuration * zoomH, [projectDuration, zoomH]);
   const totalArrangementHeight = useMemo(() => 40 + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80, 0), [visibleTracks, zoomV]);
@@ -557,7 +566,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const menuItems: (ContextMenuItem | 'separator')[] = [ { label: 'Dupliquer la piste', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' }, ];
     if (trackId !== 'track-rec-main') menuItems.push({ label: 'Supprimer la piste', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
     const target = tracks.find(t => t.id === trackId);
-    menuItems.push({
+    if (!simple || target?.isFrozen) menuItems.push({
       label: target?.isFrozen ? 'Dégeler la piste' : 'Geler la piste (freeze)',
       onClick: () => onFreezeTrack?.(trackId),
       icon: target?.isFrozen ? 'fa-fire' : 'fa-snowflake'
@@ -570,7 +579,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   
   // Gestionnaires stables pour les en-tetes memoises (ils appellent toujours la
   // derniere version des props, sans fermeture perimee).
-  const headerOnUpdate = useLatestCallback(onUpdateTrack);
+  // Les lignes d'automation masquées en mode simple ne sont jamais réécrites.
+  const headerOnUpdate = useLatestCallback((t: Track) => {
+    const orig = simple ? tracks.find(x => x.id === t.id) : undefined;
+    onUpdateTrack(orig ? { ...t, automationLanes: orig.automationLanes } : t);
+  });
   const headerOnDropPlugin = useLatestCallback(onDropPluginOnTrack);
   const headerOnMovePlugin = useLatestCallback(onMovePlugin);
   const headerOnSelectPlugin = useLatestCallback(onSelectPlugin);
@@ -1425,9 +1438,9 @@ useEffect(() => {
             <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Ciseaux : couper un clip (2)" aria-label="Outil ciseaux"><i className="fas fa-cut text-[12px]"></i></button>
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
-          <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 h-9 [@media(pointer:coarse)]:h-10 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+          {!simple && <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 h-9 [@media(pointer:coarse)]:h-10 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
             <i className="fas fa-magnet mr-2"></i> {snapEnabled ? 'Grille ON' : 'Grille OFF'}
-          </button>
+          </button>}
         </div>
         <div className="flex-1 h-full py-2 px-4 flex items-center min-w-0 justify-center">
             <div 

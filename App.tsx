@@ -93,6 +93,9 @@ import { DrumMachine, makeDrumMachineLib, drumPadsFor, drumClipFor, suggestDrumK
 import { loadDrumSound } from './utils/drumSounds';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import VocalToolsPanel from './components/VocalToolsPanel';
+import NextStepCard, { NextStepAction } from './components/NextStepCard';
+import { track, trackOnce } from './utils/analytics';
+import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -908,6 +911,8 @@ function Studio() {
   // Partie de la session en cours : lead, backs, harmonies, ad-libs.
   const [sessionPart, setSessionPart] = useState<SessionPart>('lead');
   const coachAfterTakeRef = useRef<((trackId: string, buffer: AudioBuffer, takeName: string, start: number) => void) | null>(null);
+  // Carte « Et maintenant ? » (définie plus bas, appelée après une prise ou un export).
+  const showNextStepRef = useRef<(trigger: 'take' | 'export') => void>(() => {});
   // Contexte audio déjà raccordé au métronome et aux pistes. Le moteur peut être
   // initialisé ailleurs (aperçu d'un beat du catalogue, armement, import…) :
   // l'ancien test « wasUninitialized » sautait alors le raccordement et le
@@ -1539,7 +1544,7 @@ function Studio() {
    * voix / beat) à toutes les pistes voix. L'Auto-Tune reçoit la tonalité du
    * beat quand elle est connue, sinon il corrige en chromatique.
    */
-  const handleApplyMixStyle = useCallback((styleId: string): boolean => {
+  const handleApplyMixStyle = useCallback((styleId: string, auto = false): boolean => {
     const style = findVocalMixStyle(styleId);
     if (!style) {
       setAiNotification(`Style « ${styleId} » inconnu`);
@@ -1588,6 +1593,7 @@ function Studio() {
       });
     }));
     setAiNotification(`${style.emoji} Mix « ${style.name} » appliqué sur tes pistes voix — Annuler pour revenir`);
+    track('mix_style_applied', { style: style.id, auto });
     return true;
   }, [setState]);
 
@@ -1692,6 +1698,9 @@ function Studio() {
     if (!t) return;
     const role = getVocalRole(t);
     const s = takeStats(buffer);
+    const level = s.silent || s.rmsDb < -50 ? 'silent' : s.peakDb > -0.3 ? 'clip' : s.rmsDb < -38 ? 'low' : 'ok';
+    track('take_recorded', { n: listTakes(t).length, role, level });
+    trackOnce('first_take', { role, level });
     const replay = { label: '▶ Réécouter', actions: [{ action: 'SEEK', payload: { time: start } }, { action: 'PLAY', payload: {} }] as AIAction[] };
     const redo = { label: '🔁 Refaire', actions: [{ action: 'SEEK', payload: { time: start } }, { action: 'RECORD', payload: {} }] as AIAction[] };
     if (s.silent || s.rmsDb < -50) {
@@ -1706,7 +1715,7 @@ function Studio() {
     if (role === 'lead' && !stateRef.current.vocalMixStyle && (s.peakDb > -0.3 || s.rmsDb < -38)) {
       const sid = suggestVocalMixStyle(stateRef.current.bpm, stateRef.current.beatGenre, stateRef.current.beatTitle);
       breakHistory(); // Ctrl+Z retire le style, pas la prise
-      handleApplyMixStyle(sid);
+      handleApplyMixStyle(sid, true);
       autoStyleNote = ` J'ai quand même mis le style « ${findVocalMixStyle(sid)?.name} » pour que tu entendes le rendu.`;
     }
     if (s.peakDb > -0.3) {
@@ -1731,7 +1740,7 @@ function Studio() {
       // Première prise : on fait entendre tout de suite une voix « produite ».
       const sid = suggestVocalMixStyle(st.bpm, st.beatGenre, st.beatTitle);
       breakHistory(); // Ctrl+Z retire le style, pas la prise
-      handleApplyMixStyle(sid);
+      handleApplyMixStyle(sid, true);
       const style = findVocalMixStyle(sid);
       text += ` Pour que tu entendes ta voix comme sur un vrai son, j'ai mis le style « ${style?.name} », adapté à ce beat. Réécoute ! Tu peux en essayer un autre, ou passer aux backs.`;
       const replayMix = { label: '▶ Réécouter avec le mix', actions: [{ action: 'SEEK', payload: { time: start } }, { action: 'PLAY', payload: {} }] as AIAction[] };
@@ -1755,6 +1764,8 @@ function Studio() {
       next.push(redo, { label: '🎧 Écoute mon mix', action: { action: 'ANALYZE_MIX', payload: {} } });
     }
     postNova(text, next);
+    // Première bonne prise du lead : la suite possible (achat, mix pro, partage).
+    if (role === 'lead') setTimeout(() => showNextStepRef.current('take'), 2500);
   };
 
   /** Nova « écoute » le mix et donne ses retours d'ingé son, réglage par réglage. */
@@ -1891,6 +1902,7 @@ function Studio() {
     const success = await audioEngine.startRecording(startAt, armedTrack.id);
     if (success) {
       recStartRef.current = startAt;
+      track('rec_started', { role: getVocalRole(armedTrack), punch: !!punchRecRef.current });
       audioEngine.startPlayback(startAt, stateRef.current.tracks);
       setState(produce(draft => {
         draft.isRecording = true;
@@ -3326,6 +3338,7 @@ function Studio() {
   });
 
   const handleChooseInstrument = useCallback((trackId: string, p: BridgePlugin) => {
+    track('vst_instrument_chosen', { name: String((p as any).name || '') });
     let old: string | undefined;
     setState(produce((d: DAWState) => {
       const t = d.tracks.find(x => x.id === trackId);
@@ -3561,6 +3574,7 @@ function Studio() {
     const ok = hasPlan(st, 'collab');
     proOkRef.current = { at: Date.now(), ok };
     if (ok) return true;
+    track('pro_gate_shown', { reason: /import/i.test(reason) ? 'import' : reason.slice(0, 40) });
     return new Promise<boolean>(resolve => setProGate({ reason, resolve }));
   };
 
@@ -3573,7 +3587,7 @@ function Studio() {
       const st = await billingStatus();
       const { data: who } = await catalogSupabase.auth.getUser();
       if (!who?.user) { setCollabGate('login'); pendingStartRef.current = { role, name }; return; }
-      if (!hasPlan(st, 'collab')) { setCollabGate('subscribe'); pendingStartRef.current = { role, name }; return; }
+      if (!hasPlan(st, 'collab')) { track('pro_gate_shown', { reason: 'collab' }); setCollabGate('subscribe'); pendingStartRef.current = { role, name }; return; }
       if (!(cloudRef.current && stateRef.current.id === cloudProjectId(cloudRef.current.id))) {
         const ok = await syncCloudRef.current({ interactive: true });
         if (!ok) throw new Error("la session n'a pas pu être mise en ligne");
@@ -3590,6 +3604,7 @@ function Studio() {
       collabRef.current = { client, role, name };
       collabRoleStore.set(role);
       await client.join(stateRef.current.collabSeq || 0);
+      track('collab_started', { role });
       setAiNotification(`👥 Collaboration ouverte (${ROLE_LABEL[role]}). ${role === 'artist' ? 'Tes prises partent toutes les 10 s chez l\'ingé son.' : role === 'engineer' ? 'Tes réglages partent en direct chez l\'artiste ; avec tes VST, gèle la piste pour l\'envoyer.' : 'Tes pistes partent toutes les 10 s chez les autres.'}`);
     } catch (e: any) {
       const msg = String(e?.message || 'erreur');
@@ -3616,6 +3631,7 @@ function Studio() {
       const ok = await waitPaid(sid, () => collabPayCancelRef.current);
       setCollabBusy(null);
       if (ok) {
+        track('pro_subscribed', { from: 'collab' });
         setCollabGate(null);
         setAiNotification('✅ Abonnement collaboration actif : bienvenue !');
         const p = pendingStartRef.current;
@@ -3780,6 +3796,7 @@ function Studio() {
       return;
     }
     if (inst.bpm) handleUpdateBpm(inst.bpm);
+    if (stateRef.current.projectMode !== 'BEATMAKING') track('beat_tried', { beat_id: String(inst.id ?? ''), title: String(inst.title || '') });
     setState(prev => ({ ...prev, beatGenre: inst.genre || undefined, beatTitle: inst.title || undefined }));
     let tonalite = lireTonalite(inst.key);
     let ecoute = false;
@@ -3838,6 +3855,7 @@ function Studio() {
    * ensuite sur l'instru qu'on vient de faire.
    */
   const handleStartMelodyProject = async (inst: any) => {
+    track('melody_tried', { melody_id: String(inst?.id ?? ''), title: String(inst?.title || '') });
     setState(produce((draft: DAWState) => {
       draft.projectMode = 'BEATMAKING';
       draft.name = `Instru · ${String(inst.title || 'Mélodie').slice(0, 40)}`;
@@ -4514,6 +4532,11 @@ function Studio() {
       case 'SET_VIEW': {
         const view = String(p.view || '').toUpperCase();
         if (['ARRANGEMENT', 'MIXER', 'AUTOMATION'].includes(view)) {
+          // Mode simple : la console et l'automation sont en mode avancé, on y passe.
+          if (view !== 'ARRANGEMENT' && simpleModeStore.get().simple) {
+            simpleModeStore.setPref(false);
+            notify("🎛️ Mode avancé activé pour t'ouvrir la console (menu ☰ → Mode avancé pour revenir au mode simple)");
+          }
           setState(prev => ({ ...prev, currentView: view as any }));
           // Sur téléphone on navigue par onglets : currentView n'y est pas affiché.
           if (document.body.getAttribute('data-view-mode') === 'MOBILE' && (view === 'MIXER' || view === 'ARRANGEMENT')) {
@@ -4633,9 +4656,20 @@ function Studio() {
         const target = String(p.target || '');
         if (!target) return;
         const show = () => { if (!novaSpotlight(target, p.text ? String(p.text) : undefined)) notify("Je ne trouve pas ce réglage à l'écran"); };
+        // Réglages visibles en mode simple (sinon on passe en mode avancé pour les montrer).
+        const simpleTargets = ['mix-auto', 'lyrics', 'rec', 'clock', 'beat-catalog', 'master-meter'];
+        const visibleInSimple = simpleTargets.includes(target) || target.startsWith('vol-') || (!isMobileRef.current && !target.startsWith('fx-'));
+        const simpleNow = simpleModeStore.get().simple;
+        if (simpleNow && !visibleInSimple) {
+          simpleModeStore.setPref(false);
+          notify('🎛️ Mode avancé activé pour te montrer ce réglage');
+        }
         if (isMobileRef.current) {
           // Le chat couvre l'écran sur téléphone : on va sur l'onglet où se trouve le réglage.
-          setActiveMobileTab(target.startsWith('vol-') ? 'MIXER' : 'TRACKS');
+          // (en mode simple, les volumes sont sur la page Morceau)
+          setActiveMobileTab(target === 'beat-catalog' ? 'BROWSER'
+            : ['mix-auto', 'lyrics', 'rec', 'clock', 'master-meter'].includes(target) ? 'ARRANGEMENT'
+            : target.startsWith('vol-') ? (simpleNow && visibleInSimple ? 'ARRANGEMENT' : 'MIXER') : 'TRACKS');
           setTimeout(show, 400);
         } else show();
         break;
@@ -4773,6 +4807,61 @@ function Studio() {
     return handleUniversalAudioImport(url, name, trackId || undefined, time);
   });
 
+  // --- Mode simple (artiste) ------------------------------------------------------
+  // Mode instru, ingé son et beatmaker : tous les outils, d'office.
+  const { simple: simpleMode } = useSimpleMode();
+  useEffect(() => {
+    simpleModeStore.setForced(state.projectMode === 'BEATMAKING' || collab?.role === 'engineer' || collab?.role === 'beatmaker');
+  }, [state.projectMode, collab?.role]);
+  // Onglets Pistes / Mixer / FX absents du mode simple : retour au morceau.
+  useEffect(() => {
+    if (simpleMode && (activeMobileTab === 'TRACKS' || activeMobileTab === 'MIXER' || activeMobileTab === 'PLUGINS')) setActiveMobileTab('ARRANGEMENT');
+  }, [simpleMode, activeMobileTab]);
+  const shownView = simpleMode ? 'ARRANGEMENT' : state.currentView;
+
+  // --- Mesure d'audience (parcours) ------------------------------------------------
+  useEffect(() => {
+    const melody = (() => { try { return new URLSearchParams(window.location.search).has('melody'); } catch { return false; } })();
+    const dev = autoViewMode();
+    trackOnce('daw_open', {
+      mode: melody || stateRef.current.projectMode === 'BEATMAKING' ? 'beatmaking' : 'vocal',
+      device: dev === 'MOBILE' ? 'phone' : dev === 'TABLET' ? 'tablet' : 'desktop',
+      desktop_app: isNovaDesktop(),
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { if (lyricsOpen) track('lyrics_opened'); }, [lyricsOpen]);
+  useEffect(() => { if (shareOpen) track('share_opened'); }, [shareOpen]);
+  useEffect(() => { if (isExportMenuOpen) track('export_opened'); }, [isExportMenuOpen]);
+  useEffect(() => { if (takeHomeOpen) track('takehome_opened'); }, [takeHomeOpen]);
+
+  // --- Carte « Et maintenant ? » (une fois par session et par déclencheur) ----------
+  const [nextStep, setNextStep] = useState<'take' | 'export' | null>(null);
+  const nextStepSeenRef = useRef(new Set<string>());
+  showNextStepRef.current = (trigger) => {
+    if (nextStepSeenRef.current.has(trigger)) return;
+    nextStepSeenRef.current.add(trigger);
+    setNextStep(trigger);
+    track('next_step_card_shown', { trigger });
+  };
+  const nextStepActions = useMemo((): NextStepAction[] => {
+    if (!nextStep) return [];
+    const beat = getCatalogBeat(state.tracks);
+    const owned = !!beat && (user?.owned_instruments || []).map(String).includes(beat.id);
+    const list: NextStepAction[] = beat && !owned ? ['buy_beat'] : [];
+    if (nextStep === 'take') list.push('pro_mix', 'share', 'studio');
+    else list.push('pro_mix', 'studio', 'share');
+    return list.slice(0, 3);
+  }, [nextStep, state.tracks, user]);
+  const handleNextStep = (a: NextStepAction) => {
+    track('next_step_clicked', { action: a, trigger: nextStep || '' });
+    setNextStep(null);
+    if (a === 'buy_beat') openBuyBeat(stateRef.current.tracks);
+    else if (a === 'pro_mix') openProMix();
+    else if (a === 'studio') openStudioSession();
+    else setShareOpen(true);
+  };
+
   // Auth temporairement désactivée pour éviter écran noir
   // if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 
@@ -4823,7 +4912,7 @@ function Studio() {
           isMetronomeEnabled={state.metronome.enabled}
           onToggleMetronome={handleToggleMetronome}
           onStop={handleStop} onTogglePlay={handleTogglePlay} onToggleRecord={handleToggleRecord}
-          currentView={state.currentView} onChangeView={v => setState(s => ({...s, currentView: v}))}
+          currentView={shownView} onChangeView={v => setState(s => ({...s, currentView: v}))}
           statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
           currentTheme={theme} onToggleTheme={toggleTheme}
           onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
@@ -4879,7 +4968,7 @@ function Studio() {
           {/* Mode Desktop/Tablet - Vues classiques */}
           {!isMobile && (
             <>
-              {state.currentView === 'ARRANGEMENT' && (
+              {shownView === 'ARRANGEMENT' && (
                 <ArrangementView
                    tracks={state.tracks} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
                    onSetLoop={onSetLoopStable}
@@ -4900,7 +4989,7 @@ function Studio() {
                 />
               )}
 
-              {state.currentView === 'MIXER' && (
+              {shownView === 'MIXER' && (
                  <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><MixerView
                     tracks={state.tracks} onUpdateTrack={handleUpdateTrack}
                     onOpenPlugin={onOpenPluginUI}
@@ -4913,7 +5002,7 @@ function Studio() {
                  /></Suspense>
               )}
 
-              {state.currentView === 'AUTOMATION' && (
+              {shownView === 'AUTOMATION' && (
                  <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><AutomationEditorView
                    tracks={state.tracks} currentTime={state.currentTime} bpm={state.bpm} zoomH={40}
                    onUpdateTrack={handleUpdateTrack} onSeek={handleSeek}
@@ -5024,7 +5113,19 @@ function Studio() {
         </div>
       )}
 
-      {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} novaBadge={novaUnread} />}
+      {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} novaBadge={novaUnread}
+        onToggleLyrics={() => setLyricsOpen(o => !o)} lyricsOpen={lyricsOpen} />}
+
+      <NextStepCard
+        open={!!nextStep && !state.isRecording && countInBeat === null && !(isMobile && activeMobileTab === 'NOVA')}
+        trigger={nextStep || 'take'}
+        actions={nextStepActions}
+        beatTitle={getCatalogBeat(state.tracks)?.title}
+        isMobile={isMobile}
+        besideSidebar={isSidebarOpen}
+        onAction={handleNextStep}
+        onClose={() => setNextStep(null)}
+      />
 
       <VocalToolsPanel
         open={vocalToolsOpen}
@@ -5142,7 +5243,8 @@ function Studio() {
       <Suspense fallback={null}>
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user && user.id !== 'guest' ? user : null} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} />}
       {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
-      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={() => { setIsExportMenuOpen(false); setShareOpen(true); }} />}
+      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={() => { setIsExportMenuOpen(false); setShareOpen(true); }}
+        onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} />}
       <DrumMachinePanel
         open={drumsOpen}
         onClose={() => setDrumsOpen(false)}
@@ -5199,7 +5301,7 @@ function Studio() {
       <ProGateModal
         open={!!proGate}
         reason={proGate?.reason || ''}
-        onDone={(ok) => { const g = proGate; setProGate(null); if (ok) { proOkRef.current = { at: Date.now(), ok: true }; setAiNotification('⭐ Nova Pro actif : tu peux importer tes instrus et collaborer.'); } g?.resolve(ok); }}
+        onDone={(ok) => { const g = proGate; setProGate(null); if (ok) { track('pro_subscribed', { from: 'gate' }); proOkRef.current = { at: Date.now(), ok: true }; setAiNotification('⭐ Nova Pro actif : tu peux importer tes instrus et collaborer.'); } g?.resolve(ok); }}
       />
       <CollabPanel
         open={collabOpen}

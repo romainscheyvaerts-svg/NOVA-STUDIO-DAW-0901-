@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { PluginType, User } from '../types';
 import InstrumentCatalog from './InstrumentCatalog';
 import VstBrowserTab from './VstBrowserTab';
+import { useSimpleMode } from '../utils/simpleMode';
 
 interface SideBrowser2Props {
   user: User | null;
@@ -97,16 +98,19 @@ const FXTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadat
 
 
 // --- Composant Principal ---
-const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurchase, activeTab, onTabChange, selectedTrackId, onLoadBeat, onMakeBeat }) => {
+const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurchase, activeTab: tabChoisi, onTabChange, selectedTrackId, onLoadBeat, onMakeBeat }) => {
+  // Mode simple : le catalogue seul (effets et VST en mode avancé).
+  const { simple } = useSimpleMode();
+  const activeTab = simple ? 'STORE' : tabChoisi;
   return (
     <div className="w-80 h-full flex flex-col bg-[#0c0d10] border-r border-white/5 shadow-2xl">
       {/* Tab Bar — VST : plugins du PC via le pont local (ordinateur seulement :
           ce panneau n'est pas affiché sur téléphone). */}
-      <div className="grid grid-cols-3 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
+      {!simple && <div className="grid grid-cols-3 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
         <TabButton icon="fa-store" label="Store" isActive={activeTab === 'STORE'} onClick={() => onTabChange('STORE')} />
         <TabButton icon="fa-atom" label="FX" isActive={activeTab === 'FX'} onClick={() => onTabChange('FX')} />
         <TabButton icon="fa-plug" label="VST" isActive={activeTab === 'BRIDGE'} onClick={() => onTabChange('BRIDGE')} />
-      </div>
+      </div>}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto custom-scroll">

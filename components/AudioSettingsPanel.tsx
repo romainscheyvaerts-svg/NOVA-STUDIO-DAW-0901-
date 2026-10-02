@@ -5,6 +5,8 @@ import { MidiDevice } from '../types';
 import { AudioDevice as ASIODevice } from '../services/ASIOBridge';
 import DesktopAppDownload from './DesktopAppDownload';
 import { isNovaDesktop } from '../utils/desktopApp';
+import { useSimpleMode } from '../utils/simpleMode';
+import SimpleModeToggle from './SimpleModeToggle';
 
 /** Latence mesurée en direct + réglage fin du recalage des prises. */
 const LatencyCompensation: React.FC = () => {
@@ -54,6 +56,8 @@ interface AudioDevice {
 }
 
 const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
+  // Mode simple : choix du micro / de la sortie et calage de latence seulement.
+  const { simple } = useSimpleMode();
   const [inputs, setInputs] = useState<AudioDevice[]>([]);
   const [outputs, setOutputs] = useState<AudioDevice[]>([]);
   const [selectedInput, setSelectedInput] = useState<string>('default');
@@ -315,6 +319,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
 
             {/* BODY */}
             <div className="p-8 space-y-8 bg-[#0c0d10] overflow-y-auto">
+                <SimpleModeToggle />
                 
                 {/* AUDIO I/O - Hidden when ASIO is active with a device selected */}
                 {!(asioConnected && selectedAsioDevice) && (
@@ -373,8 +378,8 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
 
                 {!(asioConnected && selectedAsioDevice) && <div className="h-px bg-white/5 w-full"></div>}
 
-                {/* ASIO BRIDGE SECTION */}
-                <div className="space-y-5">
+                {/* ASIO BRIDGE SECTION (mode simple : seulement s'il est déjà branché) */}
+                {(!simple || asioConnected) && <div className="space-y-5">
                     <div className="flex items-center justify-between mb-2">
                         <span className="text-[10px] font-black text-purple-500 uppercase tracking-widest bg-purple-500/10 px-2 py-0.5 rounded">
                             <i className="fas fa-microchip mr-1"></i>ASIO Bridge
@@ -600,8 +605,9 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                             </div>
                         )}
                     </div>
-                </div>
+                </div>}
 
+                {!simple && <>
                 <div className="h-px bg-white/5 w-full"></div>
 
                 {/* MIDI CONFIGURATION */}
@@ -688,11 +694,12 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                          </button>
                     </div>
                 </div>
+                </>}
 
                 <LatencyCompensation />
 
                 {/* TEST TONE */}
-                <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 flex items-center justify-between">
+                {!simple && <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                         <i className="fas fa-wave-square text-slate-500"></i>
                         <div className="flex flex-col">
@@ -706,7 +713,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                     >
                         {isPlayingTestTone ? 'Playing...' : 'Test Tone'}
                     </button>
-                </div>
+                </div>}
             </div>
             
             {/* FOOTER */}

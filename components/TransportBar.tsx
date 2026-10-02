@@ -6,6 +6,8 @@ import MasterVisualizer from './MasterVisualizer';
 import { midiManager } from '../services/MidiManager';
 import { playheadStore } from '../utils/playheadStore';
 import { formatMesures, nomTonaliteCourt } from '../utils/musicKey';
+import { useSimpleMode, simpleModeStore } from '../utils/simpleMode';
+import SimpleModeToggle from './SimpleModeToggle';
 
 interface TransportProps {
   isPlaying: boolean;
@@ -179,6 +181,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const bpmInputRef = useRef<HTMLInputElement>(null);
   const audioImportInputRef = useRef<HTMLInputElement>(null);
+  // Mode simple : outils de mixage, routage et import cachés (menu ☰ → Mode avancé).
+  const { simple } = useSimpleMode();
 
   useEffect(() => {
      // Check for MIDI device on mount
@@ -289,7 +293,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 </button>
 
                 {/* ✨ NOUVEAU IMPORT AUDIO */}
-                {onImportAudio && (
+                {onImportAudio && !simple && (
                     <>
                         <button
                             onClick={() => audioImportInputRef.current?.click()}
@@ -330,16 +334,16 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              <button onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Audio</span></button>
              
              {/* PDC Toggle */}
-             <button onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="Delay Compensation (PDC)">
+             {!simple && <button onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="Delay Compensation (PDC)">
                 <div className={`w-1.5 h-1.5 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400 animate-pulse' : 'bg-slate-600'}`}></div>
                 <span className="text-[9px] font-black uppercase tracking-wider">PDC</span>
-             </button>
+             </button>}
 
              {/* MIDI INDICATOR */}
-             <div className={`h-8 px-2 rounded-lg ${midiDeviceName ? 'flex' : 'hidden 2xl:flex'} items-center justify-center space-x-2 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : 'bg-white/5 border-white/10 text-slate-600'}`} title={midiDeviceName ? `MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"} role="status" aria-label={midiDeviceName ? `Clavier MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"}>
+             {!simple && <div className={`h-8 px-2 rounded-lg ${midiDeviceName ? 'flex' : 'hidden 2xl:flex'} items-center justify-center space-x-2 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : 'bg-white/5 border-white/10 text-slate-600'}`} title={midiDeviceName ? `MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"} role="status" aria-label={midiDeviceName ? `Clavier MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"}>
                  <i className="fas fa-plug text-[10px]"></i>
                  {midiDeviceName && <span className="hidden 2xl:inline text-[8px] font-black uppercase max-w-[80px] truncate">{midiDeviceName}</span>}
-             </div>
+             </div>}
           </div>
       </div>
 
@@ -352,7 +356,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           <button onClick={onTogglePlay} title="Lecture / pause (raccourci : barre d'espace)" aria-label={isPlaying ? 'Pause' : 'Lecture'} aria-pressed={isPlaying} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg ${isPlaying ? 'text-black nova-halo' : 'bg-white text-black hover:scale-105 shadow-black/40'}`} style={{ backgroundColor: isPlaying ? 'var(--accent-neon)' : '#fff' }}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-base`}></i></button>
           <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" aria-pressed={isLoopActive} className={`nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
           <OverloadBadge />
-          {onTogglePunch && (
+          {onTogglePunch && !simple && (
             <button onClick={onTogglePunch} title="Punch-in / punch-out : REC ne remplace que la zone de la boucle (pré-roll de 2 mesures, arrêt automatique)" aria-pressed={isPunchActive}
               className={`nova-hit-tactile hidden md:flex h-8 px-2 rounded-lg items-center justify-center text-[9px] font-black tracking-wider transition-all ${isPunchActive ? 'bg-red-500/25 text-red-300 border border-red-500/50' : 'text-slate-500 hover:text-white border border-transparent'}`}>
               PUNCH
@@ -374,11 +378,18 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         </div>
 
         {/* VIEW SWITCHER & THEME - Hidden on mobile/tablet (already in bottom nav) */}
+        {simple ? (
+          <button type="button" onClick={() => simpleModeStore.setPref(false)} title="Afficher la console, les effets, les VST et l'automation (rien n'est perdu)"
+            className="hidden 2xl:flex h-9 items-center gap-2 px-3 rounded-xl border border-white/10 bg-white/5 text-[10px] font-black uppercase tracking-widest text-slate-300 hover:text-white hover:bg-white/10">
+            <i className="fas fa-sliders-h"></i> Mode avancé
+          </button>
+        ) : (
         <div className="hidden 2xl:flex items-center space-x-1 bg-black/40 rounded-xl p-1 border border-white/5" style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}>
             <button onClick={() => onChangeView('ARRANGEMENT')} aria-pressed={currentView === 'ARRANGEMENT'} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'ARRANGEMENT' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'ARRANGEMENT' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'ARRANGEMENT' ? '#000' : 'var(--text-secondary)' }}>Pistes</button>
             <button onClick={() => onChangeView('MIXER')} aria-pressed={currentView === 'MIXER'} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'MIXER' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'MIXER' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'MIXER' ? '#000' : 'var(--text-secondary)' }}>Console</button>
             <button onClick={() => onChangeView('AUTOMATION')} aria-pressed={currentView === 'AUTOMATION'} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'AUTOMATION' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'AUTOMATION' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'AUTOMATION' ? '#000' : 'var(--text-secondary)' }}>Auto</button>
         </div>
+        )}
 
         {/* THEME TOGGLE */}
         {/* Sous 768 px, thème / compte / mode sont dans le menu : dans la barre ils
@@ -444,8 +455,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               </button>
             </div>
 
+            {/* Mode simple / avancé : en haut du menu, facile à retrouver */}
+            <SimpleModeToggle onDone={() => setIsMobileMenuOpen(false)} />
+
             {/* VIEW SWITCHER (inutile en mise en page téléphone : on navigue par onglets) */}
-            {!isMobileLayout && (
+            {!isMobileLayout && !simple && (
             <div className="space-y-2">
               <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Vues</div>
               <div className="grid grid-cols-3 gap-2">
@@ -529,12 +543,12 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               <div className="space-y-2">
                 <button onClick={() => { onOpenAudioEngine?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-orange-500/10 text-orange-400 font-black transition-all flex items-center justify-center space-x-2">
                   <i className="fas fa-microchip"></i>
-                  <span>Moteur Audio (Engine)</span>
+                  <span>{simple ? 'Réglages audio (micro, latence)' : 'Moteur Audio (Engine)'}</span>
                 </button>
-                <button onClick={() => { onToggleDelayComp?.(); setIsMobileMenuOpen(false); }} aria-pressed={!!isDelayCompEnabled} className={`w-full px-4 py-3 rounded-lg font-black transition-all flex items-center justify-center space-x-2 ${isDelayCompEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-400'}`}>
+                {!simple && <button onClick={() => { onToggleDelayComp?.(); setIsMobileMenuOpen(false); }} aria-pressed={!!isDelayCompEnabled} className={`w-full px-4 py-3 rounded-lg font-black transition-all flex items-center justify-center space-x-2 ${isDelayCompEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-400'}`}>
                   <div className={`w-2 h-2 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400' : 'bg-slate-600'}`}></div>
                   <span>Delay Compensation (PDC)</span>
-                </button>
+                </button>}
                 <button onClick={() => { onToggleTheme?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-white/5 text-white font-black transition-all flex items-center justify-center space-x-2">
                   <i className={`fas ${currentTheme === 'dark' ? 'fa-sun' : 'fa-moon'}`}></i>
                   <span>Changer le thème</span>
