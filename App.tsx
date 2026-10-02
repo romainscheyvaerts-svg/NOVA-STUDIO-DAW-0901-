@@ -1918,6 +1918,51 @@ export default function App() {
     }
   }, [setState, activePlugin]);
   
+  /**
+   * Reverbs et délais : toujours sur une piste d'envoi, jamais en insert d'une
+   * piste source. Ainsi une piste peut être gelée (VST du PC rendus) et rester
+   * éditable ailleurs (iPad, navigateur) sans figer l'ambiance, et toutes les
+   * voix partagent la même reverb. Reverb native → « VERB PRO » (notre reverb),
+   * délai natif → « DELAY 1/4 », reverb / délai VST → nouvelle piste d'envoi.
+   * Renvoie la piste d'envoi et l'effet, ou null si l'aiguillage ne s'applique pas.
+   */
+  const routeAmbienceToSend = useCallback((tid: string, plugin: PluginInstance, displayName: string): { sendId: string; name: string; plugin: PluginInstance; created: boolean } | null => {
+    const st = stateRef.current;
+    const src = st.tracks.find(t => t.id === tid);
+    if (!src || src.type === TrackType.SEND || src.id === 'master') return null;
+    const label = `${displayName} ${plugin.params?.name || ''} ${plugin.params?.pluginName || ''}`;
+    const isAmbience = plugin.type === 'REVERB' || plugin.type === 'DELAY' ||
+      (plugin.type === 'VST3' && /verb|hall|plate|room|space|delay|echo|écho/i.test(label));
+    if (!isAmbience) return null;
+    const isDelay = plugin.type === 'DELAY' || (plugin.type === 'VST3' && /delay|echo|écho/i.test(label));
+    let sendId = plugin.type === 'REVERB' ? 'send-verb-short' : plugin.type === 'DELAY' ? 'send-delay' : `send-aux-${Date.now().toString(36)}`;
+    // La piste d'envoi est préparée ici (l'état React est mis à jour plus tard).
+    const existing = st.tracks.find(t => t.id === sendId && t.type === TrackType.SEND);
+    const newSend: Track | null = existing ? null : (createInitialSends(st.bpm).find(t => t.id === sendId) || {
+      id: sendId, name: (plugin.params?.name || displayName || (isDelay ? 'DELAY' : 'REVERB')).toUpperCase().slice(0, 16),
+      type: TrackType.SEND, color: isDelay ? '#00f2ff' : '#10b981', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+      volume: 0.8, pan: 0, outputTrackId: 'master', sends: [], clips: [],
+      plugins: [{ ...plugin, params: { ...plugin.params, mix: 1 } }],
+      automationLanes: [createDefaultAutomation('volume', isDelay ? '#00f2ff' : '#10b981')], totalLatency: 0,
+    });
+    const sendTrack = (existing || newSend)!;
+    const usedPlugin = sendTrack.plugins.find(p => p.type === plugin.type) || sendTrack.plugins[0] || plugin;
+    setState(produce((draft: DAWState) => {
+      if (newSend && !draft.tracks.some(t => t.id === sendId)) {
+        const at = draft.tracks.findIndex(t => t.id === 'master');
+        draft.tracks.splice(at >= 0 ? at : draft.tracks.length, 0, newSend);
+      }
+      const t = draft.tracks.find(tr => tr.id === tid);
+      if (t) {
+        const sd = t.sends.find(x => x.id === sendId);
+        // Départ -10 dB par défaut s'il était fermé.
+        if (sd) { if (!(sd.level > 0.01)) sd.level = 0.32; sd.isEnabled = true; }
+        else t.sends.push({ id: sendId, level: 0.32, isEnabled: true });
+      }
+    }));
+    return { sendId, name: sendTrack.name, plugin: usedPlugin, created: !!newSend };
+  }, [setState]);
+
   const handleAddPluginFromContext = useCallback(async (tid: string, type: PluginType, metadata?: any, options?: { openUI: boolean }) => {
     // L'AutoTune s'accorde d'office sur la tonalite du projet, deduite de
     // l'instrumental charge. Sans ca il demarrait en do chromatique.
@@ -1930,6 +1975,18 @@ export default function App() {
       };
     }
     const newPlugin = createDefaultPlugins(type, 0.5, stateRef.current.bpm, reglages);
+
+    const routed = metadata?.forceInsert ? null : routeAmbienceToSend(tid, newPlugin, metadata?.name || type);
+    if (routed) {
+      const sendName = routed.name;
+      const what = metadata?.name || (type === 'REVERB' ? 'La reverb' : type === 'DELAY' ? 'Le délai' : type);
+      setAiNotification(`🌫️ ${what} passe par la piste d'envoi « ${sendName} » (départ -10 dB, réglable dans la piste ou la console). La voix reste gelable et éditable partout ; pour une autre reverb, remplace l'effet sur la piste d'envoi.`);
+      if (options?.openUI || routed.created) {
+        await ensureAudioEngine();
+        setTimeout(() => setActivePlugin({ trackId: routed.sendId, plugin: routed.plugin }), 80);
+      }
+      return;
+    }
 
     setState(produce((draft: DAWState) => {
         const track = draft.tracks.find(t => t.id === tid);
@@ -3176,6 +3233,17 @@ export default function App() {
         const type = String(p.pluginType || p.type || '').toUpperCase() as PluginType;
         if (!t || !type) return;
         const existing = findPlugin(t, type);
+        if (!existing && (type === 'REVERB' || type === 'DELAY') && t.type !== TrackType.SEND && t.id !== 'master') {
+          // Ambiance : réglée sur la piste d'envoi, dosée par le départ de la piste.
+          const routed = routeAmbienceToSend(t.id, createDefaultPlugins(type, 0.5, stateRef.current.bpm), type);
+          if (routed) {
+            const { mix, ...rest } = (p.params || {}) as Record<string, any>;
+            if (Object.keys(rest).length) handleUpdatePluginParams(routed.sendId, routed.plugin.id, { ...routed.plugin.params, ...rest, mix: 1 });
+            if (typeof mix === 'number') patchTrack(t.id, tr => { const sd = tr.sends.find(x => x.id === routed.sendId); if (sd) sd.level = Math.max(0, Math.min(1, mix)); });
+            notify(`🌫️ ${type === 'REVERB' ? 'Reverb' : 'Délai'} de ${t.name} réglé(e) via la piste d'envoi`);
+            break;
+          }
+        }
         if (existing) {
           handleUpdatePluginParams(t.id, existing.id, { ...existing.params, ...(p.params || {}) });
         } else {
