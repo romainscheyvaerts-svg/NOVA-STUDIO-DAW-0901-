@@ -10,6 +10,7 @@ interface MobileBrowserPageProps {
   selectedTrackId: string | null;
   /** Charge le beat choisi sur la piste BEAT. */
   onLoadBeat?: (inst: any) => void;
+  onMakeBeat?: (inst: any) => void;
 }
 
 // Plugins natifs Nova
@@ -36,6 +37,7 @@ const INTERNAL_PLUGINS = [
 const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
   user,
   onLoadBeat,
+  onMakeBeat,
   onAddPlugin,
   onPurchase,
   selectedTrackId
@@ -95,6 +97,7 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
               user={user}
               onPurchase={onPurchase}
               onLoadBeat={onLoadBeat}
+              onMakeBeat={onMakeBeat}
             />
           </div>
         )}

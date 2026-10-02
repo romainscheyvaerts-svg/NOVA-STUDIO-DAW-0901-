@@ -13,6 +13,7 @@ interface SideBrowser2Props {
   selectedTrackId: string | null;
   /** Charge le beat choisi sur la piste BEAT. */
   onLoadBeat?: (inst: any) => void;
+  onMakeBeat?: (inst: any) => void;
 }
 
 // --- DATA: NATIVE PLUGINS ---
@@ -96,7 +97,7 @@ const FXTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadat
 
 
 // --- Composant Principal ---
-const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurchase, activeTab, onTabChange, selectedTrackId, onLoadBeat }) => {
+const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurchase, activeTab, onTabChange, selectedTrackId, onLoadBeat, onMakeBeat }) => {
   return (
     <div className="w-80 h-full flex flex-col bg-[#0c0d10] border-r border-white/5 shadow-2xl">
       {/* Tab Bar — VST : plugins du PC via le pont local (ordinateur seulement :
@@ -109,7 +110,7 @@ const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurcha
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto custom-scroll">
-        {activeTab === 'STORE' && <InstrumentCatalog user={user} onPurchase={onPurchase} onLoadBeat={onLoadBeat} />}
+        {activeTab === 'STORE' && <InstrumentCatalog user={user} onPurchase={onPurchase} onLoadBeat={onLoadBeat} onMakeBeat={onMakeBeat} />}
         {activeTab === 'FX' && <FXTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
         {activeTab === 'BRIDGE' && <VstBrowserTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
       </div>

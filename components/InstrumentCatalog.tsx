@@ -13,13 +13,26 @@ interface InstrumentCatalogProps {
   onPurchase?: (instrumentId: number) => void;
   /** Charge le beat sur la piste BEAT (bouton « Essayer » / tap sur la ligne). */
   onLoadBeat?: (inst: any) => void;
+  /** Mélodie : ouvre un projet « instru sur mélodie » (batterie + voix possibles). */
+  onMakeBeat?: (inst: any) => void;
 }
 
 type AudioMode = 'STANDARD' | 'STUDIO';
 
-const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase, onLoadBeat }) => {
+const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase, onLoadBeat, onMakeBeat }) => {
   const [allInstrumentals, setAllInstrumentals] = useState<Instrumental[]>([]);
-  const [displayedInstrumentals, setDisplayedInstrumentals] = useState<Instrumental[]>([]);
+  // Instrus (beats complets) et mélodies (sans batterie) : deux bibliothèques séparées.
+  const [shelf, setShelf] = useState<'BEATS' | 'MELODIES'>(() => {
+    try { return localStorage.getItem('nova_store_shelf') === 'MELODIES' ? 'MELODIES' : 'BEATS'; } catch { return 'BEATS'; }
+  });
+  const isMelody = (i: Instrumental) => i.kind === 'melody';
+  const beatsCount = allInstrumentals.filter(i => !isMelody(i)).length;
+  const melodiesCount = allInstrumentals.filter(isMelody).length;
+  const displayedInstrumentals = allInstrumentals.filter(i => (shelf === 'MELODIES') === isMelody(i));
+  const chooseShelf = (s: 'BEATS' | 'MELODIES') => {
+    setShelf(s);
+    try { localStorage.setItem('nova_store_shelf', s); } catch { /* */ }
+  };
   const [loading, setLoading] = useState(true);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
@@ -57,7 +70,6 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
       const data = await supabaseManager.getActiveInstrumentals();
       console.log("[InstrumentCatalog] Données actives reçues:", data.length, "instruments");
       setAllInstrumentals(data);
-      setDisplayedInstrumentals(data);
     } catch (error: any) {
       console.error("Failed to load catalog", error.message || error);
     } finally {
@@ -305,8 +317,8 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
       <div className="p-4 border-b border-white/5 bg-[#08090b] sticky top-0 z-20 space-y-3">
         <div className="flex justify-between items-center">
           <div>
-             <h2 className="text-xs font-black uppercase tracking-widest text-white">Beat <span className="text-cyan-500">Store</span></h2>
-             <p className="text-[11px] text-slate-400">Écoute ▶ puis « Essayer » pour poser ta voix</p>
+             <h2 className="text-xs font-black uppercase tracking-widest text-white">{shelf === 'MELODIES' ? <>Mélodies <span className="text-violet-400">du studio</span></> : <>Beat <span className="text-cyan-500">Store</span></>}</h2>
+             <p className="text-[11px] text-slate-400">{shelf === 'MELODIES' ? 'Écoute ▶ puis « Faire une instru » : tu poses la batterie, puis ta voix si tu veux' : 'Écoute ▶ puis « Essayer » pour poser ta voix'}</p>
           </div>
           
           {isAdmin && (
@@ -314,6 +326,18 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
               <i className="fas fa-cog"></i>
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Deux bibliothèques : instrus complètes / mélodies à compléter */}
+      <div className="px-3 pt-3" role="tablist" aria-label="Bibliothèque">
+        <div className="grid grid-cols-2 gap-1 rounded-xl bg-white/5 p-1">
+          {([['BEATS', '🎧 Instrus', beatsCount], ['MELODIES', '🎹 Mélodies', melodiesCount]] as const).map(([id, label, n]) => (
+            <button key={id} type="button" role="tab" aria-selected={shelf === id} onClick={() => chooseShelf(id)}
+              className={`h-9 rounded-lg text-[11px] font-black transition-colors ${shelf === id ? (id === 'MELODIES' ? 'bg-violet-500 text-white' : 'bg-cyan-500 text-black') : 'text-slate-300 hover:bg-white/10'}`}>
+              {label} <span className="opacity-70">({n})</span>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -363,9 +387,9 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                         {hasLicense(inst.id) && <i className="fas fa-check-circle text-[8px] text-green-500" title="Purchased"></i>}
                     </div>
                     <div className="flex items-center text-[10px] text-slate-400 space-x-2 mt-0.5">
-                        <span>{inst.bpm || '?'} BPM</span>
+                        <span>{inst.bpm ? `${inst.bpm} BPM` : 'Tempo détecté'}</span>
                         <span>•</span>
-                        <span className="truncate">{inst.genre || 'Beat'}</span>
+                        <span className="truncate">{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>
                         {inst.key && (
                             <>
                                 <span>•</span>
@@ -376,7 +400,16 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                 </div>
 
                 {/* Actions */}
-                {onLoadBeat && (
+                {isMelody(inst) && onMakeBeat ? (
+                  <button
+                    type="button"
+                    onClick={() => onMakeBeat(inst)}
+                    className="nova-hit mr-2 h-9 px-3 rounded-lg bg-violet-500 text-white text-[11px] font-black hover:bg-violet-400 active:scale-95 transition-all"
+                    title="Ouvrir un projet pour faire une instru (batterie) sur cette mélodie, et y poser ta voix"
+                  >
+                    🥁 Faire une instru
+                  </button>
+                ) : onLoadBeat && (
                   <button
                     type="button"
                     onClick={() => onLoadBeat(inst)}
@@ -403,7 +436,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
             {displayedInstrumentals.length === 0 && (
                 <div className="text-center py-10 text-[9px] text-slate-600">
                     <i className="fas fa-music text-3xl text-slate-700 mb-3"></i>
-                    <p>Aucun beat disponible.</p>
+                    <p>{shelf === 'MELODIES' ? 'Aucune mélodie disponible.' : 'Aucun beat disponible.'}</p>
                     <p className="text-[8px] text-slate-700 mt-1">Revenez bientôt !</p>
                 </div>
             )}

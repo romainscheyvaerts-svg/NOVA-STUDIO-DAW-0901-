@@ -177,8 +177,10 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
             const estBeat = (t: typeof exportTracks[number]) => t.id === 'instrumental' || (t.instrumentId !== undefined && t.instrumentId !== null && t.instrumentId !== '');
             // Le beat n'existe plus dans ce rendu.
             const sansBeat = exportTracks.filter(t => !estBeat(t));
-            const voix = sansBeat.filter(t => t.type === 'AUDIO' && !t.isMuted && t.clips.some(c => !c.isMuted));
-            if (voix.length === 0) throw new Error('Aucune piste voix à exporter.');
+            // Les pistes de l'artiste : ses voix et sa batterie (sons Make Music,
+            // utilisables librement). La mélodie / le beat du catalogue n'y sont pas.
+            const voix = sansBeat.filter(t => (t.type === 'AUDIO' || t.type === 'DRUM_RACK') && !t.isMuted && t.clips.some(c => !c.isMuted));
+            if (voix.length === 0) throw new Error('Aucune de tes pistes (voix, batterie) à exporter.');
             // Durée : jusqu'à la fin de la dernière voix + 4 s de queue (reverb),
             // pas la longueur du beat. Tous les fichiers démarrent au même point.
             const finVoix = Math.max(...voix.flatMap(t => t.clips.map(c => c.start + c.duration)));
@@ -202,7 +204,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
             }
             setStatusText("Compression ZIP...");
             const zipBlob = await zip.generateAsync({ type: "blob" });
-            downloadBlob(zipBlob, `${filename}_Voix${vocalsDry ? '_brutes' : ''}.zip`);
+            downloadBlob(zipBlob, `${filename}_Mes_pistes${vocalsDry ? '_brutes' : ''}.zip`);
         }
         else {
             // --- EXPORT STEMS (ZIP) ---
@@ -296,7 +298,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                 >
                                     <option value="MASTER">Mix master (stéréo)</option>
                                     <option value="STEMS">Toutes les pistes (stems .zip)</option>
-                                    <option value="VOCALS">Voix seules, piste par piste (.zip)</option>
+                                    <option value="VOCALS">Mes pistes seules : voix, batterie (.zip)</option>
                                 </select>
                                 {source === 'VOCALS' && (
                                   <label className="mt-1.5 flex items-center gap-2 text-[10px] text-slate-300">
@@ -472,7 +474,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                               onClick={() => setSource('VOCALS')}
                               className={`mt-2 w-full h-10 rounded-lg text-[11px] font-bold ${source === 'VOCALS' ? 'bg-emerald-500/25 text-emerald-100 border border-emerald-400/50' : 'border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/10'}`}
                             >
-                              🎤 {source === 'VOCALS' ? 'Voix seules sélectionnées : export possible' : 'Exporter mes voix seules, piste par piste (sans le beat)'}
+                              🎤 {source === 'VOCALS' ? 'Mes pistes seules sélectionnées : export possible' : 'Exporter mes pistes seules (voix, batterie), sans le beat ni la mélodie'}
                             </button>
                             {/* Le moment où l'artiste veut son fichier : on lui donne les deux suites possibles. */}
                             <div className="mt-3 flex flex-col sm:flex-row gap-2">

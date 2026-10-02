@@ -12,6 +12,8 @@ interface LandingPageProps {
   user: User | null;
   onEnterStudio: () => void;
   onEnterWithInstrumental: (instrumental: Instrumental) => void;
+  /** Mélodie : projet « instru sur mélodie » (batterie, puis voix si on veut). */
+  onEnterWithMelody?: (melody: Instrumental) => void;
   onEnterWithAudioFile: (file: File) => void;
   onEnterWithProject: (project: DAWState) => void;
   /** Session sauvegardée automatiquement sur l'appareil (null si aucune). */
@@ -25,6 +27,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
   user, 
   onEnterStudio, 
   onEnterWithInstrumental, 
+  onEnterWithMelody,
   onEnterWithAudioFile, 
   onEnterWithProject,
   savedSession,
@@ -157,9 +160,14 @@ const LandingPage: React.FC<LandingPageProps> = ({
   };
 
   // Sélectionner un instrumental et ouvrir le DAW
+  // Deux bibliothèques : instrus complètes (poser sa voix) et mélodies (faire l'instru).
+  const [shelf, setShelf] = useState<'BEATS' | 'MELODIES'>('BEATS');
+  const isMelody = (i: Instrumental) => i.kind === 'melody';
+  const shown = instrumentals.filter(i => (shelf === 'MELODIES') === isMelody(i));
   const handleSelectInstrumental = (inst: Instrumental) => {
     stopPlayback();
-    onEnterWithInstrumental(inst);
+    if (isMelody(inst) && onEnterWithMelody) onEnterWithMelody(inst);
+    else onEnterWithInstrumental(inst);
   };
 
   // Ouvrir un fichier audio local
@@ -378,12 +386,20 @@ const LandingPage: React.FC<LandingPageProps> = ({
         {/* Zone centrale - Catalogue d'instrumentaux */}
         <section className="flex-1 flex flex-col overflow-hidden">
           <div className="p-4 border-b border-white/5 bg-[#0c0d10]/50">
-            <h2 className="text-sm font-black text-white uppercase tracking-widest">
-              <i className="fas fa-music text-cyan-400 mr-2"></i>
-              Catalogue Instrumentaux
-            </h2>
-            <p className="text-[10px] text-slate-500 mt-1">
-              Cliquez sur un beat pour l'importer et ouvrir le studio
+            <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Bibliothèque">
+              <button type="button" role="tab" aria-selected={shelf === 'BEATS'} onClick={() => setShelf('BEATS')}
+                className={`h-10 px-4 rounded-xl text-[12px] font-black transition-colors ${shelf === 'BEATS' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>
+                🎧 Instrus <span className="opacity-70">({instrumentals.filter(i => !isMelody(i)).length})</span>
+              </button>
+              <button type="button" role="tab" aria-selected={shelf === 'MELODIES'} onClick={() => setShelf('MELODIES')}
+                className={`h-10 px-4 rounded-xl text-[12px] font-black transition-colors ${shelf === 'MELODIES' ? 'bg-violet-500 text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>
+                🎹 Mélodies <span className="opacity-70">({instrumentals.filter(isMelody).length})</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-2">
+              {shelf === 'MELODIES'
+                ? 'Choisis une mélodie : je t\'ouvre un projet pour faire ton instru dessus (batterie calée sur son tempo), puis tu peux y poser ta voix.'
+                : 'Choisis une instru pour poser ta voix dessus.'}
             </p>
           </div>
 
@@ -404,14 +420,14 @@ const LandingPage: React.FC<LandingPageProps> = ({
                   Réessayer
                 </button>
               </div>
-            ) : instrumentals.length === 0 ? (
+            ) : shown.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-500">
                 <i className="fas fa-music text-4xl mb-4 text-slate-700"></i>
                 <p className="text-sm">Aucun instrumental disponible</p>
               </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                {instrumentals.map((inst) => (
+                {shown.map((inst) => (
                   <div
                     key={inst.id}
                     onClick={() => handleSelectInstrumental(inst)}
@@ -428,9 +444,13 @@ const LandingPage: React.FC<LandingPageProps> = ({
                       />
                       {/* Overlay au hover */}
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <div className="w-14 h-14 rounded-full bg-cyan-500 flex items-center justify-center shadow-lg">
-                          <i className="fas fa-arrow-right text-white text-lg"></i>
-                        </div>
+                        {isMelody(inst) ? (
+                          <span className="px-3 py-2 rounded-full bg-violet-500 text-white text-[11px] font-black shadow-lg">🥁 Faire une instru</span>
+                        ) : (
+                          <div className="w-14 h-14 rounded-full bg-cyan-500 flex items-center justify-center shadow-lg">
+                            <i className="fas fa-arrow-right text-white text-lg"></i>
+                          </div>
+                        )}
                       </div>
                       {/* Bouton Play */}
                       <button
@@ -452,9 +472,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
                     <div className="p-3">
                       <h3 className="text-xs font-bold text-white truncate">{inst.title}</h3>
                       <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-500">
-                        <span>{inst.bpm || '?'} BPM</span>
+                        <span>{inst.bpm ? `${inst.bpm} BPM` : 'Tempo détecté'}</span>
                         <span>•</span>
-                        <span className="truncate">{inst.genre || 'Beat'}</span>
+                        <span className="truncate">{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>
                       </div>
                       {inst.key && (
                         <span className="inline-block mt-2 px-2 py-0.5 bg-cyan-500/10 text-cyan-400 text-[9px] rounded-full">

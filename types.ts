@@ -75,6 +75,8 @@ export interface Instrumental {
   genre: string | null;           // Genre musical (ex: "Trap", "Drill", "RnB")
   bpm: number | null;             // Tempo en BPM (ex: 105)
   key: string | null;             // Tonalité (ex: "F MIN", "C MIN")
+  /** « beat » = instru complète, « melody » = mélodie seule (sans batterie). */
+  kind?: 'beat' | 'melody' | null;
   preview_url: string | null;     // URL de preview audio
   cover_image_url: string | null; // URL de l'image de couverture
   drive_file_id: string;          // ID du fichier Google Drive
@@ -368,6 +370,12 @@ export interface DAWState {
   projectScale?: string; 
   /** Dernier style de mix voix appliqué (utils/vocalPresets). */
   vocalMixStyle?: string;
+  /**
+   * Type de projet : VOCAL = poser sa voix sur une instru (par défaut) ;
+   * BEATMAKING = faire une instru (batterie) sur une mélodie du studio, avec
+   * la possibilité d'y poser ensuite sa voix.
+   */
+  projectMode?: 'VOCAL' | 'BEATMAKING';
   /** Genre du beat du catalogue (sert à proposer le style de mix adapté). */
   beatGenre?: string;
   /** Titre du beat du catalogue. */

@@ -446,6 +446,14 @@ export default function App() {
     setPendingInstrumental(instrumental);
     setShowLanding(false);
   };
+  // « Faire une instru sur cette mélodie » (accueil, site ?melody=<id>)
+  const pendingMelodyModeRef = useRef(false);
+  const startMelodyProjectRef = useRef<((inst: any) => Promise<void>) | null>(null);
+  const handleEnterWithMelody = (melody: any) => {
+    pendingMelodyModeRef.current = true;
+    setPendingInstrumental(melody);
+    setShowLanding(false);
+  };
   
   const handleEnterWithAudioFile = (file: File) => {
     setPendingAudioFile(file);
@@ -488,6 +496,17 @@ export default function App() {
       setShowLanding(false);
     }
   };
+
+  // Ouverture depuis le site : /daw?melody=<id> → projet « instru sur mélodie ».
+  useEffect(() => {
+    let melodyId: string | null = null;
+    try { melodyId = new URLSearchParams(window.location.search).get('melody'); } catch { /* */ }
+    if (!melodyId) return;
+    supabaseManager.getActiveInstrumentals().then(list => {
+      const inst = list.find((i: any) => String(i.id) === melodyId);
+      if (inst) handleEnterWithMelody(inst);
+    }).catch(() => {});
+  }, []);
 
   // Ouverture depuis le site : /daw?beat=<id> → studio direct, beat chargé.
   useEffect(() => {
@@ -591,7 +610,10 @@ export default function App() {
 
       // Charger un instrumental depuis le catalogue
       if (pendingInstrumental) {
-        await loadCatalogBeatRef.current?.(pendingInstrumental);
+        const melodyMode = pendingMelodyModeRef.current;
+        pendingMelodyModeRef.current = false;
+        if (melodyMode) await startMelodyProjectRef.current?.(pendingInstrumental);
+        else await loadCatalogBeatRef.current?.(pendingInstrumental);
         setPendingInstrumental(null);
       }
     };
@@ -3228,7 +3250,7 @@ export default function App() {
       : `🎵 « ${inst.title} » est prêt — appuie sur REC pour poser ta voix (gamme inconnue : l'Auto-Tune corrige sur toutes les notes)`);
     if (isMobile) setActiveMobileTab('TRACKS');
     // Mélodie du studio (sans batterie) : on propose d'en poser une, adaptée.
-    if (inst.kind === 'melody' || /melod|sample/i.test(`${inst.genre || ''}`)) {
+    if (stateRef.current.projectMode !== 'BEATMAKING' && (inst.kind === 'melody' || /melod|sample/i.test(`${inst.genre || ''}`))) {
       const st = stateRef.current;
       const sid = suggestDrumKit(st.bpm, inst.genre, inst.title);
       const others = DRUM_KITS.filter(k => k.id !== sid && ['trap', 'drill', 'boombap', 'rnb', 'afro'].includes(k.id)).slice(0, 2);
@@ -3240,6 +3262,38 @@ export default function App() {
     }
   };
   loadCatalogBeatRef.current = handleLoadCatalogBeat;
+
+  /**
+   * Projet « instru sur mélodie » : la mélodie du studio sur sa piste, une
+   * batterie posée (style deviné, tempo et tonalité de la mélodie) et la boîte
+   * à rythmes ouverte. Les pistes voix restent là : on peut poser sa voix
+   * ensuite sur l'instru qu'on vient de faire.
+   */
+  const handleStartMelodyProject = async (inst: any) => {
+    setState(produce((draft: DAWState) => {
+      draft.projectMode = 'BEATMAKING';
+      draft.name = `Instru · ${String(inst.title || 'Mélodie').slice(0, 40)}`;
+    }));
+    stateRef.current = { ...stateRef.current, projectMode: 'BEATMAKING' };
+    await handleLoadCatalogBeat(inst);
+    setState(produce((draft: DAWState) => {
+      const t = draft.tracks.find(x => x.id === 'instrumental');
+      if (t) t.name = 'MÉLODIE';
+    }));
+    await ensureAudioEngine();
+    // Tempo détecté à l'écoute : on laisse l'état se mettre à jour avant de le lire.
+    await new Promise(r => setTimeout(r, 150));
+    const st = stateRef.current;
+    const kit = suggestDrumKit(st.bpm, inst.genre, inst.title);
+    handleSetDrumKit(kit);
+    setDrumsOpen(true);
+    const others = DRUM_KITS.filter(k => k.id !== kit && ['trap', 'drill', 'boombap', 'rnb', 'afro'].includes(k.id)).slice(0, 3);
+    postNova(`🥁 Mode instru : « ${inst.title} » est sur la piste MÉLODIE et je t'ai posé une batterie ${DRUM_KITS.find(k => k.id === kit)?.name || ''} calée sur son tempo (${Math.round(st.bpm)} BPM). Change les pas, les sons et le mix de chaque pad dans la boîte à rythmes. Quand ton instru te plaît, pose ta voix dessus avec REC.`, [
+      ...others.map(k => ({ label: `${k.emoji} Essayer ${k.name}`, action: { action: 'ADD_DRUMS', payload: { kit: k.id } } as AIAction })),
+      { label: '🎤 Poser ma voix', action: { action: 'ARM_TRACK', payload: { trackId: 'track-rec-main', armed: true } } as AIAction },
+    ]);
+  };
+  startMelodyProjectRef.current = handleStartMelodyProject;
 
   const handleLoadDrumSample = useCallback(async (trackId: string, padId: number, file: File) => {
     try {
@@ -4129,6 +4183,7 @@ export default function App() {
         user={user}
         onEnterStudio={handleEnterStudio}
         onEnterWithInstrumental={handleEnterWithInstrumental}
+        onEnterWithMelody={handleEnterWithMelody}
         onEnterWithAudioFile={handleEnterWithAudioFile}
         onEnterWithProject={handleEnterWithProject}
         savedSession={savedSessionMeta}
@@ -4197,7 +4252,7 @@ export default function App() {
                     user={user} activeTab={activeSideBrowserTab} onTabChange={setActiveSideBrowserTab}
                     onAddPlugin={handleAddPluginFromContext}
                     onPurchase={handleBuyLicense} selectedTrackId={state.selectedTrackId}
-                    onLoadBeat={handleLoadCatalogBeat}
+                    onLoadBeat={handleLoadCatalogBeat} onMakeBeat={(m: any) => { void startMelodyProjectRef.current?.(m); }}
                 />
             </aside>
         )}
@@ -4324,7 +4379,7 @@ export default function App() {
                   user={user}
                   onAddPlugin={handleAddPluginFromContext}
                   onPurchase={handleBuyLicense}
-                  onLoadBeat={handleLoadCatalogBeat}
+                  onLoadBeat={handleLoadCatalogBeat} onMakeBeat={(m: any) => { void startMelodyProjectRef.current?.(m); }}
                   selectedTrackId={state.selectedTrackId}
                 />
               )}
