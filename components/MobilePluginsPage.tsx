@@ -54,7 +54,7 @@ const MobilePluginsPage: React.FC<MobilePluginsPageProps> = ({
             <button
               key={cat.id}
               onClick={() => setFilterType(cat.id as any)}
-              className={`shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              className={`shrink-0 min-h-[40px] px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 filterType === cat.id
                   ? 'bg-cyan-500 text-white'
                   : 'bg-[#14161a] text-slate-400'

@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginInstance } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import WaveformRenderer from './WaveformRenderer';
@@ -82,7 +83,7 @@ const SamplerEditor: React.FC<SamplerEditorProps> = ({ plugin, trackId, onClose 
                     <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-1">Audio Engine v1.0</p>
                 </div>
             </div>
-            <button onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center border bg-white/5 border-white/10 text-slate-600 hover:text-white transition-all">
+            <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center border bg-white/5 border-white/10 text-slate-600 hover:text-white transition-all">
                 <i className="fas fa-times"></i>
             </button>
         </div>
@@ -129,27 +130,13 @@ const SamplerEditor: React.FC<SamplerEditorProps> = ({ plugin, trackId, onClose 
 };
 
 const Knob: React.FC<{ label: string, value: number, min: number, max: number, onChange: (v: number) => void, color: string }> = ({ label, value, min, max, onChange, color }) => {
-    const handleMouseDown = (e: React.MouseEvent) => {
-        const startY = e.clientY;
-        const startVal = value;
-        const onMouseMove = (m: MouseEvent) => {
-            const delta = (startY - m.clientY) / 100;
-            const newVal = Math.max(min, Math.min(max, startVal + delta * (max - min)));
-            onChange(newVal);
-        };
-        const onMouseUp = () => {
-            window.removeEventListener('mousemove', onMouseMove);
-            window.removeEventListener('mouseup', onMouseUp);
-        };
-        window.addEventListener('mousemove', onMouseMove);
-        window.addEventListener('mouseup', onMouseUp);
-    };
+    const knob = useKnobInteraction(value, onChange, { min, max, sensitivity: 100 });
 
     const percentage = (value - min) / (max - min);
     const rotation = percentage * 270 - 135;
 
     return (
-        <div className="flex flex-col items-center space-y-2 group cursor-ns-resize" onMouseDown={handleMouseDown}>
+        <div className="flex flex-col items-center space-y-2 group cursor-ns-resize" {...knob.bind}>
              <div className="relative w-12 h-12 rounded-full bg-[#14161a] border border-white/10 shadow-lg flex items-center justify-center">
                  <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
                  <div 

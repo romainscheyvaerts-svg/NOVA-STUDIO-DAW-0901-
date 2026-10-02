@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { createEnvelopeFollower, makeCurve } from './vocalDspUtils';
 
 /**
@@ -266,6 +267,14 @@ export const VocalDeEsserUI: React.FC<VocalDeEsserUIProps> = ({ node, initialPar
     document.body.style.cursor = 'ns-resize';
   };
 
+  const setParam = (key: keyof DeEsserParams, value: number) => {
+    const newParams = { ...paramsRef.current, [key]: value };
+    paramsRef.current = newParams;
+    setParams(newParams);
+    node.updateParams(newParams);
+    if (onParamsChange) onParamsChange(newParams);
+  };
+
   const updateMode = (m: DeEsserMode) => {
     const newParams = { ...params, mode: m };
     setParams(newParams);
@@ -310,10 +319,10 @@ export const VocalDeEsserUI: React.FC<VocalDeEsserUIProps> = ({ node, initialPar
         </div>
       </div>
       <div className="grid grid-cols-4 gap-4 px-2">
-        <DeEsserKnob label="Threshold" value={params.threshold} min={-60} max={0} suffix="dB" color="#ef4444" onMouseDown={(e) => handleMouseDown('threshold', e)} displayVal={Math.round(params.threshold)} />
-        <DeEsserKnob label="Frequency" value={params.frequency} min={2000} max={12000} suffix="Hz" color="#ef4444" onMouseDown={(e) => handleMouseDown('frequency', e)} displayVal={Math.round(params.frequency)} />
-        <DeEsserKnob label="Q Factor" value={params.q} min={0.1} max={10.0} suffix="" color="#ef4444" onMouseDown={(e) => handleMouseDown('q', e)} displayVal={Number(params.q.toFixed(1))} />
-        <DeEsserKnob label="Reduction" value={params.reduction} min={0} max={1.0} factor={100} suffix="%" color="#fff" onMouseDown={(e) => handleMouseDown('reduction', e)} displayVal={Math.round(params.reduction * 100)} />
+        <DeEsserKnob label="Threshold" value={params.threshold} min={-60} max={0} suffix="dB" color="#ef4444" defaultValue={-25} onChange={(v) => setParam('threshold', v)} displayVal={Math.round(params.threshold)} />
+        <DeEsserKnob label="Frequency" value={params.frequency} min={2000} max={12000} suffix="Hz" color="#ef4444" defaultValue={6500} onChange={(v) => setParam('frequency', v)} displayVal={Math.round(params.frequency)} />
+        <DeEsserKnob label="Q Factor" value={params.q} min={0.1} max={10.0} suffix="" color="#ef4444" defaultValue={1} onChange={(v) => setParam('q', v)} displayVal={Number(params.q.toFixed(1))} />
+        <DeEsserKnob label="Reduction" value={params.reduction} min={0} max={1.0} factor={100} suffix="%" color="#fff" defaultValue={0.6} onChange={(v) => setParam('reduction', v)} displayVal={Math.round(params.reduction * 100)} />
       </div>
       <div className="flex bg-black/40 p-1 rounded-2xl border border-white/5">
         {(['BELL', 'SHELF'] as DeEsserMode[]).map(m => (
@@ -324,12 +333,13 @@ export const VocalDeEsserUI: React.FC<VocalDeEsserUIProps> = ({ node, initialPar
   );
 };
 
-const DeEsserKnob: React.FC<{ label: string, value: number, onMouseDown: (e: React.MouseEvent) => void, color: string, min: number, max: number, suffix: string, displayVal: number, factor?: number }> = ({ label, value, onMouseDown, color, min, max, suffix, displayVal }) => {
+const DeEsserKnob: React.FC<{ label: string, value: number, onChange: (v: number) => void, defaultValue?: number, color: string, min: number, max: number, suffix: string, displayVal: number, factor?: number }> = ({ label, value, onChange, defaultValue, color, min, max, suffix, displayVal }) => {
+  const knob = useKnobInteraction(value, onChange, { min, max, defaultValue });
   const norm = (value - min) / (max - min);
   const rotation = (norm * 270) - 135;
   return (
     <div className="flex flex-col items-center space-y-2 group">
-      <div onMouseDown={onMouseDown} className="w-12 h-12 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-red-500/50 transition-all shadow-xl relative">
+      <div {...knob.bind} className="w-12 h-12 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-red-500/50 transition-all shadow-xl relative">
         <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
         <div className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full transition-transform duration-75" style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: color }} />
       </div>

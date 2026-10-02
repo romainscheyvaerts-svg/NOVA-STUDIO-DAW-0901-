@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 /**
  * DENOISER PRO - Professional Noise Gate/Expander
@@ -580,43 +581,19 @@ const ProKnob: React.FC<{
   log?: boolean;
 }> = ({ label, value, min, max, onChange, suffix, color, factor = 1, log = false }) => {
   const safeVal = Number.isFinite(value) ? value : min;
+  const knob = useKnobInteraction(safeVal, onChange, { min, max, log });
   const norm = log
     ? Math.log10(safeVal / min) / Math.log10(max / min)
     : (safeVal - min) / (max - min);
   const rotation = (Math.max(0, Math.min(1, norm)) * 270) - 135;
 
-  const calculateValue = (delta: number, startNorm: number) => {
-    const newNorm = Math.max(0, Math.min(1, startNorm + delta / 200));
-    return log ? min * Math.pow(max / min, newNorm) : min + newNorm * (max - min);
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startNorm = norm;
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      const newVal = calculateValue(startY - moveEvent.clientY, startNorm);
-      onChange(newVal);
-    };
-
-    const onMouseUp = () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      document.body.style.cursor = 'default';
-    };
-
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    document.body.style.cursor = 'ns-resize';
-  };
 
   const displayVal = log ? Math.round(safeVal) : Math.round(safeVal * factor);
 
   return (
     <div className="flex flex-col items-center space-y-2">
       <div
-        onMouseDown={handleMouseDown}
+        {...knob.bind}
         className="w-14 h-14 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-teal-500/50 transition-all shadow-xl relative"
       >
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />

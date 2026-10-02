@@ -270,7 +270,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     <p className="text-[10px] text-slate-500 font-mono">Mastering & Export</p>
                 </div>
             </div>
-            <button onClick={onClose} disabled={isRendering} className="w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
+            <button aria-label="Fermer" title="Fermer" onClick={onClose} disabled={isRendering} className="w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
                 <i className="fas fa-times"></i>
             </button>
         </div>

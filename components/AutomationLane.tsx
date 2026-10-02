@@ -380,10 +380,10 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
               </span>
            </div>
         </div>
-        <button 
+        <button aria-label="Masquer la voie d'automation" 
           onClick={onRemoveLane}
           className="w-6 h-6 rounded flex items-center justify-center hover:bg-red-500/20 text-slate-600 hover:text-red-400 transition-colors"
-          title="Remove Automation Lane"
+          title="Masquer la voie d'automation"
         >
           <i className="fas fa-times text-[10px]"></i>
         </button>

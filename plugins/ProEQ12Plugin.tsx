@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 /**
  * MODULE FX_01 : PRO-EQ 12 (SURGICAL GRADE)
@@ -229,41 +230,14 @@ const EQKnob: React.FC<{
   suffix: string, color: string, log?: boolean, disabled?: boolean, precision?: number 
 }> = ({ label, value, min, max, onChange, suffix, color, log, disabled, precision = 0 }) => {
   const safeValue = Number.isFinite(value) ? value : min;
+  const knob = useKnobInteraction(safeValue, onChange, { min, max, log, disabled });
   const norm = log ? (Math.log10(safeValue / min) / Math.log10(max / min)) : (safeValue - min) / (max - min);
   
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault(); e.stopPropagation();
-    const startY = e.clientY;
-    const startNorm = norm;
-    const onMouseMove = (m: MouseEvent) => {
-      const delta = (startY - m.clientY) / 200;
-      const newNorm = Math.max(0, Math.min(1, startNorm + delta));
-      const val = log ? min * Math.pow(max / min, newNorm) : min + newNorm * (max - min);
-      onChange(val);
-    };
-    const onMouseUp = () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
-    window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
-  };
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    e.stopPropagation();
-    const startY = e.touches[0].clientY;
-    const startNorm = norm;
-    const onTouchMove = (t: TouchEvent) => {
-      if (t.cancelable) t.preventDefault();
-      const delta = (startY - t.touches[0].clientY) / 200;
-      const newNorm = Math.max(0, Math.min(1, startNorm + delta));
-      const val = log ? min * Math.pow(max / min, newNorm) : min + newNorm * (max - min);
-      onChange(val);
-    };
-    const onTouchEnd = () => { window.removeEventListener('touchmove', onTouchMove); window.removeEventListener('touchend', onTouchEnd); };
-    window.addEventListener('touchmove', onTouchMove, { passive: false }); window.addEventListener('touchend', onTouchEnd);
-  };
 
   const rotation = (norm * 270) - 135;
   return (
     <div className={`flex flex-col items-center space-y-2 select-none touch-none ${disabled ? 'opacity-20 grayscale' : ''}`}>
-      <div onMouseDown={handleMouseDown} onTouchStart={handleTouchStart} className="relative w-12 h-12 rounded-full bg-[#14161a] border border-white/10 flex items-center justify-center cursor-ns-resize shadow-xl hover:border-white/30 transition-all">
+      <div {...knob.bind} className="relative w-12 h-12 rounded-full bg-[#14161a] border border-white/10 flex items-center justify-center cursor-ns-resize shadow-xl hover:border-white/30 transition-all">
         <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full transition-transform duration-75" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}`, transform: `rotate(${rotation}deg) translateY(2px)` }} />
         <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />

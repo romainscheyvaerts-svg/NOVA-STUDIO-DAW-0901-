@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginInstance } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import WaveformRenderer from './WaveformRenderer';
@@ -98,7 +99,7 @@ const DrumSamplerEditor: React.FC<DrumSamplerEditorProps> = ({ plugin, trackId, 
                 <button onClick={previewSound} className="h-10 px-6 bg-white/10 hover:bg-white/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center space-x-2">
                     <i className="fas fa-play"></i> <span>Preview</span>
                 </button>
-                <button onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center border bg-white/5 border-white/10 text-slate-600 hover:text-white transition-all">
+                <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center border bg-white/5 border-white/10 text-slate-600 hover:text-white transition-all">
                     <i className="fas fa-times"></i>
                 </button>
             </div>
@@ -230,25 +231,12 @@ const DrumSamplerEditor: React.FC<DrumSamplerEditorProps> = ({ plugin, trackId, 
 };
 
 const DKnob: React.FC<{ label: string, value: number, displayVal: string, onChange: (v: number) => void }> = ({ label, value, displayVal, onChange }) => {
-    const handleMouseDown = (e: React.MouseEvent) => {
-        const startY = e.clientY;
-        const startVal = value;
-        const onMouseMove = (m: MouseEvent) => {
-            const delta = (startY - m.clientY) / 100;
-            onChange(Math.max(0, Math.min(1, startVal + delta)));
-        };
-        const onMouseUp = () => {
-            window.removeEventListener('mousemove', onMouseMove);
-            window.removeEventListener('mouseup', onMouseUp);
-        };
-        window.addEventListener('mousemove', onMouseMove);
-        window.addEventListener('mouseup', onMouseUp);
-    };
+    const knob = useKnobInteraction(value, onChange, { min: 0, max: 1, sensitivity: 100 });
 
     const rotation = (Math.max(0, Math.min(1, value)) * 270) - 135;
 
     return (
-        <div className="flex flex-col items-center space-y-1 group cursor-ns-resize" onMouseDown={handleMouseDown}>
+        <div className="flex flex-col items-center space-y-1 group cursor-ns-resize" {...knob.bind}>
              <div className="relative w-10 h-10 rounded-full bg-[#14161a] border border-white/10 flex items-center justify-center shadow-lg group-hover:border-orange-500/50 transition-colors">
                  <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
                  <div 

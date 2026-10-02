@@ -1,9 +1,11 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { gainToDbText } from '../utils/db';
+import { gainToDbText, panToText } from '../utils/db';
 import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { SmartKnob } from './SmartKnob';
+import ProMasterMeter from './ProMasterMeter';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { getValidDestinations, getRouteLabel } from './RoutingManager';
 
 // Track Group Colors (inspired by Pro Tools)
@@ -58,6 +60,8 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, onUpdate: (t: Track) =
           max={1.5}
           size={26} // Slightly bigger
           color={getSendColor(send.id)}
+          defaultValue={1}
+          format={gainToDbText}
           onChange={(val) => {
               const newSends = track.sends.map(s => s.id === send.id ? { ...s, level: val } : s);
               onUpdate({ ...track, sends: newSends });
@@ -156,30 +160,13 @@ const ChannelStrip: React.FC<{
     if (onRequestAddPlugin) onRequestAddPlugin(track.id, clientX, clientY);
   };
 
-  // Logic Volume Interaction
-  const handleVolInteraction = (clientY: number, rect: DOMRect) => {
-      const p = 1 - Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-      onUpdate({...track, volume: p * p * 1.5});
-  };
-
-  const onVolMouseDown = (e: React.MouseEvent) => {
-      const rect = faderTrackRef.current!.getBoundingClientRect();
-      handleVolInteraction(e.clientY, rect);
-      const move = (m: MouseEvent) => handleVolInteraction(m.clientY, rect);
-      const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-      window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
-  };
-
-  const onVolTouchStart = (e: React.TouchEvent) => {
-      e.stopPropagation(); 
-      const rect = faderTrackRef.current!.getBoundingClientRect();
-      handleVolInteraction(e.touches[0].clientY, rect);
-  };
-
-  const onVolTouchMove = (e: React.TouchEvent) => {
-      const rect = faderTrackRef.current!.getBoundingClientRect();
-      handleVolInteraction(e.touches[0].clientY, rect);
-  };
+  // Fader de volume : course en racine du gain (0…1.5), glissement RELATIF
+  // (le fader ne saute plus sous le clic), Maj = fin, molette, double-clic = 0 dB.
+  const faderPos = Math.sqrt(Math.max(0, track.volume) / 1.5);
+  const fader = useKnobInteraction(faderPos, (p) => onUpdate({ ...track, volume: p * p * 1.5 }), {
+      min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005,
+      sensitivity: Math.max(120, faderTrackRef.current?.clientHeight || 300),
+  });
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault(); 
@@ -288,9 +275,9 @@ const ChannelStrip: React.FC<{
                     <i className="fas fa-chevron-down"></i>
                   </button>
                </div>
-               <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} className={`w-5 h-5 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
+               <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} title={p.isEnabled ? 'Désactiver l\'effet' : 'Activer l\'effet'} aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.type}`} aria-pressed={p.isEnabled} className={`w-5 h-5 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx"><i className="fas fa-times"></i></button>
+            <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${p.type}`}><i className="fas fa-times"></i></button>
           </div>
         ))}
         {/* Boutons + pour ajouter des plugins */}
@@ -298,6 +285,8 @@ const ChannelStrip: React.FC<{
           <button
             key={`empty-${i}`}
             onClick={handleEmptySlotClick}
+            title="Ajouter un effet"
+            aria-label={`Ajouter un effet sur ${track.name}`}
             className="w-full h-8 rounded border border-dashed border-white/10 bg-black/5 opacity-40 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
           >
             <i className="fas fa-plus text-[8px] text-slate-600"></i>
@@ -312,19 +301,19 @@ const ChannelStrip: React.FC<{
         )}
 
         <div className="mb-2 flex flex-col items-center">
-           <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="PAN" value={track.pan} min={-1} max={1} size={36} color="#06b6d4" onChange={(val) => onUpdate({...track, pan: val})} />
+           <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="PAN" value={track.pan} min={-1} max={1} size={36} color="#06b6d4" defaultValue={0} format={panToText} onChange={(val) => onUpdate({...track, pan: val})} />
         </div>
 
         <div className="flex-1 flex space-x-3 px-2">
            <div className="flex-1 relative flex flex-col items-center">
               <div 
-                ref={faderTrackRef} 
                 data-nova-target={`vol-${track.id}`}
-                onMouseDown={onVolMouseDown}
-                onTouchStart={onVolTouchStart}
-                onTouchMove={onVolTouchMove}
-                onDoubleClick={() => onUpdate({ ...track, volume: 1 })}
-                title="Volume (double-clic : 0 dB)"
+                {...fader.bind}
+                ref={(el) => { faderTrackRef.current = el; fader.wheelRef(el); }}
+                title="Volume : glisser (Maj = fin), molette, double-clic = 0 dB"
+                role="slider"
+                aria-label={`Volume ${track.name}`}
+                aria-valuetext={gainToDbText(track.volume)}
                 className="h-full bg-black/40 rounded-full border border-white/5 relative cursor-pointer touch-none group/fader"
                 style={{ width: 'var(--fader-width)' }}
               >
@@ -333,16 +322,20 @@ const ChannelStrip: React.FC<{
                  </div>
               </div>
            </div>
+           {isMaster ? (
+              <ProMasterMeter orientation="vertical" />
+           ) : (
            <div className="flex space-x-1">
               <VUMeter analyzer={analyzer} />
               <VUMeter analyzer={analyzerR} />
            </div>
+           )}
         </div>
 
         <div className="mt-2 text-center text-[10px] font-mono tabular-nums text-slate-300">{gainToDbText(track.volume)}</div>
         <div className="mt-2 flex space-x-2">
-           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>MUTE</button>
-           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>SOLO</button>
+           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>MUTE</button>
+           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}`} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>SOLO</button>
         </div>
         
         <div className={`mt-3 h-10 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-black/40 border-white/10 text-white'}`}>
@@ -382,7 +375,7 @@ const TrackGroupHeader: React.FC<{
         className="h-8 flex items-center justify-center cursor-pointer border-b"
         style={{ backgroundColor: group.color, borderColor: group.color }}
         onClick={onToggleCollapse}
-        title={group.isCollapsed ? 'Expand Group' : 'Collapse Group'}
+        title={group.isCollapsed ? 'Déplier le groupe' : 'Replier le groupe'}
       >
         <i className={`fas ${group.isCollapsed ? 'fa-chevron-right' : 'fa-chevron-down'} text-[10px] text-black`}></i>
       </div>
@@ -417,6 +410,8 @@ const TrackGroupHeader: React.FC<{
           className={`w-full h-6 rounded text-[8px] font-black ${group.linkedMute ? 'text-black' : 'text-slate-600'}`}
           style={{ backgroundColor: group.linkedMute ? group.color : 'transparent' }}
           title="Lier les mute"
+          aria-label="Lier les mute du groupe"
+          aria-pressed={!!group.linkedMute}
         >
           M
         </button>
@@ -427,6 +422,8 @@ const TrackGroupHeader: React.FC<{
           className={`w-full h-6 rounded text-[8px] font-black ${group.linkedSolo ? 'text-black' : 'text-slate-600'}`}
           style={{ backgroundColor: group.linkedSolo ? group.color : 'transparent' }}
           title="Lier les solo"
+          aria-label="Lier les solo du groupe"
+          aria-pressed={!!group.linkedSolo}
         >
           S
         </button>
@@ -437,6 +434,8 @@ const TrackGroupHeader: React.FC<{
           className={`w-full h-6 rounded text-[8px] font-black ${group.linkedVolume ? 'text-black' : 'text-slate-600'}`}
           style={{ backgroundColor: group.linkedVolume ? group.color : 'transparent' }}
           title="Lier les volumes"
+          aria-label="Lier les volumes du groupe"
+          aria-pressed={!!group.linkedVolume}
         >
           V
         </button>
@@ -448,6 +447,7 @@ const TrackGroupHeader: React.FC<{
         className="h-8 flex items-center justify-center text-slate-600 hover:text-red-500 transition-colors border-t"
         style={{ borderColor: group.color + '40' }}
         title="Supprimer le groupe"
+        aria-label="Supprimer le groupe"
       >
         <i className="fas fa-times text-[10px]"></i>
       </button>
@@ -566,7 +566,7 @@ const MixerView: React.FC<{
       
       {/* ADD BUS / CREATE GROUP Section */}
       <div className="flex flex-col items-center justify-center px-2 border-r border-white/5 min-w-[60px] space-y-3">
-         <button onClick={onAddBus} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group" title="Ajouter un bus">
+         <button onClick={onAddBus} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group" title="Ajouter un bus" aria-label="Ajouter un bus">
             <i className="fas fa-plus group-hover:scale-125 transition-transform"></i>
          </button>
          <span className="text-[8px] font-black text-amber-600 uppercase writing-vertical rotate-180">+ BUS</span>
@@ -579,6 +579,8 @@ const MixerView: React.FC<{
                onClick={() => setShowGroupMenu(!showGroupMenu)}
                className="w-10 h-10 rounded-xl border border-dashed border-purple-500/30 text-purple-400 hover:bg-purple-500/10 flex items-center justify-center transition-all relative"
                title="Créer un groupe de pistes"
+               aria-label="Créer un groupe de pistes"
+               aria-expanded={showGroupMenu}
              >
                <i className="fas fa-layer-group text-[11px]"></i>
              </button>
@@ -617,7 +619,7 @@ const MixerView: React.FC<{
                      onClick={() => setShowGroupMenu(false)}
                      className="flex-1 py-2 rounded bg-white/5 text-slate-400 text-[10px] font-bold"
                    >
-                     Cancel
+                     Annuler
                    </button>
                    <button
                      onClick={() => {
@@ -630,7 +632,7 @@ const MixerView: React.FC<{
                      disabled={selectedForGroup.size < 2}
                      className={`flex-1 py-2 rounded text-[10px] font-bold ${selectedForGroup.size >= 2 ? 'bg-purple-500 text-white' : 'bg-white/5 text-slate-600'}`}
                    >
-                     Create ({selectedForGroup.size})
+                     Créer ({selectedForGroup.size})
                    </button>
                  </div>
                </div>

@@ -524,7 +524,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Store Manager v2.1</p>
                 </div>
             </div>
-            <button 
+            <button aria-label="Fermer" title="Fermer" 
                 onClick={onClose}
                 className="w-8 h-8 rounded-full bg-white/5 hover:bg-red-500 hover:text-white text-slate-500 flex items-center justify-center transition-all"
             >
@@ -699,7 +699,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                                         )}
                                         {editingId && !previewFile && !importedPreviewUrl && <p className="text-[8px] text-slate-500 pl-2 mt-1">Laissez vide pour garder l'actuel.</p>}
                                     </div>
-                                    {importedPreviewUrl && <button type="button" onClick={() => setImportedPreviewUrl(null)} className="text-red-500 hover:text-white"><i className="fas fa-times text-[10px]"></i></button>}
+                                    {importedPreviewUrl && <button aria-label="Retirer l'extrait" title="Retirer l'extrait" type="button" onClick={() => setImportedPreviewUrl(null)} className="text-red-500 hover:text-white"><i className="fas fa-times text-[10px]"></i></button>}
                                 </div>
                                 
                                 {/* STEMS ZIP */}
@@ -716,7 +716,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                                         {editingId && !stemsFile && !importedStemsUrl && <p className="text-[8px] text-slate-500 pl-2 mt-1">Laissez vide pour garder les stems actuels (s'il y en a).</p>}
                                     </div>
                                     {importedStemsUrl ? (
-                                        <button type="button" onClick={() => setImportedStemsUrl(null)} className="text-red-500 hover:text-white"><i className="fas fa-times text-[10px]"></i></button>
+                                        <button aria-label="Retirer les pistes séparées" title="Retirer les pistes séparées" type="button" onClick={() => setImportedStemsUrl(null)} className="text-red-500 hover:text-white"><i className="fas fa-times text-[10px]"></i></button>
                                     ) : (
                                         <span className="text-[8px] text-slate-600 font-bold uppercase tracking-wider ml-auto">Optionnel</span>
                                     )}

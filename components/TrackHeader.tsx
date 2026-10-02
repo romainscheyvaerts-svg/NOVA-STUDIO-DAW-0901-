@@ -1,6 +1,27 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { gainToDbText } from '../utils/db';
+import { gainToDbText, panToText } from '../utils/db';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
+
+/**
+ * Glissière horizontale « position absolue » (clic = la valeur sous le pointeur),
+ * avec Maj enfoncée = réglage fin relatif, double-clic = valeur par défaut.
+ * pos : 0…1 sur la largeur de l'élément.
+ */
+const dragHorizontal = (e: React.MouseEvent, startPos: number, apply: (pos: number) => void, onEnd?: () => void) => {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const clamp = (v: number) => Math.max(0, Math.min(1, v));
+  let pos = startPos;
+  let lastX = e.clientX;
+  if (!e.shiftKey) { pos = clamp((e.clientX - rect.left) / rect.width); apply(pos); }
+  const onMouseMove = (m: MouseEvent) => {
+    pos = m.shiftKey ? clamp(pos + ((m.clientX - lastX) / rect.width) * 0.1) : clamp((m.clientX - rect.left) / rect.width);
+    lastX = m.clientX;
+    apply(pos);
+  };
+  const onMouseUp = () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); onEnd?.(); };
+  window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
+};
 import { Track, PluginType, PluginInstance, TrackType, TrackSend } from '../types';
 import { isPluginBaked, isFreezeStale, isTrackFrozen } from '../utils/freeze';
 import { useRecFrozen } from '../utils/recFreezeStore';
@@ -34,16 +55,15 @@ const HorizontalSendFader: React.FC<{
   const handleInteraction = (clientX: number, rect: DOMRect) => {
     const x = clientX - rect.left;
     const progress = Math.max(0, Math.min(1, x / rect.width));
-    onChange(progress * 1.5); 
+    onChange(progress * 1.5);
   };
+  // Molette / double-clic (0 dB) partagés avec les autres potards
+  const knob = useKnobInteraction(send.level / 1.5, (p) => onChange(p * 1.5), { min: 0, max: 1, defaultValue: 1 / 1.5, wheelStep: 0.01 });
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation(); e.preventDefault();
-    const rect = e.currentTarget.getBoundingClientRect();
-    handleInteraction(e.clientX, rect);
-    const onMouseMove = (m: MouseEvent) => handleInteraction(m.clientX, rect);
-    const onMouseUp = () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
-    window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
+    if (e.detail >= 2) { knob.handleDoubleClick(); return; }
+    dragHorizontal(e, send.level / 1.5, (p) => onChange(p * 1.5));
   };
   
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -60,10 +80,15 @@ const HorizontalSendFader: React.FC<{
   const percent = (send.level / 1.5) * 100;
 
   return (
-    <div 
+    <div
+      ref={knob.wheelRef}
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
+      role="slider"
+      aria-label={`Envoi ${label}`}
+      aria-valuetext={gainToDbText(send.level)}
+      title={`Envoi ${label} : glisser (Maj = fin), molette, double-clic = 0 dB`}
       className="relative h-5 bg-black/60 rounded-md overflow-hidden border border-white/5 cursor-ew-resize group/fader transition-all hover:border-white/20 touch-none"
     >
       <div 
@@ -76,7 +101,7 @@ const HorizontalSendFader: React.FC<{
       />
       <div className="absolute inset-0 flex items-center justify-between px-2 pointer-events-none">
         <span className="text-[9px] font-bold text-white/70 uppercase tracking-tight">{label}</span>
-        <span className="text-[9px] font-mono text-white/40">{Math.round((send.level / 1.5) * 100)}%</span>
+        <span className="text-[9px] font-mono tabular-nums text-white/50">{gainToDbText(send.level)}</span>
       </div>
     </div>
   );
@@ -244,21 +269,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     }
   };
 
-  const handlePanMouseDown = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const startY = e.clientY;
-    const startPan = track.pan;
-    const onMouseMove = (m: MouseEvent) => {
-      const delta = (startY - m.clientY) / 100;
-      onUpdate({ ...track, pan: Math.max(-1, Math.min(1, startPan + delta)) });
-    };
-    const onMouseUp = () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
-    window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
-  };
-
-  const handlePanTouchStart = (e: React.TouchEvent) => {
-      e.stopPropagation();
-  };
+  // Pan : glisser vertical, Maj = fin, molette, double-clic = centre
+  const panKnob = useKnobInteraction(track.pan, (v) => onUpdate({ ...track, pan: Math.abs(v) < 0.005 ? 0 : v }), { min: -1, max: 1, sensitivity: 200, defaultValue: 0 });
+  // Volume : molette et double-clic = 0 dB (course en racine du gain)
+  const volKnob = useKnobInteraction(Math.sqrt(Math.max(0, track.volume) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }), { min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005 });
 
   const handleVolumeInteraction = (clientX: number, rect: DOMRect) => {
       const x = clientX - rect.left;
@@ -268,12 +282,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
 
   const handleVolumeMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation(); e.preventDefault();
+    if (e.detail >= 2) { volKnob.handleDoubleClick(); return; }
     setIsAdjustingVolume(true);
-    const rect = e.currentTarget.getBoundingClientRect();
-    handleVolumeInteraction(e.clientX, rect);
-    const onMouseMove = (m: MouseEvent) => handleVolumeInteraction(m.clientX, rect);
-    const onMouseUp = () => { setIsAdjustingVolume(false); window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
-    window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
+    dragHorizontal(e, Math.sqrt(Math.max(0, track.volume) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }), () => setIsAdjustingVolume(false));
   };
 
   const handleVolumeTouchStart = (e: React.TouchEvent) => {
@@ -428,6 +439,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 data-nova-target={`fx-${track.id}`}
                 onClick={(e) => { e.stopPropagation(); setFxMenu(v => !v); }}
                 title="Effets de la piste : ouvrir, activer, ajouter"
+                aria-label={`Effets de ${track.name}`}
+                aria-expanded={fxMenu}
+                aria-haspopup="menu"
                 className={`relative w-7 h-7 rounded-md flex items-center justify-center transition-all border text-[9px] font-black ${fxMenu ? 'bg-cyan-500 border-cyan-400 text-black' : insertPlugins.length ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
               >
                 FX
@@ -448,6 +462,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                         </button>
                         <button type="button" disabled={baked} onClick={(e) => togglePluginBypass(e, p)}
                           title={p.isEnabled ? 'Désactiver' : 'Activer'}
+                          aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.name || p.type}`}
+                          aria-pressed={p.isEnabled}
                           className={`w-7 h-7 rounded-md flex items-center justify-center ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}>
                           <i className="fas fa-power-off text-[9px]" />
                         </button>
@@ -467,6 +483,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           )}
           <button
             title={track.isMuted ? "Réactiver le son de cette piste" : "Rendre cette piste muette"}
+            aria-label={`Muet : ${track.name}`}
+            aria-pressed={!!track.isMuted}
             onClick={handleMuteToggle}
             onTouchStart={(e) => { e.preventDefault(); handleMuteToggle(e); }}
             className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
@@ -475,6 +493,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           </button>
           <button
             title={track.isSolo ? "Réentendre toutes les pistes" : "N'écouter que cette piste"}
+            aria-label={`Solo : ${track.name}`}
+            aria-pressed={!!track.isSolo}
             onClick={handleSoloToggle}
             onTouchStart={(e) => { e.preventDefault(); handleSoloToggle(e); }}
             className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
@@ -486,6 +506,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <button
                 onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
                 onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); setShowSends(!showSends); }}
+                title="Envois (delay, réverbes)"
+                aria-label={`Envois de ${track.name}`}
+                aria-expanded={showSends}
                 className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
             >
                 <i className="fas fa-sliders-h text-[10px]"></i>
@@ -499,6 +522,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
                 className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
                 title={track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer" : "Enregistrer sur cette piste (sinon REC choisit la piste sélectionnée)"}
+                aria-label={`Armer l'enregistrement : ${track.name}`}
+                aria-pressed={!!track.isTrackArmed}
               >
                 <span className="text-[11px] font-bold">R</span>
               </button>
@@ -509,24 +534,29 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       {track.isTrackArmed && <div className="mt-1 relative z-10"><MonitorControl compact trackId={track.id} /></div>}
 
       <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-2 rounded-lg border border-white/5 relative z-10">
-        <div 
-          onMouseDown={handlePanMouseDown}
-          onTouchStart={handlePanTouchStart}
-          onDoubleClick={(e) => { e.stopPropagation(); onUpdate({...track, pan: 0}); }}
+        <div
+          {...panKnob.bind}
+          title={`Panoramique ${panToText(track.pan)} : glisser (Maj = fin), molette, double-clic = centre`}
+          role="slider"
+          aria-label={`Panoramique ${track.name}`}
+          aria-valuetext={panToText(track.pan)}
           className="relative w-7 h-7 rounded-full bg-black border border-white/10 flex items-center justify-center cursor-ns-resize shadow-lg hover:border-cyan-500/30 transition-all touch-none group/pan"
         >
           <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${track.pan * 140}deg) translateY(-1px)` }} />
         </div>
         
         <div className="flex-1 flex flex-col justify-center h-6 relative">
-          <div 
+          <div
+            ref={volKnob.wheelRef}
             onMouseDown={handleVolumeMouseDown}
             onTouchStart={handleVolumeTouchStart}
             onTouchMove={handleVolumeTouchMove}
             onTouchEnd={handleVolumeTouchEnd}
             data-nova-target={`vol-${track.id}`}
-            onDoubleClick={(e) => { e.stopPropagation(); onUpdate({ ...track, volume: 1 }); }}
-            title="Volume (double-clic : 0 dB)"
+            title="Volume : glisser (Maj = fin), molette, double-clic = 0 dB"
+            role="slider"
+            aria-label={`Volume ${track.name}`}
+            aria-valuetext={gainToDbText(track.volume)}
             className="h-3 bg-black/60 rounded-full overflow-hidden relative cursor-ew-resize group/vol touch-none"
           >
             <div 
@@ -573,6 +603,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                       onClick={(e) => handleFXClick(e, instrumentPlugin)}
                       className="w-8 flex items-center justify-center bg-black/20 hover:bg-cyan-500/20 text-slate-500 hover:text-cyan-400 transition-colors"
                       title="Ouvrir l'éditeur"
+                      aria-label="Ouvrir l'éditeur de l'instrument"
                   >
                       <i className="fas fa-sliders-h text-[9px]"></i>
                   </button>
@@ -608,12 +639,15 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               <button
                 disabled={baked}
                 onClick={(e) => togglePluginBypass(e, p)}
+                title={p.isEnabled ? 'Désactiver l\'effet' : 'Activer l\'effet'}
+                aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.name || p.type}`}
+                aria-pressed={p.isEnabled}
                 className={`w-4 h-6 flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/40' : 'bg-white/5 text-slate-800'}`}
               >
                 <i className="fas fa-power-off text-[6px]"></i>
               </button>
             </div>
-            {!baked && <button onClick={(e) => handleRemoveFX(e, p.id)} className="delete-fx"><i className="fas fa-times"></i></button>}
+            {!baked && <button onClick={(e) => handleRemoveFX(e, p.id)} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${p.name || p.type}`}><i className="fas fa-times"></i></button>}
           </div>
           );
         })}

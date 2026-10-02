@@ -11,6 +11,7 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore } from '../utils/playheadStore';
 import { visibleEnvelope } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
+import { gainToDbText } from '../utils/db';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -61,7 +62,28 @@ interface ArrangementViewProps {
 
 const FADE_HANDLE_PX = 14;
 
-type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | null;
+// Poignée de gain de clip (ligne horizontale sur les clips audio) :
+// +12 dB tout en haut de la forme d'onde, 0 dB à 20 % sous le haut, -40 dB en bas.
+const CLIP_GAIN_MAX_DB = 12;
+const CLIP_GAIN_MIN_DB = -40;
+const CLIP_GAIN_ZERO_FRAC = 0.8;
+const CLIP_GAIN_GRAB_PX = 5;
+const clipGainToFrac = (g: number): number => {
+    const db = g > 0 ? 20 * Math.log10(g) : CLIP_GAIN_MIN_DB;
+    if (db >= 0) return CLIP_GAIN_ZERO_FRAC + (1 - CLIP_GAIN_ZERO_FRAC) * Math.min(1, db / CLIP_GAIN_MAX_DB);
+    return CLIP_GAIN_ZERO_FRAC * (1 - Math.min(1, db / CLIP_GAIN_MIN_DB));
+};
+const fracToClipGain = (f: number): number => {
+    const c = Math.max(0, Math.min(1, f));
+    const db = c >= CLIP_GAIN_ZERO_FRAC
+        ? ((c - CLIP_GAIN_ZERO_FRAC) / (1 - CLIP_GAIN_ZERO_FRAC)) * CLIP_GAIN_MAX_DB
+        : (1 - c / CLIP_GAIN_ZERO_FRAC) * CLIP_GAIN_MIN_DB;
+    return Math.pow(10, db / 20);
+};
+/** Ordonnée de la poignée de gain, relative au haut du clip (zone de forme d'onde : y+18 … y+h-4). */
+const clipGainHandleY = (clipH: number, gain: number): number => 18 + Math.max(4, clipH - 22) * (1 - clipGainToFrac(gain));
+
+type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | 'GAIN' | null;
 type LoopDragMode = 'START' | 'END' | 'BODY' | null;
 
 const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: boolean): number => {
@@ -111,6 +133,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [initialClipState, setInitialClipState] = useState<Clip | null>(null);
 
   const [hoverTime, setHoverTime] = useState<number | null>(null);
+  // Bulle « -3.5 dB » pendant le réglage du gain de clip
+  const [gainTip, setGainTip] = useState<{ x: number; y: number; text: string } | null>(null);
+  const gainDragRef = useRef<{ lastY: number; frac: number } | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: (ContextMenuItem | 'separator')[] } | null>(null);
   const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
@@ -636,7 +661,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
                 setDragStartX(x); setDragStartY(y);
                 setInitialClipState({ ...clip });
-                onSelectTrack(t.id);
+                // Ne re-sélectionner la piste que si elle change : chaque setState du
+                // studio relance l'anti-rebond de l'historique (300 ms), et le début
+                // d'un glissement (déplacement, rognage, fondu, gain) n'était alors
+                // plus annulable.
+                if (selectedTrackId !== t.id) onSelectTrack(t.id);
 
                 // Zones d'accroche : coins superieurs = fondus, bords = rognage,
                 // reste = deplacement. Jusqu'ici seul le deplacement existait sur
@@ -655,8 +684,25 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                     return;
                 }
 
+                // Poignée de gain (clips audio) : glisser verticalement, double-clic = 0 dB.
+                const onGainHandle = !!clip.bufferId && (clipEndX - clipStartX) > 16
+                    && x - clipStartX >= edge && clipEndX - x >= edge
+                    && Math.abs(relY - (2 + clipGainHandleY(zoomV - 4, clip.gain ?? 1))) <= CLIP_GAIN_GRAB_PX;
+
                 if (inFadeRow && x - clipStartX < FADE_HANDLE_PX) setDragAction('FADE_IN');
                 else if (inFadeRow && clipEndX - x < FADE_HANDLE_PX) setDragAction('FADE_OUT');
+                else if (onGainHandle) {
+                    if (e.detail >= 2) {
+                        onEditClip?.(t.id, clip.id, 'UPDATE_PROPS', { gain: 1 });
+                        setGainTip({ x: e.clientX, y: e.clientY, text: '0.0 dB' });
+                        setTimeout(() => setGainTip(null), 700);
+                        setDragAction(null);
+                        return;
+                    }
+                    gainDragRef.current = { lastY: y, frac: clipGainToFrac(clip.gain ?? 1) };
+                    setGainTip({ x: e.clientX, y: e.clientY, text: gainToDbText(clip.gain ?? 1) });
+                    setDragAction('GAIN');
+                }
                 else if (x - clipStartX < edge) setDragAction('TRIM_START');
                 else if (clipEndX - x < edge) setDragAction('TRIM_END');
                 else setDragAction('MOVE');
@@ -748,7 +794,43 @@ const handleMouseMove = (e: React.MouseEvent) => {
         }
     }
 
+    // Survol (aucun glissement) : curseur adapté à la zone du clip.
+    if (!dragAction && !loopDragMode) {
+        let cursor = '';
+        const tHover = x / zoomH;
+        let laneY = 40;
+        for (const t of visibleTracks) {
+            if (y >= laneY && y < laneY + zoomV) {
+                const c = t.clips.find(cl => tHover >= cl.start && tHover <= cl.start + cl.duration);
+                if (c) {
+                    const cx0 = c.start * zoomH, cx1 = (c.start + c.duration) * zoomH;
+                    const edge = Math.min(10, Math.max(4, (cx1 - cx0) * 0.15));
+                    const relY = y - laneY;
+                    if (c.bufferId && (cx1 - cx0) > 16 && x - cx0 >= edge && cx1 - x >= edge
+                        && Math.abs(relY - (2 + clipGainHandleY(zoomV - 4, c.gain ?? 1))) <= CLIP_GAIN_GRAB_PX) cursor = 'ns-resize';
+                    else if (x - cx0 < edge || cx1 - x < edge) cursor = 'ew-resize';
+                }
+                break;
+            }
+            laneY += zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+        }
+        const el = scrollContainerRef.current;
+        if (el.style.cursor !== cursor) el.style.cursor = cursor;
+    }
+
     const time = getSnappedTime(x / zoomH, bpm, gridSize, useSnap);
+    if (dragAction === 'GAIN' && activeClip && gainDragRef.current) {
+        // Maj = réglage fin (5x plus précis) ; cran à 0 dB.
+        const g = gainDragRef.current;
+        const waveH = Math.max(10, zoomV - 4 - 22);
+        g.frac = Math.max(0, Math.min(1, g.frac - ((y - g.lastY) / waveH) * (e.shiftKey ? 0.2 : 1)));
+        g.lastY = y;
+        let gain = fracToClipGain(g.frac);
+        if (!e.shiftKey && Math.abs(20 * Math.log10(gain)) < 0.3) gain = 1;
+        onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', { gain });
+        setGainTip({ x: e.clientX, y: e.clientY, text: gainToDbText(gain) });
+        return;
+    }
     if (dragAction === 'MOVE' && activeClip && initialClipState) {
         const dx = x - dragStartX;
         // Seuil de 4 px : un simple clic (ou une main qui tremble) ne déplace plus
@@ -830,6 +912,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
 };
 
 const handleMouseUp = () => {
+    if (gainDragRef.current) { gainDragRef.current = null; setGainTip(null); }
     setDragAction(null);
     setActiveClip(null);
     setLoopDragMode(null);
@@ -895,6 +978,9 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                     // on lit la portion miroir du buffer pour que la forme d'onde
                     // corresponde a ce qu'on entend.
                     const env = visibleEnvelope(buffer, startSample, endSample, largeurPx, px0, px1, !!clip.isReversed);
+                    // Forme d'onde à l'échelle du gain du clip (écrêtée visuellement à 100 %).
+                    const clipGain = clip.gain ?? 1;
+                    if (clipGain !== 1) for (let i = 0; i < n; i++) env[i] = Math.min(1, env[i] * clipGain);
                     const x0 = x + px0;
 
                     // ===== STYLE PRO TOOLS: Filled waveform avec outline =====
@@ -986,6 +1072,36 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
         ctx.fillRect(Math.min(hx, x + w - 6), y + 2, 6, 6);
         const hx2 = x + w - Math.max(0, fadeOutW) - 6;
         ctx.fillRect(Math.max(hx2, x), y + 2, 6, 6);
+    }
+
+    // Poignée de gain de clip
+    if (clip.bufferId && w > 16 && h > 30) {
+        const g = clip.gain ?? 1;
+        const hy = Math.round(y + clipGainHandleY(h, g)) + 0.5;
+        const modified = Math.abs(g - 1) > 0.001;
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 4);
+        ctx.clip();
+        ctx.strokeStyle = modified ? 'rgba(251,191,36,0.9)' : (isSelected ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.22)');
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x + 2, hy); ctx.lineTo(x + w - 2, hy); ctx.stroke();
+        // petit curseur au centre (zone visible du clip)
+        const vx0 = Math.max(x, 0), vx1 = Math.min(x + w, ctx.canvas.width);
+        const cxm = (vx0 + vx1) / 2;
+        ctx.fillStyle = modified ? '#fbbf24' : (isSelected ? '#ffffff' : 'rgba(255,255,255,0.5)');
+        ctx.fillRect(Math.round(cxm - 7), Math.round(hy - 2.5), 14, 5);
+        if (modified && w > 70) {
+            const label = gainToDbText(g);
+            ctx.font = '700 10px Inter';
+            const tw = ctx.measureText(label).width;
+            const ly = hy - 4 < y + 30 ? hy + 13 : hy - 5;
+            ctx.fillStyle = 'rgba(0,0,0,0.65)';
+            ctx.fillRect(cxm + 10, ly - 10, tw + 6, 13);
+            ctx.fillStyle = '#fbbf24';
+            ctx.fillText(label, cxm + 13, ly);
+        }
+        ctx.restore();
     }
 
     // Indicateur de mute
@@ -1438,6 +1554,7 @@ useEffect(() => {
       })()}
       {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
       {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled(!snapEnabled)} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
+      {gainTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300 font-mono tabular-nums" style={{ left: gainTip.x + 14, top: gainTip.y - 28 }}>Gain {gainTip.text}</div>}
       {hoverTime !== null && dragAction !== null && <div className="fixed z-[200] px-3 py-1.5 bg-black/90 border border-cyan-500/30 rounded-lg shadow-2xl pointer-events-none text-[10px] font-black text-cyan-400 font-mono" style={{ left: tooltipPos.x + 15, top: tooltipPos.y }}>{hoverTime.toFixed(3)}s {dragAction && <span className="ml-2 text-white opacity-50">[{dragAction}]</span>}</div>}
       {clipContextMenu && (
         <ContextMenu

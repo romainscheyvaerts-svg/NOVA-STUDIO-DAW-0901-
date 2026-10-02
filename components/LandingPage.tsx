@@ -474,7 +474,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
       {showAuthModal && (
         <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="relative">
-            <button
+            <button aria-label="Fermer" title="Fermer"
               onClick={() => setShowAuthModal(false)}
               className="absolute -top-2 -right-2 w-8 h-8 bg-white/10 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-red-500 transition-all z-10"
             >
@@ -496,7 +496,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
           <div className="bg-[#14161a] border border-white/10 rounded-2xl w-full max-w-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="p-4 border-b border-white/5 flex items-center justify-between">
               <h3 className="text-sm font-black text-white uppercase tracking-widest">Charger un Projet</h3>
-              <button onClick={() => setShowLoadModal(false)} className="text-slate-500 hover:text-white">
+              <button aria-label="Fermer" title="Fermer" onClick={() => setShowLoadModal(false)} className="text-slate-500 hover:text-white">
                 <i className="fas fa-times"></i>
               </button>
             </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginParameter } from '../types';
 import { EnvelopeDucker, makeCurve, SMOOTH, setParamSmooth } from './vocalDspUtils';
 
@@ -765,42 +766,15 @@ const DelayKnob: React.FC<{
   log?: boolean, factor?: number 
 }> = ({ label, value, min, max, onChange, suffix, color, log, factor = 1 }) => {
   const safeValue = Number.isFinite(value) ? value : min;
+  const knob = useKnobInteraction(safeValue, onChange, { min, max, log });
   const norm = log 
     ? (Math.log10(safeValue / min) / Math.log10(max / min)) 
     : (safeValue - min) / (max - min);
 
-  const calculateValue = (delta: number, startNorm: number) => {
-      const newNorm = Math.max(0, Math.min(1, startNorm + delta / 200));
-      return log ? min * Math.pow(max / min, newNorm) : min + newNorm * (max - min);
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault(); e.stopPropagation();
-    const startY = e.clientY;
-    const startNorm = norm;
-    const onMouseMove = (m: MouseEvent) => onChange(calculateValue(startY - m.clientY, startNorm));
-    const onMouseUp = () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
-    window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
-  };
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    e.stopPropagation();
-    const startY = e.touches[0].clientY;
-    const startNorm = norm;
-    const onTouchMove = (t: TouchEvent) => {
-        if (t.cancelable) t.preventDefault();
-        onChange(calculateValue(startY - t.touches[0].clientY, startNorm));
-    };
-    const onTouchEnd = () => { window.removeEventListener('touchmove', onTouchMove); window.removeEventListener('touchend', onTouchEnd); };
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-    window.addEventListener('touchend', onTouchEnd);
-  };
-
   return (
     <div className="flex flex-col items-center space-y-3 select-none touch-none">
       <div 
-        onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
+        {...knob.bind}
         className="relative w-14 h-14 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-cyan-500/50 transition-all shadow-xl"
       >
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />

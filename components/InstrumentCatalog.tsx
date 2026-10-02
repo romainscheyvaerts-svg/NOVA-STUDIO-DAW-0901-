@@ -380,7 +380,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                   <button
                     type="button"
                     onClick={() => onLoadBeat(inst)}
-                    className="mr-2 h-9 px-3 rounded-lg bg-cyan-500 text-black text-[11px] font-black uppercase hover:bg-cyan-400 active:scale-95 transition-all"
+                    className="nova-hit mr-2 h-9 px-3 rounded-lg bg-cyan-500 text-black text-[11px] font-black uppercase hover:bg-cyan-400 active:scale-95 transition-all"
                     title="Charger ce beat pour poser ta voix dessus"
                   >
                     Essayer
@@ -390,8 +390,9 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                     <span className="text-[11px] font-semibold text-cyan-300">{inst.price_base ? `${inst.price_base}€` : 'N/A'}</span>
                     <button 
                         onClick={() => setSelectedBeat(inst)}
-                        className="w-7 h-7 rounded-md bg-white/5 hover:bg-cyan-500 hover:text-black flex items-center justify-center transition-colors"
-                        title="Buy License"
+                        className="nova-hit w-8 h-8 rounded-md bg-white/5 hover:bg-cyan-500 hover:text-black flex items-center justify-center transition-colors"
+                        title="Acheter une licence"
+                        aria-label={`Acheter une licence pour ${inst.title}`}
                     >
                         <i className="fas fa-shopping-cart text-[10px]"></i>
                     </button>
@@ -422,7 +423,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                     onClick={(e) => e.stopPropagation()}
                 >
                     {/* BOUTON FERMETURE AVEC Z-INDEX ÉLEVÉ */}
-                    <button 
+                    <button aria-label="Fermer" title="Fermer" 
                         onClick={() => { if(!processingPayment) setSelectedBeat(null); }} 
                         className="absolute top-4 right-4 z-50 w-8 h-8 flex items-center justify-center bg-black/50 rounded-full text-slate-400 hover:text-white hover:bg-red-500/80 transition-all"
                     >
