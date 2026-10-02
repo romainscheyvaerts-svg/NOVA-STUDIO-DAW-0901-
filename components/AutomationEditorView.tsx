@@ -3,10 +3,12 @@ import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { Track, AutomationLane, AutomationPoint } from '../types';
 import AutomationLaneComponent from './AutomationLane';
 import { audioEngine } from '../engine/AudioEngine';
+import { playheadStore } from '../utils/playheadStore';
 
 interface AutomationEditorViewProps {
   tracks: Track[];
-  currentTime: number;
+  /** Inutilise : la tete de lecture est lue dans playheadStore. */
+  currentTime?: number;
   bpm: number;
   zoomH: number;
   onUpdateTrack: (track: Track) => void;
@@ -15,7 +17,6 @@ interface AutomationEditorViewProps {
 
 const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
   tracks,
-  currentTime,
   bpm,
   zoomH: initialZoomH,
   onUpdateTrack,
@@ -151,7 +152,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
       }
 
       // Playhead
-      const phX = timeToPixels(currentTime) - scrollLeft;
+      const phX = timeToPixels(playheadStore.get()) - scrollLeft;
       if (phX >= 0 && phX <= width) {
           ctx.strokeStyle = PH_COLOR;
           ctx.lineWidth = 1;
@@ -166,7 +167,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
   useEffect(() => {
       requestRef.current = requestAnimationFrame(drawRuler);
       return () => cancelAnimationFrame(requestRef.current);
-  }, [scrollLeft, currentTime, zoomH, bpm]);
+  }, [scrollLeft, zoomH, bpm]);
 
   // Pointer handling for Seek
   const handleRulerClick = (e: React.MouseEvent) => {

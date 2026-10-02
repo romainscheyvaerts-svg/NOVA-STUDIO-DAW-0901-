@@ -2,6 +2,22 @@ import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import MobileContainer from './MobileContainer';
 import { Track, Clip, TrackType, TrackSend } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
+import { playheadStore, usePlayheadTime } from '../utils/playheadStore';
+
+/** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
+const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
+  const t = usePlayheadTime(0.05);
+  return (
+    <>
+      <span className="text-cyan-400 font-mono text-sm font-bold tracking-wider">
+        {format(t + 1e-6)}
+      </span>
+      <span className="text-white/30 font-mono text-xs ml-2">
+        {(t + 1e-6).toFixed(1)}s
+      </span>
+    </>
+  );
+};
 
 // Cache des tracés de forme d'onde. Pendant la lecture, la page se ré-affiche à
 // chaque image (position de lecture) : recalculer les crêtes parcourait tout le
@@ -93,7 +109,6 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   
   // State
   const [zoom, setZoom] = useState(80); // pixels per beat
-  const [scrollX, setScrollX] = useState(0);
   const [selectedClipRaw, setSelectedClip] = useState<{ trackId: string; clip: Clip } | null>(null);
   // La sélection garde une copie du clip au moment du tap ; on relit toujours
   // la version actuelle (sinon fondus/gain repartaient de l'ancienne valeur,
@@ -159,18 +174,42 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     return `${bars}.${beats}`;
   }, [beatsPerSecond]);
 
-  // Auto-scroll to playhead
+  // Tete de lecture (regle + trait) et suivi pendant la lecture : abonnes a
+  // playheadStore, ils bougent sans re-rendre la page a chaque image.
+  const rulerPlayheadRef = useRef<HTMLDivElement>(null);
+  const linePlayheadRef = useRef<HTMLDivElement>(null);
+  // Largeur visible de la timeline, suivie par ResizeObserver (pas de lecture
+  // de clientWidth a chaque image, qui forcait un recalcul de mise en page).
+  const viewportWidthRef = useRef(0);
   useEffect(() => {
-    if (isPlaying && scrollContainerRef.current) {
-      const playheadX = timeToX(currentTime);
-      const containerWidth = scrollContainerRef.current.clientWidth - TRACK_HEADER_WIDTH;
-      const scrollLeft = scrollContainerRef.current.scrollLeft;
-      
-      if (playheadX > scrollLeft + containerWidth - 100 || playheadX < scrollLeft + 50) {
-        scrollContainerRef.current.scrollLeft = Math.max(0, playheadX - containerWidth / 2);
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    viewportWidthRef.current = el.clientWidth;
+    const ro = new ResizeObserver(() => { viewportWidthRef.current = el.clientWidth; });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    const apply = () => {
+      const t = playheadStore.get();
+      const playheadX = timeToX(t);
+      // Lectures d'abord, ecritures ensuite (evite une mise en page forcee).
+      const el = scrollContainerRef.current;
+      const scrollLeft = el ? el.scrollLeft : 0;
+      const x = `${playheadX}px`;
+      if (rulerPlayheadRef.current) rulerPlayheadRef.current.style.left = x;
+      if (linePlayheadRef.current) linePlayheadRef.current.style.left = x;
+      // Auto-scroll to playhead
+      if (isPlaying && el) {
+        const containerWidth = viewportWidthRef.current - TRACK_HEADER_WIDTH;
+        if (playheadX > scrollLeft + containerWidth - 100 || playheadX < scrollLeft + 50) {
+          el.scrollLeft = Math.max(0, playheadX - containerWidth / 2);
+        }
       }
-    }
-  }, [currentTime, isPlaying, timeToX]);
+    };
+    apply();
+    return playheadStore.subscribe(apply);
+  }, [isPlaying, timeToX]);
 
   // Handle timeline tap to seek
   const handleTimelineTap = useCallback((e: React.TouchEvent | React.MouseEvent) => {
@@ -290,10 +329,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     setPinchStart(null);
   }, []);
 
-  // Handle scroll
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    setScrollX(e.currentTarget.scrollLeft);
-  }, []);
+  // (Le defilement n'est plus copie dans un etat : la valeur n'etait lue nulle
+  // part et le suivi de la tete de lecture defile a chaque image, ce qui
+  // re-rendait toute la page — pistes et formes d'onde — 60 fois par seconde.)
 
   // Render waveform
   const renderWaveform = useCallback((
@@ -382,10 +420,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   const handlePasteClip = useCallback(() => {
     if (!clipboard || !selectedTrackId) return;
     if (onPasteClip) {
-      onPasteClip(selectedTrackId, currentTime);
+      onPasteClip(selectedTrackId, playheadStore.get());
       showNotification('📋 Clip collé');
     }
-  }, [clipboard, selectedTrackId, currentTime, onPasteClip, showNotification]);
+  }, [clipboard, selectedTrackId, onPasteClip, showNotification]);
 
   // Duplicate selected clip
   const handleDuplicateClip = useCallback(() => {
@@ -409,7 +447,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   const handleSplitClip = useCallback(() => {
     if (!selectedClip) return;
     const clip = selectedClip.clip;
-    const splitTime = currentTime;
+    const splitTime = playheadStore.get();
     
     // Only split if playhead is within clip
     if (splitTime > clip.start && splitTime < clip.start + clip.duration) {
@@ -420,7 +458,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     } else {
       showNotification('⚠️ Playhead doit être dans le clip');
     }
-  }, [selectedClip, currentTime, onSplitClip, showNotification]);
+  }, [selectedClip, onSplitClip, showNotification]);
 
   // Toggle reverse on clip
   const handleReverseClip = useCallback(() => {
@@ -523,12 +561,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         {/* Time Display */}
         <div className="flex-1 flex items-center justify-center">
           <div className="bg-black/40 rounded-lg px-3 py-1 border border-white/10">
-            <span className="text-cyan-400 font-mono text-sm font-bold tracking-wider">
-              {formatBarsBeat(currentTime)}
-            </span>
-            <span className="text-white/30 font-mono text-xs ml-2">
-              {currentTime.toFixed(1)}s
-            </span>
+            <MobileClock format={formatBarsBeat} />
           </div>
         </div>
 
@@ -754,7 +787,6 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         <div
           ref={scrollContainerRef}
           className="flex-1 overflow-auto"
-          onScroll={handleScroll}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
           onTouchCancel={handleTouchEnd}
@@ -803,8 +835,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
               {/* Playhead marker on ruler */}
               <div
+                ref={rulerPlayheadRef}
                 className="absolute top-0 bottom-0 w-0.5 bg-cyan-400 z-30"
-                style={{ left: timeToX(currentTime) }}
+                style={{ left: timeToX(playheadStore.get()) }}
               >
                 <div className="absolute -top-0 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-cyan-400" />
               </div>
@@ -825,8 +858,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
               {/* Playhead line */}
               <div
+                ref={linePlayheadRef}
                 className="absolute top-0 bottom-0 w-0.5 bg-cyan-400 z-20 pointer-events-none shadow-[0_0_8px_rgba(34,211,238,0.5)]"
-                style={{ left: timeToX(currentTime) }}
+                style={{ left: timeToX(playheadStore.get()) }}
               />
 
               {/* Track rows */}

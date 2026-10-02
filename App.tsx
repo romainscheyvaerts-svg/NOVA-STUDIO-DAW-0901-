@@ -5,7 +5,7 @@ import TransportBar from './components/TransportBar';
 import MobileTransport from './components/MobileTransport';
 import AdminTemplateButton from './components/AdminTemplateButton';
 import ArrangementView from './components/ArrangementView';
-const MixerView = lazy(() => import('./components/MixerView'));
+const MixerView = lazy(() => import('./components/MixerView').then(m => ({ default: React.memo(m.default) })));
 // Charge a la demande : PluginEditor tire les 13 interfaces de plugins,
 // soit plus de 8000 lignes qui ne servent qu'a l'ouverture d'un effet.
 const PluginEditor = lazy(() => import('./components/PluginEditor'));
@@ -63,6 +63,8 @@ import { novaSpotlight } from './utils/novaSpotlight';
 import { openBuyBeat, openProMix, openStudioSession, openBattle, getCatalogBeat } from './utils/studioLinks';
 import { parseLocalCommand } from './utils/novaCommands';
 import { listTakes, selectTakeActions, takeNumberOf } from './utils/takes';
+import { playheadStore } from './utils/playheadStore';
+import { useLatestCallback } from './utils/useLatestCallback';
 import RecordingCoach from './components/RecordingCoach';
 import LyricsPrompter from './components/LyricsPrompter';
 import MicLevelMeter from './components/MicLevelMeter';
@@ -631,12 +633,27 @@ export default function App() {
   // Ref to track atomic updates (volume/pan only) to skip expensive graph rebuild
   const skipEngineUpdateRef = useRef(false);
 
+  // Pistes deja transmises au moteur (par reference) et signature du routage.
+  // Avant, chaque modification (renommer, deplacer un clip...) rappelait
+  // updateTrack sur TOUTES les pistes, donc updateParams sur chaque effet.
+  const engineTracksRef = useRef<Map<string, Track> | null>(null);
+  const engineRoutingRef = useRef('');
   useEffect(() => {
     if (skipEngineUpdateRef.current) {
       skipEngineUpdateRef.current = false; // Reset flag
       return; // Skip rebuild for atomic updates
     }
-    if (audioEngine.ctx) state.tracks.forEach(t => audioEngine.updateTrack(t, state.tracks));
+    if (!audioEngine.ctx) return;
+    // Routage, solo et envois agissent sur les autres pistes (bus, pistes
+    // rendues muettes par un solo) : dans ce cas on met tout a jour, comme avant.
+    const routing = state.tracks.map(t =>
+      `${t.id}>${t.outputTrackId || ''}|${t.isSolo ? 1 : 0}|${(t.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}:${sd.level}`).join(',')}`
+    ).join(';');
+    const previous = engineTracksRef.current;
+    const full = !previous || routing !== engineRoutingRef.current;
+    state.tracks.forEach(t => { if (full || previous!.get(t.id) !== t) audioEngine.updateTrack(t, state.tracks); });
+    engineTracksRef.current = new Map(state.tracks.map(t => [t.id, t]));
+    engineRoutingRef.current = routing;
   }, [state.tracks]); 
   useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
   // Le reglage de compensation n'etait jamais transmis au moteur.
@@ -654,18 +671,32 @@ export default function App() {
     else metronomeService.stop();
   }, [state.isPlaying, state.metronome.enabled]);
   
+  // Tete de lecture : pendant la lecture la position va dans playheadStore (hors
+  // de l'etat React) ; seuls les composants qui l'affichent sont rafraichis.
+  // state.currentTime n'est mis a jour qu'a l'arret, a la pause et aux sauts.
   useEffect(() => {
     let animId: number;
     const updateLoop = () => {
       if (stateRef.current.isPlaying) {
-         const time = audioEngine.getCurrentTime();
-         setVisualState({ currentTime: time });
+         playheadStore.set(audioEngine.getCurrentTime());
          animId = requestAnimationFrame(updateLoop);
       }
     };
     if (state.isPlaying) { animId = requestAnimationFrame(updateLoop); }
     return () => cancelAnimationFrame(animId);
-  }, [state.isPlaying, setVisualState]);
+  }, [state.isPlaying]);
+  // A l'arret, la tete de lecture suit la position validee (stop, pause, saut,
+  // fin de prise, annulation, chargement). isPlaying fait partie des
+  // dependances : un stop qui revient a la meme position (0) doit aussi la recaler.
+  useEffect(() => { if (!state.isPlaying) playheadStore.set(state.currentTime); }, [state.currentTime, state.isPlaying]);
+
+  /** Met la lecture en pause et valide la position atteinte dans l'etat. */
+  const pausePlayback = useCallback(() => {
+    audioEngine.stopAll();
+    const t = audioEngine.getCurrentTime();
+    playheadStore.set(t);
+    setVisualState({ isPlaying: false, currentTime: t });
+  }, [setVisualState]);
 
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);
@@ -1234,6 +1265,7 @@ export default function App() {
   const handleSeek = useCallback((time: number) => { 
     // Pendant une prise, déplacer la lecture la désynchroniserait.
     if (stateRef.current.isRecording) return;
+    playheadStore.set(time);
     setVisualState({ currentTime: time });
     audioEngine.seekTo(time, stateRef.current.tracks, stateRef.current.isPlaying);
     // Le clic doit repartir sur la grille a la nouvelle position.
@@ -1249,13 +1281,12 @@ export default function App() {
       if (stateRef.current.isRecording) { await toggleRecordRef.current?.(); return; }
       await ensureAudioEngine();
       if (stateRef.current.isPlaying) {
-        audioEngine.stopAll();
-        setVisualState({ isPlaying: false });
+        pausePlayback();
       } else {
         audioEngine.startPlayback(stateRef.current.currentTime, stateRef.current.tracks);
         setVisualState({ isPlaying: true });
       }
-  }, [setVisualState]);
+  }, [setVisualState, pausePlayback]);
 
   /**
    * Récupère la prise en cours et l'ajoute à la piste armée :
@@ -1692,7 +1723,7 @@ export default function App() {
         metronomeService.stop();
         await finalizeRecording();
         // Retour au début de la prise : prêt à la réécouter.
-        const back = recStartRef.current ?? stateRef.current.currentTime;
+        const back = recStartRef.current ?? playheadStore.get();
         audioEngine.seekTo(back, stateRef.current.tracks, false);
         setState(prev => ({ ...prev, isPlaying: false, currentTime: back }));
         return;
@@ -1724,13 +1755,14 @@ export default function App() {
     try { countIn = localStorage.getItem('nova_count_in') !== '0'; } catch { /* défaut : oui */ }
     if (countIn && !(await runCountIn(currentState.bpm))) return;
 
-    let startAt = stateRef.current.currentTime;
+    let startAt = playheadStore.get();
     const pz = stateRef.current.punch;
     if (pz?.enabled && pz.punchOut > pz.punchIn) {
       // Punch : on repart un peu avant la zone (pré-roll) pour se caler.
       startAt = Math.max(0, pz.punchIn - (pz.preRoll || (240 / (stateRef.current.bpm || 120)) * 2));
       audioEngine.setLoop(false, stateRef.current.loopStart, stateRef.current.loopEnd);
       audioEngine.seekTo(startAt, stateRef.current.tracks, false);
+      playheadStore.set(startAt);
       punchRecRef.current = { in: pz.punchIn, out: pz.punchOut };
     }
     const success = await audioEngine.startRecording(startAt, armedTrack.id);
@@ -1740,7 +1772,8 @@ export default function App() {
       setState(produce(draft => {
         draft.isRecording = true;
         draft.isPlaying = true;
-        draft.recStartTime = draft.currentTime;
+        draft.currentTime = startAt;
+        draft.recStartTime = startAt;
       }));
     } else {
       setAiNotification("🎤 L'enregistrement n'a pas pu démarrer. Vérifie que le micro est autorisé, puis réessaie.");
@@ -1946,7 +1979,7 @@ export default function App() {
         id: clipId,
         name: file.name.replace(/\.[^/.]+$/, ''),
         type: TrackType.AUDIO,
-        start: stateRef.current.currentTime,
+        start: playheadStore.get(),
         duration: audioBuffer.duration,
         offset: 0,
         bufferId: clipId,
@@ -2595,7 +2628,7 @@ export default function App() {
               ? audioBufferRegistry.registerWithUrl(audioBuffer, audioRef, clipId)
               : audioBufferRegistry.register(audioBuffer, clipId);
           const clipDuration = audioBuffer.duration;
-          const clipStart = startTime ?? stateRef.current.currentTime;
+          const clipStart = startTime ?? playheadStore.get();
           const clipColor = UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length];
 
           setState(produce((draft: DAWState) => {
@@ -2896,16 +2929,13 @@ export default function App() {
   // (sauf pendant une prise, qu'on ne coupe jamais).
   useEffect(() => {
     const onPreview = () => {
-      if (stateRef.current.isPlaying && !stateRef.current.isRecording) {
-        audioEngine.stopAll();
-        setVisualState({ isPlaying: false });
-      }
+      if (stateRef.current.isPlaying && !stateRef.current.isRecording) pausePlayback();
     };
     window.addEventListener('nova:preview-start', onPreview);
     const onNotify = (e: Event) => { const d = (e as CustomEvent).detail; if (typeof d === 'string') setAiNotification(d); };
     window.addEventListener('nova:notify', onNotify);
     return () => { window.removeEventListener('nova:preview-start', onPreview); window.removeEventListener('nova:notify', onNotify); };
-  }, [setVisualState]);
+  }, [pausePlayback]);
 
   const handleLoadCatalogBeat = async (inst: any) => {
     let audioUrl = '';
@@ -2915,7 +2945,7 @@ export default function App() {
       setAiNotification("Ce beat n'a pas de fichier audio disponible.");
       return;
     }
-    if (stateRef.current.isPlaying) { audioEngine.stopAll(); setVisualState({ isPlaying: false }); }
+    if (stateRef.current.isPlaying) pausePlayback();
     // L'extrait de ce beat (ou d'un autre) s'arrête : on passe au beat dans le projet.
     window.dispatchEvent(new Event('nova:transport-start'));
     setState(produce((draft: DAWState) => {
@@ -3007,7 +3037,11 @@ export default function App() {
   useEffect(() => {
     (window as any).DAW_CONTROL = {
       loadDrumSample: handleLoadDrumSample,
-      getState: () => stateRef.current,
+      // Pendant la lecture, la position vivante est dans playheadStore.
+      getState: () => {
+        const st = stateRef.current;
+        return st.isPlaying ? { ...st, currentTime: playheadStore.get() } : st;
+      },
       getInstrumentalBuffer: () => {
           const instru = stateRef.current.tracks.find(t => t.id === 'instrumental');
           const clip = instru?.clips[0];
@@ -3381,7 +3415,7 @@ export default function App() {
 
       // ---- Marqueurs ----
       case 'ADD_MARKER':
-        handleAddMarker(Math.max(0, Number(p.time) ?? stateRef.current.currentTime), p.name);
+        handleAddMarker(Math.max(0, Number(p.time) ?? playheadStore.get()), p.name);
         break;
 
       case 'DELETE_MARKER': {
@@ -3729,7 +3763,7 @@ export default function App() {
             bpm: currentState.bpm,
             isPlaying: currentState.isPlaying,
             isRecording: currentState.isRecording,
-            currentTime: Math.round(currentState.currentTime * 100) / 100,
+            currentTime: Math.round(playheadStore.get() * 100) / 100,
             selectedTrackId: currentState.selectedTrackId,
             trackCount: currentState.tracks.length,
             currentView: currentState.currentView,
@@ -3814,6 +3848,25 @@ export default function App() {
         };
     }
   };
+
+  // --- Gestionnaires d'identite stable pour les vues memoisees ---
+  // (ArrangementView, MixerView) : des fonctions flechees recreees a chaque
+  // rendu d'App annulaient React.memo. Elles appellent toujours la derniere
+  // version (pas de fermeture perimee).
+  const onSetLoopStable = useLatestCallback((start: number, end: number) => setState(prev => ({ ...prev, loopStart: start, loopEnd: end, isLoopActive: true })));
+  const onSelectTrackStable = useLatestCallback((id: string) => setState(p => ({ ...p, selectedTrackId: id })));
+  const onDropPluginOpenUI = useLatestCallback((trackId: string, type: PluginType, metadata?: any) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true }));
+  const onOpenPluginUI = useLatestCallback(async (tid: string, p: PluginInstance) => { await ensureAudioEngine(); setActivePlugin({ trackId: tid, plugin: p }); });
+  const onRequestAddPluginMenu = useLatestCallback((tid: string, x: number, y: number) => setAddPluginMenu({ trackId: tid, x, y }));
+  const onEditClipStable = useLatestCallback(handleEditClip);
+  const onEditMidiStable = useLatestCallback((trackId: string, clipId: string) => setMidiEditorOpen({ trackId, clipId }));
+  const onArrangementAudioDrop = useLatestCallback((trackId: string, url: string, name: string, time: number) => {
+    // Beat du catalogue : même chemin que « Essayer » (remplace le beat, règle tempo et Auto-Tune).
+    const beat = takeDraggedBeat(url);
+    if (beat) return loadCatalogBeatRef.current?.(beat);
+    // Id vide = nouvelle piste (fichiers en trop d'un dépôt multiple).
+    return handleUniversalAudioImport(url, name, trackId || undefined, time);
+  });
 
   // Auth temporairement désactivée pour éviter écran noir
   // if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
@@ -3902,25 +3955,20 @@ export default function App() {
             <>
               {state.currentView === 'ARRANGEMENT' && (
                 <ArrangementView
-                   tracks={state.tracks} currentTime={state.currentTime} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
-                   onSetLoop={(start, end) => setState(prev => ({ ...prev, loopStart: start, loopEnd: end, isLoopActive: true }))}
-                   onSeek={handleSeek} bpm={state.bpm} selectedTrackId={state.selectedTrackId} onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
+                   tracks={state.tracks} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
+                   onSetLoop={onSetLoopStable}
+                   onSeek={handleSeek} bpm={state.bpm} selectedTrackId={state.selectedTrackId} onSelectTrack={onSelectTrackStable}
                    onUpdateTrack={handleUpdateTrack} onReorderTracks={handleReorderTracks}
-                   onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
-                   onSelectPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
-                   onRemovePlugin={handleRemovePlugin} onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
+                   onDropPluginOnTrack={onDropPluginOpenUI}
+                   onSelectPlugin={onOpenPluginUI}
+                   onRemovePlugin={handleRemovePlugin} onRequestAddPlugin={onRequestAddPluginMenu}
                    onAddTrack={handleCreateTrack} onDuplicateTrack={handleDuplicateTrack} onDeleteTrack={handleDeleteTrack}
                    onFreezeTrack={handleFreezeTrack}
-                   onEditClip={handleEditClip} isRecording={state.isRecording} isPlaying={state.isPlaying} recStartTime={state.recStartTime}
-                   onMoveClip={handleMoveClip} onEditMidi={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })}
+                   onEditClip={onEditClipStable} isRecording={state.isRecording} isPlaying={state.isPlaying} recStartTime={state.recStartTime}
+                   onMoveClip={handleMoveClip} onEditMidi={onEditMidiStable}
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
                    onMoveClipsBy={handleMoveClipsBy}
-                   onAudioDrop={(trackId, url, name, time) => {
-                     // Beat du catalogue : même chemin que « Essayer » (remplace le beat, règle tempo et Auto-Tune).
-                     const beat = takeDraggedBeat(url);
-                     if (beat) return loadCatalogBeatRef.current?.(beat);
-                     return handleUniversalAudioImport(url, name, trackId || undefined, time);
-                   }}
+                   onAudioDrop={onArrangementAudioDrop}
                    markers={state.markers} onAddMarker={handleAddMarker}
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
                 />
@@ -3929,10 +3977,10 @@ export default function App() {
               {state.currentView === 'MIXER' && (
                  <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><MixerView
                     tracks={state.tracks} onUpdateTrack={handleUpdateTrack}
-                    onOpenPlugin={async (tid, p) => { await ensureAudioEngine(); setActivePlugin({trackId:tid, plugin:p}); }}
-                    onDropPluginOnTrack={(trackId, type, metadata) => handleAddPluginFromContext(trackId, type, metadata, { openUI: true })}
+                    onOpenPlugin={onOpenPluginUI}
+                    onDropPluginOnTrack={onDropPluginOpenUI}
                     onRemovePlugin={handleRemovePlugin} onAddBus={handleAddBus} onToggleBypass={handleToggleBypass}
-                    onRequestAddPlugin={(tid, x, y) => setAddPluginMenu({ trackId: tid, x, y })}
+                    onRequestAddPlugin={onRequestAddPluginMenu}
                     onCopyPluginToTrack={handleCopyPluginToTrack} onReorderPlugins={handleReorderPlugins}
                     trackGroups={state.trackGroups} onCreateGroup={handleCreateGroup}
                     onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup}
