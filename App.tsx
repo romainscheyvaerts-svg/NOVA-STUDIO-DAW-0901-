@@ -204,6 +204,9 @@ const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number =
   return { id: `pl-${Date.now()}-${Math.random()}`, name, type, isEnabled: true, params, latency: 0 };
 };
 
+/** Empreinte de la reverb voix du studio (public/ir), relative à la base du site. */
+const MAKE_MUSIC_VOCAL_IR = `${import.meta.env.BASE_URL}ir/make-music-vocal.wav`;
+
 const createInitialSends = (bpm: number, outputId: string = 'master'): Track[] => [
   { 
     id: 'send-delay', 
@@ -237,7 +240,14 @@ const createInitialSends = (bpm: number, outputId: string = 'master'): Track[] =
     outputTrackId: outputId, 
     sends: [], 
     clips: [], 
-    plugins: [createDefaultPlugins('REVERB', 1.0, bpm, { decay: 1.2, preDelay: 0.01, size: 0.4, mode: 'PLATE' })], 
+    // Reverb des voix du studio : empreinte de la reverb utilisée chez Make Music
+    // (Slate VerbSuite Classics, FG-480 « Silica Beads », preset NKF), capturée
+    // avec bridge-python/capture_ir.py. Pré-délai, EQ et chorus sont dans l'empreinte.
+    plugins: [createDefaultPlugins('REVERB', 1.0, bpm, {
+      irUrl: MAKE_MUSIC_VOCAL_IR, name: 'Make Music · FG-480 Silica Beads',
+      decay: 1.2, preDelay: 0, size: 0.4, mode: 'PLATE', erLevel: 0, modDepth: 0, bassBoost: 0,
+      lowCut: 20, highCut: 20000, width: 1, ducking: 0,
+    })],
     automationLanes: [createDefaultAutomation('volume', '#10b981')], 
     totalLatency: 0 
   },

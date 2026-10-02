@@ -445,9 +445,13 @@ export class ReverbNode {
     this.irKey = key;
     this.lastIrTime = now;
     const ir = this.buildImpulse();
+    // Empreinte capturée : son niveau est calibré dans le fichier, le convolveur
+    // ne doit pas le renormaliser (il le ramène sinon à un niveau arbitraire).
+    const captured = !!this.params.irUrl && loadedIrs.get(`${this.ctx.sampleRate}|${this.params.irUrl}`) === ir;
     const t = this.ctx.currentTime;
     const firstLoad = !this.convA.buffer && !this.convB.buffer;
     if (firstLoad) {
+      this.convA.normalize = !captured;
       this.convA.buffer = ir;
       return;
     }
@@ -455,6 +459,7 @@ export class ReverbNode {
     const incoming = nextIsA ? this.convA : this.convB;
     const incomingGain = nextIsA ? this.convGainA : this.convGainB;
     const outgoingGain = nextIsA ? this.convGainB : this.convGainA;
+    incoming.normalize = !captured;
     incoming.buffer = ir;
     incomingGain.gain.cancelScheduledValues(t);
     outgoingGain.gain.cancelScheduledValues(t);
