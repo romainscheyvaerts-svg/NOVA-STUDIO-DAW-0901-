@@ -10,6 +10,14 @@ interface TrackCreationBarProps {
   /** Ouvre / ferme le prompteur de paroles. */
   onOpenLyrics?: () => void;
   lyricsOpen?: boolean;
+  /**
+   * Mode instru (mélodie du studio) ou rôle beatmaker : outils de composition
+   * (piste MIDI + piano roll, batterie). Jamais en mode voix, pour ne pas
+   * embrouiller l'artiste qui essaie une instru.
+   */
+  beatmaking?: boolean;
+  onNewMidiTrack?: () => void;
+  onOpenDrums?: () => void;
 }
 
 /**
@@ -17,7 +25,7 @@ interface TrackCreationBarProps {
  * pas. La barre flottante propose donc les deux gestes utiles : ajouter une
  * piste voix et choisir un style de mix.
  */
-const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen }) => {
+const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen, beatmaking, onNewMidiTrack, onOpenDrums }) => {
   const style = findVocalMixStyle(currentStyleId);
   return (
     <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[150] flex items-center gap-1 sm:gap-2 max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-hide">
@@ -32,6 +40,18 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOp
         <i className="fas fa-microphone text-sm text-cyan-400"></i>
         <span className="text-xs font-bold">Piste voix</span>
       </button>
+      {beatmaking && onOpenDrums && (
+        <button type="button" onClick={onOpenDrums} title="Boîte à rythmes : pas, sons, mix de chaque pad"
+          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-[#1a1c21] border-orange-400/40 text-orange-200 hover:text-white">
+          <span className="text-base leading-none">🥁</span><span className="text-xs font-bold">Batterie</span>
+        </button>
+      )}
+      {beatmaking && onNewMidiTrack && (
+        <button type="button" onClick={onNewMidiTrack} title="Nouvelle piste MIDI (synthé, basse…) et son piano roll"
+          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-[#1a1c21] border-violet-400/40 text-violet-200 hover:text-white">
+          <span className="text-base leading-none">🎹</span><span className="text-xs font-bold">Piste MIDI</span>
+        </button>
+      )}
       {onOpenLyrics && (
         <button
           type="button"

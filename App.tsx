@@ -2432,6 +2432,29 @@ function Studio() {
   }, [armedTrackId]);
 
   /** Cree un clip MIDI vide sur une piste instrument et ouvre le piano roll. */
+  /** Mode instru : nouvelle piste MIDI (synthé) avec un motif de 4 mesures, piano roll ouvert. */
+  const handleNewMidiTrack = useCallback(() => {
+    const st = stateRef.current;
+    const trackId = `track-midi-${Date.now().toString(36)}`;
+    const clipId = `clip-midi-${Date.now().toString(36)}`;
+    const bar = (60 / (st.bpm || 120)) * 4;
+    const start = Math.floor(playheadStore.get() / bar) * bar;
+    const color = UI_CONFIG.TRACK_COLORS[st.tracks.length % UI_CONFIG.TRACK_COLORS.length];
+    setState(produce((draft: DAWState) => {
+      const n = draft.tracks.filter(t => t.type === TrackType.MIDI).length + 1;
+      const track: Track = {
+        id: trackId, name: `SYNTHÉ ${n}`, type: TrackType.MIDI, color, isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+        volume: 0.8, pan: 0, outputTrackId: 'master', sends: [], plugins: [], automationLanes: [], totalLatency: 0,
+        clips: [{ id: clipId, start, duration: bar * 4, offset: 0, fadeIn: 0, fadeOut: 0, name: 'Motif', color, type: TrackType.MIDI, notes: [], isMuted: false, gain: 1 }],
+      };
+      // Sous la mélodie et la batterie, au-dessus des voix.
+      const at = draft.tracks.findIndex(t => t.id === 'track-rec-main');
+      draft.tracks.splice(at >= 0 ? at : draft.tracks.length, 0, track);
+    }));
+    setTimeout(() => setMidiEditorOpen({ trackId, clipId }), 50);
+    setAiNotification('🎹 Piste MIDI créée : dessine tes notes dans le piano roll (clic pour poser, glisser pour allonger).');
+  }, [setState]);
+
   const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => {
     const track = stateRef.current.tracks.find(t => t.id === trackId);
     if (!track) return;
@@ -4659,6 +4682,9 @@ function Studio() {
       {(!isMobile || activeMobileTab === 'TRACKS' || activeMobileTab === 'ARRANGEMENT') && (
         <TrackCreationBar
           onCreateTrack={handleCreateTrack}
+          beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
+          onOpenDrums={() => setDrumsOpen(true)}
+          onNewMidiTrack={handleNewMidiTrack}
           onOpenVocalTools={() => setVocalToolsOpen(true)}
           onOpenLyrics={() => setLyricsOpen(o => !o)}
           lyricsOpen={lyricsOpen}
