@@ -109,7 +109,7 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
             <div className="grid grid-cols-2 gap-4 pt-2">
                 {/* CLOUD ACTIONS GROUP */}
                 <div className="col-span-2 space-y-2">
-                     {!user ? (
+                     {!user && onTakeHome ? null : !user ? (
                         // NOT LOGGED IN STATE : Invitation à se connecter
                         <button 
                             onClick={handleLoginRedirect}

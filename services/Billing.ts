@@ -76,20 +76,22 @@ export const hasPlan = (st: { plans: { plan: string }[]; admin: boolean }, plan:
 
 // --- Export de mes pistes seules -----------------------------------------------------
 
-const LS = (key: string) => `nova_export_voices:${key}`;
+// Le déblocage est toujours confirmé par le serveur : une valeur dans le
+// navigateur (localStorage) suffisait avant à exporter sans payer. Cache en
+// mémoire seulement, le temps de la session.
+const unlockedCache = new Set<string>();
 
 export async function isExportVoicesUnlocked(projectKey: string): Promise<boolean> {
-  try { if (localStorage.getItem(LS(projectKey)) === '1') return true; } catch { /* */ }
+  if (unlockedCache.has(projectKey)) return true;
   try {
     const r = await billing<{ unlocked: boolean }>('export_unlocked', { project_key: projectKey });
-    if (r.unlocked) { try { localStorage.setItem(LS(projectKey), '1'); } catch { /* */ } }
+    if (r.unlocked) unlockedCache.add(projectKey);
     return r.unlocked;
   } catch { return false; }
 }
 
-export const markExportVoicesUnlocked = (projectKey: string) => {
-  try { localStorage.setItem(LS(projectKey), '1'); } catch { /* */ }
-};
+/** Après un paiement ou un crédit Nova Pro vérifié par le serveur. */
+export const markExportVoicesUnlocked = (projectKey: string) => { unlockedCache.add(projectKey); };
 
 export async function openBillingPortal(): Promise<void> {
   const tab = window.open('', '_blank');

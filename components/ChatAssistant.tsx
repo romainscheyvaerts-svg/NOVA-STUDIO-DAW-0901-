@@ -160,7 +160,8 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         role: 'assistant',
         content: responseText || "Réglages de mixage effectués.",
         timestamp: Date.now(),
-        executedAction: responseActions?.map((a: any) => a.description || a.action).join(', ')
+        // Les codes internes (SET_SEND_LEVEL…) ne veulent rien dire pour l'artiste.
+        executedAction: (responseActions || []).map((a: any) => a.description).filter(Boolean).join(', ') || undefined
       };
       
       setMessages(prev => [...prev, assistantMsg]);
@@ -201,6 +202,13 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         ? "Ouvre l'onglet « Sons » en bas, écoute les beats, puis appuie sur « Essayer » : le studio se règle tout seul sur son tempo et sa tonalité."
         : "Dans le catalogue à gauche, écoute les beats puis clique « Essayer » : le studio se règle tout seul sur son tempo et sa tonalité."
     };
+    // Mode instru (mélodie du studio) : le guide parle de batterie, pas de voix d'abord.
+    const aDesInstruments = pistes.some(t => (t.type === TrackType.DRUM_RACK || t.type === TrackType.MIDI || t.type === TrackType.SAMPLER) && (t.clips.length > 0 || (t as any).drumPads?.length));
+    if (projectState?.projectMode === 'BEATMAKING' && !aDesInstruments) return {
+      numero: 2, icone: 'fa-drum',
+      titre: 'Fais ton instru sur la mélodie',
+      detail: "En bas : « 🥁 Batterie » pour poser un rythme pas à pas, « 🎹 Piste MIDI » pour une basse ou un synthé au piano roll. Tu pourras ensuite enregistrer ta voix dessus.",
+    };
     if (!aDejaEcoute.current && !projectState?.isPlaying) return {
       numero: 2, icone: 'fa-play',
       titre: 'Écoute ton instru',
@@ -237,7 +245,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     return {
       numero: 6, icone: 'fa-star',
       titre: 'Ton morceau prend forme',
-      detail: "Refais une prise si besoin (l'ancienne est coupée, pas effacée), essaie un autre style, redemande-moi une écoute. Ctrl+Z annule. Pour exporter, il faut acheter l'instrumental."
+      detail: "Refais une prise si besoin (l'ancienne est coupée, pas effacée), essaie un autre style, redemande-moi une écoute. Ctrl+Z annule. Pour exporter : tes pistes seules (2 €, ou offert avec Nova Pro), ou achète l'instru pour le morceau complet."
     };
   }, [projectState, isMobile, sautBacks, mixEcoute]);
 

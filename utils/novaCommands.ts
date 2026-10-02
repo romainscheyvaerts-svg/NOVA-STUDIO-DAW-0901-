@@ -113,12 +113,15 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
       ...(last ? [{ action: 'SEEK', payload: { time: Math.max(0, last.start) } } as AIAction] : []),
       { action: 'RECORD', payload: {} });
   }
-  if (/\b(enregistre|enregistrer|rec|on enregistre|lance (l )?enregistrement|je suis pret)\b/.test(msg) && !/sauvegard/.test(msg))
+  // « enregistre les backs / harmonies / ad-libs » prépare d'abord la bonne piste (règles plus bas).
+  if (/\b(enregistre|enregistrer|rec|on enregistre|lance (l )?enregistrement|je suis pret)\b/.test(msg) && !/sauvegard/.test(msg) && !/\b(backs?|doubl|harmo|ad.?libs?)/.test(msg))
     return say('🔴 C\'est parti : décompte, puis enregistrement. Réappuie sur REC pour arrêter.', { action: 'RECORD', payload: {} });
   if (/^(lance|joue|play|lecture|ecoute|fais ecouter|vas y)\b/.test(msg) && !/\b(mix|analyse)\b/.test(msg))
     return say('▶ Lecture.', { action: 'PLAY', payload: {} });
   if (/\b(reviens|retour|retourne|va) au debut\b|^debut$/.test(msg)) return say('⏮ Retour au début.', { action: 'SEEK', payload: { time: 0 } });
-  if (/\b(annule|ctrl z|reviens en arriere|defais)\b/.test(msg)) return say('↩️ Annulé.', { action: 'UNDO', payload: {} });
+  // Seulement une demande d'annulation explicite : « annule la boucle » ou
+  // « annule l'autotune » déclenchaient Ctrl+Z (et pouvaient retirer une prise).
+  if (/^(annule|annule ca|annule ca stp|annule la derniere (action|modif|modification)|ctrl z|reviens en arriere|defais|defais ca)[ !.?]*$/.test(msg)) return say('↩️ Annulé.', { action: 'UNDO', payload: {} });
 
   // --- Prises ---
   if (/\b(supprime|efface|vire|enleve)\b.*\b(derniere )?prise\b/.test(msg) && voice) {

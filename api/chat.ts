@@ -293,16 +293,50 @@ function sanitizeActions(actions: any[]): any[] {
     }));
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS Headers
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+/**
+ * Protège les API d'IA : avant, n'importe quel site pouvait les appeler
+ * (CORS « * ») et vider le quota Groq / Gemini, rendant Nova muet pour tous.
+ * Seules les pages de Nova et de Make Music sont acceptées, avec une limite
+ * de requêtes par adresse IP.
+ */
+const ALLOWED = [
+  /^https:\/\/nova-studio-daw-0901[a-z0-9-]*\.vercel\.app$/,
+  /^https:\/\/(www\.)?studiomakemusic\.com$/,
+  /^https:\/\/make-music\.lovable\.app$/,
+  /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
+];
+
+const hits = new Map<string, { n: number; reset: number }>();
+
+/** true = la requête peut continuer ; false = réponse déjà envoyée. */
+function guard(req: VercelRequest, res: VercelResponse, opts: { methods: string; perMinute: number }): boolean {
+  const origin = String(req.headers.origin || '');
+  const okOrigin = !origin || ALLOWED.some(r => r.test(origin));
+  if (origin && okOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', opts.methods);
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  if (req.method === 'OPTIONS') { res.status(okOrigin ? 200 : 403).end(); return false; }
+  if (!okOrigin) { res.status(403).json({ text: 'Origine non autorisée', actions: [], error: 'Forbidden origin' }); return false; }
+
+  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'inconnue';
+  const now = Date.now();
+  const h = hits.get(ip);
+  if (!h || now > h.reset) hits.set(ip, { n: 1, reset: now + 60_000 });
+  else if (++h.n > opts.perMinute) {
+    res.setHeader('Retry-After', String(Math.ceil((h.reset - now) / 1000)));
+    res.status(429).json({ text: '⏳ Trop de demandes d\'un coup : réessaie dans une minute.', actions: [], error: 'Too Many Requests' });
+    return false;
   }
+  if (hits.size > 5000) for (const [k, v] of hits) if (now > v.reset) hits.delete(k);
+  return true;
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (!guard(req, res, { methods: 'POST, OPTIONS', perMinute: 30 })) return;
 
   if (req.method !== 'POST') {
     return res.status(405).json({

@@ -139,9 +139,30 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
     }
   };
 
-  // --- MOUSE HANDLERS ---
-  const handleMouseDown = (e: React.MouseEvent) => {
+  // --- POINTER HANDLERS (souris, doigt, stylet) ---
+  // Au doigt, un glissé sur la grille la fait défiler : on ne pose la note qu'au
+  // relâchement, si le doigt n'a presque pas bougé.
+  const pendingDrawRef = useRef<{ x: number; y: number; time: number; pitch: number } | null>(null);
+  const addNoteAt = (absTime: number, pitch: number) => {
+    const start = snapTime(absTime);
+    const duration = isDrumMode ? 0.1 : (60 / bpm * quantize * 4); // Short fixed duration for drums
+    const newNote: MidiNote = {
+        id: `n-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        pitch,
+        start,
+        duration,
+        velocity: 0.8
+    };
+    updateNotes([...(clip.notes || []), newNote]);
+    playPreview(pitch);
+  };
+  const addNoteRef = useRef(addNoteAt);
+  addNoteRef.current = addNoteAt;
+
+  const handleMouseDown = (e: React.PointerEvent) => {
     if (!containerRef.current) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const isTouch = e.pointerType !== 'mouse';
     const rect = containerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -165,17 +186,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
 
     // DRAW or TRIGGER (Drum)
     if (tool === 'DRAW' && !clickedNote) {
-        const start = snapTime(absTime);
-        const duration = isDrumMode ? 0.1 : (60 / bpm * quantize * 4); // Short fixed duration for drums
-        const newNote: MidiNote = {
-            id: `n-${Date.now()}`,
-            pitch,
-            start,
-            duration,
-            velocity: 0.8
-        };
-        updateNotes([...(clip.notes || []), newNote]);
-        playPreview(pitch);
+        if (isTouch) { pendingDrawRef.current = { x: e.clientX, y: e.clientY, time: absTime, pitch }; return; }
+        addNoteAt(absTime, pitch);
         return; // Drum mode usually single click placement
     }
 
@@ -204,6 +216,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
     } 
     else {
         if (!e.shiftKey) setSelectedNoteIds(new Set()); 
+        if (isTouch) return; // au doigt : glisser fait défiler la grille
         setDragMode('SELECT');
         setDragStart({ x: e.clientX, y: e.clientY, time: 0, pitch: 0 }); 
         setSelectionBox({ startX: x + scrollLeft, startY: y + scrollTop, endX: x + scrollLeft, endY: y + scrollTop });
@@ -279,18 +292,26 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
     }
   }, [dragMode, dragStart, initialNotes, selectedNoteIds, zoomX, quantize, bpm, selectionBox, clip.notes]);
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e?: Event) => {
+    const pending = pendingDrawRef.current;
+    pendingDrawRef.current = null;
+    if (pending && e && e.type === 'pointerup') {
+        const pe = e as PointerEvent;
+        if (Math.hypot(pe.clientX - pending.x, pe.clientY - pending.y) < 10) addNoteRef.current(pending.time, pending.pitch);
+    }
     setDragMode(null);
     setDragStart(null);
     setSelectionBox(null);
   };
 
   useEffect(() => {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener('pointermove', handleMouseMove);
+      window.addEventListener('pointerup', handleMouseUp);
+      window.addEventListener('pointercancel', handleMouseUp);
       return () => {
-          window.removeEventListener('mousemove', handleMouseMove);
-          window.removeEventListener('mouseup', handleMouseUp);
+          window.removeEventListener('pointermove', handleMouseMove);
+          window.removeEventListener('pointerup', handleMouseUp);
+          window.removeEventListener('pointercancel', handleMouseUp);
       };
   }, [handleMouseMove]);
 
@@ -423,6 +444,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
+      if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
       
       if (e.key === 'Delete' || e.key === 'Backspace') {
         deleteNotes(Array.from(selectedNoteIds));
@@ -453,7 +475,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNoteIds, applyQuantize, selectAll, doubleNotes, transpose, humanizeNotes]);
+  }, [selectedNoteIds, applyQuantize, selectAll, doubleNotes, transpose, humanizeNotes, onClose]);
 
   // --- DRUM ROW RENDERING ---
   const renderKeys = () => {
@@ -470,7 +492,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                     key={padId}
                     className="flex items-center justify-between px-2 text-[10px] font-bold border-b border-black/20 box-border bg-[#1a1c22] text-slate-400 hover:bg-[#252830] hover:text-white cursor-pointer truncate"
                     style={{ height: currentRowHeight }}
-                    onMouseDown={() => playPreview(pitch)}
+                    onPointerDown={() => playPreview(pitch)}
                 >
                     <span className="truncate w-full">{label}</span>
                 </div>
@@ -488,7 +510,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                 key={pitch} 
                 className={`flex items-center justify-end pr-1 text-[9px] font-mono border-b border-black/20 box-border ${isBlack ? 'bg-black text-slate-600' : 'bg-white text-slate-400'}`}
                 style={{ height: currentRowHeight }}
-                onMouseDown={() => playPreview(pitch)}
+                onPointerDown={() => playPreview(pitch)}
             >
                 {isC && <span className="opacity-100 font-bold text-cyan-600 mr-1">C{Math.floor(pitch/12)-1}</span>}
             </div>
@@ -525,8 +547,9 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
   return (
     <div className="w-full h-full flex flex-col bg-[#14161a] select-none text-white font-inter">
        {/* TOOLBAR (Enhanced with Quantize and Actions) */}
-       <div className="h-14 border-b border-white/10 flex items-center justify-between px-4 bg-[#0c0d10] shrink-0">
-          <div className="flex items-center space-x-4">
+       <div className="h-14 border-b border-white/10 flex items-center justify-between gap-4 px-4 bg-[#0c0d10] shrink-0 overflow-x-auto no-scrollbar">
+          <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="md:hidden shrink-0 w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center"><i className="fas fa-times"></i></button>
+          <div className="flex items-center space-x-4 shrink-0">
              <div className="flex items-center space-x-2">
                 <div className={`w-8 h-8 rounded flex items-center justify-center border ${isDrumMode ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>
                     <i className={`fas ${isDrumMode ? 'fa-drum' : 'fa-keyboard'}`}></i>
@@ -653,7 +676,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
           </div>
           
           {/* Right side: Info and Close */}
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-4 shrink-0">
              <div className="text-[9px] text-slate-500">
                 {selectedNoteIds.size > 0 && <span className="text-cyan-400">{selectedNoteIds.size} selected</span>}
                 {selectedNoteIds.size === 0 && <span>{(clip.notes || []).length} notes</span>}
@@ -669,7 +692,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                   className="w-20 accent-cyan-500"
                 />
              </div>
-             <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-8 h-8 rounded-full bg-white/5 text-slate-400 hover:text-white hover:bg-red-500/20 flex items-center justify-center"><i className="fas fa-times"></i></button>
+             <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="hidden md:flex w-8 h-8 rounded-full bg-white/5 text-slate-400 hover:text-white hover:bg-red-500/20 flex items-center justify-center"><i className="fas fa-times"></i></button>
           </div>
        </div>
 
@@ -687,8 +710,9 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
               <div 
                  ref={containerRef}
                  className="flex-1 overflow-auto bg-[#14161a] relative cursor-crosshair custom-scroll"
+                 style={{ touchAction: 'pan-x pan-y' }}
                  onScroll={handleScroll}
-                 onMouseDown={handleMouseDown}
+                 onPointerDown={handleMouseDown}
               >
                  <div style={{ width: Math.max((clip.duration + 4) * zoomX, 2000), height: totalRows * currentRowHeight, position: 'relative' }}>
                     {renderGridRows()}
@@ -715,7 +739,9 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                                     width: Math.max(5, note.duration * zoomX - 1),
                                     height: currentRowHeight - 2,
                                     backgroundColor: isSelected ? '#fff' : (isDrumMode ? '#f97316' : track.color),
-                                    opacity: isSelected ? 1 : 0.8
+                                    opacity: isSelected ? 1 : 0.8,
+                                    // Glisser une note au doigt la déplace (pas de défilement)
+                                    touchAction: 'none'
                                 }}
                             >
                                 {!isDrumMode && (note.duration * zoomX) > 20 && <span className="text-[7px] text-black ml-1 font-bold">{getNoteName(note.pitch)}</span>}

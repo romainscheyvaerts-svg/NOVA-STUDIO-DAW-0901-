@@ -131,7 +131,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
         const dt = now - last; last = now;
         late += Math.max(0, dt - 50); span += dt;
         if (span >= 1000) {
-            setCpuUsage(prev => prev * 0.5 + Math.min(100, (late / span) * 100) * 0.5);
+            setCpuUsage(prev => { const v = (Number.isFinite(prev) ? prev : 0) * 0.5 + Math.min(100, (late / span) * 100) * 0.5; return Number.isFinite(v) ? v : 0; });
             late = 0; span = 0;
         }
     }, 50);

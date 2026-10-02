@@ -36,6 +36,11 @@ interface TransportProps {
   // Modal Triggers
   onOpenSaveMenu?: () => void;
   onOpenLoadMenu?: () => void;
+  /** Menu mobile : collaboration et session en ligne (plus de boutons flottants). */
+  onOpenCollab?: () => void;
+  collabLabel?: string;
+  onOpenTakeHome?: () => void;
+  takeHomeLabel?: string;
   
   onExportMix?: () => void; 
   onShareProject?: () => void;
@@ -157,7 +162,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isMetronomeEnabled = false, onToggleMetronome, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
-  onOpenSaveMenu, onOpenLoadMenu, onExportMix, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
+  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo,
   user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar, isMobileLayout = false,
@@ -489,6 +494,16 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <i className="fas fa-compact-disc"></i>
                   <span>Exporter</span>
                 </button>
+                {onOpenTakeHome && (
+                  <button onClick={() => { onOpenTakeHome(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-cyan-500/10 text-cyan-300 font-black transition-all flex items-center justify-center space-x-2">
+                    <span>☁️ {takeHomeLabel || 'Emporter la session'}</span>
+                  </button>
+                )}
+                {onOpenCollab && (
+                  <button onClick={() => { onOpenCollab(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-violet-500/10 text-violet-200 font-black transition-all flex items-center justify-center space-x-2">
+                    <span>👥 {collabLabel || 'Collaborer'}</span>
+                  </button>
+                )}
               </div>
             </div>
 

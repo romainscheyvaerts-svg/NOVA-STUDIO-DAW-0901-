@@ -828,7 +828,28 @@ export class SupabaseManager {
   /**
    * Récupère uniquement les instrumentaux actifs (is_active = true)
    */
-  public async getActiveInstrumentals(): Promise<Instrumental[]> {
+  /** Un seul beat / mélodie (arrivée depuis le site) : pas tout le catalogue. */
+  public async getActiveInstrumental(id: string): Promise<Instrumental | null> {
+    if (!catalogSupabase) return null;
+    const { data, error } = await catalogSupabase.from('instrumentals').select('*').eq('id', id).eq('is_active', true).maybeSingle();
+    if (error) throw new Error(error.message || "Catalogue injoignable");
+    return (data as Instrumental) || null;
+  }
+
+  // Le catalogue était retéléchargé en entier par l'accueil, la bibliothèque,
+  // Nova, le défi du jour… : une minute de cache (et une seule requête à la fois).
+  private activeCache: { at: number; p: Promise<Instrumental[]> } | null = null;
+
+  public getActiveInstrumentals(): Promise<Instrumental[]> {
+    const c = this.activeCache;
+    if (c && Date.now() - c.at < 60_000) return c.p;
+    const p = this.fetchActiveInstrumentals();
+    this.activeCache = { at: Date.now(), p };
+    p.catch(() => { if (this.activeCache?.p === p) this.activeCache = null; });
+    return p;
+  }
+
+  private async fetchActiveInstrumentals(): Promise<Instrumental[]> {
     console.log("[SupabaseManager] getActiveInstrumentals() - catalogSupabase:", !!catalogSupabase);
     if (!catalogSupabase) {
       console.error("[SupabaseManager] catalogSupabase non initialisé!");

@@ -126,6 +126,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const multiDragRef = useRef<{trackId:string, clipId:string, start:number}[] | null>(null);
   
   const [loopDragMode, setLoopDragMode] = useState<LoopDragMode>(null);
+  // Tactile (iPad, téléphone) : vrai pendant un appui au doigt / stylet.
+  const touchRef = useRef(false);
+  const dragActionRef = useRef<DragAction | null>(null);
+  const loopDragRef = useRef<LoopDragMode>(null);
   const [initialLoopState, setInitialLoopState] = useState<{ start: number, end: number } | null>(null);
 
   const [dragStartX, setDragStartX] = useState(0);
@@ -580,6 +584,17 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     return fn;
   };
 
+  // Pendant qu'on déplace / rogne un clip au doigt, la page ne doit pas défiler.
+  dragActionRef.current = dragAction;
+  loopDragRef.current = loopDragMode;
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const onTouchMove = (ev: TouchEvent) => { if (dragActionRef.current || loopDragRef.current) ev.preventDefault(); };
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => el.removeEventListener('touchmove', onTouchMove);
+  }, []);
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
     const rect = scrollContainerRef.current.getBoundingClientRect();
@@ -739,8 +754,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (!(e.shiftKey || e.ctrlKey || e.metaKey)) setSelectedClipIds(new Set());
     // Un simple clic deplace la tete de lecture ; si l'utilisateur glisse, cela
     // devient un rectangle de selection (comportement habituel des DAW).
-    marqueeOriginRef.current = { x, y };
     onSeek(getSnappedTime(time, bpm, gridSize, useSnap));
+    // Au doigt, glisser sur une zone vide fait défiler l'arrangement.
+    if (touchRef.current) { marqueeOriginRef.current = null; setDragAction(null); return; }
+    marqueeOriginRef.current = { x, y };
     setDragAction('SCRUB');
 };
 
@@ -1436,6 +1453,16 @@ useEffect(() => {
           onMouseMove={handleMouseMove} 
           onMouseUp={handleMouseUp} 
           onMouseLeave={handleMouseUp} 
+          onPointerDown={(e) => {
+            if (e.pointerType === 'mouse') return;
+            // Pas d'événements souris « de compatibilité » en double après le doigt.
+            e.preventDefault();
+            touchRef.current = true;
+            handleMouseDown(e);
+          }}
+          onPointerMove={(e) => { if (e.pointerType !== 'mouse') handleMouseMove(e); }}
+          onPointerUp={(e) => { if (e.pointerType !== 'mouse') { touchRef.current = false; handleMouseUp(); } }}
+          onPointerCancel={(e) => { if (e.pointerType !== 'mouse') { touchRef.current = false; handleMouseUp(); } }}
           onScroll={(e) => { setScrollLeft(e.currentTarget.scrollLeft); setScrollTop(e.currentTarget.scrollTop); }}
           onDragOver={handleDragOver}
           onDrop={handleDrop}

@@ -469,7 +469,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                 </div>
 
                 {/* COLUMN 2: SUMMARY & ACTION */}
-                <div className="w-48 flex flex-col border-l border-white/5 pl-8 justify-between">
+                <div className="w-full md:w-60 flex flex-col border-t md:border-t-0 md:border-l border-white/5 pt-6 md:pt-0 md:pl-8 justify-between">
                     <div className="space-y-4">
                         <div className="space-y-1">
                              <label className="text-[9px] font-bold text-slate-500">Nom du fichier</label>
@@ -527,23 +527,23 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             <button
                               type="button"
                               onClick={() => setSource('VOCALS')}
-                              className={`mt-2 w-full h-10 rounded-lg text-[11px] font-bold ${source === 'VOCALS' ? 'bg-emerald-500/25 text-emerald-100 border border-emerald-400/50' : 'border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/10'}`}
+                              className={`mt-2 w-full min-h-10 py-2 leading-tight rounded-lg text-[11px] font-bold ${source === 'VOCALS' ? 'bg-emerald-500/25 text-emerald-100 border border-emerald-400/50' : 'border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/10'}`}
                             >
                               🎤 {source === 'VOCALS' ? 'Mes pistes seules sélectionnées : export possible' : 'Exporter mes pistes seules (voix, batterie), sans le beat ni la mélodie'}
                             </button>
                             {/* Le moment où l'artiste veut son fichier : on lui donne les deux suites possibles. */}
-                            <div className="mt-3 flex flex-col sm:flex-row gap-2">
+                            <div className="mt-3 flex flex-col gap-2">
                               <button
                                 type="button"
                                 onClick={() => openBuyBeat(projectState.tracks)}
-                                className="shrink-0 sm:flex-1 h-10 rounded-lg bg-amber-400 text-black text-[11px] font-black uppercase tracking-wide hover:bg-amber-300"
+                                className="w-full min-h-10 py-2 leading-tight rounded-lg bg-amber-400 text-black text-[11px] font-black uppercase tracking-wide hover:bg-amber-300"
                               >
                                 🛒 Acheter cette instru
                               </button>
                               <button
                                 type="button"
                                 onClick={openProMix}
-                                className="shrink-0 sm:flex-1 h-10 rounded-lg bg-white/10 text-white text-[11px] font-bold hover:bg-white/20"
+                                className="w-full min-h-10 py-2 leading-tight rounded-lg bg-white/10 text-white text-[11px] font-bold hover:bg-white/20"
                               >
                                 🎚️ Faire mixer par un pro
                               </button>
@@ -552,7 +552,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                               <button
                                 type="button"
                                 onClick={onOpenShare}
-                                className="mt-2 w-full h-10 rounded-lg border border-cyan-400/40 text-cyan-200 text-[11px] font-bold hover:bg-cyan-500/10"
+                                className="mt-2 w-full min-h-10 py-2 leading-tight rounded-lg border border-cyan-400/40 text-cyan-200 text-[11px] font-bold hover:bg-cyan-500/10"
                               >
                                 📲 Démo gratuite (MP3 tagué) ou extrait 30 s à partager
                               </button>
@@ -561,15 +561,15 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                         )}
 
                         <button 
-                            onClick={handleExport}
-                            disabled={isRendering || bloque || payWait}
+                            onClick={bloque ? () => openBuyBeat(projectState.tracks) : handleExport}
+                            disabled={isRendering || payWait}
                             title={bloque ? "Achetez l'instrumental pour exporter (ou choisissez « Voix seules »)" : undefined}
-                            className="w-full h-12 bg-cyan-500 hover:bg-cyan-400 text-black rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-cyan-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                            className="w-full min-h-12 py-3 whitespace-normal text-center leading-tight bg-cyan-500 hover:bg-cyan-400 text-black rounded-xl text-[10px] font-black uppercase tracking-[0.12em] shadow-lg shadow-cyan-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
                         >
                             {bloque ? <i className="fas fa-lock"></i>
                               : isRendering ? <i className="fas fa-circle-notch fa-spin"></i>
                               : <i className="fas fa-download"></i>}
-                            <span>{bloque ? 'ACHETER POUR EXPORTER' : payWait ? 'EN ATTENTE DU PAIEMENT…' : needsVoicesPayment ? (freeLeft !== null && freeLeft > 0 ? `EXPORTER (GRATUIT NOVA PRO · ${freeLeft} RESTANTS)` : 'PAYER 2 € ET EXPORTER') : source === 'VOCALS' ? 'EXPORTER MES PISTES' : 'EXPORTER'}</span>
+                            <span>{bloque ? "ACHETER L'INSTRU POUR EXPORTER" : payWait ? 'EN ATTENTE DU PAIEMENT…' : needsVoicesPayment ? (freeLeft !== null && freeLeft > 0 ? `EXPORTER (GRATUIT NOVA PRO · ${freeLeft} RESTANTS)` : 'PAYER 2 € ET EXPORTER') : source === 'VOCALS' ? 'EXPORTER MES PISTES' : 'EXPORTER'}</span>
                         </button>
                     </div>
                 </div>

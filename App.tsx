@@ -413,7 +413,7 @@ const useUndoRedo = (initialState: DAWState) => {
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
   // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
   // continuait, et pendant une prise il basculait l'enregistrement.
-  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'timeSignature', 'isLoopActive', 'loopStart', 'loopEnd'] as const;
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'timeSignature', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle'] as const;
   const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
     const out: any = { ...base };
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
@@ -431,7 +431,9 @@ const useUndoRedo = (initialState: DAWState) => {
     return [...h.past, ...h.future].some(s => s.tracks.some(t =>
       t.clips.some(c => c.bufferId === bufferId) || t.frozenClip?.bufferId === bufferId));
   }, []);
-  return { state: history.present, setState, setVisualState, undo, redo, isBufferInHistory, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
+  // Prochaine modification = nouvelle étape d'annulation, même dans l'anti-rebond.
+  const breakHistory = useCallback(() => setHistory(curr => ({ ...curr, lastChangeAt: 0 })), []);
+  return { state: history.present, setState, setVisualState, undo, redo, isBufferInHistory, breakHistory, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
 };
 
 /** Onglet ouvert au retour de Stripe (?nova_paid=…) : confirme et invite à revenir au studio. */
@@ -536,15 +538,18 @@ function Studio() {
     }
   };
 
+  // Message affiché sur l'accueil (Nova n'y est pas encore visible).
+  const [landingNotice, setLandingNotice] = useState<string | null>(null);
+
   // Ouverture depuis le site : /daw?melody=<id> → projet « instru sur mélodie ».
   useEffect(() => {
     let melodyId: string | null = null;
     try { melodyId = new URLSearchParams(window.location.search).get('melody'); } catch { /* */ }
     if (!melodyId) return;
-    supabaseManager.getActiveInstrumentals().then(list => {
-      const inst = list.find((i: any) => String(i.id) === melodyId);
+    supabaseManager.getActiveInstrumental(melodyId).then(inst => {
       if (inst) handleEnterWithMelody(inst);
-    }).catch(() => {});
+      else setLandingNotice("Cette mélodie n'est plus disponible : choisis-en une autre ci-dessous.");
+    }).catch(() => setLandingNotice("⚠️ La mélodie n'a pas pu être chargée (connexion ?). Recharge la page pour réessayer."));
   }, []);
 
   // Ouverture depuis le site : /daw?beat=<id> → studio direct, beat chargé.
@@ -552,10 +557,10 @@ function Studio() {
     let beatId: string | null = null;
     try { beatId = new URLSearchParams(window.location.search).get('beat'); } catch { /* */ }
     if (!beatId) return;
-    supabaseManager.getActiveInstrumentals().then(list => {
-      const inst = list.find((i: any) => String(i.id) === beatId);
+    supabaseManager.getActiveInstrumental(beatId).then(inst => {
       if (inst) handleEnterWithInstrumental(inst);
-    }).catch(() => {});
+      else setLandingNotice("Ce beat n'est plus disponible : choisis-en un autre ci-dessous.");
+    }).catch(() => setLandingNotice("⚠️ Le beat n'a pas pu être chargé (connexion ?). Recharge la page pour réessayer."));
   }, []);
 
   // Utilisateur par défaut pour éviter l'écran noir (temporaire)
@@ -688,7 +693,7 @@ function Studio() {
     punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 }
   };
 
-  const { state, setState, setVisualState, undo, redo, isBufferInHistory, canUndo, canRedo } = useUndoRedo(initialState);
+  const { state, setState, setVisualState, undo, redo, isBufferInHistory, breakHistory, canUndo, canRedo } = useUndoRedo(initialState);
   
   const [theme, setTheme] = useState<Theme>('dark');
   useEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
@@ -1679,6 +1684,7 @@ function Studio() {
     let autoStyleNote = '';
     if (role === 'lead' && !stateRef.current.vocalMixStyle && (s.peakDb > -0.3 || s.rmsDb < -38)) {
       const sid = suggestVocalMixStyle(stateRef.current.bpm, stateRef.current.beatGenre, stateRef.current.beatTitle);
+      breakHistory(); // Ctrl+Z retire le style, pas la prise
       handleApplyMixStyle(sid);
       autoStyleNote = ` J'ai quand même mis le style « ${findVocalMixStyle(sid)?.name} » pour que tu entendes le rendu.`;
     }
@@ -1703,6 +1709,7 @@ function Studio() {
     if (role === 'lead' && !st.vocalMixStyle) {
       // Première prise : on fait entendre tout de suite une voix « produite ».
       const sid = suggestVocalMixStyle(st.bpm, st.beatGenre, st.beatTitle);
+      breakHistory(); // Ctrl+Z retire le style, pas la prise
       handleApplyMixStyle(sid);
       const style = findVocalMixStyle(sid);
       text += ` Pour que tu entendes ta voix comme sur un vrai son, j'ai mis le style « ${style?.name} », adapté à ce beat. Réécoute ! Tu peux en essayer un autre, ou passer aux backs.`;
@@ -1772,11 +1779,15 @@ function Studio() {
     const ctx = audioEngine.ctx;
     const beat = 60 / Math.max(40, Math.min(240, bpm || 120));
     countInCancelRef.current = false;
+    // Décompte annulé : les clics déjà programmés ne doivent plus sonner.
+    const clicks: GainNode[] = [];
+    const silence = () => clicks.forEach(g => { try { g.disconnect(); } catch { /* déjà coupé */ } });
     if (ctx) {
       const t0 = ctx.currentTime + 0.05;
       for (let i = 0; i < 4; i++) {
         const osc = ctx.createOscillator();
         const g = ctx.createGain();
+        clicks.push(g);
         osc.frequency.value = i === 0 ? 1500 : 1000;
         g.gain.setValueAtTime(0.0001, t0 + i * beat);
         g.gain.exponentialRampToValueAtTime(0.4, t0 + i * beat + 0.002);
@@ -1788,11 +1799,12 @@ function Studio() {
       }
     }
     for (let i = 4; i >= 1; i--) {
-      if (countInCancelRef.current) { setCountInBeat(null); return false; }
+      if (countInCancelRef.current) { silence(); setCountInBeat(null); return false; }
       setCountInBeat(i);
       await new Promise(r => setTimeout(r, beat * 1000));
     }
     setCountInBeat(null);
+    if (countInCancelRef.current) silence();
     return !countInCancelRef.current;
   }, []);
 
@@ -1801,7 +1813,7 @@ function Studio() {
   const [headphonePromptOpen, setHeadphonePromptOpen] = useState(false);
   const toggleRecordRef = useRef<(() => Promise<void>) | null>(null);
 
-  const handleToggleRecord = useCallback(async () => {
+  const handleToggleRecordInner = useCallback(async () => {
     await ensureAudioEngine();
     const currentState = stateRef.current;
 
@@ -1869,6 +1881,14 @@ function Studio() {
       setAiNotification("🎤 L'enregistrement n'a pas pu démarrer. Vérifie que le micro est autorisé, puis réessaie.");
     }
   }, [setState, finalizeRecording, armForRecording, runCountIn, countInBeat]);
+  // Deux appuis rapides sur REC lançaient deux décomptes et deux prises (la
+  // seconde affichait une erreur alors que l'enregistrement tournait).
+  const recBusyRef = useRef(false);
+  const handleToggleRecord = useCallback(async () => {
+    if (recBusyRef.current) { countInCancelRef.current = true; return; }
+    recBusyRef.current = true;
+    try { await handleToggleRecordInner(); } finally { recBusyRef.current = false; }
+  }, [handleToggleRecordInner]);
   toggleRecordRef.current = handleToggleRecord;
 
   const answerHeadphones = useCallback((hasHeadphones: boolean) => {
@@ -2690,9 +2710,29 @@ function Studio() {
       return tag === 'input' || tag === 'textarea' || tag === 'select' || node.isContentEditable;
     };
 
+    // Fenêtre au premier plan (la plus haute) qui a un bouton « Fermer ».
+    const CLOSE_SEL = 'button[aria-label^="Fermer"], button[title^="Fermer"]';
+    const topOverlayClose = (): HTMLButtonElement | null => {
+      const els = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], .fixed.inset-0'))
+        .filter(el => el.getClientRects().length > 0 && el.querySelector(CLOSE_SEL));
+      if (!els.length) return null;
+      const z = (el: HTMLElement) => Number(getComputedStyle(el).zIndex) || 0;
+      const top = els.reduce((a, b) => (z(b) >= z(a) ? b : a));
+      return top.querySelector<HTMLButtonElement>(CLOSE_SEL);
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
+      // Échap ferme la fenêtre ouverte (export, sauvegarde, casque, Nova Pro…).
+      if (e.key === 'Escape' && !e.defaultPrevented) {
+        const btn = topOverlayClose();
+        if (btn) { e.preventDefault(); btn.click(); return; }
+      }
       if (isTypingTarget(e.target)) return;
       const mod = e.ctrlKey || e.metaKey;
+      // Fenêtre modale ouverte : R, espace, Entrée… n'agissent plus sur le projet derrière.
+      if (!mod && (document.querySelector('[aria-modal="true"]') || topOverlayClose())) return;
+      // Entrée sur un bouton : on laisse le bouton s'activer (clavier).
+      if (e.key === 'Enter' && e.target instanceof HTMLElement && e.target.closest('button, a, [role="button"]')) return;
 
       // Lecture / pause : la barre d'espace ne doit ni defiler la page ni
       // re-declencher le bouton qui a le focus.
@@ -3476,11 +3516,14 @@ function Studio() {
     }
   }, [applyCollabOp]);
   const pendingStartRef = useRef<{ role: CollabRole; name: string } | null>(null);
+  const collabPayCancelRef = useRef(false);
   const subscribeCollab = useCallback(async () => {
     try {
+      collabPayCancelRef.current = false;
       const sid = await openCheckout('collab');
       setCollabBusy('En attente du paiement (onglet Stripe)…');
-      const ok = await waitPaid(sid);
+      // Fermer le panneau arrête l'attente (avant : bouton bloqué 20 minutes).
+      const ok = await waitPaid(sid, () => collabPayCancelRef.current);
       setCollabBusy(null);
       if (ok) {
         setCollabGate(null);
@@ -3630,12 +3673,22 @@ function Studio() {
     if (stateRef.current.isPlaying) pausePlayback();
     // L'extrait de ce beat (ou d'un autre) s'arrête : on passe au beat dans le projet.
     window.dispatchEvent(new Event('nova:transport-start'));
+    const previousBeatClips = stateRef.current.tracks.find(t => t.id === 'instrumental')?.clips || [];
     setState(produce((draft: DAWState) => {
       const beat = draft.tracks.find(t => t.id === 'instrumental');
       if (beat) beat.clips = [];
     }));
     setAiNotification(`⏳ Chargement de « ${inst.title} »…`);
     const beatBuffer = await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0, inst.bpm, inst.id);
+    if (!beatBuffer) {
+      // Échec réseau : on remet l'ancien beat au lieu d'annoncer « prêt » sur une piste vide.
+      setState(produce((draft: DAWState) => {
+        const beat = draft.tracks.find(t => t.id === 'instrumental');
+        if (beat && !beat.clips.length) beat.clips = previousBeatClips as any;
+      }));
+      setAiNotification(`⚠️ « ${inst.title} » n'a pas pu être chargé (connexion ?). Réessaie depuis la bibliothèque.`);
+      return;
+    }
     if (inst.bpm) handleUpdateBpm(inst.bpm);
     setState(prev => ({ ...prev, beatGenre: inst.genre || undefined, beatTitle: inst.title || undefined }));
     let tonalite = lireTonalite(inst.key);
@@ -3858,7 +3911,9 @@ function Studio() {
       case 'ADD_TRACK':
       case 'CREATE_TRACK': {
         const type = (String(p.type || 'AUDIO').toUpperCase() as TrackType);
-        // Pas de piste MIDI : le DAW sert aux voix (aucun outil de composition).
+        // Mode instru (beatmaker) : la piste MIDI existe. En mode voix, pas de MIDI
+        // pour ne pas embrouiller l'artiste.
+        if (stateRef.current.projectMode === 'BEATMAKING' && (type === TrackType.MIDI || type === TrackType.SAMPLER)) { handleNewMidiTrack(); break; }
         const valid = [TrackType.AUDIO, TrackType.BUS, TrackType.SEND];
         handleCreateTrack(valid.includes(type) ? type : TrackType.AUDIO, p.name);
         break;
@@ -4165,7 +4220,7 @@ function Studio() {
 
       // ---- Marqueurs ----
       case 'ADD_MARKER':
-        handleAddMarker(Math.max(0, Number(p.time) ?? playheadStore.get()), p.name);
+        handleAddMarker(Math.max(0, Number.isFinite(Number(p.time)) && p.time !== undefined && p.time !== null && p.time !== '' ? Number(p.time) : playheadStore.get()), p.name);
         break;
 
       case 'DELETE_MARKER': {
@@ -4286,8 +4341,15 @@ function Studio() {
       case 'CREATE_PATTERN':
       case 'ADD_NOTES':
       case 'CLEAR_NOTES': {
-        // Composition MIDI retirée : le DAW sert à essayer sa voix sur les instrus.
-        setAiNotification("🎤 Nova Studio sert à enregistrer ta voix sur les instrus — pas de composition ici.");
+        if (stateRef.current.projectMode === 'BEATMAKING') {
+          // Mode instru : on ouvre l'outil plutôt que d'écrire les notes à la place du beatmaker.
+          const midi = stateRef.current.tracks.find(t => t.type === TrackType.MIDI && t.clips.length);
+          if (midi) { setMidiEditorOpen({ trackId: midi.id, clipId: midi.clips[0].id }); setAiNotification("🎹 Piano roll ouvert : clic pour poser une note, glisser pour l'allonger."); }
+          else handleNewMidiTrack();
+          break;
+        }
+        // Mode voix : le DAW sert à essayer sa voix sur les instrus.
+        setAiNotification("🎤 Ici on pose sa voix sur l'instru. Pour composer (batterie, piano roll), ouvre une mélodie en mode instru depuis la bibliothèque.");
         break;
       }
 
@@ -4395,7 +4457,10 @@ function Studio() {
         break;
 
       case 'SAVE_PROJECT':
-        handleSaveCloud(String(p.name || stateRef.current.name || 'STUDIO_SESSION'));
+        // Sans compte Nova (invité), la sauvegarde en ligne passe par « Emporter
+        // la session » et le compte Make Music (avant : erreur « Session expirée »).
+        if (!user || user.id === 'guest') setTakeHomeOpen(true);
+        else handleSaveCloud(String(p.name || stateRef.current.name || 'STUDIO_SESSION'));
         break;
 
       case 'OPEN_EXPORT':
@@ -4624,6 +4689,15 @@ function Studio() {
   // Afficher la Landing Page si c'est la première visite
   if (showLanding) {
     return (
+      <>
+      {landingNotice && (
+        <div className="fixed top-3 inset-x-0 z-[999] flex justify-center px-4 pointer-events-none">
+          <div role="status" className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-amber-400/40 bg-[#14161a] px-4 py-3 text-[13px] text-amber-100 shadow-2xl">
+            <span>{landingNotice}</span>
+            <button type="button" aria-label="Fermer" onClick={() => setLandingNotice(null)} className="w-8 h-8 shrink-0 rounded-lg bg-white/10 text-white">✕</button>
+          </div>
+        </div>
+      )}
       <LandingPage 
         user={user}
         onEnterStudio={handleEnterStudio}
@@ -4636,6 +4710,7 @@ function Studio() {
         onLogin={(u) => setUser(u)}
         onLogout={handleLogout}
       />
+      </>
     );
   }
 
@@ -4646,6 +4721,10 @@ function Studio() {
       {/* TransportBar - Desktop, Tablet ET Mobile avec menu hamburger */}
       <div className="relative z-50">
         <TransportBar
+          onOpenCollab={() => setCollabOpen(true)}
+          collabLabel={collab ? `Collaboration · ${collabOnline.length || 1} en ligne` : 'Collaborer à distance'}
+          onOpenTakeHome={() => setTakeHomeOpen(true)}
+          takeHomeLabel={isCloudProject ? `En ligne · ${cloudSession?.syncedAt ? formatAgo(cloudSession.syncedAt) : 'à envoyer'}` : 'Emporter la session'}
           isPlaying={state.isPlaying} currentTime={state.currentTime} bpm={state.bpm} onBpmChange={handleUpdateBpm}
           timeSignature={state.timeSignature} projectKey={state.projectKey} projectScale={state.projectScale}
           isRecording={state.isRecording} isLoopActive={state.isLoopActive}
@@ -4959,6 +5038,9 @@ function Studio() {
               <button type="button" onClick={() => answerHeadphones(false)} className="h-12 rounded-xl bg-white/10 text-white font-bold">
                 Non, haut-parleurs
               </button>
+              <button type="button" aria-label="Fermer (plus tard)" onClick={() => setHeadphonePromptOpen(false)} className="h-10 rounded-xl text-slate-400 text-sm underline">
+                Plus tard (pas d'enregistrement)
+              </button>
             </div>
             <p className="mt-3 text-xs text-slate-400">Conseil : un casque filaire donne le meilleur résultat (le Bluetooth ajoute du retard).</p>
           </div>
@@ -4966,7 +5048,7 @@ function Studio() {
       )}
 
       <Suspense fallback={null}>
-      {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} />}
+      {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user && user.id !== 'guest' ? user : null} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} />}
       {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
       {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={() => { setIsExportMenuOpen(false); setShareOpen(true); }} />}
       <DrumMachinePanel
@@ -5013,7 +5095,9 @@ function Studio() {
           </div>
         </div>
       )}
-      {isCloudProject && !showLanding && (
+      {/* Sur téléphone, ces pastilles recouvraient le chat Nova, le menu et la barre
+          d'ajout de piste : elles passent dans le menu ☰. */}
+      {isCloudProject && !showLanding && !isMobile && (
         <button type="button" onClick={() => setTakeHomeOpen(true)}
           title="Session en ligne : lien, QR code, compte client"
           className="fixed bottom-20 left-3 z-[90] md:bottom-4 h-10 rounded-full border border-cyan-500/40 bg-[#0d1117]/90 px-3 text-[11px] font-bold text-cyan-200 shadow-lg backdrop-blur">
@@ -5027,7 +5111,7 @@ function Studio() {
       />
       <CollabPanel
         open={collabOpen}
-        onClose={() => setCollabOpen(false)}
+        onClose={() => { setCollabOpen(false); if (!collab) { collabPayCancelRef.current = true; setCollabBusy(null); } }}
         active={!!collab}
         role={collab?.role || null}
         name={collab?.name || ''}
@@ -5047,7 +5131,7 @@ function Studio() {
           void c.client.send('chat', { text }).catch(() => setAiNotification("⚠️ Message non envoyé (connexion)."));
         }}
       />
-      {!showLanding && !collabOpen && (
+      {!showLanding && !collabOpen && !isMobile && (
         <button type="button" onClick={() => setCollabOpen(true)}
           title="Collaborer à distance : artiste, ingé son, beatmaker"
           className="fixed bottom-32 left-3 z-[90] md:bottom-16 h-10 rounded-full border border-violet-500/40 bg-[#0d1117]/90 px-3 text-[11px] font-bold text-violet-200 shadow-lg backdrop-blur">
