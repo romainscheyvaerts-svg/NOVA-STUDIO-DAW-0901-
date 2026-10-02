@@ -120,14 +120,19 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
     // Écouter les changements de périphériques
     navigator.mediaDevices.addEventListener('devicechange', refreshDevices);
 
-    // CPU Simulator Loop
+    // Charge réelle du navigateur : retard cumulé d'un minuteur de 50 ms
+    // (si le fil principal est occupé, l'interface et le planificateur audio
+    // prennent du retard — c'est ce qui fait craquer).
+    let last = performance.now(), late = 0, span = 0;
     cpuInterval.current = window.setInterval(() => {
-        // Simulation d'une charge CPU variable pour le look "Pro"
-        // En vrai, AudioWorklet peut donner des stats précises mais c'est complexe
-        const baseLoad = 15;
-        const variation = Math.random() * 10;
-        setCpuUsage(baseLoad + variation);
-    }, 1000);
+        const now = performance.now();
+        const dt = now - last; last = now;
+        late += Math.max(0, dt - 50); span += dt;
+        if (span >= 1000) {
+            setCpuUsage(prev => prev * 0.5 + Math.min(100, (late / span) * 100) * 0.5);
+            late = 0; span = 0;
+        }
+    }, 50);
 
     return () => {
         navigator.mediaDevices.removeEventListener('devicechange', refreshDevices);
@@ -291,10 +296,10 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                 
                 {/* CPU METER */}
                 <div className="flex items-center space-x-3 bg-black/40 px-3 py-1.5 rounded-lg border border-white/5">
-                    <span className="text-[9px] font-black text-slate-500 uppercase">DSP Load</span>
+                    <span className="text-[9px] font-black text-slate-500 uppercase" title="Part du temps où le navigateur est trop occupé (mesurée). Au-delà de 50 %, risque de craquements.">Charge</span>
                     <div className="w-24 h-2 bg-slate-800 rounded-full overflow-hidden">
                         <div 
-                            className={`h-full transition-all duration-500 ease-out ${cpuUsage > 80 ? 'bg-red-500' : 'bg-green-500'}`} 
+                            className={`h-full transition-all duration-500 ease-out ${cpuUsage > 50 ? 'bg-red-500' : cpuUsage > 25 ? 'bg-amber-500' : 'bg-green-500'}`} 
                             style={{ width: `${cpuUsage}%` }} 
                         />
                     </div>

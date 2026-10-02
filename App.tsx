@@ -3852,7 +3852,7 @@ export default function App() {
           statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
           currentTheme={theme} onToggleTheme={toggleTheme}
           onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
-          onExportMix={handleExportMix} onShareProject={() => setIsShareModalOpen(true)}
+          onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo}
           user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
