@@ -220,8 +220,10 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       numero: 2, icone: 'fa-play',
       titre: 'Écoute ton instru',
       detail: isMobile
-        ? "Appuie sur le bouton lecture ▶ en haut pour écouter le beat. Rappuie pour mettre en pause."
-        : "Appuie sur la barre d'espace (ou le bouton lecture ▶) pour écouter le beat. Rappuie pour mettre en pause."
+        ? "Appuie sur ▶ ci-dessous (ou en haut de l'écran) pour écouter le beat. Rappuie pour mettre en pause."
+        : "Appuie sur la barre d'espace (ou le bouton lecture ▶) pour écouter le beat. Rappuie pour mettre en pause.",
+      // Sur téléphone, Nova recouvre la barre du haut : le bouton est ici.
+      boutons: [{ label: "▶ Écouter l'instru", action: { action: 'PLAY', payload: {} } }],
     };
     if (!aUnePrise) return {
       numero: 3, icone: 'fa-microphone',

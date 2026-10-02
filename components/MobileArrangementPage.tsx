@@ -542,30 +542,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     <div className="flex flex-col h-full bg-[#0a0b0d] select-none pb-[calc(4rem+env(safe-area-inset-bottom))]">
       {/* === TOP BAR - Mini Transport === */}
       <div className="flex items-center h-12 px-3 bg-gradient-to-b from-[#1a1c21] to-[#14161a] border-b border-white/10 gap-2">
-        {/* Play/Stop */}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={onStop}
-            aria-label="Stop"
-            title="Stop"
-            className="nova-hit w-9 h-9 rounded-lg bg-white/5 hover:bg-white/10 active:bg-white/15 flex items-center justify-center transition-all"
-          >
-            <i className="fas fa-stop text-white/70 text-sm"></i>
-          </button>
-          <button
-            onClick={onTogglePlay}
-            aria-label={isPlaying ? 'Pause' : 'Lecture'}
-            aria-pressed={isPlaying}
-            className={`nova-hit w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
-              isPlaying 
-                ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/30' 
-                : 'bg-white/5 hover:bg-white/10 text-white/70'
-            }`}
-          >
-            <i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-sm`}></i>
-          </button>
-        </div>
-
+        {/* Lecture / stop : déjà dans la barre du haut (il y avait deux transports). */}
         {/* Time Display */}
         <div className="flex-1 flex items-center justify-center">
           <div className="bg-black/40 rounded-lg px-3 py-1 border border-white/10">

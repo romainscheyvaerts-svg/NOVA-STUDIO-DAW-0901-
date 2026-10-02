@@ -861,7 +861,9 @@ function Studio() {
     return window.innerWidth < 1024 ? 'TABLET' : 'DESKTOP';
   };
   const [viewMode, setViewMode] = useState<ViewMode>(() => readSavedViewMode() ?? autoViewMode());
-  const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('TRACKS');
+  // Sur téléphone on ouvre l'Arrangement : les prises y apparaissent avec leur
+  // forme d'onde (« Pistes » est une vue de routage où on ne les voyait pas).
+  const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('ARRANGEMENT');
   const handleViewModeChange = (mode: ViewMode) => {
     setViewMode(mode);
     try { localStorage.setItem('nova_view_mode', mode); } catch { /* stockage indisponible */ }
@@ -3747,7 +3749,7 @@ function Studio() {
     setAiNotification(tonalite
       ? `🎵 « ${inst.title} » est prêt (${nomTonalite(tonalite.rootKey, tonalite.scale)}${ecoute ? ", détectée à l'écoute" : ''}) — l'Auto-Tune est réglé sur cette gamme. Appuie sur REC pour poser ta voix`
       : `🎵 « ${inst.title} » est prêt — appuie sur REC pour poser ta voix (gamme inconnue : l'Auto-Tune corrige sur toutes les notes)`);
-    if (isMobile) setActiveMobileTab('TRACKS');
+    if (isMobile) setActiveMobileTab('ARRANGEMENT');
     // Mélodie du studio (sans batterie) : on propose d'en poser une, adaptée.
     if (stateRef.current.projectMode !== 'BEATMAKING' && (inst.kind === 'melody' || /melod|sample/i.test(`${inst.genre || ''}`))) {
       const st = stateRef.current;
@@ -4060,7 +4062,7 @@ function Studio() {
         break;
 
       case 'RECORD':
-        if (isMobileRef.current && activeTabRef.current === 'NOVA') setActiveMobileTab('TRACKS');
+        if (isMobileRef.current && activeTabRef.current === 'NOVA') setActiveMobileTab('ARRANGEMENT');
         handleToggleRecord();
         break;
 
@@ -5221,7 +5223,7 @@ function Studio() {
             onRequestOpen={isMobile ? () => setActiveMobileTab('NOVA') : undefined}
             mixGuideRequest={mixGuideRequest}
             novaFeed={novaFeed}
-            onClose={() => setActiveMobileTab('TRACKS')}
+            onClose={() => setActiveMobileTab('ARRANGEMENT')}
         />
       </div>
       
