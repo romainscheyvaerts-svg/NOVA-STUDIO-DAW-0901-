@@ -1,5 +1,6 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { gainToDbText } from '../utils/db';
 import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { SmartKnob } from './SmartKnob';
@@ -322,6 +323,8 @@ const ChannelStrip: React.FC<{
                 onMouseDown={onVolMouseDown}
                 onTouchStart={onVolTouchStart}
                 onTouchMove={onVolTouchMove}
+                onDoubleClick={() => onUpdate({ ...track, volume: 1 })}
+                title="Volume (double-clic : 0 dB)"
                 className="h-full bg-black/40 rounded-full border border-white/5 relative cursor-pointer touch-none group/fader"
                 style={{ width: 'var(--fader-width)' }}
               >
@@ -336,7 +339,8 @@ const ChannelStrip: React.FC<{
            </div>
         </div>
 
-        <div className="mt-4 flex space-x-2">
+        <div className="mt-2 text-center text-[10px] font-mono tabular-nums text-slate-300">{gainToDbText(track.volume)}</div>
+        <div className="mt-2 flex space-x-2">
            <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>MUTE</button>
            <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>SOLO</button>
         </div>

@@ -1,4 +1,5 @@
 import MonitorControl from './MonitorControl';
+import { gainToDbText } from '../utils/db';
 import React, { useState } from 'react';
 import MobileContainer from './MobileContainer';
 import { Track, Clip, TrackType, TrackSend } from '../types';
@@ -270,7 +271,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                   />
                 </div>
                 <span className="text-[10px] font-mono text-slate-400 w-10 text-right">
-                  {Math.round(track.volume * 100)}%
+                  {gainToDbText(track.volume)}
                 </span>
               </div>
             </div>

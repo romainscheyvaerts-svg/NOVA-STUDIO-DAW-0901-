@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { gainToDbText } from '../utils/db';
 import { Track, PluginType, PluginInstance, TrackType, TrackSend } from '../types';
 import { isPluginBaked, isFreezeStale, isTrackFrozen } from '../utils/freeze';
 import { useRecFrozen } from '../utils/recFreezeStore';
@@ -524,6 +525,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             onTouchMove={handleVolumeTouchMove}
             onTouchEnd={handleVolumeTouchEnd}
             data-nova-target={`vol-${track.id}`}
+            onDoubleClick={(e) => { e.stopPropagation(); onUpdate({ ...track, volume: 1 }); }}
+            title="Volume (double-clic : 0 dB)"
             className="h-3 bg-black/60 rounded-full overflow-hidden relative cursor-ew-resize group/vol touch-none"
           >
             <div 
@@ -534,8 +537,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 boxShadow: isAdjustingVolume ? `0 0 10px ${track.color}` : 'none'
               }} 
             />
-            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/45 pointer-events-none group-hover/vol:text-white/80 transition-colors uppercase">
-              {Math.round(track.volume * 100)}%
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/45 pointer-events-none group-hover/vol:text-white/80 transition-colors">
+              {gainToDbText(track.volume)}
             </span>
           </div>
         </div>
