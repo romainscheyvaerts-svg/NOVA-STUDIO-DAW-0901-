@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { PluginType } from '../types';
 import { novaBridge, BridgePlugin } from '../services/NovaBridge';
 import { useBridgeState } from '../hooks/useNovaBridge';
+import DesktopAppDownload from './DesktopAppDownload';
+import { isNovaDesktop } from '../utils/desktopApp';
 
 /** Exécutable du pont (asset de release GitHub, comme le pont ASIO). */
 export const VST_BRIDGE_DOWNLOAD_URL = '/downloads/NovaVSTBridge.exe';
@@ -14,6 +16,7 @@ export const vstMetadata = (p: BridgePlugin) => ({
 /** Bloc « pont pas lancé » : explications simples + bouton de connexion. */
 export const BridgeConnectPanel: React.FC<{ compact?: boolean }> = ({ compact }) => {
   const bridge = useBridgeState();
+  const desktop = isNovaDesktop();
   return (
     <div className="space-y-3 text-slate-300">
       {!compact && (
@@ -22,10 +25,14 @@ export const BridgeConnectPanel: React.FC<{ compact?: boolean }> = ({ compact })
           <p className="text-xs text-slate-400 mt-1">Utilise les effets VST3 installés sur ton PC (Windows), directement sur tes pistes.</p>
         </div>
       )}
-      <ol className="text-xs space-y-1.5 list-decimal pl-4 text-slate-300">
-        <li>Lance <b>NovaVSTBridge.exe</b> sur ton PC et garde sa fenêtre ouverte.</li>
-        <li>Clique sur « Connecter le pont VST ».</li>
-      </ol>
+      {desktop ? (
+        <p className="text-xs text-slate-300">Le pont VST est intégré à Nova Studio et démarre avec l'application : clique sur « Connecter le pont VST ».</p>
+      ) : (
+        <ol className="text-xs space-y-1.5 list-decimal pl-4 text-slate-300">
+          <li>Lance <b>NovaVSTBridge.exe</b> sur ton PC et garde sa fenêtre ouverte.</li>
+          <li>Clique sur « Connecter le pont VST ».</li>
+        </ol>
+      )}
       <button
         onClick={() => { void novaBridge.connect(); }}
         disabled={bridge.status === 'connecting'}
@@ -35,16 +42,19 @@ export const BridgeConnectPanel: React.FC<{ compact?: boolean }> = ({ compact })
       </button>
       {bridge.status === 'unavailable' && (
         <p role="status" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
-          Pont VST introuvable. Vérifie que NovaVSTBridge.exe est lancé sur ce PC, puis réessaie.
+          {desktop
+            ? 'Pont VST pas encore prêt (il démarre avec Nova Studio). Réessaie dans quelques secondes ; sinon, ferme et relance Nova Studio.'
+            : 'Pont VST introuvable. Vérifie que NovaVSTBridge.exe est lancé sur ce PC, puis réessaie.'}
         </p>
       )}
       {bridge.status === 'idle' && bridge.error && (
         <p role="status" className="text-xs text-amber-300">{bridge.error}</p>
       )}
-      <p className="text-[11px] text-slate-500 leading-relaxed">
-        Pas encore installé ? <a href={VST_BRIDGE_DOWNLOAD_URL} download className="text-cyan-400 underline">Télécharger NovaVSTBridge.exe</a> (Windows).
+      {!desktop && <DesktopAppDownload compact />}
+      {(!desktop || !compact) && <p className="text-[11px] text-slate-500 leading-relaxed">
+        {!desktop && <>Pas encore installé ? <a href={VST_BRIDGE_DOWNLOAD_URL} download className="text-cyan-400 underline">Télécharger NovaVSTBridge.exe</a> (Windows).</>}
         {!compact && <> À la sauvegarde, les effets VST sont rendus dans l'audio : ton projet continue sur ton téléphone.</>}
-      </p>
+      </p>}
     </div>
   );
 };

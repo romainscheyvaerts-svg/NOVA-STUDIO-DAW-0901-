@@ -1,0 +1,11 @@
+{
+  "name": "nova-studio-desktop",
+  "private": true,
+  "description": "Nova Studio pour Windows : outils de construction de l'installateur (Inno Setup via npm, aucune installation système).",
+  "scripts": {
+    "build": "build.bat"
+  },
+  "devDependencies": {
+    "innosetup-compiler": "6.3.1"
+  }
+}
