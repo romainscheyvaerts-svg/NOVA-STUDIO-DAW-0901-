@@ -81,6 +81,7 @@ import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, upload
 import { collabRoleStore } from './utils/collabStore';
 import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from './services/Billing';
 import { catalogSupabase } from './services/supabase';
+import { fetchAudio } from './utils/audioCache';
 import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
 import {
@@ -2857,9 +2858,8 @@ function Studio() {
               audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
           } else {
               audioRef = source;
-              const response = await fetch(source);
-              if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-              const arrayBuffer = await response.arrayBuffer();
+              // Cache local : un beat déjà écouté se rouvre sans réseau.
+              const arrayBuffer = await fetchAudio(source);
               audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
           }
 
@@ -4946,7 +4946,8 @@ function Studio() {
       
       {/* Sur téléphone, le « + » ne sert que dans Pistes et Arrangement ; ailleurs
           il couvrait du contenu (saisie du chat Nova, liste des effets). */}
-      {(!isMobile || activeMobileTab === 'TRACKS' || activeMobileTab === 'ARRANGEMENT') && (
+      {/* Sur ordinateur, elle recouvrait la rangée MUTE / SOLO du mixer. */}
+      {(isMobile ? (activeMobileTab === 'TRACKS' || activeMobileTab === 'ARRANGEMENT') : shownView !== 'MIXER') && (
         <TrackCreationBar
           onCreateTrack={handleCreateTrack}
           beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}

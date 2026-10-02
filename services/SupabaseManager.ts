@@ -7,6 +7,16 @@ import { SessionSerializer } from './SessionSerializer';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { shouldPersistFrozen } from './VstFreeze';
 
+// Copie locale du catalogue (fiches seulement, quelques dizaines de Ko) : sans
+// réseau, les beats déjà écoutés restent accessibles (audio en cache).
+const CATALOG_COPY_KEY = 'nova_catalog_copy';
+const saveCatalogCopy = (list: Instrumental[]) => {
+  try { localStorage.setItem(CATALOG_COPY_KEY, JSON.stringify(list)); } catch { /* stockage plein */ }
+};
+const readCatalogCopy = (): Instrumental[] => {
+  try { return JSON.parse(localStorage.getItem(CATALOG_COPY_KEY) || '[]'); } catch { return []; }
+};
+
 export class SupabaseManager {
   private static instance: SupabaseManager;
   private currentUser: any = null;
@@ -831,9 +841,16 @@ export class SupabaseManager {
   /** Un seul beat / mélodie (arrivée depuis le site) : pas tout le catalogue. */
   public async getActiveInstrumental(id: string): Promise<Instrumental | null> {
     if (!catalogSupabase) return null;
-    const { data, error } = await catalogSupabase.from('instrumentals').select('*').eq('id', id).eq('is_active', true).maybeSingle();
-    if (error) throw new Error(error.message || "Catalogue injoignable");
-    return (data as Instrumental) || null;
+    try {
+      const { data, error } = await catalogSupabase.from('instrumentals').select('*').eq('id', id).eq('is_active', true).maybeSingle();
+      if (error) throw new Error(error.message || "Catalogue injoignable");
+      return (data as Instrumental) || null;
+    } catch (e) {
+      // Hors ligne : la fiche vient de la dernière copie du catalogue.
+      const offline = readCatalogCopy().find(i => String(i.id) === String(id));
+      if (offline) return offline;
+      throw e;
+    }
   }
 
   // Le catalogue était retéléchargé en entier par l'accueil, la bibliothèque,
@@ -871,9 +888,14 @@ export class SupabaseManager {
         // sinon l'utilisateur hors ligne lit "Aucun instrumental disponible".
         throw new Error(error.message || "Catalogue injoignable");
       }
+      saveCatalogCopy((data || []) as Instrumental[]);
       return (data || []) as Instrumental[];
     } catch (e: any) {
       console.error("[SupabaseManager] Exception getActiveInstrumentals:", e);
+      // Hors ligne : dernière copie du catalogue (les beats déjà écoutés jouent
+      // depuis le cache audio).
+      const offline = readCatalogCopy();
+      if (offline.length) return offline;
       throw e instanceof Error ? e : new Error("Catalogue injoignable");
     }
   }
