@@ -55,6 +55,15 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   const less = /\b(baisse|diminue|moins fort|plus bas|reduis|moins de)\b/.test(msg);
   const say = (text: string, ...actions: AIAction[]): LocalCommandResult => ({ text, actions });
 
+  // Repères de structure : « va au refrain », « boucle la partie 2 », « va à l'outro »
+  const loopIt = /\b(boucle|loop|en boucle)\b/.test(msg);
+  if (/\b(refrain|hook)\b/.test(msg) && /\b(va|aller|vas|saute|direction|boucle|loop|mets|amene|emmene|joue)\b/.test(msg)) {
+    return say(loopIt ? '🔁 Je boucle la partie la plus pleine de la prod (souvent le refrain).' : '⏩ Je te mets sur la partie la plus pleine de la prod (souvent le refrain).', { action: 'GOTO_SECTION', payload: { target: 'full', loop: loopIt } });
+  }
+  const part = msg.match(/\b(partie|section)\s*(\d+)\b/);
+  if (part) return say(loopIt ? `🔁 Je boucle la partie ${part[2]}.` : `⏩ Partie ${part[2]}.`, { action: 'GOTO_SECTION', payload: { target: `partie ${part[2]}`, loop: loopIt } });
+  const io = msg.match(/\b(va|aller|vas|saute|direction|boucle).*\b(intro|outro)\b/);
+  if (io) return say(`⏩ ${io[2] === 'intro' ? 'Intro' : 'Outro'}.`, { action: 'GOTO_SECTION', payload: { target: io[2], loop: loopIt } });
   // « reprends à 0:45 », « enregistre à partir de 1:10 » : refaire un passage précis
   const at = msg.match(/\b(reprends|refais|recommence|enregistre|rec|repars)\b.*\b(a|a partir de|depuis|des)\s*(\d{1,2})[:h ](\d{2})\b/);
   if (at) {

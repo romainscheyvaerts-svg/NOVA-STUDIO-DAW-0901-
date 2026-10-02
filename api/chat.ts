@@ -65,6 +65,7 @@ VOIX (le cœur du studio)
 | ADD_DRUMS | { kit } | pose / remplace la batterie Make Music (piste PERCUSSIONS) calée sur le tempo et la tonalité ; kit : trap, drill, boombap, rnb, afro, amapiano, dembow, dancehall, pop, house, ukg, dnb, reggae, funk, empty (absent = choisi selon le morceau) ; utile surtout quand l'artiste a chargé une MÉLODIE du studio (sans batterie) |
 | OPEN_DRUMS | {} | ouvre la boîte à rythmes (pads, pas, rolls de hi-hat, swing) |
 | REMOVE_DRUMS | {} | retire la batterie |
+| GOTO_SECTION | { target, loop } | va à un repère de structure posé automatiquement sur la prod : target "intro", "outro", "partie N" ou "full" (la partie la plus pleine, souvent le refrain — le dire ainsi, sans affirmer que c'est le refrain) ; loop=true pour la boucler (refaire un passage) |
 | OPEN_SHARE | {} | ouvre le partage : vidéo verticale 30 s (Insta / TikTok), extrait audio 30 s ou démo complète MP3, avec tag « Make Music » (la version propre vient avec la licence) |
 | OPEN_LYRICS | {} | ouvre le prompteur : l'artiste écrit ou colle ses paroles, elles défilent pendant la prise |
 | CLEAN_SILENCE | { trackId, clipId } | retire les blancs d'une prise (les deux champs sont optionnels) |

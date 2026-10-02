@@ -27,6 +27,7 @@ const PluginManager = lazy(() => import('./components/PluginManager'));
 
 import { supabaseManager } from './services/SupabaseManager';
 import { dailyChallengeId } from './utils/dailyChallenge';
+import { detectSections, sectionColor } from './utils/songSections';
 import { SessionSerializer } from './services/SessionSerializer';
 // import { getAIProductionAssistance } from './services/AIService'; 
 import { novaBridge } from './services/NovaBridge';
@@ -2781,6 +2782,18 @@ export default function App() {
       }
     }
     if (tonalite) applyProjectKey(tonalite.rootKey, tonalite.scale);
+    // Repères de structure automatiques (Intro, Partie 1…, Outro) ; les
+    // repères posés à la main ne sont jamais touchés.
+    if (beatBuffer) {
+      const sections = detectSections(beatBuffer, inst.bpm || stateRef.current.bpm);
+      setState(produce((draft: DAWState) => {
+        draft.markers = draft.markers.filter(m => !m.id.startsWith('auto-'));
+        sections.forEach((s, i) => draft.markers.push({
+          id: `auto-${i}-${Date.now()}`, name: s.name, time: s.start, endTime: s.end, type: 'REGION', color: sectionColor(s),
+        }));
+        draft.markers.sort((a, b) => a.time - b.time);
+      }));
+    }
     audioEngine.seekTo(0, stateRef.current.tracks, false);
     setState(prev => ({ ...prev, currentTime: 0 }));
     setAiNotification(tonalite
@@ -3057,6 +3070,20 @@ export default function App() {
       case 'SEEK':
         handleSeek(Math.max(0, Number(p.time) || 0));
         break;
+
+      case 'GOTO_SECTION': {
+        // « va au refrain » → la partie la plus pleine ; « partie 2 », « intro »…
+        const regions = stateRef.current.markers.filter(m => m.type === 'REGION' && m.endTime);
+        if (!regions.length) { notify("Pas de repères sur cette prod : charge une instru du catalogue"); break; }
+        const want = String(p.target || '').toLowerCase();
+        let m = want === 'full'
+          ? regions.find(r => r.color === '#f472b6' && r.time > 0.5) || regions.find(r => r.color === '#f472b6')
+          : regions.find(r => r.name.toLowerCase() === want);
+        if (!m) { notify(`Je ne trouve pas « ${p.target} »`); break; }
+        handleSeek(m.time);
+        if (p.loop) setState(prev => ({ ...prev, loopStart: m!.time, loopEnd: m!.endTime!, isLoopActive: true }));
+        break;
+      }
 
       case 'SET_LOOP': {
         const start = Math.max(0, Number(p.start) || 0);
