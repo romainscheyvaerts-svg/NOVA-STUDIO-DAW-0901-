@@ -37,7 +37,12 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   const [filename, setFilename] = useState(projectState.name || 'Master');
   
   // SOURCE & PLAGE
-  const [source, setSource] = useState<'MASTER' | 'STEMS'>('MASTER');
+  // VOCALS : les voix seules, piste par piste. Toujours permis, même sans avoir
+  // acheté le beat : les pistes du beat sont retirées du rendu (jamais mutées
+  // seulement), l'instrumental ne peut donc pas sortir par là.
+  const [source, setSource] = useState<'MASTER' | 'STEMS' | 'VOCALS'>(exportVerrouille ? 'VOCALS' : 'MASTER');
+  const [vocalsDry, setVocalsDry] = useState(false);
+  const bloque = exportVerrouille && source !== 'VOCALS';
   const [rangeMode, setRangeMode] = useState<'FULL' | 'LOOP'>('FULL');
 
   // FORMAT & QUALITÉ
@@ -83,9 +88,11 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
       return rangeMode === 'LOOP' ? projectState.loopStart : 0;
   };
 
-  const processAudioBuffer = (buffer: AudioBuffer): AudioBuffer => {
+  const processAudioBuffer = (buffer: AudioBuffer, isStem = false): AudioBuffer => {
       // 1. Normalisation
-      if (normalize === 'peak') {
+      if (isStem) {
+          // pas de normalisation par piste
+      } else if (normalize === 'peak') {
           setStatusText('Normalisation (-0.1 dB)...');
           AudioEncoder.normalizeBuffer(buffer, -0.1);
           setLoudnessReport(`Mesuré : ${integratedLufs(buffer).toFixed(1)} LUFS · crête vraie ${truePeakDb(buffer).toFixed(1)} dBTP`);
@@ -109,10 +116,10 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
   // --- CORE RENDER LOGIC ---
 
-  const renderTrackList = async (tracksToRender: Track[], label: string): Promise<Blob> => {
+  const renderTrackList = async (tracksToRender: Track[], label: string, opts: { duration?: number; onProgress?: (p: number) => void; isStem?: boolean } = {}): Promise<Blob> => {
       setStatusText(`Rendu Audio : ${label}...`);
       
-      const duration = getDuration();
+      const duration = opts.duration ?? getDuration();
       const startOffset = getStartOffset();
 
       // Rendu Offline via AudioEngine
@@ -124,11 +131,13 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
           format === 'MP3' ? Math.min(48000, sampleRate) : sampleRate,
           (p) => {
               if (source === 'MASTER') setProgress(p); // Only update main progress bar here if master
+              opts.onProgress?.(p);
           }
       );
 
-      // Post-Processing (DSP)
-      const processedBuffer = processAudioBuffer(renderedBuffer);
+      // Post-Processing (DSP). Stems : jamais de normalisation par piste (elle
+      // casserait l'équilibre entre les pistes) ; le dither reste.
+      const processedBuffer = processAudioBuffer(renderedBuffer, !!opts.isStem);
 
       // Encodage
       if (format === 'MP3') {
@@ -141,8 +150,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   };
 
   const handleExport = async () => {
-    if (exportVerrouille) {
-      setStatusText("Achetez l'instrumental pour exporter votre morceau.");
+    if (bloque) {
+      setStatusText("Achetez l'instrumental pour exporter votre morceau (les voix seules restent exportables).");
       return;
     }
     setIsRendering(true);
@@ -163,6 +172,38 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
               ? `${filename}_${mp3Bitrate}kbps.mp3`
               : `${filename}_${sampleRate}Hz_${bitDepth}bit.${format.toLowerCase()}`);
         } 
+        else if (source === 'VOCALS') {
+            // --- VOIX SEULES, PISTE PAR PISTE (ZIP) ---
+            const estBeat = (t: typeof exportTracks[number]) => t.id === 'instrumental' || (t.instrumentId !== undefined && t.instrumentId !== null && t.instrumentId !== '');
+            // Le beat n'existe plus dans ce rendu.
+            const sansBeat = exportTracks.filter(t => !estBeat(t));
+            const voix = sansBeat.filter(t => t.type === 'AUDIO' && !t.isMuted && t.clips.some(c => !c.isMuted));
+            if (voix.length === 0) throw new Error('Aucune piste voix à exporter.');
+            // Durée : jusqu'à la fin de la dernière voix + 4 s de queue (reverb),
+            // pas la longueur du beat. Tous les fichiers démarrent au même point.
+            const finVoix = Math.max(...voix.flatMap(t => t.clips.map(c => c.start + c.duration)));
+            const dureeVoix = rangeMode === 'LOOP' ? getDuration() : Math.max(1, finVoix + 4);
+            const zip = new JSZip();
+            for (let i = 0; i < voix.length; i++) {
+                const track = voix[i];
+                setStatusText(`Voix ${i + 1}/${voix.length} : ${track.name}`);
+                setProgress((i / voix.length) * 100);
+                const rendu = vocalsDry
+                  // Prise brute : clips seuls, sans effets, départs ni bus.
+                  ? [{ ...track, isSolo: false, isFrozen: false, frozenClip: undefined, plugins: [], sends: [], outputTrackId: 'master', automationLanes: [] }, ...sansBeat.filter(t => t.id === 'master')]
+                  // Avec effets : la piste en solo à travers son bus et ses envois (reverb…).
+                  : sansBeat.map(t => t.id === track.id ? { ...t, isMuted: false, isSolo: true } : { ...t, isSolo: false });
+                const blob = await renderTrackList(rendu, track.name, {
+                  duration: dureeVoix, isStem: true,
+                  onProgress: p => setProgress(((i + p / 100) / voix.length) * 100),
+                });
+                const ext = format === 'MP3' ? 'mp3' : format.toLowerCase();
+                zip.file(`${String(i + 1).padStart(2, '0')} ${track.name.replace(/[^a-z0-9 _-]/gi, '_')}${vocalsDry ? ' (brut)' : ''}.${ext}`, blob);
+            }
+            setStatusText("Compression ZIP...");
+            const zipBlob = await zip.generateAsync({ type: "blob" });
+            downloadBlob(zipBlob, `${filename}_Voix${vocalsDry ? '_brutes' : ''}.zip`);
+        }
         else {
             // --- EXPORT STEMS (ZIP) ---
             const zip = new JSZip();
@@ -188,7 +229,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                 });
 
                 // Render Logic handles Solo implicitly
-                const blob = await renderTrackList(isolatedTracks, track.name);
+                const blob = await renderTrackList(isolatedTracks, track.name, { isStem: true });
                 zip.file(`${trackName}.wav`, blob);
             }
 
@@ -254,8 +295,15 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                     className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
                                 >
                                     <option value="MASTER">Mix master (stéréo)</option>
-                                    <option value="STEMS">All Tracks (Stems .zip)</option>
+                                    <option value="STEMS">Toutes les pistes (stems .zip)</option>
+                                    <option value="VOCALS">Voix seules, piste par piste (.zip)</option>
                                 </select>
+                                {source === 'VOCALS' && (
+                                  <label className="mt-1.5 flex items-center gap-2 text-[10px] text-slate-300">
+                                    <input type="checkbox" checked={vocalsDry} onChange={e => setVocalsDry(e.target.checked)} disabled={isRendering} />
+                                    Prises brutes (sans effets ni reverb)
+                                  </label>
+                                )}
                              </div>
                              <div className="space-y-1">
                                 <label className="text-[9px] font-bold text-slate-400">Plage Temporelle</label>
@@ -417,8 +465,15 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                               {beatsNonAchetes.length > 1
                                 ? `${beatsNonAchetes.length} instrumentaux du catalogue ne sont pas achetés.`
                                 : `L'instrumental « ${beatsNonAchetes[0]?.clips[0]?.name || beatsNonAchetes[0]?.name} » n'est pas acheté.`}
-                              {' '}Le studio permet de l'essayer librement ; l'achat débloque l'export.
+                              {' '}Le studio permet de l'essayer librement ; l'achat débloque l'export du morceau.
                             </p>
+                            <button
+                              type="button"
+                              onClick={() => setSource('VOCALS')}
+                              className={`mt-2 w-full h-10 rounded-lg text-[11px] font-bold ${source === 'VOCALS' ? 'bg-emerald-500/25 text-emerald-100 border border-emerald-400/50' : 'border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/10'}`}
+                            >
+                              🎤 {source === 'VOCALS' ? 'Voix seules sélectionnées : export possible' : 'Exporter mes voix seules, piste par piste (sans le beat)'}
+                            </button>
                             {/* Le moment où l'artiste veut son fichier : on lui donne les deux suites possibles. */}
                             <div className="mt-3 flex flex-col sm:flex-row gap-2">
                               <button
@@ -450,14 +505,14 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
                         <button 
                             onClick={handleExport}
-                            disabled={isRendering || exportVerrouille}
-                            title={exportVerrouille ? "Achetez l'instrumental pour exporter" : undefined}
+                            disabled={isRendering || bloque}
+                            title={bloque ? "Achetez l'instrumental pour exporter (ou choisissez « Voix seules »)" : undefined}
                             className="w-full h-12 bg-cyan-500 hover:bg-cyan-400 text-black rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-cyan-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
                         >
-                            {exportVerrouille ? <i className="fas fa-lock"></i>
+                            {bloque ? <i className="fas fa-lock"></i>
                               : isRendering ? <i className="fas fa-circle-notch fa-spin"></i>
                               : <i className="fas fa-download"></i>}
-                            <span>{exportVerrouille ? 'ACHETER POUR EXPORTER' : 'EXPORTER'}</span>
+                            <span>{bloque ? 'ACHETER POUR EXPORTER' : source === 'VOCALS' ? 'EXPORTER MES VOIX' : 'EXPORTER'}</span>
                         </button>
                     </div>
                 </div>
