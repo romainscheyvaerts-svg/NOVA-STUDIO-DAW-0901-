@@ -4,6 +4,13 @@ import { Track, Clip, MidiNote, EditorTool, TrackType } from '../types';
 import { NOTES } from '../plugins/AutoTunePlugin';
 import { audioEngine } from '../engine/AudioEngine';
 import { midiEffectsService } from '../services/MidiEffectsService';
+import { usePlayheadTime } from '../utils/playheadStore';
+
+/** Trait de lecture : seul lui se re-rend pendant la lecture, pas tout le piano roll. */
+const PianoRollPlayhead: React.FC<{ clipStart: number; zoomX: number }> = ({ clipStart, zoomX }) => {
+  const t = usePlayheadTime();
+  return <div className="absolute top-0 bottom-0 w-0.5 bg-white z-50 pointer-events-none" style={{ left: (t - clipStart) * zoomX }} />;
+};
 
 // Quantize options (inspired by Ableton/Logic)
 type QuantizeStrength = 25 | 50 | 75 | 100;
@@ -25,7 +32,8 @@ interface PianoRollProps {
   track: Track;
   clipId: string;
   bpm: number;
-  currentTime: number;
+  /** Inutilise : la tete de lecture est lue dans playheadStore. */
+  currentTime?: number;
   onUpdateTrack: (track: Track) => void;
   onClose: () => void;
 }
@@ -37,7 +45,7 @@ const VELOCITY_HEIGHT = 150;
 
 type DragMode = 'MOVE' | 'RESIZE_R' | 'VELOCITY' | 'SELECT' | 'DRAW' | null;
 
-const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, currentTime, onUpdateTrack, onClose }) => {
+const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack, onClose }) => {
   const clipIndex = track.clips.findIndex(c => c.id === clipId);
   const clip = track.clips[clipIndex];
   
@@ -716,7 +724,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, currentTime, 
                     })}
 
                     {/* Playhead */}
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-white z-50 pointer-events-none" style={{ left: (currentTime - clip.start) * zoomX }} />
+                    <PianoRollPlayhead clipStart={clip.start} zoomX={zoomX} />
                     
                     {selectionBox && (
                          <div className="absolute border border-cyan-500 bg-cyan-500/20 pointer-events-none" style={{ left: Math.min(selectionBox.startX, selectionBox.endX), top: Math.min(selectionBox.startY, selectionBox.endY), width: Math.abs(selectionBox.endX - selectionBox.startX), height: Math.abs(selectionBox.endY - selectionBox.startY) }} />

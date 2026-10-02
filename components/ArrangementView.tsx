@@ -8,6 +8,13 @@ import LiveRecordingClip from './LiveRecordingClip';
 import AutomationLaneComponent from './AutomationLane';
 import WaveformRenderer from './WaveformRenderer';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
+import { playheadStore } from '../utils/playheadStore';
+import { visibleEnvelope } from '../utils/waveformPeaks';
+import { useLatestCallback } from '../utils/useLatestCallback';
+
+// En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
+// l'arrangement (defilement, selection...), seulement quand leur piste change.
+const TrackHeaderMemo = React.memo(TrackHeader);
 
 interface ArrangementViewProps {
   tracks: Track[];
@@ -15,7 +22,8 @@ interface ArrangementViewProps {
   onSelectTrack: (id: string) => void;
   onUpdateTrack: (track: Track) => void;
   onReorderTracks: (sourceTrackId: string, destTrackId: string) => void;
-  currentTime: number;
+  /** Inutilise : la tete de lecture est lue dans playheadStore. */
+  currentTime?: number;
   isLoopActive: boolean;
   loopStart: number;
   loopEnd: number;
@@ -56,52 +64,6 @@ const FADE_HANDLE_PX = 14;
 type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | null;
 type LoopDragMode = 'START' | 'END' | 'BODY' | null;
 
-/**
- * Cache des cretes de forme d'onde.
- *
- * Elles etaient recalculees depuis les echantillons bruts a chaque image, et
- * meme trois fois par image (remplissage superieur, miroir inferieur, contour).
- * Sur un beat de trois minutes cela represente des dizaines de millions de
- * lectures par seconde : c'est ce qui saccadait l'arrangement pendant la
- * lecture. Le trace ne depend que du clip et de sa largeur a l'ecran, il suffit
- * donc de le calculer une fois.
- */
-const cacheCretes = new Map<string, Float32Array>();
-const CACHE_CRETES_MAX = 160;
-
-const cretesDuClip = (
-  data: Float32Array, debutEch: number, finEch: number,
-  largeur: number, inverse: boolean, cle: string
-): Float32Array => {
-  const dejaLa = cacheCretes.get(cle);
-  if (dejaLa && dejaLa.length === largeur) return dejaLa;
-
-  const cretes = new Float32Array(largeur);
-  const echParPixel = (finEch - debutEch) / largeur;
-  for (let px = 0; px < largeur; px++) {
-    let a = debutEch + Math.floor(px * echParPixel);
-    let b = Math.min(debutEch + Math.floor((px + 1) * echParPixel), data.length);
-    if (inverse) {
-      const na = Math.max(0, data.length - b);
-      const nb = Math.max(0, data.length - a);
-      a = na; b = nb;
-    }
-    let max = 0;
-    for (let sm = a; sm < b; sm++) {
-      const v = Math.abs(data[sm]);
-      if (v > max) max = v;
-    }
-    cretes[px] = Math.min(1, max * 1.3);
-  }
-
-  if (cacheCretes.size >= CACHE_CRETES_MAX) {
-    const plusAncien = cacheCretes.keys().next().value;
-    if (plusAncien !== undefined) cacheCretes.delete(plusAncien);
-  }
-  cacheCretes.set(cle, cretes);
-  return cretes;
-};
-
 const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: boolean): number => {
     if (!enabled) return time;
     const beatDuration = 60 / bpm;
@@ -114,7 +76,7 @@ const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: bo
 };
 
 const ArrangementView: React.FC<ArrangementViewProps> = ({ 
-  tracks, selectedTrackId, onSelectTrack, onUpdateTrack, onReorderTracks, currentTime, 
+  tracks, selectedTrackId, onSelectTrack, onUpdateTrack, onReorderTracks, 
   isLoopActive, loopStart, loopEnd, onSetLoop, onSeek, bpm, 
   markers = [], onAddMarker, onUpdateMarker, onDeleteMarker, isPlaying = false,
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
@@ -219,7 +181,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       // Coller se fait sur la piste selectionnee, meme sans clip selectionne.
       if (mod && (e.key === 'v' || e.key === 'V')) {
         const target = sel?.trackId || selectedTrackId;
-        if (target) { e.preventDefault(); onEditClip?.(target, '', 'PASTE', { time: currentTime }); }
+        if (target) { e.preventDefault(); onEditClip?.(target, '', 'PASTE', { time: playheadStore.get() }); }
         return;
       }
 
@@ -260,7 +222,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       if (e.key === 's' || e.key === 'S') {
         e.preventDefault();
         // La decoupe s'applique a tous les clips traverses par la tete de lecture.
-        cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'SPLIT', { time: currentTime }));
+        const t = playheadStore.get();
+        cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'SPLIT', { time: t }));
         return;
       }
     };
@@ -269,7 +232,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     window.addEventListener('keydown', handleKD);
     window.addEventListener('keyup', handleKU);
     return () => { window.removeEventListener('keydown', handleKD); window.removeEventListener('keyup', handleKU); };
-  }, [selectedClip, selectedClipIds, tracks, selectedTrackId, currentTime, onEditClip]);
+  }, [selectedClip, selectedClipIds, tracks, selectedTrackId, onEditClip]);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -334,24 +297,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const autoScrollRef = useRef(false);
   const followSuspendedUntilRef = useRef(0);
 
-  useEffect(() => {
-    if (!isPlaying) return;
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    if (Date.now() < followSuspendedUntilRef.current) return;
-
-    const playheadX = currentTime * zoomH;
-    const viewStart = el.scrollLeft;
-    const viewEnd = viewStart + el.clientWidth;
-    const margin = el.clientWidth * 0.12;
-
-    // On avance d'une "page" plutot que de recentrer en continu : bien moins
-    // fatigant a l'oeil et c'est ce que font les DAW.
-    if (playheadX > viewEnd - margin || playheadX < viewStart) {
-      autoScrollRef.current = true;
-      el.scrollLeft = Math.max(0, playheadX - el.clientWidth * 0.15);
-    }
-  }, [currentTime, isPlaying, zoomH]);
+  // (Le suivi lui-meme est fait par l'abonnement a playheadStore, plus bas :
+  // il ne provoque plus de rendu React a chaque image.)
 
   const isSyncingScroll = useRef(false);
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -482,15 +429,37 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       }
   };
 
+  // Taille de la minimap suivie par ResizeObserver. Avant, elle etait relue
+  // (getBoundingClientRect) a chaque image et, la largeur CSS n'etant pas
+  // entiere, le canvas etait realloue a chaque image.
+  const [minimapSize, setMinimapSize] = useState({ w: 0, h: 0 });
+  const minimapScaleRef = useRef(0);
+  const minimapPlayheadRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const canvas = minimapRef.current; if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    if (canvas.width !== rect.width || canvas.height !== rect.height) { canvas.width = rect.width; canvas.height = rect.height; }
+    const ro = new ResizeObserver(entries => {
+      const r = entries[0]?.contentRect; if (!r) return;
+      const w = Math.round(r.width), h = Math.round(r.height);
+      setMinimapSize(prev => (prev.w === w && prev.h === h ? prev : { w, h }));
+    });
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, []);
+
+  // Fond de la minimap (pistes, clips, boucle, fenetre visible) : redessine
+  // seulement quand il change. La tete de lecture est un trait DOM deplace
+  // par l'abonnement a playheadStore.
+  useEffect(() => {
+    const canvas = minimapRef.current; if (!canvas) return;
+    if (minimapSize.w <= 0 || minimapSize.h <= 0) return;
+    if (canvas.width !== minimapSize.w || canvas.height !== minimapSize.h) { canvas.width = minimapSize.w; canvas.height = minimapSize.h; }
     const ctx = canvas.getContext('2d'); if (!ctx) return;
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#08090b'; ctx.fillRect(0, 0, w, h);
     ctx.strokeStyle = '#1e2229'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
     const scale = w / Math.max(totalContentWidth, 1);
+    minimapScaleRef.current = scale;
+    if (minimapPlayheadRef.current) minimapPlayheadRef.current.style.transform = `translateX(${playheadStore.get() * zoomH * scale}px)`;
     const trackHeight = h / Math.max(visibleTracks.length, 1);
     visibleTracks.forEach((t, tIdx) => {
         const y = tIdx * trackHeight;
@@ -514,15 +483,13 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         ctx.strokeRect(loopX, 0, loopW, h);
     }
     
-    const phX = (currentTime * zoomH) * scale;
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(phX, 0); ctx.lineTo(phX, h); ctx.stroke();
     const viewportWidth = Math.max(0, viewportSize.width - headerWidth);
     const vx = scrollLeft * scale;
     const vw = viewportWidth * scale;
     ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, vx, h); ctx.fillRect(vx + vw, 0, w - (vx + vw), h);
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.strokeRect(vx, 0, vw, h);
     ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(vx, 0, vw, h);
-  }, [visibleTracks, totalContentWidth, scrollLeft, viewportSize, headerWidth, zoomH, currentTime, isLoopActive, loopStart, loopEnd]);
+  }, [visibleTracks, totalContentWidth, scrollLeft, viewportSize, headerWidth, zoomH, isLoopActive, loopStart, loopEnd, minimapSize]);
 
   const handleMinimapMouseDown = (e: React.MouseEvent) => {
       const canvas = minimapRef.current; if (!canvas || !scrollContainerRef.current) return;
@@ -560,6 +527,25 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     setContextMenu({ x: e.clientX, y: e.clientY, items: menuItems });
   };
   
+  // Gestionnaires stables pour les en-tetes memoises (ils appellent toujours la
+  // derniere version des props, sans fermeture perimee).
+  const headerOnUpdate = useLatestCallback(onUpdateTrack);
+  const headerOnDropPlugin = useLatestCallback(onDropPluginOnTrack);
+  const headerOnMovePlugin = useLatestCallback(onMovePlugin);
+  const headerOnSelectPlugin = useLatestCallback(onSelectPlugin);
+  const headerOnRemovePlugin = useLatestCallback(onRemovePlugin);
+  const headerOnRequestAddPlugin = useLatestCallback(onRequestAddPlugin);
+  const headerOnSwapInstrument = useLatestCallback(onSwapInstrument);
+  const headerOnContextMenu = useLatestCallback(handleTrackContextMenu);
+  const headerOnDropTrack = useLatestCallback(handleDropTrack);
+  const selectTrackStable = useLatestCallback(onSelectTrack);
+  const selectHandlersRef = useRef(new Map<string, () => void>());
+  const selectTrackHandler = (id: string) => {
+    let fn = selectHandlersRef.current.get(id);
+    if (!fn) { fn = () => selectTrackStable(id); selectHandlersRef.current.set(id, fn); }
+    return fn;
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
     const rect = scrollContainerRef.current.getBoundingClientRect();
@@ -861,87 +847,70 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     ctx.fillRect(x, y, w, 3);
 
     // ========== WAVEFORM RENDERING (Pro Tools style) ==========
+    // Seule la partie visible du clip est tracee, a partir des cretes min/max
+    // pre-calculees (utils/waveformPeaks) : plus de rebalayage du buffer au zoom.
     if (clip.bufferId) {
         const buffer = audioBufferRegistry.get(clip.bufferId);
         if (buffer) {
-            const data = buffer.getChannelData(0);
             const sampleRate = buffer.sampleRate;
             const offset = clip.offset || 0;
             const clipDuration = clip.duration;
-            
+
             // Calculer les samples à afficher
             const startSample = Math.floor(offset * sampleRate);
-            const endSample = Math.min(data.length, Math.floor((offset + clipDuration) * sampleRate));
+            const endSample = Math.min(buffer.length, Math.floor((offset + clipDuration) * sampleRate));
             const totalSamples = endSample - startSample;
-            
+
             // Waveform area (avec padding pour le nom du clip)
             const waveY = y + 18;
             const waveH = h - 22;
             const centerY = waveY + waveH / 2;
-            
+
             if (w > 2 && totalSamples > 0 && waveH > 4) {
-                const samplesPerPixel = totalSamples / w;
                 const waveColor = clip.isMuted ? '#333' : clipColor;
-                
-                // ===== STYLE PRO TOOLS: Filled waveform avec outline =====
-                ctx.fillStyle = waveColor + '55';  // Semi-transparent fill
-                ctx.strokeStyle = waveColor;
-                ctx.lineWidth = 0.5;
-                
-                // Un clip inverse jouait a l'envers mais s'affichait a l'endroit :
-                // on lit la portion miroir du buffer pour que la forme d'onde
-                // corresponde a ce qu'on entend.
-                // Crêtes calculées une seule fois puis mémorisées : les trois
-                // tracés ci-dessous les relisent au lieu de rebalayer le buffer.
                 const largeurPx = Math.max(1, Math.round(w));
-                const cle = `${clip.bufferId}|${offset.toFixed(4)}|${clipDuration.toFixed(4)}|${largeurPx}|${clip.isReversed ? 'r' : 'n'}`;
-                const cretes = cretesDuClip(data, startSample, endSample, largeurPx, !!clip.isReversed, cle);
+                // Pixels du clip reellement visibles dans le canvas.
+                const px0 = Math.max(0, Math.floor(-x));
+                const px1 = Math.min(largeurPx, Math.ceil(ctx.canvas.width - x) + 1);
 
-                ctx.beginPath();
-                ctx.moveTo(x, centerY);
+                if (px1 > px0) {
+                    const n = px1 - px0;
+                    const amp = waveH * 0.45;
+                    // Un clip inverse jouait a l'envers mais s'affichait a l'endroit :
+                    // on lit la portion miroir du buffer pour que la forme d'onde
+                    // corresponde a ce qu'on entend.
+                    const env = visibleEnvelope(buffer, startSample, endSample, largeurPx, px0, px1, !!clip.isReversed);
+                    const x0 = x + px0;
 
-                // Partie supérieure
-                for (let px = 0; px < largeurPx; px++) {
-                    ctx.lineTo(x + px, centerY - (cretes[px] * waveH * 0.45));
+                    // ===== STYLE PRO TOOLS: Filled waveform avec outline =====
+                    ctx.fillStyle = waveColor + '55';  // Semi-transparent fill
+                    ctx.beginPath();
+                    ctx.moveTo(x0, centerY);
+                    for (let i = 0; i < n; i++) ctx.lineTo(x0 + i, centerY - env[i] * amp);
+                    for (let i = n - 1; i >= 0; i--) ctx.lineTo(x0 + i, centerY + env[i] * amp);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Contour superieur et inferieur, en un seul trace.
+                    ctx.strokeStyle = waveColor + 'aa';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(x0, centerY - env[0] * amp);
+                    for (let i = 1; i < n; i++) ctx.lineTo(x0 + i, centerY - env[i] * amp);
+                    ctx.moveTo(x0, centerY + env[0] * amp);
+                    for (let i = 1; i < n; i++) ctx.lineTo(x0 + i, centerY + env[i] * amp);
+                    ctx.stroke();
+
+                    // Ligne centrale (0 dB)
+                    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([2, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(x0, centerY);
+                    ctx.lineTo(x0 + n, centerY);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
                 }
-
-                // Partie inférieure (miroir)
-                for (let px = largeurPx - 1; px >= 0; px--) {
-                    ctx.lineTo(x + px, centerY + (cretes[px] * waveH * 0.45));
-                }
-
-                ctx.closePath();
-                ctx.fill();
-
-                // Contour
-                ctx.strokeStyle = waveColor + 'aa';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                for (let px = 0; px < largeurPx; px++) {
-                    const yTop = centerY - (cretes[px] * waveH * 0.45);
-                    if (px === 0) ctx.moveTo(x + px, yTop);
-                    else ctx.lineTo(x + px, yTop);
-                }
-                ctx.stroke();
-                
-                // Ligne inférieure
-                ctx.beginPath();
-                for (let px = 0; px < largeurPx; px++) {
-                    const yBottom = centerY + (cretes[px] * waveH * 0.45);
-                    if (px === 0) ctx.moveTo(x + px, yBottom);
-                    else ctx.lineTo(x + px, yBottom);
-                }
-                ctx.stroke();
-                
-                // Ligne centrale (0 dB)
-                ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-                ctx.lineWidth = 1;
-                ctx.setLineDash([2, 4]);
-                ctx.beginPath();
-                ctx.moveTo(x, centerY);
-                ctx.lineTo(x + w, centerY);
-                ctx.stroke();
-                ctx.setLineDash([]);
             }
         }
     }
@@ -1219,20 +1188,80 @@ const drawTimeline = useCallback(() => {
         ctx.setLineDash([]);
     }
 
-    const phX = timeToPixels(currentTime) - scrollX;
-    if (phX >= 0 && phX <= w) {
-      ctx.strokeStyle = isRecording ? '#ef4444' : '#00f2ff';
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(phX, 0); ctx.lineTo(phX, h); ctx.stroke();
-      ctx.fillStyle = isRecording ? '#ef4444' : '#00f2ff';
-      ctx.beginPath(); ctx.moveTo(phX-5, 0); ctx.lineTo(phX+5, 0); ctx.lineTo(phX, 10); ctx.fill();
-    }
-}, [visibleTracks, zoomV, zoomH, currentTime, isRecording, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, gridSize, scrollLeft, scrollTop, onEditClip, onSelectTrack, markers, selectedClipIds, marquee]);
+    // La tete de lecture est dessinee sur le calque superieur (drawPlayhead).
+}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee]);
 
+// Calque statique (grille, clips, formes d'onde, reperes) : redessine seulement
+// quand son contenu change, plus a chaque image de la lecture.
 useEffect(() => {
     requestRef.current = requestAnimationFrame(drawTimeline);
     return () => cancelAnimationFrame(requestRef.current);
 }, [drawTimeline]);
+
+// --- Calque de la tete de lecture (et curseur d'enregistrement) ---
+// Redessine a chaque image depuis playheadStore, sans rendu React : on efface
+// seulement la bande de l'ancienne position.
+const overlayRef = useRef<HTMLCanvasElement>(null);
+const lastPlayheadXRef = useRef<number | null>(null);
+const isPlayingRef = useRef(isPlaying);
+isPlayingRef.current = isPlaying;
+const viewportWidthRef = useRef(viewportSize.width);
+viewportWidthRef.current = viewportSize.width;
+
+const drawPlayhead = useCallback(() => {
+    const ov = overlayRef.current;
+    const scroll = scrollContainerRef.current;
+    if (!ov || !scroll) return;
+    const ctx = ov.getContext('2d');
+    if (!ctx) return;
+    const w = ov.width, h = ov.height;
+    const t = playheadStore.get();
+
+    // Suivi du playhead pendant la lecture : on avance d'une "page" plutot que
+    // de recentrer en continu (bien moins fatigant a l'oeil, comme les DAW).
+    if (isPlayingRef.current && Date.now() >= followSuspendedUntilRef.current) {
+        const playheadX = t * zoomH;
+        const viewStart = scroll.scrollLeft;
+        const cw = viewportWidthRef.current || scroll.clientWidth;
+        if (playheadX > viewStart + cw - cw * 0.12 || playheadX < viewStart) {
+            autoScrollRef.current = true;
+            scroll.scrollLeft = Math.max(0, playheadX - cw * 0.15);
+        }
+    }
+
+    const last = lastPlayheadXRef.current;
+    if (last !== null) ctx.clearRect(Math.floor(last) - 7, 0, 15, h);
+    lastPlayheadXRef.current = null;
+
+    if (minimapPlayheadRef.current) {
+        minimapPlayheadRef.current.style.transform = `translateX(${t * zoomH * minimapScaleRef.current}px)`;
+    }
+
+    const phX = Math.round(t * zoomH - scroll.scrollLeft) + 0.5;
+    if (phX >= 0 && phX <= w) {
+        const color = isRecording ? '#ef4444' : '#00f2ff';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(phX, 0); ctx.lineTo(phX, h); ctx.stroke();
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.moveTo(phX - 5, 0); ctx.lineTo(phX + 5, 0); ctx.lineTo(phX, 10); ctx.fill();
+        lastPlayheadXRef.current = phX;
+    }
+}, [zoomH, isRecording]);
+
+useEffect(() => {
+    // Taille du calque : relue seulement quand la disposition change.
+    const ov = overlayRef.current;
+    if (ov) {
+        const cw = ov.clientWidth, ch = ov.clientHeight;
+        if (cw > 0 && ch > 0 && (ov.width !== cw || ov.height !== ch)) {
+            ov.width = cw; ov.height = ch;
+            lastPlayheadXRef.current = null;
+        }
+    }
+    drawPlayhead();
+    return playheadStore.subscribe(drawPlayhead);
+}, [drawPlayhead, scrollLeft, viewportSize.width, viewportSize.height, headerWidth, isPlaying]);
 
   return (
     <div className="nova-grille flex-1 flex flex-col overflow-hidden relative select-none" onContextMenu={e => e.preventDefault()}>
@@ -1253,6 +1282,7 @@ useEffect(() => {
               onMouseDown={handleMinimapMouseDown}
             >
                  <canvas ref={minimapRef} className="w-full h-full block" />
+                 <div ref={minimapPlayheadRef} className="absolute top-0 bottom-0 left-0 w-px bg-white pointer-events-none" style={{ willChange: 'transform' }} />
             </div>
         </div>
         <div className="flex items-center space-x-3 shrink-0">
@@ -1302,11 +1332,11 @@ useEffect(() => {
             {visibleTracks.map((track) => (
               <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>
                 <div style={{ height: `${zoomV}px` }}>
-                  <TrackHeader 
-                     track={track} isSelected={selectedTrackId === track.id} onSelect={() => onSelectTrack(track.id)} onUpdate={onUpdateTrack} 
-                     onDropPlugin={onDropPluginOnTrack} onMovePlugin={onMovePlugin} onSelectPlugin={onSelectPlugin} onRemovePlugin={onRemovePlugin} onRequestAddPlugin={onRequestAddPlugin} 
-                     onContextMenu={handleTrackContextMenu} onDragStartTrack={handleDragStartTrack} onDragOverTrack={handleDragOverTrack} onDropTrack={handleDropTrack}
-                     isDraggingOver={dragOverTrackId === track.id} onSwapInstrument={onSwapInstrument}
+                  <TrackHeaderMemo 
+                     track={track} isSelected={selectedTrackId === track.id} onSelect={selectTrackHandler(track.id)} onUpdate={headerOnUpdate} 
+                     onDropPlugin={headerOnDropPlugin} onMovePlugin={headerOnMovePlugin} onSelectPlugin={headerOnSelectPlugin} onRemovePlugin={headerOnRemovePlugin} onRequestAddPlugin={headerOnRequestAddPlugin} 
+                     onContextMenu={headerOnContextMenu} onDragStartTrack={handleDragStartTrack} onDragOverTrack={handleDragOverTrack} onDropTrack={headerOnDropTrack}
+                     isDraggingOver={dragOverTrackId === track.id} onSwapInstrument={headerOnSwapInstrument}
                   />
                 </div>
                 {track.automationLanes.map(lane => lane.isExpanded && (
@@ -1329,7 +1359,7 @@ useEffect(() => {
              visibleTracks.map((track, idx) => {
                if (!track.isTrackArmed) return null;
                let topY = 40; for (let i = 0; i < idx; i++) topY += zoomV + (visibleTracks[i].automationLanes.filter(l => l.isExpanded).length * 80);
-               return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, left: headerWidth, height: `${zoomV - 4}px`, right: 0, pointerEvents: 'none' }}><LiveRecordingClip trackId={track.id} recStartTime={recStartTime} currentTime={currentTime} zoomH={zoomH} height={zoomV - 4} /></div>;
+               return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, left: headerWidth, height: `${zoomV - 4}px`, right: 0, pointerEvents: 'none' }}><LiveRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} /></div>;
              })
           )}
         </div>
@@ -1348,6 +1378,21 @@ useEffect(() => {
               pointerEvents: 'none',
               zIndex: 20
           }} 
+      />
+      {/* Calque de la tete de lecture, redessine a chaque image sans toucher au reste */}
+      <canvas
+          ref={overlayRef}
+          style={{
+              position: 'absolute',
+              top: 48,
+              left: headerWidth,
+              right: 0,
+              bottom: 0,
+              width: `calc(100% - ${headerWidth}px)`,
+              height: 'calc(100% - 48px)',
+              pointerEvents: 'none',
+              zIndex: 21
+          }}
       />
       {editingMarkerId && (() => {
         const mk = markers.find(m => m.id === editingMarkerId);
@@ -1377,7 +1422,7 @@ useEffect(() => {
         );
       })()}
       {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
-      {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled(!snapEnabled)} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: currentTime })} />}
+      {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled(!snapEnabled)} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
       {hoverTime !== null && dragAction !== null && <div className="fixed z-[200] px-3 py-1.5 bg-black/90 border border-cyan-500/30 rounded-lg shadow-2xl pointer-events-none text-[10px] font-black text-cyan-400 font-mono" style={{ left: tooltipPos.x + 15, top: tooltipPos.y }}>{hoverTime.toFixed(3)}s {dragAction && <span className="ml-2 text-white opacity-50">[{dragAction}]</span>}</div>}
       {clipContextMenu && (
         <ContextMenu
@@ -1385,10 +1430,10 @@ useEffect(() => {
             items={[
                 { label: 'Couper', icon: 'fa-cut', shortcut: 'Ctrl+X', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'CUT'); setClipContextMenu(null); }},
                 { label: 'Copier', icon: 'fa-copy', shortcut: 'Ctrl+C', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'COPY'); setClipContextMenu(null); }},
-                { label: 'Coller', icon: 'fa-paste', shortcut: 'Ctrl+V', onClick: () => { onEditClip?.(clipContextMenu.trackId, '', 'PASTE', { time: currentTime }); setClipContextMenu(null); }},
+                { label: 'Coller', icon: 'fa-paste', shortcut: 'Ctrl+V', onClick: () => { onEditClip?.(clipContextMenu.trackId, '', 'PASTE', { time: playheadStore.get() }); setClipContextMenu(null); }},
                 'separator',
                 { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE'); setClipContextMenu(null); }},
-                { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: currentTime }); setClipContextMenu(null); }},
+                { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: playheadStore.get() }); setClipContextMenu(null); }},
                 { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE'); setClipContextMenu(null); }},
                 ...(clipContextMenu.clip.type === TrackType.MIDI && onEditMidi ? [
                   { label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); }}
@@ -1431,4 +1476,4 @@ useEffect(() => {
     </div>
   );
 };
-export default ArrangementView;
+export default React.memo(ArrangementView);

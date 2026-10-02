@@ -5,16 +5,16 @@ import { audioEngine } from '../engine/AudioEngine';
 interface LiveRecordingClipProps {
   trackId: string;
   recStartTime: number;
-  currentTime: number;
+  /** Inutilise (la position est lue dans le moteur) ; conserve pour compatibilite. */
+  currentTime?: number;
   zoomH: number; // Pixels par seconde
   height: number;
 }
 
 const LiveRecordingClip: React.FC<LiveRecordingClipProps> = ({ 
   trackId, 
-  recStartTime, 
-  currentTime, 
-  zoomH, 
+  recStartTime,
+  zoomH,
   height 
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -27,6 +27,7 @@ const LiveRecordingClip: React.FC<LiveRecordingClipProps> = ({
     // Reset au démarrage
     peaksRef.current = [];
     lastDrawTimeRef.current = recStartTime;
+    let dataArray: Uint8Array | null = null;
 
     const drawLoop = () => {
       const analyzer = audioEngine.getTrackAnalyzer(trackId);
@@ -67,7 +68,8 @@ const LiveRecordingClip: React.FC<LiveRecordingClipProps> = ({
       }
 
       // 2. Acquisition des données audio
-      const dataArray = new Uint8Array(analyzer.frequencyBinCount);
+      // Tampon réutilisé d'une image à l'autre (pas d'allocation par image).
+      if (!dataArray || dataArray.length !== analyzer.frequencyBinCount) dataArray = new Uint8Array(analyzer.frequencyBinCount);
       analyzer.getByteTimeDomainData(dataArray);
 
       // Calcul RMS instantané (Amplitude)

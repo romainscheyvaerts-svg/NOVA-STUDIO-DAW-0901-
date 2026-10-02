@@ -3,6 +3,7 @@ import { ViewType, Theme, User } from '../types';
 import { MasterMeter } from './MeterWidgets';
 import MasterVisualizer from './MasterVisualizer';
 import { midiManager } from '../services/MidiManager';
+import { playheadStore } from '../utils/playheadStore';
 
 interface TransportProps {
   isPlaying: boolean;
@@ -53,6 +54,32 @@ interface TransportProps {
   onImportAudio?: (file: File) => void;
 }
 
+const formatClock = (seconds: number) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  const cents = Math.floor((seconds % 1) * 100);
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${cents.toString().padStart(2, '0')}`;
+};
+
+/**
+ * Horloge abonnée à la tête de lecture. Le texte est écrit directement dans le
+ * DOM (au centième, seulement quand il change) : aucun rendu React pendant la
+ * lecture, ni de la barre de transport ni du reste du studio.
+ */
+const PlayheadClock: React.FC = () => {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    let last = '';
+    const update = () => {
+      const txt = formatClock(playheadStore.get() + 1e-6);
+      if (txt !== last && ref.current) { ref.current.textContent = txt; last = txt; }
+    };
+    update();
+    return playheadStore.subscribe(update);
+  }, []);
+  return <span ref={ref} className="mono nova-chiffres text-[11px] md:text-[14px] font-bold text-center" style={{ color: 'var(--accent-neon)' }}>{formatClock(playheadStore.get() + 1e-6)}</span>;
+};
+
 const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop,
   isMetronomeEnabled = false, onToggleMetronome, bpm, onBpmChange, currentTime,
@@ -86,13 +113,6 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
      
      return unsubscribe;
   }, []);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    const cents = Math.floor((seconds % 1) * 100);
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${cents.toString().padStart(2, '0')}`;
-  };
 
   const handleBpmMouseDown = (e: React.MouseEvent) => {
     if (e.detail === 2) { 
@@ -239,7 +259,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         
         <div className="flex flex-col items-center min-w-[60px] md:min-w-[80px]">
              <span className="hidden md:block text-[7px] text-slate-600 font-black uppercase tracking-[0.3em] hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}>Timeline</span>
-             <span className="mono nova-chiffres text-[11px] md:text-[14px] font-bold text-center" style={{ color: 'var(--accent-neon)' }}>{formatTime(currentTime)}</span>
+             <PlayheadClock />
         </div>
       </div>
 
