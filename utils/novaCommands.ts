@@ -55,6 +55,10 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   const less = /\b(baisse|diminue|moins fort|plus bas|reduis|moins de)\b/.test(msg);
   const say = (text: string, ...actions: AIAction[]): LocalCommandResult => ({ text, actions });
 
+  // Session à emporter : « emporte la session », « je veux continuer chez moi / sur mon iPad »
+  if (/\b(emport|chez (moi|lui|elle|toi)|sur (mon|son|ton) (ipad|ordi|ordinateur|pc|mac)|session en ligne|qr ?code)/.test(msg)) {
+    return say('🏠 Je mets la session en ligne : lien et QR code pour la continuer chez toi, et je peux la ranger dans ton compte Make Music.', { action: 'OPEN_TAKE_HOME', payload: {} });
+  }
   // Punch-in : « punch de 0:45 à 0:52 », « refais juste de 1:10 à 1:16 », « punch »
   const pr = msg.match(/\b(punch|refais juste|remplace)\b.*?(\d{1,2})[:h ](\d{2}).*?(\d{1,2})[:h ](\d{2})/);
   if (pr) {

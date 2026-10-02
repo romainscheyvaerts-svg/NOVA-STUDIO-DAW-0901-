@@ -70,6 +70,11 @@ import LyricsPrompter from './components/LyricsPrompter';
 import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
 import ShareClipModal from './components/ShareClipModal';
+import TakeHomeModal from './components/TakeHomeModal';
+import {
+  pushSession, pullSession, parseLink, createCloudSession, cloudProjectId, CloudConflictError, LocalCloudSession,
+  getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession,
+} from './services/SessionCloud';
 import DrumMachinePanel from './components/DrumMachinePanel';
 import ShortcutsHelp from './components/ShortcutsHelp';
 import { DrumMachine, makeDrumMachineLib, drumPadsFor, drumClipFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
@@ -151,7 +156,7 @@ const lireTonalite = (brut?: string | null): { rootKey: number; scale: string } 
   // « HAMONIC » est une faute presente telle quelle dans le catalogue.
   let scale = 'MAJOR';
   if (/HARMONIC|HAMONIC/.test(texte)) scale = 'MINOR_HARMONIC';
-  else if (/MIN|MINOR|M(?!AJ)/.test(texte)) scale = 'MINOR';
+  else if (/\bMIN\b|MINOR|\bM\b(?!AJ)/.test(texte)) scale = 'MINOR';
   else if (/PENTA/.test(texte)) scale = 'PENTATONIC';
   else if (/MAJ/.test(texte)) scale = 'MAJOR';
   else scale = 'MINOR'; // le catalogue est massivement en mineur
@@ -2977,6 +2982,155 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', onHide);
   }, [autosaveNow, showLanding]);
 
+  // --- Session à emporter (en ligne) -------------------------------------------------
+  // Le client enregistre au studio, continue chez lui (iPad, ordinateur), revient :
+  // la session vit en ligne (Supabase Make Music, audio compris, jamais le beat
+  // non acheté). Sur l'appareil lié, chaque modification est synchronisée.
+  const [cloudSession, setCloudSessionState] = useState<LocalCloudSession | null>(() => getLocalCloudSession());
+  const cloudRef = useRef<LocalCloudSession | null>(cloudSession);
+  const setCloudSession = useCallback((s: LocalCloudSession | null) => {
+    cloudRef.current = s; setCloudSessionState(s); setLocalCloudSession(s);
+  }, []);
+  const [takeHomeOpen, setTakeHomeOpen] = useState(false);
+  const [cloudProgress, setCloudProgress] = useState<{ pct: number; msg: string } | null>(null);
+  const [cloudError, setCloudError] = useState<string | null>(null);
+  const [cloudConflict, setCloudConflict] = useState<CloudConflictError | null>(null);
+  const cloudBusyRef = useRef(false);
+  const cloudDirtyRef = useRef(false);
+  const cloudQuietUntilRef = useRef(0);
+  const isCloudProject = !!cloudSession && state.id === cloudProjectId(cloudSession.id);
+
+  const syncCloud = useCallback(async (opts: { interactive?: boolean; force?: boolean; bake?: boolean } = {}): Promise<boolean> => {
+    if (cloudBusyRef.current) { cloudDirtyRef.current = true; return false; }
+    if (stateRef.current.isRecording) return false;
+    cloudBusyRef.current = true;
+    cloudDirtyRef.current = false;
+    const progress = opts.interactive ? (pct: number, msg: string) => setCloudProgress({ pct, msg }) : undefined;
+    if (opts.interactive) { setCloudError(null); progress!(1, 'Préparation…'); }
+    try {
+      let cur = cloudRef.current;
+      if (cur && stateRef.current.id !== cloudProjectId(cur.id)) {
+        // Un autre projet est ouvert : il n'écrase jamais la session en ligne.
+        if (!opts.interactive) return false;
+        cur = null;
+      }
+      if (!cur) {
+        const c = await createCloudSession(stateRef.current.name || 'Session');
+        cur = { id: c.id, secret: c.secret, version: 0, name: stateRef.current.name || 'Session', syncedAt: 0 };
+        setVisualState({ id: cloudProjectId(c.id) });
+        stateRef.current = { ...stateRef.current, id: cloudProjectId(c.id) };
+        setCloudSession(cur);
+      }
+      // Au studio (pont VST connecté) : les effets VST sont rendus avant l'envoi,
+      // pour que la session sonne pareil sur l'iPad (pistes gelées, éditables).
+      const st = (opts.bake || opts.interactive) && novaBridge.isConnected()
+        ? await bakeVstBeforeSave(msg => progress?.(2, msg))
+        : stateRef.current;
+      const r = await pushSession({ ...st, id: cloudProjectId(cur.id) }, user?.owned_instruments || [], { id: cur.id, secret: cur.secret }, cur.version, progress, { force: opts.force });
+      setCloudSession({ ...cur, version: r.version, name: st.name || cur.name, syncedAt: Date.now() });
+      if (opts.interactive) setTimeout(() => setCloudProgress(null), 1500);
+      return true;
+    } catch (e: any) {
+      if (e instanceof CloudConflictError) setCloudConflict(e);
+      else {
+        console.warn('[Session en ligne]', e);
+        if (opts.interactive) setCloudError(e?.message || 'Envoi impossible');
+      }
+      if (opts.interactive) setCloudProgress(null);
+      return false;
+    } finally {
+      cloudBusyRef.current = false;
+      if (cloudDirtyRef.current) setTimeout(() => { void syncCloudRef.current({}); }, 3000);
+    }
+  }, [bakeVstBeforeSave, user, setCloudSession, setVisualState]);
+  const syncCloudRef = useRef(syncCloud);
+  syncCloudRef.current = syncCloud;
+
+  // Synchronisation automatique 20 s après la dernière modification (hors lecture / prise).
+  useEffect(() => {
+    if (!isCloudProject || showLanding || state.isPlaying || state.isRecording) return;
+    if (Date.now() < cloudQuietUntilRef.current) return;
+    const t = window.setTimeout(() => { void syncCloudRef.current({}); }, 20000);
+    return () => window.clearTimeout(t);
+  }, [state.tracks, state.lyrics, state.bpm, state.markers, state.name, state.isPlaying, state.isRecording, showLanding, isCloudProject]);
+  // Onglet caché / application mise en arrière-plan (iPad) : on envoie tout de suite.
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden' && isCloudProject) void syncCloudRef.current({}); };
+    document.addEventListener('visibilitychange', onHide);
+    return () => document.removeEventListener('visibilitychange', onHide);
+  }, [isCloudProject]);
+
+  /** Ouvre une session en ligne (lien du client, compte Make Music). */
+  const openCloudSession = useCallback(async (link: CloudLink) => {
+    setCloudError(null);
+    setCloudProgress({ pct: 1, msg: 'Ouverture de la session…' });
+    try {
+      const { state: project, info } = await pullSession(link, (pct, msg) => setCloudProgress({ pct, msg }));
+      const secret = link.secret || parseLink(info.link)?.secret;
+      cloudQuietUntilRef.current = Date.now() + 15000; // le chargement (beat…) n'est pas une modification
+      restoreBeatAfterResumeRef.current = true;
+      handleEnterWithProject({ ...project, id: cloudProjectId(info.id) });
+      setCloudSession({ id: info.id, secret, version: info.version, name: info.name, syncedAt: Date.now() });
+      const when = info.updated_at ? formatAgo(Date.parse(info.updated_at)) : '';
+      setAiNotification(`☁️ Session « ${info.name} » ouverte${info.updated_from ? ` (dernière modification ${when} sur ${info.updated_from})` : ''}. Tes modifications se synchronisent toutes seules.`);
+      try { const u = new URL(window.location.href); u.searchParams.delete('session'); window.history.replaceState(null, '', u.toString()); } catch { /* */ }
+    } catch (e: any) {
+      setShowLanding(false);
+      setAiNotification(`⚠️ Session en ligne impossible à ouvrir : ${e?.message || 'lien invalide'}`);
+    } finally {
+      setTimeout(() => setCloudProgress(null), 600);
+    }
+  }, [setCloudSession]);
+
+  // Ouverture par lien : /daw?session=<id>.<clé> (QR code, WhatsApp, espace client).
+  useEffect(() => {
+    let raw: string | null = null;
+    try { raw = new URLSearchParams(window.location.search).get('session'); } catch { /* */ }
+    const link = parseLink(raw);
+    if (link) void openCloudSession(link);
+  }, []);
+
+  // Le site (page /daw) transmet la connexion du compte Make Music au studio intégré.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (!/^https:\/\/(www\.)?studiomakemusic\.com$/.test(e.origin)) return;
+      const d = e.data;
+      if (d?.type === 'NOVA_SITE_AUTH' && typeof d.accessToken === 'string' && typeof d.refreshToken === 'string') {
+        void adoptSiteSession(d.accessToken, d.refreshToken).catch(() => {});
+      }
+    };
+    window.addEventListener('message', onMsg);
+    try { window.parent?.postMessage({ type: 'NOVA_READY_FOR_AUTH' }, '*'); } catch { /* */ }
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  // Fermeture du projet (application Windows, bouton fermer) : gel des pistes VST
+  // + sauvegarde locale + synchronisation en ligne, puis seulement fermeture.
+  useEffect(() => {
+    (window as any).__novaBeforeClose = async () => {
+      try { if (novaBridge.isConnected()) await bakeVstBeforeSave(); } catch (e) { console.warn('[Fermeture] gel', e); }
+      try { await autosaveNow(); } catch { /* */ }
+      if (cloudRef.current && stateRef.current.id === cloudProjectId(cloudRef.current.id)) {
+        // Une synchro déjà en cours : on attend qu'elle finisse, puis on renvoie.
+        for (let i = 0; i < 120 && cloudBusyRef.current; i++) await new Promise(r => setTimeout(r, 500));
+        try { await syncCloudRef.current({}); } catch { /* */ }
+      }
+    };
+    return () => { delete (window as any).__novaBeforeClose; };
+  }, [bakeVstBeforeSave, autosaveNow]);
+
+  // Au studio, pont VST connecté : les pistes VST modifiées sont regelées pendant
+  // les pauses (45 s sans lecture), pour que la fermeture et l'envoi soient immédiats.
+  useEffect(() => {
+    if (showLanding || state.isPlaying || state.isRecording || !novaBridge.isConnected()) return;
+    if (tracksNeedingVstRender(state.tracks).length === 0) return;
+    const t = window.setTimeout(() => {
+      if (stateRef.current.isPlaying || stateRef.current.isRecording) return;
+      void bakeVstBeforeSave().catch(e => console.warn('[Gel auto]', e));
+    }, 45000);
+    return () => window.clearTimeout(t);
+  }, [state.tracks, state.isPlaying, state.isRecording, showLanding, bakeVstBeforeSave]);
+
   // Un extrait du catalogue démarre : le projet en lecture se met en pause
   // (sauf pendant une prise, qu'on ne coupe jamais).
   useEffect(() => {
@@ -3329,6 +3483,11 @@ export default function App() {
       case 'SEEK':
         handleSeek(Math.max(0, Number(p.time) || 0));
         break;
+
+      case 'OPEN_TAKE_HOME': {
+        setTakeHomeOpen(true);
+        break;
+      }
 
       case 'SET_PUNCH': {
         // { start, end } en secondes : zone de boucle + punch activé
@@ -4271,7 +4430,7 @@ export default function App() {
       )}
 
       <Suspense fallback={null}>
-      {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}
+      {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} />}
       {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
       {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={() => { setIsExportMenuOpen(false); setShareOpen(true); }} />}
       <DrumMachinePanel
@@ -4301,6 +4460,49 @@ export default function App() {
         clipStart={0}
       />
       <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <TakeHomeModal
+        open={takeHomeOpen}
+        onClose={() => setTakeHomeOpen(false)}
+        session={isCloudProject ? cloudSession : null}
+        progress={cloudProgress}
+        error={cloudError}
+        onSync={() => { void syncCloud({ interactive: true }); }}
+        onForget={() => { setCloudSession(null); setTakeHomeOpen(false); setAiNotification('Cet appareil n\'est plus lié à la session en ligne (elle reste disponible avec son lien).'); }}
+      />
+      {cloudProgress && !takeHomeOpen && (
+        <div className="fixed inset-x-0 top-3 z-[660] flex justify-center px-4 pointer-events-none" role="status">
+          <div className="w-full max-w-sm rounded-2xl border border-cyan-500/30 bg-[#0d1117]/95 p-3 shadow-2xl">
+            <div className="flex justify-between text-[11px] font-bold text-cyan-200"><span>☁️ {cloudProgress.msg}</span><span>{cloudProgress.pct}%</span></div>
+            <div className="mt-1.5 h-1.5 rounded-full bg-black/50 overflow-hidden"><div className="h-full bg-cyan-500 transition-all" style={{ width: `${cloudProgress.pct}%` }} /></div>
+          </div>
+        </div>
+      )}
+      {isCloudProject && !showLanding && (
+        <button type="button" onClick={() => setTakeHomeOpen(true)}
+          title="Session en ligne : lien, QR code, compte client"
+          className="fixed bottom-20 left-3 z-[90] md:bottom-4 h-10 rounded-full border border-cyan-500/40 bg-[#0d1117]/90 px-3 text-[11px] font-bold text-cyan-200 shadow-lg backdrop-blur">
+          ☁️ En ligne · {cloudSession!.syncedAt ? formatAgo(cloudSession!.syncedAt) : 'à envoyer'}
+        </button>
+      )}
+      {cloudConflict && (
+        <div className="fixed inset-0 z-[670] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="conflict-title">
+          <div className="w-full max-w-md rounded-3xl border border-amber-500/30 bg-[#121418] p-6 shadow-2xl space-y-4">
+            <h2 id="conflict-title" className="text-lg font-black text-white">⚠️ Session modifiée ailleurs</h2>
+            <p className="text-[13px] text-slate-300">
+              La session en ligne a été modifiée {cloudConflict.updatedFrom ? `sur ${cloudConflict.updatedFrom} ` : ''}{cloudConflict.updatedAt ? formatAgo(Date.parse(cloudConflict.updatedAt)) : ''}, après ta dernière synchronisation.
+            </p>
+            <button type="button" className="h-12 w-full rounded-xl bg-cyan-500 text-[13px] font-black text-black"
+              onClick={() => { const c = cloudRef.current; setCloudConflict(null); if (c) void openCloudSession({ id: c.id, secret: c.secret }); }}>
+              Ouvrir la version la plus récente
+            </button>
+            <button type="button" className="h-12 w-full rounded-xl bg-white/10 text-[13px] font-black text-white"
+              onClick={() => { setCloudConflict(null); void syncCloud({ interactive: true, force: true }); setTakeHomeOpen(true); }}>
+              Garder ma version (remplace celle en ligne)
+            </button>
+            <p className="text-[11px] text-slate-500">Ta version reste aussi sauvegardée sur cet appareil (« Reprendre ma session »).</p>
+          </div>
+        </div>
+      )}
       <ShareClipModal open={shareOpen} onClose={() => setShareOpen(false)} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />}
       </Suspense>

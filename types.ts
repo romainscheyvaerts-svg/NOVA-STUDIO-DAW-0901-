@@ -504,7 +504,8 @@ export type AIActionType =
   | 'REMOVE_DRUMS'
   | 'LOAD_DAILY_CHALLENGE'
   | 'GOTO_SECTION'
-  | 'SET_PUNCH';
+  | 'SET_PUNCH'
+  | 'OPEN_TAKE_HOME';
 
 export interface AIAction {
   action: AIActionType;

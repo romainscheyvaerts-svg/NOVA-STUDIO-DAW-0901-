@@ -11,10 +11,12 @@ interface SaveProjectModalProps {
   onSaveLocal: (name: string) => void;
   onSaveAsCopy: (name: string) => void;
   onOpenAuth: () => void;
+  /** Session à emporter : en ligne (Supabase Make Music), lien + QR code + compte client. */
+  onTakeHome?: () => void;
 }
 
 const SaveProjectModal: React.FC<SaveProjectModalProps> = ({ 
-  isOpen, onClose, currentName, user, onSaveCloud, onSaveLocal, onSaveAsCopy, onOpenAuth
+  isOpen, onClose, currentName, user, onSaveCloud, onSaveLocal, onSaveAsCopy, onOpenAuth, onTakeHome
 }) => {
   const [name, setName] = useState(currentName);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +97,14 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
                 />
                 {error && <p className="text-[10px] text-red-500 font-bold ml-1 flex items-center"><i className="fas fa-exclamation-circle mr-1"></i> {error}</p>}
             </div>
+
+            {onTakeHome && (
+                <button type="button" onClick={() => { onClose(); onTakeHome(); }}
+                    className="w-full p-4 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-left transition-all">
+                    <span className="block text-[12px] font-black text-emerald-200">🏠 Emporter la session (en ligne)</span>
+                    <span className="block text-[11px] text-slate-400 mt-1">Audio compris, dans le compte client Make Music. Lien et QR code pour continuer sur iPad ou ordinateur, retour au studio.</span>
+                </button>
+            )}
 
             <div className="grid grid-cols-2 gap-4 pt-2">
                 {/* CLOUD ACTIONS GROUP */}
