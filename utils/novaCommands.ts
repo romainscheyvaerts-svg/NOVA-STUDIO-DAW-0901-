@@ -183,6 +183,7 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   if (/\b(boucle|loop)\b/.test(msg)) return say('🔁 Boucle activée / désactivée.', { action: 'TOGGLE_LOOP', payload: {} });
 
   // --- Offres du studio ---
+  if (/\b(battle|concours|competition|clash)\b/.test(msg)) return say('🏆 Je t\'ouvre la Battle de la semaine : envoie ton extrait audio et fais voter tes potes.', { action: 'OPEN_STUDIO_OFFER', payload: { offer: 'battle' } });
   if (/\b(acheter|achete|licence|payer)\b/.test(msg)) return say('🛒 Je t\'ouvre la fiche d\'achat de l\'instru.', { action: 'OPEN_STUDIO_OFFER', payload: { offer: 'beat' } });
   if (/\b(reserver|reservation|venir au studio|session au studio|studio en vrai)\b/.test(msg))
     return say('🎙️ Je t\'ouvre la réservation d\'une session au studio, avec un ingé son.', { action: 'OPEN_STUDIO_OFFER', payload: { offer: 'session' } });

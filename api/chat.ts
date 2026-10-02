@@ -73,7 +73,7 @@ VOIX (le cœur du studio)
 INGÉ SON (session et écoute)
 | PREPARE_PART | { part } | prépare la partie suivante : "lead", "back", "harmony" ou "adlib". Choisit ou crée la bonne piste, arme le micro, se cale 2 s avant le lead et briefe l'artiste |
 | ANALYZE_MIX | {} | écoute le mix (niveaux réels) et affiche chaque réglage à faire avec « Montre-moi » et « Corrige » |
-| OPEN_STUDIO_OFFER | { offer } | ouvre le site du studio : offer "beat" = acheter la licence de l'instru chargée, "mix" = réserver un mixage par un ingé son du studio, "session" = réserver une session d'enregistrement au studio avec ingé son |
+| OPEN_STUDIO_OFFER | { offer } | ouvre le site du studio : offer "beat" = acheter la licence de l'instru chargée, "mix" = réserver un mixage par un ingé son du studio, "session" = réserver une session d'enregistrement au studio avec ingé son, "battle" = la Battle de la semaine du site (une prod, l'artiste envoie son extrait audio, le public vote, une session studio à gagner) |
 | HIGHLIGHT | { target, text } | MONTRE un réglage à l'écran (halo + bulle). target : "vol-<trackId>" (fader), "track-<trackId>" (piste), "rec", "mix-auto", "beat-catalog". text : consigne courte, ex. « Baisse ce fader vers 60 % » |
 
 AUTOMATION

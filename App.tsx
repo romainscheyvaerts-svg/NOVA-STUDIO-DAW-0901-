@@ -58,7 +58,7 @@ import { AudioAnalysisEngine } from './engine/AudioAnalysisEngine';
 import { getVocalRole, findTrackForRole, ROLE_MIX, VocalRole } from './utils/vocalRoles';
 import { analyseMix, takeStats, levelsForAI } from './utils/mixAnalysis';
 import { novaSpotlight } from './utils/novaSpotlight';
-import { openBuyBeat, openProMix, openStudioSession, getCatalogBeat } from './utils/studioLinks';
+import { openBuyBeat, openProMix, openStudioSession, openBattle, getCatalogBeat } from './utils/studioLinks';
 import { parseLocalCommand } from './utils/novaCommands';
 import { listTakes, selectTakeActions } from './utils/takes';
 import RecordingCoach from './components/RecordingCoach';
@@ -3475,6 +3475,7 @@ export default function App() {
       case 'OPEN_STUDIO_OFFER':
         if (String(p.offer) === 'beat') openBuyBeat(stateRef.current.tracks);
         else if (String(p.offer) === 'session') openStudioSession();
+        else if (String(p.offer) === 'battle') openBattle();
         else openProMix();
         break;
 

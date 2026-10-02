@@ -47,6 +47,11 @@ export function openStudioSession() {
   openStudioPage('/reservation?service=with-engineer');
 }
 
+/** Battle de la semaine : on y envoie son extrait et on fait voter. */
+export function openBattle() {
+  openStudioPage('/battle');
+}
+
 /** Réservation d'un mixage par un ingé son du studio. */
 export function openProMix() {
   openStudioPage('/reservation?service=mixing');

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { DAWState } from '../types';
 import { saveBlob } from '../utils/saveBlob';
 import { canMakeVideo, clipAudioMp3, clipVideo, demoMp3, fileBaseName, shareOrSave, projectEnd } from '../utils/demoExport';
+import { openBattle } from '../utils/studioLinks';
 
 interface ShareClipModalProps {
   open: boolean;
@@ -90,7 +91,13 @@ const ShareClipModal: React.FC<ShareClipModalProps> = ({ open, onClose, state, o
         {done && <p className="mt-4 text-[13px] font-bold text-emerald-300" role="status">{done}</p>}
         {error && <p className="mt-4 text-[13px] text-red-300" role="alert">{error}</p>}
 
-        <button type="button" onClick={onBuyBeat} className="mt-5 w-full h-11 rounded-xl bg-amber-400 text-black text-[13px] font-black">
+        {hasVoice && projectEnd(state) >= 1 && (
+          <button type="button" onClick={openBattle} className="mt-5 w-full rounded-xl border border-pink-400/40 bg-gradient-to-r from-amber-400/15 to-pink-500/15 px-4 py-3 text-left">
+            <span className="block text-[14px] font-bold text-white">🏆 Battle de la semaine</span>
+            <span className="block text-[12px] text-slate-300 mt-0.5">Crée ton extrait audio ci-dessus, envoie-le et fais voter tes potes : une session studio à gagner.</span>
+          </button>
+        )}
+        <button type="button" onClick={onBuyBeat} className="mt-3 w-full h-11 rounded-xl bg-amber-400 text-black text-[13px] font-black">
           🛒 Version propre : acheter la licence du beat
         </button>
       </div>
