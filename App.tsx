@@ -29,6 +29,10 @@ import { supabaseManager } from './services/SupabaseManager';
 import { SessionSerializer } from './services/SessionSerializer';
 // import { getAIProductionAssistance } from './services/AIService'; 
 import { novaBridge } from './services/NovaBridge';
+import { vstStateEvents } from './engine/VSTPluginNode';
+import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult } from './services/VstFreeze';
+import { canBakeTrack, hasVst, freezeSignature } from './utils/freeze';
+import { recFreezeStore } from './utils/recFreezeStore';
 import { ProjectIO } from './services/ProjectIO';
 const PianoRoll = lazy(() => import('./components/PianoRoll'));
 import { midiManager } from './services/MidiManager';
@@ -249,9 +253,9 @@ const migrateLoadedState = (loaded: DAWState): DAWState => {
   if (!tracks.some(t => t.id === 'master')) tracks.push(createMasterTrack());
   return {
     ...loaded,
-    // Le rendu gele n'est pas persiste (il vit en memoire) : a l'ouverture on
-    // repasse sur la chaine normale plutot que de laisser une piste muette.
-    tracks: tracks.map(t => (t.isFrozen ? { ...t, isFrozen: false, frozenClip: undefined } : t)),
+    // Le rendu gele est desormais sauvegarde (effets VST3 du PC rendus dans
+    // l'audio) : on le garde. Seule une piste gelee SANS son audio repasse en direct.
+    tracks: tracks.map(t => (t.isFrozen && !t.frozenClip ? { ...t, isFrozen: false } : t)),
     timeSignature: loaded.timeSignature || { numerator: 4, denominator: 4 },
     trackGroups: loaded.trackGroups || [],
     markers: loaded.markers || [],
@@ -742,8 +746,10 @@ export default function App() {
     }
     setSaveState({ isSaving: true, progress: 10, message: 'Préparation...' });
     try {
+      // Effets VST3 du PC rendus dans l'audio : le projet continue sur téléphone.
+      const baked = await bakeVstBeforeSave(message => setSaveState(s => ({ ...s, message })));
       setSaveState(s => ({ ...s, progress: 30, message: 'Sauvegarde cloud...' }));
-      const stateToSave = { ...stateRef.current, name: projectName };
+      const stateToSave = { ...baked, name: projectName };
       const saved = await supabaseManager.saveUserSession(stateToSave, (percent, message) => {
         setSaveState(s => ({ ...s, progress: Math.max(30, percent), message }));
       });
@@ -769,7 +775,8 @@ export default function App() {
     setSaveState({ isSaving: true, progress: 10, message: 'Création de la copie...' });
     try {
       const copyName = `${n} (Copy)`;
-      const stateToSave = { ...stateRef.current, id: `proj-${Date.now()}`, name: copyName };
+      const baked = await bakeVstBeforeSave(message => setSaveState(s => ({ ...s, message })));
+      const stateToSave = { ...baked, id: `proj-${Date.now()}`, name: copyName };
       setSaveState(s => ({ ...s, progress: 50, message: 'Sauvegarde...' }));
       await supabaseManager.saveUserSession(stateToSave, (percent, message) => {
         setSaveState(s => ({ ...s, progress: Math.max(50, percent), message }));
@@ -790,10 +797,12 @@ export default function App() {
     try {
       // Récupérer les IDs des instruments possédés (pour exclusion licence)
       const ownedIds = user?.owned_instruments || [];
+      // Effets VST3 du PC rendus dans l'audio : le projet continue sur téléphone.
+      const baked = await bakeVstBeforeSave(message => setSaveState(s => ({ ...s, message })));
       setSaveState(s => ({ ...s, progress: 40, message: 'Création du fichier ZIP...' }));
       
       // Utiliser ProjectIO pour créer un ZIP avec les audios
-      const zipBlob = await ProjectIO.saveProject(stateRef.current, ownedIds);
+      const zipBlob = await ProjectIO.saveProject(baked, ownedIds);
       
       setSaveState(s => ({ ...s, progress: 80, message: 'Téléchargement...' }));
       
@@ -818,7 +827,10 @@ export default function App() {
         // vient de décoder pour CE projet : clear() effaçait toutes les prises
         // d'un projet ouvert depuis un fichier ou une session sauvegardée.
         const keep = new Set<string>();
-        loadedState.tracks.forEach(t => t.clips.forEach(c => { if (c.bufferId) keep.add(c.bufferId); }));
+        loadedState.tracks.forEach(t => {
+          t.clips.forEach(c => { if (c.bufferId) keep.add(c.bufferId); });
+          if (t.frozenClip?.bufferId) keep.add(t.frozenClip.bufferId);
+        });
         audioBufferRegistry.removeMany(audioBufferRegistry.ids().filter(id => !keep.has(id)));
         
         loadedState.tracks.forEach(track => {
@@ -829,6 +841,12 @@ export default function App() {
                     delete (clip as Partial<Clip>).buffer;
                 }
             });
+            // Rendu gele charge depuis le cloud
+            if (track.frozenClip?.buffer) {
+                audioBufferRegistry.register(track.frozenClip.buffer, track.frozenClip.id);
+                track.frozenClip.bufferId = track.frozenClip.id;
+                delete (track.frozenClip as Partial<Clip>).buffer;
+            }
             track.drumPads?.forEach(pad => {
                 if (pad.buffer) {
                     audioEngine.loadDrumRackSample(track.id, pad.id, pad.buffer);
@@ -1908,66 +1926,215 @@ export default function App() {
   const handleFreezeTrack = useCallback(async (trackId: string) => {
     const track = stateRef.current.tracks.find(t => t.id === trackId);
     if (!track) return;
+    const notify = (msg: string, ms = 2500) => { setAiNotification(msg); setTimeout(() => setAiNotification(null), ms); };
 
     if (track.isFrozen) {
+      // Sans le pont, une piste dont les VST3 sont dans le rendu ne peut pas
+      // repasser en direct : les VST3 ne sonneraient plus.
+      if (hasVst(track) && !novaBridge.isConnected()) {
+        notify("🔌 Cette piste utilise des effets VST de ton PC : connecte le pont VST (onglet VST) pour la dégeler.", 4000);
+        return;
+      }
       let frozenBufferId: string | undefined;
       setState(produce((draft: DAWState) => {
         const t = draft.tracks.find(tr => tr.id === trackId);
         if (!t) return;
-        frozenBufferId = t.frozenClip?.bufferId;
         t.isFrozen = false;
-        delete t.frozenClip;
+        // Avec des VST3, le rendu reste en cache : la prochaine sauvegarde le
+        // réutilise s'il est encore à jour.
+        if (!hasVst(t)) {
+          frozenBufferId = t.frozenClip?.bufferId;
+          delete t.frozenClip;
+          delete t.frozenUpToPluginIndex;
+          delete t.frozenClipIds;
+          delete t.frozenSourceSig;
+        }
       }));
       if (frozenBufferId) setTimeout(() => releaseBufferIfUnused(frozenBufferId, []), 0);
-      setAiNotification(`🔥 "${track.name}" dégelée`);
-      setTimeout(() => setAiNotification(null), 2500);
+      notify(`🔥 "${track.name}" dégelée`);
       return;
     }
 
-    const trackEnd = track.clips.reduce((max, c) => Math.max(max, c.start + c.duration), 0);
-    if (trackEnd <= 0) {
-      setAiNotification("⚠️ Rien à geler sur cette piste");
-      setTimeout(() => setAiNotification(null), 2500);
+    if (!canBakeTrack(track)) {
+      notify("Le beat ne peut pas être gelé (licence).");
+      return;
+    }
+    if ((track.clips || []).length === 0) {
+      notify("⚠️ Rien à geler sur cette piste");
+      return;
+    }
+    if (hasVst(track) && !novaBridge.isConnected()) {
+      notify("🔌 Connecte le pont VST (onglet VST) pour geler une piste avec des effets VST.", 4000);
       return;
     }
 
     await ensureAudioEngine();
     setAiNotification(`❄️ Gel de "${track.name}"...`);
     try {
-      // On rend la piste seule, sans son bus ni ses departs : le gel ne fige
-      // que ce que la piste produit elle-meme.
-      const isolated: Track = { ...track, isFrozen: false, outputTrackId: '', sends: [], isMuted: false, isSolo: false };
-      const buffer = await audioEngine.renderProject([isolated], trackEnd, 0, 44100);
-      const clipId = `frozen-${trackId}-${Date.now()}`;
-      audioBufferRegistry.register(buffer, clipId);
-
+      // Rendu PRE-fader de tous les effets : le fader, le pan et les départs
+      // restent appliqués à la lecture (avant, ils l'étaient deux fois).
+      const r = await renderTrackFreeze(track, (track.plugins || []).length - 1);
+      let oldBufferId: string | undefined;
       setState(produce((draft: DAWState) => {
         const t = draft.tracks.find(tr => tr.id === trackId);
         if (!t) return;
+        oldBufferId = t.frozenClip?.bufferId;
         t.isFrozen = true;
-        t.frozenClip = {
-          id: clipId,
-          start: 0,
-          duration: trackEnd,
-          offset: 0,
-          fadeIn: 0,
-          fadeOut: 0,
-          name: `${t.name} (frozen)`,
-          color: t.color,
-          type: TrackType.AUDIO,
-          bufferId: clipId,
-          isMuted: false,
-          gain: 1
-        };
+        t.frozenClip = r.clip;
+        t.frozenUpToPluginIndex = r.upTo;
+        t.frozenClipIds = r.clipIds;
+        t.frozenSourceSig = r.sig;
       }));
-      setAiNotification(`❄️ "${track.name}" gelée`);
+      if (oldBufferId && oldBufferId !== r.clip.bufferId) setTimeout(() => releaseBufferIfUnused(oldBufferId, []), 0);
+      notify(`❄️ "${track.name}" gelée`);
     } catch (e: any) {
       console.error('[Freeze]', e);
-      setAiNotification(`❌ Gel impossible : ${e?.message || 'erreur'}`);
-    } finally {
-      setTimeout(() => setAiNotification(null), 2500);
+      notify(`❌ Gel impossible : ${e?.message || 'erreur'}`);
     }
   }, [setState]);
+
+  // --- Effets VST3 : état remonté au projet, rendu à la sauvegarde ----------------
+
+  // État d'un VST3 (fenêtre du plugin fermée, chargement) : enregistré dans le
+  // projet (params.stateB64), pour le retrouver à la réouverture et le rendre.
+  useEffect(() => vstStateEvents.on((pluginId, stateB64) => {
+    setState(produce((draft: DAWState) => {
+      draft.tracks.forEach(t => t.plugins.forEach(p => {
+        if (p.id === pluginId && p.type === 'VST3' && p.params?.stateB64 !== stateB64) p.params.stateB64 = stateB64;
+      }));
+    }));
+  }), [setState]);
+
+  /**
+   * Avant une sauvegarde (fichier ou cloud), pont connecté : rend les effets
+   * VST3 de chaque piste dans son audio (pas le beat), pour que le projet
+   * continue sur un téléphone. Les rendus à jour sont réutilisés.
+   * Renvoie l'état à sauvegarder.
+   */
+  const bakeVstBeforeSave = useCallback(async (onStep?: (msg: string) => void): Promise<DAWState> => {
+    if (!novaBridge.isConnected()) return stateRef.current;
+    const states = await syncLiveVstStates();
+    let base = stateRef.current;
+    if (states.size > 0) {
+      base = produce(base, (draft: DAWState) => {
+        draft.tracks.forEach(t => t.plugins.forEach(p => {
+          const st = states.get(p.id);
+          if (st && p.type === 'VST3') p.params.stateB64 = st;
+        }));
+      });
+    }
+    const todo = tracksNeedingVstRender(base.tracks);
+    const results = new Map<string, FreezeResult>();
+    for (const t of todo) {
+      onStep?.(`Rendu des effets VST : ${t.name}…`);
+      try {
+        results.set(t.id, await renderTrackFreeze(t, renderRangeFor(t), onStep));
+      } catch (e) {
+        console.warn(`[Save] Rendu VST impossible (${t.name})`, e);
+      }
+    }
+    if (results.size === 0 && base === stateRef.current) return base;
+    const old: string[] = [];
+    const next = produce(base, (draft: DAWState) => {
+      draft.tracks.forEach(t => {
+        const r = results.get(t.id);
+        if (!r) return;
+        if (t.frozenClip?.bufferId) old.push(t.frozenClip.bufferId);
+        t.frozenClip = r.clip;
+        t.frozenUpToPluginIndex = r.upTo;
+        t.frozenClipIds = r.clipIds;
+        t.frozenSourceSig = r.sig;
+      });
+    });
+    setState(next);
+    stateRef.current = next;
+    setTimeout(() => old.forEach(id => releaseBufferIfUnused(id, [])), 0);
+    return next;
+  }, [setState]);
+
+  // --- Gel automatique le temps d'une prise -----------------------------------------
+  // Piste armée : les AUTRES pistes dont les effets ajoutent plus de 10 ms (VST3
+  // du pont, Auto-Tune haute qualité…) sont lues depuis un rendu sans latence,
+  // et la compensation de latence est suspendue. Au désarmement, tout revient.
+  // Seulement dans le moteur : le projet n'est pas modifié.
+  const REC_FREEZE_THRESHOLD_S = 0.010;
+  const recFreezeCacheRef = useRef<Map<string, FreezeResult>>(new Map());
+  const recFreezeRunRef = useRef(0);
+  const armedTrackId = state.tracks.find(t => t.isTrackArmed)?.id || null;
+
+  useEffect(() => {
+    const run = ++recFreezeRunRef.current;
+    const clear = () => {
+      const ids = Array.from(recFreezeStore.get());
+      ids.forEach(id => audioEngine.setRecordingFreeze(id, null));
+      audioEngine.setDelayCompensationSuspended(false);
+      recFreezeStore.set(new Set());
+      const st = stateRef.current;
+      ids.forEach(id => { const t = st.tracks.find(tr => tr.id === id); if (t) audioEngine.updateTrack(t, st.tracks); });
+    };
+    // Changement de piste armée : on repart de zéro (la nouvelle piste armée
+    // ne doit pas rester figée). Les rendus en cache rendent ça immédiat.
+    clear();
+    if (!armedTrackId || !audioEngine.ctx) return;
+
+    audioEngine.setDelayCompensationSuspended(true);
+    let slowTimer: number | null = null;
+    (async () => {
+      const st = stateRef.current;
+      const heavy = st.tracks.filter(t =>
+        t.id !== armedTrackId && canBakeTrack(t) && !t.isFrozen && (t.clips || []).length > 0 &&
+        audioEngine.getTrackLatency(t.id) > REC_FREEZE_THRESHOLD_S);
+      if (heavy.length === 0) return;
+      // Réglages faits dans les fenêtres des VST3 : relus avant le rendu.
+      if (novaBridge.isConnected()) await syncLiveVstStates().catch(() => null);
+      let slowShown = false;
+      slowTimer = window.setTimeout(() => {
+        if (run === recFreezeRunRef.current) { slowShown = true; setAiNotification('❄️ Préparation de la prise…'); }
+      }, 300);
+      const applied = new Set(recFreezeStore.get());
+      for (const t of heavy) {
+        if (run !== recFreezeRunRef.current) return;
+        // Dernier effet qui ajoute de la latence : tout jusqu'à lui est rendu.
+        const lats = audioEngine.getTrackPluginLatencies(t.id);
+        let upTo = -1;
+        t.plugins.forEach((p, i) => { if ((lats.get(p.id) || 0) > 0) upTo = i; });
+        if (upTo < 0) continue;
+        const cur = stateRef.current.tracks.find(tr => tr.id === t.id) || t;
+        const sig = freezeSignature(cur.clips || [], cur.plugins || [], upTo);
+        let r = recFreezeCacheRef.current.get(t.id);
+        if (!r || r.sig !== sig || r.upTo !== upTo || !audioBufferRegistry.has(r.clip.bufferId!)) {
+          try {
+            const fresh = await renderTrackFreeze(cur, upTo);
+            if (r?.clip.bufferId) audioBufferRegistry.remove(r.clip.bufferId);
+            r = fresh;
+            recFreezeCacheRef.current.set(t.id, r);
+          } catch (e) {
+            console.warn(`[Prise] Gel automatique impossible (${t.name})`, e);
+            continue;
+          }
+        }
+        if (run !== recFreezeRunRef.current) return;
+        audioEngine.setRecordingFreeze(t.id, { clip: r.clip, upTo: r.upTo, clipIds: r.clipIds });
+        const now = stateRef.current;
+        const live = now.tracks.find(tr => tr.id === t.id);
+        if (live) audioEngine.updateTrack(live, now.tracks);
+        applied.add(t.id);
+        recFreezeStore.set(applied);
+      }
+      if (slowTimer) window.clearTimeout(slowTimer);
+      if (run !== recFreezeRunRef.current || applied.size === 0) return;
+      let shown = false;
+      try { shown = localStorage.getItem('nova_rec_freeze_explained') === '1'; } catch { /* */ }
+      if (!shown) {
+        try { localStorage.setItem('nova_rec_freeze_explained', '1'); } catch { /* */ }
+        setAiNotification("❄️ J'ai figé les pistes avec des effets lourds le temps de la prise : ton retour casque reste sans retard. Elles redeviennent modifiables juste après.");
+        setTimeout(() => setAiNotification(null), 6000);
+      } else if (slowShown) {
+        setAiNotification(null);
+      }
+    })();
+    return () => { if (slowTimer) window.clearTimeout(slowTimer); };
+  }, [armedTrackId]);
 
   /** Cree un clip MIDI vide sur une piste instrument et ouvre le piano roll. */
   const handleCreatePatternAndOpen = useCallback((trackId: string, time: number) => {
@@ -3626,7 +3793,7 @@ export default function App() {
         <div className={`fixed inset-0 flex items-center justify-center z-[200] ${isMobile ? 'bg-[#0c0d10]' : 'bg-black/60 backdrop-blur-sm'}`} onMouseDown={() => !isMobile && setActivePlugin(null)}>
            <div className={`relative ${isMobile ? 'w-full h-full p-4 overflow-y-auto' : ''}`} onMouseDown={e => e.stopPropagation()}>
               <Suspense fallback={<div className="w-64 h-32 flex items-center justify-center text-slate-400 text-[11px] bg-[#14161a] border border-white/10 rounded-2xl"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}>
-              <PluginEditor plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} />
+              <PluginEditor plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} onToggleFreeze={handleFreezeTrack} />
               </Suspense>
            </div>
         </div>

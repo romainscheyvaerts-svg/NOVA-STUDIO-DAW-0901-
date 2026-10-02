@@ -4,6 +4,8 @@ import { User, DAWState, Clip, Instrument, Instrumental, PendingUpload, Track } 
 import { audioBufferToWav } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
 import { SessionSerializer } from './SessionSerializer';
+import { audioBufferRegistry } from '../utils/audioBufferRegistry';
+import { shouldPersistFrozen } from './VstFreeze';
 
 export class SupabaseManager {
   private static instance: SupabaseManager;
@@ -279,9 +281,23 @@ export class SupabaseManager {
         tracks: state.tracks.map(t => ({
             ...t,
             clips: t.clips.map(c => ({ ...c })),
-            drumPads: t.drumPads ? t.drumPads.map(p => ({ ...p })) : undefined
+            drumPads: t.drumPads ? t.drumPads.map(p => ({ ...p })) : undefined,
+            frozenClip: t.frozenClip ? { ...t.frozenClip } : undefined
         }))
     };
+    // Rendu gelé (effets VST3 du PC) : gardé seulement s'il est à jour et que
+    // ce n'est pas le beat ; le projet s'ouvrira alors gelé sur le téléphone.
+    stateClone.tracks.forEach((t, i) => {
+        if (t.frozenClip && shouldPersistFrozen(state.tracks[i])) {
+            t.isFrozen = true;
+        } else {
+            t.isFrozen = false;
+            delete t.frozenClip;
+            delete t.frozenUpToPluginIndex;
+            delete t.frozenClipIds;
+            delete t.frozenSourceSig;
+        }
+    });
 
     if (onProgress) onProgress(10, "Analyse des fichiers audio...");
     // On passe l'ID utilisateur confirmé à la méthode d'upload
@@ -332,7 +348,7 @@ export class SupabaseManager {
       onProgress?: (percent: number, message: string) => void
   ) {
       const itemsToUpload: { 
-          type: 'CLIP' | 'PAD',
+          type: 'CLIP' | 'PAD' | 'FROZEN',
           trackIndex: number, 
           itemIndex: number, 
           name: string, 
@@ -346,23 +362,39 @@ export class SupabaseManager {
               const originalClip = originalState.tracks[tIdx].clips[cIdx];
               
               const isLocalBlob = clip.audioRef && clip.audioRef.startsWith('blob:');
-              const hasBuffer = !!originalClip.buffer;
+              // Les buffers vivent dans le registre (clip.bufferId) depuis l'intégration d'Immer.
+              const originalBuffer = originalClip.buffer || (originalClip.bufferId ? audioBufferRegistry.get(originalClip.bufferId) : undefined);
+              const hasBuffer = !!originalBuffer;
               const isCatalog = this.isCatalogUrl(clip.audioRef || '');
               const isAlreadyCloud = clip.audioRef && clip.audioRef.startsWith('http') && !isCatalog;
 
               if (clip.type === 'AUDIO' && (hasBuffer || isLocalBlob) && !isAlreadyCloud && !isCatalog) {
-                  if (originalClip.buffer) {
+                  if (originalBuffer) {
                       itemsToUpload.push({ 
                           type: 'CLIP',
                           trackIndex: tIdx, 
                           itemIndex: cIdx, 
                           name: clip.name, 
-                          buffer: originalClip.buffer,
+                          buffer: originalBuffer,
                           id: clip.id
                       });
                   }
               }
           });
+
+          // Rendu gelé (déjà filtré : à jour, jamais le beat). Déjà en ligne si
+          // ce même rendu a été chargé depuis le cloud.
+          const frozen = track.frozenClip;
+          if (frozen && !(frozen.audioRef && frozen.audioRef.startsWith('http'))) {
+              const original = originalState.tracks[tIdx].frozenClip;
+              const buf = original?.buffer || (original?.bufferId ? audioBufferRegistry.get(original.bufferId) : undefined);
+              if (buf) {
+                  itemsToUpload.push({ type: 'FROZEN', trackIndex: tIdx, itemIndex: 0, name: frozen.name, buffer: buf, id: frozen.id });
+              } else {
+                  delete track.frozenClip;
+                  track.isFrozen = false;
+              }
+          }
 
           // 2. Scan Drum Pads
           if (track.type === 'DRUM_RACK' && track.drumPads && originalState.tracks[tIdx].drumPads) {
@@ -419,6 +451,10 @@ export class SupabaseManager {
               const { data: { publicUrl } } = supabase!.storage.from(BUCKET_NAME).getPublicUrl(path);
 
               // Update Ref in State Clone
+              if (item.type === 'FROZEN') {
+                  stateClone.tracks[item.trackIndex].frozenClip!.audioRef = publicUrl;
+                  continue;
+              }
               if (item.type === 'CLIP') {
                   stateClone.tracks[item.trackIndex].clips[item.itemIndex].audioRef = publicUrl;
               } else {
@@ -618,6 +654,15 @@ export class SupabaseManager {
               }
           });
           
+          // 1b. Rendu gelé (décodé à la fréquence de l'appareil)
+          const frozen = track.frozenClip;
+          if (frozen?.audioRef && !frozen.buffer) {
+              promises.push(this.fetchAndDecode(frozen.audioRef).then(buf => {
+                  if (buf) frozen.buffer = buf;
+                  else { track.frozenClip = undefined; track.isFrozen = false; }
+              }));
+          }
+
           // 2. Hydrate Drum Pads
           if (track.type === 'DRUM_RACK' && track.drumPads) {
               track.drumPads.forEach(pad => {

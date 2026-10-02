@@ -6,6 +6,7 @@ import { AudioEncoder, BitDepth, AudioFormat } from '../services/AudioEncoder';
 import JSZip from 'jszip';
 import { saveBlob } from '../utils/saveBlob';
 import { openBuyBeat, openProMix } from '../utils/studioLinks';
+import { prepareTracksForOffline } from '../services/VstFreeze';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -132,16 +133,23 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
     setIsRendering(true);
     setProgress(0);
 
+    // Effets VST3 du PC : rendus par le pont (ou rendu déjà fait à la
+    // sauvegarde). Un OfflineAudioContext ne peut pas attendre le pont.
+    const prep = await prepareTracksForOffline(projectState.tracks, msg => setStatusText(msg));
+    const exportTracks = prep.tracks;
     try {
+        if (prep.missingVst.length > 0) {
+            setStatusText(`Effets VST non inclus (pont VST non connecté) : ${prep.missingVst.join(', ')}`);
+        }
         if (source === 'MASTER') {
             // --- EXPORT MASTER SIMPLE ---
-            const blob = await renderTrackList(projectState.tracks, "Master Mix");
+            const blob = await renderTrackList(exportTracks, "Master Mix");
             downloadBlob(blob, `${filename}_${sampleRate}Hz_${bitDepth}bit.${format.toLowerCase()}`);
         } 
         else {
             // --- EXPORT STEMS (ZIP) ---
             const zip = new JSZip();
-            const tracksToExport = projectState.tracks.filter(t => 
+            const tracksToExport = exportTracks.filter(t => 
                 !t.isMuted && t.id !== 'master' && (t.clips.length > 0 || t.type === 'BUS' || t.type === 'SEND')
             );
             
@@ -157,7 +165,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
                 // On soloe la piste : renderProject garde aussi tout ce qui
                 // l'alimente (pistes -> bus -> master) et ses departs.
-                const isolatedTracks = projectState.tracks.map(t => {
+                const isolatedTracks = exportTracks.map(t => {
                    if (t.id === track.id) return { ...t, isMuted: false, isSolo: true };
                    return { ...t, isSolo: false };
                 });
@@ -182,6 +190,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
         console.error(e);
         setStatusText(`❌ Erreur: ${e.message}`);
         setIsRendering(false);
+    } finally {
+        prep.cleanup();
     }
   };
 

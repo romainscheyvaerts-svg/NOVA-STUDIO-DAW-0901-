@@ -3,6 +3,7 @@ import { DAWState, Clip } from '../types';
 import { audioBufferToWav } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
+import { shouldPersistFrozen } from './VstFreeze';
 
 export class ProjectIO {
   
@@ -66,6 +67,25 @@ export class ProjectIO {
                     sClip.isUnlicensed = true;
                 }
             }
+        }
+
+        // RENDU GELÉ (effets VST3 du PC rendus dans l'audio) : il permet de
+        // continuer le projet sur un téléphone. Jamais pour le beat (licence).
+        const frozenBuffer = track.frozenClip?.bufferId ? audioBufferRegistry.get(track.frozenClip.bufferId) : undefined;
+        if (track.frozenClip && frozenBuffer && shouldPersistFrozen(track)) {
+            const filename = `frozen-${track.id}.wav`;
+            if (audioFolder) audioFolder.file(filename, audioBufferToWav(frozenBuffer));
+            sTrack.frozenClip.audioRef = `audio/${filename}`;
+            delete sTrack.frozenClip.buffer;
+            delete sTrack.frozenClip.bufferId;
+            // Ouvert ailleurs, le projet lit le rendu (sans pont, les VST3 ne sonneraient pas).
+            sTrack.isFrozen = true;
+        } else {
+            delete sTrack.frozenClip;
+            delete sTrack.frozenUpToPluginIndex;
+            delete sTrack.frozenClipIds;
+            delete sTrack.frozenSourceSig;
+            sTrack.isFrozen = false;
         }
     }
     
@@ -134,6 +154,27 @@ export class ProjectIO {
                 }
                 // Nettoyage de la ref interne
                 delete clip.audioRef;
+            }
+        }
+
+        // Rendu gelé : décodé à la fréquence de l'appareil (rééchantillonné si
+        // le téléphone tourne en 48 kHz et le PC en 44,1 kHz).
+        if (track.frozenClip?.audioRef) {
+            const audioFile = zip.file(track.frozenClip.audioRef);
+            delete track.frozenClip.audioRef;
+            if (audioFile) {
+                try {
+                    const audioBuffer = await audioEngine.ctx!.decodeAudioData(await audioFile.async("arraybuffer"));
+                    track.frozenClip.bufferId = audioBufferRegistry.register(audioBuffer, track.frozenClip.id);
+                    delete track.frozenClip.buffer;
+                } catch (e) {
+                    console.warn(`[ProjectIO] Rendu gelé illisible pour ${track.name}`, e);
+                    delete track.frozenClip;
+                    track.isFrozen = false;
+                }
+            } else {
+                delete track.frozenClip;
+                track.isFrozen = false;
             }
         }
     }
