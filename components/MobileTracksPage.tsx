@@ -59,7 +59,10 @@ const MobileSendFader: React.FC<{
           step="0.01"
           value={send.level}
           onChange={handleChange}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          aria-label={`Envoi ${label}`}
+          aria-valuetext={gainToDbText(send.level)}
+          className="absolute inset-x-0 w-full opacity-0 cursor-pointer"
+          style={{ top: -8, height: 40 }}
         />
       </div>
       <span className="text-[9px] font-mono tabular-nums text-white/50 w-12 text-right">{gainToDbText(send.level)}</span>
@@ -169,11 +172,13 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                 </div>
               </div>
 
-              {/* Quick Controls */}
-              <div className="flex items-center gap-1">
+              {/* Quick Controls : 32 px visibles, zone tactile 40 px (.nova-hit) */}
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...track, isMuted: !track.isMuted }); }}
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                  aria-label={`Muet : ${track.name}`}
+                  aria-pressed={!!track.isMuted}
+                  className={`nova-hit w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
                     track.isMuted ? 'bg-red-500 text-white' : 'bg-white/5 text-slate-500'
                   }`}
                 >
@@ -181,7 +186,9 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...track, isSolo: !track.isSolo }); }}
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                  aria-label={`Solo : ${track.name}`}
+                  aria-pressed={!!track.isSolo}
+                  className={`nova-hit w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
                     track.isSolo ? 'bg-yellow-500 text-black' : 'bg-white/5 text-slate-500'
                   }`}
                 >
@@ -189,7 +196,8 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); setExpandedFx(prev => ({ ...prev, [track.id]: !prev[track.id] })); }}
-                  className={`h-8 px-2 rounded-lg flex items-center justify-center gap-0.5 text-[10px] font-black transition-all ${
+                  aria-expanded={!!expandedFx[track.id]}
+                  className={`nova-hit h-8 px-2 rounded-lg flex items-center justify-center gap-0.5 text-[10px] font-black transition-all ${
                     expandedFx[track.id] ? 'bg-cyan-500 text-black' : track.plugins.length ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/5 text-slate-500'
                   }`}
                   aria-label="Effets de la piste"
@@ -199,7 +207,10 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                 {canHaveSends(track) && (
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleSends(track.id); }}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                    aria-label="Envois (delay, réverbes)"
+                    title="Envois"
+                    aria-expanded={!!expandedSends[track.id]}
+                    className={`nova-hit w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
                       expandedSends[track.id] ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-500'
                     }`}
                   >
@@ -209,7 +220,9 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                 {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...track, isTrackArmed: !track.isTrackArmed }); }}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                    aria-label={track.isTrackArmed ? 'Couper le micro' : 'Activer le micro'}
+                    aria-pressed={!!track.isTrackArmed}
+                    className={`nova-hit w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
                       track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-500'
                     }`}
                   >
@@ -267,7 +280,11 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                       onUpdateTrack({ ...track, volume: parseFloat(e.target.value) });
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    aria-label={`Volume ${track.name}`}
+                    aria-valuetext={gainToDbText(track.volume)}
+                    // 40 px de zone tactile (la hauteur globale des range était de 4-6 px)
+                    className="absolute inset-x-0 w-full opacity-0 cursor-pointer"
+                    style={{ top: -14, height: 40 }}
                   />
                 </div>
                 <span className="text-[10px] font-mono text-slate-400 w-10 text-right">
@@ -366,6 +383,8 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                           e.stopPropagation();
                           setShowBeatImportMenu(!showBeatImportMenu);
                         }}
+                        aria-label="Importer un beat (catalogue ou fichier)"
+                        title="Importer un beat"
                         className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 hover:bg-cyan-500/30 active:scale-95 transition-all"
                       >
                         <i className="fas fa-file-audio text-sm"></i>
@@ -427,7 +446,9 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                       e.stopPropagation();
                       onRequestAddPlugin(track.id, e.clientX, e.clientY);
                     }}
-                    className="w-7 h-7 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 active:bg-cyan-500/40 flex items-center justify-center text-cyan-400 transition-all"
+                    aria-label="Ajouter un effet"
+                    title="Ajouter un effet"
+                    className="nova-hit w-8 h-8 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 active:bg-cyan-500/40 flex items-center justify-center text-cyan-400 transition-all"
                   >
                     <i className="fas fa-plus text-xs"></i>
                   </button>
@@ -467,7 +488,8 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                               onRemovePlugin(track.id, plugin.id);
                             }
                           }}
-                          className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 hover:bg-red-600 active:bg-red-700 flex items-center justify-center text-white shadow-lg z-10 transition-all"
+                          aria-label={`Supprimer ${plugin.name || plugin.type}`}
+                          className="nova-hit absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 hover:bg-red-600 active:bg-red-700 flex items-center justify-center text-white shadow-lg z-10 transition-all"
                         >
                           <i className="fas fa-times text-[10px]"></i>
                         </button>

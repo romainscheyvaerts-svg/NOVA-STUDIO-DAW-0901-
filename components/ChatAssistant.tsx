@@ -268,7 +268,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
               </div>
             </div>
             
-            <button 
+            <button aria-label="Fermer" title="Fermer" 
               onClick={(e) => { 
                   e.stopPropagation(); 
                   setIsOpen(false);
@@ -326,7 +326,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
               <button 
                 key={i}
                 onClick={action.run}
-                className="flex-shrink-0 px-4 py-2.5 bg-white/5 border border-white/10 rounded-2xl hover:bg-cyan-500 hover:text-black hover:border-cyan-400 transition-all flex items-center space-x-2 group"
+                className="flex-shrink-0 min-h-[40px] px-4 py-2.5 bg-white/5 border border-white/10 rounded-2xl hover:bg-cyan-500 hover:text-black hover:border-cyan-400 transition-all flex items-center space-x-2 group"
               >
                 <i className={`fas ${action.icon} text-[10px]`}></i>
                 <span className="text-[11px] font-semibold tracking-tight">{action.label}</span>

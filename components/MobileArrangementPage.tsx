@@ -3,6 +3,7 @@ import MobileContainer from './MobileContainer';
 import { Track, Clip, TrackType, TrackSend } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore, usePlayheadTime } from '../utils/playheadStore';
+import { gainToDbText } from '../utils/db';
 
 /** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
 const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
@@ -70,8 +71,11 @@ interface DragState {
 }
 
 // Constants - Logic Pro iPad inspired
-const TRACK_HEADER_WIDTH = 100;
-const TRACK_HEIGHT = 64;
+/** Noms français des outils (lecteurs d'écran, info-bulles). */
+const TOOL_LABELS: Record<string, string> = { SELECT: 'Sélection', TRIM: 'Rogner', SPLIT: 'Couper', ERASE: 'Gomme', FADE: 'Fondus', DUPLICATE: 'Dupliquer' };
+
+const TRACK_HEADER_WIDTH = 120;
+const TRACK_HEIGHT = 80;
 const TIMELINE_HEIGHT = 44;
 const MIN_ZOOM = 20;
 const MAX_ZOOM = 300;
@@ -542,13 +546,17 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         <div className="flex items-center gap-1">
           <button
             onClick={onStop}
-            className="w-9 h-9 rounded-lg bg-white/5 hover:bg-white/10 active:bg-white/15 flex items-center justify-center transition-all"
+            aria-label="Stop"
+            title="Stop"
+            className="nova-hit w-9 h-9 rounded-lg bg-white/5 hover:bg-white/10 active:bg-white/15 flex items-center justify-center transition-all"
           >
             <i className="fas fa-stop text-white/70 text-sm"></i>
           </button>
           <button
             onClick={onTogglePlay}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+            aria-label={isPlaying ? 'Pause' : 'Lecture'}
+            aria-pressed={isPlaying}
+            className={`nova-hit w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
               isPlaying 
                 ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/30' 
                 : 'bg-white/5 hover:bg-white/10 text-white/70'
@@ -572,13 +580,17 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           </div>
           <button
             onClick={() => setZoom(z => Math.max(MIN_ZOOM, z - 20))}
-            className="w-9 h-9 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
+            aria-label="Dézoomer"
+            title="Dézoomer"
+            className="nova-hit w-9 h-9 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
           >
             <i className="fas fa-minus text-white/50 text-[10px]"></i>
           </button>
           <button
             onClick={() => setZoom(z => Math.min(MAX_ZOOM, z + 20))}
-            className="w-9 h-9 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
+            aria-label="Zoomer"
+            title="Zoomer"
+            className="nova-hit w-9 h-9 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center"
           >
             <i className="fas fa-plus text-white/50 text-[10px]"></i>
           </button>
@@ -586,12 +598,15 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       </div>
 
       {/* === TOOL BAR === */}
-      <div className="flex items-center h-10 px-2 bg-[#0f1114] border-b border-white/5 gap-1">
+      <div className="flex items-center h-10 px-2 bg-[#0f1114] border-b border-white/5 gap-1 overflow-x-auto scrollbar-hide">
         {tools.map(tool => (
           <button
             key={tool.id}
             onClick={() => setActiveTool(tool.id)}
-            className={`flex items-center gap-1.5 px-3 h-7 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all ${
+            aria-label={TOOL_LABELS[tool.id] || tool.label}
+            title={TOOL_LABELS[tool.id] || tool.label}
+            aria-pressed={activeTool === tool.id}
+            className={`nova-hit shrink-0 flex items-center gap-1.5 px-3 h-7 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all ${
               activeTool === tool.id
                 ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
                 : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70'
@@ -607,7 +622,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         {/* Snap toggle */}
         <button
           onClick={() => setSnapToGrid(!snapToGrid)}
-          className={`flex items-center gap-1.5 px-3 h-7 rounded-md text-[10px] font-bold transition-all ${
+          aria-label="Magnétisme sur la grille"
+          title="Magnétisme sur la grille"
+          aria-pressed={snapToGrid}
+          className={`nova-hit shrink-0 flex items-center gap-1.5 px-3 h-7 rounded-md text-[10px] font-bold transition-all ${
             snapToGrid
               ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/40'
               : 'bg-white/5 text-white/40'
@@ -621,7 +639,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         <select
           value={gridDivision}
           onChange={e => setGridDivision(Number(e.target.value))}
-          className="h-7 px-2 rounded-md bg-white/5 border border-white/10 text-[10px] font-bold text-white/70"
+          aria-label="Division de la grille"
+          className="shrink-0 h-10 px-2 rounded-md bg-white/5 border border-white/10 text-[10px] font-bold text-white/70"
         >
           <option value={1}>1/4</option>
           <option value={0.5}>1/8</option>
@@ -659,24 +678,48 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 {/* Track name + Volume fader */}
                 {/* Nom sur sa propre ligne : il etait plafonne a 55 px et se
                     reduisait a une lettre, on ne distinguait plus BEAT de BACK 1. */}
-                <div className="flex items-center gap-1.5 mb-1">
-                  <div 
+                <div className="flex items-center gap-1.5 h-6">
+                  <div
                     className="w-2 h-2 rounded-full flex-shrink-0"
                     style={{ backgroundColor: track.color }}
                   />
                   <span title={track.name} className="text-[11px] font-semibold text-white/90 truncate flex-1">
                     {track.name}
                   </span>
+                  {/* FX : ouvre le menu des effets de la piste */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onRequestAddPlugin) {
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        onRequestAddPlugin(track.id, rect.right + 5, rect.top);
+                      } else {
+                        window.dispatchEvent(new CustomEvent('request-add-plugin', {
+                          detail: { trackId: track.id, x: 150, y: 200 }
+                        }));
+                      }
+                    }}
+                    aria-label={`Effets de ${track.name}`}
+                    title="Effets (plugins)"
+                    className={`nova-hit shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-all ${
+                      track.plugins.length > 0
+                        ? 'bg-cyan-500 text-white'
+                        : 'bg-white/10 text-white/40 hover:bg-white/20'
+                    }`}
+                  >
+                    <i className="fas fa-plug text-[9px]"></i>
+                  </button>
                 </div>
 
-                <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="flex items-center gap-1.5 h-5">
                   {/* Mini Volume Fader */}
                   <div className="flex items-center gap-1 flex-1">
                     <input
                       type="range"
                       min="0"
                       max="100"
-                      value={(track.volume || 0.8) * 100}
+                      aria-label={`Volume ${track.name}`}
+                      value={Math.min(1, track.volume ?? 0.8) * 100}
                       onChange={(e) => {
                         e.stopPropagation();
                         if (onUpdateTrack) {
@@ -685,21 +728,26 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                       }}
                       onClick={(e) => e.stopPropagation()}
                       className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                      // Trait de 4 px centré, zone de saisie de toute la rangée (+ curseur 24 px)
                       style={{
-                        background: `linear-gradient(to right, ${track.color || '#22d3ee'} ${(track.volume || 0.8) * 100}%, rgba(255,255,255,0.1) ${(track.volume || 0.8) * 100}%)`
+                        height: 20,
+                        backgroundImage: `linear-gradient(to right, ${track.color || '#22d3ee'} ${Math.min(1, track.volume ?? 0.8) * 100}%, rgba(255,255,255,0.1) ${Math.min(1, track.volume ?? 0.8) * 100}%)`,
+                        backgroundColor: 'transparent', backgroundSize: '100% 4px', backgroundRepeat: 'no-repeat', backgroundPosition: 'center'
                       }}
                     />
                   </div>
                 </div>
 
-                {/* Track controls M/S/R/Send/FX */}
-                <div className="flex items-center gap-1">
+                {/* M / S / R : 32 px visibles, zone tactile 40 px (envois : bouton flottant) */}
+                <div className="flex items-center gap-1 mt-1">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       if (onUpdateTrack) onUpdateTrack({ ...track, isMuted: !track.isMuted });
                     }}
-                    className={`w-7 h-7 rounded-md text-[10px] font-bold transition-all ${
+                    aria-label={`Muet : ${track.name}`}
+                    aria-pressed={!!track.isMuted}
+                    className={`nova-hit w-8 h-8 rounded-md text-[10px] font-bold transition-all ${
                       track.isMuted
                         ? 'bg-red-500 text-white'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
@@ -712,7 +760,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                       e.stopPropagation();
                       if (onUpdateTrack) onUpdateTrack({ ...track, isSolo: !track.isSolo });
                     }}
-                    className={`w-7 h-7 rounded-md text-[10px] font-bold transition-all ${
+                    aria-label={`Solo : ${track.name}`}
+                    aria-pressed={!!track.isSolo}
+                    className={`nova-hit w-8 h-8 rounded-md text-[10px] font-bold transition-all ${
                       track.isSolo
                         ? 'bg-yellow-500 text-black'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
@@ -728,7 +778,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                       if (onUpdateTrack) onUpdateTrack({ ...track, isTrackArmed: !track.isTrackArmed });
                     }}
                     aria-label={track.isTrackArmed ? 'Couper le micro' : 'Activer le micro'}
-                    className={`w-7 h-7 rounded-md text-[10px] font-bold transition-all ${
+                    aria-pressed={!!track.isTrackArmed}
+                    className={`nova-hit w-8 h-8 rounded-md text-[10px] font-bold transition-all ${
                       track.isTrackArmed
                         ? 'bg-red-600 text-white animate-pulse'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
@@ -737,46 +788,6 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     R
                   </button>
                   )}
-                  {/* Send button - Opens sends panel */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedTrackForSends(track.id);
-                      setShowSendsPanel(true);
-                    }}
-                    className={`w-7 h-7 rounded-md text-[10px] font-bold transition-all ${
-                      track.sends.some(s => s.level > 0 && s.isEnabled)
-                        ? 'bg-purple-500 text-white'
-                        : 'bg-white/10 text-white/40 hover:bg-white/20'
-                    }`}
-                    title="Sends"
-                  >
-                    <i className="fas fa-share-nodes text-[6px]"></i>
-                  </button>
-                  {/* FX button - Opens plugin menu */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      console.log('[MobileArrangement] FX button clicked for track:', track.id, 'onRequestAddPlugin:', !!onRequestAddPlugin);
-                      if (onRequestAddPlugin) {
-                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                        onRequestAddPlugin(track.id, rect.right + 5, rect.top);
-                      } else {
-                        // Fallback: Dispatch custom event if callback not provided
-                        window.dispatchEvent(new CustomEvent('request-add-plugin', {
-                          detail: { trackId: track.id, x: 150, y: 200 }
-                        }));
-                      }
-                    }}
-                    className={`w-7 h-7 rounded-md text-[10px] font-bold transition-all ${
-                      track.plugins.length > 0
-                        ? 'bg-cyan-500 text-white'
-                        : 'bg-white/10 text-white/40 hover:bg-white/20'
-                    }`}
-                    title="Plugins"
-                  >
-                    <i className="fas fa-plug text-[6px]"></i>
-                  </button>
                 </div>
               </div>
             ))}
@@ -972,7 +983,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             </div>
             <button
               onClick={() => setSelectedClip(null)}
-              className="w-6 h-6 rounded-full bg-white/10 text-white/40 hover:bg-white/20 flex items-center justify-center"
+              aria-label="Fermer la barre d'édition du clip"
+              title="Fermer"
+              className="nova-hit w-8 h-8 rounded-full bg-white/10 text-white/50 hover:bg-white/20 flex items-center justify-center"
             >
               <i className="fas fa-times text-[10px]"></i>
             </button>
@@ -1053,32 +1066,32 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             <div className="flex-shrink-0 w-px h-8 bg-white/10 mx-1"></div>
 
             {/* Fade In */}
-            <div className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-11 rounded-lg bg-white/5">
-              <span className="text-[7px] font-bold text-white/40 mb-0.5">FADE IN</span>
+            <div className="flex-shrink-0 flex flex-col items-center justify-center px-1.5 h-12 rounded-lg bg-white/5">
+              <span className="text-[8px] font-bold text-white/40 mb-0.5">FONDU ENTRÉE</span>
               <div className="flex items-center gap-1">
-                <button onClick={() => handleFadeIn(-0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
-                <span className="text-[9px] font-mono text-cyan-400 w-6 text-center">{((selectedClip.clip.fadeIn || 0) * 1000).toFixed(0)}</span>
-                <button onClick={() => handleFadeIn(0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
+                <button onClick={() => handleFadeIn(-0.1)} aria-label="Raccourcir le fondu d'entrée" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
+                <span className="text-[9px] font-mono tabular-nums text-cyan-400 w-9 text-center">{((selectedClip.clip.fadeIn || 0) * 1000).toFixed(0)} ms</span>
+                <button onClick={() => handleFadeIn(0.1)} aria-label="Allonger le fondu d'entrée" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
               </div>
             </div>
 
             {/* Fade Out */}
-            <div className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-11 rounded-lg bg-white/5">
-              <span className="text-[7px] font-bold text-white/40 mb-0.5">FADE OUT</span>
+            <div className="flex-shrink-0 flex flex-col items-center justify-center px-1.5 h-12 rounded-lg bg-white/5">
+              <span className="text-[8px] font-bold text-white/40 mb-0.5">FONDU SORTIE</span>
               <div className="flex items-center gap-1">
-                <button onClick={() => handleFadeOut(-0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
-                <span className="text-[9px] font-mono text-cyan-400 w-6 text-center">{((selectedClip.clip.fadeOut || 0) * 1000).toFixed(0)}</span>
-                <button onClick={() => handleFadeOut(0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
+                <button onClick={() => handleFadeOut(-0.1)} aria-label="Raccourcir le fondu de sortie" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
+                <span className="text-[9px] font-mono tabular-nums text-cyan-400 w-9 text-center">{((selectedClip.clip.fadeOut || 0) * 1000).toFixed(0)} ms</span>
+                <button onClick={() => handleFadeOut(0.1)} aria-label="Allonger le fondu de sortie" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
               </div>
             </div>
 
             {/* Gain */}
-            <div className="flex-shrink-0 flex flex-col items-center justify-center w-14 h-11 rounded-lg bg-white/5">
-              <span className="text-[7px] font-bold text-white/40 mb-0.5">GAIN</span>
+            <div className="flex-shrink-0 flex flex-col items-center justify-center px-1.5 h-12 rounded-lg bg-white/5">
+              <span className="text-[8px] font-bold text-white/40 mb-0.5">GAIN</span>
               <div className="flex items-center gap-1">
-                <button onClick={() => handleGainChange(-0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
-                <span className="text-[9px] font-mono text-green-400 w-6 text-center">{((selectedClip.clip.gain || 1) * 100).toFixed(0)}%</span>
-                <button onClick={() => handleGainChange(0.1)} className="w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
+                <button onClick={() => handleGainChange(-0.1)} aria-label="Baisser le gain du clip" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
+                <span className="text-[9px] font-mono tabular-nums text-green-400 w-12 text-center">{gainToDbText(selectedClip.clip.gain ?? 1)}</span>
+                <button onClick={() => handleGainChange(0.1)} aria-label="Monter le gain du clip" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
               </div>
             </div>
 
@@ -1104,7 +1117,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       {selectedTrackId && !selectedClip && (
         <button
           onClick={handleOpenSends}
-          className="fixed bottom-20 right-4 w-14 h-14 rounded-full bg-gradient-to-br from-purple-600 to-pink-500 shadow-lg shadow-purple-500/30 flex items-center justify-center z-40 active:scale-95 transition-transform"
+          aria-label="Envois (delay, réverbes) de la piste sélectionnée"
+          title="Envois de la piste"
+          className="fixed bottom-[calc(8.5rem+env(safe-area-inset-bottom))] right-4 w-14 h-14 rounded-full bg-gradient-to-br from-purple-600 to-pink-500 shadow-lg shadow-purple-500/30 flex items-center justify-center z-40 active:scale-95 transition-transform"
         >
           <i className="fas fa-share-nodes text-white text-lg"></i>
         </button>
@@ -1131,7 +1146,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   Track: {tracks.find(t => t.id === selectedTrackForSends)?.name || 'N/A'}
                 </p>
               </div>
-              <button
+              <button aria-label="Fermer" title="Fermer"
                 onClick={() => setShowSendsPanel(false)}
                 className="w-8 h-8 rounded-full bg-white/10 text-white/60 flex items-center justify-center hover:bg-white/20"
               >

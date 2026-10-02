@@ -142,7 +142,7 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onSelectTrack(t.id); }}
-                    className="w-full text-center text-[11px] font-bold text-white truncate"
+                    className="w-full min-h-[40px] text-center text-[11px] font-bold text-white truncate"
                     title={t.name}
                   >
                     {isMaster ? 'MASTER' : t.name}
@@ -162,6 +162,8 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                         onDoubleClick={() => onUpdateTrack({ ...t, pan: 0 })}
                         onChange={(e) => onUpdateTrack({ ...t, pan: parseFloat(e.target.value) })}
                         className="w-full"
+                        // Zone tactile de 40 px ; la piste reste un trait de 4 px au centre.
+                        style={{ height: 40, background: 'linear-gradient(transparent 18px, var(--border-highlight) 18px, var(--border-highlight) 22px, transparent 22px)' }}
                       />
                       <div className="text-center text-[11px] text-slate-400 mt-0.5">
                         {t.pan === 0 ? 'C' : t.pan > 0 ? `R${Math.round(t.pan * 100)}` : `L${Math.round(Math.abs(t.pan) * 100)}`}
@@ -185,7 +187,7 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                       aria-pressed={t.isMuted}
                       aria-label={`Mute ${t.name}`}
                       onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...t, isMuted: !t.isMuted }); }}
-                      className={`flex-1 h-9 rounded-lg text-xs font-black ${t.isMuted ? 'bg-orange-500 text-white' : 'bg-white/5 text-slate-300'}`}
+                      className={`nova-hit flex-1 h-10 rounded-lg text-xs font-black ${t.isMuted ? 'bg-orange-500 text-white' : 'bg-white/5 text-slate-300'}`}
                     >
                       M
                     </button>
@@ -195,7 +197,7 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                         aria-pressed={t.isSolo}
                         aria-label={`Solo ${t.name}`}
                         onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...t, isSolo: !t.isSolo }); }}
-                        className={`flex-1 h-9 rounded-lg text-xs font-black ${t.isSolo ? 'bg-yellow-500 text-black' : 'bg-white/5 text-slate-300'}`}
+                        className={`nova-hit flex-1 h-10 rounded-lg text-xs font-black ${t.isSolo ? 'bg-yellow-500 text-black' : 'bg-white/5 text-slate-300'}`}
                       >
                         S
                       </button>
