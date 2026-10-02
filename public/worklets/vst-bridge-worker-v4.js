@@ -1,5 +1,5 @@
 /**
- * VST Bridge Worker v4
+ * VST Bridge Worker v4 (nom versionné : voir vst-bridge-processor-v4.js)
  *
  * Tient la connexion AUDIO avec le pont VST (ws://127.0.0.1:8765) hors du
  * thread principal : un rendu React ou un calcul de forme d'onde ne retarde

@@ -1,6 +1,9 @@
 /**
  * VST Bridge Processor v4
  *
+ * Nom de fichier versionné : le service worker garde les worklets en cache
+ * (même nom = même contenu) ; une nouvelle version du protocole = un nouveau nom.
+ *
  * Un effet VST3 du PC dans la chaîne Web Audio. Chaque bloc de 128 échantillons
  * part vers le pont (via un Worker qui tient le WebSocket, pour ne pas dépendre
  * du thread principal de la page) et revient traité, numéroté.
@@ -120,4 +123,4 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor('vst-bridge-processor', VSTBridgeProcessor);
+registerProcessor('vst-bridge-processor-v4', VSTBridgeProcessor);

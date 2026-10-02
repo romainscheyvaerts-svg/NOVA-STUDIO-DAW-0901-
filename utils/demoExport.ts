@@ -1,5 +1,6 @@
 import { DAWState, Track, TrackType } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
+import { prepareTracksForOffline } from '../services/VstFreeze';
 import { AudioEncoder } from '../services/AudioEncoder';
 import { supabaseManager } from '../services/SupabaseManager';
 import { getCatalogBeat } from './studioLinks';
@@ -102,7 +103,14 @@ export function clipWindow(st: DAWState, length = 30): { start: number; duration
 }
 
 export async function renderTagged(st: DAWState, start: number, duration: number, onProgress?: (p: number) => void): Promise<AudioBuffer> {
-  const mix = await audioEngine.renderProject(st.tracks, duration, start, 44100, onProgress);
+  // Effets VST3 du PC : rendus par le pont ou rendu de la sauvegarde (sinon sons secs).
+  const prep = await prepareTracksForOffline(st.tracks);
+  let mix: AudioBuffer;
+  try {
+    mix = await audioEngine.renderProject(prep.tracks, duration, start, 44100, onProgress);
+  } finally {
+    prep.cleanup();
+  }
   AudioEncoder.normalizeBuffer(mix, -1);
   return applyTag(mix);
 }

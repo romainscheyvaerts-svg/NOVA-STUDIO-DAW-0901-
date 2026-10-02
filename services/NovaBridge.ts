@@ -4,7 +4,7 @@
  * - Connexion UNIQUEMENT à la demande de l'utilisateur (« Connecter le pont VST ») :
  *   aucun essai automatique en boucle (téléphones, PC sans pont).
  * - Contrôle (JSON, requêtes numérotées) sur ce thread ; l'audio temps réel passe
- *   par un Worker dédié (public/worklets/VSTBridgeWorker.js) relié à chaque
+ *   par un Worker dédié (public/worklets/vst-bridge-worker-v4.js) relié à chaque
  *   AudioWorklet d'effet VST3.
  * - Rendu hors temps réel (RENDER) en trame binaire pour le gel / l'export.
  *
@@ -304,7 +304,7 @@ class NovaBridgeService {
 
   private ensureWorker() {
     if (!this.worker) {
-      this.worker = new Worker(`${import.meta.env.BASE_URL}worklets/VSTBridgeWorker.js`);
+      this.worker = new Worker(`${import.meta.env.BASE_URL}worklets/vst-bridge-worker-v4.js`);
     }
     this.worker.postMessage({ type: 'init', url: this.url });
   }

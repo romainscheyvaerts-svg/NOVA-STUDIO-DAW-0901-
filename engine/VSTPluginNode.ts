@@ -176,11 +176,11 @@ export class VSTPluginNode {
     let p = workletLoaded.get(this.ctx);
     if (!p) {
       // Chemin relatif à la base du build (le DAW n'est pas toujours servi à la racine).
-      p = this.ctx.audioWorklet.addModule(`${import.meta.env.BASE_URL}worklets/VSTBridgeProcessor.js`);
+      p = this.ctx.audioWorklet.addModule(`${import.meta.env.BASE_URL}worklets/vst-bridge-processor-v4.js`);
       workletLoaded.set(this.ctx, p);
     }
     await p;
-    const node = new AudioWorkletNode(this.ctx, 'vst-bridge-processor', {
+    const node = new AudioWorkletNode(this.ctx, 'vst-bridge-processor-v4', {
       numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
       channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
       processorOptions: { prebufferFrames: VST_PREBUFFER_FRAMES },
