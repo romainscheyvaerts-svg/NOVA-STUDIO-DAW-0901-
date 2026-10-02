@@ -379,9 +379,30 @@ const useUndoRedo = (initialState: DAWState) => {
   }, []);
 
   const setVisualState = useCallback((updater: Partial<DAWState>) => { setHistory(curr => ({ ...curr, present: { ...curr.present, ...updater } })); }, []);
-  const undo = useCallback(() => { setHistory(curr => { if (curr.past.length === 0) return curr; return { past: curr.past.slice(0, -1), present: curr.past[curr.past.length - 1], future: [curr.present, ...curr.future] }; }); }, []);
-  const redo = useCallback(() => { setHistory(curr => { if (curr.future.length === 0) return curr; return { past: [...curr.past, curr.present], present: curr.future[0], future: curr.future.slice(1) }; }); }, []);
-  return { state: history.present, setState, setVisualState, undo, redo, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
+
+  // Annuler / rétablir ne touche QUE au projet. Restaurer l'état entier
+  // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
+  // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
+  // continuait, et pendant une prise il basculait l'enregistrement.
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'timeSignature', 'isLoopActive', 'loopStart', 'loopEnd'] as const;
+  const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
+    const out: any = { ...base };
+    for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
+    return out as DAWState;
+  };
+  const undo = useCallback(() => { setHistory(curr => { if (curr.past.length === 0 || curr.present.isRecording) return curr; const snap = curr.past[curr.past.length - 1]; return { past: curr.past.slice(0, -1), present: withProjectOf(curr.present, snap), future: [cleanStateForHistory(curr.present), ...curr.future] }; }); }, []);
+  const redo = useCallback(() => { setHistory(curr => { if (curr.future.length === 0 || curr.present.isRecording) return curr; const snap = curr.future[0]; return { past: [...curr.past, cleanStateForHistory(curr.present)], present: withProjectOf(curr.present, snap), future: curr.future.slice(1) }; }); }, []);
+
+  // Un son supprimé doit rester en mémoire tant qu'une étape d'annulation y fait
+  // référence : sinon Ctrl+Z ramenait un clip muet.
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const isBufferInHistory = useCallback((bufferId: string) => {
+    const h = historyRef.current;
+    return [...h.past, ...h.future].some(s => s.tracks.some(t =>
+      t.clips.some(c => c.bufferId === bufferId) || t.frozenClip?.bufferId === bufferId));
+  }, []);
+  return { state: history.present, setState, setVisualState, undo, redo, isBufferInHistory, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
 };
 
 export default function App() {
@@ -573,7 +594,7 @@ export default function App() {
     punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 }
   };
 
-  const { state, setState, setVisualState, undo, redo, canUndo, canRedo } = useUndoRedo(initialState);
+  const { state, setState, setVisualState, undo, redo, isBufferInHistory, canUndo, canRedo } = useUndoRedo(initialState);
   
   const [theme, setTheme] = useState<Theme>('dark');
   useEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
@@ -608,6 +629,8 @@ export default function App() {
   useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
   // Le reglage de compensation n'etait jamais transmis au moteur.
   useEffect(() => { audioEngine.setDelayCompensation(state.isDelayCompEnabled); }, [state.isDelayCompEnabled]);
+  // Les modifications faites pendant la lecture s'entendent immédiatement.
+  useEffect(() => { audioEngine.setLiveTracks(state.tracks); }, [state.tracks]);
 
   // Metronome : reglages, tempo et signature suivent l'etat du projet.
   useEffect(() => { metronomeService.setSettings(state.metronome); }, [state.metronome]);
@@ -928,7 +951,7 @@ export default function App() {
       [...t.clips, ...(t.frozenClip ? [t.frozenClip] : [])]
         .some(c => c.bufferId === bufferId && !excludeClipIds.includes(c.id))
     );
-    if (!stillUsed) audioBufferRegistry.remove(bufferId);
+    if (!stillUsed && !isBufferInHistory(bufferId)) audioBufferRegistry.remove(bufferId);
   }, []);
 
   /** Evite de lancer deux etirements concurrents sur le meme clip. */
@@ -1836,7 +1859,7 @@ export default function App() {
       // 1. Initialiser l'audio engine
       await ensureAudioEngine();
       if (!audioEngine.ctx) {
-        alert('❌ Erreur: Audio engine non initialisé');
+        setAiNotification('❌ Le moteur audio n\x27est pas prêt : appuie sur Play une fois puis réessaie');
         return;
       }
 
@@ -1896,11 +1919,11 @@ export default function App() {
       }));
 
       console.log(`✅ [Import] Fichier importé: ${file.name} (${audioBuffer.duration.toFixed(2)}s)`);
-      alert(`✅ Importé: ${file.name}`);
+      setAiNotification(`✅ Importé : ${file.name}`);
 
     } catch (error: any) {
       console.error('❌ [Import Error]', error);
-      alert(`❌ Erreur d'import: ${error.message || 'Fichier non valide'}`);
+      setAiNotification(`❌ Import impossible : ${error.message || 'fichier non valide'}`);
     }
   }, [setState]);
 

@@ -238,7 +238,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
 
             {/* Retour casque de la piste qui enregistre */}
             {track.isTrackArmed && (
-              <div className="px-4 pb-2"><MonitorControl /></div>
+              <div className="px-4 pb-2"><MonitorControl trackId={track.id} /></div>
             )}
 
             {/* Volume Fader */}

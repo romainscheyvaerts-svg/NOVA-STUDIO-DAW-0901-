@@ -87,6 +87,9 @@ export class AudioEngine {
   /** Buffers inverses mis en cache (clip.isReversed). */
   private reversedBufferCache: Map<string, AudioBuffer> = new Map();
   private activeSources: Map<string, ScheduledSource> = new Map();
+  /** Pistes à jour pendant la lecture (les modifications s'entendent tout de suite). */
+  private liveTracks: Track[] | null = null;
+  private clipSigs: Map<string, string> = new Map();
   private scrubbingSources: Map<string, ScheduledSource> = new Map();
   
   // MIDI State
@@ -1248,8 +1251,10 @@ export class AudioEngine {
     // dernier rebuild du graphe au lieu de la valeur automatisee.
     tracks.forEach(track => this.applyAutomation(track, startOffset));
 
+    this.liveTracks = tracks;
+    this.clipSigs = this.computeClipSigs(tracks);
     this.schedulerTimer = window.setInterval(() => {
-      this.scheduler(tracks);
+      this.scheduler(this.liveTracks || tracks);
     }, this.LOOKAHEAD_MS);
   }
 
@@ -1317,6 +1322,40 @@ export class AudioEngine {
 
   public scrub(tracks: Track[], time: number, velocity: number) { /* ... */ }
   public stopScrubbing() { /* ... */ }
+
+  private computeClipSigs(tracks: Track[]): Map<string, string> {
+    const m = new Map<string, string>();
+    tracks.forEach(t => this.getPlayableClips(t).forEach(c => {
+      m.set(c.id, `${t.id}|${c.start}|${c.offset}|${c.duration}|${c.isMuted ? 1 : 0}|${c.bufferId || ''}|${c.gain ?? 1}|${c.fadeIn}|${c.fadeOut}|${c.isReversed ? 1 : 0}`);
+    }));
+    return m;
+  }
+
+  /**
+   * Les pistes ont changé pendant la lecture (clip déplacé, coupé, supprimé,
+   * prise choisie…) : on coupe les sources devenues fausses ; le planificateur
+   * relance la version à jour au passage suivant (≈ 25 ms). Avant, le
+   * planificateur gardait les pistes du moment du « Play » : un clip supprimé
+   * continuait de sonner jusqu'à l'arrêt.
+   */
+  public setLiveTracks(tracks: Track[]) {
+    if (!this.isPlaying || !this.ctx) { this.liveTracks = tracks; return; }
+    const next = this.computeClipSigs(tracks);
+    const now = this.ctx.currentTime;
+    this.activeSources.forEach((src, key) => {
+      const id = src.clipId || key;
+      if (next.get(id) === this.clipSigs.get(id)) return;
+      try {
+        src.gain.gain.cancelScheduledValues(now);
+        src.gain.gain.setValueAtTime(src.gain.gain.value, now);
+        src.gain.gain.linearRampToValueAtTime(0, now + 0.005);
+        src.source.stop(now + 0.006);
+      } catch { /* déjà arrêtée */ }
+      this.activeSources.delete(key);
+    });
+    this.clipSigs = next;
+    this.liveTracks = tracks;
+  }
 
   private scheduler(tracks: Track[]) {
     if (!this.ctx) return;
@@ -1671,21 +1710,6 @@ export class AudioEngine {
         
         const gainNode = this.ctx.createGain();
         const clipGain = clip.gain ?? 1.0;
-        gainNode.gain.setValueAtTime(clipGain, scheduleTime);
-        
-        if (clip.fadeIn > 0) {
-            gainNode.gain.setValueAtTime(0, scheduleTime);
-            gainNode.gain.linearRampToValueAtTime(clipGain, scheduleTime + clip.fadeIn);
-        }
-        
-        if (clip.fadeOut > 0) {
-            const fadeOutStart = scheduleTime + clip.duration - clip.fadeOut;
-            if (fadeOutStart > scheduleTime) {
-                gainNode.gain.setValueAtTime(clipGain, fadeOutStart);
-                gainNode.gain.linearRampToValueAtTime(0, scheduleTime + clip.duration);
-            }
-        }
-        
         source.connect(gainNode);
         // Clip gele : il contient deja les effets rendus, il entre apres eux.
         const isFrozenRender = !!dsp.frozenClipId && clip.id === dsp.frozenClipId && !!dsp.frozenInput;
@@ -1707,6 +1731,28 @@ export class AudioEngine {
         
         const playedSoFar = Math.max(0, offsetIntoClip - (clip.offset || 0));
         const remainingDuration = clip.duration - playedSoFar;
+
+        // Fondus calés sur la position RÉELLE dans le clip (comme le rendu
+        // offline). Avant, ils partaient de l'instant de planification : en
+        // lançant la lecture au milieu d'un clip, le fondu de sortie tombait
+        // après la fin du clip et chaque reprise créait un faux fondu d'entrée.
+        const clipZero = when - playedSoFar;               // instant où le clip serait à 0
+        const clipEnd = clipZero + clip.duration;
+        const fi = Math.min(clip.fadeIn || 0, clip.duration);
+        const fo = Math.min(clip.fadeOut || 0, clip.duration - fi);
+        const gainAt = (t: number) => {                     // t = position dans le clip (s)
+            let g = clipGain;
+            if (fi > 0 && t < fi) g *= Math.max(0, t / fi);
+            if (fo > 0 && t > clip.duration - fo) g *= Math.max(0, (clip.duration - t) / fo);
+            return g;
+        };
+        gainNode.gain.setValueAtTime(gainAt(playedSoFar), when);
+        if (fi > 0 && playedSoFar < fi) gainNode.gain.linearRampToValueAtTime(gainAt(fi), clipZero + fi);
+        if (fo > 0) {
+            const foStart = clip.duration - fo;
+            if (playedSoFar < foStart) gainNode.gain.setValueAtTime(gainAt(foStart), clipZero + foStart);
+            gainNode.gain.linearRampToValueAtTime(0, clipEnd);
+        }
         
         if (remainingDuration > 0 && offsetIntoClip < bufferToPlay.duration) {
             const actualDuration = Math.min(remainingDuration, bufferToPlay.duration - offsetIntoClip);

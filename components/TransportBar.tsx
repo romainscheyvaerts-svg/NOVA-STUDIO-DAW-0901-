@@ -202,14 +202,14 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              
              {/* SHARE (Only if logged in) */}
              {user && (
-                 <button onClick={onShareProject} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Share</span></button>
+                 <button onClick={onShareProject} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Partager</span></button>
              )}
              
              {/* EXPORT BUTTON */}
-             <button onClick={onExportMix} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Export</span></button>
+             <button onClick={onExportMix} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Exporter</span></button>
              
              {/* ENGINE BUTTON */}
-             <button onClick={onOpenAudioEngine} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Engine</span></button>
+             <button onClick={onOpenAudioEngine} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Audio</span></button>
              
              {/* PDC Toggle */}
              <button onClick={onToggleDelayComp} className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="Delay Compensation (PDC)">
@@ -238,7 +238,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         </div>
         
         <div className="flex flex-col items-center min-w-[60px] md:min-w-[80px]">
-             <span className="hidden md:block text-[7px] text-slate-600 font-black uppercase tracking-[0.3em] hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}>Timeline</span>
+             <span className="hidden md:block text-[7px] text-slate-600 font-black uppercase tracking-[0.3em] hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}>Position</span>
              <span className="mono nova-chiffres text-[11px] md:text-[14px] font-bold text-center" style={{ color: 'var(--accent-neon)' }}>{formatTime(currentTime)}</span>
         </div>
       </div>
@@ -253,8 +253,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
         {/* VIEW SWITCHER & THEME - Hidden on mobile/tablet (already in bottom nav) */}
         <div className="hidden 2xl:flex items-center space-x-1 bg-black/40 rounded-xl p-1 border border-white/5" style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}>
-            <button onClick={() => onChangeView('ARRANGEMENT')} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'ARRANGEMENT' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'ARRANGEMENT' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'ARRANGEMENT' ? '#000' : 'var(--text-secondary)' }}>Arrangement</button>
-            <button onClick={() => onChangeView('MIXER')} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'MIXER' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'MIXER' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'MIXER' ? '#000' : 'var(--text-secondary)' }}>Mixer</button>
+            <button onClick={() => onChangeView('ARRANGEMENT')} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'ARRANGEMENT' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'ARRANGEMENT' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'ARRANGEMENT' ? '#000' : 'var(--text-secondary)' }}>Pistes</button>
+            <button onClick={() => onChangeView('MIXER')} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'MIXER' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'MIXER' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'MIXER' ? '#000' : 'var(--text-secondary)' }}>Console</button>
             <button onClick={() => onChangeView('AUTOMATION')} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'AUTOMATION' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'AUTOMATION' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'AUTOMATION' ? '#000' : 'var(--text-secondary)' }}>Auto</button>
         </div>
 

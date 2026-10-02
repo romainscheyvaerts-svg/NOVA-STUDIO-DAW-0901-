@@ -505,7 +505,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       </div>
       
-      {track.isTrackArmed && <div className="mt-1 relative z-10"><MonitorControl compact /></div>}
+      {track.isTrackArmed && <div className="mt-1 relative z-10"><MonitorControl compact trackId={track.id} /></div>}
 
       <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-2 rounded-lg border border-white/5 relative z-10">
         <div 
@@ -569,7 +569,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                   <button
                       onClick={(e) => handleFXClick(e, instrumentPlugin)}
                       className="w-8 flex items-center justify-center bg-black/20 hover:bg-cyan-500/20 text-slate-500 hover:text-cyan-400 transition-colors"
-                      title="Open Editor"
+                      title="Ouvrir l'éditeur"
                   >
                       <i className="fas fa-sliders-h text-[9px]"></i>
                   </button>
@@ -579,7 +579,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
 
       {/* Une seule ligne, défilante : avec un style de mix (5-6 effets) la grille
           passait sur deux lignes et débordait sur la piste suivante. */}
-      <div className="mt-2 flex gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-h-0">
+      {/* Piste armée : la ligne vumètre / retour prend la place des pastilles (le bouton FX reste). */}
+      {!track.isTrackArmed && <div className="mt-2 flex gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-h-0">
         {insertPlugins.map(p => {
           // Effet compris dans le rendu gelé : lecture seule. Un VST3 reste
           // ouvrable (son panneau explique « Rendu (VST du PC) » / Dégeler).
@@ -597,7 +598,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <div className="flex w-full overflow-hidden rounded-md border border-white/5 bg-black/40">
               <button 
                 onClick={(e) => handleFXClick(e, p)}
-                onTouchStart={(e) => handleFXClick(e, p)}
                 className={`flex-1 h-7 text-[9px] font-bold uppercase truncate px-1 text-center flex items-center justify-center transition-all ${p.isEnabled ? 'text-cyan-300' : 'text-slate-600 bg-black/20'}`}
               >
                 {getAbbr(p.type, p.name)}
@@ -605,17 +605,16 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               <button
                 disabled={baked}
                 onClick={(e) => togglePluginBypass(e, p)}
-                onTouchStart={(e) => togglePluginBypass(e, p)}
                 className={`w-4 h-6 flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/40' : 'bg-white/5 text-slate-800'}`}
               >
                 <i className="fas fa-power-off text-[6px]"></i>
               </button>
             </div>
-            {!baked && <button onClick={(e) => handleRemoveFX(e, p.id)} onTouchStart={(e) => handleRemoveFX(e, p.id)} className="delete-fx"><i className="fas fa-times"></i></button>}
+            {!baked && <button onClick={(e) => handleRemoveFX(e, p.id)} className="delete-fx"><i className="fas fa-times"></i></button>}
           </div>
           );
         })}
-      </div>
+      </div>}
     </div>
   );
 };

@@ -86,7 +86,7 @@ const IOSection: React.FC<{ track: Track, allTracks: Track[], onUpdate: (t: Trac
                         value={track.inputDeviceId || 'none'}
                         onChange={(e) => onUpdate({ ...track, inputDeviceId: e.target.value === 'none' ? undefined : e.target.value })}
                     >
-                        <option value="none">No Input</option>
+                        <option value="none">Pas d'entrée</option>
                         <option value="mic-default">Mic / Line 1</option>
                     </select>
                 </div>
@@ -274,7 +274,7 @@ const ChannelStrip: React.FC<{
                     onClick={(e) => { e.stopPropagation(); if (idx > 0 && onReorderPlugins) onReorderPlugins(track.id, idx, idx - 1); }}
                     className={`w-4 h-3 rounded-t flex items-center justify-center text-[6px] ${idx > 0 ? 'text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/20' : 'text-slate-800 cursor-not-allowed'}`}
                     disabled={idx === 0}
-                    title="Move Up"
+                    title="Monter"
                   >
                     <i className="fas fa-chevron-up"></i>
                   </button>
@@ -282,7 +282,7 @@ const ChannelStrip: React.FC<{
                     onClick={(e) => { e.stopPropagation(); if (idx < track.plugins.length - 1 && onReorderPlugins) onReorderPlugins(track.id, idx, idx + 1); }}
                     className={`w-4 h-3 rounded-b flex items-center justify-center text-[6px] ${idx < track.plugins.length - 1 ? 'text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/20' : 'text-slate-800 cursor-not-allowed'}`}
                     disabled={idx === track.plugins.length - 1}
-                    title="Move Down"
+                    title="Descendre"
                   >
                     <i className="fas fa-chevron-down"></i>
                   </button>
@@ -412,7 +412,7 @@ const TrackGroupHeader: React.FC<{
           onClick={() => onUpdate({ ...group, linkedMute: !group.linkedMute })}
           className={`w-full h-6 rounded text-[8px] font-black ${group.linkedMute ? 'text-black' : 'text-slate-600'}`}
           style={{ backgroundColor: group.linkedMute ? group.color : 'transparent' }}
-          title="Link Mute"
+          title="Lier les mute"
         >
           M
         </button>
@@ -422,7 +422,7 @@ const TrackGroupHeader: React.FC<{
           onClick={() => onUpdate({ ...group, linkedSolo: !group.linkedSolo })}
           className={`w-full h-6 rounded text-[8px] font-black ${group.linkedSolo ? 'text-black' : 'text-slate-600'}`}
           style={{ backgroundColor: group.linkedSolo ? group.color : 'transparent' }}
-          title="Link Solo"
+          title="Lier les solo"
         >
           S
         </button>
@@ -432,7 +432,7 @@ const TrackGroupHeader: React.FC<{
           onClick={() => onUpdate({ ...group, linkedVolume: !group.linkedVolume })}
           className={`w-full h-6 rounded text-[8px] font-black ${group.linkedVolume ? 'text-black' : 'text-slate-600'}`}
           style={{ backgroundColor: group.linkedVolume ? group.color : 'transparent' }}
-          title="Link Volume"
+          title="Lier les volumes"
         >
           V
         </button>
@@ -443,7 +443,7 @@ const TrackGroupHeader: React.FC<{
         onClick={onDelete}
         className="h-8 flex items-center justify-center text-slate-600 hover:text-red-500 transition-colors border-t"
         style={{ borderColor: group.color + '40' }}
-        title="Delete Group"
+        title="Supprimer le groupe"
       >
         <i className="fas fa-times text-[10px]"></i>
       </button>
@@ -562,10 +562,10 @@ const MixerView: React.FC<{
       
       {/* ADD BUS / CREATE GROUP Section */}
       <div className="flex flex-col items-center justify-center px-2 border-r border-white/5 min-w-[60px] space-y-3">
-         <button onClick={onAddBus} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group" title="Add Bus Track">
+         <button onClick={onAddBus} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group" title="Ajouter un bus">
             <i className="fas fa-plus group-hover:scale-125 transition-transform"></i>
          </button>
-         <span className="text-[8px] font-black text-amber-600 uppercase writing-vertical rotate-180">ADD BUS</span>
+         <span className="text-[8px] font-black text-amber-600 uppercase writing-vertical rotate-180">+ BUS</span>
          
          {/* Create Group Button (inspired by Pro Tools) */}
          {onCreateGroup && (
@@ -574,7 +574,7 @@ const MixerView: React.FC<{
              <button 
                onClick={() => setShowGroupMenu(!showGroupMenu)}
                className="w-10 h-10 rounded-xl border border-dashed border-purple-500/30 text-purple-400 hover:bg-purple-500/10 flex items-center justify-center transition-all relative"
-               title="Create Track Group"
+               title="Créer un groupe de pistes"
              >
                <i className="fas fa-layer-group text-[11px]"></i>
              </button>
@@ -583,7 +583,7 @@ const MixerView: React.FC<{
              {/* Group Creation Menu */}
              {showGroupMenu && (
                <div className="absolute left-16 bottom-20 bg-[#1a1c22] border border-white/20 rounded-xl shadow-2xl z-[100] p-3 w-64">
-                 <div className="text-[10px] font-black uppercase text-slate-400 mb-3">Create Track Group</div>
+                 <div className="text-[10px] font-black uppercase text-slate-400 mb-3">Créer un groupe</div>
                  
                  <div className="space-y-2 max-h-40 overflow-y-auto mb-3">
                    {audioTracks.map(t => (

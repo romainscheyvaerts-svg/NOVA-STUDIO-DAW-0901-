@@ -320,7 +320,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                     <div className="grid grid-cols-2 gap-6">
                         {/* INPUT */}
                         <div className="space-y-2 group">
-                            <label className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider group-hover:text-white transition-colors">Input Device</label>
+                            <label className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider group-hover:text-white transition-colors">Entrée (micro)</label>
                             <div className="relative">
                                 <select 
                                     value={selectedInput} 
@@ -338,7 +338,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
 
                         {/* OUTPUT */}
                         <div className="space-y-2 group">
-                            <label className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider group-hover:text-white transition-colors">Output Device</label>
+                            <label className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider group-hover:text-white transition-colors">Sortie (casque / enceintes)</label>
                             <div className="relative">
                                 <select 
                                     value={selectedOutput} 
@@ -453,7 +453,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
 
                                     {/* Buffer Size */}
                                     <div className="space-y-2">
-                                        <label className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider">Buffer Size</label>
+                                        <label className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider">Taille du buffer</label>
                                         <div className="relative">
                                             <select
                                                 value={asioBlockSize}
@@ -505,9 +505,9 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                         } ${!selectedAsioDevice ? 'opacity-30 cursor-not-allowed' : ''}`}
                                     >
                                         {asioStreamActive ? (
-                                            <><i className="fas fa-stop mr-1"></i>Stop</>
+                                            <><i className="fas fa-stop mr-1"></i>Arrêter</>
                                         ) : (
-                                            <><i className="fas fa-play mr-1"></i>Start</>
+                                            <><i className="fas fa-play mr-1"></i>Démarrer</>
                                         )}
                                     </button>
                                 </div>
@@ -562,7 +562,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                                     className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all flex items-center space-x-2"
                                                 >
                                                     <i className="fas fa-download"></i>
-                                                    <span>Download Bridge</span>
+                                                    <span>Télécharger le pont</span>
                                                 </a>
                                                 <span className="text-[8px] text-slate-500">~30 MB • Windows 10/11</span>
                                             </div>

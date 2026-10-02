@@ -216,6 +216,13 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       const mod = e.ctrlKey || e.metaKey;
       const sel = selectedClip;
 
+      // Outils : 1 sélection, 2 ciseaux, 3 gomme (annoncés dans les infobulles)
+      if (!mod && !e.altKey) {
+        if (e.key === '1') { setActiveTool('SELECT'); return; }
+        if (e.key === '2') { setActiveTool('SPLIT'); return; }
+        if (e.key === '3') { setActiveTool('ERASE'); return; }
+      }
+
       // Coller se fait sur la piste selectionnee, meme sans clip selectionne.
       if (mod && (e.key === 'v' || e.key === 'V')) {
         const target = sel?.trackId || selectedTrackId;
@@ -757,8 +764,15 @@ const handleMouseMove = (e: React.MouseEvent) => {
     const time = getSnappedTime(x / zoomH, bpm, gridSize, useSnap);
     if (dragAction === 'MOVE' && activeClip && initialClipState) {
         const dx = x - dragStartX;
+        // Seuil de 4 px : un simple clic (ou une main qui tremble) ne déplace plus
+        // la prise. Avant, le moindre mouvement la recalait sur la grille.
+        if (Math.abs(dx) < 4 && Math.abs(y - dragStartY) < 4) return;
         const dt = dx / zoomH;
-        const newStart = Math.max(0, getSnappedTime(initialClipState.start + dt, bpm, gridSize, useSnap));
+        // Magnétisme RELATIF : on aimante le déplacement, pas la position. Une prise
+        // enregistrée (souvent hors grille, recalée de la latence) garde son
+        // décalage par rapport au temps au lieu d'être tirée jusqu'à 1/8 de temps.
+        const snappedDt = Math.sign(dt) * getSnappedTime(Math.abs(dt), bpm, gridSize, useSnap);
+        const newStart = Math.max(0, initialClipState.start + snappedDt);
 
         // Détecter la piste cible en fonction de la position Y
         let targetTrackId = activeClip.trackId;
@@ -1239,12 +1253,12 @@ useEffect(() => {
       <div className="h-12 flex items-center px-4 gap-4 z-30 shrink-0">
         <div className="flex items-center space-x-4 shrink-0">
           <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
-            <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Smart Tool (1)"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
-            <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Split Tool (2)"><i className="fas fa-cut text-[12px]"></i></button>
-            <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Erase Tool (3)"><i className="fas fa-eraser text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Sélection / déplacement (1)" aria-label="Outil sélection"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Ciseaux : couper un clip (2)" aria-label="Outil ciseaux"><i className="fas fa-cut text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
           <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 h-9 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
-            <i className="fas fa-magnet mr-2"></i> {snapEnabled ? 'Snap ON' : 'Snap OFF'}
+            <i className="fas fa-magnet mr-2"></i> {snapEnabled ? 'Grille ON' : 'Grille OFF'}
           </button>
         </div>
         <div className="flex-1 h-full py-2 px-4 flex items-center min-w-0 justify-center">

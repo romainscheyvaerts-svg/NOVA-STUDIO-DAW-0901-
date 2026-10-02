@@ -109,7 +109,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
           tracksToRender,
           duration,
           startOffset,
-          sampleRate, // Custom SR
+          // Le MP3 ne sait pas encoder au-delà de 48 kHz
+          format === 'MP3' ? Math.min(48000, sampleRate) : sampleRate,
           (p) => {
               if (source === 'MASTER') setProgress(p); // Only update main progress bar here if master
           }
@@ -120,8 +121,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
       // Encodage
       if (format === 'MP3') {
-        setStatusText('Encodage MP3 (192 kbps)...');
-        return await AudioEncoder.encodeMP3(processedBuffer, 192);
+        const kbps = parseInt(mp3Bitrate, 10) || 320;
+        setStatusText(`Encodage MP3 (${kbps} kbps)...`);
+        return await AudioEncoder.encodeMP3(processedBuffer, kbps);
       }
       setStatusText(`Encodage ${format} (${bitDepth}bit)...`);
       return AudioEncoder.encodeWAV(processedBuffer, bitDepth);
@@ -146,7 +148,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
         if (source === 'MASTER') {
             // --- EXPORT MASTER SIMPLE ---
             const blob = await renderTrackList(exportTracks, "Master Mix");
-            downloadBlob(blob, `${filename}_${sampleRate}Hz_${bitDepth}bit.${format.toLowerCase()}`);
+            downloadBlob(blob, format === 'MP3'
+              ? `${filename}_${mp3Bitrate}kbps.mp3`
+              : `${filename}_${sampleRate}Hz_${bitDepth}bit.${format.toLowerCase()}`);
         } 
         else {
             // --- EXPORT STEMS (ZIP) ---
@@ -238,7 +242,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                     disabled={isRendering}
                                     className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
                                 >
-                                    <option value="MASTER">Master Mix (Stereo)</option>
+                                    <option value="MASTER">Mix master (stéréo)</option>
                                     <option value="STEMS">All Tracks (Stems .zip)</option>
                                 </select>
                              </div>
@@ -271,12 +275,12 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                     className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
                                 >
                                     <option value="WAV">WAV (PCM)</option>
-                                    <option value="MP3">MP3 (Web Ready)</option>
+                                    <option value="MP3">MP3 (pour partager)</option>
                                 </select>
                             </div>
 
                             <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400">Sample Rate</label>
+                                <label className="text-[9px] font-bold text-slate-400">Fréquence</label>
                                 <select 
                                     value={sampleRate} 
                                     onChange={e => setSampleRate(Number(e.target.value))}
@@ -285,14 +289,14 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                 >
                                     <option value="44100">44100 Hz (CD)</option>
                                     <option value="48000">48000 Hz (Video)</option>
-                                    <option value="88200">88200 Hz (Hi-Res)</option>
-                                    <option value="96000">96000 Hz (Studio)</option>
+                                    <option value="88200" disabled={format === 'MP3'}>88200 Hz (Hi-Res)</option>
+                                    <option value="96000" disabled={format === 'MP3'}>96000 Hz (Studio)</option>
                                 </select>
                             </div>
 
                             {format === 'WAV' ? (
                                 <div className="space-y-1">
-                                    <label className="text-[9px] font-bold text-slate-400">Bit Depth</label>
+                                    <label className="text-[9px] font-bold text-slate-400">Résolution</label>
                                     <select 
                                         value={bitDepth} 
                                         onChange={e => setBitDepth(e.target.value as any)}
@@ -361,7 +365,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                         <div className="bg-white/5 p-3 rounded-lg space-y-2">
                              <div className="flex justify-between text-[9px]">
                                 <span className="text-slate-500">Taille estimée</span>
-                                <span className="text-white font-mono">~{(getDuration() * sampleRate * (parseInt(bitDepth)/8) * 2 / 1024 / 1024).toFixed(1)} MB</span>
+                                <span className="text-white font-mono">~{(format === 'MP3' ? getDuration() * (parseInt(mp3Bitrate, 10) || 320) * 1000 / 8 / 1024 / 1024 : getDuration() * sampleRate * (parseInt(bitDepth)/8) * 2 / 1024 / 1024).toFixed(1)} MB</span>
                              </div>
                              <div className="flex justify-between text-[9px]">
                                 <span className="text-slate-500">Durée</span>
