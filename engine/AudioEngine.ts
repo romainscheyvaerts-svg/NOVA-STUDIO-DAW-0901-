@@ -22,6 +22,7 @@ import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { interpolateCurve } from '../services/AutomationManager';
 import { DrumRackNode } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
+import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
 import { VSTPluginNode } from './VSTPluginNode';
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex } from '../utils/freeze';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
@@ -121,6 +122,17 @@ export class AudioEngine {
   // il n'est pas concerné.
   private monitorGain: GainNode | null = null;
   private inputMonitoring = false;
+  // --- Compensation de latence d'enregistrement ---
+  private recSession: NovaRecorderSession | null = null;
+  private recSource: AudioNode | null = null;
+  /** Début de lecture (horloge) pendant la prise : STOP coupe la lecture avant la prise. */
+  private recPlayStart: number | null = null;
+  private latencySamples: number[] = [];
+  private latencyTimer: ReturnType<typeof setInterval> | null = null;
+  private lastLatency = 0;
+  private asioQueueSec = 0;
+  /** Réglage fin manuel (ms, + = la prise est avancée davantage). */
+  private recOffsetMs = (() => { try { const v = parseFloat(localStorage.getItem('nova_rec_offset_ms') || ''); return Number.isFinite(v) ? Math.max(-100, Math.min(100, v)) : 0; } catch { return 0; } })();
   /** Volume du retour de la voix dans le casque (0-2), indépendant du niveau enregistré. */
   private monitorLevel = (() => {
     try { const v = parseFloat(localStorage.getItem('nova_monitor_level') || ''); return Number.isFinite(v) ? Math.min(2, Math.max(0, v)) : 1; } catch { return 1; }
@@ -337,6 +349,65 @@ export class AudioEngine {
     return Math.min(0.5, base + output);
   }
   
+  /**
+   * Latence d'enregistrement mesurée maintenant (s) : retard avec lequel
+   * l'artiste entend la lecture + retard de sa voix jusqu'à l'enregistreur.
+   * C'est de cette durée qu'une prise arrive en retard sur la grille.
+   */
+  public measureRecordLatency(): { total: number; mode: 'asio' | 'navigateur' } {
+    if (!this.ctx) return { total: 0, mode: 'navigateur' };
+    const sr = this.ctx.sampleRate;
+    if (this.isUsingASIOInput() && this.asioStreamActive) {
+      // pilote (entrée + sortie) + file de sortie du pont + tampon d'envoi (2 × 256)
+      // + tampon d'entrée de Nova + réseau local
+      const fill = this.asioInput?.fillSec ?? 0.03;
+      const total = (this.latency || 0) + this.asioQueueSec + 512 / sr + fill + 0.002;
+      return { total: Math.min(0.5, total), mode: 'asio' };
+    }
+    const out = (this.ctx.baseLatency || 0) + ((this.ctx as any).outputLatency || 0);
+    let inp = 0.01;
+    try {
+      const s = this.activeMonitorStream?.getAudioTracks()[0]?.getSettings() as any;
+      if (s && typeof s.latency === 'number' && s.latency > 0) inp = s.latency;
+    } catch { /* défaut 10 ms */ }
+    return { total: Math.min(0.5, out + inp), mode: 'navigateur' };
+  }
+
+  /** Mesure régulière (chaque seconde) tant qu'une piste est armée. */
+  private startLatencyWatch() {
+    this.stopLatencyWatch();
+    const tick = () => {
+      if (this.asioConnected && this.asioStreamActive) this.asioBridge?.getStats();
+      const m = this.measureRecordLatency();
+      this.lastLatency = this.lastLatency ? this.lastLatency * 0.6 + m.total * 0.4 : m.total;
+      if (this.recordingTrackId) this.latencySamples.push(m.total);
+      try { window.dispatchEvent(new CustomEvent('nova:latency', { detail: { ms: Math.round(this.lastLatency * 1000), mode: m.mode, offsetMs: this.recOffsetMs } })); } catch { /* */ }
+    };
+    tick();
+    this.latencyTimer = setInterval(tick, 1000);
+  }
+
+  private stopLatencyWatch() {
+    if (this.latencyTimer) clearInterval(this.latencyTimer);
+    this.latencyTimer = null;
+  }
+
+  public getLastLatencyMs() { return Math.round(this.lastLatency * 1000); }
+  public getRecordOffsetMs() { return this.recOffsetMs; }
+  public setRecordOffsetMs(ms: number) {
+    this.recOffsetMs = Math.max(-100, Math.min(100, Math.round(ms)));
+    try { localStorage.setItem('nova_rec_offset_ms', String(this.recOffsetMs)); } catch { /* */ }
+  }
+
+  /** Retour direct dans le pont ASIO quand la voix arrive par la carte son. */
+  private syncDirectMonitor() {
+    if (!this.asioBridge || !this.asioConnected) return;
+    const direct = this.isUsingASIOInput() && this.asioStreamActive && !!this.monitoringTrackId;
+    this.asioBridge.setMonitor(direct && this.inputMonitoring, this.monitorLevel, this.asioInput ? this.getASIOInputChannel() : -1);
+    // Le retour logiciel est coupé : sinon la voix serait entendue deux fois (avec du retard)
+    if (direct && this.monitorGain && this.ctx) this.monitorGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.01);
+  }
+
   public setLoop(active: boolean, start: number, end: number) {
     this.isLoopActive = active;
     this.loopStart = start;
@@ -763,6 +834,8 @@ export class AudioEngine {
       this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
       this.wireMonitor(dsp);
       this.setTrackLowLatency(trackId, true);
+      this.syncDirectMonitor();
+      this.startLatencyWatch();
       console.log("[AudioEngine] Track armed OK:", trackId);
     } catch (e: any) {
       console.error("[AudioEngine] ARM ERROR:", e);
@@ -797,6 +870,7 @@ export class AudioEngine {
   public setInputMonitoring(on: boolean) {
     this.inputMonitoring = on;
     if (this.monitorGain && this.ctx) this.monitorGain.gain.setTargetAtTime(on ? this.monitorLevel : 0, this.ctx.currentTime, 0.01);
+    this.syncDirectMonitor();
     try { window.dispatchEvent(new CustomEvent('nova:monitoring', { detail: on })); } catch { /* */ }
   }
 
@@ -805,6 +879,7 @@ export class AudioEngine {
     this.monitorLevel = Math.min(2, Math.max(0, level));
     try { localStorage.setItem('nova_monitor_level', String(this.monitorLevel)); } catch { /* */ }
     if (this.monitorGain && this.ctx && this.inputMonitoring) this.monitorGain.gain.setTargetAtTime(this.monitorLevel, this.ctx.currentTime, 0.01);
+    this.syncDirectMonitor();
     try { window.dispatchEvent(new CustomEvent('nova:monitor-level', { detail: this.monitorLevel })); } catch { /* */ }
   }
 
@@ -894,6 +969,8 @@ export class AudioEngine {
 
   public disarmTrack() {
     if (this.monitoringTrackId) this.setTrackLowLatency(this.monitoringTrackId, false);
+    this.stopLatencyWatch();
+    if (this.asioBridge && this.asioConnected) this.asioBridge.setMonitor(false, this.monitorLevel, -1);
     if (this.monitorGain) {
       try { this.monitorGain.disconnect(); } catch { /* déjà déconnecté */ }
       this.monitorGain = null;
@@ -921,6 +998,29 @@ export class AudioEngine {
       return false;
     }
     
+    // Enregistreur interne (AudioWorklet) : position exacte + son sans compression.
+    try {
+      if (this.ctx && this.ctx.audioWorklet) {
+        await ensureRecorderModule(this.ctx);
+        const src: AudioNode | null = (this.isUsingASIOInput() && this.asioInput?.getNode()) || this.monitorSource;
+        if (src) {
+          this.recSource = src;
+          this.recSession = new NovaRecorderSession(this.ctx, src);
+          this.recPlayStart = this.isPlaying ? this.playbackStartTime : null;
+          this.recStartTime = currentTime;
+          this.recordingTrackId = trackId;
+          this.latencySamples = [];
+          if (!this.latencyTimer) this.startLatencyWatch();
+          console.log("[AudioEngine] Recording started (enregistreur calé) on track:", trackId);
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn("[AudioEngine] Enregistreur calé indisponible, repli sur MediaRecorder", e);
+      this.recSession = null;
+      this.recSource = null;
+    }
+
     try {
       this.mediaRecorder = new MediaRecorder(this.activeMonitorStream);
       this.audioChunks = [];
@@ -942,6 +1042,7 @@ export class AudioEngine {
   }
 
   public async stopRecording(): Promise<{ clip: Clip, trackId: string } | null> {
+    if (this.recSession && this.recordingTrackId && this.ctx) return this.stopCalibratedRecording();
     if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive' || !this.recordingTrackId) {
       return null;
     }
@@ -1014,6 +1115,70 @@ export class AudioEngine {
   }
 
   /**
+   * Fin d'une prise de l'enregistreur calé : la prise est replacée exactement
+   * où elle aurait dû être (position de lecture au début de la prise, moins la
+   * latence moyenne mesurée pendant la prise, plus le réglage fin manuel).
+   */
+  private async stopCalibratedRecording(): Promise<{ clip: Clip, trackId: string } | null> {
+    const ctx = this.ctx!;
+    const trackId = this.recordingTrackId!;
+    const session = this.recSession!;
+    const src = this.recSource!;
+    const recordedAt = this.recStartTime;
+    const playStart = this.recPlayStart ?? (this.isPlaying ? this.playbackStartTime : null);
+    this.recPlayStart = null;
+    this.recSession = null;
+    this.recSource = null;
+    this.recordingTrackId = null;
+    this.recStartTime = 0;
+
+    const { samples, firstFrame } = await session.stop(src);
+    if (!samples.length) return null;
+    const sr = ctx.sampleRate;
+
+    // Position de chaque échantillon sur la timeline : (frame / sr) − début de lecture.
+    let lead = 0;
+    let rawStart = recordedAt;
+    if (playStart !== null && firstFrame >= 0) {
+      const playCtxAtStart = playStart + recordedAt;        // instant (horloge) où la lecture a démarré
+      lead = Math.max(0, Math.round((playCtxAtStart - firstFrame / sr) * sr));
+      rawStart = (firstFrame + lead) / sr - playStart;
+    }
+    const measured = this.latencySamples.length
+      ? this.latencySamples.reduce((s, v) => s + v, 0) / this.latencySamples.length
+      : this.measureRecordLatency().total;
+    const latency = measured + this.recOffsetMs / 1000;
+    let start = rawStart - latency;
+    let skip = 0;
+    if (start < 0) { skip = Math.round(-start * sr); start = 0; }
+
+    const body = samples.subarray(Math.min(samples.length, lead + skip));
+    if (body.length < sr * 0.05) return null;
+    const buffer = ctx.createBuffer(1, body.length, sr);
+    buffer.copyToChannel(body, 0);
+    const blob = encodeWav24(body, sr);
+    console.log(`[AudioEngine] Prise replacée : latence ${Math.round(latency * 1000)} ms (mesurée ${Math.round(measured * 1000)} ms, réglage ${this.recOffsetMs} ms)`);
+    try { window.dispatchEvent(new CustomEvent('nova:take-aligned', { detail: { ms: Math.round(latency * 1000) } })); } catch { /* */ }
+
+    return {
+      trackId,
+      clip: {
+        id: `rec-${Date.now()}`,
+        name: `Vocal Take ${new Date().toLocaleTimeString()}`,
+        start,
+        duration: buffer.duration,
+        offset: 0,
+        fadeIn: 0.01,
+        fadeOut: 0.01,
+        type: TrackType.AUDIO,
+        color: '#ff0000',
+        audioRef: URL.createObjectURL(blob),
+        buffer,
+      },
+    };
+  }
+
+  /**
    * Ré-arme la piste avec un nouveau MediaStream pour permettre plusieurs enregistrements consécutifs.
    * Le MediaRecorder ne peut pas être réutilisé après stop(), donc on doit recréer le stream.
    */
@@ -1075,7 +1240,8 @@ export class AudioEngine {
     this.pendingLoopWrap = null;
     this.pausedAt = startOffset;
     this.nextScheduleTime = this.ctx.currentTime + 0.01; 
-    this.playbackStartTime = this.ctx.currentTime - startOffset; 
+    this.playbackStartTime = this.ctx.currentTime - startOffset;
+    if (this.recSession && this.recPlayStart === null) this.recPlayStart = this.playbackStartTime; 
 
     // Valeur correcte au demarrage : sans ca, une piste dont tous les points
     // d'automation sont anterieurs au point de depart gardait la valeur du
@@ -2060,6 +2226,7 @@ export class AudioEngine {
       },
       onStats: (stats) => {
         this.latency = (stats.latency_ms || 0) / 1000;
+        this.asioQueueSec = (stats.queue_ms || 0) / 1000;
         if (stats.sample_rate && this.asioInput) this.asioInput.sourceRate = stats.sample_rate;
       }
     });

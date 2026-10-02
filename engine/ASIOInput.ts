@@ -68,6 +68,9 @@ class AsioInputPlayer extends AudioWorkletProcessor {
   process(inputs, outputs) {
     const out = outputs[0];
     const len = out[0].length;
+    // Remplissage du tampon (≈ latence ajoutée) envoyé ~5 fois par seconde
+    this.tick = (this.tick || 0) + 1;
+    if (this.tick % 70 === 0) this.port.postMessage({ type: 'fill', fill: this.fill });
     if (!this.started) {
       if (this.fill >= this.prebuffer) this.started = true;
       else { for (const c of out) c.fill(0); return true; }
@@ -92,6 +95,11 @@ export class ASIOInput {
   /** Fréquence d'échantillonnage du pont (mise à jour par la config / les stats). */
   public sourceRate: number;
   private channel = -1;
+  /** Retard actuellement retenu dans le tampon d'entrée (s). */
+  public fillSec = 0.03;
+
+  /** Nœud de sortie du lecteur (pour enregistrer sans passer par un MediaStream). */
+  public getNode(): AudioNode | null { return this.node; }
 
   constructor(ctx: AudioContext, sourceRate = 44100) {
     this.ctx = ctx;
@@ -107,6 +115,7 @@ export class ASIOInput {
         numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2],
       });
       this.node.port.postMessage({ type: 'channel', channel: this.channel });
+      this.node.port.onmessage = (e) => { if (e.data?.type === 'fill') this.fillSec = e.data.fill / this.ctx.sampleRate; };
       this.dest = this.ctx.createMediaStreamDestination();
       this.dest.channelCount = 2;
       this.node.connect(this.dest);

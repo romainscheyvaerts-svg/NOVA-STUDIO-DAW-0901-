@@ -82,6 +82,11 @@ class ASIOConfig:
     output_channels: int = 2
     bit_depth: int = 32  # 16, 24 ou 32 bits float
     use_asio: bool = True  # Utiliser ASIO si disponible
+    # Retour direct : la voix repart vers le casque DANS le pont (latence = buffer
+    # ASIO seulement), au lieu de faire l'aller-retour pont -> navigateur -> pont.
+    direct_monitor: bool = False
+    monitor_gain: float = 1.0
+    monitor_channel: int = -1  # -1 = mélange des entrées 1+2, sinon index d'entrée
 
 
 @dataclass
@@ -627,7 +632,16 @@ class ASIOAudioStream:
         
         # Buffers circulaires pour l'audio
         self.input_buffer: deque = deque(maxlen=100)  # ~100 blocs d'entrée
-        self.output_buffer: deque = deque(maxlen=100)  # ~100 blocs de sortie
+        self.output_buffer: deque = deque(maxlen=100)  # (compat stats)
+        # Sortie : anneau d'échantillons. L'ancienne file de 100 blocs pouvait
+        # accumuler ~0,6 s de retard ; ici le remplissage est borné et ramené
+        # vers ~2 blocs (le minimum qui absorbe la gigue du réseau local).
+        self._out_cap = 1 << 16
+        self._out = np.zeros((self._out_cap, max(1, config.output_channels)), dtype=np.float32)
+        self._out_r = 0
+        self._out_fill = 0
+        self._out_started = False
+        self.dropped_frames = 0
         
         # Verrous pour thread-safety
         self._lock = threading.Lock()
@@ -671,24 +685,39 @@ class ASIOAudioStream:
                 except Exception as e:
                     logger.error(f"Input callback error: {e}")
         
-        # Récupérer l'audio de sortie du buffer
+        # Récupérer l'audio de sortie (anneau à latence bornée)
+        outdata.fill(0)
         with self._lock:
-            if len(self.output_buffer) > 0:
-                output_data = self.output_buffer.popleft()
-                # S'assurer que les dimensions correspondent
-                if output_data.shape == outdata.shape:
-                    outdata[:] = output_data
-                else:
-                    # Ajuster si nécessaire
-                    outdata[:] = np.zeros_like(outdata)
-                    min_frames = min(output_data.shape[0], outdata.shape[0])
-                    min_channels = min(output_data.shape[1] if len(output_data.shape) > 1 else 1,
-                                      outdata.shape[1] if len(outdata.shape) > 1 else 1)
-                    outdata[:min_frames, :min_channels] = output_data[:min_frames, :min_channels]
+            target = 2 * frames
+            # On attend d'avoir la marge cible avant de jouer (pas de craquements)
+            if not self._out_started and self._out_fill >= target:
+                self._out_started = True
+            if self._out_started and self._out_fill > 0:
+                n = min(frames, self._out_fill)
+                ch = min(outdata.shape[1], self._out.shape[1])
+                first = min(n, self._out_cap - self._out_r)
+                outdata[:first, :ch] = self._out[self._out_r:self._out_r + first, :ch]
+                if n > first:
+                    outdata[first:n, :ch] = self._out[0:n - first, :ch]
+                self._out_r = (self._out_r + n) % self._out_cap
+                self._out_fill -= n
+                if self._out_fill == 0:
+                    self._out_started = False  # sous-alimentation : on reprend la marge
                 self.stats['blocks_out'] += 1
-            else:
-                # Silence si pas de données
-                outdata.fill(0)
+
+        # Retour direct de la voix (comme le monitoring d'un DAW en ASIO)
+        if self.config.direct_monitor and indata is not None and self.config.monitor_gain > 0:
+            try:
+                if self.config.monitor_channel >= 0 and self.config.monitor_channel < indata.shape[1]:
+                    voice = indata[:, self.config.monitor_channel]
+                else:
+                    voice = indata[:, :2].mean(axis=1) if indata.shape[1] > 1 else indata[:, 0]
+                g = float(self.config.monitor_gain)
+                for c in range(min(2, outdata.shape[1])):
+                    outdata[:, c] += voice * g
+                np.clip(outdata, -1.0, 1.0, out=outdata)
+            except Exception as e:
+                logger.error(f"Direct monitor error: {e}")
         
         # Calculer le niveau de sortie
         self.state.output_level = float(np.max(np.abs(outdata)))
@@ -766,8 +795,28 @@ class ASIOAudioStream:
         Args:
             audio_data: Array numpy avec les échantillons audio
         """
+        if audio_data.ndim == 1:
+            audio_data = audio_data.reshape(-1, 1)
         with self._lock:
-            self.output_buffer.append(audio_data)
+            n = audio_data.shape[0]
+            ch = min(audio_data.shape[1], self._out.shape[1])
+            if n >= self._out_cap:
+                audio_data = audio_data[-(self._out_cap - 1):]
+                n = audio_data.shape[0]
+            w = (self._out_r + self._out_fill) % self._out_cap
+            first = min(n, self._out_cap - w)
+            self._out[w:w + first, :ch] = audio_data[:first, :ch]
+            if n > first:
+                self._out[0:n - first, :ch] = audio_data[first:n, :ch]
+            self._out_fill = min(self._out_cap - 1, self._out_fill + n)
+            # Latence bornée : au-delà de ~6 blocs on jette le plus ancien et on
+            # revient à ~2 blocs (le DAW a pris de l'avance : on la rattrape).
+            block = max(64, self.config.block_size)
+            if self._out_fill > 6 * block:
+                drop = self._out_fill - 2 * block
+                self._out_r = (self._out_r + drop) % self._out_cap
+                self._out_fill -= drop
+                self.dropped_frames += drop
     
     def read_input(self) -> Optional[np.ndarray]:
         """
@@ -797,7 +846,12 @@ class ASIOAudioStream:
             'blocks_processed': self.stats['blocks_in'],
             'elapsed_seconds': elapsed,
             'input_buffer_size': len(self.input_buffer),
-            'output_buffer_size': len(self.output_buffer)
+            'output_buffer_size': len(self.output_buffer),
+            # Attente actuelle dans la file de sortie (ms) : sert au calage des prises
+            'queue_ms': (self._out_fill / float(self.config.sample_rate)) * 1000.0 if self.config.sample_rate else 0.0,
+            'dropped_frames': self.dropped_frames,
+            'direct_monitor': self.config.direct_monitor,
+            'monitor_gain': self.config.monitor_gain,
         }
 
 
@@ -910,6 +964,7 @@ class ASIOBridgeServer:
             "AUDIO_DATA": self._handle_audio_data,
             "RESCAN_DEVICES": self._handle_rescan_devices,
             "OPEN_CONTROL_PANEL": self._handle_open_control_panel,
+            "SET_MONITOR": self._handle_set_monitor,
         }
         
         handler = handlers.get(action)
@@ -1227,6 +1282,31 @@ class ASIOBridgeServer:
             "success": True
         })
     
+    async def _handle_set_monitor(self, client_id: str, data: dict):
+        """Retour direct de la voix dans le pont : {enabled, gain, channel}."""
+        if "enabled" in data:
+            self.config.direct_monitor = bool(data["enabled"])
+        if "gain" in data:
+            try:
+                self.config.monitor_gain = max(0.0, min(2.0, float(data["gain"])))
+            except (TypeError, ValueError):
+                pass
+        if "channel" in data:
+            try:
+                self.config.monitor_channel = int(data["channel"])
+            except (TypeError, ValueError):
+                pass
+        if self.audio_stream:
+            self.audio_stream.config.direct_monitor = self.config.direct_monitor
+            self.audio_stream.config.monitor_gain = self.config.monitor_gain
+            self.audio_stream.config.monitor_channel = self.config.monitor_channel
+        await self._send(client_id, {
+            "action": "MONITOR_SET",
+            "enabled": self.config.direct_monitor,
+            "gain": self.config.monitor_gain,
+            "channel": self.config.monitor_channel,
+        })
+
     async def _handle_get_stats(self, client_id: str, data: dict):
         """Récupérer les statistiques"""
         stats = {}

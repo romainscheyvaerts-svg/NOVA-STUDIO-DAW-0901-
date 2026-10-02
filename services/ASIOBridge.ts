@@ -33,6 +33,8 @@ export interface ASIOStats {
   sample_rate: number;
   block_size: number;
   latency_ms: number;
+  /** Attente actuelle dans la file de sortie du pont (ms). */
+  queue_ms?: number;
   input_level: number;
   output_level: number;
   buffer_underruns: number;
@@ -302,6 +304,11 @@ export class ASIOBridgeClient {
    */
   startStream(): void {
     this.send({ action: 'START_STREAM' });
+  }
+
+  /** Retour direct de la voix dans le pont (latence = buffer ASIO seulement). */
+  setMonitor(enabled: boolean, gain: number, channel: number): void {
+    this.send({ action: 'SET_MONITOR', enabled, gain, channel });
   }
 
   /**

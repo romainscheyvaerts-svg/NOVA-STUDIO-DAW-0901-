@@ -4,6 +4,43 @@ import { midiManager } from '../services/MidiManager';
 import { MidiDevice } from '../types';
 import { AudioDevice as ASIODevice } from '../services/ASIOBridge';
 
+/** Latence mesurée en direct + réglage fin du recalage des prises. */
+const LatencyCompensation: React.FC = () => {
+  const [lat, setLat] = useState<{ ms: number; mode: string } | null>(() => {
+    const ms = audioEngine.getLastLatencyMs();
+    return ms ? { ms, mode: audioEngine.isUsingASIOInput() ? 'asio' : 'navigateur' } : null;
+  });
+  const [offset, setOffset] = useState(() => audioEngine.getRecordOffsetMs());
+  useEffect(() => {
+    const on = (e: Event) => setLat((e as CustomEvent).detail);
+    window.addEventListener('nova:latency', on);
+    return () => window.removeEventListener('nova:latency', on);
+  }, []);
+  return (
+    <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Compensation de latence</span>
+        <span className="text-[11px] font-mono text-white">{lat ? `${lat.ms} ms` : 'arme une piste'}{lat ? ` · ${lat.mode === 'asio' ? 'ASIO' : 'navigateur'}` : ''}</span>
+      </div>
+      <p className="text-[11px] text-slate-400 leading-relaxed">
+        Tout système numérique a une latence. Nova la mesure chaque seconde quand une piste est armée et, à la fin de chaque prise, replace automatiquement ta voix là où elle aurait dû être. {lat && lat.mode !== 'asio' && lat.ms > 110 ? 'Latence élevée : casque Bluetooth ? Utilise un casque filaire, ou la carte son en ASIO.' : ''}
+      </p>
+      <label className="block">
+        <span className="flex justify-between text-[11px] text-slate-300">
+          <span>Réglage fin (si la voix sonne encore en avance / en retard)</span>
+          <button type="button" className="font-mono text-white" onClick={() => { audioEngine.setRecordOffsetMs(0); setOffset(0); }} title="Remettre à 0">
+            {offset > 0 ? '+' : ''}{offset} ms
+          </button>
+        </span>
+        <input type="range" min={-100} max={100} step={1} value={offset}
+          onChange={e => { const v = parseInt(e.target.value, 10); audioEngine.setRecordOffsetMs(v); setOffset(v); }}
+          className="w-full accent-emerald-400" aria-label="Réglage fin du recalage des prises (ms)" />
+        <span className="flex justify-between text-[10px] text-slate-500"><span>− voix plus tard</span><span>+ voix plus tôt</span></span>
+      </label>
+    </div>
+  );
+};
+
 interface AudioSettingsPanelProps {
   onClose: () => void;
 }
@@ -595,9 +632,9 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                 {/* LATENCY / BUFFER */}
                 <div className="space-y-5">
                     <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-black text-cyan-500 uppercase tracking-widest bg-cyan-500/10 px-2 py-0.5 rounded">Engine Performance</span>
+                        <span className="text-[10px] font-black text-cyan-500 uppercase tracking-widest bg-cyan-500/10 px-2 py-0.5 rounded">Moteur audio</span>
                         <div className="flex items-center space-x-2">
-                            <span className="text-[9px] font-bold text-slate-500 uppercase">Sample Rate:</span>
+                            <span className="text-[9px] font-bold text-slate-500 uppercase">Fréquence :</span>
                             <span className="text-[10px] font-mono text-white bg-white/5 px-2 py-0.5 rounded">{audioEngine.sampleRate} Hz</span>
                         </div>
                     </div>
@@ -608,8 +645,8 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                             className={`h-24 rounded-xl border flex flex-col items-center justify-center space-y-2 transition-all group ${latencyHint === 'low' ? 'bg-cyan-500/10 border-cyan-500 text-white' : 'bg-[#14161a] border-white/5 text-slate-500 hover:bg-[#1a1d21]'}`}
                          >
                              <i className="fas fa-bolt text-lg mb-1"></i>
-                             <span className="text-[9px] font-black uppercase tracking-widest">Low Latency</span>
-                             <span className="text-[8px] opacity-60">High CPU</span>
+                             <span className="text-[9px] font-black uppercase tracking-widest">Latence minimale</span>
+                             <span className="text-[8px] opacity-60">Pour enregistrer</span>
                          </button>
                          
                          <button 
@@ -617,8 +654,8 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                             className={`h-24 rounded-xl border flex flex-col items-center justify-center space-y-2 transition-all group ${latencyHint === 'balanced' ? 'bg-cyan-500/10 border-cyan-500 text-white' : 'bg-[#14161a] border-white/5 text-slate-500 hover:bg-[#1a1d21]'}`}
                          >
                              <i className="fas fa-balance-scale text-lg mb-1"></i>
-                             <span className="text-[9px] font-black uppercase tracking-widest">Balanced</span>
-                             <span className="text-[8px] opacity-60">Recommended</span>
+                             <span className="text-[9px] font-black uppercase tracking-widest">Équilibré</span>
+                             <span className="text-[8px] opacity-60">Recommandé</span>
                          </button>
                          
                          <button 
@@ -626,11 +663,13 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                             className={`h-24 rounded-xl border flex flex-col items-center justify-center space-y-2 transition-all group ${latencyHint === 'high' ? 'bg-cyan-500/10 border-cyan-500 text-white' : 'bg-[#14161a] border-white/5 text-slate-500 hover:bg-[#1a1d21]'}`}
                          >
                              <i className="fas fa-shield-alt text-lg mb-1"></i>
-                             <span className="text-[9px] font-black uppercase tracking-widest">Safe Mode</span>
-                             <span className="text-[8px] opacity-60">Mixing Only</span>
+                             <span className="text-[9px] font-black uppercase tracking-widest">Sécurité</span>
+                             <span className="text-[8px] opacity-60">Mixage seulement</span>
                          </button>
                     </div>
                 </div>
+
+                <LatencyCompensation />
 
                 {/* TEST TONE */}
                 <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 flex items-center justify-between">
