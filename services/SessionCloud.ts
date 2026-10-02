@@ -16,7 +16,7 @@ import { DAWState } from '../types';
  * synchronisé entre-temps.
  */
 
-const CHUNK = 40 * 1024 * 1024;
+export const CHUNK = 40 * 1024 * 1024;
 const SITE_DAW_URL = 'https://www.studiomakemusic.com/daw';
 
 export interface CloudLink { id: string; secret?: string }
@@ -59,7 +59,7 @@ export const deviceLabel = (): string => {
   return 'Navigateur';
 };
 
-async function call<T = any>(action: string, body: Record<string, unknown> = {}): Promise<T> {
+export async function call<T = any>(action: string, body: Record<string, unknown> = {}): Promise<T> {
   const { data, error } = await catalogSupabase.functions.invoke('daw-session', { body: { action, ...body } });
   if (error) {
     let payload: any = null;
@@ -71,7 +71,7 @@ async function call<T = any>(action: string, body: Record<string, unknown> = {})
   return data as T;
 }
 
-const sha1 = async (bytes: Uint8Array): Promise<string> => {
+export const sha1 = async (bytes: Uint8Array): Promise<string> => {
   const d = await crypto.subtle.digest('SHA-1', bytes);
   return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2, '0')).join('');
 };

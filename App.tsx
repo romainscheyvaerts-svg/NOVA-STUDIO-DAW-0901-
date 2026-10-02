@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
-import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup } from './types';
+import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup, CollabRole } from './types';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
 import MobileTransport from './components/MobileTransport';
@@ -71,10 +71,15 @@ import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
 import ShareClipModal from './components/ShareClipModal';
 import TakeHomeModal from './components/TakeHomeModal';
+import CollabPanel, { CollabMessage } from './components/CollabPanel';
+import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, contentOf, mixOf, sigOf, ownsContent } from './services/Collab';
+import { collabRoleStore } from './utils/collabStore';
+import { catalogSupabase } from './services/supabase';
+import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
 import {
   pushSession, pullSession, parseLink, createCloudSession, cloudProjectId, CloudConflictError, LocalCloudSession,
-  getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession,
+  getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, sessionUrl,
 } from './services/SessionCloud';
 import DrumMachinePanel from './components/DrumMachinePanel';
 import ShortcutsHelp from './components/ShortcutsHelp';
@@ -3078,7 +3083,9 @@ export default function App() {
       const st = (opts.bake || opts.interactive) && novaBridge.isConnected()
         ? await bakeVstBeforeSave(msg => progress?.(2, msg))
         : stateRef.current;
-      const r = await pushSession({ ...st, id: cloudProjectId(cur.id) }, user?.owned_instruments || [], { id: cur.id, secret: cur.secret }, cur.version, progress, { force: opts.force });
+      // En collaboration, seul l'artiste écrit l'instantané (les autres passent par le journal).
+      const collabNow = collabRef.current;
+      const r = await pushSession({ ...st, id: cloudProjectId(cur.id), collabSeq: collabNow?.client.lastSeq ?? st.collabSeq }, user?.owned_instruments || [], { id: cur.id, secret: cur.secret }, cur.version, progress, { force: opts.force || collabNow?.role === 'artist' });
       setCloudSession({ ...cur, version: r.version, name: st.name || cur.name, syncedAt: Date.now() });
       if (opts.interactive) setTimeout(() => setCloudProgress(null), 1500);
       return true;
@@ -3102,6 +3109,7 @@ export default function App() {
   useEffect(() => {
     if (!isCloudProject || showLanding || state.isPlaying || state.isRecording) return;
     if (Date.now() < cloudQuietUntilRef.current) return;
+    if (collabRef.current && collabRef.current.role !== 'artist') return;
     const t = window.setTimeout(() => { void syncCloudRef.current({}); }, 20000);
     return () => window.clearTimeout(t);
   }, [state.tracks, state.lyrics, state.bpm, state.markers, state.name, state.isPlaying, state.isRecording, showLanding, isCloudProject]);
@@ -3139,8 +3147,293 @@ export default function App() {
     let raw: string | null = null;
     try { raw = new URLSearchParams(window.location.search).get('session'); } catch { /* */ }
     const link = parseLink(raw);
-    if (link) void openCloudSession(link);
+    if (!link) return;
+    let role: string | null = null;
+    try { role = new URLSearchParams(window.location.search).get('role'); } catch { /* */ }
+    if (role === 'artist' || role === 'engineer' || role === 'beatmaker') pendingCollabRoleRef.current = role;
+    void openCloudSession(link);
   }, []);
+
+  // --- Collaboration à distance (artiste, ingé son, beatmaker) -----------------------
+  const [collabOpen, setCollabOpen] = useState(false);
+  const collabOpenRef = useRef(false);
+  collabOpenRef.current = collabOpen;
+  const [collab, setCollab] = useState<{ client: CollabClient; role: CollabRole; name: string } | null>(null);
+  const collabRef = useRef(collab);
+  collabRef.current = collab;
+  const [collabOnline, setCollabOnline] = useState<CollabMember[]>([]);
+  const [collabMessages, setCollabMessages] = useState<CollabMessage[]>([]);
+  const [collabBusy, setCollabBusy] = useState<string | null>(null);
+  const pendingCollabRoleRef = useRef<CollabRole | null>(null);
+  // Signatures connues (envoyées ou reçues) par domaine : rien n'est renvoyé en écho.
+  const knownSigRef = useRef(new Map<string, string>());
+  const knownFreezeRef = useRef(new Map<string, string>());
+  const remoteTouchedRef = useRef(new Set<string>());
+  const contentDirtyRef = useRef(new Set<string>());
+  const mixTimersRef = useRef(new Map<string, number>());
+
+  const rememberTrack = (t: Track) => {
+    knownSigRef.current.set('mix:' + t.id, sigOf(mixOf(t)));
+    knownSigRef.current.set('content:' + t.id, sigOf(contentOf(t)));
+    if (t.frozenClip) knownFreezeRef.current.set(t.id, t.frozenClip.id);
+  };
+
+  /** Applique une opération reçue d'un collaborateur. */
+  const applyCollabOp = useCallback(async (o: CollabOp) => {
+    const c = collabRef.current;
+    if (!c) return;
+    const p = o.op || {};
+    const touch = (id: string) => remoteTouchedRef.current.add(id);
+    switch (o.kind) {
+      case 'chat': {
+        const text = String(p.text || '').slice(0, 2000);
+        setCollabMessages(m => [...m.slice(-199), { id: String(o.seq), from: o.author_name, role: o.role, text, at: Date.parse(o.created_at || '') || Date.now() }]);
+        if (!collabOpenRef.current) setAiNotification(`💬 ${o.author_name} (${ROLE_LABEL[o.role] || o.role}) : ${text.slice(0, 140)}`);
+        break;
+      }
+      case 'mix': {
+        touch(p.trackId);
+        setState(produce((d: DAWState) => {
+          const t = d.tracks.find(x => x.id === p.trackId);
+          const m = p.mix || {};
+          if (!t) return;
+          if (typeof m.volume === 'number' && !t.volumeLock) t.volume = m.volume;
+          if (typeof m.pan === 'number') t.pan = m.pan;
+          if (typeof m.isMuted === 'boolean') t.isMuted = m.isMuted;
+          if (Array.isArray(m.sends)) t.sends = m.sends;
+          if (Array.isArray(m.plugins)) t.plugins = m.plugins;
+          if (typeof m.outputTrackId === 'string') t.outputTrackId = m.outputTrackId;
+        }));
+        break;
+      }
+      case 'lock': {
+        touch(p.trackId);
+        setState(produce((d: DAWState) => {
+          const t = d.tracks.find(x => x.id === p.trackId);
+          if (!t) return;
+          if (p.lock) { t.volumeLock = p.lock; t.volume = p.lock.volume; } else delete t.volumeLock;
+        }));
+        if (p.lock) setAiNotification(`🔒 ${o.author_name} a verrouillé le volume de « ${stateRef.current.tracks.find(x => x.id === p.trackId)?.name || 'une piste'} » : c'est le volume qu'il / elle veut.`);
+        else setAiNotification(`🔓 Volume déverrouillé par ${o.author_name} (${ROLE_LABEL[o.role] || o.role}).`);
+        break;
+      }
+      case 'content': {
+        await ensureBuffers(c.client.link, p.audio);
+        touch(p.trackId);
+        setState(produce((d: DAWState) => {
+          const ct = p.content || {};
+          let t = d.tracks.find(x => x.id === p.trackId);
+          if (!t) {
+            // Piste créée par un collaborateur (batterie, basse, piste d'envoi…)
+            t = {
+              id: p.trackId, name: ct.name || 'PISTE', type: ct.type || TrackType.AUDIO, color: ct.color || '#94a3b8',
+              isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1, pan: 0,
+              outputTrackId: ct.outputTrackId || 'master', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0,
+            } as Track;
+            const at = d.tracks.findIndex(x => x.type === TrackType.BUS || x.type === TrackType.SEND || x.id === 'master');
+            d.tracks.splice(at >= 0 ? at : d.tracks.length, 0, t);
+            if (p.mix) Object.assign(t, { volume: p.mix.volume ?? 1, pan: p.mix.pan ?? 0, sends: p.mix.sends || [], plugins: p.mix.plugins || [] });
+          }
+          t.name = ct.name ?? t.name;
+          t.color = ct.color ?? t.color;
+          if (ct.collabOwner) t.collabOwner = ct.collabOwner;
+          if (ct.drumMachine !== undefined) t.drumMachine = ct.drumMachine;
+          if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
+          t.clips = Array.isArray(ct.clips) ? ct.clips : t.clips;
+        }));
+        break;
+      }
+      case 'freeze': {
+        // Piste gelée par l'ingé son avec ses VST : on reçoit le rendu, la piste reste éditable.
+        await ensureBuffers(c.client.link, p.audio);
+        touch(p.trackId);
+        setState(produce((d: DAWState) => {
+          const t = d.tracks.find(x => x.id === p.trackId);
+          if (!t) return;
+          t.frozenClip = p.frozenClip;
+          t.frozenUpToPluginIndex = p.frozenUpToPluginIndex;
+          t.frozenClipIds = p.frozenClipIds;
+          t.frozenSourceSig = p.frozenSourceSig;
+          t.frozenPluginSig = p.frozenPluginSig;
+          t.isFrozen = true;
+          const refs = p.refs || {};
+          t.clips = t.clips.map(cl => (refs[cl.id] ? { ...cl, freezeRef: refs[cl.id] } : cl));
+        }));
+        setAiNotification(`❄️ ${o.author_name} a gelé « ${stateRef.current.tracks.find(x => x.id === p.trackId)?.name || 'une piste'} » avec ses effets : tu l'entends telle qu'il / elle la règle, et tu peux toujours éditer tes prises.`);
+        break;
+      }
+      default:
+        break;
+    }
+  }, [setState]);
+
+  /** Envoie le contenu d'une piste (prises, motifs) avec son audio. */
+  const sendTrackContent = useCallback(async (trackId: string) => {
+    const c = collabRef.current;
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!c || !t) return;
+    const content = contentOf(t);
+    const bufferIds = Array.from(new Set((t.clips || []).map(cl => cl.bufferId).filter(Boolean) as string[]));
+    const audio = await uploadBuffers(c.client.link, bufferIds);
+    const isNew = !knownSigRef.current.has('mix:' + t.id);
+    await c.client.send('content', { trackId, content, audio, ...(isNew ? { mix: mixOf(t) } : {}) });
+    knownSigRef.current.set('content:' + t.id, sigOf(content));
+    if (isNew) knownSigRef.current.set('mix:' + t.id, sigOf(mixOf(t)));
+  }, []);
+
+  const sendFreeze = useCallback(async (trackId: string) => {
+    const c = collabRef.current;
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!c || !t?.frozenClip?.bufferId) return;
+    const audio = await uploadBuffers(c.client.link, [t.frozenClip.bufferId]);
+    const { buffer: _b, ...frozenClip } = t.frozenClip as Clip & { buffer?: AudioBuffer };
+    const refs: Record<string, unknown> = {};
+    t.clips.forEach(cl => { if (cl.freezeRef) refs[cl.id] = cl.freezeRef; });
+    await c.client.send('freeze', {
+      trackId, frozenClip, frozenUpToPluginIndex: t.frozenUpToPluginIndex, frozenClipIds: t.frozenClipIds,
+      frozenSourceSig: t.frozenSourceSig, frozenPluginSig: t.frozenPluginSig, refs, audio,
+    });
+  }, []);
+
+  // Détection des modifications locales, selon le rôle.
+  useEffect(() => {
+    const c = collabRef.current;
+    if (!c) return;
+    for (const t of state.tracks) {
+      if (remoteTouchedRef.current.has(t.id)) { rememberTrack(t); remoteTouchedRef.current.delete(t.id); continue; }
+      const isNew = !knownSigRef.current.has('content:' + t.id);
+      if (isNew) {
+        // Piste créée ici pendant la collaboration : elle appartient à son créateur.
+        if (t.id !== 'instrumental' && !t.collabOwner && (c.role !== 'artist' || t.type !== TrackType.AUDIO)) {
+          setState(produce((d: DAWState) => { const x = d.tracks.find(y => y.id === t.id); if (x) x.collabOwner = c.role; }));
+          continue;
+        }
+        contentDirtyRef.current.add(t.id);
+        continue;
+      }
+      if (c.role === 'engineer') {
+        const s = sigOf(mixOf(t));
+        if (knownSigRef.current.get('mix:' + t.id) !== s) {
+          knownSigRef.current.set('mix:' + t.id, s);
+          const old = mixTimersRef.current.get(t.id);
+          if (old) window.clearTimeout(old);
+          mixTimersRef.current.set(t.id, window.setTimeout(() => {
+            mixTimersRef.current.delete(t.id);
+            const cur = stateRef.current.tracks.find(x => x.id === t.id);
+            if (cur) void collabRef.current?.client.send('mix', { trackId: t.id, mix: mixOf(cur) }).catch(e => console.warn('[Collab] mix', e));
+          }, 250));
+        }
+        if (t.isFrozen && t.frozenClip && knownFreezeRef.current.get(t.id) !== t.frozenClip.id) {
+          knownFreezeRef.current.set(t.id, t.frozenClip.id);
+          void sendFreeze(t.id).catch(e => console.warn('[Collab] gel', e));
+        }
+      }
+      if (ownsContent(t, c.role) && knownSigRef.current.get('content:' + t.id) !== sigOf(contentOf(t))) contentDirtyRef.current.add(t.id);
+    }
+  }, [state.tracks, collab, setState, sendFreeze]);
+
+  // Toutes les 10 s : prises et pistes modifiées envoyées (jamais pendant une prise).
+  useEffect(() => {
+    if (!collab) return;
+    let busy = false;
+    const id = window.setInterval(async () => {
+      if (busy || stateRef.current.isRecording || contentDirtyRef.current.size === 0) return;
+      busy = true;
+      const ids = Array.from(contentDirtyRef.current);
+      contentDirtyRef.current.clear();
+      for (const tid of ids) {
+        try { await sendTrackContent(tid); } catch (e) { console.warn('[Collab] contenu', e); contentDirtyRef.current.add(tid); }
+      }
+      busy = false;
+    }, 10000);
+    return () => window.clearInterval(id);
+  }, [collab, sendTrackContent]);
+
+  /** Démarre (ou rejoint) la collaboration avec un rôle. */
+  const startCollab = useCallback(async (role: CollabRole, name: string) => {
+    setCollabBusy('Mise en ligne de la session…');
+    try {
+      if (!(cloudRef.current && stateRef.current.id === cloudProjectId(cloudRef.current.id))) {
+        const ok = await syncCloudRef.current({ interactive: true });
+        if (!ok) throw new Error("la session n'a pas pu être mise en ligne");
+      }
+      const cs = cloudRef.current!;
+      setCollabBusy('Connexion aux collaborateurs…');
+      const client = new CollabClient({ id: cs.id, secret: cs.secret }, role, name,
+        (op) => applyCollabOp(op),
+        (online) => setCollabOnline(online));
+      // Le projet en cours devient la base : on ne renvoie pas ce que tout le monde a déjà.
+      stateRef.current.tracks.forEach(t => rememberTrack(t));
+      setCollab({ client, role, name });
+      collabRef.current = { client, role, name };
+      collabRoleStore.set(role);
+      await client.join(stateRef.current.collabSeq || 0);
+      setAiNotification(`👥 Collaboration ouverte (${ROLE_LABEL[role]}). ${role === 'artist' ? 'Tes prises partent toutes les 10 s chez l\'ingé son.' : role === 'engineer' ? 'Tes réglages partent en direct chez l\'artiste ; avec tes VST, gèle la piste pour l\'envoyer.' : 'Tes pistes partent toutes les 10 s chez les autres.'}`);
+    } catch (e: any) {
+      setAiNotification(`⚠️ Collaboration impossible : ${e?.message || 'erreur'}`);
+      collabRoleStore.set(null);
+      setCollab(null);
+    } finally {
+      setCollabBusy(null);
+    }
+  }, [applyCollabOp]);
+
+  const leaveCollab = useCallback(async () => {
+    const c = collabRef.current;
+    collabRoleStore.set(null);
+    setCollab(null);
+    collabRef.current = null;
+    setCollabOnline([]);
+    if (c) await c.client.leave();
+  }, []);
+
+  // Lien d'invitation (?session=…&role=…) : une fois la session ouverte, on rejoint avec ce rôle.
+  useEffect(() => {
+    const role = pendingCollabRoleRef.current;
+    if (!role || collab || !cloudSession || state.id !== cloudProjectId(cloudSession.id)) return;
+    pendingCollabRoleRef.current = null;
+    const t = window.setTimeout(() => {
+      void (async () => {
+        let name = ROLE_LABEL[role];
+        try { const { data } = await catalogSupabase.auth.getUser(); if (data?.user?.email) name = data.user.email.split('@')[0]; } catch { /* */ }
+        await startCollab(role, name);
+        setCollabOpen(true);
+      })();
+    }, 1500); // le projet ouvert (beat, prises) se pose d'abord
+    return () => window.clearTimeout(t);
+  }, [state.id, cloudSession, collab, startCollab]);
+
+  // Verrou de volume (bouton cadenas de la piste).
+  const unlockAskRef = useRef<{ trackId: string; at: number } | null>(null);
+  useEffect(() => {
+    const onLock = (e: Event) => {
+      const trackId = String((e as CustomEvent).detail || '');
+      const t = stateRef.current.tracks.find(x => x.id === trackId);
+      const c = collabRef.current;
+      if (!t) return;
+      if (t.volumeLock && c && c.role !== 'artist') {
+        // L'ingé son peut déverrouiller, mais en connaissance de cause (deuxième clic).
+        const ask = unlockAskRef.current;
+        if (!ask || ask.trackId !== trackId || Date.now() - ask.at > 5000) {
+          unlockAskRef.current = { trackId, at: Date.now() };
+          setAiNotification(`🔒 L'artiste veut ce volume sur « ${t.name} » (${gainToDbText(t.volumeLock.volume)}). Clique encore sur le cadenas pour le déverrouiller quand même.`);
+          return;
+        }
+        unlockAskRef.current = null;
+      }
+      const lock = t.volumeLock ? null : { volume: t.volume, by: c?.name || 'Artiste', at: Date.now() };
+      remoteTouchedRef.current.add(trackId);
+      setState(produce((d: DAWState) => {
+        const x = d.tracks.find(y => y.id === trackId);
+        if (!x) return;
+        if (lock) x.volumeLock = lock; else delete x.volumeLock;
+      }));
+      if (c) void c.client.send('lock', { trackId, lock }).catch(err => console.warn('[Collab] verrou', err));
+      setAiNotification(lock ? `🔒 Volume de « ${t.name} » verrouillé à ${gainToDbText(t.volume)}${c ? ' : l\'ingé son le voit' : ''}.` : `🔓 Volume de « ${t.name} » déverrouillé.`);
+    };
+    window.addEventListener('nova:volume-lock', onLock);
+    return () => window.removeEventListener('nova:volume-lock', onLock);
+  }, [setState]);
 
   // Le site (page /daw) transmet la connexion du compte Make Music au studio intégré.
   useEffect(() => {
@@ -4606,6 +4899,32 @@ export default function App() {
           title="Session en ligne : lien, QR code, compte client"
           className="fixed bottom-20 left-3 z-[90] md:bottom-4 h-10 rounded-full border border-cyan-500/40 bg-[#0d1117]/90 px-3 text-[11px] font-bold text-cyan-200 shadow-lg backdrop-blur">
           ☁️ En ligne · {cloudSession!.syncedAt ? formatAgo(cloudSession!.syncedAt) : 'à envoyer'}
+        </button>
+      )}
+      <CollabPanel
+        open={collabOpen}
+        onClose={() => setCollabOpen(false)}
+        active={!!collab}
+        role={collab?.role || null}
+        name={collab?.name || ''}
+        members={collabOnline}
+        messages={collabMessages}
+        busy={collabBusy}
+        inviteUrl={(r) => (cloudSession?.secret ? `${sessionUrl({ id: cloudSession.id, secret: cloudSession.secret })}&role=${r}` : null)}
+        onStart={(r, n) => { void startCollab(r, n); }}
+        onLeave={() => { void leaveCollab(); }}
+        onSend={(text) => {
+          const c = collabRef.current;
+          if (!c) return;
+          setCollabMessages(m => [...m.slice(-199), { id: `me-${Date.now()}`, from: c.name, role: c.role, text, at: Date.now(), mine: true }]);
+          void c.client.send('chat', { text }).catch(() => setAiNotification("⚠️ Message non envoyé (connexion)."));
+        }}
+      />
+      {!showLanding && !collabOpen && (
+        <button type="button" onClick={() => setCollabOpen(true)}
+          title="Collaborer à distance : artiste, ingé son, beatmaker"
+          className="fixed bottom-32 left-3 z-[90] md:bottom-16 h-10 rounded-full border border-violet-500/40 bg-[#0d1117]/90 px-3 text-[11px] font-bold text-violet-200 shadow-lg backdrop-blur">
+          👥 {collab ? `${collabOnline.length || 1} en ligne · Chat` : 'Collaborer'}
         </button>
       )}
       {cloudConflict && (

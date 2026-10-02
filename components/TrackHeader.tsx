@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useCollabRole, requestVolumeLock } from '../utils/collabStore';
 import { gainToDbText, panToText } from '../utils/db';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
@@ -368,6 +369,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       
   const insertPlugins = track.plugins.filter(p => p.id !== instrumentPlugin?.id);
   const frozen = isTrackFrozen(track);
+  const collabRole = useCollabRole();
   const recFrozen = useRecFrozen(track.id);
   const freezeStale = isFreezeStale(track);
 
@@ -545,7 +547,21 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${track.pan * 140}deg) translateY(-1px)` }} />
         </div>
         
-        <div className="flex-1 flex flex-col justify-center h-6 relative">
+        <div className="flex-1 flex items-center gap-1 h-6 relative">
+          {/* Verrou de volume (collaboration) : « c'est ce volume-là que veut l'artiste ». */}
+          {(track.volumeLock || collabRole === 'artist') && (
+            <button type="button"
+              onClick={(e) => { e.stopPropagation(); requestVolumeLock(track.id); }}
+              title={track.volumeLock
+                ? `Volume verrouillé par l'artiste (${gainToDbText(track.volumeLock.volume)})${collabRole === 'artist' ? ' : clic pour déverrouiller' : collabRole ? ' : clic pour le déverrouiller quand même' : ''}`
+                : "Verrouiller ce volume : l'ingé son verra que c'est le volume que tu veux"}
+              aria-pressed={!!track.volumeLock}
+              aria-label={track.volumeLock ? 'Volume verrouillé' : 'Verrouiller le volume'}
+              className={`nova-hit shrink-0 w-5 h-5 rounded flex items-center justify-center text-[9px] ${track.volumeLock ? 'bg-amber-500/25 text-amber-300' : 'text-slate-500 hover:text-white'}`}>
+              <i className={`fas ${track.volumeLock ? 'fa-lock' : 'fa-lock-open'}`} />
+            </button>
+          )}
+          <div className="flex-1 flex flex-col justify-center h-6 relative">
           <div
             ref={volKnob.wheelRef}
             onMouseDown={handleVolumeMouseDown}
@@ -557,7 +573,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             role="slider"
             aria-label={`Volume ${track.name}`}
             aria-valuetext={gainToDbText(track.volume)}
-            className="h-3 bg-black/60 rounded-full overflow-hidden relative cursor-ew-resize group/vol touch-none"
+            className={`h-3 bg-black/60 rounded-full overflow-hidden relative cursor-ew-resize group/vol touch-none ${track.volumeLock && collabRole && collabRole !== 'artist' ? 'pointer-events-none opacity-60' : ''}`}
           >
             <div 
               className={`h-full transition-all duration-75 ${isAdjustingVolume ? 'brightness-150' : 'brightness-100'}`} 
@@ -570,6 +586,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/45 pointer-events-none group-hover/vol:text-white/80 transition-colors">
               {gainToDbText(track.volume)}
             </span>
+          </div>
           </div>
         </div>
       </div>

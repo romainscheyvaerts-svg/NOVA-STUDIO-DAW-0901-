@@ -315,6 +315,16 @@ export interface Track {
    * même si les clips sont édités.
    */
   frozenPluginSig?: string;
+  /**
+   * Collaboration : rôle qui possède le contenu de la piste (prises, motifs).
+   * Absent : les pistes voix sont à l'artiste, le beat à personne.
+   */
+  collabOwner?: CollabRole;
+  /**
+   * Volume verrouillé par l'artiste (« c'est ce volume-là que je veux ») :
+   * l'ingé son le voit, peut le déverrouiller, mais le message est clair.
+   */
+  volumeLock?: { volume: number; by: string; at: number };
   /** Boîte à rythmes Make Music (piste PERCUSSIONS) : motif éditable. */
   drumMachine?: import('./utils/drumKits').DrumMachine;
   groupId?: string;            // NEW: Track group reference
@@ -376,6 +386,8 @@ export interface DAWState {
    * la possibilité d'y poser ensuite sa voix.
    */
   projectMode?: 'VOCAL' | 'BEATMAKING';
+  /** Collaboration : dernière opération du journal incluse dans cet instantané. */
+  collabSeq?: number;
   /** Genre du beat du catalogue (sert à proposer le style de mix adapté). */
   beatGenre?: string;
   /** Titre du beat du catalogue. */
@@ -557,3 +569,6 @@ declare global {
     DAW_CORE: any;
   }
 }
+
+/** Rôles de la collaboration à distance dans Nova. */
+export type CollabRole = 'artist' | 'engineer' | 'beatmaker';
