@@ -59,6 +59,8 @@ import { parseLocalCommand } from './utils/novaCommands';
 import { listTakes, selectTakeActions } from './utils/takes';
 import RecordingCoach from './components/RecordingCoach';
 import LyricsPrompter from './components/LyricsPrompter';
+import MicLevelMeter from './components/MicLevelMeter';
+import WelcomeSteps from './components/WelcomeSteps';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta } from './utils/sessionStore';
 import VocalToolsPanel from './components/VocalToolsPanel';
 
@@ -2414,6 +2416,22 @@ export default function App() {
   // Sauvegarde automatique sur l'appareil, quelques secondes après chaque
   // changement (jamais pendant la lecture ou une prise : ça couperait le son).
   const [lyricsOpen, setLyricsOpen] = useState(false);
+
+  // Première visite du studio : les 3 gestes à connaître.
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  useEffect(() => {
+    if (showLanding) return;
+    let seen = true;
+    try { seen = localStorage.getItem('nova_welcome_seen') === '1'; } catch { /* */ }
+    if (!seen) {
+      const t = setTimeout(() => setWelcomeOpen(true), 1200);
+      return () => clearTimeout(t);
+    }
+  }, [showLanding]);
+  const closeWelcome = () => {
+    setWelcomeOpen(false);
+    try { localStorage.setItem('nova_welcome_seen', '1'); } catch { /* */ }
+  };
   const autosaveTimer = useRef<number | null>(null);
   const autosaveNotified = useRef(false);
   const autosaveNow = useCallback(async () => {
@@ -3564,6 +3582,18 @@ export default function App() {
         onAskNova={() => { setVocalToolsOpen(false); if (isMobile) setActiveMobileTab('NOVA'); setMixGuideRequest(n => n + 1); }}
       />
 
+      <WelcomeSteps
+        open={welcomeOpen}
+        beatLoaded={!!state.tracks.find(t => t.id === 'instrumental')?.clips.length}
+        isMobile={isMobile}
+        onPickBeat={() => {
+          closeWelcome();
+          if (isMobile) setActiveMobileTab('BROWSER');
+          else { setIsSidebarOpen(true); setActiveSideBrowserTab('STORE'); }
+        }}
+        onClose={closeWelcome}
+      />
+
       <LyricsPrompter
         open={lyricsOpen}
         onClose={() => setLyricsOpen(false)}
@@ -3608,6 +3638,10 @@ export default function App() {
               Avec un casque, tu entends ta voix pendant que tu enregistres. Sans casque, on coupe ce retour
               pour éviter le larsen : tu entends seulement le beat.
             </p>
+            {/* Test du micro avant la toute première prise */}
+            <div className="mb-5">
+              <MicLevelMeter trackId={state.tracks.find(t => t.isTrackArmed)?.id || null} />
+            </div>
             <div className="flex flex-col gap-2">
               <button type="button" onClick={() => answerHeadphones(true)} className="h-12 rounded-xl bg-cyan-500 text-black font-black">
                 Oui, j'ai un casque
