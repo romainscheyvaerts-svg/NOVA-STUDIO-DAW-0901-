@@ -3,6 +3,8 @@ import { audioEngine } from '../engine/AudioEngine';
 import { midiManager } from '../services/MidiManager';
 import { MidiDevice } from '../types';
 import { AudioDevice as ASIODevice } from '../services/ASIOBridge';
+import DesktopAppDownload from './DesktopAppDownload';
+import { isNovaDesktop } from '../utils/desktopApp';
 
 /** Latence mesurée en direct + réglage fin du recalage des prises. */
 const LatencyCompensation: React.FC = () => {
@@ -542,9 +544,22 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                             </div>
                         )}
 
+                        {/* Application Windows : le pont ASIO est intégré, rien à télécharger */}
+                        {!asioConnected && isNovaDesktop() && (
+                            <div className="mt-3 p-3 bg-black/20 rounded-lg">
+                                <p className="text-[10px] text-slate-300 leading-relaxed">
+                                    <i className="fas fa-plug text-purple-400 mr-1"></i>
+                                    Le pont ASIO est intégré à Nova Studio et démarre avec l'application : clique sur Connecter ci-dessus.
+                                </p>
+                            </div>
+                        )}
+
                         {/* Instructions when not connected */}
-                        {!asioConnected && (
+                        {!asioConnected && !isNovaDesktop() && (
                             <div className="mt-3 space-y-3">
+                                {/* Application Windows recommandée (ponts intégrés) */}
+                                <DesktopAppDownload />
+
                                 {/* Download Bridge Section */}
                                 <div className="p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20 rounded-xl">
                                     <div className="flex items-start space-x-3">

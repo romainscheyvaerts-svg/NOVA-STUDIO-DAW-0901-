@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Nova Studio — hors ligne</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #0c0d10; color: #e2e8f0;
+    font: 16px/1.5 "Segoe UI", system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+  }
+  main { max-width: 520px; padding: 32px; text-align: center; }
+  .logo { display: flex; gap: 6px; justify-content: center; align-items: center; height: 64px; margin-bottom: 24px; }
+  .logo i { display: block; width: 8px; border-radius: 2px; background: linear-gradient(#22d3ee, #a855f7); }
+  h1 { font-size: 24px; margin: 0 0 12px; }
+  p { color: #94a3b8; margin: 0 0 12px; }
+  button {
+    margin-top: 16px; padding: 12px 28px; border: 0; border-radius: 10px; cursor: pointer;
+    background: linear-gradient(90deg, #22d3ee, #a855f7); color: #0c0d10; font: 600 16px "Segoe UI", sans-serif;
+  }
+  button:focus-visible { outline: 2px solid #e2e8f0; outline-offset: 3px; }
+  small { display: block; margin-top: 16px; color: #64748b; }
+</style>
+</head>
+<body>
+<main>
+  <div class="logo" aria-hidden="true">
+    <i style="height:26px"></i><i style="height:44px"></i><i style="height:60px"></i><i style="height:40px"></i><i style="height:52px"></i><i style="height:30px"></i>
+  </div>
+  <h1>Impossible de charger Nova Studio</h1>
+  <p>Nova Studio a besoin d'Internet pour s'ouvrir. Vérifie la connexion du PC (Wi-Fi ou câble), puis réessaie.</p>
+  <p>Les ponts ASIO et VST tournent déjà sur ce PC : rien d'autre à lancer.</p>
+  <button id="retry" type="button">Réessayer</button>
+  <small id="auto">Nouvel essai automatique dans <span id="n">20</span> s</small>
+</main>
+<script>
+  var URL_APP = "%(url)s";
+  function retry() { location.replace(URL_APP); }
+  document.getElementById('retry').addEventListener('click', retry);
+  window.addEventListener('online', retry);
+  var n = 20;
+  setInterval(function () {
+    n -= 1;
+    if (n <= 0) { retry(); n = 20; }
+    document.getElementById('n').textContent = n;
+  }, 1000);
+</script>
+</body>
+</html>

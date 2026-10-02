@@ -1,0 +1,7 @@
+venv/
+build/
+dist/
+vendor/
+node_modules/
+__pycache__/
+test/__pycache__/

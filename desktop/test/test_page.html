@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>TEST</title></head>
+<body style="background:#111;color:#eee;font-family:sans-serif">
+<h1>Page de test Nova Studio Desktop</h1>
+<pre id="out"></pre>
+<script>
+  // Page de test : voir run_tests.py. Chaque résultat est renvoyé au serveur de test.
+  var mode = new URLSearchParams(location.search).get('mode') || 'slow';
+  function report(k, v) {
+    document.getElementById('out').textContent += k + ' = ' + v + '\n';
+    return fetch('/report?k=' + k + '&v=' + encodeURIComponent(v)).catch(function () {});
+  }
+  if (mode === 'slow') window.__novaBeforeClose = async function () {
+    report('close', 'start');
+    await new Promise(function (r) { setTimeout(r, 3000); });
+    await report('saved', '1');
+  };
+  if (mode === 'throw') window.__novaBeforeClose = function () { throw new Error('boom'); };
+  if (mode === 'reject') window.__novaBeforeClose = async function () { throw new Error('boom'); };
+  if (mode === 'hang') window.__novaBeforeClose = function () { report('close', 'start'); return new Promise(function () {}); };
+  (async function () {
+    report('marker', JSON.stringify(window.__novaDesktop || null));
+    report('ua', navigator.userAgent);
+    var mic;
+    try {
+      var s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mic = 'OK:' + s.getAudioTracks().length;
+      s.getTracks().forEach(function (t) { t.stop(); });
+    } catch (e) { mic = 'ERR:' + e.name; }
+    report('mic', mic);
+    try { report('perm', (await navigator.permissions.query({ name: 'microphone' })).state); } catch (e) { report('perm', 'ERR'); }
+    var ac = new AudioContext();
+    report('audioctx', ac.state);
+    document.title = 'READY';
+    report('ready', '1');
+  })();
+</script>
+</body>
+</html>
