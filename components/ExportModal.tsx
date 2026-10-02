@@ -1,5 +1,6 @@
 
 import { integratedLufs, normalizeToLufs, truePeakDb } from '../utils/loudness';
+import { openCheckout, waitPaid, isExportVoicesUnlocked, markExportVoicesUnlocked, spendExportCredit, billingStatus } from '../services/Billing';
 import React, { useState, useEffect } from 'react';
 import { DAWState, Track } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
@@ -17,9 +18,11 @@ interface ExportModalProps {
   ownedInstrumentIds?: (string | number)[];
   /** Démo taguée / extrait à partager (dispo sans licence). */
   onOpenShare?: () => void;
+  /** Identifiant stable du projet (achat « mes pistes seules » rattaché au projet). */
+  projectKey?: string;
 }
 
-const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState, ownedInstrumentIds = [], onOpenShare }) => {
+const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState, ownedInstrumentIds = [], onOpenShare, projectKey }) => {
 
   // Verrou de licence. Le DAW sert a essayer les instrumentaux : on ne peut
   // sortir un fichier audio que si le beat du catalogue present dans le projet
@@ -43,6 +46,56 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   const [source, setSource] = useState<'MASTER' | 'STEMS' | 'VOCALS'>(exportVerrouille ? 'VOCALS' : 'MASTER');
   const [vocalsDry, setVocalsDry] = useState(false);
   const bloque = exportVerrouille && source !== 'VOCALS';
+  // Mes pistes seules sans avoir acheté le beat / la mélodie : 2 € par projet.
+  const [voicesUnlocked, setVoicesUnlocked] = useState<boolean | null>(null);
+  const [payWait, setPayWait] = useState(false);
+  const payCancelled = React.useRef(false);
+  // Export payant (2 €, ou un des 10 exports gratuits de Nova Pro) : mes pistes
+  // seules sans le beat acheté, ou tout projet sans instru du catalogue (instru importée).
+  const hasCatalogBeat = projectState.tracks.some(t => t.instrumentId !== undefined && t.instrumentId !== null && t.instrumentId !== '');
+  const paidExport = (source === 'VOCALS' && exportVerrouille) || !hasCatalogBeat;
+  const needsVoicesPayment = paidExport && voicesUnlocked !== true;
+  const [freeLeft, setFreeLeft] = useState<number | null>(null);
+  React.useEffect(() => {
+    if (!isOpen || !projectKey || !paidExport) return;
+    let live = true;
+    void isExportVoicesUnlocked(projectKey).then(u => { if (live) setVoicesUnlocked(u); });
+    void billingStatus().then(st => { if (live && (st.plans.some(p => p.plan === 'collab') || st.admin)) setFreeLeft(st.free_exports_left ?? 0); });
+    return () => { live = false; payCancelled.current = true; };
+  }, [isOpen, projectKey, paidExport]);
+  const payVoices = async () => {
+    if (!projectKey) return;
+    payCancelled.current = false;
+    setStatusText('');
+    // Abonné Nova Pro : un export gratuit du mois d'abord.
+    if (freeLeft !== null && freeLeft > 0) {
+      const r = await spendExportCredit(projectKey);
+      if (r.unlocked) {
+        markExportVoicesUnlocked(projectKey);
+        setVoicesUnlocked(true);
+        setFreeLeft(r.remaining);
+        setLoudnessReport(`⭐ Export gratuit Nova Pro utilisé (il t'en reste ${r.remaining} ce mois-ci).`);
+        setTimeout(() => { void handleExportRef.current?.(); }, 300);
+        return;
+      }
+    }
+    try {
+      const sid = await openCheckout('export_voices', { project_key: projectKey });
+      setPayWait(true);
+      const ok = await waitPaid(sid, () => payCancelled.current);
+      setPayWait(false);
+      if (ok) {
+        markExportVoicesUnlocked(projectKey);
+        setVoicesUnlocked(true);
+        setLoudnessReport('✅ Paiement reçu : tes pistes s\'exportent.');
+        setTimeout(() => { void handleExportRef.current?.(); }, 300);
+      }
+    } catch (e: any) {
+      setPayWait(false);
+      setLoudnessReport(`⚠️ Paiement impossible : ${e?.message || 'erreur'}`);
+    }
+  };
+  const handleExportRef = React.useRef<(() => Promise<void>) | null>(null);
   const [rangeMode, setRangeMode] = useState<'FULL' | 'LOOP'>('FULL');
 
   // FORMAT & QUALITÉ
@@ -150,6 +203,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   };
 
   const handleExport = async () => {
+    if (needsVoicesPayment) { void payVoices(); return; }
     if (bloque) {
       setStatusText("Achetez l'instrumental pour exporter votre morceau (les voix seules restent exportables).");
       return;
@@ -256,6 +310,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   };
 
   const downloadBlob = (blob: Blob, name: string) => saveBlob(blob, name);
+  handleExportRef.current = handleExport;
 
   return (
     <div className="fixed inset-0 z-[1200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
@@ -507,14 +562,14 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
                         <button 
                             onClick={handleExport}
-                            disabled={isRendering || bloque}
+                            disabled={isRendering || bloque || payWait}
                             title={bloque ? "Achetez l'instrumental pour exporter (ou choisissez « Voix seules »)" : undefined}
                             className="w-full h-12 bg-cyan-500 hover:bg-cyan-400 text-black rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-cyan-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
                         >
                             {bloque ? <i className="fas fa-lock"></i>
                               : isRendering ? <i className="fas fa-circle-notch fa-spin"></i>
                               : <i className="fas fa-download"></i>}
-                            <span>{bloque ? 'ACHETER POUR EXPORTER' : source === 'VOCALS' ? 'EXPORTER MES VOIX' : 'EXPORTER'}</span>
+                            <span>{bloque ? 'ACHETER POUR EXPORTER' : payWait ? 'EN ATTENTE DU PAIEMENT…' : needsVoicesPayment ? (freeLeft !== null && freeLeft > 0 ? `EXPORTER (GRATUIT NOVA PRO · ${freeLeft} RESTANTS)` : 'PAYER 2 € ET EXPORTER') : source === 'VOCALS' ? 'EXPORTER MES PISTES' : 'EXPORTER'}</span>
                         </button>
                     </div>
                 </div>

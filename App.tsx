@@ -71,15 +71,17 @@ import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
 import ShareClipModal from './components/ShareClipModal';
 import TakeHomeModal from './components/TakeHomeModal';
+import ProGateModal from './components/ProGateModal';
 import CollabPanel, { CollabMessage } from './components/CollabPanel';
 import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, contentOf, mixOf, sigOf, ownsContent } from './services/Collab';
 import { collabRoleStore } from './utils/collabStore';
+import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from './services/Billing';
 import { catalogSupabase } from './services/supabase';
 import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
 import {
   pushSession, pullSession, parseLink, createCloudSession, cloudProjectId, CloudConflictError, LocalCloudSession,
-  getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, sessionUrl,
+  getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, sessionUrl, signInAccount,
 } from './services/SessionCloud';
 import DrumMachinePanel from './components/DrumMachinePanel';
 import ShortcutsHelp from './components/ShortcutsHelp';
@@ -432,7 +434,39 @@ const useUndoRedo = (initialState: DAWState) => {
   return { state: history.present, setState, setVisualState, undo, redo, isBufferInHistory, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
 };
 
+/** Onglet ouvert au retour de Stripe (?nova_paid=…) : confirme et invite à revenir au studio. */
+function PaymentReturn({ sessionId }: { sessionId: string }) {
+  const [state, setState] = useState<'wait' | 'ok' | 'ko'>('wait');
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      for (let i = 0; i < 10 && live; i++) {
+        try { const r = await verifyPayment(sessionId); if (r.paid) { setState('ok'); return; } } catch { /* */ }
+        await new Promise(r => setTimeout(r, 2000));
+      }
+      if (live) setState('ko');
+    })();
+    return () => { live = false; };
+  }, [sessionId]);
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#0b0d10] p-6 text-center text-white">
+      <div className="max-w-sm space-y-3">
+        <p className="text-4xl">{state === 'ok' ? '✅' : state === 'ko' ? '⏳' : '…'}</p>
+        <h1 className="text-xl font-black">{state === 'ok' ? 'Paiement validé' : state === 'ko' ? 'Paiement en cours de validation' : 'Vérification du paiement…'}</h1>
+        <p className="text-sm text-slate-300">{state === 'ok' ? "Tu peux fermer cet onglet : le studio s'est débloqué tout seul." : 'Reviens au studio : il se débloque dès que Stripe confirme.'}</p>
+        <button type="button" onClick={() => window.close()} className="mt-2 h-11 rounded-xl bg-cyan-500 px-5 text-sm font-black text-black">Fermer cet onglet</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const paidParam = (() => { try { return new URLSearchParams(window.location.search).get('nova_paid'); } catch { return null; } })();
+  if (paidParam && /^cs_(test|live)_[A-Za-z0-9]+$/.test(paidParam)) return <PaymentReturn sessionId={paidParam} />;
+  return <Studio />;
+}
+
+function Studio() {
   // Landing Page state - Always show landing on startup
   const [showLanding, setShowLanding] = useState(true);
   
@@ -747,6 +781,8 @@ export default function App() {
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);
   const [aiNotification, setAiNotification] = useState<string | null>(null);
+  // Nova Pro (5 €/mois) : importer ses propres instrus + collaborer. Défini plus bas.
+  const requireProRef = useRef<(reason: string) => Promise<boolean>>(async () => true);
 
   // Nettoyage automatique des blancs après chaque prise (réglable, mémorisé).
   const [autoCleanSilence, setAutoCleanSilenceState] = useState<boolean>(() => {
@@ -1027,7 +1063,15 @@ export default function App() {
   }, [handleLoadProject]);
 
   const handleShareProject = async (e: string) => { setIsShareModalOpen(false); };
-  const handleExportMix = async () => { setIsExportMenuOpen(true); };
+  const handleExportMix = async () => {
+    // Identifiant stable du projet (l'achat « mes pistes seules » y est rattaché).
+    if (!/^(cloud-|proj-[a-z0-9]{8,})/.test(stateRef.current.id || '')) {
+      const id = `proj-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      setVisualState({ id });
+      stateRef.current = { ...stateRef.current, id };
+    }
+    setIsExportMenuOpen(true);
+  };
 
   /**
    * Libere un buffer uniquement si plus aucun clip ne l'utilise.
@@ -2058,6 +2102,7 @@ export default function App() {
 
   // ✨ NOUVEAU SYSTÈME D'IMPORT AUDIO - Simple et fiable
   const handleNewAudioImport = useCallback(async (file: File) => {
+    if (!(await requireProRef.current('Importer un son de ton ordinateur (une instru venue d\'ailleurs) fait partie de Nova Pro.'))) return;
     try {
       // 1. Initialiser l'audio engine
       await ensureAudioEngine();
@@ -2693,6 +2738,10 @@ export default function App() {
    *        etre conditionne.
    */
   const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number, sourceBpm?: number, instrumentId?: string | number) => {
+      // Fichier de l'utilisateur (pas le catalogue) : Nova Pro.
+      if (instrumentId === undefined && (source instanceof File || String(source).startsWith('blob:'))) {
+        if (!(await requireProRef.current('Importer un son de ton ordinateur (une instru venue d\'ailleurs) fait partie de Nova Pro.'))) return null as any;
+      }
       setExternalImportNotice(`Chargement: ${name}...`);
       try {
           await ensureAudioEngine();
@@ -3350,9 +3399,29 @@ export default function App() {
   }, [collab, sendTrackContent]);
 
   /** Démarre (ou rejoint) la collaboration avec un rôle. */
+  // --- Nova Pro : verrou des fonctions payantes ---------------------------------------
+  const [proGate, setProGate] = useState<{ reason: string; resolve: (ok: boolean) => void } | null>(null);
+  const proOkRef = useRef<{ at: number; ok: boolean } | null>(null);
+  requireProRef.current = async (reason: string) => {
+    const c = proOkRef.current;
+    if (c?.ok && Date.now() - c.at < 10 * 60_000) return true;
+    const st = await billingStatus();
+    const ok = hasPlan(st, 'collab');
+    proOkRef.current = { at: Date.now(), ok };
+    if (ok) return true;
+    return new Promise<boolean>(resolve => setProGate({ reason, resolve }));
+  };
+
+  const [collabGate, setCollabGate] = useState<'login' | 'subscribe' | null>(null);
   const startCollab = useCallback(async (role: CollabRole, name: string) => {
     setCollabBusy('Mise en ligne de la session…');
+    setCollabGate(null);
     try {
+      // Collaboration = compte Make Music + abonnement 5 €/mois (vérifié aussi par le serveur).
+      const st = await billingStatus();
+      const { data: who } = await catalogSupabase.auth.getUser();
+      if (!who?.user) { setCollabGate('login'); pendingStartRef.current = { role, name }; return; }
+      if (!hasPlan(st, 'collab')) { setCollabGate('subscribe'); pendingStartRef.current = { role, name }; return; }
       if (!(cloudRef.current && stateRef.current.id === cloudProjectId(cloudRef.current.id))) {
         const ok = await syncCloudRef.current({ interactive: true });
         if (!ok) throw new Error("la session n'a pas pu être mise en ligne");
@@ -3370,13 +3439,37 @@ export default function App() {
       await client.join(stateRef.current.collabSeq || 0);
       setAiNotification(`👥 Collaboration ouverte (${ROLE_LABEL[role]}). ${role === 'artist' ? 'Tes prises partent toutes les 10 s chez l\'ingé son.' : role === 'engineer' ? 'Tes réglages partent en direct chez l\'artiste ; avec tes VST, gèle la piste pour l\'envoyer.' : 'Tes pistes partent toutes les 10 s chez les autres.'}`);
     } catch (e: any) {
-      setAiNotification(`⚠️ Collaboration impossible : ${e?.message || 'erreur'}`);
+      const msg = String(e?.message || 'erreur');
+      if (/Connecte-toi/.test(msg)) setCollabGate('login');
+      else if (/Abonnement/.test(msg)) setCollabGate('subscribe');
+      else setAiNotification(`⚠️ Collaboration impossible : ${msg}`);
+      pendingStartRef.current = { role, name };
+      void collabRef.current?.client.leave();
       collabRoleStore.set(null);
       setCollab(null);
+      collabRef.current = null;
     } finally {
       setCollabBusy(null);
     }
   }, [applyCollabOp]);
+  const pendingStartRef = useRef<{ role: CollabRole; name: string } | null>(null);
+  const subscribeCollab = useCallback(async () => {
+    try {
+      const sid = await openCheckout('collab');
+      setCollabBusy('En attente du paiement (onglet Stripe)…');
+      const ok = await waitPaid(sid);
+      setCollabBusy(null);
+      if (ok) {
+        setCollabGate(null);
+        setAiNotification('✅ Abonnement collaboration actif : bienvenue !');
+        const p = pendingStartRef.current;
+        if (p) void startCollab(p.role, p.name);
+      }
+    } catch (e: any) {
+      setCollabBusy(null);
+      setAiNotification(`⚠️ Abonnement impossible : ${e?.message || 'erreur'}`);
+    }
+  }, [startCollab]);
 
   const leaveCollab = useCallback(async () => {
     const c = collabRef.current;
@@ -4849,7 +4942,7 @@ export default function App() {
       <Suspense fallback={null}>
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} />}
       {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
-      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={() => { setIsExportMenuOpen(false); setShareOpen(true); }} />}
+      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={() => { setIsExportMenuOpen(false); setShareOpen(true); }} />}
       <DrumMachinePanel
         open={drumsOpen}
         onClose={() => setDrumsOpen(false)}
@@ -4901,6 +4994,11 @@ export default function App() {
           ☁️ En ligne · {cloudSession!.syncedAt ? formatAgo(cloudSession!.syncedAt) : 'à envoyer'}
         </button>
       )}
+      <ProGateModal
+        open={!!proGate}
+        reason={proGate?.reason || ''}
+        onDone={(ok) => { const g = proGate; setProGate(null); if (ok) { proOkRef.current = { at: Date.now(), ok: true }; setAiNotification('⭐ Nova Pro actif : tu peux importer tes instrus et collaborer.'); } g?.resolve(ok); }}
+      />
       <CollabPanel
         open={collabOpen}
         onClose={() => setCollabOpen(false)}
@@ -4912,6 +5010,9 @@ export default function App() {
         busy={collabBusy}
         inviteUrl={(r) => (cloudSession?.secret ? `${sessionUrl({ id: cloudSession.id, secret: cloudSession.secret })}&role=${r}` : null)}
         onStart={(r, n) => { void startCollab(r, n); }}
+        gate={collabGate}
+        onSignIn={async (email, password) => { await signInAccount(email, password); const p = pendingStartRef.current; setCollabGate(null); if (p) void startCollab(p.role, p.name); }}
+        onSubscribe={() => { void subscribeCollab(); }}
         onLeave={() => { void leaveCollab(); }}
         onSend={(text) => {
           const c = collabRef.current;

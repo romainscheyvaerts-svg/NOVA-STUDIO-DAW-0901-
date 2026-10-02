@@ -23,6 +23,10 @@ interface Props {
   onLeave: () => void;
   onSend: (text: string) => void;
   busy?: string | null;
+  /** Il faut d'abord se connecter (compte Make Music) ou s'abonner (5 €/mois). */
+  gate?: 'login' | 'subscribe' | null;
+  onSignIn?: (email: string, password: string) => Promise<void>;
+  onSubscribe?: () => void;
 }
 
 const ROLE_HELP: Record<CollabRole, string> = {
@@ -38,6 +42,9 @@ const CollabPanel: React.FC<Props> = (p) => {
   const [startName, setStartName] = useState('');
   const [copied, setCopied] = useState<CollabRole | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [signErr, setSignErr] = useState<string | null>(null);
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [p.messages.length, p.open]);
   if (!p.open) return null;
 
@@ -69,6 +76,24 @@ const CollabPanel: React.FC<Props> = (p) => {
           <p className="text-[11px] text-slate-500">{ROLE_LABEL[startRole]} : {ROLE_HELP[startRole]}.</p>
           <input value={startName} onChange={e => setStartName(e.target.value)} placeholder="Ton nom (affiché aux autres)"
             className="h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[13px] text-white" />
+          {p.gate === 'login' && p.onSignIn && (
+            <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+              <p className="text-[12px] font-bold text-white">Connecte-toi avec ton compte Make Music</p>
+              <input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="E-mail" className="h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[13px] text-white" />
+              <input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mot de passe" className="h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[13px] text-white" />
+              <button type="button" disabled={!email || !password} className={`${btn} w-full bg-white text-black`}
+                onClick={async () => { setSignErr(null); try { await p.onSignIn!(email, password); setPassword(''); } catch (e: any) { setSignErr(e?.message || 'Connexion impossible'); } }}>Se connecter</button>
+              {signErr && <p className="text-[11px] text-red-300">{signErr}</p>}
+              <a href="https://www.studiomakemusic.com/auth" target="_blank" rel="noopener noreferrer" className="block text-center text-[11px] text-cyan-300 underline">Créer un compte sur studiomakemusic.com</a>
+            </div>
+          )}
+          {p.gate === 'subscribe' && p.onSubscribe && (
+            <div className="space-y-2 rounded-2xl border border-violet-500/30 bg-violet-500/10 p-3">
+              <p className="text-[12px] font-bold text-white">Abonnement collaboration : 5 € / mois</p>
+              <p className="text-[11px] text-slate-300">Pour chaque compte qui collabore (artiste, ingé son, beatmaker). Sans engagement, résiliable quand tu veux.</p>
+              <button type="button" disabled={!!p.busy} onClick={p.onSubscribe} className={`${btn} w-full bg-violet-500 text-white`}>{p.busy || "M'abonner (paiement sécurisé Stripe)"}</button>
+            </div>
+          )}
           <button type="button" disabled={!!p.busy} onClick={() => p.onStart(startRole, startName.trim() || ROLE_LABEL[startRole])}
             className={`${btn} w-full bg-cyan-500 text-black`}>{p.busy || 'Démarrer la collaboration'}</button>
           <p className="text-[10px] text-slate-500">La session est mise en ligne (audio des voix compris, jamais le beat non acheté).</p>
