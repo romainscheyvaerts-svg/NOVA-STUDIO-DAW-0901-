@@ -21,6 +21,8 @@ interface ChatAssistantProps {
   onSendMessage: (msg: string) => Promise<any>;
   onExecuteAction: (action: AIAction) => void;
   externalNotification?: string | null;
+  /** Change à chaque annonce, même si le texte est identique. */
+  externalNotificationId?: number;
   isMobile?: boolean;
   forceOpen?: boolean;
   onClose?: () => void; // New prop for explicit close action
@@ -39,7 +41,7 @@ interface ChatAssistantProps {
   onRequestOpen?: () => void;
 }
 
-const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, isMobile, forceOpen, onClose, projectState, mixGuideRequest, novaFeed, suppressAutoOpen, onRequestOpen }) => {
+const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, externalNotificationId, isMobile, forceOpen, onClose, projectState, mixGuideRequest, novaFeed, suppressAutoOpen, onRequestOpen }) => {
   const [isOpen, setIsOpen] = useState(forceOpen || false);
   // Bandeau quand le chat est fermé : sinon les messages du studio passaient inaperçus.
   const [toast, setToast] = useState<{ id: number; text: string; hasChoices: boolean } | null>(null);
@@ -116,10 +118,15 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         content: externalNotification,
         timestamp: Date.now(),
       };
-      setMessages(prev => [...prev, assistantMsg]);
+      // Même annonce répétée de près : un seul message dans l'historique.
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && last.content === externalNotification && Date.now() - last.timestamp < 10000) return prev;
+        return [...prev, assistantMsg];
+      });
       if (!isOpenRef.current) showToast(externalNotification);
     }
-  }, [externalNotification]); 
+  }, [externalNotification, externalNotificationId]); 
 
   const handleSend = async (customMsg?: string) => {
     const msgToSend = customMsg || inputValue;

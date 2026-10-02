@@ -1,6 +1,6 @@
 import { catalogSupabase } from './supabase';
 import { call, sha1, CHUNK, CloudLink } from './SessionCloud';
-import { audioBufferToWav } from './AudioUtils';
+import { wavOf } from './AudioUtils';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { audioEngine } from '../engine/AudioEngine';
 import { Clip, CollabRole, Track } from '../types';
@@ -61,6 +61,7 @@ export class CollabClient {
     const r = await call<{ member_key: string; last_seq: number; members: CollabMember[]; channel: string }>('join', this.body({ role: this.role, name: this.name }));
     this.memberKey = r.member_key;
     this.lastSeq = Math.max(0, fromSeq);
+    this.floorSeq = this.lastSeq;
     const ch = catalogSupabase.channel(r.channel, { config: { broadcast: { self: false }, presence: { key: this.memberKey } } });
     ch.on('broadcast', { event: 'op' }, ({ payload }) => { void this.receive(payload as CollabOp); });
     ch.on('presence', { event: 'sync' }, () => {
@@ -98,14 +99,32 @@ export class CollabClient {
   // rattrapage (connexion, puis toutes les 10 s) récupère ce qui a été manqué.
   private applied = new Set<number>();
   private chain: Promise<void> = Promise.resolve();
+  /** Opérations antérieures à l'instantané chargé : déjà dedans. */
+  private floorSeq = 0;
+  /** Opérations dont l'application a échoué (audio non téléchargé…) : réessayées. */
+  private failed = new Map<number, { o: CollabOp; tries: number }>();
 
   private apply(o: CollabOp) {
-    if (!o || typeof o.seq !== 'number' || this.applied.has(o.seq) || o.seq <= this.lastSeq) return;
+    if (!o || typeof o.seq !== 'number' || this.applied.has(o.seq) || o.seq <= this.floorSeq) return;
     this.applied.add(o.seq);
     if (o.member_key === this.memberKey) return;
     // Application en série : une opération lente (téléchargement) ne double pas la suivante.
-    this.chain = this.chain.then(() => Promise.resolve(this.onOp(o))).catch(e => console.warn('[Collab] opération', o.kind, e));
+    this.chain = this.chain.then(async () => {
+      try {
+        await this.onOp(o);
+        this.failed.delete(o.seq);
+      } catch (e) {
+        // Avant : marquée appliquée quand même, le clip restait muet sans retour.
+        const tries = (this.failed.get(o.seq)?.tries || 0) + 1;
+        if (tries < 6) this.failed.set(o.seq, { o, tries });
+        else { this.failed.delete(o.seq); this.onFailure?.(o); }
+        console.warn('[Collab] opération', o.kind, e);
+      }
+    });
   }
+
+  /** Appelé quand une opération reste impossible à appliquer après plusieurs essais. */
+  onFailure?: (o: CollabOp) => void;
 
   private async receive(o: CollabOp) { this.apply(o); }
 
@@ -114,14 +133,20 @@ export class CollabClient {
     if (this.catchingUp) return;
     this.catchingUp = true;
     try {
+      // Réessai des opérations en échec.
+      for (const { o } of this.failed.values()) { this.applied.delete(o.seq); this.apply(o); }
+      // Numéros communs à toutes les sessions : une opération validée un instant
+      // après une autre peut porter un numéro plus petit. On relit donc une petite
+      // marge en arrière (les doublons sont écartés par « applied »).
+      let after = Math.max(this.floorSeq, this.lastSeq - 50);
       for (let round = 0; round < 20; round++) {
-        const r = await call<{ ops: CollabOp[] }>('ops_since', this.body({ after: this.lastSeq }));
+        const r = await call<{ ops: CollabOp[] }>('ops_since', this.body({ after }));
         r.ops.forEach(o => this.apply(o));
-        if (r.ops.length) this.lastSeq = Math.max(this.lastSeq, ...r.ops.map(o => o.seq));
+        if (r.ops.length) { this.lastSeq = Math.max(this.lastSeq, ...r.ops.map(o => o.seq)); after = Math.max(after, ...r.ops.map(o => o.seq)); }
         if (r.ops.length < 500) break;
       }
-      // Ce qui est confirmé n'a plus besoin d'être mémorisé.
-      this.applied.forEach(seq => { if (seq <= this.lastSeq) this.applied.delete(seq); });
+      // Hors de la marge relue, plus besoin de mémoriser.
+      this.applied.forEach(seq => { if (seq < this.lastSeq - 200) this.applied.delete(seq); });
       if (!this.timer) this.timer = setInterval(() => { void this.catchUp(); }, 10000);
     } catch (e) {
       console.warn('[Collab] rattrapage', e);
@@ -150,7 +175,7 @@ export async function uploadBuffers(link: CloudLink, bufferIds: string[]): Promi
     if (done) { out[id] = done; continue; }
     const buf = audioBufferRegistry.get(id);
     if (!buf) continue;
-    const bytes = new Uint8Array(await audioBufferToWav(buf).arrayBuffer());
+    const bytes = new Uint8Array(await wavOf(buf).arrayBuffer());
     const parts: string[] = [];
     for (let off = 0; off < bytes.length; off += CHUNK) {
       const part = bytes.subarray(off, Math.min(bytes.length, off + CHUNK));

@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import { DAWState, Clip } from '../types';
-import { audioBufferToWav } from './AudioUtils';
+import { wavOf } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { shouldPersistFrozen } from './VstFreeze';
@@ -56,7 +56,7 @@ export class ProjectIO {
                     if (!written.has(filename)) {
                         written.add(filename);
                         // Conversion AudioBuffer -> WAV Blob
-                        const wavBlob = audioBufferToWav(buffer);
+                        const wavBlob = wavOf(buffer);
                         if (audioFolder) {
                             audioFolder.file(filename, wavBlob);
                         }
@@ -74,7 +74,7 @@ export class ProjectIO {
         const frozenBuffer = track.frozenClip?.bufferId ? audioBufferRegistry.get(track.frozenClip.bufferId) : undefined;
         if (track.frozenClip && frozenBuffer && shouldPersistFrozen(track)) {
             const filename = `frozen-${track.id}.wav`;
-            if (audioFolder) audioFolder.file(filename, audioBufferToWav(frozenBuffer));
+            if (audioFolder) audioFolder.file(filename, wavOf(frozenBuffer));
             sTrack.frozenClip.audioRef = `audio/${filename}`;
             delete sTrack.frozenClip.buffer;
             delete sTrack.frozenClip.bufferId;

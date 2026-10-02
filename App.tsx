@@ -647,8 +647,13 @@ function Studio() {
 
       // Charger un fichier audio local
       if (pendingAudioFile) {
-        await handleNewAudioImport(pendingAudioFile);
+        const ok = await handleNewAudioImport(pendingAudioFile);
         setPendingAudioFile(null);
+        // Nova Pro refusé : retour à l'accueil plutôt qu'un studio vide.
+        if (ok === false) {
+          setShowLanding(true);
+          setLandingNotice("Importer ta propre instru fait partie de Nova Pro (5 €/mois). Les instrus et mélodies du catalogue restent gratuites.");
+        }
         return;
       }
 
@@ -715,8 +720,10 @@ function Studio() {
   const unsavedMountRef = useRef(false);
 
 
-  // Ref to track atomic updates (volume/pan only) to skip expensive graph rebuild
-  const skipEngineUpdateRef = useRef(false);
+  // Pistes dont seul le volume / pan a changé (déjà appliqué au moteur) : pas de
+  // reconstruction pour ELLES. Avant, un drapeau global sautait toute la mise à
+  // jour suivante, et un effet ajouté au même moment n'arrivait jamais au moteur.
+  const atomicTracksRef = useRef(new Map<string, Track>());
 
   // Pistes deja transmises au moteur (par reference) et signature du routage.
   // Avant, chaque modification (renommer, deplacer un clip...) rappelait
@@ -724,10 +731,8 @@ function Studio() {
   const engineTracksRef = useRef<Map<string, Track> | null>(null);
   const engineRoutingRef = useRef('');
   useEffect(() => {
-    if (skipEngineUpdateRef.current) {
-      skipEngineUpdateRef.current = false; // Reset flag
-      return; // Skip rebuild for atomic updates
-    }
+    const atomic = atomicTracksRef.current;
+    atomicTracksRef.current = new Map();
     if (!audioEngine.ctx) return;
     // Routage, solo et envois agissent sur les autres pistes (bus, pistes
     // rendues muettes par un solo) : dans ce cas on met tout a jour, comme avant.
@@ -736,7 +741,10 @@ function Studio() {
     ).join(';');
     const previous = engineTracksRef.current;
     const full = !previous || routing !== engineRoutingRef.current;
-    state.tracks.forEach(t => { if (full || previous!.get(t.id) !== t) audioEngine.updateTrack(t, state.tracks); });
+    state.tracks.forEach(t => {
+      if (!full && atomic.get(t.id) === t) return; // volume / pan déjà réglés directement
+      if (full || previous!.get(t.id) !== t) audioEngine.updateTrack(t, state.tracks);
+    });
     engineTracksRef.current = new Map(state.tracks.map(t => [t.id, t]));
     engineRoutingRef.current = routing;
   }, [state.tracks]); 
@@ -785,7 +793,12 @@ function Studio() {
 
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);
-  const [aiNotification, setAiNotification] = useState<string | null>(null);
+  // Chaque annonce a son identifiant : la même phrase deux fois de suite
+  // (« Aucun blanc à retirer ici ») était avalée la seconde fois.
+  const [aiNotice, setAiNotice] = useState<{ text: string; id: number } | null>(null);
+  const setAiNotification = useCallback((text: string | null) => {
+    setAiNotice(text ? { text, id: Date.now() + Math.random() } : null);
+  }, []);
   // Nova Pro (5 €/mois) : importer ses propres instrus + collaborer. Défini plus bas.
   const requireProRef = useRef<(reason: string) => Promise<boolean>>(async () => true);
 
@@ -1316,13 +1329,13 @@ function Studio() {
             previousTrack.pan === updatedTrack.pan &&
             previousTrack.isMuted === updatedTrack.isMuted &&
             previousTrack.isSolo === updatedTrack.isSolo &&
-            previousTrack.plugins.length === updatedTrack.plugins.length;
+            previousTrack.plugins === updatedTrack.plugins && previousTrack.sends === updatedTrack.sends && previousTrack.clips === updatedTrack.clips;
 
         const isPanOnlyChange = previousTrack.pan !== updatedTrack.pan &&
             previousTrack.volume === updatedTrack.volume &&
             previousTrack.isMuted === updatedTrack.isMuted &&
             previousTrack.isSolo === updatedTrack.isSolo &&
-            previousTrack.plugins.length === updatedTrack.plugins.length;
+            previousTrack.plugins === updatedTrack.plugins && previousTrack.sends === updatedTrack.sends && previousTrack.clips === updatedTrack.clips;
 
         if (isVolumeOnlyChange || isPanOnlyChange) {
             // Use atomic methods for better performance
@@ -1332,8 +1345,8 @@ function Studio() {
             if (isPanOnlyChange) {
                 audioEngine.setTrackPan(updatedTrack.id, updatedTrack.pan);
             }
-            // Set flag to skip full graph rebuild in useEffect
-            skipEngineUpdateRef.current = true;
+            // Cette piste-là n'a pas besoin d'être reconstruite.
+            atomicTracksRef.current.set(updatedTrack.id, updatedTrack);
         }
     }
 
@@ -2122,7 +2135,7 @@ function Studio() {
 
   // ✨ NOUVEAU SYSTÈME D'IMPORT AUDIO - Simple et fiable
   const handleNewAudioImport = useCallback(async (file: File) => {
-    if (!(await requireProRef.current('Importer un son de ton ordinateur (une instru venue d\'ailleurs) fait partie de Nova Pro.'))) return;
+    if (!(await requireProRef.current('Importer un son de ton ordinateur (une instru venue d\'ailleurs) fait partie de Nova Pro.'))) return false;
     try {
       // 1. Initialiser l'audio engine
       await ensureAudioEngine();
@@ -3296,6 +3309,13 @@ function Studio() {
     if (!c) return;
     const p = o.op || {};
     const touch = (id: string) => remoteTouchedRef.current.add(id);
+    // Chacun son domaine : une opération hors de ses droits est ignorée (avant,
+    // n'importe quel membre pouvait écraser les prises ou le mix d'un autre).
+    const existing = typeof p.trackId === 'string' ? stateRef.current.tracks.find(x => x.id === p.trackId) : undefined;
+    const refuse = (why: string) => { console.warn('[Collab] opération refusée', o.kind, o.role, why); };
+    if ((o.kind === 'mix' || o.kind === 'freeze') && o.role !== 'engineer') return refuse('réservé à l’ingé son');
+    if (o.kind === 'lock' && !(o.role === 'artist' || (o.role === 'engineer' && !p.lock))) return refuse('verrou');
+    if (o.kind === 'content' && existing && !ownsContent(existing, o.role)) return refuse('piste d’un autre rôle');
     switch (o.kind) {
       case 'chat': {
         const text = String(p.text || '').slice(0, 2000);
@@ -3494,6 +3514,7 @@ function Studio() {
       const client = new CollabClient({ id: cs.id, secret: cs.secret }, role, name,
         (op) => applyCollabOp(op),
         (online) => setCollabOnline(online));
+      client.onFailure = (o) => setAiNotification(`⚠️ Une modification de ${o.author_name} n'a pas pu être reçue (connexion). Demande-lui de la renvoyer, ou recharge la session.`);
       // Le projet en cours devient la base : on ne renvoie pas ce que tout le monde a déjà.
       stateRef.current.tracks.forEach(t => rememberTrack(t));
       setCollab({ client, role, name });
@@ -5192,7 +5213,8 @@ function Studio() {
             onSendMessage={envoyerAuChatbot}
             onExecuteAction={executeAIAction}
             projectState={state}
-            externalNotification={aiNotification}
+            externalNotification={aiNotice?.text ?? null}
+            externalNotificationId={aiNotice?.id}
             suppressAutoOpen={drumsOpen || !!midiEditorOpen || isExportMenuOpen || collabOpen || takeHomeOpen}
             isMobile={isMobile}
             forceOpen={isMobile && activeMobileTab === 'NOVA'}

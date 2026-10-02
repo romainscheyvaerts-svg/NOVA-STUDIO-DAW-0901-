@@ -64,3 +64,14 @@ export const audioBufferToWav = (buffer: AudioBuffer): Blob => {
 
   return new Blob([view], { type: 'audio/wav' });
 };
+
+// Un enregistrement ne change jamais une fois créé (chaque édition produit un
+// nouveau buffer) : on ne l'encode en WAV qu'une fois. Avant, la sauvegarde
+// automatique (toutes les 4 s après une modification) ré-encodait toutes les
+// prises du projet, ce qui figeait l'interface sur les longues sessions (iPad).
+const wavCache = new WeakMap<AudioBuffer, Blob>();
+export const wavOf = (buffer: AudioBuffer): Blob => {
+  let wav = wavCache.get(buffer);
+  if (!wav) { wav = audioBufferToWav(buffer); wavCache.set(buffer, wav); }
+  return wav;
+};

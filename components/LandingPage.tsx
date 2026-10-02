@@ -196,7 +196,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
           onEnterWithProject(project);
         }
       } catch (error: any) {
-        alert(`Erreur de chargement: ${error.message}`);
+        setPreviewError(`Ce projet n'a pas pu être ouvert : ${error?.message || 'fichier illisible'}`); setTimeout(() => setPreviewError(null), 6000);
       }
     }
   };
@@ -209,13 +209,13 @@ const LandingPage: React.FC<LandingPageProps> = ({
         onEnterWithProject(project);
       }
     } catch (error: any) {
-      alert(`Erreur: ${error.message}`);
+      setPreviewError(`Ce projet n'a pas pu être chargé : ${error?.message || 'erreur réseau'}`); setTimeout(() => setPreviewError(null), 6000);
     }
   };
 
   // Image de couverture
   const getCoverImage = (inst: Instrumental): string => {
-    return inst.cover_image_url || 'https://via.placeholder.com/150?text=Beat';
+    return inst.cover_image_url || 'data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20150%20150%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%230e7490%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%234c1d95%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%22150%22%20height%3D%22150%22%20fill%3D%22url(%23g)%22%2F%3E%3Ctext%20x%3D%2275%22%20y%3D%2288%22%20font-size%3D%2240%22%20text-anchor%3D%22middle%22%20fill%3D%22%23ffffff%22%20fill-opacity%3D%220.7%22%3E%E2%99%AA%3C%2Ftext%3E%3C%2Fsvg%3E';
   };
 
   return (
@@ -355,8 +355,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 <i className="fas fa-file-audio text-purple-400 text-lg"></i>
               </div>
               <div className="text-left">
-                <p className="text-sm font-bold text-white">Ouvrir Audio</p>
-                <p className="text-[10px] text-slate-500">Fichier MP3, WAV...</p>
+                <p className="text-sm font-bold text-white">Ouvrir Audio <span className="ml-1 rounded-full bg-violet-500/20 px-2 py-0.5 text-[9px] font-black text-violet-200 align-middle">⭐ Nova Pro</span></p>
+                <p className="text-[10px] text-slate-500">Ta propre instru (MP3, WAV…) · 5 €/mois</p>
               </div>
             </button>
 
@@ -430,6 +430,10 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 {shown.map((inst) => (
                   <div
                     key={inst.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={isMelody(inst) ? `Faire une instru sur la mélodie « ${inst.title} »` : `Poser ma voix sur « ${inst.title} »`}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSelectInstrumental(inst); } }}
                     onClick={() => handleSelectInstrumental(inst)}
                     className={`group relative bg-[#14161a] border rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-[1.02] hover:shadow-xl hover:shadow-cyan-500/10 ${
                       playingId === inst.id ? 'border-cyan-500 ring-2 ring-cyan-500/30' : 'border-white/5 hover:border-cyan-500/30'
@@ -454,6 +458,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
                       </div>
                       {/* Bouton Play */}
                       <button
+                        type="button"
+                        aria-label={playingId === inst.id ? `Mettre en pause « ${inst.title} »` : `Écouter « ${inst.title} »`}
+                        onKeyDown={(e) => e.stopPropagation()}
                         onClick={(e) => togglePlay(inst, e)}
                         className={`absolute bottom-2 right-2 w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                           playingId === inst.id || loadingPreviewId === inst.id
