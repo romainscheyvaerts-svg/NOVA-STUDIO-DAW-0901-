@@ -176,7 +176,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [markerContextMenu, setMarkerContextMenu] = useState<{ x: number; y: number; marker: Marker } | null>(null);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
 
-  const [headerWidth, setHeaderWidth] = useState(256);
+  // 296 px : nom de piste lisible avec FX, M, S, envois et R sur la même ligne.
+  const [headerWidth, setHeaderWidth] = useState(296);
   const [isResizingHeader, setIsResizingHeader] = useState(false);
   const [isDraggingMinimap, setIsDraggingMinimap] = useState(false);
 

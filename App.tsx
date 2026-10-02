@@ -647,6 +647,16 @@ export default function App() {
     try { return localStorage.getItem('nova_headphones') === '1'; } catch { return false; }
   });
   useEffect(() => { audioEngine.setInputMonitoring(inputMonitoring); }, [inputMonitoring]);
+  // Bouton « Retour casque » des pistes : il demande ici d'allumer / couper le retour.
+  useEffect(() => {
+    const onSet = (e: Event) => {
+      const on = !!(e as CustomEvent).detail;
+      setInputMonitoringState(on);
+      try { localStorage.setItem('nova_headphones', on ? '1' : '0'); } catch { /* */ }
+    };
+    window.addEventListener('nova:set-monitoring', onSet);
+    return () => window.removeEventListener('nova:set-monitoring', onSet);
+  }, []);
   const setInputMonitoring = (on: boolean) => {
     setInputMonitoringState(on);
     try { localStorage.setItem('nova_headphones', on ? '1' : '0'); } catch { /* stockage indisponible */ }

@@ -121,6 +121,10 @@ export class AudioEngine {
   // il n'est pas concerné.
   private monitorGain: GainNode | null = null;
   private inputMonitoring = false;
+  /** Volume du retour de la voix dans le casque (0-2), indépendant du niveau enregistré. */
+  private monitorLevel = (() => {
+    try { const v = parseFloat(localStorage.getItem('nova_monitor_level') || ''); return Number.isFinite(v) ? Math.min(2, Math.max(0, v)) : 1; } catch { return 1; }
+  })();
   private monitoringTrackId: string | null = null;
   private recordingTrackId: string | null = null;
   private recStartTime: number = 0;
@@ -784,7 +788,7 @@ export class AudioEngine {
     if (dsp.inputAnalyzer) this.monitorSource.connect(dsp.inputAnalyzer);
     if (this.monitorGain) { try { this.monitorGain.disconnect(); } catch { /* déjà déconnecté */ } }
     this.monitorGain = this.ctx.createGain();
-    this.monitorGain.gain.value = this.inputMonitoring ? 1 : 0;
+    this.monitorGain.gain.value = this.inputMonitoring ? this.monitorLevel : 0;
     this.monitorSource.connect(this.monitorGain);
     this.monitorGain.connect(dsp.input);
   }
@@ -792,8 +796,19 @@ export class AudioEngine {
   /** Active / coupe le retour du micro dans le casque. */
   public setInputMonitoring(on: boolean) {
     this.inputMonitoring = on;
-    if (this.monitorGain && this.ctx) this.monitorGain.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.01);
+    if (this.monitorGain && this.ctx) this.monitorGain.gain.setTargetAtTime(on ? this.monitorLevel : 0, this.ctx.currentTime, 0.01);
+    try { window.dispatchEvent(new CustomEvent('nova:monitoring', { detail: on })); } catch { /* */ }
   }
+
+  /** Volume du retour casque (la prise enregistrée n'est pas affectée). */
+  public setMonitorLevel(level: number) {
+    this.monitorLevel = Math.min(2, Math.max(0, level));
+    try { localStorage.setItem('nova_monitor_level', String(this.monitorLevel)); } catch { /* */ }
+    if (this.monitorGain && this.ctx && this.inputMonitoring) this.monitorGain.gain.setTargetAtTime(this.monitorLevel, this.ctx.currentTime, 0.01);
+    try { window.dispatchEvent(new CustomEvent('nova:monitor-level', { detail: this.monitorLevel })); } catch { /* */ }
+  }
+
+  public getMonitorLevel() { return this.monitorLevel; }
 
   public isInputMonitoring() { return this.inputMonitoring; }
 

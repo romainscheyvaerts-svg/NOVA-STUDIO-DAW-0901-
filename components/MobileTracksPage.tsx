@@ -1,3 +1,4 @@
+import MonitorControl from './MonitorControl';
 import React, { useState } from 'react';
 import MobileContainer from './MobileContainer';
 import { Track, Clip, TrackType, TrackSend } from '../types';
@@ -85,6 +86,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
   onOpenCatalog
 }) => {
   const [expandedSends, setExpandedSends] = useState<Record<string, boolean>>({});
+  const [expandedFx, setExpandedFx] = useState<Record<string, boolean>>({});
   const [showBeatImportMenu, setShowBeatImportMenu] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   
@@ -184,6 +186,15 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                 >
                   <span className="text-[10px] font-bold">S</span>
                 </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setExpandedFx(prev => ({ ...prev, [track.id]: !prev[track.id] })); }}
+                  className={`h-8 px-2 rounded-lg flex items-center justify-center gap-0.5 text-[10px] font-black transition-all ${
+                    expandedFx[track.id] ? 'bg-cyan-500 text-black' : track.plugins.length ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/5 text-slate-500'
+                  }`}
+                  aria-label="Effets de la piste"
+                >
+                  FX{track.plugins.length ? <span className="opacity-80">{track.plugins.length}</span> : <i className="fas fa-plus text-[7px] ml-0.5" />}
+                </button>
                 {canHaveSends(track) && (
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleSends(track.id); }}
@@ -206,6 +217,29 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Effets : accès direct, juste sous l'en-tête */}
+            {expandedFx[track.id] && (
+              <div className="px-4 pb-2 flex gap-2 overflow-x-auto no-scrollbar" onClick={e => e.stopPropagation()}>
+                {track.plugins.map(p => (
+                  <button key={p.id} type="button" onClick={() => onOpenPlugin?.(track.id, p.id)}
+                    className={`shrink-0 h-9 px-3 rounded-lg text-[12px] font-bold border ${p.isEnabled ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200' : 'border-white/10 bg-white/5 text-slate-500 line-through'}`}>
+                    {p.name || p.type}
+                  </button>
+                ))}
+                {onRequestAddPlugin && (
+                  <button type="button" onClick={(e) => onRequestAddPlugin(track.id, e.clientX, e.clientY)}
+                    className="shrink-0 h-9 px-3 rounded-lg text-[12px] font-bold bg-cyan-500 text-black">
+                    <i className="fas fa-plus mr-1 text-[10px]" /> Effet
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Retour casque de la piste qui enregistre */}
+            {track.isTrackArmed && (
+              <div className="px-4 pb-2"><MonitorControl /></div>
+            )}
 
             {/* Volume Fader */}
             <div className="px-4 pb-2" data-nova-target={`vol-${track.id}`}>

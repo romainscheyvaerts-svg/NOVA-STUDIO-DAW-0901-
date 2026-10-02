@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Track, PluginType, PluginInstance, TrackType, TrackSend } from '../types';
 import { isPluginBaked, isFreezeStale, isTrackFrozen } from '../utils/freeze';
 import { useRecFrozen } from '../utils/recFreezeStore';
+import MonitorControl from './MonitorControl';
 
 interface TrackHeaderProps {
   track: Track;
@@ -86,6 +87,20 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   onDragStartTrack, onDragOverTrack, onDropTrack, isDraggingOver, onSwapInstrument
 }) => {
   const [isDragOverFX, setIsDragOverFX] = useState(false);
+  // Menu « FX » toujours accessible (les pastilles du bas disparaissent quand la piste est basse)
+  const [fxMenu, setFxMenu] = useState(false);
+  const fxBtnRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!fxMenu) return;
+    const close = (e: MouseEvent | TouchEvent) => {
+      const t = e.target as Node;
+      if (fxBtnRef.current?.parentElement?.contains(t)) return;
+      setFxMenu(false);
+    };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('touchstart', close);
+    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('touchstart', close); };
+  }, [fxMenu]);
   const [isRenaming, setIsRenaming] = useState(false);
   const [isAdjustingVolume, setIsAdjustingVolume] = useState(false);
   const [showSends, setShowSends] = useState(false);
@@ -404,6 +419,51 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
         
         <div className="flex space-x-1 shrink-0">
+          {track.id !== 'master' && (
+            <div className="relative">
+              <button
+                ref={fxBtnRef}
+                type="button"
+                data-nova-target={`fx-${track.id}`}
+                onClick={(e) => { e.stopPropagation(); setFxMenu(v => !v); }}
+                title="Effets de la piste : ouvrir, activer, ajouter"
+                className={`relative w-7 h-7 rounded-md flex items-center justify-center transition-all border text-[9px] font-black ${fxMenu ? 'bg-cyan-500 border-cyan-400 text-black' : insertPlugins.length ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
+              >
+                FX
+                {insertPlugins.length > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] rounded-full bg-cyan-400 text-black text-[8px] leading-[14px] text-center">{insertPlugins.length}</span>}
+              </button>
+              {fxMenu && (
+                <div className="fixed z-[600] w-56 rounded-xl border border-white/10 bg-[#14161c] p-1.5 shadow-2xl" onClick={e => e.stopPropagation()}
+                  style={(() => { const r = fxBtnRef.current?.getBoundingClientRect(); return r ? { top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - 232)) } : {}; })()}>
+                  {insertPlugins.length === 0 && <p className="px-2 py-1.5 text-[11px] text-slate-400">Aucun effet sur cette piste.</p>}
+                  {insertPlugins.map(p => {
+                    const baked = isPluginBaked(track, track.plugins.indexOf(p));
+                    return (
+                      <div key={p.id} className="flex items-center gap-1 rounded-lg hover:bg-white/5">
+                        <button type="button" disabled={baked && p.type !== 'VST3'}
+                          onClick={(e) => { setFxMenu(false); handleFXClick(e, p); }}
+                          className={`flex-1 min-w-0 truncate px-2 py-1.5 text-left text-[12px] font-semibold ${p.isEnabled ? 'text-white' : 'text-slate-500 line-through'}`}>
+                          {p.name || getAbbr(p.type, p.name)}
+                        </button>
+                        <button type="button" disabled={baked} onClick={(e) => togglePluginBypass(e, p)}
+                          title={p.isEnabled ? 'Désactiver' : 'Activer'}
+                          className={`w-7 h-7 rounded-md flex items-center justify-center ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}>
+                          <i className="fas fa-power-off text-[9px]" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {onRequestAddPlugin && (
+                    <button type="button"
+                      onClick={(e) => { setFxMenu(false); const r = fxBtnRef.current?.getBoundingClientRect(); onRequestAddPlugin(track.id, r ? r.left : e.clientX, r ? r.bottom + 4 : e.clientY); }}
+                      className="mt-1 w-full rounded-lg bg-cyan-500/15 px-2 py-1.5 text-left text-[12px] font-bold text-cyan-300 hover:bg-cyan-500/25">
+                      <i className="fas fa-plus mr-1.5 text-[10px]" /> Ajouter un effet
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <button
             title={track.isMuted ? "Réactiver le son de cette piste" : "Rendre cette piste muette"}
             onClick={handleMuteToggle}
@@ -445,6 +505,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       </div>
       
+      {track.isTrackArmed && <div className="mt-1 relative z-10"><MonitorControl compact /></div>}
+
       <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-2 rounded-lg border border-white/5 relative z-10">
         <div 
           onMouseDown={handlePanMouseDown}
