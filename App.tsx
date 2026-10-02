@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup } from './types';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
@@ -62,7 +62,7 @@ import { analyseMix, takeStats, levelsForAI } from './utils/mixAnalysis';
 import { novaSpotlight } from './utils/novaSpotlight';
 import { openBuyBeat, openProMix, openStudioSession, openBattle, getCatalogBeat } from './utils/studioLinks';
 import { parseLocalCommand } from './utils/novaCommands';
-import { listTakes, selectTakeActions, takeNumberOf } from './utils/takes';
+import { listTakes, selectTakeActions, takeNumberOf, compTakeInZone, activeTakeInZone, CompZone } from './utils/takes';
 import { playheadStore } from './utils/playheadStore';
 import { useLatestCallback } from './utils/useLatestCallback';
 import RecordingCoach from './components/RecordingCoach';
@@ -2845,6 +2845,22 @@ export default function App() {
   const [lyricsOpen, setLyricsOpen] = useState(false);
   // Extrait 30 s / démo taguée
   const [shareOpen, setShareOpen] = useState(false);
+  // Comping : zones où garder une prise (parties du morceau, boucle).
+  const compZones = useMemo<CompZone[]>(() => {
+    const zones: CompZone[] = [];
+    if (state.loopEnd > state.loopStart + 0.2) zones.push({ start: state.loopStart, end: state.loopEnd, label: 'La boucle' });
+    (state.markers || []).filter(m => m.type === 'REGION' && typeof m.endTime === 'number' && m.endTime! > m.time)
+      .forEach(m => zones.push({ start: m.time, end: m.endTime!, label: m.name }));
+    return zones;
+  }, [state.loopStart, state.loopEnd, state.markers]);
+  const handleCompTake = useCallback((trackId: string, n: number, zone: CompZone) => {
+    setState(produce((draft: DAWState) => {
+      const t = draft.tracks.find(x => x.id === trackId);
+      if (t) t.clips = compTakeInZone(t as Track, n, zone);
+    }));
+    setAiNotification(`🎚️ Prise ${n} gardée sur « ${zone.label} » (les autres prises restent dessous, Annuler pour revenir).`);
+  }, [setState]);
+
   // Punch-in / punch-out : zone de la boucle, pré-roll, arrêt automatique
   const punchRecRef = useRef<{ in: number; out: number; stopping?: boolean } | null>(null);
   const handleTogglePunch = useCallback(() => {
@@ -3566,6 +3582,26 @@ export default function App() {
       case 'SEEK':
         handleSeek(Math.max(0, Number(p.time) || 0));
         break;
+
+      case 'COMP_TAKE': {
+        // { take, zone?, trackId? } : « garde la prise 2 sur la partie 2 »
+        const take = Number(p.take);
+        const norm = (v: string) => v.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const want = norm(String(p.zone || ''));
+        const st = stateRef.current;
+        const zones: CompZone[] = [];
+        if (st.loopEnd > st.loopStart + 0.2) zones.push({ start: st.loopStart, end: st.loopEnd, label: 'La boucle' });
+        (st.markers || []).filter(m => m.type === 'REGION' && typeof m.endTime === 'number' && m.endTime! > m.time)
+          .forEach(m => zones.push({ start: m.time, end: m.endTime!, label: m.name }));
+        const zone = want ? zones.find(z => norm(z.label) === want) || zones.find(z => norm(z.label).includes(want) || want.includes(norm(z.label))) : undefined;
+        const track = (p.trackId ? findTrack(p.trackId) : undefined)
+          || st.tracks.find(t => t.type === TrackType.AUDIO && listTakes(t).some(x => x.n === take));
+        if (!track || !Number.isFinite(take)) { notify(`Je ne trouve pas la prise ${p.take}`); break; }
+        if (want && !zone) { notify(`Je ne trouve pas la partie « ${p.zone} » (ajoute des repères de structure ou une boucle)`); break; }
+        if (zone) handleCompTake(track.id, take, zone);
+        else (selectTakeActions(track, take) || []).forEach(a => executeAIAction(a));
+        break;
+      }
 
       case 'OPEN_TAKE_HOME': {
         setTakeHomeOpen(true);
@@ -4438,6 +4474,9 @@ export default function App() {
           const take = listTakes(t).find(x => x.n === n);
           if (listen && take) { handleSeek(take.start); if (!stateRef.current.isPlaying) void handleTogglePlay(); }
         }}
+        compZones={compZones}
+        onCompTake={(trackId, n, zone) => handleCompTake(trackId, n, zone)}
+        activeTakeInZone={(trackId, zone) => { const t = state.tracks.find(x => x.id === trackId); return t ? activeTakeInZone(t, zone) : null; }}
         onAskNova={() => { setVocalToolsOpen(false); if (isMobile) setActiveMobileTab('NOVA'); setMixGuideRequest(n => n + 1); }}
       />
 

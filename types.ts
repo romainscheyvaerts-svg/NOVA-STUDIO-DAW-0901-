@@ -513,7 +513,8 @@ export type AIActionType =
   | 'LOAD_DAILY_CHALLENGE'
   | 'GOTO_SECTION'
   | 'SET_PUNCH'
-  | 'OPEN_TAKE_HOME';
+  | 'OPEN_TAKE_HOME'
+  | 'COMP_TAKE';
 
 export interface AIAction {
   action: AIActionType;

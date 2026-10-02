@@ -55,6 +55,14 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   const less = /\b(baisse|diminue|moins fort|plus bas|reduis|moins de)\b/.test(msg);
   const say = (text: string, ...actions: AIAction[]): LocalCommandResult => ({ text, actions });
 
+  // Comping : « garde la prise 2 sur la partie 2 / le refrain / la boucle »
+  const compCmd = msg.match(/\b(garde|prends|choisis|mets)\b.*\bprise (\d+)\b.*\b(sur|pour|dans) (l |la |le |les )?(.+)$/);
+  if (compCmd && voice && !/\btout\b|\bentier/.test(compCmd[5])) {
+    const n = parseInt(compCmd[2], 10);
+    const zone = compCmd[5].trim();
+    return say(`🎚️ Je garde la prise ${n} sur « ${zone} » (les autres prises restent dessous).`,
+      { action: 'COMP_TAKE', payload: { take: n, zone, trackId: voice.id } });
+  }
   // Session à emporter : « emporte la session », « je veux continuer chez moi / sur mon iPad »
   if (/\b(emport|chez (moi|lui|elle|toi)|sur (mon|son|ton) (ipad|ordi|ordinateur|pc|mac)|session en ligne|qr ?code)/.test(msg)) {
     return say('🏠 Je mets la session en ligne : lien et QR code pour la continuer chez toi, et je peux la ranger dans ton compte Make Music.', { action: 'OPEN_TAKE_HOME', payload: {} });
