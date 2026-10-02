@@ -141,6 +141,13 @@ export async function renderTrackFreeze(track: Track, upTo: number, onStep?: (ms
   };
 }
 
+/** Piste d'instrument VST vue comme une piste audio : son rendu = son unique clip. */
+const instrumentAsAudio = (t: Track): Track => ({
+  ...t, type: TrackType.AUDIO, isFrozen: false, vstInstrument: undefined,
+  frozenClip: undefined, frozenClipIds: undefined, frozenUpToPluginIndex: undefined, frozenSourceSig: undefined, frozenPluginSig: undefined,
+  clips: [{ ...t.frozenClip!, start: 0, offset: 0 }],
+});
+
 /** Effets VST3 actifs (pas contournés) sur la piste. */
 const activeVst = (t: Track) => (t.plugins || []).some(p => isVst(p) && p.isEnabled);
 
@@ -150,6 +157,8 @@ const activeVst = (t: Track) => (t.plugins || []).some(p => isVst(p) && p.isEnab
  */
 export function tracksNeedingVstRender(tracks: Track[]): Track[] {
   return tracks.filter(t => {
+    // Instrument VST : son rendu (frozenClip) suit les notes, il n'est jamais remplacé ici.
+    if (t.vstInstrument) return false;
     if (!canBakeTrack(t) || !activeVst(t) || (t.clips || []).length === 0) return false;
     if (!t.frozenClip) return true;
     // Sur PC (pont connecté), un rendu dont les clips ont bougé est refait :
@@ -192,6 +201,25 @@ export async function prepareTracksForOffline(tracks: Track[], onStep?: (msg: st
   const missingVst: string[] = [];
   const out: Track[] = [];
   for (const t of tracks) {
+    // Instrument VST rendu + effets VST3 : les effets sont rendus sur le son de l'instrument.
+    if (t.vstInstrument && isTrackFrozen(t) && activeVst(t) && canBakeTrack(t)) {
+      if (novaBridge.isConnected()) {
+        try {
+          const src = instrumentAsAudio(t);
+          const r = await renderTrackFreeze(src, lastVstIndex(src), onStep);
+          temp.push(r.clip.bufferId!);
+          const ft: Track = { ...src, isFrozen: true };
+          applyFreezeResult(ft, r);
+          out.push(ft);
+          continue;
+        } catch (e) {
+          console.warn('[Export] Rendu VST impossible', e);
+        }
+      }
+      missingVst.push(t.name);
+      out.push(t);
+      continue;
+    }
     if (isTrackFrozen(t) || !activeVst(t) || !canBakeTrack(t)) { out.push(t); continue; }
     if (t.frozenClip && !isFreezeStale(t) && freezeIndex(t) >= lastVstIndex(t)) {
       out.push({ ...t, isFrozen: true });

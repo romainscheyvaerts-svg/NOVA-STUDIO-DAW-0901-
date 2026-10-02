@@ -7,6 +7,7 @@
  *   par un Worker dédié (public/worklets/vst-bridge-worker-v4.js) relié à chaque
  *   AudioWorklet d'effet VST3.
  * - Rendu hors temps réel (RENDER) en trame binaire pour le gel / l'export.
+ * - v5 : instruments VST3 (RENDER_INSTRUMENT : notes -> audio, mode instru).
  *
  * Protocole complet : bridge-python/nova_bridge_server.py.
  */
@@ -19,6 +20,8 @@ export interface BridgePlugin {
   path: string;
   uid: string;
   pluginName?: string | null;
+  /** Instrument (pont v5) : true / false, null = pas encore lu par le pont. */
+  isInstrument?: boolean | null;
 }
 
 export type BridgeStatus = 'idle' | 'connecting' | 'connected' | 'unavailable';
@@ -28,6 +31,22 @@ export interface BridgeState {
   error: string | null;
   version: number | null;
   pluginCount: number;
+  /** Le pont sait rendre des instruments VST3 (v5 et plus). */
+  instruments: boolean;
+  /** Lecture des plugins en cours sur le pont (instrument ou effet ?) : [lus, total]. */
+  instrumentsPending: [number, number] | null;
+}
+
+/** Première version du pont qui rend les instruments VST3. */
+export const BRIDGE_INSTRUMENTS_VERSION = 5;
+
+export interface InstrumentNote {
+  pitch: number;
+  /** Secondes depuis le début du rendu. */
+  start: number;
+  duration: number;
+  /** 0–1 */
+  velocity: number;
 }
 
 export interface LoadResult {
@@ -36,6 +55,7 @@ export interface LoadResult {
   latencySamples: number;
   bufferLatencySamples: number;
   stateB64: string | null;
+  isInstrument: boolean;
 }
 
 type SlotEvent =
@@ -47,7 +67,7 @@ const align4 = (n: number) => (n + 3) & ~3;
 class NovaBridgeService {
   readonly url = 'ws://127.0.0.1:8765';
   private ws: WebSocket | null = null;
-  private state: BridgeState = { status: 'idle', error: null, version: null, pluginCount: 0 };
+  private state: BridgeState = { status: 'idle', error: null, version: null, pluginCount: 0, instruments: false, instrumentsPending: null };
   private listeners = new Set<(s: BridgeState) => void>();
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void; timer: number }>();
   private nextId = 1;
@@ -103,7 +123,10 @@ class NovaBridgeService {
         this.ws = ws;
         try {
           const hello = await this.request({ action: 'HELLO' }, 3000);
-          this.setBridgeState({ status: 'connected', error: null, version: hello.version ?? null });
+          this.setBridgeState({
+            status: 'connected', error: null, version: hello.version ?? null,
+            instruments: !!hello.instruments && (Number(hello.version) || 0) >= BRIDGE_INSTRUMENTS_VERSION,
+          });
           this.ensureWorker();
           done(true);
           this.listPlugins().catch(() => { /* liste demandée plus tard */ });
@@ -122,7 +145,7 @@ class NovaBridgeService {
         this.pending.clear();
         if (wasConnected) {
           this.worker?.postMessage({ type: 'close' });
-          this.setBridgeState({ status: 'idle', error: 'Le pont VST a été fermé.' });
+          this.setBridgeState({ status: 'idle', error: 'Le pont VST a été fermé.', instrumentsPending: null });
         }
         done(false, 'Pont VST introuvable');
       };
@@ -205,10 +228,18 @@ class NovaBridgeService {
       path: p.path,
       uid: p.uid || '',
       pluginName: p.plugin_name ?? null,
+      isInstrument: typeof p.is_instrument === 'boolean' ? p.is_instrument : (p.category === 'Instrument' ? true : null),
     }));
-    this.setBridgeState({ pluginCount: this.plugins.length });
+    const prog = Array.isArray(r.probe_progress) ? r.probe_progress : null;
+    this.setBridgeState({
+      pluginCount: this.plugins.length,
+      instrumentsPending: r.instruments_pending ? [Number(prog?.[0]) || 0, Number(prog?.[1]) || 0] : null,
+    });
     return this.plugins;
   }
+
+  /** Instruments VST3 du PC (la liste suit la lecture faite par le pont). */
+  getCachedInstruments(): BridgePlugin[] { return this.plugins.filter(p => p.isInstrument === true); }
 
   /** Identifiant de slot unique (un même id de plugin peut exister deux fois après un copier-coller). */
   claimSlot(pluginId: string): string {
@@ -238,6 +269,7 @@ class NovaBridgeService {
       latencySamples: Number(r.latency_samples) || 0,
       bufferLatencySamples: Number(r.buffer_latency_samples) || 0,
       stateB64: r.state || null,
+      isInstrument: !!r.is_instrument,
     };
   }
 
@@ -248,6 +280,12 @@ class NovaBridgeService {
   async getPluginState(slotId: string): Promise<string | null> {
     const r = await this.request({ action: 'GET_STATE', slot_id: slotId });
     return r.state || null;
+  }
+
+  /** Empreinte de l'état (sans l'état) : suivi léger d'une fenêtre de plugin ouverte. */
+  async getPluginStateHash(slotId: string): Promise<string | null> {
+    const r = await this.request({ action: 'GET_STATE', slot_id: slotId, hash_only: true });
+    return r.hash || null;
   }
 
   async setPluginState(slotId: string, stateB64: string): Promise<boolean> {
@@ -298,6 +336,26 @@ class NovaBridgeService {
       ws.send(buf);
     });
     return res.channels as Float32Array[];
+  }
+
+  /**
+   * Instrument VST3 (pont v5) : notes -> audio stéréo, hors temps réel.
+   * slotId : son réglé dans l'instance chargée (fenêtre comprise) ; sinon
+   * instance temporaire avec path / stateB64. Durée = lengthSeconds + tailSeconds.
+   */
+  async renderInstrument(opts: {
+    slotId?: string | null; path?: string; pluginName?: string | null; stateB64?: string | null;
+    sampleRate: number; notes: InstrumentNote[]; lengthSeconds: number; tailSeconds?: number;
+  }): Promise<Float32Array[]> {
+    if (!this.state.instruments) throw new Error('Mets à jour le pont VST pour utiliser tes instruments.');
+    const seconds = opts.lengthSeconds + (opts.tailSeconds || 0);
+    const r = await this.request({
+      action: 'RENDER_INSTRUMENT', slot_id: opts.slotId || null, path: opts.path || null,
+      plugin_name: opts.pluginName || null, state: opts.slotId ? null : (opts.stateB64 || null),
+      sample_rate: Math.round(opts.sampleRate), notes: opts.notes,
+      length_seconds: opts.lengthSeconds, tail_seconds: opts.tailSeconds || 0,
+    }, 60000 + seconds * 4000);
+    return r.channels as Float32Array[];
   }
 
   // --- Audio temps réel ---------------------------------------------------

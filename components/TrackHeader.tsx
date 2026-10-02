@@ -26,6 +26,7 @@ const dragHorizontal = (e: React.MouseEvent, startPos: number, apply: (pos: numb
 import { Track, PluginType, PluginInstance, TrackType, TrackSend } from '../types';
 import { isPluginBaked, isFreezeStale, isTrackFrozen } from '../utils/freeze';
 import { useRecFrozen } from '../utils/recFreezeStore';
+import { useInstrumentStatus } from '../utils/instrumentStore';
 import MonitorControl from './MonitorControl';
 
 interface TrackHeaderProps {
@@ -373,7 +374,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const frozen = isTrackFrozen(track);
   const collabRole = useCollabRole();
   const recFrozen = useRecFrozen(track.id);
-  const freezeStale = isFreezeStale(track);
+  // Instrument VST du PC : son rendu suit les notes (pas un gel classique).
+  const inst = track.vstInstrument;
+  const instStatus = useInstrumentStatus(track.id);
+  const freezeStale = !inst && isFreezeStale(track);
 
   return (
     <div 
@@ -421,7 +425,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 className={`text-[12px] font-bold tracking-wide truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-400'}`}
               >
                 {track.name}
-                {frozen && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400" title="Piste gelée : lue depuis son rendu"></i>}
+                {frozen && !inst && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400" title="Piste gelée : lue depuis son rendu"></i>}
+                {inst && <i className="fas fa-plug text-[8px] ml-1 text-fuchsia-300" title={`Instrument VST du PC : ${inst.name}`} aria-label={`Instrument VST : ${inst.name}`}></i>}
+                {inst && (instStatus.rendering || instStatus.loading) && <span role="status" className="ml-1 text-[9px] font-normal normal-case text-fuchsia-300"><i className="fas fa-circle-notch fa-spin mr-0.5"></i>rendu…</span>}
+                {inst && !instStatus.rendering && instStatus.error && <i className="fas fa-exclamation-triangle text-[8px] ml-1 text-amber-400" title={`Rendu impossible (${instStatus.error}) : le synthé Nova joue les notes.`}></i>}
                 {!frozen && recFrozen === 'frozen' && <i className="fas fa-snowflake text-[8px] ml-1 text-sky-300" title="Figée pendant l'enregistrement (effets à latence)" aria-label="Figée pendant l'enregistrement (effets à latence)"></i>}
                 {!frozen && recFrozen === 'pending' && <i className="fas fa-snowflake text-[8px] ml-1 text-sky-300/60 animate-pulse" title="Préparation de la prise…" aria-label="Préparation de la prise"></i>}
                 {freezeStale && <i className="fas fa-exclamation-triangle text-[8px] ml-1 text-amber-400" title="Les prises ont changé depuis le rendu : il sera refait à la prochaine sauvegarde sur PC (pont VST)."></i>}

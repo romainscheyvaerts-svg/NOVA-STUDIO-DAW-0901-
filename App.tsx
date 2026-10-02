@@ -30,7 +30,10 @@ import { dailyChallengeId } from './utils/dailyChallenge';
 import { detectSections, sectionColor } from './utils/songSections';
 import { SessionSerializer } from './services/SessionSerializer';
 // import { getAIProductionAssistance } from './services/AIService'; 
-import { novaBridge } from './services/NovaBridge';
+import { novaBridge, BridgePlugin } from './services/NovaBridge';
+import { clearInstrumentRender, instrumentFromPlugin, isInstrumentRenderCurrent } from './services/VstInstrument';
+import { useVstInstruments } from './hooks/useVstInstruments';
+import VstInstrumentPicker from './components/VstInstrumentPicker';
 import { vstStateEvents } from './engine/VSTPluginNode';
 import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult } from './services/VstFreeze';
 import { canBakeTrack, hasVst, freezeSignature } from './utils/freeze';
@@ -73,7 +76,7 @@ import ShareClipModal from './components/ShareClipModal';
 import TakeHomeModal from './components/TakeHomeModal';
 import ProGateModal from './components/ProGateModal';
 import CollabPanel, { CollabMessage } from './components/CollabPanel';
-import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, contentOf, mixOf, sigOf, ownsContent } from './services/Collab';
+import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
 import { collabRoleStore } from './utils/collabStore';
 import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from './services/Billing';
 import { catalogSupabase } from './services/supabase';
@@ -408,6 +411,8 @@ const useUndoRedo = (initialState: DAWState) => {
   }, []);
 
   const setVisualState = useCallback((updater: Partial<DAWState>) => { setHistory(curr => ({ ...curr, present: { ...curr.present, ...updater } })); }, []);
+  // Projet modifié SANS étape d'annulation (rendu d'un instrument VST qui suit les notes).
+  const setSilently = useCallback((fn: (prev: DAWState) => DAWState) => { setHistory(curr => ({ ...curr, present: fn(curr.present) })); }, []);
 
   // Annuler / rétablir ne touche QUE au projet. Restaurer l'état entier
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
@@ -433,7 +438,7 @@ const useUndoRedo = (initialState: DAWState) => {
   }, []);
   // Prochaine modification = nouvelle étape d'annulation, même dans l'anti-rebond.
   const breakHistory = useCallback(() => setHistory(curr => ({ ...curr, lastChangeAt: 0 })), []);
-  return { state: history.present, setState, setVisualState, undo, redo, isBufferInHistory, breakHistory, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
+  return { state: history.present, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, breakHistory, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
 };
 
 /** Onglet ouvert au retour de Stripe (?nova_paid=…) : confirme et invite à revenir au studio. */
@@ -698,7 +703,7 @@ function Studio() {
     punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 }
   };
 
-  const { state, setState, setVisualState, undo, redo, isBufferInHistory, breakHistory, canUndo, canRedo } = useUndoRedo(initialState);
+  const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, breakHistory, canUndo, canRedo } = useUndoRedo(initialState);
   
   const [theme, setTheme] = useState<Theme>('dark');
   useEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
@@ -2262,6 +2267,12 @@ function Studio() {
     if (!track) return;
     const notify = (msg: string, ms = 2500) => { setAiNotification(msg); setTimeout(() => setAiNotification(null), ms); };
 
+    // Instrument VST du PC : la piste est déjà lue depuis son rendu, mis à jour tout seul.
+    if (track.vstInstrument) {
+      notify(`🎹 « ${track.name} » joue ${track.vstInstrument.name} : son rendu se met à jour tout seul quand tu modifies les notes.`, 4000);
+      return;
+    }
+
     if (track.isFrozen) {
       // Sans le pont, une piste dont les VST3 sont dans le rendu ne peut pas
       // repasser en direct : les VST3 ne sonneraient plus.
@@ -3299,6 +3310,45 @@ function Studio() {
   const contentDirtyRef = useRef(new Set<string>());
   const mixTimersRef = useRef(new Map<string, number>());
 
+  // --- Instruments VST3 du PC sur les pistes MIDI (mode instru) ---------------------
+  // Les notes sont rendues par le pont et jouées comme un rendu gelé (sauvegardé,
+  // exporté, envoyé en collaboration) : le son du VST se joue aussi sans pont.
+  const notifyInstrument = useCallback((msg: string, ms = 5000) => {
+    setAiNotification(msg);
+    setTimeout(() => setAiNotification(null), ms);
+  }, []);
+  const vstInstruments = useVstInstruments({
+    tracks: state.tracks, bpm: state.bpm, stateRef, setSilently,
+    canRender: (t) => { const c = collabRef.current; return !c || ownsContent(t, c.role); },
+    releaseBuffer: (id) => releaseBufferIfUnused(id, []),
+    notify: (msg) => notifyInstrument(msg, 6000),
+  });
+
+  const handleChooseInstrument = useCallback((trackId: string, p: BridgePlugin) => {
+    let old: string | undefined;
+    setState(produce((d: DAWState) => {
+      const t = d.tracks.find(x => x.id === trackId);
+      if (!t) return;
+      // Ancien son retiré : le synthé Nova joue en attendant le rendu du nouveau.
+      if (t.vstInstrument || t.isFrozen) { old = t.frozenClip?.bufferId; clearInstrumentRender(t); }
+      t.vstInstrument = instrumentFromPlugin(p);
+    }));
+    if (old) setTimeout(() => releaseBufferIfUnused(old, []), 0);
+    notifyInstrument(`🎹 ${p.name} sur ta piste : clique « Choisir le son » pour ouvrir sa fenêtre sur ton PC.`);
+  }, [setState, notifyInstrument]);
+
+  const handleUseSynth = useCallback((trackId: string) => {
+    let old: string | undefined;
+    setState(produce((d: DAWState) => {
+      const t = d.tracks.find(x => x.id === trackId);
+      if (!t?.vstInstrument) return;
+      old = t.frozenClip?.bufferId;
+      clearInstrumentRender(t);
+      delete t.vstInstrument;
+    }));
+    if (old) setTimeout(() => releaseBufferIfUnused(old, []), 0);
+  }, [setState]);
+
   const rememberTrack = (t: Track) => {
     knownSigRef.current.set('mix:' + t.id, sigOf(mixOf(t)));
     knownSigRef.current.set('content:' + t.id, sigOf(contentOf(t)));
@@ -3374,6 +3424,23 @@ function Studio() {
           if (ct.drumMachine !== undefined) t.drumMachine = ct.drumMachine;
           if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
           t.clips = Array.isArray(ct.clips) ? ct.clips : t.clips;
+          // Instrument VST du beatmaker : on reçoit le rendu de ses notes.
+          if (ct.vstInstrument) {
+            const keep = t.vstInstrument?.path === ct.vstInstrument.path ? t.vstInstrument.stateB64 : undefined;
+            t.vstInstrument = { ...ct.vstInstrument, ...(keep ? { stateB64: keep } : {}) };
+            const r = ct.instrumentRender;
+            if (r?.frozenClip) {
+              t.isFrozen = true;
+              t.frozenClip = r.frozenClip;
+              t.frozenUpToPluginIndex = -1;
+              t.frozenClipIds = r.frozenClipIds;
+              t.frozenSourceSig = r.frozenSourceSig;
+              delete t.frozenPluginSig;
+            } else clearInstrumentRender(t);
+          } else if (t.vstInstrument) {
+            clearInstrumentRender(t);
+            delete t.vstInstrument;
+          }
         }));
         break;
       }
@@ -3407,8 +3474,7 @@ function Studio() {
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!c || !t) return;
     const content = contentOf(t);
-    const bufferIds = Array.from(new Set((t.clips || []).map(cl => cl.bufferId).filter(Boolean) as string[]));
-    const audio = await uploadBuffers(c.client.link, bufferIds);
+    const audio = await uploadBuffers(c.client.link, contentBufferIds(t));
     const isNew = !knownSigRef.current.has('mix:' + t.id);
     await c.client.send('content', { trackId, content, audio, ...(isNew ? { mix: mixOf(t) } : {}) });
     knownSigRef.current.set('content:' + t.id, sigOf(content));
@@ -5190,7 +5256,23 @@ function Studio() {
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
           <div className="fixed inset-0 z-[250] bg-[#0c0d10] flex flex-col animate-in slide-in-from-bottom-10 duration-200">
              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement de l'éditeur…</div>}>
-               <PianoRoll track={state.tracks.find(t => t.id === midiEditorOpen.trackId)!} clipId={midiEditorOpen.clipId} bpm={state.bpm} currentTime={state.currentTime} onUpdateTrack={handleUpdateTrack} onClose={() => setMidiEditorOpen(null)} />
+               <PianoRoll track={state.tracks.find(t => t.id === midiEditorOpen.trackId)!} clipId={midiEditorOpen.clipId} bpm={state.bpm} currentTime={state.currentTime} onUpdateTrack={handleUpdateTrack} onClose={() => setMidiEditorOpen(null)}
+                 toolbarExtra={(() => {
+                   // Mode instru seulement : le mode voix reste épuré.
+                   const t = state.tracks.find(x => x.id === midiEditorOpen.trackId);
+                   if (!t || t.type !== TrackType.MIDI || !(state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker')) return null;
+                   return (
+                     <VstInstrumentPicker
+                       track={t}
+                       stale={!!t.vstInstrument && !isInstrumentRenderCurrent(t, state.bpm)}
+                       onChoose={(p) => handleChooseInstrument(t.id, p)}
+                       onUseSynth={() => handleUseSynth(t.id)}
+                       onRetry={() => vstInstruments.retry(t.id)}
+                       onError={(msg) => notifyInstrument(`🎹 ${msg}`)}
+                     />
+                   );
+                 })()}
+               />
              </Suspense>
           </div>
       )}

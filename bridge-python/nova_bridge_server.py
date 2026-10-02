@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-NOVA BRIDGE VST3 — v4
+NOVA BRIDGE VST3 — v5
 
-Pont local entre Nova Studio (navigateur) et les plugins VST3 installés sur le PC.
+Pont local entre Nova Studio (navigateur) et les plugins VST3 installés sur le PC
+(effets, et depuis la v5 instruments : notes rendues en audio hors temps réel).
 
 Sécurité
   - écoute uniquement sur 127.0.0.1 (jamais sur le réseau local) ;
@@ -12,12 +13,25 @@ Sécurité
 
 Protocole (WebSocket ws://127.0.0.1:8765)
   Messages JSON (contrôle) — chaque réponse renvoie le « req_id » reçu :
-    HELLO / PING                → capacités, version
-    GET_PLUGIN_LIST [rescan]    → plugins installés
+    HELLO / PING                → capacités, version (5 : instruments)
+    GET_PLUGIN_LIST [rescan]    → plugins installés ; chacun porte is_instrument
+                                  (true / false / null = pas encore lu), plus
+                                  instruments_pending + probe_progress [lus, total]
+                                  pendant la lecture des plugins sans moduleinfo
     LOAD_PLUGIN  slot_id path [plugin_name] sample_rate [state]
-                                → name, vendor, latency_samples, buffer_latency_samples, state
+                                → name, vendor, latency_samples, buffer_latency_samples, state, is_instrument
     UNLOAD_PLUGIN slot_id
     GET_STATE / SET_STATE slot_id [state]   (état binaire du plugin en base64)
+                                GET_STATE renvoie aussi « hash » (SHA-1 de l'état) ;
+                                hash_only=true : sans l'état (suivi d'une fenêtre ouverte)
+    RENDER_INSTRUMENT           (v5) notes → audio, réponse en trame binaire type 2
+      {slot_id | path+plugin_name+state, sample_rate,
+       notes:[{pitch 0–127, start s, duration s, velocity 0–1 (> 1 : lu en 0–127), channel? 0–15}],
+       length_seconds, tail_seconds}
+      slot_id : son réglé dans l'instance chargée (fenêtre comprise) ; sinon
+      instance temporaire. Réponse : {action:"RENDER_INSTRUMENT", req_id, success,
+      nch:2, nframes, sample_rate} + float32 stéréo entrelacés (comme RENDER),
+      durée = length_seconds + tail_seconds.
     SHOW_EDITOR / CLOSE_EDITOR slot_id      (fenêtre native du plugin sur le PC)
     GET_PARAMS / SET_PARAM      (paramètres exposés par le plugin)
     PROCESS_AUDIO               (ancien format JSON, conservé pour compatibilité)
@@ -33,6 +47,7 @@ Protocole (WebSocket ws://127.0.0.1:8765)
       JSON requête : {action:"RENDER", req_id, slot_id | path+plugin_name+state,
                       sample_rate, nch, nframes, tail_seconds}
       Réponse : même enveloppe, JSON {action:"RENDER", req_id, success, nch, nframes}.
+      (RENDER_INSTRUMENT est aussi accepté dans cette enveloppe, sans audio.)
 
 Threads : JUCE n'accepte qu'un thread « message » pour préparer/détruire un
 plugin et afficher sa fenêtre (show_editor bloque jusqu'à la fermeture). Le
@@ -42,6 +57,7 @@ tourne dans un thread à part, le traitement audio dans un thread par slot.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -58,9 +74,11 @@ import websockets
 from websockets.asyncio.server import serve, ServerConnection
 
 import vst_host
-from vst_host import JuceThread, Slot, scan_vst3, render_offline
+import vst_probe
+from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events
 
-VERSION = 4
+VERSION = 5
+MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
 ORPHAN_GRACE_S = 90          # un slot survit 90 s à une déconnexion (rechargement de page)
@@ -150,6 +168,10 @@ class NovaBridgeServer:
         self.misc_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="misc")
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._refused: Dict[str, float] = {}
+        # Lecture des plugins sans moduleinfo.json (instrument ou effet ?)
+        self.probe_task: Optional[asyncio.Task] = None
+        self.probe_progress: Optional[List[int]] = None
+        self._probed: set = set()
 
     # --- démarrage ---------------------------------------------------------
 
@@ -190,6 +212,47 @@ class NovaBridgeServer:
         self.plugins = await self.loop.run_in_executor(self.misc_pool, scan_vst3)
         self.scan_done.set()
         logger.info(f"📦 {len(self.plugins)} plugins VST3 trouvés ({time.time() - t:.1f} s)")
+        self._start_probe()
+
+    def _start_probe(self):
+        if self.probe_task is not None and not self.probe_task.done():
+            return
+        self.probe_task = asyncio.create_task(self._probe())
+
+    async def _probe(self):
+        """Instrument ou effet ? Lu en arrière-plan pour les plugins sans
+        moduleinfo.json (cache disque : quasi instantané après la 1re fois)."""
+        try:
+            while True:
+                todo = sorted({p["path"] for p in self.plugins
+                               if p.get("is_instrument") is None and p["path"] not in self._probed})
+                if not todo:
+                    return
+                self._probed.update(todo)
+                self.probe_progress = [0, len(todo)]
+
+                def progress(done, total):
+                    self.probe_progress = [done, total]
+
+                results = await self.loop.run_in_executor(
+                    self.misc_pool, lambda: vst_probe.probe_bundles(todo, MAIN_SCRIPT, progress))
+                self.plugins = vst_probe.apply_classes(self.plugins, results)
+                n = sum(1 for p in self.plugins if p.get("is_instrument"))
+                logger.info(f"🎹 {n} instruments VST3 disponibles")
+        except Exception as e:
+            logger.warning(f"Lecture des instruments interrompue : {e}")
+        finally:
+            self.probe_progress = None
+
+    def _learn_kind(self, slot: Slot):
+        """Plugin chargé : on sait enfin si c'est un instrument."""
+        changed = False
+        for p in self.plugins:
+            if p["path"] == slot.path and p.get("is_instrument") is None:
+                p["is_instrument"] = slot.is_instrument
+                p["category"] = "Instrument" if slot.is_instrument else "Effect"
+                changed = True
+        return changed
 
     async def _reaper(self):
         while True:
@@ -286,16 +349,20 @@ class NovaBridgeServer:
     async def _a_hello(self, ws, req):
         self._reply(ws, req, {"success": True, "version": VERSION, "binary_audio": True,
                               "render": True, "editor": vst_host.HAS_PEDALBOARD,
-                              "pedalboard": vst_host.HAS_PEDALBOARD})
+                              "pedalboard": vst_host.HAS_PEDALBOARD,
+                              "instruments": vst_host.HAS_PEDALBOARD})
 
     async def _a_get_plugin_list(self, ws, req):
         if req.get("rescan"):
             self.scan_done.clear()
+            self._probed.clear()
             await self._scan()
         await self.scan_done.wait()
         effects_only = bool(req.get("effects_only"))
         plugins = [p for p in self.plugins if not effects_only or p["category"] == "Effect"]
-        self._reply(ws, req, {"success": True, "plugins": plugins})
+        pending = self.probe_task is not None and not self.probe_task.done()
+        self._reply(ws, req, {"success": True, "plugins": plugins, "instruments_pending": pending,
+                              "probe_progress": self.probe_progress if pending else None})
 
     async def _a_load_plugin(self, ws, req):
         slot_id = str(req.get("slot_id") or "default")
@@ -332,14 +399,16 @@ class NovaBridgeServer:
                 self._drop_slot(slot_id)
             raise
         state = await self._in_slot(slot, slot.get_state)
-        logger.info(f"✅ {slot.name} chargé ({sr} Hz, latence {slot.latency_samples} éch.)")
+        self._learn_kind(slot)
+        kind = "instrument" if slot.is_instrument else "effet"
+        logger.info(f"✅ {slot.name} chargé ({kind}, {sr} Hz, latence {slot.latency_samples} éch.)")
         self._reply(ws, req, self._load_payload(slot, state))
 
     def _load_payload(self, slot: Slot, state, reused=False):
         return {"success": True, "slot_id": slot.slot_id, "name": slot.name, "vendor": slot.vendor,
                 "latency_samples": slot.latency_samples, "buffer_latency_samples": 0,
                 "sample_rate": slot.sample_rate, "state": state, "has_editor": vst_host.HAS_PEDALBOARD,
-                "reused": reused}
+                "is_instrument": slot.is_instrument, "reused": reused}
 
     async def _a_unload_plugin(self, ws, req):
         sid = str(req.get("slot_id", ""))
@@ -349,7 +418,12 @@ class NovaBridgeServer:
 
     async def _a_get_state(self, ws, req):
         slot = self._slot(req)
-        self._reply(ws, req, {"success": True, "state": await self._in_slot(slot, slot.get_state)})
+        state = await self._in_slot(slot, slot.get_state)
+        digest = hashlib.sha1(state.encode("ascii")).hexdigest() if state else None
+        payload = {"success": True, "hash": digest}
+        if not req.get("hash_only"):
+            payload["state"] = state
+        self._reply(ws, req, payload)
 
     async def _a_set_state(self, ws, req):
         slot = self._slot(req)
@@ -454,10 +528,53 @@ class NovaBridgeServer:
 
     # --- rendu hors temps réel -------------------------------------------------
 
+    async def _a_render_instrument(self, ws, req):
+        await self._render_instrument(ws, req)
+
+    async def _render_instrument(self, ws, meta: dict):
+        """Notes → audio à travers un instrument VST3 (réponse : trame binaire type 2)."""
+        try:
+            sr = int(meta.get("sample_rate") or 48000)
+            notes = meta.get("notes") or []
+            if not isinstance(notes, list):
+                raise ValueError("Notes invalides")
+            length = float(meta.get("length_seconds") or 0)
+            if length <= 0:
+                length = max([float(n.get("start", 0)) + float(n.get("duration", 0)) for n in notes if isinstance(n, dict)] or [0])
+            duration = min(vst_host.MAX_RENDER_SECONDS, max(0.1, length + max(0.0, float(meta.get("tail_seconds") or 0))))
+            events = midi_events([n for n in notes if isinstance(n, dict)], duration)
+            slot = self.slots.get(str(meta.get("slot_id") or ""))
+            t = time.time()
+            if slot is not None and slot.plugin is not None and slot.is_instrument and slot.sample_rate == sr:
+                # Instance chargée : le son choisi dans sa fenêtre, sans la fermer.
+                out = await self._in_slot(slot, slot.render_midi, events, duration)
+                name = slot.name
+            else:
+                path, pname, state = meta.get("path"), meta.get("plugin_name"), meta.get("state")
+                if slot is not None and slot.plugin is not None:
+                    path, pname = slot.path, slot.plugin_name
+                    state = await self._in_slot(slot, slot.get_state) or state
+                if not path:
+                    raise ValueError("Instrument à rendre introuvable")
+                out = await self.loop.run_in_executor(self.render_pool, render_instrument_offline, self.juce,
+                                                      path, pname, state, events, duration, sr)
+                name = os.path.basename(path)
+            logger.info(f"🎹 Rendu {name} : {len(events) // 2} notes, {duration:.1f} s en {time.time() - t:.1f} s")
+            reply = {"action": "RENDER_INSTRUMENT", "req_id": meta.get("req_id"), "success": True,
+                     "nch": 2, "nframes": int(out.shape[1]), "sample_rate": sr}
+            await self._send(ws, build_render_frame(reply, out.T.reshape(-1)))
+        except Exception as e:
+            logger.error(f"RENDER_INSTRUMENT : {e}")
+            await self._send(ws, build_render_frame({"action": "RENDER_INSTRUMENT", "req_id": meta.get("req_id"),
+                                                     "success": False, "error": str(e)}, None))
+
     async def _on_render(self, ws, buf: bytes):
         meta: Dict[str, Any] = {}
         try:
             meta, data = parse_render_frame(buf)
+            if meta.get("action") == "RENDER_INSTRUMENT":
+                await self._render_instrument(ws, meta)
+                return
             nch = int(meta.get("nch") or 2)
             nframes = int(meta.get("nframes") or (data.size // nch))
             sr = int(meta.get("sample_rate") or 48000)
@@ -484,6 +601,9 @@ class NovaBridgeServer:
 
 
 def main():
+    if "--probe-vst3" in sys.argv:
+        vst_probe.child_main()  # processus enfant : lecture des plugins (voir vst_probe)
+        return
     # Console Windows redirigée (fichier, pipe) : cp1252 refusait les accents/emojis.
     for stream in (sys.stdout, sys.stderr):
         try:

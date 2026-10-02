@@ -10,7 +10,7 @@ datas = [
 ]
 datas += [(f, 'webview2') for f in glob.glob('vendor/webview2/*.dll')]
 binaries = []
-hiddenimports = ['asio_bridge', 'asio_control_panel', 'nova_bridge_server', 'vst_host',
+hiddenimports = ['asio_bridge', 'asio_control_panel', 'nova_bridge_server', 'vst_host', 'vst_probe',
                  'comtypes', 'comtypes.client']
 hiddenimports += collect_submodules('websockets')
 

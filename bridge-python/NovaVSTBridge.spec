@@ -14,7 +14,7 @@ hiddenimports = collect_submodules('websockets')
 # pedalboard embarque un module natif (JUCE) et ses données : on prend tout.
 tmp_ret = collect_all('pedalboard')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-hiddenimports += ['pedalboard_native', 'vst_host']
+hiddenimports += ['pedalboard_native', 'vst_host', 'vst_probe']
 
 
 a = Analysis(

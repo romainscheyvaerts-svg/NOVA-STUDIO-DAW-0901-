@@ -248,7 +248,19 @@ export const contentOf = (t: Track) => ({
   name: t.name, type: t.type, color: t.color, outputTrackId: t.outputTrackId,
   collabOwner: t.collabOwner, drumMachine: t.drumMachine, drumPads: t.drumPads?.map(p => { const { buffer: _b, ...r } = p as any; return r; }),
   clips: (t.clips || []).map(clipForWire),
+  // Instrument VST du PC : le rendu des notes voyage avec la piste (sans
+  // l'état du plugin, lourd et inutile à qui n'a pas le VST).
+  vstInstrument: t.vstInstrument ? { ...t.vstInstrument, stateB64: undefined } : undefined,
+  instrumentRender: t.vstInstrument && t.isFrozen && t.frozenClip
+    ? { frozenClip: clipForWire(t.frozenClip), frozenClipIds: t.frozenClipIds, frozenSourceSig: t.frozenSourceSig }
+    : undefined,
 });
+
+/** Audio à envoyer avec le contenu d'une piste (prises + rendu d'instrument VST). */
+export const contentBufferIds = (t: Track): string[] => Array.from(new Set([
+  ...(t.clips || []).map(c => c.bufferId),
+  t.vstInstrument && t.isFrozen ? t.frozenClip?.bufferId : undefined,
+].filter(Boolean) as string[]));
 export const mixOf = (t: Track) => ({
   volume: t.volumeLock ? undefined : t.volume, pan: t.pan, isMuted: t.isMuted,
   sends: t.sends, plugins: t.plugins, outputTrackId: t.outputTrackId,

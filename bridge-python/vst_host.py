@@ -12,6 +12,8 @@ Hôte VST3 du pont Nova (pedalboard de Spotify).
                   compresseur, réverbe… – continue d'un bloc à l'autre).
 - render_offline() : rendu d'un buffer complet (gel / export) sur une instance
                   temporaire, avec une queue de silence pour les réverbes.
+- Instruments   : Slot.render_midi() / render_instrument_offline() rendent des
+                  notes (MIDI) en audio, hors temps réel.
 - JuceThread    : le seul thread autorisé à préparer / détruire un plugin et à
                   afficher sa fenêtre (contrainte de JUCE).
 """
@@ -95,6 +97,7 @@ def _entry_from_bundle(bundle: str, base: str) -> List[Dict[str, Any]]:
                 "vendor": cls.get("Vendor") or fvendor or "",
                 "uid": cls.get("CID") or "",
                 "category": "Instrument" if is_instr else "Effect",
+                "is_instrument": is_instr,
                 "sub_categories": subs,
                 "path": bundle,
                 # Bundles « shell » (plusieurs plugins) : load_plugin(plugin_name=...)
@@ -103,6 +106,8 @@ def _entry_from_bundle(bundle: str, base: str) -> List[Dict[str, Any]]:
     if not entries:
         entries.append({
             "name": name, "vendor": vendor, "uid": "", "category": "Effect",
+            # Inconnu tant que vst_probe n'a pas lu le plugin (pas de moduleinfo.json)
+            "is_instrument": None,
             "sub_categories": [], "path": bundle, "plugin_name": None,
         })
     return entries
@@ -333,9 +338,94 @@ def prepare_plugin(path: str, plugin_name: Optional[str], state_b64: Optional[st
     en retenant au début l'équivalent de la latence du plugin."""
     plugin = _open_plugin(path, plugin_name)
     restored = _set_state(plugin, state_b64)
-    plugin.process(np.zeros((2, block), np.float32), int(sample_rate), buffer_size=block, reset=False)
+    if _is_instrument(plugin):
+        # Un instrument refuse l'audio en entrée : on le prépare avec du MIDI vide.
+        plugin([], duration=block / float(sample_rate), sample_rate=int(sample_rate), num_channels=2,
+               buffer_size=block, reset=False)
+    else:
+        plugin.process(np.zeros((2, block), np.float32), int(sample_rate), buffer_size=block, reset=False)
     plugin.reset()
     return plugin, restored
+
+
+def _is_instrument(plugin) -> bool:
+    try:
+        return bool(getattr(plugin, "is_instrument", False))
+    except Exception:
+        return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INSTRUMENTS : notes → audio
+# ─────────────────────────────────────────────────────────────────────────────
+
+MAX_RENDER_SECONDS = 20 * 60
+
+
+def midi_events(notes: List[Dict[str, Any]], duration: float) -> List[tuple]:
+    """Notes du DAW → messages MIDI (octets, instant en s) triés pour pedalboard.
+
+    Note : {pitch 0–127, start s, duration s, velocity, channel? 0–15}.
+    velocity : 0–1 (flottant, 1 = fort) ; une valeur > 1 est lue en 0–127.
+    À instant égal, les fins de note passent avant les débuts (note répétée)."""
+    evs = []
+    for n in notes or []:
+        try:
+            pitch = int(n.get("pitch"))
+            start = float(n.get("start"))
+            length = float(n.get("duration"))
+            v = float(n.get("velocity", 0.8))
+            ch = int(n.get("channel") or 0) & 0x0F
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= pitch <= 127) or not np.isfinite(start) or not np.isfinite(length) or start >= duration:
+            continue
+        start = max(0.0, start)
+        end = min(duration, start + max(0.005, length))
+        vel = int(round(v * 127)) if v <= 1.0 else int(round(v))
+        vel = max(1, min(127, vel))
+        evs.append((end, 0, bytes([0x80 | ch, pitch, 0])))
+        evs.append((start, 1, bytes([0x90 | ch, pitch, vel])))
+    evs.sort(key=lambda e: (e[0], e[1]))
+    return [(b, t) for t, _, b in evs]
+
+
+def _panic() -> List[tuple]:
+    """All Sound Off + All Notes Off sur les 16 canaux (rendu précédent coupé)."""
+    out = []
+    for ch in range(16):
+        out.append((bytes([0xB0 | ch, 120, 0]), 0.0))
+        out.append((bytes([0xB0 | ch, 123, 0]), 0.0))
+    return out
+
+
+def _render_midi_on(plugin, events: List[tuple], duration: float, sr: int, block: int) -> np.ndarray:
+    """Rend `duration` s de MIDI sur une instance déjà préparée (reset=False :
+    pas de préparation, donc possible hors du thread JUCE, fenêtre ouverte)."""
+    lat = _latency_of(plugin)
+    n = int(round(duration * sr))
+    # Rendu précédent coupé, puis un court silence pour vider les voix.
+    plugin(_panic(), duration=0.25, sample_rate=sr, num_channels=2, buffer_size=block, reset=False)
+    out = np.asarray(plugin(events, duration=(n + lat) / float(sr), sample_rate=sr, num_channels=2,
+                            buffer_size=block, reset=False), np.float32)
+    out = _to_stereo(out)[:, lat:lat + n]
+    if out.shape[1] < n:
+        out = np.concatenate([out, np.zeros((2, n - out.shape[1]), np.float32)], axis=1)
+    return np.ascontiguousarray(out)
+
+
+def render_instrument_offline(juce: "JuceThread", path: str, plugin_name: Optional[str], state_b64: Optional[str],
+                              events: List[tuple], duration: float, sample_rate: int) -> np.ndarray:
+    """Rendu d'un instrument sur une instance temporaire (pas de slot chargé)."""
+    sr = int(sample_rate)
+    plugin, _ = juce.run_sync(prepare_plugin, path, plugin_name, state_b64, sr, RENDER_BLOCK)
+    try:
+        if not _is_instrument(plugin):
+            raise ValueError(f"{getattr(plugin, 'name', 'Ce plugin')} n'est pas un instrument")
+        return _render_midi_on(plugin, events, duration, sr, RENDER_BLOCK)
+    finally:
+        juce.release(plugin)
+        plugin = None
 
 
 BLOCK = 128          # taille du bloc temps réel (quantum Web Audio)
@@ -368,6 +458,7 @@ class Slot:
         self.orphan_since: Optional[float] = None
         self.loaded = threading.Event()
         self.error: Optional[str] = None
+        self.is_instrument = False
 
     @property
     def latency_samples(self) -> int:
@@ -381,6 +472,7 @@ class Slot:
                                               self.sample_rate, BLOCK)
         self.name = getattr(plugin, "name", None) or self.name
         self.vendor = getattr(plugin, "manufacturer_name", "") or ""
+        self.is_instrument = _is_instrument(plugin)
         with self.lock:
             self.plugin = plugin
             self.reported_latency = _latency_of(plugin)
@@ -410,6 +502,16 @@ class Slot:
             self._fifo = fifo[:, n:]
             self.blocks += 1
             return fifo[:, :n]
+
+    def render_midi(self, events: List[tuple], duration: float) -> np.ndarray:
+        """Instrument : rendu des notes avec le son réglé dans cette instance
+        (fenêtre du plugin ouverte ou non)."""
+        with self.lock:
+            if self.plugin is None:
+                raise RuntimeError("Plugin non chargé sur le pont")
+            if not self.is_instrument:
+                raise ValueError(f"{self.name} n'est pas un instrument")
+            return _render_midi_on(self.plugin, events, duration, self.sample_rate, BLOCK)
 
     def get_state(self) -> Optional[str]:
         with self.lock:

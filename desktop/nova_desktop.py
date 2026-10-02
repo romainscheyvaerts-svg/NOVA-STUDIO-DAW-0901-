@@ -7,6 +7,7 @@ Un seul exécutable, trois rôles :
                                       + lance / surveille les deux ponts en processus enfants
   NovaStudio.exe --bridge asio        pont ASIO   (bridge-python/asio_bridge.py, ws://127.0.0.1:8766)
   NovaStudio.exe --bridge vst         pont VST3   (bridge-python/nova_bridge_server.py, ws://127.0.0.1:8765)
+  NovaStudio.exe --probe-vst3         lecture des plugins VST3 pour le pont (bridge-python/vst_probe.py)
   NovaStudio.exe <...>asio_control_panel.py "<driver>"
                                       panneau ASIO (le pont ASIO relance sys.executable avec ce script)
 
@@ -711,6 +712,12 @@ def main() -> int:
     argv = sys.argv[1:]
     if len(argv) >= 2 and argv[0] == "--bridge":
         return run_bridge(argv[1])
+    if argv and argv[0] == "--probe-vst3":
+        # Pont VST : lecture des plugins (instrument ou effet ?) dans un processus enfant
+        _bridge_import_path()
+        import vst_probe
+        vst_probe.child_main()
+        return 0
     if argv and argv[0].lower().endswith("asio_control_panel.py"):
         return run_asio_control_panel(argv[1] if len(argv) > 1 else "")
 

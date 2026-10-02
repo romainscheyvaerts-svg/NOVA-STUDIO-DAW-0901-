@@ -36,6 +36,8 @@ interface PianoRollProps {
   currentTime?: number;
   onUpdateTrack: (track: Track) => void;
   onClose: () => void;
+  /** Élément ajouté dans la barre d'outils (choix du son en mode instru). */
+  toolbarExtra?: React.ReactNode;
 }
 
 // Configuration
@@ -45,7 +47,7 @@ const VELOCITY_HEIGHT = 150;
 
 type DragMode = 'MOVE' | 'RESIZE_R' | 'VELOCITY' | 'SELECT' | 'DRAW' | null;
 
-const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack, onClose }) => {
+const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack, onClose, toolbarExtra }) => {
   const clipIndex = track.clips.findIndex(c => c.id === clipId);
   const clip = track.clips[clipIndex];
   
@@ -559,7 +561,10 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                     <p className="text-[9px] text-slate-500 font-mono">{clip.name}</p>
                 </div>
              </div>
-             
+
+             {/* Son de la piste (mode instru : instrument VST du PC) */}
+             {toolbarExtra}
+
              <div className="h-8 w-px bg-white/10"></div>
              
              {/* Tools */}

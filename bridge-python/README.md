@@ -18,6 +18,14 @@ Les plugins VST3 installés sur le PC, utilisables dans Nova Studio (navigateur)
 - `RENDER` : rendu hors temps réel d'un buffer complet + queue (gel à la sauvegarde, export)
 - Fenêtre native du plugin (`SHOW_EDITOR`) via pedalboard : l'hôte JUCE
   `nova-vst-host` n'est plus nécessaire, un seul exécutable suffit
+- **v5 – instruments VST3** (mode instru du DAW) : `GET_PLUGIN_LIST` indique
+  `is_instrument` ; `RENDER_INSTRUMENT` rend des notes en audio hors temps réel
+  (avec le son réglé dans la fenêtre du plugin si le slot est chargé). Les
+  plugins sans `moduleinfo.json` (Vital, Omnisphere, Kontakt…) sont lus une fois
+  en arrière-plan par `vst_probe.py` (processus enfant `--probe-vst3`, plusieurs
+  en parallèle, délai par plugin) ; résultat en cache dans
+  `%LOCALAPPDATA%\NovaStudio\vst3_classes.json` (~3 min la 1re fois pour ~600
+  plugins, instantané ensuite)
 
 Le protocole complet est décrit en tête de `nova_bridge_server.py`.
 
@@ -29,7 +37,9 @@ puis dans Nova Studio (sur ordinateur) : onglet **VST** → « Connecter le pont
 venv\Scripts\python.exe -m pip install pyinstaller websockets numpy pedalboard
 venv\Scripts\python.exe -m PyInstaller NovaVSTBridge.spec --noconfirm --workpath %TEMP%\nova-vst-build
 # → dist\NovaVSTBridge.exe (~25 Mo, Python non requis)
+# puis copier dist\NovaVSTBridge.exe dans ..\public\downloads\ (lien de téléchargement du DAW)
 ```
+(`build.bat` / `build_exe.py` construisent le pont ASIO, pas celui-ci.)
 
 **En développement :**
 ```bash

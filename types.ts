@@ -327,9 +327,31 @@ export interface Track {
   volumeLock?: { volume: number; by: string; at: number };
   /** Boîte à rythmes Make Music (piste PERCUSSIONS) : motif éditable. */
   drumMachine?: import('./utils/drumKits').DrumMachine;
+  /**
+   * Piste MIDI (mode instru) jouée par un instrument VST3 du PC (pont VST).
+   * Les notes sont rendues hors temps réel dans frozenClip (isFrozen, aucun
+   * effet inclus : frozenUpToPluginIndex = -1) : le son est sauvegardé avec
+   * le projet et se joue partout, même sans le pont.
+   */
+  vstInstrument?: VstInstrument;
   groupId?: string;            // NEW: Track group reference
   height?: number;             // NEW: Custom track height
   isMinimized?: boolean;       // NEW: Collapsed state
+}
+
+/** Instrument VST3 du PC choisi pour une piste MIDI (voir Track.vstInstrument). */
+export interface VstInstrument {
+  name: string;
+  vendor?: string;
+  /** Bundle .vst3 sur le PC du beatmaker. */
+  path: string;
+  /** Bundle à plusieurs plugins : nom du plugin. */
+  pluginName?: string | null;
+  uid?: string;
+  /** Son réglé dans la fenêtre du plugin (état binaire en base64). */
+  stateB64?: string | null;
+  /** Empreinte (notes, tempo, son) du rendu actuel : différente = à refaire. */
+  renderSig?: string;
 }
 
 // Time Signature type (inspired by Reaper/Ableton)
