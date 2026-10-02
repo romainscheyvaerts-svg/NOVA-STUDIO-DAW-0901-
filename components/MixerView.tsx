@@ -207,7 +207,7 @@ const ChannelStrip: React.FC<{
         {track.plugins.map((p, idx) => (
           <div 
             key={p.id} 
-            className="relative group/fxslot w-full h-8 mb-1 fx-slot"
+            className="relative group/fxslot w-full h-8 [@media(pointer:coarse)]:h-10 mb-1 fx-slot"
             draggable
             onDragStart={(e) => {
               e.dataTransfer.setData('pluginData', JSON.stringify(p));
@@ -256,8 +256,8 @@ const ChannelStrip: React.FC<{
                {p.type}
             </button>
             <div className="absolute right-1 top-0 bottom-0 flex items-center space-x-0.5">
-               {/* Move Up/Down Buttons */}
-               <div className="flex flex-col opacity-0 group-hover/fxslot:opacity-100 transition-opacity">
+               {/* Move Up/Down Buttons (toujours visibles au doigt : pas de survol) */}
+               <div className="flex flex-col opacity-0 group-hover/fxslot:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                   <button 
                     onClick={(e) => { e.stopPropagation(); if (idx > 0 && onReorderPlugins) onReorderPlugins(track.id, idx, idx - 1); }}
                     className={`w-4 h-3 rounded-t flex items-center justify-center text-[6px] ${idx > 0 ? 'text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/20' : 'text-slate-800 cursor-not-allowed'}`}
@@ -275,7 +275,7 @@ const ChannelStrip: React.FC<{
                     <i className="fas fa-chevron-down"></i>
                   </button>
                </div>
-               <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} title={p.isEnabled ? 'Désactiver l\'effet' : 'Activer l\'effet'} aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.type}`} aria-pressed={p.isEnabled} className={`w-5 h-5 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
+               <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} title={p.isEnabled ? 'Désactiver l\'effet' : 'Activer l\'effet'} aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.type}`} aria-pressed={p.isEnabled} className={`w-5 h-5 [@media(pointer:coarse)]:w-8 [@media(pointer:coarse)]:h-8 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
             </div>
             <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${p.type}`}><i className="fas fa-times"></i></button>
           </div>
@@ -287,7 +287,7 @@ const ChannelStrip: React.FC<{
             onClick={handleEmptySlotClick}
             title="Ajouter un effet"
             aria-label={`Ajouter un effet sur ${track.name}`}
-            className="w-full h-8 rounded border border-dashed border-white/10 bg-black/5 opacity-40 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
+            className="w-full h-8 [@media(pointer:coarse)]:h-10 rounded border border-dashed border-white/10 bg-black/5 opacity-40 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
           >
             <i className="fas fa-plus text-[8px] text-slate-600"></i>
           </button>
@@ -334,8 +334,8 @@ const ChannelStrip: React.FC<{
 
         <div className="mt-2 text-center text-[10px] font-mono tabular-nums text-slate-300">{gainToDbText(track.volume)}</div>
         <div className="mt-2 flex space-x-2">
-           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>MUTE</button>
-           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}`} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>SOLO</button>
+           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>MUTE</button>
+           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>SOLO</button>
         </div>
         
         <div className={`mt-3 h-10 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-black/40 border-white/10 text-white'}`}>

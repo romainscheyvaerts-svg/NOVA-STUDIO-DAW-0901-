@@ -74,8 +74,10 @@ interface DragState {
 /** Noms français des outils (lecteurs d'écran, info-bulles). */
 const TOOL_LABELS: Record<string, string> = { SELECT: 'Sélection', TRIM: 'Rogner', SPLIT: 'Couper', ERASE: 'Gomme', FADE: 'Fondus', DUPLICATE: 'Dupliquer' };
 
-const TRACK_HEADER_WIDTH = 120;
-const TRACK_HEIGHT = 80;
+// En-tête de 132 px × 98 px : M / S / R au pas de 40 px et glissière de 40 px
+// de haut (cibles tactiles), le nom passe sur une ligne fine au-dessus.
+const TRACK_HEADER_WIDTH = 132;
+const TRACK_HEIGHT = 98; // 16 + 40 + 40, + bordure (sinon les rangées se chevauchent d'1 px)
 const TIMELINE_HEIGHT = 44;
 const MIN_ZOOM = 20;
 const MAX_ZOOM = 300;
@@ -575,7 +577,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       </div>
 
       {/* === TOOL BAR === */}
-      <div className="flex items-center h-10 px-2 bg-[#0f1114] border-b border-white/5 gap-1 overflow-x-auto scrollbar-hide">
+      <div className="flex items-center h-10 px-2 bg-[#0f1114] border-b border-white/5 gap-2 overflow-x-auto scrollbar-hide">
         {tools.map(tool => (
           <button
             key={tool.id}
@@ -652,17 +654,41 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 }`}
                 style={{ height: TRACK_HEIGHT }}
               >
-                {/* Track name + Volume fader */}
                 {/* Nom sur sa propre ligne : il etait plafonne a 55 px et se
                     reduisait a une lettre, on ne distinguait plus BEAT de BACK 1. */}
-                <div className="flex items-center gap-1.5 h-6">
+                <div className="flex items-center gap-1.5 h-4">
                   <div
                     className="w-2 h-2 rounded-full flex-shrink-0"
                     style={{ backgroundColor: track.color }}
                   />
-                  <span title={track.name} className="text-[11px] font-semibold text-white/90 truncate flex-1">
+                  <span title={track.name} className="text-[11px] leading-4 font-semibold text-white/90 truncate flex-1">
                     {track.name}
                   </span>
+                </div>
+
+                {/* Volume (zone de 40 px de haut) + FX (zone tactile 40 px) */}
+                <div className="flex items-center gap-2 h-10">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    aria-label={`Volume ${track.name}`}
+                    value={Math.min(1, track.volume ?? 0.8) * 100}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      if (onUpdateTrack) {
+                        onUpdateTrack({ ...track, volume: Number(e.target.value) / 100 });
+                      }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex-1 min-w-0 rounded-full appearance-none cursor-pointer"
+                    // Trait de 4 px centré, zone de saisie de toute la rangée (+ curseur 24 px)
+                    style={{
+                      height: 40,
+                      backgroundImage: `linear-gradient(to right, ${track.color || '#22d3ee'} ${Math.min(1, track.volume ?? 0.8) * 100}%, rgba(255,255,255,0.1) ${Math.min(1, track.volume ?? 0.8) * 100}%)`,
+                      backgroundColor: 'transparent', backgroundSize: '100% 4px', backgroundRepeat: 'no-repeat', backgroundPosition: 'center'
+                    }}
+                  />
                   {/* FX : ouvre le menu des effets de la piste */}
                   <button
                     onClick={(e) => {
@@ -678,45 +704,18 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     }}
                     aria-label={`Effets de ${track.name}`}
                     title="Effets (plugins)"
-                    className={`nova-hit shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-all ${
+                    className={`nova-hit shrink-0 w-7 h-7 rounded-md flex items-center justify-center transition-all ${
                       track.plugins.length > 0
                         ? 'bg-cyan-500 text-white'
                         : 'bg-white/10 text-white/40 hover:bg-white/20'
                     }`}
                   >
-                    <i className="fas fa-plug text-[9px]"></i>
+                    <i className="fas fa-plug text-[10px]"></i>
                   </button>
                 </div>
 
-                <div className="flex items-center gap-1.5 h-5">
-                  {/* Mini Volume Fader */}
-                  <div className="flex items-center gap-1 flex-1">
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      aria-label={`Volume ${track.name}`}
-                      value={Math.min(1, track.volume ?? 0.8) * 100}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        if (onUpdateTrack) {
-                          onUpdateTrack({ ...track, volume: Number(e.target.value) / 100 });
-                        }
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-                      // Trait de 4 px centré, zone de saisie de toute la rangée (+ curseur 24 px)
-                      style={{
-                        height: 20,
-                        backgroundImage: `linear-gradient(to right, ${track.color || '#22d3ee'} ${Math.min(1, track.volume ?? 0.8) * 100}%, rgba(255,255,255,0.1) ${Math.min(1, track.volume ?? 0.8) * 100}%)`,
-                        backgroundColor: 'transparent', backgroundSize: '100% 4px', backgroundRepeat: 'no-repeat', backgroundPosition: 'center'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* M / S / R : 32 px visibles, zone tactile 40 px (envois : bouton flottant) */}
-                <div className="flex items-center gap-1 mt-1">
+                {/* M / S / R : 32 px visibles au pas de 40 px, zone tactile 40 × 40 (envois : bouton flottant) */}
+                <div className="flex items-center gap-2 h-10">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1125,7 +1124,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               </div>
               <button aria-label="Fermer" title="Fermer"
                 onClick={() => setShowSendsPanel(false)}
-                className="w-8 h-8 rounded-full bg-white/10 text-white/60 flex items-center justify-center hover:bg-white/20"
+                className="nova-hit w-8 h-8 rounded-full bg-white/10 text-white/60 flex items-center justify-center hover:bg-white/20"
               >
                 <i className="fas fa-times text-sm"></i>
               </button>
@@ -1167,7 +1166,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                         </div>
                         <button
                           onClick={() => handleSendToggle(send.id)}
-                          className={`w-10 h-6 rounded-full transition-all ${
+                          aria-pressed={send.isEnabled}
+                          aria-label={`Envoi ${sendTrack?.name || send.id}`}
+                          className={`nova-hit w-10 h-6 rounded-full transition-all ${
                             send.isEnabled 
                               ? 'bg-cyan-500' 
                               : 'bg-white/20'

@@ -258,15 +258,22 @@
     @media (hover: none) { .delete-fx { opacity: 1; } }
     @media (pointer: coarse) {
       input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, select { font-size: 16px !important; }
-      input[type="range"] { height: 6px; }
-      input[type="range"]::-webkit-slider-thumb { width: 24px; height: 24px; }
-      input[type="range"]::-moz-range-thumb { width: 24px; height: 24px; }
     }
 
     input[type="range"] { appearance: none; background: var(--border-highlight); border-radius: 10px; height: 4px; }
     input[type="range"]::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; background: var(--accent-neon); border-radius: 50%; cursor: pointer; transition: transform 0.1s; }
     input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
-    
+
+    /* Tactile : ces règles venaient AVANT celles du dessus et étaient donc
+       écrasées (curseur de 12 px, piste de 4 px). Placées après : curseur de
+       24 px et zone de saisie de 40 px dont seul le trait central (6 px) se voit.
+       Les glissières à hauteur fixée en ligne (style="height…") gardent la leur. */
+    @media (pointer: coarse) {
+      input[type="range"]:not([style*="height"]) { height: 40px; padding: 17px 0; background-clip: content-box !important; }
+      input[type="range"]::-webkit-slider-thumb { width: 24px; height: 24px; }
+      input[type="range"]::-moz-range-thumb { width: 24px; height: 24px; }
+    }
+
     /* Gros sliders pour Tablette/Mobile */
     body[data-view-mode="TABLET"] input[type="range"]::-webkit-slider-thumb,
     body[data-view-mode="MOBILE"] input[type="range"]::-webkit-slider-thumb {
@@ -283,6 +290,22 @@
       content: ''; position: absolute;
       top: min(0px, calc((100% - 40px) / 2)); bottom: min(0px, calc((100% - 40px) / 2));
       left: min(0px, calc((100% - 40px) / 2)); right: min(0px, calc((100% - 40px) / 2));
+    }
+    /* Même zone, mais seulement au doigt : à la souris (vues PC) rien ne change. */
+    @media (pointer: coarse) {
+      .nova-hit-tactile:not(.absolute):not(.fixed):not(.sticky) { position: relative; }
+      .nova-hit-tactile::after {
+        content: ''; position: absolute;
+        top: min(0px, calc((100% - 40px) / 2)); bottom: min(0px, calc((100% - 40px) / 2));
+        left: min(0px, calc((100% - 40px) / 2)); right: min(0px, calc((100% - 40px) / 2));
+      }
+    }
+    /* Rangée de petits boutons : 4 px d'écart, 12 px au doigt pour que chaque
+       zone de 40 px ne déborde pas sur la voisine (le mode tablette agrandit
+       déjà les boutons à 44 px, l'écart y reste de 4 px). */
+    .nova-hit-gap { column-gap: 4px; }
+    @media (pointer: coarse) {
+      body:not([data-view-mode="TABLET"]) .nova-hit-gap { column-gap: 12px; }
     }
     /* Défilement horizontal sans barre visible (barres d'actions mobiles). */
     .scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }

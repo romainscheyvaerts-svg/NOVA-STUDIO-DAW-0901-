@@ -134,7 +134,7 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                   data-nova-target={`vol-${t.id}`}
                   ref={(el) => { stripRefs.current[t.id] = el; }}
                   onClick={() => onSelectTrack(t.id)}
-                  className={`snap-start shrink-0 w-[88px] rounded-xl border p-2 flex flex-col items-center gap-2 transition-colors ${
+                  className={`snap-start shrink-0 w-[96px] rounded-xl border p-2 flex flex-col items-center gap-2 transition-colors ${
                     isMaster ? 'bg-[#101820] border-cyan-500/40' : 'bg-[#14161a] border-white/10'
                   } ${isSelected ? 'ring-2 ring-cyan-400' : ''}`}
                 >
@@ -165,12 +165,19 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                         // Zone tactile de 40 px ; la piste reste un trait de 4 px au centre.
                         style={{ height: 40, background: 'linear-gradient(transparent 18px, var(--border-highlight) 18px, var(--border-highlight) 22px, transparent 22px)' }}
                       />
-                      <div className="text-center text-[11px] text-slate-400 mt-0.5">
+                      {/* Le double-tap ne remet pas au centre sur tous les téléphones : toucher la valeur le fait. */}
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...t, pan: 0 }); }}
+                        aria-label={`Centrer le panoramique de ${t.name}`}
+                        title="Toucher pour centrer"
+                        className="block w-full h-10 text-center text-[11px] text-slate-400"
+                      >
                         {t.pan === 0 ? 'C' : t.pan > 0 ? `R${Math.round(t.pan * 100)}` : `L${Math.round(Math.abs(t.pan) * 100)}`}
-                      </div>
+                      </button>
                     </div>
                   ) : (
-                    <div className="h-[38px]" />
+                    <div className="h-20" />
                   )}
 
                   <VerticalFader
@@ -179,7 +186,15 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                     label={`Volume ${isMaster ? 'master' : t.name}`}
                     onChange={(v) => { onUpdateTrack({ ...t, volume: v }); if (!isSelected) onSelectTrack(t.id); }}
                   />
-                  <div className="text-[11px] font-mono text-cyan-400">{toDb(t.volume)} dB</div>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...t, volume: 1 }); }}
+                    aria-label={`Remettre ${isMaster ? 'le master' : t.name} à 0 dB`}
+                    title="Toucher pour revenir à 0 dB"
+                    className="w-full h-10 text-[11px] font-mono text-cyan-400"
+                  >
+                    {toDb(t.volume)} dB
+                  </button>
 
                   <div className="flex gap-1.5 w-full">
                     <button

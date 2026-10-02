@@ -33,6 +33,30 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   const [soundMenu, setSoundMenu] = useState<number | null>(null);
   const pressTimer = useRef<number | null>(null);
   const longPressed = useRef(false);
+  // Téléphone : 8 pas par page (1–8 / 9–16) au lieu d'une grille qui défilait
+  // sans le dire (7 pas visibles sur 16) ; le pad touché est le pad « choisi ».
+  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 639px)').matches);
+  const [page, setPage] = useState(0);
+  const [selPad, setSelPad] = useState(0);
+  useEffect(() => {
+    const mq = window.matchMedia?.('(max-width: 639px)');
+    if (!mq) return;
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener?.('change', on);
+    return () => mq.removeEventListener?.('change', on);
+  }, []);
+  // Tablette : la grille déborde (16 ou 32 pas) -> fondu + flèche à droite
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [moreRight, setMoreRight] = useState(false);
+  const checkScroll = () => {
+    const el = gridRef.current;
+    setMoreRight(!!el && el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  };
+  useEffect(() => {
+    checkScroll();
+    window.addEventListener('resize', checkScroll);
+    return () => window.removeEventListener('resize', checkScroll);
+  }, [p.open, p.dm?.bars, !!p.dm, narrow]);
 
   // Tête de lecture sur le motif
   useEffect(() => {
@@ -82,6 +106,10 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   };
 
   const len = dm ? 16 * dm.bars : 16;
+  const pages = len / 8;
+  const curPage = Math.min(page, pages - 1);
+  const shownSteps = narrow ? Array.from({ length: 8 }, (_, i) => curPage * 8 + i) : Array.from({ length: len }, (_, i) => i);
+  const pad = dm?.rows[Math.min(selPad, (dm?.rows.length || 1) - 1)];
 
   return (
     <div className="fixed inset-0 z-[560] flex items-end sm:items-center justify-center bg-black/50" onClick={p.onClose} role="dialog" aria-modal="true" aria-labelledby="drums-title">
@@ -112,11 +140,44 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
             <p className="text-sm text-slate-300">Choisis un style de batterie : elle se cale sur le tempo et la tonalité de ta mélodie.</p>
           ) : (
             <>
+              {/* Téléphone : choix de la moitié de mesure + réglages du pad choisi */}
+              {narrow && (
+                <div className="flex items-center gap-2">
+                  <div className="flex shrink-0 rounded-xl overflow-hidden border border-white/10" role="group" aria-label="Pas affichés">
+                    {Array.from({ length: pages }, (_, pi) => (
+                      <button key={pi} type="button" onClick={() => setPage(pi)} aria-pressed={curPage === pi}
+                        aria-label={`Pas ${pi * 8 + 1} à ${pi * 8 + 8}`}
+                        className={`relative h-10 min-w-[48px] px-2 text-[12px] font-black tabular-nums ${curPage === pi ? 'bg-white text-black' : 'bg-white/5 text-white'}`}>
+                        {pi * 8 + 1}–{pi * 8 + 8}
+                        {/* Point = la lecture joue dans cette page */}
+                        {playStep >= pi * 8 && playStep < pi * 8 + 8 && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-cyan-400" />}
+                      </button>
+                    ))}
+                  </div>
+                  {pad && (
+                    <button type="button" onClick={() => setSoundMenu(soundMenu === null ? Math.min(selPad, dm.rows.length - 1) : null)}
+                      aria-expanded={soundMenu !== null} title="Son et mix du pad choisi"
+                      className={`ml-auto min-w-0 h-10 px-3 rounded-xl text-[12px] font-bold truncate ${soundMenu !== null ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-200'}`}>
+                      <i className="fas fa-sliders-h mr-1.5" />{pad.name}
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Grille */}
-              <div className="overflow-x-auto no-scrollbar">
-                <div className="inline-block min-w-full">
+              <div className="relative">
+              <div ref={gridRef} onScroll={checkScroll} className={narrow ? '-mx-2' : 'overflow-x-auto no-scrollbar'}>
+                <div className={narrow ? '' : 'inline-block min-w-full'}>
                   {dm.rows.map((r, ri) => (
                     <div key={r.id} className="flex items-center gap-1 mb-1">
+                      {narrow ? (
+                        <button type="button" onClick={() => { p.onAudition(ri); setSelPad(ri); if (soundMenu !== null) setSoundMenu(ri); }}
+                          aria-label={`Écouter ${r.name}`} aria-pressed={selPad === ri} title="Écouter et choisir ce pad"
+                          className={`shrink-0 w-10 h-10 rounded-lg px-0.5 text-[9px] leading-[10px] font-bold text-center break-words overflow-hidden ${selPad === ri ? 'bg-cyan-500/20 text-white ring-1 ring-cyan-400/60' : 'bg-white/5 text-slate-200'}`}>
+                          <span className={r.muted ? 'line-through opacity-50' : ''}>{r.name}</span>
+                          {r.solo && <span className="text-amber-300"> S</span>}
+                        </button>
+                      ) : (
                       <div className="sticky left-0 z-10 bg-[#121418] pr-1 flex items-center gap-1 w-[118px] shrink-0">
                         <button type="button" onClick={() => p.onAudition(ri)} title="Écouter le son"
                           className="flex-1 min-w-0 h-9 rounded-lg bg-white/5 text-left px-2 text-[11px] font-bold text-white truncate hover:bg-white/10">
@@ -125,9 +186,10 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                           {r.mix && Object.values(r.mix).some(v => v) && <span className="ml-1 text-violet-300" title="Effets sur ce pad">✦</span>}
                         </button>
                         <button type="button" onClick={() => setSoundMenu(soundMenu === ri ? null : ri)} aria-label={`Son et mix du pad ${r.name}`} title="Son et mix du pad"
-                          className={`w-7 h-9 rounded-lg text-[11px] ${soundMenu === ri ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}><i className="fas fa-sliders-h" /></button>
+                          className={`nova-hit-tactile w-7 h-9 rounded-lg text-[11px] ${soundMenu === ri ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}><i className="fas fa-sliders-h" /></button>
                       </div>
-                      {Array.from({ length: len }, (_, si) => {
+                      )}
+                      {shownSteps.map(si => {
                         const v = r.steps[si] || 0;
                         const roll = r.ratchet[si] || 1;
                         const beatStart = si % 4 === 0;
@@ -140,7 +202,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                             onPointerUp={() => endPress(ri, si)}
                             onPointerLeave={() => { if (pressTimer.current) window.clearTimeout(pressTimer.current); }}
                             onContextMenu={e => { e.preventDefault(); cycleRoll(ri, si); }}
-                            className={`relative shrink-0 w-8 h-9 rounded-md border transition-colors ${playStep === si ? 'ring-2 ring-white/70' : ''} ${
+                            className={`relative rounded-md border transition-colors ${narrow ? 'nova-hit flex-1 min-w-0 h-10' : 'nova-hit-tactile shrink-0 w-8 h-9 [@media(pointer:coarse)]:w-9 [@media(pointer:coarse)]:h-10'} ${playStep === si ? 'ring-2 ring-white/70' : ''} ${
                               v >= 100 ? 'bg-gradient-to-b from-cyan-400 to-violet-500 border-transparent'
                               : v > 0 ? 'bg-cyan-500/45 border-transparent'
                               : beatStart ? 'bg-white/[0.09] border-white/10' : 'bg-white/[0.04] border-white/5'}`}
@@ -152,6 +214,14 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                     </div>
                   ))}
                 </div>
+              </div>
+              {!narrow && moreRight && (
+                <button type="button" onClick={() => gridRef.current?.scrollBy({ left: gridRef.current.clientWidth * 0.6, behavior: 'smooth' })}
+                  aria-label="Voir les pas suivants" title="Pas suivants"
+                  className="absolute right-0 inset-y-0 mb-1 w-11 flex items-center justify-end pr-1.5 rounded-r-lg bg-gradient-to-l from-[#121418] via-[#121418]/85 to-transparent text-white/80">
+                  <i className="fas fa-chevron-right" />
+                </button>
+              )}
               </div>
 
               {soundMenu !== null && dm.rows[soundMenu] && (
@@ -169,7 +239,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                 <div className="flex rounded-xl overflow-hidden border border-white/10">
                   {[1, 2].map(b => (
                     <button key={b} type="button" onClick={() => p.onChange(setBars(dm, b as 1 | 2))}
-                      className={`h-9 px-3 font-bold ${dm.bars === b ? 'bg-white text-black' : 'bg-white/5 text-white'}`}>{b} mesure{b > 1 ? 's' : ''}</button>
+                      className={`h-10 px-3 font-bold ${dm.bars === b ? 'bg-white text-black' : 'bg-white/5 text-white'}`}>{b} mesure{b > 1 ? 's' : ''}</button>
                   ))}
                 </div>
                 <label className="flex items-center gap-2">
@@ -177,9 +247,10 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                   <input type="range" min={0} max={0.6} step={0.05} value={dm.swing} onChange={e => p.onChange({ ...dm, swing: parseFloat(e.target.value) })} />
                   <span className="tabular-nums w-8">{Math.round(dm.swing * 100)}%</span>
                 </label>
-                <button type="button" onClick={p.onRemove} className="ml-auto h-9 px-3 rounded-lg bg-white/5 text-slate-300 hover:text-white">Retirer la batterie</button>
+                <button type="button" onClick={p.onRemove} className="ml-auto h-10 px-3 rounded-lg bg-white/5 text-slate-300 hover:text-white">Retirer la batterie</button>
               </div>
               <p className="text-[11px] text-slate-500">
+                {narrow && "Touche le nom d'un pad pour l'écouter et le choisir ; 1–8 / 9–16 change de moitié de mesure (le point bleu montre où joue la lecture). "}
                 Tap : allumer → accent léger → éteindre. Appui long (ou clic droit) : roll ×2 ×3 ×4. Bouton réglages d'un pad : son, accordage, longueur et mix (EQ, compression, saturation, réverb, délai). La 808 et le log drum sont accordés sur la tonalité du morceau.
               </p>
             </>
@@ -237,10 +308,10 @@ const PadEditor: React.FC<PadEditorProps> = ({ kitId, row, onEdit, onAudition, o
       <div className="flex items-center gap-2">
         <p className="text-[13px] font-black text-white mr-auto">Pad « {row.name} »</p>
         <button type="button" onClick={() => onEdit(r => ({ ...r, muted: !r.muted }))} aria-pressed={!!row.muted}
-          className={`h-8 px-3 rounded-lg text-[11px] font-black ${row.muted ? 'bg-red-500 text-white' : 'bg-white/10 text-white'}`}>Mute</button>
+          className={`nova-hit h-8 px-3 rounded-lg text-[11px] font-black ${row.muted ? 'bg-red-500 text-white' : 'bg-white/10 text-white'}`}>Mute</button>
         <button type="button" onClick={() => onEdit(r => ({ ...r, solo: !r.solo }))} aria-pressed={!!row.solo}
-          className={`h-8 px-3 rounded-lg text-[11px] font-black ${row.solo ? 'bg-amber-400 text-black' : 'bg-white/10 text-white'}`}>Solo</button>
-        <button type="button" onClick={onClose} aria-label="Fermer les réglages du pad" className="w-8 h-8 rounded-lg bg-white/5 text-slate-300"><i className="fas fa-times" /></button>
+          className={`nova-hit h-8 px-3 rounded-lg text-[11px] font-black ${row.solo ? 'bg-amber-400 text-black' : 'bg-white/10 text-white'}`}>Solo</button>
+        <button type="button" onClick={onClose} aria-label="Fermer les réglages du pad" className="nova-hit w-8 h-8 rounded-lg bg-white/5 text-slate-300"><i className="fas fa-times" /></button>
       </div>
 
       <div>
@@ -258,7 +329,7 @@ const PadEditor: React.FC<PadEditorProps> = ({ kitId, row, onEdit, onAudition, o
                 const ref = libUrl(id);
                 return (
                   <button key={id} type="button" onClick={() => pick(ref)} title={libSoundLabel(ref) || ''}
-                    className={`h-8 min-w-[36px] px-2 rounded-lg text-[12px] font-bold ${row.sound === ref ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white hover:bg-white/15'}`}>
+                    className={`nova-hit h-8 min-w-[36px] px-2 rounded-lg text-[12px] font-bold ${row.sound === ref ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white hover:bg-white/15'}`}>
                     {i + 1}
                   </button>
                 );
@@ -277,7 +348,7 @@ const PadEditor: React.FC<PadEditorProps> = ({ kitId, row, onEdit, onAudition, o
             <div className="flex flex-wrap gap-1.5">
               {DRUM_SOUNDS.filter(x => synths.includes(`synth:${x.id}`)).map(x => (
                 <button key={x.id} type="button" onClick={() => pick(`synth:${x.id}`)}
-                  className={`h-8 px-3 rounded-lg text-[12px] font-bold ${row.sound === `synth:${x.id}` ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white hover:bg-white/15'}`}>
+                  className={`nova-hit h-8 px-3 rounded-lg text-[12px] font-bold ${row.sound === `synth:${x.id}` ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white hover:bg-white/15'}`}>
                   {x.name}
                 </button>
               ))}
@@ -301,9 +372,9 @@ const PadEditor: React.FC<PadEditorProps> = ({ kitId, row, onEdit, onAudition, o
         <div className="flex items-center gap-2 mb-1.5">
           <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mr-auto">Mix du pad</p>
           <button type="button" onClick={() => setMix({ ...DEFAULT_PAD_MIX, ...(PAD_MIX_PRESETS[row.id] || {}) })}
-            className="h-8 px-3 rounded-lg bg-violet-500/20 text-violet-200 text-[11px] font-bold hover:bg-violet-500/30">✦ Réglage pro</button>
+            className="nova-hit h-8 px-3 rounded-lg bg-violet-500/20 text-violet-200 text-[11px] font-bold hover:bg-violet-500/30">✦ Réglage pro</button>
           <button type="button" onClick={() => onEdit(r => ({ ...r, mix: {} }))}
-            className="h-8 px-3 rounded-lg bg-white/5 text-slate-300 text-[11px] font-bold hover:text-white">Sans effet</button>
+            className="nova-hit h-8 px-3 rounded-lg bg-white/5 text-slate-300 text-[11px] font-bold hover:text-white">Sans effet</button>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
           <Knob label="Graves" value={mix.eqLow} min={-12} max={12} step={0.5} fmt={db} onChange={v => setMix({ eqLow: v })} onReset={() => setMix({ eqLow: 0 })} />

@@ -129,6 +129,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     return () => { window.removeEventListener('mousedown', close); window.removeEventListener('touchstart', close); };
   }, [fxMenu]);
   const [isRenaming, setIsRenaming] = useState(false);
+  // Double-tap sur le nom = renommer (au doigt, le double-clic n'arrive pas toujours)
+  const lastNameTap = useRef(0);
   const [isAdjustingVolume, setIsAdjustingVolume] = useState(false);
   const [showSends, setShowSends] = useState(false);
   const [newName, setNewName] = useState(track.name);
@@ -410,6 +412,12 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               <span 
                 title={track.name}
                 onDoubleClick={(e) => { e.stopPropagation(); setIsRenaming(true); }}
+                data-no-longpress
+                onTouchEnd={(e) => {
+                  const now = Date.now();
+                  if (now - lastNameTap.current < 350) { e.preventDefault(); e.stopPropagation(); lastNameTap.current = 0; setIsRenaming(true); }
+                  else lastNameTap.current = now;
+                }}
                 className={`text-[12px] font-bold tracking-wide truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-400'}`}
               >
                 {track.name}
@@ -432,7 +440,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           </div>
         </div>
         
-        <div className="flex space-x-1 shrink-0">
+        {/* Écran tactile en mode PC (iPad paysage) : boutons espacés au pas de 40 px, zones .nova-hit-tactile */}
+        <div className="flex nova-hit-gap shrink-0">
           {track.id !== 'master' && (
             <div className="relative">
               <button
@@ -444,7 +453,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 aria-label={`Effets de ${track.name}`}
                 aria-expanded={fxMenu}
                 aria-haspopup="menu"
-                className={`relative w-7 h-7 rounded-md flex items-center justify-center transition-all border text-[9px] font-black ${fxMenu ? 'bg-cyan-500 border-cyan-400 text-black' : insertPlugins.length ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
+                className={`nova-hit-tactile relative w-7 h-7 rounded-md flex items-center justify-center transition-all border text-[9px] font-black ${fxMenu ? 'bg-cyan-500 border-cyan-400 text-black' : insertPlugins.length ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
               >
                 FX
                 {insertPlugins.length > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] rounded-full bg-cyan-400 text-black text-[8px] leading-[14px] text-center">{insertPlugins.length}</span>}
@@ -459,14 +468,14 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                       <div key={p.id} className="flex items-center gap-1 rounded-lg hover:bg-white/5">
                         <button type="button" disabled={baked && p.type !== 'VST3'}
                           onClick={(e) => { setFxMenu(false); handleFXClick(e, p); }}
-                          className={`flex-1 min-w-0 truncate px-2 py-1.5 text-left text-[12px] font-semibold ${p.isEnabled ? 'text-white' : 'text-slate-500 line-through'}`}>
+                          className={`flex-1 min-w-0 truncate px-2 py-1.5 [@media(pointer:coarse)]:py-3 text-left text-[12px] font-semibold ${p.isEnabled ? 'text-white' : 'text-slate-500 line-through'}`}>
                           {p.name || getAbbr(p.type, p.name)}
                         </button>
                         <button type="button" disabled={baked} onClick={(e) => togglePluginBypass(e, p)}
                           title={p.isEnabled ? 'Désactiver' : 'Activer'}
                           aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.name || p.type}`}
                           aria-pressed={p.isEnabled}
-                          className={`w-7 h-7 rounded-md flex items-center justify-center ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}>
+                          className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}>
                           <i className="fas fa-power-off text-[9px]" />
                         </button>
                       </div>
@@ -475,7 +484,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                   {onRequestAddPlugin && (
                     <button type="button"
                       onClick={(e) => { setFxMenu(false); const r = fxBtnRef.current?.getBoundingClientRect(); onRequestAddPlugin(track.id, r ? r.left : e.clientX, r ? r.bottom + 4 : e.clientY); }}
-                      className="mt-1 w-full rounded-lg bg-cyan-500/15 px-2 py-1.5 text-left text-[12px] font-bold text-cyan-300 hover:bg-cyan-500/25">
+                      className="mt-1 w-full rounded-lg bg-cyan-500/15 px-2 py-1.5 [@media(pointer:coarse)]:py-3 text-left text-[12px] font-bold text-cyan-300 hover:bg-cyan-500/25">
                       <i className="fas fa-plus mr-1.5 text-[10px]" /> Ajouter un effet
                     </button>
                   )}
@@ -488,8 +497,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             aria-label={`Muet : ${track.name}`}
             aria-pressed={!!track.isMuted}
             onClick={handleMuteToggle}
-            onTouchStart={(e) => { e.preventDefault(); handleMuteToggle(e); }}
-            className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
+            // Pas de onTouchStart : React l'écoute en passif, preventDefault échouait et le
+            // clic qui suit rebasculait (M / S / R / envois sans effet au doigt).
+            className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
             <span className="text-[11px] font-bold">M</span>
           </button>
@@ -498,8 +508,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             aria-label={`Solo : ${track.name}`}
             aria-pressed={!!track.isSolo}
             onClick={handleSoloToggle}
-            onTouchStart={(e) => { e.preventDefault(); handleSoloToggle(e); }}
-            className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
+            className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
             <span className="text-[11px] font-bold">S</span>
           </button>
@@ -507,11 +516,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {canHaveSends && (
             <button
                 onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
-                onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); setShowSends(!showSends); }}
                 title="Envois (delay, réverbes)"
                 aria-label={`Envois de ${track.name}`}
                 aria-expanded={showSends}
-                className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
+                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
             >
                 <i className="fas fa-sliders-h text-[10px]"></i>
             </button>
@@ -521,8 +529,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
               <button
                 onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
-                onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
-                className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
+                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
                 title={track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer" : "Enregistrer sur cette piste (sinon REC choisit la piste sélectionnée)"}
                 aria-label={`Armer l'enregistrement : ${track.name}`}
                 aria-pressed={!!track.isTrackArmed}
@@ -542,7 +549,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           role="slider"
           aria-label={`Panoramique ${track.name}`}
           aria-valuetext={panToText(track.pan)}
-          className="relative w-7 h-7 rounded-full bg-black border border-white/10 flex items-center justify-center cursor-ns-resize shadow-lg hover:border-cyan-500/30 transition-all touch-none group/pan"
+          className="nova-hit-tactile relative w-7 h-7 rounded-full bg-black border border-white/10 flex items-center justify-center cursor-ns-resize shadow-lg hover:border-cyan-500/30 transition-all touch-none group/pan"
         >
           <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${track.pan * 140}deg) translateY(-1px)` }} />
         </div>
@@ -573,16 +580,19 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             role="slider"
             aria-label={`Volume ${track.name}`}
             aria-valuetext={gainToDbText(track.volume)}
-            className={`h-3 bg-black/60 rounded-full overflow-hidden relative cursor-ew-resize group/vol touch-none ${track.volumeLock && collabRole && collabRole !== 'artist' ? 'pointer-events-none opacity-60' : ''}`}
+            className={`nova-hit-tactile h-3 relative cursor-ew-resize group/vol touch-none ${track.volumeLock && collabRole && collabRole !== 'artist' ? 'pointer-events-none opacity-60' : ''}`}
           >
-            <div 
-              className={`h-full transition-all duration-75 ${isAdjustingVolume ? 'brightness-150' : 'brightness-100'}`} 
-              style={{ 
-                width: `${(Math.sqrt(track.volume / 1.5)) * 100}%`, 
-                backgroundColor: track.color,
-                boxShadow: isAdjustingVolume ? `0 0 10px ${track.color}` : 'none'
-              }} 
-            />
+            {/* Cadre arrondi à part : son overflow-hidden coupait la zone tactile (.nova-hit-tactile) */}
+            <div className="h-full bg-black/60 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-75 ${isAdjustingVolume ? 'brightness-150' : 'brightness-100'}`}
+                style={{
+                  width: `${(Math.sqrt(track.volume / 1.5)) * 100}%`,
+                  backgroundColor: track.color,
+                  boxShadow: isAdjustingVolume ? `0 0 10px ${track.color}` : 'none'
+                }}
+              />
+            </div>
             <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/45 pointer-events-none group-hover/vol:text-white/80 transition-colors">
               {gainToDbText(track.volume)}
             </span>

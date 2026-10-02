@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, PropsWithChildren } from 'react';
+import { createPortal } from 'react-dom';
 import { ViewType, Theme, User } from '../types';
 import ProMasterMeter from './ProMasterMeter';
 import MasterVisualizer from './MasterVisualizer';
@@ -219,6 +220,18 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
     if (isEditingBpm) bpmInputRef.current?.focus();
   }, [isEditingBpm]);
 
+  // Échap ferme le menu (sans arrêter la lecture au passage).
+  useEffect(() => {
+    if (!isMobileMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      setIsMobileMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [isMobileMenuOpen]);
+
   return (
     <div className="nova-verre nova-verre-haut h-16 flex items-center px-2 md:px-4 justify-between z-50 relative shrink-0 transition-all border-b" style={{ borderColor: 'var(--border-dim)' }}>
       {noArmedTrackError && (
@@ -337,15 +350,15 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         <div className="flex items-center space-x-2 md:space-x-3 bg-black/40 px-3 md:px-4 py-1.5 rounded-xl border border-white/5" style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}>
           <button onClick={onStop} title="Stop (Échap)" aria-label="Stop" className="nova-hit w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
           <button onClick={onTogglePlay} title="Lecture / pause (raccourci : barre d'espace)" aria-label={isPlaying ? 'Pause' : 'Lecture'} aria-pressed={isPlaying} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg ${isPlaying ? 'text-black nova-halo' : 'bg-white text-black hover:scale-105 shadow-black/40'}`} style={{ backgroundColor: isPlaying ? 'var(--accent-neon)' : '#fff' }}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-base`}></i></button>
-          <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" aria-pressed={isLoopActive} className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
+          <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" aria-pressed={isLoopActive} className={`nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
           <OverloadBadge />
           {onTogglePunch && (
             <button onClick={onTogglePunch} title="Punch-in / punch-out : REC ne remplace que la zone de la boucle (pré-roll de 2 mesures, arrêt automatique)" aria-pressed={isPunchActive}
-              className={`hidden md:flex h-8 px-2 rounded-lg items-center justify-center text-[9px] font-black tracking-wider transition-all ${isPunchActive ? 'bg-red-500/25 text-red-300 border border-red-500/50' : 'text-slate-500 hover:text-white border border-transparent'}`}>
+              className={`nova-hit-tactile hidden md:flex h-8 px-2 rounded-lg items-center justify-center text-[9px] font-black tracking-wider transition-all ${isPunchActive ? 'bg-red-500/25 text-red-300 border border-red-500/50' : 'text-slate-500 hover:text-white border border-transparent'}`}>
               PUNCH
             </button>
           )}
-          <button onClick={onToggleMetronome} title="Métronome" aria-label="Métronome" aria-pressed={isMetronomeEnabled} className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
+          <button onClick={onToggleMetronome} title="Métronome" aria-label="Métronome" aria-pressed={isMetronomeEnabled} className={`nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
           <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" aria-label={isRecording ? "Arrêter l'enregistrement" : 'Enregistrer'} aria-pressed={isRecording} className={`h-12 px-4 2xl:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'var(--border-highlight)' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">Rec</span></button>
         </div>
         
@@ -412,9 +425,12 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
       </div>
 
       {/* MOBILE DROPDOWN MENU */}
-      {isMobileMenuOpen && (
-        <div className="2xl:hidden absolute top-full left-0 right-0 md:right-auto md:w-[400px] bg-[#0a0b0d] border-b border-white/10 shadow-2xl z-[100] max-h-[80vh] overflow-y-auto" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}>
-          <div className="p-4 space-y-3">
+      {/* Rendu dans <body> : dans la barre (empilement z-50) le tiroir passait sous
+          les boutons flottants (Piste voix, Collaborer, onglets) et se coupait. */}
+      {isMobileMenuOpen && createPortal(<>
+        <div className="2xl:hidden fixed inset-x-0 top-16 bottom-0 z-[540] bg-black/50" onClick={() => setIsMobileMenuOpen(false)} aria-hidden="true" />
+        <div role="dialog" aria-label="Menu" className="2xl:hidden fixed top-16 left-0 right-0 md:right-auto md:w-[400px] z-[550] max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain bg-[#0a0b0d] border-b md:border-r border-white/10 shadow-2xl" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)', touchAction: 'pan-y' }}>
+          <div className="p-4 space-y-3" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
 
             {/* Téléphone : métronome et boucle (masqués dans la barre sous 768 px) */}
             <div className="grid grid-cols-2 gap-2">
@@ -581,7 +597,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
           </div>
         </div>
-      )}
+      </>, document.body)}
     </div>
   );
 };

@@ -168,7 +168,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
 
   // 296 px : nom de piste lisible avec FX, M, S, envois et R sur la même ligne.
-  const [headerWidth, setHeaderWidth] = useState(296);
+  // Écran tactile en vue PC (iPad paysage) : boutons espacés au pas de 40 px,
+  // 40 px de plus pour que le nom reste lisible.
+  const [headerWidth, setHeaderWidth] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth >= 1024 && window.matchMedia?.('(pointer: coarse)').matches ? 336 : 296);
   const [isResizingHeader, setIsResizingHeader] = useState(false);
   const [isDraggingMinimap, setIsDraggingMinimap] = useState(false);
 
@@ -1416,12 +1419,13 @@ useEffect(() => {
     <div className="nova-grille flex-1 flex flex-col overflow-hidden relative select-none" onContextMenu={e => e.preventDefault()}>
       <div className="h-12 flex items-center px-4 gap-4 z-30 shrink-0">
         <div className="flex items-center space-x-4 shrink-0">
+          {/* Au doigt : outils de 40 px (36 px à la souris) */}
           <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
-            <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Sélection / déplacement (1)" aria-label="Outil sélection"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
-            <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Ciseaux : couper un clip (2)" aria-label="Outil ciseaux"><i className="fas fa-cut text-[12px]"></i></button>
-            <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Sélection / déplacement (1)" aria-label="Outil sélection"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Ciseaux : couper un clip (2)" aria-label="Outil ciseaux"><i className="fas fa-cut text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
-          <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 h-9 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+          <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 h-9 [@media(pointer:coarse)]:h-10 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
             <i className="fas fa-magnet mr-2"></i> {snapEnabled ? 'Grille ON' : 'Grille OFF'}
           </button>
         </div>
@@ -1506,8 +1510,8 @@ useEffect(() => {
               </div>
             ))}
             <div style={{ flexGrow: 1 }} />
-            {/* Resize handle */}
-            <div className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-cyan-500/50 active:bg-cyan-500 z-50 flex items-center justify-center group" onMouseDown={handleHeaderResizeStart}>
+            {/* Resize handle (souris seulement : au doigt il captait les touchers destinés au bouton R) */}
+            <div className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-cyan-500/50 active:bg-cyan-500 z-50 flex items-center justify-center group [@media(pointer:coarse)]:hidden" onMouseDown={handleHeaderResizeStart}>
               <div className="w-0.5 h-8 bg-white/20 rounded-full group-hover:bg-white/50 pointer-events-none" />
             </div>
           </div>
