@@ -1,6 +1,7 @@
 
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { loadWorkletModule, setParamSmooth } from './vocalDspUtils';
 
 /**
@@ -531,6 +532,14 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
     lastTouchY.current = e.touches[0].clientY;
   };
 
+  const setParam = (key: keyof SaturatorParams, value: number) => {
+    setParams(prev => {
+      const newParams = { ...prev, [key]: value };
+      node.updateParams(newParams);
+      return newParams;
+    });
+  };
+
   const setMode = (mode: SaturationMode) => {
     const newParams = { ...params, mode };
     setParams(newParams);
@@ -583,10 +592,10 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
       </div>
 
       <div className="grid grid-cols-4 gap-4">
-        <SatKnob label="Drive" value={(Number.isFinite(params.drive) ? params.drive : 20) / 100} onMouseDown={(e) => handleMouseDown('drive', e)} onTouchStart={(e) => handleTouchStart('drive', e)} color="#facc15" suffix="" displayVal={Math.round(Number.isFinite(params.drive) ? params.drive : 20)} />
-        <SatKnob label="Tone" value={(params.tone + 1) / 2} onMouseDown={(e) => handleMouseDown('tone', e)} onTouchStart={(e) => handleTouchStart('tone', e)} color="#facc15" suffix="" displayVal={Math.round(params.tone * 100)} />
-        <SatKnob label="Mix" value={params.mix} onMouseDown={(e) => handleMouseDown('mix', e)} onTouchStart={(e) => handleTouchStart('mix', e)} color="#facc15" suffix="%" displayVal={Math.round(params.mix * 100)} />
-        <SatKnob label="Output" value={params.outputGain / 2} onMouseDown={(e) => handleMouseDown('outputGain', e)} onTouchStart={(e) => handleTouchStart('outputGain', e)} color="#facc15" suffix="dB" displayVal={Math.round((params.outputGain - 1) * 12)} />
+        <SatKnob label="Drive" value={(Number.isFinite(params.drive) ? params.drive : 20) / 100} defaultValue={0.2} onChange={(v) => setParam('drive', v * 100)} color="#facc15" suffix="" displayVal={Math.round(Number.isFinite(params.drive) ? params.drive : 20)} />
+        <SatKnob label="Tone" value={(params.tone + 1) / 2} defaultValue={0.5} onChange={(v) => setParam('tone', v * 2 - 1)} color="#facc15" suffix="" displayVal={Math.round(params.tone * 100)} />
+        <SatKnob label="Mix" value={params.mix} defaultValue={0.5} onChange={(v) => setParam('mix', v)} color="#facc15" suffix="%" displayVal={Math.round(params.mix * 100)} />
+        <SatKnob label="Output" value={params.outputGain / 2} defaultValue={0.5} onChange={(v) => setParam('outputGain', v * 2)} color="#facc15" suffix="dB" displayVal={Math.round((params.outputGain - 1) * 12)} />
       </div>
 
       <div className="pt-6 border-t border-white/5 flex justify-between items-center">
@@ -606,17 +615,18 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
 const SatKnob: React.FC<{
   label: string;
   value: number;
-  onMouseDown: (e: React.MouseEvent) => void;
-  onTouchStart?: (e: React.TouchEvent) => void;
+  onChange: (v: number) => void;
+  defaultValue?: number;
   color: string;
   suffix: string;
   displayVal: number;
-}> = ({ label, value, onMouseDown, onTouchStart, color, suffix, displayVal }) => {
+}> = ({ label, value, onChange, defaultValue, color, suffix, displayVal }) => {
   const safeValue = Number.isFinite(value) ? value : 0;
+  const knob = useKnobInteraction(safeValue, onChange, { min: 0, max: 1, sensitivity: 150, defaultValue });
   const rotation = (safeValue * 270) - 135;
   return (
     <div className="flex flex-col items-center space-y-3 group touch-none">
-      <div onMouseDown={onMouseDown} onTouchStart={onTouchStart} className="w-14 h-14 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-yellow-500/50 transition-all shadow-xl relative">
+      <div {...knob.bind} className="w-14 h-14 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-yellow-500/50 transition-all shadow-xl relative">
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div className="absolute top-1/2 left-1/2 w-1.5 h-6 -ml-0.75 -mt-6 origin-bottom rounded-full transition-transform duration-75" style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: color, boxShadow: `0 0 8px ${color}66` }} />
         <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />

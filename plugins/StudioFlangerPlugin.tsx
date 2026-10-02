@@ -1,5 +1,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 /**
  * MODULE FX_09 : STUDIO FLANGER
@@ -127,32 +128,14 @@ export class FlangerNode {
 const FlangerKnob: React.FC<{ 
   label: string, value: number, onChange: (v: number) => void, suffix?: string, factor?: number, defaultValue?: number 
 }> = ({ label, value, onChange, suffix, factor = 1, defaultValue = 0.5 }) => {
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startValue = value;
-    const onMouseMove = (m: MouseEvent) => {
-      const deltaY = (startY - m.clientY) / 200;
-      const newValue = Math.max(0, Math.min(1, startValue + deltaY));
-      onChange(newValue);
-    };
-    const onMouseUp = () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      document.body.style.cursor = 'default';
-    };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    document.body.style.cursor = 'ns-resize';
-  };
+  const knob = useKnobInteraction(value, onChange, { min: 0, max: 1, defaultValue });
 
   const rotation = (value * 270) - 135;
 
   return (
     <div className="flex flex-col items-center space-y-2 select-none">
       <div 
-        onMouseDown={handleMouseDown}
-        onDoubleClick={() => onChange(defaultValue)}
+        {...knob.bind}
         className="w-14 h-14 rounded-full bg-[#111318] border-2 border-white/5 flex items-center justify-center cursor-pointer hover:border-blue-500/50 transition-all shadow-xl relative"
       >
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40" />

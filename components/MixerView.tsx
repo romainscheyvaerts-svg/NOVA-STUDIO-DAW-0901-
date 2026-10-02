@@ -1,10 +1,11 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { gainToDbText } from '../utils/db';
+import { gainToDbText, panToText } from '../utils/db';
 import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { SmartKnob } from './SmartKnob';
 import ProMasterMeter from './ProMasterMeter';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { getValidDestinations, getRouteLabel } from './RoutingManager';
 
 // Track Group Colors (inspired by Pro Tools)
@@ -59,6 +60,8 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, onUpdate: (t: Track) =
           max={1.5}
           size={26} // Slightly bigger
           color={getSendColor(send.id)}
+          defaultValue={1}
+          format={gainToDbText}
           onChange={(val) => {
               const newSends = track.sends.map(s => s.id === send.id ? { ...s, level: val } : s);
               onUpdate({ ...track, sends: newSends });
@@ -157,30 +160,13 @@ const ChannelStrip: React.FC<{
     if (onRequestAddPlugin) onRequestAddPlugin(track.id, clientX, clientY);
   };
 
-  // Logic Volume Interaction
-  const handleVolInteraction = (clientY: number, rect: DOMRect) => {
-      const p = 1 - Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-      onUpdate({...track, volume: p * p * 1.5});
-  };
-
-  const onVolMouseDown = (e: React.MouseEvent) => {
-      const rect = faderTrackRef.current!.getBoundingClientRect();
-      handleVolInteraction(e.clientY, rect);
-      const move = (m: MouseEvent) => handleVolInteraction(m.clientY, rect);
-      const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-      window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
-  };
-
-  const onVolTouchStart = (e: React.TouchEvent) => {
-      e.stopPropagation(); 
-      const rect = faderTrackRef.current!.getBoundingClientRect();
-      handleVolInteraction(e.touches[0].clientY, rect);
-  };
-
-  const onVolTouchMove = (e: React.TouchEvent) => {
-      const rect = faderTrackRef.current!.getBoundingClientRect();
-      handleVolInteraction(e.touches[0].clientY, rect);
-  };
+  // Fader de volume : course en racine du gain (0…1.5), glissement RELATIF
+  // (le fader ne saute plus sous le clic), Maj = fin, molette, double-clic = 0 dB.
+  const faderPos = Math.sqrt(Math.max(0, track.volume) / 1.5);
+  const fader = useKnobInteraction(faderPos, (p) => onUpdate({ ...track, volume: p * p * 1.5 }), {
+      min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005,
+      sensitivity: Math.max(120, faderTrackRef.current?.clientHeight || 300),
+  });
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault(); 
@@ -313,19 +299,19 @@ const ChannelStrip: React.FC<{
         )}
 
         <div className="mb-2 flex flex-col items-center">
-           <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="PAN" value={track.pan} min={-1} max={1} size={36} color="#06b6d4" onChange={(val) => onUpdate({...track, pan: val})} />
+           <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="PAN" value={track.pan} min={-1} max={1} size={36} color="#06b6d4" defaultValue={0} format={panToText} onChange={(val) => onUpdate({...track, pan: val})} />
         </div>
 
         <div className="flex-1 flex space-x-3 px-2">
            <div className="flex-1 relative flex flex-col items-center">
               <div 
-                ref={faderTrackRef} 
                 data-nova-target={`vol-${track.id}`}
-                onMouseDown={onVolMouseDown}
-                onTouchStart={onVolTouchStart}
-                onTouchMove={onVolTouchMove}
-                onDoubleClick={() => onUpdate({ ...track, volume: 1 })}
-                title="Volume (double-clic : 0 dB)"
+                {...fader.bind}
+                ref={(el) => { faderTrackRef.current = el; fader.wheelRef(el); }}
+                title="Volume : glisser (Maj = fin), molette, double-clic = 0 dB"
+                role="slider"
+                aria-label={`Volume ${track.name}`}
+                aria-valuetext={gainToDbText(track.volume)}
                 className="h-full bg-black/40 rounded-full border border-white/5 relative cursor-pointer touch-none group/fader"
                 style={{ width: 'var(--fader-width)' }}
               >

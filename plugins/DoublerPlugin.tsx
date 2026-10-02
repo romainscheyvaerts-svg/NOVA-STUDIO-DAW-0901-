@@ -1,5 +1,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { setParamSmooth } from './vocalDspUtils';
 
 /**
@@ -187,42 +188,16 @@ const DoublerKnob: React.FC<{
   label: string, value: number, onChange: (v: number) => void, suffix?: string, factor?: number, defaultValue?: number 
 }> = ({ label, value, onChange, suffix, factor = 1, defaultValue = 0.5 }) => {
   const safeValue = Number.isFinite(value) ? value : defaultValue || 0;
+  const knob = useKnobInteraction(safeValue, onChange, { min: 0, max: 1, defaultValue, sensitivity: 150 });
 
-  const handleInteraction = (delta: number, startVal: number) => {
-      const newVal = Math.max(0, Math.min(1, startVal + delta));
-      if (Number.isFinite(newVal)) onChange(newVal);
-  };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault(); e.stopPropagation();
-    const startY = e.clientY;
-    const startValue = safeValue;
-    const onMouseMove = (m: MouseEvent) => handleInteraction((startY - m.clientY) / 150, startValue);
-    const onMouseUp = () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
-    window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
-  };
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    e.stopPropagation();
-    const startY = e.touches[0].clientY;
-    const startValue = safeValue;
-    const onTouchMove = (t: TouchEvent) => {
-        if(t.cancelable) t.preventDefault();
-        handleInteraction((startY - t.touches[0].clientY) / 150, startValue);
-    };
-    const onTouchEnd = () => { window.removeEventListener('touchmove', onTouchMove); window.removeEventListener('touchend', onTouchEnd); };
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-    window.addEventListener('touchend', onTouchEnd);
-  };
 
   const rotation = (safeValue * 270) - 135;
 
   return (
     <div className="flex flex-col items-center space-y-2 select-none group touch-none">
       <div 
-        onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
-        onDoubleClick={() => onChange(defaultValue || 0.5)}
+        {...knob.bind}
         className="w-14 h-14 rounded-full bg-[#121418] border-2 border-white/5 flex items-center justify-center cursor-pointer hover:border-violet-500/50 transition-all shadow-xl relative"
       >
         <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40 shadow-inner" />

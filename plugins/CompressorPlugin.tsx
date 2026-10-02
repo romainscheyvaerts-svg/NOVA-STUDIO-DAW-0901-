@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginParameter } from '../types';
 import { makeCurve, loadWorkletModule } from './vocalDspUtils';
 
@@ -825,17 +826,17 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
 
       {/* Main controls */}
       <div className="grid grid-cols-6 gap-4">
-        <CompressorKnob label="Threshold" value={params.threshold} min={-60} max={0} suffix="dB" color="#f97316" onChange={(v) => updateParam('threshold', v)} displayVal={Math.round(params.threshold)} />
-        <CompressorKnob label="Ratio" value={params.ratio} min={1} max={20} suffix=":1" color="#f97316" onChange={(v) => updateParam('ratio', v)} displayVal={params.ratio.toFixed(1)} />
-        <CompressorKnob label="Knee" value={params.knee} min={0} max={40} suffix="dB" color="#f97316" onChange={(v) => updateParam('knee', v)} displayVal={Math.round(params.knee)} />
-        <CompressorKnob label="Attack" value={params.attack} min={0.0001} max={0.1} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('attack', v)} displayVal={(params.attack * 1000).toFixed(1)} />
-        <CompressorKnob label="Release" value={params.release} min={0.01} max={1.0} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('release', v)} displayVal={Math.round(params.release * 1000)} />
-        <CompressorKnob label="Makeup" value={params.makeupGain} min={0.25} max={4} factor={1} suffix="x" color="#fff" onChange={(v) => updateParam('makeupGain', v)} displayVal={params.makeupGain.toFixed(2)} disabled={params.autoMakeup} />
+        <CompressorKnob label="Threshold" defaultValue={-18} value={params.threshold} min={-60} max={0} suffix="dB" color="#f97316" onChange={(v) => updateParam('threshold', v)} displayVal={Math.round(params.threshold)} />
+        <CompressorKnob label="Ratio" defaultValue={4} value={params.ratio} min={1} max={20} suffix=":1" color="#f97316" onChange={(v) => updateParam('ratio', v)} displayVal={params.ratio.toFixed(1)} />
+        <CompressorKnob label="Knee" defaultValue={12} value={params.knee} min={0} max={40} suffix="dB" color="#f97316" onChange={(v) => updateParam('knee', v)} displayVal={Math.round(params.knee)} />
+        <CompressorKnob label="Attack" defaultValue={0.003} value={params.attack} min={0.0001} max={0.1} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('attack', v)} displayVal={(params.attack * 1000).toFixed(1)} />
+        <CompressorKnob label="Release" defaultValue={0.25} value={params.release} min={0.01} max={1.0} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('release', v)} displayVal={Math.round(params.release * 1000)} />
+        <CompressorKnob label="Makeup" defaultValue={1.6} value={params.makeupGain} min={0.25} max={4} factor={1} suffix="x" color="#fff" onChange={(v) => updateParam('makeupGain', v)} displayVal={params.makeupGain.toFixed(2)} disabled={params.autoMakeup} />
       </div>
 
       {/* Advanced controls */}
       <div className="grid grid-cols-4 gap-4 pt-2 border-t border-white/5">
-        <CompressorKnob label="Mix" value={params.mix} min={0} max={1} factor={100} suffix="%" color="#06b6d4" onChange={(v) => updateParam('mix', v)} displayVal={Math.round(params.mix * 100)} />
+        <CompressorKnob label="Mix" defaultValue={1} value={params.mix} min={0} max={1} factor={100} suffix="%" color="#06b6d4" onChange={(v) => updateParam('mix', v)} displayVal={Math.round(params.mix * 100)} />
         <CompressorKnob label="Lookahead" value={params.lookahead} min={0} max={0.005} factor={1000} suffix="ms" color="#06b6d4" onChange={(v) => updateParam('lookahead', v)} displayVal={(params.lookahead * 1000).toFixed(1)} />
         
         {/* Auto Makeup toggle */}
@@ -864,48 +865,19 @@ const CompressorKnob: React.FC<{
   displayVal: string | number;
   factor?: number;
   disabled?: boolean;
-}> = ({ label, value, onChange, color, min, max, suffix, displayVal, disabled }) => {
+  defaultValue?: number;
+}> = ({ label, value, onChange, color, min, max, suffix, displayVal, disabled, defaultValue }) => {
   const safeValue = Number.isFinite(value) ? value : min;
+  const knob = useKnobInteraction(safeValue, onChange, { min, max, disabled, defaultValue });
   const norm = (safeValue - min) / (max - min);
   const rotation = (norm * 270) - 135;
 
-  const handleInteraction = (delta: number, startVal: number) => {
-    if (disabled) return;
-    const newVal = Math.max(min, Math.min(max, startVal + delta * (max - min)));
-    if (Number.isFinite(newVal)) {
-      onChange(newVal);
-    }
-  };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (disabled) return;
-    e.preventDefault(); e.stopPropagation();
-    const startY = e.clientY;
-    const startVal = safeValue;
-    const onMouseMove = (m: MouseEvent) => handleInteraction((startY - m.clientY) / 200, startVal);
-    const onMouseUp = () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
-    window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
-  };
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (disabled) return;
-    e.stopPropagation();
-    const startY = e.touches[0].clientY;
-    const startVal = safeValue;
-    const onTouchMove = (t: TouchEvent) => {
-      if (t.cancelable) t.preventDefault();
-      handleInteraction((startY - t.touches[0].clientY) / 200, startVal);
-    };
-    const onTouchEnd = () => { window.removeEventListener('touchmove', onTouchMove); window.removeEventListener('touchend', onTouchEnd); };
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-    window.addEventListener('touchend', onTouchEnd);
-  };
 
   return (
     <div className={`flex flex-col items-center space-y-2 group touch-none ${disabled ? 'opacity-40' : ''}`}>
       <div 
-        onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
+        {...knob.bind}
         className={`w-11 h-11 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center transition-all shadow-xl relative ${disabled ? 'cursor-not-allowed' : 'cursor-ns-resize hover:border-orange-500/50'}`}
       >
         <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />

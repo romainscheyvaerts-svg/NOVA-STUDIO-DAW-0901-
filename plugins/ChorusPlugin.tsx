@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 /**
  * PROFESSIONAL DIMENSION CHORUS v3.0
@@ -360,51 +361,15 @@ const ChorusKnob: React.FC<{
   label: string, value: number, onChange: (v: number) => void, suffix?: string, factor?: number, defaultValue?: number, color?: string 
 }> = ({ label, value, onChange, suffix, factor = 1, defaultValue = 0.5, color = '#00f2ff' }) => {
   const safeValue = Number.isFinite(value) ? value : defaultValue || 0.5;
+  const knob = useKnobInteraction(safeValue, onChange, { min: 0, max: 1, defaultValue });
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startY = e.clientY;
-    const startValue = safeValue;
-    const onMouseMove = (m: MouseEvent) => {
-      const deltaY = (startY - m.clientY) / 200;
-      onChange(Math.max(0, Math.min(1, startValue + deltaY)));
-    };
-    const onMouseUp = () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      document.body.style.cursor = 'default';
-    };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    document.body.style.cursor = 'ns-resize';
-  };
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    e.stopPropagation();
-    const startY = e.touches[0].clientY;
-    const startValue = safeValue;
-    const onTouchMove = (t: TouchEvent) => {
-        if (t.cancelable) t.preventDefault();
-        const deltaY = (startY - t.touches[0].clientY) / 200;
-        onChange(Math.max(0, Math.min(1, startValue + deltaY)));
-    };
-    const onTouchEnd = () => {
-        window.removeEventListener('touchmove', onTouchMove);
-        window.removeEventListener('touchend', onTouchEnd);
-    };
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-    window.addEventListener('touchend', onTouchEnd);
-  };
 
   const rotation = (safeValue * 270) - 135;
 
   return (
     <div className="flex flex-col items-center space-y-2 select-none group touch-none">
       <div 
-        onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
-        onDoubleClick={() => onChange(defaultValue || 0.5)}
+        {...knob.bind}
         className="w-12 h-12 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-cyan-500/50 transition-all shadow-xl relative"
       >
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />

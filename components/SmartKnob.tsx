@@ -1,6 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { automationManager } from '../services/AutomationManager';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 interface SmartKnobProps {
   id: string;           // ID unique pour le registre automation (ex: 'track-1-vol')
@@ -15,11 +16,15 @@ interface SmartKnobProps {
   color?: string;
   suffix?: string;
   size?: number;
+  /** Valeur du double-clic (sinon 0 pour une plage bipolaire, ou la valeur d'ouverture). */
+  defaultValue?: number;
+  /** Affichage de la valeur (ex. « -3.0 dB », « G 20 »). */
+  format?: (v: number) => string;
 }
 
 export const SmartKnob: React.FC<SmartKnobProps> = ({
   id, targetId, paramId, label, value, min, max, onChange, 
-  isBridged = false, color = '#00f2ff', suffix = '', size = 50
+  isBridged = false, color = '#00f2ff', suffix = '', size = 50, defaultValue, format
 }) => {
   // État local visuel (découplé du parent pour performance 60fps en lecture)
   const [visualValue, setVisualValue] = useState(value);
@@ -62,82 +67,15 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
     };
   }, [id, targetId, isBridged]); // Dependencies minimales
 
-  // GESTION SOURIS (WRITE MODE)
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    automationManager.touch(id);
-
-    const startY = e.clientY;
-    const startVal = internalValueRef.current;
-    const range = max - min;
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaPixel = startY - moveEvent.clientY;
-      const deltaVal = (deltaPixel / 150) * range; // Sensibilité
-
-      let newVal = Math.max(min, Math.min(max, startVal + deltaVal));
-
-      // Mise à jour visuelle locale
-      setVisualValue(newVal);
-      internalValueRef.current = newVal;
-
-      // Envoi au moteur (qui gère le throttling VST et l'enregistrement)
-      // Le moteur appellera ensuite le onChange réel si nécessaire
-      const currentTime = window.DAW_CONTROL ? window.DAW_CONTROL.getState().currentTime : 0;
-      automationManager.setValue(id, newVal, currentTime);
-    };
-
-    const handleMouseUp = () => {
-      automationManager.release(id);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-  };
-
-  // GESTION TACTILE (WRITE MODE)
-  const handleTouchStart = (e: React.TouchEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    automationManager.touch(id);
-
-    const startY = e.touches[0].clientY;
-    const startVal = internalValueRef.current;
-    const range = max - min;
-
-    const handleTouchMove = (moveEvent: TouchEvent) => {
-      if (moveEvent.touches.length === 0) return;
-
-      const deltaPixel = startY - moveEvent.touches[0].clientY;
-      const deltaVal = (deltaPixel / 150) * range; // Même sensibilité que souris
-
-      let newVal = Math.max(min, Math.min(max, startVal + deltaVal));
-
-      // Mise à jour visuelle locale
-      setVisualValue(newVal);
-      internalValueRef.current = newVal;
-
-      // Envoi au moteur
-      const currentTime = window.DAW_CONTROL ? window.DAW_CONTROL.getState().currentTime : 0;
-      automationManager.setValue(id, newVal, currentTime);
-    };
-
-    const handleTouchEnd = () => {
-      automationManager.release(id);
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', handleTouchEnd);
-      window.removeEventListener('touchcancel', handleTouchEnd);
-    };
-
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
-    window.addEventListener('touchend', handleTouchEnd);
-    window.addEventListener('touchcancel', handleTouchEnd);
-  };
+  // GESTES (WRITE MODE) : glisser, Maj = fin, molette, double-clic = défaut.
+  // Le moteur d'automation enregistre pendant que le potard est « touché ».
+  const knob = useKnobInteraction(visualValue, (newVal) => {
+    setVisualValue(newVal);
+    internalValueRef.current = newVal;
+    // Envoi au moteur (qui gère le throttling VST et l'enregistrement)
+    const currentTime = window.DAW_CONTROL ? window.DAW_CONTROL.getState().currentTime : 0;
+    automationManager.setValue(id, newVal, currentTime);
+  }, { min, max, sensitivity: 150, defaultValue, onStart: () => automationManager.touch(id), onEnd: () => automationManager.release(id) });
 
   // RENDER (CANVAS ou SVG simple)
   // On utilise un SVG pour la netteté et la performance CSS
@@ -147,8 +85,13 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
   return (
     <div className="flex flex-col items-center space-y-2 select-none group">
       <div
-        onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
+        {...knob.bind}
+        role="slider"
+        aria-label={label}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={Number(visualValue.toFixed(3))}
+        aria-valuetext={format ? format(visualValue) : `${visualValue.toFixed(1)}${suffix}`}
         className="relative rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-white/30 transition-colors shadow-lg touch-none"
         style={{ width: size, height: size }}
       >
@@ -173,7 +116,7 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
         <span className="block text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</span>
         <div className="bg-black/60 px-2 py-0.5 rounded border border-white/5 min-w-[40px]">
           <span className="text-[9px] font-mono font-bold text-white">
-            {visualValue.toFixed(1)}{suffix}
+            {format ? format(visualValue) : <>{visualValue.toFixed(1)}{suffix}</>}
           </span>
         </div>
       </div>

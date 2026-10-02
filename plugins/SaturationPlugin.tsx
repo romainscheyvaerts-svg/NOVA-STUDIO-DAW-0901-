@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 /**
  * MODULE FX_03 : VOCAL SATURATION ENGINE
@@ -271,6 +272,14 @@ export const VocalSaturationUI: React.FC<VocalSaturationUIProps> = ({ node, init
     document.body.style.cursor = 'ns-resize';
   };
 
+  const setParam = (key: keyof SaturationParams, value: number) => {
+    setParams(prev => {
+      const newParams = { ...prev, [key]: value };
+      node.updateParams(newParams);
+      return newParams;
+    });
+  };
+
   const setMode = (mode: SaturationMode) => {
     const newParams = { ...params, mode };
     setParams(newParams);
@@ -326,10 +335,10 @@ export const VocalSaturationUI: React.FC<VocalSaturationUIProps> = ({ node, init
       </div>
 
       <div className="grid grid-cols-4 gap-4 px-2">
-        <SatKnob label="Drive" value={(params.drive - 1) / 9} factor={100} suffix="%" color="#facc15" onMouseDown={(e) => handleMouseDown('drive', e)} displayVal={Math.round((params.drive-1)/9 * 100)} />
-        <SatKnob label="Tilt Tone" value={(params.tone + 1) / 2} factor={100} suffix="%" color="#facc15" onMouseDown={(e) => handleMouseDown('tone', e)} displayVal={Math.round(params.tone * 100)} />
-        <SatKnob label="Dry / Wet" value={params.mix} factor={100} suffix="%" color="#fff" onMouseDown={(e) => handleMouseDown('mix', e)} displayVal={Math.round(params.mix * 100)} />
-        <SatKnob label="Output" value={params.outputGain / 2} factor={200} suffix="%" color="#fff" onMouseDown={(e) => handleMouseDown('outputGain', e)} displayVal={Math.round(params.outputGain * 100)} />
+        <SatKnob label="Drive" value={(params.drive - 1) / 9} factor={100} suffix="%" color="#facc15" onChange={(v) => setParam('drive', 1 + v * 9)} displayVal={Math.round((params.drive-1)/9 * 100)} />
+        <SatKnob label="Tilt Tone" value={(params.tone + 1) / 2} factor={100} suffix="%" color="#facc15" onChange={(v) => setParam('tone', v * 2 - 1)} displayVal={Math.round(params.tone * 100)} />
+        <SatKnob label="Dry / Wet" value={params.mix} factor={100} suffix="%" color="#fff" onChange={(v) => setParam('mix', v)} displayVal={Math.round(params.mix * 100)} />
+        <SatKnob label="Output" value={params.outputGain / 2} factor={200} suffix="%" color="#fff" defaultValue={0.5} onChange={(v) => setParam('outputGain', v * 2)} displayVal={Math.round(params.outputGain * 100)} />
       </div>
 
       <div className="pt-6 border-t border-white/5 flex justify-between items-center text-slate-700">
@@ -346,12 +355,13 @@ export const VocalSaturationUI: React.FC<VocalSaturationUIProps> = ({ node, init
   );
 };
 
-const SatKnob: React.FC<{ label: string, value: number, onMouseDown: (e: React.MouseEvent) => void, color: string, factor: number, suffix: string, displayVal: number }> = ({ label, value, onMouseDown, color, factor, suffix, displayVal }) => {
+const SatKnob: React.FC<{ label: string, value: number, onChange: (v: number) => void, defaultValue?: number, color: string, factor: number, suffix: string, displayVal: number }> = ({ label, value, onChange, defaultValue, color, factor, suffix, displayVal }) => {
+  const knob = useKnobInteraction(value, onChange, { min: 0, max: 1, sensitivity: 150, defaultValue });
   const rotation = (value * 270) - 135;
   return (
     <div className="flex flex-col items-center space-y-3 group">
       <div 
-        onMouseDown={onMouseDown} 
+        {...knob.bind} 
         className="w-14 h-14 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-yellow-500/50 transition-all shadow-xl relative"
       >
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />

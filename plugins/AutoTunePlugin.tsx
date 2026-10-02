@@ -1,6 +1,7 @@
 
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 // Export constants for use in other plugins (MasterSync)
 export const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -880,9 +881,9 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
       </div>
 
       <div className="grid grid-cols-3 gap-8 pt-2">
-        <TuneKnob label="Retune Speed" value={params.speed} onMouseDown={(e) => handleMouseDown('speed', e)} onTouchStart={(e) => handleTouchStart('speed', e)} factor={100} suffix="%" inverseLabel={true} />
-        <TuneKnob label="Humanize" value={params.humanize} onMouseDown={(e) => handleMouseDown('humanize', e)} onTouchStart={(e) => handleTouchStart('humanize', e)} factor={100} suffix="%" />
-        <TuneKnob label="Amount" value={params.mix} onMouseDown={(e) => handleMouseDown('mix', e)} onTouchStart={(e) => handleTouchStart('mix', e)} factor={100} suffix="%" />
+        <TuneKnob label="Retune Speed" value={params.speed} defaultValue={0.1} onChange={(v) => updateParam('speed', v)} factor={100} suffix="%" inverseLabel={true} />
+        <TuneKnob label="Humanize" value={params.humanize} defaultValue={0.2} onChange={(v) => updateParam('humanize', v)} factor={100} suffix="%" />
+        <TuneKnob label="Amount" value={params.mix} defaultValue={1} onChange={(v) => updateParam('mix', v)} factor={100} suffix="%" />
       </div>
     </div>
   );
@@ -891,12 +892,13 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
 const TuneKnob: React.FC<{
   label: string;
   value: number;
-  onMouseDown: (e: React.MouseEvent) => void;
-  onTouchStart?: (e: React.TouchEvent) => void;
+  onChange: (v: number) => void;
+  defaultValue?: number;
   factor: number;
   suffix: string;
   inverseLabel?: boolean
-}> = ({ label, value, onMouseDown, onTouchStart, factor, suffix, inverseLabel }) => {
+}> = ({ label, value, onChange, defaultValue, factor, suffix, inverseLabel }) => {
+  const knob = useKnobInteraction(value, onChange, { min: 0, max: 1, sensitivity: 150, defaultValue });
   const rotation = (value * 270) - 135;
   let displayValue = `${Math.round(value * factor)}${suffix}`;
   if (inverseLabel) {
@@ -907,7 +909,7 @@ const TuneKnob: React.FC<{
   }
 
   return (
-    <div className="flex flex-col items-center space-y-3 group cursor-ns-resize touch-none" onMouseDown={onMouseDown} onTouchStart={onTouchStart}>
+    <div className="flex flex-col items-center space-y-3 group cursor-ns-resize touch-none" {...knob.bind}>
       <div className="relative w-16 h-16 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center shadow-lg group-hover:border-cyan-500/50 transition-colors">
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div

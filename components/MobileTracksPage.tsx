@@ -62,7 +62,7 @@ const MobileSendFader: React.FC<{
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
         />
       </div>
-      <span className="text-[9px] font-mono text-white/50 w-8 text-right">{Math.round(percent)}%</span>
+      <span className="text-[9px] font-mono tabular-nums text-white/50 w-12 text-right">{gainToDbText(send.level)}</span>
     </div>
   );
 };
