@@ -1,4 +1,5 @@
 
+import { integratedLufs, normalizeToLufs, truePeakDb } from '../utils/loudness';
 import React, { useState, useEffect } from 'react';
 import { DAWState, Track } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
@@ -46,7 +47,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   const [mp3Bitrate, setMp3Bitrate] = useState<string>('320');
 
   // TRAITEMENT
-  const [normalize, setNormalize] = useState(false);
+  // Normalisation : aucune, crête (-0,1 dB) ou loudness (LUFS) comme les plateformes
+  const [normalize, setNormalize] = useState<'off' | 'peak' | 'lufs14' | 'lufs16'>('off');
+  const [loudnessReport, setLoudnessReport] = useState<string | null>(null);
   const [dither, setDither] = useState(true); // On by default for lower bit depths
 
   // UI STATE
@@ -82,9 +85,17 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
   const processAudioBuffer = (buffer: AudioBuffer): AudioBuffer => {
       // 1. Normalisation
-      if (normalize) {
+      if (normalize === 'peak') {
           setStatusText('Normalisation (-0.1 dB)...');
           AudioEncoder.normalizeBuffer(buffer, -0.1);
+          setLoudnessReport(`Mesuré : ${integratedLufs(buffer).toFixed(1)} LUFS · crête vraie ${truePeakDb(buffer).toFixed(1)} dBTP`);
+      } else if (normalize === 'lufs14' || normalize === 'lufs16') {
+          const target = normalize === 'lufs14' ? -14 : -16;
+          setStatusText(`Loudness ${target} LUFS...`);
+          const r = normalizeToLufs(buffer, target, -1);
+          setLoudnessReport(`Loudness : ${Number.isFinite(r.before) ? r.before.toFixed(1) : '—'} → ${Number.isFinite(r.after) ? r.after.toFixed(1) : '—'} LUFS · crête vraie ${r.truePeak.toFixed(1)} dBTP${r.limitedByPeak ? ' (cible non atteinte : crêtes trop hautes, passe un limiteur sur le master)' : ''}`);
+      } else {
+          setLoudnessReport(`Mesuré : ${integratedLufs(buffer).toFixed(1)} LUFS · crête vraie ${truePeakDb(buffer).toFixed(1)} dBTP`);
       }
       
       // 2. Dithering (Uniquement si réduction de bits)
@@ -330,12 +341,15 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     <div className="space-y-3">
                         <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">3. Traitement du Signal</span>
                         <div className="flex space-x-6">
-                            <label className="flex items-center space-x-2 cursor-pointer group">
-                                <div className={`w-4 h-4 border rounded flex items-center justify-center transition-all ${normalize ? 'bg-cyan-500 border-cyan-500 text-black' : 'border-white/20 bg-black/40'}`}>
-                                    {normalize && <i className="fas fa-check text-[8px]"></i>}
-                                </div>
-                                <input type="checkbox" checked={normalize} onChange={e => setNormalize(e.target.checked)} className="hidden" disabled={isRendering} />
-                                <span className={`text-[10px] font-bold ${normalize ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'}`}>Normaliser (-0.1 dB)</span>
+                            <label className="flex items-center space-x-2 text-[10px] font-bold text-slate-300">
+                                <span>Niveau</span>
+                                <select value={normalize} onChange={e => setNormalize(e.target.value as typeof normalize)} disabled={isRendering}
+                                    className="h-8 bg-black/40 border border-white/10 rounded-lg px-2 text-[10px] text-white font-bold focus:border-cyan-500 outline-none">
+                                    <option value="off">Tel quel</option>
+                                    <option value="peak">Crête -0,1 dB</option>
+                                    <option value="lufs14">-14 LUFS (Spotify, YouTube)</option>
+                                    <option value="lufs16">-16 LUFS (Apple Music)</option>
+                                </select>
                             </label>
 
                             <label className="flex items-center space-x-2 cursor-pointer group">
@@ -391,6 +405,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                 <span className="text-[8px] text-slate-500 block text-center animate-pulse">{statusText}</span>
                             </div>
                         )}
+                        {loudnessReport && <p className="text-[10px] text-emerald-300 text-center" role="status">{loudnessReport}</p>}
 
                         {exportVerrouille && (
                           <div className="mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200">
