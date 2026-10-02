@@ -1,2 +1,0 @@
-
-// Fichier supprimé comme demandé.
