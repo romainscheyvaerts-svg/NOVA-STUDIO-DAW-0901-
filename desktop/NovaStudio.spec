@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Recette PyInstaller de Nova Studio pour Windows (dossier dist/NovaStudio/, sans console).
-# Lancée par build.py ; les sources des ponts viennent de ../bridge-python (non modifiées).
+# Lancée par build.py ; les sources des ponts viennent de ../bridge-python (non modifiées),
+# l'interface du DAW de build/ui-bundle (build_ui.py).
 import glob
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
@@ -9,6 +10,11 @@ datas = [
     ('assets/nova.ico', '.'),
 ]
 datas += [(f, 'webview2') for f in glob.glob('vendor/webview2/*.dll')]
+# Interface du DAW embarquée (construite par build_ui.py) -> _internal/ui/
+import os
+if not os.path.isfile('build/ui-bundle/desktop-ui.json'):
+    raise SystemExit("build/ui-bundle absent : lancer build.py (ou build_ui.py) d'abord")
+datas += [('build/ui-bundle', 'ui')]
 binaries = []
 hiddenimports = ['asio_bridge', 'asio_control_panel', 'nova_bridge_server', 'vst_host', 'vst_probe', 'license_watch',
                  'comtypes', 'comtypes.client']

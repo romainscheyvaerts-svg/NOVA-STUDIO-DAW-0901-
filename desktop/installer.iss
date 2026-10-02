@@ -1,8 +1,11 @@
 ﻿; Installateur Windows de Nova Studio (Inno Setup 6, compilé par build.py).
 ; Installation par utilisateur : aucun droit administrateur demandé.
+; Le runtime Microsoft Edge WebView2 est installé automatiquement s'il manque (rare : présent
+; d'office sur Windows 11 et sur les Windows 10 à jour), par l'installateur officiel de Microsoft
+; (« Evergreen Bootstrapper », téléchargé et vérifié par build.py ; Internet requis dans ce cas).
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.1.0"
 #endif
 
 [Setup]
@@ -39,6 +42,11 @@ WizardStyle=modern
 AppMutex=NovaStudioDesktopMutex
 CloseApplications=yes
 RestartApplications=no
+#ifdef SIGN
+; build.py passe /Snovasign=<commande signtool> quand un certificat est configuré (NOVA_SIGN_*)
+SignTool=novasign
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "fr"; MessagesFile: "compiler:Languages\French.isl"
@@ -48,6 +56,7 @@ Name: "desktopicon"; Description: "Créer un raccourci sur le Bureau"; GroupDesc
 
 [Files]
 Source: "dist\NovaStudio\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "vendor\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
 
 [InstallDelete]
 ; Mise à jour propre : on repart d'un dossier _internal vide (anciennes DLL).
@@ -59,7 +68,33 @@ Name: "{group}\Désinstaller Nova Studio"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\Nova Studio"; Filename: "{app}\NovaStudio.exe"; Tasks: desktopicon
 
 [Run]
+; Runtime WebView2 absent : installation silencieuse (par utilisateur si l'installation l'est).
+Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installation du composant Microsoft Edge WebView2 (affichage de Nova Studio)…"; Flags: waituntilterminated; Check: NeedsWebView2
 Filename: "{app}\NovaStudio.exe"; Description: "Lancer Nova Studio"; Flags: nowait postinstall skipifsilent
 
 ; Les données (profil WebView2 : connexion, sessions locales ; journaux) sont dans
 ; %LOCALAPPDATA%\NovaStudio et sont volontairement conservées à la désinstallation.
+
+[Code]
+// Runtime WebView2 présent ? (clés documentées par Microsoft : machine 32/64 bits ou utilisateur)
+function WebView2Version(Root: Integer; Key: String): String;
+begin
+  if not RegQueryStringValue(Root, Key, 'pv', Result) then
+    Result := '';
+end;
+
+function NeedsWebView2: Boolean;
+var
+  V: String;
+begin
+  V := WebView2Version(HKLM32, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}');
+  if (V = '') or (V = '0.0.0.0') then
+    V := WebView2Version(HKLM64, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}');
+  if (V = '') or (V = '0.0.0.0') then
+    V := WebView2Version(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}');
+  Result := (V = '') or (V = '0.0.0.0');
+  if Result then
+    Log('WebView2 absent : installation par MicrosoftEdgeWebview2Setup.exe')
+  else
+    Log('WebView2 présent : ' + V);
+end;
