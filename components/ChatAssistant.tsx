@@ -412,6 +412,9 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       {!isMobile && (
         <button 
           onClick={() => setIsOpen(!isOpen)}
+          aria-label={isOpen ? "Fermer l'assistante Nova" : "Ouvrir l'assistante Nova"}
+          title={isOpen ? 'Fermer Nova' : 'Nova, ton assistante de studio'}
+          aria-expanded={isOpen}
           className={`w-20 h-20 rounded-[32px] flex items-center justify-center shadow-[0_0_50px_rgba(0,242,255,0.2)] transition-all duration-500 hover:scale-110 active:scale-90 group relative ${
             isOpen ? 'bg-white text-black rotate-90' : 'bg-[#0f1115] border border-cyan-500/30 text-cyan-400'
           }`}
