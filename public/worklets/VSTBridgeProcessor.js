@@ -1,179 +1,121 @@
 /**
- * VST Bridge Audio Processor v3.0
- * 
- * Gère le streaming audio bidirectionnel entre le DAW et le serveur VST
- * Supporte les multi-instances via système de slots
+ * VST Bridge Processor v4
+ *
+ * Un effet VST3 du PC dans la chaîne Web Audio. Chaque bloc de 128 échantillons
+ * part vers le pont (via un Worker qui tient le WebSocket, pour ne pas dépendre
+ * du thread principal de la page) et revient traité, numéroté.
+ *
+ * Latence FIXE : la sortie du bloc n est le bloc traité n - delayBlocks
+ * (pré-tampon). Le moteur compense cette latence à la lecture.
+ * Bloc absent à l'heure (pont en retard) : silence pour ce bloc. Jamais de
+ * mélange sec + traité.
+ *
+ * Inactif (plugin pas chargé sur le pont) ou contourné (piste armée : retour
+ * casque sans retard) : le son passe tel quel, sans latence.
  */
+
+const RING = 512; // blocs gardés (≈ 1,4 s à 48 kHz)
 
 class VSTBridgeProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
-    
-    // Slot identification for multi-instance support
-    this.slotId = options?.processorOptions?.slotId || 'default';
-    
-    // Buffer pour l'audio traité reçu du serveur
-    this.processedBuffer = [];
-    this.bufferSize = 128;
-    this.samplesSent = 0;
-    this.sequenceNumber = 0;
-    
-    // Ring buffer for smooth playback (reduces glitches)
-    this.ringBufferSize = 4; // Number of blocks to buffer
-    this.ringBuffer = [];
-    this.ringWriteIndex = 0;
-    this.ringReadIndex = 0;
-    
-    // Latency compensation
-    this.inputLatency = 0;
-    this.outputLatency = 0;
-    
-    // Statistics
-    this.blocksProcessed = 0;
+    const o = (options && options.processorOptions) || {};
+    this.delayBlocks = Math.max(2, Math.min(RING - 8, Math.round((o.prebufferFrames || 2048) / 128)));
+    this.ring = new Array(RING);
+    this.bridge = null;       // MessagePort vers le Worker
+    this.active = false;      // plugin chargé et flux ouvert
+    this.bypass = false;      // piste armée : passe-plat
+    this.seq = 0;
     this.underruns = 0;
-    
-    // Écouter les messages du thread principal
-    this.port.onmessage = (event) => {
-      this.handleMessage(event.data);
+    this.received = 0;
+    this.silentIn = 0;
+    this.lastRecvSeq = -1;
+    this.lastLoudSeq = -1;
+    this.statsAt = 0;
+    this.activeSince = 0;     // les premiers blocs (remplissage du pré-tampon) ne sont pas des pertes
+
+    this.port.onmessage = (e) => {
+      const m = e.data || {};
+      if (m.type === 'port') {
+        this.bridge = m.port;
+        this.bridge.onmessage = (ev) => this.onProcessed(ev.data);
+      } else if (m.type === 'active') {
+        if (m.on && !this.active) { this.ring = new Array(RING); this.activeSince = this.seq; this.received = 0; } // tampon propre
+        this.active = !!m.on;
+      } else if (m.type === 'bypass') {
+        if (!m.on && this.bypass) { this.ring = new Array(RING); this.activeSince = this.seq; }
+        this.bypass = !!m.on;
+      }
     };
-    
-    // Notify main thread that processor is ready
-    this.port.postMessage({
-      type: 'ready',
-      slotId: this.slotId
-    });
   }
-  
-  handleMessage(data) {
-    switch (data.type) {
-      case 'processed':
-        // Audio traité reçu du serveur
-        this.receiveProcessedAudio(data.channels, data.slotId);
-        break;
-        
-      case 'config':
-        // Configuration update
-        if (data.bufferSize) this.bufferSize = data.bufferSize;
-        if (data.ringBufferSize) this.ringBufferSize = data.ringBufferSize;
-        break;
-        
-      case 'reset':
-        // Reset buffers
-        this.processedBuffer = [];
-        this.ringBuffer = [];
-        this.ringWriteIndex = 0;
-        this.ringReadIndex = 0;
-        break;
-        
-      case 'getStats':
-        // Return statistics
-        this.port.postMessage({
-          type: 'stats',
-          slotId: this.slotId,
-          blocksProcessed: this.blocksProcessed,
-          underruns: this.underruns,
-          ringBufferFill: this.getRingBufferFill()
-        });
-        break;
+
+  onProcessed(m) {
+    if (!m || typeof m.seq !== 'number' || !m.data) return;
+    // Trop tard : l'heure de ce bloc est passée (compté comme manquant).
+    if (m.seq < this.seq - this.delayBlocks) return;
+    this.ring[m.seq % RING] = { seq: m.seq, data: m.data };
+    this.received++;
+    if (m.seq > this.lastRecvSeq) this.lastRecvSeq = m.seq;
+    const d = m.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i] > 1e-5 || d[i] < -1e-5) { if (m.seq > this.lastLoudSeq) this.lastLoudSeq = m.seq; break; }
     }
   }
-  
-  receiveProcessedAudio(channels, slotId) {
-    // Only process if this is for our slot (or no slot specified for backward compat)
-    if (slotId && slotId !== this.slotId) return;
-    
-    // Convert to Float32Array and add to ring buffer
-    const processedChannels = channels.map(ch => new Float32Array(ch));
-    
-    // Add to ring buffer for smooth playback
-    if (this.ringBuffer.length < this.ringBufferSize) {
-      this.ringBuffer.push(processedChannels);
-    } else {
-      // Overwrite oldest entry
-      this.ringBuffer[this.ringWriteIndex] = processedChannels;
-      this.ringWriteIndex = (this.ringWriteIndex + 1) % this.ringBufferSize;
+
+  process(inputs, outputs) {
+    const out = outputs[0];
+    const oL = out[0];
+    const oR = out[1] || out[0];
+    const inp = inputs[0] || [];
+    const iL = inp[0];
+    const iR = inp[1] || inp[0];
+    const n = oL.length;
+
+    if (!this.active || this.bypass || !this.bridge) {
+      if (iL) { oL.set(iL); if (oR !== oL) oR.set(iR); } else { oL.fill(0); if (oR !== oL) oR.fill(0); }
+      this.seq++;
+      return true;
     }
-  }
-  
-  getRingBufferFill() {
-    return this.ringBuffer.length;
-  }
-  
-  getNextProcessedBlock() {
-    if (this.ringBuffer.length === 0) {
-      return null;
-    }
-    
-    const block = this.ringBuffer[this.ringReadIndex];
-    this.ringBuffer[this.ringReadIndex] = null;
-    this.ringReadIndex = (this.ringReadIndex + 1) % Math.max(this.ringBuffer.length, 1);
-    
-    // Clean up null entries
-    this.ringBuffer = this.ringBuffer.filter(b => b !== null);
-    this.ringReadIndex = 0;
-    
-    return block;
-  }
-  
-  process(inputs, outputs, parameters) {
-    const input = inputs[0];
-    const output = outputs[0];
-    
-    if (!input || input.length === 0) return true;
-    
-    this.blocksProcessed++;
-    
-    // ÉTAPE 1: Capturer et envoyer l'audio d'entrée au serveur
-    const inputSamples = [];
-    for (let channel = 0; channel < input.length; channel++) {
-      inputSamples.push(input[channel].slice()); // Clone
-    }
-    
-    // Envoyer au thread principal
-    this.samplesSent += input[0].length;
-    if (this.samplesSent >= this.bufferSize) {
-      this.port.postMessage({
-        type: 'audio',
-        samples: inputSamples,
-        slotId: this.slotId,
-        sequence: this.sequenceNumber++
-      });
-      this.samplesSent = 0;
-    }
-    
-    // ÉTAPE 2: Utiliser l'audio traité reçu du serveur
-    const processedBlock = this.getNextProcessedBlock();
-    
-    if (processedBlock && processedBlock.length > 0) {
-      // Use processed audio from server
-      for (let channel = 0; channel < output.length; channel++) {
-        if (processedBlock[channel]) {
-          const len = Math.min(output[channel].length, processedBlock[channel].length);
-          output[channel].set(processedBlock[channel].subarray(0, len));
-          
-          // Fill remaining with zeros if processed block is shorter
-          if (len < output[channel].length) {
-            output[channel].fill(0, len);
-          }
-        } else {
-          // No data for this channel, use input as bypass
-          output[channel].set(input[channel] || new Float32Array(output[channel].length));
-        }
-      }
-    } else {
-      // No processed audio available - bypass mode (pass through input)
-      // This prevents silence during network latency
-      this.underruns++;
-      
-      for (let channel = 0; channel < output.length; channel++) {
-        if (input[channel]) {
-          output[channel].set(input[channel]);
-        } else {
-          output[channel].fill(0);
-        }
+
+    // 1) Envoi du bloc courant (entrelacé stéréo)
+    const data = new Float32Array(n * 2);
+    let loud = false;
+    if (iL) {
+      for (let i = 0; i < n; i++) {
+        const l = iL[i], r = iR[i];
+        data[2 * i] = l; data[2 * i + 1] = r;
+        if (!loud && (l > 1e-6 || l < -1e-6 || r > 1e-6 || r < -1e-6)) loud = true;
       }
     }
-    
+    this.silentIn = loud ? 0 : this.silentIn + 1;
+    // Silence prolongé en entrée ET sortie déjà silencieuse (queue de réverbe
+    // finie) : inutile de solliciter le pont. Le bloc est marqué silencieux.
+    const gate = this.silentIn > this.delayBlocks + 64 && (this.lastRecvSeq - this.lastLoudSeq) > 64;
+    if (gate) {
+      this.ring[this.seq % RING] = { seq: this.seq, data: null };
+    } else {
+      this.bridge.postMessage({ seq: this.seq, data }, [data.buffer]);
+    }
+
+    // 2) Sortie : le bloc traité d'il y a delayBlocks
+    const want = this.seq - this.delayBlocks;
+    const e = want >= 0 ? this.ring[want % RING] : null;
+    const hit = !!(e && e.seq === want);
+    if (hit && e.data) {
+      const d = e.data;
+      for (let i = 0; i < n; i++) { oL[i] = d[2 * i]; if (oR !== oL) oR[i] = d[2 * i + 1]; }
+    } else {
+      oL.fill(0); if (oR !== oL) oR.fill(0);
+      // Le tout premier bloc traité peut tarder (premier passage dans le plugin) : on ne compte qu'ensuite.
+      if (want >= this.activeSince && this.received > 0 && !hit) this.underruns++;
+    }
+    if (hit) this.ring[want % RING] = undefined;
+
+    this.seq++;
+    if (this.seq - this.statsAt >= 375) { // ≈ toutes les secondes
+      this.statsAt = this.seq;
+      this.port.postMessage({ type: 'stats', underruns: this.underruns, received: this.received, seq: this.seq });
+    }
     return true;
   }
 }

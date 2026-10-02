@@ -29,9 +29,11 @@ interface PluginEditorProps {
   isMobile?: boolean; 
   track?: Track; // Needed for Drum Rack
   onUpdateTrack?: (track: Track) => void; // Needed for Drum Rack
+  /** Gèle / dégèle la piste (effets VST3 du PC). */
+  onToggleFreeze?: (trackId: string) => void;
 }
 
-const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, onUpdateParams, isMobile, track, onUpdateTrack }) => {
+const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, onUpdateParams, isMobile, track, onUpdateTrack, onToggleFreeze }) => {
   const [nodeInstance, setNodeInstance] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -99,11 +101,12 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
 
   // --- SPECIAL CASE: VST3 EXTERNALS ---
   if (plugin.type === 'VST3') {
-      if (isMobile) return mobileShell(<VSTPluginWindow plugin={plugin} onClose={onClose} />);
+      const vstWindow = <VSTPluginWindow plugin={plugin} onClose={onClose} trackId={trackId} track={track} onToggleFreeze={onToggleFreeze} />;
+      if (isMobile) return mobileShell(vstWindow);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
               <div className="pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-lg">
-                  <VSTPluginWindow plugin={plugin} onClose={onClose} />
+                  {vstWindow}
               </div>
           </div>
       );

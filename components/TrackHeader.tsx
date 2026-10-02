@@ -1,6 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Track, PluginType, PluginInstance, TrackType, TrackSend } from '../types';
+import { isPluginBaked, isFreezeStale, isTrackFrozen } from '../utils/freeze';
+import { useRecFrozen } from '../utils/recFreezeStore';
 
 interface TrackHeaderProps {
   track: Track;
@@ -205,7 +207,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     const pluginVendor = e.dataTransfer.getData('pluginVendor');
 
     if (pluginType && onDropPlugin) {
-      const metadata = pluginName ? { name: pluginName, vendor: pluginVendor } : undefined;
+      let metadata: any = pluginName ? { name: pluginName, vendor: pluginVendor } : undefined;
+      // VST3 : chemin du plugin sur le PC, nom de classe, id (sinon le pont ne
+      // savait pas quoi charger et l'effet restait muet).
+      const extra = e.dataTransfer.getData('pluginMetadata');
+      if (extra) { try { metadata = { ...(metadata || {}), ...JSON.parse(extra) }; } catch { /* données invalides */ } }
       onDropPlugin(track.id, pluginType, metadata);
       return;
     } 
@@ -334,6 +340,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       : null;
       
   const insertPlugins = track.plugins.filter(p => p.id !== instrumentPlugin?.id);
+  const frozen = isTrackFrozen(track);
+  const recFrozen = useRecFrozen(track.id);
+  const freezeStale = isFreezeStale(track);
 
   return (
     <div 
@@ -343,7 +352,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={() => { setIsDragOverFX(false); }}
       onDrop={handleOnDrop}
-      className={`group border-b border-white/10 p-3 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${track.isFrozen ? 'opacity-60 grayscale' : ''} ${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
+      className={`group border-b border-white/10 p-3 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${frozen ? 'bg-cyan-500/[0.03]' : ''}${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
       style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined }}
     >
       <div className="flex justify-between items-start mb-2">
@@ -374,7 +383,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 onDoubleClick={(e) => { e.stopPropagation(); setIsRenaming(true); }}
                 className={`text-[12px] font-bold tracking-wide truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-400'}`}
               >
-                {track.name} {track.isFrozen && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400"></i>}
+                {track.name}
+                {frozen && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400" title="Piste gelée : lue depuis son rendu"></i>}
+                {!frozen && recFrozen && <i className="fas fa-snowflake text-[8px] ml-1 text-sky-300" title="Figée pendant l'enregistrement (effets à latence)" aria-label="Figée pendant l'enregistrement (effets à latence)"></i>}
+                {freezeStale && <i className="fas fa-exclamation-triangle text-[8px] ml-1 text-amber-400" title="Les prises ont changé depuis le rendu : il sera refait à la prochaine sauvegarde sur PC (pont VST)."></i>}
               </span>
             )}
             {/* Les pastilles d effets ne tiennent pas quand la piste est basse :
@@ -505,12 +517,19 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       {/* Une seule ligne, défilante : avec un style de mix (5-6 effets) la grille
           passait sur deux lignes et débordait sur la piste suivante. */}
       <div className="mt-2 flex gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-h-0">
-        {insertPlugins.map(p => (
-          <div 
-            key={p.id} 
-            draggable={!track.isFrozen}
-            onDragStart={(e) => { if (track.isFrozen) return; e.stopPropagation(); handleFXDragStart(e, p.id); }}
-            className={`relative group/fxitem flex flex-col items-center fx-slot shrink-0 basis-[calc(25%-3px)] ${track.isFrozen ? 'pointer-events-none opacity-40' : ''}`}
+        {insertPlugins.map(p => {
+          // Effet compris dans le rendu gelé : lecture seule. Un VST3 reste
+          // ouvrable (son panneau explique « Rendu (VST du PC) » / Dégeler).
+          const baked = isPluginBaked(track, track.plugins.indexOf(p));
+          const bakedVst = baked && p.type === 'VST3';
+          return (
+          <div
+            key={p.id}
+            draggable={!baked}
+            onDragStart={(e) => { if (baked) return; e.stopPropagation(); handleFXDragStart(e, p.id); }}
+            title={bakedVst ? "Rendu (VST du PC) : déjà inclus dans l'audio de la piste. Pour le régler, ouvre le projet sur ton PC avec le pont VST." : baked ? 'Inclus dans le rendu gelé de la piste' : undefined}
+            data-fx-baked={baked ? '1' : undefined}
+            className={`relative group/fxitem flex flex-col items-center fx-slot shrink-0 basis-[calc(25%-3px)] ${baked ? (bakedVst ? 'opacity-70' : 'pointer-events-none opacity-40') : ''}`}
           >
             <div className="flex w-full overflow-hidden rounded-md border border-white/5 bg-black/40">
               <button 
@@ -520,7 +539,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               >
                 {getAbbr(p.type, p.name)}
               </button>
-              <button 
+              <button
+                disabled={baked}
                 onClick={(e) => togglePluginBypass(e, p)}
                 onTouchStart={(e) => togglePluginBypass(e, p)}
                 className={`w-4 h-6 flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/40' : 'bg-white/5 text-slate-800'}`}
@@ -528,9 +548,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 <i className="fas fa-power-off text-[6px]"></i>
               </button>
             </div>
-            <button onClick={(e) => handleRemoveFX(e, p.id)} onTouchStart={(e) => handleRemoveFX(e, p.id)} className="delete-fx"><i className="fas fa-times"></i></button>
+            {!baked && <button onClick={(e) => handleRemoveFX(e, p.id)} onTouchStart={(e) => handleRemoveFX(e, p.id)} className="delete-fx"><i className="fas fa-times"></i></button>}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
