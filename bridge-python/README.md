@@ -4,22 +4,44 @@ Bridge Python pour connecter le DAW Nova Studio (web) aux ressources natives du 
 
 ## 🎛️ Modules Disponibles
 
-### 1. Nova Bridge VST3 (`nova_bridge_server.py`)
-Serveur WebSocket pour le streaming de plugins VST3 natifs.
+### 1. Nova Bridge VST3 (`nova_bridge_server.py` + `vst_host.py`)
+Les plugins VST3 installés sur le PC, utilisables dans Nova Studio (navigateur).
 
-- Port: **8765**
-- Permet de charger et utiliser des plugins VST3 installés sur le PC
-- Streaming audio bidirectionnel
-- Support de 100+ instances simultanées
+- Port : **8765**, uniquement sur `127.0.0.1` (jamais visible du réseau local)
+- Origines acceptées : `localhost`, `nova-studio-daw-0901(-*).vercel.app`,
+  `*.studiomakemusic.com`, plus `NOVA_BRIDGE_ALLOWED_ORIGINS`
+  (virgules ; préfixe `re:` pour une expression régulière)
+- Audio temps réel en trames binaires, traité dans l'ordre, une instance
+  persistante par effet du DAW (id du plugin côté DAW = id du slot)
+- Latence du plugin annoncée au DAW (compensée à la lecture)
+- État du plugin (GET/SET_STATE, base64) enregistré dans le projet
+- `RENDER` : rendu hors temps réel d'un buffer complet + queue (gel à la sauvegarde, export)
+- Fenêtre native du plugin (`SHOW_EDITOR`) via pedalboard : l'hôte JUCE
+  `nova-vst-host` n'est plus nécessaire, un seul exécutable suffit
 
-**Démarrage:**
+Le protocole complet est décrit en tête de `nova_bridge_server.py`.
+
+**Pour l'artiste :** lancer `NovaVSTBridge.exe`, laisser la fenêtre ouverte,
+puis dans Nova Studio (sur ordinateur) : onglet **VST** → « Connecter le pont VST ».
+
+**Construire l'exécutable** (dans `bridge-python/`, avec le venv) :
 ```bash
-# Windows
-start_bridge.bat
-
-# Ou manuellement
-python nova_bridge_server.py
+venv\Scripts\python.exe -m pip install pyinstaller websockets numpy pedalboard
+venv\Scripts\python.exe -m PyInstaller NovaVSTBridge.spec --noconfirm --workpath %TEMP%\nova-vst-build
+# → dist\NovaVSTBridge.exe (~25 Mo, Python non requis)
 ```
+
+**En développement :**
+```bash
+start_bridge.bat            # ou : python nova_bridge_server.py
+```
+
+Contraintes de pedalboard/JUCE prises en compte : un seul thread « message »
+(le thread principal du pont) prépare, détruit et affiche les plugins ; le
+traitement audio tourne dans un thread par slot avec `reset=False`. Une
+fenêtre de plugin ouverte se ferme si un autre plugin doit être chargé ou
+rendu pendant ce temps. Les plugins que pedalboard ne sait pas charger
+(certaines protections iLok) renvoient une erreur claire au DAW.
 
 ### 2. ASIO Bridge (`asio_bridge.py`) ⭐ NOUVEAU
 Bridge pour connecter le DAW web à une carte son ASIO.
@@ -186,9 +208,9 @@ pip install sounddevice
 ```
 bridge-python/
 ├── asio_bridge.py          # Bridge ASIO principal
-├── nova_bridge_server.py   # Bridge VST3
-├── audio_processor.py      # Traitement audio multi-instances
-├── vst3_manager.py         # Gestionnaire de plugins VST3
+├── nova_bridge_server.py   # Pont VST3 (WebSocket, protocole)
+├── vst_host.py             # Hôte VST3 : inventaire, instances, rendu, fenêtres
+├── NovaVSTBridge.spec      # Recette PyInstaller du pont VST3
 ├── requirements.txt        # Dépendances Python
 ├── start_asio_bridge.bat   # Démarrer le bridge ASIO
 ├── start_bridge.bat        # Démarrer le bridge VST3

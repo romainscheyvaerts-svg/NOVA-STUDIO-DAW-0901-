@@ -264,11 +264,23 @@ export interface Track {
   events?: any[];
   drumPads?: DrumPad[];        // Only for DRUM_RACK tracks
   /**
-   * Rendu audio de la piste quand elle est gelee (isFrozen).
+   * Rendu audio de la piste quand elle est gelee (isFrozen), PRE-fader/pan.
    * Les clips et plugins d'origine ne sont jamais supprimes : degeler
    * consiste simplement a repasser sur la chaine normale.
+   * Sur PC avec le pont VST, le rendu des effets VST3 fait a la sauvegarde
+   * reste en cache (isFrozen = false) : le projet s'ouvre gele ailleurs.
    */
   frozenClip?: Clip;
+  /**
+   * Dernier effet inclus dans le rendu gele (index dans plugins). Les effets
+   * suivants restent actifs et modifiables (lecture : rendu -> effets restants
+   * -> fader/pan -> departs). Absent : tous les effets sont dans le rendu.
+   */
+  frozenUpToPluginIndex?: number;
+  /** Clips inclus dans le rendu : les clips ajoutes ensuite sont joues normalement. */
+  frozenClipIds?: string[];
+  /** Empreinte des clips et effets rendus : si elle change, le rendu est perime. */
+  frozenSourceSig?: string;
   /** Boîte à rythmes Make Music (piste PERCUSSIONS) : motif éditable. */
   drumMachine?: import('./utils/drumKits').DrumMachine;
   groupId?: string;            // NEW: Track group reference

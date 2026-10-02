@@ -1,242 +1,123 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { novaBridge } from '../services/NovaBridge';
-import { PluginInstance } from '../types';
+import React, { useState } from 'react';
+import { PluginInstance, Track } from '../types';
+import { useBridgeState, useVstNodeInfo } from '../hooks/useNovaBridge';
+import { liveVstNodes } from '../engine/VSTPluginNode';
+import { isFreezeStale, isPluginBaked } from '../utils/freeze';
+import { BridgeConnectPanel } from './VstBrowserTab';
 
 interface VSTPluginWindowProps {
   plugin: PluginInstance;
   onClose: () => void;
-  trackId?: string;  // Track ID for multi-instance support
-  pluginIndex?: number;  // Plugin index in chain for multi-instance support
+  trackId?: string;
+  track?: Track;
+  /** Gèle / dégèle la piste (handleFreezeTrack). */
+  onToggleFreeze?: (trackId: string) => void;
 }
 
 /**
- * VSTPluginWindow v3.0
- * 
- * Affiche l'interface d'un plugin VST3 via le bridge Python.
- * Supporte les multi-instances via système de slots.
+ * Panneau d'un effet VST3 du PC. L'interface du plugin s'ouvre dans sa propre
+ * fenêtre sur le PC (pont VST) ; ici : état, latence, bouton d'ouverture.
+ * Sans pont (téléphone) : l'effet est déjà rendu dans l'audio de la piste.
  */
-const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ 
-  plugin, 
-  onClose,
-  trackId = 'default',
-  pluginIndex = 0
-}) => {
-  const canvasRef = useRef<HTMLImageElement>(null);
-  const [status, setStatus] = useState<string>('Connecting to VST Bridge...');
-  const [isConnected, setIsConnected] = useState(false);
-  const [pluginParams, setPluginParams] = useState<any[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  
-  // Generate unique slot ID for this plugin instance
-  const slotId = `${trackId}_fx${pluginIndex}`;
-  
-  // Drag State
-  const isDragging = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0 });
+const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ plugin, onClose, trackId, track, onToggleFreeze }) => {
+  const bridge = useBridgeState();
+  const info = useVstNodeInfo(plugin.id);
+  const [opening, setOpening] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
+  const index = track ? track.plugins.findIndex(p => p.id === plugin.id) : -1;
+  const baked = !!track && index >= 0 && isPluginBaked(track, index);
+  const stale = !!track && baked && isFreezeStale(track);
+  const vendor = plugin.params?.vendor;
 
-  useEffect(() => {
-    // Connect to bridge if not connected
-    novaBridge.connect();
-    
-    // Subscribe to connection status
-    const unsubStatus = novaBridge.subscribe((state) => {
-      setIsConnected(state.isConnected);
-      if (!state.isConnected) {
-        setStatus('Bridge déconnecté - Vérifiez que le serveur Python est lancé');
-      }
-    });
-
-    // 1. Load the plugin via the path stored in params
-    const pluginPath = plugin.params?.localPath;
-    
-    if (pluginPath) {
-        console.log(`[VST Window] Loading ${plugin.name} from ${pluginPath} (slot: ${slotId})`);
-        novaBridge.loadPluginToSlot(pluginPath, 44100, slotId);
-        setStatus('Loading Plugin...');
-    } else {
-        setStatus('Error: Missing Plugin Path');
+  const openEditor = async () => {
+    setOpenError(null);
+    setOpening(true);
+    try {
+      await liveVstNodes.get(plugin.id)?.openEditor();
+    } catch (e: any) {
+      setOpenError(e?.message || "La fenêtre du plugin n'a pas pu s'ouvrir.");
+    } finally {
+      setOpening(false);
     }
-
-    // 2. Subscribe to UI frames for this slot
-    const unsubscribeUI = novaBridge.subscribeToSlotUI(slotId, (base64Image) => {
-        if (canvasRef.current) {
-            canvasRef.current.src = `data:image/jpeg;base64,${base64Image}`;
-            if (status !== 'Active') setStatus('Active');
-        }
-    });
-    
-    // 3. Subscribe to params for this slot
-    const unsubscribeParams = novaBridge.subscribeToSlotParams(slotId, (params) => {
-        setPluginParams(params);
-    });
-
-    // 4. Subscribe to load errors for this slot
-    const unsubscribeError = novaBridge.subscribeToSlotError(slotId, (error) => {
-        console.error('[VST Window] Load Error:', error);
-        setLoadError(error);
-        setStatus('Error: ' + error.substring(0, 50));
-    });
-
-    return () => {
-      unsubStatus();
-      unsubscribeUI();
-      unsubscribeParams();
-      unsubscribeError();
-      
-      // Unload plugin from this slot when window closes
-      novaBridge.unloadPluginFromSlot(slotId);
-    };
-  }, [plugin, slotId]);
-
-  // --- MOUSE EVENTS MAPPING ---
-
-  const getCoords = (e: React.MouseEvent) => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      return {
-          x: Math.round(e.clientX - rect.left),
-          y: Math.round(e.clientY - rect.top)
-      };
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-      e.preventDefault();
-      const { x, y } = getCoords(e);
-      
-      // Send click to specific slot
-      novaBridge.clickOnSlot(x, y, 'left', slotId);
-      
-      // Prepare for drag
-      isDragging.current = true;
-      dragStart.current = { x, y };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-      if (!isDragging.current) return;
-      
-      const { x, y } = getCoords(e);
-      
-      // Send drag to specific slot
-      novaBridge.dragOnSlot(dragStart.current.x, dragStart.current.y, x, y, slotId);
-  };
-
-  const handleMouseUp = (e: React.MouseEvent) => {
-      if (isDragging.current) {
-          isDragging.current = false;
-      }
-  };
-
-  const handleWheel = (e: React.WheelEvent) => {
-      const { x, y } = getCoords(e);
-      // DeltaY positive = down, negative = up
-      const delta = e.deltaY > 0 ? -1 : 1; 
-      novaBridge.scrollOnSlot(x, y, delta, slotId);
-  };
-
-  const handleContextMenu = (e: React.MouseEvent) => {
-      e.preventDefault();
-      const { x, y } = getCoords(e);
-      novaBridge.clickOnSlot(x, y, 'right', slotId);
-  };
+  let body: React.ReactNode;
+  if (baked) {
+    body = (
+      <div className="space-y-3">
+        <div className="inline-flex items-center gap-2 px-2 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-[11px] font-bold">
+          <i className="fas fa-snowflake"></i> Rendu (VST du PC)
+        </div>
+        <p className="text-xs text-slate-300">
+          Cet effet est déjà inclus dans l'audio de la piste : tu l'entends partout, même sur ton téléphone.
+          Pour le régler, ouvre le projet sur ton PC avec le pont VST, puis « Dégeler ».
+        </p>
+        {stale && (
+          <p role="status" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2">
+            <i className="fas fa-exclamation-triangle mr-1"></i>
+            Les prises ont changé depuis ce rendu. Il sera refait à la prochaine sauvegarde sur ton PC (pont VST connecté).
+          </p>
+        )}
+        {bridge.status === 'connected' && trackId && onToggleFreeze && (
+          <button onClick={() => onToggleFreeze(trackId)} className="w-full h-10 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-black uppercase tracking-wide">
+            <i className="fas fa-fire mr-2"></i>Dégeler la piste
+          </button>
+        )}
+      </div>
+    );
+  } else if (bridge.status !== 'connected') {
+    body = (
+      <div className="space-y-3">
+        <p className="text-xs text-slate-400">Sans le pont, cet effet est contourné : la piste sonne sans lui.</p>
+        <BridgeConnectPanel compact />
+      </div>
+    );
+  } else if (!plugin.isEnabled) {
+    body = <p className="text-xs text-slate-400">Effet désactivé. Réactive-le avec le bouton d'alimentation de l'effet.</p>;
+  } else if (!info || info.status === 'loading' || info.status === 'offline') {
+    body = <p className="text-xs text-slate-300"><i className="fas fa-circle-notch animate-spin mr-2"></i>Chargement du plugin sur ton PC…</p>;
+  } else if (info.status === 'error') {
+    body = (
+      <p role="alert" className="text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+        Le pont n'a pas pu charger ce plugin : {info.error}. Certains plugins protégés (iLok) ne fonctionnent pas avec le pont.
+      </p>
+    );
+  } else {
+    body = (
+      <div className="space-y-3">
+        <p className="text-xs text-emerald-300"><i className="fas fa-circle text-[6px] mr-2 align-middle"></i>Actif · retard compensé à la lecture ({info.latencyMs} ms)</p>
+        <button
+          onClick={openEditor}
+          disabled={opening}
+          className="w-full h-11 rounded-xl bg-cyan-500 text-black text-xs font-black uppercase tracking-wide hover:bg-cyan-400 disabled:opacity-60"
+        >
+          <i className="fas fa-external-link-alt mr-2"></i>{opening ? 'Ouverture…' : 'Ouvrir la fenêtre du plugin'}
+        </button>
+        <p className="text-[11px] text-slate-500">La fenêtre s'ouvre sur ton PC. Tes réglages sont enregistrés dans le projet quand tu la fermes.</p>
+        {track?.isTrackArmed && (
+          <p className="text-[11px] text-slate-400">Piste armée : l'effet est contourné pendant l'enregistrement pour que ton retour casque reste sans retard.</p>
+        )}
+        {info.underruns > 0 && (
+          <p className="text-[11px] text-amber-300">Le pont a pris du retard ({info.underruns} coupures). Ferme les programmes inutiles si le son craque.</p>
+        )}
+        {openError && <p role="alert" className="text-[11px] text-red-300">{openError}</p>}
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col bg-[#1e2229] border border-white/10 rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-      
-      {/* WINDOW HEADER */}
-      <div className="h-8 bg-[#0c0d10] border-b border-white/10 flex items-center justify-between px-3 select-none cursor-move">
-        <div className="flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${status === 'Active' ? 'bg-green-500 animate-pulse' : isConnected ? 'bg-yellow-500' : 'bg-red-500'}`}></div>
-            <span className="text-[10px] font-black text-white uppercase tracking-widest">{plugin.name} (VST3)</span>
+    <div className="w-[min(92vw,380px)] bg-[#0f1115] border border-white/10 rounded-2xl p-4 space-y-4" data-vst-window={plugin.id}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest">VST3 de ton PC</div>
+          <div className="text-sm font-black text-white truncate">{plugin.params?.name || plugin.name}</div>
+          {vendor && <div className="text-[10px] text-slate-500 truncate">{vendor}</div>}
         </div>
-        <div className="flex items-center space-x-2">
-            <span className="text-[8px] font-mono text-slate-500">{status}</span>
-            <span className="text-[7px] font-mono text-slate-600">slot: {slotId}</span>
-            <button onClick={onClose} className="text-slate-500 hover:text-red-500 transition-colors">
-                <i className="fas fa-times text-xs"></i>
-            </button>
-        </div>
+        <button onClick={onClose} aria-label="Fermer" className="w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 shrink-0">
+          <i className="fas fa-times"></i>
+        </button>
       </div>
-
-      {/* VST VIEWPORT */}
-      <div className="relative bg-black flex items-center justify-center overflow-hidden min-w-[400px] min-h-[300px]">
-         {/* L'image est affichée directement */}
-         <img 
-            ref={canvasRef}
-            className="cursor-crosshair block max-w-full max-h-[80vh]"
-            alt="VST Interface"
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onWheel={handleWheel}
-            onContextMenu={handleContextMenu}
-            draggable={false}
-         />
-         
-         {status !== 'Active' && (
-             <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/70">
-                 <div className="flex flex-col items-center space-y-3 max-w-[350px] text-center p-4">
-                     {loadError ? (
-                         <>
-                             <i className="fas fa-lock text-3xl text-red-500"></i>
-                             <span className="text-xs text-red-400 font-bold">Plugin non supporté</span>
-                             <span className="text-[10px] text-slate-400 leading-relaxed">
-                                 Ce plugin nécessite une licence ou utilise un format protégé.
-                                 <br/>
-                                 <span className="text-yellow-500">Le bridge Python (pedalboard) ne peut pas charger les plugins commerciaux.</span>
-                             </span>
-                             <div className="mt-2 p-2 bg-slate-800 rounded text-[9px] text-slate-500">
-                                 <span className="text-green-400">Alternative :</span> Utilisez les effets intégrés (Reverb, Delay, EQ, Compressor) dans l'onglet FW
-                             </div>
-                         </>
-                     ) : (
-                         <>
-                             <i className={`fas ${isConnected ? 'fa-satellite-dish' : 'fa-exclamation-triangle'} text-2xl ${isConnected ? 'text-slate-700 animate-pulse' : 'text-red-700'}`}></i>
-                             <span className="text-[9px] text-slate-500 font-mono">{status}</span>
-                             {!isConnected && (
-                                 <span className="text-[8px] text-slate-600 font-mono">
-                                     python bridge-python/nova_bridge_server.py
-                                 </span>
-                             )}
-                         </>
-                     )}
-                 </div>
-             </div>
-         )}
-      </div>
-      
-      {/* PARAMETERS PANEL (collapsible) */}
-      {pluginParams.length > 0 && (
-        <div className="max-h-32 overflow-y-auto bg-[#151820] border-t border-white/5">
-          <div className="px-2 py-1 text-[8px] text-slate-500 uppercase tracking-wide">
-            Parameters ({pluginParams.length})
-          </div>
-          <div className="grid grid-cols-4 gap-1 px-2 pb-2">
-            {pluginParams.slice(0, 12).map((param, idx) => (
-              <div key={idx} className="flex flex-col">
-                <span className="text-[7px] text-slate-600 truncate">{param.display_name || param.name}</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={param.value}
-                  onChange={(e) => novaBridge.setParamForSlot(param.name, parseFloat(e.target.value), slotId)}
-                  className="w-full h-2 accent-purple-500"
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      
-      {/* FOOTER CONTROLS */}
-      <div className="h-6 bg-[#0c0d10] border-t border-white/5 flex items-center justify-between px-2">
-         <span className="text-[8px] font-mono text-slate-600">NOVA BRIDGE v3.0 • MULTI-INSTANCE</span>
-         <div className="flex space-x-2 items-center">
-             <span className="text-[7px] font-mono text-slate-700">{novaBridge.getActiveSlots().size} slots</span>
-             <i className={`fas fa-wifi text-[8px] ${isConnected ? 'text-green-500' : 'text-red-500'}`} title={isConnected ? "Connected" : "Disconnected"}></i>
-         </div>
-      </div>
+      {body}
     </div>
   );
 };

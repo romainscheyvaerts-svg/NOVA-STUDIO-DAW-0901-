@@ -1,8 +1,8 @@
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { PluginType, User, Instrument, PluginMetadata } from '../types';
-import { novaBridge } from '../services/NovaBridge';
+import React, { useState, useMemo } from 'react';
+import { PluginType, User } from '../types';
 import InstrumentCatalog from './InstrumentCatalog';
+import VstBrowserTab from './VstBrowserTab';
 
 interface SideBrowser2Props {
   user: User | null;
@@ -31,71 +31,6 @@ const INTERNAL_PLUGINS = [
     { id: 'MASTERSYNC', name: 'Master Sync', category: 'Utility', icon: 'fa-sync-alt', color: '#ffffff' }
     // Instruments (samplers, drum rack) retirés : le DAW sert aux voix, pas à composer.
 ];
-
-// --- Onglet Bridge (Plugins Externes) ---
-const BridgeTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadata: any, options?: { openUI: boolean }) => void, selectedTrackId: string | null }> = ({ onAddPlugin, selectedTrackId }) => {
-    const [plugins, setPlugins] = useState<PluginMetadata[]>([]);
-    const [searchTerm, setSearchTerm] = useState('');
-    const searchInputRef = useRef<HTMLInputElement>(null);
-
-    useEffect(() => {
-        novaBridge.requestPlugins();
-        const unsubscribe = novaBridge.subscribeToPlugins(setPlugins);
-        return unsubscribe;
-    }, []);
-
-    const handleDragStart = (e: React.DragEvent, p: PluginMetadata) => {
-        e.dataTransfer.setData('pluginType', 'VST3');
-        e.dataTransfer.setData('pluginName', p.name);
-        e.dataTransfer.setData('pluginVendor', p.vendor);
-        e.dataTransfer.setData('application/nova-plugin', 'true');
-        e.dataTransfer.setData('pluginLocalPath', p.localPath || ''); 
-    };
-
-    const handleClickPlugin = (p: PluginMetadata) => {
-        const targetTrackId = selectedTrackId || 'track-rec-main';
-        onAddPlugin(targetTrackId, 'VST3', { name: p.name, localPath: p.localPath }, { openUI: true });
-    };
-
-    const filteredPlugins = useMemo(() => plugins.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())), [plugins, searchTerm]);
-
-    return (
-        <div className="p-4 space-y-3">
-            <div className="relative">
-                <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-xs text-slate-600"></i>
-                <input 
-                    ref={searchInputRef}
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Filtrer les plugins VST3..."
-                    className="w-full h-10 bg-black/40 border border-white/10 rounded-xl pl-10 pr-4 text-xs font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-cyan-500/30 transition-all uppercase tracking-widest"
-                />
-            </div>
-            {filteredPlugins.map(p => (
-                <div 
-                    key={p.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, p)}
-                    onClick={() => handleClickPlugin(p)}
-                    className="w-full p-3 bg-white/[0.02] border border-white/5 rounded-lg flex items-center space-x-3 transition-all cursor-pointer active:cursor-grabbing hover:bg-white/[0.04]"
-                >
-                    <div className="w-8 h-8 rounded-md bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/20 text-xs"><i className="fas fa-plug"></i></div>
-                    <div>
-                        <div className="text-xs font-bold text-white truncate">{p.name}</div>
-                        <div className="text-[9px] text-slate-500">{p.vendor}</div>
-                    </div>
-                </div>
-            ))}
-             {filteredPlugins.length === 0 && (
-                <div className="text-center py-10 opacity-50">
-                    <i className="fas fa-plug text-2xl text-slate-600 mb-2"></i>
-                    <p className="text-[10px] text-slate-500">Aucun VST détecté.<br/>Vérifiez le Bridge.</p>
-                </div>
-            )}
-        </div>
-    );
-};
 
 // --- Onglet Local SUPPRIMÉ - Import déplacé dans TransportBar ---
 
@@ -164,17 +99,19 @@ const FXTab: React.FC<{ onAddPlugin: (trackId: string, type: PluginType, metadat
 const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurchase, activeTab, onTabChange, selectedTrackId, onLoadBeat }) => {
   return (
     <div className="w-80 h-full flex flex-col bg-[#0c0d10] border-r border-white/5 shadow-2xl">
-      {/* Tab Bar */}
-      {/* Onglet Bridge (VST externes) retiré : inutile pour essayer sa voix */}
-      <div className="grid grid-cols-2 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
+      {/* Tab Bar — VST : plugins du PC via le pont local (ordinateur seulement :
+          ce panneau n'est pas affiché sur téléphone). */}
+      <div className="grid grid-cols-3 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">
         <TabButton icon="fa-store" label="Store" isActive={activeTab === 'STORE'} onClick={() => onTabChange('STORE')} />
         <TabButton icon="fa-atom" label="FX" isActive={activeTab === 'FX'} onClick={() => onTabChange('FX')} />
+        <TabButton icon="fa-plug" label="VST" isActive={activeTab === 'BRIDGE'} onClick={() => onTabChange('BRIDGE')} />
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto custom-scroll">
         {activeTab === 'STORE' && <InstrumentCatalog user={user} onPurchase={onPurchase} onLoadBeat={onLoadBeat} />}
         {activeTab === 'FX' && <FXTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
+        {activeTab === 'BRIDGE' && <VstBrowserTab onAddPlugin={onAddPlugin} selectedTrackId={selectedTrackId} />}
       </div>
     </div>
   );

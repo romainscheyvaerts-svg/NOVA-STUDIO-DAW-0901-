@@ -23,7 +23,6 @@ if errorlevel 1 (
 echo.
 echo Installation des dependances...
 pip install websockets numpy pedalboard 2>nul
-pip install pillow pywin32 2>nul
 
 echo.
 echo ========================================

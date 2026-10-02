@@ -22,7 +22,8 @@ import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { interpolateCurve } from '../services/AutomationManager';
 import { DrumRackNode } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
-import { novaBridge } from '../services/NovaBridge';
+import { VSTPluginNode } from './VSTPluginNode';
+import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex } from '../utils/freeze';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
 interface TrackDSP {
@@ -32,9 +33,20 @@ interface TrackDSP {
   gain: GainNode;           
   analyzer: AnalyserNode;
   inputAnalyzer?: AnalyserNode; 
-  pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any }>;
+  pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any; connectedTo?: AudioNode }>;
+  /** Effets actifs cables (ordre de la chaine) et, sur une piste gelee, ceux apres le rendu. */
+  chainIds?: string[];
+  postChainIds?: string[];
   /** Latence cumulée des effets actifs (s) : les clips de la piste partent d'autant plus tôt. */
   pluginLatency?: number; 
+  /**
+   * Piste gelee : le rendu entre ici, apres les effets compris dans le rendu
+   * (frozenInput -> effets restants -> fader). postFreezeLatency : latence des
+   * seuls effets restants, appliquee au clip gele.
+   */
+  frozenInput?: GainNode;
+  frozenClipId?: string;
+  postFreezeLatency?: number;
   sends: Map<string, GainNode>; 
   inputStream?: MediaStreamAudioSourceNode | null;
   currentInputDeviceId?: string | null;
@@ -135,7 +147,6 @@ export class AudioEngine {
   public sampleRate: number = 44100;
   public latency: number = 0;
   private currentBpm: number = 120;
-  private activeVSTPlugin: { trackId: string, pluginId: string } | null = null;
 
   // --- ASIO BRIDGE ---
   private asioBridge: ASIOBridgeClient | null = null;
@@ -396,7 +407,11 @@ export class AudioEngine {
    * AUDIO avec leur volume et leur pan : le fichier exporte ne contenait aucun
    * effet et ne ressemblait pas a ce qu'on entend dans le studio.
    */
-  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void): Promise<AudioBuffer> {
+  /**
+   * @param options.preFader rendu AVANT fader/pan/automation (gel de piste : le
+   *        fader et le pan restent appliques a la lecture, sinon ils l'etaient deux fois).
+   */
+  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void, options: { preFader?: boolean } = {}): Promise<AudioBuffer> {
     const totalSamples = Math.ceil(totalDuration * targetSampleRate);
     const offlineCtx = new OfflineAudioContext(2, totalSamples, targetSampleRate);
     // Les noeuds de plugins/instruments n'utilisent que l'API BaseAudioContext.
@@ -411,6 +426,10 @@ export class AudioEngine {
     interface RenderTrack {
       /** Latence cumulée des effets (s), compensée comme en lecture. */
       latency?: number;
+      /** Piste gelee : entree du rendu (apres les effets rendus) et latence des effets restants. */
+      frozenInput?: GainNode;
+      frozenClipId?: string;
+      postLatency?: number;
       input: GainNode;
       gain: GainNode;
       panner: StereoPannerNode;
@@ -438,32 +457,50 @@ export class AudioEngine {
       const output = offlineCtx.createGain();
 
       let head: AudioNode = input;
-      const offlinePlugins = (track.isFrozen && track.frozenClip) ? [] : (track.plugins || []);
+      // Piste gelee : meme cablage qu'en lecture (rendu -> effets restants).
+      const frozen = isTrackFrozen(track);
+      const prePlugins = frozen ? (uncoveredClips(track).length > 0 ? preFreezePlugins(track) : []) : (track.plugins || []);
+      const postPlugins = frozen ? postFreezePlugins(track) : [];
       let offlineLatency = 0;
-      for (const plugin of offlinePlugins) {
-        if (!plugin.isEnabled) continue;
+      let postLatency = 0;
+      let frozenInput: GainNode | undefined;
+      const addPlugin = (plugin: PluginInstance, isPost: boolean) => {
+        if (!plugin.isEnabled) return;
         try {
           const entry = this.createPluginNode(plugin, this.currentBpm, renderCtx);
-          if (!entry) continue;
+          if (!entry) return;
           if (entry.node?.ready instanceof Promise) pendingPlugins.push(entry.node.ready);
           head.connect(entry.input);
           head = entry.output;
           const l = entry.node?.latency;
-          if (typeof l === 'number' && l > 0 && l < 0.5) offlineLatency += l;
+          if (typeof l === 'number' && l > 0 && l < 0.5) {
+            offlineLatency += l;
+            if (isPost) postLatency += l;
+          }
         } catch (e) {
           console.warn(`[Render] Plugin ignore (${plugin.type}) :`, e);
         }
+      };
+      prePlugins.forEach(p => addPlugin(p, false));
+      if (frozen) {
+        frozenInput = offlineCtx.createGain();
+        head.connect(frozenInput);
+        head = frozenInput;
       }
+      postPlugins.forEach(p => addPlugin(p, true));
       head.connect(gain);
       gain.connect(panner);
       panner.connect(output);
 
       // Le solo ne concerne que les pistes sources : un bus ne doit pas etre coupe.
       const silenced = track.isMuted || soloSilenced.has(track.id);
-      gain.gain.value = silenced ? 0 : track.volume;
-      panner.pan.value = track.pan;
+      gain.gain.value = silenced ? 0 : (options.preFader ? 1 : track.volume);
+      panner.pan.value = options.preFader ? 0 : track.pan;
 
-      const rt: RenderTrack = { input, gain, panner, output, sends: new Map(), latency: offlineLatency };
+      const rt: RenderTrack = {
+        input, gain, panner, output, sends: new Map(), latency: offlineLatency,
+        frozenInput, frozenClipId: frozen ? track.frozenClip!.id : undefined, postLatency,
+      };
 
       // Instruments (pistes MIDI / sampler / drum rack)
       if (track.type === TrackType.MIDI) {
@@ -524,6 +561,7 @@ export class AudioEngine {
     for (const track of tracks) {
       const rt = rendered.get(track.id)!;
       if (track.isMuted || soloSilenced.has(track.id)) continue;
+      if (options.preFader) continue; // gel : volume/pan appliques a la lecture
 
       (track.automationLanes || []).forEach(lane => {
         const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends);
@@ -567,7 +605,8 @@ export class AudioEngine {
           continue;
         }
 
-        const clipStartInProject = clip.start - startOffset - (rt.latency || 0);
+        const isFrozenRender = !!rt.frozenInput && clip.id === rt.frozenClipId;
+        const clipStartInProject = clip.start - startOffset - ((isFrozenRender ? rt.postLatency : rt.latency) || 0);
         if (clipStartInProject + clip.duration < 0) continue;
         if (clipStartInProject > totalDuration) continue;
 
@@ -578,7 +617,7 @@ export class AudioEngine {
         clipGain.gain.value = clip.gain ?? 1.0;
 
         source.connect(clipGain);
-        clipGain.connect(rt.input);
+        clipGain.connect(isFrozenRender ? rt.frozenInput! : rt.input);
 
         const playOffset = clip.offset || 0;
         const startTime = Math.max(0, clipStartInProject);
@@ -609,9 +648,8 @@ export class AudioEngine {
     for (const track of tracks) {
       const rt = rendered.get(track.id)!;
       if (!rt.synth && !rt.sampler && !rt.drumRack) continue;
-      if (track.isFrozen && track.frozenClip) continue; // deja dans le rendu gele
-
-      for (const clip of track.clips || []) {
+      // Piste gelee : seules les notes ajoutees apres le rendu sont rejouees.
+      for (const clip of (isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []))) {
         if (clip.isMuted || clip.type !== TrackType.MIDI || !clip.notes) continue;
 
         for (const note of clip.notes) {
@@ -763,6 +801,43 @@ export class AudioEngine {
   private lowLatencyTracks = new Set<string>();
 
   /**
+   * Gel temporaire le temps d'une prise : les pistes aux effets lourds (VST3 du
+   * pont, Auto-Tune haute qualité…) sont lues depuis un rendu, sans latence.
+   * Rien n'est écrit dans le projet : c'est une surcouche du moteur.
+   */
+  private recFreezes = new Map<string, { clip: Clip; upTo: number; clipIds: string[] }>();
+  /** Compensation de latence suspendue pendant une prise (pistes figées : inutile). */
+  private pdcSuspended = false;
+
+  public setRecordingFreeze(trackId: string, freeze: { clip: Clip; upTo: number; clipIds: string[] } | null) {
+    if (freeze) this.recFreezes.set(trackId, freeze); else this.recFreezes.delete(trackId);
+    const dsp = this.tracksDSP.get(trackId);
+    if (dsp) dsp.graphSignature = undefined; // recâblage au prochain updateTrack
+  }
+
+  public setDelayCompensationSuspended(on: boolean) { this.pdcSuspended = on; }
+
+  /** Latence (s) de chaque effet actif d'une piste, dans l'ordre de la chaîne. */
+  public getTrackPluginLatencies(trackId: string): Map<string, number> {
+    const out = new Map<string, number>();
+    const dsp = this.tracksDSP.get(trackId);
+    dsp?.pluginChain.forEach((entry, id) => {
+      const l = entry.instance?.latency;
+      out.set(id, typeof l === 'number' && l > 0 ? l : 0);
+    });
+    return out;
+  }
+
+  public getTrackLatency(trackId: string): number { return this.tracksDSP.get(trackId)?.pluginLatency || 0; }
+
+  /** Piste telle que le moteur la joue (avec un éventuel gel de prise). */
+  private eff(track: Track): Track {
+    const f = this.recFreezes.get(track.id);
+    if (!f || isTrackFrozen(track)) return track;
+    return { ...track, isFrozen: true, frozenClip: f.clip, frozenUpToPluginIndex: f.upTo, frozenClipIds: f.clipIds };
+  }
+
+  /**
    * Bascule les effets d'une piste en mode basse latence (piste armée) ou
    * pleine qualité, puis recalcule la compensation de lecture de la piste.
    * La compensation ne retarde jamais l'entrée micro : elle n'avance que la
@@ -775,13 +850,31 @@ export class AudioEngine {
     let total = 0;
     dsp.pluginChain.forEach(entry => {
       const inst = entry.instance;
-      if (inst && typeof inst.updateParams === 'function' && 'latency' in inst) {
+      // Effets VST3 du pont : impossible sans latence, ils sont contournés tant
+      // que la piste est armée (retour casque sans retard).
+      if (inst instanceof VSTPluginNode) inst.setMonitorBypass(on);
+      else if (inst && typeof inst.updateParams === 'function' && 'latency' in inst) {
         try { inst.updateParams({ lowLatency: on }); } catch { /* effet sans ce mode */ }
       }
-      const l = inst?.latency;
-      if (typeof l === 'number' && l > 0 && l < 0.5) total += l;
     });
-    dsp.pluginLatency = total;
+    this.recomputeTrackLatency(trackId);
+  }
+
+  /**
+   * Latence de compensation d'une piste : effets actifs de la chaine. Piste
+   * gelee : le clip gele ne traverse que les effets restants (postFreezeLatency).
+   */
+  private recomputeTrackLatency(trackId: string) {
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp) return;
+    const lat = (id: string) => {
+      const l = dsp.pluginChain.get(id)?.instance?.latency;
+      return (typeof l === 'number' && l > 0 && l < 0.5) ? l : 0;
+    };
+    const ids = dsp.chainIds || [];
+    const postIds = dsp.postChainIds || [];
+    dsp.pluginLatency = ids.reduce((acc, id) => acc + lat(id), 0);
+    dsp.postFreezeLatency = postIds.reduce((acc, id) => acc + lat(id), 0);
   }
 
   public disarmTrack() {
@@ -1121,14 +1214,15 @@ export class AudioEngine {
 
   /** Clips reellement joues : le rendu gele remplace les clips d'origine. */
   private getPlayableClips(track: Track): Clip[] {
-    if (track.isFrozen && track.frozenClip) return [track.frozenClip];
+    track = this.eff(track);
+    if (isTrackFrozen(track)) return [track.frozenClip!, ...uncoveredClips(track)];
     return track.clips || [];
   }
 
   private scheduleClips(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number, maxLatency: number, latencies: Map<string, number>) {
-      tracks.forEach(track => {
+      tracks.map(t => this.eff(t)).forEach(track => {
       if (track.isMuted) return; 
-      const isFrozenRender = track.isFrozen && !!track.frozenClip;
+      const isFrozenRender = isTrackFrozen(track);
       if (!isFrozenRender && track.type !== TrackType.AUDIO && track.type !== TrackType.SAMPLER && track.type !== TrackType.BUS && track.type !== TrackType.SEND) return;
 
       this.getPlayableClips(track).forEach(clip => {
@@ -1136,7 +1230,7 @@ export class AudioEngine {
         if (this.activeSources.has(sourceKey)) return;
         
         const clipEnd = clip.start + clip.duration;
-        const lat = this.tracksDSP.get(track.id)?.pluginLatency || 0;
+        const lat = this.pdcSuspended ? 0 : (this.tracksDSP.get(track.id)?.pluginLatency || 0);
         const overlapsWindow = clip.start < projectWindowEnd + lat && clipEnd > projectWindowStart;
         if (overlapsWindow) {
            this.playClipSource(track.id, clip, contextScheduleTime, projectWindowStart);
@@ -1146,12 +1240,13 @@ export class AudioEngine {
   }
 
   private scheduleMidi(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number) {
-      tracks.forEach(track => {
+      tracks.map(t => this.eff(t)).forEach(track => {
         if (track.isMuted) return;
         if (track.type !== TrackType.MIDI && track.type !== TrackType.SAMPLER && track.type !== TrackType.DRUM_RACK) return;
-        if (track.isFrozen && track.frozenClip) return; // deja rendu dans le clip gele
+        // Piste gelee : seules les notes ajoutees apres le rendu sont jouees.
+        const midiClips = isTrackFrozen(track) ? uncoveredClips(track) : track.clips;
 
-        track.clips.forEach(clip => {
+        midiClips.forEach(clip => {
            if (clip.type !== TrackType.MIDI || !clip.notes) return;
            
            const clipEnd = clip.start + clip.duration;
@@ -1411,11 +1506,14 @@ export class AudioEngine {
         }
         
         source.connect(gainNode);
-        gainNode.connect(dsp.input);
+        // Clip gele : il contient deja les effets rendus, il entre apres eux.
+        const isFrozenRender = !!dsp.frozenClipId && clip.id === dsp.frozenClipId && !!dsp.frozenInput;
+        gainNode.connect(isFrozenRender ? dsp.frozenInput! : dsp.input);
         
         // Compensation de latence : sans elle, une voix passée dans l'Auto-Tune
         // (~27 ms) arrivait en retard sur le beat.
-        const pt = projectTime + (dsp.pluginLatency || 0);
+        // Pendant une prise, la compensation est suspendue (pistes lourdes figées).
+        const pt = projectTime + (this.pdcSuspended ? 0 : ((isFrozenRender ? dsp.postFreezeLatency : dsp.pluginLatency) || 0));
         let offsetIntoClip = clip.offset || 0;
         if (pt > clip.start) {
             offsetIntoClip += (pt - clip.start);
@@ -1476,6 +1574,8 @@ export class AudioEngine {
         break;
       case 'VOCALSATURATOR': node = new VocalSaturatorNode(ctx); break;
       case 'MASTERSYNC': node = new MasterSyncNode(ctx); break;
+      // Effet VST3 du PC via le pont local (passe-plat sans pont ou hors ligne).
+      case 'VST3': node = new VSTPluginNode(ctx, plugin); break;
       default:
         const bypassIn = ctx.createGain();
         const bypassOut = ctx.createGain();
@@ -1572,7 +1672,9 @@ export class AudioEngine {
   private graphSignatureOf(track: Track): string {
     return [
       track.type,
-      (track.isFrozen && track.frozenClip) ? 'frozen' : 'live',
+      isTrackFrozen(track)
+        ? `frozen:${freezeIndex(track)}:${uncoveredClips(track).length > 0 ? 1 : 0}:${track.frozenClip!.id}`
+        : 'live',
       track.outputTrackId || '',
       track.plugins.map(p => `${p.id}:${p.isEnabled ? 1 : 0}`).join(','),
       (track.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}`).join(',')
@@ -1610,6 +1712,7 @@ export class AudioEngine {
 
   public updateTrack(track: Track, allTracks: Track[]) {
     if (!this.ctx) return;
+    track = this.eff(track);
 
     // Pre-cree les DSP de toutes les pistes: sinon une piste routee vers un bus
     // declare APRES elle dans le tableau retombait silencieusement sur le master.
@@ -1639,14 +1742,14 @@ export class AudioEngine {
       dsp.gain.gain.setTargetAtTime(target, t, 0.015);
       dsp.panner.pan.setTargetAtTime(track.pan, t, 0.015);
 
-      if (!(track.isFrozen && track.frozenClip)) {
-        track.plugins.forEach(p => {
-          const entry = dsp.pluginChain.get(p.id);
-          if (entry && entry.instance && typeof entry.instance.updateParams === 'function') {
-            entry.instance.updateParams(p.params);
-          }
-        });
-      }
+      // Seuls les effets cables ont une entree (sur une piste gelee : ceux
+      // apres le rendu, qui restent reglables).
+      track.plugins.forEach(p => {
+        const entry = dsp.pluginChain.get(p.id);
+        if (entry && entry.instance && typeof entry.instance.updateParams === 'function') {
+          entry.instance.updateParams(p.params);
+        }
+      });
       (track.sends || []).forEach(send => {
         const sendGain = dsp.sends.get(send.id);
         if (sendGain) sendGain.gain.setTargetAtTime(send.isEnabled ? send.level : 0, t, 0.015);
@@ -1674,41 +1777,85 @@ export class AudioEngine {
     // We only disconnect the chain between plugins below by rebuilding it.
     
     let head: AudioNode = dsp.input;
-    
+    // Sorties d'effets cablees au passage precedent : on ne coupe QUE ces liens
+    // (pas le graphe interne des effets). Sans ca, reordonner ou geler une chaine
+    // laissait l'ancien lien en place et doublait le signal.
+    dsp.pluginChain.forEach(entry => {
+      if (entry.connectedTo) {
+        try { entry.output.disconnect(entry.connectedTo); } catch (e) {}
+        entry.connectedTo = undefined;
+      }
+    });
+    const link = (from: AudioNode, to: AudioNode) => {
+      from.connect(to);
+      dsp!.pluginChain.forEach(entry => { if (entry.output === from) entry.connectedTo = to; });
+    };
+
+    // Piste gelee : rendu -> effets restants -> fader. Les effets compris dans
+    // le rendu ne servent plus qu'aux clips ajoutes apres le rendu ; s'il n'y en
+    // a pas, ils sont liberes (CPU, et instances du pont VST).
+    const frozen = isTrackFrozen(track);
+    const prePlugins = frozen ? (uncoveredClips(track).length > 0 ? preFreezePlugins(track) : []) : track.plugins;
+    const postPlugins = frozen ? postFreezePlugins(track) : [];
     const currentPluginIds = new Set<string>();
-    // Piste gelee : le rendu contient deja les effets, on court-circuite la chaine
-    // (c'est precisement ce qui libere du CPU).
-    const pluginsToApply = (track.isFrozen && track.frozenClip) ? [] : track.plugins;
-    
-    let chainLatency = 0;
-    pluginsToApply.forEach(plugin => {
+    const chainIds: string[] = [];
+    const postIds: string[] = [];
+    // Piste armée : effets en mode basse latence (retour casque sans retard).
+    const lowLatency = this.lowLatencyTracks.has(track.id);
+
+    const wire = (plugin: PluginInstance, isPost: boolean) => {
       currentPluginIds.add(plugin.id);
       let pEntry = dsp!.pluginChain.get(plugin.id);
-      
-      // Piste armée : effets en mode basse latence (retour casque sans retard).
-      const lowLatency = this.lowLatencyTracks.has(track.id);
       if (!pEntry) {
         const instance = this.createPluginNode(plugin, this.currentBpm);
         if (instance) {
           pEntry = { input: instance.input, output: instance.output, instance: instance.node };
           dsp!.pluginChain.set(plugin.id, pEntry);
-          if (lowLatency && instance.node?.updateParams) instance.node.updateParams({ ...plugin.params, lowLatency: true });
+          if (instance.node instanceof VSTPluginNode) {
+            const trackId = track.id;
+            instance.node.setLatencyListener(() => this.recomputeTrackLatency(trackId));
+            if (lowLatency) instance.node.setMonitorBypass(true);
+          } else if (lowLatency && instance.node?.updateParams) {
+            instance.node.updateParams({ ...plugin.params, lowLatency: true });
+          }
         }
       } else if (pEntry.instance && pEntry.instance.updateParams) {
         pEntry.instance.updateParams({ ...plugin.params, lowLatency });
       }
-      
-      if (pEntry) {
-        if (plugin.isEnabled) {
-            head.connect(pEntry.input);
-            head = pEntry.output;
-            const l = pEntry.instance?.latency;
-            if (typeof l === 'number' && l > 0 && l < 0.5) chainLatency += l;
-        }
+      if (pEntry && plugin.isEnabled) {
+        link(head, pEntry.input);
+        head = pEntry.output;
+        chainIds.push(plugin.id);
+        if (isPost) postIds.push(plugin.id);
       }
-    });
-    dsp.pluginLatency = chainLatency;
-    
+    };
+
+    prePlugins.forEach(p => wire(p, false));
+    // Gel de prise : les effets rendus restent instanciés (non câblés) pour
+    // repartir instantanément après la prise, sans recharger les VST3 du pont.
+    if (frozen && prePlugins.length === 0 && this.recFreezes.has(track.id)) {
+      preFreezePlugins(track).forEach(p => { if (dsp!.pluginChain.has(p.id)) currentPluginIds.add(p.id); });
+    }
+    if (frozen) {
+      if (!dsp.frozenInput) {
+        dsp.frozenInput = this.ctx.createGain();
+        dsp.frozenInput.channelCount = 2;
+        dsp.frozenInput.channelCountMode = 'explicit';
+        dsp.frozenInput.channelInterpretation = 'speakers';
+      }
+      try { dsp.frozenInput.disconnect(); } catch (e) {}
+      link(head, dsp.frozenInput);
+      head = dsp.frozenInput;
+      dsp.frozenClipId = track.frozenClip!.id;
+    } else {
+      dsp.frozenClipId = undefined;
+      if (dsp.frozenInput) { try { dsp.frozenInput.disconnect(); } catch (e) {} }
+    }
+    postPlugins.forEach(p => wire(p, true));
+    dsp.chainIds = chainIds;
+    dsp.postChainIds = postIds;
+    this.recomputeTrackLatency(track.id);
+
     dsp.pluginChain.forEach((val, id) => {
       if (!currentPluginIds.has(id)) {
         try {
@@ -1721,8 +1868,8 @@ export class AudioEngine {
         dsp!.pluginChain.delete(id);
       }
     });
-    
-    head.connect(dsp.gain);
+
+    link(head, dsp.gain);
     dsp.gain.connect(dsp.panner);
     dsp.panner.connect(dsp.analyzer);
     dsp.analyzer.connect(dsp.output);
@@ -1838,55 +1985,6 @@ export class AudioEngine {
     for (let i = 0; i < data.length; i++) { const sample = (data[i] - 128) / 128; sum += sample * sample; }
     return Math.sqrt(sum / data.length);
   }
-  public async enableVSTAudioStreaming(trackId: string, pluginId: string) {
-    if (!this.ctx) await this.init();
-    const dsp = this.tracksDSP.get(trackId);
-    if (!dsp) {
-        console.error(`[AudioEngine] VST Streaming: DSP for track ${trackId} not found.`);
-        return;
-    }
-    
-    const pluginEntry = dsp.pluginChain.get(pluginId);
-    if (!pluginEntry) {
-        console.error(`[AudioEngine] VST Streaming: Plugin ${pluginId} not found on track ${trackId}.`);
-        return;
-    }
-
-    if (this.activeVSTPlugin && (this.activeVSTPlugin.trackId !== trackId || this.activeVSTPlugin.pluginId !== pluginId)) {
-        this.disableVSTAudioStreaming();
-    }
-    
-    try {
-        const a = pluginEntry.input;
-        const b = pluginEntry.output;
-    } catch(e) { /* might not be connected if already disconnected */ }
-
-    await novaBridge.initAudioStreaming(this.ctx!, pluginEntry.input, pluginEntry.output);
-    this.activeVSTPlugin = { trackId, pluginId };
-  }
-
-  public disableVSTAudioStreaming() {
-    if (!this.activeVSTPlugin) return;
-
-    const { trackId, pluginId } = this.activeVSTPlugin;
-    const dsp = this.tracksDSP.get(trackId);
-    if (!dsp || !dsp.pluginChain.has(pluginId)) {
-        this.activeVSTPlugin = null;
-        return;
-    }
-    const pluginEntry = dsp.pluginChain.get(pluginId)!;
-
-    novaBridge.stopAudioStreaming();
-    
-    try {
-        pluginEntry.input.disconnect(); // Disconnect from worklet
-    } catch(e) {}
-    
-    pluginEntry.input.connect(pluginEntry.output);
-
-    this.activeVSTPlugin = null;
-  }
-
   // ═══════════════════════════════════════════════════════════════════════
   // ASIO BRIDGE INTEGRATION
   // ═══════════════════════════════════════════════════════════════════════

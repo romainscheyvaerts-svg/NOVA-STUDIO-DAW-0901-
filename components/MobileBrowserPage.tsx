@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import MobileContainer from './MobileContainer';
 import { PluginType, User, PluginMetadata } from '../types';
-import { novaBridge } from '../services/NovaBridge';
 import InstrumentCatalog from './InstrumentCatalog';
 
 interface MobileBrowserPageProps {
@@ -32,7 +31,7 @@ const INTERNAL_PLUGINS = [
 
 /**
  * Navigateur mobile - Réplique exacte du SideBrowser2 desktop
- * Onglets: STORE (instruments), FX (plugins natifs), BRIDGE (VST3)
+ * Onglets: STORE (instruments), FX (plugins natifs). Pas de VST sur téléphone.
  */
 const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
   user,
@@ -43,14 +42,7 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'STORE' | 'FX' | 'BRIDGE'>('STORE');
   const [searchTerm, setSearchTerm] = useState('');
-  const [vst3Plugins, setVst3Plugins] = useState<PluginMetadata[]>([]);
-
-  // Charger les plugins VST3
-  useEffect(() => {
-    novaBridge.requestPlugins();
-    const unsubscribe = novaBridge.subscribeToPlugins(setVst3Plugins);
-    return unsubscribe;
-  }, []);
+  // Pas d'onglet VST sur téléphone : le pont VST ne tourne que sur un PC.
 
   const handleAddPlugin = (type: PluginType, metadata?: any) => {
     const targetTrackId = selectedTrackId || 'track-rec-main';
@@ -65,11 +57,6 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
     ), [searchTerm]
   );
 
-  // Filtrer les VST3
-  const filteredVST3Plugins = useMemo(() =>
-    vst3Plugins.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())),
-    [vst3Plugins, searchTerm]
-  );
 
   return (
     <MobileContainer title="Navigateur">
@@ -165,49 +152,6 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
           </div>
         )}
 
-        {/* Contenu BRIDGE - Plugins VST3 */}
-        {activeTab === 'BRIDGE' && (
-          <div className="space-y-4">
-            {/* Barre de recherche */}
-            <div className="relative">
-              <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
-              <input
-                type="text"
-                placeholder="Filtrer les plugins VST3..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-[#14161a] border border-white/10 rounded-xl pl-11 pr-4 py-3 text-white placeholder-slate-600 focus:border-cyan-500/50 focus:outline-none text-sm"
-              />
-            </div>
-
-            {/* Liste des VST3 */}
-            <div className="space-y-2">
-              {filteredVST3Plugins.map(plugin => (
-                <button
-                  key={plugin.id}
-                  onClick={() => handleAddPlugin('VST3', { name: plugin.name, localPath: plugin.localPath })}
-                  className="w-full bg-[#14161a] rounded-xl p-4 border border-white/10 hover:border-cyan-500/30 hover:bg-white/5 transition-all active:scale-95 flex items-center gap-3"
-                >
-                  <div className="w-11 h-11 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20">
-                    <i className="fas fa-plug text-lg"></i>
-                  </div>
-                  <div className="flex-1 text-left">
-                    <div className="text-white font-bold text-sm">{plugin.name}</div>
-                    <div className="text-xs text-slate-500">{plugin.vendor}</div>
-                  </div>
-                  <i className="fas fa-plus text-slate-400 text-xs"></i>
-                </button>
-              ))}
-              {filteredVST3Plugins.length === 0 && (
-                <div className="text-center py-12 text-slate-500">
-                  <i className="fas fa-plug text-4xl mb-4 opacity-30"></i>
-                  <p className="text-sm">Aucun VST3 détecté</p>
-                  <p className="text-xs mt-2 text-slate-600">Vérifiez le Bridge</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </MobileContainer>
   );
