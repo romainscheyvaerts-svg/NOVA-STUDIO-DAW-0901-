@@ -297,7 +297,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
       const rect = el.getBoundingClientRect();
       const pointerX = e.clientX - rect.left;
-      const timeUnderPointer = (el.scrollLeft + pointerX) / zoomH;
+      // La timeline commence après la colonne des en-têtes de pistes (même repère que les clics).
+      const timeUnderPointer = Math.max(0, (el.scrollLeft + pointerX - headerWidth) / zoomH);
 
       const factor = Math.exp(-e.deltaY * 0.0015);
       const nextZoom = Math.min(300, Math.max(10, zoomH * factor));
@@ -311,7 +312,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [zoomH]);
+  }, [zoomH, headerWidth]);
 
   // Recale le defilement une fois la nouvelle largeur appliquee, pour garder
   // le meme instant sous le curseur pendant le zoom.
@@ -320,9 +321,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const el = scrollContainerRef.current;
     if (!anchor || !el) return;
     pendingZoomAnchorRef.current = null;
-    el.scrollLeft = Math.max(0, anchor.time * zoomH - anchor.pointerX);
+    el.scrollLeft = Math.max(0, anchor.time * zoomH + headerWidth - anchor.pointerX);
     setScrollLeft(el.scrollLeft);
-  }, [zoomH]);
+  }, [zoomH, headerWidth]);
 
   // --- Suivi du playhead pendant la lecture ---
   // La tete de lecture sortait de l'ecran et il fallait defiler a la main.

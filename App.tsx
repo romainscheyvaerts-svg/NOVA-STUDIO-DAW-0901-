@@ -1251,7 +1251,7 @@ function Studio() {
         case 'MUTE': if(idx > -1) newClips[idx] = { ...newClips[idx], isMuted: !newClips[idx].isMuted }; break;
         // payload.start permet de deposer la copie a un endroit precis
         // (Alt+glisser laisse une copie a la position d'origine).
-        case 'DUPLICATE': if(idx > -1) newClips.push({ ...newClips[idx], id: `clip-dup-${Date.now()}`, start: payload?.start ?? (newClips[idx].start + newClips[idx].duration + 0.1) }); break;
+        case 'DUPLICATE': if(idx > -1) newClips.push({ ...newClips[idx], id: `clip-dup-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, start: payload?.start ?? (newClips[idx].start + newClips[idx].duration + 0.1) }); break;
         case 'RENAME': if(idx > -1) newClips[idx] = { ...newClips[idx], name: payload.name }; break;
         case 'SPLIT': 
             if(idx > -1) {

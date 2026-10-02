@@ -439,7 +439,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       // Fallback: create new clip after current
       const newClip: Partial<Clip> = {
         ...selectedClip.clip,
-        id: `clip-dup-${Date.now()}`,
+        id: `clip-dup-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
         start: selectedClip.clip.start + selectedClip.clip.duration + 0.1
       };
       // Would need onAddClip to fully work
