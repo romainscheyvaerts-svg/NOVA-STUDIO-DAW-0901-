@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import React, { useState, useRef, useEffect } from 'react';
 import { AIChatMessage, AIAction, DAWState, TrackType } from '../types';
 import { VOCAL_MIX_STYLES } from '../utils/vocalPresets';
@@ -29,10 +30,26 @@ interface ChatAssistantProps {
   mixGuideRequest?: number;
   /** Messages poussés par le studio (bilan de prise, consignes, écoute du mix). */
   novaFeed?: NovaFeedMessage[];
+  /**
+   * Un éditeur occupe l'écran (piano roll, boîte à rythmes, export…) : Nova ne
+   * s'ouvre pas toute seule par-dessus, elle montre un bandeau discret.
+   */
+  suppressAutoOpen?: boolean;
+  /** Téléphone : ouvrir Nova = aller sur son onglet. */
+  onRequestOpen?: () => void;
 }
 
-const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, isMobile, forceOpen, onClose, projectState, mixGuideRequest, novaFeed }) => {
+const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, isMobile, forceOpen, onClose, projectState, mixGuideRequest, novaFeed, suppressAutoOpen, onRequestOpen }) => {
   const [isOpen, setIsOpen] = useState(forceOpen || false);
+  // Bandeau quand le chat est fermé : sinon les messages du studio passaient inaperçus.
+  const [toast, setToast] = useState<{ id: number; text: string; hasChoices: boolean } | null>(null);
+  const isOpenRef = useRef(isOpen);
+  isOpenRef.current = isOpen;
+  const showToast = (text: string, hasChoices = false) => {
+    const id = Date.now();
+    setToast({ id, text, hasChoices });
+    window.setTimeout(() => setToast(t => (t && t.id === id ? null : t)), hasChoices ? 9000 : 6000);
+  };
   const [inputValue, setInputValue] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -69,7 +86,9 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     if (!fresh.length) return;
     fresh.forEach(m => feedSeen.current.add(m.id));
     setMessages(prev => [...prev, ...fresh.map(m => ({ id: m.id, role: 'assistant' as const, content: m.content, timestamp: Date.now(), choices: m.choices }))]);
-    if (!isMobile) setIsOpen(true);
+    const last = fresh[fresh.length - 1];
+    if (!isMobile && !suppressAutoOpen) setIsOpen(true);
+    else if (!isOpenRef.current) showToast(last.content, !!last.choices?.length);
   }, [novaFeed, isMobile]);
 
   // Étapes de session que l'artiste a choisi de passer / déjà faites.
@@ -98,6 +117,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, assistantMsg]);
+      if (!isOpenRef.current) showToast(externalNotification);
     }
   }, [externalNotification]); 
 
@@ -252,6 +272,15 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
 
   return (
     <div className={containerClass}>
+      {toast && !isOpen && createPortal(
+        <button type="button" role="status" aria-live="polite"
+          onClick={() => { setToast(null); setIsOpen(true); onRequestOpen?.(); }}
+          className="fixed left-1/2 -translate-x-1/2 bottom-36 md:bottom-24 z-[900] w-[min(520px,calc(100vw-24px))] rounded-2xl border border-cyan-500/30 bg-[#0d1117]/95 px-4 py-3 text-left shadow-2xl backdrop-blur pointer-events-auto">
+          <span className="block text-[12px] text-slate-100 line-clamp-3">{toast.text}</span>
+          {toast.hasChoices && <span className="mt-1 block text-[11px] font-bold text-cyan-300">Voir les propositions de Nova →</span>}
+        </button>,
+        document.body,
+      )}
       {isOpen && (
         <div className={windowClass}>
           <div className="p-6 border-b border-white/5 flex justify-between items-center bg-gradient-to-br from-cyan-500/10 to-transparent">

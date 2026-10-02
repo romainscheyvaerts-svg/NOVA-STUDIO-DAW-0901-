@@ -5109,8 +5109,10 @@ function Studio() {
             onExecuteAction={executeAIAction}
             projectState={state}
             externalNotification={aiNotification}
+            suppressAutoOpen={drumsOpen || !!midiEditorOpen || isExportMenuOpen || collabOpen || takeHomeOpen}
             isMobile={isMobile}
             forceOpen={isMobile && activeMobileTab === 'NOVA'}
+            onRequestOpen={isMobile ? () => setActiveMobileTab('NOVA') : undefined}
             mixGuideRequest={mixGuideRequest}
             novaFeed={novaFeed}
             onClose={() => setActiveMobileTab('TRACKS')}
