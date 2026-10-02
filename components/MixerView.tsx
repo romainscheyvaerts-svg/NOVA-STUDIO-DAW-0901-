@@ -4,6 +4,7 @@ import { gainToDbText } from '../utils/db';
 import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { SmartKnob } from './SmartKnob';
+import ProMasterMeter from './ProMasterMeter';
 import { getValidDestinations, getRouteLabel } from './RoutingManager';
 
 // Track Group Colors (inspired by Pro Tools)
@@ -333,10 +334,14 @@ const ChannelStrip: React.FC<{
                  </div>
               </div>
            </div>
+           {isMaster ? (
+              <ProMasterMeter orientation="vertical" />
+           ) : (
            <div className="flex space-x-1">
               <VUMeter analyzer={analyzer} />
               <VUMeter analyzer={analyzerR} />
            </div>
+           )}
         </div>
 
         <div className="mt-2 text-center text-[10px] font-mono tabular-nums text-slate-300">{gainToDbText(track.volume)}</div>

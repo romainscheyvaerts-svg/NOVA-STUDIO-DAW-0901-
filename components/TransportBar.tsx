@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, PropsWithChildren } from 'react';
 import { ViewType, Theme, User } from '../types';
-import { MasterMeter } from './MeterWidgets';
+import ProMasterMeter from './ProMasterMeter';
 import MasterVisualizer from './MasterVisualizer';
 import { midiManager } from '../services/MidiManager';
 import { playheadStore } from '../utils/playheadStore';
@@ -232,7 +232,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           {/* MOBILE HAMBURGER MENU BUTTON */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="xl:hidden w-10 h-10 rounded-lg flex items-center justify-center bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all"
+            className="2xl:hidden w-10 h-10 rounded-lg flex items-center justify-center bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all"
             title="Menu"
           >
             <i className={`fas ${isMobileMenuOpen ? 'fa-times' : 'fa-bars'} text-lg`}></i>
@@ -313,7 +313,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              </button>
 
              {/* MIDI INDICATOR */}
-             <div className={`h-8 px-2 rounded-lg flex items-center justify-center space-x-2 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : 'bg-white/5 border-white/10 text-slate-600'}`} title={midiDeviceName || "No MIDI Device"}>
+             <div className={`h-8 px-2 rounded-lg ${midiDeviceName ? 'flex' : 'hidden 2xl:flex'} items-center justify-center space-x-2 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : 'bg-white/5 border-white/10 text-slate-600'}`} title={midiDeviceName || "No MIDI Device"}>
                  <i className="fas fa-plug text-[10px]"></i>
                  {midiDeviceName && <span className="hidden 2xl:inline text-[8px] font-black uppercase max-w-[80px] truncate">{midiDeviceName}</span>}
              </div>
@@ -322,7 +322,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
       {/* CENTER: TRANSPORT */}
       <div className="flex flex-1 md:flex-none justify-center items-center space-x-2 md:space-x-3 2xl:space-x-4">
-        <div className="hidden 2xl:block"><MasterMeter /></div>
+        <div className="hidden xl:block"><ProMasterMeter /></div>
         
         <div className="flex items-center space-x-2 md:space-x-3 bg-black/40 px-3 md:px-4 py-1.5 rounded-xl border border-white/5" style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}>
           <button onClick={onStop} title="Stop (Échap)" aria-label="Stop" className="w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
@@ -336,7 +336,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             </button>
           )}
           <button onClick={onToggleMetronome} title="Métronome" className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
-          <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" className={`h-12 px-4 md:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'var(--border-highlight)' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">Rec</span></button>
+          <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" className={`h-12 px-4 2xl:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'var(--border-highlight)' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">Rec</span></button>
         </div>
         
         <PlayheadClock bpm={bpm} numerator={tsNum} denominator={tsDen} />
@@ -362,7 +362,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             la faisaient déborder (déconnexion et mode hors de l'écran en 390 px). */}
         <button 
             onClick={onToggleTheme}
-            className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 hidden md:flex items-center justify-center transition-all"
+            className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 hidden 2xl:flex items-center justify-center transition-all"
             title="Changer le thème"
             style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}
         >
@@ -388,21 +388,21 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         
         {/* LOGIN / USER SECTION */}
         {user ? (
-            <div className="hidden md:flex items-center space-x-2 bg-black/30 rounded-full pl-1 pr-1 py-1 border border-white/10" style={{ backgroundColor: 'var(--bg-item)' }}>
+            <div className="hidden 2xl:flex items-center space-x-2 bg-black/30 rounded-full pl-1 pr-1 py-1 border border-white/10" style={{ backgroundColor: 'var(--bg-item)' }}>
                 <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-[10px] font-black text-white shadow-lg shadow-cyan-500/20">{user.username.charAt(0).toUpperCase()}</div>
                 <button onClick={onLogout} className="w-7 h-7 rounded-full bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white flex items-center justify-center transition-all"><i className="fas fa-sign-out-alt text-[10px]"></i></button>
             </div>
         ) : (
-            <button onClick={onOpenAuth} aria-label="Connexion" className="h-8 px-4 rounded-full bg-white/10 hover:bg-cyan-500 hover:text-black text-white text-[9px] font-black uppercase tracking-widest transition-all border border-white/10 hidden md:flex items-center space-x-2"><i className="fas fa-user-circle"></i></button>
+            <button onClick={onOpenAuth} aria-label="Connexion" className="h-8 px-4 rounded-full bg-white/10 hover:bg-cyan-500 hover:text-black text-white text-[9px] font-black uppercase tracking-widest transition-all border border-white/10 hidden 2xl:flex items-center space-x-2"><i className="fas fa-user-circle"></i></button>
         )}
 
         {/* View Switcher for mobile/tablet injection from parent */}
-        <div className="hidden md:block">{children}</div>
+        <div className="hidden 2xl:block">{children}</div>
       </div>
 
       {/* MOBILE DROPDOWN MENU */}
       {isMobileMenuOpen && (
-        <div className="xl:hidden absolute top-full left-0 right-0 bg-[#0a0b0d] border-b border-white/10 shadow-2xl z-[100] max-h-[80vh] overflow-y-auto" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}>
+        <div className="2xl:hidden absolute top-full left-0 right-0 md:right-auto md:w-[400px] bg-[#0a0b0d] border-b border-white/10 shadow-2xl z-[100] max-h-[80vh] overflow-y-auto" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}>
           <div className="p-4 space-y-3">
 
             {/* Téléphone : métronome et boucle (masqués dans la barre sous 768 px) */}
