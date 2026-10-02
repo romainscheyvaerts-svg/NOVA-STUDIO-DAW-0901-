@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { DRUM_KITS, DrumMachine, DrumRow, setBars, PadMix, DEFAULT_PAD_MIX, PAD_MIX_PRESETS } from '../utils/drumKits';
+import { DRUM_KITS, DrumMachine, DrumRow, setBars, PadMix, DEFAULT_PAD_MIX, PAD_MIX_PRESETS, libraryChoices, libSoundLabel } from '../utils/drumKits';
+import { libUrl } from '../utils/drumLibrary';
 import { DRUM_SOUNDS, DrumCategory } from '../utils/drumSounds';
 import { audioEngine } from '../engine/AudioEngine';
 
@@ -155,6 +156,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
 
               {soundMenu !== null && dm.rows[soundMenu] && (
                 <PadEditor
+                  kitId={dm.kitId}
                   row={dm.rows[soundMenu]}
                   onEdit={patch => editRow(soundMenu, patch)}
                   onAudition={() => setTimeout(() => p.onAudition(soundMenu), 120)}
@@ -189,6 +191,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
 };
 
 interface PadEditorProps {
+  kitId: string;
   row: DrumRow;
   onEdit: (patch: (r: DrumRow) => DrumRow) => void;
   onAudition: () => void;
@@ -211,7 +214,20 @@ const Knob: React.FC<KnobProps> = k => (
 );
 
 /** Réglages d'un pad : son, niveau, panoramique, accordage, longueur, mute / solo et mix par effets natifs. */
-const PadEditor: React.FC<PadEditorProps> = ({ row, onEdit, onAudition, onClose }) => {
+const PadEditor: React.FC<PadEditorProps> = ({ kitId, row, onEdit, onAudition, onClose }) => {
+  const [allStyles, setAllStyles] = React.useState(false);
+  const lib = libraryChoices(row.id, kitId);
+  const synths = DRUM_SOUNDS.filter(s => (CAT_OF[row.id] || []).includes(s.category)).map(s => `synth:${s.id}`);
+  // Tous les sons possibles du pad, dans l'ordre affiché (pour ◀ ▶)
+  const all = [...lib.flatMap(c => c.ids.map(libUrl)), ...synths];
+  const pick = (ref: string) => { onEdit(r => ({ ...r, sound: ref })); onAudition(); };
+  const step = (d: number) => {
+    if (!all.length) return;
+    const i = all.indexOf(row.sound);
+    pick(all[(i + d + all.length) % all.length]);
+  };
+  const label = libSoundLabel(row.sound) || DRUM_SOUNDS.find(x => `synth:${x.id}` === row.sound)?.name || 'Son';
+  const shown = allStyles ? lib : lib.slice(0, 2);
   const mix: PadMix = { ...DEFAULT_PAD_MIX, ...(row.mix || {}) };
   const setMix = (patch: Partial<PadMix>) => onEdit(r => ({ ...r, mix: { ...(r.mix || {}), ...patch } }));
   const db = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`;
@@ -228,16 +244,46 @@ const PadEditor: React.FC<PadEditorProps> = ({ row, onEdit, onAudition, onClose 
       </div>
 
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1.5">Son</p>
-        <div className="flex flex-wrap gap-2">
-          {DRUM_SOUNDS.filter(s => (CAT_OF[row.id] || []).includes(s.category)).map(s => (
-            <button key={s.id} type="button"
-              onClick={() => { onEdit(r => ({ ...r, sound: `synth:${s.id}` })); onAudition(); }}
-              className={`h-9 px-3 rounded-lg text-[12px] font-bold ${row.sound === `synth:${s.id}` ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white'}`}>
-              {s.name}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 mb-2">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mr-auto">Son</p>
+          <button type="button" onClick={() => step(-1)} aria-label="Son précédent" className="w-9 h-9 rounded-lg bg-white/10 text-white"><i className="fas fa-chevron-left" /></button>
+          <span className="min-w-[120px] text-center text-[12px] font-bold text-white truncate">{label}</span>
+          <button type="button" onClick={() => step(1)} aria-label="Son suivant" className="w-9 h-9 rounded-lg bg-white/10 text-white"><i className="fas fa-chevron-right" /></button>
         </div>
+        {shown.map(c => (
+          <div key={c.style} className="mb-2">
+            <p className="text-[11px] text-slate-400 mb-1">Make Music · {c.styleName}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {c.ids.map((id, i) => {
+                const ref = libUrl(id);
+                return (
+                  <button key={id} type="button" onClick={() => pick(ref)} title={libSoundLabel(ref) || ''}
+                    className={`h-8 min-w-[36px] px-2 rounded-lg text-[12px] font-bold ${row.sound === ref ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white hover:bg-white/15'}`}>
+                    {i + 1}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+        {lib.length > 2 && (
+          <button type="button" onClick={() => setAllStyles(v => !v)} className="mb-2 text-[11px] font-bold text-cyan-300 hover:text-cyan-200">
+            {allStyles ? 'Moins de styles' : `+ ${lib.length - 2} autres styles`}
+          </button>
+        )}
+        {synths.length > 0 && (
+          <>
+            <p className="text-[11px] text-slate-400 mb-1">Sons Nova{row.id === '808' ? ' (accordés sur la tonalité)' : ''}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {DRUM_SOUNDS.filter(x => synths.includes(`synth:${x.id}`)).map(x => (
+                <button key={x.id} type="button" onClick={() => pick(`synth:${x.id}`)}
+                  className={`h-8 px-3 rounded-lg text-[12px] font-bold ${row.sound === `synth:${x.id}` ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white hover:bg-white/15'}`}>
+                  {x.name}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">

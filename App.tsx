@@ -67,7 +67,7 @@ import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
 import ShareClipModal from './components/ShareClipModal';
 import DrumMachinePanel from './components/DrumMachinePanel';
-import { DrumMachine, makeDrumMachine, drumPadsFor, drumClipFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
+import { DrumMachine, makeDrumMachineLib, drumPadsFor, drumClipFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
 import { loadDrumSound } from './utils/drumSounds';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta } from './utils/sessionStore';
 import VocalToolsPanel from './components/VocalToolsPanel';
@@ -2636,7 +2636,7 @@ export default function App() {
   const handleSetDrumKit = useCallback((kitId?: string) => {
     const st = stateRef.current;
     const id = kitId && DRUM_KITS.some(k => k.id === kitId) ? kitId : suggestDrumKit(st.bpm, st.beatGenre, st.beatTitle);
-    applyDrumMachine(makeDrumMachine(id));
+    applyDrumMachine(makeDrumMachineLib(id));
     const kit = DRUM_KITS.find(k => k.id === id);
     setAiNotification(`🥁 Batterie « ${kit?.name} » posée, calée sur le tempo (${Math.round(st.bpm)} BPM)${typeof st.projectKey === 'number' ? ' et la tonalité' : ''}. Lance la lecture !`);
   }, [applyDrumMachine]);
@@ -3957,7 +3957,20 @@ export default function App() {
         onChange={dm => applyDrumMachine(dm)}
         onKit={kitId => { void ensureAudioEngine().then(() => handleSetDrumKit(kitId)); }}
         onRemove={() => { handleRemoveDrums(); setDrumsOpen(false); }}
-        onAudition={ri => { void ensureAudioEngine().then(() => audioEngine.triggerTrackAttack(DRUM_TRACK_ID, 60 + ri, 1)); }}
+        onAudition={ri => {
+          // Le son choisi est chargé avant d'être joué (sample de la bibliothèque au premier clic).
+          void ensureAudioEngine().then(async () => {
+            const row = (stateRef.current.tracks.find(t => t.id === DRUM_TRACK_ID)?.drumMachine as DrumMachine | undefined)?.rows[ri];
+            if (row && audioEngine.ctx) {
+              try {
+                const pk = stateRef.current.projectKey;
+                const buf = await loadDrumSound(row.sound, audioEngine.ctx, typeof pk === "number" ? pk : 0);
+                audioEngine.loadDrumRackSample(DRUM_TRACK_ID, ri + 1, buf);
+              } catch { /* son indisponible */ }
+            }
+            audioEngine.triggerTrackAttack(DRUM_TRACK_ID, 60 + ri, 1);
+          });
+        }}
         isPlaying={state.isPlaying}
         onTogglePlay={handleTogglePlay}
         bpm={state.bpm}

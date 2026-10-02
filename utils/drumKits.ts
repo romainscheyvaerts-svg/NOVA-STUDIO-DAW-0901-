@@ -1,3 +1,4 @@
+import { DRUM_LIBRARY, DRUM_LIBRARY_STYLES, LibCategory, libUrl } from './drumLibrary';
 import { Clip, DrumPad, TrackType } from '../types';
 import { FACTORY_KITS } from './drumFactory';
 
@@ -296,3 +297,64 @@ export function padFxPlugins(r: DrumRow): { id: string; name: string; type: 'PRO
 }
 
 export const padSends = (r: DrumRow) => { const m = padMixOf(r); return { verb: m.verb, delay: m.delay }; };
+
+// ===== Sons de la bibliothèque Make Music (dossier DRUMS du studio) =====
+
+/** Style de la bibliothèque utilisé par chaque kit. */
+const KIT_LIB_STYLE: Record<string, string> = {
+  trap: 'trap', drill: 'drill', boombap: 'boombap', rnb: 'rnb', afro: 'afro', amapiano: 'afro',
+  dembow: 'reggaeton', dancehall: 'reggaeton', reggae: 'reggaeton', pop: 'pop', house: 'house',
+  ukg: 'house', dnb: 'dnb', funk: 'soul', empty: 'trap',
+};
+/** Styles voisins quand un style n'a pas la catégorie demandée. */
+const NEAR: Record<string, string[]> = {
+  trap: ['drill', 'rnb'], drill: ['trap'], boombap: ['soul', 'rnb'], rnb: ['soul', 'trap'], soul: ['rnb', 'boombap'],
+  afro: ['rnb', 'reggaeton'], reggaeton: ['afro', 'pop'], pop: ['rnb', 'house'], house: ['pop', 'dnb'],
+  dnb: ['house', 'drill'], indie: ['pop', 'boombap'],
+};
+/** Catégorie(s) de la bibliothèque pour chaque rangée (la 808 reste synthétisée et accordée). */
+const ROW_LIB_CATS: Record<string, LibCategory[]> = {
+  kick: ['kick'], snare: ['snare', 'clap'], clap: ['clap', 'snare'], hatc: ['hatc'], hato: ['hato', 'cymbal'],
+  perc: ['rim'], fx: ['cymbal', 'rim'],
+};
+
+export interface LibChoice { style: string; styleName: string; ids: string[] }
+
+/** Sons proposés pour une rangée : le style du kit d'abord, puis les voisins, puis le reste. */
+export function libraryChoices(rowId: string, kitId: string): LibChoice[] {
+  const cats = ROW_LIB_CATS[rowId];
+  if (!cats) return [];
+  const main = KIT_LIB_STYLE[kitId] || 'trap';
+  const order = [main, ...(NEAR[main] || []), ...Object.keys(DRUM_LIBRARY)].filter((s, i, a) => a.indexOf(s) === i);
+  return order
+    .map(style => ({ style, styleName: DRUM_LIBRARY_STYLES[style] || style, ids: cats.flatMap(c => DRUM_LIBRARY[style]?.[c] || []) }))
+    .filter(c => c.ids.length > 0);
+}
+
+/** Premier son de la bibliothèque pour une rangée (style du kit, sinon voisin). */
+export function defaultLibSound(rowId: string, kitId: string): string | null {
+  const c = libraryChoices(rowId, kitId);
+  const main = KIT_LIB_STYLE[kitId] || 'trap';
+  const pick = c.find(x => x.style === main) || c.find(x => (NEAR[main] || []).includes(x.style));
+  return pick ? libUrl(pick.ids[0]) : null;
+}
+
+/** Kit avec les vrais sons du studio (la 808 accordée reste synthétisée). */
+export function makeDrumMachineLib(kitId: string): DrumMachine {
+  const dm = makeDrumMachine(kitId);
+  return { ...dm, rows: dm.rows.map(r => { const s = defaultLibSound(r.id, dm.kitId); return s ? { ...r, sound: s } : r; }) };
+}
+
+/** Nom lisible d'un son de la bibliothèque (« Kick 3 · Trap »). */
+export function libSoundLabel(ref: string): string | null {
+  const m = /\/drums\/lib\/([a-z]+-[0-9a-f]{8})\.wav$/.exec(ref);
+  if (!m) return null;
+  for (const [style, cats] of Object.entries(DRUM_LIBRARY)) {
+    for (const [cat, ids] of Object.entries(cats)) {
+      const i = (ids as string[]).indexOf(m[1]);
+      if (i >= 0) return `${CAT_LABEL[cat] || cat} ${i + 1} · ${DRUM_LIBRARY_STYLES[style] || style}`;
+    }
+  }
+  return 'Sample';
+}
+const CAT_LABEL: Record<string, string> = { kick: 'Kick', snare: 'Snare', clap: 'Clap', hatc: 'Hi-hat', hato: 'Open hat', rim: 'Rim / Perc', cymbal: 'Cymbale' };

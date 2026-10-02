@@ -2,7 +2,8 @@
  * Service worker de Nova Studio (application installable).
  * - Pages : toujours le réseau d'abord (jamais une ancienne version du DAW),
  *   la copie en cache ne sert que hors ligne.
- * - /assets/ (fichiers versionnés par Vite), polices, icônes, worklets :
+ * - /assets/ (fichiers versionnés par Vite), polices, icônes, worklets, sons
+ *   de batterie (/drums/, noms = empreinte du fichier) :
  *   cache d'abord, ils ne changent jamais sous le même nom.
  * - Tout le reste (API, Supabase, audio des beats) : réseau direct, pas de cache.
  */
@@ -38,7 +39,7 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  if (/^\/(assets|fonts|icons|worklets)\//.test(url.pathname)) {
+  if (/^\/(assets|fonts|icons|worklets|drums)\//.test(url.pathname)) {
     e.respondWith((async () => {
       const hit = await caches.match(req);
       if (hit) return hit;

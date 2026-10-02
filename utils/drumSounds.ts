@@ -84,6 +84,9 @@ async function render(dur: number, sr: number, build: (ctx: OfflineAudioContext,
   return ctx.startRendering();
 }
 
+/** Catégorie de la bibliothèque → réglage de crête équivalent. */
+const LIB_PEAK_ID: Record<string, string> = { hatc: 'hat-closed', hato: 'hat-open', cymbal: 'crash', clap: 'clap', rim: 'rim' };
+
 /** Crête visée par son (dBFS) : kicks / 808 / snares devant, hi-hats plus discrets. */
 const PEAK_DB: Record<string, number> = {
   'hat-closed': -9, 'hat-tight': -9, shaker: -11, 'hat-open': -10, crash: -11,
@@ -218,7 +221,8 @@ export function loadDrumSound(ref: string, ctx: BaseAudioContext, root = 0): Pro
   let p = cache.get(key);
   if (!p) {
     p = ref.startsWith('url:')
-      ? fetch(ref.slice(4)).then(r => r.arrayBuffer()).then(b => ctx.decodeAudioData(b))
+      ? fetch(ref.slice(4)).then(r => { if (!r.ok) throw new Error(`son introuvable (${r.status})`); return r.arrayBuffer(); })
+          .then(b => ctx.decodeAudioData(b)).then(b => normalize(b, LIB_PEAK_ID[(/\/([a-z]+)-[0-9a-f]{8}\.wav$/.exec(ref) || [])[1] || ''] || 'sample'))
       : synth(id, sr, root).then(b => normalize(b, id));
     cache.set(key, p);
     p.catch(() => cache.delete(key));

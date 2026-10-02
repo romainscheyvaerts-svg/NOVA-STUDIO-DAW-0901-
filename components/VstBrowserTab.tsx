@@ -4,7 +4,7 @@ import { novaBridge, BridgePlugin } from '../services/NovaBridge';
 import { useBridgeState } from '../hooks/useNovaBridge';
 
 /** Exécutable du pont (asset de release GitHub, comme le pont ASIO). */
-export const VST_BRIDGE_DOWNLOAD_URL = 'https://github.com/romainscheyvaerts-svg/NOVA-STUDIO-DAW-0901-/releases/download/v1.0.0-vst-bridge/NovaVSTBridge.exe';
+export const VST_BRIDGE_DOWNLOAD_URL = '/downloads/NovaVSTBridge.exe';
 
 /** Métadonnées enregistrées dans plugin.params à l'ajout d'un VST3. */
 export const vstMetadata = (p: BridgePlugin) => ({
@@ -42,7 +42,7 @@ export const BridgeConnectPanel: React.FC<{ compact?: boolean }> = ({ compact })
         <p role="status" className="text-xs text-amber-300">{bridge.error}</p>
       )}
       <p className="text-[11px] text-slate-500 leading-relaxed">
-        Pas encore installé ? <a href={VST_BRIDGE_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">Télécharger NovaVSTBridge.exe</a> (Windows).
+        Pas encore installé ? <a href={VST_BRIDGE_DOWNLOAD_URL} download className="text-cyan-400 underline">Télécharger NovaVSTBridge.exe</a> (Windows).
         {!compact && <> À la sauvegarde, les effets VST sont rendus dans l'audio : ton projet continue sur ton téléphone.</>}
       </p>
     </div>
