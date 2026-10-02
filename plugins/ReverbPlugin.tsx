@@ -36,7 +36,30 @@ export interface ReverbParams {
   mode: ReverbMode;
   isEnabled: boolean;
   name?: string;
+  /**
+   * Empreinte capturée (réponse impulsionnelle WAV, ex. /ir/make-music-vocal.wav) :
+   * la reverb devient une copie par convolution d'une vraie reverb (celle du
+   * studio). Decay, taille, diffusion et mode sont alors ignorés ; pré-délai,
+   * filtres, largeur et mix restent actifs.
+   */
+  irUrl?: string;
 }
+
+// Empreintes capturées, décodées une fois par fréquence d'échantillonnage.
+const capturedIrCache = new Map<string, Promise<AudioBuffer | null>>();
+function loadCapturedIr(ctx: BaseAudioContext, url: string): Promise<AudioBuffer | null> {
+  const key = `${ctx.sampleRate}|${url}`;
+  let p = capturedIrCache.get(key);
+  if (!p) {
+    p = fetch(url)
+      .then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`IR ${r.status}`))))
+      .then(b => ctx.decodeAudioData(b))
+      .catch(e => { console.warn('[Reverb] Empreinte introuvable, reverb calculée à la place', url, e); capturedIrCache.delete(key); return null; });
+    capturedIrCache.set(key, p);
+  }
+  return p;
+}
+const loadedIrs = new Map<string, AudioBuffer>();
 
 export const REVERB_PRESETS: Array<Partial<ReverbParams> & { name: string }> = [
   { 
@@ -327,6 +350,8 @@ export class ReverbNode {
   private buildImpulse(): AudioBuffer {
     const sr = this.ctx.sampleRate;
     const p = this.params;
+    const captured = p.irUrl ? loadedIrs.get(`${sr}|${p.irUrl}`) : undefined;
+    if (captured) return captured;
     const decay = clamp(safeNum(p.decay, 2.5), 0.1, 15);
     const size = clamp(safeNum(p.size, 0.7), 0, 1);
     const damping = clamp(safeNum(p.damping, 0.5), 0, 1);
@@ -377,8 +402,24 @@ export class ReverbNode {
     return ir;
   }
 
+  /** Promesse résolue quand l'empreinte capturée est chargée (export hors ligne). */
+  public ready?: Promise<void>;
+
+  /** Charge l'empreinte capturée puis la met en place. */
+  private ensureCapturedIr() {
+    const url = this.params.irUrl;
+    if (!url) return;
+    const key = `${this.ctx.sampleRate}|${url}`;
+    if (loadedIrs.has(key)) return;
+    this.ready = loadCapturedIr(this.ctx, url).then(buf => {
+      if (buf) loadedIrs.set(key, buf);
+      if (this.params.irUrl === url) { this.irKey = ''; this.regenerateImpulse(true); }
+    });
+  }
+
   private irSignature() {
     const p = this.params;
+    if (p.irUrl) return `ir|${p.irUrl}|${loadedIrs.has(`${this.ctx.sampleRate}|${p.irUrl}`) ? 1 : 0}`;
     return [
       Math.round(clamp(safeNum(p.decay, 2.5), 0.1, 15) * 50),
       Math.round(clamp(safeNum(p.size, 0.7), 0, 1) * 50),
@@ -390,6 +431,7 @@ export class ReverbNode {
 
   /** Charge une nouvelle reponse si les reglages qui la definissent ont change. */
   private regenerateImpulse(immediate = false) {
+    this.ensureCapturedIr();
     const key = this.irSignature();
     if (key === this.irKey) return;
     if (this.irTimer) { clearTimeout(this.irTimer); this.irTimer = null; }
