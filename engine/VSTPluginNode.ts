@@ -87,6 +87,10 @@ export class VSTPluginNode {
     liveVstNodes.set(plugin.id, this);
     notifyInfo();
     this.unsubs.push(novaBridge.subscribe((s: BridgeState) => this.onBridgeState(s)));
+    // Licence activée (« C'est fait ») : un chargement raté est relancé.
+    this.unsubs.push(novaBridge.onLicenseDone((path) => {
+      if (path === plugin.params?.localPath && this.status === 'error' && novaBridge.isConnected()) void this.start();
+    }));
   }
 
   // --- Contrat des effets du moteur --------------------------------------------

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NOVA BRIDGE VST3 — v5
+NOVA BRIDGE VST3 — v6
 
 Pont local entre Nova Studio (navigateur) et les plugins VST3 installés sur le PC
 (effets, et depuis la v5 instruments : notes rendues en audio hors temps réel).
@@ -13,11 +13,14 @@ Sécurité
 
 Protocole (WebSocket ws://127.0.0.1:8765)
   Messages JSON (contrôle) — chaque réponse renvoie le « req_id » reçu :
-    HELLO / PING                → capacités, version (5 : instruments)
+    HELLO / PING                → capacités, version (5 : instruments, 6 : fenêtres de licence)
     GET_PLUGIN_LIST [rescan]    → plugins installés ; chacun porte is_instrument
                                   (true / false / null = pas encore lu), plus
                                   instruments_pending + probe_progress [lus, total]
-                                  pendant la lecture des plugins sans moduleinfo
+                                  pendant la lecture des plugins sans moduleinfo ;
+                                  (v6) scan_status (ok, error, activation, hang, crash)
+                                  et license (activation / nag) quand c'est connu.
+                                  rescan=true relit aussi les plugins en attente d'activation
     LOAD_PLUGIN  slot_id path [plugin_name] sample_rate [state]
                                 → name, vendor, latency_samples, buffer_latency_samples, state, is_instrument
     UNLOAD_PLUGIN slot_id
@@ -35,7 +38,15 @@ Protocole (WebSocket ws://127.0.0.1:8765)
     SHOW_EDITOR / CLOSE_EDITOR slot_id      (fenêtre native du plugin sur le PC)
     GET_PARAMS / SET_PARAM      (paramètres exposés par le plugin)
     PROCESS_AUDIO               (ancien format JSON, conservé pour compatibilité)
-  Événements : EDITOR_CLOSED (avec l'état), LATENCY (latence mesurée qui change).
+  Événements : EDITOR_CLOSED (avec l'état), LATENCY (latence mesurée qui change),
+    (v6) LICENSE_WINDOW {type:"license_window", plugin, path, plugin_name, title,
+      status: activation|nag, source: load|render, slot_id?} : un plugin vient
+      d'ouvrir une fenêtre (activation de licence, enregistrement…), ramenée au
+      premier plan ; le chargement / rendu attend qu'elle soit fermée (15 min max).
+      Envoyé à la connexion concernée, sinon à toutes.
+
+  Instances : un slot par effet / instrument chargé ; les rendus hors slot
+  réutilisent une instance hors ligne par plugin (vst_host.OfflinePool).
 
   Trames binaires (little-endian) :
     type 1 — bloc audio temps réel (aller et retour, même format)
@@ -73,11 +84,12 @@ import numpy as np
 import websockets
 from websockets.asyncio.server import serve, ServerConnection
 
+import license_watch
 import vst_host
 import vst_probe
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events
 
-VERSION = 5
+VERSION = 6
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
@@ -172,12 +184,20 @@ class NovaBridgeServer:
         self.probe_task: Optional[asyncio.Task] = None
         self.probe_progress: Optional[List[int]] = None
         self._probed: set = set()
+        # Fenêtres de licence : connexions à prévenir, mémoire entre lancements.
+        self.clients: set = set()
+        self.licenses = license_watch.LicenseLog()
 
     # --- démarrage ---------------------------------------------------------
 
     async def run(self):
         self.loop = asyncio.get_running_loop()
         self.scan_done = asyncio.Event()
+        vst_host.WATCHER = license_watch.LicenseWatcher(
+            on_window=lambda w, info: self.loop.call_soon_threadsafe(self._license_window, w, info),
+            ignore_title=self._is_editor_title,
+            excluded_pids=vst_probe.probe_pids,
+            on_clean=lambda w: self.loop.call_soon_threadsafe(self._license_clean, w))
         asyncio.create_task(self._scan())
         asyncio.create_task(self._reaper())
         self.origins = allowed_origins()
@@ -245,14 +265,67 @@ class NovaBridgeServer:
             self.probe_progress = None
 
     def _learn_kind(self, slot: Slot):
-        """Plugin chargé : on sait enfin si c'est un instrument."""
+        """Plugin chargé : on sait enfin si c'est un instrument (et la lecture
+        en arrière-plan n'a plus à le relire, même s'il demandait une activation)."""
         changed = False
         for p in self.plugins:
-            if p["path"] == slot.path and p.get("is_instrument") is None:
+            unsettled = p.get("scan_status") in ("activation", "hang", "crash")
+            if p["path"] == slot.path and (p.get("is_instrument") is None or unsettled):
                 p["is_instrument"] = slot.is_instrument
                 p["category"] = "Instrument" if slot.is_instrument else "Effect"
+                p["scan_status"] = "ok"
                 changed = True
+        if changed:
+            self.misc_pool.submit(vst_probe.record_loaded, slot.path, slot.plugin_name, slot.is_instrument)
         return changed
+
+    # --- fenêtres de licence ---------------------------------------------------
+
+    def _is_editor_title(self, title: str) -> bool:
+        """La fenêtre d'édition ouverte par le DAW n'est pas une demande de licence."""
+        slot = self.juce.editor_slot
+        return bool(slot is not None and title and title == slot.name)
+
+    def _display_name(self, path: str, plugin_name: Optional[str], fallback: str) -> str:
+        for p in self.plugins:
+            if p["path"] == path and (p.get("plugin_name") or None) == (plugin_name or None):
+                return p["name"]
+        return fallback
+
+    def _license_window(self, w, info: dict):
+        """(Boucle asyncio) Un plugin a ouvert une fenêtre au chargement : déjà
+        ramenée au premier plan par le surveillant ; on prévient le DAW."""
+        title = info.get("title") or ""
+        name = self._display_name(w.path, w.plugin_name, w.label)
+        status = self.licenses.window(w.path, w.plugin_name, name, title)
+        for p in self.plugins:
+            if p["path"] == w.path:
+                p["license"] = status
+                p["license_title"] = title
+        if status == "nag":
+            logger.info(f"🔑 {name} ouvre encore sa fenêtre (version d'essai ou rappel ?) : il n'est plus chargé automatiquement")
+        msg = {"action": "LICENSE_WINDOW", "type": "license_window", "plugin": name, "path": w.path,
+               "plugin_name": w.plugin_name, "title": title, "status": status,
+               "source": w.context.get("source", "load")}
+        if w.context.get("slot_id"):
+            msg["slot_id"] = w.context["slot_id"]
+        target = w.context.get("ws")
+        for ws in ([target] if target in self.clients else list(self.clients)):
+            asyncio.ensure_future(self._send(ws, msg))
+
+    def _needs_activation(self, path: str, plugin_name: Optional[str]) -> bool:
+        if self.licenses.status(path, plugin_name):
+            return True
+        return any(p["path"] == path and (p.get("license") or p.get("scan_status") == "activation") for p in self.plugins)
+
+    def _license_clean(self, w):
+        """Chargé sans fenêtre (20 s de surveillance) : licence en ordre."""
+        if self.licenses.clean(w.path, w.plugin_name):
+            logger.info(f"🔑 {self._display_name(w.path, w.plugin_name, w.label)} : licence en ordre")
+            for p in self.plugins:
+                if p["path"] == w.path and p.get("license"):
+                    p.pop("license", None)
+                    p.pop("license_title", None)
 
     async def _reaper(self):
         while True:
@@ -262,6 +335,8 @@ class NovaBridgeServer:
                 if slot.orphan_since and now - slot.orphan_since > ORPHAN_GRACE_S:
                     self._drop_slot(sid)
                     logger.info(f"🗑️ Slot orphelin libéré : {slot.name}")
+            # Instances hors ligne inutilisées / mémoire presque pleine
+            await self.loop.run_in_executor(self.misc_pool, vst_host.OFFLINE.reap)
 
     def _drop_slot(self, slot_id: str):
         slot = self.slots.pop(slot_id, None)
@@ -276,6 +351,7 @@ class NovaBridgeServer:
     async def _handle(self, ws: ServerConnection):
         origin = ws.request.headers.get("Origin") if ws.request else None
         logger.info(f"🔗 Connexion ({origin or 'sans origine'})")
+        self.clients.add(ws)
         try:
             async for message in ws:
                 if isinstance(message, (bytes, bytearray)):
@@ -296,6 +372,7 @@ class NovaBridgeServer:
         except websockets.ConnectionClosed:
             pass
         finally:
+            self.clients.discard(ws)
             for sid, slot in list(self.slots.items()):
                 if slot.owner is ws:
                     slot.owner = None
@@ -350,16 +427,24 @@ class NovaBridgeServer:
         self._reply(ws, req, {"success": True, "version": VERSION, "binary_audio": True,
                               "render": True, "editor": vst_host.HAS_PEDALBOARD,
                               "pedalboard": vst_host.HAS_PEDALBOARD,
-                              "instruments": vst_host.HAS_PEDALBOARD})
+                              "instruments": vst_host.HAS_PEDALBOARD,
+                              "license_events": license_watch.IS_WINDOWS})
 
     async def _a_get_plugin_list(self, ws, req):
         if req.get("rescan"):
             self.scan_done.clear()
             self._probed.clear()
+            # Choix explicite : les plugins en attente d'activation sont relus.
+            await self.loop.run_in_executor(self.misc_pool, vst_probe.forget_unsettled)
             await self._scan()
         await self.scan_done.wait()
         effects_only = bool(req.get("effects_only"))
-        plugins = [p for p in self.plugins if not effects_only or p["category"] == "Effect"]
+        plugins = []
+        for p in self.plugins:
+            if effects_only and p["category"] != "Effect":
+                continue
+            lic = p.get("license") or self.licenses.status(p["path"], p.get("plugin_name"))
+            plugins.append({**p, "license": lic} if lic else p)
         pending = self.probe_task is not None and not self.probe_task.done()
         self._reply(ws, req, {"success": True, "plugins": plugins, "instruments_pending": pending,
                               "probe_progress": self.probe_progress if pending else None})
@@ -374,7 +459,9 @@ class NovaBridgeServer:
             # réglages faits depuis dans la fenêtre du plugin).
             existing.owner = ws
             existing.orphan_since = None
-            await asyncio.wait_for(self.loop.run_in_executor(self.misc_pool, existing.loaded.wait, 30), 35)
+            # Une fenêtre de licence peut retenir le premier chargement plusieurs minutes.
+            wait = vst_host.LICENSE_WAIT_S
+            await asyncio.wait_for(self.loop.run_in_executor(self.misc_pool, existing.loaded.wait, wait), wait + 5)
             if existing.error:
                 raise RuntimeError(existing.error)
             state = await self._in_slot(existing, existing.get_state)
@@ -391,13 +478,24 @@ class NovaBridgeServer:
         self.slot_queues[slot_id] = q
         asyncio.create_task(self._slot_worker(slot, q))
         try:
-            await self._in_slot(slot, slot.load, req.get("state"))
+            await self._in_slot(slot, slot.load, req.get("state"), {"ws": ws, "slot_id": slot_id, "source": "load"})
         except Exception as e:
             slot.error = str(e)
             slot.loaded.set()
             if self.slots.get(slot_id) is slot:
                 self._drop_slot(slot_id)
+            if self._needs_activation(path, req.get("plugin_name")):
+                # Fenêtre d'activation fermée sans activer : beaucoup de plugins ne
+                # la rouvrent qu'au prochain lancement de l'hôte.
+                name = self._display_name(path, req.get("plugin_name"), os.path.basename(path)[:-5])
+                raise RuntimeError(f"{name} n'est pas activé : active sa licence (relance le pont VST pour revoir "
+                                   f"sa fenêtre d'activation)") from e
             raise
+        if self.slots.get(slot_id) is not slot:
+            # Retiré pendant le chargement (DAW lassé d'attendre une fenêtre de licence) :
+            # l'instance arrivée entre-temps est libérée sur le thread JUCE.
+            slot.unload()
+            raise RuntimeError("Chargement annulé")
         state = await self._in_slot(slot, slot.get_state)
         self._learn_kind(slot)
         kind = "instrument" if slot.is_instrument else "effet"
@@ -412,9 +510,44 @@ class NovaBridgeServer:
 
     async def _a_unload_plugin(self, ws, req):
         sid = str(req.get("slot_id", ""))
-        if sid in self.slots:
+        slot = self.slots.get(sid)
+        if slot is not None:
             self._drop_slot(sid)
+            # Plus utilisé nulle part : son instance hors ligne part avec lui.
+            if not any(s.path == slot.path for s in self.slots.values()):
+                self.misc_pool.submit(vst_host.OFFLINE.reap, slot.path)
         self._reply(ws, req, {"success": True})
+
+    # --- tests (NOVA_BRIDGE_DEBUG=1) : fenêtre de licence simulée -------------------
+
+    async def _a_debug_license_window(self, ws, req):
+        if os.environ.get("NOVA_BRIDGE_DEBUG") != "1":
+            raise RuntimeError("Action de test désactivée")
+        import ctypes
+        title = str(req.get("title") or "Software Activation: Test Plugin")
+        path = str(req.get("path") or "C:\\Test\\Test Plugin.vst3")
+        w = vst_host.WATCHER.begin(path, req.get("plugin_name"), {"ws": ws, "source": "load"})
+        threading.Thread(target=lambda: ctypes.windll.user32.MessageBoxW(None, "Fenêtre de licence simulée (test du pont)", title, 0x40),
+                         daemon=True).start()
+        self.loop.call_later(1.0, w.end)
+        self._reply(ws, req, {"success": True})
+
+    async def _a_debug_windows(self, ws, req):
+        if os.environ.get("NOVA_BRIDGE_DEBUG") != "1":
+            raise RuntimeError("Action de test désactivée")
+        import ctypes
+        u = ctypes.windll.user32
+        u.GetForegroundWindow.restype = ctypes.c_void_p
+        fg = u.GetForegroundWindow()
+        buf = ctypes.create_unicode_buffer(512)
+        u.InternalGetWindowText(ctypes.c_void_p(fg), buf, 512)
+        mine = license_watch.windows_of(license_watch.descendants(os.getpid()))
+        if req.get("close_title"):
+            for h, info in mine.items():
+                if info["title"] == req["close_title"]:
+                    license_watch.close_window(h)
+        self._reply(ws, req, {"success": True, "foreground": buf.value,
+                              "windows": [i["title"] for i in mine.values()]})
 
     async def _a_get_state(self, ws, req):
         slot = self._slot(req)
@@ -557,7 +690,8 @@ class NovaBridgeServer:
                 if not path:
                     raise ValueError("Instrument à rendre introuvable")
                 out = await self.loop.run_in_executor(self.render_pool, render_instrument_offline, self.juce,
-                                                      path, pname, state, events, duration, sr)
+                                                      path, pname, state, events, duration, sr,
+                                                      {"ws": ws, "source": "render"})
                 name = os.path.basename(path)
             logger.info(f"🎹 Rendu {name} : {len(events) // 2} notes, {duration:.1f} s en {time.time() - t:.1f} s")
             reply = {"action": "RENDER_INSTRUMENT", "req_id": meta.get("req_id"), "success": True,
@@ -589,7 +723,8 @@ class NovaBridgeServer:
                 raise ValueError("Plugin à rendre introuvable")
             t = time.time()
             out = await self.loop.run_in_executor(self.render_pool, render_offline, self.juce, path, pname, state,
-                                                  audio, sr, float(meta.get("tail_seconds") or 0))
+                                                  audio, sr, float(meta.get("tail_seconds") or 0),
+                                                  {"ws": ws, "source": "render"})
             logger.info(f"🎚️ Rendu {os.path.basename(path)} : {out.shape[1] / sr:.1f} s en {time.time() - t:.1f} s")
             reply = {"action": "RENDER", "req_id": meta.get("req_id"), "success": True,
                      "nch": 2, "nframes": int(out.shape[1]), "sample_rate": sr}

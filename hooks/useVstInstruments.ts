@@ -45,6 +45,19 @@ export function useVstInstruments(opts: {
     }));
   }), []);
 
+  // Licence activée (« C'est fait ») : rendus ratés de cet instrument relancés.
+  useEffect(() => novaBridge.onLicenseDone((path) => {
+    const { tracks, bpm, canRender } = optsRef.current;
+    tracks.forEach(t => {
+      if (t.vstInstrument?.path !== path || !canRender(t)) return;
+      if (instrumentStore.get(t.id).error || !isInstrumentRenderCurrent(t, bpm)) {
+        failedSig.current.delete(t.id);
+        instrumentStore.patch(t.id, { error: null });
+        void runRef.current(t.id);
+      }
+    });
+  }), []);
+
   const run = async (trackId: string) => {
     if (running.current.has(trackId)) { again.current.add(trackId); return; }
     running.current.add(trackId);
@@ -58,7 +71,9 @@ export function useVstInstruments(opts: {
       name = first.name;
       sig = instrumentRenderSig(first, stateRef.current.bpm);
       // Premier chargement : l'état d'origine du plugin arrive avec lui.
-      await ensureInstrumentSlot(first).catch(() => undefined);
+      // Plugin introuvable, pas activé, pas un instrument… : dit tout de suite,
+      // même sans notes à rendre.
+      await ensureInstrumentSlot(first);
       await new Promise(r => setTimeout(r, 30));
       const t = stateRef.current.tracks.find(x => x.id === trackId);
       if (!t?.vstInstrument) return;
@@ -102,6 +117,9 @@ export function useVstInstruments(opts: {
       if (again.current.delete(trackId)) schedule(trackId);
     }
   };
+
+  const runRef = useRef(run);
+  runRef.current = run;
 
   const schedule = (trackId: string) => {
     const old = timers.current.get(trackId);

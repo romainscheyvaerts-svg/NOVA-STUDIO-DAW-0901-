@@ -143,7 +143,7 @@ const VstBrowserTab: React.FC<{
           <div className="w-8 h-8 rounded-md bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/20 text-xs shrink-0"><i className="fas fa-plug"></i></div>
           <div className="min-w-0">
             <div className="text-xs font-bold text-white truncate">{p.name}</div>
-            <div className="text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}{p.category === 'Instrument' ? ' · instrument' : ''}</div>
+            <div className="text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}{p.category === 'Instrument' ? ' · instrument' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}</div>
           </div>
         </div>
       ))}

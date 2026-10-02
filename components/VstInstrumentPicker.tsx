@@ -60,6 +60,14 @@ const VstInstrumentPicker: React.FC<{
     return plugins.filter(p => !q || p.name.toLowerCase().includes(q) || p.vendor.toLowerCase().includes(q)).slice(0, 200);
   }, [plugins, query]);
 
+  // Plugins pas lus car ils demandent une activation : peut-être des instruments.
+  const toActivate = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return novaBridge.getCachedToActivate()
+      .filter(p => !q || p.name.toLowerCase().includes(q) || p.vendor.toLowerCase().includes(q)).slice(0, 100);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plugins, query]);
+
   const busy = status.loading || status.rendering;
   const label = inst ? inst.name : 'Synthé Nova';
 
@@ -166,7 +174,7 @@ const VstInstrumentPicker: React.FC<{
                       <i className="fas fa-keyboard text-fuchsia-300 text-[10px] w-4"></i>
                       <span className="min-w-0 flex-1">
                         <span className="block text-xs font-bold text-white truncate">{p.name}</span>
-                        <span className="block text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}</span>
+                        <span className="block text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : p.license ? ' · activation à faire' : ''}</span>
                       </span>
                     </button>
                   ))}
@@ -176,6 +184,23 @@ const VstInstrumentPicker: React.FC<{
                     </p>
                   )}
                 </div>
+                {toActivate.length > 0 && (
+                  <div className="space-y-1 pt-2 border-t border-white/10">
+                    <div className="text-[9px] font-black uppercase tracking-widest text-amber-300/80 pt-1">À activer ({toActivate.length})</div>
+                    <p className="text-[10px] text-slate-400">Ces plugins demandent une activation de licence avant d'être lus. Choisis-en un : sa fenêtre d'activation s'ouvre sur ton PC.</p>
+                    {toActivate.map(p => (
+                      <button key={p.id} type="button" data-vst-to-activate={p.name}
+                        onClick={() => { onChoose(p); setOpen(false); }}
+                        className="w-full p-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.04] hover:bg-amber-500/10 flex items-center gap-2 text-left">
+                        <i className="fas fa-key text-amber-300 text-[10px] w-4"></i>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-xs font-bold text-white truncate">{p.name}</span>
+                          <span className="block text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : ''}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>

@@ -11,7 +11,11 @@ Hôte VST3 du pont Nova (pedalboard de Spotify).
                   l'ordre d'arrivée, avec reset=False (l'état du plugin –
                   compresseur, réverbe… – continue d'un bloc à l'autre).
 - render_offline() : rendu d'un buffer complet (gel / export) sur une instance
-                  temporaire, avec une queue de silence pour les réverbes.
+                  hors ligne (OfflinePool : gardée et réutilisée, un plugin à
+                  fenêtre de licence ne la rouvre pas à chaque rendu), avec une
+                  queue de silence pour les réverbes.
+- instantiate() : toute création d'instance passe par là, surveillée par
+                  license_watch (fenêtre d'activation ramenée au premier plan).
 - Instruments   : Slot.render_midi() / render_instrument_offline() rendent des
                   notes (MIDI) en audio, hors temps réel.
 - JuceThread    : le seul thread autorisé à préparer / détruire un plugin et à
@@ -26,10 +30,14 @@ import platform
 import queue
 import re
 import threading
-from concurrent.futures import Future, ThreadPoolExecutor
+import time
+from collections import OrderedDict
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
+
+import license_watch
 
 try:
     import pedalboard
@@ -415,17 +423,143 @@ def _render_midi_on(plugin, events: List[tuple], duration: float, sr: int, block
 
 
 def render_instrument_offline(juce: "JuceThread", path: str, plugin_name: Optional[str], state_b64: Optional[str],
-                              events: List[tuple], duration: float, sample_rate: int) -> np.ndarray:
-    """Rendu d'un instrument sur une instance temporaire (pas de slot chargé)."""
+                              events: List[tuple], duration: float, sample_rate: int,
+                              context: Optional[dict] = None) -> np.ndarray:
+    """Rendu d'un instrument hors slot (instance hors ligne réutilisée, voir OfflinePool)."""
     sr = int(sample_rate)
-    plugin, _ = juce.run_sync(prepare_plugin, path, plugin_name, state_b64, sr, RENDER_BLOCK)
+    entry = OFFLINE.acquire(juce, path, plugin_name, state_b64, sr, RENDER_BLOCK, context)
     try:
-        if not _is_instrument(plugin):
-            raise ValueError(f"{getattr(plugin, 'name', 'Ce plugin')} n'est pas un instrument")
-        return _render_midi_on(plugin, events, duration, sr, RENDER_BLOCK)
+        if not _is_instrument(entry.plugin):
+            raise ValueError(f"{getattr(entry.plugin, 'name', 'Ce plugin')} n'est pas un instrument")
+        return _render_midi_on(entry.plugin, events, duration, sr, RENDER_BLOCK)
     finally:
-        juce.release(plugin)
-        plugin = None
+        OFFLINE.release(entry)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CRÉATION D'INSTANCE (surveillance des fenêtres de licence)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# license_watch.LicenseWatcher posé par le serveur : chaque création d'instance
+# est surveillée (fenêtre d'activation ramenée devant le navigateur et signalée).
+WATCHER = None
+LOAD_TIMEOUT_S = 120.0
+LICENSE_WAIT_S = 15 * 60.0   # le temps de saisir un numéro de série, de se connecter…
+
+
+def instantiate(juce: "JuceThread", path: str, plugin_name: Optional[str], state_b64: Optional[str],
+                sample_rate: int, block: int, context: Optional[dict] = None):
+    """prepare_plugin sur le thread JUCE, sous surveillance. Une fenêtre de
+    licence modale bloque le chargement : on attend alors jusqu'à 15 min."""
+    w = WATCHER.begin(path, plugin_name, context) if WATCHER is not None else None
+    fut = juce.call(prepare_plugin, path, plugin_name, state_b64, sample_rate, block)
+    t0 = time.time()
+    try:
+        while True:
+            try:
+                return fut.result(timeout=1.0)
+            except FutureTimeout:
+                limit = LICENSE_WAIT_S if (w is not None and w.seen) else LOAD_TIMEOUT_S
+                if time.time() - t0 > limit:
+                    # Fini plus tard (fenêtre fermée) : l'instance orpheline est libérée.
+                    fut.add_done_callback(lambda f: juce.release(f.result()[0]) if not f.exception() else None)
+                    raise TimeoutError("Le plugin ne répond pas (fenêtre de licence restée ouverte ?)")
+    finally:
+        if w is not None:
+            w.end()
+
+
+def _restore_and_reset(plugin, state_b64: Optional[str]):
+    """(Thread JUCE) État du rendu appliqué, puis remise à zéro (voix, queues)."""
+    if state_b64:
+        _set_state(plugin, state_b64)
+    plugin.reset()
+
+
+class _OfflineEntry:
+    def __init__(self, key):
+        self.key = key
+        self.plugin = None
+        self.default_state: Optional[str] = None
+        self.lock = threading.Lock()
+        self.last_used = time.time()
+
+
+class OfflinePool:
+    """Instances hors ligne (gel, export, instrument sans slot) gardées et
+    réutilisées par (plugin, fréquence) : un plugin à fenêtre de licence ou de
+    rappel (« nag ») ne la rouvre plus à chaque rendu. Avant chaque rendu :
+    état appliqué puis remise à zéro, sur le thread JUCE. Libérées après 3 min
+    sans rendu, au-delà de MAX instances, à la décharge du plugin et quand la
+    mémoire du PC est presque pleine."""
+
+    MAX = 4
+    IDLE_S = 180.0
+    MEMORY_HIGH = 88   # % de mémoire physique utilisée
+
+    def __init__(self):
+        self.entries: "OrderedDict[tuple, _OfflineEntry]" = OrderedDict()
+        self.lock = threading.Lock()
+        self.juce: Optional["JuceThread"] = None
+
+    def acquire(self, juce: "JuceThread", path: str, plugin_name: Optional[str], state_b64: Optional[str],
+                sr: int, block: int, context: Optional[dict] = None) -> _OfflineEntry:
+        self.juce = juce
+        key = (path, plugin_name or "", int(sr), int(block))
+        self.reap()
+        with self.lock:
+            e = self.entries.get(key)
+            if e is None:
+                e = self.entries[key] = _OfflineEntry(key)
+            self.entries.move_to_end(key)
+        e.lock.acquire()  # un rendu à la fois par instance
+        try:
+            if e.plugin is None:
+                e.plugin, _ = instantiate(juce, path, plugin_name, None, sr, block, context)
+                e.default_state = _get_state(e.plugin)
+            # Pas d'état fourni : réglages d'origine (pas ceux du rendu précédent).
+            juce.run_sync(_restore_and_reset, e.plugin, state_b64 or e.default_state)
+        except BaseException:
+            e.lock.release()
+            with self.lock:
+                if e.plugin is None and self.entries.get(key) is e:
+                    del self.entries[key]
+            raise
+        self._evict_extra()
+        return e
+
+    def release(self, e: _OfflineEntry):
+        e.last_used = time.time()
+        e.lock.release()
+
+    def _drop(self, e: _OfflineEntry):
+        plugin, e.plugin = e.plugin, None
+        if plugin is not None and self.juce is not None:
+            self.juce.release(plugin)
+
+    def _evict_extra(self):
+        with self.lock:
+            idle = [e for e in self.entries.values() if not e.lock.locked()]
+            extra = len(self.entries) - self.MAX
+            for e in idle[:max(0, extra)]:
+                del self.entries[e.key]
+                self._drop(e)
+
+    def reap(self, path: Optional[str] = None):
+        """Libère les instances inutilisées (délai, mémoire pleine, plugin déchargé)."""
+        now = time.time()
+        pressure = license_watch.memory_load() >= self.MEMORY_HIGH
+        with self.lock:
+            for key, e in list(self.entries.items()):
+                if e.lock.locked():
+                    continue
+                if pressure or (path is not None and key[0] == path) or now - e.last_used > self.IDLE_S:
+                    del self.entries[key]
+                    self._drop(e)
+                    logger.info(f"♻️ Instance hors ligne libérée : {os.path.basename(key[0])}")
+
+
+OFFLINE = OfflinePool()
 
 
 BLOCK = 128          # taille du bloc temps réel (quantum Web Audio)
@@ -467,9 +601,9 @@ class Slot:
 
     # Les méthodes ci-dessous tournent dans self.executor.
 
-    def load(self, state_b64: Optional[str]) -> bool:
-        plugin, restored = self.juce.run_sync(prepare_plugin, self.path, self.plugin_name, state_b64,
-                                              self.sample_rate, BLOCK)
+    def load(self, state_b64: Optional[str], context: Optional[dict] = None) -> bool:
+        plugin, restored = instantiate(self.juce, self.path, self.plugin_name, state_b64,
+                                       self.sample_rate, BLOCK, context)
         self.name = getattr(plugin, "name", None) or self.name
         self.vendor = getattr(plugin, "manufacturer_name", "") or ""
         self.is_instrument = _is_instrument(plugin)
@@ -550,13 +684,15 @@ class Slot:
 
 
 def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], state_b64: Optional[str],
-                   audio: np.ndarray, sample_rate: int, tail_seconds: float) -> np.ndarray:
-    """Rendu hors temps réel sur une instance temporaire (l'instance temps réel
-    n'est pas perturbée) : buffer complet + queue de silence pour les réverbes.
+                   audio: np.ndarray, sample_rate: int, tail_seconds: float,
+                   context: Optional[dict] = None) -> np.ndarray:
+    """Rendu hors temps réel sur une instance hors ligne réutilisée (l'instance
+    temps réel n'est pas perturbée) : buffer complet + queue de silence pour les réverbes.
     La sortie de pedalboard est alignée mais retient au début l'équivalent de
     la latence du plugin : on pousse du silence jusqu'à tout récupérer."""
     sr = int(sample_rate)
-    plugin, _ = juce.run_sync(prepare_plugin, path, plugin_name, state_b64, sr, RENDER_BLOCK)
+    entry = OFFLINE.acquire(juce, path, plugin_name, state_b64, sr, RENDER_BLOCK, context)
+    plugin = entry.plugin
     parts = []
     try:
         tail = max(0, int(round(float(tail_seconds or 0) * sr)))
@@ -579,8 +715,8 @@ def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], stat
                 parts.append(_to_stereo(out))
                 got += out.shape[-1]
     finally:
-        juce.release(plugin)
         plugin = None
+        OFFLINE.release(entry)
     res = np.concatenate(parts, axis=1) if parts else np.zeros((2, 0), np.float32)
     if res.shape[1] < total:
         res = np.concatenate([res, np.zeros((2, total - res.shape[1]), np.float32)], axis=1)

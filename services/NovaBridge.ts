@@ -8,6 +8,8 @@
  *   AudioWorklet d'effet VST3.
  * - Rendu hors temps réel (RENDER) en trame binaire pour le gel / l'export.
  * - v5 : instruments VST3 (RENDER_INSTRUMENT : notes -> audio, mode instru).
+ * - v6 : LICENSE_WINDOW (fenêtre d'activation d'un plugin ramenée au premier
+ *   plan sur le PC) : message au musicien, délais allongés, « C'est fait ».
  *
  * Protocole complet : bridge-python/nova_bridge_server.py.
  */
@@ -22,7 +24,28 @@ export interface BridgePlugin {
   pluginName?: string | null;
   /** Instrument (pont v5) : true / false, null = pas encore lu par le pont. */
   isInstrument?: boolean | null;
+  /** (pont v6) Fenêtre de licence vue : activation à faire, ou « nag » (revient à chaque chargement). */
+  license?: 'activation' | 'nag' | null;
+  /** (pont v6) Lecture en arrière-plan : ok, error, activation, hang, crash. */
+  scanStatus?: string | null;
 }
+
+/**
+ * (pont v6) Un plugin vient d'ouvrir une fenêtre d'activation / de licence au
+ * chargement : le pont l'a ramenée au premier plan, le chargement l'attend.
+ */
+export interface LicenseWindowEvent {
+  plugin: string;
+  path: string;
+  pluginName: string | null;
+  title: string;
+  status: 'activation' | 'nag';
+  source: 'load' | 'render' | string;
+  slotId: string | null;
+}
+
+/** Délai laissé à un chargement / rendu retenu par une fenêtre de licence. */
+const LICENSE_WAIT_MS = 15 * 60 * 1000;
 
 export type BridgeStatus = 'idle' | 'connecting' | 'connected' | 'unavailable';
 
@@ -173,6 +196,10 @@ class NovaBridgeService {
       else p.resolve(msg);
       return;
     }
+    if (msg && msg.action === 'LICENSE_WINDOW') {
+      this.onLicenseWindowMsg(msg);
+      return;
+    }
     if (msg && (msg.action === 'EDITOR_CLOSED' || msg.action === 'LATENCY') && msg.slot_id) {
       this.slotListeners.get(String(msg.slot_id))?.forEach(cb => { try { cb(msg); } catch { /* */ } });
     }
@@ -229,6 +256,8 @@ class NovaBridgeService {
       uid: p.uid || '',
       pluginName: p.plugin_name ?? null,
       isInstrument: typeof p.is_instrument === 'boolean' ? p.is_instrument : (p.category === 'Instrument' ? true : null),
+      license: p.license === 'activation' || p.license === 'nag' ? p.license : null,
+      scanStatus: p.scan_status ?? null,
     }));
     const prog = Array.isArray(r.probe_progress) ? r.probe_progress : null;
     this.setBridgeState({
@@ -240,6 +269,50 @@ class NovaBridgeService {
 
   /** Instruments VST3 du PC (la liste suit la lecture faite par le pont). */
   getCachedInstruments(): BridgePlugin[] { return this.plugins.filter(p => p.isInstrument === true); }
+
+  /** Plugins pas encore lus parce qu'ils demandent une activation (peut-être des instruments). */
+  getCachedToActivate(): BridgePlugin[] {
+    return this.plugins.filter(p => p.isInstrument !== true && p.isInstrument !== false && (!!p.license || p.scanStatus === 'activation'));
+  }
+
+  // --- Fenêtres de licence (pont v6) ---------------------------------------
+
+  private licenseListeners = new Set<(e: LicenseWindowEvent) => void>();
+  private licenseDoneListeners = new Set<(path: string) => void>();
+
+  /** Un plugin a ouvert sa fenêtre d'activation (ramenée au premier plan sur le PC). */
+  onLicenseWindow(cb: (e: LicenseWindowEvent) => void): () => void {
+    this.licenseListeners.add(cb);
+    return () => { this.licenseListeners.delete(cb); };
+  }
+
+  /** « C'est fait » : le musicien a activé le plugin, les chargements / rendus ratés sont relancés. */
+  onLicenseDone(cb: (path: string) => void): () => void {
+    this.licenseDoneListeners.add(cb);
+    return () => { this.licenseDoneListeners.delete(cb); };
+  }
+
+  licenseDone(path: string) {
+    this.licenseDoneListeners.forEach(cb => { try { cb(path); } catch { /* écouteur fautif */ } });
+  }
+
+  private onLicenseWindowMsg(msg: any) {
+    // Le chargement / rendu attend la fermeture de la fenêtre : on lui laisse le temps.
+    this.pending.forEach((p, id) => {
+      window.clearTimeout(p.timer);
+      p.timer = window.setTimeout(() => {
+        this.pending.delete(id);
+        p.reject(new Error('Le pont VST ne répond pas'));
+      }, LICENSE_WAIT_MS);
+    });
+    const e: LicenseWindowEvent = {
+      plugin: String(msg.plugin || 'Le plugin'), path: String(msg.path || ''), pluginName: msg.plugin_name ?? null,
+      title: String(msg.title || ''), status: msg.status === 'nag' ? 'nag' : 'activation',
+      source: msg.source || 'load', slotId: msg.slot_id ?? null,
+    };
+    this.plugins = this.plugins.map(p => (p.path === e.path ? { ...p, license: e.status } : p));
+    this.licenseListeners.forEach(cb => { try { cb(e); } catch { /* écouteur fautif */ } });
+  }
 
   /** Identifiant de slot unique (un même id de plugin peut exister deux fois après un copier-coller). */
   claimSlot(pluginId: string): string {

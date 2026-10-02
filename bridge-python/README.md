@@ -26,6 +26,18 @@ Les plugins VST3 installés sur le PC, utilisables dans Nova Studio (navigateur)
   en parallèle, délai par plugin) ; résultat en cache dans
   `%LOCALAPPDATA%\NovaStudio\vst3_classes.json` (~3 min la 1re fois pour ~600
   plugins, instantané ensuite)
+- **v6 – fenêtres de licence** (`license_watch.py`) : après chaque création
+  d'instance (slot, rendu), les nouvelles fenêtres du pont et des programmes
+  qu'il lance sont surveillées ~20 s ; une fenêtre d'activation / de licence est
+  ramenée au premier plan et signalée au DAW (`LICENSE_WINDOW`), le chargement
+  l'attend jusqu'à 15 min. Pendant la lecture en arrière-plan, une telle fenêtre
+  est cachée aussitôt et le plugin noté « activation » (jamais relu tout seul ;
+  « Chercher à nouveau » le relit). Les rendus hors slot réutilisent une
+  instance par plugin (`OfflinePool`) : plus de fenêtre à chaque gel / export.
+  Plugins qui rouvrent leur fenêtre à chaque lancement : notés « nag » dans
+  `%LOCALAPPDATA%\NovaStudio\license_windows.json`.
+  Test sans plugin protégé : `NOVA_BRIDGE_DEBUG=1` active `DEBUG_LICENSE_WINDOW`
+  (fenêtre simulée) et `DEBUG_WINDOWS` (premier plan, fenêtres du pont)
 
 Le protocole complet est décrit en tête de `nova_bridge_server.py`.
 

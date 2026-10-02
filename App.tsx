@@ -34,6 +34,7 @@ import { novaBridge, BridgePlugin } from './services/NovaBridge';
 import { clearInstrumentRender, instrumentFromPlugin, isInstrumentRenderCurrent } from './services/VstInstrument';
 import { useVstInstruments } from './hooks/useVstInstruments';
 import VstInstrumentPicker from './components/VstInstrumentPicker';
+import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
 import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult } from './services/VstFreeze';
 import { canBakeTrack, hasVst, freezeSignature } from './utils/freeze';
@@ -4860,6 +4861,8 @@ function Studio() {
         />
       )}
       <TouchInteractionManager />
+      {/* Fenêtre d'activation de licence d'un VST ouverte sur le PC (pont VST) */}
+      <LicenseNotice />
 
       <div className="flex-1 flex overflow-hidden relative">
         {isSidebarOpen && !isMobile && (

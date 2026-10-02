@@ -13,6 +13,11 @@ absent…) : la lecture se fait dans un processus enfant (le pont relancé avec
 --probe-vst3), avec un délai par plugin. Résultats gardés en cache
 (%LOCALAPPDATA%/NovaStudio/vst3_classes.json) : seuls les plugins nouveaux ou
 mis à jour sont relus au lancement suivant.
+
+Fenêtres de licence : certains plugins (Slate, Harrison…) ouvrent une fenêtre
+« Software Activation » dès le chargement de la DLL. Dans l'enfant, elle est
+cachée aussitôt et le plugin est noté « activation » (jamais relu tout seul) :
+c'est un chargement explicite depuis Nova qui l'ouvre, au premier plan.
 """
 
 import ctypes
@@ -25,7 +30,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger('NovaBridge.Probe')
 
@@ -33,7 +38,7 @@ MARK = "@@NOVA@@"
 PER_PLUGIN_TIMEOUT_S = 15.0
 FIRST_TIMEOUT_S = 40.0      # démarrage de l'enfant (exécutable PyInstaller) + 1er plugin
 WORKERS = 6
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 # Une classe : (nom, sous-catégories), ex. ("Vital", "Instrument|Synth")
 Classes = List[Tuple[str, str]]
@@ -138,6 +143,30 @@ def read_classes(bundle: str) -> Classes:
     return out
 
 
+def _dialog_watch(state: dict, emit: Callable[[dict], None]):
+    """(Enfant) Une fenêtre (activation, licence, enregistrement…) apparaît
+    pendant la lecture d'un plugin : elle est cachée tout de suite (personne ne
+    peut s'en servir dans ce processus jetable) et signalée au pont."""
+    import license_watch as lw
+    me = os.getpid()
+    base = set(lw.windows_of(lw.descendants(me)))
+    while True:
+        time.sleep(0.2)
+        i = state.get("i")
+        if i is None:
+            continue
+        try:
+            wins = lw.windows_of(lw.descendants(me))
+        except Exception:
+            continue
+        for h, info in wins.items():
+            if h in base or h in state["seen"]:
+                continue
+            state["seen"].add(h)
+            lw.hide_window(h)
+            emit({"i": i, "dialog": info["title"] or info["cls"]})
+
+
 def child_main():
     """Point d'entrée de l'enfant : chemins lus sur stdin, une ligne JSON par
     résultat sur stdout (préfixée : les plugins écrivent aussi sur stdout)."""
@@ -156,18 +185,24 @@ def child_main():
             out = os.fdopen(msvcrt.open_osfhandle(k32.GetStdHandle(-11), os.O_WRONLY), "w", encoding="utf-8")
         if inp is None:
             inp = os.fdopen(msvcrt.open_osfhandle(k32.GetStdHandle(-10), os.O_RDONLY), "r", encoding="utf-8")
+    lock = threading.Lock()
 
     def emit(obj):
-        out.write("\n" + MARK + json.dumps(obj) + "\n")
-        out.flush()
+        with lock:
+            out.write("\n" + MARK + json.dumps(obj) + "\n")
+            out.flush()
 
     paths = [line.strip() for line in inp.read().splitlines() if line.strip()]
+    state: dict = {"i": None, "seen": set()}
+    threading.Thread(target=_dialog_watch, args=(state, emit), daemon=True).start()
     for i, p in enumerate(paths):
+        state["i"] = i
         emit({"i": i, "start": True})
         try:
             emit({"i": i, "classes": read_classes(p)})
         except BaseException as e:  # noqa: BLE001
             emit({"i": i, "error": str(e)[:200]})
+    state["i"] = None
     emit({"end": True})
     os._exit(0)
 
@@ -175,6 +210,58 @@ def child_main():
 # ─────────────────────────────────────────────────────────────────────────────
 # PONT : lancement de l'enfant, cache
 # ─────────────────────────────────────────────────────────────────────────────
+#
+# Résultat d'une lecture : {"c": classes | None, "st": statut, "t": titre}
+#   ok          classes lues
+#   error       binaire illisible (pas de factory, chargement refusé…)
+#   activation  le plugin a ouvert une fenêtre (activation de licence,
+#               enregistrement…) : fenêtre cachée, plugin pas relu
+#               automatiquement ; un chargement explicite depuis Nova l'ouvre
+#               au premier plan (voir license_watch)
+#   hang        ne répond pas, sans fenêtre visible
+#   crash       l'enfant s'est arrêté sur ce plugin
+# Seuls « ok » et « error » sont définitifs ; les autres sont relus au
+# « Chercher à nouveau » (rescan) ou quand le plugin est mis à jour.
+
+Probe = Dict[str, object]
+_live_procs: Set[int] = set()
+
+
+def probe_pids() -> Set[int]:
+    """Processus de lecture en cours (et leurs descendants) : leurs fenêtres ne
+    sont pas celles d'un chargement explicite."""
+    import license_watch as lw
+    out: Set[int] = set()
+    for pid in list(_live_procs):
+        out |= lw.descendants(pid)
+    return out
+
+
+def _kill_tree(proc: "subprocess.Popen"):
+    """L'enfant ET les programmes qu'un plugin a lancés (aide de licence) :
+    sinon leur fenêtre restait ouverte après l'arrêt de l'enfant."""
+    try:
+        import license_watch as lw
+        pids = lw.descendants(proc.pid)
+    except Exception:
+        pids = {proc.pid}
+    for pid in sorted(pids, key=lambda p: p == proc.pid):
+        try:
+            if pid == proc.pid:
+                proc.kill()
+            else:
+                os.kill(pid, 9)
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=3)
+    except Exception:
+        pass
+    # Laisse au programme d'aide de licence le temps de disparaître : un enfant
+    # suivant qui s'y connectait encore s'arrêtait net.
+    time.sleep(0.3)
+    _live_procs.discard(proc.pid)
+
 
 def _cache_path() -> str:
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
@@ -185,8 +272,15 @@ def _load_cache() -> Dict[str, dict]:
     try:
         with open(_cache_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
-        if data.get("v") == CACHE_VERSION and isinstance(data.get("items"), dict):
-            return data["items"]
+        items = data.get("items")
+        if not isinstance(items, dict):
+            return {}
+        if data.get("v") == CACHE_VERSION:
+            return items
+        if data.get("v") == 1:
+            # v1 : les plugins sans réponse étaient en fait souvent des fenêtres
+            # d'activation : on les relit, le reste est gardé.
+            return {k: {**v, "st": "ok"} for k, v in items.items() if isinstance(v.get("c"), list)}
     except Exception:
         pass
     return {}
@@ -202,6 +296,35 @@ def _save_cache(items: Dict[str, dict]):
         os.replace(tmp, path)
     except Exception as e:
         logger.debug(f"cache non écrit : {e}")
+
+
+_cache_lock = threading.Lock()
+
+
+def record_loaded(path: str, plugin_name: Optional[str], is_instrument: bool):
+    """Plugin chargé sans souci par le pont (licence active) : le cache ne le
+    garde plus comme « activation ». Sa catégorie vient de pedalboard."""
+    fp = _fingerprint(path)
+    if fp is None:
+        return
+    with _cache_lock:
+        cache = _load_cache()
+        hit = cache.get(path)
+        if hit and hit.get("st") == "ok":
+            return
+        name = plugin_name or os.path.basename(path)[:-5]
+        cache[path] = {"m": fp[0], "s": fp[1], "st": "ok",
+                       "c": [[name, "Instrument" if is_instrument else "Fx"]]}
+        _save_cache(cache)
+
+
+def forget_unsettled():
+    """« Chercher à nouveau » : plugins en attente d'activation / sans réponse relus."""
+    with _cache_lock:
+        cache = _load_cache()
+        kept = {k: v for k, v in cache.items() if v.get("st") in ("ok", "error")}
+        if len(kept) != len(cache):
+            _save_cache(kept)
 
 
 def _fingerprint(bundle: str) -> Optional[Tuple[float, int]]:
@@ -221,10 +344,11 @@ def _child_command(main_script: Optional[str]) -> List[str]:
     return [sys.executable, main_script or os.path.abspath(sys.argv[0]), "--probe-vst3"]
 
 
-def _run_child(cmd: List[str], paths: List[str], results: Dict[str, Optional[Classes]],
+def _run_child(cmd: List[str], paths: List[str], results: Dict[str, Probe],
                on_done: Callable[[], None]):
-    """Lit les plugins dans des enfants successifs (relancés après un plantage
-    ou un blocage). results[path] = classes, ou None si illisible."""
+    """Lit les plugins dans des enfants successifs (relancés après un plantage,
+    un blocage ou une fenêtre d'activation)."""
+    import license_watch as lw
     remaining = list(paths)
     stalls = 0
     while remaining:
@@ -237,6 +361,7 @@ def _run_child(cmd: List[str], paths: List[str], results: Dict[str, Optional[Cla
         except Exception as e:
             logger.warning(f"Lecture des instruments impossible : {e}")
             return
+        _live_procs.add(proc.pid)
         q: "queue.Queue" = queue.Queue()
 
         def reader(stream=proc.stdout):
@@ -259,6 +384,7 @@ def _run_child(cmd: List[str], paths: List[str], results: Dict[str, Optional[Cla
         cur: Optional[int] = None
         done = 0
         finished = False
+        dialog: Optional[str] = None
         deadline = time.time() + FIRST_TIMEOUT_S
         while True:
             try:
@@ -273,23 +399,42 @@ def _run_child(cmd: List[str], paths: List[str], results: Dict[str, Optional[Cla
             i = int(msg.get("i", -1))
             if not 0 <= i < len(remaining):
                 continue
+            if "dialog" in msg:
+                # Fenêtre d'activation : pas un blocage, on arrête ce plugin là.
+                cur, dialog = i, str(msg.get("dialog") or "")
+                break
             if msg.get("start"):
                 cur = i
             else:
-                results[remaining[i]] = [tuple(c) for c in msg["classes"]] if "classes" in msg else None
+                ok = "classes" in msg
+                results[remaining[i]] = {"c": [tuple(c) for c in msg["classes"]] if ok else None,
+                                         "st": "ok" if ok else "error"}
                 cur = None
                 done = i + 1
                 on_done()
             deadline = time.time() + PER_PLUGIN_TIMEOUT_S
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        if cur is not None and dialog is None and not finished:
+            # Sans réponse : une fenêtre (même cachée) du plugin ou de son aide ?
+            try:
+                wins = lw.windows_of(lw.descendants(proc.pid), visible_only=False)
+                titled = [w["title"] for w in wins.values() if w["title"]]
+                if titled:
+                    dialog = titled[0]
+            except Exception:
+                pass
+        _kill_tree(proc)
         if finished:
             return
         if cur is not None:
-            logger.info(f"   (plugin ignoré : {os.path.basename(remaining[cur])} ne répond pas à la lecture)")
-            results[remaining[cur]] = None
+            name = os.path.basename(remaining[cur])
+            if dialog is not None:
+                logger.info(f"   🔑 {name} demande une activation (« {dialog} ») : à charger une fois depuis Nova")
+                results[remaining[cur]] = {"c": None, "st": "activation", "t": dialog[:200]}
+            elif q.empty() and proc.poll() is not None and time.time() < deadline:
+                results[remaining[cur]] = {"c": None, "st": "crash"}
+            else:
+                logger.info(f"   (plugin ignoré : {name} ne répond pas à la lecture)")
+                results[remaining[cur]] = {"c": None, "st": "hang"}
             on_done()
             remaining = remaining[cur + 1:]
             stalls = 0
@@ -297,20 +442,30 @@ def _run_child(cmd: List[str], paths: List[str], results: Dict[str, Optional[Cla
             remaining = remaining[done:]
             stalls = 0 if done else stalls + 1
             if stalls >= 2 and remaining:
-                results[remaining[0]] = None
+                results[remaining[0]] = {"c": None, "st": "crash"}
                 on_done()
                 remaining = remaining[1:]
                 stalls = 0
 
 
-def apply_classes(plugins: List[dict], results: Dict[str, Optional[Classes]]) -> List[dict]:
-    """Inventaire complété : is_instrument / category des plugins lus. Un bundle
-    à plusieurs plugins garde son entrée (effet) et gagne une entrée par
+def apply_classes(plugins: List[dict], results: Dict[str, Probe]) -> List[dict]:
+    """Inventaire complété : is_instrument / category des plugins lus, et
+    scan_status / license (activation demandée) des autres. Un bundle à
+    plusieurs plugins garde son entrée (effet) et gagne une entrée par
     instrument (plugin_name)."""
     out: List[dict] = []
     seen = {(p["name"].lower(), (p.get("vendor") or "").lower()) for p in plugins}
     for e in plugins:
-        classes = results.get(e["path"]) if e.get("is_instrument") is None else None
+        r = results.get(e["path"]) if e.get("is_instrument") is None else None
+        if not r:
+            out.append(e)
+            continue
+        classes = r.get("c")
+        st = r.get("st")
+        e = {**e, "scan_status": st}
+        if st == "activation":
+            e["license"] = "activation"
+            e["license_title"] = r.get("t")
         if not classes:
             out.append(e)
             continue
@@ -332,12 +487,13 @@ def apply_classes(plugins: List[dict], results: Dict[str, Optional[Classes]]) ->
 
 
 def probe_bundles(bundles: List[str], main_script: Optional[str] = None,
-                  on_progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, Optional[Classes]]:
-    """Classes des plugins donnés (cache d'abord, puis processus enfant)."""
+                  on_progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, Probe]:
+    """Lecture des plugins donnés (cache d'abord, puis processus enfants)."""
     if platform.system() != "Windows":
         return {}
-    cache = _load_cache()
-    results: Dict[str, Optional[Classes]] = {}
+    with _cache_lock:
+        cache = _load_cache()
+    results: Dict[str, Probe] = {}
     todo: List[str] = []
     prints: Dict[str, Tuple[float, int]] = {}
     for b in bundles:
@@ -348,7 +504,8 @@ def probe_bundles(bundles: List[str], main_script: Optional[str] = None,
         hit = cache.get(b)
         if hit and hit.get("m") == fp[0] and hit.get("s") == fp[1]:
             c = hit.get("c")
-            results[b] = [tuple(x) for x in c] if isinstance(c, list) else None
+            results[b] = {"c": [tuple(x) for x in c] if isinstance(c, list) else None,
+                          "st": hit.get("st") or ("ok" if isinstance(c, list) else "hang"), "t": hit.get("t")}
         else:
             todo.append(b)
     total = len(todo)
@@ -362,14 +519,18 @@ def probe_bundles(bundles: List[str], main_script: Optional[str] = None,
     if todo:
         logger.info(f"🔎 Recherche des instruments : {total} plugins à lire (une seule fois)…")
         t = time.time()
-        fresh: Dict[str, Optional[Classes]] = {}
+        fresh: Dict[str, Probe] = {}
         lock = threading.Lock()
 
         def flush():
-            for b, c in list(fresh.items()):
-                fp = prints[b]
-                cache[b] = {"m": fp[0], "s": fp[1], "c": [list(x) for x in c] if c is not None else None}
-            _save_cache(cache)
+            with _cache_lock:
+                disk = _load_cache()
+                for b, r in list(fresh.items()):
+                    fp = prints[b]
+                    c = r.get("c")
+                    disk[b] = {"m": fp[0], "s": fp[1], "st": r.get("st"), "t": r.get("t"),
+                               "c": [list(x) for x in c] if c is not None else None}
+                _save_cache(disk)
 
         def done_and_save():
             with lock:
@@ -386,8 +547,21 @@ def probe_bundles(bundles: List[str], main_script: Optional[str] = None,
             th.start()
         for th in threads:
             th.join()
+        # Arrêts / blocages : relus un par un. En parallèle, un même programme
+        # d'aide de licence (partagé par les plugins d'un éditeur) pouvait
+        # appartenir à un autre enfant : la fenêtre n'était pas vue, ou l'enfant
+        # s'arrêtait quand l'autre était fermé.
+        for _ in range(2 if workers > 1 else 0):
+            again = [b for b in todo if (fresh.get(b) or {}).get("st") in ("crash", "hang")]
+            if not again:
+                break
+            second: Dict[str, Probe] = {}
+            _run_child(_child_command(main_script), again, second, lambda: None)
+            fresh.update(second)
         results.update(fresh)
         with lock:
             flush()
-        logger.info(f"🔎 Lecture terminée ({len(fresh)}/{total} en {time.time() - t:.0f} s)")
+        n_act = sum(1 for r in fresh.values() if r.get("st") == "activation")
+        logger.info(f"🔎 Lecture terminée ({len(fresh)}/{total} en {time.time() - t:.0f} s"
+                    + (f", {n_act} demandent une activation" if n_act else "") + ")")
     return results
