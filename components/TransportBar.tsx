@@ -4,6 +4,7 @@ import { MasterMeter } from './MeterWidgets';
 import MasterVisualizer from './MasterVisualizer';
 import { midiManager } from '../services/MidiManager';
 import { playheadStore } from '../utils/playheadStore';
+import { formatMesures, nomTonaliteCourt } from '../utils/musicKey';
 
 interface TransportProps {
   isPlaying: boolean;
@@ -19,6 +20,11 @@ interface TransportProps {
   onToggleMetronome?: () => void;
   bpm: number;
   onBpmChange: (newBpm: number) => void;
+  /** Signature (horloge en mesures). 4/4 par défaut. */
+  timeSignature?: { numerator: number; denominator: number };
+  /** Tonalité du projet (0 = Do … 11 = Si) et gamme ('MINOR', 'MAJOR'…), si connues. */
+  projectKey?: number;
+  projectScale?: string;
   currentTime: number;
   currentView: ViewType;
   onChangeView: (view: ViewType) => void;
@@ -80,28 +86,76 @@ const formatClock = (seconds: number) => {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${cents.toString().padStart(2, '0')}`;
 };
 
+type ClockMode = 'TIME' | 'BARS';
+const CLOCK_MODE_KEY = 'nova_clock_mode';
+const lireModeHorloge = (): ClockMode => {
+  try { return localStorage.getItem(CLOCK_MODE_KEY) === 'BARS' ? 'BARS' : 'TIME'; } catch { return 'TIME'; }
+};
+
 /**
  * Horloge abonnée à la tête de lecture. Le texte est écrit directement dans le
  * DOM (au centième, seulement quand il change) : aucun rendu React pendant la
  * lecture, ni de la barre de transport ni du reste du studio.
+ * Clic : bascule minutes:secondes ⇄ mesures | temps | ticks (mémorisé).
  */
-const PlayheadClock: React.FC = () => {
+const PlayheadClock: React.FC<{ bpm: number; numerator: number; denominator: number; compact?: boolean }> = ({ bpm, numerator, denominator, compact = false }) => {
   const ref = useRef<HTMLSpanElement>(null);
+  const [mode, setMode] = useState<ClockMode>(lireModeHorloge);
+  const format = (t: number) => mode === 'BARS' ? formatMesures(t + 1e-6, bpm, numerator, denominator) : formatClock(t + 1e-6);
   useEffect(() => {
     let last = '';
     const update = () => {
-      const txt = formatClock(playheadStore.get() + 1e-6);
+      const txt = format(playheadStore.get());
       if (txt !== last && ref.current) { ref.current.textContent = txt; last = txt; }
     };
     update();
     return playheadStore.subscribe(update);
-  }, []);
-  return <span ref={ref} className="mono nova-chiffres text-[11px] md:text-[14px] font-bold text-center" style={{ color: 'var(--accent-neon)' }}>{formatClock(playheadStore.get() + 1e-6)}</span>;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, bpm, numerator, denominator]);
+  const toggle = () => setMode(m => {
+    const next: ClockMode = m === 'TIME' ? 'BARS' : 'TIME';
+    try { localStorage.setItem(CLOCK_MODE_KEY, next); } catch { /* stockage indisponible */ }
+    return next;
+  });
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      data-nova-target="clock"
+      title={mode === 'BARS' ? 'Mesures | temps | ticks (960 par temps). Clic : afficher en minutes:secondes' : 'Minutes:secondes. Clic : afficher en mesures | temps | ticks'}
+      aria-label={mode === 'BARS' ? 'Position en mesures, temps et ticks. Cliquer pour afficher le temps' : 'Position en minutes et secondes. Cliquer pour afficher les mesures'}
+      className="flex flex-col items-center min-w-[60px] md:min-w-[96px] min-h-[40px] justify-center px-1 rounded-lg hover:bg-white/5 transition-colors"
+    >
+      {!compact && (
+        <span className="hidden md:block text-[7px] font-black uppercase tracking-[0.3em] hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}>
+          {mode === 'BARS' ? 'Mesure' : 'Position'}
+        </span>
+      )}
+      <span ref={ref} className="mono nova-chiffres text-[11px] md:text-[14px] font-bold text-center whitespace-pre" style={{ color: 'var(--accent-neon)' }}>{format(playheadStore.get())}</span>
+    </button>
+  );
+};
+
+/** Tonalité + signature, compactes, à côté du tempo (connues quand le beat vient du catalogue). */
+const KeyBadge: React.FC<{ projectKey?: number; projectScale?: string; numerator: number; denominator: number }> = ({ projectKey, projectScale, numerator, denominator }) => {
+  const nom = nomTonaliteCourt(projectKey, projectScale);
+  const court = nomTonaliteCourt(projectKey, projectScale, true);
+  return (
+    <div className="hidden lg:flex flex-col items-end leading-tight" title={nom ? `Tonalité du projet : ${nom} · signature ${numerator}/${denominator}` : `Signature ${numerator}/${denominator}`}>
+      {nom ? (
+        <span className="text-[10px] font-black whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>
+          <span className="hidden 2xl:inline">{nom}</span><span className="2xl:hidden">{court}</span>
+        </span>
+      ) : null}
+      <span className="text-[8px] font-bold text-slate-500 mono nova-chiffres">{numerator}/{denominator}</span>
+    </div>
+  );
 };
 
 const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, isPunchActive = false, onTogglePunch,
   isMetronomeEnabled = false, onToggleMetronome, bpm, onBpmChange, currentTime,
+  timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
   onOpenSaveMenu, onOpenLoadMenu, onExportMix, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo,
@@ -110,6 +164,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   onImportAudio,
   children
 }) => {
+  const tsNum = timeSignature?.numerator || 4;
+  const tsDen = timeSignature?.denominator || 4;
   const [isEditingBpm, setIsEditingBpm] = useState(false);
   const [tempBpm, setTempBpm] = useState(bpm.toString());
   const [midiActive, setMidiActive] = useState(false);
@@ -283,10 +339,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" className={`h-12 px-4 md:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'var(--border-highlight)' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">Rec</span></button>
         </div>
         
-        <div className="flex flex-col items-center min-w-[60px] md:min-w-[80px]">
-             <span className="hidden md:block text-[7px] text-slate-600 font-black uppercase tracking-[0.3em] hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}>Position</span>
-             <PlayheadClock />
-        </div>
+        <PlayheadClock bpm={bpm} numerator={tsNum} denominator={tsDen} />
       </div>
 
       {/* RIGHT SIDE CONTROLS */}
@@ -316,8 +369,12 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             <i className={`fas ${currentTheme === 'dark' ? 'fa-sun text-amber-400' : 'fa-moon text-slate-300'}`}></i>
         </button>
 
+        {/* TONALITÉ + SIGNATURE */}
+        <KeyBadge projectKey={projectKey} projectScale={projectScale} numerator={tsNum} denominator={tsDen} />
+
         {/* BPM CONTROL */}
-        <div className="hidden sm:flex flex-col items-end cursor-ns-resize group" onMouseDown={handleBpmMouseDown}>
+        <div className="hidden sm:flex flex-col items-end cursor-ns-resize group" onMouseDown={handleBpmMouseDown} title="Tempo : glisser vers le haut ou le bas, double-clic pour saisir">
+
            <div className="flex items-center space-x-2">
               {isEditingBpm ? (
                 <input ref={bpmInputRef} type="text" value={tempBpm} onChange={(e) => setTempBpm(e.target.value.replace(/[^0-9.]/g, ''))} onBlur={() => { setIsEditingBpm(false); onBpmChange(parseFloat(tempBpm) || 120); }} onKeyDown={(e) => e.key === 'Enter' && bpmInputRef.current?.blur()} className="w-10 md:w-12 bg-white/10 border border-cyan-500/50 rounded text-center text-[10px] md:text-[11px] font-black text-white outline-none" />

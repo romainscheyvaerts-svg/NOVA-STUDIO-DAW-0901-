@@ -3896,6 +3896,7 @@ export default function App() {
       <div className="relative z-50">
         <TransportBar
           isPlaying={state.isPlaying} currentTime={state.currentTime} bpm={state.bpm} onBpmChange={handleUpdateBpm}
+          timeSignature={state.timeSignature} projectKey={state.projectKey} projectScale={state.projectScale}
           isRecording={state.isRecording} isLoopActive={state.isLoopActive}
           isPunchActive={!!state.punch?.enabled} onTogglePunch={handleTogglePunch}
           onToggleLoop={() => setState(p => ({ ...p, isLoopActive: !p.isLoopActive }))}
