@@ -69,6 +69,7 @@ import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
 import ShareClipModal from './components/ShareClipModal';
 import DrumMachinePanel from './components/DrumMachinePanel';
+import ShortcutsHelp from './components/ShortcutsHelp';
 import { DrumMachine, makeDrumMachineLib, drumPadsFor, drumClipFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
 import { loadDrumSound } from './utils/drumSounds';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta } from './utils/sessionStore';
@@ -2452,13 +2453,37 @@ export default function App() {
         setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive }));
         return;
       }
-      if (e.key === 'Home') { e.preventDefault(); handleSeek(0); return; }
+      if (e.key === 'Home' || e.key === 'Enter') { e.preventDefault(); handleSeek(0); return; }
+      if (e.key === 'End') {
+        e.preventDefault();
+        const end = Math.max(0, ...stateRef.current.tracks.flatMap(t => t.clips.map(c => c.start + c.duration)));
+        handleSeek(end);
+        return;
+      }
+      // , / . : une mesure en arrière / en avant (Maj : un temps)
+      if (e.key === ',' || e.key === '.' || e.key === ';' || e.key === ':') {
+        e.preventDefault();
+        const beat = 60 / (stateRef.current.bpm || 120);
+        const step = e.shiftKey ? beat : beat * 4;
+        const dir = (e.key === ',' || e.key === ';') ? -1 : 1;
+        const t = audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime;
+        handleSeek(Math.max(0, Math.round((t + dir * step) / step) * step));
+        return;
+      }
+      // K : repère à la tête de lecture
+      if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        const t = audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime;
+        handleAddMarker(t);
+        return;
+      }
+      if (e.key === '?') { e.preventDefault(); setShortcutsOpen(v => !v); return; }
       if (e.key === 'Escape' && stateRef.current.isPlaying) { e.preventDefault(); handleStop(); return; }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, undo, redo, setState]);
+  }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, handleAddMarker, undo, redo, setState]);
 
   const handleRequestAddPlugin = useCallback((trackId: string, x: number, y: number) => {
     setAddPluginMenu({ trackId, x, y });
@@ -2627,6 +2652,8 @@ export default function App() {
   const [lyricsOpen, setLyricsOpen] = useState(false);
   // Extrait 30 s / démo taguée
   const [shareOpen, setShareOpen] = useState(false);
+  // Aide-mémoire des raccourcis (touche « ? »)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // ===== Batterie Make Music (piste PERCUSSIONS) =====
   const [drumsOpen, setDrumsOpen] = useState(false);
@@ -4049,6 +4076,7 @@ export default function App() {
         bpm={state.bpm}
         clipStart={0}
       />
+      <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <ShareClipModal open={shareOpen} onClose={() => setShareOpen(false)} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />}
       </Suspense>
