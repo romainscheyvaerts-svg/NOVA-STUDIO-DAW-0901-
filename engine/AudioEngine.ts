@@ -1357,8 +1357,18 @@ export class AudioEngine {
     this.liveTracks = tracks;
   }
 
+  private lastOverloadAt = 0;
   private scheduler(tracks: Track[]) {
     if (!this.ctx) return;
+    // Surcharge : le planificateur a pris du retard sur l'horloge audio (onglet
+    // trop chargé, trop d'effets) → risque de trous / craquements.
+    if (this.nextScheduleTime < this.ctx.currentTime - 0.15 && document.visibilityState === 'visible') {
+      const now = performance.now();
+      if (now - this.lastOverloadAt > 1000) {
+        this.lastOverloadAt = now;
+        try { window.dispatchEvent(new CustomEvent('nova:overload')); } catch { /* */ }
+      }
+    }
     let guard = 0;
     while (this.nextScheduleTime < this.ctx.currentTime + this.SCHEDULE_AHEAD_SEC && guard++ < 64) {
       const projectTimeStart = this.nextScheduleTime - this.playbackStartTime;

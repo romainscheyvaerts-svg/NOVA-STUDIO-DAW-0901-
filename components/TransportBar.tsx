@@ -55,6 +55,23 @@ interface TransportProps {
   onImportAudio?: (file: File) => void;
 }
 
+/** Voyant de surcharge : s'allume 4 s quand le moteur prend du retard. */
+const OverloadBadge: React.FC = () => {
+  const [on, setOn] = React.useState(false);
+  React.useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const hit = () => { setOn(true); if (t) clearTimeout(t); t = setTimeout(() => setOn(false), 4000); };
+    window.addEventListener('nova:overload', hit);
+    return () => { window.removeEventListener('nova:overload', hit); if (t) clearTimeout(t); };
+  }, []);
+  if (!on) return null;
+  return (
+    <span role="status" title="L'ordinateur n'arrive plus à suivre : ferme d'autres onglets ou gèle les pistes chargées en effets." className="hidden md:inline-flex h-6 items-center rounded-md bg-amber-500/20 px-2 text-[9px] font-black text-amber-300 border border-amber-500/40 animate-pulse">
+      ⚠ SURCHARGE
+    </span>
+  );
+};
+
 const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, isPunchActive = false, onTogglePunch,
   isMetronomeEnabled = false, onToggleMetronome, bpm, onBpmChange, currentTime,
@@ -235,6 +252,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           <button onClick={onStop} title="Stop (Échap)" aria-label="Stop" className="w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
           <button onClick={onTogglePlay} title="Lecture / pause (raccourci : barre d'espace)" className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg ${isPlaying ? 'text-black nova-halo' : 'bg-white text-black hover:scale-105 shadow-black/40'}`} style={{ backgroundColor: isPlaying ? 'var(--accent-neon)' : '#fff' }}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-base`}></i></button>
           <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
+          <OverloadBadge />
           {onTogglePunch && (
             <button onClick={onTogglePunch} title="Punch-in / punch-out : REC ne remplace que la zone de la boucle (pré-roll de 2 mesures, arrêt automatique)" aria-pressed={isPunchActive}
               className={`hidden md:flex h-8 px-2 rounded-lg items-center justify-center text-[9px] font-black tracking-wider transition-all ${isPunchActive ? 'bg-red-500/25 text-red-300 border border-red-500/50' : 'text-slate-500 hover:text-white border border-transparent'}`}>
