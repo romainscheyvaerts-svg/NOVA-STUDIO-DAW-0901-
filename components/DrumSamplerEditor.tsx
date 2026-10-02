@@ -99,7 +99,7 @@ const DrumSamplerEditor: React.FC<DrumSamplerEditorProps> = ({ plugin, trackId, 
                 <button onClick={previewSound} className="h-10 px-6 bg-white/10 hover:bg-white/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center space-x-2">
                     <i className="fas fa-play"></i> <span>Preview</span>
                 </button>
-                <button onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center border bg-white/5 border-white/10 text-slate-600 hover:text-white transition-all">
+                <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center border bg-white/5 border-white/10 text-slate-600 hover:text-white transition-all">
                     <i className="fas fa-times"></i>
                 </button>
             </div>

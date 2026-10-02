@@ -83,7 +83,7 @@ const SamplerEditor: React.FC<SamplerEditorProps> = ({ plugin, trackId, onClose 
                     <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-1">Audio Engine v1.0</p>
                 </div>
             </div>
-            <button onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center border bg-white/5 border-white/10 text-slate-600 hover:text-white transition-all">
+            <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center border bg-white/5 border-white/10 text-slate-600 hover:text-white transition-all">
                 <i className="fas fa-times"></i>
             </button>
         </div>

@@ -51,7 +51,7 @@ const ArtistGuide: React.FC<ArtistGuideProps> = ({ step, isVisible, onClose, onN
     <div className="fixed bottom-8 right-8 w-80 bg-[#1e2229] border-2 border-cyan-500 shadow-[0_0_30px_rgba(6,182,212,0.3)] rounded-2xl p-6 z-[100] animate-in slide-in-from-bottom-4 fade-in">
       <div className="flex justify-between items-start mb-4">
         <h3 className="text-cyan-400 font-black uppercase tracking-widest text-sm">{current.title}</h3>
-        <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
+        <button aria-label="Fermer" title="Fermer" onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
           <i className="fas fa-times"></i>
         </button>
       </div>

@@ -76,7 +76,7 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
                     <p className="text-[10px] text-slate-500 font-mono">Choisissez une méthode</p>
                 </div>
             </div>
-            <button onClick={onClose} className="w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
+            <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
                 <i className="fas fa-times"></i>
             </button>
         </div>

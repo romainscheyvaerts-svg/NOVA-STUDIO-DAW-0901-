@@ -439,6 +439,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 data-nova-target={`fx-${track.id}`}
                 onClick={(e) => { e.stopPropagation(); setFxMenu(v => !v); }}
                 title="Effets de la piste : ouvrir, activer, ajouter"
+                aria-label={`Effets de ${track.name}`}
+                aria-expanded={fxMenu}
+                aria-haspopup="menu"
                 className={`relative w-7 h-7 rounded-md flex items-center justify-center transition-all border text-[9px] font-black ${fxMenu ? 'bg-cyan-500 border-cyan-400 text-black' : insertPlugins.length ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
               >
                 FX
@@ -459,6 +462,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                         </button>
                         <button type="button" disabled={baked} onClick={(e) => togglePluginBypass(e, p)}
                           title={p.isEnabled ? 'Désactiver' : 'Activer'}
+                          aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.name || p.type}`}
+                          aria-pressed={p.isEnabled}
                           className={`w-7 h-7 rounded-md flex items-center justify-center ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}>
                           <i className="fas fa-power-off text-[9px]" />
                         </button>
@@ -478,6 +483,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           )}
           <button
             title={track.isMuted ? "Réactiver le son de cette piste" : "Rendre cette piste muette"}
+            aria-label={`Muet : ${track.name}`}
+            aria-pressed={!!track.isMuted}
             onClick={handleMuteToggle}
             onTouchStart={(e) => { e.preventDefault(); handleMuteToggle(e); }}
             className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
@@ -486,6 +493,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           </button>
           <button
             title={track.isSolo ? "Réentendre toutes les pistes" : "N'écouter que cette piste"}
+            aria-label={`Solo : ${track.name}`}
+            aria-pressed={!!track.isSolo}
             onClick={handleSoloToggle}
             onTouchStart={(e) => { e.preventDefault(); handleSoloToggle(e); }}
             className={`w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
@@ -497,6 +506,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <button
                 onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
                 onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); setShowSends(!showSends); }}
+                title="Envois (delay, réverbes)"
+                aria-label={`Envois de ${track.name}`}
+                aria-expanded={showSends}
                 className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
             >
                 <i className="fas fa-sliders-h text-[10px]"></i>
@@ -510,6 +522,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
                 className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
                 title={track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer" : "Enregistrer sur cette piste (sinon REC choisit la piste sélectionnée)"}
+                aria-label={`Armer l'enregistrement : ${track.name}`}
+                aria-pressed={!!track.isTrackArmed}
               >
                 <span className="text-[11px] font-bold">R</span>
               </button>
@@ -589,6 +603,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                       onClick={(e) => handleFXClick(e, instrumentPlugin)}
                       className="w-8 flex items-center justify-center bg-black/20 hover:bg-cyan-500/20 text-slate-500 hover:text-cyan-400 transition-colors"
                       title="Ouvrir l'éditeur"
+                      aria-label="Ouvrir l'éditeur de l'instrument"
                   >
                       <i className="fas fa-sliders-h text-[9px]"></i>
                   </button>
@@ -624,12 +639,15 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               <button
                 disabled={baked}
                 onClick={(e) => togglePluginBypass(e, p)}
+                title={p.isEnabled ? 'Désactiver l\'effet' : 'Activer l\'effet'}
+                aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.name || p.type}`}
+                aria-pressed={p.isEnabled}
                 className={`w-4 h-6 flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/40' : 'bg-white/5 text-slate-800'}`}
               >
                 <i className="fas fa-power-off text-[6px]"></i>
               </button>
             </div>
-            {!baked && <button onClick={(e) => handleRemoveFX(e, p.id)} className="delete-fx"><i className="fas fa-times"></i></button>}
+            {!baked && <button onClick={(e) => handleRemoveFX(e, p.id)} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${p.name || p.type}`}><i className="fas fa-times"></i></button>}
           </div>
           );
         })}

@@ -275,9 +275,9 @@ const ChannelStrip: React.FC<{
                     <i className="fas fa-chevron-down"></i>
                   </button>
                </div>
-               <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} className={`w-5 h-5 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
+               <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} title={p.isEnabled ? 'Désactiver l\'effet' : 'Activer l\'effet'} aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.type}`} aria-pressed={p.isEnabled} className={`w-5 h-5 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx"><i className="fas fa-times"></i></button>
+            <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${p.type}`}><i className="fas fa-times"></i></button>
           </div>
         ))}
         {/* Boutons + pour ajouter des plugins */}
@@ -285,6 +285,8 @@ const ChannelStrip: React.FC<{
           <button
             key={`empty-${i}`}
             onClick={handleEmptySlotClick}
+            title="Ajouter un effet"
+            aria-label={`Ajouter un effet sur ${track.name}`}
             className="w-full h-8 rounded border border-dashed border-white/10 bg-black/5 opacity-40 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
           >
             <i className="fas fa-plus text-[8px] text-slate-600"></i>
@@ -332,8 +334,8 @@ const ChannelStrip: React.FC<{
 
         <div className="mt-2 text-center text-[10px] font-mono tabular-nums text-slate-300">{gainToDbText(track.volume)}</div>
         <div className="mt-2 flex space-x-2">
-           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>MUTE</button>
-           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>SOLO</button>
+           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>MUTE</button>
+           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}`} className={`flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>SOLO</button>
         </div>
         
         <div className={`mt-3 h-10 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-black/40 border-white/10 text-white'}`}>
@@ -373,7 +375,7 @@ const TrackGroupHeader: React.FC<{
         className="h-8 flex items-center justify-center cursor-pointer border-b"
         style={{ backgroundColor: group.color, borderColor: group.color }}
         onClick={onToggleCollapse}
-        title={group.isCollapsed ? 'Expand Group' : 'Collapse Group'}
+        title={group.isCollapsed ? 'Déplier le groupe' : 'Replier le groupe'}
       >
         <i className={`fas ${group.isCollapsed ? 'fa-chevron-right' : 'fa-chevron-down'} text-[10px] text-black`}></i>
       </div>
@@ -408,6 +410,8 @@ const TrackGroupHeader: React.FC<{
           className={`w-full h-6 rounded text-[8px] font-black ${group.linkedMute ? 'text-black' : 'text-slate-600'}`}
           style={{ backgroundColor: group.linkedMute ? group.color : 'transparent' }}
           title="Lier les mute"
+          aria-label="Lier les mute du groupe"
+          aria-pressed={!!group.linkedMute}
         >
           M
         </button>
@@ -418,6 +422,8 @@ const TrackGroupHeader: React.FC<{
           className={`w-full h-6 rounded text-[8px] font-black ${group.linkedSolo ? 'text-black' : 'text-slate-600'}`}
           style={{ backgroundColor: group.linkedSolo ? group.color : 'transparent' }}
           title="Lier les solo"
+          aria-label="Lier les solo du groupe"
+          aria-pressed={!!group.linkedSolo}
         >
           S
         </button>
@@ -428,6 +434,8 @@ const TrackGroupHeader: React.FC<{
           className={`w-full h-6 rounded text-[8px] font-black ${group.linkedVolume ? 'text-black' : 'text-slate-600'}`}
           style={{ backgroundColor: group.linkedVolume ? group.color : 'transparent' }}
           title="Lier les volumes"
+          aria-label="Lier les volumes du groupe"
+          aria-pressed={!!group.linkedVolume}
         >
           V
         </button>
@@ -439,6 +447,7 @@ const TrackGroupHeader: React.FC<{
         className="h-8 flex items-center justify-center text-slate-600 hover:text-red-500 transition-colors border-t"
         style={{ borderColor: group.color + '40' }}
         title="Supprimer le groupe"
+        aria-label="Supprimer le groupe"
       >
         <i className="fas fa-times text-[10px]"></i>
       </button>
@@ -557,7 +566,7 @@ const MixerView: React.FC<{
       
       {/* ADD BUS / CREATE GROUP Section */}
       <div className="flex flex-col items-center justify-center px-2 border-r border-white/5 min-w-[60px] space-y-3">
-         <button onClick={onAddBus} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group" title="Ajouter un bus">
+         <button onClick={onAddBus} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group" title="Ajouter un bus" aria-label="Ajouter un bus">
             <i className="fas fa-plus group-hover:scale-125 transition-transform"></i>
          </button>
          <span className="text-[8px] font-black text-amber-600 uppercase writing-vertical rotate-180">+ BUS</span>
@@ -570,6 +579,8 @@ const MixerView: React.FC<{
                onClick={() => setShowGroupMenu(!showGroupMenu)}
                className="w-10 h-10 rounded-xl border border-dashed border-purple-500/30 text-purple-400 hover:bg-purple-500/10 flex items-center justify-center transition-all relative"
                title="Créer un groupe de pistes"
+               aria-label="Créer un groupe de pistes"
+               aria-expanded={showGroupMenu}
              >
                <i className="fas fa-layer-group text-[11px]"></i>
              </button>
@@ -608,7 +619,7 @@ const MixerView: React.FC<{
                      onClick={() => setShowGroupMenu(false)}
                      className="flex-1 py-2 rounded bg-white/5 text-slate-400 text-[10px] font-bold"
                    >
-                     Cancel
+                     Annuler
                    </button>
                    <button
                      onClick={() => {
@@ -621,7 +632,7 @@ const MixerView: React.FC<{
                      disabled={selectedForGroup.size < 2}
                      className={`flex-1 py-2 rounded text-[10px] font-bold ${selectedForGroup.size >= 2 ? 'bg-purple-500 text-white' : 'bg-white/5 text-slate-600'}`}
                    >
-                     Create ({selectedForGroup.size})
+                     Créer ({selectedForGroup.size})
                    </button>
                  </div>
                </div>

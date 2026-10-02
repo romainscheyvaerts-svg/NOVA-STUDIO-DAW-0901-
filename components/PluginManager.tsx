@@ -196,7 +196,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onClose, onPluginsDiscove
               <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mt-1">Détection avancée des binaires VST3 et Audio Units</p>
             </div>
           </div>
-          <button onClick={onClose} className="w-14 h-14 rounded-full bg-white/5 hover:bg-white/10 text-slate-500 hover:text-white transition-all flex items-center justify-center border border-white/5">
+          <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-14 h-14 rounded-full bg-white/5 hover:bg-white/10 text-slate-500 hover:text-white transition-all flex items-center justify-center border border-white/5">
             <i className="fas fa-times text-xl"></i>
           </button>
         </div>

@@ -234,6 +234,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             className="2xl:hidden w-10 h-10 rounded-lg flex items-center justify-center bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all"
             title="Menu"
+            aria-label={isMobileMenuOpen ? 'Fermer le menu' : 'Ouvrir le menu'}
+            aria-expanded={isMobileMenuOpen}
           >
             <i className={`fas ${isMobileMenuOpen ? 'fa-times' : 'fa-bars'} text-lg`}></i>
           </button>
@@ -243,25 +245,27 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               onClick={onToggleSidebar} 
               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors border ${isSidebarOpen ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
               title={isSidebarOpen ? "Masquer le navigateur" : "Afficher le navigateur"}
+              aria-label={isSidebarOpen ? "Masquer le navigateur" : "Afficher le navigateur"}
+              aria-pressed={!!isSidebarOpen}
             >
               <i className="fas fa-columns text-xs"></i>
             </button>
             <div className="h-6 w-px bg-white/5" style={{ backgroundColor: 'var(--border-dim)' }}></div>
              <div className="flex items-center space-x-1 pr-2 border-r border-white/5" style={{ borderColor: 'var(--border-dim)' }}>
-                <button onClick={onUndo} disabled={!canUndo} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border border-white/10 ${canUndo ? 'bg-white/5 hover:bg-cyan-500 hover:text-black' : 'opacity-30 cursor-not-allowed'}`} style={{ color: canUndo ? 'var(--text-primary)' : 'var(--text-secondary)' }}><i className="fas fa-undo text-[10px]"></i></button>
-                <button onClick={onRedo} disabled={!canRedo} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border border-white/10 ${canRedo ? 'bg-white/5 hover:bg-cyan-500 hover:text-black' : 'opacity-30 cursor-not-allowed'}`} style={{ color: canRedo ? 'var(--text-primary)' : 'var(--text-secondary)' }}><i className="fas fa-redo text-[10px]"></i></button>
+                <button onClick={onUndo} disabled={!canUndo} title="Annuler (Ctrl+Z)" aria-label="Annuler" className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border border-white/10 ${canUndo ? 'bg-white/5 hover:bg-cyan-500 hover:text-black' : 'opacity-30 cursor-not-allowed'}`} style={{ color: canUndo ? 'var(--text-primary)' : 'var(--text-secondary)' }}><i className="fas fa-undo text-[10px]"></i></button>
+                <button onClick={onRedo} disabled={!canRedo} title="Rétablir (Ctrl+Y)" aria-label="Rétablir" className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border border-white/10 ${canRedo ? 'bg-white/5 hover:bg-cyan-500 hover:text-black' : 'opacity-30 cursor-not-allowed'}`} style={{ color: canRedo ? 'var(--text-primary)' : 'var(--text-secondary)' }}><i className="fas fa-redo text-[10px]"></i></button>
              </div>
              
              {/* FILE ACTIONS GROUP */}
              <div className="flex items-center space-x-1 pr-2 border-r border-white/5" style={{ borderColor: 'var(--border-dim)' }}>
                 {/* OPEN / LOAD */}
-                <button onClick={onOpenLoadMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white" title="Ouvrir un projet">
+                <button onClick={onOpenLoadMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white" title="Ouvrir un projet" aria-label="Ouvrir un projet">
                     <i className="fas fa-folder-open text-[10px]"></i>
                     <span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Ouvrir</span>
                 </button>
 
                 {/* SAVE */}
-                <button onClick={onOpenSaveMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white" title="Sauvegarder">
+                <button onClick={onOpenSaveMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white" title="Sauvegarder" aria-label="Sauvegarder">
                     <i className="fas fa-save text-[10px]"></i>
                     <span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Sauver</span>
                 </button>
@@ -273,6 +277,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                             onClick={() => audioImportInputRef.current?.click()}
                             className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"
                             title="Importer un fichier audio"
+                            aria-label="Importer un fichier audio"
                         >
                             <i className="fas fa-file-import text-[10px]"></i>
                             <span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Import</span>
@@ -297,23 +302,23 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              
              {/* SHARE (Only if logged in) */}
              {user && (
-                 <button onClick={onShareProject} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Partager</span></button>
+                 <button onClick={onShareProject} title="Partager le projet" aria-label="Partager le projet" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Partager</span></button>
              )}
              
              {/* EXPORT BUTTON */}
-             <button onClick={onExportMix} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Exporter</span></button>
+             <button onClick={onExportMix} title="Exporter le mix" aria-label="Exporter le mix" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Exporter</span></button>
              
              {/* ENGINE BUTTON */}
-             <button onClick={onOpenAudioEngine} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Audio</span></button>
+             <button onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Audio</span></button>
              
              {/* PDC Toggle */}
-             <button onClick={onToggleDelayComp} className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="Delay Compensation (PDC)">
+             <button onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="Delay Compensation (PDC)">
                 <div className={`w-1.5 h-1.5 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400 animate-pulse' : 'bg-slate-600'}`}></div>
                 <span className="text-[9px] font-black uppercase tracking-wider">PDC</span>
              </button>
 
              {/* MIDI INDICATOR */}
-             <div className={`h-8 px-2 rounded-lg ${midiDeviceName ? 'flex' : 'hidden 2xl:flex'} items-center justify-center space-x-2 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : 'bg-white/5 border-white/10 text-slate-600'}`} title={midiDeviceName || "No MIDI Device"}>
+             <div className={`h-8 px-2 rounded-lg ${midiDeviceName ? 'flex' : 'hidden 2xl:flex'} items-center justify-center space-x-2 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : 'bg-white/5 border-white/10 text-slate-600'}`} title={midiDeviceName ? `MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"} role="status" aria-label={midiDeviceName ? `Clavier MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"}>
                  <i className="fas fa-plug text-[10px]"></i>
                  {midiDeviceName && <span className="hidden 2xl:inline text-[8px] font-black uppercase max-w-[80px] truncate">{midiDeviceName}</span>}
              </div>
@@ -325,9 +330,9 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         <div className="hidden xl:block"><ProMasterMeter /></div>
         
         <div className="flex items-center space-x-2 md:space-x-3 bg-black/40 px-3 md:px-4 py-1.5 rounded-xl border border-white/5" style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}>
-          <button onClick={onStop} title="Stop (Échap)" aria-label="Stop" className="w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
-          <button onClick={onTogglePlay} title="Lecture / pause (raccourci : barre d'espace)" className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg ${isPlaying ? 'text-black nova-halo' : 'bg-white text-black hover:scale-105 shadow-black/40'}`} style={{ backgroundColor: isPlaying ? 'var(--accent-neon)' : '#fff' }}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-base`}></i></button>
-          <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
+          <button onClick={onStop} title="Stop (Échap)" aria-label="Stop" className="nova-hit w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
+          <button onClick={onTogglePlay} title="Lecture / pause (raccourci : barre d'espace)" aria-label={isPlaying ? 'Pause' : 'Lecture'} aria-pressed={isPlaying} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg ${isPlaying ? 'text-black nova-halo' : 'bg-white text-black hover:scale-105 shadow-black/40'}`} style={{ backgroundColor: isPlaying ? 'var(--accent-neon)' : '#fff' }}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-base`}></i></button>
+          <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" aria-pressed={isLoopActive} className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
           <OverloadBadge />
           {onTogglePunch && (
             <button onClick={onTogglePunch} title="Punch-in / punch-out : REC ne remplace que la zone de la boucle (pré-roll de 2 mesures, arrêt automatique)" aria-pressed={isPunchActive}
@@ -335,8 +340,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               PUNCH
             </button>
           )}
-          <button onClick={onToggleMetronome} title="Métronome" className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
-          <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" className={`h-12 px-4 2xl:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'var(--border-highlight)' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">Rec</span></button>
+          <button onClick={onToggleMetronome} title="Métronome" aria-label="Métronome" aria-pressed={isMetronomeEnabled} className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
+          <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" aria-label={isRecording ? "Arrêter l'enregistrement" : 'Enregistrer'} aria-pressed={isRecording} className={`h-12 px-4 2xl:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'var(--border-highlight)' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">Rec</span></button>
         </div>
         
         <PlayheadClock bpm={bpm} numerator={tsNum} denominator={tsDen} />
@@ -352,9 +357,9 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
         {/* VIEW SWITCHER & THEME - Hidden on mobile/tablet (already in bottom nav) */}
         <div className="hidden 2xl:flex items-center space-x-1 bg-black/40 rounded-xl p-1 border border-white/5" style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}>
-            <button onClick={() => onChangeView('ARRANGEMENT')} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'ARRANGEMENT' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'ARRANGEMENT' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'ARRANGEMENT' ? '#000' : 'var(--text-secondary)' }}>Pistes</button>
-            <button onClick={() => onChangeView('MIXER')} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'MIXER' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'MIXER' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'MIXER' ? '#000' : 'var(--text-secondary)' }}>Console</button>
-            <button onClick={() => onChangeView('AUTOMATION')} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'AUTOMATION' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'AUTOMATION' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'AUTOMATION' ? '#000' : 'var(--text-secondary)' }}>Auto</button>
+            <button onClick={() => onChangeView('ARRANGEMENT')} aria-pressed={currentView === 'ARRANGEMENT'} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'ARRANGEMENT' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'ARRANGEMENT' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'ARRANGEMENT' ? '#000' : 'var(--text-secondary)' }}>Pistes</button>
+            <button onClick={() => onChangeView('MIXER')} aria-pressed={currentView === 'MIXER'} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'MIXER' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'MIXER' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'MIXER' ? '#000' : 'var(--text-secondary)' }}>Console</button>
+            <button onClick={() => onChangeView('AUTOMATION')} aria-pressed={currentView === 'AUTOMATION'} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'AUTOMATION' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'AUTOMATION' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'AUTOMATION' ? '#000' : 'var(--text-secondary)' }}>Auto</button>
         </div>
 
         {/* THEME TOGGLE */}
@@ -364,6 +369,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             onClick={onToggleTheme}
             className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 hidden 2xl:flex items-center justify-center transition-all"
             title="Changer le thème"
+            aria-label={currentTheme === 'dark' ? 'Passer au thème clair' : 'Passer au thème sombre'}
             style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}
         >
             <i className={`fas ${currentTheme === 'dark' ? 'fa-sun text-amber-400' : 'fa-moon text-slate-300'}`}></i>
@@ -390,7 +396,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         {user ? (
             <div className="hidden 2xl:flex items-center space-x-2 bg-black/30 rounded-full pl-1 pr-1 py-1 border border-white/10" style={{ backgroundColor: 'var(--bg-item)' }}>
                 <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-[10px] font-black text-white shadow-lg shadow-cyan-500/20">{user.username.charAt(0).toUpperCase()}</div>
-                <button onClick={onLogout} className="w-7 h-7 rounded-full bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white flex items-center justify-center transition-all"><i className="fas fa-sign-out-alt text-[10px]"></i></button>
+                <button onClick={onLogout} title="Se déconnecter" aria-label="Se déconnecter" className="w-7 h-7 rounded-full bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white flex items-center justify-center transition-all"><i className="fas fa-sign-out-alt text-[10px]"></i></button>
             </div>
         ) : (
             <button onClick={onOpenAuth} aria-label="Connexion" className="h-8 px-4 rounded-full bg-white/10 hover:bg-cyan-500 hover:text-black text-white text-[9px] font-black uppercase tracking-widest transition-all border border-white/10 hidden 2xl:flex items-center space-x-2"><i className="fas fa-user-circle"></i></button>
@@ -407,11 +413,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
             {/* Téléphone : métronome et boucle (masqués dans la barre sous 768 px) */}
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => onToggleMetronome?.()} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${isMetronomeEnabled ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300'}`}>
+              <button onClick={() => onToggleMetronome?.()} aria-pressed={isMetronomeEnabled} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${isMetronomeEnabled ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300'}`}>
                 <i className="fas fa-drum block mb-1"></i>
                 Métronome
               </button>
-              <button onClick={() => onToggleLoop?.()} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${isLoopActive ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300'}`}>
+              <button onClick={() => onToggleLoop?.()} aria-pressed={isLoopActive} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${isLoopActive ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300'}`}>
                 <i className="fas fa-sync-alt block mb-1"></i>
                 Boucle
               </button>
@@ -494,7 +500,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <i className="fas fa-microchip"></i>
                   <span>Moteur Audio (Engine)</span>
                 </button>
-                <button onClick={() => { onToggleDelayComp?.(); setIsMobileMenuOpen(false); }} className={`w-full px-4 py-3 rounded-lg font-black transition-all flex items-center justify-center space-x-2 ${isDelayCompEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-400'}`}>
+                <button onClick={() => { onToggleDelayComp?.(); setIsMobileMenuOpen(false); }} aria-pressed={!!isDelayCompEnabled} className={`w-full px-4 py-3 rounded-lg font-black transition-all flex items-center justify-center space-x-2 ${isDelayCompEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-400'}`}>
                   <div className={`w-2 h-2 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400' : 'bg-slate-600'}`}></div>
                   <span>Delay Compensation (PDC)</span>
                 </button>
@@ -515,7 +521,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             <div className="space-y-2">
               <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Tempo (BPM)</div>
               <div className="bg-white/5 p-4 rounded-lg flex items-center justify-center space-x-3">
-                <button onClick={() => onBpmChange(Math.max(20, bpm - 1))} className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">-</button>
+                <button onClick={() => onBpmChange(Math.max(20, bpm - 1))} aria-label="Tempo -1" className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">-</button>
                 {isEditingBpm ? (
                   <input
                     ref={bpmInputRef}
@@ -529,7 +535,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 ) : (
                   <div onClick={() => setIsEditingBpm(true)} className="text-3xl font-black text-cyan-400 cursor-pointer">{bpm}</div>
                 )}
-                <button onClick={() => onBpmChange(Math.min(999, bpm + 1))} className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">+</button>
+                <button onClick={() => onBpmChange(Math.min(999, bpm + 1))} aria-label="Tempo +1" className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">+</button>
               </div>
             </div>
 
