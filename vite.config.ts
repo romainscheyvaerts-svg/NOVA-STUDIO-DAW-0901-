@@ -90,7 +90,12 @@ export default defineConfig(({ mode }) => {
         port: 3000,
         host: '0.0.0.0',
       },
-      plugins: [react(), devApiPlugin()],
+      plugins: [react(), devApiPlugin(), {
+        // Date de construction dans la page : l'application Windows ne se met à
+        // jour que vers une version plus récente que celle qu'elle embarque.
+        name: 'nova-build-stamp',
+        transformIndexHtml: (html: string) => html.replace('</head>', `  <meta name="nova-build" content="${Date.now()}">\n  </head>`),
+      }],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)

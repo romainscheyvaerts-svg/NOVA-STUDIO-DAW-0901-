@@ -85,6 +85,26 @@ def version_id(index_bytes: bytes) -> str:
     return "ui-" + hashlib.sha256(index_bytes).hexdigest()[:12]
 
 
+BUILD_META = re.compile(rb'<meta\s+name=["\']nova-build["\']\s+content=["\'](\d{10,16})["\']', re.I)
+
+
+def build_stamp(index_bytes: bytes) -> "float | None":
+    """Date de construction du DAW (meta « nova-build », en ms), ou None pour les
+    anciennes versions qui ne la portent pas."""
+    m = BUILD_META.search(index_bytes or b"")
+    return int(m.group(1)) / 1000.0 if m else None
+
+
+def version_build_stamp(v: "UiVersion | None") -> "float | None":
+    if v is None:
+        return None
+    try:
+        with open(os.path.join(v.root, "index.html"), "rb") as f:
+            return build_stamp(f.read())
+    except OSError:
+        return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Versions présentes sur le disque
 # ─────────────────────────────────────────────────────────────────────────────
@@ -538,6 +558,14 @@ def check_for_update(origin: str, data_dir: str, active: "UiVersion | None", bun
         return None
     if vid in bad_ids(cache):
         say(f"interface en ligne {vid} déjà écartée (n'avait pas démarré)")
+        return None
+    # Jamais vers une version plus ancienne que celle qu'on a (installateur
+    # construit avant la mise en ligne, ou mise en ligne bloquée) : avant, « le
+    # site fait foi » faisait revenir l'application en arrière.
+    mine = version_build_stamp(active)
+    online_stamp = build_stamp(index)
+    if mine is not None and (online_stamp is None or online_stamp < mine):
+        say(f"interface en ligne {vid} plus ancienne que la nôtre ({active.id}) : on garde la nôtre")
         return None
     for v in [bundled, *known]:
         if v is not None and v.index_sha == sha:

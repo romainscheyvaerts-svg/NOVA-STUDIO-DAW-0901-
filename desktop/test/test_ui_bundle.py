@@ -166,6 +166,33 @@ def main():
         a10, _, _ = ub.choose(bundled_dir, cache)
         check("la version de l'installateur est prise", a10.kind == "bundled", repr(a10))
 
+        print("\n== jamais vers une version plus ancienne (date de construction nova-build)")
+        def stamp_index(root, ms):
+            p = os.path.join(root, "index.html")
+            with open(p, "rb") as f:
+                html = f.read()
+            if ms is not None:
+                html = html.replace(b"</head>", f'<meta name="nova-build" content="{ms}"></head>'.encode())
+            with open(p, "wb") as f:
+                f.write(html)
+        data2 = os.path.join(tmp, "data2")
+        recent_dir = os.path.join(tmp, "recent")
+        make_site(recent_dir, "r1")
+        now_ms = int(time.time() * 1000)
+        stamp_index(recent_dir, now_ms)
+        ub.write_manifest(recent_dir, "bundled", {"type": "test"})
+        ar, br, dlr = ub.choose(recent_dir, ub.cache_root(data2))
+        shutil.rmtree(online)
+        make_site(online, "old")  # en ligne : ancienne version sans date
+        check("en ligne sans date : on garde la nôtre", ub.check_for_update(origin, data2, ar, br, dlr, "test") is None)
+        stamp_index(online, now_ms - 86_400_000)
+        check("en ligne plus ancienne : on garde la nôtre", ub.check_for_update(origin, data2, ar, br, dlr, "test") is None)
+        shutil.rmtree(online)
+        make_site(online, "new")
+        stamp_index(online, now_ms + 60_000)
+        vn = ub.check_for_update(origin, data2, ar, br, dlr, "test")
+        check("en ligne plus récente : téléchargée", vn is not None and vn.kind == "downloaded", repr(vn))
+
         print("\n== nettoyage")
         ub.prune(cache, {a10.id})
         left = [n for n in os.listdir(cache) if n.startswith("ui-")]
