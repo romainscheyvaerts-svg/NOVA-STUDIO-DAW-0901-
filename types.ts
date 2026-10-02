@@ -469,7 +469,8 @@ export type AIActionType =
   // Batterie Make Music
   | 'ADD_DRUMS'
   | 'OPEN_DRUMS'
-  | 'REMOVE_DRUMS'; 
+  | 'REMOVE_DRUMS'
+  | 'LOAD_DAILY_CHALLENGE';
 
 export interface AIAction {
   action: AIActionType;

@@ -1,3 +1,4 @@
+import { dailyChallengeId } from '../utils/dailyChallenge';
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Instrumental, DAWState } from '../types';
 import { supabaseManager } from '../services/SupabaseManager';
@@ -48,6 +49,13 @@ const LandingPage: React.FC<LandingPageProps> = ({
   const projectInputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = user?.email?.toLowerCase() === 'romain.scheyvaerts@gmail.com';
+
+  // Défi du jour : la même prod que sur le site (Beat Swipe), pour tout le monde.
+  const challenge = React.useMemo(() => {
+    const beats = instrumentals.filter(i => (i as any).kind === 'beat' && (i.preview_url || i.drive_file_id));
+    const id = dailyChallengeId(beats.map(b => String(b.id)));
+    return beats.find(b => String(b.id) === id) || null;
+  }, [instrumentals]);
 
   // Charger le catalogue d'instrumentaux
   useEffect(() => {
@@ -299,6 +307,23 @@ const LandingPage: React.FC<LandingPageProps> = ({
               </button>
             )}
             
+            {/* Défi du jour */}
+            {challenge && (
+              <button
+                onClick={() => onEnterWithInstrumental(challenge)}
+                className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-amber-400/15 to-pink-500/15 border border-pink-400/40 rounded-xl hover:border-pink-400/70 transition-all group"
+              >
+                <div className="w-12 h-12 rounded-xl overflow-hidden bg-pink-500/20 flex items-center justify-center shrink-0">
+                  {challenge.cover_image_url ? <img src={challenge.cover_image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-xl">🎯</span>}
+                </div>
+                <div className="text-left min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-amber-300">🎯 Défi du jour</p>
+                  <p className="text-sm font-bold text-white truncate">{String(challenge.title || '').split('|')[0].trim()}</p>
+                  <p className="text-[11px] text-slate-300">Pose 4 mesures dessus, partage, fais voter.</p>
+                </div>
+              </button>
+            )}
+
             {/* Bouton Nouveau projet */}
             <button
               onClick={onEnterStudio}

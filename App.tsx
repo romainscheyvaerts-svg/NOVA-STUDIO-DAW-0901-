@@ -26,6 +26,7 @@ const AudioSettingsPanel = lazy(() => import('./components/AudioSettingsPanel'))
 const PluginManager = lazy(() => import('./components/PluginManager'));
 
 import { supabaseManager } from './services/SupabaseManager';
+import { dailyChallengeId } from './utils/dailyChallenge';
 import { SessionSerializer } from './services/SessionSerializer';
 // import { getAIProductionAssistance } from './services/AIService'; 
 import { novaBridge } from './services/NovaBridge';
@@ -3443,6 +3444,17 @@ export default function App() {
 
       case 'REMOVE_DRUMS':
         handleRemoveDrums();
+        break;
+
+      case 'LOAD_DAILY_CHALLENGE':
+        // Même prod que le défi du jour du site (Beat Swipe).
+        void supabaseManager.getActiveInstrumentals().then(list => {
+          const beats = list.filter(i => (i as any).kind === 'beat' && (i.preview_url || i.drive_file_id));
+          const id = dailyChallengeId(beats.map(b => String(b.id)));
+          const inst = beats.find(b => String(b.id) === id);
+          if (inst && loadCatalogBeatRef.current) void loadCatalogBeatRef.current(inst);
+          else notify("Le défi du jour n'est pas disponible pour le moment");
+        }).catch(() => notify("Catalogue indisponible"));
         break;
 
       case 'OPEN_MIX_STYLES':

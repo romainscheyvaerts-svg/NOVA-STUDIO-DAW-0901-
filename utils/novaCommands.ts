@@ -141,6 +141,8 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
       ...st.tracks.filter(isVoice).map(t => ({ action: 'UPDATE_PLUGIN', payload: { trackId: t.id, pluginType: 'AUTOTUNE', params } } as AIAction)));
   }
 
+  // Défi du jour (même prod que Beat Swipe sur le site)
+  if (/\bd[eé]fi\b/.test(msg)) return say('🎯 Je charge la prod du défi du jour : pose 4 mesures dessus !', { action: 'LOAD_DAILY_CHALLENGE', payload: {} });
   // Batterie Make Music
   if (/\b(batterie|drums?|percu\w*|rythmique|808)\b/.test(msg)) {
     if (/\b(enleve|retire|supprime|sans|coupe|vire)\b/.test(msg)) return say('Batterie retirée.', { action: 'REMOVE_DRUMS', payload: {} });
