@@ -72,7 +72,7 @@ import DrumMachinePanel from './components/DrumMachinePanel';
 import ShortcutsHelp from './components/ShortcutsHelp';
 import { DrumMachine, makeDrumMachineLib, drumPadsFor, drumClipFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
 import { loadDrumSound } from './utils/drumSounds';
-import { saveSession, loadSession, getSessionMeta, SavedSessionMeta } from './utils/sessionStore';
+import { saveSession, loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import VocalToolsPanel from './components/VocalToolsPanel';
 
 const AVAILABLE_FX_MENU = [
@@ -451,7 +451,18 @@ export default function App() {
       restoreBeatAfterResumeRef.current = true;
       handleEnterWithProject(project);
     } catch (e) {
-      console.error('[Session] Reprise impossible', e);
+      console.error('[Session] Reprise impossible, essai de la sauvegarde précédente', e);
+      // La dernière sauvegarde est abîmée : on reprend l'avant-dernière.
+      const prev = await loadSession('previous');
+      if (prev) {
+        try {
+          const project = await ProjectIO.loadProject(new File([prev.blob], 'session.novaproj.zip'));
+          restoreBeatAfterResumeRef.current = true;
+          handleEnterWithProject(project);
+          setAiNotification(`La dernière sauvegarde était abîmée : j'ai repris la précédente (${formatAgo(prev.savedAt)}).`);
+          return;
+        } catch { /* les deux sont illisibles */ }
+      }
       setAiNotification("La session sauvegardée n'a pas pu être rouverte.");
       setShowLanding(false);
     }
@@ -2837,13 +2848,17 @@ export default function App() {
   };
   const autosaveTimer = useRef<number | null>(null);
   const autosaveNotified = useRef(false);
+  const autosaveBusy = useRef(false);
+  const autosavePending = useRef(false);
   const autosaveNow = useCallback(async () => {
+    if (autosaveBusy.current) { autosavePending.current = true; return; }
     const st = stateRef.current;
     if (st.isRecording) return;
+    autosaveBusy.current = true;
     const voiceTakes = st.tracks.filter(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId)
       .reduce((n, t) => n + t.clips.filter(c => /^Prise \d+/.test(c.name || '')).length, 0);
     const hasAudio = st.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0);
-    if (!hasAudio && !(st.lyrics || '').trim()) return; // rien à garder : on n'écrase pas une session précédente
+    if (!hasAudio && !(st.lyrics || '').trim()) { autosaveBusy.current = false; return; } // rien à garder : on n'écrase pas une session précédente
     try {
       const blob = await ProjectIO.saveProject(st, user?.owned_instruments || []);
       const beatClip = st.tracks.find(t => t.id === 'instrumental')?.clips[0];
@@ -2859,8 +2874,13 @@ export default function App() {
       }
     } catch (e) {
       console.warn('[Session] Sauvegarde auto impossible', e);
+    } finally {
+      autosaveBusy.current = false;
+      if (autosavePending.current) { autosavePending.current = false; setTimeout(() => { void autosaveNowRef.current?.(); }, 500); }
     }
   }, [user]);
+  const autosaveNowRef = useRef<(() => Promise<void>) | null>(null);
+  autosaveNowRef.current = autosaveNow;
   useEffect(() => {
     if (showLanding || state.isPlaying || state.isRecording) return;
     if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);

@@ -10,6 +10,7 @@
 const DB_NAME = 'nova-studio';
 const STORE = 'sessions';
 const KEY = 'current';
+const PREVIOUS = 'previous';
 
 export interface SavedSessionMeta {
   savedAt: number;
@@ -46,12 +47,33 @@ async function run<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRe
   }
 }
 
+/**
+ * Deux emplacements : la sauvegarde précédente est gardée (« previous ») dans
+ * la même transaction que l'écriture de la nouvelle. Si la dernière est
+ * illisible (onglet fermé en pleine écriture, quota…), on reprend l'avant-dernière.
+ */
 export async function saveSession(blob: Blob, meta: SavedSessionMeta): Promise<void> {
-  await run('readwrite', s => s.put({ ...meta, blob } as SavedSession, KEY));
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const st = tx.objectStore(STORE);
+      const prev = st.get(KEY);
+      prev.onsuccess = () => {
+        if (prev.result) st.put(prev.result, PREVIOUS);
+        st.put({ ...meta, blob } as SavedSession, KEY);
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
 }
 
-export async function loadSession(): Promise<SavedSession | null> {
-  try { return (await run<SavedSession | undefined>('readonly', s => s.get(KEY))) || null; } catch { return null; }
+export async function loadSession(slot: 'current' | 'previous' = 'current'): Promise<SavedSession | null> {
+  try { return (await run<SavedSession | undefined>('readonly', s => s.get(slot === 'current' ? KEY : PREVIOUS))) || null; } catch { return null; }
 }
 
 export async function getSessionMeta(): Promise<SavedSessionMeta | null> {
