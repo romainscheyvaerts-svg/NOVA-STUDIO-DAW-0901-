@@ -1,3 +1,4 @@
+import { logClientError } from '../utils/errorLog';
 import React, { ErrorInfo, ReactNode } from 'react';
 import { ContextMenuItem } from '../types';
 
@@ -27,6 +28,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
+    logClientError(error, 'affichage');
 
     this.setState({
       errorInfo: errorInfo,
