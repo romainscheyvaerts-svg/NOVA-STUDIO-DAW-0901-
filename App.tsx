@@ -2564,7 +2564,6 @@ export default function App() {
    *        etre conditionne.
    */
   const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number, sourceBpm?: number, instrumentId?: string | number) => {
-      console.log('[handleUniversalAudioImport] Début import:', name);
       setExternalImportNotice(`Chargement: ${name}...`);
       try {
           await ensureAudioEngine();
@@ -2585,7 +2584,9 @@ export default function App() {
           }
 
           const clipName = name.replace(/\.[^/.]+$/, '');
-          const clipId = `clip-${Date.now()}`;
+          // Unique même si plusieurs fichiers arrivent dans la même milliseconde.
+          const uid = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          const clipId = `clip-${uid}`;
 
           // IMPORTANT: Register buffer in registry OUTSIDE of React state
           // This avoids Immer proxy issues with native AudioBuffer objects.
@@ -2611,7 +2612,7 @@ export default function App() {
                       targetTrackId = 'instrumental';
                   } else {
                       isNewTrackNeeded = true;
-                      targetTrackId = `track-audio-${Date.now()}`;
+                      targetTrackId = `track-audio-${uid}`;
                   }
               }
 
@@ -2903,7 +2904,9 @@ export default function App() {
       }
     };
     window.addEventListener('nova:preview-start', onPreview);
-    return () => window.removeEventListener('nova:preview-start', onPreview);
+    const onNotify = (e: Event) => { const d = (e as CustomEvent).detail; if (typeof d === 'string') setAiNotification(d); };
+    window.addEventListener('nova:notify', onNotify);
+    return () => { window.removeEventListener('nova:preview-start', onPreview); window.removeEventListener('nova:notify', onNotify); };
   }, [setVisualState]);
 
   const handleLoadCatalogBeat = async (inst: any) => {
@@ -3918,7 +3921,7 @@ export default function App() {
                      // Beat du catalogue : même chemin que « Essayer » (remplace le beat, règle tempo et Auto-Tune).
                      const beat = takeDraggedBeat(url);
                      if (beat) return loadCatalogBeatRef.current?.(beat);
-                     return handleUniversalAudioImport(url, name, trackId, time);
+                     return handleUniversalAudioImport(url, name, trackId || undefined, time);
                    }}
                    markers={state.markers} onAddMarker={handleAddMarker}
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}

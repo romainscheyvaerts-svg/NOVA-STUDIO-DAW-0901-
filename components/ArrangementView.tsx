@@ -440,7 +440,6 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
       const dropTime = Math.max(0, x / zoomH);
       
-      console.log('[ArrangementView Drop] Position:', { x, y, dropTime });
       
       let targetTrackId: string | null = null;
       let currentY = 40;
@@ -456,9 +455,6 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           targetTrackId = visibleTracks.find(t => t.id === 'instrumental')?.id || 
                           visibleTracks.find(t => t.type === TrackType.AUDIO)?.id || 
                           null;
-          console.log('[ArrangementView Drop] Piste cible par défaut:', targetTrackId);
-      } else {
-          console.log('[ArrangementView Drop] Piste cible trouvée:', targetTrackId);
       }
       
       if (!targetTrackId) {
@@ -467,25 +463,30 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       }
       
       const audioUrl = e.dataTransfer.getData('audio-url');
-      console.log('[ArrangementView Drop] audio-url récupérée:', audioUrl);
-      console.log('[ArrangementView Drop] onAudioDrop disponible:', !!onAudioDrop);
       
       if (audioUrl && onAudioDrop) {
           const audioName = e.dataTransfer.getData('audio-name') || 'Imported Audio';
-          console.log('[ArrangementView Drop] Appel de onAudioDrop avec:', { targetTrackId, audioUrl, audioName, dropTime });
           onAudioDrop(targetTrackId, audioUrl, audioName, dropTime);
           return;
-      } else {
-          console.warn('[ArrangementView Drop] audioUrl vide ou onAudioDrop manquant');
       }
       
-      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-          const file = e.dataTransfer.files[0];
-          console.log('[ArrangementView Drop] Fichier détecté:', file.name, file.type);
-          if (file.type.startsWith('audio/') && onAudioDrop) {
-              const blobUrl = URL.createObjectURL(file);
-              onAudioDrop(targetTrackId, blobUrl, file.name, dropTime);
-          }
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0 && onAudioDrop) {
+          // Windows ne donne pas toujours de type MIME (.aif, .flac…) : on regarde aussi l'extension.
+          const AUDIO_EXT = /\.(wav|wave|mp3|aif|aiff|flac|ogg|oga|opus|m4a|aac|webm|caf)$/i;
+          const files = Array.from(e.dataTransfer.files);
+          const audio = files.filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
+          const refused = files.length - audio.length;
+          // Plusieurs fichiers : un par piste, à partir de celle visée (comme dans les autres DAW).
+          const startIdx = Math.max(0, visibleTracks.findIndex(t => t.id === targetTrackId));
+          const targets = visibleTracks.slice(startIdx).filter(t => t.type === TrackType.AUDIO);
+          // Au-delà des pistes existantes : une nouvelle piste par fichier (id vide).
+          audio.forEach((file, i) => {
+              const tid = targets[i]?.id || (i === 0 ? targetTrackId! : '');
+              onAudioDrop(tid, URL.createObjectURL(file), file.name, dropTime);
+          });
+          const notes: string[] = [];
+          if (refused) notes.push(`${refused} fichier${refused > 1 ? 's' : ''} ignoré${refused > 1 ? 's' : ''} (pas de l'audio : WAV, MP3, AIFF, FLAC, OGG, M4A acceptés)`);
+          if (notes.length) window.dispatchEvent(new CustomEvent('nova:notify', { detail: notes.join(' · ') }));
       }
   };
 
