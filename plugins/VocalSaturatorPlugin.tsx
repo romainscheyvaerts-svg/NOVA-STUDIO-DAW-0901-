@@ -1,11 +1,13 @@
 
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { loadWorkletModule, setParamSmooth } from './vocalDspUtils';
 
 /**
  * MODULE FX_03 : VOCAL SATURATOR (ANALOG COLORATION v2.0)
  * -----------------------------------------------------
- * DSP: Drive -> Shaper (Oversampled) -> Tilt Tone -> 3-Band EQ -> Mix.
+ * DSP: Drive -> Shaper (ADAA, sans latence) -> compensation de niveau -> Tilt Tone
+ *      -> 3-Band EQ -> Mix.
  */
 
 export type SaturationMode = 'TUBE' | 'TAPE' | 'TRANSISTOR' | 'SOFT_CLIP';
@@ -22,12 +24,99 @@ export interface SaturatorParams {
   outputGain: number; // Added to interface to match usage
 }
 
+/**
+ * Etage de saturation sans latence : anti-repliement par ADAA du 1er ordre
+ * (« antiderivative anti-aliasing », Parker/Zavalishin/Le Bivic 2016).
+ *
+ * Le WaveShaperNode surechantillonne x4 retardait la voie saturee de 4 ms
+ * (192 echantillons a 48 kHz, mesure) sans retard equivalent sur le sec :
+ * au mix 0,3 a 0,7 des styles, la voix etait filtree en peigne (creux tous les
+ * 250 Hz) et le retard s'entendait au casque pendant la prise. L'ADAA calcule
+ * la moyenne exacte de la courbe entre deux echantillons (primitive tabulee),
+ * ce qui attenue fortement les harmoniques repliees pour un retard d'un
+ * demi-echantillon seulement (~0,01 ms).
+ */
+const ADAA_WORKLET_CODE = `
+class AdaaShaperProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    this.f = null; this.F = null; this.n = 0;
+    this.prev = [0, 0]; this.pending = null;
+    // Courbe initiale passee a la creation : disponible des le premier bloc
+    // (un message du port peut arriver apres le debut d'un rendu hors ligne).
+    const init = options && options.processorOptions && options.processorOptions.curve;
+    if (init && init.length > 1) this.load(Float32Array.from(init));
+    this.port.onmessage = (e) => { if (e.data && e.data.curve) this.pending = e.data.curve; };
+  }
+  load(curve) {
+    const n = curve.length;
+    const h = 2 / (n - 1);
+    const F = new Float64Array(n);
+    for (let i = 1; i < n; i++) F[i] = F[i - 1] + 0.5 * h * (curve[i - 1] + curve[i]);
+    this.f = curve; this.F = F; this.n = n; this.h = h;
+  }
+  // Courbe (interpolation lineaire, prolongee a plat hors de [-1, 1])
+  fv(x) {
+    const f = this.f, n = this.n;
+    if (x <= -1) return f[0];
+    if (x >= 1) return f[n - 1];
+    const u = (x + 1) / this.h; const j = Math.min(n - 2, Math.floor(u)); const t = u - j;
+    return f[j] + (f[j + 1] - f[j]) * t;
+  }
+  // Primitive exacte de la courbe lineaire par morceaux
+  Fv(x) {
+    const f = this.f, F = this.F, n = this.n, h = this.h;
+    if (x <= -1) return f[0] * (x + 1);
+    if (x >= 1) return F[n - 1] + f[n - 1] * (x - 1);
+    const u = (x + 1) / h; const j = Math.min(n - 2, Math.floor(u)); const d = (u - j) * h;
+    return F[j] + f[j] * d + 0.5 * (f[j + 1] - f[j]) / h * d * d;
+  }
+  process(inputs, outputs) {
+    if (this.pending) { this.load(this.pending); this.pending = null; }
+    const input = inputs[0], output = outputs[0];
+    if (!output || !output[0]) return true;
+    const nIn = input ? input.length : 0;
+    for (let c = 0; c < output.length; c++) {
+      const out = output[c];
+      const src = nIn > 0 ? (input[c] || input[0]) : null;
+      if (!src || !this.f) { if (src) out.set(src); else out.fill(0); this.prev[c] = 0; continue; }
+      let xp = this.prev[c] || 0, Fp = this.Fv(xp);
+      for (let i = 0; i < out.length; i++) {
+        const x = src[i];
+        const dx = x - xp;
+        let y;
+        if (dx > 1e-5 || dx < -1e-5) {
+          const Fx = this.Fv(x);
+          y = (Fx - Fp) / dx;
+          Fp = Fx;
+        } else {
+          y = this.fv(0.5 * (x + xp));
+          Fp = this.Fv(x);
+        }
+        out[i] = y;
+        xp = x;
+      }
+      this.prev[c] = xp;
+    }
+    return true;
+  }
+}
+try { registerProcessor('adaa-shaper-processor', AdaaShaperProcessor); } catch (e) {}
+`;
+
+/** Niveau de reference de la compensation de drive : sinus crete -14 dBFS (voix deja compressee). */
+const DRIVE_REF_AMPLITUDE = 0.2;
+
 export class VocalSaturatorNode {
   private ctx: AudioContext;
   public input: GainNode;
   public output: GainNode;
   private driveGain: GainNode;
+  // Repli (et passage avant chargement du worklet) : courbe sans surechantillonnage,
+  // donc sans latence.
   private shaper: WaveShaperNode;
+  private adaa: AudioWorkletNode | null = null;
+  private curve: Float32Array = new Float32Array([-1, 1]);
   private autoGain: GainNode;
   private dcBlock: BiquadFilterNode;
   private tiltLow: BiquadFilterNode;
@@ -38,6 +127,12 @@ export class VocalSaturatorNode {
   private wetGain: GainNode;
   private dryGain: GainNode;
   private makeupGain: GainNode;
+  private readonly createdAt: number;
+
+  /** Pret quand l'etage ADAA est en place (le rendu hors ligne attend cette promesse). */
+  public readonly ready: Promise<void>;
+  /** Aucun retard ajoute (l'ADAA decale de 0,5 echantillon, negligeable). */
+  public readonly latency = 0;
 
   private params: SaturatorParams = {
     drive: 20,
@@ -53,11 +148,12 @@ export class VocalSaturatorNode {
 
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
+    this.createdAt = ctx.currentTime;
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     this.driveGain = ctx.createGain();
     this.shaper = ctx.createWaveShaper();
-    this.shaper.oversample = '4x';
+    this.shaper.oversample = 'none';
     this.autoGain = ctx.createGain();
     // Une courbe asymetrique cree une composante continue : on la retire.
     this.dcBlock = ctx.createBiquadFilter();
@@ -84,11 +180,11 @@ export class VocalSaturatorNode {
     this.makeupGain = ctx.createGain();
     this.setupChain();
     this.generateCurve();
+    this.applyParams();
+    this.ready = this.initWorklet();
   }
 
   private setupChain() {
-    this.input.disconnect();
-
     // -- DRY PATH --
     this.input.connect(this.dryGain);
     this.dryGain.connect(this.makeupGain);
@@ -107,8 +203,25 @@ export class VocalSaturatorNode {
     this.wetGain.connect(this.makeupGain);
 
     this.makeupGain.connect(this.output);
+  }
 
-    this.applyParams();
+  private async initWorklet() {
+    try {
+      await loadWorkletModule(this.ctx, 'adaa-shaper', ADAA_WORKLET_CODE);
+      const node = new AudioWorkletNode(this.ctx, 'adaa-shaper-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { curve: Array.from(this.curve) }
+      });
+      this.adaa = node;
+      // Bascule de l'etage de courbe : meme courbe, meme niveau, meme retard (~0).
+      this.driveGain.connect(node);
+      node.connect(this.dcBlock);
+      try { this.driveGain.disconnect(this.shaper); } catch (e) {}
+    } catch (e) {
+      console.warn('[VocalSaturator] ADAA indisponible, courbe simple :', e);
+    }
   }
 
   public updateParams(p: Partial<SaturatorParams>) {
@@ -122,19 +235,20 @@ export class VocalSaturatorNode {
     this.applyParams();
   }
 
+  private safeDrive() {
+    const d = Number(this.params.drive);
+    return Number.isFinite(d) ? Math.max(0, Math.min(100, d)) : 20;
+  }
+
   private generateCurve() {
     const n = 4096;
     const curve = new Float32Array(n);
-    const safeDrive = Number.isFinite(this.params.drive) ? this.params.drive : 20;
-    const drive = 1 + (safeDrive / 10);
-    const mode = this.params.mode;
+    const drive = 1 + (this.safeDrive() / 10);
     for (let i = 0; i < n; i++) {
-      let x = (i * 2) / n - 1;
+      // Echantillonnage exact de [-1, 1] (x = 0 tombe sur le milieu de la table)
+      const x = (i * 2) / (n - 1) - 1;
 
-      if (this.params.mode === 'TAPE') {
-        curve[i] = Math.tanh(x * drive) / Math.tanh(drive);
-      } 
-      else if (this.params.mode === 'TUBE') {
+      if (this.params.mode === 'TUBE') {
         // Asymetrie douce (harmoniques paires). L'ancienne alternance positive
         // en racine carree ecrasait les petits signaux (pente nulle en 0) et
         // sonnait comme une distorsion de croisement sur les fins de phrase.
@@ -142,51 +256,94 @@ export class VocalSaturatorNode {
         const t0 = Math.tanh(drive * b);
         const norm = (Math.tanh(drive * (1 + b)) - Math.tanh(drive * (b - 1))) / 2;
         curve[i] = (Math.tanh(drive * (x + b)) - t0) / norm;
-      } 
+      }
       else if (this.params.mode === 'TRANSISTOR') {
         // Ecretage plus dur et symetrique (harmoniques impaires). Ce mode n'avait
         // pas de courbe : la voie saturee etait muette (presets Drill / Telephone).
         const shape = (v: number) => (drive * v) / Math.pow(1 + Math.pow(Math.abs(drive * v), 2.5), 0.4);
         curve[i] = shape(x) / shape(1);
-      } 
+      }
       else if (this.params.mode === 'SOFT_CLIP') {
         const gainX = x * drive * 0.5;
         curve[i] = Math.abs(gainX) < 1 ? gainX - (Math.pow(gainX, 3) / 3) : (gainX > 0 ? 0.66 : -0.66);
         curve[i] *= 1.5;
       }
+      else {
+        // TAPE (et valeur inconnue) : tangente hyperbolique normalisee
+        curve[i] = Math.tanh(x * drive) / Math.tanh(drive);
+      }
     }
+    this.curve = curve;
     this.shaper.curve = curve;
+    if (this.adaa) this.adaa.port.postMessage({ curve });
+  }
+
+  /**
+   * Compensation de niveau du drive : gain efficace de « pre-gain + courbe »
+   * pour un sinus de reference (crete -14 dBFS, niveau typique d'une voix
+   * compressee), inverse ensuite. Avant, la voie saturee sortait 6 a 14 dB
+   * plus fort que le sec (drive 15 a 40) : monter le drive montait surtout le
+   * volume. Desormais le drive change la couleur (harmoniques, arrondi des
+   * cretes) a niveau quasi constant, comme les saturateurs de reference.
+   */
+  private driveCompensation(pre: number): number {
+    const c = this.curve, n = c.length;
+    const lookup = (x: number) => {
+      if (x <= -1) return c[0];
+      if (x >= 1) return c[n - 1];
+      const u = (x + 1) * (n - 1) / 2; const j = Math.min(n - 2, Math.floor(u)); const t = u - j;
+      return c[j] + (c[j + 1] - c[j]) * t;
+    };
+    const N = 256;
+    let mean = 0;
+    const ys = new Float64Array(N);
+    for (let i = 0; i < N; i++) { ys[i] = lookup(pre * DRIVE_REF_AMPLITUDE * Math.sin(2 * Math.PI * (i + 0.5) / N)); mean += ys[i]; }
+    mean /= N;
+    let e = 0;
+    for (let i = 0; i < N; i++) e += (ys[i] - mean) * (ys[i] - mean);
+    const rmsOut = Math.sqrt(e / N);
+    const rmsIn = DRIVE_REF_AMPLITUDE / Math.SQRT2;
+    return rmsOut > 1e-9 ? rmsIn / rmsOut : 1;
   }
 
   private applyParams() {
-    const now = this.ctx.currentTime;
-    const { drive, tone, mix, outputGain, isEnabled } = this.params;
+    const { tone, mix, outputGain, isEnabled } = this.params;
     const safe = (v: number) => Number.isFinite(v) ? v : 0;
+    const set = (prm: AudioParam, v: number) => setParamSmooth(prm, v, this.ctx, this.createdAt, 0.02);
 
     if (isEnabled) {
-      const sDrive = safe(drive);
-      this.driveGain.gain.setTargetAtTime(1 + (sDrive / 25), now, 0.02);
-      this.autoGain.gain.setTargetAtTime(1 / (1 + (sDrive / 60)), now, 0.02);
-      
-      const sTone = safe(tone);
-      this.tiltHigh.gain.setTargetAtTime(sTone * 12, now, 0.02);
-      this.tiltLow.gain.setTargetAtTime(-sTone * 12, now, 0.02);
-      
-      this.eqLowNode.gain.setTargetAtTime(safe(this.params.eqLow), now, 0.02);
-      this.eqMidNode.gain.setTargetAtTime(safe(this.params.eqMid), now, 0.02);
-      this.eqHighNode.gain.setTargetAtTime(safe(this.params.eqHigh), now, 0.02);
-      
-      const sMix = safe(mix);
-      this.dryGain.gain.setTargetAtTime(1 - sMix, now, 0.02);
-      this.wetGain.gain.setTargetAtTime(sMix, now, 0.02);
-      this.makeupGain.gain.setTargetAtTime(safe(outputGain), now, 0.02);
+      const pre = 1 + (this.safeDrive() / 25);
+      set(this.driveGain.gain, pre);
+      set(this.autoGain.gain, this.driveCompensation(pre));
+
+      const sTone = Math.max(-1, Math.min(1, safe(tone)));
+      set(this.tiltHigh.gain, sTone * 12);
+      set(this.tiltLow.gain, -sTone * 12);
+
+      set(this.eqLowNode.gain, safe(this.params.eqLow));
+      set(this.eqMidNode.gain, safe(this.params.eqMid));
+      set(this.eqHighNode.gain, safe(this.params.eqHigh));
+
+      const sMix = Math.max(0, Math.min(1, safe(mix)));
+      set(this.dryGain.gain, 1 - sMix);
+      set(this.wetGain.gain, sMix);
+      set(this.makeupGain.gain, Math.max(0, Number.isFinite(outputGain) ? outputGain : 1));
     } else {
-      this.dryGain.gain.setTargetAtTime(1, now, 0.02);
-      this.wetGain.gain.setTargetAtTime(0, now, 0.02);
+      set(this.dryGain.gain, 1);
+      set(this.wetGain.gain, 0);
+      set(this.makeupGain.gain, 1);
     }
   }
 
   public getParams() { return { ...this.params }; }
+
+  public dispose() {
+    try { this.input.disconnect(); } catch (e) {}
+    if (this.adaa) {
+      try { this.adaa.disconnect(); } catch (e) {}
+      this.adaa = null;
+    }
+  }
 }
 
 interface VocalSaturationUIProps {
@@ -293,7 +450,9 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
       if (typeof current !== 'number') return prev;
 
       let min = 0, max = 1;
-      if (activeParam.current === 'drive') { min = 1; max = 10; }
+      // Drive sur 0-100 comme les reglages enregistres (l'ancien 1-10 ramenait
+      // d'un coup un drive de preset 25 a 10 des qu'on touchait le bouton).
+      if (activeParam.current === 'drive') { min = 0; max = 100; }
       if (activeParam.current === 'tone') { min = -1; max = 1; }
       if (activeParam.current === 'outputGain') { min = 0; max = 2; }
       if (['eqLow', 'eqMid', 'eqHigh'].includes(activeParam.current)) { min = -12; max = 12; }
@@ -318,7 +477,9 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
       if (typeof current !== 'number') return prev;
 
       let min = 0, max = 1;
-      if (activeParam.current === 'drive') { min = 1; max = 10; }
+      // Drive sur 0-100 comme les reglages enregistres (l'ancien 1-10 ramenait
+      // d'un coup un drive de preset 25 a 10 des qu'on touchait le bouton).
+      if (activeParam.current === 'drive') { min = 0; max = 100; }
       if (activeParam.current === 'tone') { min = -1; max = 1; }
       if (activeParam.current === 'outputGain') { min = 0; max = 2; }
       if (['eqLow', 'eqMid', 'eqHigh'].includes(activeParam.current)) { min = -12; max = 12; }
@@ -422,7 +583,7 @@ export const VocalSaturatorUI: React.FC<VocalSaturationUIProps> = ({ node, initi
       </div>
 
       <div className="grid grid-cols-4 gap-4">
-        <SatKnob label="Drive" value={(params.drive - 1) / 9} onMouseDown={(e) => handleMouseDown('drive', e)} onTouchStart={(e) => handleTouchStart('drive', e)} color="#facc15" suffix="" displayVal={Math.round(params.drive * 10)} />
+        <SatKnob label="Drive" value={(Number.isFinite(params.drive) ? params.drive : 20) / 100} onMouseDown={(e) => handleMouseDown('drive', e)} onTouchStart={(e) => handleTouchStart('drive', e)} color="#facc15" suffix="" displayVal={Math.round(Number.isFinite(params.drive) ? params.drive : 20)} />
         <SatKnob label="Tone" value={(params.tone + 1) / 2} onMouseDown={(e) => handleMouseDown('tone', e)} onTouchStart={(e) => handleTouchStart('tone', e)} color="#facc15" suffix="" displayVal={Math.round(params.tone * 100)} />
         <SatKnob label="Mix" value={params.mix} onMouseDown={(e) => handleMouseDown('mix', e)} onTouchStart={(e) => handleTouchStart('mix', e)} color="#facc15" suffix="%" displayVal={Math.round(params.mix * 100)} />
         <SatKnob label="Output" value={params.outputGain / 2} onMouseDown={(e) => handleMouseDown('outputGain', e)} onTouchStart={(e) => handleTouchStart('outputGain', e)} color="#facc15" suffix="dB" displayVal={Math.round((params.outputGain - 1) * 12)} />

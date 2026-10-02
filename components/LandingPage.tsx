@@ -4,6 +4,7 @@ import { supabaseManager } from '../services/SupabaseManager';
 import { audioEngine } from '../engine/AudioEngine';
 import { ProjectIO } from '../services/ProjectIO';
 import AuthScreen from './AuthScreen';
+import InstallAppButton from './InstallAppButton';
 import { SavedSessionMeta, formatAgo } from '../utils/sessionStore';
 
 interface LandingPageProps {
@@ -243,6 +244,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </div>
 
+        <div className="flex items-center gap-2">
+        <InstallAppButton />
         {/* Bouton connexion / menu utilisateur */}
         {user && user.id !== 'guest' ? (
           <div className="flex items-center gap-3">
@@ -267,6 +270,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             Connexion
           </button>
         )}
+        </div>
       </header>
 
       {/* Contenu principal */}

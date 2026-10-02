@@ -1,5 +1,6 @@
 import React from 'react';
 import { VOCAL_MIX_STYLES } from '../utils/vocalPresets';
+import { TakeInfo, fmtTime } from '../utils/takes';
 
 interface VocalToolsPanelProps {
   open: boolean;
@@ -22,6 +23,12 @@ interface VocalToolsPanelProps {
   onBuyBeat: () => void;
   onProMix: () => void;
   onBookSession: () => void;
+  onShare: () => void;
+  onOpenDrums: () => void;
+  hasDrums: boolean;
+  /** Prises par piste voix (choix de la meilleure prise). */
+  takeGroups: { trackId: string; trackName: string; takes: TakeInfo[] }[];
+  onSelectTake: (trackId: string, n: number, listen: boolean) => void;
 }
 
 const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }> = ({ checked, onChange, label, hint }) => (
@@ -126,18 +133,56 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
             </p>
             <div className="mt-3 flex flex-col sm:flex-row gap-2">
               {p.hasCatalogBeat && (
-                <button type="button" onClick={p.onBuyBeat} className="flex-1 h-10 rounded-xl bg-amber-400 text-black text-[12px] font-black hover:bg-amber-300">
+                <button type="button" onClick={p.onBuyBeat} className="shrink-0 sm:flex-1 h-10 rounded-xl bg-amber-400 text-black text-[12px] font-black hover:bg-amber-300">
                   🛒 Acheter cette instru
                 </button>
               )}
-              <button type="button" onClick={p.onProMix} className="flex-1 h-10 rounded-xl bg-white/10 text-white text-[12px] font-bold hover:bg-white/20">
+              <button type="button" onClick={p.onProMix} className="shrink-0 sm:flex-1 h-10 rounded-xl bg-white/10 text-white text-[12px] font-bold hover:bg-white/20">
                 🎚️ Faire mixer par un pro
               </button>
             </div>
             <button type="button" onClick={p.onBookSession} className="mt-2 w-full h-10 rounded-xl border border-white/15 text-white text-[12px] font-bold hover:bg-white/10">
               🎙️ Enregistrer ce morceau au studio, avec un ingé son
             </button>
+            <button type="button" onClick={p.onShare} className="mt-2 w-full h-10 rounded-xl border border-cyan-400/40 text-cyan-200 text-[12px] font-bold hover:bg-cyan-500/10">
+              📲 Partager un extrait (vidéo / audio) ou télécharger la démo
+            </button>
+            <button type="button" onClick={p.onOpenDrums} className="mt-2 w-full h-10 rounded-xl border border-orange-400/40 text-orange-200 text-[12px] font-bold hover:bg-orange-500/10">
+              🥁 {p.hasDrums ? 'Modifier la batterie' : 'Ajouter une batterie (pour une mélodie)'}
+            </button>
           </div>
+
+          {/* Mes prises : écouter / garder la meilleure */}
+          {p.takeGroups.some(g => g.takes.length > 1) && (
+            <div className="border-t border-white/5 pt-4">
+              <h3 className="text-[12px] font-black uppercase tracking-wider text-slate-400 mb-2">Mes prises</h3>
+              <div className="space-y-3">
+                {p.takeGroups.filter(g => g.takes.length > 1).map(g => (
+                  <div key={g.trackId}>
+                    <p className="text-[11px] text-slate-400 mb-1.5">{g.trackName}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {g.takes.map(t => (
+                        <div key={t.n} className={`flex items-center rounded-xl border ${t.active ? "border-cyan-400/60 bg-cyan-500/10" : "border-white/10 bg-white/[0.03]"}`}>
+                          <button type="button" onClick={() => p.onSelectTake(g.trackId, t.n, true)} aria-label={`Écouter la prise ${t.n}`}
+                            className="h-10 pl-3 pr-2 text-[12px] font-bold text-white flex items-center gap-1.5">
+                            <i className="fas fa-play text-[9px]" /> Prise {t.n}
+                            <span className="text-[10px] font-normal text-slate-400">{fmtTime(t.start)}</span>
+                          </button>
+                          {t.active ? (
+                            <span className="h-10 px-3 flex items-center text-[11px] font-black text-cyan-300">✓</span>
+                          ) : (
+                            <button type="button" onClick={() => p.onSelectTake(g.trackId, t.n, false)}
+                              className="h-10 px-3 text-[11px] font-bold text-slate-200 border-l border-white/10 hover:text-white">Garder</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-2">Garder une prise coupe les autres au même endroit (elles ne sont pas effacées).</p>
+            </div>
+          )}
 
           {/* Outils */}
           <div className="border-t border-white/5 pt-4">

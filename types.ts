@@ -276,7 +276,9 @@ export interface Track {
   frozenClipIds?: string[];
   /** Empreinte des clips et effets rendus : si elle change, le rendu est perime. */
   frozenSourceSig?: string;
-  groupId?: string;           // NEW: Track group reference
+  /** Boîte à rythmes Make Music (piste PERCUSSIONS) : motif éditable. */
+  drumMachine?: import('./utils/drumKits').DrumMachine;
+  groupId?: string;            // NEW: Track group reference
   height?: number;             // NEW: Custom track height
   isMinimized?: boolean;       // NEW: Collapsed state
 }
@@ -457,7 +459,12 @@ export type AIActionType =
   | 'ANALYZE_MIX'
   | 'HIGHLIGHT'
   | 'OPEN_STUDIO_OFFER'
-  | 'OPEN_LYRICS'; 
+  | 'OPEN_LYRICS'
+  | 'OPEN_SHARE'
+  // Batterie Make Music
+  | 'ADD_DRUMS'
+  | 'OPEN_DRUMS'
+  | 'REMOVE_DRUMS'; 
 
 export interface AIAction {
   action: AIActionType;

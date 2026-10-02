@@ -14,9 +14,11 @@ interface ExportModalProps {
   projectState: DAWState;
   /** Instrumentaux du catalogue achetes par l'utilisateur. */
   ownedInstrumentIds?: (string | number)[];
+  /** Démo taguée / extrait à partager (dispo sans licence). */
+  onOpenShare?: () => void;
 }
 
-const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState, ownedInstrumentIds = [] }) => {
+const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState, ownedInstrumentIds = [], onOpenShare }) => {
 
   // Verrou de licence. Le DAW sert a essayer les instrumentaux : on ne peut
   // sortir un fichier audio que si le beat du catalogue present dans le projet
@@ -403,18 +405,27 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                               <button
                                 type="button"
                                 onClick={() => openBuyBeat(projectState.tracks)}
-                                className="flex-1 h-10 rounded-lg bg-amber-400 text-black text-[11px] font-black uppercase tracking-wide hover:bg-amber-300"
+                                className="shrink-0 sm:flex-1 h-10 rounded-lg bg-amber-400 text-black text-[11px] font-black uppercase tracking-wide hover:bg-amber-300"
                               >
                                 🛒 Acheter cette instru
                               </button>
                               <button
                                 type="button"
                                 onClick={openProMix}
-                                className="flex-1 h-10 rounded-lg bg-white/10 text-white text-[11px] font-bold hover:bg-white/20"
+                                className="shrink-0 sm:flex-1 h-10 rounded-lg bg-white/10 text-white text-[11px] font-bold hover:bg-white/20"
                               >
                                 🎚️ Faire mixer par un pro
                               </button>
                             </div>
+                            {onOpenShare && (
+                              <button
+                                type="button"
+                                onClick={onOpenShare}
+                                className="mt-2 w-full h-10 rounded-lg border border-cyan-400/40 text-cyan-200 text-[11px] font-bold hover:bg-cyan-500/10"
+                              >
+                                📲 Démo gratuite (MP3 tagué) ou extrait 30 s à partager
+                              </button>
+                            )}
                           </div>
                         )}
 

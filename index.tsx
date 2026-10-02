@@ -19,6 +19,19 @@ if (loadingEl) {
   setTimeout(() => loadingEl.remove(), 300);
 }
 
+// Application installable : service worker seulement en ligne (https), en page
+// principale (pas dans le cadre du site) et hors application iPhone (Capacitor).
+if (
+  'serviceWorker' in navigator &&
+  window.location.protocol === 'https:' &&
+  window.top === window.self &&
+  !(window as any).Capacitor
+) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => { /* pas bloquant */ });
+  });
+}
+
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>

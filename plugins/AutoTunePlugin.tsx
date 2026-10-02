@@ -64,6 +64,10 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       for (let i = 0; i < notes.length; i++) m[notes[i]] = 1;
       return m;
     });
+    // Mode basse latence (prise de voix) : lecture a vitesse variable avec
+    // raccords synchrones de la periode, cf. llProcess.
+    this.llDmin = Math.round(0.0005 * sr) + 4;
+    this.llOut = new Float32Array(128);
     this.reset();
   }
 
@@ -82,6 +86,9 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
     this.lastDetectedFreq = 0; this.lastTargetFreq = 0; this.lastVoiced = false;
     this.msgCounter = 0;
     this.wasBypassed = false;
+    this.llInit = false; this.llRp = 0; this.llOldRp = 0; this.llX = 0; this.llXLen = 1;
+    this.llCorr = 0; this.llTarget = -1; this.llHeld = 0; this.llRatio = 1; this.llVoiced = false;
+    this.llMix = -1;
   }
 
   static get parameterDescriptors() {
@@ -91,7 +98,8 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       { name: 'humanize', defaultValue: 0.0, minValue: 0.0, maxValue: 1.0 },
       { name: 'rootKey', defaultValue: 0, minValue: 0, maxValue: 11 },
       { name: 'scaleType', defaultValue: 0, minValue: 0, maxValue: 4 },
-      { name: 'bypass', defaultValue: 0, minValue: 0, maxValue: 1 }
+      { name: 'bypass', defaultValue: 0, minValue: 0, maxValue: 1 },
+      { name: 'lowLatency', defaultValue: 0, minValue: 0, maxValue: 1 }
     ];
   }
 
@@ -198,9 +206,8 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
   // Hysteresis : on ne change de note cible que si la voix est nettement plus
   // proche de la nouvelle. Sans ca, une note tenue entre deux degres oscillait
   // d'une note a l'autre (le fameux "warble").
-  chooseTarget(midi, rootKey, mask) {
+  chooseTarget(midi, rootKey, mask, cur) {
     const cand = this.nearestNote(midi, rootKey, mask);
-    const cur = this.curTarget;
     if (cur < 0 || cand === cur) return cand;
     const curPc = (((cur - rootKey) % 12) + 12) % 12;
     if (!mask[curPc]) return cand;
@@ -224,7 +231,7 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       if (voiced) {
         const f0 = sr / P;
         const midi = 69 + 12 * Math.log2(f0 / 440);
-        const tgt = this.chooseTarget(midi, rootKey, mask);
+        const tgt = this.chooseTarget(midi, rootKey, mask, this.curTarget);
         if (tgt !== this.curTarget) { this.curTarget = tgt; this.heldTime = 0; }
         else this.heldTime += dt;
         const want = (tgt - midi) * 100;
@@ -280,6 +287,81 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       }
       this.nextSynth = ts + P / ratio;
     }
+  }
+
+  hermite(pos) {
+    const i = Math.floor(pos), t = pos - i, M = this.MASK, b = this.inBuf;
+    const xm1 = b[(i - 1) & M], x0 = b[i & M], x1 = b[(i + 1) & M], x2 = b[(i + 2) & M];
+    const c1 = 0.5 * (x1 - xm1);
+    const c2 = xm1 - 2.5 * x0 + 2 * x1 - 0.5 * x2;
+    const c3 = 0.5 * (x2 - xm1) + 1.5 * (x0 - x1);
+    return ((c3 * t + c2) * t + c1) * t + x0;
+  }
+
+  // Mode basse latence (prise de voix, retour casque) : principe des
+  // correcteurs temps reel historiques (Auto-Tune d'origine) : la voix est
+  // relue a vitesse variable (rapport = correction voulue) et, quand la tete
+  // de lecture rattrape l'ecriture (ou s'en eloigne), elle saute d'un nombre
+  // entier de periodes avec un fondu enchaine : les deux tetes sont alors en
+  // phase, le raccord est inaudible. Le retard reste entre llDmin (0,5 ms) et
+  // llDmin + une periode (moyenne ~4 ms pour une voix a 150 Hz), au lieu des
+  // ~27 ms de la PSOLA. Contrepartie : les formants suivent la correction
+  // (quelques % pour un demi-ton), acceptable pour le retour casque ; la
+  // lecture et l'export utilisent la PSOLA qui preserve les formants.
+  llProcess(n, speed, amount, humanize, rootKey, mask) {
+    const sr = sampleRate;
+    const dt = n / sr;
+    // Derniere estimation (pas de recul d'analyse : on suit la voix au plus pres)
+    const est = this.histCount > 0 ? this.histPeriod[(this.histCount - 1) % this.HN] : 0;
+    const voiced = est > 0;
+    if (voiced) {
+      const f0 = sr / est;
+      const midi = 69 + 12 * Math.log2(f0 / 440);
+      const tgt = this.chooseTarget(midi, rootKey, mask, this.llTarget);
+      if (tgt !== this.llTarget) { this.llTarget = tgt; this.llHeld = 0; } else this.llHeld += dt;
+      const want = (tgt - midi) * 100;
+      let tau = 0.3 * speed * speed;
+      const hold = Math.max(0, Math.min(1, (this.llHeld - 0.08) / 0.25));
+      tau += humanize * humanize * 0.25 * hold;
+      const a = tau < 0.0005 ? 1 : 1 - Math.exp(-dt / tau);
+      this.llCorr += (want - this.llCorr) * a;
+    } else {
+      this.llCorr *= Math.exp(-dt / 0.03);
+      this.llTarget = -1;
+    }
+    let ratio = Math.pow(2, (this.llCorr * amount) / 1200);
+    if (ratio < 0.7) ratio = 0.7; else if (ratio > 1.4) ratio = 1.4;
+    // Saut = une periode (au moins 2 ms pour un fondu propre) ; hors voisement, 6 ms.
+    let Pj = voiced ? est : Math.round(0.006 * sr);
+    const minJ = Math.round(0.002 * sr);
+    if (Pj < minJ) Pj *= Math.ceil(minJ / Pj);
+    const base = this.inCount - n;
+    const Dmin = this.llDmin, out = this.llOut;
+    if (!this.llInit) { this.llRp = base - 1 - Dmin; this.llX = 0; this.llRatio = ratio; this.llInit = true; }
+    let rp = this.llRp, op = this.llOldRp, x = this.llX;
+    const r0 = this.llRatio;
+    for (let i = 0; i < n; i++) {
+      const now = base + i;
+      const rr = r0 + (ratio - r0) * (i + 1) / n;
+      rp += rr;
+      if (x > 0) op += rr;
+      const d = now - rp;
+      if (x <= 0) {
+        if (d < Dmin + Pj * Math.max(0, rr - 1)) { op = rp; rp -= Pj; x = this.llXLen = Math.round(Pj); }
+        else if (d > Dmin + Pj * (1 + Math.max(0, 1 - rr)) + 2) { op = rp; rp += Pj; x = this.llXLen = Math.round(Pj); }
+      }
+      if (now - rp < 3) rp = now - 3;
+      let y = this.hermite(rp);
+      if (x > 0) {
+        if (now - op < 3) op = now - 3;
+        // Poids de l'ancienne tete : 1 -> 0 (cosinus sureleve)
+        const g = 0.5 - 0.5 * Math.cos(Math.PI * x / this.llXLen);
+        y = y * (1 - g) + this.hermite(op) * g;
+        x--;
+      }
+      out[i] = y;
+    }
+    this.llRp = rp; this.llOldRp = op; this.llX = x; this.llRatio = ratio;
   }
 
   process(inputs, outputs, parameters) {
@@ -357,6 +439,24 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       this.wsum[idx] = 0;
     }
     this.outCount = blockEnd;
+
+    // 4. Mode basse latence, avec fondu de 20 ms entre les deux moteurs
+    const llWanted = parameters.lowLatency[0] > 0.5 ? 1 : 0;
+    if (this.llMix < 0) this.llMix = llWanted; // premier bloc : pas de fondu
+    if (llWanted > 0 || this.llMix > 0) {
+      if (this.llOut.length < blockSize) this.llOut = new Float32Array(blockSize);
+      this.llProcess(blockSize, speed, amount, humanize, rootKey, mask);
+      const step = 1 / (0.02 * sampleRate);
+      let m = this.llMix;
+      for (let i = 0; i < blockSize; i++) {
+        if (m < llWanted) m = Math.min(llWanted, m + step); else if (m > llWanted) m = Math.max(llWanted, m - step);
+        outData[i] = outData[i] * (1 - m) + this.llOut[i] * m;
+      }
+      this.llMix = m;
+    } else {
+      // Repartira d'un retard minimal a la prochaine activation
+      this.llInit = false; this.llCorr = 0; this.llTarget = -1;
+    }
     for (let c = 1; c < output.length; c++) output[c].set(outData);
 
     if (++this.msgCounter >= 8) {
@@ -396,6 +496,15 @@ export function autoTuneLatencySamples(sampleRate: number): number {
   return 2 * Math.ceil(sampleRate / 75) + 34;
 }
 
+/**
+ * Latence nominale du mode basse latence (en echantillons) : retard minimal
+ * (llDmin du worklet) + une demi-periode d'une voix a 150 Hz. Le retard reel
+ * varie entre llDmin et llDmin + une periode selon les raccords.
+ */
+export function autoTuneLowLatencySamples(sampleRate: number): number {
+  return Math.round(0.0005 * sampleRate) + 4 + Math.round(sampleRate / 300);
+}
+
 export interface AutoTuneParams {
   speed: number;      // 0.0 (robot, instantane) to 1.0 (~300 ms, naturel)
   humanize: number;   // 0.0 to 1.0 : ralentit la correction sur les notes tenues
@@ -403,6 +512,11 @@ export interface AutoTuneParams {
   rootKey: number;    // 0 to 11
   scale: string;      // Scale Name
   isEnabled: boolean;
+  /**
+   * Mode basse latence (piste armee : retour casque) : ~4 ms au lieu de ~27 ms.
+   * Bascule en fondu de 20 ms. Optionnel, desactive par defaut.
+   */
+  lowLatency?: boolean;
 }
 
 export class AutoTuneNode {
@@ -418,7 +532,8 @@ export class AutoTuneNode {
     mix: 1.0,
     rootKey: 0,
     scale: 'CHROMATIC',
-    isEnabled: true
+    isEnabled: true,
+    lowLatency: false
   };
 
   /**
@@ -428,23 +543,34 @@ export class AutoTuneNode {
    */
   public readonly ready: Promise<void>;
 
+  private readonly hqLatency: number;
+  private readonly llLatency: number;
+
   /**
-   * Retard introduit par le moteur PSOLA (~27 ms), en secondes. Expose pour
-   * une eventuelle compensation de latence cote moteur audio.
+   * Retard introduit, en secondes, selon le mode courant : ~27 ms en PSOLA
+   * (lecture, export), ~4 ms en mode basse latence. Relu par le moteur apres
+   * chaque updateParams({ lowLatency }) pour la compensation de lecture.
    */
-  public readonly latency: number;
+  public get latency(): number {
+    if (this.failed) return 0; // passage direct : aucun retard
+    return this.params.lowLatency ? this.llLatency : this.hqLatency;
+  }
+  private failed = false;
+  private disposed = false;
 
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
     this.input = ctx.createGain();
     this.output = ctx.createGain();
-    this.latency = autoTuneLatencySamples(ctx.sampleRate) / ctx.sampleRate;
+    this.hqLatency = autoTuneLatencySamples(ctx.sampleRate) / ctx.sampleRate;
+    this.llLatency = autoTuneLowLatencySamples(ctx.sampleRate) / ctx.sampleRate;
     this.ready = this.initWorklet();
   }
 
   private async initWorklet() {
     try {
       await loadAutoTuneModule(this.ctx);
+      if (this.disposed) return;
 
       this.worklet = new AudioWorkletNode(this.ctx, 'auto-tune-processor', {
         numberOfInputs: 1,
@@ -454,7 +580,8 @@ export class AutoTuneNode {
           amount: this.params.mix,
           humanize: this.params.humanize,
           rootKey: this.params.rootKey,
-          scaleType: Math.max(0, SCALES.indexOf(this.params.scale))
+          scaleType: Math.max(0, SCALES.indexOf(this.params.scale)),
+          lowLatency: this.params.lowLatency ? 1 : 0
         }
       });
 
@@ -473,6 +600,7 @@ export class AutoTuneNode {
     } catch (e) {
       console.error("[AutoTune] Worklet Load Error:", e);
       // Fallback: Bypass if fails
+      this.failed = true;
       this.input.connect(this.output);
     }
   }
@@ -491,6 +619,8 @@ export class AutoTuneNode {
     const safe = (v: number, def: number) => Number.isFinite(v) ? v : def;
     
     params.get('bypass')?.setValueAtTime(isEnabled ? 0 : 1, now);
+    // Le worklet fait lui-meme le fondu entre les deux moteurs.
+    params.get('lowLatency')?.setValueAtTime(this.params.lowLatency ? 1 : 0, now);
     params.get('retuneSpeed')?.setTargetAtTime(safe(speed, 0.1), now, 0.01);
     params.get('amount')?.setTargetAtTime(safe(mix, 1), now, 0.01);
     params.get('humanize')?.setTargetAtTime(safe(humanize, 0), now, 0.01);
@@ -501,6 +631,20 @@ export class AutoTuneNode {
 
   public setStatusCallback(cb: (data: any) => void) {
     this.onStatusCallback = cb;
+  }
+
+  /**
+   * Libere le worklet : sans ca, une instance retiree de la chaine continuait
+   * de calculer (son process renvoie toujours true) jusqu'a la fermeture du contexte.
+   */
+  public dispose() {
+    this.disposed = true;
+    this.onStatusCallback = null;
+    try { this.input.disconnect(); } catch (e) {}
+    if (this.worklet) {
+      try { this.worklet.port.onmessage = null; this.worklet.disconnect(); } catch (e) {}
+      this.worklet = null;
+    }
   }
 }
 

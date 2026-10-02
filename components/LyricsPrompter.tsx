@@ -78,19 +78,26 @@ const LyricsPrompter: React.FC<LyricsPrompterProps> = (p) => {
   return (
     <div
       className="fixed z-[420] left-1/2 -translate-x-1/2 w-[min(94vw,560px)] top-[150px] md:top-[170px] rounded-2xl border border-white/15 bg-black/85 backdrop-blur-md shadow-2xl flex flex-col"
-      style={{ height: editing ? 'min(60vh, 460px)' : 'min(40vh, 340px)' }}
+      style={{ height: editing ? 'min(60vh, 460px)' : 'min(44vh, 380px)' }}
       role="region"
       aria-label="Prompteur de paroles"
     >
       {/* Barre d'outils */}
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/10">
-        <span className="text-[12px] font-black text-white mr-auto">📝 Mes paroles</span>
-        {editing ? (
-          <button type="button" onClick={saveDraft} className="h-9 px-3 rounded-lg bg-cyan-500 text-black text-[12px] font-black">
-            ✓ Prêt
-          </button>
-        ) : (
-          <>
+      {/* Barre d'outils : deux rangées pour tenir sur un téléphone */}
+      <div className="border-b border-white/10 px-3 py-2 space-y-2">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[13px] font-black text-white mr-auto">📝 Mes paroles</span>
+          {editing ? (
+            <button type="button" onClick={saveDraft} className="h-9 px-3 rounded-lg bg-cyan-500 text-black text-[12px] font-black">
+              ✓ Prêt
+            </button>
+          ) : (
+            <button type="button" className={btn} aria-label="Modifier les paroles" onClick={() => { setDraft(p.lyrics); setEditing(true); }}>✏️ Modifier</button>
+          )}
+          <button type="button" className={btn} aria-label="Fermer le prompteur" onClick={() => { if (editing) saveDraft(); p.onClose(); }}>✕</button>
+        </div>
+        {!editing && (
+          <div className="flex items-center gap-1.5 flex-wrap">
             <button type="button" className={btn} title="Plus lent" aria-label="Plus lent"
               onClick={() => p.onSpeedChange(Math.max(4, p.speed - 2))}>🐢</button>
             <span className="text-[11px] text-slate-300 tabular-nums w-14 text-center" title="Lignes par minute">{p.speed} l/min</span>
@@ -98,12 +105,10 @@ const LyricsPrompter: React.FC<LyricsPrompterProps> = (p) => {
               onClick={() => p.onSpeedChange(Math.min(60, p.speed + 2))}>🐇</button>
             <button type="button" className={btn} aria-label="Texte plus petit" onClick={() => setFontSize(f => Math.max(16, f - 2))}>A−</button>
             <button type="button" className={btn} aria-label="Texte plus grand" onClick={() => setFontSize(f => Math.min(44, f + 2))}>A+</button>
-            <button type="button" className={btn} title="La première ligne démarre à la position actuelle du beat"
+            <button type="button" className={`${btn} ml-auto`} title="La première ligne démarre à la position actuelle du beat"
               onClick={() => p.onStartChange(p.isPlaying ? audioEngine.getCurrentTime() : p.currentTime)}>⏱ Commencer ici</button>
-            <button type="button" className={btn} aria-label="Modifier les paroles" onClick={() => { setDraft(p.lyrics); setEditing(true); }}>✏️</button>
-          </>
+          </div>
         )}
-        <button type="button" className={btn} aria-label="Fermer le prompteur" onClick={() => { if (editing) saveDraft(); p.onClose(); }}>✕</button>
       </div>
 
       {editing ? (

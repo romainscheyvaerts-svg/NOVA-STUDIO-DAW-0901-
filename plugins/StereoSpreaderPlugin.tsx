@@ -98,9 +98,10 @@ export class StereoSpreaderNode {
   public analyzerR: AnalyserNode;
   public correlationAnalyzer: AnalyserNode;
   
-  // Correlation meter data
+  // Correlation meter data (calculee a la demande, voir getCorrelation)
   private correlationValue: number = 1.0;
-  private correlationInterval: number | null = null;
+  private corrL: Float32Array | null = null;
+  private corrR: Float32Array | null = null;
 
   private params: SpreaderParams = {
     width: 1.0,
@@ -190,7 +191,11 @@ export class StereoSpreaderNode {
     this.outputMerger = ctx.createChannelMerger(2);
     
     this.setupChain();
-    this.startCorrelationMeter();
+    // Plus de setInterval de mesure : il tournait 20 fois par seconde pour
+    // chaque instance, y compris celles creees pour l'export hors ligne (jamais
+    // arretees : le moteur appelle dispose(), pas destroy()), alors que
+    // l'interface calcule sa propre correlation. getCorrelation() mesure
+    // desormais a la demande.
   }
 
   private setupChain() {
@@ -343,33 +348,6 @@ export class StereoSpreaderNode {
     this.applyParams();
   }
 
-  private startCorrelationMeter() {
-    // Calculate phase correlation in real-time
-    this.correlationInterval = window.setInterval(() => {
-      const bufferLength = this.analyzerL.fftSize;
-      const dataL = new Float32Array(bufferLength);
-      const dataR = new Float32Array(bufferLength);
-      
-      this.analyzerL.getFloatTimeDomainData(dataL);
-      this.analyzerR.getFloatTimeDomainData(dataR);
-      
-      // Calculate correlation coefficient
-      let sumLR = 0;
-      let sumL2 = 0;
-      let sumR2 = 0;
-      
-      for (let i = 0; i < bufferLength; i++) {
-        sumLR += dataL[i] * dataR[i];
-        sumL2 += dataL[i] * dataL[i];
-        sumR2 += dataR[i] * dataR[i];
-      }
-      
-      const denominator = Math.sqrt(sumL2 * sumR2);
-      this.correlationValue = denominator > 0 ? sumLR / denominator : 1.0;
-      
-    }, 50); // 20 Hz update rate
-  }
-
   public updateParams(p: Partial<SpreaderParams>) {
     this.params = { ...this.params, ...p };
     this.applyParams();
@@ -442,16 +420,33 @@ export class StereoSpreaderNode {
     }
   }
 
+  /** Correlation de phase L/R de la sortie (-1..1), mesuree a l'appel. */
   public getCorrelation(): number {
+    const n = this.analyzerL.fftSize;
+    if (!this.corrL || this.corrL.length !== n) { this.corrL = new Float32Array(n); this.corrR = new Float32Array(n); }
+    const dataL = this.corrL, dataR = this.corrR!;
+    this.analyzerL.getFloatTimeDomainData(dataL as any);
+    this.analyzerR.getFloatTimeDomainData(dataR as any);
+    let sumLR = 0, sumL2 = 0, sumR2 = 0;
+    for (let i = 0; i < n; i++) {
+      sumLR += dataL[i] * dataR[i];
+      sumL2 += dataL[i] * dataL[i];
+      sumR2 += dataR[i] * dataR[i];
+    }
+    const denominator = Math.sqrt(sumL2 * sumR2);
+    this.correlationValue = denominator > 0 ? sumLR / denominator : 1.0;
     return this.correlationValue;
   }
 
   public getStatus() { return { ...this.params }; }
   
   public destroy() {
-    if (this.correlationInterval) {
-      clearInterval(this.correlationInterval);
-    }
+    this.dispose();
+  }
+
+  public dispose() {
+    try { this.input.disconnect(); } catch (e) {}
+    try { this.output.disconnect(); } catch (e) {}
   }
 }
 

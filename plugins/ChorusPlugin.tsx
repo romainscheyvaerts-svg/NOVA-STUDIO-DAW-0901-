@@ -60,8 +60,6 @@ export class ChorusNode {
   private maxVoices = 4;
   
   // Random LFO (for S&H style modulation)
-  private randomLFOInterval: number | null = null;
-  private randomLFOValues: number[] = [0, 0, 0, 0];
   
   // Metering
   public analyzerL: AnalyserNode;
@@ -112,7 +110,9 @@ export class ChorusNode {
     // Create voices
     this.createVoices();
     this.setupGraph();
-    this.startRandomLFO();
+    // Le setInterval « LFO aleatoire » (100 ms) n'est plus lance : ses valeurs
+    // n'etaient lues nulle part, et il continuait de tourner apres le retrait
+    // du plugin et pour chaque instance d'export hors ligne.
   }
 
   private createVoices() {
@@ -187,17 +187,6 @@ export class ChorusNode {
     splitter.connect(this.analyzerR, 1);
     
     this.applyParams();
-  }
-
-  private startRandomLFO() {
-    // Update random LFO values at rate-dependent intervals
-    this.randomLFOInterval = window.setInterval(() => {
-      if (this.params.lfoShape === 'RANDOM') {
-        for (let i = 0; i < this.maxVoices; i++) {
-          this.randomLFOValues[i] = (Math.random() - 0.5) * 2;
-        }
-      }
-    }, 100); // Update every 100ms
   }
 
   public updateParams(p: Partial<ChorusParams>) {
@@ -351,10 +340,12 @@ export class ChorusNode {
     return { ...this.params };
   }
   
+  /** Appele par le moteur au retrait du plugin : arrete les LFO. */
+  public dispose() {
+    this.destroy();
+  }
+
   public destroy() {
-    if (this.randomLFOInterval) {
-      clearInterval(this.randomLFOInterval);
-    }
     for (const voice of this.voices) {
       try {
         voice.lfo.stop();
