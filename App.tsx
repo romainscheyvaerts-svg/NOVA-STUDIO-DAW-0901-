@@ -326,10 +326,11 @@ const SaveOverlay: React.FC<{ progress: number; message: string }> = ({ progress
 );
 
 const useUndoRedo = (initialState: DAWState) => {
-  const [history, setHistory] = useState<{ past: DAWState[]; present: DAWState; future: DAWState[]; }>({ past: [], present: initialState, future: [] });
+  // lastChangeAt : heure de la dernière modification RÉELLE du projet (pas une
+  // sélection ni un changement de vue), pour l'anti-rebond des entrées.
+  const [history, setHistory] = useState<{ past: DAWState[]; present: DAWState; future: DAWState[]; lastChangeAt?: number }>({ past: [], present: initialState, future: [] });
   const MAX_HISTORY = 100;
   const HISTORY_DEBOUNCE_MS = 300; // Debounce 300ms pour éviter trop d'entrées
-  const lastHistoryUpdateRef = useRef<number>(0);
 
   const cleanStateForHistory = (stateToClean: DAWState): DAWState => {
     return produce(stateToClean, draft => {
@@ -352,9 +353,10 @@ const useUndoRedo = (initialState: DAWState) => {
     // l'updater deux fois, la seconde passe voyait 0 ms ecoulee, repartait en
     // anti-rebond et ecrasait l'entree d'historique. Resultat : Ctrl+Z ne
     // restaurait presque jamais rien. Un reducer doit rester pur.
+    // L'heure est prise ici (le reducer reste pur) ; l'anti-rebond se mesure
+    // depuis la dernière modification réelle : sélectionner une piste juste
+    // avant un glisser ne fond plus ce glisser dans l'entrée précédente.
     const maintenant = Date.now();
-    const antiRebond = maintenant - lastHistoryUpdateRef.current < HISTORY_DEBOUNCE_MS;
-    if (!antiRebond) lastHistoryUpdateRef.current = maintenant;
 
     setHistory(curr => {
       const newState = typeof updater === 'function' ? updater(curr.present) : updater;
@@ -379,11 +381,12 @@ const useUndoRedo = (initialState: DAWState) => {
       if (!modificationReelle) return { ...curr, present: newState };
 
       // Changements rapproches : on met a jour le present sans nouvelle entree.
-      if (antiRebond) return { ...curr, present: newState };
+      const antiRebond = maintenant - (curr.lastChangeAt || 0) < HISTORY_DEBOUNCE_MS;
+      if (antiRebond) return { ...curr, present: newState, lastChangeAt: maintenant };
 
       const cleanedPresentForHistory = cleanStateForHistory(curr.present);
 
-      return { past: [...curr.past, cleanedPresentForHistory].slice(-MAX_HISTORY), present: newState, future: [] };
+      return { past: [...curr.past, cleanedPresentForHistory].slice(-MAX_HISTORY), present: newState, future: [], lastChangeAt: maintenant };
     });
   }, []);
 
