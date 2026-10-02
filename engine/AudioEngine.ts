@@ -21,6 +21,7 @@ import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { interpolateCurve } from '../services/AutomationManager';
 import { DrumRackNode } from './DrumRackNode'; // NEW
+import { DrumPadFxBank } from './DrumPadFx';
 import { novaBridge } from '../services/NovaBridge';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
@@ -42,6 +43,8 @@ interface TrackDSP {
   drumSampler?: DrumSamplerNode; // Pro Drum Sampler (Single)
   melodicSampler?: MelodicSamplerNode; // New Pro Melodic Sampler
   drumRack?: DrumRackNode; // NEW: 30-Pad Drum Rack
+  /** Mix par pad de la batterie Make Music. */
+  drumFx?: DrumPadFxBank;
   // Empreinte du cablage (plugins, routage, departs) : permet d'eviter de
   // reconstruire — et donc de couper brievement — le graphe quand rien de
   // structurel n'a change.
@@ -504,6 +507,15 @@ export class AudioEngine {
         sendGain.connect(target.input);
         rt.sends.set(send.id, sendGain);
       });
+    }
+
+    // --- 2a. Batterie Make Music : mix par pad (effets + envois) aussi à l'export
+    for (const track of tracks) {
+      const rt = rendered.get(track.id)!;
+      if (track.type !== TrackType.DRUM_RACK || !track.drumMachine || !rt.drumRack) continue;
+      const bank = new DrumPadFxBank(offlineCtx, rt.drumRack, (pl, c) => this.createPluginNode(pl, this.currentBpm, c as AudioContext));
+      bank.configure(track.drumMachine.rows, id => rendered.get(id)?.input, track.isMuted ? 0 : track.volume);
+      pendingPlugins.push(...bank.readyPromises());
     }
 
     // --- 2b. Automation (apres le cablage des departs, qu'elle peut piloter)
@@ -1609,6 +1621,11 @@ export class AudioEngine {
     
     if (track.type === TrackType.DRUM_RACK && dsp.drumRack && track.drumPads) {
       dsp.drumRack.updatePadsState(track.drumPads);
+      // Batterie Make Music : chaîne d'effets propre à chaque pad.
+      if (track.drumMachine) {
+        if (!dsp.drumFx) dsp.drumFx = new DrumPadFxBank(this.ctx, dsp.drumRack, (pl, c) => this.createPluginNode(pl, this.currentBpm, c as AudioContext));
+        dsp.drumFx.configure(track.drumMachine.rows, id => this.tracksDSP.get(id)?.input, track.isMuted ? 0 : track.volume);
+      }
     }
 
     // Le cablage n'a pas bouge (on a juste renomme la piste, deplace un clip,

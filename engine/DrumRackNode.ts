@@ -6,6 +6,22 @@ import { DrumPad } from '../types';
  * Manages 30 distinct sample pads with individual volume/pan.
  * Triggered by MIDI notes 60 (Pad 1) to 89 (Pad 30).
  */
+/** Durée réellement audible d'un son (jusqu'à -50 dB sous sa crête), mise en cache. */
+const audibleCache = new WeakMap<AudioBuffer, number>();
+function audibleLength(buf: AudioBuffer): number {
+  const hit = audibleCache.get(buf);
+  if (hit !== undefined) return hit;
+  const d = buf.getChannelData(0);
+  let pk = 0;
+  for (let i = 0; i < d.length; i++) { const a = d[i] < 0 ? -d[i] : d[i]; if (a > pk) pk = a; }
+  const floor = pk * 0.00316;
+  let last = d.length - 1;
+  while (last > 0 && Math.abs(d[last]) < floor) last--;
+  const len = Math.max(0.01, (last + 1) / buf.sampleRate);
+  audibleCache.set(buf, len);
+  return len;
+}
+
 export class DrumRackNode {
   private ctx: AudioContext;
   public input: GainNode;
@@ -18,6 +34,12 @@ export class DrumRackNode {
   private pads: Map<number, DrumPad> = new Map();
   // « Choke » : un pad coupe les autres du même groupe (hi-hat fermé / ouvert, 808).
   private chokeVoices: Map<number, { src: AudioBufferSourceNode; gain: GainNode }[]> = new Map();
+  // Entrée de la chaîne d'effets propre à chaque pad (mix par pad) ; sinon sortie directe.
+  private padInputs: Map<number, AudioNode> = new Map();
+
+  public setPadInput(padId: number, node: AudioNode | null) {
+    if (node) this.padInputs.set(padId, node); else this.padInputs.delete(padId);
+  }
 
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
@@ -73,10 +95,20 @@ export class DrumRackNode {
     // Create Source
     const source = this.ctx.createBufferSource();
     source.buffer = buffer;
+    const tune = pad.tune || 0;
+    if (tune) source.playbackRate.value = Math.pow(2, tune / 12);
 
     // Create Gain (Volume * Velocity)
     const gainNode = this.ctx.createGain();
-    gainNode.gain.value = pad.volume * velocity;
+    const level = pad.volume * velocity;
+    gainNode.gain.value = level;
+    // Longueur : le son est raccourci par un fondu (comme le « decay » d'une MPC).
+    const decay = pad.decay ?? 1;
+    if (decay < 0.999) {
+      const len = (audibleLength(buffer) / Math.pow(2, tune / 12)) * Math.max(0.05, decay);
+      gainNode.gain.setValueAtTime(level, now);
+      gainNode.gain.setTargetAtTime(0, now + len * 0.6, len * 0.15);
+    }
 
     // Create Panner
     const panner = this.ctx.createStereoPanner();
@@ -85,7 +117,7 @@ export class DrumRackNode {
     // Graph: Source -> Gain -> Panner -> Output
     source.connect(gainNode);
     gainNode.connect(panner);
-    panner.connect(this.output);
+    panner.connect(this.padInputs.get(padId) || this.output);
 
     source.start(now);
 

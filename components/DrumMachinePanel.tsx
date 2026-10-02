@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { DRUM_KITS, DrumMachine, DrumRow, setBars } from '../utils/drumKits';
+import { DRUM_KITS, DrumMachine, DrumRow, setBars, PadMix, DEFAULT_PAD_MIX, PAD_MIX_PRESETS } from '../utils/drumKits';
 import { DRUM_SOUNDS, DrumCategory } from '../utils/drumSounds';
 import { audioEngine } from '../engine/AudioEngine';
 
@@ -119,10 +119,12 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                       <div className="sticky left-0 z-10 bg-[#121418] pr-1 flex items-center gap-1 w-[118px] shrink-0">
                         <button type="button" onClick={() => p.onAudition(ri)} title="Écouter le son"
                           className="flex-1 min-w-0 h-9 rounded-lg bg-white/5 text-left px-2 text-[11px] font-bold text-white truncate hover:bg-white/10">
-                          {r.name}
+                          <span className={r.muted ? 'line-through opacity-50' : ''}>{r.name}</span>
+                          {r.solo && <span className="ml-1 text-amber-300">S</span>}
+                          {r.mix && Object.values(r.mix).some(v => v) && <span className="ml-1 text-violet-300" title="Effets sur ce pad">✦</span>}
                         </button>
-                        <button type="button" onClick={() => setSoundMenu(soundMenu === ri ? null : ri)} aria-label={`Changer le son de ${r.name}`}
-                          className="w-7 h-9 rounded-lg bg-white/5 text-slate-300 text-[10px] hover:bg-white/10"><i className="fas fa-caret-down" /></button>
+                        <button type="button" onClick={() => setSoundMenu(soundMenu === ri ? null : ri)} aria-label={`Son et mix du pad ${r.name}`} title="Son et mix du pad"
+                          className={`w-7 h-9 rounded-lg text-[11px] ${soundMenu === ri ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}><i className="fas fa-sliders-h" /></button>
                       </div>
                       {Array.from({ length: len }, (_, si) => {
                         const v = r.steps[si] || 0;
@@ -152,23 +154,12 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               </div>
 
               {soundMenu !== null && dm.rows[soundMenu] && (
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                  <p className="text-[12px] font-bold text-white mb-2">Son du pad « {dm.rows[soundMenu].name} »</p>
-                  <div className="flex flex-wrap gap-2">
-                    {DRUM_SOUNDS.filter(s => (CAT_OF[dm.rows[soundMenu].id] || []).includes(s.category)).map(s => (
-                      <button key={s.id} type="button"
-                        onClick={() => { editRow(soundMenu, r => ({ ...r, sound: `synth:${s.id}` })); setTimeout(() => p.onAudition(soundMenu), 120); }}
-                        className={`h-9 px-3 rounded-lg text-[12px] font-bold ${dm.rows[soundMenu].sound === `synth:${s.id}` ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white'}`}>
-                        {s.name}
-                      </button>
-                    ))}
-                  </div>
-                  <label className="mt-3 flex items-center gap-3 text-[12px] text-slate-300">
-                    Volume
-                    <input type="range" min={0} max={1.2} step={0.01} value={dm.rows[soundMenu].volume}
-                      onChange={e => editRow(soundMenu, r => ({ ...r, volume: parseFloat(e.target.value) }))} className="flex-1" />
-                  </label>
-                </div>
+                <PadEditor
+                  row={dm.rows[soundMenu]}
+                  onEdit={patch => editRow(soundMenu, patch)}
+                  onAudition={() => setTimeout(() => p.onAudition(soundMenu), 120)}
+                  onClose={() => setSoundMenu(null)}
+                />
               )}
 
               {/* Réglages */}
@@ -187,11 +178,97 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                 <button type="button" onClick={p.onRemove} className="ml-auto h-9 px-3 rounded-lg bg-white/5 text-slate-300 hover:text-white">Retirer la batterie</button>
               </div>
               <p className="text-[11px] text-slate-500">
-                Tap : allumer → accent léger → éteindre. Appui long (ou clic droit) : roll ×2 ×3 ×4. La 808 et le log drum sont accordés sur la tonalité du morceau.
+                Tap : allumer → accent léger → éteindre. Appui long (ou clic droit) : roll ×2 ×3 ×4. Bouton réglages d'un pad : son, accordage, longueur et mix (EQ, compression, saturation, réverb, délai). La 808 et le log drum sont accordés sur la tonalité du morceau.
               </p>
             </>
           )}
         </div>
+      </div>
+    </div>
+  );
+};
+
+interface PadEditorProps {
+  row: DrumRow;
+  onEdit: (patch: (r: DrumRow) => DrumRow) => void;
+  onAudition: () => void;
+  onClose: () => void;
+}
+
+interface KnobProps {
+  label: string; value: number; min: number; max: number; step: number;
+  fmt: (v: number) => string; onChange: (v: number) => void; onReset: () => void;
+}
+
+const Knob: React.FC<KnobProps> = k => (
+  <label className="flex flex-col gap-1 min-w-0">
+    <span className="flex justify-between text-[11px] text-slate-400">
+      <span>{k.label}</span>
+      <button type="button" onClick={k.onReset} title="Remettre à zéro" className="tabular-nums text-slate-200 hover:text-cyan-300">{k.fmt(k.value)}</button>
+    </span>
+    <input type="range" min={k.min} max={k.max} step={k.step} value={k.value} onChange={e => k.onChange(parseFloat(e.target.value))} className="w-full accent-cyan-400" />
+  </label>
+);
+
+/** Réglages d'un pad : son, niveau, panoramique, accordage, longueur, mute / solo et mix par effets natifs. */
+const PadEditor: React.FC<PadEditorProps> = ({ row, onEdit, onAudition, onClose }) => {
+  const mix: PadMix = { ...DEFAULT_PAD_MIX, ...(row.mix || {}) };
+  const setMix = (patch: Partial<PadMix>) => onEdit(r => ({ ...r, mix: { ...(r.mix || {}), ...patch } }));
+  const db = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`;
+  const pct = (v: number) => `${Math.round(v * 100)} %`;
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 space-y-3">
+      <div className="flex items-center gap-2">
+        <p className="text-[13px] font-black text-white mr-auto">Pad « {row.name} »</p>
+        <button type="button" onClick={() => onEdit(r => ({ ...r, muted: !r.muted }))} aria-pressed={!!row.muted}
+          className={`h-8 px-3 rounded-lg text-[11px] font-black ${row.muted ? 'bg-red-500 text-white' : 'bg-white/10 text-white'}`}>Mute</button>
+        <button type="button" onClick={() => onEdit(r => ({ ...r, solo: !r.solo }))} aria-pressed={!!row.solo}
+          className={`h-8 px-3 rounded-lg text-[11px] font-black ${row.solo ? 'bg-amber-400 text-black' : 'bg-white/10 text-white'}`}>Solo</button>
+        <button type="button" onClick={onClose} aria-label="Fermer les réglages du pad" className="w-8 h-8 rounded-lg bg-white/5 text-slate-300"><i className="fas fa-times" /></button>
+      </div>
+
+      <div>
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1.5">Son</p>
+        <div className="flex flex-wrap gap-2">
+          {DRUM_SOUNDS.filter(s => (CAT_OF[row.id] || []).includes(s.category)).map(s => (
+            <button key={s.id} type="button"
+              onClick={() => { onEdit(r => ({ ...r, sound: `synth:${s.id}` })); onAudition(); }}
+              className={`h-9 px-3 rounded-lg text-[12px] font-bold ${row.sound === `synth:${s.id}` ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white'}`}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
+        <Knob label="Volume" value={row.volume} min={0} max={1.2} step={0.01} fmt={pct} onChange={v => onEdit(r => ({ ...r, volume: v }))} onReset={() => onEdit(r => ({ ...r, volume: 0.9 }))} />
+        <Knob label="Panoramique" value={row.pan} min={-1} max={1} step={0.05}
+          fmt={v => (Math.abs(v) < 0.025 ? 'centre' : `${v < 0 ? 'G' : 'D'} ${Math.round(Math.abs(v) * 100)}`)}
+          onChange={v => onEdit(r => ({ ...r, pan: v }))} onReset={() => onEdit(r => ({ ...r, pan: 0 }))} />
+        <Knob label="Accordage" value={row.tune || 0} min={-12} max={12} step={1} fmt={v => `${v > 0 ? '+' : ''}${v} dt`}
+          onChange={v => onEdit(r => ({ ...r, tune: v }))} onReset={() => onEdit(r => ({ ...r, tune: 0 }))} />
+        <Knob label="Longueur" value={row.decay ?? 1} min={0.05} max={1} step={0.01} fmt={pct}
+          onChange={v => onEdit(r => ({ ...r, decay: v }))} onReset={() => onEdit(r => ({ ...r, decay: 1 }))} />
+      </div>
+
+      <div>
+        <div className="flex items-center gap-2 mb-1.5">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mr-auto">Mix du pad</p>
+          <button type="button" onClick={() => setMix({ ...DEFAULT_PAD_MIX, ...(PAD_MIX_PRESETS[row.id] || {}) })}
+            className="h-8 px-3 rounded-lg bg-violet-500/20 text-violet-200 text-[11px] font-bold hover:bg-violet-500/30">✦ Réglage pro</button>
+          <button type="button" onClick={() => onEdit(r => ({ ...r, mix: {} }))}
+            className="h-8 px-3 rounded-lg bg-white/5 text-slate-300 text-[11px] font-bold hover:text-white">Sans effet</button>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
+          <Knob label="Graves" value={mix.eqLow} min={-12} max={12} step={0.5} fmt={db} onChange={v => setMix({ eqLow: v })} onReset={() => setMix({ eqLow: 0 })} />
+          <Knob label="Médiums" value={mix.eqMid} min={-12} max={12} step={0.5} fmt={db} onChange={v => setMix({ eqMid: v })} onReset={() => setMix({ eqMid: 0 })} />
+          <Knob label="Aigus" value={mix.eqHigh} min={-12} max={12} step={0.5} fmt={db} onChange={v => setMix({ eqHigh: v })} onReset={() => setMix({ eqHigh: 0 })} />
+          <Knob label="Compression" value={mix.comp} min={0} max={1} step={0.01} fmt={pct} onChange={v => setMix({ comp: v })} onReset={() => setMix({ comp: 0 })} />
+          <Knob label="Saturation" value={mix.sat} min={0} max={1} step={0.01} fmt={pct} onChange={v => setMix({ sat: v })} onReset={() => setMix({ sat: 0 })} />
+          <Knob label="Réverb" value={mix.verb} min={0} max={1} step={0.01} fmt={pct} onChange={v => setMix({ verb: v })} onReset={() => setMix({ verb: 0 })} />
+          <Knob label="Délai" value={mix.delay} min={0} max={1} step={0.01} fmt={pct} onChange={v => setMix({ delay: v })} onReset={() => setMix({ delay: 0 })} />
+        </div>
+        <p className="mt-2 text-[11px] text-slate-500">Effets natifs Nova, sans latence : EQ, compresseur, saturation à bande ; réverb et délai partagés avec les voix (envois).</p>
       </div>
     </div>
   );

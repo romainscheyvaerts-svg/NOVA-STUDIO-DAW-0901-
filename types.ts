@@ -235,6 +235,11 @@ export interface DrumPad {
   midiNote: number; // 60 + (id - 1)
   buffer?: AudioBuffer;
   audioRef?: string; // URL for persistence
+  /** Accordage (demi-tons) et longueur (0.05-1) du son. */
+  tune?: number;
+  decay?: number;
+  /** Groupe de « choke » (hi-hat fermé / ouvert, 808). */
+  chokeGroup?: number;
 }
 
 export interface Track {

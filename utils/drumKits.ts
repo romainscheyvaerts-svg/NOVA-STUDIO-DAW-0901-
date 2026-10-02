@@ -21,9 +21,19 @@ export interface DrumRow {
   pan: number;
   /** Les pads d'un même groupe se coupent (hi-hat fermé / ouvert, 808). */
   choke?: number;
+  /** Accordage en demi-tons (-12 … +12). */
+  tune?: number;
+  /** Longueur du son (0.05 … 1 = son complet). */
+  decay?: number;
+  muted?: boolean;
+  solo?: boolean;
+  /** Mix du pad (effets natifs du DAW). */
+  mix?: Partial<PadMix>;
 }
 
 export interface DrumMachine {
+  /** Tempo utilisé pour le dernier clip (régénération si le tempo change). */
+  bpmUsed?: number;
   kitId: string;
   bars: 1 | 2;
   swing: number; // 0 - 0.6
@@ -186,7 +196,7 @@ export function setBars(dm: DrumMachine, bars: 1 | 2): DrumMachine {
 export function drumPadsFor(dm: DrumMachine): DrumPad[] {
   return dm.rows.map((r, i) => ({
     id: i + 1, name: r.name, sampleName: r.sound, volume: r.volume, pan: r.pan,
-    isMuted: false, isSolo: false, midiNote: 60 + i, audioRef: `nova-drum:${r.sound}`,
+    isMuted: !!r.muted, isSolo: !!r.solo, tune: r.tune || 0, decay: r.decay ?? 1, midiNote: 60 + i, audioRef: `nova-drum:${r.sound}`,
     // le groupe de choke voyage avec le pad (lu par DrumRackNode)
     ...(r.choke ? { chokeGroup: r.choke } as any : {}),
   }));
@@ -220,3 +230,69 @@ export function drumClipFor(dm: DrumMachine, bpm: number, start: number, end: nu
     fadeIn: 0, fadeOut: 0, color: '#f97316', notes,
   } as unknown as Clip;
 }
+
+// ===== Mix par pad : les effets natifs du DAW sur chaque son =====
+
+/** Réglages simples d'un pad, traduits en vrais effets (EQ, compresseur, saturateur, envois). */
+export interface PadMix {
+  eqLow: number;   // dB, plateau grave 100 Hz
+  eqMid: number;   // dB, cloche 1 kHz
+  eqHigh: number;  // dB, plateau aigu 8 kHz
+  comp: number;    // 0-1 dosage de compression (FET)
+  sat: number;     // 0-1 dosage de saturation (tape)
+  verb: number;    // 0-1 envoi vers la réverb du projet
+  delay: number;   // 0-1 envoi vers le délai du projet
+}
+
+export const DEFAULT_PAD_MIX: PadMix = { eqLow: 0, eqMid: 0, eqHigh: 0, comp: 0, sat: 0, verb: 0, delay: 0 };
+
+/** Point de départ « produit » par type de pad. */
+export const PAD_MIX_PRESETS: Record<string, Partial<PadMix>> = {
+  kick: { eqLow: 2, eqMid: -2, comp: 0.35 },
+  '808': { sat: 0.3, eqMid: -1 },
+  snare: { eqHigh: 2, comp: 0.3, verb: 0.15 },
+  clap: { eqHigh: 2, verb: 0.2 },
+  hatc: { eqLow: -6, eqHigh: 1 },
+  hato: { eqLow: -6, verb: 0.08 },
+  perc: { verb: 0.12, delay: 0.08 },
+  fx: { verb: 0.15 },
+};
+
+const padMixOf = (r: DrumRow): PadMix => ({ ...DEFAULT_PAD_MIX, ...(r.mix || {}) });
+
+/** Effets (au format des plugins du DAW) d'un pad, ids stables par pad. */
+export function padFxPlugins(r: DrumRow): { id: string; name: string; type: 'PROEQ12' | 'COMPRESSOR' | 'VOCALSATURATOR'; isEnabled: boolean; params: Record<string, any>; latency: number }[] {
+  const m = padMixOf(r);
+  const out: ReturnType<typeof padFxPlugins> = [];
+  if (m.eqLow || m.eqMid || m.eqHigh) {
+    const freqs = [80, 150, 300, 500, 1000, 2000, 4000, 6000, 8000, 10000, 12000, 18000];
+    const bands = freqs.map((frequency, id) => ({ id, type: 'peaking', frequency, gain: 0, q: 1, isEnabled: false, isSolo: false }));
+    Object.assign(bands[1], { type: 'lowshelf', frequency: 100, gain: m.eqLow, q: 0.71, isEnabled: !!m.eqLow });
+    Object.assign(bands[4], { type: 'peaking', frequency: 1000, gain: m.eqMid, q: 0.9, isEnabled: !!m.eqMid });
+    Object.assign(bands[8], { type: 'highshelf', frequency: 8000, gain: m.eqHigh, q: 0.71, isEnabled: !!m.eqHigh });
+    out.push({ id: `${r.id}-eq`, name: 'EQ', type: 'PROEQ12', isEnabled: true, latency: 0, params: { isEnabled: true, masterGain: 1, bands } });
+  }
+  if (m.comp > 0) {
+    // Compression « punch » : attaque lente qui laisse passer le transitoire,
+    // gain de compensation calculé pour garder un niveau proche du son sec.
+    const a = m.comp;
+    const threshold = -10 - 10 * a;
+    const ratio = 2 + 3 * a;
+    const makeupDb = 0.5 * Math.max(0, -threshold - 6) * (1 - 1 / ratio);
+    out.push({ id: `${r.id}-comp`, name: 'Compression', type: 'COMPRESSOR', isEnabled: true, latency: 0, params: {
+      isEnabled: true, threshold, ratio, knee: 6, attack: 0.012, release: 0.1,
+      makeupGain: Math.pow(10, makeupDb / 20), autoMakeup: false, mix: 1, scHpFreq: 40, lookahead: 0, mode: 'FET',
+    } });
+  }
+  if (m.sat > 0) {
+    // Le saturateur se compense pour une voix (-14 dBFS) ; une frappe de batterie
+    // est plus forte, donc on rattrape le niveau perdu à l'écrêtage doux.
+    out.push({ id: `${r.id}-sat`, name: 'Saturation', type: 'VOCALSATURATOR', isEnabled: true, latency: 0, params: {
+      isEnabled: true, drive: 60 * m.sat, mix: 0.3 + 0.5 * m.sat, tone: 0, eqLow: 0, eqMid: 0, eqHigh: 0, mode: 'TAPE',
+      outputGain: Math.pow(10, (2.5 * m.sat) / 20),
+    } });
+  }
+  return out;
+}
+
+export const padSends = (r: DrumRow) => { const m = padMixOf(r); return { verb: m.verb, delay: m.delay }; };

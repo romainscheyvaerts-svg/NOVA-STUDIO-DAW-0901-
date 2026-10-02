@@ -2441,7 +2441,6 @@ export default function App() {
   const applyDrumMachine = useCallback((dm: DrumMachine) => {
     setState(produce((draft: DAWState) => {
       let t = draft.tracks.find(x => x.id === DRUM_TRACK_ID);
-      const clip = drumClipFor(dm, draft.bpm, 0, drumLoopEnd(draft as DAWState), `clip-drums-${Date.now()}`);
       if (!t) {
         const newTrack: Track = {
           id: DRUM_TRACK_ID, name: 'PERCUSSIONS', type: TrackType.DRUM_RACK, color: '#f97316',
@@ -2453,9 +2452,16 @@ export default function App() {
         draft.tracks.splice(beatIdx + 1, 0, newTrack);
         t = draft.tracks.find(x => x.id === DRUM_TRACK_ID)!;
       }
-      t.drumMachine = dm as any;
+      // Le clip n'est régénéré que si le rythme change (pas pour un réglage de son ou de mix).
+      const sig = (m: DrumMachine) => JSON.stringify([m.bars, m.swing, m.rows.map(r => [r.steps, r.ratchet])]);
+      const end = drumLoopEnd(draft as DAWState);
+      const prev = t.drumMachine as DrumMachine | undefined;
+      const cur = t.clips[0];
+      if (!prev || !cur || sig(prev) !== sig(dm) || Math.abs(cur.start + cur.duration - end) > 0.01 || prev.bpmUsed !== draft.bpm) {
+        t.clips = [drumClipFor(dm, draft.bpm, 0, end, `clip-drums-${Date.now()}`) as any];
+      }
+      t.drumMachine = { ...dm, bpmUsed: draft.bpm } as any;
       t.drumPads = drumPadsFor(dm) as any;
-      t.clips = [clip as any];
     }));
   }, [setState]);
 
