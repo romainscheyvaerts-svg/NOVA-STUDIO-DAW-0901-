@@ -16,6 +16,8 @@ export class DrumRackNode {
   
   // Internal State (Vol/Pan/Mute) to apply on trigger
   private pads: Map<number, DrumPad> = new Map();
+  // « Choke » : un pad coupe les autres du même groupe (hi-hat fermé / ouvert, 808).
+  private chokeVoices: Map<number, { src: AudioBufferSourceNode; gain: GainNode }[]> = new Map();
 
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
@@ -86,6 +88,16 @@ export class DrumRackNode {
     panner.connect(this.output);
 
     source.start(now);
+
+    const group = (pad as any).chokeGroup as number | undefined;
+    if (group) {
+      const voices = this.chokeVoices.get(group) || [];
+      // Coupe brève (5 ms) des voix du groupe encore en train de sonner.
+      voices.forEach(v => {
+        try { v.gain.gain.setTargetAtTime(0, now, 0.005); v.src.stop(now + 0.05); } catch { /* déjà arrêtée */ }
+      });
+      this.chokeVoices.set(group, [{ src: source, gain: gainNode }]);
+    }
 
     // Garbage Collection
     source.onended = () => {

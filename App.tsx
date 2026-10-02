@@ -62,6 +62,9 @@ import LyricsPrompter from './components/LyricsPrompter';
 import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
 import ShareClipModal from './components/ShareClipModal';
+import DrumMachinePanel from './components/DrumMachinePanel';
+import { DrumMachine, makeDrumMachine, drumPadsFor, drumClipFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
+import { loadDrumSound } from './utils/drumSounds';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta } from './utils/sessionStore';
 import VocalToolsPanel from './components/VocalToolsPanel';
 
@@ -2422,6 +2425,84 @@ export default function App() {
   // Extrait 30 s / démo taguée
   const [shareOpen, setShareOpen] = useState(false);
 
+  // ===== Batterie Make Music (piste PERCUSSIONS) =====
+  const [drumsOpen, setDrumsOpen] = useState(false);
+  const DRUM_TRACK_ID = 'track-drums';
+
+  /** Fin de la boucle de batterie : fin du beat / de la mélodie, au moins 8 mesures. */
+  const drumLoopEnd = (st: DAWState) => {
+    const beat = st.tracks.find(t => t.id === 'instrumental');
+    const beatEnd = beat ? Math.max(0, ...beat.clips.map(c => c.start + c.duration)) : 0;
+    const bar = (60 / st.bpm) * 4;
+    return Math.max(beatEnd, bar * 8);
+  };
+
+  /** Applique un motif : pads + clip régénérés (une étape d'historique). */
+  const applyDrumMachine = useCallback((dm: DrumMachine) => {
+    setState(produce((draft: DAWState) => {
+      let t = draft.tracks.find(x => x.id === DRUM_TRACK_ID);
+      const clip = drumClipFor(dm, draft.bpm, 0, drumLoopEnd(draft as DAWState), `clip-drums-${Date.now()}`);
+      if (!t) {
+        const newTrack: Track = {
+          id: DRUM_TRACK_ID, name: 'PERCUSSIONS', type: TrackType.DRUM_RACK, color: '#f97316',
+          isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 0.85, pan: 0,
+          outputTrackId: 'master', sends: [], clips: [], plugins: [],
+          automationLanes: [createDefaultAutomation('volume', '#f97316')], totalLatency: 0,
+        } as Track;
+        const beatIdx = draft.tracks.findIndex(x => x.id === 'instrumental');
+        draft.tracks.splice(beatIdx + 1, 0, newTrack);
+        t = draft.tracks.find(x => x.id === DRUM_TRACK_ID)!;
+      }
+      t.drumMachine = dm as any;
+      t.drumPads = drumPadsFor(dm) as any;
+      t.clips = [clip as any];
+    }));
+  }, [setState]);
+
+  const handleSetDrumKit = useCallback((kitId?: string) => {
+    const st = stateRef.current;
+    const id = kitId && DRUM_KITS.some(k => k.id === kitId) ? kitId : suggestDrumKit(st.bpm, st.beatGenre, st.beatTitle);
+    applyDrumMachine(makeDrumMachine(id));
+    const kit = DRUM_KITS.find(k => k.id === id);
+    setAiNotification(`🥁 Batterie « ${kit?.name} » posée, calée sur le tempo (${Math.round(st.bpm)} BPM)${typeof st.projectKey === 'number' ? ' et la tonalité' : ''}. Lance la lecture !`);
+  }, [applyDrumMachine]);
+
+  const handleRemoveDrums = useCallback(() => {
+    setState(produce((draft: DAWState) => { draft.tracks = draft.tracks.filter(t => t.id !== DRUM_TRACK_ID); }));
+    setAiNotification('Batterie retirée (Annuler pour la remettre).');
+  }, [setState]);
+
+  // Sons des pads : générés / chargés puis donnés au moteur (808 accordée sur la tonalité).
+  const loadedPads = useRef(new Map<string, string>());
+  useEffect(() => {
+    const t = state.tracks.find(x => x.id === DRUM_TRACK_ID);
+    if (!t?.drumMachine || !audioEngine.ctx) return;
+    const ctx = audioEngine.ctx;
+    const root = typeof state.projectKey === 'number' ? state.projectKey : 0;
+    const timer = setTimeout(() => {
+      t.drumMachine!.rows.forEach((r, i) => {
+        const key = `${r.sound}|${root}`;
+        const padKey = `${t.id}:${i + 1}`;
+        if (loadedPads.current.get(padKey) === key && audioEngine.getDrumRackNode(t.id)?.getBuffers().has(i + 1)) return;
+        loadDrumSound(r.sound, ctx, root).then(buf => {
+          audioEngine.loadDrumRackSample(t.id, i + 1, buf);
+          loadedPads.current.set(padKey, key);
+        }).catch(() => { /* son indisponible */ });
+      });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [state.tracks, state.projectKey]);
+
+  // Tempo ou longueur du beat changés : la boucle de batterie suit.
+  const drumTempoRef = useRef<number>(state.bpm);
+  useEffect(() => {
+    const t = stateRef.current.tracks.find(x => x.id === DRUM_TRACK_ID);
+    if (!t?.drumMachine) { drumTempoRef.current = state.bpm; return; }
+    if (drumTempoRef.current === state.bpm) return;
+    drumTempoRef.current = state.bpm;
+    applyDrumMachine(t.drumMachine);
+  }, [state.bpm, applyDrumMachine]);
+
   // Première visite du studio : les 3 gestes à connaître.
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   useEffect(() => {
@@ -2531,6 +2612,17 @@ export default function App() {
       ? `🎵 « ${inst.title} » est prêt (${nomTonalite(tonalite.rootKey, tonalite.scale)}${ecoute ? ", détectée à l'écoute" : ''}) — l'Auto-Tune est réglé sur cette gamme. Appuie sur REC pour poser ta voix`
       : `🎵 « ${inst.title} » est prêt — appuie sur REC pour poser ta voix (gamme inconnue : l'Auto-Tune corrige sur toutes les notes)`);
     if (isMobile) setActiveMobileTab('TRACKS');
+    // Mélodie du studio (sans batterie) : on propose d'en poser une, adaptée.
+    if (inst.kind === 'melody' || /melod|sample/i.test(`${inst.genre || ''}`)) {
+      const st = stateRef.current;
+      const sid = suggestDrumKit(st.bpm, inst.genre, inst.title);
+      const others = DRUM_KITS.filter(k => k.id !== sid && ['trap', 'drill', 'boombap', 'rnb', 'afro'].includes(k.id)).slice(0, 2);
+      const first = DRUM_KITS.find(k => k.id === sid)!;
+      postNova(`🎹 « ${inst.title} » est une mélodie, sans batterie. Je te pose une batterie calée sur son tempo et sa tonalité ? Tu pourras modifier chaque pas.`, [
+        { label: `${first.emoji} Batterie ${first.name}`, action: { action: 'ADD_DRUMS', payload: { kit: sid } } },
+        ...others.map(k => ({ label: `${k.emoji} ${k.name}`, action: { action: 'ADD_DRUMS', payload: { kit: k.id } } as AIAction })),
+      ]);
+    }
   };
   loadCatalogBeatRef.current = handleLoadCatalogBeat;
 
@@ -3166,6 +3258,19 @@ export default function App() {
         setShareOpen(true);
         break;
 
+      case 'ADD_DRUMS':
+        void ensureAudioEngine().then(() => handleSetDrumKit(p.kit ? String(p.kit) : undefined));
+        if (p.open !== false) setDrumsOpen(true);
+        break;
+
+      case 'OPEN_DRUMS':
+        setDrumsOpen(true);
+        break;
+
+      case 'REMOVE_DRUMS':
+        handleRemoveDrums();
+        break;
+
       case 'OPEN_MIX_STYLES':
         setVocalToolsOpen(true);
         break;
@@ -3224,7 +3329,7 @@ export default function App() {
       handleFreezeTrack, handleAddMarker, handleDeleteMarker, handleCreateGroup, handleUpdateGroup,
       handleDeleteGroup, handleCreatePatternAndOpen, handleMoveClip, handleSaveCloud, undo, redo,
       canUndo, canRedo, handleUniversalAudioImport, handleApplyMixStyle, handleCleanSilences,
-      prepareSessionPart, handleAnalyzeMix]);
+      prepareSessionPart, handleAnalyzeMix, handleSetDrumKit, handleRemoveDrums]);
 
   const envoyerAuChatbot = async (messageUtilisateur: string) => {
     // Ordres simples (« monte ma voix », « style trap », « refais la prise »…) :
@@ -3580,6 +3685,8 @@ export default function App() {
         onProMix={openProMix}
         onBookSession={openStudioSession}
         onShare={() => { setVocalToolsOpen(false); setShareOpen(true); }}
+        onOpenDrums={() => { setVocalToolsOpen(false); setDrumsOpen(true); }}
+        hasDrums={!!state.tracks.find(t => t.id === DRUM_TRACK_ID)}
         takeGroups={state.tracks.filter(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId)
           .map(t => ({ trackId: t.id, trackName: t.name, takes: listTakes(t) }))}
         onSelectTake={(trackId, n, listen) => {
@@ -3669,6 +3776,19 @@ export default function App() {
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}
       {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
       {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={() => { setIsExportMenuOpen(false); setShareOpen(true); }} />}
+      <DrumMachinePanel
+        open={drumsOpen}
+        onClose={() => setDrumsOpen(false)}
+        dm={(state.tracks.find(t => t.id === DRUM_TRACK_ID)?.drumMachine as DrumMachine) || null}
+        onChange={dm => applyDrumMachine(dm)}
+        onKit={kitId => { void ensureAudioEngine().then(() => handleSetDrumKit(kitId)); }}
+        onRemove={() => { handleRemoveDrums(); setDrumsOpen(false); }}
+        onAudition={ri => { void ensureAudioEngine().then(() => audioEngine.triggerTrackAttack(DRUM_TRACK_ID, 60 + ri, 1)); }}
+        isPlaying={state.isPlaying}
+        onTogglePlay={handleTogglePlay}
+        bpm={state.bpm}
+        clipStart={0}
+      />
       <ShareClipModal open={shareOpen} onClose={() => setShareOpen(false)} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />}
       </Suspense>

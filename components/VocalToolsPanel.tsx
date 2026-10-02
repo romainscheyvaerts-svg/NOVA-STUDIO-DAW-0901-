@@ -24,6 +24,8 @@ interface VocalToolsPanelProps {
   onProMix: () => void;
   onBookSession: () => void;
   onShare: () => void;
+  onOpenDrums: () => void;
+  hasDrums: boolean;
   /** Prises par piste voix (choix de la meilleure prise). */
   takeGroups: { trackId: string; trackName: string; takes: TakeInfo[] }[];
   onSelectTake: (trackId: string, n: number, listen: boolean) => void;
@@ -144,6 +146,9 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
             </button>
             <button type="button" onClick={p.onShare} className="mt-2 w-full h-10 rounded-xl border border-cyan-400/40 text-cyan-200 text-[12px] font-bold hover:bg-cyan-500/10">
               📲 Partager un extrait (vidéo / audio) ou télécharger la démo
+            </button>
+            <button type="button" onClick={p.onOpenDrums} className="mt-2 w-full h-10 rounded-xl border border-orange-400/40 text-orange-200 text-[12px] font-bold hover:bg-orange-500/10">
+              🥁 {p.hasDrums ? 'Modifier la batterie' : 'Ajouter une batterie (pour une mélodie)'}
             </button>
           </div>
 

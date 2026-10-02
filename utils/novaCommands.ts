@@ -141,6 +141,14 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
       ...st.tracks.filter(isVoice).map(t => ({ action: 'UPDATE_PLUGIN', payload: { trackId: t.id, pluginType: 'AUTOTUNE', params } } as AIAction)));
   }
 
+  // Batterie Make Music
+  if (/\b(batterie|drums?|percu\w*|rythmique|808)\b/.test(msg)) {
+    if (/\b(enleve|retire|supprime|sans|coupe|vire)\b/.test(msg)) return say('Batterie retirée.', { action: 'REMOVE_DRUMS', payload: {} });
+    const kits: [RegExp, string][] = [[/\btrap\b/, 'trap'], [/\bdrill\b/, 'drill'], [/boom ?bap|old ?school/, 'boombap'], [/\b(rnb|r ?&? ?b|soul)\b/, 'rnb'], [/\bafro/, 'afro'], [/amapiano/, 'amapiano'], [/reggaeton|dembow/, 'dembow'], [/dancehall/, 'dancehall'], [/\bpop\b/, 'pop'], [/house/, 'house'], [/garage|ukg/, 'ukg'], [/drum ?(and|&|n) ?bass|dnb/, 'dnb'], [/reggae/, 'reggae'], [/funk/, 'funk']];
+    const hit = kits.find(([re]) => re.test(msg));
+    if (/\b(ouvre|modifie|edite|montre)\b/.test(msg) && !hit) return say('🥁 Voici la batterie.', { action: 'OPEN_DRUMS', payload: {} });
+    return say(hit ? `🥁 Je pose une batterie ${hit[1]} calée sur ton beat.` : '🥁 Je pose une batterie adaptée à ton morceau.', { action: 'ADD_DRUMS', payload: hit ? { kit: hit[1] } : {} });
+  }
   // --- Styles de mix ---
   const styleWords: [RegExp, string][] = [
     [/\btrap\b/, 'trap-autotune'], [/\bdrill\b/, 'drill'], [/\b(chant|rnb|r ?n ?b|r&b|chante)\b/, 'chant-rnb'],
