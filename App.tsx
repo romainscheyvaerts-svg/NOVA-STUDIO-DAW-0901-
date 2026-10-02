@@ -4761,8 +4761,17 @@ function Studio() {
         });
         let response = await ask(apiBaseUrl).catch(() => null);
         let data: any = response ? await response.clone().json().catch(() => ({})) : {};
-        // Déploiement sans clé d'IA (ou API injoignable) : on passe par le
-        // déploiement de référence, qui en a une. Sans ça Nova restait muet.
+        // Déploiement sans clé d'IA (ou API injoignable) :
+        // 1) fonction Supabase « nova-chat » (clé Gemini des secrets Supabase),
+        //    Nova ne dépend plus d'un ancien déploiement Vercel ;
+        if (!response || !response.ok || data?.error === 'API key missing') {
+            const viaSupabase = await fetch('https://mxdrxpzxbgybchzzvpkf.supabase.co/functions/v1/nova-chat', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+            }).catch(() => null);
+            const d2: any = viaSupabase ? await viaSupabase.clone().json().catch(() => ({})) : {};
+            if (viaSupabase && viaSupabase.ok) { response = viaSupabase; data = d2; }
+        }
+        // 2) en dernier recours, le déploiement de référence.
         if (!response || !response.ok || data?.error === 'API key missing') {
             const FALLBACK = 'https://nova-studio-daw-0901.vercel.app';
             if (window.location.origin !== FALLBACK) {
