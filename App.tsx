@@ -71,6 +71,7 @@ import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
 import ShareClipModal from './components/ShareClipModal';
 import TakeHomeModal from './components/TakeHomeModal';
+import { isNovaDesktop } from './utils/desktopApp';
 import {
   pushSession, pullSession, parseLink, createCloudSession, cloudProjectId, CloudConflictError, LocalCloudSession,
   getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession,
@@ -3102,6 +3103,21 @@ export default function App() {
     window.addEventListener('message', onMsg);
     try { window.parent?.postMessage({ type: 'NOVA_READY_FOR_AUTH' }, '*'); } catch { /* */ }
     return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  // Application Windows : le pont VST est lancé par l'application, on s'y
+  // connecte tout seul (il démarre en quelques secondes : plusieurs essais).
+  // Dans le navigateur, rien ne change (bouton « Connecter » de l'onglet VST).
+  useEffect(() => {
+    if (!isNovaDesktop()) return;
+    let stop = false;
+    (async () => {
+      for (let i = 0; i < 10 && !stop && !novaBridge.isConnected(); i++) {
+        try { if (await novaBridge.connect()) break; } catch { /* pas encore prêt */ }
+        await new Promise(r => setTimeout(r, 1500));
+      }
+    })();
+    return () => { stop = true; };
   }, []);
 
   // Fermeture du projet (application Windows, bouton fermer) : gel des pistes VST
