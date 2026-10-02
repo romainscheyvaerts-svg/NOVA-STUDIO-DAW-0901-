@@ -14,7 +14,8 @@ export interface LocalCommandResult {
 }
 
 const norm = (s: string) =>
-  s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’']/g, ' ').replace(/\s+/g, ' ').trim();
+  // Les traits d'union deviennent des espaces : « vas-y » = « vas y ».
+  s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’'-]/g, ' ').replace(/\s+/g, ' ').trim();
 
 const isVoice = (t: Track) => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId;
 
@@ -163,7 +164,8 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
 
   // --- Auto-Tune ---
   if (/auto ?tune|autotune|justesse|robot/.test(msg) && voice) {
-    if (/\b(sans|enleve|retire|coupe|supprime|pas d)\b/.test(msg))
+    // « annule / désactive l'autotune » le retire (il en ajoutait un).
+    if (/\b(sans|enleve|retire|coupe|supprime|pas d|annule|desactive|arrete)\b/.test(msg))
       return say('Auto-Tune retiré de ta voix.', { action: 'REMOVE_PLUGIN', payload: { trackId: voice.id, pluginType: 'AUTOTUNE' } });
     const hard = more || /robot|fort|serre|max/.test(msg);
     const soft = less || /naturel|leger|discret/.test(msg);

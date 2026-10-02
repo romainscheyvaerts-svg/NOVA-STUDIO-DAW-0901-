@@ -62,7 +62,11 @@ export const track = (event: string, props?: Record<string, unknown>): void => {
 
 /** Comme track, mais une seule fois par session (ex. première prise). */
 export const trackOnce = (event: string, props?: Record<string, unknown>): void => {
-  if (onceSeen.has(event)) return;
+  // Marqué « vu » seulement si l'événement part vraiment (nom valide, hors local).
+  if (onceSeen.has(event) || !/^[a-z0-9_]{2,40}$/.test(event)) return;
+  try {
+    if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname) && !localStorage.getItem('nova_track_local')) return;
+  } catch { /* stockage indisponible : on mesure quand même */ }
   onceSeen.add(event);
   track(event, props);
 };

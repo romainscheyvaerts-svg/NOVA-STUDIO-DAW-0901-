@@ -21,18 +21,18 @@ export const audioBufferToWav = (buffer: AudioBuffer): Blob => {
   const format = 1; // PCM
   const bitDepth = 16;
   
-  // Entrelacement des canaux si stéréo
+  // Entrelacement de tous les canaux (avant : au-delà de 2, seul le premier
+  // était écrit alors que l'en-tête annonçait N canaux, fichier illisible).
   let data: Float32Array;
-  if (numChannels === 2) {
-      const left = buffer.getChannelData(0);
-      const right = buffer.getChannelData(1);
-      data = new Float32Array(left.length * 2);
-      for (let i = 0; i < left.length; i++) {
-          data[i * 2] = left[i];
-          data[i * 2 + 1] = right[i];
-      }
-  } else {
+  if (numChannels === 1) {
       data = buffer.getChannelData(0);
+  } else {
+      const channels = Array.from({ length: numChannels }, (_, c) => buffer.getChannelData(c));
+      const len = channels[0].length;
+      data = new Float32Array(len * numChannels);
+      for (let i = 0; i < len; i++) {
+          for (let c = 0; c < numChannels; c++) data[i * numChannels + c] = channels[c][i];
+      }
   }
 
   const bytesPerSample = bitDepth / 8;

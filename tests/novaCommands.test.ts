@@ -138,12 +138,14 @@ describe('parseLocalCommand : détails des actions', () => {
     expect(kinds('annule la boucle')).toEqual(['TOGGLE_LOOP']);
   });
 
-  // Comportement actuel discutable (voir le rapport) : « annule l'autotune »
-  // AJOUTE l'Auto-Tune (UPDATE_PLUGIN) au lieu de le retirer.
-  it.todo("« annule l'autotune » devrait retirer l'Auto-Tune (REMOVE_PLUGIN)");
-  // « vas-y » (avec le trait d'union) n'est pas reconnu : la normalisation garde
-  // le « - », la règle attend « vas y ». La phrase part donc à l'IA.
-  it.todo('« vas-y » devrait lancer la lecture comme « vas y »');
+  it("« annule l'autotune » retire l'Auto-Tune (REMOVE_PLUGIN)", () => {
+    expect(kinds("annule l'autotune")).toEqual(['REMOVE_PLUGIN']);
+    expect(kinds("désactive l'autotune")).toEqual(['REMOVE_PLUGIN']);
+  });
+  it('« vas-y » lance la lecture comme « vas y »', () => {
+    expect(kinds('vas-y')).toEqual(['PLAY']);
+    expect(kinds('vas y')).toEqual(['PLAY']);
+  });
 
   it('tempo : SET_BPM avec la valeur, bornes 50–220', () => {
     expect(first('140 bpm')?.payload).toEqual({ bpm: 140 });

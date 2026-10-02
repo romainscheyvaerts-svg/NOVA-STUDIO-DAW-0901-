@@ -117,11 +117,20 @@ describe('CollabClient.join', () => {
     expect(c.lastSeq).toBe(3);
   });
 
-  // Bug constaté (voir le rapport) : avec fromSeq > 0, le rattrapage lancé par
-  // le callback SUBSCRIBED occupe le verrou catchingUp ; le « await
-  // this.catchUp() » de join() revient tout de suite, donc join() se résout
-  // avant que les opérations manquées soient lues.
-  it.todo('join(fromSeq > 0) ne se résout qu\'une fois le rattrapage terminé');
+  // (corrigé : join() attend le rattrapage en cours)
+  it('join(fromSeq > 0) ne se résout qu\'une fois le rattrapage terminé', async () => {
+    let open!: () => void;
+    h.server.gate = new Promise<void>(r => { open = r; });
+    h.server.ops = [op(6), op(7)];
+    const { c } = client();
+    let joined = false;
+    const p = c.join(5).then(() => { joined = true; });
+    await new Promise(r => setTimeout(r, 20));
+    expect(joined).toBe(false);
+    open();
+    await p;
+    expect(c.lastSeq).toBe(7);
+  });
 
   it('présence : liste des membres en ligne', async () => {
     const { c, onPresence } = client();
@@ -247,10 +256,27 @@ describe('CollabClient : échecs et réessais', () => {
     expect(onFailure.mock.calls[0][0].seq).toBe(7);
   });
 
-  // Bug constaté (voir le rapport) : si un réessai est encore dans la file
-  // (téléchargement lent > 10 s), le rattrapage suivant le remet en file et
-  // l'opération finit appliquée deux fois.
-  it.todo('une opération en échec dont le réessai est encore en file ne doit pas être remise en file');
+  // (corrigé : une opération déjà en file n'est pas remise en file)
+  it('une opération en échec dont le réessai est encore en file n\'est pas remise en file', async () => {
+    let release: (() => void) | null = null;
+    let n = 0;
+    const onOp = vi.fn(async () => {
+      n++;
+      if (n === 1) throw new Error('KO');
+      await new Promise<void>(r => { release = r; });
+    });
+    const { c } = client(onOp);
+    await c.join(0);
+    h.channels[0].broadcast(op(7));
+    await settle(c);
+    await c.catchUp();
+    for (let i = 0; i < 50 && !release; i++) await new Promise(r => setTimeout(r, 1));
+    await c.catchUp();
+    await c.catchUp();
+    (release as unknown as () => void)();
+    await settle(c);
+    expect(onOp).toHaveBeenCalledTimes(2);
+  });
 
   it('erreur réseau pendant le rattrapage : pas d\'exception, le suivant repart', async () => {
     const onOp = vi.fn();

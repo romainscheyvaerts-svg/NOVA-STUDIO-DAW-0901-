@@ -42,7 +42,10 @@ export class CollabClient {
   memberKey = '';
   lastSeq = 0;
   private channel: ReturnType<typeof catalogSupabase.channel> | null = null;
-  private catchingUp = false;
+  /** Rattrapage en cours : un second appel attend la fin de celui-ci. */
+  private catchUpRun: Promise<void> | null = null;
+  /** Opérations en file ou en cours d'application (pas de second essai en parallèle). */
+  private pending = new Set<number>();
 
   constructor(
     public link: CloudLink,
@@ -108,6 +111,7 @@ export class CollabClient {
     if (!o || typeof o.seq !== 'number' || this.applied.has(o.seq) || o.seq <= this.floorSeq) return;
     this.applied.add(o.seq);
     if (o.member_key === this.memberKey) return;
+    this.pending.add(o.seq);
     // Application en série : une opération lente (téléchargement) ne double pas la suivante.
     this.chain = this.chain.then(async () => {
       try {
@@ -119,6 +123,8 @@ export class CollabClient {
         if (tries < 6) this.failed.set(o.seq, { o, tries });
         else { this.failed.delete(o.seq); this.onFailure?.(o); }
         console.warn('[Collab] opération', o.kind, e);
+      } finally {
+        this.pending.delete(o.seq);
       }
     });
   }
@@ -129,12 +135,21 @@ export class CollabClient {
   private async receive(o: CollabOp) { this.apply(o); }
 
   private timer: ReturnType<typeof setInterval> | null = null;
-  async catchUp() {
-    if (this.catchingUp) return;
-    this.catchingUp = true;
+  // Un appel pendant un rattrapage attend celui-ci (avant : il rendait la main
+  // aussitôt, et join() se terminait avant d'avoir lu les opérations manquées).
+  catchUp(): Promise<void> {
+    if (!this.catchUpRun) this.catchUpRun = this.runCatchUp().finally(() => { this.catchUpRun = null; });
+    return this.catchUpRun;
+  }
+
+  private async runCatchUp() {
     try {
-      // Réessai des opérations en échec.
-      for (const { o } of this.failed.values()) { this.applied.delete(o.seq); this.apply(o); }
+      // Réessai des opérations en échec (sauf celles déjà en file : sinon appliquées deux fois).
+      for (const { o } of this.failed.values()) {
+        if (this.pending.has(o.seq)) continue;
+        this.applied.delete(o.seq);
+        this.apply(o);
+      }
       // Numéros communs à toutes les sessions : une opération validée un instant
       // après une autre peut porter un numéro plus petit. On relit donc une petite
       // marge en arrière (les doublons sont écartés par « applied »).
@@ -150,8 +165,6 @@ export class CollabClient {
       if (!this.timer) this.timer = setInterval(() => { void this.catchUp(); }, 10000);
     } catch (e) {
       console.warn('[Collab] rattrapage', e);
-    } finally {
-      this.catchingUp = false;
     }
   }
 
