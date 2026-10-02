@@ -13,12 +13,18 @@ export interface TakeInfo {
   active: boolean;
 }
 
+/** Numéro de prise d'un clip : champ dédié, sinon le nom (anciens projets). */
+export function takeNumberOf(c: { takeNumber?: number; name?: string }): number | null {
+  if (typeof c.takeNumber === 'number' && c.takeNumber > 0) return c.takeNumber;
+  const m = /^Prise (\d+)/.exec(c.name || '');
+  return m ? parseInt(m[1], 10) : null;
+}
+
 export function listTakes(track: Track): TakeInfo[] {
   const map = new Map<number, TakeInfo>();
   for (const c of track.clips) {
-    const m = /^Prise (\d+)/.exec(c.name || '');
-    if (!m) continue;
-    const n = parseInt(m[1], 10);
+    const n = takeNumberOf(c);
+    if (n === null) continue;
     const t = map.get(n) || { n, clipIds: [], start: Infinity, end: 0, active: false };
     t.clipIds.push(c.id);
     t.start = Math.min(t.start, c.start);

@@ -62,7 +62,7 @@ import { analyseMix, takeStats, levelsForAI } from './utils/mixAnalysis';
 import { novaSpotlight } from './utils/novaSpotlight';
 import { openBuyBeat, openProMix, openStudioSession, openBattle, getCatalogBeat } from './utils/studioLinks';
 import { parseLocalCommand } from './utils/novaCommands';
-import { listTakes, selectTakeActions } from './utils/takes';
+import { listTakes, selectTakeActions, takeNumberOf } from './utils/takes';
 import RecordingCoach from './components/RecordingCoach';
 import LyricsPrompter from './components/LyricsPrompter';
 import MicLevelMeter from './components/MicLevelMeter';
@@ -1295,12 +1295,10 @@ export default function App() {
     let takeGainDb = 0;
     if (result && result.clip.buffer) {
       const track = stateRef.current.tracks.find(t => t.id === result.trackId);
-      const takeNumber = 1 + (track?.clips || []).reduce((max, c) => {
-        const m = /^Prise (\d+)/.exec(c.name || '');
-        return m ? Math.max(max, parseInt(m[1], 10)) : max;
-      }, 0);
+      const takeNumber = 1 + (track?.clips || []).reduce((max, c) => Math.max(max, takeNumberOf(c) ?? 0), 0);
       takeName = `Prise ${takeNumber}`;
       result.clip.name = takeName;
+      result.clip.takeNumber = takeNumber;
       if (autoCleanRef.current && !punch) {
         cleaned = stripSilenceFromClip({ ...result.clip, bufferId: result.clip.id }, result.clip.buffer);
       }
@@ -2857,7 +2855,7 @@ export default function App() {
     if (st.isRecording) return;
     autosaveBusy.current = true;
     const voiceTakes = st.tracks.filter(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId)
-      .reduce((n, t) => n + t.clips.filter(c => /^Prise \d+/.test(c.name || '')).length, 0);
+      .reduce((n, t) => n + t.clips.filter(c => takeNumberOf(c) !== null).length, 0);
     const hasAudio = st.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0);
     if (!hasAudio && !(st.lyrics || '').trim()) { autosaveBusy.current = false; return; } // rien à garder : on n'écrase pas une session précédente
     try {

@@ -184,6 +184,8 @@ export interface TrackGroup {
 
 export interface Clip {
   id: string;
+  /** Numéro de prise (Prise N) : survit au renommage du clip. */
+  takeNumber?: number;
   start: number;
   duration: number;
   offset: number; 
