@@ -1,9 +1,10 @@
 /**
  * Briques DSP partagees par les plugins voix.
  *
- * Tout est fait avec des noeuds Web Audio natifs (pas de setInterval ni
- * d'AnalyserNode lu depuis le thread principal) : le comportement est donc
- * identique en lecture temps reel et dans l'export (OfflineAudioContext).
+ * Tout est fait avec des noeuds Web Audio natifs ou des AudioWorklet (pas de
+ * setInterval ni d'AnalyserNode lu depuis le thread principal) : le
+ * comportement est donc identique en lecture temps reel et dans l'export
+ * (OfflineAudioContext).
  */
 
 /** Courbe de WaveShaper echantillonnee sur [-1, 1]. */
@@ -64,6 +65,33 @@ export class EnvelopeDucker {
       try { n.disconnect(); } catch (e) {}
     }
   }
+}
+
+/**
+ * Charge un module AudioWorklet (code source en chaine) une seule fois par
+ * contexte, temps reel ou hors ligne. L'URL d'objet est liberee des que le
+ * module est charge ; en cas d'echec, la promesse est oubliee pour permettre
+ * un nouvel essai.
+ */
+const workletLoads = new WeakMap<BaseAudioContext, Map<string, Promise<void>>>();
+export function loadWorkletModule(ctx: BaseAudioContext, key: string, code: string): Promise<void> {
+  let perCtx = workletLoads.get(ctx);
+  if (!perCtx) { perCtx = new Map(); workletLoads.set(ctx, perCtx); }
+  let p = perCtx.get(key);
+  if (!p) {
+    if (!ctx.audioWorklet) return Promise.reject(new Error('AudioWorklet indisponible'));
+    const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+    p = ctx.audioWorklet.addModule(url).finally(() => URL.revokeObjectURL(url));
+    perCtx.set(key, p);
+    const m = perCtx;
+    p.catch(() => m.delete(key));
+  }
+  return p;
+}
+
+/** Vrai pour un contexte de rendu hors ligne (export). */
+export function isOfflineContext(ctx: BaseAudioContext): boolean {
+  return typeof OfflineAudioContext !== 'undefined' && ctx instanceof OfflineAudioContext;
 }
 
 /** Constante de temps pour setTargetAtTime : evite les clics sur les reglages. */

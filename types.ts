@@ -445,7 +445,8 @@ export type AIActionType =
   | 'ANALYZE_MIX'
   | 'HIGHLIGHT'
   | 'OPEN_STUDIO_OFFER'
-  | 'OPEN_LYRICS'; 
+  | 'OPEN_LYRICS'
+  | 'OPEN_SHARE'; 
 
 export interface AIAction {
   action: AIActionType;

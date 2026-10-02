@@ -61,6 +61,7 @@ import RecordingCoach from './components/RecordingCoach';
 import LyricsPrompter from './components/LyricsPrompter';
 import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
+import ShareClipModal from './components/ShareClipModal';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta } from './utils/sessionStore';
 import VocalToolsPanel from './components/VocalToolsPanel';
 
@@ -152,7 +153,8 @@ const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number =
 
   if (type === 'DELAY') params = { division: '1/4', feedback: 0.4, feedbackLP: 5000, feedbackHP: 150, mix, pingPong: false, bpm, isEnabled: true };
   if (type === 'REVERB') params = { decay: 2.5, preDelay: 0.02, damping: 0.4, mix, size: 0.7, mode: 'HALL', isEnabled: true };
-  if (type === 'COMPRESSOR') params = { threshold: -18, ratio: 4, knee: 12, attack: 0.003, release: 0.25, makeupGain: 1.0, isEnabled: true };
+  // makeupGain ≈ +4 dB : le compresseur n'ajoute plus de gain caché (ancien DynamicsCompressor)
+  if (type === 'COMPRESSOR') params = { threshold: -18, ratio: 4, knee: 12, attack: 0.003, release: 0.25, makeupGain: 1.6, isEnabled: true };
   if (type === 'AUTOTUNE') params = { speed: 0.1, humanize: 0.2, mix: 1.0, rootKey: 0, scale: 'CHROMATIC', isEnabled: true };
   if (type === 'CHORUS') params = { rate: 1.2, depth: 0.35, spread: 0.5, mix: 0.4, isEnabled: true };
   if (type === 'FLANGER') params = { rate: 0.5, depth: 0.5, feedback: 0.7, manual: 0.3, mix: 0.5, invertPhase: false, isEnabled: true };
@@ -1518,6 +1520,7 @@ export default function App() {
       postNova("🎧 Le mix auto te donne un bon aperçu. Pour un son prêt à sortir, nos ingés son peuvent mixer ta voix sur l'instru." + (beat ? ` Et pour l'utiliser, il te faut la licence de « ${beat.title} ».` : ""), [
         { label: "🎚️ Faire mixer par un pro", action: { action: "OPEN_STUDIO_OFFER", payload: { offer: "mix" } } },
         { label: "🎙️ L'enregistrer au studio", action: { action: "OPEN_STUDIO_OFFER", payload: { offer: "session" } } },
+        { label: "📲 Partager un extrait", action: { action: "OPEN_SHARE", payload: {} } },
         ...(beat ? [{ label: "🛒 Acheter cette instru", action: { action: "OPEN_STUDIO_OFFER", payload: { offer: "beat" } } as AIAction }] : []),
       ]);
     }, 400);
@@ -2416,6 +2419,8 @@ export default function App() {
   // Sauvegarde automatique sur l'appareil, quelques secondes après chaque
   // changement (jamais pendant la lecture ou une prise : ça couperait le son).
   const [lyricsOpen, setLyricsOpen] = useState(false);
+  // Extrait 30 s / démo taguée
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Première visite du studio : les 3 gestes à connaître.
   const [welcomeOpen, setWelcomeOpen] = useState(false);
@@ -3157,6 +3162,10 @@ export default function App() {
         setLyricsOpen(true);
         break;
 
+      case 'OPEN_SHARE':
+        setShareOpen(true);
+        break;
+
       case 'OPEN_MIX_STYLES':
         setVocalToolsOpen(true);
         break;
@@ -3570,6 +3579,7 @@ export default function App() {
         onBuyBeat={() => openBuyBeat(stateRef.current.tracks)}
         onProMix={openProMix}
         onBookSession={openStudioSession}
+        onShare={() => { setVocalToolsOpen(false); setShareOpen(true); }}
         takeGroups={state.tracks.filter(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId)
           .map(t => ({ trackId: t.id, trackName: t.name, takes: listTakes(t) }))}
         onSelectTake={(trackId, n, listen) => {
@@ -3658,7 +3668,8 @@ export default function App() {
       <Suspense fallback={null}>
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} />}
       {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
-      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} ownedInstrumentIds={user?.owned_instruments || []} />}
+      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={() => { setIsExportMenuOpen(false); setShareOpen(true); }} />}
+      <ShareClipModal open={shareOpen} onClose={() => setShareOpen(false)} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />}
       </Suspense>
       

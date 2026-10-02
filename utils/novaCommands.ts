@@ -157,6 +157,8 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   }
 
   // --- Session ---
+  if (/\b(partage|partager|extrait|demo|tiktok|insta|instagram|story|clip)\b/.test(msg))
+    return say('📲 Je t\'ouvre le partage : vidéo 30 s pour Insta / TikTok, extrait audio ou démo complète.', { action: 'OPEN_SHARE', payload: {} });
   if (/\b(paroles|prompteur|texte|lyrics)\b/.test(msg)) return say('📝 Le prompteur est ouvert : écris ou colle tes paroles, elles défileront pendant la prise.', { action: 'OPEN_LYRICS', payload: {} });
   if (/\b(backs?|doubl)/.test(msg) && /\b(fais|faire|prepare|on fait|passe|enregistre)\b/.test(msg)) return say('🎤 Je prépare la piste des backs.', { action: 'PREPARE_PART', payload: { part: 'back' } });
   if (/\bharmo/.test(msg) && /\b(fais|faire|prepare|on fait|passe|enregistre)\b/.test(msg)) return say('🎶 Je prépare la piste des harmonies.', { action: 'PREPARE_PART', payload: { part: 'harmony' } });

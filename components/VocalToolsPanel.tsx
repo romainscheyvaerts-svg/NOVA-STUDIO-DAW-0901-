@@ -23,6 +23,7 @@ interface VocalToolsPanelProps {
   onBuyBeat: () => void;
   onProMix: () => void;
   onBookSession: () => void;
+  onShare: () => void;
   /** Prises par piste voix (choix de la meilleure prise). */
   takeGroups: { trackId: string; trackName: string; takes: TakeInfo[] }[];
   onSelectTake: (trackId: string, n: number, listen: boolean) => void;
@@ -130,16 +131,19 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
             </p>
             <div className="mt-3 flex flex-col sm:flex-row gap-2">
               {p.hasCatalogBeat && (
-                <button type="button" onClick={p.onBuyBeat} className="flex-1 h-10 rounded-xl bg-amber-400 text-black text-[12px] font-black hover:bg-amber-300">
+                <button type="button" onClick={p.onBuyBeat} className="shrink-0 sm:flex-1 h-10 rounded-xl bg-amber-400 text-black text-[12px] font-black hover:bg-amber-300">
                   🛒 Acheter cette instru
                 </button>
               )}
-              <button type="button" onClick={p.onProMix} className="flex-1 h-10 rounded-xl bg-white/10 text-white text-[12px] font-bold hover:bg-white/20">
+              <button type="button" onClick={p.onProMix} className="shrink-0 sm:flex-1 h-10 rounded-xl bg-white/10 text-white text-[12px] font-bold hover:bg-white/20">
                 🎚️ Faire mixer par un pro
               </button>
             </div>
             <button type="button" onClick={p.onBookSession} className="mt-2 w-full h-10 rounded-xl border border-white/15 text-white text-[12px] font-bold hover:bg-white/10">
               🎙️ Enregistrer ce morceau au studio, avec un ingé son
+            </button>
+            <button type="button" onClick={p.onShare} className="mt-2 w-full h-10 rounded-xl border border-cyan-400/40 text-cyan-200 text-[12px] font-bold hover:bg-cyan-500/10">
+              📲 Partager un extrait (vidéo / audio) ou télécharger la démo
             </button>
           </div>
 

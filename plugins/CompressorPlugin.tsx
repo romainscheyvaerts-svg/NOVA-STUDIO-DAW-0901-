@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PluginParameter } from '../types';
-import { makeCurve } from './vocalDspUtils';
+import { makeCurve, loadWorkletModule } from './vocalDspUtils';
 
 export interface CompressorParams {
   threshold: number;      // -60 to 0 dB
@@ -15,43 +15,193 @@ export interface CompressorParams {
   autoMakeup: boolean;    // Auto-calculate makeup gain
   mode: 'CLEAN' | 'VCA' | 'OPTO' | 'FET';  // Character modes
   isEnabled: boolean;
+  /**
+   * Mode basse latence (piste armee pour l'enregistrement) : la pre-lecture
+   * est ignoree, le compresseur n'ajoute alors aucun retard. Optionnel.
+   */
+  lowLatency?: boolean;
 }
+
+/**
+ * Compresseur dans un AudioWorklet, SANS LATENCE (hors pre-lecture choisie).
+ *
+ * L'ancienne version reposait sur DynamicsCompressorNode, qui pose trois
+ * problemes pour une voix :
+ *  - 6 ms de retard fixe (sa pre-lecture interne), entendus au casque pendant
+ *    la prise et compenses par un retard equivalent sur le sec ;
+ *  - un gain de compensation CACHE (environ 0,6 x la reduction a 0 dBFS),
+ *    ajoute au « Makeup » : 8 a 13 dB de plus sur les styles voix, et baisser
+ *    le seuil rendait la voix PLUS forte ;
+ *  - aucune entree de detection : le passe-haut de sidechain etait impossible.
+ *
+ * Ici (architecture « feed-forward, domaine log », Giannoulis/Massberg/Reiss) :
+ *  - detection sur le signal filtre par le passe-haut de sidechain (scHpFreq),
+ *    stereo liee ;
+ *  - crete (CLEAN, FET facon 1176) ou RMS (VCA facon SSL, OPTO facon LA-2A) ;
+ *  - genou doux quadratique, ratio exact : la courbe affichee est celle entendue ;
+ *  - detecteur « lisse decouple » sur la reduction (pas d'ondulation sur les
+ *    graves) et release dependant du programme : en OPTO, une reduction
+ *    tenue longtemps se relache lentement (cellule optique du LA-2A), une
+ *    crete isolee se relache vite ; effet plus discret en VCA ;
+ *  - makeupGain est desormais le gain de compensation REEL (plus de gain cache).
+ */
+const COMP_WORKLET_CODE = `
+class VocalCompressorProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [
+      { name: 'threshold', defaultValue: -18, minValue: -100, maxValue: 0, automationRate: 'k-rate' },
+      { name: 'ratio', defaultValue: 4, minValue: 1, maxValue: 100, automationRate: 'k-rate' },
+      { name: 'knee', defaultValue: 12, minValue: 0, maxValue: 40, automationRate: 'k-rate' },
+      { name: 'attack', defaultValue: 0.003, minValue: 0.00001, maxValue: 1, automationRate: 'k-rate' },
+      { name: 'release', defaultValue: 0.25, minValue: 0.005, maxValue: 5, automationRate: 'k-rate' },
+      { name: 'scHpFreq', defaultValue: 80, minValue: 10, maxValue: 2000, automationRate: 'k-rate' },
+      { name: 'lookahead', defaultValue: 0, minValue: 0, maxValue: 0.01, automationRate: 'k-rate' },
+      { name: 'mode', defaultValue: 0, minValue: 0, maxValue: 3, automationRate: 'k-rate' }
+    ];
+  }
+  constructor() {
+    super();
+    this.SIZE = 2048; this.MASK = 2047; // > 10 ms a 192 kHz
+    this.bufL = new Float32Array(this.SIZE); this.bufR = new Float32Array(this.SIZE);
+    this.w = 0;
+    this.la = 0; this.laOld = 0; this.xf = 0;
+    this.s = [0, 0, 0, 0, 0, 0, 0, 0];
+    this.lastFc = -1;
+    this.ms = 0; this.y1 = 0; this.yL = 0; this.charge = 0;
+    this.msg = 0; this.grPeak = 0;
+  }
+  setHighpass(fc) {
+    const w0 = 2 * Math.PI * Math.min(fc, sampleRate * 0.45) / sampleRate;
+    const alpha = Math.sin(w0) / (2 * 0.7071);
+    const c = Math.cos(w0), a0 = 1 + alpha;
+    this.b0 = (1 + c) / 2 / a0; this.b1 = -(1 + c) / a0; this.b2 = this.b0;
+    this.a1 = -2 * c / a0; this.a2 = (1 - alpha) / a0;
+    this.lastFc = fc;
+  }
+  process(inputs, outputs, p) {
+    const input = inputs[0], output = outputs[0];
+    if (!output || !output[0]) return true;
+    const n = output[0].length;
+    const nIn = input ? input.length : 0;
+    const inL = nIn > 0 ? input[0] : null;
+    const inR = nIn > 1 ? input[1] : inL;
+    const outL = output[0], outR = output.length > 1 ? output[1] : null;
+    if (p.scHpFreq[0] !== this.lastFc) this.setHighpass(p.scHpFreq[0]);
+    const T = p.threshold[0];
+    const R = Math.max(1, p.ratio[0]);
+    const W = Math.max(0, p.knee[0]);
+    const k = 1 - 1 / R;
+    const mode = Math.round(p.mode[0]);
+    const rms = mode === 1 || mode === 2;
+    const aA = Math.exp(-1 / (Math.max(0.00001, p.attack[0]) * sampleRate));
+    // Release dependant du programme : la « charge » monte quand la reduction
+    // dure (constante 1 s) et redescend lentement (2,5 s).
+    const qGain = mode === 2 ? 4 : mode === 1 ? 1 : 0;
+    const tRel = Math.max(0.005, p.release[0]) * (1 + qGain * this.charge);
+    const aR = Math.exp(-1 / (tRel * sampleRate));
+    const aRms = Math.exp(-1 / ((mode === 2 ? 0.01 : 0.004) * sampleRate));
+    const aQup = Math.exp(-1 / sampleRate), aQdn = Math.exp(-1 / (2.5 * sampleRate));
+    const laT = Math.min(this.SIZE - 2, Math.max(0, Math.round(p.lookahead[0] * sampleRate)));
+    if (laT !== this.la && this.xf <= 0) { this.laOld = this.la; this.la = laT; this.xf = 256; }
+    const b0 = this.b0, b1 = this.b1, b2 = this.b2, a1 = this.a1, a2 = this.a2;
+    const s = this.s, M = this.MASK, bL = this.bufL, bR = this.bufR;
+    let ms = this.ms, y1 = this.y1, yL = this.yL, q = this.charge, w = this.w, grPeak = this.grPeak;
+    for (let i = 0; i < n; i++) {
+      const xl = inL ? inL[i] : 0, xr = inR ? inR[i] : 0;
+      // Passe-haut de detection (n'affecte pas le son entendu)
+      let hl = b0 * xl + b1 * s[0] + b2 * s[1] - a1 * s[2] - a2 * s[3];
+      let hr = b0 * xr + b1 * s[4] + b2 * s[5] - a1 * s[6] - a2 * s[7];
+      if (hl < 1e-15 && hl > -1e-15) hl = 0;
+      if (hr < 1e-15 && hr > -1e-15) hr = 0;
+      s[1] = s[0]; s[0] = xl; s[3] = s[2]; s[2] = hl;
+      s[5] = s[4]; s[4] = xr; s[7] = s[6]; s[6] = hr;
+      let lvl;
+      if (rms) {
+        ms = aRms * ms + (1 - aRms) * 0.5 * (hl * hl + hr * hr);
+        if (ms < 1e-20) ms = 0;
+        // +3 dB : un sinus est mesure a sa valeur crete, comme en mode crete
+        lvl = 10 * Math.log10(ms + 1e-20) + 3.0103;
+      } else {
+        const a = Math.max(hl < 0 ? -hl : hl, hr < 0 ? -hr : hr);
+        lvl = 20 * Math.log10(a + 1e-10);
+      }
+      // Calculateur de gain : genou doux quadratique
+      const over = lvl - T;
+      let c = 0;
+      if (2 * over > W) c = k * over;
+      else if (W > 0 && 2 * over > -W) { const u = over + W / 2; c = k * u * u / (2 * W); }
+      // Detecteur lisse decouple (sur la reduction, en dB)
+      const r1 = aR * y1 + (1 - aR) * c;
+      y1 = c > r1 ? c : r1;
+      yL = aA * yL + (1 - aA) * y1;
+      q = yL > 1 ? aQup * q + (1 - aQup) : aQdn * q;
+      if (yL > grPeak) grPeak = yL;
+      const g = Math.exp(-yL * 0.11512925464970229);
+      bL[w] = xl; bR[w] = xr;
+      let vl, vr;
+      if (this.xf > 0) {
+        const f = this.xf / 256;
+        const iN = (w - this.la) & M, iO = (w - this.laOld) & M;
+        vl = bL[iN] * (1 - f) + bL[iO] * f;
+        vr = bR[iN] * (1 - f) + bR[iO] * f;
+        this.xf--;
+      } else {
+        const iN = (w - this.la) & M;
+        vl = bL[iN]; vr = bR[iN];
+      }
+      outL[i] = vl * g;
+      if (outR) outR[i] = vr * g;
+      w = (w + 1) & M;
+    }
+    this.ms = ms; this.y1 = y1; this.yL = yL; this.charge = q; this.w = w; this.grPeak = grPeak;
+    if (++this.msg >= 8) {
+      this.msg = 0;
+      this.port.postMessage({ gr: -yL, peak: -grPeak });
+      this.grPeak = 0;
+    }
+    return true;
+  }
+}
+try { registerProcessor('vocal-compressor-processor', VocalCompressorProcessor); } catch (e) {}
+`;
+
+const MODE_INDEX: Record<CompressorParams['mode'], number> = { CLEAN: 0, VCA: 1, OPTO: 2, FET: 3 };
 
 export class CompressorNode {
   private ctx: AudioContext;
   public input: GainNode;
   public output: GainNode;
-  
-  // Core compression
-  private compressor: DynamicsCompressorNode;
+
+  // Etage de compression : AudioWorklet (sans latence). Si le worklet ne peut
+  // pas se charger, repli sur DynamicsCompressorNode (ancien comportement).
+  private worklet: AudioWorkletNode | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
+  private compIn: GainNode;
   private makeupGainNode: GainNode;
-  
+
   // Parallel mix
   private dryGain: GainNode;
   private wetGain: GainNode;
-  
-  // Sidechain HP filter (reduces bass pumping)
-  private scHighpass: BiquadFilterNode;
-  
-  // Lookahead delay
-  private lookaheadDelay: DelayNode;
-  
+
   // Character/saturation
   private saturationNode: WaveShaperNode;
   private dcBlock: BiquadFilterNode;
   private modeTrim: GainNode;
 
-  // Le DynamicsCompressorNode retarde le son de 6 ms (sa pre-lecture
-  // interne). Sans le meme retard sur le sec, le mix parallele filtrait la
-  // voix en peigne (creux tous les ~170 Hz).
+  // Retard du sec = latence de la voie compressee (0 sauf pre-lecture), pour
+  // que le mix parallele ne filtre pas la voix en peigne.
   private dryDelay: DelayNode;
-  
+
   // Metering
   private inputAnalyzer: AnalyserNode;
   private outputAnalyzer: AnalyserNode;
   private inputData: Float32Array;
   private outputData: Float32Array;
-  
+  private reduction = 0;
+
+  /** Pret quand le worklet est charge (le rendu hors ligne attend cette promesse). */
+  public readonly ready: Promise<void>;
+
   private params: CompressorParams = {
     threshold: -18,
     ratio: 4,
@@ -64,47 +214,34 @@ export class CompressorNode {
     lookahead: 0,
     autoMakeup: false,
     mode: 'CLEAN',
-    isEnabled: true
+    isEnabled: true,
+    lowLatency: false
   };
 
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
-    
+
     // I/O
     this.input = ctx.createGain();
     this.output = ctx.createGain();
-    
-    // Initialize with zero gain and ramp up to avoid click on creation
-    this.output.gain.setValueAtTime(0, ctx.currentTime);
-    this.output.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
-    
+    // Muet jusqu'a ce que l'etage de compression soit en place (quelques ms),
+    // puis montee de 20 ms : ni clic ni bouffee non compressee a l'insertion.
+    this.output.gain.value = 0;
+
     // Metering
     this.inputAnalyzer = ctx.createAnalyser();
     this.inputAnalyzer.fftSize = 256;
     this.inputData = new Float32Array(this.inputAnalyzer.frequencyBinCount);
-    
+
     this.outputAnalyzer = ctx.createAnalyser();
     this.outputAnalyzer.fftSize = 256;
     this.outputData = new Float32Array(this.outputAnalyzer.frequencyBinCount);
-    
-    // Sidechain HP - insert before compressor
-    this.scHighpass = ctx.createBiquadFilter();
-    this.scHighpass.type = 'highpass';
-    this.scHighpass.frequency.value = 80;
-    this.scHighpass.Q.value = 0.707;
-    
-    // Lookahead delay on main signal
-    this.lookaheadDelay = ctx.createDelay(0.01); // Max 10ms
-    this.lookaheadDelay.delayTime.value = 0;
-    
-    // Core compressor
-    this.compressor = ctx.createDynamicsCompressor();
-    
-    // Makeup gain
+
+    this.compIn = ctx.createGain();
     this.makeupGainNode = ctx.createGain();
-    
+
     // Saturation for character modes (sans surechantillonnage : il ajoute
-    // une latence non compensee, et les courbes douces aliasent tres peu)
+    // une latence, et les courbes douces aliasent tres peu)
     this.saturationNode = ctx.createWaveShaper();
     this.saturationNode.oversample = 'none';
     this.updateSaturationCurve('CLEAN');
@@ -113,44 +250,74 @@ export class CompressorNode {
     this.dcBlock.frequency.value = 8;
     this.modeTrim = ctx.createGain();
     this.dryDelay = ctx.createDelay(0.05);
-    this.dryDelay.delayTime.value = Math.floor(0.006 * ctx.sampleRate) / ctx.sampleRate;
-    
+    this.dryDelay.delayTime.value = 0;
+
     // Parallel compression mix
     this.dryGain = ctx.createGain();
     this.dryGain.gain.value = 0; // Full wet by default
     this.wetGain = ctx.createGain();
     this.wetGain.gain.value = 1;
-    
+
     this.input.connect(this.inputAnalyzer);
-    
-    // Dry path (for parallel compression), aligne sur le compresseur
+
+    // Dry path (for parallel compression), aligne sur la voie compressee
     this.input.connect(this.dryDelay);
     this.dryDelay.connect(this.dryGain);
-    
-    // Wet path (compressed)
-    // NOTE: le passe-haut de sidechain etait insere ICI, dans le trajet audio
-    // principal. Il ne filtrait donc pas la detection mais le signal entendu :
-    // avec sa valeur par defaut de 80 Hz, poser un compresseur amputait les
-    // graves de la piste (un sinus 50 Hz perdait plus de la moitie de son
-    // niveau, et 31 dB a 300 Hz). Le signal va desormais directement au
-    // compresseur. Un vrai sidechain filtre demande un AudioWorklet, car
-    // DynamicsCompressorNode n'expose pas d'entree de detection separee.
-    this.input.connect(this.lookaheadDelay);
-    this.lookaheadDelay.connect(this.compressor);
-    this.compressor.connect(this.saturationNode);
+
+    // Wet path : entree -> [compression] -> couleur -> compensation
+    this.input.connect(this.compIn);
     this.saturationNode.connect(this.dcBlock);
     this.dcBlock.connect(this.modeTrim);
     this.modeTrim.connect(this.makeupGainNode);
     this.makeupGainNode.connect(this.wetGain);
-    
+
     // Merge dry + wet
     this.dryGain.connect(this.output);
     this.wetGain.connect(this.output);
-    
+
     // Output metering
     this.output.connect(this.outputAnalyzer);
-    
+
     this.applyParams();
+    this.ready = this.initWorklet();
+  }
+
+  private async initWorklet() {
+    try {
+      await loadWorkletModule(this.ctx, 'vocal-compressor', COMP_WORKLET_CODE);
+      this.worklet = new AudioWorkletNode(this.ctx, 'vocal-compressor-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2]
+      });
+      this.worklet.port.onmessage = (e) => {
+        const d = e.data || {};
+        if (Number.isFinite(d.peak)) this.reduction = d.peak;
+      };
+      this.compIn.connect(this.worklet);
+      this.worklet.connect(this.saturationNode);
+    } catch (e) {
+      console.warn('[Compressor] Worklet indisponible, repli sur DynamicsCompressorNode :', e);
+      this.compressor = this.ctx.createDynamicsCompressor();
+      this.compIn.connect(this.compressor);
+      this.compressor.connect(this.saturationNode);
+    }
+    this.applyParams(true);
+    const t = this.ctx.currentTime;
+    this.output.gain.cancelScheduledValues(t);
+    this.output.gain.setValueAtTime(0, t);
+    this.output.gain.linearRampToValueAtTime(1, t + 0.02);
+  }
+
+  /** Retard ajoute par le plugin, en secondes (0 sauf pre-lecture choisie). */
+  public get latency(): number {
+    return this.effectiveLookahead() + (this.compressor ? 0.006 : 0);
+  }
+
+  private effectiveLookahead(): number {
+    if (this.params.lowLatency || !this.params.isEnabled) return 0;
+    const l = Number(this.params.lookahead);
+    return Number.isFinite(l) ? Math.max(0, Math.min(0.01, l)) : 0;
   }
 
   /**
@@ -186,7 +353,8 @@ export class CompressorNode {
   /**
    * Caractere dynamique de chaque mode, applique aux reglages utilisateur :
    * OPTO lent et doux, FET rapide et dur, VCA tel quel, CLEAN neutre.
-   * trimDb compense la perte de crete due a la saturation du mode.
+   * trimDb compense la perte de crete due a la saturation du mode (mesure :
+   * sur une voix compressee, le mode change la couleur, pas le niveau).
    */
   private modeDynamics() {
     const safe = (val: number, def: number) => Number.isFinite(val) ? val : def;
@@ -196,19 +364,19 @@ export class CompressorNode {
     let trimDb = 0;
     switch (this.params.mode) {
       case 'VCA':
-        trimDb = 0.5;
+        trimDb = 0.3;
         break;
       case 'OPTO':
         attack = Math.max(0.01, attack * 1.5);
-        release = Math.max(0.12, release * 1.6);
-        knee = Math.max(knee, 12);
-        trimDb = 1.5;
+        release = Math.max(0.06, release);
+        knee = Math.max(knee, 10);
+        trimDb = 0.3;
         break;
       case 'FET':
         attack = Math.max(0.0002, attack * 0.5);
         release = Math.max(0.03, release * 0.75);
         knee = Math.min(knee, 4);
-        trimDb = 1.5;
+        trimDb = 0.6;
         break;
     }
     return { attack: Math.min(1, attack), release: Math.min(1, release), knee, trim: Math.pow(10, trimDb / 20) };
@@ -221,59 +389,75 @@ export class CompressorNode {
   }
 
   public updateParams(p: Partial<CompressorParams>) {
+    const oldMode = this.params.mode;
     this.params = { ...this.params, ...p };
-    
-    if (p.mode !== undefined) {
+
+    if (this.params.mode !== oldMode) {
       this.updateSaturationCurve(this.params.mode);
     }
-    
+
     this.applyParams();
   }
 
-  private applyParams() {
+  /** immediate : valeurs posees sans lissage (mise en place du worklet). */
+  private applyParams(immediate = false) {
     const now = this.ctx.currentTime;
     const safe = (val: number, def: number) => Number.isFinite(val) ? val : def;
+    const set = (prm: AudioParam | undefined, v: number, tau = 0.01) => {
+      if (!prm || !Number.isFinite(v)) return;
+      if (immediate) { prm.cancelScheduledValues(now); prm.setValueAtTime(v, now); }
+      else prm.setTargetAtTime(v, now, tau);
+    };
+    const dyn = this.modeDynamics();
+    const threshold = Math.max(-100, Math.min(0, safe(this.params.threshold, -18)));
+    const ratio = Math.max(1, Math.min(20, safe(this.params.ratio, 4)));
+    const look = this.effectiveLookahead();
+
+    if (this.worklet) {
+      const prm = this.worklet.parameters;
+      set(prm.get('threshold'), threshold);
+      set(prm.get('ratio'), ratio);
+      set(prm.get('knee'), dyn.knee);
+      set(prm.get('attack'), dyn.attack);
+      set(prm.get('release'), dyn.release);
+      set(prm.get('scHpFreq'), Math.max(10, Math.min(2000, safe(this.params.scHpFreq, 80))));
+      prm.get('mode')?.setValueAtTime(MODE_INDEX[this.params.mode] ?? 0, now);
+      // Le worklet fait lui-meme un fondu quand la pre-lecture change.
+      prm.get('lookahead')?.setValueAtTime(look, now);
+      set(this.dryDelay.delayTime, look, 0.005);
+    } else if (this.compressor) {
+      set(this.compressor.threshold, this.params.isEnabled ? threshold : 0);
+      set(this.compressor.ratio, this.params.isEnabled ? ratio : 1);
+      set(this.compressor.knee, dyn.knee);
+      set(this.compressor.attack, dyn.attack);
+      set(this.compressor.release, dyn.release);
+      this.dryDelay.delayTime.setTargetAtTime(Math.floor(0.006 * this.ctx.sampleRate) / this.ctx.sampleRate, now, 0.01);
+    }
 
     if (this.params.isEnabled) {
-      this.compressor.threshold.setTargetAtTime(safe(this.params.threshold, -18), now, 0.01);
-      this.compressor.ratio.setTargetAtTime(safe(this.params.ratio, 4), now, 0.01);
-      const dyn = this.modeDynamics();
-      this.compressor.knee.setTargetAtTime(dyn.knee, now, 0.01);
-      this.compressor.attack.setTargetAtTime(dyn.attack, now, 0.01);
-      this.compressor.release.setTargetAtTime(dyn.release, now, 0.01);
-      this.modeTrim.gain.setTargetAtTime(dyn.trim, now, 0.01);
-      
-      const makeup = this.params.autoMakeup 
-        ? this.calculateAutoMakeup() 
+      set(this.modeTrim.gain, dyn.trim);
+      const makeup = this.params.autoMakeup
+        ? this.calculateAutoMakeup()
         : safe(this.params.makeupGain, 1.0);
-      this.makeupGainNode.gain.setTargetAtTime(makeup, now, 0.01);
-      
-      
-      const look = Math.max(0, Math.min(0.01, safe(this.params.lookahead, 0)));
-      this.lookaheadDelay.delayTime.setTargetAtTime(look, now, 0.01);
-      this.dryDelay.delayTime.setTargetAtTime(Math.floor(0.006 * this.ctx.sampleRate) / this.ctx.sampleRate + look, now, 0.01);
-      
-      const wet = safe(this.params.mix, 1);
-      const dry = 1 - wet;
-      this.wetGain.gain.setTargetAtTime(wet, now, 0.01);
-      this.dryGain.gain.setTargetAtTime(dry, now, 0.01);
-      
+      set(this.makeupGainNode.gain, Math.max(0, makeup));
+      const wet = Math.max(0, Math.min(1, safe(this.params.mix, 1)));
+      set(this.wetGain.gain, wet);
+      set(this.dryGain.gain, 1 - wet);
     } else {
-      this.compressor.threshold.setTargetAtTime(0, now, 0.01);
-      this.compressor.ratio.setTargetAtTime(1, now, 0.01);
-      this.makeupGainNode.gain.setTargetAtTime(1.0, now, 0.01);
-      
-      this.wetGain.gain.setTargetAtTime(0, now, 0.01);
-      this.dryGain.gain.setTargetAtTime(1, now, 0.01);
+      set(this.makeupGainNode.gain, 1.0);
+      set(this.wetGain.gain, 0);
+      set(this.dryGain.gain, 1);
     }
   }
 
+  /** Reduction de gain la plus forte depuis la derniere lecture (dB, <= 0). */
   public getReduction(): number {
-    return this.compressor.reduction;
+    if (this.compressor) return this.compressor.reduction;
+    return this.reduction;
   }
-  
+
   public getInputLevel(): number {
-    this.inputAnalyzer.getFloatTimeDomainData(this.inputData);
+    this.inputAnalyzer.getFloatTimeDomainData(this.inputData as any);
     let max = 0;
     for (let i = 0; i < this.inputData.length; i++) {
       const abs = Math.abs(this.inputData[i]);
@@ -281,9 +465,9 @@ export class CompressorNode {
     }
     return max > 0 ? 20 * Math.log10(max) : -100;
   }
-  
+
   public getOutputLevel(): number {
-    this.outputAnalyzer.getFloatTimeDomainData(this.outputData);
+    this.outputAnalyzer.getFloatTimeDomainData(this.outputData as any);
     let max = 0;
     for (let i = 0; i < this.outputData.length; i++) {
       const abs = Math.abs(this.outputData[i]);
@@ -293,20 +477,29 @@ export class CompressorNode {
   }
 
   public getAudioParam(paramId: string): AudioParam | null {
+    const wp = this.worklet?.parameters;
     switch(paramId) {
-      case 'threshold': return this.compressor.threshold;
-      case 'ratio': return this.compressor.ratio;
-      case 'knee': return this.compressor.knee;
-      case 'attack': return this.compressor.attack;
-      case 'release': return this.compressor.release;
+      case 'threshold': return wp?.get('threshold') ?? this.compressor?.threshold ?? null;
+      case 'ratio': return wp?.get('ratio') ?? this.compressor?.ratio ?? null;
+      case 'knee': return wp?.get('knee') ?? this.compressor?.knee ?? null;
+      case 'attack': return wp?.get('attack') ?? this.compressor?.attack ?? null;
+      case 'release': return wp?.get('release') ?? this.compressor?.release ?? null;
       case 'makeupGain': return this.makeupGainNode.gain;
       case 'mix': return this.wetGain.gain;
-      case 'scHpFreq': return this.scHighpass.frequency;
+      case 'scHpFreq': return wp?.get('scHpFreq') ?? null;
       default: return null;
     }
   }
 
   public getParams() { return { ...this.params }; }
+
+  public dispose() {
+    try { this.input.disconnect(); } catch (e) {}
+    if (this.worklet) {
+      try { this.worklet.port.onmessage = null; this.worklet.disconnect(); } catch (e) {}
+      this.worklet = null;
+    }
+  }
 }
 
 const COMPRESSOR_PRESETS: Record<string, Partial<CompressorParams>> = {
@@ -318,7 +511,7 @@ const COMPRESSOR_PRESETS: Record<string, Partial<CompressorParams>> = {
     release: 0.2,
     mix: 1.0,
     scHpFreq: 100,
-    lookahead: 0.002,
+    lookahead: 0, // voix : aucune latence (la pre-lecture retarde le retour casque)
     mode: 'OPTO'
   },
   'Vocal Aggressive': {
@@ -329,7 +522,7 @@ const COMPRESSOR_PRESETS: Record<string, Partial<CompressorParams>> = {
     release: 0.1,
     mix: 1.0,
     scHpFreq: 150,
-    lookahead: 0.001,
+    lookahead: 0,
     mode: 'FET'
   },
   'Mix Bus Glue': {

@@ -62,6 +62,7 @@ CLIPS
 VOIX (le cœur du studio)
 | APPLY_MIX_STYLE | { style } | mix automatique de toutes les pistes voix. style : "rap-clair", "trap-autotune", "drill", "chant-rnb", "voix-brute", "telephone" |
 | OPEN_MIX_STYLES | {} | ouvre le panneau « Mix auto » (styles + outils voix) |
+| OPEN_SHARE | {} | ouvre le partage : vidéo verticale 30 s (Insta / TikTok), extrait audio 30 s ou démo complète MP3, avec tag « Make Music » (la version propre vient avec la licence) |
 | OPEN_LYRICS | {} | ouvre le prompteur : l'artiste écrit ou colle ses paroles, elles défilent pendant la prise |
 | CLEAN_SILENCE | { trackId, clipId } | retire les blancs d'une prise (les deux champs sont optionnels) |
 | SET_AUTO_CLEAN | { enabled } | blancs retirés automatiquement après chaque prise |
