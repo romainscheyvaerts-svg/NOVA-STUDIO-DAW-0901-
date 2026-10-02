@@ -4,7 +4,8 @@ import { liveVstNodes } from '../engine/VSTPluginNode';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { novaBridge } from './NovaBridge';
 import {
-  canBakeTrack, freezeIndex, freezeSignature, hasVst, isFreezeStale, isTrackFrozen, isVst, lastVstIndex,
+  anchorClipsToRender, canBakeTrack, freezeIndex, freezeSignature, hasVst, isFreezeStale, isTrackFrozen, isVst, lastVstIndex,
+  needsRerender, pluginsSignature,
 } from '../utils/freeze';
 
 /**
@@ -24,6 +25,28 @@ export interface FreezeResult {
   upTo: number;
   clipIds: string[];
   sig: string;
+  /** Empreinte des effets rendus seuls (clips ancrés : la piste reste éditable). */
+  pluginSig: string;
+  /** Place de chaque clip rendu dans le rendu, telle qu'au moment du rendu. */
+  anchors: Map<string, NonNullable<Clip['freezeRef']>>;
+}
+
+/**
+ * Applique un rendu à une piste (brouillon Immer ou copie) : rendu, empreintes,
+ * et ancrage des clips restés identiques depuis le début du rendu.
+ */
+export function applyFreezeResult(t: Track, r: FreezeResult): void {
+  t.frozenClip = r.clip;
+  t.frozenUpToPluginIndex = r.upTo;
+  t.frozenClipIds = r.clipIds;
+  t.frozenSourceSig = r.sig;
+  t.frozenPluginSig = r.pluginSig;
+  t.clips = (t.clips || []).map(c => {
+    const ref = r.anchors.get(c.id);
+    if (!ref) return c;
+    const unchanged = Math.abs((c.start - (c.offset || 0)) - ref.anchor) < 1e-6 && Math.abs((c.offset || 0) - ref.from) < 1e-6 && Math.abs(c.duration - (ref.to - ref.from)) < 1e-6;
+    return unchanged ? { ...c, freezeRef: ref } : c;
+  });
 }
 
 type Segment = { kind: 'native'; plugins: PluginInstance[] } | { kind: 'vst'; plugin: PluginInstance };
@@ -112,7 +135,10 @@ export async function renderTrackFreeze(track: Track, upTo: number, onStep?: (ms
     name: `${track.name} (rendu)`, color: track.color, type: TrackType.AUDIO,
     bufferId: clipId, isMuted: false, gain: 1,
   };
-  return { clip, upTo, clipIds: clips.map(c => c.id), sig: freezeSignature(clips, track.plugins || [], upTo) };
+  return {
+    clip, upTo, clipIds: clips.map(c => c.id), sig: freezeSignature(clips, track.plugins || [], upTo),
+    pluginSig: pluginsSignature(track.plugins || [], upTo), anchors: anchorClipsToRender(clips, clipId),
+  };
 }
 
 /** Effets VST3 actifs (pas contournés) sur la piste. */
@@ -126,7 +152,9 @@ export function tracksNeedingVstRender(tracks: Track[]): Track[] {
   return tracks.filter(t => {
     if (!canBakeTrack(t) || !activeVst(t) || (t.clips || []).length === 0) return false;
     if (!t.frozenClip) return true;
-    if (isFreezeStale(t)) return true;
+    // Sur PC (pont connecté), un rendu dont les clips ont bougé est refait :
+    // la tranche ancrée suffit ailleurs, mais ici on peut avoir l'exact.
+    if (needsRerender(t)) return true;
     return freezeIndex(t) < lastVstIndex(t);
   });
 }
@@ -173,7 +201,9 @@ export async function prepareTracksForOffline(tracks: Track[], onStep?: (msg: st
       try {
         const r = await renderTrackFreeze(t, lastVstIndex(t), onStep);
         temp.push(r.clip.bufferId!);
-        out.push({ ...t, isFrozen: true, frozenClip: r.clip, frozenUpToPluginIndex: r.upTo, frozenClipIds: r.clipIds, frozenSourceSig: r.sig });
+        const ft: Track = { ...t, isFrozen: true };
+        applyFreezeResult(ft, r);
+        out.push(ft);
         continue;
       } catch (e) {
         console.warn('[Export] Rendu VST impossible', e);

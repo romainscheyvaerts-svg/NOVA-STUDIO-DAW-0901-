@@ -32,7 +32,7 @@ import { SessionSerializer } from './services/SessionSerializer';
 // import { getAIProductionAssistance } from './services/AIService'; 
 import { novaBridge } from './services/NovaBridge';
 import { vstStateEvents } from './engine/VSTPluginNode';
-import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult } from './services/VstFreeze';
+import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult } from './services/VstFreeze';
 import { canBakeTrack, hasVst, freezeSignature } from './utils/freeze';
 import { recFreezeStore } from './utils/recFreezeStore';
 import { ProjectIO } from './services/ProjectIO';
@@ -2099,6 +2099,7 @@ export default function App() {
           delete t.frozenUpToPluginIndex;
           delete t.frozenClipIds;
           delete t.frozenSourceSig;
+          delete t.frozenPluginSig;
         }
       }));
       if (frozenBufferId) setTimeout(() => releaseBufferIfUnused(frozenBufferId, []), 0);
@@ -2131,10 +2132,7 @@ export default function App() {
         if (!t) return;
         oldBufferId = t.frozenClip?.bufferId;
         t.isFrozen = true;
-        t.frozenClip = r.clip;
-        t.frozenUpToPluginIndex = r.upTo;
-        t.frozenClipIds = r.clipIds;
-        t.frozenSourceSig = r.sig;
+        applyFreezeResult(t, r);
       }));
       if (oldBufferId && oldBufferId !== r.clip.bufferId) setTimeout(() => releaseBufferIfUnused(oldBufferId, []), 0);
       notify(`❄️ "${track.name}" gelée`);
@@ -2191,10 +2189,7 @@ export default function App() {
         const r = results.get(t.id);
         if (!r) return;
         if (t.frozenClip?.bufferId) old.push(t.frozenClip.bufferId);
-        t.frozenClip = r.clip;
-        t.frozenUpToPluginIndex = r.upTo;
-        t.frozenClipIds = r.clipIds;
-        t.frozenSourceSig = r.sig;
+        applyFreezeResult(t, r);
       });
     });
     setState(next);

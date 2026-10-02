@@ -24,7 +24,7 @@ import { DrumRackNode } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
 import { VSTPluginNode } from './VSTPluginNode';
-import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex } from '../utils/freeze';
+import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback } from '../utils/freeze';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
 interface TrackDSP {
@@ -683,7 +683,7 @@ export class AudioEngine {
           continue;
         }
 
-        const isFrozenRender = !!rt.frozenInput && clip.id === rt.frozenClipId;
+        const isFrozenRender = !!rt.frozenInput && (clip.id === rt.frozenClipId || !!clip.isFreezeSlice);
         const clipStartInProject = clip.start - startOffset - ((isFrozenRender ? rt.postLatency : rt.latency) || 0);
         if (clipStartInProject + clip.duration < 0) continue;
         if (clipStartInProject > totalDuration) continue;
@@ -927,7 +927,8 @@ export class AudioEngine {
   private eff(track: Track): Track {
     const f = this.recFreezes.get(track.id);
     if (!f || isTrackFrozen(track)) return track;
-    return { ...track, isFrozen: true, frozenClip: f.clip, frozenUpToPluginIndex: f.upTo, frozenClipIds: f.clipIds };
+    // Gel le temps d'une prise : rendu entier (ancien modèle), clips non ancrés.
+    return { ...track, isFrozen: true, frozenClip: f.clip, frozenUpToPluginIndex: f.upTo, frozenClipIds: f.clipIds, frozenPluginSig: undefined };
   }
 
   /**
@@ -1445,7 +1446,7 @@ export class AudioEngine {
   /** Clips reellement joues : le rendu gele remplace les clips d'origine. */
   private getPlayableClips(track: Track): Clip[] {
     track = this.eff(track);
-    if (isTrackFrozen(track)) return [track.frozenClip!, ...uncoveredClips(track)];
+    if (isTrackFrozen(track)) { const p = frozenPlayback(track); return [...p.render, ...p.live]; }
     return track.clips || [];
   }
 
@@ -1722,7 +1723,7 @@ export class AudioEngine {
         const clipGain = clip.gain ?? 1.0;
         source.connect(gainNode);
         // Clip gele : il contient deja les effets rendus, il entre apres eux.
-        const isFrozenRender = !!dsp.frozenClipId && clip.id === dsp.frozenClipId && !!dsp.frozenInput;
+        const isFrozenRender = !!dsp.frozenClipId && (clip.id === dsp.frozenClipId || !!clip.isFreezeSlice) && !!dsp.frozenInput;
         gainNode.connect(isFrozenRender ? dsp.frozenInput! : dsp.input);
         
         // Compensation de latence : sans elle, une voix passée dans l'Auto-Tune

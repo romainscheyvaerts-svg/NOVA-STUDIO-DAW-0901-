@@ -206,6 +206,30 @@ export interface Clip {
   isUnlicensed?: boolean;
   warp?: WarpSettings;            // NEW: time stretch (Ableton-style)
   groupId?: string;               // NEW: clip grouping
+  /**
+   * Place du clip dans le rendu gelé de sa piste (au moment du rendu). Couper,
+   * déplacer, raccourcir ou changer le volume d'un clip gelé (sur iPad, dans le
+   * navigateur…) se fait sur le clip d'origine : la lecture rejoue la tranche
+   * correspondante du rendu, et au dégel les vrais effets (VST du PC)
+   * retrouvent directement les modifications. Copié avec le clip (découpe).
+   */
+  freezeRef?: FreezeRef;
+  /** Tranche de rendu gelé fabriquée pour la lecture (jamais dans le projet). */
+  isFreezeSlice?: boolean;
+}
+
+export interface FreezeRef {
+  /** Id du rendu (frozenClip.id) auquel l'ancrage se rapporte. */
+  renderId: string;
+  /** Temps du rendu correspondant à l'offset 0 de l'audio source. */
+  anchor: number;
+  /** Partie de l'audio source rendue (offsets source). */
+  from: number;
+  to: number;
+  /** Fondus et gain déjà contenus dans le rendu. */
+  fadeIn: number;
+  fadeOut: number;
+  gain: number;
 }
 
 export interface AutomationPoint {
@@ -283,6 +307,12 @@ export interface Track {
   frozenClipIds?: string[];
   /** Empreinte des clips et effets rendus : si elle change, le rendu est perime. */
   frozenSourceSig?: string;
+  /**
+   * Empreinte des seuls effets rendus (modèle « clips ancrés », voir
+   * Clip.freezeRef) : tant qu'elle ne change pas, le rendu reste valable
+   * même si les clips sont édités.
+   */
+  frozenPluginSig?: string;
   /** Boîte à rythmes Make Music (piste PERCUSSIONS) : motif éditable. */
   drumMachine?: import('./utils/drumKits').DrumMachine;
   groupId?: string;            // NEW: Track group reference
