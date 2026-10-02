@@ -363,6 +363,29 @@
       }
     })();
 
+    // Démarrage bloqué (réseau coupé, ancienne version gardée par le
+    // navigateur…) : au lieu d'un écran sombre sans fin, on propose de
+    // recharger ou de réparer (vide la copie hors ligne et recharge).
+    window.novaRepair = function() {
+      var done = function() { location.replace(location.pathname + '?r=' + Date.now() + (location.search ? '&' + location.search.slice(1) : '')); };
+      var jobs = [];
+      try { if (navigator.serviceWorker) jobs.push(navigator.serviceWorker.getRegistrations().then(function(rs) { return Promise.all(rs.map(function(r) { return r.unregister(); })); })); } catch (e) {}
+      try { if (window.caches) jobs.push(caches.keys().then(function(ks) { return Promise.all(ks.map(function(k) { return caches.delete(k); })); })); } catch (e) {}
+      Promise.all(jobs).then(done, done);
+    };
+    setTimeout(function() {
+      var root = document.getElementById('root');
+      var loadingEl = document.getElementById('loading-screen');
+      if (loadingEl && root && !root.children.length) {
+        loadingEl.innerHTML = '<div style="max-width:420px;padding:24px;text-align:center;font-family:Inter,sans-serif;">' +
+          '<p style="color:#e2e8f0;font-size:18px;font-weight:700;margin-bottom:8px;">Nova met du temps à démarrer</p>' +
+          '<p style="color:#94a3b8;font-size:14px;margin-bottom:20px;">Vérifie ta connexion. Si l\'écran reste vide, « Réparer » efface l\'ancienne version gardée par ton navigateur (tes sessions ne sont pas supprimées).</p>' +
+          '<button onclick="location.reload()" style="margin:4px;padding:12px 20px;background:#00f2ff;color:#000;border:none;border-radius:10px;font-weight:800;cursor:pointer;">Recharger</button>' +
+          '<button onclick="novaRepair()" style="margin:4px;padding:12px 20px;background:transparent;color:#e2e8f0;border:1px solid #475569;border-radius:10px;font-weight:700;cursor:pointer;">Réparer</button>' +
+          '</div>';
+      }
+    }, 12000);
+
     // SPA redirect handler for GitHub Pages
     (function(){
       var redirect = sessionStorage.redirect;

@@ -52,20 +52,18 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       }
 
       return (
-        <div className="min-h-screen bg-black flex items-center justify-center p-6">
-          <div className="max-w-2xl w-full bg-gray-900 rounded-lg border border-red-500/30 p-8">
-            <h1 className="text-2xl font-black text-red-500 text-center mb-4 uppercase">
-              Something Went Wrong
-            </h1>
-            <p className="text-gray-400 text-center mb-8">
-              An unexpected error occurred.
+        <div className="min-h-screen bg-[#0c0d10] flex items-center justify-center p-6">
+          <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/[0.03] p-7 text-center">
+            <p className="text-lg font-black text-white mb-2">Nova a rencontré un problème</p>
+            <p className="text-sm text-slate-400 mb-6">
+              Ton travail sauvegardé n'est pas perdu. Recharge la page ; si le problème revient, « Réparer » efface l'ancienne version gardée par ton navigateur.
             </p>
-            <button
-                onClick={this.handleReset}
-                className="w-full px-6 py-3 bg-cyan-500 hover:bg-cyan-600 text-black font-black rounded uppercase transition-colors"
-              >
-                Try Again
-            </button>
+            <div className="flex flex-col gap-2.5">
+              <button onClick={() => window.location.reload()} className="h-12 rounded-xl bg-cyan-400 text-black font-black">Recharger</button>
+              <button onClick={() => { const r = (window as any).novaRepair; if (typeof r === 'function') r(); else window.location.reload(); }} className="h-12 rounded-xl border border-white/15 text-white font-bold">Réparer</button>
+              <button onClick={this.handleReset} className="h-10 text-sm text-slate-400 underline">Réessayer sans recharger</button>
+            </div>
+            {this.state.error && <p className="mt-5 text-[11px] text-slate-600 break-words">{String(this.state.error.message).slice(0, 200)}</p>}
           </div>
         </div>
       );
