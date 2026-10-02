@@ -12,6 +12,8 @@ interface TransportProps {
   onToggleRecord: () => void;
   isLoopActive: boolean;
   onToggleLoop: () => void;
+  isPunchActive?: boolean;
+  onTogglePunch?: () => void;
   isMetronomeEnabled?: boolean;
   onToggleMetronome?: () => void;
   bpm: number;
@@ -54,7 +56,7 @@ interface TransportProps {
 }
 
 const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
-  isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop,
+  isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, isPunchActive = false, onTogglePunch,
   isMetronomeEnabled = false, onToggleMetronome, bpm, onBpmChange, currentTime,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
   onOpenSaveMenu, onOpenLoadMenu, onExportMix, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
@@ -230,9 +232,15 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         <div className="hidden 2xl:block"><MasterMeter /></div>
         
         <div className="flex items-center space-x-2 md:space-x-3 bg-black/40 px-3 md:px-4 py-1.5 rounded-xl border border-white/5" style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}>
-          <button onClick={onStop} className="w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
+          <button onClick={onStop} title="Stop (Échap)" aria-label="Stop" className="w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
           <button onClick={onTogglePlay} title="Lecture / pause (raccourci : barre d'espace)" className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg ${isPlaying ? 'text-black nova-halo' : 'bg-white text-black hover:scale-105 shadow-black/40'}`} style={{ backgroundColor: isPlaying ? 'var(--accent-neon)' : '#fff' }}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-base`}></i></button>
-          <button onClick={onToggleLoop} className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
+          <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
+          {onTogglePunch && (
+            <button onClick={onTogglePunch} title="Punch-in / punch-out : REC ne remplace que la zone de la boucle (pré-roll de 2 mesures, arrêt automatique)" aria-pressed={isPunchActive}
+              className={`hidden md:flex h-8 px-2 rounded-lg items-center justify-center text-[9px] font-black tracking-wider transition-all ${isPunchActive ? 'bg-red-500/25 text-red-300 border border-red-500/50' : 'text-slate-500 hover:text-white border border-transparent'}`}>
+              PUNCH
+            </button>
+          )}
           <button onClick={onToggleMetronome} title="Métronome" className={`hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
           <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" className={`h-12 px-4 md:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'var(--border-highlight)' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">Rec</span></button>
         </div>

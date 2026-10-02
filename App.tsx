@@ -1255,6 +1255,28 @@ export default function App() {
    */
   const finalizeRecording = useCallback(async () => {
     const result = await audioEngine.stopRecording();
+    const punch = punchRecRef.current;
+    punchRecRef.current = null;
+    if (punch) {
+      // La boucle avait été suspendue pendant le punch : on la remet.
+      const st = stateRef.current;
+      audioEngine.setLoop(st.isLoopActive, st.loopStart, st.loopEnd);
+      if (result && result.clip.buffer) {
+        const c = result.clip;
+        const from = Math.max(punch.in, c.start);
+        const to = Math.min(punch.out, c.start + c.duration);
+        if (to - from < 0.05) {
+          setState(produce(draft => { draft.isRecording = false; draft.recStartTime = null; }));
+          setAiNotification('Punch : rien n\'a été enregistré dans la zone (la prise s\'est arrêtée avant).');
+          return null;
+        }
+        c.offset = (c.offset || 0) + (from - c.start);
+        c.start = from;
+        c.duration = to - from;
+        c.fadeIn = 0.01;
+        c.fadeOut = 0.01;
+      }
+    }
     let cleaned: StripSilenceResult | null = null;
     let takeName = '';
     let mutedOld = 0;
@@ -1268,13 +1290,14 @@ export default function App() {
       }, 0);
       takeName = `Prise ${takeNumber}`;
       result.clip.name = takeName;
-      if (autoCleanRef.current) {
+      if (autoCleanRef.current && !punch) {
         cleaned = stripSilenceFromClip({ ...result.clip, bufferId: result.clip.id }, result.clip.buffer);
       }
       // Niveau automatique : qu'on chante fort ou doucement, chaque prise arrive
       // au même niveau dans le mix (-20 dBFS moyen sur la voix), sans saturer.
       const lv = takeStats(result.clip.buffer);
-      if (!lv.silent && lv.rmsDb > -60) {
+      // En punch, la nouvelle partie garde le niveau de la prise qu'elle complète.
+      if (!punch && !lv.silent && lv.rmsDb > -60) {
         let g = -20 - lv.rmsDb;
         g = Math.min(g, -1 - lv.peakDb);          // jamais au-dessus de -1 dBFS en crête
         g = Math.max(-6, Math.min(12, g));
@@ -1294,9 +1317,23 @@ export default function App() {
         if (track) {
           const takeStart = clip.start;
           const takeEnd = clip.start + clip.duration;
-          track.clips.forEach(c => {
-            if (!c.isMuted && c.start < takeEnd && c.start + c.duration > takeStart) { c.isMuted = true; mutedOld++; }
-          });
+          if (punch) {
+            // Punch : l'ancienne prise est découpée autour de la zone (avant /
+            // après gardés, le passage remplacé retiré — Annuler le rend).
+            const next: Clip[] = [];
+            track.clips.forEach(c => {
+              const cEnd = c.start + c.duration;
+              if (c.isMuted || cEnd <= takeStart || c.start >= takeEnd) { next.push(c); return; }
+              if (c.start < takeStart) next.push({ ...c, id: `${c.id}-a${Date.now()}`, duration: takeStart - c.start, fadeOut: 0.01 });
+              if (cEnd > takeEnd) next.push({ ...c, id: `${c.id}-b${Date.now()}`, start: takeEnd, offset: (c.offset || 0) + (takeEnd - c.start), duration: cEnd - takeEnd, fadeIn: 0.01 });
+              mutedOld++;
+            });
+            track.clips = next;
+          } else {
+            track.clips.forEach(c => {
+              if (!c.isMuted && c.start < takeEnd && c.start + c.duration > takeStart) { c.isMuted = true; mutedOld++; }
+            });
+          }
           if (cleaned) track.clips.push(...cleaned.clips.map(toStore));
           else track.clips.push(toStore(clip));
         }
@@ -1306,7 +1343,7 @@ export default function App() {
       const parts: string[] = [`🎤 ${takeName} enregistrée`];
       if (cleaned) parts.push(`${cleaned.removedSec.toFixed(1)} s de blanc retirées`);
       if (takeGainDb) parts.push(`niveau ajusté (${takeGainDb > 0 ? '+' : ''}${Math.round(takeGainDb)} dB)`);
-      if (mutedOld) parts.push(`l'ancienne prise est coupée`);
+      if (mutedOld) parts.push(punch ? 'passage remplacé dans l\'ancienne prise' : `l'ancienne prise est coupée`);
       parts.push('▶ pour l\'écouter · Annuler pour revenir');
       setAiNotification(parts.join(' — '));
       const buf = result.clip.buffer;
@@ -1678,7 +1715,15 @@ export default function App() {
     try { countIn = localStorage.getItem('nova_count_in') !== '0'; } catch { /* défaut : oui */ }
     if (countIn && !(await runCountIn(currentState.bpm))) return;
 
-    const startAt = stateRef.current.currentTime;
+    let startAt = stateRef.current.currentTime;
+    const pz = stateRef.current.punch;
+    if (pz?.enabled && pz.punchOut > pz.punchIn) {
+      // Punch : on repart un peu avant la zone (pré-roll) pour se caler.
+      startAt = Math.max(0, pz.punchIn - (pz.preRoll || (240 / (stateRef.current.bpm || 120)) * 2));
+      audioEngine.setLoop(false, stateRef.current.loopStart, stateRef.current.loopEnd);
+      audioEngine.seekTo(startAt, stateRef.current.tracks, false);
+      punchRecRef.current = { in: pz.punchIn, out: pz.punchOut };
+    }
     const success = await audioEngine.startRecording(startAt, armedTrack.id);
     if (success) {
       recStartRef.current = startAt;
@@ -1719,6 +1764,18 @@ export default function App() {
     audioEngine.seekTo(0, stateRef.current.tracks, false);
     setState(prev => ({ ...prev, isPlaying: false, currentTime: 0, isRecording: false }));
   }, [setState, finalizeRecording]);
+
+  // Punch : la prise s'arrête toute seule une mesure après la fin de la zone.
+  useEffect(() => {
+    if (!state.isRecording) return;
+    const id = setInterval(() => {
+      const z = punchRecRef.current;
+      if (!z || z.stopping) return;
+      const bar = 240 / (stateRef.current.bpm || 120);
+      if (audioEngine.getCurrentTime() > z.out + bar) { z.stopping = true; void toggleRecordRef.current?.(); }
+    }, 100);
+    return () => clearInterval(id);
+  }, [state.isRecording]);
 
   const handleDuplicateTrack = useCallback((trackId: string) => {
     setState(produce((draft: DAWState) => {
@@ -2652,6 +2709,30 @@ export default function App() {
   const [lyricsOpen, setLyricsOpen] = useState(false);
   // Extrait 30 s / démo taguée
   const [shareOpen, setShareOpen] = useState(false);
+  // Punch-in / punch-out : zone de la boucle, pré-roll, arrêt automatique
+  const punchRecRef = useRef<{ in: number; out: number; stopping?: boolean } | null>(null);
+  const handleTogglePunch = useCallback(() => {
+    const st = stateRef.current;
+    if (st.punch?.enabled) {
+      setState(prev => ({ ...prev, punch: { ...prev.punch, enabled: false } }));
+      setAiNotification('Punch désactivé');
+      return;
+    }
+    if (!(st.loopEnd > st.loopStart + 0.2)) {
+      setAiNotification('Punch : définis d\'abord la zone à refaire avec la boucle (glisse dans la règle en haut de la timeline).');
+      return;
+    }
+    const bar = 240 / (st.bpm || 120);
+    setState(prev => ({ ...prev, punch: { enabled: true, punchIn: prev.loopStart, punchOut: prev.loopEnd, preRoll: bar * 2, postRoll: bar } }));
+    setAiNotification(`🎯 Punch : REC repart 2 mesures avant la zone et ne remplace que ${st.loopStart.toFixed(1)} s → ${st.loopEnd.toFixed(1)} s.`);
+  }, [setState]);
+  // La zone de punch suit la zone de boucle quand on la déplace.
+  useEffect(() => {
+    if (!state.punch?.enabled) return;
+    if (state.punch.punchIn === state.loopStart && state.punch.punchOut === state.loopEnd) return;
+    setVisualState({ punch: { ...state.punch, punchIn: state.loopStart, punchOut: state.loopEnd } });
+  }, [state.loopStart, state.loopEnd, state.punch, setVisualState]);
+
   // Aide-mémoire des raccourcis (touche « ? »)
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
@@ -3130,6 +3211,16 @@ export default function App() {
       case 'SEEK':
         handleSeek(Math.max(0, Number(p.time) || 0));
         break;
+
+      case 'SET_PUNCH': {
+        // { start, end } en secondes : zone de boucle + punch activé
+        const a = Math.max(0, Number(p.start) || 0), b = Number(p.end) || 0;
+        if (b > a + 0.2) {
+          const bar = 240 / (stateRef.current.bpm || 120);
+          setState(prev => ({ ...prev, loopStart: a, loopEnd: b, punch: { enabled: true, punchIn: a, punchOut: b, preRoll: bar * 2, postRoll: bar } }));
+        } else handleTogglePunch();
+        break;
+      }
 
       case 'GOTO_SECTION': {
         // « va au refrain » → la partie la plus pleine ; « partie 2 », « intro »…
@@ -3732,6 +3823,7 @@ export default function App() {
         <TransportBar
           isPlaying={state.isPlaying} currentTime={state.currentTime} bpm={state.bpm} onBpmChange={handleUpdateBpm}
           isRecording={state.isRecording} isLoopActive={state.isLoopActive}
+          isPunchActive={!!state.punch?.enabled} onTogglePunch={handleTogglePunch}
           onToggleLoop={() => setState(p => ({ ...p, isLoopActive: !p.isLoopActive }))}
           isMetronomeEnabled={state.metronome.enabled}
           onToggleMetronome={handleToggleMetronome}

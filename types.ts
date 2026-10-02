@@ -471,7 +471,8 @@ export type AIActionType =
   | 'OPEN_DRUMS'
   | 'REMOVE_DRUMS'
   | 'LOAD_DAILY_CHALLENGE'
-  | 'GOTO_SECTION';
+  | 'GOTO_SECTION'
+  | 'SET_PUNCH';
 
 export interface AIAction {
   action: AIActionType;

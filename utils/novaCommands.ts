@@ -55,6 +55,13 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   const less = /\b(baisse|diminue|moins fort|plus bas|reduis|moins de)\b/.test(msg);
   const say = (text: string, ...actions: AIAction[]): LocalCommandResult => ({ text, actions });
 
+  // Punch-in : « punch de 0:45 à 0:52 », « refais juste de 1:10 à 1:16 », « punch »
+  const pr = msg.match(/\b(punch|refais juste|remplace)\b.*?(\d{1,2})[:h ](\d{2}).*?(\d{1,2})[:h ](\d{2})/);
+  if (pr) {
+    const a = parseInt(pr[2], 10) * 60 + parseInt(pr[3], 10), b = parseInt(pr[4], 10) * 60 + parseInt(pr[5], 10);
+    if (b > a) return say(`🎯 Punch prêt : appuie sur REC, je repars 2 mesures avant ${pr[2]}:${pr[3]} et je ne remplace que jusqu'à ${pr[4]}:${pr[5]}.`, { action: 'SET_PUNCH', payload: { start: a, end: b } });
+  }
+  if (/\bpunch\b/.test(msg)) return say('🎯 Punch : je bascule le mode (la zone = la boucle).', { action: 'SET_PUNCH', payload: {} });
   // Repères de structure : « va au refrain », « boucle la partie 2 », « va à l'outro »
   const loopIt = /\b(boucle|loop|en boucle)\b/.test(msg);
   if (/\b(refrain|hook)\b/.test(msg) && /\b(va|aller|vas|saute|direction|boucle|loop|mets|amene|emmene|joue)\b/.test(msg)) {
