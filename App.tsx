@@ -2085,6 +2085,7 @@ export default function App() {
       ids.forEach(id => audioEngine.setRecordingFreeze(id, null));
       audioEngine.setDelayCompensationSuspended(false);
       recFreezeStore.set(new Set());
+      recFreezeStore.setPending(new Set());
       const st = stateRef.current;
       ids.forEach(id => { const t = st.tracks.find(tr => tr.id === id); if (t) audioEngine.updateTrack(t, st.tracks); });
     };
@@ -2103,9 +2104,9 @@ export default function App() {
       if (heavy.length === 0) return;
       // Réglages faits dans les fenêtres des VST3 : relus avant le rendu.
       if (novaBridge.isConnected()) await syncLiveVstStates().catch(() => null);
-      let slowShown = false;
+      // Rendu de plus de 300 ms : petit ❄️ animé sur les pistes concernées.
       slowTimer = window.setTimeout(() => {
-        if (run === recFreezeRunRef.current) { slowShown = true; setAiNotification('❄️ Préparation de la prise…'); }
+        if (run === recFreezeRunRef.current) recFreezeStore.setPending(new Set(heavy.map(t => t.id)));
       }, 300);
       const applied = new Set(recFreezeStore.get());
       for (const t of heavy) {
@@ -2130,6 +2131,7 @@ export default function App() {
           }
         }
         if (run !== recFreezeRunRef.current) return;
+        if (!r) continue;
         audioEngine.setRecordingFreeze(t.id, { clip: r.clip, upTo: r.upTo, clipIds: r.clipIds });
         const now = stateRef.current;
         const live = now.tracks.find(tr => tr.id === t.id);
@@ -2138,6 +2140,7 @@ export default function App() {
         recFreezeStore.set(applied);
       }
       if (slowTimer) window.clearTimeout(slowTimer);
+      if (run === recFreezeRunRef.current) recFreezeStore.setPending(new Set());
       if (run !== recFreezeRunRef.current || applied.size === 0) return;
       let shown = false;
       try { shown = localStorage.getItem('nova_rec_freeze_explained') === '1'; } catch { /* */ }
@@ -2145,8 +2148,6 @@ export default function App() {
         try { localStorage.setItem('nova_rec_freeze_explained', '1'); } catch { /* */ }
         setAiNotification("❄️ J'ai figé les pistes avec des effets lourds le temps de la prise : ton retour casque reste sans retard. Elles redeviennent modifiables juste après.");
         setTimeout(() => setAiNotification(null), 6000);
-      } else if (slowShown) {
-        setAiNotification(null);
       }
     })();
     return () => { if (slowTimer) window.clearTimeout(slowTimer); };

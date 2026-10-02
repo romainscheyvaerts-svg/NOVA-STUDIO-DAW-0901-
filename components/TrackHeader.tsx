@@ -385,7 +385,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               >
                 {track.name}
                 {frozen && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400" title="Piste gelée : lue depuis son rendu"></i>}
-                {!frozen && recFrozen && <i className="fas fa-snowflake text-[8px] ml-1 text-sky-300" title="Figée pendant l'enregistrement (effets à latence)" aria-label="Figée pendant l'enregistrement (effets à latence)"></i>}
+                {!frozen && recFrozen === 'frozen' && <i className="fas fa-snowflake text-[8px] ml-1 text-sky-300" title="Figée pendant l'enregistrement (effets à latence)" aria-label="Figée pendant l'enregistrement (effets à latence)"></i>}
+                {!frozen && recFrozen === 'pending' && <i className="fas fa-snowflake text-[8px] ml-1 text-sky-300/60 animate-pulse" title="Préparation de la prise…" aria-label="Préparation de la prise"></i>}
                 {freezeStale && <i className="fas fa-exclamation-triangle text-[8px] ml-1 text-amber-400" title="Les prises ont changé depuis le rendu : il sera refait à la prochaine sauvegarde sur PC (pont VST)."></i>}
               </span>
             )}
