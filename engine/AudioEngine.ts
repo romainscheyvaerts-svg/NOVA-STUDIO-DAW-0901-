@@ -22,6 +22,8 @@ import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { interpolateCurve } from '../services/AutomationManager';
 import { DrumRackNode } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
+import { Bass808Node, planOfClips } from './Bass808Node';
+import { events808 } from '../utils/bass808';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
 import { VSTPluginNode } from './VSTPluginNode';
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback } from '../utils/freeze';
@@ -56,6 +58,8 @@ interface TrackDSP {
   drumSampler?: DrumSamplerNode; // Pro Drum Sampler (Single)
   melodicSampler?: MelodicSamplerNode; // New Pro Melodic Sampler
   drumRack?: DrumRackNode; // NEW: 30-Pad Drum Rack
+  /** Basse 808 mélodique (piste MIDI avec track.bass808). */
+  bass808?: Bass808Node;
   /** Mix par pad de la batterie Make Music. */
   drumFx?: DrumPadFxBank;
   // Empreinte du cablage (plugins, routage, departs) : permet d'eviter de
@@ -516,6 +520,7 @@ export class AudioEngine {
       synth?: Synthesizer;
       sampler?: AudioSampler;
       drumRack?: DrumRackNode;
+      bass808?: Bass808Node;
     }
     const rendered = new Map<string, RenderTrack>();
     // Certains plugins (AutoTune) s'initialisent de maniere asynchrone : on
@@ -581,7 +586,12 @@ export class AudioEngine {
       };
 
       // Instruments (pistes MIDI / sampler / drum rack)
-      if (track.type === TrackType.MIDI) {
+      if (track.type === TrackType.MIDI && track.bass808) {
+        rt.bass808 = new Bass808Node(renderCtx, track.bass808.style);
+        rt.bass808.setGlideTime(track.bass808.glideTime);
+        rt.bass808.output.connect(input);
+        pendingPlugins.push(rt.bass808.ready);
+      } else if (track.type === TrackType.MIDI) {
         rt.synth = new Synthesizer(renderCtx);
         rt.synth.output.connect(input);
       } else if (track.type === TrackType.SAMPLER) {
@@ -755,6 +765,14 @@ export class AudioEngine {
 
     if (pendingPlugins.length > 0) {
       await Promise.all(pendingPlugins.map(pr => pr.catch(() => undefined)));
+    }
+
+    // --- 5b. 808 : plan monophonique (glissés), une fois son son prêt
+    for (const track of tracks) {
+      const rt = rendered.get(track.id)!;
+      if (!rt.bass808 || !track.bass808) continue;
+      const clips = isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []);
+      rt.bass808.playVoices(planOfClips(clips, track.bass808), startOffset);
     }
 
     if (onProgress) onProgress(85);
@@ -1243,8 +1261,10 @@ export class AudioEngine {
     this.isPlaying = true;
     this.pendingLoopWrap = null;
     this.pausedAt = startOffset;
-    this.nextScheduleTime = this.ctx.currentTime + 0.01; 
-    this.playbackStartTime = this.ctx.currentTime - startOffset;
+    this.nextScheduleTime = this.ctx.currentTime + 0.01;
+    // Le point de départ tombe pile au début de la 1re fenêtre : une note posée
+    // exactement là (1er kick de la batterie, 1re 808) était sautée.
+    this.playbackStartTime = this.nextScheduleTime - startOffset;
     if (this.recSession && this.recPlayStart === null) this.recPlayStart = this.playbackStartTime; 
 
     // Valeur correcte au demarrage : sans ca, une piste dont tous les points
@@ -1254,6 +1274,8 @@ export class AudioEngine {
 
     this.liveTracks = tracks;
     this.clipSigs = this.computeClipSigs(tracks);
+    // 1re fenêtre tout de suite (le minuteur arrivait après son début).
+    this.scheduler(tracks);
     this.schedulerTimer = window.setInterval(() => {
       this.scheduler(this.liveTracks || tracks);
     }, this.LOOKAHEAD_MS);
@@ -1275,6 +1297,7 @@ export class AudioEngine {
     this.activeSources.clear();
     this.tracksDSP.forEach(dsp => {
         if (dsp.synth) dsp.synth.releaseAll();
+        if (dsp.bass808) dsp.bass808.stopAll();
         if (dsp.sampler) dsp.sampler.stopAll();
         if (dsp.drumSampler) dsp.drumSampler.stop();
         if (dsp.melodicSampler) dsp.melodicSampler.stopAll();
@@ -1421,6 +1444,7 @@ export class AudioEngine {
 
     this.tracksDSP.forEach(dsp => {
       if (dsp.synth) dsp.synth.releaseAll();
+      if (dsp.bass808) dsp.bass808.stopAll(boundaryContextTime);
       if (dsp.sampler) dsp.sampler.stopAll();
       if (dsp.drumSampler) dsp.drumSampler.stop();
       if (dsp.melodicSampler) dsp.melodicSampler.stopAll();
@@ -1477,6 +1501,14 @@ export class AudioEngine {
         // Piste gelee : seules les notes ajoutees apres le rendu sont jouees.
         const midiClips = isTrackFrozen(track) ? uncoveredClips(track) : track.clips;
 
+        // 808 : plan monophonique (glissés) joué dans l'ordre du temps.
+        const b808 = this.tracksDSP.get(track.id)?.bass808;
+        if (track.bass808 && b808) {
+          const evs = events808(planOfClips(midiClips, track.bass808), projectWindowStart, projectWindowEnd);
+          b808.play(evs, t => contextScheduleTime + (t - projectWindowStart));
+          return;
+        }
+
         midiClips.forEach(clip => {
            if (clip.type !== TrackType.MIDI || !clip.notes) return;
            
@@ -1510,7 +1542,8 @@ export class AudioEngine {
       
       const now = Math.max(time, this.ctx.currentTime);
       
-      if (dsp.synth) dsp.synth.triggerAttack(pitch, velocity, now);
+      if (dsp.bass808) dsp.bass808.triggerAttack(pitch, velocity, now);
+      else if (dsp.synth) dsp.synth.triggerAttack(pitch, velocity, now);
       else if (dsp.melodicSampler) dsp.melodicSampler.triggerAttack(pitch, velocity, now);
       else if (dsp.drumSampler) dsp.drumSampler.trigger(velocity, now);
       else if (dsp.drumRack) dsp.drumRack.trigger(pitch, velocity, now);
@@ -1524,7 +1557,8 @@ export class AudioEngine {
       
       const now = Math.max(time, this.ctx.currentTime);
       
-      if (dsp.synth) dsp.synth.triggerRelease(pitch, now);
+      if (dsp.bass808) dsp.bass808.triggerRelease(pitch, now);
+      else if (dsp.synth) dsp.synth.triggerRelease(pitch, now);
       else if (dsp.melodicSampler) dsp.melodicSampler.triggerRelease(pitch, now);
       else if (dsp.sampler) dsp.sampler.triggerRelease(pitch, now);
   }
@@ -1851,7 +1885,10 @@ export class AudioEngine {
       inputAnalyzer: this.ctx.createAnalyser()
     };
 
-    if (track.type === TrackType.MIDI) {
+    if (track.type === TrackType.MIDI && track.bass808) {
+      dsp.bass808 = new Bass808Node(this.ctx, track.bass808.style);
+      dsp.bass808.output.connect(dsp.input);
+    } else if (track.type === TrackType.MIDI) {
       dsp.synth = new Synthesizer(this.ctx);
       dsp.synth.output.connect(dsp.input);
     }
@@ -1929,6 +1966,7 @@ export class AudioEngine {
     if (!dsp) return;
 
     try { dsp.synth?.releaseAll(); } catch (e) {}
+    try { dsp.bass808?.stopAll(); } catch (e) {}
     try { dsp.sampler?.stopAll(); } catch (e) {}
     try { dsp.drumSampler?.stop(); } catch (e) {}
     try { dsp.melodicSampler?.stopAll(); } catch (e) {}
@@ -1959,6 +1997,25 @@ export class AudioEngine {
 
     const dsp = this.ensureTrackDSP(track);
     if (!dsp) return;
+
+    // Piste MIDI : synthé ou 808 selon track.bass808 (peut changer : annuler, collaboration).
+    if (track.type === TrackType.MIDI) {
+      if (track.bass808 && !dsp.bass808) {
+        try { dsp.synth?.releaseAll(); dsp.synth?.output.disconnect(); } catch (e) {}
+        dsp.synth = undefined;
+        dsp.bass808 = new Bass808Node(this.ctx, track.bass808.style);
+        dsp.bass808.output.connect(dsp.input);
+      } else if (!track.bass808 && dsp.bass808) {
+        try { dsp.bass808.stopAll(); dsp.bass808.output.disconnect(); } catch (e) {}
+        dsp.bass808 = undefined;
+        dsp.synth = new Synthesizer(this.ctx);
+        dsp.synth.output.connect(dsp.input);
+      }
+      if (track.bass808 && dsp.bass808) {
+        dsp.bass808.setStyle(track.bass808.style);
+        dsp.bass808.setGlideTime(track.bass808.glideTime);
+      }
+    }
     
     if (track.type === TrackType.DRUM_RACK && dsp.drumRack && track.drumPads) {
       dsp.drumRack.updatePadsState(track.drumPads);

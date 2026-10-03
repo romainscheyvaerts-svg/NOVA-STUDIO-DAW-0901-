@@ -34,6 +34,8 @@ import { novaBridge, BridgePlugin } from './services/NovaBridge';
 import { clearInstrumentRender, instrumentFromPlugin, isInstrumentRenderCurrent } from './services/VstInstrument';
 import { useVstInstruments } from './hooks/useVstInstruments';
 import VstInstrumentPicker from './components/VstInstrumentPicker';
+import Bass808Controls from './components/Bass808Controls';
+import { BASS808_TRACK_ID, kit808Style, starter808Notes } from './utils/bass808';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
 import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult } from './services/VstFreeze';
@@ -2698,6 +2700,21 @@ function Studio() {
     }));
   }, [setState]);
 
+  // Région (marqueur avec début et fin) : cale une partie du morceau et le prompteur.
+  const handleAddRegion = useCallback((start: number, end: number, name?: string) => {
+    const id = `rg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setState(produce((draft: DAWState) => {
+      const index = draft.markers.length;
+      draft.markers.push({
+        id, name: name || `Partie ${draft.markers.filter(m => m.type === 'REGION').length + 1}`,
+        time: Math.max(0, Math.min(start, end)), endTime: Math.max(start, end), type: 'REGION',
+        color: MARKER_COLORS[index % MARKER_COLORS.length],
+      });
+      draft.markers.sort((a, b) => a.time - b.time);
+    }));
+    return id;
+  }, [setState]);
+
   const handleDeleteMarker = useCallback((markerId: string) => {
     setState(produce((draft: DAWState) => {
       draft.markers = draft.markers.filter(m => m.id !== markerId);
@@ -2747,7 +2764,9 @@ function Studio() {
       const node = el as HTMLElement | null;
       if (!node || !node.tagName) return false;
       const tag = node.tagName.toLowerCase();
-      return tag === 'input' || tag === 'textarea' || tag === 'select' || node.isContentEditable;
+      // Un curseur (swing, volume d'un pad…) n'est pas une saisie : l'espace garde la lecture.
+      if (tag === 'input') return !['range', 'button'].includes((node as HTMLInputElement).type);
+      return tag === 'textarea' || tag === 'select' || node.isContentEditable;
     };
 
     // Fenêtre au premier plan (la plus haute) qui a un bouton « Fermer ».
@@ -2760,6 +2779,13 @@ function Studio() {
       const top = els.reduce((a, b) => (z(b) >= z(a) ? b : a));
       return top.querySelector<HTMLButtonElement>(CLOSE_SEL);
     };
+    // Vraie fenêtre ouverte (export, sauvegarde, paiement…). Les panneaux de
+    // travail (batterie, piano roll : data-nova-transport) n'en sont pas.
+    const blockingOverlay = () => Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"], [role="dialog"], .fixed.inset-0'))
+      .some(el => !el.closest('[data-nova-transport]') && (el.getAttribute('aria-modal') === 'true' || (el.getClientRects().length > 0 && !!el.querySelector(CLOSE_SEL))));
+    // Espace géré ici : le bouton qui a le focus ne doit pas se « cliquer » en plus au relâchement.
+    let spaceDown = false;
+    const onKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space' && spaceDown) { spaceDown = false; e.preventDefault(); } };
 
     const onKeyDown = (e: KeyboardEvent) => {
       // Échap ferme la fenêtre ouverte (export, sauvegarde, casque, Nova Pro…).
@@ -2770,7 +2796,9 @@ function Studio() {
       if (isTypingTarget(e.target)) return;
       const mod = e.ctrlKey || e.metaKey;
       // Fenêtre modale ouverte : R, espace, Entrée… n'agissent plus sur le projet derrière.
-      if (!mod && (document.querySelector('[aria-modal="true"]') || topOverlayClose())) return;
+      if (!mod && blockingOverlay()) return;
+      // Batterie / piano roll ouverts : seule la barre d'espace (lecture / pause) passe.
+      if (!mod && e.code !== 'Space' && document.querySelector('[data-nova-transport]')) return;
       // Entrée sur un bouton : on laisse le bouton s'activer (clavier).
       if (e.key === 'Enter' && e.target instanceof HTMLElement && e.target.closest('button, a, [role="button"]')) return;
 
@@ -2778,6 +2806,8 @@ function Studio() {
       // re-declencher le bouton qui a le focus.
       if (e.code === 'Space' && !mod) {
         e.preventDefault();
+        if (e.repeat) return;
+        spaceDown = true;
         handleTogglePlay();
         return;
       }
@@ -2827,7 +2857,8 @@ function Studio() {
     };
 
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
   }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, handleAddMarker, undo, redo, setState]);
 
   const handleRequestAddPlugin = useCallback((trackId: string, x: number, y: number) => {
@@ -3088,13 +3119,47 @@ function Studio() {
     const st = stateRef.current;
     const id = kitId && DRUM_KITS.some(k => k.id === kitId) ? kitId : suggestDrumKit(st.bpm, st.beatGenre, st.beatTitle);
     applyDrumMachine(makeDrumMachineLib(id));
+    // La 808 prend le son du kit (saturée en drill).
+    setState(produce((draft: DAWState) => {
+      const b = draft.tracks.find(t => t.id === BASS808_TRACK_ID)?.bass808;
+      if (b) b.style = kit808Style(id);
+    }));
     const kit = DRUM_KITS.find(k => k.id === id);
     setAiNotification(`🥁 Batterie « ${kit?.name} » posée, calée sur le tempo (${Math.round(st.bpm)} BPM)${typeof st.projectKey === 'number' ? ' et la tonalité' : ''}. Lance la lecture !`);
-  }, [applyDrumMachine]);
+  }, [applyDrumMachine, setState]);
 
   const handleRemoveDrums = useCallback(() => {
     setState(produce((draft: DAWState) => { draft.tracks = draft.tracks.filter(t => t.id !== DRUM_TRACK_ID); }));
     setAiNotification('Batterie retirée (Annuler pour la remettre).');
+  }, [setState]);
+
+  // ===== Basse 808 mélodique : piste MIDI jouée au piano roll (utils/bass808.ts) =====
+  const handleOpen808 = useCallback(() => {
+    const st = stateRef.current;
+    setDrumsOpen(false);
+    const bar = (60 / (st.bpm || 120)) * 4;
+    const ex = st.tracks.find(t => t.id === BASS808_TRACK_ID);
+    const exClip = ex?.clips.find(c => c.type === TrackType.MIDI);
+    if (ex && exClip) { setMidiEditorOpen({ trackId: ex.id, clipId: exClip.id }); return; }
+    const kitId = (st.tracks.find(t => t.id === DRUM_TRACK_ID)?.drumMachine as DrumMachine | undefined)?.kitId;
+    const clipId = `clip-808-${Date.now().toString(36)}`;
+    const color = '#d946ef';
+    const clip: Clip = { id: clipId, start: 0, duration: bar * 4, offset: 0, fadeIn: 0, fadeOut: 0, name: '808', color, type: TrackType.MIDI,
+      notes: starter808Notes({ projectKey: st.projectKey, bpm: st.bpm, bars: 4, kitId }), isMuted: false, gain: 1 };
+    setState(produce((draft: DAWState) => {
+      const t = draft.tracks.find(x => x.id === BASS808_TRACK_ID);
+      if (t) { t.clips.push(clip); return; }
+      const track: Track = {
+        id: BASS808_TRACK_ID, name: '808', type: TrackType.MIDI, color, isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+        volume: 0.85, pan: 0, outputTrackId: 'master', sends: [], plugins: [], automationLanes: [], totalLatency: 0,
+        bass808: { style: kit808Style(kitId), glide: true }, clips: [clip],
+      };
+      // Sous la batterie (sinon sous la mélodie).
+      const at = Math.max(draft.tracks.findIndex(x => x.id === DRUM_TRACK_ID), draft.tracks.findIndex(x => x.id === 'instrumental'));
+      draft.tracks.splice(at + 1, 0, track);
+    }));
+    setTimeout(() => setMidiEditorOpen({ trackId: BASS808_TRACK_ID, clipId }), 50);
+    setAiNotification(`🔊 808 posée${typeof st.projectKey === 'number' ? ' sur la tonique du morceau' : ''} : dessine ta ligne au piano roll. Deux notes qui se chevauchent glissent (slide).`);
   }, [setState]);
 
   // Sons des pads : générés / chargés puis donnés au moteur (808 accordée sur la tonalité).
@@ -3437,6 +3502,7 @@ function Studio() {
           if (ct.collabOwner) t.collabOwner = ct.collabOwner;
           if (ct.drumMachine !== undefined) t.drumMachine = ct.drumMachine;
           if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
+          if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
           t.clips = Array.isArray(ct.clips) ? ct.clips : t.clips;
           // Instrument VST du beatmaker : on reçoit le rendu de ses notes.
           if (ct.vstInstrument) {
@@ -3823,7 +3889,8 @@ function Studio() {
       setState(produce((draft: DAWState) => {
         draft.markers = draft.markers.filter(m => !m.id.startsWith('auto-'));
         sections.forEach((s, i) => draft.markers.push({
-          id: `auto-${i}-${Date.now()}`, name: s.name, time: s.start, endTime: s.end, type: 'REGION', color: sectionColor(s),
+          // Id stable (n° de partie) : les paroles calées dessus dans le prompteur le restent.
+          id: `auto-${i}`, name: s.name, time: s.start, endTime: s.end, type: 'REGION', color: sectionColor(s),
         }));
         draft.markers.sort((a, b) => a.time - b.time);
       }));
@@ -4953,6 +5020,7 @@ function Studio() {
           beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
           onOpenDrums={() => setDrumsOpen(true)}
           onNewMidiTrack={handleNewMidiTrack}
+          onOpen808={handleOpen808}
           onOpenVocalTools={() => setVocalToolsOpen(true)}
           onOpenLyrics={() => setLyricsOpen(o => !o)}
           lyricsOpen={lyricsOpen}
@@ -4995,7 +5063,7 @@ function Studio() {
                    onMoveClipsBy={handleMoveClipsBy}
                    onAudioDrop={onArrangementAudioDrop}
                    markers={state.markers} onAddMarker={handleAddMarker}
-                   onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
+                   onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker} onAddRegion={handleAddRegion}
                 />
               )}
 
@@ -5178,6 +5246,7 @@ function Studio() {
         open={welcomeOpen}
         beatLoaded={!!state.tracks.find(t => t.id === 'instrumental')?.clips.length}
         isMobile={isMobile}
+        beatmaking={state.projectMode === 'BEATMAKING'}
         onPickBeat={() => {
           closeWelcome();
           if (isMobile) setActiveMobileTab('BROWSER');
@@ -5195,6 +5264,18 @@ function Studio() {
         onStartChange={t => setState(prev => ({ ...prev, lyricsStart: Math.max(0, t) }))}
         speed={state.lyricsSpeed ?? 16}
         onSpeedChange={v => setState(prev => ({ ...prev, lyricsSpeed: v }))}
+        regions={state.markers.filter(m => m.type === 'REGION' && (m.endTime ?? 0) > m.time)}
+        regionMap={state.lyricsRegions || {}}
+        onRegionMapChange={map => setState(prev => ({ ...prev, lyricsRegions: map }))}
+        onCreateRegion={(name) => {
+          // Nouvelle région : la boucle si elle est active, sinon 8 mesures depuis la tête de lecture.
+          const st = stateRef.current;
+          const bar = (60 / (st.bpm || 120)) * 4;
+          const t0 = st.isLoopActive && st.loopEnd > st.loopStart ? st.loopStart : playheadStore.get();
+          const t1 = st.isLoopActive && st.loopEnd > st.loopStart ? st.loopEnd : t0 + bar * 8;
+          return handleAddRegion(t0, t1, name);
+        }}
+        bpm={state.bpm}
         isPlaying={state.isPlaying}
         isRecording={state.isRecording}
         currentTime={state.currentTime}
@@ -5280,6 +5361,8 @@ function Studio() {
         onTogglePlay={handleTogglePlay}
         bpm={state.bpm}
         clipStart={0}
+        onOpen808={handleOpen808}
+        has808={state.tracks.some(t => t.id === BASS808_TRACK_ID)}
       />
       <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <TakeHomeModal
@@ -5369,12 +5452,14 @@ function Studio() {
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}
       
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
-          <div className="fixed inset-0 z-[250] bg-[#0c0d10] flex flex-col animate-in slide-in-from-bottom-10 duration-200">
+          <div data-nova-transport="" className="fixed inset-0 z-[250] bg-[#0c0d10] flex flex-col animate-in slide-in-from-bottom-10 duration-200">
              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement de l'éditeur…</div>}>
                <PianoRoll track={state.tracks.find(t => t.id === midiEditorOpen.trackId)!} clipId={midiEditorOpen.clipId} bpm={state.bpm} currentTime={state.currentTime} onUpdateTrack={handleUpdateTrack} onClose={() => setMidiEditorOpen(null)}
+                 isPlaying={state.isPlaying} onTogglePlay={handleTogglePlay}
                  toolbarExtra={(() => {
                    // Mode instru seulement : le mode voix reste épuré.
                    const t = state.tracks.find(x => x.id === midiEditorOpen.trackId);
+                   if (t?.bass808) return <Bass808Controls value={t.bass808} onChange={v => handleUpdateTrack({ ...t, bass808: v })} />;
                    if (!t || t.type !== TrackType.MIDI || !(state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker')) return null;
                    return (
                      <VstInstrumentPicker

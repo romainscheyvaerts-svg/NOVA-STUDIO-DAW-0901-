@@ -16,6 +16,9 @@ interface DrumMachinePanelProps {
   onTogglePlay: () => void;
   bpm: number;
   clipStart: number;
+  /** Ouvre (ou crée) la piste 808 dans le piano roll. */
+  onOpen808?: () => void;
+  has808?: boolean;
 }
 
 const CAT_OF: Record<string, DrumCategory[]> = {
@@ -110,13 +113,27 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   const curPage = Math.min(page, pages - 1);
   const shownSteps = narrow ? Array.from({ length: 8 }, (_, i) => curPage * 8 + i) : Array.from({ length: len }, (_, i) => i);
   const pad = dm?.rows[Math.min(selPad, (dm?.rows.length || 1) - 1)];
+  // Ancienne rangée 808 (projets d'avant la piste 808) : visible tant qu'elle joue.
+  const shownRows = dm ? dm.rows.map((r, ri) => ({ r, ri })).filter(({ r }) => r.id !== '808' || r.steps.some(v => v > 0)) : [];
 
+  // Ordinateur : panneau en bas, sans fond qui bloque (la barre de transport
+  // reste cliquable). Téléphone : feuille plein écran avec fond.
+  // data-nova-transport : la barre d'espace lance / coupe la lecture (App.tsx).
   return (
-    <div className="fixed inset-0 z-[560] flex items-end sm:items-center justify-center bg-black/50" onClick={p.onClose} role="dialog" aria-modal="true" aria-labelledby="drums-title">
-      <div className="w-full sm:max-w-4xl max-h-[92vh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-[#121418] border border-white/10 shadow-2xl pb-[env(safe-area-inset-bottom)]" onClick={e => e.stopPropagation()}>
+    <div data-nova-transport="" className={narrow
+      ? 'fixed inset-0 z-[560] flex items-end justify-center bg-black/50'
+      : 'fixed inset-x-0 bottom-0 z-[560] flex justify-center px-4 pb-3 pointer-events-none'}
+      onClick={narrow ? p.onClose : undefined} role="dialog" aria-modal={narrow ? 'true' : undefined} aria-labelledby="drums-title">
+      <div className={`w-full flex flex-col bg-[#121418] border border-white/10 shadow-2xl pb-[env(safe-area-inset-bottom)] pointer-events-auto ${narrow ? 'max-h-[92vh] rounded-t-3xl' : 'max-w-4xl max-h-[min(64vh,600px)] rounded-3xl shadow-black/60'}`} onClick={e => e.stopPropagation()}>
         {/* En-tête */}
         <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-white/5">
           <h2 id="drums-title" className="text-[16px] font-black text-white mr-auto">🥁 Batterie <span className="text-slate-400 font-bold text-[12px]">Make Music</span></h2>
+          {p.onOpen808 && (
+            <button type="button" onClick={p.onOpen808} title="Basse 808 : joue-la au piano roll, accordée sur la tonalité, avec glissés"
+              className="h-10 px-3 rounded-xl text-[12px] font-black bg-fuchsia-500/20 text-fuchsia-100 border border-fuchsia-400/40 hover:bg-fuchsia-500/30">
+              🔊 808{p.has808 ? '' : ' +'}
+            </button>
+          )}
           {dm && (
             <button type="button" onClick={p.onTogglePlay} className={`h-10 px-4 rounded-xl text-[12px] font-black ${p.isPlaying ? 'bg-white text-black' : 'bg-cyan-500 text-black'}`}>
               <i className={`fas ${p.isPlaying ? 'fa-pause' : 'fa-play'} mr-1.5`} />{p.isPlaying ? 'Pause' : 'Écouter'}
@@ -168,7 +185,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               <div className="relative">
               <div ref={gridRef} onScroll={checkScroll} className={narrow ? '-mx-2' : 'overflow-x-auto no-scrollbar'}>
                 <div className={narrow ? '' : 'inline-block min-w-full'}>
-                  {dm.rows.map((r, ri) => (
+                  {shownRows.map(({ r, ri }) => (
                     <div key={r.id} className="flex items-center gap-1 mb-1">
                       {narrow ? (
                         <button type="button" onClick={() => { p.onAudition(ri); setSelPad(ri); if (soundMenu !== null) setSoundMenu(ri); }}
@@ -251,7 +268,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               </div>
               <p className="text-[11px] text-slate-500">
                 {narrow && "Touche le nom d'un pad pour l'écouter et le choisir ; 1–8 / 9–16 change de moitié de mesure (le point bleu montre où joue la lecture). "}
-                Tap : allumer → accent léger → éteindre. Appui long (ou clic droit) : roll ×2 ×3 ×4. Bouton réglages d'un pad : son, accordage, longueur et mix (EQ, compression, saturation, réverb, délai). La 808 et le log drum sont accordés sur la tonalité du morceau.
+                Tap : allumer → accent léger → éteindre. Appui long (ou clic droit) : roll ×2 ×3 ×4. Bouton réglages d'un pad : son, accordage, longueur et mix (EQ, compression, saturation, réverb, délai). Le log drum est accordé sur la tonalité du morceau ; la 808 se joue au piano roll (bouton « 🔊 808 »). Barre d'espace : lecture / pause.
               </p>
             </>
           )}

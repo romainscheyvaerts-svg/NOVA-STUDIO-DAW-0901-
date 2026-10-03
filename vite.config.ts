@@ -96,10 +96,8 @@ export default defineConfig(({ mode }) => {
         name: 'nova-build-stamp',
         transformIndexHtml: (html: string) => html.replace('</head>', `  <meta name="nova-build" content="${Date.now()}">\n  </head>`),
       }],
-      define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-      },
+      // Pas de clé Gemini injectée dans le code du navigateur : l'IA passe par
+      // /api/chat ou la fonction Supabase nova-chat, qui gardent la clé côté serveur.
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

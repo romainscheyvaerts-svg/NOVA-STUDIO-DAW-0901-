@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { audioEngine } from '../engine/AudioEngine';
+import type { Marker } from '../types';
+import { autoRegionMap, lyricBlocks, prompterLine, regionAnchors } from '../utils/lyricsTiming';
 
 interface LyricsPrompterProps {
   open: boolean;
@@ -16,6 +18,14 @@ interface LyricsPrompterProps {
   isRecording: boolean;
   /** Position courante quand le projet est à l'arrêt (ou si le moteur ne répond pas). */
   currentTime: number;
+  /** Régions de la fenêtre d'édition (marqueurs avec début et fin). */
+  regions?: Marker[];
+  /** Bloc de paroles (n°) → id de région. */
+  regionMap?: Record<string, string>;
+  onRegionMapChange?: (map: Record<string, string>) => void;
+  /** Crée une région (boucle active, sinon 8 mesures à la tête de lecture) et renvoie son id. */
+  onCreateRegion?: (name: string) => string;
+  bpm?: number;
 }
 
 const LINE_H = 1.45; // interligne (em)
@@ -34,6 +44,7 @@ const LyricsPrompter: React.FC<LyricsPrompterProps> = (p) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const [activeLine, setActiveLine] = useState(0);
+  const [showRegions, setShowRegions] = useState(false);
 
   useEffect(() => { if (!editing) setDraft(p.lyrics); }, [p.lyrics, editing]);
   // À chaque ouverture : on repart des paroles du projet (session reprise, projet chargé).
@@ -46,6 +57,19 @@ const LyricsPrompter: React.FC<LyricsPrompterProps> = (p) => {
   useEffect(() => { try { localStorage.setItem('nova_prompter_font', String(fontSize)); } catch { /* */ } }, [fontSize]);
 
   const lines = useMemo(() => p.lyrics.split('\n'), [p.lyrics]);
+  const blocks = useMemo(() => lyricBlocks(lines), [lines]);
+  const regions = useMemo(() => p.regions || [], [p.regions]);
+  const regionMap = useMemo(() => p.regionMap || {}, [p.regionMap]);
+  // Points de calage : chaque bloc associé défile sur la durée de sa région.
+  const anchors = useMemo(() => regionAnchors(blocks, regionMap, regions), [blocks, regionMap, regions]);
+  const regionMode = anchors.length > 0;
+  const fmt = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  const bars = (r: Marker) => Math.round(((r.endTime ?? r.time) - r.time) / ((60 / (p.bpm || 120)) * 4) * 10) / 10;
+  const setBlockRegion = (i: number, id: string) => {
+    const next = { ...regionMap };
+    if (id) next[String(i)] = id; else delete next[String(i)];
+    p.onRegionMapChange?.(next);
+  };
 
   // Défilement synchronisé sur la position du projet
   useEffect(() => {
@@ -55,7 +79,7 @@ const LyricsPrompter: React.FC<LyricsPrompterProps> = (p) => {
       const el = scrollRef.current;
       if (el) {
         const t = p.isPlaying ? audioEngine.getCurrentTime() : p.currentTime;
-        const linesElapsed = Math.max(0, (t - p.start) * (p.speed / 60));
+        const linesElapsed = prompterLine(t, { anchors, start: p.start, speed: p.speed });
         const lineH = fontSize * LINE_H;
         el.scrollTop = linesElapsed * lineH;
         setActiveLine(Math.floor(linesElapsed));
@@ -64,7 +88,7 @@ const LyricsPrompter: React.FC<LyricsPrompterProps> = (p) => {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [p.open, editing, p.isPlaying, p.currentTime, p.start, p.speed, fontSize]);
+  }, [p.open, editing, p.isPlaying, p.currentTime, p.start, p.speed, fontSize, anchors]);
 
   if (!p.open) return null;
 
@@ -98,15 +122,58 @@ const LyricsPrompter: React.FC<LyricsPrompterProps> = (p) => {
         </div>
         {!editing && (
           <div className="flex items-center gap-1.5 flex-wrap">
-            <button type="button" className={btn} title="Plus lent" aria-label="Plus lent"
-              onClick={() => p.onSpeedChange(Math.max(4, p.speed - 2))}>🐢</button>
-            <span className="text-[11px] text-slate-300 tabular-nums w-14 text-center" title="Lignes par minute">{p.speed} l/min</span>
-            <button type="button" className={btn} title="Plus rapide" aria-label="Plus rapide"
-              onClick={() => p.onSpeedChange(Math.min(60, p.speed + 2))}>🐇</button>
+            {!regionMode && (<>
+              <button type="button" className={btn} title="Plus lent" aria-label="Plus lent"
+                onClick={() => p.onSpeedChange(Math.max(4, p.speed - 2))}>🐢</button>
+              <span className="text-[11px] text-slate-300 tabular-nums w-14 text-center" title="Lignes par minute">{p.speed} l/min</span>
+              <button type="button" className={btn} title="Plus rapide" aria-label="Plus rapide"
+                onClick={() => p.onSpeedChange(Math.min(60, p.speed + 2))}>🐇</button>
+            </>)}
+            {p.onRegionMapChange && (
+              <button type="button" className={`${btn} ${showRegions || regionMode ? '!bg-cyan-500/25 ring-1 ring-cyan-400/60' : ''}`}
+                aria-expanded={showRegions} title="Caler chaque partie des paroles sur une région de la fenêtre d'édition"
+                onClick={() => setShowRegions(v => !v)}>🎯 Régions{regionMode ? ` (${blocks.filter((_, i) => regions.some(r => r.id === regionMap[String(i)])).length})` : ''}</button>
+            )}
             <button type="button" className={btn} aria-label="Texte plus petit" onClick={() => setFontSize(f => Math.max(16, f - 2))}>A−</button>
             <button type="button" className={btn} aria-label="Texte plus grand" onClick={() => setFontSize(f => Math.min(44, f + 2))}>A+</button>
-            <button type="button" className={`${btn} ml-auto`} title="La première ligne démarre à la position actuelle du beat"
-              onClick={() => p.onStartChange(p.isPlaying ? audioEngine.getCurrentTime() : p.currentTime)}>⏱ Commencer ici</button>
+            {!regionMode && (
+              <button type="button" className={`${btn} ml-auto`} title="La première ligne démarre à la position actuelle du beat"
+                onClick={() => p.onStartChange(p.isPlaying ? audioEngine.getCurrentTime() : p.currentTime)}>⏱ Commencer ici</button>
+            )}
+          </div>
+        )}
+        {!editing && showRegions && (
+          <div className="rounded-xl bg-white/5 border border-white/10 p-2 space-y-1.5 max-h-[38vh] overflow-y-auto">
+            <p className="text-[11px] text-slate-300 leading-snug">
+              Chaque partie de tes paroles défile pendant sa région. Pour aller plus vite ou plus lentement, tire les bords de la région dans la règle de la fenêtre d'édition (clic droit sur la règle pour en créer une).
+            </p>
+            {blocks.length === 0 && <p className="text-[11px] text-slate-400">Sépare tes parties par une ligne vide (Couplet, Refrain…).</p>}
+            {blocks.map((b, i) => {
+              const id = regionMap[String(i)] || '';
+              const r = regions.find(x => x.id === id);
+              return (
+                <div key={i} className="flex items-center gap-1.5">
+                  <span className="flex-1 min-w-0 truncate text-[12px] font-bold text-white" title={b.title}>{b.title}</span>
+                  <select value={r ? id : ''} onChange={e => setBlockRegion(i, e.target.value)}
+                    aria-label={`Région pour « ${b.title} »`}
+                    className="h-8 max-w-[52%] rounded-lg bg-black/60 border border-white/15 text-[11px] text-white px-1.5">
+                    <option value="">Vitesse fixe</option>
+                    {regions.map(x => <option key={x.id} value={x.id}>{x.name} · {fmt(x.time)} ({bars(x)} mes.)</option>)}
+                  </select>
+                  {p.onCreateRegion && !r && (
+                    <button type="button" className="h-8 px-2 rounded-lg bg-white/10 text-[11px] font-bold text-white" title="Crée une région (la boucle, ou 8 mesures à la tête de lecture)"
+                      aria-label={`Créer une région pour « ${b.title} »`}
+                      onClick={() => setBlockRegion(i, p.onCreateRegion!(b.title))}>＋</button>
+                  )}
+                </div>
+              );
+            })}
+            {blocks.length > 0 && regions.length > 0 && (
+              <div className="flex gap-1.5 pt-1">
+                <button type="button" className={btn} onClick={() => p.onRegionMapChange?.(autoRegionMap(blocks, regions))}>Associer dans l'ordre</button>
+                {regionMode && <button type="button" className={btn} onClick={() => p.onRegionMapChange?.({})}>Tout en vitesse fixe</button>}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -121,7 +188,7 @@ const LyricsPrompter: React.FC<LyricsPrompterProps> = (p) => {
             autoFocus
           />
           <p className="text-[11px] text-slate-400">
-            Elles défilent pendant que tu enregistres. Règle la vitesse avec 🐢 / 🐇 et utilise « Commencer ici » pour caler la première ligne sur ton entrée.
+            Elles défilent pendant que tu enregistres. Sépare tes parties (Couplet, Refrain…) par une ligne vide : avec 🎯 Régions, chacune défile pendant sa région de la fenêtre d'édition. Sinon règle la vitesse avec 🐢 / 🐇.
           </p>
         </div>
       ) : (

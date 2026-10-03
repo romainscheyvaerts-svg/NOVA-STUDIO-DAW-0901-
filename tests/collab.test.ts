@@ -402,6 +402,11 @@ describe('contentOf / mixOf / contentBufferIds / sigOf', () => {
     ...over,
   });
 
+  it('contentOf : les réglages de la 808 voyagent avec les notes', () => {
+    const c = contentOf(t({ type: 'MIDI' as any, bass808: { style: '808', glide: true } }));
+    expect(c.bass808).toEqual({ style: '808', glide: true });
+  });
+
   it('contentOf : clips sans buffer / audioRef / tranche de gel, sans réglages de mix', () => {
     const c = contentOf(t());
     expect(c.clips.map(x => x.id)).toEqual(['c1', 'c2', 'c3']);

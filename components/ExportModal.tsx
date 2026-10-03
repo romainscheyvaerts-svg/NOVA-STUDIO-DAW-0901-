@@ -257,9 +257,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
             const estBeat = (t: typeof exportTracks[number]) => t.id === 'instrumental' || (t.instrumentId !== undefined && t.instrumentId !== null && t.instrumentId !== '');
             // Le beat n'existe plus dans ce rendu.
             const sansBeat = exportTracks.filter(t => !estBeat(t));
-            // Les pistes de l'artiste : ses voix et sa batterie (sons Make Music,
+            // Les pistes de l'artiste : ses voix, sa batterie et sa 808 (sons Make Music,
             // utilisables librement). La mélodie / le beat du catalogue n'y sont pas.
-            const voix = sansBeat.filter(t => (t.type === 'AUDIO' || t.type === 'DRUM_RACK') && !t.isMuted && t.clips.some(c => !c.isMuted));
+            const voix = sansBeat.filter(t => (t.type === 'AUDIO' || t.type === 'DRUM_RACK' || !!t.bass808) && !t.isMuted && t.clips.some(c => !c.isMuted));
             if (voix.length === 0) throw new Error('Aucune de tes pistes (voix, batterie) à exporter.');
             // Durée : jusqu'à la fin de la dernière voix + 4 s de queue (reverb),
             // pas la longueur du beat. Tous les fichiers démarrent au même point.

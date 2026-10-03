@@ -37,6 +37,8 @@ interface ArrangementViewProps {
   onAddMarker?: (time: number, name?: string) => void;
   onUpdateMarker?: (marker: Marker) => void;
   onDeleteMarker?: (markerId: string) => void;
+  /** Crée une région (marqueur avec début et fin) : elle cale le prompteur de paroles. */
+  onAddRegion?: (start: number, end: number, name?: string) => void;
   // Plugins
   onDropPluginOnTrack: (trackId: string, type: PluginType, metadata?: any) => void;
   onMovePlugin?: (sourceTrackId: string, destTrackId: string, pluginId: string) => void;
@@ -101,7 +103,7 @@ const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: bo
 const ArrangementView: React.FC<ArrangementViewProps> = ({ 
   tracks, selectedTrackId, onSelectTrack, onUpdateTrack, onReorderTracks, 
   isLoopActive, loopStart, loopEnd, onSetLoop, onSeek, bpm, 
-  markers = [], onAddMarker, onUpdateMarker, onDeleteMarker, isPlaying = false,
+  markers = [], onAddMarker, onUpdateMarker, onDeleteMarker, onAddRegion, isPlaying = false,
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip, isRecording, recStartTime,
   onCreatePattern, onSwapInstrument, onEditMidi, onAudioDrop, onMoveClipsBy
@@ -166,6 +168,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   }, [dragOverTrackId, onReorderTracks]);
 
   const [markerContextMenu, setMarkerContextMenu] = useState<{ x: number; y: number; marker: Marker } | null>(null);
+  // Bord de région en cours de déplacement (début ou fin) : règle aussi la vitesse du prompteur.
+  const regionDragRef = useRef<{ marker: Marker; edge: 'START' | 'END' } | null>(null);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
 
   // 296 px : nom de piste lisible avec FX, M, S, envois et R sur la même ligne.
@@ -638,10 +642,25 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         if (e.button === 2 && onAddMarker) {
             e.preventDefault();
             const markerTime = getSnappedTime(time, bpm, gridSize, useSnap);
+            const bar = (60 / (bpm || 120)) * 4;
             setContextMenu({ x: e.clientX, y: e.clientY, items: [
-                { label: 'Ajouter un marqueur ici', icon: 'fa-map-pin', onClick: () => { onAddMarker(markerTime); setContextMenu(null); } }
+                { label: 'Ajouter un marqueur ici', icon: 'fa-map-pin', onClick: () => { onAddMarker(markerTime); setContextMenu(null); } },
+                ...(onAddRegion ? [
+                    { label: 'Créer une région ici (8 mesures)', icon: 'fa-arrows-left-right', onClick: () => { onAddRegion(markerTime, markerTime + bar * 8); setContextMenu(null); } },
+                    ...(isLoopActive && loopEnd > loopStart ? [{ label: 'Créer une région = la boucle', icon: 'fa-repeat', onClick: () => { onAddRegion(loopStart, loopEnd); setContextMenu(null); } }] : []),
+                ] : []),
             ]});
             return;
+        }
+
+        // Bords de région : on les tire pour caler une partie (et le prompteur).
+        if (e.button !== 2 && onUpdateMarker) {
+            const edgeHit = touchRef.current ? 14 : 6;
+            for (const mk of markers) {
+                if (mk.type !== 'REGION' || !mk.endTime) continue;
+                if (Math.abs(x - mk.endTime * zoomH) < edgeHit) { regionDragRef.current = { marker: mk, edge: 'END' }; e.preventDefault(); return; }
+                if (Math.abs(x - mk.time * zoomH) < edgeHit) { regionDragRef.current = { marker: mk, edge: 'START' }; e.preventDefault(); return; }
+            }
         }
 
         if (isLoopActive && loopEnd > loopStart) {
@@ -783,6 +802,19 @@ const handleMouseMove = (e: React.MouseEvent) => {
     const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
     const useSnap = snapEnabled && !isShiftDownRef.current;
+
+    const rd = regionDragRef.current;
+    if (rd && onUpdateMarker) {
+        const tSnap = Math.max(0, getSnappedTime(x / zoomH, bpm, gridSize, useSnap));
+        const beat = 60 / (bpm || 120);
+        const m = rd.marker;
+        const next = rd.edge === 'END'
+          ? { ...m, endTime: Math.max(m.time + beat, tSnap) }
+          : { ...m, time: Math.min((m.endTime ?? tSnap + beat) - beat, tSnap) };
+        regionDragRef.current = { ...rd, marker: next };
+        onUpdateMarker(next);
+        return;
+    }
 
     if (loopDragMode && initialLoopState) {
         const dx = x - dragStartX;
@@ -946,6 +978,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
 };
 
 const handleMouseUp = () => {
+    regionDragRef.current = null;
     if (gainDragRef.current) { gainDragRef.current = null; setGainTip(null); }
     setDragAction(null);
     setActiveClip(null);
@@ -1637,16 +1670,20 @@ useEffect(() => {
         <ContextMenu
             x={markerContextMenu.x} y={markerContextMenu.y} onClose={() => setMarkerContextMenu(null)}
             items={[
-                { label: 'Go to Marker', icon: 'fa-crosshairs', onClick: () => { onSeek(markerContextMenu.marker.time); setMarkerContextMenu(null); }},
-                { label: 'Rename', icon: 'fa-pen', onClick: () => { setEditingMarkerId(markerContextMenu.marker.id); setMarkerContextMenu(null); }},
-                { label: 'Change Color', icon: 'fa-palette', onClick: () => { 
+                { label: 'Aller au marqueur', icon: 'fa-crosshairs', onClick: () => { onSeek(markerContextMenu.marker.time); setMarkerContextMenu(null); }},
+                { label: 'Renommer', icon: 'fa-pen', onClick: () => { setEditingMarkerId(markerContextMenu.marker.id); setMarkerContextMenu(null); }},
+                ...(markerContextMenu.marker.type !== 'REGION' && onUpdateMarker ? [{ label: 'En faire une région (8 mesures)', icon: 'fa-arrows-left-right', onClick: () => {
+                    onUpdateMarker({ ...markerContextMenu.marker, type: 'REGION' as const, endTime: markerContextMenu.marker.time + (60 / (bpm || 120)) * 32 });
+                    setMarkerContextMenu(null);
+                }}] : []),
+                { label: 'Changer la couleur', icon: 'fa-palette', onClick: () => { 
                     const colors = ['#f59e0b', '#10b981', '#3b82f6', '#ef4444', '#8b5cf6', '#ec4899'];
                     const nextColor = colors[(colors.indexOf(markerContextMenu.marker.color) + 1) % colors.length];
                     onUpdateMarker?.({ ...markerContextMenu.marker, color: nextColor });
                     setMarkerContextMenu(null);
                 }},
                 'separator',
-                { label: 'Delete Marker', icon: 'fa-trash', danger: true, onClick: () => { onDeleteMarker?.(markerContextMenu.marker.id); setMarkerContextMenu(null); }}
+                { label: 'Supprimer', icon: 'fa-trash', danger: true, onClick: () => { onDeleteMarker?.(markerContextMenu.marker.id); setMarkerContextMenu(null); }}
             ]}
         />
     )}

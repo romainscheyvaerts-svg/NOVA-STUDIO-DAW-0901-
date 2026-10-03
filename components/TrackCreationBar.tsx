@@ -18,6 +18,8 @@ interface TrackCreationBarProps {
   beatmaking?: boolean;
   onNewMidiTrack?: () => void;
   onOpenDrums?: () => void;
+  /** Crée / ouvre la piste 808 (piano roll). */
+  onOpen808?: () => void;
 }
 
 /**
@@ -25,7 +27,7 @@ interface TrackCreationBarProps {
  * pas. La barre flottante propose donc les deux gestes utiles : ajouter une
  * piste voix et choisir un style de mix.
  */
-const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen, beatmaking, onNewMidiTrack, onOpenDrums }) => {
+const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen, beatmaking, onNewMidiTrack, onOpenDrums, onOpen808 }) => {
   const style = findVocalMixStyle(currentStyleId);
   return (
     <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[150] flex items-center gap-1 sm:gap-2 max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-hide">
@@ -44,6 +46,12 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOp
         <button type="button" onClick={onOpenDrums} title="Boîte à rythmes : pas, sons, mix de chaque pad"
           className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-[#1a1c21] border-orange-400/40 text-orange-200 hover:text-white">
           <span className="text-base leading-none">🥁</span><span className="text-xs font-bold">Batterie</span>
+        </button>
+      )}
+      {beatmaking && onOpen808 && (
+        <button type="button" onClick={onOpen808} title="Basse 808 : joue-la au piano roll, accordée sur la tonalité, avec glissés"
+          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-[#1a1c21] border-fuchsia-400/40 text-fuchsia-200 hover:text-white">
+          <span className="text-base leading-none">🔊</span><span className="text-xs font-bold">808</span>
         </button>
       )}
       {beatmaking && onNewMidiTrack && (

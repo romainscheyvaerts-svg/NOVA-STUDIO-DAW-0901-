@@ -259,7 +259,7 @@ const clipForWire = (c: Clip): Clip => {
 /** Contenu d'une piste à envoyer (sans les réglages de mix, qui sont à l'ingé). */
 export const contentOf = (t: Track) => ({
   name: t.name, type: t.type, color: t.color, outputTrackId: t.outputTrackId,
-  collabOwner: t.collabOwner, drumMachine: t.drumMachine, drumPads: t.drumPads?.map(p => { const { buffer: _b, ...r } = p as any; return r; }),
+  collabOwner: t.collabOwner, drumMachine: t.drumMachine, bass808: t.bass808, drumPads: t.drumPads?.map(p => { const { buffer: _b, ...r } = p as any; return r; }),
   clips: (t.clips || []).map(clipForWire),
   // Instrument VST du PC : le rendu des notes voyage avec la piste (sans
   // l'état du plugin, lourd et inutile à qui n'a pas le VST).

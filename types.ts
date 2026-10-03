@@ -327,6 +327,8 @@ export interface Track {
   volumeLock?: { volume: number; by: string; at: number };
   /** Boîte à rythmes Make Music (piste PERCUSSIONS) : motif éditable. */
   drumMachine?: import('./utils/drumKits').DrumMachine;
+  /** Piste MIDI jouée par la basse 808 mélodique (piano roll, glissés). */
+  bass808?: import('./utils/bass808').Bass808Settings;
   /**
    * Piste MIDI (mode instru) jouée par un instrument VST3 du PC (pont VST).
    * Les notes sont rendues hors temps réel dans frozenClip (isFrozen, aucun
@@ -420,6 +422,9 @@ export interface DAWState {
   lyricsStart?: number;
   /** Vitesse de défilement (lignes / minute). */
   lyricsSpeed?: number;
+  /** Bloc de paroles (n° dans l'ordre, séparés par une ligne vide) → id de la région
+   *  où il doit défiler : la vitesse du prompteur vient alors de la durée des régions. */
+  lyricsRegions?: Record<string, string>;
   isPlaying: boolean;
   isRecording: boolean;
   currentTime: number;

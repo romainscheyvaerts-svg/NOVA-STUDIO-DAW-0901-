@@ -3,10 +3,12 @@ import { Clip, DrumPad, TrackType } from '../types';
 import { FACTORY_KITS } from './drumFactory';
 
 /**
- * Boîte à rythmes Make Music : 8 rangées de pads, un motif de 16 pas par
+ * Boîte à rythmes Make Music : 7 rangées de pads, un motif de 16 pas par
  * mesure (1 ou 2 mesures), vélocités, « rolls » (×2 ×3 ×4 sur un pas, pour
  * les hi-hats trap / drill) et swing. Les kits partent des rythmes d'usine du
- * sampler Make Music, enrichis par genre (808 suivant le kick, rolls…).
+ * sampler Make Music, enrichis par genre (rolls…). La 808 n'est plus une
+ * rangée : c'est une piste mélodique jouée au piano roll (utils/bass808.ts).
+ * Les anciens projets gardent leur rangée « 808 » (elle joue toujours).
  */
 
 export interface DrumRow {
@@ -20,7 +22,7 @@ export interface DrumRow {
   ratchet: number[];
   volume: number;
   pan: number;
-  /** Les pads d'un même groupe se coupent (hi-hat fermé / ouvert, 808). */
+  /** Les pads d'un même groupe se coupent (hi-hat fermé / ouvert, ancienne 808). */
   choke?: number;
   /** Accordage en demi-tons (-12 … +12). */
   tune?: number;
@@ -57,7 +59,6 @@ const at = (vel: number, ...pos: number[]) => { const a = z(); pos.forEach(p => 
 /** Rangées standard : l'ordre donne les notes MIDI (60 = rangée 1). */
 const ROW_DEFS: { id: string; name: string; sound: string; choke?: number; volume?: number; pan?: number }[] = [
   { id: 'kick', name: 'Kick', sound: 'synth:kick-punch' },
-  { id: '808', name: '808', sound: 'synth:808', choke: 2, volume: 0.9 },
   { id: 'snare', name: 'Snare', sound: 'synth:snare-crisp' },
   { id: 'clap', name: 'Clap', sound: 'synth:clap' },
   { id: 'hatc', name: 'Hi-hat fermé', sound: 'synth:hat-closed', choke: 1, volume: 0.7, pan: 0.15 },
@@ -105,7 +106,6 @@ export const DRUM_KITS: DrumKitDef[] = [
   { id: 'trap', name: 'Trap', emoji: '🔥', bpm: 140, build: () => {
     const r = fromFactory('Trap');
     set(r, 'kick', { sound: 'synth:kick-boom' });
-    set(r, '808', { steps: at(110, 0, 7, 10) });
     set(r, 'hatc', { sound: 'synth:hat-tight', steps: Array.from({ length: STEPS }, (_, i) => (i % 2 === 0 ? (i % 4 === 0 ? 100 : 80) : 0)), ratchet: one().map((_, i) => (i === 6 || i === 14 ? 3 : i === 11 ? 2 : 1)) });
     // roll : les pas 6, 11 et 14 doivent jouer
     const hat = r.find(x => x.id === 'hatc')!; hat.steps[6] = hat.steps[6] || 80; hat.steps[11] = 70; hat.steps[14] = hat.steps[14] || 80;
@@ -114,7 +114,6 @@ export const DRUM_KITS: DrumKitDef[] = [
   { id: 'drill', name: 'Drill', emoji: '🔪', bpm: 142, build: () => {
     const r = fromFactory('Drill');
     set(r, 'kick', { sound: 'synth:kick-boom' });
-    set(r, '808', { sound: 'synth:808-dist', steps: at(115, 0, 3, 6, 10, 13) });
     set(r, 'snare', { sound: 'synth:snare-fat' });
     const hat = r.find(x => x.id === 'hatc')!; hat.sound = 'synth:hat-tight';
     hat.ratchet = one().map((_, i) => (i === 7 ? 3 : i === 15 ? 2 : 1)); hat.steps[7] = hat.steps[7] || 80; hat.steps[15] = hat.steps[15] || 75;
@@ -131,7 +130,6 @@ export const DRUM_KITS: DrumKitDef[] = [
   { id: 'rnb', name: 'R&B', emoji: '🎶', bpm: 72, build: () => {
     const r = fromFactory('R&B');
     set(r, 'snare', { sound: 'synth:snap', name: 'Snap' });
-    set(r, '808', { steps: at(95, 0, 10) });
     set(r, 'perc', { sound: 'synth:shaker', steps: at(50, 3, 7, 11, 15) });
     return r;
   } },
@@ -312,7 +310,7 @@ const NEAR: Record<string, string[]> = {
   afro: ['rnb', 'reggaeton'], reggaeton: ['afro', 'pop'], pop: ['rnb', 'house'], house: ['pop', 'dnb'],
   dnb: ['house', 'drill'], indie: ['pop', 'boombap'],
 };
-/** Catégorie(s) de la bibliothèque pour chaque rangée (la 808 reste synthétisée et accordée). */
+/** Catégorie(s) de la bibliothèque pour chaque rangée (l'ancienne 808 reste synthétisée et accordée). */
 const ROW_LIB_CATS: Record<string, LibCategory[]> = {
   kick: ['kick'], snare: ['snare', 'clap'], clap: ['clap', 'snare'], hatc: ['hatc'], hato: ['hato', 'cymbal'],
   perc: ['rim'], fx: ['cymbal', 'rim'],
@@ -339,7 +337,7 @@ export function defaultLibSound(rowId: string, kitId: string): string | null {
   return pick ? libUrl(pick.ids[0]) : null;
 }
 
-/** Kit avec les vrais sons du studio (la 808 accordée reste synthétisée). */
+/** Kit avec les vrais sons du studio. */
 export function makeDrumMachineLib(kitId: string): DrumMachine {
   const dm = makeDrumMachine(kitId);
   return { ...dm, rows: dm.rows.map(r => { const s = defaultLibSound(r.id, dm.kitId); return s ? { ...r, sound: s } : r; }) };

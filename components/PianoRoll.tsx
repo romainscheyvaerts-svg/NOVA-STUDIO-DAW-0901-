@@ -38,6 +38,9 @@ interface PianoRollProps {
   onClose: () => void;
   /** Élément ajouté dans la barre d'outils (choix du son en mode instru). */
   toolbarExtra?: React.ReactNode;
+  /** Lecture / pause du projet depuis l'éditeur (il couvre la barre de transport). */
+  isPlaying?: boolean;
+  onTogglePlay?: () => void;
 }
 
 // Configuration
@@ -47,7 +50,7 @@ const VELOCITY_HEIGHT = 150;
 
 type DragMode = 'MOVE' | 'RESIZE_R' | 'VELOCITY' | 'SELECT' | 'DRAW' | null;
 
-const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack, onClose, toolbarExtra }) => {
+const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack, onClose, toolbarExtra, isPlaying, onTogglePlay }) => {
   const clipIndex = track.clips.findIndex(c => c.id === clipId);
   const clip = track.clips[clipIndex];
   
@@ -157,6 +160,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
     };
     updateNotes([...(clip.notes || []), newNote]);
     playPreview(pitch);
+    return newNote;
   };
   const addNoteRef = useRef(addNoteAt);
   addNoteRef.current = addNoteAt;
@@ -189,7 +193,14 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
     // DRAW or TRIGGER (Drum)
     if (tool === 'DRAW' && !clickedNote) {
         if (isTouch) { pendingDrawRef.current = { x: e.clientX, y: e.clientY, time: absTime, pitch }; return; }
-        addNoteAt(absTime, pitch);
+        const n = addNoteAt(absTime, pitch);
+        // Clavier : glisser après le clic allonge la note posée (longueur au tracé).
+        if (!isDrumMode) {
+            setSelectedNoteIds(new Set([n.id]));
+            setInitialNotes([...(clip.notes || []), n]);
+            setDragMode('RESIZE_R');
+            setDragStart({ x: e.clientX, y: e.clientY, time: absTime, pitch });
+        }
         return; // Drum mode usually single click placement
     }
 
@@ -541,7 +552,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
           if (isDrumMode) {
              containerRef.current.scrollTop = 0; // Top for drums
           } else {
-             containerRef.current.scrollTop = (127 - 72) * currentRowHeight - (containerRef.current.clientHeight / 2);
+             // 808 : registre grave (Do 1 – Do 3) au centre.
+             containerRef.current.scrollTop = (127 - (track.bass808 ? 36 : 72)) * currentRowHeight - (containerRef.current.clientHeight / 2);
           }
       }
   }, [isDrumMode]);
@@ -562,7 +574,14 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                 </div>
              </div>
 
-             {/* Son de la piste (mode instru : instrument VST du PC) */}
+             {onTogglePlay && (
+               <button type="button" onClick={onTogglePlay} aria-label={isPlaying ? 'Pause' : 'Lecture'} title="Écouter / pause (barre d'espace)"
+                 className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${isPlaying ? 'bg-cyan-400 text-black' : 'bg-white text-black'}`}>
+                 <i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-sm`}></i>
+               </button>
+             )}
+
+             {/* Son de la piste (mode instru : instrument VST du PC, 808) */}
              {toolbarExtra}
 
              <div className="h-8 w-px bg-white/10"></div>

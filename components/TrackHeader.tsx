@@ -367,7 +367,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       latency: 0
   } : null;
 
-  const instrumentPlugin = isMidiOrSampler 
+  // Batterie Make Music : réglée dans son panneau (bouton Batterie), pas de pastille
+  // « Drum Rack 30 » qui débordait sur la piste suivante.
+  const instrumentPlugin = isMidiOrSampler && !track.drumMachine
       ? (track.plugins.find(p => p.type === 'MELODIC_SAMPLER' || p.type === 'DRUM_SAMPLER') || drumRackFakePlugin)
       : null;
       
@@ -623,7 +625,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       )}
       
       {instrumentPlugin && (
-          <div className="mt-2 relative group/inst">
+          <div className="mt-2 relative group/inst min-h-0 overflow-hidden">
               <div className="flex w-full overflow-hidden rounded-md border border-cyan-500/30 bg-cyan-500/5 shadow-[0_0_10px_rgba(0,242,255,0.05)]">
                   <div className="w-8 flex items-center justify-center bg-cyan-500/10 border-r border-cyan-500/20 pointer-events-none">
                       <i className={`fas ${instrumentPlugin.type === 'DRUM_RACK_UI' || instrumentPlugin.type === 'DRUM_SAMPLER' ? 'fa-drum' : 'fa-music'} text-[10px] text-cyan-400`}></i>

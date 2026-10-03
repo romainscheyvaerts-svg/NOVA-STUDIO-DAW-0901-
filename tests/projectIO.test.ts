@@ -239,3 +239,16 @@ describe('ProjectIO.loadProject : fichiers invalides', () => {
     expect(lead.clips[0].bufferId).toBeTruthy();
   });
 });
+
+describe('ProjectIO : piste 808', () => {
+  it('réglages 808 et notes conservés (sauvegarde puis rechargement)', async () => {
+    const st = project();
+    const notes = [{ id: 'a', pitch: 31, start: 0, duration: 0.5, velocity: 0.9 }, { id: 'b', pitch: 38, start: 0.4, duration: 0.5, velocity: 0.8 }];
+    st.tracks.push(makeTrack({ id: 'track-808', name: '808', type: 'MIDI' as any, bass808: { style: '808-dist', glide: true, glideTime: 0.07 },
+      clips: [makeClip({ id: 'c808', type: 'MIDI' as any, duration: 2, notes })] }));
+    const loaded = await reload(await ProjectIO.saveProject(st, []));
+    const t = loaded.tracks.find(x => x.id === 'track-808')!;
+    expect(t.bass808).toEqual({ style: '808-dist', glide: true, glideTime: 0.07 });
+    expect(t.clips[0].notes).toEqual(notes);
+  });
+});
