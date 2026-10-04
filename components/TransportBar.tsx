@@ -283,13 +283,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 {/* OPEN / LOAD */}
                 <button onClick={onOpenLoadMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white" title="Ouvrir un projet" aria-label="Ouvrir un projet">
                     <i className="fas fa-folder-open text-[10px]"></i>
-                    <span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Ouvrir</span>
+                    <span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Ouvrir</span>
                 </button>
 
                 {/* SAVE */}
                 <button onClick={onOpenSaveMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white" title="Sauvegarder" aria-label="Sauvegarder">
                     <i className="fas fa-save text-[10px]"></i>
-                    <span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Sauver</span>
+                    <span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Sauver</span>
                 </button>
 
                 {/* ✨ NOUVEAU IMPORT AUDIO */}
@@ -302,7 +302,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                             aria-label="Importer un fichier audio"
                         >
                             <i className="fas fa-file-import text-[10px]"></i>
-                            <span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Import</span>
+                            <span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Import</span>
                         </button>
                         <input
                             ref={audioImportInputRef}
@@ -324,14 +324,14 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              
              {/* SHARE (Only if logged in) */}
              {user && (
-                 <button onClick={onShareProject} title="Partager le projet" aria-label="Partager le projet" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Partager</span></button>
+                 <button onClick={onShareProject} title="Partager le projet" aria-label="Partager le projet" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Partager</span></button>
              )}
              
              {/* EXPORT BUTTON */}
              <button onClick={onExportMix} title="Exporter le mix" aria-label="Exporter le mix" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Exporter</span></button>
              
              {/* ENGINE BUTTON */}
-             <button onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Audio</span></button>
+             <button onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Audio</span></button>
              
              {/* PDC Toggle */}
              {!simple && <button onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="Delay Compensation (PDC)">
@@ -340,7 +340,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              </button>}
 
              {/* MIDI INDICATOR */}
-             {!simple && <div className={`h-8 px-2 rounded-lg ${midiDeviceName ? 'flex' : 'hidden 2xl:flex'} items-center justify-center space-x-2 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : 'bg-white/5 border-white/10 text-slate-600'}`} title={midiDeviceName ? `MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"} role="status" aria-label={midiDeviceName ? `Clavier MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"}>
+             {!simple && <div className={`h-8 px-2 rounded-lg ${midiDeviceName ? 'flex' : 'hidden min-[2300px]:flex'} items-center justify-center space-x-2 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : 'bg-white/5 border-white/10 text-slate-600'}`} title={midiDeviceName ? `MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"} role="status" aria-label={midiDeviceName ? `Clavier MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"}>
                  <i className="fas fa-plug text-[10px]"></i>
                  {midiDeviceName && <span className="hidden 2xl:inline text-[8px] font-black uppercase max-w-[80px] truncate">{midiDeviceName}</span>}
              </div>}
@@ -373,7 +373,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
       <div className="flex items-center space-x-2 md:space-x-3 2xl:space-x-4">
         
         {/* VISUALIZER (Only on very large screens to save space) */}
-        <div className="hidden 2xl:block opacity-80 hover:opacity-100 transition-opacity">
+        <div className="hidden min-[2200px]:block opacity-80 hover:opacity-100 transition-opacity">
            <MasterVisualizer />
         </div>
 
@@ -422,7 +422,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         </div>
         
         {/* LOGIN / USER SECTION */}
-        {user ? (
+        {/* Invité (pas de compte) : « Connexion », pas d'avatar ni de déconnexion. */}
+        {user && user.id !== 'guest' ? (
             <div className="hidden 2xl:flex items-center space-x-2 bg-black/30 rounded-full pl-1 pr-1 py-1 border border-white/10" style={{ backgroundColor: 'var(--bg-item)' }}>
                 <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-[10px] font-black text-white shadow-lg shadow-cyan-500/20">{user.username.charAt(0).toUpperCase()}</div>
                 <button onClick={onLogout} title="Se déconnecter" aria-label="Se déconnecter" className="w-7 h-7 rounded-full bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white flex items-center justify-center transition-all"><i className="fas fa-sign-out-alt text-[10px]"></i></button>
@@ -586,7 +587,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
             {/* USER SECTION */}
             <div className="space-y-2 border-t border-white/10 pt-3">
-              {user ? (
+              {user && user.id !== 'guest' ? (
                 <div className="flex items-center justify-between bg-white/5 p-4 rounded-lg">
                   <div className="flex items-center space-x-3">
                     <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-sm font-black text-white">

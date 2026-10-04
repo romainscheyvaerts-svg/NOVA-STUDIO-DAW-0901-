@@ -34,15 +34,17 @@ const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ activeTab, onTabChang
     { id: 'NOVA', icon: 'fa-wand-magic-sparkles', label: 'Nova' },
   ];
   const tabs = simple ? simpleTabs : fullTabs;
-  const isActive = (id: MobileTab | 'LYRICS') => id === 'LYRICS' ? !!lyricsOpen : activeTab === id;
+  // Paroles ouvertes : c'est la feuille qui est au premier plan, pas l'onglet dessous.
+  const isActive = (id: MobileTab | 'LYRICS') => id === 'LYRICS' ? !!lyricsOpen : activeTab === id && !(lyricsOpen && tabs.some(t => t.id === 'LYRICS'));
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-[100] bg-[#08090b]/98 backdrop-blur-xl border-t border-white/10 safe-area-inset-bottom">
+    <div role="navigation" aria-label="Onglets du studio" className="fixed bottom-0 left-0 right-0 z-[100] bg-[#08090b]/[0.98] backdrop-blur-xl border-t border-white/10 safe-area-inset-bottom">
       <div className="flex items-center justify-around h-16 px-2">
         {tabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => { if (tab.id === 'LYRICS') onToggleLyrics?.(); else onTabChange(tab.id); }}
+            // Un autre onglet ferme la feuille « Mes paroles » : elle restait par-dessus Sons / Nova.
+            onClick={() => { if (tab.id === 'LYRICS') onToggleLyrics?.(); else { if (lyricsOpen) onToggleLyrics?.(); onTabChange(tab.id); } }}
             aria-pressed={tab.id === 'LYRICS' ? !!lyricsOpen : undefined}
             aria-current={tab.id !== 'LYRICS' && activeTab === tab.id ? 'page' : undefined}
             className={`flex flex-col items-center justify-center flex-1 h-full transition-all relative ${

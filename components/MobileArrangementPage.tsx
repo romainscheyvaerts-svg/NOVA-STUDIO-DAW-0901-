@@ -929,7 +929,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   {/* Empty track hint */}
                   {track.clips.length === 0 && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <span className="text-[10px] text-white/20 font-medium">Empty</span>
+                      <span className="text-[10px] text-white/20 font-medium">Vide</span>
                     </div>
                   )}
                 </div>
@@ -1159,7 +1159,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                       className={`p-3 rounded-xl border transition-all ${
                         send.isEnabled 
                           ? 'bg-white/5 border-white/10' 
-                          : 'bg-white/2 border-white/5 opacity-50'
+                          : 'bg-white/[0.02] border-white/5 opacity-50'
                       }`}
                     >
                       <div className="flex items-center justify-between mb-2">
