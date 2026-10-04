@@ -233,7 +233,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
       if (format === 'MP3') {
         const kbps = parseInt(mp3Bitrate, 10) || 320;
         setStatusText(`Encodage MP3 (${kbps} kbps)...`);
-        return await AudioEncoder.encodeMP3(processedBuffer, kbps);
+        return await AudioEncoder.encodeMP3Plafonne(processedBuffer, kbps);
       }
       setStatusText(`Création du fichier ${format}…`);
       return AudioEncoder.encodeWAV(processedBuffer, bitDepth);

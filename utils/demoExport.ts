@@ -122,7 +122,7 @@ export async function renderTagged(st: DAWState, start: number, duration: number
 
 export async function demoMp3(st: DAWState, onProgress?: (p: number) => void): Promise<Blob> {
   const mix = await renderTagged(st, 0, Math.max(1, projectEnd(st)), onProgress);
-  return AudioEncoder.encodeMP3(mix, 128);
+  return AudioEncoder.encodeMP3Plafonne(mix, 128);
 }
 
 export function fileBaseName(st: DAWState): string {
@@ -258,7 +258,7 @@ export async function clipVideo(st: DAWState, onProgress?: (p: number) => void):
 export async function clipAudioMp3(st: DAWState, onProgress?: (p: number) => void): Promise<Blob> {
   const { start, duration } = clipWindow(st);
   const mix = await renderTagged(st, start, duration, onProgress);
-  return AudioEncoder.encodeMP3(mix, 160);
+  return AudioEncoder.encodeMP3Plafonne(mix, 160);
 }
 
 /** Partage natif (téléphone) si possible, sinon téléchargement. */
