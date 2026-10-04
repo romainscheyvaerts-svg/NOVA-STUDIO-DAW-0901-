@@ -23,6 +23,11 @@ const ago = (at: number): string => {
   const s = Math.max(0, Math.round((Date.now() - at) / 1000));
   return s < 60 ? "à l'instant" : s < 3600 ? `il y a ${Math.round(s / 60)} min` : `il y a ${Math.round(s / 3600)} h`;
 };
+/** « Max (ingé) », mais « Ingé son » tout court quand le nom est déjà le rôle. */
+const who = (name: string, peerIsEngineer: boolean): string => {
+  const role = peerIsEngineer ? 'ingé' : 'artiste';
+  return name.toLowerCase().includes(role) ? name : `${name} (${role})`;
+};
 const btn = 'h-10 rounded-xl px-3 text-[12px] font-black transition-colors disabled:opacity-40';
 
 const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
@@ -55,9 +60,9 @@ const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
         {r.connecting && <p role="status" className="text-[12px] text-sky-300"><i className="fas fa-circle-notch fa-spin mr-1.5" />{r.connecting}</p>}
         <p data-testid="remote-peer" className="text-[12px] text-slate-300">
           {r.peerName
-            ? <><span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5" />{r.peerName} ({isArtist ? 'ingé' : 'artiste'}) est connecté.</>
+            ? <><span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5" />{who(r.peerName, isArtist)} est connecté.</>
             : r.peerSeen
-              ? <><span className="inline-block w-2 h-2 rounded-full bg-sky-400 mr-1.5" />{r.peerSeen.name} ({isArtist ? 'ingé' : 'artiste'}) actif {ago(r.peerSeen.at)}.</>
+              ? <><span className="inline-block w-2 h-2 rounded-full bg-sky-400 mr-1.5" />{who(r.peerSeen.name, isArtist)} actif {ago(r.peerSeen.at)}.</>
               : isArtist ? "Ton ingé n'est pas encore connecté : envoie-lui le lien ci-dessous." : "L'artiste n'est pas connecté pour l'instant : ses envois t'attendent en ligne."}
         </p>
         {r.queuedCount > 0 && <p className="text-[11px] text-amber-300">📡 {r.queuedCount} envoi{r.queuedCount > 1 ? 's' : ''} en attente de connexion : ça partira tout seul.</p>}
