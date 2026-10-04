@@ -430,7 +430,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 className={`text-[12px] font-bold tracking-wide truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-400'}`}
               >
                 {track.name}
-                {frozen && !inst && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400" title="Piste gelée : lue depuis son rendu"></i>}
+                {frozen && !inst && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400" role="img"
+                  aria-label={track.frozenAuto ? "Piste gelée par l'ingé" : 'Piste gelée'}
+                  title={track.frozenAuto ? "Piste gelée par l'ingé (ses effets VST) : tes coupes, fondus et volumes seront rejoués AVANT ses effets quand il rouvrira la session." : 'Piste gelée : lue depuis son rendu'}></i>}
                 {inst && <i className="fas fa-plug text-[8px] ml-1 text-fuchsia-300" title={`Instrument VST du PC : ${inst.name}`} aria-label={`Instrument VST : ${inst.name}`}></i>}
                 {inst && (instStatus.rendering || instStatus.loading) && <span role="status" className="ml-1 text-[9px] font-normal normal-case text-fuchsia-300"><i className="fas fa-circle-notch fa-spin mr-0.5"></i>rendu…</span>}
                 {inst && !instStatus.rendering && instStatus.error && <i className="fas fa-exclamation-triangle text-[8px] ml-1 text-amber-400" title={`Rendu impossible (${instStatus.error}) : le synthé Nova joue les notes.`}></i>}

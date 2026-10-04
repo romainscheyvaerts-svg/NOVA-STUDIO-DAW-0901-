@@ -126,7 +126,8 @@ describe('clips ancrés et lecture d\'une piste gelée', () => {
       makeClip({ id: 'midi', bufferId: 'b', notes: [] }),
     ], 'fz');
     expect(Array.from(m.keys())).toEqual(['a']);
-    expect(m.get('a')).toEqual({ renderId: 'fz', anchor: 2, from: 1, to: 3, fadeIn: 0.1, fadeOut: 0, gain: 0.8 });
+    // srcClipId : le clip d'origine, gardé par les découpes (journal des éditions pré-effet).
+    expect(m.get('a')).toEqual({ renderId: 'fz', anchor: 2, from: 1, to: 3, fadeIn: 0.1, fadeOut: 0, gain: 0.8, srcClipId: 'a' });
   });
 
   function anchored(edit: Partial<Clip> = {}, src: Partial<Clip> = {}): Track {

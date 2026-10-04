@@ -38,8 +38,13 @@ import Bass808Controls from './components/Bass808Controls';
 import { BASS808_TRACK_ID, kit808Style, starter808Notes } from './utils/bass808';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
-import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult } from './services/VstFreeze';
-import { canBakeTrack, hasVst, freezeSignature } from './utils/freeze';
+import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
+import { canBakeTrack, hasVst, freezeSignature, trackBufferIds } from './utils/freeze';
+import { getEditAuthor, setEditAuthor } from './utils/preFxEdits';
+import { usePreFxReplay } from './hooks/usePreFxReplay';
+import { mergeSessionEdits } from './utils/preFxMerge';
+import PreFxReplayPanel from './components/PreFxReplayPanel';
+import FrozenEditsNotice from './components/FrozenEditsNotice';
 import { recFreezeStore } from './utils/recFreezeStore';
 import { ProjectIO } from './services/ProjectIO';
 const PianoRoll = lazy(() => import('./components/PianoRoll'));
@@ -440,8 +445,7 @@ const useUndoRedo = (initialState: DAWState) => {
   historyRef.current = history;
   const isBufferInHistory = useCallback((bufferId: string) => {
     const h = historyRef.current;
-    return [...h.past, ...h.future].some(s => s.tracks.some(t =>
-      t.clips.some(c => c.bufferId === bufferId) || t.frozenClip?.bufferId === bufferId));
+    return [...h.past, ...h.future].some(s => s.tracks.some(t => trackBufferIds(t).includes(bufferId)));
   }, []);
   // Prochaine modification = nouvelle étape d'annulation, même dans l'anti-rebond.
   const breakHistory = useCallback(() => setHistory(curr => ({ ...curr, lastChangeAt: 0 })), []);
@@ -755,7 +759,7 @@ function Studio() {
     // Routage, solo et envois agissent sur les autres pistes (bus, pistes
     // rendues muettes par un solo) : dans ce cas on met tout a jour, comme avant.
     const routing = state.tracks.map(t =>
-      `${t.id}>${t.outputTrackId || ''}|${t.isSolo ? 1 : 0}|${(t.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}:${sd.level}`).join(',')}`
+      `${t.id}>${t.outputTrackId || ''}|${t.isSolo ? 1 : 0}|${t.isFrozen ? 1 : 0}|${(t.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}:${sd.level}`).join(',')}`
     ).join(';');
     const previous = engineTracksRef.current;
     const full = !previous || routing !== engineRoutingRef.current;
@@ -945,6 +949,10 @@ function Studio() {
   };
 
   const handleLogout = async () => {
+    // Au studio (pont VST) : pistes VST gelées + session sauvegardée avant de se déconnecter.
+    if (novaBridge.isConnected() && !showLanding) {
+      try { await bakeVstBeforeSave(); await autosaveNow(); } catch (e) { console.warn('[Déconnexion] gel', e); }
+    }
     await supabaseManager.signOut(); setUser(null);
     // Appli Windows : « Déconnexion » ferme aussi le compte Make Music → la porte de connexion revient.
     if (isNovaDesktop()) { try { await catalogSupabase.auth.signOut(); } catch { /* hors ligne */ } }
@@ -1039,10 +1047,8 @@ function Studio() {
         // vient de décoder pour CE projet : clear() effaçait toutes les prises
         // d'un projet ouvert depuis un fichier ou une session sauvegardée.
         const keep = new Set<string>();
-        loadedState.tracks.forEach(t => {
-          t.clips.forEach(c => { if (c.bufferId) keep.add(c.bufferId); });
-          if (t.frozenClip?.bufferId) keep.add(t.frozenClip.bufferId);
-        });
+        // (rendus gelés, rendus d'envois VST, sons d'origine de la photo du gel compris)
+        loadedState.tracks.forEach(t => trackBufferIds(t).forEach(id => keep.add(id)));
         audioBufferRegistry.removeMany(audioBufferRegistry.ids().filter(id => !keep.has(id)));
         
         loadedState.tracks.forEach(track => {
@@ -1128,6 +1134,8 @@ function Studio() {
     const stillUsed = stateRef.current.tracks.some(t =>
       [...t.clips, ...(t.frozenClip ? [t.frozenClip] : [])]
         .some(c => c.bufferId === bufferId && !excludeClipIds.includes(c.id))
+      // Rendus d'envois VST, sons d'origine de la photo du gel (éditions pré-effet).
+      || trackBufferIds({ ...t, clips: [], frozenClip: undefined }).includes(bufferId)
     );
     if (!stillUsed && !isBufferInHistory(bufferId)) audioBufferRegistry.remove(bufferId);
   }, []);
@@ -2312,6 +2320,7 @@ function Studio() {
         const t = draft.tracks.find(tr => tr.id === trackId);
         if (!t) return;
         t.isFrozen = false;
+        delete t.frozenAuto;
         // Avec des VST3, le rendu reste en cache : la prochaine sauvegarde le
         // réutilise s'il est encore à jour.
         if (!hasVst(t)) {
@@ -2325,6 +2334,8 @@ function Studio() {
       }));
       if (frozenBufferId) setTimeout(() => releaseBufferIfUnused(frozenBufferId, []), 0);
       notify(`🔥 "${track.name}" dégelée`);
+      // Éditions faites pendant le gel (ailleurs) : rejouées avant les effets, on le montre.
+      setTimeout(() => preFxAnnounceRef.current?.([trackId]), 0);
       return;
     }
 
@@ -2353,7 +2364,8 @@ function Studio() {
         if (!t) return;
         oldBufferId = t.frozenClip?.bufferId;
         t.isFrozen = true;
-        applyFreezeResult(t, r);
+        delete t.frozenAuto; // gel voulu (CPU) : il reste gelé partout
+        applyFreezeResult(t, r, getEditAuthor() || undefined);
       }));
       if (oldBufferId && oldBufferId !== r.clip.bufferId) setTimeout(() => releaseBufferIfUnused(oldBufferId, []), 0);
       notify(`❄️ "${track.name}" gelée`);
@@ -2395,6 +2407,7 @@ function Studio() {
     }
     const todo = tracksNeedingVstRender(base.tracks);
     const results = new Map<string, FreezeResult>();
+    const by = getEditAuthor() || "l'ingé";
     for (const t of todo) {
       onStep?.(`Rendu des effets VST : ${t.name}…`);
       try {
@@ -2403,16 +2416,22 @@ function Studio() {
         console.warn(`[Save] Rendu VST impossible (${t.name})`, e);
       }
     }
-    if (results.size === 0 && base === stateRef.current) return base;
     const old: string[] = [];
-    const next = produce(base, (draft: DAWState) => {
+    let next = results.size === 0 ? base : produce(base, (draft: DAWState) => {
       draft.tracks.forEach(t => {
         const r = results.get(t.id);
         if (!r) return;
         if (t.frozenClip?.bufferId) old.push(t.frozenClip.bufferId);
-        applyFreezeResult(t, r);
+        applyFreezeResult(t, r, by);
       });
     });
+    // Bus / envois à effets VST (reverb VST de l'ingé) : rendus par source, après les pistes.
+    const busResults: BusFreezeResult[] = [];
+    for (const bus of busesNeedingVstRender(next.tracks)) {
+      try { busResults.push(await renderBusFreeze(bus, next.tracks, onStep)); } catch (e) { console.warn(`[Save] Rendu du bus VST impossible (${bus.name})`, e); }
+    }
+    if (busResults.length) next = produce(next, (draft: DAWState) => { busResults.forEach(r => old.push(...applyBusFreezeResult(draft.tracks, r, by))); });
+    if (next === stateRef.current) return next;
     setState(next);
     stateRef.current = next;
     setTimeout(() => old.forEach(id => releaseBufferIfUnused(id, [])), 0);
@@ -3813,6 +3832,43 @@ function Studio() {
     return () => { stop = true; };
   }, []);
 
+  // --- Gel pré-effet : retour sur le PC de l'ingé --------------------------------------
+  // Auteur des éditions (journal enregistré avec la session) : compte ou collaboration.
+  // Invité (pas de compte) : pas de nom, le journal dit « l'artiste » (ou « l'ingé » au PC).
+  useEffect(() => {
+    const account = user && user.id !== 'guest' ? (user.username || (user.email || '').split('@')[0]) : '';
+    setEditAuthor(collab?.name || account || '');
+  }, [user, collab]);
+  const notifyPreFx = useCallback((msg: string, ms = 4000) => { setAiNotification(msg); setTimeout(() => setAiNotification(null), ms); }, []);
+  // Pont VST connecté : les pistes gelées à la sauvegarde se dégèlent (plugins présents)
+  // et les éditions faites ailleurs passent avant les effets (résumé).
+  const preFx = usePreFxReplay({ stateId: state.id, tracks: state.tracks, showLanding, stateRef, setState, notify: notifyPreFx });
+  const preFxAnnounceRef = useRef(preFx.announce);
+  preFxAnnounceRef.current = preFx.announce;
+
+  // Session en ligne modifiée ailleurs en même temps (artiste sur la tablette, ingé
+  // au studio) : on garde cette version et on y ajoute les éditions pré-effet de l'autre.
+  const mergeCloudVersions = useCallback(async () => {
+    const c = cloudRef.current;
+    if (!c) return;
+    setCloudConflict(null);
+    setCloudProgress({ pct: 1, msg: "Récupération de l'autre version…" });
+    try {
+      const { state: theirs, info } = await pullSession({ id: c.id, secret: c.secret }, (pct, msg) => setCloudProgress({ pct, msg }));
+      const m = mergeSessionEdits(stateRef.current, theirs);
+      setState(prev => ({ ...prev, tracks: m.state.tracks }));
+      setCloudSession({ ...c, version: info.version, syncedAt: Date.now() });
+      preFx.showMerge(m, theirs);
+      // La version fusionnée devient la version en ligne.
+      setTimeout(() => { void syncCloudRef.current({ interactive: true }); }, 400);
+    } catch (e: any) {
+      setCloudError(e?.message || 'Fusion impossible');
+      setTakeHomeOpen(true);
+    } finally {
+      setTimeout(() => setCloudProgress(null), 600);
+    }
+  }, [setState, setCloudSession, preFx.showMerge]);
+
   // Fermeture du projet (application Windows, bouton fermer) : gel des pistes VST
   // + sauvegarde locale + synchronisation en ligne, puis seulement fermeture.
   useEffect(() => {
@@ -3831,14 +3887,14 @@ function Studio() {
   // Au studio, pont VST connecté : les pistes VST modifiées sont regelées pendant
   // les pauses (45 s sans lecture), pour que la fermeture et l'envoi soient immédiats.
   useEffect(() => {
-    if (showLanding || state.isPlaying || state.isRecording || !novaBridge.isConnected()) return;
-    if (tracksNeedingVstRender(state.tracks).length === 0) return;
+    if (showLanding || state.isPlaying || state.isRecording || !novaBridge.isConnected() || preFx.panel) return;
+    if (tracksNeedingVstRender(state.tracks).length === 0 && busesNeedingVstRender(state.tracks).length === 0) return;
     const t = window.setTimeout(() => {
       if (stateRef.current.isPlaying || stateRef.current.isRecording) return;
       void bakeVstBeforeSave().catch(e => console.warn('[Gel auto]', e));
     }, 45000);
     return () => window.clearTimeout(t);
-  }, [state.tracks, state.isPlaying, state.isRecording, showLanding, bakeVstBeforeSave]);
+  }, [state.tracks, state.isPlaying, state.isRecording, showLanding, bakeVstBeforeSave, preFx.panel]);
 
   // Un extrait du catalogue démarre : le projet en lecture se met en pause
   // (sauf pendant une prise, qu'on ne coupe jamais).
@@ -5473,6 +5529,11 @@ function Studio() {
       />
       {/* « Collaborer » (ordinateur / tablette) : dans le bandeau du bas ; flottant,
           il recouvrait le bas du catalogue Beat Store. */}
+      {!showLanding && <FrozenEditsNotice tracks={state.tracks} bridgeConnected={preFx.bridgeConnected} projectId={state.id} compact={isMobile} />}
+      {preFx.panel && (
+        <PreFxReplayPanel data={preFx.panel} onClose={preFx.close} onRefreeze={preFx.refreeze}
+          onRevert={preFx.revertTrack} onRestore={preFx.restoreTrack} onRetry={preFx.retry} onTakeTheirs={preFx.takeTheirs} />
+      )}
       {cloudConflict && (
         <div className="fixed inset-0 z-[670] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="conflict-title">
           <div className="w-full max-w-md rounded-3xl border border-amber-500/30 bg-[#121418] p-6 shadow-2xl space-y-4">
@@ -5480,7 +5541,13 @@ function Studio() {
             <p className="text-[13px] text-slate-300">
               La session en ligne a été modifiée {cloudConflict.updatedFrom ? `sur ${cloudConflict.updatedFrom} ` : ''}{cloudConflict.updatedAt ? formatAgo(Date.parse(cloudConflict.updatedAt)) : ''}, après ta dernière synchronisation.
             </p>
-            <button type="button" className="h-12 w-full rounded-xl bg-cyan-500 text-[13px] font-black text-black"
+            {state.tracks.some(t => t.freezeBase) && (
+              <button type="button" className="h-12 w-full rounded-xl bg-cyan-500 text-[13px] font-black text-black"
+                onClick={() => { void mergeCloudVersions(); }}>
+                Fusionner : garder les éditions des deux (recommandé)
+              </button>
+            )}
+            <button type="button" className={`h-12 w-full rounded-xl text-[13px] font-black ${state.tracks.some(t => t.freezeBase) ? 'bg-white/10 text-white' : 'bg-cyan-500 text-black'}`}
               onClick={() => { const c = cloudRef.current; setCloudConflict(null); if (c) void openCloudSession({ id: c.id, secret: c.secret }); }}>
               Ouvrir la version la plus récente
             </button>

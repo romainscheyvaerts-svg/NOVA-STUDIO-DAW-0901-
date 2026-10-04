@@ -26,7 +26,8 @@ import { Bass808Node, planOfClips } from './Bass808Node';
 import { events808 } from '../utils/bass808';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
 import { VSTPluginNode } from './VSTPluginNode';
-import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback } from '../utils/freeze';
+import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback, isFrozenBus, isFeedCovered, busFrozenSlices } from '../utils/freeze';
+import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
 interface TrackDSP {
@@ -493,7 +494,7 @@ export class AudioEngine {
    * @param options.preFader rendu AVANT fader/pan/automation (gel de piste : le
    *        fader et le pan restent appliques a la lecture, sinon ils l'etaient deux fois).
    */
-  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void, options: { preFader?: boolean } = {}): Promise<AudioBuffer> {
+  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean } = {}): Promise<AudioBuffer> {
     const totalSamples = Math.ceil(totalDuration * targetSampleRate);
     const offlineCtx = new OfflineAudioContext(2, totalSamples, targetSampleRate);
     // Les noeuds de plugins/instruments n'utilisent que l'API BaseAudioContext.
@@ -542,7 +543,8 @@ export class AudioEngine {
       let head: AudioNode = input;
       // Piste gelee : meme cablage qu'en lecture (rendu -> effets restants).
       const frozen = isTrackFrozen(track);
-      const prePlugins = frozen ? (uncoveredClips(track).length > 0 ? preFreezePlugins(track) : []) : (track.plugins || []);
+      // Bus d'effets gelé : ce qui y entre encore en direct (envoi ajouté ailleurs) passe par ses effets non rendus.
+      const prePlugins = frozen ? ((uncoveredClips(track).length > 0 || isFrozenBus(track)) ? preFreezePlugins(track) : []) : (track.plugins || []);
       const postPlugins = frozen ? postFreezePlugins(track) : [];
       let offlineLatency = 0;
       let postLatency = 0;
@@ -619,11 +621,13 @@ export class AudioEngine {
       const rt = rendered.get(track.id)!;
       const destId = track.outputTrackId;
       const dest = destId && destId !== track.id ? rendered.get(destId) : undefined;
-      rt.output.connect(dest ? dest.input : masterGain);
+      // Part déjà jouée depuis le rendu du bus VST gelé (tranches) : pas d'envoi direct en plus.
+      if (!(dest && isFeedCovered(track, destId, tracks))) rt.output.connect(dest ? dest.input : masterGain);
 
       (track.sends || []).forEach(send => {
         if (!send.id || !send.isEnabled || send.level <= 0) return;
         if (send.id === track.id) return;
+        if (isFeedCovered(track, send.id, tracks)) return;
         const target = rendered.get(send.id);
         if (!target) return;
         const sendGain = offlineCtx.createGain();
@@ -649,10 +653,12 @@ export class AudioEngine {
     for (const track of tracks) {
       const rt = rendered.get(track.id)!;
       if (track.isMuted || soloSilenced.has(track.id)) continue;
-      if (options.preFader) continue; // gel : volume/pan appliques a la lecture
+      // Gel : volume/pan appliqués à la lecture ; le volume avant effets seulement si demandé (export).
+      if (options.preFader && !options.keepPreVolume) continue;
 
       (track.automationLanes || []).forEach(lane => {
-        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends);
+        if (options.preFader && lane.parameterName !== PRE_VOLUME) return;
+        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends, (rt.frozenInput || rt.input).gain);
         if (!cible || !lane.points || lane.points.length === 0) return;
 
         const points = [...lane.points].sort((a, b) => a.time - b.time);
@@ -675,14 +681,14 @@ export class AudioEngine {
     let processedClips = 0;
     let totalClips = 0;
     tracks.forEach(track => {
-      totalClips += this.getPlayableClips(track).filter(c => !c.isMuted).length;
+      totalClips += this.getPlayableClips(track, tracks).filter(c => !c.isMuted).length;
     });
 
     // --- 4. Clips audio (toutes les pistes qui en portent, bus et sends inclus)
     for (const track of tracks) {
       const rt = rendered.get(track.id)!;
 
-      for (const clip of this.getPlayableClips(track)) {
+      for (const clip of this.getPlayableClips(track, tracks)) {
         if (clip.isMuted) continue;
         if (clip.type === TrackType.MIDI) continue; // traite plus bas
 
@@ -1457,6 +1463,8 @@ export class AudioEngine {
       try {
         dsp.gain.gain.cancelScheduledValues(boundaryContextTime);
         dsp.panner.pan.cancelScheduledValues(boundaryContextTime);
+        dsp.input.gain.cancelScheduledValues(boundaryContextTime);
+        dsp.frozenInput?.gain.cancelScheduledValues(boundaryContextTime);
       } catch (e) {}
     });
 
@@ -1468,9 +1476,14 @@ export class AudioEngine {
   }
 
   /** Clips reellement joues : le rendu gele remplace les clips d'origine. */
-  private getPlayableClips(track: Track): Clip[] {
+  private getPlayableClips(track: Track, all?: Track[]): Clip[] {
     track = this.eff(track);
-    if (isTrackFrozen(track)) { const p = frozenPlayback(track); return [...p.render, ...p.live]; }
+    if (isTrackFrozen(track)) {
+      const p = frozenPlayback(track);
+      // Bus VST gelé : il joue les tranches des rendus d'envoi de ses sources.
+      const bus = all && isFrozenBus(track) ? busFrozenSlices(track, all) : [];
+      return [...p.render, ...bus, ...p.live];
+    }
     return track.clips || [];
   }
 
@@ -1480,7 +1493,7 @@ export class AudioEngine {
       const isFrozenRender = isTrackFrozen(track);
       if (!isFrozenRender && track.type !== TrackType.AUDIO && track.type !== TrackType.SAMPLER && track.type !== TrackType.BUS && track.type !== TrackType.SEND) return;
 
-      this.getPlayableClips(track).forEach(clip => {
+      this.getPlayableClips(track, tracks).forEach(clip => {
         const sourceKey = `${clip.id}`; 
         if (this.activeSources.has(sourceKey)) return;
         
@@ -1601,9 +1614,13 @@ export class AudioEngine {
     nomParametre: string,
     gain: AudioParam,
     pan: AudioParam,
-    sends: Map<string, GainNode>
+    sends: Map<string, GainNode>,
+    pre?: AudioParam
   ): AudioParam | null {
     if (nomParametre === 'volume') return gain;
+    // Volume AVANT effets (tête de chaîne) : édité sur une piste gelée, il
+    // attaque le compresseur et la reverb au dégel. Piste gelée : après le rendu.
+    if (nomParametre === PRE_VOLUME) return pre || null;
     if (nomParametre === 'pan') return pan;
     if (nomParametre.startsWith('send::')) {
       const idDepart = nomParametre.slice('send::'.length);
@@ -1688,7 +1705,7 @@ export class AudioEngine {
                 if (point.time >= start && point.time < end) {
                     const scheduleTime = when + (point.time - start);
                     
-                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends);
+                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
                     if (ancre) ancre.setValueAtTime(point.value, scheduleTime);
                     
                     const nextPoint = lane.points[index + 1];
@@ -1696,7 +1713,7 @@ export class AudioEngine {
                         // On programme la rampe meme si le point suivant sort de la
                         // fenetre : sinon la valeur restait en palier jusqu'a lui.
                         const nextScheduleTime = when + (nextPoint.time - start);
-                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends);
+                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
                         if (cible) {
                             this.programmerSegment(cible, point, nextPoint, scheduleTime, nextScheduleTime);
                         }
@@ -1944,8 +1961,9 @@ export class AudioEngine {
   }
 
   /** Tout ce qui impose de recabler le graphe de la piste. */
-  private graphSignatureOf(track: Track): string {
+  private graphSignatureOf(track: Track, extra = ''): string {
     return [
+      extra,
       track.type,
       isTrackFrozen(track)
         ? `frozen:${freezeIndex(track)}:${uncoveredClips(track).length > 0 ? 1 : 0}:${track.frozenClip!.id}`
@@ -2030,7 +2048,11 @@ export class AudioEngine {
     // bouge un fader...) : on met a jour les valeurs sans reconstruire le graphe.
     // Sinon la moindre edition provoquait un fondu a zero de 15 ms sur TOUTES
     // les pistes, donc un decrochage audible pendant la lecture.
-    const signature = this.graphSignatureOf(track);
+    // Parts de cette piste déjà jouées depuis le rendu d'un bus VST gelé (tablette) : envoi direct coupé.
+    const coveredOut = !!track.outputTrackId && isFeedCovered(track, track.outputTrackId, allTracks);
+    const sendLevelOf = (send: { id: string; isEnabled: boolean; level: number }) =>
+      (!send.isEnabled || isFeedCovered(track, send.id, allTracks)) ? 0 : send.level;
+    const signature = this.graphSignatureOf(track, coveredOut ? 'covered-out' : '');
     if (dsp.graphSignature === signature) {
       const t = this.ctx.currentTime;
       const target = (track.isMuted || this.soloSilencedIds.has(track.id)) ? 0 : track.volume;
@@ -2047,7 +2069,7 @@ export class AudioEngine {
       });
       (track.sends || []).forEach(send => {
         const sendGain = dsp.sends.get(send.id);
-        if (sendGain) sendGain.gain.setTargetAtTime(send.isEnabled ? send.level : 0, t, 0.015);
+        if (sendGain) sendGain.gain.setTargetAtTime(sendLevelOf(send), t, 0.015);
       });
       return;
     }
@@ -2090,7 +2112,8 @@ export class AudioEngine {
     // le rendu ne servent plus qu'aux clips ajoutes apres le rendu ; s'il n'y en
     // a pas, ils sont liberes (CPU, et instances du pont VST).
     const frozen = isTrackFrozen(track);
-    const prePlugins = frozen ? (uncoveredClips(track).length > 0 ? preFreezePlugins(track) : []) : track.plugins;
+    // Bus d'effets gelé : ce qui y entre encore en direct (envoi ajouté ailleurs) passe par ses effets non rendus.
+    const prePlugins = frozen ? ((uncoveredClips(track).length > 0 || isFrozenBus(track)) ? preFreezePlugins(track) : []) : track.plugins;
     const postPlugins = frozen ? postFreezePlugins(track) : [];
     const currentPluginIds = new Set<string>();
     const chainIds: string[] = [];
@@ -2183,7 +2206,7 @@ export class AudioEngine {
       const destDSP = this.tracksDSP.get(track.outputTrackId);
       if (destDSP) destNode = destDSP.input;
     }
-    dsp.output.connect(destNode);
+    if (!coveredOut) dsp.output.connect(destNode);
     
     // === SEND ROUTING - Connect to send/bus tracks ===
     // First, disconnect all existing sends
@@ -2204,7 +2227,7 @@ export class AudioEngine {
         }
         
         // Set the send level with smooth transition
-        const sendLevel = send.isEnabled ? send.level : 0;
+        const sendLevel = sendLevelOf(send);
         sendGain.gain.setTargetAtTime(sendLevel, now + fadeTime, 0.015);
         
         // Connect from after panner (post-fader send) to send gain
@@ -2234,6 +2257,7 @@ export class AudioEngine {
   private applyAutomation(track: Track, time: number) {
     const dsp = this.tracksDSP.get(track.id);
     if (!dsp || !this.ctx) return;
+    this.resetPreVolume(track, dsp);
     if (track.isMuted || this.soloSilencedIds.has(track.id)) return;
     
     track.automationLanes.forEach(lane => {
@@ -2259,10 +2283,27 @@ export class AudioEngine {
         }
         
         const now = this.ctx.currentTime;
-        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends);
+        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
         if (cible) cible.setValueAtTime(value, now);
     });
 }
+
+  /** Gain « volume avant effets » : tête de chaîne, ou entrée du rendu sur une piste gelée. */
+  private preParam(dsp: TrackDSP): AudioParam {
+    return (dsp.frozenClipId && dsp.frozenInput ? dsp.frozenInput : dsp.input).gain;
+  }
+
+  /** Sans volume avant effets, les deux gains de tête reviennent à 1 (lane effacée, gel / dégel). */
+  private resetPreVolume(track: Track, dsp: TrackDSP) {
+    if (!this.ctx) return;
+    const has = (track.automationLanes || []).some(l => l.parameterName === PRE_VOLUME && l.points.length > 0);
+    const now = this.ctx.currentTime;
+    const active = this.preParam(dsp);
+    [dsp.input.gain, dsp.frozenInput?.gain].forEach(p => {
+      if (!p || (has && p === active)) return;
+      try { p.cancelScheduledValues(now); p.setValueAtTime(1, now); } catch (e) {}
+    });
+  }
 
   public getTrackPluginParameters(trackId: string): { pluginId: string, pluginName: string, params: PluginParameter[] }[] { return []; }
   public getMasterAnalyzer() { return this.masterAnalyzer; }

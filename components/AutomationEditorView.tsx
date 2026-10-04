@@ -55,7 +55,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
       // Check if already exists
       if (track.automationLanes.some(l => l.parameterName === paramId)) return;
 
-      const initialVal = paramId === 'volume' ? track.volume : (paramId === 'pan' ? track.pan : 0.5);
+      const initialVal = paramId === 'volume' ? track.volume : paramId === 'preVolume' ? 1 : (paramId === 'pan' ? track.pan : 0.5);
 
       const newLane: AutomationLane = {
           id: `auto-${Date.now()}`,
@@ -75,6 +75,8 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
   const getAvailableParameters = (track: Track) => {
       const params = [
           { id: 'volume', name: 'Volume', min: 0, max: 1.5 },
+          // Avant les effets : un fondu attaque le compresseur et la reverb (piste gelée : rejoué au dégel).
+          { id: 'preVolume', name: 'Volume avant effets', min: 0, max: 1.5 },
           { id: 'pan', name: 'Pan', min: -1, max: 1 }
       ];
       

@@ -298,7 +298,13 @@ export class SupabaseManager {
     // Rendu gelé (effets VST3 du PC) : gardé seulement s'il est à jour et que
     // ce n'est pas le beat ; le projet s'ouvrira alors gelé sur le téléphone.
     stateClone.tracks.forEach((t, i) => {
-        if (t.frozenClip && shouldPersistFrozen(state.tracks[i])) {
+        // Ce format (ancien « projet cloud ») ne transporte pas les rendus d'envois :
+        // un bus VST n'y est jamais gelé (il joue son effet, ou le son passe tel quel).
+        delete t.sendFreezes;
+        delete t.freezeBase;
+        delete t.preFxJournal;
+        const isBus = (t.clips || []).length === 0 && (t.type === 'BUS' || t.type === 'SEND');
+        if (t.frozenClip && !isBus && shouldPersistFrozen(state.tracks[i])) {
             t.isFrozen = true;
         } else {
             t.isFrozen = false;

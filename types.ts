@@ -232,6 +232,85 @@ export interface FreezeRef {
   fadeIn: number;
   fadeOut: number;
   gain: number;
+  /**
+   * Clip d'origine (au moment du rendu) dont ce clip est issu : survit aux
+   * découpes. Sert au journal des éditions pré-effet (utils/preFxEdits).
+   */
+  srcClipId?: string;
+}
+
+/** Clip tel qu'il était au moment du gel (référence des éditions pré-effet). */
+export interface FreezeBaseClip {
+  id: string;
+  name?: string;
+  start: number;
+  offset: number;
+  duration: number;
+  gain: number;
+  fadeIn: number;
+  fadeOut: number;
+  isMuted?: boolean;
+}
+
+/**
+ * Photo de la piste au moment du gel automatique (PC de l'ingé) : les éditions
+ * faites ensuite ailleurs (tablette, chez l'artiste) se lisent par rapport à
+ * elle, et l'ingé peut toujours y revenir.
+ */
+export interface FreezeBase {
+  /** Id du rendu (frozenClip.id) photographié. */
+  renderId: string;
+  at: number;
+  /** Qui a gelé (nom affiché). */
+  by?: string;
+  clips: FreezeBaseClip[];
+  /** Volume avant effets (automation) au moment du gel. */
+  preVolume?: AutomationPoint[];
+}
+
+/** Une édition pré-effet, décrite pour l'humain (résumé, conflits). */
+export interface PreFxOp {
+  kind: 'delete' | 'split' | 'remove' | 'move' | 'gain' | 'fade' | 'mute' | 'unmute' | 'add' | 'volume';
+  /** Clip d'origine concerné (absent : nouvelle prise, automation). */
+  baseClipId?: string;
+  /** Position sur la ligne de temps (s), pour l'affichage. */
+  at: number;
+  /** Fin de la zone concernée (s). */
+  end?: number;
+  /** Détail lisible (« -3 dB », « 0,8 s »…). */
+  detail?: string;
+  /** Auteur (nom affiché) et date. */
+  by?: string;
+  ts?: number;
+}
+
+/** Journal des éditions faites sur une piste gelée (enregistré avec la session). */
+export interface PreFxJournal {
+  v: 1;
+  /** Rendu auquel le journal se rapporte (freezeBase.renderId). */
+  renderId: string;
+  ops: PreFxOp[];
+}
+
+/**
+ * Rendu, à travers les effets VST d'un bus / envoi (reverb VST…), de la part
+ * qu'une piste y envoie. Rangé sur la piste SOURCE : ses tranches suivent les
+ * éditions de ses clips (une voix supprimée emporte sa reverb).
+ */
+export interface SendFreeze {
+  /** Bus / envoi d'effets concerné. */
+  busId: string;
+  /** Rendu du bus au moment du gel (= bus.frozenClip.id) : sinon périmé. */
+  busRenderId: string;
+  /** Rendu des clips de la source auquel les tranches se rapportent (freezeRef.renderId). */
+  anchorId: string;
+  /** Rendu (après les effets du bus jusqu'au dernier VST inclus). */
+  clip: Clip;
+  /** Volume de la source et niveau d'envoi au moment du rendu. */
+  volume: number;
+  level: number;
+  /** Empreinte de ce qui a été rendu (source + effets du bus). */
+  sig: string;
 }
 
 export interface AutomationPoint {
@@ -316,6 +395,18 @@ export interface Track {
    */
   frozenPluginSig?: string;
   /**
+   * Gel automatique (sauvegarde / fermeture sur le PC avec le pont VST) : la
+   * piste se dégèle toute seule quand la session rouvre sur un PC qui a les
+   * plugins ; un gel manuel (CPU) reste, lui, tel quel.
+   */
+  frozenAuto?: boolean;
+  /** Photo de la piste au gel : référence des éditions pré-effet (voir PreFxJournal). */
+  freezeBase?: FreezeBase;
+  /** Éditions faites sur la piste gelée (auteur, date), pour le résumé au dégel. */
+  preFxJournal?: PreFxJournal;
+  /** Rendus des envois de cette piste vers des bus à effets VST gelés. */
+  sendFreezes?: SendFreeze[];
+  /**
    * Collaboration : rôle qui possède le contenu de la piste (prises, motifs).
    * Absent : les pistes voix sont à l'artiste, le beat à personne.
    */
@@ -398,6 +489,11 @@ export type AutomationCurveType = 'LINEAR' | 'EXPONENTIAL' | 'LOGARITHMIC' | 'S_
 export interface DAWState {
   id: string;
   name: string;
+  /**
+   * Version du format de la session (absent = avant le gel pré-effet).
+   * 2 : gel automatique avec photo, journal pré-effet et rendus d'envois VST.
+   */
+  schemaVersion?: number;
   bpm: number;
   timeSignature: TimeSignature;  // NEW
   projectKey?: number; 

@@ -118,7 +118,7 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
     if (lane.points.length === 0) {
         // Mode "Pas de points" : Ligne continue valeur par défaut
         // Pour le volume c'est souvent 1.0 (env 70%)
-        const defaultVal = lane.parameterName === 'volume' ? 1.0 : (lane.min + (lane.max - lane.min) * 0.5);
+        const defaultVal = lane.parameterName === 'volume' || lane.parameterName === 'preVolume' ? 1.0 : (lane.min + (lane.max - lane.min) * 0.5);
         const defaultY = valToY(defaultVal); 
         
         ctx.strokeStyle = lineColor;
@@ -359,7 +359,7 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
     }
   };
 
-  const displayName = lane.parameterName.replace('plugin::', '').replace('send::', 'Send ').toUpperCase();
+  const displayName = lane.parameterName === 'preVolume' ? 'VOLUME AVANT EFFETS' : lane.parameterName.replace('plugin::', '').replace('send::', 'Send ').toUpperCase();
 
   if (variant === 'header') {
     return (
