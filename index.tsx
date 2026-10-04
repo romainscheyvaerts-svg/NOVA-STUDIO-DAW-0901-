@@ -5,6 +5,7 @@ import './styles/tailwind.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import DesktopAccessGate from './components/DesktopAccessGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { installGlobalErrorLog } from './utils/errorLog';
 
@@ -39,7 +40,9 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      <DesktopAccessGate>
+        <App />
+      </DesktopAccessGate>
     </ErrorBoundary>
   </React.StrictMode>
 );

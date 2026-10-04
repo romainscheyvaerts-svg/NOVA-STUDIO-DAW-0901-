@@ -944,7 +944,11 @@ function Studio() {
     }
   };
 
-  const handleLogout = async () => { await supabaseManager.signOut(); setUser(null); };
+  const handleLogout = async () => {
+    await supabaseManager.signOut(); setUser(null);
+    // Appli Windows : « Déconnexion » ferme aussi le compte Make Music → la porte de connexion revient.
+    if (isNovaDesktop()) { try { await catalogSupabase.auth.signOut(); } catch { /* hors ligne */ } }
+  };
   const handleBuyLicense = (instrumentId: string | number) => { if (!user) return; const updatedUser = { ...user, owned_instruments: [...(user.owned_instruments || []), instrumentId] }; setUser(updatedUser); setAiNotification(`✅ Licence achetée avec succès ! Export débloqué.`); };
   
   const handleSaveCloud = async (projectName: string) => { 
