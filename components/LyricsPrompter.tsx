@@ -105,6 +105,8 @@ const LyricsPrompter: React.FC<LyricsPrompterProps> = (p) => {
       style={{ height: editing ? 'min(60vh, 460px)' : 'min(44vh, 380px)' }}
       role="region"
       aria-label="Prompteur de paroles"
+      // Échap dans le prompteur : enregistre et ferme (avant, rien ne se passait).
+      onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (editing) saveDraft(); p.onClose(); } }}
     >
       {/* Barre d'outils */}
       {/* Barre d'outils : deux rangées pour tenir sur un téléphone */}

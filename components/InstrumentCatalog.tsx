@@ -387,9 +387,12 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                         {hasLicense(inst.id) && <i className="fas fa-check-circle text-[8px] text-green-500" title="Purchased"></i>}
                     </div>
                     <div className="flex items-center text-[10px] text-slate-400 space-x-2 mt-0.5">
-                        <span>{inst.bpm ? `${inst.bpm} BPM` : 'Tempo détecté'}</span>
+                        <span className="whitespace-nowrap shrink-0">{inst.bpm ? `${inst.bpm} BPM` : 'Tempo auto'}</span>
+                        {/* Liste étroite : genre OU tonalité, sinon les deux sortaient en « T… • F#… ». */}
+                        {!inst.key && <>
                         <span>•</span>
                         <span className="truncate">{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>
+                        </>}
                         {inst.key && (
                             <>
                                 <span>•</span>

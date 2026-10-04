@@ -113,7 +113,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
   const togglePlay = (inst: Instrumental, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (playingId === inst.id) {
+    // Re-cliquer pendant le chargement annule (avant : ça relançait le
+    // chargement et affichait « Lecture impossible » à tort).
+    if (playingId === inst.id || loadingPreviewId === inst.id) {
       stopPlayback();
       return;
     }
@@ -145,13 +147,16 @@ const LandingPage: React.FC<LandingPageProps> = ({
     audio.onplaying = () => { setLoadingPreviewId(null); setPlayingId(inst.id); };
     audio.onended = () => { setPlayingId(null); setLoadingPreviewId(null); };
     audio.onerror = () => {
+      if (audioRef.current !== audio) return; // ancienne pré-écoute, déjà remplacée
       setLoadingPreviewId(null);
       setPlayingId(null);
       setPreviewError(`Lecture impossible : « ${inst.title} » est injoignable`);
       setTimeout(() => setPreviewError(null), 3500);
     };
 
-    audio.play().catch(() => {
+    audio.play().catch((err: any) => {
+      // Interrompue par un stop ou une autre pré-écoute : ce n'est pas une erreur.
+      if (audioRef.current !== audio || err?.name === 'AbortError') return;
       setLoadingPreviewId(null);
       setPlayingId(null);
       setPreviewError(`Lecture impossible : « ${inst.title} »`);
@@ -479,7 +484,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                     <div className="p-3">
                       <h3 className="text-xs font-bold text-white truncate">{inst.title}</h3>
                       <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-500">
-                        <span>{inst.bpm ? `${inst.bpm} BPM` : 'Tempo détecté'}</span>
+                        <span>{inst.bpm ? `${inst.bpm} BPM` : 'Tempo auto'}</span>
                         <span>•</span>
                         <span className="truncate">{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>
                       </div>
@@ -512,6 +517,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 onLogin(u);
                 setShowAuthModal(false);
               }}
+              onClose={() => setShowAuthModal(false)}
             />
           </div>
         </div>

@@ -292,7 +292,9 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       {toast && !isOpen && createPortal(
         <button type="button" role="status" aria-live="polite"
           onClick={() => { setToast(null); setIsOpen(true); onRequestOpen?.(); }}
-          className="fixed left-1/2 -translate-x-1/2 bottom-36 md:bottom-24 z-[900] w-[min(520px,calc(100vw-24px))] rounded-2xl border border-cyan-500/30 bg-[#0d1117]/95 px-4 py-3 text-left shadow-2xl backdrop-blur pointer-events-auto">
+          // Au-dessus du bouton Nova (bas droite) : avant, centré en bas, il cachait « Piste voix / Paroles /
+          // Mix auto » pendant 6 s, et passait par-dessus les menus et fenêtres (z 900).
+          className="fixed left-1/2 -translate-x-1/2 bottom-36 md:left-auto md:right-6 md:translate-x-0 md:bottom-28 z-[520] w-[min(520px,calc(100vw-24px))] rounded-2xl border border-cyan-500/30 bg-[#0d1117]/95 px-4 py-3 text-left shadow-2xl backdrop-blur pointer-events-auto">
           <span className="block text-[12px] text-slate-100 line-clamp-3">{toast.text}</span>
           {toast.hasChoices && <span className="mt-1 block text-[11px] font-bold text-cyan-300">Voir les propositions de Nova →</span>}
         </button>,

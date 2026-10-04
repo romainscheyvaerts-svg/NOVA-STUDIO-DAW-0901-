@@ -156,8 +156,12 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
                     className="col-span-2 p-4 rounded-xl border border-purple-500/30 bg-purple-500/5 hover:bg-purple-500/10 hover:border-purple-500 flex flex-row items-center justify-center space-x-3 transition-all group text-purple-400"
                 >
                     <i className="fas fa-file-export"></i>
-                    <span className="text-[10px] font-black uppercase tracking-widest">Export Local (.zip)</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest">Fichier sur cet appareil (.zip)</span>
                 </button>
+                {/* Débutant : savoir que rien n'est perdu même sans fichier ni compte. */}
+                <p className="col-span-2 -mt-2 text-[10px] text-slate-500 text-center">
+                  Pour le rouvrir plus tard : accueil → « Charger Projet ». Ta session se sauvegarde aussi toute seule dans ce navigateur.
+                </p>
             </div>
         </div>
 
