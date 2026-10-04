@@ -26,6 +26,7 @@ import { CATEGORY_LABEL_FR, classifyPlugin, paramRoles, toSetting, unitOf } from
 import { liveVstNodes, novaVstEvents } from '../engine/VSTPluginNode';
 import { isVoiceTrack } from '../utils/vocalRoles';
 import { toVstParams } from '../utils/autotuneVst';
+import { enforceRemoteMixRule, installedForRemote, RemoteMixRule } from '../utils/remoteInge';
 
 export interface NovaVstCtx {
   getState: () => DAWState;
@@ -35,6 +36,11 @@ export interface NovaVstCtx {
   post: (content: string, choices?: { label: string; action?: AIAction; actions?: AIAction[] }[]) => void;
   /** Repli sans pont : style de mix intégré de NOVA. */
   applyBuiltinStyle: (styleId: string) => void;
+  /**
+   * Mode « Ingé à distance », côté ingé : effets temporels toujours en envoi,
+   * et pendant l'enregistrement reverbs / délais de NOVA seulement.
+   */
+  remoteRule?: () => RemoteMixRule | null;
 }
 
 export const VST_ACTIONS = new Set(['VST_MIX', 'VST_LIST', 'VST_SHOW_PARAMS', 'VST_SET_PARAM', 'VST_REMOVE', 'VST_MOVE', 'VST_MIX_FALLBACK']);
@@ -134,14 +140,16 @@ export async function handleNovaVstAction(a: AIAction, ctx: NovaVstCtx): Promise
       await loadKnowledge();
       let installed: KnownPlugin[] = installedForMix();
       if (await introspectMissing(installed, 2)) installed = installedForMix();
+      const rule = ctx.remoteRule?.() || null;
+      installed = installedForRemote(installed, rule);
       const loud = loudOf(voice);
-      const plan = planVoiceMix({
+      const plan = enforceRemoteMixRule(planVoiceMix({
         installed, dims: intent.dims, tweakOnly: intent.tweakOnly, tuneSpeed: intent.tuneSpeed,
         voice: { id: voice.id, name: voice.name, plugins: voice.plugins },
         bus: (() => { const b = st.tracks.find(t => t.id === (voice.outputTrackId || 'bus-vox') && t.id !== 'master') || st.tracks.find(t => t.id === 'bus-vox'); return b ? { id: b.id, name: b.name, plugins: b.plugins } : null; })(),
         sendTracks: st.tracks.filter(t => t.id.startsWith('send-')).map(t => ({ id: t.id, name: t.name, plugins: t.plugins })),
         loudDb: loud ?? undefined, bpm: st.bpm,
-      });
+      }), rule);
       ctx.mutate(d => { applyMixPlan(d, plan, { voiceTrackIds: [voice.id] }); });
       const vstCount = plan.tracks.reduce((n, t) => n + t.vst.length, 0);
       ctx.post(

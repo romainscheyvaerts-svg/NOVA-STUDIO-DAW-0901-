@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AutotuneBadge } from './AutotuneVstPanel';
 import { useCollabRole, requestVolumeLock } from '../utils/collabStore';
+import { requestRemoteSend, useRemoteBadge } from '../utils/remoteStore';
 import { useSimpleMode } from '../utils/simpleMode';
 import { gainToDbText, panToText } from '../utils/db';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
@@ -377,6 +378,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const insertPlugins = track.plugins.filter(p => p.id !== instrumentPlugin?.id);
   const frozen = isTrackFrozen(track);
   const collabRole = useCollabRole();
+  const remote = useRemoteBadge(track.id);
   // Mode simple : ni effets ni envois dans l'en-tête (Mix auto s'en charge).
   const { simple } = useSimpleMode();
   const recFrozen = useRecFrozen(track.id);
@@ -441,6 +443,20 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 {!frozen && recFrozen === 'pending' && <i className="fas fa-snowflake text-[8px] ml-1 text-sky-300/60 animate-pulse" title="Préparation de la prise…" aria-label="Préparation de la prise"></i>}
                 {freezeStale && <i className="fas fa-exclamation-triangle text-[8px] ml-1 text-amber-400" title="Les prises ont changé depuis le rendu : il sera refait à la prochaine sauvegarde sur PC (pont VST)."></i>}
               </span>
+            )}
+            {/* Ingé à distance : où en est la piste (« Chez l'ingé… », « Mise à jour reçue »), et l'envoyer. */}
+            {!isRenaming && remote.badge?.label && (
+              <span data-testid={`remote-badge-${track.id}`} role="status" title={remote.badge.label}
+                className={`shrink min-w-0 max-w-[110px] truncate px-1 h-4 rounded text-[9px] font-bold leading-4 ${remote.badge.tone === 'ok' ? 'bg-emerald-500/15 text-emerald-300' : remote.badge.tone === 'warn' ? 'bg-amber-500/15 text-amber-300' : remote.badge.tone === 'busy' ? 'bg-sky-500/15 text-sky-300' : 'bg-white/5 text-slate-300'}`}>
+                🎧 {remote.badge.label}
+              </span>
+            )}
+            {!isRenaming && remote.role === 'artist' && remote.badge?.canSend && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); requestRemoteSend(track.id); }}
+                title="Envoyer cette piste à l'ingé (audio brut + tes éditions)" aria-label={`Envoyer ${track.name} à l'ingé`}
+                className="shrink-0 px-1.5 h-5 rounded bg-cyan-500/20 text-cyan-200 text-[9px] font-black hover:bg-cyan-500/30">
+                <i className="fas fa-paper-plane mr-0.5"></i>Ingé
+              </button>
             )}
             {/* Les pastilles d effets ne tiennent pas quand la piste est basse :
                 ce badge indique toujours combien d effets sont actifs. */}

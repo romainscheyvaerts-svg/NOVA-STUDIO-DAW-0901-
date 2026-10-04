@@ -86,6 +86,12 @@ import ProGateModal from './components/ProGateModal';
 import CollabPanel, { CollabMessage } from './components/CollabPanel';
 import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
 import { collabRoleStore } from './utils/collabStore';
+import RemoteIngePanel from './components/RemoteIngePanel';
+import LiveVstRemotePanel from './components/LiveVstRemotePanel';
+import { useRemoteInge } from './hooks/useRemoteInge';
+import { parseRemoteLink } from './utils/remoteInge';
+import { applyRemoteVstParams, catalogOf, LIVE_VST_KINDS, LiveVstDeps, readRemoteVstParams, VstCatalogEntry, VstParamAck, VstParamsReply, VstRemoteRequests } from './services/LiveVstRemote';
+import { liveVstNodes } from './engine/VSTPluginNode';
 import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from './services/Billing';
 import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
@@ -2144,7 +2150,17 @@ function Studio() {
     }
     const newPlugin = createDefaultPlugins(type, 0.5, stateRef.current.bpm, reglages);
 
-    const routed = metadata?.forceInsert ? null : routeAmbienceToSend(tid, newPlugin, metadata?.name || type);
+    // Ingé à distance : verrou d'enregistrement (reverb / délai VST) et règle des envois.
+    const remoteCheck = remoteRef.current?.checkAdd(tid, newPlugin, !!metadata?.forceInsert);
+    const blocked = remoteCheck && remoteCheck.ok === false ? remoteCheck : null;
+    if (blocked) {
+      const msg = `⛔ ${blocked.message}`;
+      setAiNotification(msg);
+      setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), 9000);
+      if (blocked.code === 'vst-temporal-recording') return;
+    }
+    const insertOk = metadata?.forceInsert && !blocked;
+    const routed = insertOk ? null : routeAmbienceToSend(tid, newPlugin, metadata?.name || type);
     if (routed) {
       const sendName = routed.name;
       const what = metadata?.name || (type === 'REVERB' ? 'La reverb' : type === 'DELAY' ? 'Le délai' : type);
@@ -2305,6 +2321,11 @@ function Studio() {
     if (!track) return;
     const notify = (msg: string, ms = 2500) => { setAiNotification(msg); setTimeout(() => setAiNotification(null), ms); };
 
+    // Ingé à distance, chez l'artiste : le rendu vient de l'ingé (ses VST) ; la prise brute se reprend dans le panneau.
+    if (track.remote && stateRef.current.remoteInge?.role === 'artist' && track.remote.appliedSig && track.isFrozen) {
+      notify(`🎧 « ${track.name} » joue les effets de l'ingé (ses VST, que tu n'as pas). Pour réentendre ta prise brute : « Revenir à ma prise brute » dans le panneau Ingé à distance (👥).`, 6000);
+      return;
+    }
     // Instrument VST du PC : la piste est déjà lue depuis son rendu, mis à jour tout seul.
     if (track.vstInstrument) {
       notify(`🎹 « ${track.name} » joue ${track.vstInstrument.name} : son rendu se met à jour tout seul quand tu modifies les notes.`, 4000);
@@ -3434,6 +3455,18 @@ function Studio() {
   const contentDirtyRef = useRef(new Set<string>());
   const mixTimersRef = useRef(new Map<string, number>());
 
+  // En direct : VST de l'artiste réglés à distance par l'ingé (services/LiveVstRemote).
+  const vstReqsRef = useRef(new VstRemoteRequests<any>());
+  const [artistVstCatalog, setArtistVstCatalog] = useState<VstCatalogEntry[] | null>(null);
+  const liveVstDeps: LiveVstDeps = useMemo(() => ({
+    isConnected: () => novaBridge.isConnected(),
+    paramsText: () => !!novaBridge.getBridgeState().paramsText,
+    slotOf: (id: string) => liveVstNodes.get(id)?.getSlotId() || null,
+    setParams: (slot, params) => novaBridge.setParams(slot, params),
+    getParams: (slot) => novaBridge.getParams(slot),
+    syncState: async (id) => (await liveVstNodes.get(id)?.syncState()) || null,
+  }), []);
+
   // --- Instruments VST3 du PC sur les pistes MIDI (mode instru) ---------------------
   // Les notes sont rendues par le pont et jouées comme un rendu gelé (sauvegardé,
   // exporté, envoyé en collaboration) : le son du VST se joue aussi sans pont.
@@ -3493,6 +3526,23 @@ function Studio() {
     if ((o.kind === 'mix' || o.kind === 'freeze') && o.role !== 'engineer') return refuse('réservé à l’ingé son');
     if (o.kind === 'lock' && !(o.role === 'artist' || (o.role === 'engineer' && !p.lock))) return refuse('verrou');
     if (o.kind === 'content' && existing && !ownsContent(existing, o.role)) return refuse('piste d’un autre rôle');
+    // En direct : l'ingé règle les VST hébergés par le pont du PC de l'artiste.
+    if (LIVE_VST_KINDS.has(o.kind)) {
+      if ((o.kind === 'vst_param' || o.kind === 'vst_params_get') && o.role === 'engineer' && c.role === 'artist') {
+        const reply = o.kind === 'vst_param' ? await applyRemoteVstParams(p, liveVstDeps) : await readRemoteVstParams(p, liveVstDeps);
+        await c.client.send(o.kind === 'vst_param' ? 'vst_param_ack' : 'vst_params', reply);
+        if (o.kind === 'vst_param' && (reply as VstParamAck).ok) setAiNotification(`🎛️ ${o.author_name} (ingé) a réglé ${(existing?.plugins.find(x => x.id === p.pluginId)?.name) || 'un VST'} sur ton PC.`);
+      } else if ((o.kind === 'vst_param_ack' || o.kind === 'vst_params') && o.role === 'artist' && c.role === 'engineer') {
+        if (o.kind === 'vst_param_ack' && p.ok && typeof p.stateB64 === 'string') {
+          // État relu chez l'artiste : notre prochain envoi de mix ne le réécrase pas.
+          setSilently(produce((d: DAWState) => { d.tracks.forEach(t => t.plugins.forEach(x => { if (x.id === p.pluginId && x.type === 'VST3') x.params = { ...x.params, stateB64: p.stateB64 }; })); }));
+        }
+        vstReqsRef.current.resolve(String(p.reqId), p);
+      } else if (o.kind === 'vst_catalog' && o.role === 'artist' && c.role === 'engineer') {
+        setArtistVstCatalog(Array.isArray(p.plugins) ? p.plugins.slice(0, 400) : []);
+      }
+      return;
+    }
     switch (o.kind) {
       case 'chat': {
         const text = String(p.text || '').slice(0, 2000);
@@ -3692,6 +3742,7 @@ function Studio() {
 
   const [collabGate, setCollabGate] = useState<'login' | 'subscribe' | null>(null);
   const startCollab = useCallback(async (role: CollabRole, name: string) => {
+    if (remoteRef.current?.active) await remoteRef.current.leave(false);
     setCollabBusy('Mise en ligne de la session…');
     setCollabGate(null);
     try {
@@ -3763,6 +3814,75 @@ function Studio() {
     setCollabOnline([]);
     if (c) await c.client.leave();
   }, []);
+
+  // En direct, côté artiste avec le pont : la liste de ses VST part chez l'ingé.
+  const catalogSigRef = useRef('');
+  useEffect(() => {
+    if (!collab || collab.role !== 'artist') { catalogSigRef.current = ''; return; }
+    let stop = false;
+    const publish = async () => {
+      if (!novaBridge.isConnected()) return;
+      const list = catalogOf(await novaBridge.listPlugins().catch(() => novaBridge.getCachedPlugins()));
+      const sig = sigOf(list.map(x => x.path + x.pluginName));
+      if (stop || !list.length || sig === catalogSigRef.current) return;
+      catalogSigRef.current = sig;
+      await collabRef.current?.client.send('vst_catalog', { plugins: list }).catch(() => { catalogSigRef.current = ''; });
+    };
+    void publish();
+    const unsub = novaBridge.subscribe(() => { void publish(); });
+    return () => { stop = true; unsub(); };
+  }, [collab]);
+
+  /** Ingé (en direct) : demande à l'artiste de lire / régler un de ses VST. */
+  const askArtistVst = useCallback(async <T,>(kind: 'vst_param' | 'vst_params_get', body: Record<string, unknown>): Promise<T> => {
+    const c = collabRef.current;
+    if (!c) throw new Error('Collaboration fermée');
+    const { reqId, promise } = vstReqsRef.current.create();
+    await c.client.send(kind, { ...body, reqId });
+    // Le canal en direct peut manquer la réponse : on relit le journal en attendant.
+    const poll = window.setInterval(() => { void c.client.catchUp(); }, 2500);
+    try { return await promise; } finally { window.clearInterval(poll); }
+  }, []);
+
+  // --- Mode « Ingé à distance (ses propres VST) » : chacun sa session ---------------------
+  const remoteGate = useCallback(async (interactive: boolean) => {
+    const { data: who } = await catalogSupabase.auth.getUser();
+    if (!who?.user) { if (interactive) { setCollabGate('login'); setCollabOpen(true); } return false; }
+    const st = await billingStatus();
+    if (!hasPlan(st, 'collab')) { if (interactive) { track('pro_gate_shown', { reason: 'collab' }); setCollabGate('subscribe'); setCollabOpen(true); } return false; }
+    return true;
+  }, []);
+  const remote = useRemoteInge({
+    tracks: state.tracks, remoteInge: state.remoteInge, isRecording: state.isRecording, showLanding,
+    stateRef, setState, setSilently,
+    notify: (msg, ms = 5000) => { setAiNotification(msg); setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), ms); },
+    gate: remoteGate,
+    saveSession: async () => {
+      await autosaveNow();
+      if (cloudRef.current && stateRef.current.id === cloudProjectId(cloudRef.current.id)) await syncCloudRef.current({});
+    },
+    releaseBuffer: (id) => releaseBufferIfUnused(id, []),
+    author: () => getEditAuthor(),
+  });
+  const remoteRef = useRef(remote);
+  remoteRef.current = remote;
+  const pendingRemoteRef = useRef<{ role: 'artist' | 'engineer'; name: string; link?: string } | null>(null);
+  const startRemote = useCallback(async (role: 'artist' | 'engineer', name: string, link?: string) => {
+    pendingRemoteRef.current = { role, name, link };
+    if (collabRef.current) await leaveCollab();
+    const ok = await remoteRef.current.start(role, name, link);
+    if (ok) { pendingRemoteRef.current = null; setRemoteLinkFromUrl(null); setCollabGate(null); }
+  }, [leaveCollab]);
+  // Lien d'invitation de l'ingé (?inge=…) : il garde SA session ; le panneau s'ouvre avec le lien.
+  const [remoteLinkFromUrl, setRemoteLinkFromUrl] = useState<string | null>(() => {
+    try { const v = new URLSearchParams(window.location.search).get('inge'); return parseRemoteLink(v) ? v : null; } catch { return null; }
+  });
+  useEffect(() => {
+    if (!remoteLinkFromUrl || showLanding) return;
+    setCollabOpen(true);
+    setAiNotification("🎧 Un artiste t'invite en « Ingé à distance » : ses pistes arriveront dans cette session. Clique « Me relier à l'artiste ».");
+    try { const u = new URL(window.location.href); u.searchParams.delete('inge'); window.history.replaceState(null, '', u.toString()); } catch { /* */ }
+  }, [remoteLinkFromUrl, showLanding]);
 
   // Lien d'invitation (?session=…&role=…) : une fois la session ouverte, on rejoint avec ce rôle.
   useEffect(() => {
@@ -4103,6 +4223,7 @@ function Studio() {
         notify: (msg) => { setAiNotification(msg); setTimeout(() => setAiNotification(null), 3500); },
         post: postNova,
         applyBuiltinStyle: (id) => { handleApplyMixStyle(id); },
+        remoteRule: () => remoteRef.current?.mixRule() || null,
       }).catch(e => postNova(`Je n'ai pas pu toucher à tes plugins : ${e?.message || e}`));
       return;
     }
@@ -5080,7 +5201,7 @@ function Studio() {
       <div className="relative z-50">
         <TransportBar
           onOpenCollab={() => setCollabOpen(true)}
-          collabLabel={collab ? `Collaboration · ${collabOnline.length || 1} en ligne` : 'Collaborer à distance'}
+          collabLabel={remote.active ? 'Ingé à distance' : collab ? `Collaboration · ${collabOnline.length || 1} en ligne` : 'Collaborer à distance'}
           onOpenTakeHome={() => setTakeHomeOpen(true)}
           takeHomeLabel={isCloudProject ? `En ligne · ${cloudSession?.syncedAt ? formatAgo(cloudSession.syncedAt) : 'à envoyer'}` : 'Emporter la session'}
           isPlaying={state.isPlaying} currentTime={state.currentTime} bpm={state.bpm} onBpmChange={handleUpdateBpm}
@@ -5202,7 +5323,7 @@ function Studio() {
                 <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen}
                   title="Collaborer à distance : artiste, ingé son, beatmaker"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${collabOpen ? 'border-violet-400 bg-violet-500/25 text-white' : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'}`}>
-                  👥 {collab ? `${collabOnline.length || 1} en ligne · Chat` : 'Collaborer'}
+                  {remote.active ? `🎧 Ingé à distance${remote.peerName ? ' · en ligne' : ''}` : `👥 ${collab ? `${collabOnline.length || 1} en ligne · Chat` : 'Collaborer'}`}
                 </button>
                 {isCloudProject && (
                   <button type="button" onClick={() => setTakeHomeOpen(true)}
@@ -5531,8 +5652,9 @@ function Studio() {
         reason={proGate?.reason || ''}
         onDone={(ok) => { const g = proGate; setProGate(null); if (ok) { track('pro_subscribed', { from: 'gate' }); proOkRef.current = { at: Date.now(), ok: true }; setAiNotification('⭐ Nova Pro actif : tu peux importer tes instrus et collaborer.'); } g?.resolve(ok); }}
       />
+      <RemoteIngePanel open={collabOpen && (remote.active || !!(remote.connecting && !collab))} onClose={() => setCollabOpen(false)} remote={remote} />
       <CollabPanel
-        open={collabOpen}
+        open={collabOpen && !remote.active && !(remote.connecting && !collab)}
         onClose={() => { setCollabOpen(false); if (!collab) { collabPayCancelRef.current = true; setCollabBusy(null); } }}
         active={!!collab}
         role={collab?.role || null}
@@ -5543,7 +5665,40 @@ function Studio() {
         inviteUrl={(r) => (cloudSession?.secret ? `${sessionUrl({ id: cloudSession.id, secret: cloudSession.secret })}&role=${r}` : null)}
         onStart={(r, n) => { void startCollab(r, n); }}
         gate={collabGate}
-        onSignIn={async (email, password) => { await signInAccount(email, password); const p = pendingStartRef.current; setCollabGate(null); if (p) void startCollab(p.role, p.name); }}
+        onSignIn={async (email, password) => {
+          await signInAccount(email, password);
+          setCollabGate(null);
+          const r = pendingRemoteRef.current;
+          if (r) { void startRemote(r.role, r.name, r.link); return; }
+          const p = pendingStartRef.current;
+          if (p) void startCollab(p.role, p.name);
+        }}
+        onStartRemote={(r, n, l) => { void startRemote(r, n, l); }}
+        remoteBusy={remote.connecting}
+        remoteError={remote.error}
+        remoteLinkFromUrl={remoteLinkFromUrl}
+        savedRemote={state.remoteInge ? { role: state.remoteInge.role } : null}
+        liveVst={collab?.role === 'engineer' ? (
+          <LiveVstRemotePanel
+            tracks={state.tracks}
+            catalog={artistVstCatalog}
+            selectedTrackId={state.selectedTrackId}
+            onRead={(trackId, pluginId) => askArtistVst<VstParamsReply>('vst_params_get', { trackId, pluginId })}
+            onSet={(trackId, pluginId, name, value) => {
+              const num = Number(value.replace(',', '.'));
+              const setting = value !== '' && Number.isFinite(num) && /^-?[\d.,]+$/.test(value.trim()) ? { name, real: num } : { name, text: value };
+              return askArtistVst<VstParamAck>('vst_param', { trackId, pluginId, params: [setting] });
+            }}
+            onAdd={(entry, trackId) => {
+              const plugin: PluginInstance = {
+                id: `vst-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: entry.name, type: 'VST3', isEnabled: true, latency: 0,
+                params: { name: entry.name, vendor: entry.vendor, localPath: entry.path, pluginName: entry.pluginName || undefined },
+              };
+              setState(produce((d: DAWState) => { const t = d.tracks.find(x => x.id === trackId); if (t) t.plugins.push(plugin); }));
+              setAiNotification(`🎛️ ${entry.name} (VST de l'artiste) ajouté sur ta piste : il se charge sur son PC. Règle-le ici (« Lire ses réglages »).`);
+            }}
+          />
+        ) : null}
         onSubscribe={() => { void subscribeCollab(); }}
         onLeave={() => { void leaveCollab(); }}
         onSend={(text) => {

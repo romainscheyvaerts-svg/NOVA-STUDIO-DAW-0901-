@@ -241,6 +241,14 @@ describe('aller-retour artiste → ingé → artiste', () => {
     const m = mapRenderedRefs(clips, rendered);
     expect(m.get('p2a')?.renderId).toBe('R');
     expect(m.has('new')).toBe(false);
+    // Projet rouvert entre-temps : le son a un autre identifiant (alias par le clip resté identique).
+    const reopened = [
+      makeClip({ id: 'p2', start: 4, offset: 4, duration: 1, bufferId: 'p1' }),
+      makeClip({ id: 'p2b', start: 5, offset: 5, duration: 1, bufferId: 'p1' }),
+    ];
+    const m2 = mapRenderedRefs(reopened, rendered);
+    expect(m2.get('p2')?.renderId).toBe('R');
+    expect(m2.get('p2b')?.renderId).toBe('R');
   });
 
   it('revenir à ma prise brute (annulable : réglages de l\'ingé en réserve)', () => {

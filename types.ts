@@ -740,6 +740,8 @@ export interface RemoteTrackInfo {
   appliedSig?: string;
   /** Artiste : réglages de l'ingé reçus, pas encore appliqués (« Recevoir les réglages de l'ingé »). */
   pending?: any;
+  /** Artiste : derniers réglages de l'ingé appliqués (pour les réappliquer après un retour à la prise brute). */
+  last?: any;
   /** Artiste : l'artiste a accepté une fois → les mises à jour suivantes s'appliquent toutes seules. */
   accepted?: boolean;
   /** Artiste : ses réglages d'avant (« Revenir à ma prise brute »). */

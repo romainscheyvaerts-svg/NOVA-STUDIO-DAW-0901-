@@ -185,10 +185,13 @@ const preVolumePoints = (t: Track): AutomationPoint[] =>
 
 /**
  * Empreinte de ce que l'ingé doit retraiter : audio brut + éditions (clips,
- * fondus, gains, mute, volume avant effets). Ni les rendus reçus de l'ingé, ni
- * le fader (après les effets) n'y entrent : appliquer un retour ne renvoie rien.
+ * fondus, gains, mute, volume avant effets ; une autre prise = d'autres clips).
+ * Ni les rendus reçus de l'ingé, ni le fader (après les effets) n'y entrent :
+ * appliquer un retour ne renvoie rien.
  */
-export const rawSignature = (t: Track): string => hashOf({ c: editableClips(t), pv: preVolumePoints(t) });
+export const rawSignature = (t: Track): string =>
+  // Sans l'identifiant du son : il change quand le projet est rouvert (même audio).
+  hashOf({ c: editableClips(t).map(({ bufferId: _b, ...c }) => c), pv: preVolumePoints(t) });
 
 export interface RemoteSendPayload {
   /** Piste chez l'artiste. */
@@ -216,7 +219,7 @@ export const sendBufferIds = (p: RemoteSendPayload): string[] =>
 
 /** Artiste : y a-t-il quelque chose de nouveau à envoyer pour cette piste ? */
 export const artistNeedsSend = (t: Track): boolean =>
-  !!t.remote && (t.clips || []).some(c => !!c.bufferId) && rawSignature(t) !== t.remote.sentSig;
+  !!t.remote && ((t.clips || []).some(c => !!c.bufferId) || !!t.remote.sentV) && rawSignature(t) !== t.remote.sentSig;
 
 /** Artiste : marque la piste comme envoyée (version suivante). Mutation. */
 export function markSent(t: Track, sig: string): number {
@@ -376,15 +379,23 @@ export const artistBusId = (id: string): string => (id.startsWith(ARTIST_BUS_PRE
  */
 export function mapRenderedRefs(clips: Clip[], rendered: RemoteReturnPayload['rendered']): Map<string, FreezeRef> {
   const out = new Map<string, FreezeRef>();
+  // Même son sous un autre identifiant (projet rouvert entre-temps) : alias par les clips restés identiques.
+  const alias = new Map<string, string>();
+  for (const r of rendered) {
+    const same = clips.find(c => c.id === r.clipId);
+    if (same?.bufferId && r.bufferId) alias.set(r.bufferId, same.bufferId);
+  }
   for (const c of clips) {
     if (c.isFreezeSlice || c.notes || !c.bufferId) continue;
-    const exact = rendered.find(r => r.clipId === c.id);
-    if (exact) { out.set(c.id, { ...exact.ref }); continue; }
+    const exact = rendered.find(r => r.clipId === c.id)
+      // Découpé d'un clip déjà ancré à un rendu de l'ingé : même clip d'origine.
+      || (c.freezeRef?.srcClipId ? rendered.find(r => r.clipId === c.freezeRef!.srcClipId || r.ref.srcClipId === c.freezeRef!.srcClipId) : undefined);
+    if (exact && (!exact.bufferId || exact.clipId === c.id || (alias.get(exact.bufferId) || exact.bufferId) === c.bufferId)) { out.set(c.id, { ...exact.ref }); continue; }
     const from = c.offset || 0;
     const to = from + c.duration;
     let best: { ref: FreezeRef; overlap: number } | null = null;
     for (const r of rendered) {
-      if (!r.bufferId || r.bufferId !== c.bufferId) continue;
+      if (!r.bufferId || (alias.get(r.bufferId) || r.bufferId) !== c.bufferId) continue;
       const overlap = Math.min(to, r.ref.to) - Math.max(from, r.ref.from);
       if (overlap > 0.001 && (!best || overlap > best.overlap)) best = { ref: r.ref, overlap };
     }
@@ -487,7 +498,7 @@ export function applyReturnOnArtist(tracks: Track[], p: RemoteReturnPayload, by?
   if (renderId) t.freezeBase = makeFreezeBase(t, renderId, by);
   else delete t.freezeBase;
   delete t.preFxJournal;
-  t.remote = { ...t.remote!, appliedV: p.forV, appliedSig: p.sig, accepted: true, reverted: false };
+  t.remote = { ...t.remote!, appliedV: p.forV, appliedSig: p.sig, accepted: true, reverted: false, last: p };
   delete t.remote.pending;
   return { trackId: t.id, released };
 }
@@ -508,7 +519,8 @@ export function revertOnArtist(tracks: Track[], trackId: string, lastReturn?: Re
   delete t.frozenClip; delete t.frozenUpToPluginIndex; delete t.frozenClipIds; delete t.frozenPluginSig; delete t.frozenSourceSig;
   delete t.sendFreezes; delete t.freezeBase; delete t.preFxJournal;
   t.clips = (t.clips || []).map(c => { if (!c.freezeRef) return c; const { freezeRef: _f, ...rest } = c; return rest as Clip; });
-  t.remote = { ...t.remote!, reverted: true, appliedSig: undefined, ...(lastReturn ? { pending: lastReturn } : {}) };
+  const keep = lastReturn || t.remote!.last;
+  t.remote = { ...t.remote!, reverted: true, appliedSig: undefined, ...(keep ? { pending: keep } : {}) };
   return true;
 }
 
