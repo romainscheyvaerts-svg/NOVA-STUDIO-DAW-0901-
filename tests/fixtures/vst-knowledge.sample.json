@@ -340,6 +340,184 @@
    ]
   },
   {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Tube-Tech CL 1B mk II.vst3#Tube-Tech CL 1B mk II",
+   "scanName": "Tube-Tech CL 1B mk II",
+   "name": "Tube-Tech CL 1B mk II",
+   "vendor": "Softube",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Tube-Tech CL 1B mk II.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "opto",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 4,
+   "paramCount": 13,
+   "roles": {
+    "bypass": "bypass",
+    "threshold": "threshold_db",
+    "ratio": "ratio",
+    "attack": "attack",
+    "release": "release",
+    "mix": "parallel_compression"
+   },
+   "params": [
+    {
+     "name": "ratio",
+     "text": "6:1",
+     "displayName": "Ratio"
+    },
+    {
+     "name": "threshold_db",
+     "text": "Off",
+     "displayName": "Threshold"
+    },
+    {
+     "name": "attack",
+     "text": "5.0",
+     "displayName": "Attack",
+     "range": [
+      0,
+      10,
+      0.1
+     ]
+    },
+    {
+     "name": "release",
+     "text": "5.0",
+     "displayName": "Release",
+     "range": [
+      0,
+      10,
+      0.1
+     ]
+    },
+    {
+     "name": "parallel_compression",
+     "text": "100",
+     "displayName": "Parallel Compression",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\uaudio_distressor.vst3#uaudio_distressor",
+   "scanName": "uaudio_distressor",
+   "name": "UADx Empirical Labs Distressor",
+   "vendor": "Universal Audio (UADx)",
+   "path": "C:\\Program Files\\Common Files\\VST3\\uaudio_distressor.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "fet",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 86,
+   "paramCount": 12,
+   "roles": {
+    "bypass": "bypass",
+    "ratio": "ratio",
+    "attack": "attack",
+    "release": "release",
+    "input": "input",
+    "output": "output",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "values": [
+      "Off",
+      "Byp"
+     ]
+    },
+    {
+     "name": "ratio",
+     "text": "6:1",
+     "displayName": "Ratio",
+     "values": [
+      "1:1",
+      "2:1",
+      "3:1",
+      "4:1",
+      "6:1",
+      "10:1",
+      "20:1",
+      "NUKE"
+     ]
+    },
+    {
+     "name": "input",
+     "text": "5.0",
+     "displayName": "Input",
+     "range": [
+      0,
+      10.5,
+      0.1
+     ]
+    },
+    {
+     "name": "attack",
+     "text": "5.0",
+     "displayName": "Attack",
+     "range": [
+      0,
+      10.5,
+      0.1
+     ]
+    },
+    {
+     "name": "release",
+     "text": "5.0",
+     "displayName": "Release",
+     "range": [
+      0,
+      10.5,
+      0.1
+     ]
+    },
+    {
+     "name": "output",
+     "text": "6.5",
+     "displayName": "Output",
+     "range": [
+      0,
+      10.5,
+      0.1
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    }
+   ]
+  },
+  {
    "key": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-DS.vst3#FabFilter Pro-DS",
    "scanName": "FabFilter Pro-DS",
    "name": "Pro-DS",

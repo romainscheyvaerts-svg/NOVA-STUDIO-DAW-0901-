@@ -183,7 +183,31 @@ def _open_plugin(path: str, plugin_name: Optional[str] = None):
         if "scan" not in str(e).lower():
             raise
         logger.info(f"Nouvel essai de chargement : {os.path.basename(path)}")
-        return load_plugin(path)
+        try:
+            return load_plugin(path)
+        except ImportError:
+            inner = _bundle_binary(path)
+            if not inner:
+                raise
+            # UADx (uaudio_*.vst3, constaté le 04/10/2026) : le dossier du plugin
+            # n'est pas « scanné » par pedalboard, son fichier interne se charge.
+            logger.info(f"Chargement par le fichier interne : {os.path.basename(path)}")
+            return load_plugin(inner)
+
+
+def _bundle_binary(path: str) -> Optional[str]:
+    """Fichier binaire d'un dossier VST3 (Contents\\x86_64-win\\<nom>.vst3), s'il existe."""
+    if not os.path.isdir(path):
+        return None
+    arch = os.path.join(path, "Contents", "x86_64-win")
+    named = os.path.join(arch, os.path.basename(path))
+    if os.path.isfile(named):
+        return named
+    try:
+        found = [f for f in os.listdir(arch) if f.lower().endswith(".vst3")]
+    except OSError:
+        return None
+    return os.path.join(arch, found[0]) if len(found) == 1 else None
 
 
 def _to_stereo(block: np.ndarray) -> np.ndarray:
