@@ -41,6 +41,13 @@ export class LiveBridge {
 
   private onBinary(buf: ArrayBuffer) {
     const u8 = new Uint8Array(buf);
+    if (u8[0] === 2) {
+      const jlen = new DataView(buf).getUint32(4, true);
+      const m = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, jlen)));
+      const w = this.renderWaiters.get(m.req_id);
+      if (w) { this.renderWaiters.delete(m.req_id); w(buf); }
+      return;
+    }
     if (u8[0] !== 1) return;
     const L = u8[1];
     const h = (2 + L + 3) & ~3;
@@ -52,6 +59,38 @@ export class LiveBridge {
     this.blocks.set(seq, data);
     this.blockWaiters.get(seq)?.();
   }
+
+  /**
+   * Rendu hors temps réel (trame type 2) d'un signal mono à travers un slot chargé
+   * (réglages actuels de l'instance), avec une queue de silence. Renvoie gauche / droite.
+   */
+  async render(slotId: string, mono: Float32Array, sampleRate: number, tailSeconds = 0): Promise<[Float32Array, Float32Array]> {
+    const req_id = this.nextId++;
+    const meta = new TextEncoder().encode(JSON.stringify({ action: 'RENDER', req_id, slot_id: slotId, sample_rate: sampleRate, nch: 1, nframes: mono.length, tail_seconds: tailSeconds }));
+    const off = (8 + meta.length + 3) & ~3;
+    const buf = new ArrayBuffer(off + mono.length * 4);
+    const u8 = new Uint8Array(buf);
+    u8[0] = 2;
+    new DataView(buf).setUint32(4, meta.length, true);
+    u8.set(meta, 8);
+    new Float32Array(buf, off, mono.length).set(mono);
+    const res: ArrayBuffer = await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('rendu trop long')), 600000);
+      this.renderWaiters.set(req_id, (b) => { clearTimeout(t); resolve(b); });
+      this.ws.send(buf);
+    });
+    const dv = new DataView(res);
+    const jlen = dv.getUint32(4, true);
+    const m = JSON.parse(new TextDecoder().decode(new Uint8Array(res, 8, jlen)));
+    if (!m.success) throw new Error(m.error || 'rendu impossible');
+    const o = (8 + jlen + 3) & ~3;
+    const inter = new Float32Array(res.slice(o, o + m.nframes * 2 * 4));
+    const l = new Float32Array(m.nframes); const r = new Float32Array(m.nframes);
+    for (let i = 0; i < m.nframes; i++) { l[i] = inter[2 * i]; r[i] = inter[2 * i + 1]; }
+    return [l, r];
+  }
+
+  private renderWaiters = new Map<number, (b: ArrayBuffer) => void>();
 
   /**
    * Fait passer un signal mono dans un slot en temps réel (blocs de 128, au plus

@@ -86,6 +86,9 @@ import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
 import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
+import { AutotuneVstManager } from './components/AutotuneVstPanel';
+import { handleNovaVstAction, VST_ACTIONS } from './services/NovaVstMix';
+import { novaVstEvents } from './engine/VSTPluginNode';
 import {
   pushSession, pullSession, parseLink, createCloudSession, cloudProjectId, CloudConflictError, LocalCloudSession,
   getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, sessionUrl, signInAccount,
@@ -2363,13 +2366,19 @@ function Studio() {
 
   // État d'un VST3 (fenêtre du plugin fermée, chargement) : enregistré dans le
   // projet (params.stateB64), pour le retrouver à la réouverture et le rendre.
-  useEffect(() => vstStateEvents.on((pluginId, stateB64) => {
-    setState(produce((draft: DAWState) => {
+  useEffect(() => vstStateEvents.on((pluginId, stateB64, source) => {
+    const update = produce((draft: DAWState) => {
       draft.tracks.forEach(t => t.plugins.forEach(p => {
-        if (p.id === pluginId && p.type === 'VST3' && p.params?.stateB64 !== stateB64) p.params.stateB64 = stateB64;
+        if (p.id === pluginId && p.type === 'VST3' && p.params?.stateB64 !== stateB64) {
+          p.params.stateB64 = stateB64;
+          // Réglé à la main dans la fenêtre du plugin : les réglages de Nova ne le réécrasent plus.
+          if (source === 'editor' && p.params.novaSettings) delete p.params.novaSettings;
+        }
       }));
-    }));
-  }), [setState]);
+    });
+    // Chargement / réglage par Nova : conséquence, pas une étape d'annulation de plus.
+    if (source === 'load' || source === 'nova') setSilently(update); else setState(update);
+  }), [setState, setSilently]);
 
   /**
    * Avant une sauvegarde (fichier ou cloud), pont connecté : rend les effets
@@ -4025,6 +4034,18 @@ function Studio() {
    */
   const executeAIAction = useCallback((a: AIAction) => {
     if (!a || !a.action) return;
+    // Nova pilote les VST du PC (mix, liste, réglages) : services/NovaVstMix.
+    if (VST_ACTIONS.has(a.action)) {
+      const silent = a.action === 'VST_MIX_FALLBACK';
+      void handleNovaVstAction(a, {
+        getState: () => stateRef.current,
+        mutate: (fn) => { if (silent) setSilently(produce(fn)); else { breakHistory(); setState(produce(fn)); } },
+        notify: (msg) => { setAiNotification(msg); setTimeout(() => setAiNotification(null), 3500); },
+        post: postNova,
+        applyBuiltinStyle: (id) => { handleApplyMixStyle(id); },
+      }).catch(e => postNova(`Je n'ai pas pu toucher à tes plugins : ${e?.message || e}`));
+      return;
+    }
     const p = (a.payload || {}) as any;
     const tracks = stateRef.current.tracks;
 
@@ -4771,6 +4792,11 @@ function Studio() {
       canUndo, canRedo, handleUniversalAudioImport, handleApplyMixStyle, handleCleanSilences,
       prepareSessionPart, handleAnalyzeMix, handleSetDrumKit, handleRemoveDrums]);
 
+  // Un VST posé par Nova ne se charge pas (licence, démo, plantage) : l'effet de NOVA reprend.
+  useEffect(() => novaVstEvents.on(r => {
+    if (r.failed) executeAIAction({ action: 'VST_MIX_FALLBACK', payload: { pluginId: r.pluginId, reason: r.failed } } as AIAction);
+  }), [executeAIAction]);
+
   const envoyerAuChatbot = async (messageUtilisateur: string) => {
     // Ordres simples (« monte ma voix », « style trap », « refais la prise »…) :
     // exécutés tout de suite, sans attendre l'IA ni dépendre du réseau.
@@ -5508,6 +5534,7 @@ function Studio() {
       <Suspense fallback={null}>
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
+      <AutotuneVstManager />
       </Suspense>
       
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
