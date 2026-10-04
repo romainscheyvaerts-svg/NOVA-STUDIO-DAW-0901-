@@ -25,18 +25,39 @@ export interface VstNodeInfo {
   pluginId: string;
   status: VstNodeStatus;
   error: string | null;
+  /** (pont v7, chargement discret) Le plugin a demandé une licence / activation. */
+  licenseRequired?: boolean;
   name: string;
   latencyMs: number;
   underruns: number;
 }
 
-type StateListener = (pluginId: string, stateB64: string) => void;
+/** D'où vient l'état : fenêtre du plugin fermée par l'artiste, chargement, réglage par Nova. */
+export type VstStateSource = 'editor' | 'load' | 'nova';
+type StateListener = (pluginId: string, stateB64: string, source?: VstStateSource) => void;
 
 /** Remontée de l'état des plugins (fenêtre fermée, chargement) vers le projet. */
 export const vstStateEvents = {
   listeners: new Set<StateListener>(),
   on(cb: StateListener) { this.listeners.add(cb); return () => { this.listeners.delete(cb); }; },
-  emit(pluginId: string, stateB64: string) { this.listeners.forEach(cb => { try { cb(pluginId, stateB64); } catch { /* */ } }); },
+  emit(pluginId: string, stateB64: string, source?: VstStateSource) { this.listeners.forEach(cb => { try { cb(pluginId, stateB64, source); } catch { /* */ } }); },
+};
+
+/** Réglages posés par Nova (params.novaSettings) : résultat relu, ou échec (repli). */
+export interface NovaSettingsReport {
+  pluginId: string;
+  name: string;
+  ok: boolean;
+  /** Paramètre → valeur texte relue sur le plugin. */
+  readback: { name: string; text: string; ok: boolean }[];
+  /** Le plugin n'a pas pu servir : licence / démo / plantage. */
+  failed?: 'license' | 'load' | null;
+  error?: string | null;
+}
+export const novaVstEvents = {
+  listeners: new Set<(r: NovaSettingsReport) => void>(),
+  on(cb: (r: NovaSettingsReport) => void) { this.listeners.add(cb); return () => { this.listeners.delete(cb); }; },
+  emit(r: NovaSettingsReport) { this.listeners.forEach(cb => { try { cb(r); } catch { /* */ } }); },
 };
 
 /** Effets VST3 vivants (un par effet de piste), pour l'interface et la sauvegarde. */
@@ -69,10 +90,21 @@ export class VSTPluginNode {
   private unsubs: (() => void)[] = [];
   private slotUnsub: (() => void) | null = null;
   private latencyListener: (() => void) | null = null;
+  private statusListeners = new Set<(s: VstNodeStatus) => void>();
+  private licenseRequired = false;
+  /** Réglages de Nova déjà appliqués (JSON) : réappliqués s'ils changent (Annuler, nouveau mix). */
+  private knownSettings = 'null';
+  private readonly quiet: boolean;
 
-  constructor(ctx: BaseAudioContext, plugin: PluginInstance) {
+  /**
+   * opts.quiet : plugin posé par NOVA lui-même (autotune du PC) : chargement
+   * discret (aucune fenêtre de licence ne surgit, voir NovaBridge.loadPlugin).
+   */
+  constructor(ctx: BaseAudioContext, plugin: PluginInstance, opts: { quiet?: boolean } = {}) {
     this.ctx = ctx;
     this.plugin = plugin;
+    this.quiet = !!opts.quiet || !!plugin.params?.novaQuiet;
+    this.knownSettings = JSON.stringify(plugin.params?.novaSettings || null);
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     this.knownState = plugin.params?.stateB64 || null;
@@ -98,6 +130,14 @@ export class VSTPluginNode {
   updateParams(params: Record<string, any>) {
     if (!params) return;
     // lowLatency : ignoré (voir setMonitorBypass).
+    if ('novaSettings' in params) {
+      const js = JSON.stringify(params.novaSettings || null);
+      if (js !== this.knownSettings) {
+        this.knownSettings = js;
+        this.plugin = { ...this.plugin, params: { ...this.plugin.params, novaSettings: params.novaSettings } };
+        if (this.status === 'active') void this.applyNovaSettings();
+      }
+    }
     const next = params.stateB64;
     if (typeof next === 'string' && next && next !== this.knownState) {
       this.knownState = next;
@@ -116,9 +156,15 @@ export class VSTPluginNode {
 
   setLatencyListener(cb: (() => void) | null) { this.latencyListener = cb; }
 
+  /** Changements d'état (chargé, erreur, pont fermé). */
+  onStatus(cb: (s: VstNodeStatus) => void): () => void {
+    this.statusListeners.add(cb);
+    return () => { this.statusListeners.delete(cb); };
+  }
+
   getInfo(): VstNodeInfo {
     return {
-      pluginId: this.plugin.id, status: this.status, error: this.error,
+      pluginId: this.plugin.id, status: this.status, error: this.error, licenseRequired: this.licenseRequired,
       name: this.loadedName || this.plugin.name, underruns: this.underruns,
       latencyMs: Math.round(this.latency * 1000),
     };
@@ -153,16 +199,38 @@ export class VSTPluginNode {
 
   // --- Interne -----------------------------------------------------------------
 
-  private adoptState(st: string) {
+  private adoptState(st: string, source: VstStateSource = 'load') {
     if (st === this.knownState) return;
     this.knownState = st;
-    vstStateEvents.emit(this.plugin.id, st);
+    vstStateEvents.emit(this.plugin.id, st, source);
+  }
+
+  /**
+   * Réglages posés par Nova (mix piloté par le chat) : envoyés au plugin par leur
+   * nom et leur valeur texte / réelle, RELUS, puis l'état du plugin est enregistré
+   * dans le projet. Rien n'ouvre la fenêtre du plugin.
+   */
+  private async applyNovaSettings() {
+    const settings = this.plugin.params?.novaSettings as { name: string; text?: string; real?: number }[] | undefined;
+    const slotId = this.slotId;
+    if (!settings || !settings.length || !slotId || this.status !== 'active') return;
+    try {
+      const res = await novaBridge.setParams(slotId, settings);
+      const readback = res.results.map(r => ({ name: r.name, text: r.text || '', ok: !!r.ok }));
+      if (this.slotId !== slotId) return;
+      const st = await novaBridge.getPluginState(slotId).catch(() => null);
+      if (st) this.adoptState(st, 'nova');
+      novaVstEvents.emit({ pluginId: this.plugin.id, name: this.loadedName || this.plugin.name, ok: readback.every(r => r.ok), readback });
+    } catch (e: any) {
+      novaVstEvents.emit({ pluginId: this.plugin.id, name: this.loadedName || this.plugin.name, ok: false, readback: [], error: e?.message || null });
+    }
   }
 
   private setStatus(status: VstNodeStatus, error: string | null = null) {
     this.status = status;
     this.error = error;
     notifyInfo();
+    this.statusListeners.forEach(cb => { try { cb(status); } catch { /* écouteur fautif */ } });
   }
 
   private onBridgeState(s: BridgeState) {
@@ -210,8 +278,9 @@ export class VSTPluginNode {
       const slotId = this.slotId;
       const res = await novaBridge.loadPlugin({
         slotId, path, pluginName: this.plugin.params?.pluginName || null,
-        sampleRate: this.ctx.sampleRate, stateB64: this.knownState,
+        sampleRate: this.ctx.sampleRate, stateB64: this.knownState, quiet: this.quiet,
       });
+      this.licenseRequired = false;
       if (this.disposed || seq !== this.loadSeq) { novaBridge.unloadPlugin(slotId); return; }
       this.loadedName = res.name;
       this.pluginLatencySamples = res.latencySamples + res.bufferLatencySamples;
@@ -219,7 +288,7 @@ export class VSTPluginNode {
 
       this.slotUnsub?.();
       this.slotUnsub = novaBridge.onSlotEvent(slotId, (ev) => {
-        if (ev.action === 'EDITOR_CLOSED' && ev.state) this.adoptState(ev.state);
+        if (ev.action === 'EDITOR_CLOSED' && ev.state) this.adoptState(ev.state, 'editor');
         if (ev.action === 'LATENCY') {
           this.pluginLatencySamples = Number(ev.latency_samples) || 0;
           this.updateLatency(true);
@@ -237,10 +306,16 @@ export class VSTPluginNode {
       node.port.postMessage({ type: 'active', on: true });
       this.setStatus('active');
       this.updateLatency(true);
+      if (this.plugin.params?.novaSettings) void this.applyNovaSettings();
     } catch (e: any) {
       if (this.disposed || seq !== this.loadSeq) return;
       this.teardown();
+      this.licenseRequired = !!e?.licenseRequired;
       this.setStatus('error', e?.message || 'Chargement impossible');
+      // Plugin posé par Nova : le projet repasse sur l'effet de NOVA (voir App, VST_MIX_FALLBACK).
+      if (this.plugin.params?.novaSlot) {
+        novaVstEvents.emit({ pluginId: this.plugin.id, name: this.plugin.name, ok: false, readback: [], failed: this.licenseRequired ? 'license' : 'load', error: e?.message || null });
+      }
     }
   }
 

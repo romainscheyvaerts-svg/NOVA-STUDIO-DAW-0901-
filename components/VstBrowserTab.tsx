@@ -4,6 +4,7 @@ import { novaBridge, BridgePlugin } from '../services/NovaBridge';
 import { useBridgeState } from '../hooks/useNovaBridge';
 import DesktopAppDownload from './DesktopAppDownload';
 import { isNovaDesktop } from '../utils/desktopApp';
+import { AutotuneVstSettings } from './AutotuneVstPanel';
 
 /** Exécutable du pont (asset de release GitHub, comme le pont ASIO). */
 export const VST_BRIDGE_DOWNLOAD_URL = '/downloads/NovaVSTBridge.exe';
@@ -110,6 +111,7 @@ const VstBrowserTab: React.FC<{
           <i className={`fas fa-sync-alt ${loadingList ? 'animate-spin' : ''}`}></i>
         </button>
       </div>
+      <AutotuneVstSettings />
       <div className="relative">
         <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-xs text-slate-600"></i>
         <input

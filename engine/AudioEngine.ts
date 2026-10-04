@@ -8,7 +8,7 @@ import { ChorusNode } from '../plugins/ChorusPlugin';
 import { FlangerNode } from '../plugins/FlangerPlugin';
 import { VocalDoublerNode } from '../plugins/DoublerPlugin';
 import { StereoSpreaderNode } from '../plugins/StereoSpreaderPlugin';
-import { AutoTuneNode } from '../plugins/AutoTunePlugin';
+import { HybridAutoTuneNode } from './HybridAutoTuneNode';
 import { CompressorNode } from '../plugins/CompressorPlugin';
 import { DeEsserNode } from '../plugins/DeEsserPlugin';
 import { DenoiserNode } from '../plugins/DenoiserPlugin';
@@ -1832,7 +1832,9 @@ export class AudioEngine {
       case 'REVERB': node = new ReverbNode(ctx); break;
       case 'DELAY': node = new SyncDelayNode(ctx, bpm); break;
       case 'COMPRESSOR': node = new CompressorNode(ctx); break;
-      case 'AUTOTUNE': node = new AutoTuneNode(ctx); break;
+      // Autotune du PC (Auto-Tune Pro, MetaTune… via le pont) si l'artiste l'a
+      // choisi, sinon celui de NOVA (repli automatique, voir HybridAutoTuneNode).
+      case 'AUTOTUNE': node = new HybridAutoTuneNode(ctx, plugin); break;
       case 'CHORUS': node = new ChorusNode(ctx); break;
       case 'FLANGER': node = new FlangerNode(ctx); break;
       case 'DOUBLER': node = new VocalDoublerNode(ctx); break;
@@ -2110,6 +2112,10 @@ export class AudioEngine {
             const trackId = track.id;
             instance.node.setLatencyListener(() => this.recomputeTrackLatency(trackId));
             if (lowLatency) instance.node.setMonitorBypass(true);
+          } else if (instance.node instanceof HybridAutoTuneNode) {
+            const trackId = track.id;
+            instance.node.setLatencyListener(() => this.recomputeTrackLatency(trackId));
+            if (lowLatency) instance.node.updateParams({ ...plugin.params, lowLatency: true });
           } else if (lowLatency && instance.node?.updateParams) {
             instance.node.updateParams({ ...plugin.params, lowLatency: true });
           }
