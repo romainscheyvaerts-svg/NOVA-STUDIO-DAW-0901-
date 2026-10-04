@@ -451,6 +451,57 @@ def run():
         step_ok("E. PC : revenir à la version de l'ingé (annulable) + export", e_revert)
         save_log(logE); ctx.close()
 
+        # --- F. « Volume avant effets » dessiné sur la tablette (automation preVolume) :
+        # fondu de la phrase 1 (1 → 2,5 s jusqu'à -20 dB), retour à 0 dB juste après la phrase.
+        def make_prevol_zip():
+            srcz = OUT / "B_session_editee_tablette.novaproj.zip"
+            dst = OUT / "F_session_tablette_volume_avant_effets.novaproj.zip"
+            with zipfile.ZipFile(srcz) as zi, zipfile.ZipFile(dst, "w") as zo:
+                for n in zi.namelist():
+                    data = zi.read(n)
+                    if n == "project.json":
+                        js = json.loads(data)
+                        v = next(t for t in js["tracks"] if t["id"] == "voix")
+                        v["automationLanes"] = [l for l in v.get("automationLanes", []) if l.get("parameterName") != "preVolume"] + [{
+                            "id": "auto-prevol", "parameterName": "preVolume", "color": "#22d3ee", "isExpanded": True, "min": 0, "max": 1.5,
+                            "points": [{"id": "a", "time": 0, "value": 1}, {"id": "b", "time": 1.0, "value": 1}, {"id": "c", "time": 2.5, "value": 0.1},
+                                       {"id": "d", "time": 3.0, "value": 0.1}, {"id": "e", "time": 3.05, "value": 1}]}]
+                        data = json.dumps(js).encode()
+                    zo.writestr(n, data)
+            return dst
+        fzip = step_ok("F. préparation : volume avant effets dessiné sur la tablette", make_prevol_zip)
+
+        logF = Log("F_pc_volume_avant_effets")
+        ctx, page = new_page(b, "pc", logF)
+        prepare(page, FakeBridge(), desktop=True)
+
+        def f_pc():
+            open_project_file(page, fzip, res, "F1_pc_volume_avant_effets")
+            page.get_by_test_id("prefx-panel").wait_for(timeout=30000)
+            shot(page, "F2_pc_resume_avec_volume")
+            res["F_resume"] = page.get_by_test_id("prefx-summary").inner_text()
+            assert "4 éditions" in res["F_resume"], res["F_resume"]
+            page.get_by_role("button", name="C'est noté").click(); page.wait_for_timeout(800)
+            for name in ("Plus tard", "C'est parti"):
+                bb = page.get_by_role("button", name=name, exact=True).locator("visible=true").first
+                try:
+                    if bb.is_visible(): bb.click(); page.wait_for_timeout(400)
+                except Exception:
+                    pass
+            export_wav(page, OUT / "F_export_pc_volume_avant_effets.wav", "F3")
+        step_ok("F. PC : volume avant effets rejoué avant compresseur et reverb + export", f_pc)
+        save_log(logF); ctx.close()
+
+        logF2 = Log("F2_tablette_apercu_volume")
+        ctx, page = new_page(b, "tab", logF2)
+        prepare(page, None, desktop=False)
+
+        def f_tab():
+            open_project_file(page, fzip, res, "F4_tablette_volume_avant_effets")
+            export_wav(page, OUT / "F_export_tablette_apercu_volume.wav", "F5")
+        step_ok("F. Tablette : aperçu du volume (après le rendu gelé) + export", f_tab)
+        save_log(logF2); ctx.close()
+
         # --- D. PC sans la reverb installée : la piste reste gelée, on prévient
         logD = Log("D_pc_plugin_manquant")
         ctx, page = new_page(b, "pc", logD)
@@ -508,6 +559,14 @@ def run():
             checks["tablette : la voix sonne avec les effets VST gelés (phrase 1 ±0,5 dB du PC)"] = abs((m["tablette_phrase1_dB (sans plugins, rendus gelés)"] or 0) - (m["phrase1_avant_dB"] or 99)) <= 0.5
             checks["tablette : la reverb VST gelée suit la voix (queue phrase 1 ±1 dB du PC)"] = abs((m["tablette_reverb_apres_phrase1_dB (3,05-3,9 s)"] or 0) - (m["pc_reverb_apres_phrase1_dB (3,05-3,9 s)"] or 99)) <= 1
             checks["tablette : phrase 3 supprimée, sa reverb aussi (< -80 dB)"] = (m["tablette_zone_phrase3_dB (7,5-9 s)"] or 0) < -80
+        FP = OUT / "F_export_pc_volume_avant_effets.wav"; FT = OUT / "F_export_tablette_apercu_volume.wav"
+        if FP.exists() and FT.exists():
+            m["F_fin_phrase1_dB (2,6-3 s) PC avant / volume avant effets"] = [rms_db(A, 2.6, 3.0), rms_db(FP, 2.6, 3.0)]
+            m["F_queue_reverb_phrase1_dB (3,1-3,9 s) PC avant / PC volume avant effets / tablette aperçu"] = [rms_db(A, 3.1, 3.9), rms_db(FP, 3.1, 3.9), rms_db(FT, 3.1, 3.9)]
+            qa_, qf, qt = m["F_queue_reverb_phrase1_dB (3,1-3,9 s) PC avant / PC volume avant effets / tablette aperçu"]
+            checks["volume avant effets (PC) : la reverb suit le fondu (queue -10 dB+)"] = (qa_ or 0) - (qf or 0) >= 10
+            res["F_note"] = ("Sur la tablette (sans plugins), le volume avant effets s'applique après le rendu gelé : la queue de reverb "
+                             "revient quand le volume remonte (aperçu). Au PC, il est rejoué AVANT le compresseur et la reverb.")
         E = OUT / "E_export_pc_version_ingé.wav"
         if E.exists():
             m["retour_version_ingé_zone_phrase3_dB (7,5-9 s)"] = rms_db(E, 7.5, 9.0)

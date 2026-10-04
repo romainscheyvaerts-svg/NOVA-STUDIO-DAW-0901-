@@ -309,11 +309,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const toggleAutomation = (e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation();
     let lanes = [...track.automationLanes];
-    // Piste gelée (effets de l'ingé) : le volume dessiné ici passe AVANT les effets au dégel.
-    if (frozen && !lanes.some(l => l.parameterName === 'preVolume')) {
-      lanes = lanes.map(l => ({ ...l, isExpanded: false }));
-      lanes.push({ id: `auto-${Date.now()}`, parameterName: 'preVolume', points: [], color: track.color, isExpanded: true, min: 0, max: 1.5 });
-    } else if (lanes.length === 0) {
+    if (lanes.length === 0) {
       lanes.push({ 
           id: `auto-${Date.now()}`, 
           parameterName: 'volume', 
