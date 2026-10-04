@@ -360,6 +360,13 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
     setRangeMode('FULL');
     setTimeout(() => { void handleExportRef.current?.(); }, 50);
   };
+  // Vue simple, instru pas achetée : mes voix seules (sans le beat), 2 € par
+  // projet ou un export Nova Pro offert — même paiement que la vue avancée.
+  const exportVoix = () => {
+    sourceTouched.current = true;
+    setSource('VOCALS');
+    setTimeout(() => { void handleExportRef.current?.(); }, 50);
+  };
   // Prix du morceau complet (instru importée : 2 €, ou export Nova Pro offert).
   const completPaye = !admin && !hasCatalogBeat && voicesUnlocked !== true;
   const choix = 'w-full flex items-center gap-3 rounded-2xl border p-4 text-left transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed';
@@ -406,6 +413,11 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
             {!advanced && (
               <div className="space-y-3" data-export-vue="simple">
+                {admin && (
+                  <p className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-[12px] text-center font-bold text-emerald-300" role="status">
+                    <i className="fas fa-user-shield mr-1"></i>Admin : export gratuit
+                  </p>
+                )}
                 {onOpenShare && (
                   <button type="button" onClick={onOpenShare} disabled={isRendering} className={`${choix} border-cyan-400/40 bg-cyan-500/10 hover:bg-cyan-500/15`}>
                     <span className="text-2xl leading-none" aria-hidden="true">📲</span>
@@ -449,6 +461,16 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                       className="w-full min-h-11 rounded-xl bg-amber-400 px-3 py-2 text-left text-[13px] font-black text-black hover:bg-amber-300">
                       🛒 Acheter l'instru <span className="font-bold text-black/70">: fichier propre, sans tag</span>
                     </button>
+                    <button type="button" onClick={exportVoix} disabled={isRendering || payWait}
+                      className="w-full min-h-11 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-left text-[13px] font-bold text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-50">
+                      🎤 Mes voix seules, sans le beat{' '}
+                      <span className="font-black text-emerald-300">
+                        {payWait ? '· En attente du paiement…'
+                          : voicesUnlocked === true ? '· Exporter'
+                          : freeLeft !== null && freeLeft > 0 ? `· Exporter (gratuit Nova Pro · ${freeLeft} restants)`
+                          : '· Payer 2 € et exporter'}
+                      </span>
+                    </button>
                     <button type="button" onClick={openProMix}
                       className="w-full min-h-10 rounded-xl bg-white/5 px-3 py-2 text-left text-[12px] font-bold text-slate-200 hover:bg-white/10">
                       🎚️ Le faire mixer par un ingé son pro
@@ -462,7 +484,6 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                       <span className="block text-[12px] text-slate-300 mt-0.5">
                         {format === 'MP3' ? 'Fichier MP3' : 'Fichier WAV qualité studio'}, sans tag, prêt pour Spotify ou YouTube.
                         {completPaye && (freeLeft !== null && freeLeft > 0 ? ` Gratuit avec Nova Pro (${freeLeft} restants).` : ' 2 €.')}
-                        {admin && ' Admin : gratuit.'}
                       </span>
                     </span>
                     {payWait ? <span className="text-[11px] text-slate-300">Paiement…</span> : <i className="fas fa-download text-emerald-300" aria-hidden="true"></i>}

@@ -164,7 +164,10 @@ def d_connecte_studio(page, log, res, vp):
         shot(page, "2_connecte_non_abonne_studio")
     with step(res, "export : paiement 2 € proposé"):
         open_export(page)
+        # Fenêtre d'export simple (choix débutant) : le paiement 2 € (mes voix
+        # seules) doit s'y trouver, sans passer par « Réglages avancés ».
         page.get_by_text(re.compile("PAYER 2 € ET EXPORTER", re.I)).first.wait_for(timeout=15000)
+        assert page.locator("[data-export-vue=simple]").count() == 1, "paiement hors de la vue simple"
         shot(page, "3_export_non_abonne_paiement")
     with step(res, "clic Payer : Stripe ouvert dans le navigateur, export débloqué après vérification"):
         page.get_by_role("button", name=re.compile("PAYER 2 € ET EXPORTER", re.I)).first.click()
@@ -184,6 +187,7 @@ def d_superadmin(page, log, res, vp):
         enter_studio(page, res)
         open_export(page)
         page.get_by_text("Admin : export gratuit").first.wait_for(timeout=15000)
+        assert page.locator("[data-export-vue=simple]").count() == 1, "mention admin hors de la vue simple"
         txt = page.inner_text("body")
         assert "PAYER 2 €" not in txt.upper()
         shot(page, "4_export_superadmin_libre")
