@@ -28,7 +28,7 @@ CREATE TABLE public.users (
   is_verified BOOLEAN DEFAULT FALSE,
   avatar TEXT,
   owned_instruments INTEGER[] DEFAULT ARRAY[]::INTEGER[],
-  google_ai_api_key TEXT DEFAULT 'AIzaSyCIRfnObPFke1qTGJTHeGS0GCXMfM41RH8',
+  google_ai_api_key TEXT DEFAULT 'COLLE_TA_CLE_GEMINI_ICI',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -65,7 +65,7 @@ BEGIN
     NEW.id,
     NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'username', SPLIT_PART(NEW.email, '@', 1)),
-    'AIzaSyCIRfnObPFke1qTGJTHeGS0GCXMfM41RH8'
+    'COLLE_TA_CLE_GEMINI_ICI'
   );
   RETURN NEW;
 END;
@@ -87,7 +87,7 @@ SELECT
   id,
   email,
   COALESCE(raw_user_meta_data->>'username', SPLIT_PART(email, '@', 1)),
-  'AIzaSyCIRfnObPFke1qTGJTHeGS0GCXMfM41RH8'
+  'COLLE_TA_CLE_GEMINI_ICI'
 FROM auth.users;
 
 -- =====================================================================
