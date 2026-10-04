@@ -1,4 +1,5 @@
 import { catalogSupabase } from './supabase';
+import { isNovaDesktop } from '../utils/desktopApp';
 
 /**
  * Paiements Nova (Stripe Checkout, fonction nova-billing du site) :
@@ -33,6 +34,14 @@ const returnUrl = () => {
  * ne pas être bloqué) et renvoie l'identifiant de la session de paiement.
  */
 export async function openCheckout(product: BillingProduct, extra: Record<string, unknown> = {}): Promise<string> {
+  // Application Windows : toute nouvelle fenêtre part dans le navigateur de l'ordinateur
+  // (nova_desktop.py, NewWindowRequested). On ouvre donc directement la page Stripe,
+  // sans onglet vide préalable ; l'appli reste ouverte et attend le paiement.
+  if (isNovaDesktop()) {
+    const r = await billing<{ url: string; session_id: string }>('checkout', { product, return_url: returnUrl(), ...extra });
+    window.open(r.url, '_blank');
+    return r.session_id;
+  }
   const tab = window.open('', '_blank');
   try {
     const r = await billing<{ url: string; session_id: string }>('checkout', { product, return_url: returnUrl(), ...extra });
@@ -94,6 +103,11 @@ export async function isExportVoicesUnlocked(projectKey: string): Promise<boolea
 export const markExportVoicesUnlocked = (projectKey: string) => { unlockedCache.add(projectKey); };
 
 export async function openBillingPortal(): Promise<void> {
+  if (isNovaDesktop()) {
+    const r = await billing<{ url: string }>('portal', { return_url: returnUrl() });
+    window.open(r.url, '_blank');
+    return;
+  }
   const tab = window.open('', '_blank');
   const r = await billing<{ url: string }>('portal', { return_url: returnUrl() });
   if (tab) tab.location.href = r.url; else window.location.href = r.url;
