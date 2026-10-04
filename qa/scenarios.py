@@ -489,7 +489,7 @@ def s_avance(page, log, res, vp):
         page.get_by_role("button", name=re.compile("Ajouter un effet")).first.click(); page.wait_for_timeout(600)
         shot(page, f"{res['name']}_04_liste_fx")
         res["liste_fx"] = [x["t"] for x in visible_buttons(page)][-25:]
-        page.get_by_text(re.compile("^(Reverb|Réverb|Delay|EQ|Compress)", re.I)).first.click(); page.wait_for_timeout(1200)
+        page.get_by_text("Spatial Verb", exact=True).locator("visible=true").first.click(); page.wait_for_timeout(1200)
         shot(page, f"{res['name']}_05_effet_ouvert")
         page.keyboard.press("Escape"); page.wait_for_timeout(500)
         res["effet_ferme_echap"] = page.evaluate("""() => ![...document.querySelectorAll('[role=dialog],[aria-modal=true]')].some(e=>e.getClientRects().length)""")
