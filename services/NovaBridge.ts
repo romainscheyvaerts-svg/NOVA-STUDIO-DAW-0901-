@@ -10,6 +10,8 @@
  * - v5 : instruments VST3 (RENDER_INSTRUMENT : notes -> audio, mode instru).
  * - v6 : LICENSE_WINDOW (fenêtre d'activation d'un plugin ramenée au premier
  *   plan sur le PC) : message au musicien, délais allongés, « C'est fait ».
+ * - v7 : paramètres par valeur texte (GET_PARAMS détaillé, SET_PARAMS relu) :
+ *   autotune du PC réglé sur la gamme du beat, mix piloté par Nova.
  *
  * Protocole complet : bridge-python/nova_bridge_server.py.
  */
@@ -58,6 +60,18 @@ export interface BridgeState {
   instruments: boolean;
   /** Lecture des plugins en cours sur le pont (instrument ou effet ?) : [lus, total]. */
   instrumentsPending: [number, number] | null;
+  /** (v7) Paramètres lisibles et réglables par leur valeur texte (« F# », « Minor »). */
+  paramsText?: boolean;
+}
+
+/** Première version du pont qui règle les paramètres par valeur texte. */
+export const BRIDGE_PARAMS_TEXT_VERSION = 7;
+
+/** Résultat d'un réglage groupé (SET_PARAMS) : valeurs relues sur le plugin. */
+export interface SetParamsResult {
+  results: { name: string; ok: boolean; text?: string; value?: number; error?: string }[];
+  latencySamples: number;
+  latencyChanged: boolean;
 }
 
 /** Première version du pont qui rend les instruments VST3. */
@@ -149,6 +163,7 @@ class NovaBridgeService {
           this.setBridgeState({
             status: 'connected', error: null, version: hello.version ?? null,
             instruments: !!hello.instruments && (Number(hello.version) || 0) >= BRIDGE_INSTRUMENTS_VERSION,
+            paramsText: !!hello.params_text && (Number(hello.version) || 0) >= BRIDGE_PARAMS_TEXT_VERSION,
           });
           this.ensureWorker();
           done(true);
@@ -192,8 +207,12 @@ class NovaBridgeService {
       const p = this.pending.get(msg.req_id)!;
       this.pending.delete(msg.req_id);
       window.clearTimeout(p.timer);
-      if (msg.success === false) p.reject(new Error(msg.error || 'Erreur du pont VST'));
-      else p.resolve(msg);
+      if (msg.success === false) {
+        const err: Error & { licenseRequired?: boolean } = new Error(msg.error || 'Erreur du pont VST');
+        // (v7) Chargement discret refusé par une fenêtre de licence / démo.
+        if (msg.license_required) err.licenseRequired = true;
+        p.reject(err);
+      } else p.resolve(msg);
       return;
     }
     if (msg && msg.action === 'LICENSE_WINDOW') {
@@ -311,6 +330,9 @@ class NovaBridgeService {
       source: msg.source || 'load', slotId: msg.slot_id ?? null,
     };
     this.plugins = this.plugins.map(p => (p.path === e.path ? { ...p, license: e.status } : p));
+    // (v7) Chargement discret posé par NOVA (autotune, mix auto) : la fenêtre a été
+    // fermée par le pont, le plugin passe « non disponible » ; rien à montrer.
+    if (msg.quiet) return;
     this.licenseListeners.forEach(cb => { try { cb(e); } catch { /* écouteur fautif */ } });
   }
 
@@ -332,11 +354,16 @@ class NovaBridgeService {
     return () => { set!.delete(cb); if (set!.size === 0) this.slotListeners.delete(slotId); };
   }
 
-  async loadPlugin(opts: { slotId: string; path: string; pluginName?: string | null; sampleRate: number; stateB64?: string | null }): Promise<LoadResult> {
+  /**
+   * quiet (pont v7) : chargement décidé par NOVA (autotune, mix auto) ; une fenêtre
+   * de licence / démo est fermée par le pont et le chargement échoue
+   * (erreur.licenseRequired) au lieu de faire surgir une fenêtre.
+   */
+  async loadPlugin(opts: { slotId: string; path: string; pluginName?: string | null; sampleRate: number; stateB64?: string | null; quiet?: boolean }): Promise<LoadResult> {
     const r = await this.request({
       action: 'LOAD_PLUGIN', slot_id: opts.slotId, path: opts.path, plugin_name: opts.pluginName || null,
-      sample_rate: Math.round(opts.sampleRate), state: opts.stateB64 || null,
-    }, 60000);
+      sample_rate: Math.round(opts.sampleRate), state: opts.stateB64 || null, ...(opts.quiet ? { quiet: true } : {}),
+    }, opts.quiet ? 180000 : 60000);
     return {
       name: r.name || '', vendor: r.vendor || '',
       latencySamples: Number(r.latency_samples) || 0,
@@ -364,6 +391,20 @@ class NovaBridgeService {
   async setPluginState(slotId: string, stateB64: string): Promise<boolean> {
     const r = await this.request({ action: 'SET_STATE', slot_id: slotId, state: stateB64 });
     return !!r.success;
+  }
+
+  /** (v7) Paramètres du plugin chargé : clé, valeur brute, valeur texte, choix possibles. */
+  async getParams(slotId: string, names?: string[]): Promise<any[]> {
+    // Passe par le thread des plugins du pont, après les chargements en cours (≈ 5 s chacun).
+    const r = await this.request({ action: 'GET_PARAMS', slot_id: slotId, ...(names ? { names } : {}) }, 120000);
+    return Array.isArray(r.parameters) ? r.parameters : [];
+  }
+
+  /** (v7) Réglage groupé par texte / valeur réelle / brute ; renvoie les valeurs relues. */
+  async setParams(slotId: string, params: { name: string; text?: string; real?: number; value?: number }[]): Promise<SetParamsResult> {
+    if (!this.state.paramsText) throw new Error('Mets à jour le pont VST (version 7) pour régler les plugins.');
+    const r = await this.request({ action: 'SET_PARAMS', slot_id: slotId, params: params.map(({ name, text, real, value }) => ({ name, text, real, value })) }, 120000);
+    return { results: r.results || [], latencySamples: Number(r.latency_samples) || 0, latencyChanged: !!r.latency_changed };
   }
 
   showEditor(slotId: string) { return this.request({ action: 'SHOW_EDITOR', slot_id: slotId }); }

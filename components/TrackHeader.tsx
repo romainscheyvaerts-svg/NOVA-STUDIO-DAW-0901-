@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { AutotuneBadge } from './AutotuneVstPanel';
 import { useCollabRole, requestVolumeLock } from '../utils/collabStore';
 import { useSimpleMode } from '../utils/simpleMode';
 import { gainToDbText, panToText } from '../utils/db';
@@ -554,6 +555,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       </div>
       
+      {/* Autotune du PC : « Auto-Tune Pro · F# mineur » (ou l'autotune de NOVA en repli). */}
+      <AutotuneBadge track={track} />
       {track.isTrackArmed && <div className="mt-1 relative z-10"><MonitorControl compact trackId={track.id} /></div>}
 
       <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-2 rounded-lg border border-white/5 relative z-10">

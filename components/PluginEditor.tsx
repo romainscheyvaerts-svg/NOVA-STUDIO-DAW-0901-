@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { PluginInstance, Track } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { AutoTuneUI } from '../plugins/AutoTunePlugin';
+import { AutotuneEngineNote } from './AutotuneVstPanel';
 import { ProfessionalReverbUI } from '../plugins/ReverbPlugin';
 import { VocalCompressorUI } from '../plugins/CompressorPlugin';
 import { SyncDelayUI } from '../plugins/DelayPlugin';
@@ -197,7 +198,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
 
   const renderPluginUI = () => {
     switch(plugin.type) {
-      case 'AUTOTUNE': return <AutoTuneUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
+      case 'AUTOTUNE': return <><AutotuneEngineNote pluginId={plugin.id} /><AutoTuneUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} /></>;
       case 'REVERB': return <ProfessionalReverbUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
       case 'COMPRESSOR': return <VocalCompressorUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
       case 'DELAY': return <SyncDelayUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;

@@ -286,7 +286,7 @@ class LicenseWatcher:
                     self.on_window(w, {"hwnd": hwnd, **info})
                 except Exception:
                     pass
-                threading.Thread(target=bring_window, args=(hwnd,), daemon=True).start()
+                self._present(w, hwnd)
         with self.lock:
             self.watches.append(w)
             if self.thread is None or not self.thread.is_alive():
@@ -294,6 +294,18 @@ class LicenseWatcher:
                 self.thread.start()
         self.wake.set()
         return w
+
+    def _present(self, w: Watch, hwnd: int):
+        """Fenêtre de licence vue : ramenée devant (chargement demandé par le
+        musicien), ou cachée puis fermée (v7, chargement « discret » : autotune
+        ou mix posés automatiquement par NOVA ; aucune fenêtre ne doit surgir,
+        le plugin est alors noté indisponible par le serveur)."""
+        if w.context.get("quiet"):
+            w.context["license_seen"] = True
+            hide_window(hwnd)
+            close_window(hwnd)
+            return
+        threading.Thread(target=bring_window, args=(hwnd,), daemon=True).start()
 
     def _owner(self, title: str) -> Optional[Watch]:
         live = [w for w in self.watches if w.ended is None] or self.watches
@@ -335,12 +347,14 @@ class LicenseWatcher:
                 self.open_windows[hwnd] = (w, info)
                 w.seen = True
                 w.titles.append(info["title"])
-                logger.info(f"🔑 {w.label} ouvre une fenêtre : « {info['title'] or info['cls']} » (ramenée au premier plan)")
+                quiet = bool(w.context.get("quiet"))
+                logger.info(f"🔑 {w.label} ouvre une fenêtre : « {info['title'] or info['cls']} » "
+                            f"({'fermée : chargement discret' if quiet else 'ramenée au premier plan'})")
                 try:
                     self.on_window(w, {"hwnd": hwnd, **info})
                 except Exception as e:
                     logger.debug(f"Signalement de fenêtre : {e}")
-                threading.Thread(target=bring_window, args=(hwnd,), daemon=True).start()
+                self._present(w, hwnd)
             self.wake.wait(POLL_S)
             self.wake.clear()
 
