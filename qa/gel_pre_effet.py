@@ -423,6 +423,10 @@ def run():
             res["BT_bandeau"] = page.get_by_test_id("frozen-notice").inner_text()
             assert "3 éditions" in res["BT_bandeau"], res["BT_bandeau"]
         step_ok("B'. Tablette 1024 : bandeau avec les éditions gardées", t_open)
+
+        def t_export():
+            export_wav(page, OUT / "BT_export_tablette_apercu.wav", "BT2")
+        step_ok("B'. Tablette 1024 : export (aperçu sans les plugins : rendus gelés)", t_export)
         save_log(logT); ctx.close()
 
         # --- E. PC : « Revenir à ma version » (tout est annulable) puis export
@@ -495,6 +499,15 @@ def run():
             "voix supprimée : pas de queue de reverb orpheline après": isinstance(q3, str) or q3 < -80,
             "fondu AVANT la reverb : queue phrase 2 plus basse de 6 dB+": (m["queue_phrase2_avant_dB (6,05-7 s)"] or 0) - (m["queue_phrase2_pre_effet_dB (6,05-7 s)"] or 0) >= 6,
         }
+        T = OUT / "BT_export_tablette_apercu.wav"
+        if T.exists():
+            m["tablette_phrase1_dB (sans plugins, rendus gelés)"] = rms_db(T, 1.2, 2.8)
+            m["tablette_zone_phrase3_dB (7,5-9 s)"] = rms_db(T, 7.5, 9.0)
+            m["tablette_reverb_apres_phrase1_dB (3,05-3,9 s)"] = rms_db(T, 3.05, 3.9)
+            m["pc_reverb_apres_phrase1_dB (3,05-3,9 s)"] = rms_db(A, 3.05, 3.9)
+            checks["tablette : la voix sonne avec les effets VST gelés (phrase 1 ±0,5 dB du PC)"] = abs((m["tablette_phrase1_dB (sans plugins, rendus gelés)"] or 0) - (m["phrase1_avant_dB"] or 99)) <= 0.5
+            checks["tablette : la reverb VST gelée suit la voix (queue phrase 1 ±1 dB du PC)"] = abs((m["tablette_reverb_apres_phrase1_dB (3,05-3,9 s)"] or 0) - (m["pc_reverb_apres_phrase1_dB (3,05-3,9 s)"] or 99)) <= 1
+            checks["tablette : phrase 3 supprimée, sa reverb aussi (< -80 dB)"] = (m["tablette_zone_phrase3_dB (7,5-9 s)"] or 0) < -80
         E = OUT / "E_export_pc_version_ingé.wav"
         if E.exists():
             m["retour_version_ingé_zone_phrase3_dB (7,5-9 s)"] = rms_db(E, 7.5, 9.0)
