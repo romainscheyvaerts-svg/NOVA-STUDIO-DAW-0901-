@@ -352,8 +352,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     <i className="fas fa-file-export text-lg"></i>
                 </div>
                 <div>
-                    <h2 className="text-sm font-black text-white uppercase tracking-widest">Bounce Audio</h2>
-                    <p className="text-[10px] text-slate-500 font-mono">Mastering & Export</p>
+                    <h2 className="text-sm font-black text-white uppercase tracking-widest">Exporter ton morceau</h2>
+                    <p className="text-[10px] text-slate-500 font-mono">Fichier audio (WAV / MP3)</p>
                 </div>
             </div>
             <button aria-label="Fermer" title="Fermer" onClick={onClose} disabled={isRendering} className="w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
@@ -474,7 +474,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     {/* SECTION: DSP OPTIONS */}
                     <div className="space-y-3">
                         <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">3. Traitement du Signal</span>
-                        <div className="flex space-x-6">
+                        <div className="flex flex-wrap gap-x-6 gap-y-2">
                             <label className="flex items-center space-x-2 text-[10px] font-bold text-slate-300">
                                 <span>Niveau</span>
                                 <select value={normalize} onChange={e => setNormalize(e.target.value as typeof normalize)} disabled={isRendering}

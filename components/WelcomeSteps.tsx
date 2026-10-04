@@ -3,6 +3,8 @@ import React from 'react';
 interface WelcomeStepsProps {
   open: boolean;
   beatLoaded: boolean;
+  /** Beat choisi sur l'accueil, en cours de chargement : l'étape 1 est déjà faite. */
+  beatLoading?: string | null;
   isMobile: boolean;
   /** Ouvert depuis une mélodie : on fabrique un beat, les gestes ne sont pas les mêmes. */
   beatmaking?: boolean;
@@ -14,14 +16,19 @@ interface WelcomeStepsProps {
  * Première visite : les 3 gestes à connaître, rien de plus. L'artiste doit
  * comprendre en 5 secondes qu'il peut enregistrer tout de suite.
  */
-const WelcomeSteps: React.FC<WelcomeStepsProps> = ({ open, beatLoaded, isMobile, beatmaking, onPickBeat, onClose }) => {
+const WelcomeSteps: React.FC<WelcomeStepsProps> = ({ open, beatLoaded: loadedNow, beatLoading, isMobile, beatmaking, onPickBeat, onClose }) => {
   if (!open) return null;
+  // L'artiste vient de cliquer un beat sur l'accueil : ne pas lui redemander
+  // d'en choisir un (« Choisir un beat » + « Plus tard » prêtaient à confusion).
+  const beatLoaded = loadedNow || !!beatLoading;
   const steps = beatmaking ? [
     { n: 1, done: beatLoaded, icon: '🎹', title: 'Ta mélodie est posée', text: 'Écoute-la avec ▶ ou la barre d\'espace.' },
     { n: 2, done: false, icon: '🥁', title: 'Ajoute la batterie et la 808', text: '« 🥁 Batterie » : choisis un kit et clique les cases. « 🔊 808 » : tes basses note par note dans le piano roll.' },
     { n: 3, done: false, icon: '🔴', title: 'Pose ta voix dessus', text: 'Appuie sur REC : décompte 4-3-2-1, puis chante. Je mixe ta voix tout seul.' },
   ] : [
-    { n: 1, done: beatLoaded, icon: '🎵', title: 'Choisis un beat', text: isMobile ? 'Onglet « Sons » en bas → « Essayer ».' : 'Dans le catalogue à gauche → « Essayer ».' },
+    beatLoading && !loadedNow
+      ? { n: 1, done: true, icon: '🎵', title: `Beat choisi : « ${beatLoading} »`, text: 'Il se charge, quelques secondes. Tu pourras en changer quand tu veux (Sons / catalogue).' }
+      : { n: 1, done: beatLoaded, icon: '🎵', title: 'Choisis un beat', text: isMobile ? 'Onglet « Sons » en bas → « Essayer ».' : 'Dans le catalogue à gauche → « Essayer ».' },
     { n: 2, done: false, icon: '🔴', title: 'Appuie sur REC', text: 'Décompte 4-3-2-1, puis chante. Réappuie pour arrêter. Tes paroles peuvent défiler (📝 Paroles).' },
     { n: 3, done: false, icon: '🎚️', title: 'Écoute ta voix mixée', text: 'Je pose un style de mix tout seul après ta prise. Change-le avec « Mix auto », ou demande à Nova.' },
   ];

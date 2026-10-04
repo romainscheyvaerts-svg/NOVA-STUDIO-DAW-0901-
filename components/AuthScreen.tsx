@@ -6,9 +6,11 @@ import { isSupabaseConfigured } from '../services/supabase';
 
 interface AuthScreenProps {
   onAuthenticated: (user: User) => void;
+  /** Bouton ✕ / Échap : revenir là où on était sans se connecter. */
+  onClose?: () => void;
 }
 
-const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
+const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onClose }) => {
   const [stage, setStage] = useState<AuthStage>('LOGIN');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,8 +119,16 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
       }
   };
 
+  // Échap ferme (l'écran couvre tout : sans ça, on restait coincé dessus).
+  useEffect(() => {
+    if (!onClose) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-[9999] bg-[#0c0d10] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[9999] bg-[#0c0d10] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Connexion">
       {/* Background Ambience */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-cyan-900/20 via-[#0c0d10] to-[#0c0d10]"></div>
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
@@ -127,6 +137,12 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
       </div>
 
       <div className="relative w-full max-w-md bg-[#14161a] border border-white/10 rounded-[32px] p-8 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in duration-500">
+        {onClose && (
+          <button type="button" onClick={onClose} aria-label="Fermer" title="Fermer (Échap)"
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center transition-colors">
+            <i className="fas fa-times"></i>
+          </button>
+        )}
         
         {/* LOGO AREA */}
         <div className="flex flex-col items-center mb-8">

@@ -148,7 +148,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
 
   const refreshDevices = async () => {
     try {
-        setStatus('Scanning devices...');
+        setStatus('Recherche du micro et des sorties…');
         // Demander la permission si nécessaire pour voir les labels
         await navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop())).catch(() => {});
 
@@ -158,10 +158,10 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
 
         setInputs(audioInputs);
         setOutputs(audioOutputs);
-        setStatus('Ready');
+        setStatus('Prêt');
     } catch (err) {
         console.error("Device scan error", err);
-        setStatus('Error accessing devices. Check permissions.');
+        setStatus("⚠️ Micro inaccessible. Autorise le micro dans le navigateur (icône 🔒 à gauche de l'adresse).");
     }
   };
 
@@ -295,8 +295,8 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                         <i className="fas fa-sliders-h"></i>
                     </div>
                     <div>
-                        <h2 className="text-sm font-black text-white uppercase tracking-[0.2em]">Audio Engine</h2>
-                        <p className="text-[10px] text-slate-500 font-mono font-bold">Hardware Configuration</p>
+                        <h2 className="text-sm font-black text-white uppercase tracking-[0.2em]">Réglages audio</h2>
+                        <p className="text-[10px] text-slate-500 font-mono font-bold">Micro, sortie son et latence</p>
                     </div>
                 </div>
                 
@@ -339,7 +339,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                     onChange={handleInputChange}
                                     className="w-full h-11 bg-[#14161a] border border-white/10 rounded-xl px-4 text-[11px] font-medium text-white focus:border-orange-500 outline-none appearance-none transition-all hover:bg-[#1a1d21]"
                                 >
-                                    <option value="default">Default System Input</option>
+                                    <option value="default">Micro par défaut de l'ordinateur</option>
                                     {inputs.map(dev => (
                                         <option key={dev.deviceId} value={dev.deviceId}>{dev.label}</option>
                                     ))}
@@ -358,7 +358,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                     className="w-full h-11 bg-[#14161a] border border-white/10 rounded-xl px-4 text-[11px] font-medium text-white focus:border-orange-500 outline-none appearance-none transition-all hover:bg-[#1a1d21]"
                                     disabled={!isSinkSupported}
                                 >
-                                    <option value="default">Default System Output</option>
+                                    <option value="default">Sortie par défaut de l'ordinateur</option>
                                     {outputs.map(dev => (
                                         <option key={dev.deviceId} value={dev.deviceId}>{dev.label}</option>
                                     ))}
@@ -719,11 +719,11 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
             {/* FOOTER */}
             <div className="bg-[#14161a] px-8 py-4 border-t border-white/5 flex justify-between items-center shrink-0">
                 <div className="flex items-center space-x-2">
-                    <div className={`w-2 h-2 rounded-full ${status.includes('Error') ? 'bg-red-500' : 'bg-green-500 animate-pulse'}`}></div>
+                    <div className={`w-2 h-2 rounded-full ${(status.includes('Error') || status.startsWith('⚠️')) ? 'bg-red-500' : 'bg-green-500 animate-pulse'}`}></div>
                     <span className="text-[9px] font-mono text-slate-400 uppercase">{status}</span>
                 </div>
                 <button onClick={onClose} className="px-8 py-2.5 bg-white text-black text-[10px] font-black uppercase rounded-lg hover:bg-slate-200 transition-colors shadow-lg shadow-white/5">
-                    Save Configuration
+                    Valider
                 </button>
             </div>
         </div>

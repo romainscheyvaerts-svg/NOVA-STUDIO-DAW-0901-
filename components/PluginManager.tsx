@@ -176,7 +176,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onClose, onPluginsDiscove
   };
 
   return (
-    <div className="fixed inset-0 z-[600] bg-black/98 backdrop-blur-3xl flex items-center justify-center p-6 animate-in fade-in duration-500">
+    <div className="fixed inset-0 z-[600] bg-black/[0.98] backdrop-blur-3xl flex items-center justify-center p-6 animate-in fade-in duration-500">
       <input 
         type="file" 
         ref={fileInputRef} 

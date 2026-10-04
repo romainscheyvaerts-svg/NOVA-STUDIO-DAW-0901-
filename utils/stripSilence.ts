@@ -20,6 +20,10 @@ export interface StripSilenceOptions {
   preRollSec?: number;
   /** Marge gardée après chaque passage (fin de mot, queue de réverb naturelle). */
   postRollSec?: number;
+  /** Un passage plus court que ça (marges comprises) ne devient pas un clip à lui seul. */
+  minClipSec?: number;
+  /** Un passage trop court rejoint un voisin à moins de cette distance (sinon : bruit retiré). */
+  joinGapSec?: number;
 }
 
 export interface VoiceSegment {
@@ -34,6 +38,8 @@ const DEFAULTS: Required<StripSilenceOptions> = {
   minSoundSec: 0.08,
   preRollSec: 0.08,
   postRollSec: 0.15,
+  minClipSec: 0.5,
+  joinGapSec: 1.5,
 };
 
 const toDb = (x: number) => 20 * Math.log10(Math.max(x, 1e-9));
@@ -104,6 +110,28 @@ export function detectVoiceSegments(
     const prev = out[out.length - 1];
     if (prev && s.start <= prev.end) prev.end = Math.max(prev.end, s.end);
     else out.push(s);
+  }
+
+  // Pas de miettes sur la piste : un passage très court (mot bref, souffle)
+  // rejoint le passage voisin s'il est proche ; s'il est isolé, c'est un bruit
+  // (le clic de souris qui arrête REC, typiquement) et il est retiré.
+  // Une prise qui ne contient que ce passage le garde. Annuler rend tout.
+  let changed = true;
+  while (changed && out.length > 1) {
+    changed = false;
+    for (let i = 0; i < out.length; i++) {
+      const s = out[i];
+      if (s.end - s.start >= o.minClipSec) continue;
+      const gapPrev = i > 0 ? s.start - out[i - 1].end : Infinity;
+      const gapNext = i < out.length - 1 ? out[i + 1].start - s.end : Infinity;
+      if (Math.min(gapPrev, gapNext) <= o.joinGapSec) {
+        if (gapPrev <= gapNext) out[i - 1].end = s.end;
+        else out[i + 1].start = s.start;
+      }
+      out.splice(i, 1);
+      changed = true;
+      break;
+    }
   }
   return out;
 }

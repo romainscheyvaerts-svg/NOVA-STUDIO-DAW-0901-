@@ -113,7 +113,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
   const togglePlay = (inst: Instrumental, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (playingId === inst.id) {
+    // Re-cliquer pendant le chargement annule (avant : ça relançait le
+    // chargement et affichait « Lecture impossible » à tort).
+    if (playingId === inst.id || loadingPreviewId === inst.id) {
       stopPlayback();
       return;
     }
@@ -145,13 +147,16 @@ const LandingPage: React.FC<LandingPageProps> = ({
     audio.onplaying = () => { setLoadingPreviewId(null); setPlayingId(inst.id); };
     audio.onended = () => { setPlayingId(null); setLoadingPreviewId(null); };
     audio.onerror = () => {
+      if (audioRef.current !== audio) return; // ancienne pré-écoute, déjà remplacée
       setLoadingPreviewId(null);
       setPlayingId(null);
       setPreviewError(`Lecture impossible : « ${inst.title} » est injoignable`);
       setTimeout(() => setPreviewError(null), 3500);
     };
 
-    audio.play().catch(() => {
+    audio.play().catch((err: any) => {
+      // Interrompue par un stop ou une autre pré-écoute : ce n'est pas une erreur.
+      if (audioRef.current !== audio || err?.name === 'AbortError') return;
       setLoadingPreviewId(null);
       setPlayingId(null);
       setPreviewError(`Lecture impossible : « ${inst.title} »`);
@@ -479,7 +484,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                     <div className="p-3 flex flex-col gap-2">
                       <h3 className="text-[13px] font-bold text-white truncate leading-tight">{inst.title}</h3>
                       <div className="flex flex-wrap items-center gap-1.5 text-[10px] leading-none">
-                        <span className="mono rounded-md border border-white/10 bg-white/[0.03] px-1.5 py-1 text-slate-300 whitespace-nowrap">{inst.bpm ? `${inst.bpm} BPM` : 'Tempo détecté'}</span>
+                        <span className="mono rounded-md border border-white/10 bg-white/[0.03] px-1.5 py-1 text-slate-300 whitespace-nowrap">{inst.bpm ? `${inst.bpm} BPM` : 'Tempo auto'}</span>
                         {inst.key && (
                           <span className="mono rounded-md border border-cyan-400/25 bg-cyan-400/[0.06] px-1.5 py-1 text-cyan-300 whitespace-nowrap">
                             {inst.key}
@@ -511,6 +516,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 onLogin(u);
                 setShowAuthModal(false);
               }}
+              onClose={() => setShowAuthModal(false)}
             />
           </div>
         </div>

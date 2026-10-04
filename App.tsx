@@ -514,6 +514,11 @@ function Studio() {
   };
   
   const handleEnterWithProject = (project: any) => {
+    // Le beat du catalogue n'est jamais dans le fichier (licence) : on le
+    // recharge depuis le catalogue, comme pour « Reprendre ma session ».
+    // Avant, un projet rouvert depuis un .zip affichait « 🚫 Licence requise »
+    // et la piste du beat restait muette.
+    restoreBeatAfterResumeRef.current = true;
     setPendingProject(project);
     setShowLanding(false);
   };
@@ -524,6 +529,7 @@ function Studio() {
   // Après une reprise : le beat du catalogue n'est pas dans la sauvegarde (licence),
   // on le recharge depuis le catalogue.
   const restoreBeatAfterResumeRef = useRef(false);
+  const restoreCatalogBeatRef = useRef<(done: string) => Promise<void>>(async () => {});
 
   const handleResumeSession = async () => {
     const saved = await loadSession();
@@ -1073,6 +1079,7 @@ function Studio() {
           if (loadedProject) {
               handleLoadProject(loadedProject);
               setExternalImportNotice("✅ Projet chargé !");
+              setTimeout(() => { void restoreCatalogBeatRef.current('📂 Projet ouvert : tes prises et tes paroles sont là.'); }, 900);
           }
       } catch (e: any) {
           setExternalImportNotice(`❌ Erreur: ${e.message}`);
@@ -3009,20 +3016,27 @@ function Studio() {
     }));
   };
 
-  // Reprise d'une session : on recharge le beat du catalogue (non sauvegardé).
+  // Reprise d'une session / projet ouvert : on recharge le beat du catalogue (non sauvegardé).
+  restoreCatalogBeatRef.current = async (done: string) => {
+    const beat = stateRef.current.tracks.find(t => t.id === 'instrumental');
+    if (!beat || beat.instrumentId === undefined) return;
+    if (beat.clips.some(c => c.bufferId && audioBufferRegistry.get(c.bufferId))) return;
+    try {
+      const list = await supabaseManager.getActiveInstrumentals();
+      const inst = list.find((i: any) => String(i.id) === String(beat.instrumentId));
+      if (inst) await loadCatalogBeatRef.current?.(inst);
+      else { setAiNotification("Ce beat n'est plus au catalogue : choisis-en un autre (tes prises sont gardées)."); return; }
+    } catch {
+      setAiNotification("⚠️ Le beat n'a pas pu être rechargé (connexion ?). Tes prises sont là : recharge le beat depuis le catalogue.");
+      return;
+    }
+    setAiNotification(done);
+  };
   useEffect(() => {
     if (showLanding || !restoreBeatAfterResumeRef.current) return;
-    const timer = setTimeout(async () => {
+    const timer = setTimeout(() => {
       restoreBeatAfterResumeRef.current = false;
-      const beat = stateRef.current.tracks.find(t => t.id === 'instrumental');
-      if (!beat || beat.instrumentId === undefined) return;
-      if (beat.clips.some(c => c.bufferId && audioBufferRegistry.get(c.bufferId))) return;
-      try {
-        const list = await supabaseManager.getActiveInstrumentals();
-        const inst = list.find((i: any) => String(i.id) === String(beat.instrumentId));
-        if (inst) await loadCatalogBeatRef.current?.(inst);
-      } catch { /* hors ligne : le beat reste à recharger à la main */ }
-      setAiNotification('💾 Session reprise : tes prises et tes paroles sont là.');
+      void restoreCatalogBeatRef.current('💾 Session reprise : tes prises et tes paroles sont là.');
     }, 900);
     return () => clearTimeout(timer);
   }, [showLanding]);
@@ -4858,7 +4872,10 @@ function Studio() {
     } catch (error: any) {
         console.error("Erreur Chatbot:", error);
         return {
-            text: `Erreur de connexion: ${error.message || 'Serveur inaccessible'}`,
+            // Message compréhensible et actionnable (avant : « Erreur de connexion: Erreur serveur: réseau »).
+            text: navigator.onLine === false
+              ? "📡 Pas de connexion internet : je ne peux pas répondre aux questions libres pour l'instant. Reconnecte-toi puis renvoie ton message. Les boutons (Mix auto, Mes paroles, tempo…) marchent toujours."
+              : "😕 Je n'arrive pas à joindre mon serveur pour l'instant. Réessaie dans un moment (renvoie ton message). Les boutons ci-dessus et les demandes simples (« mets le tempo à 90 », « mix trap ») marchent toujours.",
             actions: []
         };
     }
@@ -5180,7 +5197,7 @@ function Studio() {
           puis jamais rendue. Charger un beat ouvrait donc un studio vide
           pendant plusieurs secondes, sans le moindre signe d'activite. */}
       {externalImportNotice && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[1500] px-4 py-2.5 rounded-xl
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
                         bg-[#14161a]/95 border border-white/10 shadow-2xl backdrop-blur-sm
                         flex items-center gap-2.5 text-[12px] font-medium text-slate-200
                         animate-in fade-in slide-in-from-top-2 duration-200">
@@ -5245,6 +5262,7 @@ function Studio() {
       <WelcomeSteps
         open={welcomeOpen}
         beatLoaded={!!state.tracks.find(t => t.id === 'instrumental')?.clips.length}
+        beatLoading={externalImportNotice?.startsWith('Chargement') ? externalImportNotice.replace(/^Chargement\s*:\s*/, '').replace(/\.{3}$/, '') : null}
         isMobile={isMobile}
         beatmaking={state.projectMode === 'BEATMAKING'}
         onPickBeat={() => {
@@ -5445,7 +5463,7 @@ function Studio() {
         </div>
       )}
       <ShareClipModal open={shareOpen} onClose={() => setShareOpen(false)} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
-      {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />}
+      {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} onClose={() => setIsAuthOpen(false)} />}
       </Suspense>
       
       {addPluginMenu && <ContextMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)} items={AVAILABLE_FX_MENU.map(fx => ({ label: fx.name, icon: fx.icon, onClick: () => handleAddPluginFromContext(addPluginMenu.trackId, fx.id as PluginType, {}, { openUI: true }) }))} />}
