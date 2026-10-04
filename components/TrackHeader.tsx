@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AutotuneBadge } from './AutotuneVstPanel';
 import { useCollabRole, requestVolumeLock } from '../utils/collabStore';
+import { requestRemoteSend, useRemoteBadge } from '../utils/remoteStore';
 import { useSimpleMode } from '../utils/simpleMode';
 import { gainToDbText, panToText } from '../utils/db';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
@@ -377,6 +378,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const insertPlugins = track.plugins.filter(p => p.id !== instrumentPlugin?.id);
   const frozen = isTrackFrozen(track);
   const collabRole = useCollabRole();
+  const remote = useRemoteBadge(track.id);
   // Mode simple : ni effets ni envois dans l'en-tête (Mix auto s'en charge).
   const { simple } = useSimpleMode();
   const recFrozen = useRecFrozen(track.id);
@@ -404,10 +406,18 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             className="cursor-grab active:cursor-grabbing text-slate-500 hover:text-cyan-500 mr-2 flex-shrink-0 transition-colors p-1 flex items-center space-x-2"
           >
             <i className="fas fa-grip-vertical text-[10px]"></i>
-            <i className={`fas ${getTrackIcon()} text-[10px] ${isSelected ? 'text-white' : ''}`}></i>
+            <span className="relative"><i className={`fas ${getTrackIcon()} text-[10px] ${isSelected ? 'text-white' : ''}`}></i>
+            {/* Ingé à distance : où en est la piste (« Chez l'ingé… », « Mise à jour reçue ») ; sans prendre la place du nom. */}
+            {remote.badge?.label && (
+              <span data-testid={`remote-badge-${track.id}`} role="img" aria-label={`Ingé à distance : ${remote.badge.label}`} title={`Ingé à distance : ${remote.badge.label}`}
+                className={`absolute -top-1 -right-1.5 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] ring-1 ring-black/60 ${remote.badge.tone === 'ok' ? 'bg-emerald-500 text-black' : remote.badge.tone === 'warn' ? 'bg-amber-400 text-black' : remote.badge.tone === 'busy' ? 'bg-sky-400 text-black animate-pulse' : 'bg-slate-500 text-white'}`}>
+                <i className="fas fa-headphones"></i>
+              </span>
+            )}
+            </span>
           </div>
 
-          <div className="min-w-0 flex items-center gap-1.5">
+          <div className="min-w-0 overflow-hidden flex items-center gap-1.5">
             {isRenaming ? (
               <input 
                 ref={nameInputRef}
@@ -428,7 +438,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                   if (now - lastNameTap.current < 350) { e.preventDefault(); e.stopPropagation(); lastNameTap.current = 0; setIsRenaming(true); }
                   else lastNameTap.current = now;
                 }}
-                className={`text-[12px] font-bold tracking-wide truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-400'}`}
+                className={`min-w-[3.5rem] text-[12px] font-bold tracking-wide truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-400'}`}
               >
                 {track.name}
                 {frozen && !inst && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400" role="img"
@@ -441,6 +451,14 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 {!frozen && recFrozen === 'pending' && <i className="fas fa-snowflake text-[8px] ml-1 text-sky-300/60 animate-pulse" title="Préparation de la prise…" aria-label="Préparation de la prise"></i>}
                 {freezeStale && <i className="fas fa-exclamation-triangle text-[8px] ml-1 text-amber-400" title="Les prises ont changé depuis le rendu : il sera refait à la prochaine sauvegarde sur PC (pont VST)."></i>}
               </span>
+            )}
+            {/* Ingé à distance : où en est la piste (« Chez l'ingé… », « Mise à jour reçue »), et l'envoyer. */}
+            {!isRenaming && remote.role === 'artist' && remote.badge?.canSend && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); requestRemoteSend(track.id); }}
+                title="Envoyer cette piste à l'ingé (audio brut + tes éditions)" aria-label={`Envoyer ${track.name} à l'ingé`}
+                className="shrink-0 w-5 h-5 rounded bg-cyan-500/20 text-cyan-200 text-[9px] hover:bg-cyan-500/30">
+                <i className="fas fa-paper-plane"></i>
+              </button>
             )}
             {/* Les pastilles d effets ne tiennent pas quand la piste est basse :
                 ce badge indique toujours combien d effets sont actifs. */}

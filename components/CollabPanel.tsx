@@ -27,18 +27,50 @@ interface Props {
   gate?: 'login' | 'subscribe' | null;
   onSignIn?: (email: string, password: string) => Promise<void>;
   onSubscribe?: () => void;
+  /** Mode « Ingé à distance (ses propres VST) » : chacun sa session (voir RemoteIngePanel). */
+  onStartRemote?: (role: 'artist' | 'engineer', name: string, link?: string) => void;
+  remoteBusy?: string | null;
+  remoteError?: string | null;
+  /** Lien reçu (?inge=…) : le panneau s'ouvre sur « Ingé à distance », rôle ingé. */
+  remoteLinkFromUrl?: string | null;
+  /** Lien enregistré avec le projet mais pas connecté : « Reprendre ». */
+  savedRemote?: { role: 'artist' | 'engineer' } | null;
+  /** En direct, côté ingé : réglage à distance des VST du PC de l'artiste. */
+  liveVst?: React.ReactNode;
 }
+
+export type CollabMode = 'live' | 'remote';
+
+/** Les deux modes, expliqués en une phrase au moment du choix. */
+export const MODE_INFO: Record<CollabMode, { title: string; help: string }> = {
+  live: {
+    title: 'En direct',
+    help: "L'ingé travaille dans TA session, comme à côté de toi : mêmes effets (ceux de NOVA et les VST installés sur ton PC), tout se voit en direct.",
+  },
+  remote: {
+    title: 'Ingé à distance (ses propres VST)',
+    help: "Chacun garde sa session : tu envoies tes pistes, l'ingé les traite avec SES VST (que tu n'as pas) et te renvoie le rendu, que tu peux encore éditer.",
+  },
+};
 
 const ROLE_HELP: Record<CollabRole, string> = {
   artist: 'enregistre et édite ses voix ; peut verrouiller le volume d\'une piste',
   engineer: 'règle volumes, effets Nova et envois (ou ses VST : la piste est gelée puis envoyée)',
   beatmaker: 'ajoute batterie, basse et ses propres pistes',
 };
+const REMOTE_ROLE_HELP: Record<CollabRole, string> = {
+  artist: "enregistre, envoie ses pistes à l'ingé et reçoit ses réglages (navigateur, tablette ou téléphone : pas besoin de VST)",
+  engineer: "reçoit les pistes dans SA session et les traite avec ses VST (appli NOVA Studio pour Windows), puis les renvoie",
+  beatmaker: '',
+};
 const ROLE_COLOR: Record<CollabRole, string> = { artist: 'text-cyan-300', engineer: 'text-amber-300', beatmaker: 'text-violet-300' };
 
 const CollabPanel: React.FC<Props> = (p) => {
   const [text, setText] = useState('');
-  const [startRole, setStartRole] = useState<CollabRole>('artist');
+  const [startRole, setStartRole] = useState<CollabRole>(p.remoteLinkFromUrl ? 'engineer' : 'artist');
+  const [mode, setMode] = useState<CollabMode>(p.remoteLinkFromUrl || p.savedRemote ? 'remote' : 'live');
+  const [remoteLink, setRemoteLink] = useState(p.remoteLinkFromUrl || '');
+  useEffect(() => { if (p.remoteLinkFromUrl) { setMode('remote'); setStartRole('engineer'); setRemoteLink(p.remoteLinkFromUrl); } }, [p.remoteLinkFromUrl]);
   const [startName, setStartName] = useState('');
   const [copied, setCopied] = useState<CollabRole | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -66,14 +98,29 @@ const CollabPanel: React.FC<Props> = (p) => {
 
       {!p.active ? (
         <div className="p-4 space-y-3 overflow-y-auto">
-          <p className="text-[12px] text-slate-300">Travaille à distance sur cette session : l'artiste, l'ingé son et le beatmaker voient les changements des autres en direct.</p>
+          <fieldset className="space-y-1.5" aria-label="Mode de collaboration">
+            <legend className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-1">Comment vous travaillez ?</legend>
+            {(['live', 'remote'] as CollabMode[]).map(m => (
+              <label key={m} data-testid={`collab-mode-${m}`} className={`block cursor-pointer rounded-2xl border p-3 transition-colors ${mode === m ? 'border-cyan-400 bg-cyan-500/10' : 'border-white/10 bg-white/[0.02] hover:bg-white/[0.05]'}`}>
+                <span className="flex items-center gap-2">
+                  <input type="radio" name="collab-mode" checked={mode === m} onChange={() => { setMode(m); if (m === 'remote' && startRole === 'beatmaker') setStartRole('artist'); }} className="accent-cyan-400" />
+                  <span className="text-[13px] font-black text-white">{MODE_INFO[m].title}</span>
+                </span>
+                <span className="mt-1 block text-[11px] leading-snug text-slate-300">{MODE_INFO[m].help}</span>
+              </label>
+            ))}
+          </fieldset>
           <label className="block text-[11px] text-slate-400">Ton rôle
-            <select value={startRole} onChange={e => setStartRole(e.target.value as CollabRole)}
+            <select value={startRole} onChange={e => setStartRole(e.target.value as CollabRole)} data-testid="collab-role"
               className="mt-1 h-11 w-full rounded-xl border border-white/10 bg-black/40 px-2 text-[13px] font-bold text-white">
-              {(['artist', 'engineer', 'beatmaker'] as CollabRole[]).map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+              {(mode === 'remote' ? ['artist', 'engineer'] as CollabRole[] : ['artist', 'engineer', 'beatmaker'] as CollabRole[]).map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
             </select>
           </label>
-          <p className="text-[11px] text-slate-500">{ROLE_LABEL[startRole]} : {ROLE_HELP[startRole]}.</p>
+          <p className="text-[11px] text-slate-500">{ROLE_LABEL[startRole]} : {mode === 'remote' ? REMOTE_ROLE_HELP[startRole] : ROLE_HELP[startRole]}.</p>
+          {mode === 'remote' && startRole === 'engineer' && (
+            <input value={remoteLink} onChange={e => setRemoteLink(e.target.value)} placeholder="Colle le lien envoyé par l'artiste (…?inge=…)" aria-label="Lien de l'artiste" data-testid="remote-link-input"
+              className="h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[12px] text-white" />
+          )}
           <input value={startName} onChange={e => setStartName(e.target.value)} placeholder="Ton nom (affiché aux autres)"
             className="h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[13px] text-white" />
           {p.gate === 'login' && p.onSignIn && (
@@ -94,9 +141,23 @@ const CollabPanel: React.FC<Props> = (p) => {
               <button type="button" disabled={!!p.busy} onClick={p.onSubscribe} className={`${btn} w-full bg-violet-500 text-white`}>{p.busy || "M'abonner (paiement sécurisé Stripe)"}</button>
             </div>
           )}
-          <button type="button" disabled={!!p.busy} onClick={() => p.onStart(startRole, startName.trim() || ROLE_LABEL[startRole])}
-            className={`${btn} w-full bg-cyan-500 text-black`}>{p.busy || 'Démarrer la collaboration'}</button>
-          <p className="text-[10px] text-slate-500">La session est mise en ligne (audio des voix compris, jamais le beat non acheté).</p>
+          {mode === 'live' ? (
+            <>
+              <button type="button" disabled={!!p.busy} onClick={() => p.onStart(startRole, startName.trim() || ROLE_LABEL[startRole])}
+                className={`${btn} w-full bg-cyan-500 text-black`}>{p.busy || 'Démarrer la collaboration en direct'}</button>
+              <p className="text-[10px] text-slate-500">La session est mise en ligne (audio des voix compris, jamais le beat non acheté).</p>
+            </>
+          ) : (
+            <>
+              <button type="button" data-testid="remote-start" disabled={!!p.remoteBusy || (startRole === 'engineer' && !remoteLink.trim())}
+                onClick={() => p.onStartRemote?.(startRole === 'engineer' ? 'engineer' : 'artist', startName.trim() || ROLE_LABEL[startRole], startRole === 'engineer' ? remoteLink.trim() : undefined)}
+                className={`${btn} w-full bg-cyan-500 text-black`}>{p.remoteBusy || (startRole === 'engineer' ? "Me relier à l'artiste" : 'Créer le lien avec mon ingé')}</button>
+              {startRole === 'engineer' && !remoteLink.trim() && <p className="text-[11px] text-slate-500">Il te faut le lien que l'artiste copie dans son panneau « Ingé à distance ».</p>}
+              {p.savedRemote && <p className="text-[11px] text-slate-400">Ce projet a déjà un lien ({p.savedRemote.role === 'artist' ? 'avec ton ingé' : "avec l'artiste"}) : il sera repris.</p>}
+              <p className="text-[10px] text-slate-500">Seules les pistes que tu envoies voyagent (audio brut + éditions), jamais le beat.</p>
+            </>
+          )}
+          {p.remoteError && <p role="alert" className="text-[12px] text-red-300">{p.remoteError}</p>}
         </div>
       ) : (
         <>
@@ -117,6 +178,7 @@ const CollabPanel: React.FC<Props> = (p) => {
               ))}
             </div>
           </div>
+          {p.liveVst}
           <div ref={listRef} className="flex-1 min-h-[160px] overflow-y-auto p-4 space-y-2" aria-live="polite">
             {p.messages.length === 0 && <p className="text-[12px] text-slate-500">Pas encore de message. Dis bonjour !</p>}
             {p.messages.map(m => (
