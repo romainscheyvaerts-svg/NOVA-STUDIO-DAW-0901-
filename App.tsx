@@ -38,8 +38,12 @@ import Bass808Controls from './components/Bass808Controls';
 import { BASS808_TRACK_ID, kit808Style, starter808Notes } from './utils/bass808';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
-import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult } from './services/VstFreeze';
-import { canBakeTrack, hasVst, freezeSignature } from './utils/freeze';
+import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
+import { canBakeTrack, hasVst, freezeSignature, trackBufferIds } from './utils/freeze';
+import { getEditAuthor, setEditAuthor } from './utils/preFxEdits';
+import { usePreFxReplay } from './hooks/usePreFxReplay';
+import PreFxReplayPanel from './components/PreFxReplayPanel';
+import FrozenEditsNotice from './components/FrozenEditsNotice';
 import { recFreezeStore } from './utils/recFreezeStore';
 import { ProjectIO } from './services/ProjectIO';
 const PianoRoll = lazy(() => import('./components/PianoRoll'));
@@ -440,8 +444,7 @@ const useUndoRedo = (initialState: DAWState) => {
   historyRef.current = history;
   const isBufferInHistory = useCallback((bufferId: string) => {
     const h = historyRef.current;
-    return [...h.past, ...h.future].some(s => s.tracks.some(t =>
-      t.clips.some(c => c.bufferId === bufferId) || t.frozenClip?.bufferId === bufferId));
+    return [...h.past, ...h.future].some(s => s.tracks.some(t => trackBufferIds(t).includes(bufferId)));
   }, []);
   // Prochaine modification = nouvelle étape d'annulation, même dans l'anti-rebond.
   const breakHistory = useCallback(() => setHistory(curr => ({ ...curr, lastChangeAt: 0 })), []);
@@ -755,7 +758,7 @@ function Studio() {
     // Routage, solo et envois agissent sur les autres pistes (bus, pistes
     // rendues muettes par un solo) : dans ce cas on met tout a jour, comme avant.
     const routing = state.tracks.map(t =>
-      `${t.id}>${t.outputTrackId || ''}|${t.isSolo ? 1 : 0}|${(t.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}:${sd.level}`).join(',')}`
+      `${t.id}>${t.outputTrackId || ''}|${t.isSolo ? 1 : 0}|${t.isFrozen ? 1 : 0}|${(t.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}:${sd.level}`).join(',')}`
     ).join(';');
     const previous = engineTracksRef.current;
     const full = !previous || routing !== engineRoutingRef.current;
@@ -1124,6 +1127,8 @@ function Studio() {
     const stillUsed = stateRef.current.tracks.some(t =>
       [...t.clips, ...(t.frozenClip ? [t.frozenClip] : [])]
         .some(c => c.bufferId === bufferId && !excludeClipIds.includes(c.id))
+      // Rendus d'envois VST, sons d'origine de la photo du gel (éditions pré-effet).
+      || trackBufferIds({ ...t, clips: [], frozenClip: undefined }).includes(bufferId)
     );
     if (!stillUsed && !isBufferInHistory(bufferId)) audioBufferRegistry.remove(bufferId);
   }, []);
@@ -2308,6 +2313,7 @@ function Studio() {
         const t = draft.tracks.find(tr => tr.id === trackId);
         if (!t) return;
         t.isFrozen = false;
+        delete t.frozenAuto;
         // Avec des VST3, le rendu reste en cache : la prochaine sauvegarde le
         // réutilise s'il est encore à jour.
         if (!hasVst(t)) {
@@ -2321,6 +2327,8 @@ function Studio() {
       }));
       if (frozenBufferId) setTimeout(() => releaseBufferIfUnused(frozenBufferId, []), 0);
       notify(`🔥 "${track.name}" dégelée`);
+      // Éditions faites pendant le gel (ailleurs) : rejouées avant les effets, on le montre.
+      setTimeout(() => preFxAnnounceRef.current?.([trackId]), 0);
       return;
     }
 
@@ -2349,7 +2357,8 @@ function Studio() {
         if (!t) return;
         oldBufferId = t.frozenClip?.bufferId;
         t.isFrozen = true;
-        applyFreezeResult(t, r);
+        delete t.frozenAuto; // gel voulu (CPU) : il reste gelé partout
+        applyFreezeResult(t, r, getEditAuthor() || undefined);
       }));
       if (oldBufferId && oldBufferId !== r.clip.bufferId) setTimeout(() => releaseBufferIfUnused(oldBufferId, []), 0);
       notify(`❄️ "${track.name}" gelée`);
@@ -2391,6 +2400,7 @@ function Studio() {
     }
     const todo = tracksNeedingVstRender(base.tracks);
     const results = new Map<string, FreezeResult>();
+    const by = getEditAuthor() || "l'ingé";
     for (const t of todo) {
       onStep?.(`Rendu des effets VST : ${t.name}…`);
       try {
@@ -2399,16 +2409,22 @@ function Studio() {
         console.warn(`[Save] Rendu VST impossible (${t.name})`, e);
       }
     }
-    if (results.size === 0 && base === stateRef.current) return base;
     const old: string[] = [];
-    const next = produce(base, (draft: DAWState) => {
+    let next = results.size === 0 ? base : produce(base, (draft: DAWState) => {
       draft.tracks.forEach(t => {
         const r = results.get(t.id);
         if (!r) return;
         if (t.frozenClip?.bufferId) old.push(t.frozenClip.bufferId);
-        applyFreezeResult(t, r);
+        applyFreezeResult(t, r, by);
       });
     });
+    // Bus / envois à effets VST (reverb VST de l'ingé) : rendus par source, après les pistes.
+    const busResults: BusFreezeResult[] = [];
+    for (const bus of busesNeedingVstRender(next.tracks)) {
+      try { busResults.push(await renderBusFreeze(bus, next.tracks, onStep)); } catch (e) { console.warn(`[Save] Rendu du bus VST impossible (${bus.name})`, e); }
+    }
+    if (busResults.length) next = produce(next, (draft: DAWState) => { busResults.forEach(r => old.push(...applyBusFreezeResult(draft.tracks, r, by))); });
+    if (next === stateRef.current) return next;
     setState(next);
     stateRef.current = next;
     setTimeout(() => old.forEach(id => releaseBufferIfUnused(id, [])), 0);
@@ -3809,6 +3825,16 @@ function Studio() {
     return () => { stop = true; };
   }, []);
 
+  // --- Gel pré-effet : retour sur le PC de l'ingé --------------------------------------
+  // Auteur des éditions (journal enregistré avec la session) : compte ou collaboration.
+  useEffect(() => { setEditAuthor(collab?.name || user?.username || (user?.email || '').split('@')[0] || ''); }, [user, collab]);
+  const notifyPreFx = useCallback((msg: string, ms = 4000) => { setAiNotification(msg); setTimeout(() => setAiNotification(null), ms); }, []);
+  // Pont VST connecté : les pistes gelées à la sauvegarde se dégèlent (plugins présents)
+  // et les éditions faites ailleurs passent avant les effets (résumé).
+  const preFx = usePreFxReplay({ stateId: state.id, tracks: state.tracks, showLanding, stateRef, setState, notify: notifyPreFx });
+  const preFxAnnounceRef = useRef(preFx.announce);
+  preFxAnnounceRef.current = preFx.announce;
+
   // Fermeture du projet (application Windows, bouton fermer) : gel des pistes VST
   // + sauvegarde locale + synchronisation en ligne, puis seulement fermeture.
   useEffect(() => {
@@ -3827,14 +3853,14 @@ function Studio() {
   // Au studio, pont VST connecté : les pistes VST modifiées sont regelées pendant
   // les pauses (45 s sans lecture), pour que la fermeture et l'envoi soient immédiats.
   useEffect(() => {
-    if (showLanding || state.isPlaying || state.isRecording || !novaBridge.isConnected()) return;
-    if (tracksNeedingVstRender(state.tracks).length === 0) return;
+    if (showLanding || state.isPlaying || state.isRecording || !novaBridge.isConnected() || preFx.panel) return;
+    if (tracksNeedingVstRender(state.tracks).length === 0 && busesNeedingVstRender(state.tracks).length === 0) return;
     const t = window.setTimeout(() => {
       if (stateRef.current.isPlaying || stateRef.current.isRecording) return;
       void bakeVstBeforeSave().catch(e => console.warn('[Gel auto]', e));
     }, 45000);
     return () => window.clearTimeout(t);
-  }, [state.tracks, state.isPlaying, state.isRecording, showLanding, bakeVstBeforeSave]);
+  }, [state.tracks, state.isPlaying, state.isRecording, showLanding, bakeVstBeforeSave, preFx.panel]);
 
   // Un extrait du catalogue démarre : le projet en lecture se met en pause
   // (sauf pendant une prise, qu'on ne coupe jamais).
@@ -5442,6 +5468,11 @@ function Studio() {
           className="fixed bottom-32 left-3 z-[90] md:bottom-16 h-10 rounded-full border border-violet-500/40 bg-[#0d1117]/90 px-3 text-[11px] font-bold text-violet-200 shadow-lg backdrop-blur">
           👥 {collab ? `${collabOnline.length || 1} en ligne · Chat` : 'Collaborer'}
         </button>
+      )}
+      {!showLanding && <FrozenEditsNotice tracks={state.tracks} bridgeConnected={preFx.bridgeConnected} projectId={state.id} compact={isMobile} />}
+      {preFx.panel && (
+        <PreFxReplayPanel data={preFx.panel} onClose={preFx.close} onRefreeze={preFx.refreeze}
+          onRevert={preFx.revertTrack} onRestore={preFx.restoreTrack} onRetry={preFx.retry} />
       )}
       {cloudConflict && (
         <div className="fixed inset-0 z-[670] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="conflict-title">

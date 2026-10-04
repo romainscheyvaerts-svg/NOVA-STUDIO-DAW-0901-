@@ -1,4 +1,4 @@
-import { Clip, PluginInstance, Track } from '../types';
+import { Clip, PluginInstance, Track, TrackType } from '../types';
 
 /**
  * Regles du gel de piste, partagees par le moteur audio, la sauvegarde et l'interface.
@@ -53,13 +53,76 @@ export const anchorClipsToRender = (clips: Clip[], renderId: string): Map<string
     const offset = c.offset || 0;
     out.set(c.id, {
       renderId, anchor: c.start - offset, from: offset, to: offset + c.duration,
-      fadeIn: c.fadeIn || 0, fadeOut: c.fadeOut || 0, gain: c.gain ?? 1,
+      fadeIn: c.fadeIn || 0, fadeOut: c.fadeOut || 0, gain: c.gain ?? 1, srcClipId: c.id,
     });
   }
   return out;
 };
 
 const playbackCache = new WeakMap<Track, { render: Clip[]; live: Clip[] }>();
+
+/**
+ * Tranches d'un rendu qui suivent les clips ancrés : pour chaque clip, la
+ * partie du rendu qui correspond à son audio actuel, à sa position actuelle
+ * (+ la queue des effets si sa fin n'a pas bougé, jusqu'au clip rendu suivant).
+ * Les parties rallongées au-delà du rendu reviennent dans « live ».
+ */
+export const sliceAnchored = (
+  clips: Clip[], render: Clip, isAnchoredClip: (c: Clip) => boolean, tailMax: number, idSuffix = '~fz',
+): { render: Clip[]; live: Clip[] } => {
+  const anchored: Clip[] = [];
+  const live: Clip[] = [];
+  clips.forEach(c => (isAnchoredClip(c) ? anchored : live).push(c));
+  // Débuts des régions rendues (temps du rendu) : une queue s'arrête avant la suivante.
+  const regionStarts = anchored.map(c => c.freezeRef!.anchor + c.freezeRef!.from).sort((a, b) => a - b);
+  const out: Clip[] = [];
+  for (const c of anchored) {
+    const ref = c.freezeRef!;
+    const off = c.offset || 0;
+    const end = off + c.duration;
+    const a = Math.max(off, ref.from);
+    const b = Math.min(end, ref.to);
+    if (b - a > 0.001) {
+      const startsAtRenderStart = Math.abs(a - ref.from) < 1e-3;
+      const endsAtRenderEnd = Math.abs(b - ref.to) < 1e-3 && end <= ref.to + 1e-3;
+      let duration = b - a;
+      const userFadeOut = c.fadeOut || 0;
+      // Fin d'origine (pas raccourcie, pas de nouveau fondu) : on garde la queue des effets.
+      if (endsAtRenderEnd && Math.abs(userFadeOut - ref.fadeOut) < 1e-3 && userFadeOut < 0.02) {
+        const renderEnd = ref.anchor + ref.to;
+        const next = regionStarts.find(s => s > renderEnd + 1e-3);
+        const room = Math.min(tailMax, (next ?? Infinity) - renderEnd, render.duration - renderEnd);
+        if (room > 0) duration += room;
+      }
+      out.push({
+        ...c,
+        id: `${c.id}${idSuffix}`,
+        bufferId: render.bufferId,
+        buffer: undefined,
+        audioRef: undefined,
+        warp: undefined,
+        start: c.start + (a - off),
+        offset: ref.anchor + a,
+        duration,
+        // Le rendu contient déjà le gain et les fondus d'origine : on n'applique que les changements.
+        gain: (c.gain ?? 1) / (ref.gain || 1),
+        fadeIn: startsAtRenderStart && Math.abs((c.fadeIn || 0) - ref.fadeIn) < 1e-3 ? 0 : Math.max(c.fadeIn || 0, startsAtRenderStart ? 0 : 0.005),
+        fadeOut: endsAtRenderEnd && Math.abs(userFadeOut - ref.fadeOut) < 1e-3 ? 0 : Math.max(userFadeOut, endsAtRenderEnd ? 0 : 0.005),
+        isFreezeSlice: true,
+        freezeRef: undefined,
+      });
+    }
+    // Clip rallongé au-delà de ce qui a été rendu : ces parties passent en direct.
+    if (off < ref.from - 1e-3) {
+      live.push({ ...c, id: `${c.id}~pre`, duration: Math.min(c.duration, ref.from - off), fadeOut: 0.005 });
+    }
+    if (end > ref.to + 1e-3) {
+      const s = Math.max(off, ref.to);
+      live.push({ ...c, id: `${c.id}~post`, start: c.start + (s - off), offset: s, duration: end - s, fadeIn: 0.005 });
+    }
+  }
+  return { render: out, live };
+};
 
 /**
  * Lecture d'une piste gelée : tranches du rendu (entrent après les effets
@@ -75,61 +138,85 @@ export const frozenPlayback = (t: Track): { render: Clip[]; live: Clip[] } => {
     const covered = coveredClipIds(t);
     result = { render: [fc], live: covered ? (t.clips || []).filter(c => !covered.has(c.id)) : [] };
   } else {
-    const anchored: Clip[] = [];
-    const live: Clip[] = [];
-    (t.clips || []).forEach(c => (isAnchored(t, c) ? anchored : live).push(c));
-    // Débuts des régions rendues (temps du rendu) : une queue s'arrête avant la suivante.
-    const regionStarts = anchored.map(c => c.freezeRef!.anchor + c.freezeRef!.from).sort((a, b) => a - b);
-    const render: Clip[] = [];
-    for (const c of anchored) {
-      const ref = c.freezeRef!;
-      const off = c.offset || 0;
-      const end = off + c.duration;
-      const a = Math.max(off, ref.from);
-      const b = Math.min(end, ref.to);
-      if (b - a > 0.001) {
-        const startsAtRenderStart = Math.abs(a - ref.from) < 1e-3;
-        const endsAtRenderEnd = Math.abs(b - ref.to) < 1e-3 && end <= ref.to + 1e-3;
-        let duration = b - a;
-        const userFadeOut = c.fadeOut || 0;
-        // Fin d'origine (pas raccourcie, pas de nouveau fondu) : on garde la queue des effets.
-        if (endsAtRenderEnd && Math.abs(userFadeOut - ref.fadeOut) < 1e-3 && userFadeOut < 0.02) {
-          const renderEnd = ref.anchor + ref.to;
-          const next = regionStarts.find(s => s > renderEnd + 1e-3);
-          const room = Math.min(FREEZE_SLICE_TAIL, (next ?? Infinity) - renderEnd, fc.duration - renderEnd);
-          if (room > 0) duration += room;
-        }
-        render.push({
-          ...c,
-          id: `${c.id}~fz`,
-          bufferId: fc.bufferId,
-          buffer: undefined,
-          audioRef: undefined,
-          warp: undefined,
-          start: c.start + (a - off),
-          offset: ref.anchor + a,
-          duration,
-          // Le rendu contient déjà le gain et les fondus d'origine : on n'applique que les changements.
-          gain: (c.gain ?? 1) / (ref.gain || 1),
-          fadeIn: startsAtRenderStart && Math.abs((c.fadeIn || 0) - ref.fadeIn) < 1e-3 ? 0 : Math.max(c.fadeIn || 0, startsAtRenderStart ? 0 : 0.005),
-          fadeOut: endsAtRenderEnd && Math.abs(userFadeOut - ref.fadeOut) < 1e-3 ? 0 : Math.max(userFadeOut, endsAtRenderEnd ? 0 : 0.005),
-          isFreezeSlice: true,
-          freezeRef: undefined,
-        });
-      }
-      // Clip rallongé au-delà de ce qui a été rendu : ces parties passent en direct.
-      if (off < ref.from - 1e-3) {
-        live.push({ ...c, id: `${c.id}~pre`, duration: Math.min(c.duration, ref.from - off), fadeOut: 0.005 });
-      }
-      if (end > ref.to + 1e-3) {
-        const s = Math.max(off, ref.to);
-        live.push({ ...c, id: `${c.id}~post`, start: c.start + (s - off), offset: s, duration: end - s, fadeIn: 0.005 });
-      }
-    }
-    result = { render, live };
+    result = sliceAnchored(t.clips || [], fc, c => isAnchored(t, c), FREEZE_SLICE_TAIL);
   }
   playbackCache.set(t, result);
   return result;
+};
+
+// --- Bus / envois à effets VST gelés (reverb VST de l'ingé…) ------------------
+//
+// Un bus d'effets n'a pas de clips : son rendu est fait PAR SOURCE (la part que
+// chaque piste y envoie, passée dans les effets du bus) et rangé sur la piste
+// source (Track.sendFreezes). Ses tranches suivent les clips de la source :
+// une voix supprimée sur la tablette emporte sa reverb. Au dégel sur le PC, la
+// vraie reverb repart de l'audio sec édité.
+
+/** Queue maximale gardée après un clip pour un envoi (reverb, délai). */
+export const SEND_SLICE_TAIL = 8;
+/** Queue de rendu d'un bus d'effets (reverb longue). */
+export const SEND_RENDER_TAIL = 6;
+
+/** Rendu d'envoi valable pour ce bus (bus gelé sur ce rendu). */
+export const activeSendFreeze = (source: Track, bus: Track | undefined) => {
+  if (!bus || !isTrackFrozen(bus) || !source.sendFreezes) return undefined;
+  return source.sendFreezes.find(sf => sf.busId === bus.id && sf.busRenderId === bus.frozenClip!.id);
+};
+
+/** La part de cette source vers ce bus est-elle jouée depuis un rendu ? (son envoi direct est alors coupé) */
+export const isFeedCovered = (source: Track, busId: string, tracks: Track[]): boolean =>
+  !!activeSendFreeze(source, tracks.find(t => t.id === busId));
+
+/** Bus d'effets gelé (pas de clips : ses sources portent ses rendus). */
+export const isFrozenBus = (t: Track): boolean =>
+  isTrackFrozen(t) && (t.type === TrackType.BUS || t.type === TrackType.SEND) && (t.clips || []).length === 0;
+
+/** Niveau actuel de la part de la source vers le bus (envoi, ou sortie routée = 1). */
+export const feedLevel = (source: Track, busId: string): number => {
+  const send = (source.sends || []).find(s => s.id === busId && s.isEnabled);
+  if (send) return send.level;
+  return source.outputTrackId === busId ? 1 : 0;
+};
+
+const sendSliceCache = new WeakMap<Track, Map<string, Clip[]>>();
+
+/** Tranches du rendu d'envoi d'une source vers un bus gelé. */
+export const sendFreezeSlices = (source: Track, bus: Track): Clip[] => {
+  const sf = activeSendFreeze(source, bus);
+  if (!sf || source.isMuted) return [];
+  let per = sendSliceCache.get(source);
+  if (!per) { per = new Map(); sendSliceCache.set(source, per); }
+  const key = `${bus.id}|${sf.busRenderId}|${feedLevel(source, bus.id)}`;
+  const hit = per.get(key);
+  if (hit) return hit;
+  const { render } = sliceAnchored(
+    source.clips || [], sf.clip,
+    c => !!c.freezeRef && c.freezeRef.renderId === sf.anchorId && !c.isReversed && !!c.bufferId,
+    SEND_SLICE_TAIL, `~snd-${bus.id}`,
+  );
+  // Fader de la source ou niveau d'envoi changés depuis le rendu : on suit (c'est linéaire).
+  const ratio = (sf.volume > 0 ? source.volume / sf.volume : 1) * (sf.level > 0 ? feedLevel(source, bus.id) / sf.level : 1);
+  const slices = render.map(c => ({ ...c, id: `${source.id}:${c.id}`, gain: (c.gain ?? 1) * ratio }));
+  per.set(key, slices);
+  return slices;
+};
+
+/** Tranches jouées par un bus gelé : celles de toutes ses sources. */
+export const busFrozenSlices = (bus: Track, tracks: Track[]): Clip[] => {
+  if (!isFrozenBus(bus)) return [];
+  const out: Clip[] = [];
+  for (const s of tracks) if (s.id !== bus.id && s.sendFreezes) out.push(...sendFreezeSlices(s, bus));
+  return out;
+};
+
+/** Tous les sons qu'une piste garde en mémoire (clips, rendus, photo du gel). */
+export const trackBufferIds = (t: Track): string[] => {
+  const ids: string[] = [];
+  (t.clips || []).forEach(c => { if (c.bufferId) ids.push(c.bufferId); });
+  if (t.frozenClip?.bufferId) ids.push(t.frozenClip.bufferId);
+  (t.sendFreezes || []).forEach(sf => { if (sf.clip.bufferId) ids.push(sf.clip.bufferId); });
+  (t.freezeBase?.clips || []).forEach(c => { const b = (c as { bufferId?: string }).bufferId; if (b) ids.push(b); });
+  return ids;
 };
 
 /** Clips joues en direct sur une piste gelee (ajoutes apres le rendu, parties rallongees). */

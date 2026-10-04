@@ -4,6 +4,9 @@ import { wavOf } from './AudioUtils';
 import { audioEngine } from '../engine/AudioEngine';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { shouldPersistFrozen } from './VstFreeze';
+import { novaBridge } from './NovaBridge';
+import { isTrackFrozen } from '../utils/freeze';
+import { getEditAuthor, SESSION_SCHEMA_VERSION, stampJournal } from '../utils/preFxEdits';
 
 export class ProjectIO {
   
@@ -16,6 +19,9 @@ export class ProjectIO {
     
     // 1. Clonage de l'état pour modification (on retire les buffers lourds du JSON)
     const serializableState = JSON.parse(JSON.stringify(state));
+    // Format de session : les anciennes versions ignorent simplement les champs ajoutés.
+    serializableState.schemaVersion = SESSION_SCHEMA_VERSION;
+    const author = getEditAuthor() || (novaBridge.isConnected() ? "l'ingé" : "l'artiste");
     
     const audioFolder = zip.folder("audio");
     // Un même enregistrement peut porter plusieurs clips (prise découpée par le
@@ -80,12 +86,54 @@ export class ProjectIO {
             delete sTrack.frozenClip.bufferId;
             // Ouvert ailleurs, le projet lit le rendu (sans pont, les VST3 ne sonneraient pas).
             sTrack.isFrozen = true;
+            // Rendu gardé en cache sur le PC (pas gelé à la main) : gel automatique,
+            // la piste se dégèlera toute seule sur un PC qui a les plugins.
+            if (!isTrackFrozen(track)) sTrack.frozenAuto = true;
         } else {
             delete sTrack.frozenClip;
             delete sTrack.frozenUpToPluginIndex;
             delete sTrack.frozenClipIds;
             delete sTrack.frozenSourceSig;
+            delete sTrack.frozenPluginSig;
+            delete sTrack.frozenAuto;
             sTrack.isFrozen = false;
+        }
+
+        // Rendus des envois vers un bus VST gelé (reverb de l'ingé) : gardés si le bus l'est.
+        const keptSends: any[] = [];
+        (track.sendFreezes || []).forEach((sf, i) => {
+            const bus = state.tracks.find(b => b.id === sf.busId);
+            const buf = sf.clip.bufferId ? audioBufferRegistry.get(sf.clip.bufferId) : undefined;
+            if (!bus || !buf || !bus.frozenClip || bus.frozenClip.id !== sf.busRenderId || !shouldPersistFrozen(bus)) return;
+            const filename = `send-${track.id}-${sf.busId}.wav`;
+            if (audioFolder) audioFolder.file(filename, wavOf(buf));
+            const sSf = sTrack.sendFreezes[i];
+            sSf.clip.audioRef = `audio/${filename}`;
+            delete sSf.clip.buffer;
+            delete sSf.clip.bufferId;
+            keptSends.push(sSf);
+        });
+        if (keptSends.length) sTrack.sendFreezes = keptSends; else delete sTrack.sendFreezes;
+
+        // Photo du gel (éditions pré-effet) : gardée tant qu'un rendu s'y rapporte.
+        // Le son d'un clip supprimé depuis le gel reste dans la session : l'ingé peut y revenir.
+        const base = track.freezeBase;
+        const baseLive = !!base && ((!!sTrack.frozenClip && track.frozenClip?.id === base.renderId) || keptSends.some(sf => sf.anchorId === base.renderId));
+        if (base && baseLive) {
+            (sTrack.freezeBase.clips || []).forEach((bc: any) => {
+                const buf = bc.bufferId ? audioBufferRegistry.get(bc.bufferId) : undefined;
+                if (buf && !isUnlicensedStoreBeat) {
+                    const filename = `${bc.bufferId}.wav`;
+                    if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavOf(buf)); }
+                    bc.audioRef = `audio/${filename}`;
+                }
+                delete bc.bufferId;
+            });
+            const journal = stampJournal(track, author);
+            if (journal) sTrack.preFxJournal = journal; else delete sTrack.preFxJournal;
+        } else {
+            delete sTrack.freezeBase;
+            delete sTrack.preFxJournal;
         }
     }
     
@@ -175,6 +223,44 @@ export class ProjectIO {
             } else {
                 delete track.frozenClip;
                 track.isFrozen = false;
+            }
+        }
+
+        // Rendus d'envois (reverb VST gelée) : un rendu illisible est simplement retiré.
+        if (Array.isArray(track.sendFreezes)) {
+            const kept: any[] = [];
+            for (const sf of track.sendFreezes) {
+                const ref = sf?.clip?.audioRef;
+                const audioFile = ref ? zip.file(ref) : null;
+                if (!audioFile) continue;
+                try {
+                    const audioBuffer = await audioEngine.ctx!.decodeAudioData(await audioFile.async("arraybuffer"));
+                    sf.clip.bufferId = audioBufferRegistry.register(audioBuffer, sf.clip.id);
+                    delete sf.clip.audioRef;
+                    delete sf.clip.buffer;
+                    kept.push(sf);
+                } catch (e) {
+                    console.warn(`[ProjectIO] Rendu d'envoi illisible pour ${track.name}`, e);
+                }
+            }
+            if (kept.length) track.sendFreezes = kept; else delete track.sendFreezes;
+        }
+
+        // Photo du gel : sons des clips d'origine (même fichier qu'un clip = même son).
+        for (const bc of (track.freezeBase?.clips || [])) {
+            const ref = bc.audioRef;
+            delete bc.audioRef;
+            if (!ref) continue;
+            const already = decoded.get(ref);
+            if (already) { bc.bufferId = already; continue; }
+            const audioFile = zip.file(ref);
+            if (!audioFile) continue;
+            try {
+                const audioBuffer = await audioEngine.ctx!.decodeAudioData(await audioFile.async("arraybuffer"));
+                bc.bufferId = audioBufferRegistry.register(audioBuffer, `${bc.id}-base`);
+                decoded.set(ref, bc.bufferId);
+            } catch (e) {
+                console.warn(`[ProjectIO] Son d'origine illisible (${track.name})`, e);
             }
         }
     }
