@@ -216,17 +216,25 @@ export const toSetting = (p: VstParam, t: Target, why: string, tolerance = 0.25)
     return { name: p.name, text: best.v, why };
   }
   let v = t.value;
+  const lo = p.range?.[0];
+  const hi = p.range?.[1];
+  // Unités physiques incompatibles (secondes vers un bouton en %, Hz vers un bouton
+  // 0–10…) : on ne devine pas, le réglage d'usine du plugin reste (mesuré en réel :
+  // VerbSuite « decay » en %, EchoBoy en graduations 0–10).
+  const family = (u: Unit) => (u === 'ms' || u === 's' ? 'time' : u === 'hz' || u === 'khz' ? 'freq' : u);
+  const physical = (u: Unit) => u === 'db' || u === 'ms' || u === 's' || u === 'hz' || u === 'khz';
+  if (physical(t.unit) && family(t.unit) !== family(unit)) return null;
   // Conversion vers l'unité du plugin.
   if (t.unit === 'ms' && unit === 's') v = v / 1000;
   if (t.unit === 's' && unit === 'ms') v = v * 1000;
   if (t.unit === 'hz' && unit === 'khz') v = v / 1000;
   if (t.unit === 'khz' && unit === 'hz') v = v * 1000;
-  if (t.unit === 'pct') {
-    const hi = p.range?.[1];
-    if (unit !== 'pct' && typeof hi === 'number' && hi <= 1.0001) v = v / 100;
+  if (t.unit === 'pct' && unit !== 'pct') {
+    const finite = typeof lo === 'number' && typeof hi === 'number' && Number.isFinite(lo) && Number.isFinite(hi) && hi > lo;
+    if (!finite) return null;
+    // Bouton sans unité : le pourcentage devient une position sur sa course (47 % → 4,7 sur 0–10).
+    v = (lo as number) + ((hi as number) - (lo as number)) * (v / 100);
   }
-  const lo = p.range?.[0];
-  const hi = p.range?.[1];
   if (typeof lo === 'number' && Number.isFinite(lo)) v = Math.max(lo, v);
   if (typeof hi === 'number' && Number.isFinite(hi)) v = Math.min(hi, v);
   if (t.unit === 'ratio' && Math.abs(v - t.value) > 0.05) return null; // ratio 2:1 hors plage

@@ -195,3 +195,21 @@ describe('commandes du chat (pont connecté)', () => {
     expect(parseVstCommand('mix spatial', st, false)).toBeNull();
   });
 });
+
+describe('toSetting : unités incompatibles (mesuré en réel le 04/10)', () => {
+  it('secondes vers un decay en % (VerbSuite) : pas de réglage inventé', () => {
+    expect(toSetting({ name: 'reverb_decay', text: '25%', range: [0, 100, 0] } as any, { value: 2.9, unit: 's' }, 'durée')).toBeNull();
+  });
+  it('Hz vers un bouton 0–10 (EchoBoy) : pas de réglage inventé', () => {
+    expect(toSetting({ name: 'highcut', text: '1.00', range: [0, 10, 0] } as any, { value: 6000, unit: 'hz' }, 'filtre')).toBeNull();
+  });
+  it('% vers un bouton 0–10 : position sur la course', () => {
+    expect(toSetting({ name: 'feedback', text: '1.25', range: [0, 10, 0] } as any, { value: 47, unit: 'pct' }, 'répétitions')?.real).toBeCloseTo(4.7, 3);
+  });
+  it('% vers un paramètre 0–1 : divisé par 100', () => {
+    expect(toSetting({ name: 'mix', text: '0.5', range: [0, 1, 0] } as any, { value: 60, unit: 'pct' }, 'mélange')?.real).toBeCloseTo(0.6, 3);
+  });
+  it('ms vers s : converti', () => {
+    expect(toSetting({ name: 'release_s', text: '0.10 s', range: [0, 5, 0] } as any, { value: 90, unit: 'ms' }, 'relâchement')?.real).toBeCloseTo(0.09, 3);
+  });
+});

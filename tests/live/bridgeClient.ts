@@ -13,7 +13,7 @@ export class LiveBridge {
   private blockWaiters = new Map<number, () => void>();
   events: any[] = [];
 
-  async open(url = 'ws://127.0.0.1:8765') {
+  async open(url = process.env.NOVA_BRIDGE_URL || 'ws://127.0.0.1:8765') {
     this.ws = new WebSocket(url);
     this.ws.binaryType = 'arraybuffer';
     await new Promise<void>((res, rej) => { this.ws.onopen = () => res(); this.ws.onerror = () => rej(new Error('Pont VST injoignable')); });

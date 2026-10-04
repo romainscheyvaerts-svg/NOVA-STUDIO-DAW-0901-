@@ -658,6 +658,59 @@ def _norm(x: str) -> str:
     return re.sub(r"[\s_\-]+", "", x.lower())
 
 
+_NUM = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
+_OFF_WORDS = re.compile(r"\b(not|off|disabled|inactive|no)\b|^0$", re.I)
+
+
+def _first_number(x) -> Optional[float]:
+    m = _NUM.search(str(x))
+    return float(m.group(0).replace(",", ".")) if m else None
+
+
+def _valid_strings(p) -> List[str]:
+    # num_steps n'est pas fiable : Pro-C 3 annonce 2 147 483 647 crans pour un
+    # ratio qui n'accepte que 676 textes (« 2.00:1 »). On lit la liste elle-même.
+    try:
+        vv = p.valid_values
+        return [str(v) for v in vv][:20000] if vv else []
+    except Exception:
+        return []
+
+
+def _nearest_valid(vv: List[str], target: float) -> Optional[str]:
+    """Liste de valeurs texte (Pro-C 3 : « 2.00:1 » mais pas « 2:1 ») : la valeur
+    dont le nombre est le plus proche de la cible, si l'écart reste minime."""
+    best, gap = None, None
+    nums = [(v, _first_number(v)) for v in vv]
+    nums = [(v, n) for v, n in nums if n is not None]
+    if not nums:
+        return None
+    for v, n in nums:
+        d = abs(n - target)
+        if gap is None or d < gap:
+            best, gap = v, d
+    span = max(n for _, n in nums) - min(n for _, n in nums)
+    return best if gap is not None and gap <= max(0.02 * abs(target), 0.01 * span, 1e-6) else None
+
+
+def _two_state_choice(vv: List[str], on: bool) -> Optional[str]:
+    """Interrupteur à deux libellés (« Not Bypassed » / « Bypassed », « Off » / « On »)."""
+    if len(vv) != 2:
+        return None
+    off = [v for v in vv if _OFF_WORDS.search(v.strip())]
+    if len(off) != 1:
+        return None
+    other = vv[1] if off[0] == vv[0] else vv[0]
+    return other if on else off[0]
+
+
+def _set_from_list(plugin, key: str, p, hit: str):
+    try:
+        setattr(plugin, key, hit)
+    except Exception:
+        p.raw_value = float(p.get_raw_value_for(hit))
+
+
 def apply_param(plugin, key: str, p, it: Dict[str, Any]):
     """Un réglage : text (valeur affichée), real (unité du plugin) ou value (brute 0–1)."""
     if it.get("text") is not None:
@@ -668,30 +721,35 @@ def apply_param(plugin, key: str, p, it: Dict[str, Any]):
                 setattr(plugin, key, b)
                 return
         try:
-            steps = int(getattr(p, "num_steps", 0))
-        except Exception:
-            steps = 0
-        vv = []
-        if 0 < steps <= 4096:
             try:
-                vv = [str(v) for v in (p.valid_values or [])]
-            except Exception:
-                vv = []
-        if vv:
+                setattr(plugin, key, float(text))   # « 20 » pour un paramètre numérique
+            except ValueError:
+                setattr(plugin, key, text)          # « F# », « Minor »
+            return
+        except Exception as first:
+            # Refusé : on cherche dans la liste du plugin (casse, « Off » → « Not Bypassed »,
+            # « 2:1 » → « 2.00:1 »).
+            vv = _valid_strings(p)
             hit = next((v for v in vv if v == text), None) or next((v for v in vv if _norm(v) == _norm(text)), None)
-            if hit is not None:
-                try:
-                    setattr(plugin, key, hit)
-                except Exception:
-                    p.raw_value = float(p.get_raw_value_for(hit))
-                return
-        try:
-            setattr(plugin, key, float(text))   # « 20 » pour un paramètre numérique
-        except ValueError:
-            setattr(plugin, key, text)
+            if hit is None:
+                b = _bool_from(text)
+                hit = _two_state_choice(vv, b) if b is not None else None
+            if hit is None:
+                n = _first_number(text)
+                hit = _nearest_valid(vv, n) if n is not None else None
+            if hit is None:
+                raise first
+            _set_from_list(plugin, key, p, hit)
         return
     if it.get("real") is not None:
-        setattr(plugin, key, float(it["real"]))
+        try:
+            setattr(plugin, key, float(it["real"]))
+        except (ValueError, TypeError):
+            # Paramètre à liste de textes (« 2.00:1 ») : valeur la plus proche.
+            hit = _nearest_valid(_valid_strings(p), float(it["real"]))
+            if hit is None:
+                raise
+            _set_from_list(plugin, key, p, hit)
         return
     if it.get("value") is not None:
         p.raw_value = max(0.0, min(1.0, float(it["value"])))
