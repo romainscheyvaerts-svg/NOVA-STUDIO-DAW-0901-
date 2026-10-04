@@ -29,6 +29,7 @@ import { VSTPluginNode } from './VSTPluginNode';
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback, isFrozenBus, isFeedCovered, busFrozenSlices } from '../utils/freeze';
 import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
+import { computePdc, PdcNode, PDC_MAX_SECONDS } from '../utils/pdc';
 
 interface TrackDSP {
   input: GainNode;          
@@ -52,6 +53,15 @@ interface TrackDSP {
   frozenClipId?: string;
   postFreezeLatency?: number;
   sends: Map<string, GainNode>; 
+  /**
+   * Compensation de latence (PDC) : retard de la sortie principale et de chaque
+   * envoi pour aligner les chemins plus courts (voir utils/pdc.ts) ; outputs =
+   * destinations câblées ; downLatency = latence en aval de la chaîne (s).
+   */
+  outDelay?: DelayNode;
+  sendDelays?: Map<string, DelayNode>;
+  outputs?: string[];
+  downLatency?: number;
   inputStream?: MediaStreamAudioSourceNode | null;
   currentInputDeviceId?: string | null;
   synth?: Synthesizer; // PolySynth for MIDI tracks
@@ -513,6 +523,11 @@ export class AudioEngine {
       frozenInput?: GainNode;
       frozenClipId?: string;
       postLatency?: number;
+      /** PDC : sortie principale et envois retardés ; latence en aval de la chaîne (s). */
+      outDelay?: DelayNode;
+      sendDelays?: Map<string, DelayNode>;
+      outputs?: string[];
+      down?: number;
       input: GainNode;
       gain: GainNode;
       panner: StereoPannerNode;
@@ -622,7 +637,15 @@ export class AudioEngine {
       const destId = track.outputTrackId;
       const dest = destId && destId !== track.id ? rendered.get(destId) : undefined;
       // Part déjà jouée depuis le rendu du bus VST gelé (tranches) : pas d'envoi direct en plus.
-      if (!(dest && isFeedCovered(track, destId, tracks))) rt.output.connect(dest ? dest.input : masterGain);
+      rt.outputs = [];
+      rt.sendDelays = new Map();
+      if (!(dest && isFeedCovered(track, destId, tracks))) {
+        // PDC : même alignement qu'en lecture (retard réglé après le câblage).
+        rt.outDelay = offlineCtx.createDelay(PDC_MAX_SECONDS);
+        rt.output.connect(rt.outDelay);
+        rt.outDelay.connect(dest ? dest.input : masterGain);
+        rt.outputs.push(dest ? destId! : '');
+      }
 
       (track.sends || []).forEach(send => {
         if (!send.id || !send.isEnabled || send.level <= 0) return;
@@ -633,8 +656,26 @@ export class AudioEngine {
         const sendGain = offlineCtx.createGain();
         sendGain.gain.value = send.level;
         rt.panner.connect(sendGain);
-        sendGain.connect(target.input);
+        const sendDelay = offlineCtx.createDelay(PDC_MAX_SECONDS);
+        sendGain.connect(sendDelay);
+        sendDelay.connect(target.input);
+        rt.sendDelays!.set(send.id, sendDelay);
+        rt.outputs!.push(send.id);
         rt.sends.set(send.id, sendGain);
+      });
+    }
+
+    // --- 2-PDC. Compensation de latence (bus, envois) : mêmes règles qu'en lecture.
+    {
+      const nodes = new Map<string, PdcNode>();
+      rendered.forEach((rt, id) => nodes.set(id, { latency: rt.latency || 0, outputs: rt.outputs || [] }));
+      const pdc = computePdc(nodes);
+      rendered.forEach((rt, id) => {
+        const r = pdc.get(id);
+        rt.down = r?.down || 0;
+        const main = rt.outDelay ? rt.outputs?.[0] : undefined;
+        if (rt.outDelay && r && main !== undefined) rt.outDelay.delayTime.value = r.delays.get(main) ?? r.down;
+        rt.sendDelays?.forEach((node, sendId) => { node.delayTime.value = r?.delays.get(sendId) ?? 0; });
       });
     }
 
@@ -700,7 +741,7 @@ export class AudioEngine {
         }
 
         const isFrozenRender = !!rt.frozenInput && (clip.id === rt.frozenClipId || !!clip.isFreezeSlice);
-        const clipStartInProject = clip.start - startOffset - ((isFrozenRender ? rt.postLatency : rt.latency) || 0);
+        const clipStartInProject = clip.start - startOffset - (((isFrozenRender ? rt.postLatency : rt.latency) || 0) + (rt.down || 0));
         if (clipStartInProject + clip.duration < 0) continue;
         if (clipStartInProject > totalDuration) continue;
 
@@ -932,7 +973,7 @@ export class AudioEngine {
     if (dsp) dsp.graphSignature = undefined; // recâblage au prochain updateTrack
   }
 
-  public setDelayCompensationSuspended(on: boolean) { this.pdcSuspended = on; }
+  public setDelayCompensationSuspended(on: boolean) { this.pdcSuspended = on; this.recomputePdc(); }
 
   /** Latence (s) de chaque effet actif d'une piste, dans l'ordre de la chaîne. */
   public getTrackPluginLatencies(trackId: string): Map<string, number> {
@@ -945,7 +986,11 @@ export class AudioEngine {
     return out;
   }
 
-  public getTrackLatency(trackId: string): number { return this.tracksDSP.get(trackId)?.pluginLatency || 0; }
+  /** Latence compensée d'une piste jusqu'au master (effets de la piste + bus et envois en aval), en s. */
+  public getTrackLatency(trackId: string): number {
+    const d = this.tracksDSP.get(trackId);
+    return d ? (d.pluginLatency || 0) + (d.downLatency || 0) : 0;
+  }
 
   /** Piste telle que le moteur la joue (avec un éventuel gel de prise). */
   private eff(track: Track): Track {
@@ -993,6 +1038,32 @@ export class AudioEngine {
     const postIds = dsp.postChainIds || [];
     dsp.pluginLatency = ids.reduce((acc, id) => acc + lat(id), 0);
     dsp.postFreezeLatency = postIds.reduce((acc, id) => acc + lat(id), 0);
+    this.recomputePdc();
+  }
+
+  /**
+   * Compensation de latence de toute la session (pistes, bus, envois), comme
+   * dans les DAW : retards des sorties plus courtes + avance des clips.
+   * Suspendue pendant une prise (retour casque sans retard).
+   */
+  private recomputePdc() {
+    if (!this.ctx) return;
+    const nodes = new Map<string, PdcNode>();
+    this.tracksDSP.forEach((d, id) => nodes.set(id, { latency: this.pdcSuspended ? 0 : (d.pluginLatency || 0), outputs: d.outputs || [] }));
+    const res = computePdc(nodes);
+    const t = this.ctx.currentTime;
+    const setDelay = (node: DelayNode | undefined, sec: number) => {
+      if (!node) return;
+      const v = this.pdcSuspended ? 0 : sec;
+      if (Math.abs(node.delayTime.value - v) > 1e-6) node.delayTime.setValueAtTime(v, t);
+    };
+    this.tracksDSP.forEach((d, id) => {
+      const r = res.get(id);
+      d.downLatency = this.pdcSuspended || !r ? 0 : r.down;
+      const main = d.outputs?.[0];
+      setDelay(d.outDelay, r && main !== undefined ? (r.delays.get(main) ?? r.down) : 0);
+      d.sendDelays?.forEach((node, sendId) => setDelay(node, r?.delays.get(sendId) ?? 0));
+    });
   }
 
   public disarmTrack() {
@@ -1498,7 +1569,7 @@ export class AudioEngine {
         if (this.activeSources.has(sourceKey)) return;
         
         const clipEnd = clip.start + clip.duration;
-        const lat = this.pdcSuspended ? 0 : (this.tracksDSP.get(track.id)?.pluginLatency || 0);
+        const lat = this.pdcSuspended ? 0 : this.getTrackLatency(track.id);
         const overlapsWindow = clip.start < projectWindowEnd + lat && clipEnd > projectWindowStart;
         if (overlapsWindow) {
            this.playClipSource(track.id, clip, contextScheduleTime, projectWindowStart);
@@ -1780,7 +1851,7 @@ export class AudioEngine {
         // Compensation de latence : sans elle, une voix passée dans l'Auto-Tune
         // (~27 ms) arrivait en retard sur le beat.
         // Pendant une prise, la compensation est suspendue (pistes lourdes figées).
-        const pt = projectTime + (this.pdcSuspended ? 0 : ((isFrozenRender ? dsp.postFreezeLatency : dsp.pluginLatency) || 0));
+        const pt = projectTime + (this.pdcSuspended ? 0 : (((isFrozenRender ? dsp.postFreezeLatency : dsp.pluginLatency) || 0) + (dsp.downLatency || 0)));
         let offsetIntoClip = clip.offset || 0;
         if (pt > clip.start) {
             offsetIntoClip += (pt - clip.start);
@@ -2000,10 +2071,12 @@ export class AudioEngine {
     dsp.sends.forEach(g => { try { g.disconnect(); } catch (e) {} });
     dsp.sends.clear();
 
-    [dsp.input, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer]
+    dsp.sendDelays?.forEach(n => { try { n.disconnect(); } catch (e) {} });
+    [dsp.input, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
       .forEach(n => { try { n?.disconnect(); } catch (e) {} });
 
     this.tracksDSP.delete(trackId);
+    this.recomputePdc();
   }
 
   public updateTrack(track: Track, allTracks: Track[]) {
@@ -2206,19 +2279,30 @@ export class AudioEngine {
     
     dsp.output.disconnect();
     let destNode: AudioNode = this.masterOutput!;
+    let destId = '';
     if (track.outputTrackId && track.outputTrackId !== track.id) {
       // 'master' est desormais une vraie piste (fader + inserts master).
       // Si elle n'existe pas (ancien projet), on retombe sur la sortie master du moteur.
       const destDSP = this.tracksDSP.get(track.outputTrackId);
-      if (destDSP) destNode = destDSP.input;
+      if (destDSP) { destNode = destDSP.input; destId = track.outputTrackId; }
     }
-    if (!coveredOut) dsp.output.connect(destNode);
+    // PDC : sortie -> retard -> destination (retard réglé par recomputePdc).
+    if (!dsp.outDelay) dsp.outDelay = this.ctx.createDelay(PDC_MAX_SECONDS);
+    try { dsp.outDelay.disconnect(); } catch (e) {}
+    const outputs: string[] = [];
+    if (!coveredOut) {
+      dsp.output.connect(dsp.outDelay);
+      dsp.outDelay.connect(destNode);
+      outputs.push(destId);
+    }
     
     // === SEND ROUTING - Connect to send/bus tracks ===
     // First, disconnect all existing sends
     dsp.sends.forEach((sendGain, sendId) => {
       try { sendGain.disconnect(); } catch (e) {}
     });
+    if (!dsp.sendDelays) dsp.sendDelays = new Map();
+    dsp.sendDelays.forEach(node => { try { node.disconnect(); } catch (e) {} });
     
     // Process each send in the track's sends array
     if (track.sends && track.sends.length > 0) {
@@ -2242,7 +2326,11 @@ export class AudioEngine {
         // Find the destination send/bus track and connect
         const destSendDSP = this.tracksDSP.get(send.id);
         if (destSendDSP) {
-          sendGain.connect(destSendDSP.input);
+          let sendDelay = dsp!.sendDelays!.get(send.id);
+          if (!sendDelay) { sendDelay = this.ctx!.createDelay(PDC_MAX_SECONDS); dsp!.sendDelays!.set(send.id, sendDelay); }
+          sendGain.connect(sendDelay);
+          sendDelay.connect(destSendDSP.input);
+          outputs.push(send.id);
           // console.log(`[AudioEngine] Send connected: ${track.name} -> ${send.id} (level: ${sendLevel})`);
         } else {
           // console.warn(`[AudioEngine] Send destination not found: ${send.id}`);
@@ -2258,6 +2346,11 @@ export class AudioEngine {
         dsp!.sends.delete(sendId);
       }
     });
+    dsp.sendDelays.forEach((node, sendId) => {
+      if (!currentSendIds.has(sendId)) { try { node.disconnect(); } catch (e) {} dsp!.sendDelays!.delete(sendId); }
+    });
+    dsp.outputs = outputs;
+    this.recomputePdc();
   }
 
   private applyAutomation(track: Track, time: number) {
