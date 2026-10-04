@@ -42,6 +42,7 @@ import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstS
 import { canBakeTrack, hasVst, freezeSignature, trackBufferIds } from './utils/freeze';
 import { getEditAuthor, setEditAuthor } from './utils/preFxEdits';
 import { usePreFxReplay } from './hooks/usePreFxReplay';
+import { mergeSessionEdits } from './utils/preFxMerge';
 import PreFxReplayPanel from './components/PreFxReplayPanel';
 import FrozenEditsNotice from './components/FrozenEditsNotice';
 import { recFreezeStore } from './utils/recFreezeStore';
@@ -947,7 +948,13 @@ function Studio() {
     }
   };
 
-  const handleLogout = async () => { await supabaseManager.signOut(); setUser(null); };
+  const handleLogout = async () => {
+    // Au studio (pont VST) : pistes VST gelées + session sauvegardée avant de se déconnecter.
+    if (novaBridge.isConnected() && !showLanding) {
+      try { await bakeVstBeforeSave(); await autosaveNow(); } catch (e) { console.warn('[Déconnexion] gel', e); }
+    }
+    await supabaseManager.signOut(); setUser(null);
+  };
   const handleBuyLicense = (instrumentId: string | number) => { if (!user) return; const updatedUser = { ...user, owned_instruments: [...(user.owned_instruments || []), instrumentId] }; setUser(updatedUser); setAiNotification(`✅ Licence achetée avec succès ! Export débloqué.`); };
   
   const handleSaveCloud = async (projectName: string) => { 
@@ -1038,10 +1045,8 @@ function Studio() {
         // vient de décoder pour CE projet : clear() effaçait toutes les prises
         // d'un projet ouvert depuis un fichier ou une session sauvegardée.
         const keep = new Set<string>();
-        loadedState.tracks.forEach(t => {
-          t.clips.forEach(c => { if (c.bufferId) keep.add(c.bufferId); });
-          if (t.frozenClip?.bufferId) keep.add(t.frozenClip.bufferId);
-        });
+        // (rendus gelés, rendus d'envois VST, sons d'origine de la photo du gel compris)
+        loadedState.tracks.forEach(t => trackBufferIds(t).forEach(id => keep.add(id)));
         audioBufferRegistry.removeMany(audioBufferRegistry.ids().filter(id => !keep.has(id)));
         
         loadedState.tracks.forEach(track => {
@@ -3827,13 +3832,40 @@ function Studio() {
 
   // --- Gel pré-effet : retour sur le PC de l'ingé --------------------------------------
   // Auteur des éditions (journal enregistré avec la session) : compte ou collaboration.
-  useEffect(() => { setEditAuthor(collab?.name || user?.username || (user?.email || '').split('@')[0] || ''); }, [user, collab]);
+  // Invité (pas de compte) : pas de nom, le journal dit « l'artiste » (ou « l'ingé » au PC).
+  useEffect(() => {
+    const account = user && user.id !== 'guest' ? (user.username || (user.email || '').split('@')[0]) : '';
+    setEditAuthor(collab?.name || account || '');
+  }, [user, collab]);
   const notifyPreFx = useCallback((msg: string, ms = 4000) => { setAiNotification(msg); setTimeout(() => setAiNotification(null), ms); }, []);
   // Pont VST connecté : les pistes gelées à la sauvegarde se dégèlent (plugins présents)
   // et les éditions faites ailleurs passent avant les effets (résumé).
   const preFx = usePreFxReplay({ stateId: state.id, tracks: state.tracks, showLanding, stateRef, setState, notify: notifyPreFx });
   const preFxAnnounceRef = useRef(preFx.announce);
   preFxAnnounceRef.current = preFx.announce;
+
+  // Session en ligne modifiée ailleurs en même temps (artiste sur la tablette, ingé
+  // au studio) : on garde cette version et on y ajoute les éditions pré-effet de l'autre.
+  const mergeCloudVersions = useCallback(async () => {
+    const c = cloudRef.current;
+    if (!c) return;
+    setCloudConflict(null);
+    setCloudProgress({ pct: 1, msg: "Récupération de l'autre version…" });
+    try {
+      const { state: theirs, info } = await pullSession({ id: c.id, secret: c.secret }, (pct, msg) => setCloudProgress({ pct, msg }));
+      const m = mergeSessionEdits(stateRef.current, theirs);
+      setState(prev => ({ ...prev, tracks: m.state.tracks }));
+      setCloudSession({ ...c, version: info.version, syncedAt: Date.now() });
+      preFx.showMerge(m, theirs);
+      // La version fusionnée devient la version en ligne.
+      setTimeout(() => { void syncCloudRef.current({ interactive: true }); }, 400);
+    } catch (e: any) {
+      setCloudError(e?.message || 'Fusion impossible');
+      setTakeHomeOpen(true);
+    } finally {
+      setTimeout(() => setCloudProgress(null), 600);
+    }
+  }, [setState, setCloudSession, preFx.showMerge]);
 
   // Fermeture du projet (application Windows, bouton fermer) : gel des pistes VST
   // + sauvegarde locale + synchronisation en ligne, puis seulement fermeture.
@@ -5472,7 +5504,7 @@ function Studio() {
       {!showLanding && <FrozenEditsNotice tracks={state.tracks} bridgeConnected={preFx.bridgeConnected} projectId={state.id} compact={isMobile} />}
       {preFx.panel && (
         <PreFxReplayPanel data={preFx.panel} onClose={preFx.close} onRefreeze={preFx.refreeze}
-          onRevert={preFx.revertTrack} onRestore={preFx.restoreTrack} onRetry={preFx.retry} />
+          onRevert={preFx.revertTrack} onRestore={preFx.restoreTrack} onRetry={preFx.retry} onTakeTheirs={preFx.takeTheirs} />
       )}
       {cloudConflict && (
         <div className="fixed inset-0 z-[670] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="conflict-title">
@@ -5481,7 +5513,13 @@ function Studio() {
             <p className="text-[13px] text-slate-300">
               La session en ligne a été modifiée {cloudConflict.updatedFrom ? `sur ${cloudConflict.updatedFrom} ` : ''}{cloudConflict.updatedAt ? formatAgo(Date.parse(cloudConflict.updatedAt)) : ''}, après ta dernière synchronisation.
             </p>
-            <button type="button" className="h-12 w-full rounded-xl bg-cyan-500 text-[13px] font-black text-black"
+            {state.tracks.some(t => t.freezeBase) && (
+              <button type="button" className="h-12 w-full rounded-xl bg-cyan-500 text-[13px] font-black text-black"
+                onClick={() => { void mergeCloudVersions(); }}>
+                Fusionner : garder les éditions des deux (recommandé)
+              </button>
+            )}
+            <button type="button" className={`h-12 w-full rounded-xl text-[13px] font-black ${state.tracks.some(t => t.freezeBase) ? 'bg-white/10 text-white' : 'bg-cyan-500 text-black'}`}
               onClick={() => { const c = cloudRef.current; setCloudConflict(null); if (c) void openCloudSession({ id: c.id, secret: c.secret }); }}>
               Ouvrir la version la plus récente
             </button>

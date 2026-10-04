@@ -192,3 +192,36 @@ describe('sauvegarde : format v2 et rétrocompatibilité', () => {
     expect(zip).toBeTruthy();
   });
 });
+
+describe('fusion de deux versions de la session (conflit en ligne)', () => {
+  it('éditions de l\'artiste reprises, conflit expliqué, nouvelle piste ajoutée, l\'autre version à un clic', async () => {
+    const { mergeSessionEdits, takeTheirsFor } = await import('../utils/preFxMerge');
+    const mine = pcSession();                       // PC de l'ingé
+    const theirs = JSON.parse(JSON.stringify(pcSession())); // tablette de l'artiste
+    // Ingé : fondu sur la phrase B. Artiste : supprime la phrase A, change aussi la phrase B, ajoute une piste.
+    mine.tracks[0].clips = mine.tracks[0].clips.map(c => (c.id === 'b' ? { ...c, fadeOut: 0.2 } : c));
+    theirs.tracks[0].clips = theirs.tracks[0].clips.filter((c: any) => c.id !== 'a').map((c: any) => (c.id === 'b' ? { ...c, gain: 0.5 } : c));
+    theirs.tracks.push(makeTrack({ id: 'chœurs', name: 'Chœurs' }));
+    const m = mergeSessionEdits(mine, theirs);
+    const voix = m.state.tracks[0];
+    expect(voix.clips.map(c => c.id)).toEqual(['b']);              // A supprimée (artiste)
+    expect(voix.clips[0].fadeOut).toBe(0.2);                        // B : version de l'ingé gardée
+    expect(voix.clips[0].gain ?? 1).toBe(1);
+    expect(m.conflicts).toEqual([expect.objectContaining({ trackId: 'voix', baseClipId: 'b', mine: '1 fondu', theirs: '1 volume de clip' })]);
+    expect(m.addedTrackIds).toEqual(['chœurs']);
+    expect(m.mergedTrackIds).toEqual(['voix']);
+    const alt = takeTheirsFor(voix, theirs.tracks[0], 'b');
+    expect(alt.find(c => c.freezeRef?.srcClipId === 'b')).toMatchObject({ gain: 0.5, fadeOut: 0 });
+  });
+
+  it('photos différentes (re-rendu entre-temps) : aucune fusion de clips, version de cet appareil gardée', async () => {
+    const { mergeSessionEdits } = await import('../utils/preFxMerge');
+    const mine = pcSession();
+    const theirs = JSON.parse(JSON.stringify(pcSession()));
+    theirs.tracks[0].freezeBase.renderId = 'autre-rendu';
+    theirs.tracks[0].clips = [];
+    const m = mergeSessionEdits(mine, theirs);
+    expect(m.state.tracks[0].clips.map(c => c.id)).toEqual(['a', 'b']);
+    expect(m.conflicts).toEqual([]);
+  });
+});

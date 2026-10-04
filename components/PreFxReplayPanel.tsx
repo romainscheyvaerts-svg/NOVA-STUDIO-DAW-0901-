@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { PreFxOp } from '../types';
 import { fmtTime } from '../utils/preFxEdits';
 import { PreFxPanelData } from '../hooks/usePreFxReplay';
+import { SessionConflict } from '../utils/preFxMerge';
 
 /**
  * Retour sur le PC de l'ingé : résumé des éditions faites ailleurs (tablette,
@@ -25,10 +26,11 @@ interface Props {
   onRevert: (trackId: string) => void;
   onRestore: (trackId: string) => void;
   onRetry: () => void;
+  onTakeTheirs?: (c: SessionConflict) => void;
 }
 
-const PreFxReplayPanel: React.FC<Props> = ({ data, onClose, onRefreeze, onRevert, onRestore, onRetry }) => {
-  const { summary, missing, thawed, reverted } = data;
+const PreFxReplayPanel: React.FC<Props> = ({ data, onClose, onRefreeze, onRevert, onRestore, onRetry, onTakeTheirs }) => {
+  const { summary, missing, thawed, reverted, merge } = data;
   const [open, setOpen] = useState<string | null>(summary.tracks.length === 1 ? summary.tracks[0].trackId : null);
   const okRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { okRef.current?.focus(); }, []);
@@ -43,8 +45,14 @@ const PreFxReplayPanel: React.FC<Props> = ({ data, onClose, onRefreeze, onRevert
       <div className="w-full max-w-lg max-h-[88vh] overflow-y-auto rounded-3xl border border-cyan-500/30 bg-[#121418] p-5 sm:p-6 shadow-2xl space-y-4">
         <div className="space-y-1">
           <h2 id="prefx-title" className="text-lg font-black text-white">
-            {summary.total > 0 ? '🔥 Éditions rejouées avant tes effets' : '⚠️ Plugins manquants sur ce PC'}
+            {merge ? '🔀 Les deux versions sont fusionnées' : summary.total > 0 ? '🔥 Éditions rejouées avant tes effets' : '⚠️ Plugins manquants sur ce PC'}
           </h2>
+          {merge && (
+            <p className="text-[12px] leading-snug text-slate-400">
+              Ta version est gardée, et les éditions faites ailleurs sur les pistes gelées y sont ajoutées
+              {merge.added > 0 ? ` (+ ${merge.added} piste${merge.added > 1 ? 's' : ''} ajoutée${merge.added > 1 ? 's' : ''})` : ''}.
+            </p>
+          )}
           {summary.total > 0 && (
             <>
               <p className="text-[15px] font-bold text-cyan-300" data-testid="prefx-summary">{summary.line}</p>
@@ -99,6 +107,32 @@ const PreFxReplayPanel: React.FC<Props> = ({ data, onClose, onRefreeze, onRevert
               );
             })}
           </ul>
+        )}
+
+        {merge && merge.conflicts.length > 0 && (
+          <div className="space-y-2 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3" data-testid="prefx-conflicts">
+            <p className="text-[12px] font-bold text-amber-200">
+              {merge.conflicts.length} passage{merge.conflicts.length > 1 ? 's' : ''} modifié{merge.conflicts.length > 1 ? 's' : ''} des deux côtés : ta version est gardée.
+            </p>
+            <ul className="space-y-2">
+              {merge.conflicts.map(c => {
+                const key = `${c.trackId}:${c.baseClipId}`;
+                const done = merge.resolved.includes(key);
+                return (
+                  <li key={key} className="rounded-xl bg-black/20 p-2 text-[11px] text-amber-50/90">
+                    <p><b>{c.trackName}</b> · {c.name} ({fmtTime(c.at)} → {fmtTime(c.end)})</p>
+                    <p className="text-slate-400">Toi : {c.mine} · L'autre version : {c.theirs}</p>
+                    {onTakeTheirs && (
+                      <button type="button" disabled={done} onClick={() => onTakeTheirs(c)}
+                        className="mt-1 h-8 w-full rounded-lg bg-amber-500/20 text-[11px] font-bold text-amber-100 disabled:opacity-50">
+                        {done ? "Version de l'autre prise (Ctrl+Z pour revenir)" : "Prendre plutôt la version de l'autre"}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         )}
 
         {missing.length > 0 && (

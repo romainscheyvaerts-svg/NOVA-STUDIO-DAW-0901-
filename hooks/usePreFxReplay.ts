@@ -5,6 +5,7 @@ import { novaBridge } from '../services/NovaBridge';
 import { useBridgeState } from './useNovaBridge';
 import { canRevert, PRE_VOLUME, revertToBase } from '../utils/preFxEdits';
 import { applyRefreeze, applyThaw, planThaw, replaySummary, ReplaySummary, thawCandidates, ThawPlan } from '../utils/preFxThaw';
+import { SessionConflict, SessionMerge, takeTheirsFor } from '../utils/preFxMerge';
 
 export interface PreFxPanelData {
   summary: ReplaySummary;
@@ -12,6 +13,8 @@ export interface PreFxPanelData {
   thawed: string[];
   /** Pistes remises dans la version d'avant les éditions (pour « Rétablir »). */
   reverted: Record<string, { clips: Clip[]; lanes: AutomationLane[] }>;
+  /** Fusion de deux versions (session modifiée ailleurs en même temps). */
+  merge?: { conflicts: SessionConflict[]; theirs: DAWState['tracks']; resolved: string[]; added: number };
 }
 
 /**
@@ -33,20 +36,24 @@ export function usePreFxReplay(o: {
   const [retryTick, setRetryTick] = useState(0);
   const triedRef = useRef(new Set<string>());
   const busyRef = useRef(false);
-  const candKey = thawCandidates(tracks).map(t => `${t.id}:${t.frozenClip!.id}`).join('|');
+  const [doneTick, setDoneTick] = useState(0);
+  // Pistes gelées automatiquement pas encore essayées (une piste dont le plugin
+  // manque n'est réessayée qu'avec « Réessayer » : pas de boucle, pas de résumé écrasé).
+  const keyOf = (id: string, render: string) => `${stateId}:${id}:${render}`;
+  const pendKey = thawCandidates(tracks).filter(t => !triedRef.current.has(keyOf(t.id, t.frozenClip!.id)))
+    .map(t => `${t.id}:${t.frozenClip!.id}`).join('|');
 
   useEffect(() => {
-    if (bridge.status !== 'connected' || showLanding || !candKey) return;
-    const key = `${stateId}#${candKey}#${retryTick}`;
-    if (triedRef.current.has(key) || busyRef.current) return;
-    triedRef.current.add(key);
+    if (bridge.status !== 'connected' || showLanding || !pendKey || busyRef.current) return;
     busyRef.current = true;
     void (async () => {
       try {
         const list = await novaBridge.listPlugins().catch(() => novaBridge.getCachedPlugins());
-        const plan = planThaw(stateRef.current.tracks, list.map(p => p.path).filter(Boolean));
+        const tracksNow = stateRef.current.tracks;
+        thawCandidates(tracksNow).forEach(t => triedRef.current.add(keyOf(t.id, t.frozenClip!.id)));
+        const plan = planThaw(tracksNow, list.map(p => p.path).filter(Boolean));
         if (plan.thaw.length) setState(produce((d: DAWState) => { applyThaw(d.tracks, plan.thaw); }));
-        const summary = replaySummary(stateRef.current.tracks, plan.thaw);
+        const summary = replaySummary(tracksNow, plan.thaw);
         if (summary.total > 0 || plan.missing.length > 0) {
           setPanel({ summary, missing: plan.missing, thawed: plan.thaw, reverted: {} });
         } else if (plan.thaw.length) {
@@ -56,9 +63,11 @@ export function usePreFxReplay(o: {
         console.warn('[Dégel auto]', e);
       } finally {
         busyRef.current = false;
+        setDoneTick(n => n + 1);
       }
     })();
-  }, [bridge.status, showLanding, candKey, stateId, retryTick, stateRef, setState, notify]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridge.status, showLanding, pendKey, retryTick, doneTick, stateRef, setState, notify]);
 
   /** Dégel fait à la main : même résumé s'il y a des éditions. */
   const announce = useCallback((ids: string[]) => {
@@ -67,6 +76,23 @@ export function usePreFxReplay(o: {
   }, [stateRef]);
 
   const close = useCallback(() => setPanel(null), []);
+
+  /** Après une fusion de versions : éditions reprises et conflits expliqués. */
+  const showMerge = useCallback((m: SessionMerge, theirs: DAWState) => {
+    const summary = replaySummary(m.state.tracks, m.mergedTrackIds);
+    setPanel({ summary, missing: [], thawed: [], reverted: {}, merge: { conflicts: m.conflicts, theirs: theirs.tracks, resolved: [], added: m.addedTrackIds.length } });
+  }, []);
+
+  /** Conflit : prendre la version de l'autre pour ce passage (annulable : Ctrl+Z). */
+  const takeTheirs = useCallback((c: SessionConflict) => {
+    const other = panel?.merge?.theirs.find(t => t.id === c.trackId);
+    if (!other) return;
+    setState(produce((d: DAWState) => {
+      const x = d.tracks.find(y => y.id === c.trackId);
+      if (x) x.clips = takeTheirsFor(x as any, other, c.baseClipId) as Clip[];
+    }));
+    setPanel(p => (p?.merge ? { ...p, merge: { ...p.merge, resolved: [...p.merge.resolved, `${c.trackId}:${c.baseClipId}`] } } : p));
+  }, [panel, setState]);
 
   const refreeze = useCallback(() => {
     const ids = panel?.thawed || [];
@@ -110,7 +136,7 @@ export function usePreFxReplay(o: {
     });
   }, [panel, setState]);
 
-  const retry = useCallback(() => { setPanel(null); setRetryTick(n => n + 1); }, []);
+  const retry = useCallback(() => { triedRef.current.clear(); setPanel(null); setRetryTick(n => n + 1); }, []);
 
-  return { panel, announce, close, refreeze, revertTrack, restoreTrack, retry, bridgeConnected: bridge.status === 'connected' };
+  return { panel, announce, close, refreeze, revertTrack, restoreTrack, retry, showMerge, takeTheirs, bridgeConnected: bridge.status === 'connected' };
 }

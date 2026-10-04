@@ -211,7 +211,8 @@ export const sendFreezeSig = (s: Track, bus: Track): string => {
 /** Bus VST dont le rendu (par source) est à (re)faire avant une sauvegarde. */
 export function busesNeedingVstRender(tracks: Track[]): Track[] {
   return vstBuses(tracks).filter(bus => {
-    const sources = busSources(bus, tracks);
+    // Une source dont les propres VST3 n'ont pas pu être rendus est ignorée (pas de rendu en boucle).
+    const sources = busSources(bus, tracks).filter(s => !!sourcePlayable(s));
     if (sources.length === 0) return false;
     if (!bus.frozenClip || isFreezeStale(bus) || freezeIndex(bus) < lastVstIndex(bus)) return true;
     return sources.some(s => {
