@@ -406,10 +406,18 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             className="cursor-grab active:cursor-grabbing text-slate-500 hover:text-cyan-500 mr-2 flex-shrink-0 transition-colors p-1 flex items-center space-x-2"
           >
             <i className="fas fa-grip-vertical text-[10px]"></i>
-            <i className={`fas ${getTrackIcon()} text-[10px] ${isSelected ? 'text-white' : ''}`}></i>
+            <span className="relative"><i className={`fas ${getTrackIcon()} text-[10px] ${isSelected ? 'text-white' : ''}`}></i>
+            {/* Ingé à distance : où en est la piste (« Chez l'ingé… », « Mise à jour reçue ») ; sans prendre la place du nom. */}
+            {remote.badge?.label && (
+              <span data-testid={`remote-badge-${track.id}`} role="img" aria-label={`Ingé à distance : ${remote.badge.label}`} title={`Ingé à distance : ${remote.badge.label}`}
+                className={`absolute -top-1 -right-1.5 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] ring-1 ring-black/60 ${remote.badge.tone === 'ok' ? 'bg-emerald-500 text-black' : remote.badge.tone === 'warn' ? 'bg-amber-400 text-black' : remote.badge.tone === 'busy' ? 'bg-sky-400 text-black animate-pulse' : 'bg-slate-500 text-white'}`}>
+                <i className="fas fa-headphones"></i>
+              </span>
+            )}
+            </span>
           </div>
 
-          <div className="min-w-0 flex items-center gap-1.5">
+          <div className="min-w-0 overflow-hidden flex items-center gap-1.5">
             {isRenaming ? (
               <input 
                 ref={nameInputRef}
@@ -430,7 +438,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                   if (now - lastNameTap.current < 350) { e.preventDefault(); e.stopPropagation(); lastNameTap.current = 0; setIsRenaming(true); }
                   else lastNameTap.current = now;
                 }}
-                className={`text-[12px] font-bold tracking-wide truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-400'}`}
+                className={`min-w-[3.5rem] text-[12px] font-bold tracking-wide truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-400'}`}
               >
                 {track.name}
                 {frozen && !inst && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400" role="img"
@@ -445,17 +453,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               </span>
             )}
             {/* Ingé à distance : où en est la piste (« Chez l'ingé… », « Mise à jour reçue »), et l'envoyer. */}
-            {!isRenaming && remote.badge?.label && (
-              <span data-testid={`remote-badge-${track.id}`} role="status" title={remote.badge.label}
-                className={`shrink min-w-0 max-w-[110px] truncate px-1 h-4 rounded text-[9px] font-bold leading-4 ${remote.badge.tone === 'ok' ? 'bg-emerald-500/15 text-emerald-300' : remote.badge.tone === 'warn' ? 'bg-amber-500/15 text-amber-300' : remote.badge.tone === 'busy' ? 'bg-sky-500/15 text-sky-300' : 'bg-white/5 text-slate-300'}`}>
-                🎧 {remote.badge.label}
-              </span>
-            )}
             {!isRenaming && remote.role === 'artist' && remote.badge?.canSend && (
               <button type="button" onClick={(e) => { e.stopPropagation(); requestRemoteSend(track.id); }}
                 title="Envoyer cette piste à l'ingé (audio brut + tes éditions)" aria-label={`Envoyer ${track.name} à l'ingé`}
-                className="shrink-0 px-1.5 h-5 rounded bg-cyan-500/20 text-cyan-200 text-[9px] font-black hover:bg-cyan-500/30">
-                <i className="fas fa-paper-plane mr-0.5"></i>Ingé
+                className="shrink-0 w-5 h-5 rounded bg-cyan-500/20 text-cyan-200 text-[9px] hover:bg-cyan-500/30">
+                <i className="fas fa-paper-plane"></i>
               </button>
             )}
             {/* Les pastilles d effets ne tiennent pas quand la piste est basse :

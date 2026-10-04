@@ -63,6 +63,7 @@ export function useRemoteInge(o: RemoteIngeOptions) {
   const clientRef = useRef<RemoteIngeClient | null>(null);
   const outboxRef = useRef<RemoteOutbox | null>(null);
   const [members, setMembers] = useState<CollabMember[]>([]);
+  const [peerSeen, setPeerSeen] = useState<{ name: string; at: number } | null>(null);
   const [acks, setAcks] = useState<Record<string, RemoteAck>>({});
   const [busy, setBusy] = useState<Record<string, string>>({});
   const [queued, setQueued] = useState<string[]>([]);
@@ -157,6 +158,8 @@ export function useRemoteInge(o: RemoteIngeOptions) {
     const me = clientRef.current;
     if (!me || !REMOTE_KINDS.has(op.kind) || op.role === me.role) return;
     const p = op.op || {};
+    // Signe de vie de l'autre (le direct peut être coupé : la présence ne suffit pas).
+    setPeerSeen({ name: op.author_name, at: Date.now() });
     if (me.role === 'artist') {
       if (op.kind === 'ri_ack') {
         setAcks(a => (a[p.trackId] && a[p.trackId].v > p.v ? a : { ...a, [p.trackId]: p as RemoteAck }));
@@ -207,6 +210,8 @@ export function useRemoteInge(o: RemoteIngeOptions) {
 
   // --- Lien ----------------------------------------------------------------------------------
 
+  /** Lien déjà repris (ou en cours) : la reprise automatique ne le rouvre pas en double. */
+  const resumeTriedRef = useRef('');
   const start = useCallback(async (role: RemoteRole, name: string, linkRaw?: string, opts: { quiet?: boolean } = {}): Promise<boolean> => {
     setError(null);
     try {
@@ -222,6 +227,7 @@ export function useRemoteInge(o: RemoteIngeOptions) {
       }
       await clientRef.current?.leave().catch(() => {});
       const linkStr = linkToString(link);
+      resumeTriedRef.current = linkStr;
       const same = saved?.link === linkStr && saved.role === role;
       const client = new RemoteIngeClient(link, role, name, op => onOpRef.current(op), setMembers);
       clientRef.current = client;
@@ -264,10 +270,9 @@ export function useRemoteInge(o: RemoteIngeOptions) {
   }, [mutateSilently]);
 
   // Reprise automatique du lien enregistré avec le projet (sans fenêtre si ça échoue).
-  const resumeTriedRef = useRef('');
   useEffect(() => {
     const saved = o.remoteInge;
-    if (active || !saved || o.showLanding || resumeTriedRef.current === saved.link) return;
+    if (active || clientRef.current || !saved || o.showLanding || resumeTriedRef.current === saved.link) return;
     resumeTriedRef.current = saved.link;
     const t = window.setTimeout(() => { void start(saved.role, saved.role === 'artist' ? 'Artiste' : 'Ingé', saved.link, { quiet: true }); }, 2500);
     return () => window.clearTimeout(t);
@@ -535,6 +540,8 @@ export function useRemoteInge(o: RemoteIngeOptions) {
     active: !!active, role, phase, name: active?.name || '', connecting, error, setError,
     inviteUrl: active && role === 'artist' ? remoteInviteUrl(active.link) : null,
     peerName: peer?.display_name || null,
+    /** Dernier signe de vie de l'autre (envoi, accusé de réception), si la présence en direct manque. */
+    peerSeen: peer ? null : peerSeen,
     bridgeConnected: bridgeOk,
     queuedCount: queued.length,
     savedLink: o.remoteInge || null,
