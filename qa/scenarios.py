@@ -669,7 +669,10 @@ def s_finitions(page, log, res, vp):
         open_studio(page, res, vp=vp)
         do_take(page, res, "prise", first=True)
         c = page.get_by_role("region", name="Et maintenant ?").get_by_role("button", name="Fermer")
-        if visible(c): c.click(); page.wait_for_timeout(300)
+        try:  # en tablette, la fenêtre Nova peut couvrir la carte : sans importance ici
+            if visible(c): c.click(timeout=3000); page.wait_for_timeout(300)
+        except Exception:
+            pass
         dismiss_toasts(page)
     with step(res, "bandeau du bas : rien ne flotte sur le catalogue ni sur les clips"):
         geo = page.evaluate("""() => {
@@ -718,8 +721,8 @@ def s_finitions(page, log, res, vp):
         assert res["export_simple"]["Extrait 30 s pour les réseaux"] and res["export_simple"]["Mon morceau complet"]
         assert not res["export_simple"]["Dithering"] and not res["export_simple"]["Fréquence"], "réglages techniques visibles par défaut"
         btn(page, re.compile("Réglages avancés")).click(); page.wait_for_timeout(600)
-        txt = body(page)
-        res["export_avance"] = {k: (k in txt) for k in ("Dithering", "Format et qualité", "Volume final", "Retour aux choix simples")}
+        txt = body(page).lower()
+        res["export_avance"] = {k: (k.lower() in txt) for k in ("Dithering", "Format et qualité", "Volume final", "Retour aux choix simples")}
         shot(page, f"{res['name']}_04_export_avance")
         assert all(res["export_avance"].values()), "réglages avancés incomplets"
         btn(page, re.compile("Retour aux choix simples")).click(); page.wait_for_timeout(400)

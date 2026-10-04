@@ -119,6 +119,35 @@ export class AudioEncoder {
   }
 
   /**
+   * MP3 dont la crête vraie, mesurée sur le fichier DÉCODÉ, reste sous
+   * `ceilingDbtp`. Un beat masterisé fort (sommets écrêtés) prend jusqu'à
+   * +3 dB de crête à l'encodage : plafonner la source ne suffit pas. On
+   * encode, on décode, on mesure ; si ça dépasse, on baisse d'autant et on
+   * ré-encode une fois. Modifie le buffer en place.
+   */
+  public static async encodeMP3Plafonne(buffer: AudioBuffer, kbps: number, ceilingDbtp = -1.5): Promise<Blob> {
+    const { truePeakDb } = await import('../utils/loudness');
+    let blob = await AudioEncoder.encodeMP3(buffer, kbps);
+    // Le décodeur du navigateur sous-estime un peu la crête d'un MP3 très
+    // écrêté : on recommence (3 passes au plus) tant qu'elle dépasse.
+    for (let pass = 0; pass < 3; pass++) {
+      let tp: number;
+      try {
+        const ctx = new OfflineAudioContext(Math.min(2, buffer.numberOfChannels), 1, buffer.sampleRate);
+        tp = truePeakDb(await ctx.decodeAudioData(await blob.arrayBuffer()));
+      } catch { break; /* décodage impossible : on garde cet encodage */ }
+      if (!(tp > ceilingDbtp)) break;
+      const g = Math.pow(10, (ceilingDbtp - 0.5 - tp) / 20);
+      for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const d = buffer.getChannelData(c);
+        for (let i = 0; i < d.length; i++) d[i] *= g;
+      }
+      blob = await AudioEncoder.encodeMP3(buffer, kbps);
+    }
+    return blob;
+  }
+
+  /**
    * Encode un AudioBuffer en fichier WAV
    */
   public static encodeWAV(buffer: AudioBuffer, bitDepth: BitDepth): Blob {
