@@ -174,7 +174,16 @@ def _open_plugin(path: str, plugin_name: Optional[str] = None):
             return load_plugin(path, plugin_name=plugin_name)
         except Exception:
             pass  # le nom de classe ne correspond pas toujours : on tente sans
-    return load_plugin(path)
+    try:
+        return load_plugin(path)
+    except ImportError as e:
+        # Certains plugins (Slate MetaTune, constaté le 04/10/2026) échouent au
+        # tout premier « scan » de la session (vérification de licence trop
+        # lente) puis se chargent normalement : un seul nouvel essai.
+        if "scan" not in str(e).lower():
+            raise
+        logger.info(f"Nouvel essai de chargement : {os.path.basename(path)}")
+        return load_plugin(path)
 
 
 def _to_stereo(block: np.ndarray) -> np.ndarray:
@@ -559,6 +568,145 @@ class OfflinePool:
                     logger.info(f"♻️ Instance hors ligne libérée : {os.path.basename(key[0])}")
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PARAMÈTRES (v7 : valeurs texte)
+# ─────────────────────────────────────────────────────────────────────────────
+
+MAX_LISTED_VALUES = 128
+
+
+def _text_of(p) -> str:
+    try:
+        return str(p.string_value)
+    except Exception:
+        return ""
+
+
+def param_info(key: str, p) -> Dict[str, Any]:
+    """Description d'un paramètre pour le DAW (introspection, sans index codé en dur)."""
+    raw = float(getattr(p, "raw_value", 0.0))
+    info: Dict[str, Any] = {"name": key, "display_name": getattr(p, "name", key),
+                            "value": raw if np.isfinite(raw) else 0.0, "text": _text_of(p)}
+    for attr in ("label", "units"):
+        try:
+            v = getattr(p, attr)
+            if v:
+                info[attr] = str(v)
+        except Exception:
+            pass
+    try:
+        steps = int(getattr(p, "num_steps"))
+    except Exception:
+        steps = 0
+    info["num_steps"] = steps
+    info["is_boolean"] = _is_bool(p)
+    try:
+        info["is_discrete"] = bool(getattr(p, "is_discrete"))
+    except Exception:
+        pass
+    try:
+        lo, hi, step = p.range
+        # JSON strict côté navigateur : pas de -Infinity (niveaux en dB « -inf »).
+        fin = lambda x: None if x is None or not np.isfinite(float(x)) else float(x)
+        info["range"] = [fin(lo), fin(hi), fin(step)]
+    except Exception:
+        pass
+    if 0 < steps <= MAX_LISTED_VALUES:
+        try:
+            vv = p.valid_values
+            if vv is not None:
+                info["values"] = [str(v) for v in vv][:MAX_LISTED_VALUES]
+        except Exception:
+            pass
+    return info
+
+
+def _is_bool(p) -> bool:
+    """Interrupteur : pedalboard n'expose pas toujours is_boolean (Auto-Tune Pro
+    « latency_removal », notes de MetaTune) ; la plage (False, True) le trahit."""
+    try:
+        if bool(getattr(p, "is_boolean", False)) or getattr(p, "type", None) is bool:
+            return True
+    except Exception:
+        pass
+    try:
+        lo, hi, _ = p.range
+        if isinstance(lo, bool) or isinstance(hi, bool):
+            return True
+    except Exception:
+        pass
+    try:
+        vv = p.valid_values
+        return vv is not None and len(vv) == 2 and {str(v) for v in vv} == {"False", "True"}
+    except Exception:
+        return False
+
+
+def _bool_from(v) -> Optional[bool]:
+    if isinstance(v, bool):
+        return v
+    t = str(v).strip().lower()
+    if t in ("on", "true", "1", "1.0", "yes", "oui", "enabled", "active"):
+        return True
+    if t in ("off", "false", "0", "0.0", "no", "non", "disabled"):
+        return False
+    return None
+
+
+def _norm(x: str) -> str:
+    return re.sub(r"[\s_\-]+", "", x.lower())
+
+
+def apply_param(plugin, key: str, p, it: Dict[str, Any]):
+    """Un réglage : text (valeur affichée), real (unité du plugin) ou value (brute 0–1)."""
+    if it.get("text") is not None:
+        text = str(it["text"])
+        if _is_bool(p):
+            b = _bool_from(text)
+            if b is not None:
+                setattr(plugin, key, b)
+                return
+        try:
+            steps = int(getattr(p, "num_steps", 0))
+        except Exception:
+            steps = 0
+        vv = []
+        if 0 < steps <= 4096:
+            try:
+                vv = [str(v) for v in (p.valid_values or [])]
+            except Exception:
+                vv = []
+        if vv:
+            hit = next((v for v in vv if v == text), None) or next((v for v in vv if _norm(v) == _norm(text)), None)
+            if hit is not None:
+                try:
+                    setattr(plugin, key, hit)
+                except Exception:
+                    p.raw_value = float(p.get_raw_value_for(hit))
+                return
+        try:
+            setattr(plugin, key, float(text))   # « 20 » pour un paramètre numérique
+        except ValueError:
+            setattr(plugin, key, text)
+        return
+    if it.get("real") is not None:
+        setattr(plugin, key, float(it["real"]))
+        return
+    if it.get("value") is not None:
+        p.raw_value = max(0.0, min(1.0, float(it["value"])))
+        return
+    raise ValueError("Valeur manquante (text, real ou value)")
+
+
+def _reprepare(plugin, sample_rate: int, block: int) -> int:
+    """(Thread JUCE) Nouvelle préparation (reset=True) : c'est là que le plugin
+    publie sa nouvelle latence (mesuré sur Auto-Tune Pro ; un reset() seul la
+    fait relire à l'ancienne valeur). Renvoie la latence annoncée."""
+    plugin.process(np.zeros((2, block), np.float32), int(sample_rate), buffer_size=block, reset=True)
+    return _latency_of(plugin)
+
+
 OFFLINE = OfflinePool()
 
 
@@ -655,23 +803,89 @@ class Slot:
         with self.lock:
             return _set_state(self.plugin, state_b64) if self.plugin is not None else False
 
-    def parameters(self) -> List[Dict[str, Any]]:
+    def _on_message_thread(self, fn, *args):
+        """Lecture / réglage des paramètres sur le thread JUCE (thread « message »).
+
+        Constaté le 04/10/2026 : lire les paramètres d'une instance d'Auto-Tune Pro
+        (pedalboard → get_text_for_raw_value) depuis le thread d'un slot PENDANT
+        qu'une autre instance se chargeait sur le thread JUCE bloquait tout le pont
+        (verrou du plugin contre verrou de l'interpréteur). Tout passe donc par le
+        thread JUCE, à la suite des chargements. Exception : une fenêtre de plugin
+        ouverte occupe ce thread (et serait fermée) : on travaille alors sur place."""
+        if self.juce.editor_slot is not None:
+            return fn(*args)
+        return self.juce.run_sync(fn, *args, timeout=LOAD_TIMEOUT_S)
+
+    def parameters(self, names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Paramètres exposés : clé, nom affiché, valeur brute 0–1 et (v7) valeur
+        texte telle que le plugin l'affiche (« F# », « Minor », « 20 »), plage,
+        type et, pour les paramètres à choix (≤ 128 crans), la liste des valeurs."""
+        return self._on_message_thread(self._parameters_now, names)
+
+    def _parameters_now(self, names: Optional[List[str]]) -> List[Dict[str, Any]]:
         out = []
         with self.lock:
             params = getattr(self.plugin, "parameters", {}) or {}
+            wanted = set(names) if names else None
             for key, p in list(params.items())[:256]:
+                if wanted is not None and key not in wanted:
+                    continue
                 try:
-                    out.append({"name": key, "display_name": getattr(p, "name", key),
-                                "value": float(getattr(p, "raw_value", 0.0))})
+                    out.append(param_info(key, p))
                 except Exception:
                     pass
         return out
 
     def set_parameter(self, name: str, value: float):
+        def now():
+            with self.lock:
+                p = (getattr(self.plugin, "parameters", {}) or {}).get(name)
+                if p is not None:
+                    p.raw_value = float(value)
+        self._on_message_thread(now)
+
+    def set_parameters(self, items: List[Dict[str, Any]], probe_latency: Optional[bool] = None) -> Dict[str, Any]:
+        """(v7) Réglage groupé, par valeur texte (« F# »), réelle (20.0 ms) ou
+        brute (0–1). Chaque réglage est relu : on renvoie la valeur texte
+        effectivement prise par le plugin. Si la latence annoncée change (mode
+        basse latence d'Auto-Tune…), le plugin est re-préparé et la latence du
+        flux repart de zéro."""
+        return self._on_message_thread(self._set_parameters_now, items, probe_latency)
+
+    def _set_parameters_now(self, items: List[Dict[str, Any]], probe_latency: Optional[bool]) -> Dict[str, Any]:
+        results = []
         with self.lock:
-            p = (getattr(self.plugin, "parameters", {}) or {}).get(name)
-            if p is not None:
-                p.raw_value = float(value)
+            plugin = self.plugin
+            if plugin is None:
+                raise RuntimeError("Plugin non chargé sur le pont")
+            before = int(self.reported_latency)
+            params = getattr(plugin, "parameters", {}) or {}
+            for it in items or []:
+                name = str(it.get("name") or "")
+                p = params.get(name)
+                if p is None:
+                    results.append({"name": name, "ok": False, "error": "Paramètre inconnu"})
+                    continue
+                try:
+                    apply_param(plugin, name, p, it)
+                    results.append({"name": name, "ok": True, "text": _text_of(p), "value": float(p.raw_value)})
+                except Exception as e:
+                    results.append({"name": name, "ok": False, "error": str(e)[:200], "text": _text_of(p),
+                                    "value": float(getattr(p, "raw_value", 0.0))})
+            after = _latency_of(plugin)
+            if probe_latency is None:
+                probe_latency = any("latency" in str(it.get("name") or "").lower() for it in items or [])
+            if probe_latency or after != before:
+                # Le plugin n'annonce sa nouvelle latence qu'à la préparation suivante
+                # (Auto-Tune Pro : 2 670 → 112 éch. en mode Low Latency) : nouvelle
+                # préparation, relecture, flux remis à zéro.
+                after = _reprepare(plugin, self.sample_rate, BLOCK)
+                self.reported_latency = after
+                self._fifo = np.zeros((2, 0), dtype=np.float32)
+                self.padded_total = 0
+        changed = after != before
+        return {"results": results, "latency_samples": self.latency_samples, "latency_changed": changed,
+                "plugin_latency_before": before, "plugin_latency_after": after}
 
     def unload(self):
         self.juce.close_editor(self)

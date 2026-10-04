@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NOVA BRIDGE VST3 — v6
+NOVA BRIDGE VST3 — v7
 
 Pont local entre Nova Studio (navigateur) et les plugins VST3 installés sur le PC
 (effets, et depuis la v5 instruments : notes rendues en audio hors temps réel).
@@ -13,7 +13,8 @@ Sécurité
 
 Protocole (WebSocket ws://127.0.0.1:8765)
   Messages JSON (contrôle) — chaque réponse renvoie le « req_id » reçu :
-    HELLO / PING                → capacités, version (5 : instruments, 6 : fenêtres de licence)
+    HELLO / PING                → capacités, version (5 : instruments, 6 : fenêtres de licence,
+                                  7 : paramètres par valeur texte, params_text=true)
     GET_PLUGIN_LIST [rescan]    → plugins installés ; chacun porte is_instrument
                                   (true / false / null = pas encore lu), plus
                                   instruments_pending + probe_progress [lus, total]
@@ -21,8 +22,12 @@ Protocole (WebSocket ws://127.0.0.1:8765)
                                   (v6) scan_status (ok, error, activation, hang, crash)
                                   et license (activation / nag) quand c'est connu.
                                   rescan=true relit aussi les plugins en attente d'activation
-    LOAD_PLUGIN  slot_id path [plugin_name] sample_rate [state]
+    LOAD_PLUGIN  slot_id path [plugin_name] sample_rate [state] [quiet]
                                 → name, vendor, latency_samples, buffer_latency_samples, state, is_instrument
+                                  (v7) quiet=true : chargement posé par NOVA lui-même (autotune,
+                                  mix auto). Une fenêtre de licence / démo est cachée et fermée
+                                  au lieu d'être ramenée devant, et le chargement échoue avec
+                                  license_required=true : le DAW passe au plugin suivant.
     UNLOAD_PLUGIN slot_id
     GET_STATE / SET_STATE slot_id [state]   (état binaire du plugin en base64)
                                 GET_STATE renvoie aussi « hash » (SHA-1 de l'état) ;
@@ -36,7 +41,19 @@ Protocole (WebSocket ws://127.0.0.1:8765)
       nch:2, nframes, sample_rate} + float32 stéréo entrelacés (comme RENDER),
       durée = length_seconds + tail_seconds.
     SHOW_EDITOR / CLOSE_EDITOR slot_id      (fenêtre native du plugin sur le PC)
-    GET_PARAMS / SET_PARAM      (paramètres exposés par le plugin)
+    GET_PARAMS [names]          paramètres exposés par le plugin. Chacun : name (clé), display_name,
+                                  value (brute 0–1) et depuis la v7 : text (valeur affichée par le
+                                  plugin, ex. « F# », « Minor », « 20 »), num_steps, is_boolean,
+                                  is_discrete, range [min, max, pas] et values (liste des choix
+                                  possibles quand il y en a 128 au plus). names : filtre facultatif.
+    SET_PARAM name value        (valeur brute 0–1, ancien format)
+    SET_PARAMS (v7) slot_id params:[{name, text | real | value}]
+                                → results:[{name, ok, text, value, error?}] (valeur RELUE sur le
+                                  plugin après réglage), latency_samples, latency_changed. text :
+                                  valeur affichée (« F# », « Harmonic Minor », « On ») ; real : valeur
+                                  dans l'unité du plugin (20.0 pour 20 ms) ; value : brute 0–1.
+                                  Si la latence annoncée change (mode basse latence), le plugin est
+                                  re-préparé et un événement LATENCY suit.
     PROCESS_AUDIO               (ancien format JSON, conservé pour compatibilité)
   Événements : EDITOR_CLOSED (avec l'état), LATENCY (latence mesurée qui change),
     (v6) LICENSE_WINDOW {type:"license_window", plugin, path, plugin_name, title,
@@ -89,7 +106,7 @@ import vst_host
 import vst_probe
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events
 
-VERSION = 6
+VERSION = 7
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
@@ -99,6 +116,10 @@ MAX_QUEUE_BLOCKS = 64        # au-delà, le DAW a déjà compté le bloc comme p
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger("NovaBridge")
 logging.getLogger("websockets").setLevel(logging.WARNING)  # pas une ligne par connexion
+
+
+class LicenseRequired(RuntimeError):
+    """Chargement discret (quiet) interrompu par une fenêtre de licence / démo."""
 
 
 def allowed_origins() -> List[Any]:
@@ -306,7 +327,7 @@ class NovaBridgeServer:
             logger.info(f"🔑 {name} ouvre encore sa fenêtre (version d'essai ou rappel ?) : il n'est plus chargé automatiquement")
         msg = {"action": "LICENSE_WINDOW", "type": "license_window", "plugin": name, "path": w.path,
                "plugin_name": w.plugin_name, "title": title, "status": status,
-               "source": w.context.get("source", "load")}
+               "source": w.context.get("source", "load"), "quiet": bool(w.context.get("quiet"))}
         if w.context.get("slot_id"):
             msg["slot_id"] = w.context["slot_id"]
         target = w.context.get("ws")
@@ -428,7 +449,8 @@ class NovaBridgeServer:
                               "render": True, "editor": vst_host.HAS_PEDALBOARD,
                               "pedalboard": vst_host.HAS_PEDALBOARD,
                               "instruments": vst_host.HAS_PEDALBOARD,
-                              "license_events": license_watch.IS_WINDOWS})
+                              "license_events": license_watch.IS_WINDOWS,
+                              "params_text": True})
 
     async def _a_get_plugin_list(self, ws, req):
         if req.get("rescan"):
@@ -477,8 +499,19 @@ class NovaBridgeServer:
         q: asyncio.Queue = asyncio.Queue()
         self.slot_queues[slot_id] = q
         asyncio.create_task(self._slot_worker(slot, q))
+        ctx = {"ws": ws, "slot_id": slot_id, "source": "load", "quiet": bool(req.get("quiet"))}
         try:
-            await self._in_slot(slot, slot.load, req.get("state"), {"ws": ws, "slot_id": slot_id, "source": "load"})
+            await self._in_slot(slot, slot.load, req.get("state"), ctx)
+            if ctx.get("license_seen"):
+                raise LicenseRequired(f"{slot.name} demande une licence ou une activation : il n'est pas utilisé")
+        except LicenseRequired as e:
+            slot.error = str(e)
+            slot.loaded.set()
+            if self.slots.get(slot_id) is slot:
+                self._drop_slot(slot_id)
+            logger.info(f"🔑 {e}")
+            self._reply(ws, req, {"success": False, "error": str(e), "license_required": True})
+            return
         except Exception as e:
             slot.error = str(e)
             slot.loaded.set()
@@ -565,7 +598,22 @@ class NovaBridgeServer:
 
     async def _a_get_params(self, ws, req):
         slot = self._slot(req)
-        self._reply(ws, req, {"action": "PARAMS", "parameters": await self._in_slot(slot, slot.parameters)})
+        names = req.get("names") if isinstance(req.get("names"), list) else None
+        self._reply(ws, req, {"action": "PARAMS", "success": True,
+                              "parameters": await self._in_slot(slot, slot.parameters, names)})
+
+    async def _a_set_params(self, ws, req):
+        slot = self._slot(req)
+        items = req.get("params") if isinstance(req.get("params"), list) else []
+        probe = req.get("probe_latency")
+        res = await self._in_slot(slot, slot.set_parameters, items, None if probe is None else bool(probe))
+        self._reply(ws, req, {"success": True, **res})
+        if res.get("latency_changed") or probe:
+            logger.info(f"⏱️ {slot.name} : latence {res.get('plugin_latency_before')} → "
+                        f"{res.get('plugin_latency_after')} éch.")
+            if slot.owner is not None:
+                await self._send(slot.owner, {"action": "LATENCY", "slot_id": slot.slot_id,
+                                              "latency_samples": slot.latency_samples})
 
     async def _a_set_param(self, ws, req):
         slot = self._slot(req)
