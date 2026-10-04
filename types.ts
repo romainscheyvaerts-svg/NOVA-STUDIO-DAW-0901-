@@ -412,6 +412,11 @@ export interface Track {
    */
   collabOwner?: CollabRole;
   /**
+   * Mode « Ingé à distance » : piste envoyée par l'artiste à l'ingé (chez
+   * l'artiste) ou reçue de l'artiste (chez l'ingé). Voir utils/remoteInge.
+   */
+  remote?: RemoteTrackInfo;
+  /**
    * Volume verrouillé par l'artiste (« c'est ce volume-là que je veux ») :
    * l'ingé son le voit, peut le déverrouiller, mais le message est clair.
    */
@@ -508,6 +513,8 @@ export interface DAWState {
   projectMode?: 'VOCAL' | 'BEATMAKING';
   /** Collaboration : dernière opération du journal incluse dans cet instantané. */
   collabSeq?: number;
+  /** Mode « Ingé à distance » : lien avec la session de l'autre (artiste / ingé). */
+  remoteInge?: RemoteIngeLinkInfo;
   /** Genre du beat du catalogue (sert à proposer le style de mix adapté). */
   beatGenre?: string;
   /** Titre du beat du catalogue. */
@@ -697,3 +704,54 @@ declare global {
 
 /** Rôles de la collaboration à distance dans Nova. */
 export type CollabRole = 'artist' | 'engineer' | 'beatmaker';
+
+// --- Mode « Ingé à distance » (utils/remoteInge) ----------------------------------
+
+/** Enregistrement en direct (effets temporels de NOVA seulement) ou mix (VST de l'ingé). */
+export type RemoteIngePhase = 'recording' | 'mixing';
+
+/** Lien entre la session de l'artiste et celle de l'ingé (chacun garde la sienne). */
+export interface RemoteIngeLinkInfo {
+  /** Session en ligne qui sert de boîte aux lettres (« id.clé »). */
+  link: string;
+  role: 'artist' | 'engineer';
+  phase: RemoteIngePhase;
+  /** Dernière opération du lien déjà appliquée (rattrapage à la reconnexion). */
+  seq?: number;
+}
+
+/** Réglages de l'artiste sur une piste avant les réglages de l'ingé (retour possible). */
+export interface RemoteBefore {
+  plugins: PluginInstance[];
+  sends: TrackSend[];
+  pan: number;
+}
+
+export interface RemoteTrackInfo {
+  /** Piste correspondante dans la session de l'autre. */
+  peerTrackId: string;
+  /** Emplacement choisi par l'artiste en glissant la piste (lead, backs…). */
+  slot?: string;
+  /** Artiste : dernière version envoyée et empreinte de l'audio brut + éditions. */
+  sentV?: number;
+  sentSig?: string;
+  /** Artiste : version (et empreinte) des réglages de l'ingé appliqués. */
+  appliedV?: number;
+  appliedSig?: string;
+  /** Artiste : réglages de l'ingé reçus, pas encore appliqués (« Recevoir les réglages de l'ingé »). */
+  pending?: any;
+  /** Artiste : l'artiste a accepté une fois → les mises à jour suivantes s'appliquent toutes seules. */
+  accepted?: boolean;
+  /** Artiste : ses réglages d'avant (« Revenir à ma prise brute »). */
+  before?: RemoteBefore;
+  /** Artiste : prise brute remise (réglages de l'ingé gardés en réserve). */
+  reverted?: boolean;
+  /** Ingé : dernière version reçue de l'artiste. */
+  recvV?: number;
+  recvSig?: string;
+  /** Ingé : version renvoyée et empreinte du renvoi (jamais deux fois le même). */
+  returnedV?: number;
+  returnedSig?: string;
+  /** Ingé : renvoi automatique (après le premier « Envoyer à l'artiste »). */
+  auto?: boolean;
+}
