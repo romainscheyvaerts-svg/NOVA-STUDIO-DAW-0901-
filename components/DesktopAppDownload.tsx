@@ -40,7 +40,7 @@ const DesktopAppDownload: React.FC<{ compact?: boolean }> = ({ compact }) => {
               <i className="fas fa-download" aria-hidden="true"></i>
               <span>Télécharger Nova Studio pour Windows (recommandé au studio : pont ASIO et VST intégrés)</span>
             </a>
-            <span className="text-[9px] text-slate-400">~22 Mo • Windows 10/11</span>
+            <span className="text-[9px] text-slate-400">environ 36 Mo • Windows 10/11</span>
           </div>
         </div>
       </div>

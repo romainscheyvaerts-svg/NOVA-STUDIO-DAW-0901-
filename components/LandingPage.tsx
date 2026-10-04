@@ -7,6 +7,7 @@ import { ProjectIO } from '../services/ProjectIO';
 import AuthScreen from './AuthScreen';
 import InstallAppButton from './InstallAppButton';
 import { SavedSessionMeta, formatAgo } from '../utils/sessionStore';
+import { DESKTOP_APP_DOWNLOAD_URL, isNovaDesktop } from '../utils/desktopApp';
 
 interface LandingPageProps {
   user: User | null;
@@ -378,6 +379,26 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 <p className="text-[11px] text-slate-400">Local ou Cloud</p>
               </div>
             </button>
+
+            {/* Application Windows (masquée sur téléphone et dans l'application elle-même) */}
+            {!isNovaDesktop() && (
+              <a
+                href={DESKTOP_APP_DOWNLOAD_URL}
+                download
+                title="Installe Nova Studio sur ton PC : il s'ouvre sans Internet, les ponts ASIO et VST démarrent tout seuls, ta session est sauvegardée à la fermeture."
+                className="hidden md:flex w-full items-center gap-4 p-4 bg-white/[0.02] border border-white/10 rounded-xl hover:border-sky-400/40 hover:bg-white/[0.05] transition-all group"
+              >
+                <div className="w-12 h-12 rounded-xl bg-sky-500/15 flex items-center justify-center group-hover:bg-sky-500/25 transition-all">
+                  <i className="fab fa-windows text-sky-300 text-lg" aria-hidden="true"></i>
+                </div>
+                <div className="text-left min-w-0">
+                  <p className="text-sm font-bold text-white">Nova Studio pour Windows</p>
+                  <p className="text-[11px] text-slate-400">Télécharger l'appli PC · ASIO + VST</p>
+                  <p className="text-[10px] text-slate-500">Windows 10/11 · environ 36 Mo</p>
+                </div>
+                <i className="fas fa-download ml-auto text-slate-500 group-hover:text-sky-300 transition-colors" aria-hidden="true"></i>
+              </a>
+            )}
           </div>
 
           {/* Footer sidebar */}
