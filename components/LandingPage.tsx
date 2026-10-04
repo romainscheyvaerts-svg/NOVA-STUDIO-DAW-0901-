@@ -7,7 +7,8 @@ import { ProjectIO } from '../services/ProjectIO';
 import AuthScreen from './AuthScreen';
 import InstallAppButton from './InstallAppButton';
 import { SavedSessionMeta, formatAgo } from '../utils/sessionStore';
-import { DESKTOP_APP_DOWNLOAD_URL, isNovaDesktop } from '../utils/desktopApp';
+import { DESKTOP_APP_DOWNLOAD_URL, getNovaDesktop, isNovaDesktop } from '../utils/desktopApp';
+import { tonaliteFr } from '../utils/keyName';
 
 interface LandingPageProps {
   user: User | null;
@@ -262,7 +263,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             <h1 className="text-lg font-black text-white tracking-tight">
               NOVA <span className="text-cyan-400">STUDIO</span>
             </h1>
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest">Digital Audio Workstation</p>
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest">Studio d'enregistrement</p>
           </div>
         </div>
 
@@ -376,7 +377,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
               </div>
               <div className="text-left">
                 <p className="text-sm font-bold text-white">Charger Projet</p>
-                <p className="text-[11px] text-slate-400">Local ou Cloud</p>
+                <p className="text-[11px] text-slate-400">Depuis ton ordinateur ou ton compte</p>
               </div>
             </button>
 
@@ -404,7 +405,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
           {/* Footer sidebar */}
           <div className="nova-signature mt-auto p-4 border-t border-white/5">
             <p className="text-[9px] text-slate-600 text-center">
-              © 2026 Nova Studio • v1.0.0
+              © 2026 Nova Studio{getNovaDesktop() ? ` • Windows v${getNovaDesktop()!.version}` : ''}
             </p>
           </div>
         </aside>
@@ -508,7 +509,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         <span className="mono rounded-md border border-white/10 bg-white/[0.03] px-1.5 py-1 text-slate-300 whitespace-nowrap">{inst.bpm ? `${inst.bpm} BPM` : 'Tempo auto'}</span>
                         {inst.key && (
                           <span className="mono rounded-md border border-cyan-400/25 bg-cyan-400/[0.06] px-1.5 py-1 text-cyan-300 whitespace-nowrap">
-                            {inst.key}
+                            {tonaliteFr(inst.key)}
                           </span>
                         )}
                         <span className="truncate text-slate-400">{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>

@@ -334,7 +334,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              <button onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Audio</span></button>
              
              {/* PDC Toggle */}
-             {!simple && <button onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="Delay Compensation (PDC)">
+             {!simple && <button onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="Compensation de latence des effets (PDC)">
                 <div className={`w-1.5 h-1.5 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400 animate-pulse' : 'bg-slate-600'}`}></div>
                 <span className="text-[9px] font-black uppercase tracking-wider">PDC</span>
              </button>}
@@ -544,11 +544,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               <div className="space-y-2">
                 <button onClick={() => { onOpenAudioEngine?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-orange-500/10 text-orange-400 font-black transition-all flex items-center justify-center space-x-2">
                   <i className="fas fa-microchip"></i>
-                  <span>{simple ? 'Réglages audio (micro, latence)' : 'Moteur Audio (Engine)'}</span>
+                  <span>{simple ? 'Réglages audio (micro, latence)' : 'Réglages audio (moteur, latence)'}</span>
                 </button>
                 {!simple && <button onClick={() => { onToggleDelayComp?.(); setIsMobileMenuOpen(false); }} aria-pressed={!!isDelayCompEnabled} className={`w-full px-4 py-3 rounded-lg font-black transition-all flex items-center justify-center space-x-2 ${isDelayCompEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-400'}`}>
                   <div className={`w-2 h-2 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400' : 'bg-slate-600'}`}></div>
-                  <span>Delay Compensation (PDC)</span>
+                  <span>Compensation de latence (PDC)</span>
                 </button>}
                 <button onClick={() => { onToggleTheme?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-white/5 text-white font-black transition-all flex items-center justify-center space-x-2">
                   <i className={`fas ${currentTheme === 'dark' ? 'fa-sun' : 'fa-moon'}`}></i>

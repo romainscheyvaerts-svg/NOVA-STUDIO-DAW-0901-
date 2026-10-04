@@ -7,6 +7,7 @@ import { stripeManager } from '../services/StripeManager';
 import AdminPanel from './AdminPanel';
 import { audioEngine } from '../engine/AudioEngine';
 import { setDraggedBeat } from '../utils/beatDrag';
+import { tonaliteFr } from '../utils/keyName';
 
 interface InstrumentCatalogProps {
   user: User | null;
@@ -391,7 +392,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                         <span className="text-slate-600" aria-hidden="true">•</span>
                         {/* Liste étroite : tonalité OU genre, sinon les deux sortaient en « T… • F#… » (QA 04/10). */}
                         {inst.key
-                            ? <span className="mono shrink-0 text-cyan-300/80">{inst.key}</span>
+                            ? <span className="mono shrink-0 text-cyan-300/80">{tonaliteFr(inst.key)}</span>
                             : <span className="truncate">{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>}
                     </div>
                 </div>
@@ -463,7 +464,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                     <div className="w-full md:w-1/3 bg-[#0c0d10] p-6 flex flex-col items-center justify-center text-center">
                         <img src={getCoverImage(selectedBeat)} className="w-32 h-32 rounded-lg shadow-lg mb-4" />
                         <h2 className="text-lg font-black text-white uppercase">{selectedBeat.title}</h2>
-                        <p className="text-[10px] text-slate-500 mb-4">{selectedBeat.bpm || '?'} BPM • {selectedBeat.key || 'N/A'}</p>
+                        <p className="text-[10px] text-slate-500 mb-4">{selectedBeat.bpm || '?'} BPM • {tonaliteFr(selectedBeat.key) || 'tonalité inconnue'}</p>
                     </div>
 
                     <div className="w-full md:w-2/3 p-6 relative">

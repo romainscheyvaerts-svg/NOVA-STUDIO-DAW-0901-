@@ -64,8 +64,8 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
                     <i className="fas fa-folder-open text-lg"></i>
                 </div>
                 <div>
-                    <h2 className="text-sm font-black text-white uppercase tracking-widest">Ouvrir un Projet</h2>
-                    <p className="text-[10px] text-slate-500 font-mono">Bibliothèque de projets</p>
+                    <h2 className="text-sm font-black text-white uppercase tracking-widest">Ouvrir un projet</h2>
+                    <p className="text-[11px] text-slate-400">Tes projets enregistrés</p>
                 </div>
             </div>
             <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
@@ -79,13 +79,13 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
                 onClick={() => setActiveTab('CLOUD')}
                 className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'CLOUD' ? 'bg-white/5 text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-500 hover:text-slate-300'}`}
             >
-                <i className="fas fa-cloud mr-2"></i> Cloud (Compte)
+                <i className="fas fa-cloud mr-2"></i> Mon compte (en ligne)
             </button>
             <button 
                 onClick={() => setActiveTab('LOCAL')}
                 className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'LOCAL' ? 'bg-white/5 text-purple-400 border-b-2 border-purple-400' : 'text-slate-500 hover:text-slate-300'}`}
             >
-                <i className="fas fa-hdd mr-2"></i> Local (Fichier)
+                <i className="fas fa-hdd mr-2"></i> Fichier sur l'ordinateur
             </button>
         </div>
 

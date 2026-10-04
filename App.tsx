@@ -2984,7 +2984,7 @@ function Studio() {
               }
           }));
 
-          setExternalImportNotice(`✅ Importé: ${clipName}`);
+          setExternalImportNotice(`✅ Importé : ${clipName}`);
           console.log(`[AudioImport] Successfully imported: ${clipName} (bufferId: ${bufferId})`);
           // Rendu pour l'appelant (analyse du beat : tonalité, BPM).
           return audioBuffer;
@@ -5030,8 +5030,9 @@ function Studio() {
       
       {/* Sur téléphone, le « + » ne sert que dans Pistes et Arrangement ; ailleurs
           il couvrait du contenu (saisie du chat Nova, liste des effets). */}
-      {/* Sur ordinateur, elle recouvrait la rangée MUTE / SOLO du mixer. */}
-      {(isMobile ? (activeMobileTab === 'TRACKS' || activeMobileTab === 'ARRANGEMENT') : shownView !== 'MIXER') && (
+      {/* Sur ordinateur / tablette, elle est posée dans le bandeau du bas (sous la
+          grille) : flottante, elle cachait des clips et la rangée MUTE / SOLO du mixer. */}
+      {isMobile && (activeMobileTab === 'TRACKS' || activeMobileTab === 'ARRANGEMENT') && (
         <TrackCreationBar
           onCreateTrack={handleCreateTrack}
           beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
@@ -5104,6 +5105,42 @@ function Studio() {
                  /></Suspense>
               )}
             </>
+          )}
+
+          {/* Bandeau du bas (ordinateur / tablette) : Collaborer, session en ligne et
+              les gestes voix (Piste voix, Paroles, Mix auto). Il prend sa propre place
+              sous la grille : plus rien ne flotte sur les clips ni sur le catalogue. */}
+          {!isMobile && (
+            <div data-nova-dock className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-28 border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
+              <div className="flex shrink-0 items-center gap-2">
+                <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen}
+                  title="Collaborer à distance : artiste, ingé son, beatmaker"
+                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${collabOpen ? 'border-violet-400 bg-violet-500/25 text-white' : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'}`}>
+                  👥 {collab ? `${collabOnline.length || 1} en ligne · Chat` : 'Collaborer'}
+                </button>
+                {isCloudProject && (
+                  <button type="button" onClick={() => setTakeHomeOpen(true)}
+                    title="Session en ligne : lien, QR code, compte client"
+                    className="h-10 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-3 text-[11px] font-bold text-cyan-200 whitespace-nowrap">
+                    ☁️ En ligne · {cloudSession?.syncedAt ? formatAgo(cloudSession.syncedAt) : 'à envoyer'}
+                  </button>
+                )}
+              </div>
+              <div className="flex min-w-0 flex-1 justify-center">
+                <TrackCreationBar
+                  docked
+                  onCreateTrack={handleCreateTrack}
+                  beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
+                  onOpenDrums={() => setDrumsOpen(true)}
+                  onNewMidiTrack={handleNewMidiTrack}
+                  onOpen808={handleOpen808}
+                  onOpenVocalTools={() => setVocalToolsOpen(true)}
+                  onOpenLyrics={() => setLyricsOpen(o => !o)}
+                  lyricsOpen={lyricsOpen}
+                  currentStyleId={state.vocalMixStyle}
+                />
+              </div>
+            </div>
           )}
 
           {/* Mode Mobile - Nouveau système de pages */}
@@ -5402,13 +5439,7 @@ function Studio() {
       )}
       {/* Sur téléphone, ces pastilles recouvraient le chat Nova, le menu et la barre
           d'ajout de piste : elles passent dans le menu ☰. */}
-      {isCloudProject && !showLanding && !isMobile && (
-        <button type="button" onClick={() => setTakeHomeOpen(true)}
-          title="Session en ligne : lien, QR code, compte client"
-          className="fixed bottom-20 left-3 z-[90] md:bottom-4 h-10 rounded-full border border-cyan-500/40 bg-[#0d1117]/90 px-3 text-[11px] font-bold text-cyan-200 shadow-lg backdrop-blur">
-          ☁️ En ligne · {cloudSession!.syncedAt ? formatAgo(cloudSession!.syncedAt) : 'à envoyer'}
-        </button>
-      )}
+      {/* Ordinateur / tablette : la pastille « En ligne » est dans le bandeau du bas. */}
       <ProGateModal
         open={!!proGate}
         reason={proGate?.reason || ''}
@@ -5436,13 +5467,8 @@ function Studio() {
           void c.client.send('chat', { text }).catch(() => setAiNotification("⚠️ Message non envoyé (connexion)."));
         }}
       />
-      {!showLanding && !collabOpen && !isMobile && (
-        <button type="button" onClick={() => setCollabOpen(true)}
-          title="Collaborer à distance : artiste, ingé son, beatmaker"
-          className="fixed bottom-32 left-3 z-[90] md:bottom-16 h-10 rounded-full border border-violet-500/40 bg-[#0d1117]/90 px-3 text-[11px] font-bold text-violet-200 shadow-lg backdrop-blur">
-          👥 {collab ? `${collabOnline.length || 1} en ligne · Chat` : 'Collaborer'}
-        </button>
-      )}
+      {/* « Collaborer » (ordinateur / tablette) : dans le bandeau du bas ; flottant,
+          il recouvrait le bas du catalogue Beat Store. */}
       {cloudConflict && (
         <div className="fixed inset-0 z-[670] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="conflict-title">
           <div className="w-full max-w-md rounded-3xl border border-amber-500/30 bg-[#121418] p-6 shadow-2xl space-y-4">

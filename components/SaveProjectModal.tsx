@@ -74,8 +74,8 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
                     <i className="fas fa-save text-lg"></i>
                 </div>
                 <div>
-                    <h2 className="text-sm font-black text-white uppercase tracking-widest">Sauvegarder le Projet</h2>
-                    <p className="text-[10px] text-slate-500 font-mono">Choisissez une méthode</p>
+                    <h2 className="text-sm font-black text-white uppercase tracking-widest">Sauvegarder le projet</h2>
+                    <p className="text-[11px] text-slate-400">Choisis où le garder</p>
                 </div>
             </div>
             <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
@@ -86,13 +86,13 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
         <div className="p-8 space-y-6">
             {/* Project Name Input */}
             <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nom du Projet</label>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nom du projet</label>
                 <input 
                     type="text" 
                     value={name}
                     onChange={(e) => { setName(e.target.value); setError(null); }}
                     className="w-full h-12 bg-black/40 border border-white/10 rounded-xl px-4 text-white font-bold focus:border-cyan-500 focus:outline-none transition-all placeholder:text-slate-700"
-                    placeholder="Mon Super Hit..."
+                    placeholder="Ex. : Mon premier son"
                     autoFocus
                 />
                 {error && <p className="text-[10px] text-red-500 font-bold ml-1 flex items-center"><i className="fas fa-exclamation-circle mr-1"></i> {error}</p>}

@@ -106,3 +106,27 @@ export function normalizeToLufs(buffer: AudioBuffer, targetLufs: number, ceiling
   }
   return { before, after: before + gainDb, truePeak: tp + gainDb, gainDb, limitedByPeak };
 }
+
+/**
+ * Plafond de crête vraie visé avant l'encodage MP3. L'encodeur ajoute de la
+ * crête (souvent 0,5 dB, parfois plus sur un beat très compressé) : on garde
+ * de la marge pour que le fichier MP3 décodé reste vers -1 dBTP au plus.
+ */
+export const MP3_TRUE_PEAK_CEILING = -1.5;
+
+/**
+ * Baisse le volume (jamais ne le monte) pour que la crête vraie reste sous
+ * `ceilingDbtp`. Modifie le buffer en place ; renvoie le gain appliqué (dB,
+ * 0 si rien à faire). Évite l'écrêtage à la conversion MP3.
+ */
+export function capTruePeak(buffer: AudioBuffer, ceilingDbtp: number): number {
+  const tp = truePeakDb(buffer);
+  if (!(tp > ceilingDbtp)) return 0;
+  const gainDb = ceilingDbtp - tp;
+  const g = Math.pow(10, gainDb / 20);
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const d = buffer.getChannelData(c);
+    for (let i = 0; i < d.length; i++) d[i] *= g;
+  }
+  return gainDb;
+}

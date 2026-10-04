@@ -4,6 +4,7 @@ import { prepareTracksForOffline } from '../services/VstFreeze';
 import { AudioEncoder } from '../services/AudioEncoder';
 import { supabaseManager } from '../services/SupabaseManager';
 import { getCatalogBeat } from './studioLinks';
+import { capTruePeak, MP3_TRUE_PEAK_CEILING } from './loudness';
 
 /**
  * Démo gratuite et extrait partageable.
@@ -76,8 +77,9 @@ async function applyTag(mix: AudioBuffer): Promise<AudioBuffer> {
       const dst = mix.getChannelData(ch);
       const src = tag.getChannelData(Math.min(ch, tag.numberOfChannels - 1));
       for (let i = 0; i < src.length && at + i < dst.length; i++) {
-        const v = dst[at + i] * 0.75 + src[i]; // léger « ducking » du mix sous le tag
-        dst[at + i] = v > 1 ? 1 : v < -1 ? -1 : v;
+        // Léger « ducking » du mix sous le tag. Pas d'écrêtage ici (il
+        // saturait le MP3 jusqu'à +3,6 dBTP) : renderTagged plafonne ensuite.
+        dst[at + i] = dst[at + i] * 0.75 + src[i];
       }
     }
   }
@@ -112,7 +114,10 @@ export async function renderTagged(st: DAWState, start: number, duration: number
     prep.cleanup();
   }
   AudioEncoder.normalizeBuffer(mix, -1);
-  return applyTag(mix);
+  await applyTag(mix);
+  // Crête vraie sous le plafond MP3 (le tag et l'encodeur ajoutent de la crête).
+  capTruePeak(mix, MP3_TRUE_PEAK_CEILING);
+  return mix;
 }
 
 export async function demoMp3(st: DAWState, onProgress?: (p: number) => void): Promise<Blob> {

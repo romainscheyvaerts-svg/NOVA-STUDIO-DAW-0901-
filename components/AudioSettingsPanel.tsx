@@ -325,8 +325,8 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                 {!(asioConnected && selectedAsioDevice) && (
                 <div className="space-y-5">
                     <div className="flex items-center space-x-2 mb-2">
-                        <span className="text-[10px] font-black text-orange-500 uppercase tracking-widest bg-orange-500/10 px-2 py-0.5 rounded">Audio I/O</span>
-                        <span className="text-[8px] text-slate-500">(System Drivers)</span>
+                        <span className="text-[10px] font-black text-orange-500 uppercase tracking-widest bg-orange-500/10 px-2 py-0.5 rounded">Micro et sortie son</span>
+                        <span className="text-[9px] text-slate-500">(réglages de l'ordinateur)</span>
                     </div>
 
                     <div className="grid grid-cols-2 gap-6">

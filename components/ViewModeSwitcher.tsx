@@ -13,21 +13,21 @@ const ViewModeSwitcher: React.FC<ViewModeSwitcherProps> = ({ currentMode, onChan
       <button 
         onClick={() => onChange('DESKTOP')}
         className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${currentMode === 'DESKTOP' ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-slate-600 hover:text-white hover:bg-white/5'}`}
-        title="Mode PC (Desktop)"
+        title="Mode PC (ordinateur)"
       >
         <i className="fas fa-desktop text-[10px]"></i>
       </button>
       <button 
         onClick={() => onChange('TABLET')}
         className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${currentMode === 'TABLET' ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-slate-600 hover:text-white hover:bg-white/5'}`}
-        title="Mode Tablette (Touch)"
+        title="Mode Tablette (tactile)"
       >
         <i className="fas fa-tablet-alt text-[10px]"></i>
       </button>
       <button 
         onClick={() => onChange('MOBILE')}
         className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${currentMode === 'MOBILE' ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-slate-600 hover:text-white hover:bg-white/5'}`}
-        title="Mode Mobile (Focus)"
+        title="Mode Mobile (téléphone)"
       >
         <i className="fas fa-mobile-alt text-[10px]"></i>
       </button>

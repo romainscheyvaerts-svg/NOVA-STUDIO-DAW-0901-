@@ -1,5 +1,5 @@
 
-import { integratedLufs, normalizeToLufs, truePeakDb } from '../utils/loudness';
+import { integratedLufs, normalizeToLufs, truePeakDb, capTruePeak, MP3_TRUE_PEAK_CEILING } from '../utils/loudness';
 import { openCheckout, waitPaid, isExportVoicesUnlocked, markExportVoicesUnlocked, spendExportCredit, billingStatus } from '../services/Billing';
 import React, { useState, useEffect } from 'react';
 import { DAWState, Track } from '../types';
@@ -137,6 +137,10 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   const [dither, setDither] = useState(true); // On by default for lower bit depths
 
   // UI STATE
+  // Par défaut, deux choix simples (extrait réseaux / morceau complet) ; le
+  // format, la qualité, le niveau et les pistes séparées sont derrière
+  // « Réglages avancés ». Le moteur d'export est le même dans les deux vues.
+  const [advanced, setAdvanced] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
@@ -172,21 +176,28 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
       if (isStem) {
           // pas de normalisation par piste
       } else if (normalize === 'peak') {
-          setStatusText('Normalisation (-0.1 dB)...');
+          setStatusText('Réglage du volume…');
           AudioEncoder.normalizeBuffer(buffer, -0.1);
           setLoudnessReport(`Mesuré : ${integratedLufs(buffer).toFixed(1)} LUFS · crête vraie ${truePeakDb(buffer).toFixed(1)} dBTP`);
       } else if (normalize === 'lufs14' || normalize === 'lufs16') {
           const target = normalize === 'lufs14' ? -14 : -16;
-          setStatusText(`Loudness ${target} LUFS...`);
+          setStatusText(`Réglage du volume (${target} LUFS)…`);
           const r = normalizeToLufs(buffer, target, -1);
           setLoudnessReport(`Loudness : ${Number.isFinite(r.before) ? r.before.toFixed(1) : '—'} → ${Number.isFinite(r.after) ? r.after.toFixed(1) : '—'} LUFS · crête vraie ${r.truePeak.toFixed(1)} dBTP${r.limitedByPeak ? ' (cible non atteinte : crêtes trop hautes, passe un limiteur sur le master)' : ''}`);
       } else {
           setLoudnessReport(`Mesuré : ${integratedLufs(buffer).toFixed(1)} LUFS · crête vraie ${truePeakDb(buffer).toFixed(1)} dBTP`);
       }
       
+      // MP3 : crête vraie plafonnée vers -1 dBTP. Sinon un mix déjà fort (crête
+      // à 0 dB) sature à la conversion MP3.
+      if (format === 'MP3') {
+          const cut = capTruePeak(buffer, MP3_TRUE_PEAK_CEILING);
+          if (cut < 0 && !isStem) setLoudnessReport(r => `${r ? r + ' · ' : ''}volume baissé de ${(-cut).toFixed(1)} dB pour que le MP3 ne sature pas`);
+      }
+
       // 2. Dithering (Uniquement si réduction de bits)
       if (dither && format === 'WAV' && bitDepth !== '32') {
-          setStatusText('Application du Dithering (TPDF)...');
+          setStatusText('Dithering…');
           AudioEncoder.applyDither(buffer, parseInt(bitDepth));
       }
 
@@ -196,7 +207,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   // --- CORE RENDER LOGIC ---
 
   const renderTrackList = async (tracksToRender: Track[], label: string, opts: { duration?: number; onProgress?: (p: number) => void; isStem?: boolean } = {}): Promise<Blob> => {
-      setStatusText(`Rendu Audio : ${label}...`);
+      setStatusText(`Mixage : ${label}…`);
       
       const duration = opts.duration ?? getDuration();
       const startOffset = getStartOffset();
@@ -224,7 +235,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
         setStatusText(`Encodage MP3 (${kbps} kbps)...`);
         return await AudioEncoder.encodeMP3(processedBuffer, kbps);
       }
-      setStatusText(`Encodage ${format} (${bitDepth}bit)...`);
+      setStatusText(`Création du fichier ${format}…`);
       return AudioEncoder.encodeWAV(processedBuffer, bitDepth);
   };
 
@@ -247,7 +258,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
         }
         if (source === 'MASTER') {
             // --- EXPORT MASTER SIMPLE ---
-            const blob = await renderTrackList(exportTracks, "Master Mix");
+            const blob = await renderTrackList(exportTracks, "ton morceau");
             downloadBlob(blob, format === 'MP3'
               ? `${filename}_${mp3Bitrate}kbps.mp3`
               : `${filename}_${sampleRate}Hz_${bitDepth}bit.${format.toLowerCase()}`);
@@ -282,7 +293,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                 const ext = format === 'MP3' ? 'mp3' : format.toLowerCase();
                 zip.file(`${String(i + 1).padStart(2, '0')} ${track.name.replace(/[^a-z0-9 _-]/gi, '_')}${vocalsDry ? ' (brut)' : ''}.${ext}`, blob);
             }
-            setStatusText("Compression ZIP...");
+            setStatusText("Création du fichier .zip…");
             const zipBlob = await zip.generateAsync({ type: "blob" });
             downloadBlob(zipBlob, `${filename}_Mes_pistes${vocalsDry ? '_brutes' : ''}.zip`);
         }
@@ -300,7 +311,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                 const trackName = track.name.replace(/[^a-z0-9]/gi, '_');
                 
                 // Update UI
-                setStatusText(`Export Stem ${i + 1}/${totalSteps} : ${track.name}`);
+                setStatusText(`Piste ${i + 1}/${totalSteps} : ${track.name}`);
                 setProgress((i / totalSteps) * 100);
 
                 // On soloe la piste : renderProject garde aussi tout ce qui
@@ -315,12 +326,12 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                 zip.file(`${trackName}.wav`, blob);
             }
 
-            setStatusText("Compression ZIP...");
+            setStatusText("Création du fichier .zip…");
             const zipBlob = await zip.generateAsync({ type: "blob" });
             downloadBlob(zipBlob, `${filename}_Stems.zip`);
         }
 
-        setStatusText('✅ Export Terminé !');
+        setStatusText('✅ Export terminé !');
         const kind = source === 'VOCALS' ? 'vocals' : source === 'STEMS' ? 'stems' : 'full';
         track('export_done', { source: kind, paid: paidExport, admin });
         onExported?.({ source: kind, paid: paidExport });
@@ -331,7 +342,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
     } catch (e: any) {
         console.error(e);
-        setStatusText(`❌ Erreur: ${e.message}`);
+        setStatusText(`❌ Export impossible : ${e.message}`);
         setIsRendering(false);
     } finally {
         prep.cleanup();
@@ -341,9 +352,39 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   const downloadBlob = (blob: Blob, name: string) => saveBlob(blob, name);
   handleExportRef.current = handleExport;
 
+  // Vue simple : « Mon morceau complet » = le mix entier, avec les réglages
+  // en cours (WAV qualité studio par défaut), par le même export.
+  const exportComplet = () => {
+    sourceTouched.current = true;
+    setSource('MASTER');
+    setRangeMode('FULL');
+    setTimeout(() => { void handleExportRef.current?.(); }, 50);
+  };
+  // Prix du morceau complet (instru importée : 2 €, ou export Nova Pro offert).
+  const completPaye = !admin && !hasCatalogBeat && voicesUnlocked !== true;
+  const choix = 'w-full flex items-center gap-3 rounded-2xl border p-4 text-left transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed';
+  const statusBlock = (
+    <>
+      {isRendering && (
+        <div className="space-y-1">
+          <div className="flex justify-between text-[10px] font-black uppercase text-cyan-400">
+            <span>Export en cours…</span>
+            <span>{Math.round(progress)}%</span>
+          </div>
+          <div className="h-1.5 bg-black/50 rounded-full overflow-hidden">
+            <div className="h-full bg-cyan-500 transition-all duration-100 ease-linear" style={{ width: `${progress}%` }} />
+          </div>
+          <span className="text-[11px] text-slate-400 block text-center animate-pulse">{statusText}</span>
+        </div>
+      )}
+      {!isRendering && statusText && <p className="text-[12px] text-slate-300 text-center" role="status">{statusText}</p>}
+      {loudnessReport && <p className="text-[11px] text-emerald-300 text-center" role="status">{loudnessReport}</p>}
+    </>
+  );
+
   return (
     <div className="fixed inset-0 z-[1200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-2xl max-h-[90dvh] overflow-y-auto bg-[#14161a] border border-white/10 rounded-3xl shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className={`w-full ${advanced ? 'max-w-2xl' : 'max-w-lg'} max-h-[90dvh] overflow-y-auto bg-[#14161a] border border-white/10 rounded-3xl shadow-2xl flex flex-col`} onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="export-title">
         
         {/* Header */}
         <div className="p-6 border-b border-white/5 bg-gradient-to-r from-cyan-900/20 to-transparent flex justify-between items-center">
@@ -352,8 +393,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     <i className="fas fa-file-export text-lg"></i>
                 </div>
                 <div>
-                    <h2 className="text-sm font-black text-white uppercase tracking-widest">Exporter ton morceau</h2>
-                    <p className="text-[10px] text-slate-500 font-mono">Fichier audio (WAV / MP3)</p>
+                    <h2 id="export-title" className="text-sm font-black text-white uppercase tracking-widest">Exporter ton morceau</h2>
+                    <p className="text-[11px] text-slate-400">{advanced ? 'Réglages avancés : format, qualité, pistes séparées' : 'Choisis ce que tu veux faire de ton son'}</p>
                 </div>
             </div>
             <button aria-label="Fermer" title="Fermer" onClick={onClose} disabled={isRendering} className="w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
@@ -361,27 +402,109 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
             </button>
         </div>
 
-        <div className="p-8 flex flex-col space-y-6">
-            
+        <div className={`${advanced ? 'p-8' : 'p-6'} flex flex-col space-y-6`}>
+
+            {!advanced && (
+              <div className="space-y-3" data-export-vue="simple">
+                {onOpenShare && (
+                  <button type="button" onClick={onOpenShare} disabled={isRendering} className={`${choix} border-cyan-400/40 bg-cyan-500/10 hover:bg-cyan-500/15`}>
+                    <span className="text-2xl leading-none" aria-hidden="true">📲</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px] font-black text-white">Extrait 30 s pour les réseaux</span>
+                      <span className="block text-[12px] text-slate-300 mt-0.5">Vidéo ou MP3 avec le tag Make Music, pour Insta, TikTok ou WhatsApp. Gratuit.</span>
+                    </span>
+                    <i className="fas fa-chevron-right text-slate-500" aria-hidden="true"></i>
+                  </button>
+                )}
+
+                {adminPending && beatsNonAchetes.length > 0 ? (
+                  <div className={`${choix} border-white/10 bg-white/[0.03]`} role="status">
+                    <span className="text-2xl leading-none" aria-hidden="true">💿</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px] font-black text-white">Mon morceau complet</span>
+                      <span className="block text-[12px] text-slate-400 mt-0.5"><i className="fas fa-circle-notch fa-spin mr-1"></i>Vérification de ta licence…</span>
+                    </span>
+                  </div>
+                ) : exportVerrouille ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-2.5">
+                    <div className="flex items-start gap-3">
+                      <span className="text-2xl leading-none" aria-hidden="true">💿</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[15px] font-black text-white">Mon morceau complet</p>
+                        <p className="text-[12px] text-slate-300 mt-0.5">
+                          {beatsNonAchetes.length > 1
+                            ? `${beatsNonAchetes.length} instrus de ton projet ne sont pas encore achetées.`
+                            : `L'instru « ${beatsNonAchetes[0]?.clips[0]?.name || beatsNonAchetes[0]?.name} » n'est pas encore achetée.`}
+                          {' '}Tu peux déjà récupérer une démo gratuite.
+                        </p>
+                      </div>
+                    </div>
+                    {onOpenShare && (
+                      <button type="button" onClick={onOpenShare} disabled={isRendering}
+                        className="w-full min-h-11 rounded-xl border border-cyan-400/40 bg-cyan-500/10 px-3 py-2 text-left text-[13px] font-bold text-cyan-100 hover:bg-cyan-500/20">
+                        ⬇️ Démo gratuite du morceau complet <span className="font-normal text-cyan-200/80">(MP3 avec le tag)</span>
+                      </button>
+                    )}
+                    <button type="button" onClick={() => openBuyBeat(projectState.tracks)}
+                      className="w-full min-h-11 rounded-xl bg-amber-400 px-3 py-2 text-left text-[13px] font-black text-black hover:bg-amber-300">
+                      🛒 Acheter l'instru <span className="font-bold text-black/70">: fichier propre, sans tag</span>
+                    </button>
+                    <button type="button" onClick={openProMix}
+                      className="w-full min-h-10 rounded-xl bg-white/5 px-3 py-2 text-left text-[12px] font-bold text-slate-200 hover:bg-white/10">
+                      🎚️ Le faire mixer par un ingé son pro
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={exportComplet} disabled={isRendering || payWait} className={`${choix} border-emerald-400/40 bg-emerald-500/10 hover:bg-emerald-500/15`}>
+                    <span className="text-2xl leading-none" aria-hidden="true">💿</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px] font-black text-white">Mon morceau complet</span>
+                      <span className="block text-[12px] text-slate-300 mt-0.5">
+                        {format === 'MP3' ? 'Fichier MP3' : 'Fichier WAV qualité studio'}, sans tag, prêt pour Spotify ou YouTube.
+                        {completPaye && (freeLeft !== null && freeLeft > 0 ? ` Gratuit avec Nova Pro (${freeLeft} restants).` : ' 2 €.')}
+                        {admin && ' Admin : gratuit.'}
+                      </span>
+                    </span>
+                    {payWait ? <span className="text-[11px] text-slate-300">Paiement…</span> : <i className="fas fa-download text-emerald-300" aria-hidden="true"></i>}
+                  </button>
+                )}
+
+                {statusBlock}
+
+                <button type="button" onClick={() => setAdvanced(true)} disabled={isRendering} aria-expanded={false}
+                  className="w-full pt-1 text-center text-[12px] font-bold text-slate-400 hover:text-white">
+                  ⚙️ Réglages avancés <span className="font-normal">(format, qualité, voix seules, pistes séparées…)</span>
+                </button>
+              </div>
+            )}
+
+            {advanced && (
+            <button type="button" onClick={() => setAdvanced(false)} disabled={isRendering} aria-expanded={true}
+              className="self-start -mt-2 text-[12px] font-bold text-slate-400 hover:text-white">
+              ← Retour aux choix simples
+            </button>
+            )}
+
+            {advanced && (
             <div className="flex flex-col gap-6 md:flex-row md:gap-8">
                 {/* COLUMN 1: CONFIG */}
                 <div className="flex-1 space-y-6">
                     
                     {/* SECTION: SOURCE */}
                     <div className="space-y-3">
-                        <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">1. Source & Plage</span>
+                        <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">1. Quoi et quelle durée</span>
                         
                         <div className="grid grid-cols-2 gap-3">
                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400">Source</label>
+                                <label className="text-[9px] font-bold text-slate-400">Quoi</label>
                                 <select 
                                     value={source} 
                                     onChange={e => { sourceTouched.current = true; setSource(e.target.value as any); }}
                                     disabled={isRendering}
                                     className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
                                 >
-                                    <option value="MASTER">Mix master (stéréo)</option>
-                                    <option value="STEMS">Toutes les pistes (stems .zip)</option>
+                                    <option value="MASTER">Mon morceau (mix stéréo)</option>
+                                    <option value="STEMS">Toutes les pistes séparées (.zip)</option>
                                     <option value="VOCALS">Mes pistes seules : voix, batterie (.zip)</option>
                                 </select>
                                 {source === 'VOCALS' && (
@@ -392,15 +515,15 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                 )}
                              </div>
                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400">Plage Temporelle</label>
+                                <label className="text-[9px] font-bold text-slate-400">Durée</label>
                                 <select 
                                     value={rangeMode} 
                                     onChange={e => setRangeMode(e.target.value as any)}
                                     disabled={isRendering}
                                     className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
                                 >
-                                    <option value="FULL">Projet Entier</option>
-                                    <option value="LOOP">Boucle Active ({projectState.loopStart.toFixed(1)}s - {projectState.loopEnd.toFixed(1)}s)</option>
+                                    <option value="FULL">Tout le morceau</option>
+                                    <option value="LOOP">Zone de boucle ({projectState.loopStart.toFixed(1)}s - {projectState.loopEnd.toFixed(1)}s)</option>
                                 </select>
                              </div>
                         </div>
@@ -408,7 +531,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
                     {/* SECTION: FORMAT */}
                     <div className="space-y-3">
-                        <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">2. Format & Qualité</span>
+                        <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">2. Format et qualité</span>
                         
                         <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1">
@@ -419,13 +542,13 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                     disabled={isRendering}
                                     className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
                                 >
-                                    <option value="WAV">WAV (PCM)</option>
+                                    <option value="WAV">WAV (qualité studio)</option>
                                     <option value="MP3">MP3 (pour partager)</option>
                                 </select>
                             </div>
 
                             <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400">Fréquence</label>
+                                <label className="text-[9px] font-bold text-slate-400">Fréquence d'échantillonnage</label>
                                 <select 
                                     value={sampleRate} 
                                     onChange={e => setSampleRate(Number(e.target.value))}
@@ -433,9 +556,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                     className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
                                 >
                                     <option value="44100">44100 Hz (CD)</option>
-                                    <option value="48000">48000 Hz (Video)</option>
+                                    <option value="48000">48000 Hz (vidéo)</option>
                                     <option value="88200" disabled={format === 'MP3'}>88200 Hz (Hi-Res)</option>
-                                    <option value="96000" disabled={format === 'MP3'}>96000 Hz (Studio)</option>
+                                    <option value="96000" disabled={format === 'MP3'}>96000 Hz (studio)</option>
                                 </select>
                             </div>
 
@@ -448,23 +571,23 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                         disabled={isRendering}
                                         className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
                                     >
-                                        <option value="16">16-bit (Standard)</option>
-                                        <option value="24">24-bit (Pro)</option>
-                                        <option value="32">32-bit Float (Max)</option>
+                                        <option value="16">16 bits (CD)</option>
+                                        <option value="24">24 bits (pro)</option>
+                                        <option value="32">32 bits flottant (max)</option>
                                     </select>
                                 </div>
                             ) : (
                                 <div className="space-y-1">
-                                    <label className="text-[9px] font-bold text-slate-400">Bitrate</label>
+                                    <label className="text-[9px] font-bold text-slate-400">Qualité MP3</label>
                                     <select 
                                         value={mp3Bitrate} 
                                         onChange={e => setMp3Bitrate(e.target.value)}
                                         disabled={isRendering}
                                         className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
                                     >
-                                        <option value="320">320 kbps (Max)</option>
-                                        <option value="192">192 kbps (Good)</option>
-                                        <option value="128">128 kbps (Fast)</option>
+                                        <option value="320">320 kbps (max)</option>
+                                        <option value="192">192 kbps (bonne)</option>
+                                        <option value="128">128 kbps (léger)</option>
                                     </select>
                                 </div>
                             )}
@@ -473,14 +596,14 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
                     {/* SECTION: DSP OPTIONS */}
                     <div className="space-y-3">
-                        <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">3. Traitement du Signal</span>
+                        <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">3. Volume final</span>
                         <div className="flex flex-wrap gap-x-6 gap-y-2">
                             <label className="flex items-center space-x-2 text-[10px] font-bold text-slate-300">
-                                <span>Niveau</span>
+                                <span>Volume</span>
                                 <select value={normalize} onChange={e => setNormalize(e.target.value as typeof normalize)} disabled={isRendering}
                                     className="h-8 bg-black/40 border border-white/10 rounded-lg px-2 text-[10px] text-white font-bold focus:border-cyan-500 outline-none">
-                                    <option value="off">Tel quel</option>
-                                    <option value="peak">Crête -0,1 dB</option>
+                                    <option value="off">Tel quel (MP3 : plafonné vers -1 dB)</option>
+                                    <option value="peak">Au plus fort sans saturer</option>
                                     <option value="lufs14">-14 LUFS (Spotify, YouTube)</option>
                                     <option value="lufs16">-16 LUFS (Apple Music)</option>
                                 </select>
@@ -491,7 +614,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                     {dither && <i className="fas fa-check text-[8px]"></i>}
                                 </div>
                                 <input type="checkbox" checked={dither} onChange={e => setDither(e.target.checked)} className="hidden" disabled={isRendering || bitDepth === '32'} />
-                                <span className={`text-[10px] font-bold ${dither ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'} ${bitDepth === '32' ? 'opacity-50' : ''}`}>Dithering (Triangular)</span>
+                                <span className={`text-[10px] font-bold ${dither ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'} ${bitDepth === '32' ? 'opacity-50' : ''}`}>Dithering (adoucit le passage en 16/24 bits)</span>
                             </label>
                         </div>
                     </div>
@@ -513,33 +636,21 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                         <div className="bg-white/5 p-3 rounded-lg space-y-2">
                              <div className="flex justify-between text-[9px]">
                                 <span className="text-slate-500">Taille estimée</span>
-                                <span className="text-white font-mono">~{(format === 'MP3' ? getDuration() * (parseInt(mp3Bitrate, 10) || 320) * 1000 / 8 / 1024 / 1024 : getDuration() * sampleRate * (parseInt(bitDepth)/8) * 2 / 1024 / 1024).toFixed(1)} MB</span>
+                                <span className="text-white font-mono">~{(format === 'MP3' ? getDuration() * (parseInt(mp3Bitrate, 10) || 320) * 1000 / 8 / 1024 / 1024 : getDuration() * sampleRate * (parseInt(bitDepth)/8) * 2 / 1024 / 1024).toFixed(1)} Mo</span>
                              </div>
                              <div className="flex justify-between text-[9px]">
                                 <span className="text-slate-500">Durée</span>
-                                <span className="text-white font-mono">{getDuration().toFixed(1)}s</span>
+                                <span className="text-white font-mono">{Math.floor(getDuration() / 60)} min {String(Math.round(getDuration() % 60)).padStart(2, '0')} s</span>
                              </div>
                              <div className="flex justify-between text-[9px]">
                                 <span className="text-slate-500">Canaux</span>
-                                <span className="text-white font-mono">Stéréo L/R</span>
+                                <span className="text-white font-mono">Stéréo</span>
                              </div>
                         </div>
                     </div>
 
                     <div className="space-y-3">
-                        {isRendering && (
-                            <div className="space-y-1">
-                                <div className="flex justify-between text-[8px] font-black uppercase text-cyan-400">
-                                    <span>Exporting...</span>
-                                    <span>{Math.round(progress)}%</span>
-                                </div>
-                                <div className="h-1.5 bg-black/50 rounded-full overflow-hidden">
-                                    <div className="h-full bg-cyan-500 transition-all duration-100 ease-linear" style={{ width: `${progress}%` }} />
-                                </div>
-                                <span className="text-[8px] text-slate-500 block text-center animate-pulse">{statusText}</span>
-                            </div>
-                        )}
-                        {loudnessReport && <p className="text-[10px] text-emerald-300 text-center" role="status">{loudnessReport}</p>}
+                        {statusBlock}
 
                         {exportVerrouille && !adminPending && (
                           <div className="mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200">
@@ -609,6 +720,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     </div>
                 </div>
             </div>
+            )}
 
         </div>
       </div>

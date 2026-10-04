@@ -650,6 +650,87 @@ def s_mobile_onglets(page, log, res, vp):
         page.keyboard.press("Escape")
 
 
+def _rects_overlap(a, b):
+    return a and b and a["x"] < b["x"] + b["width"] - 1 and b["x"] < a["x"] + a["width"] - 1 and a["y"] < b["y"] + b["height"] - 1 and b["y"] < a["y"] + a["height"] - 1
+
+
+def s_finitions(page, log, res, vp):
+    """Finitions du 04/10 : bandeau du bas, export simple, libellés, version."""
+    with step(res, "accueil : pas de « v1.0.0 », tonalités en français"):
+        page.goto(BASE, wait_until="domcontentloaded")
+        page.get_by_text("Nouveau Projet").first.wait_for(timeout=20000)
+        page.wait_for_timeout(1500)
+        txt = body(page)
+        res["accueil_v100"] = "v1.0.0" in txt
+        res["accueil_minor"] = re.findall(r"\b[A-G][#b]? (?:harmonic )?minor\b", txt)[:5]
+        assert not res["accueil_v100"], "« v1.0.0 » encore affiché"
+        assert not res["accueil_minor"], f"tonalités en anglais : {res['accueil_minor']}"
+    with step(res, "ouvrir studio + une prise"):
+        open_studio(page, res, vp=vp)
+        do_take(page, res, "prise", first=True)
+        c = page.get_by_role("region", name="Et maintenant ?").get_by_role("button", name="Fermer")
+        if visible(c): c.click(); page.wait_for_timeout(300)
+        dismiss_toasts(page)
+    with step(res, "bandeau du bas : rien ne flotte sur le catalogue ni sur les clips"):
+        geo = page.evaluate("""() => {
+          const r = el => { if (!el || !el.getClientRects().length) return null; const b = el.getBoundingClientRect(); return {x: b.x, y: b.y, width: b.width, height: b.height}; };
+          const btn = re => [...document.querySelectorAll('button')].find(b => b.getClientRects().length && re.test((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')));
+          const clips = [...document.querySelectorAll('[data-clip-id], [data-clipid]')].filter(e => e.getClientRects().length).map(r);
+          return {
+            dock: r(document.querySelector('[data-nova-dock]')),
+            aside: r(document.querySelector('aside')),
+            main: r(document.querySelector('main')),
+            collab: r(btn(/Collaborer|en ligne · Chat/)),
+            voix: r(btn(/Piste voix/)), paroles: r(btn(/^\\W*Paroles/)), mix: r(document.querySelector("button[title='Choisir un style de mix pour ta voix']")),
+            clips,
+          };
+        }""")
+        res["geo"] = {k: v for k, v in geo.items() if k != "clips"}
+        res["nb_clips"] = len(geo["clips"])
+        assert geo["dock"], "bandeau du bas absent"
+        for k in ("collab", "voix", "paroles", "mix"):
+            b = geo[k]
+            assert b, f"bouton {k} invisible"
+            assert _rects_overlap(b, geo["dock"]), f"{k} hors du bandeau du bas"
+            assert not _rects_overlap(b, geo["aside"]), f"{k} recouvre le catalogue"
+            assert not any(_rects_overlap(b, c) for c in geo["clips"]), f"{k} recouvre un clip"
+        assert geo["main"]["y"] + geo["main"]["height"] <= geo["dock"]["y"] + geo["dock"]["height"] + 1
+        shot(page, f"{res['name']}_01_bandeau")
+    with step(res, "Collaborer ouvre le panneau"):
+        btn(page, re.compile("Collaborer")).click(); page.wait_for_timeout(700)
+        res["collab_ouvert"] = "Collaborer à distance" in body(page) or "Ton rôle" in body(page)
+        shot(page, f"{res['name']}_02_collab")
+        page.keyboard.press("Escape"); page.wait_for_timeout(300)
+        if res["collab_ouvert"] and visible(btn(page, re.compile("Collaborer"))):
+            pass
+        assert res["collab_ouvert"], "panneau Collaborer non ouvert"
+        b = btn(page, re.compile("Collaborer"))
+        if b.get_attribute("aria-pressed") == "true": b.click(); page.wait_for_timeout(400)
+    with step(res, "export : 2 choix simples, réglages avancés repliés"):
+        b = btn(page, re.compile(r"^\W*Exporter( le mix)?\s*$"))
+        if not visible(b):
+            page.get_by_role("button", name=re.compile("Ouvrir le menu")).first.click(); page.wait_for_timeout(500)
+            b = btn(page, re.compile(r"^\W*Exporter( le mix)?\s*$"))
+        b.click(); page.wait_for_timeout(1000)
+        txt = body(page)
+        res["export_simple"] = {k: (k in txt) for k in ("Extrait 30 s pour les réseaux", "Mon morceau complet", "Réglages avancés", "Dithering", "Fréquence", "Source")}
+        shot(page, f"{res['name']}_03_export_simple")
+        assert res["export_simple"]["Extrait 30 s pour les réseaux"] and res["export_simple"]["Mon morceau complet"]
+        assert not res["export_simple"]["Dithering"] and not res["export_simple"]["Fréquence"], "réglages techniques visibles par défaut"
+        btn(page, re.compile("Réglages avancés")).click(); page.wait_for_timeout(600)
+        txt = body(page)
+        res["export_avance"] = {k: (k in txt) for k in ("Dithering", "Format et qualité", "Volume final", "Retour aux choix simples")}
+        shot(page, f"{res['name']}_04_export_avance")
+        assert all(res["export_avance"].values()), "réglages avancés incomplets"
+        btn(page, re.compile("Retour aux choix simples")).click(); page.wait_for_timeout(400)
+        assert "Dithering" not in body(page)
+    with step(res, "« Extrait 30 s pour les réseaux » ouvre le partage"):
+        btn(page, re.compile("Extrait 30 s pour les réseaux")).click(); page.wait_for_timeout(800)
+        res["partage_ouvert"] = "Fais écouter ton son" in body(page)
+        shot(page, f"{res['name']}_05_partage")
+        assert res["partage_ouvert"]
+
+
 ALL = [
     (s_accueil, ["pc", "tel"]),
     (s_studio_transport, ["pc", "tel"]),
@@ -664,6 +745,7 @@ ALL = [
     (s_fenetres, ["pc", "tab"]),
     (s_largeurs, ["pc"]),
     (s_mobile_onglets, ["tel"]),
+    (s_finitions, ["pc", "tab"]),
 ]
 
 

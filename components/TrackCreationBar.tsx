@@ -20,6 +20,11 @@ interface TrackCreationBarProps {
   onOpenDrums?: () => void;
   /** Crée / ouvre la piste 808 (piano roll). */
   onOpen808?: () => void;
+  /**
+   * Ordinateur / tablette : la barre est posée dans le bandeau du bas du
+   * studio (sous la grille) au lieu de flotter au milieu des clips.
+   */
+  docked?: boolean;
 }
 
 /**
@@ -27,10 +32,12 @@ interface TrackCreationBarProps {
  * pas. La barre flottante propose donc les deux gestes utiles : ajouter une
  * piste voix et choisir un style de mix.
  */
-const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen, beatmaking, onNewMidiTrack, onOpenDrums, onOpen808 }) => {
+const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen, beatmaking, onNewMidiTrack, onOpenDrums, onOpen808, docked }) => {
   const style = findVocalMixStyle(currentStyleId);
   return (
-    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[150] flex items-center gap-1 sm:gap-2 max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-hide">
+    <div className={docked
+      ? 'flex items-center gap-2 max-w-full overflow-x-auto scrollbar-hide'
+      : 'fixed bottom-20 left-1/2 -translate-x-1/2 z-[150] flex items-center gap-1 sm:gap-2 max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-hide'}>
       <button
         type="button"
         onClick={() => onCreateTrack(TrackType.AUDIO, 'VOIX')}
