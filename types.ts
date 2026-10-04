@@ -632,6 +632,8 @@ export type AIActionType =
   // Outils voix
   | 'APPLY_MIX_STYLE'
   | 'OPEN_MIX_STYLES'
+  // Nova pilote les plugins VST du PC (services/NovaVstMix)
+  | 'VST_MIX' | 'VST_LIST' | 'VST_SHOW_PARAMS' | 'VST_SET_PARAM' | 'VST_REMOVE' | 'VST_MOVE' | 'VST_MIX_FALLBACK'
   | 'CLEAN_SILENCE'
   | 'SET_AUTO_CLEAN'
   // Ingé son : session guidée, écoute du mix, montrer un réglage

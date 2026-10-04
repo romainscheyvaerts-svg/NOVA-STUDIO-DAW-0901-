@@ -1,0 +1,5700 @@
+{
+ "generated": "2026-10-04",
+ "source": "introspection réelle du pont VST (pedalboard) sur le PC du studio",
+ "plugins": [
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Amp Sim.vst3#AIR Amp Sim",
+   "scanName": "AIR Amp Sim",
+   "name": "AIR Amp Sim",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Amp Sim.vst3",
+   "pluginName": null,
+   "category": "amp",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 13,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Amplifiers.vst3#Amplifiers",
+   "scanName": "Amplifiers",
+   "name": "Amplifiers",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Amplifiers.vst3",
+   "pluginName": null,
+   "category": "amp",
+   "classifiedBy": "name",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Neural DSP\\Archetype John Mayer X.vst3#Archetype John Mayer X",
+   "scanName": "Archetype John Mayer X",
+   "name": "Archetype John Mayer X",
+   "vendor": "Neural DSP",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Neural DSP\\Archetype John Mayer X.vst3",
+   "pluginName": null,
+   "category": "amp",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 84,
+   "paramCount": 173,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Neural DSP\\Archetype Rabea X.vst3#Archetype Rabea X",
+   "scanName": "Archetype Rabea X",
+   "name": "Archetype Rabea X",
+   "vendor": "Neural DSP",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Neural DSP\\Archetype Rabea X.vst3",
+   "pluginName": null,
+   "category": "amp",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 68,
+   "paramCount": 195,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_blackdist2.vst3#bx_blackdist2",
+   "scanName": "bx_blackdist2",
+   "name": "bx_blackdist2",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_blackdist2.vst3",
+   "pluginName": null,
+   "category": "amp",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 5,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_distorange.vst3#bx_distorange",
+   "scanName": "bx_distorange",
+   "name": "bx_distorange",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_distorange.vst3",
+   "pluginName": null,
+   "category": "amp",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 5,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_greenscreamer.vst3#bx_greenscreamer",
+   "scanName": "bx_greenscreamer",
+   "name": "bx_greenscreamer",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_greenscreamer.vst3",
+   "pluginName": null,
+   "category": "amp",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 5,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_megasingle.vst3#bx_megasingle",
+   "scanName": "bx_megasingle",
+   "name": "bx_megasingle",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_megasingle.vst3",
+   "pluginName": null,
+   "category": "amp",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 37,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_metal2.vst3#bx_metal2",
+   "scanName": "bx_metal2",
+   "name": "bx_metal2",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_metal2.vst3",
+   "pluginName": null,
+   "category": "amp",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 8,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_rockrack V3 Player.vst3#bx_rockrack V3 Player",
+   "scanName": "bx_rockrack V3 Player",
+   "name": "bx_rockrack V3 Player",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_rockrack V3 Player.vst3",
+   "pluginName": null,
+   "category": "amp",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 4,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Auto-Tune Pro.vst3#Auto-Tune Pro",
+   "scanName": "Auto-Tune Pro",
+   "name": "Auto-Tune Pro",
+   "vendor": "Antares",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Auto-Tune Pro.vst3",
+   "pluginName": null,
+   "category": "autotune",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 2670,
+   "paramCount": 120,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Channel Strip.vst3#AIR Channel Strip",
+   "scanName": "AIR Channel Strip",
+   "name": "AIR Channel Strip",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Channel Strip.vst3",
+   "pluginName": null,
+   "category": "channel-strip",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 22,
+   "roles": {
+    "bypass": "bypass",
+    "threshold": "gate_threshold",
+    "ratio": "comp_ratio",
+    "attack": "gate_attack",
+    "release": "gate_release",
+    "output": "output"
+   },
+   "params": [
+    {
+     "name": "gate_attack",
+     "text": "0.18 ms",
+     "displayName": "Gate Attack",
+     "range": [
+      0.01,
+      1000,
+      null
+     ]
+    },
+    {
+     "name": "gate_release",
+     "text": "7.40 ms",
+     "displayName": "Gate Release",
+     "range": [
+      1,
+      3000,
+      null
+     ]
+    },
+    {
+     "name": "gate_threshold",
+     "text": "-120.0 dB",
+     "displayName": "Gate Threshold",
+     "range": [
+      -120,
+      0,
+      null
+     ]
+    },
+    {
+     "name": "comp_ratio",
+     "text": "3.9:1 ",
+     "displayName": "Comp Ratio"
+    },
+    {
+     "name": "output",
+     "text": "0.00 dB",
+     "displayName": "Output",
+     "range": [
+      null,
+      24,
+      null
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Compressor.vst3#AIR Compressor",
+   "scanName": "AIR Compressor",
+   "name": "AIR Compressor",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Compressor.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "digital",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 9,
+   "roles": {
+    "bypass": "bypass",
+    "threshold": "threshold",
+    "ratio": "ratio",
+    "attack": "attack",
+    "release": "release",
+    "output": "output",
+    "mix": "mix",
+    "knee": "knee"
+   },
+   "params": [
+    {
+     "name": "threshold",
+     "text": "-48.0 dB",
+     "displayName": "Threshold",
+     "range": [
+      -60,
+      0,
+      0.1
+     ]
+    },
+    {
+     "name": "ratio",
+     "text": "3.9:1 ",
+     "displayName": "Ratio"
+    },
+    {
+     "name": "knee",
+     "text": "50 %",
+     "displayName": "Knee",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "attack",
+     "text": "1.71 ms",
+     "displayName": "Attack"
+    },
+    {
+     "name": "release",
+     "text": "140 ms",
+     "displayName": "Release"
+    },
+    {
+     "name": "output",
+     "text": "15.0 dB",
+     "displayName": "Output",
+     "range": [
+      0,
+      30,
+      0.1
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Bettermaker Bus Compressor DSP.vst3#Bettermaker Bus Compressor DSP",
+   "scanName": "Bettermaker Bus Compressor DSP",
+   "name": "Bettermaker Bus Compressor DSP",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Bettermaker Bus Compressor DSP.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "vca",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 19,
+   "roles": {
+    "bypass": "bypass",
+    "threshold": "threshold",
+    "ratio": "ratio",
+    "attack": "attack",
+    "release": "release",
+    "output": "output",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "threshold",
+     "text": "-5.00",
+     "displayName": "THRESHOLD",
+     "range": [
+      -35,
+      5,
+      0.1
+     ]
+    },
+    {
+     "name": "ratio",
+     "text": "2.00",
+     "displayName": "RATIO",
+     "range": [
+      1,
+      5,
+      1
+     ]
+    },
+    {
+     "name": "attack",
+     "text": "30.00",
+     "displayName": "ATTACK",
+     "range": [
+      0.1,
+      60,
+      0.1
+     ]
+    },
+    {
+     "name": "release",
+     "text": "250.00",
+     "displayName": "RELEASE",
+     "range": [
+      10,
+      1200,
+      null
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100.00",
+     "displayName": "MIX",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "output",
+     "text": "0.00",
+     "displayName": "OUTPUT",
+     "range": [
+      -10,
+      15,
+      0.1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Bus FORCE.vst3#Bus FORCE",
+   "scanName": "Bus FORCE",
+   "name": "Bus FORCE",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Bus FORCE.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "digital",
+   "classifiedBy": "params",
+   "status": "ok",
+   "latency": 104,
+   "paramCount": 141,
+   "roles": {
+    "bypass": "on_off",
+    "threshold": "comp_threshold_db",
+    "attack": "comp_attack_ms",
+    "release": "comp_release_ms",
+    "makeup": "comp_make_up_gain_db",
+    "input": "input_trim_db",
+    "output": "output_trim_db",
+    "autogain": "auto_gain"
+   },
+   "params": [
+    {
+     "name": "on_off",
+     "text": "Active",
+     "displayName": "On/Off",
+     "values": [
+      "Active",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "input_trim_db",
+     "text": "0.000",
+     "displayName": "Input Trim",
+     "range": [
+      -24,
+      24,
+      null
+     ]
+    },
+    {
+     "name": "output_trim_db",
+     "text": "0.000",
+     "displayName": "Output Trim",
+     "range": [
+      -24,
+      24,
+      null
+     ]
+    },
+    {
+     "name": "comp_threshold_db",
+     "text": "0.000",
+     "displayName": "Comp Threshold",
+     "range": [
+      -50,
+      0,
+      null
+     ]
+    },
+    {
+     "name": "comp_attack_ms",
+     "text": "75.5",
+     "displayName": "Comp Attack",
+     "range": [
+      1,
+      300,
+      null
+     ]
+    },
+    {
+     "name": "comp_release_ms",
+     "text": "30.0",
+     "displayName": "Comp Release",
+     "range": [
+      1,
+      500,
+      null
+     ]
+    },
+    {
+     "name": "comp_make_up_gain_db",
+     "text": "0.000",
+     "displayName": "Comp Make Up gain",
+     "range": [
+      0,
+      30,
+      null
+     ]
+    },
+    {
+     "name": "auto_gain",
+     "text": "On",
+     "displayName": "Auto Gain",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_opto Pedal.vst3#bx_opto Pedal",
+   "scanName": "bx_opto Pedal",
+   "name": "bx_opto Pedal",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_opto Pedal.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "opto",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 6,
+   "roles": {
+    "bypass": "power"
+   },
+   "params": [
+    {
+     "name": "power",
+     "text": "On",
+     "displayName": "Power",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Comp DIODE-609.vst3#Comp DIODE-609",
+   "scanName": "Comp DIODE-609",
+   "name": "Comp DIODE-609",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Comp DIODE-609.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "digital",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 32,
+   "paramCount": 132,
+   "roles": {
+    "bypass": "on_off",
+    "threshold": "ch1_comp_threshold_db",
+    "ratio": "ch1_comp_ratio",
+    "attack": "ch1_comp_attack_ms",
+    "release": "ch1_comp_recovery",
+    "makeup": "ch1_comp_make_up_gain_db",
+    "mix": "dry_wet_mix"
+   },
+   "params": [
+    {
+     "name": "on_off",
+     "text": "Active",
+     "displayName": "On/Off",
+     "values": [
+      "Active",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "dry_wet_mix",
+     "text": "100",
+     "displayName": "Dry/Wet Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "ch1_comp_threshold_db",
+     "text": "0.000",
+     "displayName": "Ch1: Comp threshold",
+     "range": [
+      -40,
+      0,
+      null
+     ]
+    },
+    {
+     "name": "ch1_comp_attack_ms",
+     "text": "0.000",
+     "displayName": "Ch1: Comp attack",
+     "range": [
+      0,
+      75,
+      null
+     ]
+    },
+    {
+     "name": "ch1_comp_recovery",
+     "text": "100ms",
+     "displayName": "Ch1: Comp recovery",
+     "values": [
+      "100ms",
+      "400ms",
+      "800ms",
+      "1500ms",
+      "a1",
+      "a2"
+     ]
+    },
+    {
+     "name": "ch1_comp_ratio",
+     "text": "2:1",
+     "displayName": "Ch1: Comp ratio",
+     "values": [
+      "1.1:1",
+      "1.2:1",
+      "1.5:1",
+      "2:1",
+      "3:1",
+      "4:1",
+      "6:1"
+     ]
+    },
+    {
+     "name": "ch1_comp_make_up_gain_db",
+     "text": "0.000",
+     "displayName": "Ch1: Comp make-up gain",
+     "range": [
+      0,
+      20,
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Comp FET-76.vst3#Comp FET-76",
+   "scanName": "Comp FET-76",
+   "name": "Comp FET-76",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Comp FET-76.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "fet",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 272,
+   "paramCount": 115,
+   "roles": {
+    "bypass": "on_off",
+    "ratio": "ratio",
+    "attack": "attack",
+    "release": "release",
+    "makeup": "output_gain_db",
+    "input": "input_gain_db",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "on_off",
+     "text": "Active",
+     "displayName": "On/Off",
+     "values": [
+      "Active",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "input_gain_db",
+     "text": "-48.0",
+     "displayName": "Input Gain",
+     "range": [
+      -48,
+      0,
+      null
+     ]
+    },
+    {
+     "name": "attack",
+     "text": "4.00",
+     "displayName": "Attack",
+     "range": [
+      1,
+      7,
+      0.01
+     ]
+    },
+    {
+     "name": "release",
+     "text": "4.00",
+     "displayName": "Release",
+     "range": [
+      1,
+      7,
+      0.01
+     ]
+    },
+    {
+     "name": "ratio",
+     "text": "4",
+     "displayName": "Ratio",
+     "values": [
+      "4",
+      "8",
+      "12",
+      "20",
+      "All"
+     ]
+    },
+    {
+     "name": "output_gain_db",
+     "text": "0.000",
+     "displayName": "Output Gain",
+     "range": [
+      -48,
+      0,
+      null
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Comp TUBE-STA.vst3#Comp TUBE-STA",
+   "scanName": "Comp TUBE-STA",
+   "name": "Comp TUBE-STA",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Comp TUBE-STA.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "digital",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 32,
+   "paramCount": 112,
+   "roles": {
+    "bypass": "on_off",
+    "release": "recovery_mode",
+    "makeup": "output_gain_db",
+    "input": "input_gain_db",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "on_off",
+     "text": "Active",
+     "displayName": "On/Off",
+     "values": [
+      "Active",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "input_gain_db",
+     "text": "0.000",
+     "displayName": "Input Gain",
+     "range": [
+      0,
+      48,
+      null
+     ]
+    },
+    {
+     "name": "recovery_mode",
+     "text": "Single",
+     "displayName": "Recovery Mode",
+     "values": [
+      "Single",
+      "Double",
+      "Triple"
+     ]
+    },
+    {
+     "name": "output_gain_db",
+     "text": "48.0",
+     "displayName": "Output Gain",
+     "range": [
+      0,
+      48,
+      null
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-C 3.vst3#FabFilter Pro-C 3",
+   "scanName": "FabFilter Pro-C 3",
+   "name": "Pro-C 3",
+   "vendor": "FabFilter",
+   "path": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-C 3.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "vca",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 105,
+   "roles": {
+    "bypass": "bypass",
+    "threshold": "threshold",
+    "ratio": "ratio",
+    "attack": "attack",
+    "release": "release",
+    "output": "output_level",
+    "mix": "mix",
+    "knee": "knee",
+    "autogain": "auto_gain",
+    "style": "style"
+   },
+   "params": [
+    {
+     "name": "style",
+     "text": "Clean",
+     "displayName": "Style",
+     "values": [
+      "Clean",
+      "Versatile",
+      "Smooth",
+      "Punch",
+      "Upward",
+      "TTM",
+      "Op-El",
+      "Vari-Mu",
+      "Classic",
+      "Opto",
+      "Vocal",
+      "Mastering",
+      "Bus",
+      "Pumping"
+     ]
+    },
+    {
+     "name": "threshold",
+     "text": "-16.00 dB",
+     "displayName": "Threshold",
+     "range": [
+      -60,
+      0,
+      0.06
+     ]
+    },
+    {
+     "name": "ratio",
+     "text": "3.50:1",
+     "displayName": "Ratio"
+    },
+    {
+     "name": "knee",
+     "text": "+7.35 dB",
+     "displayName": "Knee",
+     "range": [
+      0,
+      72,
+      null
+     ]
+    },
+    {
+     "name": "attack",
+     "text": "0.725 ms",
+     "displayName": "Attack",
+     "range": [
+      0.005,
+      250,
+      null
+     ]
+    },
+    {
+     "name": "release",
+     "text": "100.0 ms",
+     "displayName": "Release",
+     "range": [
+      1.001,
+      997.1,
+      null
+     ]
+    },
+    {
+     "name": "auto_gain",
+     "text": "On",
+     "displayName": "Auto Gain",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "mix",
+     "text": "100.0%",
+     "displayName": "Mix",
+     "range": [
+      0,
+      200,
+      0.2
+     ]
+    },
+    {
+     "name": "output_level",
+     "text": "0.00 dB",
+     "displayName": "Output Level",
+     "range": [
+      null,
+      36,
+      null
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Not Bypassed",
+     "displayName": "Bypass",
+     "values": [
+      "Not Bypassed",
+      "Bypassed"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Tube-Tech CL 1B mk II.vst3#Tube-Tech CL 1B mk II",
+   "scanName": "Tube-Tech CL 1B mk II",
+   "name": "Tube-Tech CL 1B mk II",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Tube-Tech CL 1B mk II.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "opto",
+   "classifiedBy": "name",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\uaudio_distressor.vst3#uaudio_distressor",
+   "scanName": "uaudio_distressor",
+   "name": "uaudio_distressor",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\uaudio_distressor.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "fet",
+   "classifiedBy": "name",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\uaudio_teletronix_la-2a_silver.vst3#uaudio_teletronix_la-2a_silver",
+   "scanName": "uaudio_teletronix_la-2a_silver",
+   "name": "uaudio_teletronix_la-2a_silver",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\uaudio_teletronix_la-2a_silver.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "opto",
+   "classifiedBy": "name",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\uaudio_ua_1176_rev_a.vst3#uaudio_ua_1176_rev_a",
+   "scanName": "uaudio_ua_1176_rev_a",
+   "name": "uaudio_ua_1176_rev_a",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\uaudio_ua_1176_rev_a.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "fet",
+   "classifiedBy": "name",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\uaudio_ua_1176ae.vst3#uaudio_ua_1176ae",
+   "scanName": "uaudio_ua_1176ae",
+   "name": "uaudio_ua_1176ae",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\uaudio_ua_1176ae.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "fet",
+   "classifiedBy": "name",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\uaudio_ua_1176ln_rev_e.vst3#uaudio_ua_1176ln_rev_e",
+   "scanName": "uaudio_ua_1176ln_rev_e",
+   "name": "uaudio_ua_1176ln_rev_e",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\uaudio_ua_1176ln_rev_e.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "fet",
+   "classifiedBy": "name",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\DeEdger.vst3#DeEdger",
+   "scanName": "DeEdger",
+   "name": "DeEdger",
+   "vendor": "Tokyo Dawn Labs",
+   "path": "C:\\Program Files\\Common Files\\VST3\\DeEdger.vst3",
+   "pluginName": null,
+   "category": "deesser",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 12,
+   "roles": {
+    "frequency": "freq_hz",
+    "range": "depth",
+    "listen": "focus_listen"
+   },
+   "params": [
+    {
+     "name": "freq_hz",
+     "text": "3100",
+     "displayName": "Freq",
+     "range": [
+      50,
+      12000,
+      null
+     ]
+    },
+    {
+     "name": "depth",
+     "text": "0.0",
+     "displayName": "Depth",
+     "range": [
+      0,
+      20,
+      0.1
+     ]
+    },
+    {
+     "name": "focus_listen",
+     "text": "Off",
+     "displayName": "Focus Listen",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-DS.vst3#FabFilter Pro-DS",
+   "scanName": "FabFilter Pro-DS",
+   "name": "Pro-DS",
+   "vendor": "FabFilter",
+   "path": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-DS.vst3",
+   "pluginName": null,
+   "category": "deesser",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 720,
+   "paramCount": 25,
+   "roles": {
+    "bypass": "bypass",
+    "threshold": "threshold",
+    "frequency": "high_pass_frequency",
+    "range": "range",
+    "listen": "audition_triggering",
+    "output": "output_level"
+   },
+   "params": [
+    {
+     "name": "threshold",
+     "text": "-36.00 dB",
+     "displayName": "Threshold",
+     "range": [
+      null,
+      0,
+      null
+     ]
+    },
+    {
+     "name": "range",
+     "text": "6.00 dB",
+     "displayName": "Range",
+     "range": [
+      0,
+      24,
+      null
+     ]
+    },
+    {
+     "name": "audition_triggering",
+     "text": "Off",
+     "displayName": "Audition Triggering",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "high_pass_frequency",
+     "text": "7000.0 Hz",
+     "displayName": "High-Pass Frequency",
+     "range": [
+      2000,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "output_level",
+     "text": "0.00 dB",
+     "displayName": "Output Level",
+     "range": [
+      null,
+      36,
+      null
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Not Bypassed",
+     "displayName": "Bypass",
+     "values": [
+      "Not Bypassed",
+      "Bypassed"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Delay.vst3#AIR Delay",
+   "scanName": "AIR Delay",
+   "name": "AIR Delay",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Delay.vst3",
+   "pluginName": null,
+   "category": "delay",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 12,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "time": "time",
+    "feedback": "feedback",
+    "sync": "sync",
+    "lowcut": "hpf",
+    "width": "width"
+   },
+   "params": [
+    {
+     "name": "time",
+     "text": "1/8T ",
+     "displayName": "Time",
+     "values": [
+      "1/32 ",
+      "1/16T ",
+      "1/32D ",
+      "1/16 ",
+      "1/8T ",
+      "1/16D ",
+      "1/8 ",
+      "1/4T ",
+      "1/8D ",
+      "1/4 ",
+      "2/4T ",
+      "1/4D ",
+      "2/4 ",
+      "5/8 ",
+      "3/4 ",
+      "7/8 ",
+      "4/4 ",
+      "5/4 ",
+      "6/4 ",
+      "8/4 "
+     ]
+    },
+    {
+     "name": "sync",
+     "text": "On ",
+     "displayName": "Sync",
+     "values": [
+      "Off ",
+      "On "
+     ]
+    },
+    {
+     "name": "feedback",
+     "text": "31 %",
+     "displayName": "Feedback",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "hpf",
+     "text": "20.0 Hz",
+     "displayName": "HPF",
+     "range": [
+      20,
+      1000,
+      null
+     ]
+    },
+    {
+     "name": "width",
+     "text": "65 %",
+     "displayName": "Width",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Delay Pro.vst3#AIR Delay Pro",
+   "scanName": "AIR Delay Pro",
+   "name": "AIR Delay Pro",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Delay Pro.vst3",
+   "pluginName": null,
+   "category": "delay",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 44,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix_mod_on",
+    "time": "time",
+    "feedback": "feedback",
+    "sync": "sync",
+    "width": "tap_width",
+    "style": "mode"
+   },
+   "params": [
+    {
+     "name": "mode",
+     "text": "Analog ",
+     "displayName": "Mode",
+     "values": [
+      "Digital ",
+      "Analog "
+     ]
+    },
+    {
+     "name": "sync",
+     "text": "On ",
+     "displayName": "Sync",
+     "values": [
+      "Off ",
+      "On "
+     ]
+    },
+    {
+     "name": "time",
+     "text": "1/8D ",
+     "displayName": "Time",
+     "values": [
+      "1/32 ",
+      "1/16T ",
+      "1/32D ",
+      "1/16 ",
+      "1/8T ",
+      "1/16D ",
+      "1/8 ",
+      "1/4T ",
+      "1/8D ",
+      "1/4 ",
+      "1/2T ",
+      "1/4D ",
+      "2/4 ",
+      "5/8 ",
+      "3/4 ",
+      "7/8 ",
+      "4/4 ",
+      "5/4 ",
+      "6/4 ",
+      "8/4 "
+     ]
+    },
+    {
+     "name": "tap_width",
+     "text": "100 %",
+     "displayName": "Tap Width",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "feedback",
+     "text": "60 %",
+     "displayName": "Feedback",
+     "range": [
+      0,
+      150,
+      1
+     ]
+    },
+    {
+     "name": "mix_mod_on",
+     "text": "On ",
+     "displayName": "Mix Mod On",
+     "values": [
+      "Off ",
+      "On "
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Diff Delay.vst3#AIR Diff Delay",
+   "scanName": "AIR Diff Delay",
+   "name": "AIR Diff Delay",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Diff Delay.vst3",
+   "pluginName": null,
+   "category": "delay",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 11,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "time": "delay",
+    "feedback": "feedback",
+    "sync": "sync",
+    "lowcut": "low_cut",
+    "width": "width"
+   },
+   "params": [
+    {
+     "name": "mix",
+     "text": "58 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "delay",
+     "text": "1/8D ",
+     "displayName": "Delay",
+     "values": [
+      "1/64 ",
+      "1/32 ",
+      "1/16T ",
+      "1/32D ",
+      "1/16 ",
+      "1/8T ",
+      "1/16D ",
+      "1/8 ",
+      "1/4T ",
+      "1/8D ",
+      "1/4 ",
+      "1/2T ",
+      "1/4D ",
+      "2/4 ",
+      "4/4T ",
+      "3/4 ",
+      "4/4 "
+     ]
+    },
+    {
+     "name": "feedback",
+     "text": "67 %",
+     "displayName": "Feedback",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "sync",
+     "text": "On ",
+     "displayName": "Sync",
+     "values": [
+      "Off ",
+      "On "
+     ]
+    },
+    {
+     "name": "low_cut",
+     "text": "390 Hz",
+     "displayName": "Low Cut",
+     "range": [
+      20,
+      1000,
+      null
+     ]
+    },
+    {
+     "name": "width",
+     "text": "69 %",
+     "displayName": "Width",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Multitap Delay.vst3#AIR Multitap Delay",
+   "scanName": "AIR Multitap Delay",
+   "name": "AIR Multitap Delay",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Multitap Delay.vst3",
+   "pluginName": null,
+   "category": "delay",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 30,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "time": "delay",
+    "feedback": "feedback",
+    "sync": "sync",
+    "lowcut": "low_cut",
+    "highcut": "high_cut"
+   },
+   "params": [
+    {
+     "name": "sync",
+     "text": "On ",
+     "displayName": "Sync",
+     "values": [
+      "Off ",
+      "On "
+     ]
+    },
+    {
+     "name": "delay",
+     "text": "4/4 ",
+     "displayName": "Delay",
+     "values": [
+      "1/16 ",
+      "1/8T ",
+      "1/16D ",
+      "1/8 ",
+      "1/4T ",
+      "1/8D ",
+      "1/4 ",
+      "1/2T ",
+      "1/4D ",
+      "1/2 ",
+      "1/1T ",
+      "3/4 ",
+      "4/4 ",
+      "5/4 ",
+      "6/4 ",
+      "7/4 ",
+      "8/4 "
+     ]
+    },
+    {
+     "name": "feedback",
+     "text": "50 %",
+     "displayName": "Feedback",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "low_cut",
+     "text": "500 Hz",
+     "displayName": "Low Cut",
+     "range": [
+      20,
+      1000,
+      null
+     ]
+    },
+    {
+     "name": "high_cut",
+     "text": "2.00 kHz",
+     "displayName": "High Cut",
+     "range": [
+      1000,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "50 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Delay BRIGADE.vst3#Delay BRIGADE",
+   "scanName": "Delay BRIGADE",
+   "name": "Delay BRIGADE",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Delay BRIGADE.vst3",
+   "pluginName": null,
+   "category": "delay",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 48,
+   "paramCount": 128,
+   "roles": {
+    "bypass": "on_off",
+    "mix": "blend",
+    "time": "left_delay_time",
+    "feedback": "feedback",
+    "sync": "left_delay_time_sync",
+    "lowcut": "eq_high_pass_cutoff_frequency",
+    "highcut": "eq_low_pass_cutoff_frequency",
+    "width": "stereo_time_offset"
+   },
+   "params": [
+    {
+     "name": "on_off",
+     "text": "Active",
+     "displayName": "On/Off",
+     "values": [
+      "Active",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "blend",
+     "text": "0.500",
+     "displayName": "Blend",
+     "range": [
+      0,
+      1,
+      0.001
+     ]
+    },
+    {
+     "name": "left_delay_time",
+     "text": "0.540",
+     "displayName": "Left Delay Time",
+     "range": [
+      0,
+      1,
+      0.001
+     ]
+    },
+    {
+     "name": "left_delay_time_sync",
+     "text": "1/8.d",
+     "displayName": "Left Delay Time Sync",
+     "values": [
+      "1/32",
+      "1/16.t",
+      "1/32.d",
+      "1/16",
+      "1/8.t",
+      "1/16.d",
+      "1/8",
+      "1/4.t",
+      "1/8.d",
+      "1/4",
+      "1/2.t",
+      "1/4.d",
+      "1/2",
+      "1.t",
+      "1/2.d",
+      "1",
+      "2.t",
+      "1.d",
+      "2"
+     ]
+    },
+    {
+     "name": "feedback",
+     "text": "0.616",
+     "displayName": "Feedback",
+     "range": [
+      0,
+      1,
+      0.001
+     ]
+    },
+    {
+     "name": "stereo_time_offset",
+     "text": "0.000",
+     "displayName": "Stereo Time Offset",
+     "range": [
+      -1,
+      1,
+      null
+     ]
+    },
+    {
+     "name": "eq_high_pass_cutoff_frequency",
+     "text": "0.000",
+     "displayName": "EQ High Pass Cutoff Frequency",
+     "range": [
+      0,
+      1,
+      0.001
+     ]
+    },
+    {
+     "name": "eq_low_pass_cutoff_frequency",
+     "text": "1.00",
+     "displayName": "EQ Low Pass Cutoff Frequency",
+     "range": [
+      0,
+      1,
+      0.001
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Delay ETERNITY.vst3#Delay ETERNITY",
+   "scanName": "Delay ETERNITY",
+   "name": "Delay ETERNITY",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Delay ETERNITY.vst3",
+   "pluginName": null,
+   "category": "delay",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 48,
+   "paramCount": 161,
+   "roles": {
+    "bypass": "on_off",
+    "mix": "dry_wet",
+    "time": "line_1_delay_time_link",
+    "feedback": "line_1_feedback",
+    "sync": "line_1_time_left_sync",
+    "lowcut": "eq_high_pass_cutoff_frequency",
+    "highcut": "eq_low_pass_cutoff_frequency",
+    "width": "line_1_stereo_time_offset"
+   },
+   "params": [
+    {
+     "name": "on_off",
+     "text": "Active",
+     "displayName": "On/Off",
+     "values": [
+      "Active",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "dry_wet",
+     "text": "0.220",
+     "displayName": "Dry/Wet",
+     "range": [
+      0,
+      1,
+      0.001
+     ]
+    },
+    {
+     "name": "line_1_time_left_sync",
+     "text": "1/8",
+     "displayName": "Line 1 Time Left Sync",
+     "values": [
+      "1/32",
+      "1/16.t",
+      "1/32.d",
+      "1/16",
+      "1/8.t",
+      "1/16.d",
+      "1/8",
+      "1/4.t",
+      "1/8.d",
+      "1/4",
+      "1/2.t",
+      "1/4.d",
+      "1/2",
+      "1.t",
+      "1/2.d",
+      "1",
+      "2.t",
+      "1.d",
+      "2"
+     ]
+    },
+    {
+     "name": "line_1_feedback",
+     "text": "0.521",
+     "displayName": "Line 1 Feedback",
+     "range": [
+      0,
+      1.25,
+      null
+     ]
+    },
+    {
+     "name": "line_1_stereo_time_offset",
+     "text": "0.000",
+     "displayName": "Line 1 Stereo Time Offset",
+     "range": [
+      -1,
+      1,
+      null
+     ]
+    },
+    {
+     "name": "line_1_delay_time_link",
+     "text": "On",
+     "displayName": "Line 1 Delay Time Link",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "eq_high_pass_cutoff_frequency",
+     "text": "0.000",
+     "displayName": "EQ High Pass Cutoff Frequency",
+     "range": [
+      0,
+      1,
+      0.001
+     ]
+    },
+    {
+     "name": "eq_low_pass_cutoff_frequency",
+     "text": "1.00",
+     "displayName": "EQ Low Pass Cutoff Frequency",
+     "range": [
+      0,
+      1,
+      0.001
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Soundtoys\\EchoBoy.vst3#EchoBoy",
+   "scanName": "EchoBoy",
+   "name": "EchoBoy",
+   "vendor": "Soundtoys",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Soundtoys\\EchoBoy.vst3",
+   "pluginName": null,
+   "category": "delay",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 32,
+   "paramCount": 25,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "feedback": "feedback",
+    "sync": "tempo_bpm",
+    "lowcut": "lowcut",
+    "highcut": "highcut",
+    "style": "mode"
+   },
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "mix",
+     "text": "50.0",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "mode",
+     "text": "Single",
+     "displayName": "Mode",
+     "values": [
+      "Single",
+      "Dual",
+      "Ping-Pong",
+      "Rhythm"
+     ]
+    },
+    {
+     "name": "feedback",
+     "text": "0.00",
+     "displayName": "Feedback",
+     "range": [
+      0,
+      1.25,
+      0.01
+     ]
+    },
+    {
+     "name": "lowcut",
+     "text": "0.00",
+     "displayName": "LowCut",
+     "range": [
+      0,
+      1,
+      0.01
+     ]
+    },
+    {
+     "name": "highcut",
+     "text": "0.00",
+     "displayName": "HighCut",
+     "range": [
+      0,
+      1,
+      0.01
+     ]
+    },
+    {
+     "name": "tempo_bpm",
+     "text": "120.0",
+     "displayName": "Tempo",
+     "range": [
+      30,
+      240,
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ValhallaDSP\\ValhallaDelay.vst3#ValhallaDelay",
+   "scanName": "ValhallaDelay",
+   "name": "ValhallaDelay",
+   "vendor": "Valhalla DSP, LLC",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ValhallaDSP\\ValhallaDelay.vst3",
+   "pluginName": null,
+   "category": "delay",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 39,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "feedback": "repeatswell",
+    "sync": "delaylsync",
+    "lowcut": "lowcut",
+    "highcut": "highcut",
+    "width": "delayspread",
+    "style": "mode"
+   },
+   "params": [
+    {
+     "name": "mix",
+     "text": "50.0 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "delaylsync",
+     "text": "Msec",
+     "displayName": "DelayLSync"
+    },
+    {
+     "name": "delayspread",
+     "text": "0.0 ms",
+     "displayName": "DelaySpread",
+     "range": [
+      -20,
+      20,
+      null
+     ]
+    },
+    {
+     "name": "repeatswell",
+     "text": "Swell",
+     "displayName": "RepeatSwell"
+    },
+    {
+     "name": "lowcut",
+     "text": "10 Hz",
+     "displayName": "LowCut",
+     "range": [
+      10,
+      2000,
+      10
+     ]
+    },
+    {
+     "name": "highcut",
+     "text": "20000 Hz",
+     "displayName": "HighCut",
+     "range": [
+      200,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "mode",
+     "text": "Tape",
+     "displayName": "Mode"
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Kill EQ.vst3#AIR Kill EQ",
+   "scanName": "AIR Kill EQ",
+   "name": "AIR Kill EQ",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Kill EQ.vst3",
+   "pluginName": null,
+   "category": "eq",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 12,
+   "roles": {
+    "bypass": "bypass",
+    "output": "output"
+   },
+   "bands": 0,
+   "params": [
+    {
+     "name": "output",
+     "text": "0.0 dB",
+     "displayName": "Output",
+     "range": [
+      -20,
+      20,
+      0.1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Para EQ.vst3#AIR Para EQ",
+   "scanName": "AIR Para EQ",
+   "name": "AIR Para EQ",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Para EQ.vst3",
+   "pluginName": null,
+   "category": "eq",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 27,
+   "roles": {
+    "bypass": "bypass",
+    "lowcut": "low_cut_freq",
+    "highcut": "high_cut_freq",
+    "output": "output"
+   },
+   "bands": 0,
+   "params": [
+    {
+     "name": "low_cut_freq",
+     "text": "100 Hz",
+     "displayName": "Low Cut Freq",
+     "range": [
+      20,
+      8000,
+      null
+     ]
+    },
+    {
+     "name": "high_cut_freq",
+     "text": "20.0 kHz",
+     "displayName": "High Cut Freq",
+     "range": [
+      120,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "output",
+     "text": "0.0 dB",
+     "displayName": "Output",
+     "range": [
+      -20,
+      20,
+      0.1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_2098 EQ.vst3#bx_2098 EQ",
+   "scanName": "bx_2098 EQ",
+   "name": "bx_2098 EQ",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_2098 EQ.vst3",
+   "pluginName": null,
+   "category": "eq",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 76,
+   "roles": {
+    "bypass": "power",
+    "lowcut": "hpf_frequency_1_hz",
+    "highcut": "lpf_frequency_1_hz"
+   },
+   "bands": 0,
+   "params": [
+    {
+     "name": "power",
+     "text": "On",
+     "displayName": "Power",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "hpf_frequency_1_hz",
+     "text": "20.0",
+     "displayName": "HPF Frequency 1",
+     "range": [
+      20,
+      300,
+      null
+     ]
+    },
+    {
+     "name": "lpf_frequency_1_hz",
+     "text": "30.00k",
+     "displayName": "LPF Frequency 1"
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\kiloHearts\\Carve EQ.vst3#Carve EQ",
+   "scanName": "Carve EQ",
+   "name": "Carve EQ",
+   "vendor": "Kilohearts",
+   "path": "C:\\Program Files\\Common Files\\VST3\\kiloHearts\\Carve EQ.vst3",
+   "pluginName": null,
+   "category": "eq",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 5,
+   "roles": {
+    "bypass": "bypass",
+    "gain": "gain"
+   },
+   "bands": 0,
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "gain",
+     "text": "+0.00 dB",
+     "displayName": "Gain"
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Kush Audio\\Clariphonic Mk3.vst3#Clariphonic Mk3",
+   "scanName": "Clariphonic Mk3",
+   "name": "Clariphonic Mk3",
+   "vendor": "Kush Audio",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Kush Audio\\Clariphonic Mk3.vst3",
+   "pluginName": null,
+   "category": "eq",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 111,
+   "paramCount": 19,
+   "roles": {
+    "output": "output_trim"
+   },
+   "bands": 0,
+   "params": [
+    {
+     "name": "output_trim",
+     "text": "0.0",
+     "displayName": "Output Trim",
+     "range": [
+      -12,
+      12,
+      0.1
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Dangerous BAX EQ Master.vst3#Dangerous BAX EQ Master",
+   "scanName": "Dangerous BAX EQ Master",
+   "name": "Dangerous BAX EQ Master",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Dangerous BAX EQ Master.vst3",
+   "pluginName": null,
+   "category": "eq",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 21,
+   "roles": {
+    "bypass": "power",
+    "lowcut": "low_cut_frequency_1",
+    "highcut": "high_cut_frequency_1"
+   },
+   "bands": 0,
+   "params": [
+    {
+     "name": "low_cut_frequency_1",
+     "text": "Out",
+     "displayName": "Low Cut Frequency 1",
+     "values": [
+      "Out",
+      "12 Hz",
+      "18 Hz",
+      "24 Hz",
+      "30 Hz",
+      "36 Hz",
+      "43 Hz",
+      "54 Hz"
+     ]
+    },
+    {
+     "name": "high_cut_frequency_1",
+     "text": "Out",
+     "displayName": "High Cut Frequency 1",
+     "values": [
+      "Out",
+      "70 kHz",
+      "28 kHz",
+      "18 kHz",
+      "12.6 kHz",
+      "11.1 kHz",
+      "9 kHz",
+      "7.5 kHz"
+     ]
+    },
+    {
+     "name": "power",
+     "text": "On",
+     "displayName": "Power",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Dangerous BAX EQ Mix.vst3#Dangerous BAX EQ Mix",
+   "scanName": "Dangerous BAX EQ Mix",
+   "name": "Dangerous BAX EQ Mix",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Dangerous BAX EQ Mix.vst3",
+   "pluginName": null,
+   "category": "eq",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 10,
+   "roles": {
+    "bypass": "power",
+    "lowcut": "low_cut_frequency",
+    "highcut": "high_cut_frequency",
+    "output": "output_level_db"
+   },
+   "bands": 0,
+   "params": [
+    {
+     "name": "low_cut_frequency",
+     "text": "Out",
+     "displayName": "Low Cut Frequency",
+     "values": [
+      "Out",
+      "12 Hz",
+      "18 Hz",
+      "24 Hz",
+      "30 Hz",
+      "36 Hz",
+      "43 Hz",
+      "54 Hz"
+     ]
+    },
+    {
+     "name": "high_cut_frequency",
+     "text": "Out",
+     "displayName": "High Cut Frequency",
+     "values": [
+      "Out",
+      "70 kHz",
+      "28 kHz",
+      "18 kHz",
+      "12.6 kHz",
+      "11.1 kHz",
+      "9 kHz",
+      "7.5 kHz"
+     ]
+    },
+    {
+     "name": "output_level_db",
+     "text": "0.0",
+     "displayName": "Output Level",
+     "range": [
+      -5,
+      5,
+      0.1
+     ]
+    },
+    {
+     "name": "power",
+     "text": "On",
+     "displayName": "Power",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-Q 4.vst3#FabFilter Pro-Q 4",
+   "scanName": "FabFilter Pro-Q 4",
+   "name": "Pro-Q 4",
+   "vendor": "FabFilter",
+   "path": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-Q 4.vst3",
+   "pluginName": null,
+   "category": "eq",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 400,
+   "roles": {},
+   "bands": 17,
+   "params": [
+    {
+     "name": "band_1_used",
+     "text": "Unused",
+     "displayName": "Band 1 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_1_enabled",
+     "text": "Enabled",
+     "displayName": "Band 1 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_1_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 1 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_1_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 1 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_1_q",
+     "text": "1.000",
+     "displayName": "Band 1 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_1_shape",
+     "text": "Bell",
+     "displayName": "Band 1 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_2_used",
+     "text": "Unused",
+     "displayName": "Band 2 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_2_enabled",
+     "text": "Enabled",
+     "displayName": "Band 2 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_2_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 2 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_2_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 2 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_2_q",
+     "text": "1.000",
+     "displayName": "Band 2 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_2_shape",
+     "text": "Bell",
+     "displayName": "Band 2 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_3_used",
+     "text": "Unused",
+     "displayName": "Band 3 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_3_enabled",
+     "text": "Enabled",
+     "displayName": "Band 3 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_3_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 3 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_3_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 3 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_3_q",
+     "text": "1.000",
+     "displayName": "Band 3 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_3_shape",
+     "text": "Bell",
+     "displayName": "Band 3 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_4_used",
+     "text": "Unused",
+     "displayName": "Band 4 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_4_enabled",
+     "text": "Enabled",
+     "displayName": "Band 4 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_4_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 4 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_4_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 4 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_4_q",
+     "text": "1.000",
+     "displayName": "Band 4 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_4_shape",
+     "text": "Bell",
+     "displayName": "Band 4 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_5_used",
+     "text": "Unused",
+     "displayName": "Band 5 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_5_enabled",
+     "text": "Enabled",
+     "displayName": "Band 5 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_5_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 5 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_5_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 5 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_5_q",
+     "text": "1.000",
+     "displayName": "Band 5 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_5_shape",
+     "text": "Bell",
+     "displayName": "Band 5 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_6_used",
+     "text": "Unused",
+     "displayName": "Band 6 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_6_enabled",
+     "text": "Enabled",
+     "displayName": "Band 6 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_6_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 6 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_6_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 6 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_6_q",
+     "text": "1.000",
+     "displayName": "Band 6 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_6_shape",
+     "text": "Bell",
+     "displayName": "Band 6 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_7_used",
+     "text": "Unused",
+     "displayName": "Band 7 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_7_enabled",
+     "text": "Enabled",
+     "displayName": "Band 7 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_7_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 7 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_7_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 7 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_7_q",
+     "text": "1.000",
+     "displayName": "Band 7 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_7_shape",
+     "text": "Bell",
+     "displayName": "Band 7 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_8_used",
+     "text": "Unused",
+     "displayName": "Band 8 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_8_enabled",
+     "text": "Enabled",
+     "displayName": "Band 8 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_8_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 8 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_8_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 8 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_8_q",
+     "text": "1.000",
+     "displayName": "Band 8 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_8_shape",
+     "text": "Bell",
+     "displayName": "Band 8 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Filter.vst3#AIR Filter",
+   "scanName": "AIR Filter",
+   "name": "AIR Filter",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Filter.vst3",
+   "pluginName": null,
+   "category": "filter",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 9,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Vintage Filter.vst3#AIR Vintage Filter",
+   "scanName": "AIR Vintage Filter",
+   "name": "AIR Vintage Filter",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Vintage Filter.vst3",
+   "pluginName": null,
+   "category": "filter",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 13,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_cleansweep V2.vst3#bx_cleansweep V2",
+   "scanName": "bx_cleansweep V2",
+   "name": "bx_cleansweep V2",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_cleansweep V2.vst3",
+   "pluginName": null,
+   "category": "filter",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 8,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_subfilter.vst3#bx_subfilter",
+   "scanName": "bx_subfilter",
+   "name": "bx_subfilter",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_subfilter.vst3",
+   "pluginName": null,
+   "category": "filter",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 7,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Expander.vst3#AIR Expander",
+   "scanName": "AIR Expander",
+   "name": "AIR Expander",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Expander.vst3",
+   "pluginName": null,
+   "category": "gate",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 8,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Filter Gate.vst3#AIR Filter Gate",
+   "scanName": "AIR Filter Gate",
+   "name": "AIR Filter Gate",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Filter Gate.vst3",
+   "pluginName": null,
+   "category": "gate",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 15,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Noise Gate.vst3#AIR Noise Gate",
+   "scanName": "AIR Noise Gate",
+   "name": "AIR Noise Gate",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Noise Gate.vst3",
+   "pluginName": null,
+   "category": "gate",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 9,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Diode Clip.vst3#AIR Diode Clip",
+   "scanName": "AIR Diode Clip",
+   "name": "AIR Diode Clip",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Diode Clip.vst3",
+   "pluginName": null,
+   "category": "limiter",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 10,
+   "roles": {
+    "bypass": "bypass",
+    "output": "level"
+   },
+   "params": [
+    {
+     "name": "level",
+     "text": "0.0 dB",
+     "displayName": "Level",
+     "range": [
+      null,
+      12,
+      null
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Limiter.vst3#AIR Limiter",
+   "scanName": "AIR Limiter",
+   "name": "AIR Limiter",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Limiter.vst3",
+   "pluginName": null,
+   "category": "limiter",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 7,
+   "roles": {
+    "bypass": "bypass",
+    "ceiling": "ceiling",
+    "release": "release"
+   },
+   "params": [
+    {
+     "name": "ceiling",
+     "text": "0.0 dB",
+     "displayName": "Ceiling",
+     "range": [
+      -24,
+      0,
+      0.1
+     ]
+    },
+    {
+     "name": "release",
+     "text": "316 ms",
+     "displayName": "Release"
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Maximizer.vst3#AIR Maximizer",
+   "scanName": "AIR Maximizer",
+   "name": "AIR Maximizer",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Maximizer.vst3",
+   "pluginName": null,
+   "category": "limiter",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 8,
+   "roles": {
+    "bypass": "bypass",
+    "threshold": "threshold",
+    "ceiling": "ceiling",
+    "release": "release"
+   },
+   "params": [
+    {
+     "name": "threshold",
+     "text": "-20.0 dB",
+     "displayName": "Threshold",
+     "range": [
+      -40,
+      0,
+      0.1
+     ]
+    },
+    {
+     "name": "ceiling",
+     "text": "-5.0 dB FS",
+     "displayName": "Ceiling"
+    },
+    {
+     "name": "release",
+     "text": "316 ms",
+     "displayName": "Release"
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Bus PEAK.vst3#Bus PEAK",
+   "scanName": "Bus PEAK",
+   "name": "Bus PEAK",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Bus PEAK.vst3",
+   "pluginName": null,
+   "category": "limiter",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 452,
+   "paramCount": 126,
+   "roles": {
+    "bypass": "on_off",
+    "ceiling": "true_peak_on_off",
+    "release": "limiter_release_ms",
+    "input": "input_gain_db"
+   },
+   "params": [
+    {
+     "name": "on_off",
+     "text": "Active",
+     "displayName": "On/Off",
+     "values": [
+      "Active",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "input_gain_db",
+     "text": "0.000",
+     "displayName": "Input Gain",
+     "range": [
+      0,
+      36,
+      null
+     ]
+    },
+    {
+     "name": "true_peak_on_off",
+     "text": "On",
+     "displayName": "True Peak On/Off",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "limiter_release_ms",
+     "text": "50.0",
+     "displayName": "Limiter Release",
+     "range": [
+      0,
+      2000,
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-L 2.vst3#FabFilter Pro-L 2",
+   "scanName": "FabFilter Pro-L 2",
+   "name": "Pro-L 2",
+   "vendor": "FabFilter",
+   "path": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-L 2.vst3",
+   "pluginName": null,
+   "category": "limiter",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 3115,
+   "paramCount": 37,
+   "roles": {
+    "bypass": "bypass",
+    "ceiling": "true_peak_limiting",
+    "release": "release",
+    "output": "output_level"
+   },
+   "params": [
+    {
+     "name": "release",
+     "text": "400.0 ms",
+     "displayName": "Release",
+     "range": [
+      0,
+      998.2,
+      null
+     ]
+    },
+    {
+     "name": "true_peak_limiting",
+     "text": "On",
+     "displayName": "True Peak Limiting",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "bypass",
+     "text": "Not Bypassed",
+     "displayName": "Bypass",
+     "values": [
+      "Not Bypassed",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "output_level",
+     "text": "0.00 dBTP",
+     "displayName": "Output Level",
+     "range": [
+      -30,
+      0,
+      0.03
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Chorus.vst3#AIR Chorus",
+   "scanName": "AIR Chorus",
+   "name": "AIR Chorus",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Chorus.vst3",
+   "pluginName": null,
+   "category": "modulation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 9,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "mix",
+     "text": "50 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Ensemble.vst3#AIR Ensemble",
+   "scanName": "AIR Ensemble",
+   "name": "AIR Ensemble",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Ensemble.vst3",
+   "pluginName": null,
+   "category": "modulation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 8,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "width": "width"
+   },
+   "params": [
+    {
+     "name": "width",
+     "text": "100 %",
+     "displayName": "Width",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "75 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Flanger.vst3#AIR Flanger",
+   "scanName": "AIR Flanger",
+   "name": "AIR Flanger",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Flanger.vst3",
+   "pluginName": null,
+   "category": "modulation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 7,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "mix",
+     "text": "50 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Multi-Chorus.vst3#AIR Multi-Chorus",
+   "scanName": "AIR Multi-Chorus",
+   "name": "AIR Multi-Chorus",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Multi-Chorus.vst3",
+   "pluginName": null,
+   "category": "modulation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 10,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "width": "width"
+   },
+   "params": [
+    {
+     "name": "width",
+     "text": "100 %",
+     "displayName": "Width",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "50 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Phaser.vst3#AIR Phaser",
+   "scanName": "AIR Phaser",
+   "name": "AIR Phaser",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Phaser.vst3",
+   "pluginName": null,
+   "category": "modulation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 9,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "mix",
+     "text": "50 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_bluechorus2.vst3#bx_bluechorus2",
+   "scanName": "bx_bluechorus2",
+   "name": "bx_bluechorus2",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_bluechorus2.vst3",
+   "pluginName": null,
+   "category": "modulation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 5,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "mix",
+     "text": "50.0",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Chorus DIMENSION-D.vst3#Chorus DIMENSION-D",
+   "scanName": "Chorus DIMENSION-D",
+   "name": "Chorus DIMENSION-D",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Chorus DIMENSION-D.vst3",
+   "pluginName": null,
+   "category": "modulation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 48,
+   "paramCount": 102,
+   "roles": {
+    "bypass": "on_off",
+    "width": "stereo_mode"
+   },
+   "params": [
+    {
+     "name": "on_off",
+     "text": "Active",
+     "displayName": "On/Off",
+     "values": [
+      "Active",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "stereo_mode",
+     "text": "Stereo",
+     "displayName": "Stereo Mode",
+     "values": [
+      "Stereo",
+      "Mono"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Chorus JUN-6.vst3#Chorus JUN-6",
+   "scanName": "Chorus JUN-6",
+   "name": "Chorus JUN-6",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Chorus JUN-6.vst3",
+   "pluginName": null,
+   "category": "modulation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 48,
+   "paramCount": 103,
+   "roles": {
+    "bypass": "on_off",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "on_off",
+     "text": "Active",
+     "displayName": "On/Off",
+     "values": [
+      "Active",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "50.0",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Soundtoys\\Crystallizer.vst3#Crystallizer",
+   "scanName": "Crystallizer",
+   "name": "Crystallizer",
+   "vendor": "Soundtoys",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Soundtoys\\Crystallizer.vst3",
+   "pluginName": null,
+   "category": "modulation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 32,
+   "paramCount": 24,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "mix",
+     "text": "50.0",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Absynth 6 FX.vst3#Absynth 6 FX",
+   "scanName": "Absynth 6 FX",
+   "name": "Absynth 6 FX",
+   "vendor": "Native Instruments",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Absynth 6 FX.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 21,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Flavor.vst3#AIR Flavor",
+   "scanName": "AIR Flavor",
+   "name": "AIR Flavor",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Flavor.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 8,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Freq Shift.vst3#AIR Freq Shift",
+   "scanName": "AIR Freq Shift",
+   "name": "AIR Freq Shift",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Freq Shift.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 6,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Half Speed.vst3#AIR Half Speed",
+   "scanName": "AIR Half Speed",
+   "name": "AIR Half Speed",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Half Speed.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 12,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Pumper.vst3#AIR Pumper",
+   "scanName": "AIR Pumper",
+   "name": "AIR Pumper",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Pumper.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 9,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Spectral.vst3#AIR Spectral",
+   "scanName": "AIR Spectral",
+   "name": "AIR Spectral",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Spectral.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 15,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Talk Box.vst3#AIR Talk Box",
+   "scanName": "AIR Talk Box",
+   "name": "AIR Talk Box",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Talk Box.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 13,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ARCTIC.vst3#ARCTIC",
+   "scanName": "ARCTIC",
+   "name": "ARCTIC",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ARCTIC.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ARCTICFLAT.vst3#ARCTICFLAT",
+   "scanName": "ARCTICFLAT",
+   "name": "ARCTICFLAT",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ARCTICFLAT.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ARCTICFLATZL.vst3#ARCTICFLATZL",
+   "scanName": "ARCTICFLATZL",
+   "name": "ARCTICFLATZL",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ARCTICFLATZL.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ARCTICZL.vst3#ARCTICZL",
+   "scanName": "ARCTICZL",
+   "name": "ARCTICZL",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ARCTICZL.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ASH.vst3#ASH",
+   "scanName": "ASH",
+   "name": "ASH",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ASH.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ASHFLAT.vst3#ASHFLAT",
+   "scanName": "ASHFLAT",
+   "name": "ASHFLAT",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ASHFLAT.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ASHFLATZL.vst3#ASHFLATZL",
+   "scanName": "ASHFLATZL",
+   "name": "ASHFLATZL",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ASHFLATZL.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ASHULTRA.vst3#ASHULTRA",
+   "scanName": "ASHULTRA",
+   "name": "ASHULTRA",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ASHULTRA.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ASHULTRAFLAT.vst3#ASHULTRAFLAT",
+   "scanName": "ASHULTRAFLAT",
+   "name": "ASHULTRAFLAT",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ASHULTRAFLAT.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ASHULTRAFLATZL.vst3#ASHULTRAFLATZL",
+   "scanName": "ASHULTRAFLATZL",
+   "name": "ASHULTRAFLATZL",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ASHULTRAFLATZL.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ASHULTRAZL.vst3#ASHULTRAZL",
+   "scanName": "ASHULTRAZL",
+   "name": "ASHULTRAZL",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ASHULTRAZL.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ASHZL.vst3#ASHZL",
+   "scanName": "ASHZL",
+   "name": "ASHZL",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ASHZL.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\BLACK.vst3#BLACK",
+   "scanName": "BLACK",
+   "name": "BLACK",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\BLACK.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\BLACK GURU.vst3#BLACK GURU",
+   "scanName": "BLACK GURU",
+   "name": "BLACK GURU",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\BLACK GURU.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\BLACK GURUZL.vst3#BLACK GURUZL",
+   "scanName": "BLACK GURUZL",
+   "name": "BLACK GURUZL",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\BLACK GURUZL.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\BLACKZL.vst3#BLACKZL",
+   "scanName": "BLACKZL",
+   "name": "BLACKZL",
+   "vendor": "",
+   "path": "C:\\Program Files\\Common Files\\VST3\\BLACKZL.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "error",
+   "reason": "Failed to load plugin as VST3Plugin. Errors were:",
+   "latency": null,
+   "paramCount": 0
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Blue Cat Audio\\BC PatchWork VST3.vst3#BC PatchWork VST3",
+   "scanName": "BC PatchWork VST3",
+   "name": "Blue Cat's PatchWork",
+   "vendor": "Blue Cat Audio",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Blue Cat Audio\\BC PatchWork VST3.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 93,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_boom.vst3#bx_boom",
+   "scanName": "bx_boom",
+   "name": "bx_boom",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_boom.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 4,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_masterdesk Classic.vst3#bx_masterdesk Classic",
+   "scanName": "bx_masterdesk Classic",
+   "name": "bx_masterdesk Classic",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_masterdesk Classic.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "ok",
+   "latency": 304,
+   "paramCount": 12,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\A.O.M\\Cyclic_Panner.vst3#Cyclic_Panner",
+   "scanName": "Cyclic_Panner",
+   "name": "Cyclic Panner",
+   "vendor": "A.O.M.",
+   "path": "C:\\Program Files\\Common Files\\VST3\\A.O.M\\Cyclic_Panner.vst3",
+   "pluginName": null,
+   "category": "other",
+   "classifiedBy": "none",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 9,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Pitch Shifter.vst3#AIR Pitch Shifter",
+   "scanName": "AIR Pitch Shifter",
+   "name": "AIR Pitch Shifter",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Pitch Shifter.vst3",
+   "pluginName": null,
+   "category": "pitch",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 5,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Auto-Key.vst3#Auto-Key",
+   "scanName": "Auto-Key",
+   "name": "Auto-Key",
+   "vendor": "Antares",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Auto-Key.vst3",
+   "pluginName": null,
+   "category": "pitch",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 3,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_tuner.vst3#bx_tuner",
+   "scanName": "bx_tuner",
+   "name": "bx_tuner",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_tuner.vst3",
+   "pluginName": null,
+   "category": "pitch",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 5,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Non-Lin Reverb.vst3#AIR Non-Lin Reverb",
+   "scanName": "AIR Non-Lin Reverb",
+   "name": "AIR Non-Lin Reverb",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Non-Lin Reverb.vst3",
+   "pluginName": null,
+   "category": "reverb",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 11,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "decay": "time",
+    "predelay": "pre_delay",
+    "lowcut": "low_cut",
+    "highcut": "high_cut",
+    "width": "width"
+   },
+   "params": [
+    {
+     "name": "pre_delay",
+     "text": "4 ms",
+     "displayName": "Pre-Delay",
+     "range": [
+      0,
+      250,
+      1
+     ]
+    },
+    {
+     "name": "time",
+     "text": "203 ms",
+     "displayName": "Time",
+     "range": [
+      0,
+      1000,
+      null
+     ]
+    },
+    {
+     "name": "low_cut",
+     "text": "149 Hz",
+     "displayName": "Low Cut",
+     "range": [
+      20,
+      1000,
+      null
+     ]
+    },
+    {
+     "name": "high_cut",
+     "text": "4.45 kHz",
+     "displayName": "High Cut",
+     "range": [
+      1000,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "width",
+     "text": "48 %",
+     "displayName": "Width",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "53 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Reverb.vst3#AIR Reverb",
+   "scanName": "AIR Reverb",
+   "name": "AIR Reverb",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Reverb.vst3",
+   "pluginName": null,
+   "category": "reverb",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 20,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "decay": "time",
+    "predelay": "pre_delay",
+    "size": "room_size",
+    "lowcut": "low_cut",
+    "highcut": "high_cut",
+    "width": "input_width"
+   },
+   "params": [
+    {
+     "name": "low_cut",
+     "text": "72 Hz",
+     "displayName": "Low Cut",
+     "range": [
+      1,
+      1000,
+      null
+     ]
+    },
+    {
+     "name": "pre_delay",
+     "text": "0 ms",
+     "displayName": "Pre-Delay",
+     "range": [
+      0,
+      250,
+      1
+     ]
+    },
+    {
+     "name": "room_size",
+     "text": "40 %",
+     "displayName": "Room Size",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "time",
+     "text": "1.7 s",
+     "displayName": "Time"
+    },
+    {
+     "name": "high_cut",
+     "text": "16.9 kHz",
+     "displayName": "High Cut",
+     "range": [
+      1000,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "input_width",
+     "text": "+30 %",
+     "displayName": "Input Width",
+     "range": [
+      -100,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Spring Reverb.vst3#AIR Spring Reverb",
+   "scanName": "AIR Spring Reverb",
+   "name": "AIR Spring Reverb",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Spring Reverb.vst3",
+   "pluginName": null,
+   "category": "reverb",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 8,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "decay": "time",
+    "predelay": "pre_delay",
+    "lowcut": "low_cut",
+    "width": "width"
+   },
+   "params": [
+    {
+     "name": "pre_delay",
+     "text": "2 ms",
+     "displayName": "Pre Delay",
+     "range": [
+      0,
+      250,
+      1
+     ]
+    },
+    {
+     "name": "time",
+     "text": "4.0 s",
+     "displayName": "Time"
+    },
+    {
+     "name": "low_cut",
+     "text": "141 Hz",
+     "displayName": "Low Cut",
+     "range": [
+      20,
+      1000,
+      null
+     ]
+    },
+    {
+     "name": "width",
+     "text": "0 %",
+     "displayName": "Width",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "50 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Stutter.vst3#AIR Stutter",
+   "scanName": "AIR Stutter",
+   "name": "AIR Stutter",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Stutter.vst3",
+   "pluginName": null,
+   "category": "reverb",
+   "classifiedBy": "params",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 12,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "decay": "freeze_decay"
+   },
+   "params": [
+    {
+     "name": "freeze_decay",
+     "text": "1.09 s",
+     "displayName": "Freeze Decay"
+    },
+    {
+     "name": "mix",
+     "text": "100 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ANA2 x64.vst3#ANA2 x64",
+   "scanName": "ANA2 x64",
+   "name": "ANA 2",
+   "vendor": "Sonic Academy",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ANA2 x64.vst3",
+   "pluginName": null,
+   "category": "reverb",
+   "classifiedBy": "params",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 400,
+   "roles": {
+    "mix": "filters_parallel",
+    "decay": "amp_env_decay_sec",
+    "width": "osc_1_pulse_width"
+   },
+   "params": [
+    {
+     "name": "osc_1_pulse_width",
+     "text": "0.00 %",
+     "displayName": "Osc 1 Pulse Width",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "amp_env_decay_sec",
+     "text": "60.00 sec",
+     "displayName": "Amp Env Decay",
+     "range": [
+      0,
+      60,
+      null
+     ]
+    },
+    {
+     "name": "filters_parallel",
+     "text": "series",
+     "displayName": "Filters Parallel",
+     "values": [
+      "series",
+      "parallel"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ValhallaDSP\\ValhallaVintageVerb.vst3#ValhallaVintageVerb",
+   "scanName": "ValhallaVintageVerb",
+   "name": "ValhallaVintageVerb",
+   "vendor": "Valhalla DSP, LLC",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ValhallaDSP\\ValhallaVintageVerb.vst3",
+   "pluginName": null,
+   "category": "reverb",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 18,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "decay": "decay",
+    "predelay": "predelay",
+    "size": "size",
+    "lowcut": "lowcut",
+    "highcut": "highcut"
+   },
+   "params": [
+    {
+     "name": "mix",
+     "text": "100.0 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "predelay",
+     "text": "20.00 ms",
+     "displayName": "PreDelay",
+     "range": [
+      0,
+      500,
+      null
+     ]
+    },
+    {
+     "name": "decay",
+     "text": "4.00 s",
+     "displayName": "Decay"
+    },
+    {
+     "name": "size",
+     "text": "100.0 %",
+     "displayName": "Size",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "highcut",
+     "text": "8000 Hz",
+     "displayName": "HighCut",
+     "range": [
+      100,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "lowcut",
+     "text": "10 Hz",
+     "displayName": "LowCut",
+     "range": [
+      10,
+      1500,
+      10
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Slate Digital\\VerbSuite Classics.vst3#VerbSuite Classics",
+   "scanName": "VerbSuite Classics",
+   "name": "VerbSuite Classics",
+   "vendor": "Slate Digital",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Slate Digital\\VerbSuite Classics.vst3",
+   "pluginName": null,
+   "category": "reverb",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 12,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "dry_wet",
+    "decay": "reverb_decay",
+    "predelay": "reverb_pre_delay",
+    "width": "reverb_width"
+   },
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "reverb_decay",
+     "text": "100%",
+     "displayName": "Reverb Decay",
+     "range": [
+      25,
+      130,
+      null
+     ]
+    },
+    {
+     "name": "reverb_pre_delay",
+     "text": "0.00ms",
+     "displayName": "Reverb Pre-Delay",
+     "range": [
+      0,
+      350,
+      null
+     ]
+    },
+    {
+     "name": "reverb_width",
+     "text": "0.00dB",
+     "displayName": "Reverb Width",
+     "range": [
+      -6,
+      6,
+      null
+     ]
+    },
+    {
+     "name": "dry_wet",
+     "text": "100.0%",
+     "displayName": "Dry/Wet",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Distortion.vst3#AIR Distortion",
+   "scanName": "AIR Distortion",
+   "name": "AIR Distortion",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Distortion.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 11,
+   "roles": {
+    "bypass": "bypass",
+    "drive": "drive",
+    "mix": "mix",
+    "style": "mode",
+    "highcut": "high_cut",
+    "output": "output"
+   },
+   "params": [
+    {
+     "name": "mode",
+     "text": "Hard ",
+     "displayName": "Mode",
+     "values": [
+      "Hard ",
+      "Soft ",
+      "Wrap "
+     ]
+    },
+    {
+     "name": "drive",
+     "text": "15 dB",
+     "displayName": "Drive",
+     "range": [
+      0,
+      60,
+      1
+     ]
+    },
+    {
+     "name": "high_cut",
+     "text": "20.0 kHz",
+     "displayName": "High Cut",
+     "range": [
+      1000,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "output",
+     "text": "100 %",
+     "displayName": "Output",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Enhancer.vst3#AIR Enhancer",
+   "scanName": "AIR Enhancer",
+   "name": "AIR Enhancer",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Enhancer.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 9,
+   "roles": {
+    "bypass": "bypass",
+    "output": "output"
+   },
+   "params": [
+    {
+     "name": "output",
+     "text": "0.0 dB",
+     "displayName": "Output",
+     "range": [
+      null,
+      0,
+      null
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Fuzz-Wah.vst3#AIR Fuzz-Wah",
+   "scanName": "AIR Fuzz-Wah",
+   "name": "AIR Fuzz-Wah",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Fuzz-Wah.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 20,
+   "roles": {
+    "bypass": "bypass",
+    "drive": "drive",
+    "mix": "mix",
+    "tone": "tone",
+    "output": "output"
+   },
+   "params": [
+    {
+     "name": "mix",
+     "text": "100 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "drive",
+     "text": "20 dB",
+     "displayName": "Drive",
+     "range": [
+      0,
+      40,
+      1
+     ]
+    },
+    {
+     "name": "tone",
+     "text": "3.16 kHz",
+     "displayName": "Tone",
+     "range": [
+      1000,
+      10000,
+      null
+     ]
+    },
+    {
+     "name": "output",
+     "text": "0.0 dB",
+     "displayName": "Output",
+     "range": [
+      null,
+      0,
+      null
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Lo-Fi.vst3#AIR Lo-Fi",
+   "scanName": "AIR Lo-Fi",
+   "name": "AIR Lo-Fi",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Lo-Fi.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 18,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "mix",
+     "text": "100 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Tube Drive.vst3#AIR Tube Drive",
+   "scanName": "AIR Tube Drive",
+   "name": "AIR Tube Drive",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Tube Drive.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 6,
+   "roles": {
+    "bypass": "bypass",
+    "drive": "drive",
+    "output": "output"
+   },
+   "params": [
+    {
+     "name": "drive",
+     "text": "0 %",
+     "displayName": "Drive",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "output",
+     "text": "0.0 dB",
+     "displayName": "Output",
+     "range": [
+      -20,
+      20,
+      0.1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Black Box Analog Design HG-2.vst3#Black Box Analog Design HG-2",
+   "scanName": "Black Box Analog Design HG-2",
+   "name": "Black Box Analog Design HG-2",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Black Box Analog Design HG-2.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 32,
+   "paramCount": 17,
+   "roles": {
+    "bypass": "power",
+    "drive": "saturation_in",
+    "mix": "mix",
+    "output": "output",
+    "input": "input_gain_db"
+   },
+   "params": [
+    {
+     "name": "power",
+     "text": "On",
+     "displayName": "Power",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "saturation_in",
+     "text": "Off",
+     "displayName": "Saturation In",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "input_gain_db",
+     "text": "0.0",
+     "displayName": "Input Gain",
+     "range": [
+      -12,
+      12,
+      0.1
+     ]
+    },
+    {
+     "name": "output",
+     "text": "50",
+     "displayName": "Output",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Bus EXCITER-104.vst3#Bus EXCITER-104",
+   "scanName": "Bus EXCITER-104",
+   "name": "Bus EXCITER-104",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Bus EXCITER-104.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 176,
+   "paramCount": 115,
+   "roles": {
+    "bypass": "on_off",
+    "drive": "big_bass_drive",
+    "output": "output_level_db"
+   },
+   "params": [
+    {
+     "name": "on_off",
+     "text": "Active",
+     "displayName": "On/Off",
+     "values": [
+      "Active",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "big_bass_drive",
+     "text": "50.0",
+     "displayName": "Big Bass Drive",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "output_level_db",
+     "text": "0.000",
+     "displayName": "Output Level",
+     "range": [
+      -24,
+      24,
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_yellowdrive.vst3#bx_yellowdrive",
+   "scanName": "bx_yellowdrive",
+   "name": "bx_yellowdrive",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_yellowdrive.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 5,
+   "roles": {
+    "bypass": "bypass",
+    "drive": "drive",
+    "tone": "tone",
+    "output": "level"
+   },
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "drive",
+     "text": "5.0",
+     "displayName": "Drive",
+     "range": [
+      0,
+      10,
+      0.1
+     ]
+    },
+    {
+     "name": "tone",
+     "text": "5.0",
+     "displayName": "Tone",
+     "range": [
+      0,
+      10,
+      0.1
+     ]
+    },
+    {
+     "name": "level",
+     "text": "5.0",
+     "displayName": "Level",
+     "range": [
+      0,
+      10,
+      0.1
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Soundtoys\\Decapitator.vst3#Decapitator",
+   "scanName": "Decapitator",
+   "name": "Decapitator",
+   "vendor": "Soundtoys",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Soundtoys\\Decapitator.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 62,
+   "paramCount": 12,
+   "roles": {
+    "bypass": "bypass",
+    "drive": "drive",
+    "mix": "mix",
+    "tone": "tone_db",
+    "style": "style",
+    "lowcut": "lowcut_hz",
+    "highcut": "highcut_hz",
+    "autogain": "autogain",
+    "output": "outputtrim_db"
+   },
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "style",
+     "text": "A",
+     "displayName": "Style",
+     "values": [
+      "A",
+      "E",
+      "N",
+      "T",
+      "P"
+     ]
+    },
+    {
+     "name": "drive",
+     "text": "0.0",
+     "displayName": "Drive",
+     "range": [
+      0,
+      10,
+      0.1
+     ]
+    },
+    {
+     "name": "lowcut_hz",
+     "text": "20.0",
+     "displayName": "LowCut",
+     "range": [
+      20,
+      1000,
+      null
+     ]
+    },
+    {
+     "name": "tone_db",
+     "text": "0.0",
+     "displayName": "Tone",
+     "range": [
+      -12,
+      12,
+      null
+     ]
+    },
+    {
+     "name": "highcut_hz",
+     "text": "20000.0",
+     "displayName": "HighCut",
+     "range": [
+      1000,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100.0",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "autogain",
+     "text": "On",
+     "displayName": "AutoGain",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "outputtrim_db",
+     "text": "0.0",
+     "displayName": "OutputTrim",
+     "range": [
+      -24,
+      0,
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Saturn 2.vst3#FabFilter Saturn 2",
+   "scanName": "FabFilter Saturn 2",
+   "name": "Saturn 2",
+   "vendor": "FabFilter",
+   "path": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Saturn 2.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 400,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "input": "input_gain"
+   },
+   "params": [
+    {
+     "name": "input_gain",
+     "text": "0.00 dB",
+     "displayName": "Input Gain",
+     "range": [
+      -36,
+      36,
+      null
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Not Bypassed",
+     "displayName": "Bypass",
+     "values": [
+      "Not Bypassed",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100%",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Stereo Width.vst3#AIR Stereo Width",
+   "scanName": "AIR Stereo Width",
+   "name": "AIR Stereo Width",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Stereo Width.vst3",
+   "pluginName": null,
+   "category": "stereo",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 9,
+   "roles": {
+    "bypass": "bypass",
+    "width": "width"
+   },
+   "params": [
+    {
+     "name": "width",
+     "text": "100 %",
+     "displayName": "Width",
+     "range": [
+      0,
+      200,
+      1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_shredspread.vst3#bx_shredspread",
+   "scanName": "bx_shredspread",
+   "name": "bx_shredspread",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_shredspread.vst3",
+   "pluginName": null,
+   "category": "stereo",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 16,
+   "roles": {
+    "bypass": "bypass",
+    "width": "stereo_width_on"
+   },
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "stereo_width_on",
+     "text": "On",
+     "displayName": "Stereo Width On",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Transient.vst3#AIR Transient",
+   "scanName": "AIR Transient",
+   "name": "AIR Transient",
+   "vendor": "AIR Music Technology",
+   "path": "C:\\Program Files\\Common Files\\VST3\\AIR Music Technology\\AIR Transient.vst3",
+   "pluginName": null,
+   "category": "utility",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 7,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Bus TRANSIENT.vst3#Bus TRANSIENT",
+   "scanName": "Bus TRANSIENT",
+   "name": "Bus TRANSIENT",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Bus TRANSIENT.vst3",
+   "pluginName": null,
+   "category": "utility",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 144,
+   "paramCount": 131,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_meter.vst3#bx_meter",
+   "scanName": "bx_meter",
+   "name": "bx_meter",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_meter.vst3",
+   "pluginName": null,
+   "category": "utility",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 9,
+   "roles": {},
+   "params": []
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\bx_solo.vst3#bx_solo",
+   "scanName": "bx_solo",
+   "name": "bx_solo",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\bx_solo.vst3",
+   "pluginName": null,
+   "category": "utility",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 8,
+   "roles": {},
+   "params": []
+  }
+ ]
+}

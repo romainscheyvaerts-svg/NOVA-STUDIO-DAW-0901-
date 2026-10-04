@@ -1,6 +1,8 @@
 import { AIAction, DAWState, Track, TrackType } from '../types';
 import { findVocalMixStyle } from './vocalPresets';
 import { listTakes, selectTakeActions } from './takes';
+import { parseVstCommand } from './novaVstCommands';
+import { novaBridge } from '../services/NovaBridge';
 
 /**
  * Commandes de Nova comprises SANS l'IA : exécution immédiate, même hors
@@ -46,6 +48,9 @@ function lastTake(t: Track) {
 
 export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult | null {
   const msg = norm(raw);
+  // Pont VST connecté : Nova mixe sur les plugins du PC (liste, styles, réglages).
+  const vst = parseVstCommand(raw, st, novaBridge.isConnected() && !!novaBridge.getBridgeState().paramsText);
+  if (vst) return vst;
   if (!msg || msg.length > 90) return null;
   // Questions et demandes de conseil : pour l'IA.
   if (/\?|\b(pourquoi|comment|conseil\w*|quel\w*|quoi|explique\w*|aide moi a choisir|tu penses|recommande\w*)\b/.test(msg)) return null;

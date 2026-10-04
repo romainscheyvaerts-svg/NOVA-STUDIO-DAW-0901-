@@ -1,0 +1,1623 @@
+{
+ "plugins": [
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Bettermaker Bus Compressor DSP.vst3#Bettermaker Bus Compressor DSP",
+   "scanName": "Bettermaker Bus Compressor DSP",
+   "name": "Bettermaker Bus Compressor DSP",
+   "vendor": "Plugin Alliance",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Bettermaker Bus Compressor DSP.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "vca",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 19,
+   "roles": {
+    "bypass": "bypass",
+    "threshold": "threshold",
+    "ratio": "ratio",
+    "attack": "attack",
+    "release": "release",
+    "output": "output",
+    "mix": "mix"
+   },
+   "params": [
+    {
+     "name": "threshold",
+     "text": "-5.00",
+     "displayName": "THRESHOLD",
+     "range": [
+      -35,
+      5,
+      0.1
+     ]
+    },
+    {
+     "name": "ratio",
+     "text": "2.00",
+     "displayName": "RATIO",
+     "range": [
+      1,
+      5,
+      1
+     ]
+    },
+    {
+     "name": "attack",
+     "text": "30.00",
+     "displayName": "ATTACK",
+     "range": [
+      0.1,
+      60,
+      0.1
+     ]
+    },
+    {
+     "name": "release",
+     "text": "250.00",
+     "displayName": "RELEASE",
+     "range": [
+      10,
+      1200,
+      null
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100.00",
+     "displayName": "MIX",
+     "range": [
+      0,
+      100,
+      1
+     ]
+    },
+    {
+     "name": "output",
+     "text": "0.00",
+     "displayName": "OUTPUT",
+     "range": [
+      -10,
+      15,
+      0.1
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Comp DIODE-609.vst3#Comp DIODE-609",
+   "scanName": "Comp DIODE-609",
+   "name": "Comp DIODE-609",
+   "vendor": "Arturia",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Arturia\\Comp DIODE-609.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "digital",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 32,
+   "paramCount": 132,
+   "roles": {
+    "bypass": "on_off",
+    "threshold": "ch1_comp_threshold_db",
+    "ratio": "ch1_comp_ratio",
+    "attack": "ch1_comp_attack_ms",
+    "release": "ch1_comp_recovery",
+    "makeup": "ch1_comp_make_up_gain_db",
+    "mix": "dry_wet_mix"
+   },
+   "params": [
+    {
+     "name": "on_off",
+     "text": "Active",
+     "displayName": "On/Off",
+     "values": [
+      "Active",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "dry_wet_mix",
+     "text": "100",
+     "displayName": "Dry/Wet Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "ch1_comp_threshold_db",
+     "text": "0.000",
+     "displayName": "Ch1: Comp threshold",
+     "range": [
+      -40,
+      0,
+      null
+     ]
+    },
+    {
+     "name": "ch1_comp_attack_ms",
+     "text": "0.000",
+     "displayName": "Ch1: Comp attack",
+     "range": [
+      0,
+      75,
+      null
+     ]
+    },
+    {
+     "name": "ch1_comp_recovery",
+     "text": "100ms",
+     "displayName": "Ch1: Comp recovery",
+     "values": [
+      "100ms",
+      "400ms",
+      "800ms",
+      "1500ms",
+      "a1",
+      "a2"
+     ]
+    },
+    {
+     "name": "ch1_comp_ratio",
+     "text": "2:1",
+     "displayName": "Ch1: Comp ratio",
+     "values": [
+      "1.1:1",
+      "1.2:1",
+      "1.5:1",
+      "2:1",
+      "3:1",
+      "4:1",
+      "6:1"
+     ]
+    },
+    {
+     "name": "ch1_comp_make_up_gain_db",
+     "text": "0.000",
+     "displayName": "Ch1: Comp make-up gain",
+     "range": [
+      0,
+      20,
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-C 3.vst3#FabFilter Pro-C 3",
+   "scanName": "FabFilter Pro-C 3",
+   "name": "Pro-C 3",
+   "vendor": "FabFilter",
+   "path": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-C 3.vst3",
+   "pluginName": null,
+   "category": "compressor",
+   "compType": "vca",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 105,
+   "roles": {
+    "bypass": "bypass",
+    "threshold": "threshold",
+    "ratio": "ratio",
+    "attack": "attack",
+    "release": "release",
+    "output": "output_level",
+    "mix": "mix",
+    "knee": "knee",
+    "autogain": "auto_gain",
+    "style": "style"
+   },
+   "params": [
+    {
+     "name": "style",
+     "text": "Clean",
+     "displayName": "Style",
+     "values": [
+      "Clean",
+      "Versatile",
+      "Smooth",
+      "Punch",
+      "Upward",
+      "TTM",
+      "Op-El",
+      "Vari-Mu",
+      "Classic",
+      "Opto",
+      "Vocal",
+      "Mastering",
+      "Bus",
+      "Pumping"
+     ]
+    },
+    {
+     "name": "threshold",
+     "text": "-16.00 dB",
+     "displayName": "Threshold",
+     "range": [
+      -60,
+      0,
+      0.06
+     ]
+    },
+    {
+     "name": "ratio",
+     "text": "3.50:1",
+     "displayName": "Ratio"
+    },
+    {
+     "name": "knee",
+     "text": "+7.35 dB",
+     "displayName": "Knee",
+     "range": [
+      0,
+      72,
+      null
+     ]
+    },
+    {
+     "name": "attack",
+     "text": "0.725 ms",
+     "displayName": "Attack",
+     "range": [
+      0.005,
+      250,
+      null
+     ]
+    },
+    {
+     "name": "release",
+     "text": "100.0 ms",
+     "displayName": "Release",
+     "range": [
+      1.001,
+      997.1,
+      null
+     ]
+    },
+    {
+     "name": "auto_gain",
+     "text": "On",
+     "displayName": "Auto Gain",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "mix",
+     "text": "100.0%",
+     "displayName": "Mix",
+     "range": [
+      0,
+      200,
+      0.2
+     ]
+    },
+    {
+     "name": "output_level",
+     "text": "0.00 dB",
+     "displayName": "Output Level",
+     "range": [
+      null,
+      36,
+      null
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Not Bypassed",
+     "displayName": "Bypass",
+     "values": [
+      "Not Bypassed",
+      "Bypassed"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-DS.vst3#FabFilter Pro-DS",
+   "scanName": "FabFilter Pro-DS",
+   "name": "Pro-DS",
+   "vendor": "FabFilter",
+   "path": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-DS.vst3",
+   "pluginName": null,
+   "category": "deesser",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 720,
+   "paramCount": 25,
+   "roles": {
+    "bypass": "bypass",
+    "threshold": "threshold",
+    "frequency": "high_pass_frequency",
+    "range": "range",
+    "listen": "audition_triggering",
+    "output": "output_level"
+   },
+   "params": [
+    {
+     "name": "threshold",
+     "text": "-36.00 dB",
+     "displayName": "Threshold",
+     "range": [
+      null,
+      0,
+      null
+     ]
+    },
+    {
+     "name": "range",
+     "text": "6.00 dB",
+     "displayName": "Range",
+     "range": [
+      0,
+      24,
+      null
+     ]
+    },
+    {
+     "name": "audition_triggering",
+     "text": "Off",
+     "displayName": "Audition Triggering",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "high_pass_frequency",
+     "text": "7000.0 Hz",
+     "displayName": "High-Pass Frequency",
+     "range": [
+      2000,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "output_level",
+     "text": "0.00 dB",
+     "displayName": "Output Level",
+     "range": [
+      null,
+      36,
+      null
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Not Bypassed",
+     "displayName": "Bypass",
+     "values": [
+      "Not Bypassed",
+      "Bypassed"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Soundtoys\\EchoBoy.vst3#EchoBoy",
+   "scanName": "EchoBoy",
+   "name": "EchoBoy",
+   "vendor": "Soundtoys",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Soundtoys\\EchoBoy.vst3",
+   "pluginName": null,
+   "category": "delay",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 32,
+   "paramCount": 25,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "feedback": "feedback",
+    "sync": "tempo_bpm",
+    "lowcut": "lowcut",
+    "highcut": "highcut",
+    "style": "mode"
+   },
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "mix",
+     "text": "50.0",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "mode",
+     "text": "Single",
+     "displayName": "Mode",
+     "values": [
+      "Single",
+      "Dual",
+      "Ping-Pong",
+      "Rhythm"
+     ]
+    },
+    {
+     "name": "feedback",
+     "text": "0.00",
+     "displayName": "Feedback",
+     "range": [
+      0,
+      1.25,
+      0.01
+     ]
+    },
+    {
+     "name": "lowcut",
+     "text": "0.00",
+     "displayName": "LowCut",
+     "range": [
+      0,
+      1,
+      0.01
+     ]
+    },
+    {
+     "name": "highcut",
+     "text": "0.00",
+     "displayName": "HighCut",
+     "range": [
+      0,
+      1,
+      0.01
+     ]
+    },
+    {
+     "name": "tempo_bpm",
+     "text": "120.0",
+     "displayName": "Tempo",
+     "range": [
+      30,
+      240,
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ValhallaDSP\\ValhallaDelay.vst3#ValhallaDelay",
+   "scanName": "ValhallaDelay",
+   "name": "ValhallaDelay",
+   "vendor": "Valhalla DSP, LLC",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ValhallaDSP\\ValhallaDelay.vst3",
+   "pluginName": null,
+   "category": "delay",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 39,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "feedback": "repeatswell",
+    "sync": "delaylsync",
+    "lowcut": "lowcut",
+    "highcut": "highcut",
+    "width": "delayspread",
+    "style": "mode"
+   },
+   "params": [
+    {
+     "name": "mix",
+     "text": "50.0 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "delaylsync",
+     "text": "Msec",
+     "displayName": "DelayLSync"
+    },
+    {
+     "name": "delayspread",
+     "text": "0.0 ms",
+     "displayName": "DelaySpread",
+     "range": [
+      -20,
+      20,
+      null
+     ]
+    },
+    {
+     "name": "repeatswell",
+     "text": "Swell",
+     "displayName": "RepeatSwell"
+    },
+    {
+     "name": "lowcut",
+     "text": "10 Hz",
+     "displayName": "LowCut",
+     "range": [
+      10,
+      2000,
+      10
+     ]
+    },
+    {
+     "name": "highcut",
+     "text": "20000 Hz",
+     "displayName": "HighCut",
+     "range": [
+      200,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "mode",
+     "text": "Tape",
+     "displayName": "Mode"
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-Q 4.vst3#FabFilter Pro-Q 4",
+   "scanName": "FabFilter Pro-Q 4",
+   "name": "Pro-Q 4",
+   "vendor": "FabFilter",
+   "path": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-Q 4.vst3",
+   "pluginName": null,
+   "category": "eq",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 400,
+   "roles": {},
+   "bands": 17,
+   "params": [
+    {
+     "name": "band_1_used",
+     "text": "Unused",
+     "displayName": "Band 1 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_1_enabled",
+     "text": "Enabled",
+     "displayName": "Band 1 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_1_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 1 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_1_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 1 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_1_q",
+     "text": "1.000",
+     "displayName": "Band 1 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_1_shape",
+     "text": "Bell",
+     "displayName": "Band 1 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_2_used",
+     "text": "Unused",
+     "displayName": "Band 2 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_2_enabled",
+     "text": "Enabled",
+     "displayName": "Band 2 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_2_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 2 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_2_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 2 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_2_q",
+     "text": "1.000",
+     "displayName": "Band 2 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_2_shape",
+     "text": "Bell",
+     "displayName": "Band 2 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_3_used",
+     "text": "Unused",
+     "displayName": "Band 3 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_3_enabled",
+     "text": "Enabled",
+     "displayName": "Band 3 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_3_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 3 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_3_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 3 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_3_q",
+     "text": "1.000",
+     "displayName": "Band 3 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_3_shape",
+     "text": "Bell",
+     "displayName": "Band 3 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_4_used",
+     "text": "Unused",
+     "displayName": "Band 4 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_4_enabled",
+     "text": "Enabled",
+     "displayName": "Band 4 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_4_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 4 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_4_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 4 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_4_q",
+     "text": "1.000",
+     "displayName": "Band 4 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_4_shape",
+     "text": "Bell",
+     "displayName": "Band 4 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_5_used",
+     "text": "Unused",
+     "displayName": "Band 5 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_5_enabled",
+     "text": "Enabled",
+     "displayName": "Band 5 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_5_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 5 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_5_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 5 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_5_q",
+     "text": "1.000",
+     "displayName": "Band 5 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_5_shape",
+     "text": "Bell",
+     "displayName": "Band 5 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_6_used",
+     "text": "Unused",
+     "displayName": "Band 6 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_6_enabled",
+     "text": "Enabled",
+     "displayName": "Band 6 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_6_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 6 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_6_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 6 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_6_q",
+     "text": "1.000",
+     "displayName": "Band 6 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_6_shape",
+     "text": "Bell",
+     "displayName": "Band 6 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_7_used",
+     "text": "Unused",
+     "displayName": "Band 7 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_7_enabled",
+     "text": "Enabled",
+     "displayName": "Band 7 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_7_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 7 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_7_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 7 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_7_q",
+     "text": "1.000",
+     "displayName": "Band 7 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_7_shape",
+     "text": "Bell",
+     "displayName": "Band 7 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    },
+    {
+     "name": "band_8_used",
+     "text": "Unused",
+     "displayName": "Band 8 Used",
+     "values": [
+      "Unused",
+      "Used"
+     ]
+    },
+    {
+     "name": "band_8_enabled",
+     "text": "Enabled",
+     "displayName": "Band 8 Enabled",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "band_8_frequency",
+     "text": "1000.0 Hz",
+     "displayName": "Band 8 Frequency",
+     "range": [
+      10,
+      30000,
+      null
+     ]
+    },
+    {
+     "name": "band_8_gain",
+     "text": "0.00 dB",
+     "displayName": "Band 8 Gain",
+     "range": [
+      -30,
+      30,
+      0.06
+     ]
+    },
+    {
+     "name": "band_8_q",
+     "text": "1.000",
+     "displayName": "Band 8 Q",
+     "range": [
+      0.025,
+      40,
+      null
+     ]
+    },
+    {
+     "name": "band_8_shape",
+     "text": "Bell",
+     "displayName": "Band 8 Shape",
+     "values": [
+      "Bell",
+      "Low Shelf",
+      "Low Cut",
+      "High Shelf",
+      "High Cut",
+      "Notch",
+      "Band Pass",
+      "Tilt Shelf",
+      "Flat Tilt",
+      "All Pass"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-L 2.vst3#FabFilter Pro-L 2",
+   "scanName": "FabFilter Pro-L 2",
+   "name": "Pro-L 2",
+   "vendor": "FabFilter",
+   "path": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Pro-L 2.vst3",
+   "pluginName": null,
+   "category": "limiter",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 3115,
+   "paramCount": 37,
+   "roles": {
+    "bypass": "bypass",
+    "ceiling": "true_peak_limiting",
+    "release": "release",
+    "output": "output_level"
+   },
+   "params": [
+    {
+     "name": "release",
+     "text": "400.0 ms",
+     "displayName": "Release",
+     "range": [
+      0,
+      998.2,
+      null
+     ]
+    },
+    {
+     "name": "true_peak_limiting",
+     "text": "On",
+     "displayName": "True Peak Limiting",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "bypass",
+     "text": "Not Bypassed",
+     "displayName": "Bypass",
+     "values": [
+      "Not Bypassed",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "output_level",
+     "text": "0.00 dBTP",
+     "displayName": "Output Level",
+     "range": [
+      -30,
+      0,
+      0.03
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\ValhallaDSP\\ValhallaVintageVerb.vst3#ValhallaVintageVerb",
+   "scanName": "ValhallaVintageVerb",
+   "name": "ValhallaVintageVerb",
+   "vendor": "Valhalla DSP, LLC",
+   "path": "C:\\Program Files\\Common Files\\VST3\\ValhallaDSP\\ValhallaVintageVerb.vst3",
+   "pluginName": null,
+   "category": "reverb",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 18,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "decay": "decay",
+    "predelay": "predelay",
+    "size": "size",
+    "lowcut": "lowcut",
+    "highcut": "highcut"
+   },
+   "params": [
+    {
+     "name": "mix",
+     "text": "100.0 %",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "predelay",
+     "text": "20.00 ms",
+     "displayName": "PreDelay",
+     "range": [
+      0,
+      500,
+      null
+     ]
+    },
+    {
+     "name": "decay",
+     "text": "4.00 s",
+     "displayName": "Decay"
+    },
+    {
+     "name": "size",
+     "text": "100.0 %",
+     "displayName": "Size",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "highcut",
+     "text": "8000 Hz",
+     "displayName": "HighCut",
+     "range": [
+      100,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "lowcut",
+     "text": "10 Hz",
+     "displayName": "LowCut",
+     "range": [
+      10,
+      1500,
+      10
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Slate Digital\\VerbSuite Classics.vst3#VerbSuite Classics",
+   "scanName": "VerbSuite Classics",
+   "name": "VerbSuite Classics",
+   "vendor": "Slate Digital",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Slate Digital\\VerbSuite Classics.vst3",
+   "pluginName": null,
+   "category": "reverb",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 12,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "dry_wet",
+    "decay": "reverb_decay",
+    "predelay": "reverb_pre_delay",
+    "width": "reverb_width"
+   },
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "reverb_decay",
+     "text": "100%",
+     "displayName": "Reverb Decay",
+     "range": [
+      25,
+      130,
+      null
+     ]
+    },
+    {
+     "name": "reverb_pre_delay",
+     "text": "0.00ms",
+     "displayName": "Reverb Pre-Delay",
+     "range": [
+      0,
+      350,
+      null
+     ]
+    },
+    {
+     "name": "reverb_width",
+     "text": "0.00dB",
+     "displayName": "Reverb Width",
+     "range": [
+      -6,
+      6,
+      null
+     ]
+    },
+    {
+     "name": "dry_wet",
+     "text": "100.0%",
+     "displayName": "Dry/Wet",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\Soundtoys\\Decapitator.vst3#Decapitator",
+   "scanName": "Decapitator",
+   "name": "Decapitator",
+   "vendor": "Soundtoys",
+   "path": "C:\\Program Files\\Common Files\\VST3\\Soundtoys\\Decapitator.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 62,
+   "paramCount": 12,
+   "roles": {
+    "bypass": "bypass",
+    "drive": "drive",
+    "mix": "mix",
+    "tone": "tone_db",
+    "style": "style",
+    "lowcut": "lowcut_hz",
+    "highcut": "highcut_hz",
+    "autogain": "autogain",
+    "output": "outputtrim_db"
+   },
+   "params": [
+    {
+     "name": "bypass",
+     "text": "Off",
+     "displayName": "Bypass",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "style",
+     "text": "A",
+     "displayName": "Style",
+     "values": [
+      "A",
+      "E",
+      "N",
+      "T",
+      "P"
+     ]
+    },
+    {
+     "name": "drive",
+     "text": "0.0",
+     "displayName": "Drive",
+     "range": [
+      0,
+      10,
+      0.1
+     ]
+    },
+    {
+     "name": "lowcut_hz",
+     "text": "20.0",
+     "displayName": "LowCut",
+     "range": [
+      20,
+      1000,
+      null
+     ]
+    },
+    {
+     "name": "tone_db",
+     "text": "0.0",
+     "displayName": "Tone",
+     "range": [
+      -12,
+      12,
+      null
+     ]
+    },
+    {
+     "name": "highcut_hz",
+     "text": "20000.0",
+     "displayName": "HighCut",
+     "range": [
+      1000,
+      20000,
+      null
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100.0",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    },
+    {
+     "name": "autogain",
+     "text": "On",
+     "displayName": "AutoGain",
+     "range": [
+      0,
+      1,
+      1
+     ],
+     "values": [
+      "False",
+      "True"
+     ],
+     "isBoolean": true
+    },
+    {
+     "name": "outputtrim_db",
+     "text": "0.0",
+     "displayName": "OutputTrim",
+     "range": [
+      -24,
+      0,
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "key": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Saturn 2.vst3#FabFilter Saturn 2",
+   "scanName": "FabFilter Saturn 2",
+   "name": "Saturn 2",
+   "vendor": "FabFilter",
+   "path": "C:\\Program Files\\Common Files\\VST3\\FabFilter\\FabFilter Saturn 2.vst3",
+   "pluginName": null,
+   "category": "saturation",
+   "classifiedBy": "name",
+   "status": "ok",
+   "latency": 0,
+   "paramCount": 400,
+   "roles": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "input": "input_gain"
+   },
+   "params": [
+    {
+     "name": "input_gain",
+     "text": "0.00 dB",
+     "displayName": "Input Gain",
+     "range": [
+      -36,
+      36,
+      null
+     ]
+    },
+    {
+     "name": "bypass",
+     "text": "Not Bypassed",
+     "displayName": "Bypass",
+     "values": [
+      "Not Bypassed",
+      "Bypassed"
+     ]
+    },
+    {
+     "name": "mix",
+     "text": "100%",
+     "displayName": "Mix",
+     "range": [
+      0,
+      100,
+      0.1
+     ]
+    }
+   ]
+  }
+ ]
+}

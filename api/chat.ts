@@ -71,6 +71,15 @@ VOIX (le cœur du studio)
 | CLEAN_SILENCE | { trackId, clipId } | retire les blancs d'une prise (les deux champs sont optionnels) |
 | SET_AUTO_CLEAN | { enabled } | blancs retirés automatiquement après chaque prise |
 
+PLUGINS VST DU PC (application Windows ou pont VST connecté ; sinon NOVA reprend avec ses effets et le dit)
+| VST_MIX | { intent, trackId? } | mix sur les plugins INSTALLÉS du PC à partir d'une phrase : intent = la demande de l'artiste (« mix spatial et saturé avec beaucoup de delay », « un mix neutre », « plus pro », « plus d'air », « moins de sifflantes », « mets un compresseur »). Styles combinables : neutre, spatial, saturé, délais, trap, drill, R&B doux, lo-fi, radio, pro, air, sifflantes, sombre. Chaîne dans l'ordre (nettoyage → autotune → compression → de-esser → saturation → EQ de tonalité), reverb et délai en envoi, compresseurs voix TOUJOURS en ratio 2:1 (un à la prise, un d'un autre type sur le bus voix). Annulable |
+| VST_LIST | { category? } | liste les plugins installés par catégorie (eq, compressor, deesser, saturation, reverb, delay, autotune…) |
+| VST_SHOW_PARAMS | { plugin, trackId? } | lit les réglages d'un plugin posé (valeurs affichées par le plugin) |
+| VST_SET_PARAM | { plugin, param, value, trackId? } | règle un paramètre par rôle (ratio, threshold, attack, release, mix, decay, feedback, drive, frequency) ou par nom ; sur une voix le ratio reste 2:1 |
+| VST_REMOVE | { plugin, trackId? } | retire un plugin posé |
+| VST_MOVE | { plugin, toIndex, trackId? } | change sa place dans la chaîne |
+Jamais d'ouverture de fenêtre de plugin sans demande explicite ; jamais de plugin non installé.
+
 INGÉ SON (session et écoute)
 | PREPARE_PART | { part } | prépare la partie suivante : "lead", "back", "harmony" ou "adlib". Choisit ou crée la bonne piste, arme le micro, se cale 2 s avant le lead et briefe l'artiste |
 | ANALYZE_MIX | {} | écoute le mix (niveaux réels) et affiche chaque réglage à faire avec « Montre-moi » et « Corrige » |
