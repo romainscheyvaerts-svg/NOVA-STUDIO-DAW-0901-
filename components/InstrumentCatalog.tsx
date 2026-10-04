@@ -331,11 +331,11 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
 
       {/* Deux bibliothèques : instrus complètes / mélodies à compléter */}
       <div className="px-3 pt-3" role="tablist" aria-label="Bibliothèque">
-        <div className="grid grid-cols-2 gap-1 rounded-xl bg-white/5 p-1">
+        <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.06] bg-white/[0.03] p-1">
           {([['BEATS', '🎧 Instrus', beatsCount], ['MELODIES', '🎹 Mélodies', melodiesCount]] as const).map(([id, label, n]) => (
             <button key={id} type="button" role="tab" aria-selected={shelf === id} onClick={() => chooseShelf(id)}
-              className={`h-9 rounded-lg text-[11px] font-black transition-colors ${shelf === id ? (id === 'MELODIES' ? 'bg-violet-500 text-white' : 'bg-cyan-500 text-black') : 'text-slate-300 hover:bg-white/10'}`}>
-              {label} <span className="opacity-70">({n})</span>
+              className={`h-9 rounded-lg text-[11px] font-bold transition-all ${shelf === id ? (id === 'MELODIES' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(167,139,250,0.5)]' : 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(34,211,238,0.45)]') : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
+              {label} <span className={`ml-0.5 rounded-md px-1.5 py-0.5 text-[10px] mono ${shelf === id ? (id === 'MELODIES' ? 'bg-violet-400/15 text-violet-300' : 'bg-cyan-400/15 text-cyan-300') : 'bg-white/5 text-slate-500'}`}>{n}</span>
             </button>
           ))}
         </div>
@@ -386,16 +386,15 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                         <h3 className={`text-[12px] font-semibold truncate ${playingId === inst.id ? 'text-cyan-400' : 'text-white'}`}>{inst.title}</h3>
                         {hasLicense(inst.id) && <i className="fas fa-check-circle text-[8px] text-green-500" title="Purchased"></i>}
                     </div>
-                    <div className="flex items-center text-[10px] text-slate-400 space-x-2 mt-0.5">
-                        <span>{inst.bpm ? `${inst.bpm} BPM` : 'Tempo détecté'}</span>
-                        <span>•</span>
-                        <span className="truncate">{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>
+                    <div className="flex items-center text-[10px] text-slate-400 gap-x-1.5 mt-1 min-w-0 whitespace-nowrap">
+                        <span className="mono shrink-0 text-slate-300">{inst.bpm ? `${inst.bpm} BPM` : 'Tempo détecté'}</span>
+                        <span className="text-slate-600" aria-hidden="true">•</span>
                         {inst.key && (
                             <>
-                                <span>•</span>
-                                <span className="truncate">{inst.key}</span>
+                                <span className="mono shrink-0 text-cyan-300/80">{inst.key}</span>
                             </>
                         )}
+                        <span className="truncate">{inst.key && <span className="text-slate-600" aria-hidden="true">• </span>}{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>
                     </div>
                 </div>
 
@@ -413,7 +412,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                   <button
                     type="button"
                     onClick={() => onLoadBeat(inst)}
-                    className="nova-hit mr-2 h-9 px-3 rounded-lg bg-cyan-500 text-black text-[11px] font-black uppercase hover:bg-cyan-400 active:scale-95 transition-all"
+                    className={`nova-hit mr-2 h-9 px-3 rounded-lg border text-[11px] font-black uppercase active:scale-95 transition-all ${playingId === inst.id ? 'bg-cyan-500 border-cyan-400 text-black hover:bg-cyan-400' : 'bg-cyan-400/[0.08] border-cyan-400/40 text-cyan-300 hover:bg-cyan-500 hover:border-cyan-400 hover:text-black'}`}
                     title="Charger ce beat pour poser ta voix dessus"
                   >
                     Essayer

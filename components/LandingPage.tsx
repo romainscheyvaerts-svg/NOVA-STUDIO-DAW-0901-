@@ -342,7 +342,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
               </div>
               <div className="text-left">
                 <p className="text-sm font-bold text-white">Nouveau Projet</p>
-                <p className="text-[10px] text-slate-500">Projet vierge</p>
+                <p className="text-[11px] text-slate-400">Projet vierge</p>
               </div>
             </button>
 
@@ -356,7 +356,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
               </div>
               <div className="text-left">
                 <p className="text-sm font-bold text-white">Ouvrir Audio <span className="ml-1 rounded-full bg-violet-500/20 px-2 py-0.5 text-[9px] font-black text-violet-200 align-middle">⭐ Nova Pro</span></p>
-                <p className="text-[10px] text-slate-500">Ta propre instru (MP3, WAV…) · 5 €/mois</p>
+                <p className="text-[11px] text-slate-400">Ta propre instru (MP3, WAV…) · 5 €/mois</p>
               </div>
             </button>
 
@@ -370,7 +370,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
               </div>
               <div className="text-left">
                 <p className="text-sm font-bold text-white">Charger Projet</p>
-                <p className="text-[10px] text-slate-500">Local ou Cloud</p>
+                <p className="text-[11px] text-slate-400">Local ou Cloud</p>
               </div>
             </button>
           </div>
@@ -386,14 +386,14 @@ const LandingPage: React.FC<LandingPageProps> = ({
         {/* Zone centrale - Catalogue d'instrumentaux */}
         <section className="flex-1 flex flex-col overflow-hidden">
           <div className="p-4 border-b border-white/5 bg-[#0c0d10]/50">
-            <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Bibliothèque">
+            <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-white/[0.06] bg-white/[0.03] p-1" role="tablist" aria-label="Bibliothèque">
               <button type="button" role="tab" aria-selected={shelf === 'BEATS'} onClick={() => setShelf('BEATS')}
-                className={`h-10 px-4 rounded-xl text-[12px] font-black transition-colors ${shelf === 'BEATS' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>
-                🎧 Instrus <span className="opacity-70">({instrumentals.filter(i => !isMelody(i)).length})</span>
+                className={`h-9 px-4 rounded-lg text-[12px] font-bold transition-all ${shelf === 'BEATS' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(34,211,238,0.45)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
+                🎧 Instrus <span className={`ml-1 rounded-md px-1.5 py-0.5 text-[10px] mono ${shelf === 'BEATS' ? 'bg-cyan-400/15 text-cyan-300' : 'bg-white/5 text-slate-500'}`}>{instrumentals.filter(i => !isMelody(i)).length}</span>
               </button>
               <button type="button" role="tab" aria-selected={shelf === 'MELODIES'} onClick={() => setShelf('MELODIES')}
-                className={`h-10 px-4 rounded-xl text-[12px] font-black transition-colors ${shelf === 'MELODIES' ? 'bg-violet-500 text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>
-                🎹 Mélodies <span className="opacity-70">({instrumentals.filter(isMelody).length})</span>
+                className={`h-9 px-4 rounded-lg text-[12px] font-bold transition-all ${shelf === 'MELODIES' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(167,139,250,0.5)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
+                🎹 Mélodies <span className={`ml-1 rounded-md px-1.5 py-0.5 text-[10px] mono ${shelf === 'MELODIES' ? 'bg-violet-400/15 text-violet-300' : 'bg-white/5 text-slate-500'}`}>{instrumentals.filter(isMelody).length}</span>
               </button>
             </div>
             <p className="text-[11px] text-slate-400 mt-2">
@@ -435,8 +435,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
                     aria-label={isMelody(inst) ? `Faire une instru sur la mélodie « ${inst.title} »` : `Poser ma voix sur « ${inst.title} »`}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSelectInstrumental(inst); } }}
                     onClick={() => handleSelectInstrumental(inst)}
-                    className={`group relative bg-[#14161a] border rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-[1.02] hover:shadow-xl hover:shadow-cyan-500/10 ${
-                      playingId === inst.id ? 'border-cyan-500 ring-2 ring-cyan-500/30' : 'border-white/5 hover:border-cyan-500/30'
+                    className={`group relative bg-[#14161a] border rounded-xl overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_32px_-12px_rgba(0,0,0,0.8)] ${
+                      playingId === inst.id ? 'border-cyan-500/70 ring-1 ring-cyan-400/40' : 'border-white/[0.06] hover:border-white/15'
                     }`}
                   >
                     {/* Cover */}
@@ -444,7 +444,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                       <img
                         src={getCoverImage(inst)}
                         alt={inst.title}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                       />
                       {/* Overlay au hover */}
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -465,7 +465,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         className={`absolute bottom-2 right-2 w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                           playingId === inst.id || loadingPreviewId === inst.id
                             ? 'bg-cyan-500 text-black'
-                            : 'bg-black/70 text-white hover:bg-cyan-500 hover:text-black'
+                            : 'bg-black/55 text-white border border-white/15 backdrop-blur-md hover:bg-cyan-400 hover:border-cyan-300 hover:text-black'
                         }`}
                       >
                         <i className={`fas ${
@@ -476,18 +476,17 @@ const LandingPage: React.FC<LandingPageProps> = ({
                     </div>
 
                     {/* Info */}
-                    <div className="p-3">
-                      <h3 className="text-xs font-bold text-white truncate">{inst.title}</h3>
-                      <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-500">
-                        <span>{inst.bpm ? `${inst.bpm} BPM` : 'Tempo détecté'}</span>
-                        <span>•</span>
-                        <span className="truncate">{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>
+                    <div className="p-3 flex flex-col gap-2">
+                      <h3 className="text-[13px] font-bold text-white truncate leading-tight">{inst.title}</h3>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] leading-none">
+                        <span className="mono rounded-md border border-white/10 bg-white/[0.03] px-1.5 py-1 text-slate-300 whitespace-nowrap">{inst.bpm ? `${inst.bpm} BPM` : 'Tempo détecté'}</span>
+                        {inst.key && (
+                          <span className="mono rounded-md border border-cyan-400/25 bg-cyan-400/[0.06] px-1.5 py-1 text-cyan-300 whitespace-nowrap">
+                            {inst.key}
+                          </span>
+                        )}
+                        <span className="truncate text-slate-400">{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>
                       </div>
-                      {inst.key && (
-                        <span className="inline-block mt-2 px-2 py-0.5 bg-cyan-500/10 text-cyan-400 text-[9px] rounded-full">
-                          {inst.key}
-                        </span>
-                      )}
                     </div>
                   </div>
                 ))}

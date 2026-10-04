@@ -605,7 +605,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 }}
               />
             </div>
-            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/45 pointer-events-none group-hover/vol:text-white/80 transition-colors">
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono tabular-nums text-white/70 [text-shadow:0_1px_2px_rgba(0,0,0,0.95)] pointer-events-none group-hover/vol:text-white transition-colors">
               {gainToDbText(track.volume)}
             </span>
           </div>
