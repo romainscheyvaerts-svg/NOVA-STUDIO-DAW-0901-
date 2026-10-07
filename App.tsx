@@ -3268,7 +3268,8 @@ function Studio() {
     }));
     breakHistory();
     if (takeAudition) { setTakeAuditionState(null); audioEngine.setTakeAudition(null); }
-    setAiNotification(`✂️ ${takeName(t, n)} gardée de ${fmtTime(r.zone.start)} à ${fmtTime(r.zone.end)} (crossfades posés aux raccords) — Annuler pour revenir.`);
+    const at = (x: number) => `${Math.floor(x / 60)}:${(x % 60).toFixed(1).padStart(4, '0').replace('.', ',')}`;
+    setAiNotification(`✂️ ${takeName(t, n)} gardée de ${at(r.zone.start)} à ${at(r.zone.end)} (crossfades posés aux raccords) — Annuler pour revenir.`);
   }, [setState, breakHistory, takeAudition]);
   const handleKeepTake = useCallback((trackId: string, n: number) => {
     const t = stateRef.current.tracks.find(x => x.id === trackId);
@@ -5971,7 +5972,7 @@ function Studio() {
         audition={takeAudition}
         onAuditionTake={handleAuditionTake}
         onKeepTake={handleKeepTake}
-        onShowLanes={(trackId) => { setVocalToolsOpen(false); handleToggleTakeLanes(trackId, true); if (isMobile) setActiveMobileTab('ARRANGEMENT'); }}
+        onShowLanes={isMobile ? undefined : (trackId) => { setVocalToolsOpen(false); handleToggleTakeLanes(trackId, true); }}
         compZones={compZones}
         onCompTake={(trackId, n, zone) => handleCompTake(trackId, n, zone)}
         activeTakeInZone={(trackId, zone) => { const t = state.tracks.find(x => x.id === trackId); return t ? activeTakeInZone(t, zone) : null; }}

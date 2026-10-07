@@ -6,7 +6,7 @@ Faux plugins à latence exacte (DelayNode, comme un VST qui annonce sa latence) 
   beat → master (sans effet)
 Un clic à 1,000 s sur la voix et sur le beat : chaque chemin doit tomber à 1,000 s.
 """
-import json
+import json, os
 from playwright.sync_api import sync_playwright
 
 EXE = r"C:\Users\lenno\AppData\Local\ms-playwright\chromium_headless_shell-1243\chrome-headless-shell-win64\chrome-headless-shell.exe"
@@ -51,7 +51,7 @@ with sync_playwright() as p:
     pg = b.new_page()
     errs = []
     pg.on("pageerror", lambda e: errs.append(str(e)[:200]))
-    pg.goto("http://localhost:3411/", wait_until="domcontentloaded", timeout=60000)
+    pg.goto(os.environ.get("NOVA_URL", "http://localhost:3411/"), wait_until="domcontentloaded", timeout=60000)
     res = pg.evaluate(JS)
     print(json.dumps(res, ensure_ascii=False, indent=1))
     ok = all(v is not None and abs(v - 1000.0) < 0.05 for v in res.values())

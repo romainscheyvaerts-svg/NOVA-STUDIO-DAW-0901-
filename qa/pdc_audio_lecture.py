@@ -1,5 +1,5 @@
 """Lecture réelle : instant de départ des clips audio (voix → bus voix + envoi reverb)."""
-import json
+import json, os
 from playwright.sync_api import sync_playwright
 EXE = r"C:\Users\lenno\AppData\Local\ms-playwright\chromium_headless_shell-1243\chrome-headless-shell-win64\chrome-headless-shell.exe"
 JS = r"""
@@ -39,5 +39,5 @@ async () => {
 with sync_playwright() as p:
     b = p.chromium.launch(headless=True, executable_path=EXE, args=["--autoplay-policy=no-user-gesture-required"]); pg = b.new_page()
     errs = []; pg.on("pageerror", lambda x: errs.append(str(x)[:200]))
-    pg.goto("http://localhost:3411/", wait_until="domcontentloaded"); pg.wait_for_timeout(2500)
+    pg.goto(os.environ.get("NOVA_URL", "http://localhost:3411/"), wait_until="domcontentloaded"); pg.wait_for_timeout(2500)
     print(json.dumps(pg.evaluate(JS), ensure_ascii=False, indent=1)); print("erreurs :", errs[:2]); b.close()

@@ -35,7 +35,7 @@ interface VocalToolsPanelProps {
   onAuditionTake: (trackId: string, n: number | null) => void;
   onKeepTake: (trackId: string, n: number) => void;
   /** Ouvre les couloirs de la piste dans l'arrangement. */
-  onShowLanes: (trackId: string) => void;
+  onShowLanes?: (trackId: string) => void;
   /** Comping : zones (parties du morceau, boucle) où garder une prise. */
   compZones?: CompZone[];
   onCompTake?: (trackId: string, n: number, zone: CompZone) => void;
@@ -123,11 +123,11 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
                   <div key={g.trackId}>
                     <div className="flex items-center gap-2 mb-1.5">
                       <p className="text-[11px] text-slate-400 min-w-0 truncate flex-1">{g.trackName}</p>
-                      <button type="button" onClick={() => p.onShowLanes(g.trackId)}
+                      {p.onShowLanes && <button type="button" onClick={() => p.onShowLanes!(g.trackId)}
                         title="Ouvre les couloirs sous la piste : balaie un passage d'une prise pour le garder (comme les Playlists de Pro Tools)."
                         className="h-8 px-2.5 rounded-lg text-[11px] font-bold text-cyan-200 border border-cyan-400/40 hover:bg-cyan-500/10 shrink-0">
                         <i className="fas fa-layer-group mr-1" />Voir les couloirs
-                      </button>
+                      </button>}
                     </div>
                     <div className="flex flex-col gap-1.5">
                       {g.lanes.map(l => {
