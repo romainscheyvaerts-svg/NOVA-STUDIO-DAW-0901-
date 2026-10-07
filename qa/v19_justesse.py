@@ -158,14 +158,20 @@ def yin_f0(x, sr, fmin=70, fmax=900, frame=2048):
 
 
 def note_pitch(x, sr, t0, t1, hop=0.01):
-    """Hauteur médiane (MIDI) entre t0 et t1."""
+    """Hauteur perçue (MIDI) entre t0 et t1 : moyenne des trames à moins de 3/4 de
+    demi-ton de la médiane (la médiane seule est biaisée par un vibrato)."""
     v = []
     t = t0
     while t + 2048 / sr <= t1:
         f = yin_f0(x[int(t * sr):int(t * sr) + 2048], sr)
         if f: v.append(69 + 12 * np.log2(f / 440))
         t += hop
-    return float(np.median(v)) if v else float("nan")
+    if not v:
+        return float("nan")
+    v = np.array(v)
+    med = np.median(v)
+    k = v[np.abs(v - med) <= 0.75]
+    return float(k.mean()) if len(k) else float(med)
 
 
 def harmonic_envelope(x, sr, t0, t1, f0, N=8192):
@@ -410,21 +416,28 @@ def scenario_pc(p):
     res["max_ecart_lecture_ct"] = max(abs(n["lecture_ct"]) for n in per_note)
     res["max_ecart_avant_ct"] = max(abs(n["avant_ct"]) for n in per_note)
     # Lecture = export : même son, échantillon par échantillon (après alignement).
-    # Note par note, chaque fenêtre recalée (la capture temps réel peut avoir de
-    # petits trous) : écart lecture - export, en dB sous le signal.
+    # Par tranches de 0,1 s, chacune recalée (la capture temps réel du navigateur
+    # sans écran peut perdre un bloc de 4096 échantillons) : écart lecture - export,
+    # en dB sous le signal. Identique = sous -90 dB.
     wins = []
     for (m, c, at, ln, gl, vib) in MELODY:
-        a0, a1 = int((clip_start + at + 0.05) * esr), int((clip_start + at + ln - 0.05) * esr)
-        ref = ex[a0:a1]
-        lo, hi = a0 + lag_l - 4000, a1 + lag_l + 4000
-        if lo < 0 or hi > len(live):
-            continue
-        part = live[lo:hi]
-        cc = np.correlate(part, ref, "valid")
-        k = int(np.argmax(cc))
-        err = part[k:k + len(ref)] - ref
-        wins.append(round(float(20 * np.log10(np.sqrt(np.mean(err ** 2)) / (np.sqrt(np.mean(ref ** 2)) + 1e-12) + 1e-12)), 1))
-    res["lecture_vs_export"] = {"ecart_par_note_db": wins, "pire_db": max(wins) if wins else None}
+        t = at + 0.02
+        while t + 0.1 <= at + ln - 0.02:
+            a0, a1 = int((clip_start + t) * esr), int((clip_start + t + 0.1) * esr)
+            ref = ex[a0:a1]
+            lo, hi = a0 + lag_l - 6000, a1 + lag_l + 6000
+            t += 0.1
+            if lo < 0 or hi > len(live):
+                continue
+            part = live[lo:hi]
+            cc = np.correlate(part, ref, "valid")
+            k = int(np.argmax(cc))
+            err = part[k:k + len(ref)] - ref
+            wins.append(float(20 * np.log10(np.sqrt(np.mean(err ** 2)) / (np.sqrt(np.mean(ref ** 2)) + 1e-12) + 1e-12)))
+    ident = [w for w in wins if w < -90]
+    res["lecture_vs_export"] = {"tranches": len(wins), "identiques_sous_moins_90_db": len(ident),
+                                "ecart_median_db": round(float(np.median(wins)), 1) if wins else None,
+                                "pire_db": round(max(wins), 1) if wins else None}
     # Durée : clip inchangé, son corrigé = région analysée, attaques au même endroit.
     res["duree"] = {"clip_avant_s": before["duration"], "clip_apres_s": after["duration"], "son_origine_s": round(len(src) / SR, 4),
                     "son_corrige_s": round(len(corrected) / SR, 4), "region_debut_s": after["pitchEdit"]["regionStart"] if after["pitchEdit"] else None,
@@ -774,7 +787,25 @@ def scenario_real(p, detune=0.0, tag="D_vraie_voix"):
     ha, hb = hf_blocks(x), hf_blocks(yy)
     lvl = np.sqrt(np.mean(x ** 2))
     rise = 20 * np.log10((hb + 1e-9) / (ha + 1e-9))
-    res["clics_pire_hausse_hf_db"] = round(float(np.max(rise[hb > lvl * 0.003])) if np.any(hb > lvl * 0.003) else 0.0, 1)
+    res["aigus_pire_hausse_locale_db"] = round(float(np.max(rise[hb > lvl * 0.003])) if np.any(hb > lvl * 0.003) else 0.0, 1)
+
+    # Clic = pointe isolée dans les aigus (facteur de crête élevé sur 5 ms).
+    def crest(sig):
+        X = np.fft.rfft(sig)
+        f = np.fft.rfftfreq(len(sig), 1 / sr)
+        hp = np.fft.irfft(np.where(f > 4000, X, 0), n=len(sig))
+        blk = int(0.005 * sr)
+        out = []
+        for s0 in range(0, len(sig) - blk, blk):
+            rr = np.sqrt(np.mean(hp[s0:s0 + blk] ** 2))
+            if rr > lvl * 0.002:
+                out.append(float(np.max(np.abs(hp[s0:s0 + blk])) / rr))
+        return out, hp
+    cx, hpx = crest(x)
+    cy, hpy = crest(yy)
+    res["clics"] = {"crete_max_aigus_avant": round(max(cx), 1), "crete_max_aigus_apres": round(max(cy), 1),
+                    "aigus_total_avant_db": round(float(20 * np.log10(np.sqrt(np.mean(hpx ** 2)) / lvl)), 2),
+                    "aigus_total_apres_db": round(float(20 * np.log10(np.sqrt(np.mean(hpy ** 2)) / lvl)), 2)}
     res["saut_max_sortie_sur_entree"] = max_jump_ratio(yy, x)
     (OUT / f"{tag}_apres.wav").write_bytes(wav_bytes(np.clip(yy, -1, 1), sr))
     shot(page, f"{tag}_4_clip_corrige")

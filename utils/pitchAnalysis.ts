@@ -153,6 +153,20 @@ const medianOf = (v: number[]): number => {
 };
 
 /**
+ * Hauteur perçue d'une note : moyenne des trames proches de la médiane (à
+ * moins de 3/4 de demi-ton). La médiane seule est biaisée sur un vibrato
+ * (une sinusoïde s'attarde à ses extrêmes) : mesuré, jusqu'à 5 cents d'erreur
+ * sur un vibrato de ±15 cents.
+ */
+export function centerOf(v: number[]): number {
+  const med = medianOf(v);
+  if (Number.isNaN(med)) return med;
+  let s = 0, c = 0;
+  for (const x of v) if (Math.abs(x - med) <= 0.75) { s += x; c++; }
+  return c ? s / c : med;
+}
+
+/**
  * Hauteur trame par trame d'un signal mono. Coût mesuré : ~0,1 s de calcul
  * par 10 s de voix (dans un worker, l'interface reste fluide).
  */
@@ -219,6 +233,21 @@ function cleanTrack(m: Float32Array) {
     while (j < n && Number.isNaN(m[j])) j++;
     if (j < n && j - i <= 3 && Math.abs(m[j] - m[i - 1]) < 2) {
       for (let k = i; k < j; k++) m[k] = m[i - 1] + ((m[j] - m[i - 1]) * (k - i + 1)) / (j - i + 1);
+    }
+    i = j;
+  }
+  // Bords de passage : la fenêtre d'analyse y est à moitié dans le silence, la
+  // hauteur trouvée part souvent en vrille (pic dessiné en fin de note). Les 3
+  // trames du bord qui s'écartent de plus de 0,6 demi-ton du cœur sont retirées.
+  for (let i = 0; i < n; i++) {
+    if (Number.isNaN(m[i])) continue;
+    let j = i;
+    while (j < n && !Number.isNaN(m[j])) j++;
+    if (j - i >= 10) {
+      const inner = (a: number, b: number) => { const w: number[] = []; for (let k = a; k < b; k++) w.push(m[k]); return medianOf(w); };
+      const head = inner(i + 3, i + 9), tail = inner(j - 9, j - 3);
+      for (let k = i + 2; k >= i; k--) if (Math.abs(m[k] - head) > 0.6) { for (let q = i; q <= k; q++) m[q] = NaN; break; }
+      for (let k = j - 3; k < j; k++) if (Math.abs(m[k] - tail) > 0.6) { for (let q = k; q < j; q++) m[q] = NaN; break; }
     }
     i = j;
   }
@@ -326,7 +355,7 @@ export function segmentNotes(track: PitchTrack, opts: SegmentOptions = {}): Pitc
       const t = Math.floor(len * 0.15);
       const w: number[] = [];
       for (let k = s[0] + t; k < s[1] - t; k++) if (!Number.isNaN(midi[r0 + k])) w.push(midi[r0 + k]);
-      return medianOf(w.length ? w : Array.from(sm.slice(s[0], s[1])).filter(v => !Number.isNaN(v)));
+      return centerOf(w.length ? w : Array.from(sm.slice(s[0], s[1])).filter(v => !Number.isNaN(v)));
     };
     const isDipCut = (c: number) => {
       const v = rmsDb[r0 + c];

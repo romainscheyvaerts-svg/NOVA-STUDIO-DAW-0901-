@@ -138,6 +138,19 @@ describe('rendu PSOLA', () => {
     });
   });
 
+  it('note avec vibrato : le centre corrigé tombe juste (moyenne perçue, pas la médiane)', () => {
+    const x = synthVoice(SR, 1.0, [{ midi: 63.6, at: 0.1, len: 0.6, vibratoCents: 15, vibratoHz: 5.5 }]);
+    const tr = analyzePitch(x, SR);
+    const found = segmentNotes(tr);
+    const [y] = renderPitch([x], tr, correctionCurve(tr, found, autoCorrect(found, { root: 9, scale: 'MINOR' }, 1, 'naturel')));
+    // Hauteur perçue = moyenne sur des cycles entiers de vibrato (3 cycles de 5,5 Hz).
+    const t2 = analyzePitch(y, SR);
+    const v: number[] = [];
+    for (let i = 0; i < t2.midi.length; i++) { const t = (i * t2.hop) / SR; if (t >= 0.2 && t < 0.2 + 3 / 5.5 && !Number.isNaN(t2.midi[i])) v.push(t2.midi[i]); }
+    const mean = v.reduce((a, b) => a + b, 0) / v.length;
+    expect(Math.abs(mean - 64) * 100).toBeLessThan(3);
+  });
+
   it('marques de période : une par cycle dans une note', () => {
     const x = synthVoice(SR, 0.5, [{ midi: 57, at: 0.05, len: 0.4 }]);
     const tr = analyzePitch(x, SR);

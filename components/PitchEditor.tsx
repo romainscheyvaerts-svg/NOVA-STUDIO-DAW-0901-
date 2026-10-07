@@ -43,6 +43,8 @@ type Status = 'loading' | 'ready' | 'rendering' | 'error' | 'empty';
 
 const bufferOf = (id?: string) => (id ? audioBufferRegistry.get(id) : undefined);
 const fmtCents = (c: number) => `${c > 0 ? '+' : c < 0 ? '−' : '±'}${Math.abs(Math.round(c))} ct`;
+/** Écart à la gamme lisible : ✓, « +38 ct », ou « hors gamme » (note sur un demi-ton hors de la gamme). */
+const scaleTag = (c: number) => (Math.abs(c) >= 50 ? 'hors gamme' : Math.abs(c) >= 3 ? fmtCents(c) : '✓');
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
 /** Couleur d'une note selon sa justesse (écart à la gamme, en cents). */
@@ -357,7 +359,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
       if (x1 - x0 < 26) return;
       const c = targetCenter(n, edits[i]);
       const cents = centsFromScale(c, key.root, key.scale);
-      const label = Math.abs(cents) >= 3 ? fmtCents(cents) : '✓';
+      const label = scaleTag(cents);
       const text = x1 - x0 > 80 ? `${noteNameFr(Math.round(c))} ${label}` : label;
       const tw = ctx.measureText(text).width;
       // Au-dessus du bloc, dans un petit cartouche lisible.
@@ -530,22 +532,22 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
   const clipName = clip?.name || 'clip';
 
   const globalBar = (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="pitch-global">
-      <label className="flex min-w-[220px] flex-1 items-center gap-2" title="Comme « Corriger la hauteur » de Flex Pitch : ramène chaque note vers la note de la gamme la plus proche. Les notes que tu as retouchées à la main ne bougent pas.">
-        <span className="whitespace-nowrap text-[12px] font-black text-white">🎯 Corriger tout dans la gamme</span>
+    <div className={phone ? 'flex flex-col gap-2' : 'flex flex-wrap items-center gap-x-4 gap-y-2'} data-testid="pitch-global">
+      <label className={phone ? 'flex flex-wrap items-center gap-x-2 gap-y-1' : 'flex min-w-[220px] flex-1 items-center gap-2'} title="Comme « Corriger la hauteur » de Flex Pitch : ramène chaque note vers la note de la gamme la plus proche. Les notes que tu as retouchées à la main ne bougent pas.">
+        <span className={`whitespace-nowrap text-[12px] font-black text-white ${phone ? 'w-full' : ''}`}>🎯 Corriger tout dans la gamme</span>
         <input type="range" min={0} max={100} step={1} value={amount} aria-label="Dosage de la correction"
           data-testid="pitch-amount" disabled={!notes.length}
           onPointerDown={() => snapshot()}
           onKeyDown={e => { if (e.key.startsWith('Arrow')) snapshot(); }}
           onChange={e => { const a = Number(e.target.value); setAmount(a); applyGlobal(a, style); }}
           className="min-w-[90px] flex-1 accent-cyan-400" style={{ minHeight: 32 }} />
-        <span className="w-11 text-right font-mono text-[13px] font-black text-cyan-300">{amount} %</span>
+        <span className="w-12 shrink-0 text-right font-mono text-[13px] font-black text-cyan-300">{amount} %</span>
       </label>
-      <div role="radiogroup" aria-label="Style de correction" className="flex overflow-hidden rounded-lg border border-white/10">
+      <div role="radiogroup" aria-label="Style de correction" className={`flex overflow-hidden rounded-lg border border-white/10 ${phone ? 'w-full' : ''}`}>
         {([['naturel', 'Naturel', 'Garde la vie de ta voix : glissades, vibrato, petites variations'], ['robot', 'Robot', 'Notes bien droites, sauts nets : l’effet Auto-Tune du rap']] as const).map(([id, label, hint]) => (
           <button key={id} type="button" role="radio" aria-checked={style === id} title={hint} data-testid={`pitch-style-${id}`}
             onClick={() => { snapshot(); setStyle(id); applyGlobal(amount || 100, id); if (!amount) setAmount(100); }}
-            className={`min-h-[40px] px-3 text-[12px] font-black ${style === id ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>{label}</button>
+            className={`min-h-[40px] px-3 text-[12px] font-black ${phone ? 'flex-1 min-h-[44px]' : ''} ${style === id ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>{label}</button>
         ))}
       </div>
     </div>
@@ -623,11 +625,11 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
           title="Remet la voix telle que tu l’as chantée (la version corrigée reste dans Ctrl+Z)"
           className="min-h-[42px] rounded-lg px-3 text-[12px] font-bold text-amber-300 hover:bg-amber-400/10">↩ Revenir à la prise d’origine</button>
       )}
-      <span className="mr-auto text-[11px] text-slate-500">{changed ? 'Rien n’est effacé : la prise d’origine est gardée.' : 'Aucune note retouchée pour l’instant.'}</span>
-      <button type="button" onClick={onClose} className="min-h-[42px] rounded-lg bg-white/5 px-4 text-[12px] font-bold text-slate-300">Annuler</button>
+      <span className={`mr-auto text-[11px] text-slate-500 ${phone ? 'w-full' : ''}`}>{changed ? 'Rien n’est effacé : la prise d’origine est gardée.' : 'Aucune note retouchée pour l’instant.'}</span>
+      <button type="button" onClick={onClose} className={`min-h-[42px] rounded-lg bg-white/5 px-4 text-[12px] font-bold text-slate-300 ${phone ? 'min-h-[48px] flex-1' : ''}`}>Annuler</button>
       <button type="button" onClick={() => void apply()} disabled={!changed || busy} data-testid="pitch-apply"
         title="Crée la version corrigée du clip (même durée, timbre gardé). Ctrl+Z pour annuler."
-        className="min-h-[42px] rounded-lg bg-cyan-500 px-5 text-[13px] font-black text-black disabled:cursor-not-allowed disabled:opacity-40">
+        className={`min-h-[42px] rounded-lg bg-cyan-500 px-5 text-[13px] font-black text-black disabled:cursor-not-allowed disabled:opacity-40 ${phone ? 'min-h-[48px] flex-[2]' : ''}`}>
         {status === 'rendering' ? 'Calcul…' : 'Appliquer'}
       </button>
     </div>
@@ -642,11 +644,11 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-11 w-11 rounded-lg bg-white/5 text-slate-300">✕</button>
         </div>
         <p className="mb-2 text-[12px] text-slate-400">Ramène ta voix dans la gamme. Dose à l’oreille, puis « Appliquer » : ta prise d’origine est gardée.</p>
-        <div className="mb-3 h-[34vh] min-h-[160px]">{grid}</div>
+        <div className="mb-3 flex h-[34vh] min-h-[160px] flex-col">{grid}</div>
         <div className="space-y-3">
           {keyBar}
           {globalBar}
-          {listenBar}
+          <div className="flex items-center justify-between gap-2">{listenBar}</div>
           <p className="text-[11px] text-slate-500">Retouche note par note : ouvre ce clip sur un ordi ou une tablette.</p>
         </div>
         <div className="mt-auto">{footer}</div>
@@ -705,7 +707,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg bg-black/25 px-3 py-2" data-testid="pitch-selection">
           <span className="min-w-[150px] text-[12px] text-slate-300" role="status">
             {!notes.length ? '' : selCount === 0 ? 'Touche une note pour la retoucher (Ctrl+A : toutes).'
-              : selCount === 1 && selCenter !== null ? <><b className="text-white">{noteNameFr(Math.round(selCenter))}</b> {fmtCents(centsFromScale(selCenter, key.root, key.scale))} de la gamme</>
+              : selCount === 1 && selCenter !== null ? <><b className="text-white">{noteNameFr(Math.round(selCenter))}</b> · {Math.abs(centsFromScale(selCenter, key.root, key.scale)) >= 50 ? 'hors gamme' : `${scaleTag(centsFromScale(selCenter, key.root, key.scale))}${Math.abs(centsFromScale(selCenter, key.root, key.scale)) >= 3 ? ' de la gamme' : ' juste'}`}</>
               : <><b className="text-white">{selCount} notes</b> sélectionnées</>}
           </span>
           <div className="flex items-center gap-1" role="group" aria-label="Monter ou descendre">
