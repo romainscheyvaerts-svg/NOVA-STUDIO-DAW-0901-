@@ -699,7 +699,8 @@ export type AIActionType =
   | 'GOTO_SECTION'
   | 'SET_PUNCH'
   | 'OPEN_TAKE_HOME'
-  | 'COMP_TAKE';
+  | 'COMP_TAKE'
+  | 'AUTO_COMP';
 
 export interface AIAction {
   action: AIActionType;

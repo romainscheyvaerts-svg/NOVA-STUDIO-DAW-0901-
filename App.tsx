@@ -121,6 +121,8 @@ import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange,
 import { splitLoopPasses, keptLoopPasses, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
 import { compSwipe, compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
+import AutoCompCard, { AutoCompProposal } from './components/AutoCompCard';
+import { autoComp, SpanReader } from './utils/autoComp';
 import { editSelectionStore } from './utils/editSelection';
 import { useEditCommands } from './hooks/useEditCommands';
 
@@ -3320,11 +3322,59 @@ function Studio() {
     setAiNotification(`🗑️ ${name} supprimée${r.replacedBy.length ? ` — la Prise ${r.replacedBy.join(', ')} la remplace dans ta voix finale` : ''}. Annuler pour la retrouver.`);
   }, [setState, breakHistory, releaseBufferIfUnused, takeAudition]);
 
+  // ===== « Meilleure prise » par l'IA locale (V22) : note chaque prise, propose un comp.
+  const [autoCompProposal, setAutoCompProposal] = useState<AutoCompProposal | null>(null);
+  const autoCompBeforeRef = useRef<{ trackId: string; clips: Clip[]; takeMeta?: TakeMeta[] } | null>(null);
+  const handleAutoComp = useCallback((trackId: string) => {
+    const st = stateRef.current;
+    const t = st.tracks.find(x => x.id === trackId);
+    if (!t || takeCount(t) < 2) { setAiNotification('✨ Il faut au moins 2 prises sur la piste pour choisir la meilleure.'); return; }
+    const read: SpanReader = (sp, from, to) => {
+      const buf = sp.base.bufferId ? audioBufferRegistry.get(sp.base.bufferId) : sp.base.buffer;
+      if (!buf) return null;
+      const sr = buf.sampleRate;
+      const a = Math.max(0, Math.round((from - sp.anchor) * sr)), b = Math.min(buf.length, Math.round((to - sp.anchor) * sr));
+      return b > a ? { samples: buf.getChannelData(0).subarray(a, b), sampleRate: sr } : null;
+    };
+    const key = typeof st.projectKey === 'number' ? { root: st.projectKey, scale: st.projectScale } : null;
+    const r = autoComp(t.clips as Clip[], read, { bpm: st.bpm, key });
+    if (!r.choices.length) { setAiNotification("✨ Je n'ai pas trouvé de passage chanté commun à tes prises."); return; }
+    autoCompBeforeRef.current = { trackId, clips: t.clips as Clip[], takeMeta: t.takeMeta as TakeMeta[] | undefined };
+    breakHistory();
+    setState(produce((draft: DAWState) => {
+      const d = draft.tracks.find(x => x.id === trackId);
+      if (!d) return;
+      d.clips = r.clips as any;
+      let meta = d.takeMeta as TakeMeta[] | undefined;
+      for (const [n, sc] of Object.entries(r.takeScores)) meta = patchMeta(meta, Number(n), { score: sc });
+      d.takeMeta = meta;
+    }));
+    breakHistory();
+    const names: Record<number, string> = {};
+    listLanes(t).forEach(l => { names[l.n] = l.name; });
+    setAutoCompProposal({ trackId, trackName: t.name, choices: r.choices, takeScores: r.takeScores, names });
+    setTakeLanesOpen(prev => ({ ...prev, [trackId]: true }));
+    track('auto_comp', { phrases: r.choices.length, takes: Object.keys(r.takeScores).length });
+  }, [setState, breakHistory]);
+  const handleAutoCompRevert = useCallback(() => {
+    const b = autoCompBeforeRef.current;
+    autoCompBeforeRef.current = null;
+    setAutoCompProposal(null);
+    if (!b) return;
+    breakHistory();
+    setState(produce((draft: DAWState) => {
+      const d = draft.tracks.find(x => x.id === b.trackId);
+      if (d) { d.clips = b.clips as any; d.takeMeta = b.takeMeta; }
+    }));
+    breakHistory();
+    setAiNotification("↩ Ton comp d'avant est revenu.");
+  }, [setState, breakHistory]);
+
   const takeLanesApi = useMemo<TakeLanesApi>(() => ({
     open: takeLanesOpen, audition: takeAudition,
     onToggle: handleToggleTakeLanes, onAudition: handleAuditionTake, onComp: handleCompSwipe, onKeep: handleKeepTake,
-    onRename: handleRenameTake, onDuplicate: handleDuplicateTake, onDelete: handleDeleteTake,
-  }), [takeLanesOpen, takeAudition, handleToggleTakeLanes, handleAuditionTake, handleCompSwipe, handleKeepTake, handleRenameTake, handleDuplicateTake, handleDeleteTake]);
+    onRename: handleRenameTake, onDuplicate: handleDuplicateTake, onDelete: handleDeleteTake, onAutoComp: handleAutoComp,
+  }), [takeLanesOpen, takeAudition, handleToggleTakeLanes, handleAuditionTake, handleCompSwipe, handleKeepTake, handleRenameTake, handleDuplicateTake, handleDeleteTake, handleAutoComp]);
 
   // Punch-in / punch-out (utils/punch) : points indépendants de la boucle, posés
   // dans la règle ou depuis la sélection ; pré/post-roll réglables ; QuickPunch.
@@ -4936,6 +4986,13 @@ function Studio() {
         break;
       }
 
+      case 'AUTO_COMP': {
+        const tr = (p.trackId ? findTrack(p.trackId) : undefined) || stateRef.current.tracks.find(t => takeCount(t) > 1);
+        if (!tr) { notify('Il faut au moins 2 prises sur une piste pour choisir la meilleure'); break; }
+        handleAutoComp(tr.id);
+        break;
+      }
+
       case 'OPEN_TAKE_HOME': {
         setTakeHomeOpen(true);
         break;
@@ -5945,6 +6002,10 @@ function Studio() {
         onClose={() => setNextStep(null)}
       />
 
+      <AutoCompCard proposal={autoCompProposal}
+        onKeep={() => { autoCompBeforeRef.current = null; setAutoCompProposal(null); setAiNotification("✓ Comp de l'IA gardé — tu peux encore le retoucher en balayant dans les couloirs."); }}
+        onRevert={handleAutoCompRevert}
+        onListen={(t0) => { handleSeek(Math.max(0, t0 - 0.5)); if (!stateRef.current.isPlaying) void handleTogglePlay(); }} />
       <VocalToolsPanel
         open={vocalToolsOpen}
         onClose={() => setVocalToolsOpen(false)}
@@ -5972,6 +6033,7 @@ function Studio() {
         audition={takeAudition}
         onAuditionTake={handleAuditionTake}
         onKeepTake={handleKeepTake}
+        onAutoComp={(trackId) => { setVocalToolsOpen(false); handleAutoComp(trackId); }}
         onShowLanes={isMobile ? undefined : (trackId) => { setVocalToolsOpen(false); handleToggleTakeLanes(trackId, true); }}
         compZones={compZones}
         onCompTake={(trackId, n, zone) => handleCompTake(trackId, n, zone)}

@@ -36,6 +36,8 @@ interface VocalToolsPanelProps {
   onKeepTake: (trackId: string, n: number) => void;
   /** Ouvre les couloirs de la piste dans l'arrangement. */
   onShowLanes?: (trackId: string) => void;
+  /** « Meilleure prise » : l'IA locale note les prises et propose un comp. */
+  onAutoComp?: (trackId: string) => void;
   /** Comping : zones (parties du morceau, boucle) où garder une prise. */
   compZones?: CompZone[];
   onCompTake?: (trackId: string, n: number, zone: CompZone) => void;
@@ -129,6 +131,13 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
                         <i className="fas fa-layer-group mr-1" />Voir les couloirs
                       </button>}
                     </div>
+                    {p.onAutoComp && (
+                      <button type="button" onClick={() => p.onAutoComp!(g.trackId)}
+                        title="Nova note chaque prise phrase par phrase (justesse, calage sur le temps, niveau, bruit), sur ton ordi, et monte le meilleur comp. Tu le gardes ou tu reviens en arrière."
+                        className="mb-1.5 w-full h-10 rounded-xl bg-gradient-to-r from-cyan-500/20 to-fuchsia-500/20 border border-cyan-400/40 text-[12px] font-black text-white hover:from-cyan-500/30">
+                        ✨ Meilleure prise : laisse l'IA choisir phrase par phrase
+                      </button>
+                    )}
                     <div className="flex flex-col gap-1.5">
                       {g.lanes.map(l => {
                         const zone = compZoneIdx >= 0 ? p.compZones?.[compZoneIdx] : undefined;

@@ -493,6 +493,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     setContextMenu({ x, y, items: [
       { label: isOpen ? 'Replier les couloirs de prises' : `Afficher les couloirs (${lanes.length} prises)`, icon: isOpen ? 'fa-chevron-up' : 'fa-layer-group',
         onClick: () => { takeLanes.onToggle(trackId); setContextMenu(null); } },
+      ...(takeLanes.onAutoComp && lanes.length > 1 ? [{ label: '✨ Meilleure prise (IA, sur ton ordi)', icon: 'fa-wand-magic-sparkles', onClick: () => { takeLanes.onAutoComp!(trackId); setContextMenu(null); } }] : []),
       'separator' as const,
       ...lanes.flatMap(l => [
         { label: `Écouter ${l.label}`, icon: 'fa-headphones', onClick: () => { takeLanes.onAudition(trackId, l.n); setContextMenu(null); } },

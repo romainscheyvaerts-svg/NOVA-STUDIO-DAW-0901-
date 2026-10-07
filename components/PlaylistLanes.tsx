@@ -32,6 +32,8 @@ export interface TakeLanesApi {
   onRename: (trackId: string, n: number, name: string) => void;
   onDuplicate: (trackId: string, n: number) => void;
   onDelete: (trackId: string, n: number) => void;
+  /** « Meilleure prise » : comp proposé par l'IA locale. */
+  onAutoComp?: (trackId: string) => void;
 }
 
 // ------------------------------------------------------------------ en-têtes (colonne gauche)
