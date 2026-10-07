@@ -1,0 +1,179 @@
+"""Captures avant / après des corrections de l'audit d'usage (07/10/2026).
+
+  NOVA_URL=http://localhost:3418/ python qa/audit_corrections.py avant b2 b6
+  NOVA_URL=http://localhost:3418/ python qa/audit_corrections.py apres b2
+
+Chaque scénario écrit `<code>_<phase>_*.png` dans D:\\1 WORK\\CONTENU\\nova-audit-corrections
+et un résumé JSON `<code>_<phase>.json`. Navigateur headless : aucune fenêtre.
+"""
+import json, os, re, sys, time
+sys.path.insert(0, os.path.dirname(__file__))
+os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-audit-corrections")
+from qalib import launch, new_page, shot, OUT, Log  # noqa: E402
+from scenarios import open_studio, visible, body, btn, close_welcome, do_take, wait_text_gone  # noqa: E402
+from playwright.sync_api import sync_playwright  # noqa: E402
+
+PHASE = sys.argv[1] if len(sys.argv) > 1 else "apres"
+ONLY = [a.lower() for a in sys.argv[2:]]
+
+
+def mk(b, vp="pc", mode="simple", name="x"):
+    log = Log(name)
+    ctx, pg = new_page(b, vp, log)
+    pg.add_init_script(f"try {{ localStorage.setItem('nova_simple_mode', '{'1' if mode == 'simple' else '0'}'); localStorage.setItem('nova_headphones', '1'); localStorage.setItem('nova_count_in', '0') }} catch (e) {{}}")
+    pg._log = log
+    return ctx, pg
+
+
+def S(pg, code, label):
+    return shot(pg, f"{code}_{PHASE}_{label}")
+
+
+def errors(pg):
+    return [e["text"][:250] for e in pg._log.entries if e["kind"] in ("console.error", "pageerror")]
+
+
+def take(pg, secs=3):
+    pg.keyboard.press("Home"); pg.keyboard.press("r")
+    pg.wait_for_timeout(1500 + secs * 1000)
+    pg.keyboard.press("r"); pg.wait_for_timeout(3500)
+
+
+def headers(pg):
+    """Pistes à l'écran : nom, y, armée, sélectionnée."""
+    return pg.evaluate("""() => Array.from(document.querySelectorAll('[data-track-header]')).map(h => {
+      const r = h.getBoundingClientRect();
+      return {name: h.getAttribute('data-track-name'), y: Math.round(r.y), h: Math.round(r.height),
+              armed: h.getAttribute('data-armed') === '1', selected: h.getAttribute('data-selected') === '1',
+              onScreen: r.y >= 0 && r.bottom <= innerHeight, clips: +(h.getAttribute('data-clips') || 0)};
+    })""")
+
+
+# ------------------------------------------------------------------ B2
+def b2(b, R):
+    ctx, pg = mk(b, "pc", "simple", "b2")
+    open_studio(pg, R)
+    take(pg)  # une prise sur REC (comme l'artiste)
+    btn(pg, re.compile("Piste voix", re.I)).click(); pg.wait_for_timeout(1500)
+    S(pg, "b2", "01_piste_voix")
+    R["pistes_apres_ajout"] = headers(pg)
+    take(pg)
+    S(pg, "b2", "02_prise_suivante")
+    R["pistes_apres_prise"] = headers(pg)
+    pg.keyboard.press("Control+z"); pg.wait_for_timeout(600)
+    pg.keyboard.press("Control+z"); pg.wait_for_timeout(600)
+    R["apres_2_annulations"] = [h["name"] for h in headers(pg)]
+    # Piste du bas sélectionnée : la nouvelle arrive dessous, hors de l'écran → défilement.
+    pg.locator("[data-track-header='back-2']").first.click(); pg.wait_for_timeout(300)
+    pg.evaluate("() => document.querySelectorAll('.custom-scroll').forEach(e => e.scrollTop = 0)")
+    pg.wait_for_timeout(300)
+    btn(pg, re.compile("Piste voix", re.I)).click(); pg.wait_for_timeout(1500)
+    S(pg, "b2", "03_sous_back2")
+    R["sous_back2"] = [h for h in headers(pg) if h["name"] in ("BACK 2", "VOIX")]
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+# ------------------------------------------------------------------ B6
+def b6(b, R):
+    ctx, pg = mk(b, "pc", "simple", "b6")
+    hang = {"n": 0}
+
+    def hold(route, request):
+        hang["n"] += 1  # jamais de réponse : réseau coupé en plein chargement
+
+    ctx.route(re.compile(r"(storage/v1/object/public/instruments|stream-instrumental)"), hold)
+    pg.goto(os.environ.get("NOVA_URL", "http://localhost:3418/"), wait_until="domcontentloaded")
+    pg.get_by_text("NOCTAMBULE", exact=True).first.wait_for(timeout=20000)
+    pg.get_by_text("NOCTAMBULE", exact=True).first.click()
+    pg.wait_for_timeout(1500)
+    close_welcome(pg)
+    pg.wait_for_timeout(2000)
+    S(pg, "b6", "01_chargement_2s")
+    pg.wait_for_timeout(15000)
+    S(pg, "b6", "02_apres_17s")
+    R["texte_17s"] = re.findall(r"[^\n]*(?:beat|Beat|connexion|Réessayer)[^\n]*", body(pg))[:8]
+    pg.keyboard.press("r"); pg.wait_for_timeout(2500)
+    S(pg, "b6", "03_rec_pendant_chargement")
+    R["enregistre"] = pg.evaluate("() => /Enregistrement|● REC|REC ·/.test(document.body.innerText)")
+    R["texte_rec"] = re.findall(r"[^\n]*(?:beat|Beat|chargement|Chargement)[^\n]*", body(pg))[:8]
+    R["requetes_bloquees"] = hang["n"]
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+# ------------------------------------------------------------------ G1
+def g1(b, R, vp="pc"):
+    ctx, pg = mk(b, vp, "simple", f"g1_{vp}")
+    open_studio(pg, R)
+    pg.keyboard.press("Home"); pg.keyboard.press("r"); pg.wait_for_timeout(3000)
+    S(pg, "g1", f"{vp}_01_pendant_prise")
+    pg.keyboard.press("r"); pg.wait_for_timeout(4500)
+    S(pg, "g1", f"{vp}_02_apres_prise")
+    R[f"{vp}_nova_ouvert"] = pg.evaluate("() => !!document.querySelector('[data-testid=nova-chat-panel]')")
+    R[f"{vp}_cartes"] = pg.evaluate("() => document.querySelectorAll('[role=region][aria-label]').length")
+    pill = pg.locator("[data-testid='nova-tip-pill']")
+    R[f"{vp}_pastille"] = pill.first.inner_text().strip() if pill.count() else None
+    if pill.count():
+        pill.first.click(); pg.wait_for_timeout(800)
+        S(pg, "g1", f"{vp}_03_conseil_ouvert")
+        pg.keyboard.press("Escape"); pg.wait_for_timeout(500)
+        S(pg, "g1", f"{vp}_04_echap")
+    R[f"{vp}_errors"] = errors(pg)
+    ctx.close()
+
+
+def g1_all(b, R):
+    g1(b, R, "pc"); g1(b, R, "tab")
+
+
+# ------------------------------------------------------------------ B5
+def open_console(pg):
+    for label in ("Console", "Mixage", "Mixer", "Mix"):
+        t = pg.get_by_role("button", name=re.compile(f"^{label}$", re.I))
+        if t.count() and visible(t.first):
+            t.first.click(); pg.wait_for_timeout(1200); return True
+    return False
+
+
+def trap(pg):
+    pg.locator("button[title='Choisir un style de mix pour ta voix']").first.click(); pg.wait_for_timeout(800)
+    pg.get_by_role("dialog", name=re.compile("Mix auto")).get_by_role("button", name="Trap autotune").first.click()
+    pg.wait_for_timeout(1500)
+    pg.keyboard.press("Escape"); pg.mouse.click(5, 5); pg.wait_for_timeout(500)
+
+
+def b5(b, R):
+    ctx, pg = mk(b, "pc", "avance", "b5")
+    open_studio(pg, R)
+    trap(pg)
+    open_console(pg)
+    S(pg, "b5", "01_console")
+    R["slots"] = pg.locator(".fx-slot").all_inner_texts()[:20]
+    more = pg.locator("[data-testid^='mixer-inserts-plus-']")
+    R["plus"] = more.first.inner_text().strip() if more.count() else None
+    if more.count():
+        more.first.click(); pg.wait_for_timeout(500)
+        S(pg, "b5", "02_liste")
+        pg.keyboard.press("Escape")
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5}
+
+if __name__ == "__main__":
+    todo = [k for k in SCEN if not ONLY or k in ONLY]
+    with sync_playwright() as p:
+        br = launch(p)
+        for k in todo:
+            R = {"name": f"{k}_{PHASE}"}
+            t = time.time()
+            try:
+                SCEN[k](br, R)
+            except Exception as e:  # noqa
+                R["EXCEPTION"] = f"{type(e).__name__}: {str(e)[:400]}"
+            R["secs"] = round(time.time() - t, 1)
+            (OUT / f"{k}_{PHASE}.json").write_text(json.dumps(R, ensure_ascii=False, indent=1), encoding="utf-8")
+            print(k, json.dumps({x: y for x, y in R.items() if x not in ("welcome_buttons",)}, ensure_ascii=False)[:1500])
+        br.close()

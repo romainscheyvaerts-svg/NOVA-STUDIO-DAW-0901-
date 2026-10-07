@@ -394,13 +394,18 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   return (
     <div 
       data-nova-target={`track-${track.id}`}
+      data-track-header={track.id}
+      data-track-name={track.name}
+      data-armed={track.isTrackArmed ? '1' : '0'}
+      data-selected={isSelected ? '1' : '0'}
+      data-clips={track.clips.length}
       onClick={onSelect}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, track.id); }}
       onDragOver={handleDragOver}
       onDragLeave={() => { setIsDragOverFX(false); }}
       onDrop={handleOnDrop}
       className={`group border-b border-white/10 px-3 py-2 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${frozen ? 'bg-cyan-500/[0.03]' : ''}${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
-      style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined }}
+      style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined, scrollMarginTop: 44, scrollMarginBottom: 8 }}
     >
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center truncate flex-1 pr-2">

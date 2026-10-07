@@ -99,6 +99,7 @@ import { anchorClipsToWindow, applyPreviewOnEngineer, clearPreviewOnEngineer, ha
 import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from './services/Billing';
 import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
+import { planVoiceTrack, revealTrack } from './utils/voiceTrack';
 import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
 import { AutotuneVstManager } from './components/AutotuneVstPanel';
@@ -1675,6 +1676,41 @@ function Studio() {
     }
     return true;
   }, [setState]);
+
+  /**
+   * « + Piste voix » (audit B2) : la piste arrive sous la piste sélectionnée,
+   * reprend le traitement de la voix (style de mix), devient la piste
+   * sélectionnée ET armée, et l'écran défile jusqu'à elle : la prise suivante
+   * part dessus. Une seule étape d'annulation (création), l'armement n'en est pas une.
+   */
+  const handleAddVoiceTrack = useCallback(async () => {
+    const st = stateRef.current;
+    if (st.isRecording) { setAiNotification('⏺️ Arrête la prise en cours avant d’ajouter une piste.'); return; }
+    const plan = planVoiceTrack(st.tracks, st.selectedTrackId);
+    const id = `track-voix-${Date.now().toString(36)}`;
+    setState(produce((draft: DAWState) => {
+      const tpl = plan.templateId && draft.vocalMixStyle ? draft.tracks.find(t => t.id === plan.templateId) : undefined;
+      const color = UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length];
+      const newTrack: Track = {
+        id, name: plan.name, type: TrackType.AUDIO, color,
+        isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+        volume: tpl ? tpl.volume : 1.0, pan: 0, outputTrackId: plan.outputTrackId,
+        sends: tpl ? tpl.sends.map(s => ({ ...s })) : createInitialSends(draft.bpm).map(s => ({ id: s.id, level: 0, isEnabled: true })),
+        clips: [],
+        plugins: tpl ? tpl.plugins.map(p => ({ ...JSON.parse(JSON.stringify(p)), id: `pl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` })) : [],
+        automationLanes: [createDefaultAutomation('volume', color)],
+        totalLatency: 0,
+      };
+      draft.tracks.splice(Math.min(plan.index, draft.tracks.length), 0, newTrack);
+      draft.selectedTrackId = id;
+    }));
+    revealTrack(id);
+    await ensureAudioEngine();
+    // Laisse le moteur câbler la nouvelle piste avant de l'armer.
+    await new Promise(r => setTimeout(r, 80));
+    const armed = await armForRecording(id);
+    if (armed) setAiNotification(`🎤 Piste ${plan.name} prête : ta prochaine prise part dessus.`);
+  }, [setState, armForRecording]);
 
   /**
    * L'ingé son prépare la partie suivante de la session : choisit (ou crée) la
@@ -5571,6 +5607,7 @@ function Studio() {
       {isMobile && (activeMobileTab === 'TRACKS' || activeMobileTab === 'ARRANGEMENT') && (
         <TrackCreationBar
           onCreateTrack={handleCreateTrack}
+          onAddVoiceTrack={handleAddVoiceTrack}
           beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
           onOpenDrums={() => setDrumsOpen(true)}
           onNewMidiTrack={handleNewMidiTrack}
@@ -5667,6 +5704,7 @@ function Studio() {
                 <TrackCreationBar
                   docked
                   onCreateTrack={handleCreateTrack}
+                  onAddVoiceTrack={handleAddVoiceTrack}
                   beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
                   onOpenDrums={() => setDrumsOpen(true)}
                   onNewMidiTrack={handleNewMidiTrack}
