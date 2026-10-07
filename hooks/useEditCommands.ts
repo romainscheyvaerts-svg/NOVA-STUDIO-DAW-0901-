@@ -86,6 +86,19 @@ let current: EditCommands | null = null;
 /** Commandes d'édition du studio ouvert (null avant son montage). */
 export const getEditCommands = (): EditCommands | null => current;
 
+/**
+ * Nudge (Pro Tools) en une fonction simple, pour le bus de commandes du clavier :
+ * décale les clips sélectionnés (ou la plage) de `steps` pas dans le sens
+ * `direction` (1 = droite, -1 = gauche). Pas réglable dans la barre d'outils
+ * (grille, 1/10/100 ms, 1 image, 1 temps, 1 mesure). Renvoie false si le
+ * studio n'est pas monté.
+ */
+export function nudgeClips(direction: 1 | -1, steps = 1): boolean {
+  if (!current) return false;
+  current.nudge(direction, steps);
+  return true;
+}
+
 /** Durée de l'audio d'un clip (pour les « handles » des crossfades). */
 export const bufferDurationOf = (c: { bufferId?: string; buffer?: { duration: number } }): number | undefined =>
   c.buffer?.duration ?? (c.bufferId ? audioBufferRegistry.get(c.bufferId)?.duration : undefined);
