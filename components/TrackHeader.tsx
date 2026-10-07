@@ -30,6 +30,7 @@ import { Track, PluginType, PluginInstance, TrackType, TrackSend } from '../type
 import { isPluginBaked, isFreezeStale, isTrackFrozen } from '../utils/freeze';
 import { useRecFrozen } from '../utils/recFreezeStore';
 import { useInstrumentStatus } from '../utils/instrumentStore';
+import { openSynthPanel } from '../utils/synthPanelStore';
 import MonitorControl from './MonitorControl';
 import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
@@ -683,6 +684,23 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                       <i className="fas fa-sliders-h text-[9px]"></i>
                   </button>
               </div>
+          </div>
+      )}
+
+      {/* Synthé NOVA (V24) : pastille de l'instrument d'une piste MIDI, ouvre son écran. */}
+      {!instrumentPlugin && track.type === TrackType.MIDI && !track.bass808 && !track.vstInstrument && !track.drumMachine && (
+          <div className="mt-2 relative min-h-0 overflow-hidden">
+              <button type="button" data-testid={`synth-pill-${track.id}`}
+                  onClick={(e) => { e.stopPropagation(); openSynthPanel(track.id); }}
+                  title="Ouvrir le synthé NOVA (sons et réglages)" aria-label={`Ouvrir le synthé de ${track.name}`}
+                  className="flex w-full items-center overflow-hidden rounded-md border border-cyan-500/30 bg-cyan-500/5 hover:bg-cyan-500/10 text-left min-h-[32px]">
+                  <span className="w-8 self-stretch flex items-center justify-center bg-cyan-500/10 border-r border-cyan-500/20"><i className="fas fa-music text-[10px] text-cyan-400"></i></span>
+                  <span className="flex-1 min-w-0 px-2 flex flex-col justify-center">
+                      <span className="text-[9px] font-black uppercase text-cyan-100 truncate">{track.novaSynth?.name || 'Synthé simple'}</span>
+                      <span className="text-[7px] text-slate-500 font-mono">Synthé NOVA</span>
+                  </span>
+                  <span className="w-8 self-stretch flex items-center justify-center bg-black/20 text-slate-400"><i className="fas fa-sliders-h text-[9px]"></i></span>
+              </button>
           </div>
       )}
 

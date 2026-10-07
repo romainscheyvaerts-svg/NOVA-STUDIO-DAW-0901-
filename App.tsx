@@ -9,6 +9,7 @@ const MixerView = lazy(() => import('./components/MixerView').then(m => ({ defau
 // Charge a la demande : PluginEditor tire les 13 interfaces de plugins,
 // soit plus de 8000 lignes qui ne servent qu'a l'ouverture d'un effet.
 const PluginEditor = lazy(() => import('./components/PluginEditor'));
+const SynthPanel = lazy(() => import('./components/SynthPanel'));
 import ChatAssistant from './components/ChatAssistant';
 import ViewModeSwitcher from './components/ViewModeSwitcher';
 import ContextMenu from './components/ContextMenu';
@@ -33,9 +34,12 @@ import { SessionSerializer } from './services/SessionSerializer';
 import { novaBridge, BridgePlugin } from './services/NovaBridge';
 import { clearInstrumentRender, instrumentFromPlugin, isInstrumentRenderCurrent } from './services/VstInstrument';
 import { useVstInstruments } from './hooks/useVstInstruments';
+import { useSynthPanelTrack, openSynthPanel, closeSynthPanel } from './utils/synthPanelStore';
+import type { NovaSynthSettings } from './utils/novaSynth';
 import VstInstrumentPicker from './components/VstInstrumentPicker';
 import Bass808Controls from './components/Bass808Controls';
 import { BASS808_TRACK_ID, kit808Style, starter808Notes } from './utils/bass808';
+import { normalizeSynth } from './utils/novaSynth';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
 import { renderTrackFreeze, renderTrackPreview, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
@@ -3650,6 +3654,33 @@ function Studio() {
     if (old) setTimeout(() => releaseBufferIfUnused(old, []), 0);
   }, [setState]);
 
+  // ===== Synthé NOVA (V24) : écran ouvert depuis la pastille de la piste ou le piano roll =====
+  const synthPanelTrackId = useSynthPanelTrack();
+  const handleSynthChange = useCallback((trackId: string, s: NovaSynthSettings | undefined) => {
+    // Une seule voie : setState (annulable, anti-rebond des glissements, collaboration).
+    setState(produce((d: DAWState) => {
+      const t = d.tracks.find(x => x.id === trackId);
+      if (!t || t.type !== TrackType.MIDI) return;
+      if (s) t.novaSynth = s; else delete t.novaSynth;
+    }));
+  }, [setState]);
+  const handleSynthPreview = useCallback(async (trackId: string, s: NovaSynthSettings, pitches: number[]) => {
+    await ensureAudioEngine();
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t) return;
+    // Le moteur prend tout de suite les réglages montrés (sans attendre le rendu React).
+    audioEngine.updateTrack({ ...t, novaSynth: s }, stateRef.current.tracks);
+    pitches.forEach(p => audioEngine.previewMidiNote(trackId, p, 1.1));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const handleSynthNoteOn = useCallback((trackId: string, pitch: number) => {
+    void ensureAudioEngine().then(() => audioEngine.triggerTrackAttack(trackId, pitch, 0.85));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const handleSynthNoteOff = useCallback((trackId: string, pitch: number) => {
+    audioEngine.triggerTrackRelease(trackId, pitch);
+  }, []);
+
   /** Ce que tout le monde a déjà (rien n'est renvoyé). mix:false : le mix est suivi champ par champ à part. */
   const rememberTrack = (t: Track, opts: { mix?: boolean } = {}) => {
     if (opts.mix !== false || !knownFieldsRef.current.has(t.id)) knownFieldsRef.current.set(t.id, fieldSigsOf(mixFieldsOf(t)));
@@ -3781,6 +3812,7 @@ function Studio() {
           if (ct.drumMachine !== undefined) t.drumMachine = ct.drumMachine;
           if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
           if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
+          if (ct.novaSynth !== undefined) { if (ct.novaSynth) t.novaSynth = normalizeSynth(ct.novaSynth); else delete t.novaSynth; }
           t.clips = Array.isArray(ct.clips) ? ct.clips : t.clips;
           // Instrument VST du beatmaker : on reçoit le rendu de ses notes.
           if (ct.vstInstrument) {
@@ -6078,6 +6110,16 @@ function Studio() {
         </div>
       )}
       <ShareClipModal open={shareOpen} onClose={() => setShareOpen(false)} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
+      {(() => {
+        const st = synthPanelTrackId ? state.tracks.find(t => t.id === synthPanelTrackId && t.type === TrackType.MIDI && !t.bass808) : undefined;
+        if (!st) return null;
+        return (
+          <SynthPanel track={st} onClose={closeSynthPanel}
+            onChange={s => handleSynthChange(st.id, s)}
+            onPreview={(s, pitches) => { void handleSynthPreview(st.id, s, pitches); }}
+            onNoteOn={p => handleSynthNoteOn(st.id, p)} onNoteOff={p => handleSynthNoteOff(st.id, p)} />
+        );
+      })()}
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} onClose={() => setIsAuthOpen(false)} />}
       </Suspense>
       
@@ -6095,6 +6137,14 @@ function Studio() {
                    if (t?.bass808) return <Bass808Controls value={t.bass808} onChange={v => handleUpdateTrack({ ...t, bass808: v })} />;
                    if (!t || t.type !== TrackType.MIDI || !(state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker')) return null;
                    return (
+                     <>
+                     {!t.vstInstrument && (
+                       <button type="button" onClick={() => openSynthPanel(t.id)} data-testid="open-synth-panel"
+                         title="Ouvrir le synthé NOVA : 48 sons (pianos, nappes, plucks, cloches…) et tous les réglages"
+                         className="nova-hit h-8 px-2.5 rounded-lg text-[11px] font-bold border bg-cyan-500/15 border-cyan-400/50 text-cyan-100 hover:bg-cyan-500/25 shrink-0">
+                         <i className="fas fa-sliders-h mr-1" />{t.novaSynth?.name || 'Synthé'}
+                       </button>
+                     )}
                      <VstInstrumentPicker
                        track={t}
                        stale={!!t.vstInstrument && !isInstrumentRenderCurrent(t, state.bpm)}
@@ -6103,6 +6153,7 @@ function Studio() {
                        onRetry={() => vstInstruments.retry(t.id)}
                        onError={(msg) => notifyInstrument(`🎹 ${msg}`)}
                      />
+                     </>
                    );
                  })()}
                />
