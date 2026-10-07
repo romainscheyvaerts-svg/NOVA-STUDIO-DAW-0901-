@@ -227,6 +227,19 @@ const MidiHost: React.FC<Props> = ({ state, getState, setState, pianoRoll }) => 
   }, [getState]);
   useEffect(() => { midiCapture.setPlaying(!!state.isPlaying); }, [state.isPlaying]);
 
+  // Diagnostic en lecture seule (console, tests de bout en bout), comme window.__novaCollab.
+  useEffect(() => {
+    (window as any).__novaMidi = {
+      bpm: () => getState().bpm,
+      captured: () => midiCapture.size,
+      tracks: () => getState().tracks.map(t => ({
+        id: t.id, name: t.name, type: t.type,
+        clips: t.clips.filter(c => Array.isArray(c.notes)).map(c => ({ id: c.id, name: c.name, start: c.start, duration: c.duration, groove: c.groove ? c.groove.template.id : null, notes: (c.notes || []).map(n => ({ p: n.pitch, s: n.start, d: n.duration, v: n.velocity })) })),
+      })),
+    };
+    return () => { delete (window as any).__novaMidi; };
+  }, [getState]);
+
   // Sons des batteries importées (la batterie principale est chargée par App).
   const loaded = useRef(new Map<string, string>());
   useEffect(() => {

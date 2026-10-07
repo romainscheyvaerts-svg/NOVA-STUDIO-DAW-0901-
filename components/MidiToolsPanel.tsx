@@ -37,7 +37,7 @@ const DEFAULTS: AllParams = {
   strum: { direction: 'up', spreadMs: 30, tension: 0 },
   arp: { pattern: 'UP', rate: '1/16', octaves: 1, gate: 80 },
   flam: { offsetMs: 25, velocity: 0.6 },
-  chop: { grid: '1/16', gate: 90 },
+  chop: { grid: '1/16', gate: 100 },
   roll: { rate: '1/32', ramp: 'up', from: 0.35, to: 1, pitchRamp: 0 },
   velocity: { shape: 'up', min: 0.3, max: 1, cycles: 1, points: [0.3, 0.6, 1, 0.6, 0.3, 0.6, 1, 0.6] },
   random: { pitch: 0, velocity: 0.15, timingMs: 8, chance: 1, seed: 1 },
