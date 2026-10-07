@@ -10,6 +10,7 @@ import InstallAppButton from './InstallAppButton';
 import { SavedSessionMeta, formatAgo } from '../utils/sessionStore';
 import { DESKTOP_APP_DOWNLOAD_URL, getNovaDesktop, isNovaDesktop } from '../utils/desktopApp';
 import { tonaliteFr } from '../utils/keyName';
+import { ThemeToggleButton } from './ThemeSwitch';
 
 interface LandingPageProps {
   user: User | null;
@@ -24,6 +25,8 @@ interface LandingPageProps {
   onResumeSession?: () => void;
   onLogin: (user: User) => void;
   onLogout: () => void;
+  /** « Nouveau projet depuis un modèle » (modèles de session). */
+  onOpenTemplates?: () => void;
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({ 
@@ -36,7 +39,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
   savedSession,
   onResumeSession,
   onLogin,
-  onLogout 
+  onLogout,
+  onOpenTemplates
 }) => {
   const [instrumentals, setInstrumentals] = useState<Instrumental[]>([]);
   const [loading, setLoading] = useState(true);
@@ -255,7 +259,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
       />
 
       {/* Header avec bouton connexion */}
-      <header className="nova-brandbar shrink-0 flex items-center justify-between px-6 py-4 border-b border-white/5 bg-[#0c0d10]">
+      <header className="nova-brandbar shrink-0 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-white/5 bg-[#0c0d10]">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center">
             <i className="fas fa-wave-square text-white text-sm"></i>
@@ -269,6 +273,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+        <ThemeToggleButton />
         <InstallAppButton />
         {/* Bouton connexion / menu utilisateur */}
         {user && user.id !== 'guest' ? (
@@ -353,6 +358,23 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 <p className="text-[11px] text-slate-400">Projet vierge</p>
               </div>
             </button>
+
+            {/* Nouveau projet depuis un modèle de session */}
+            {onOpenTemplates && (
+              <button
+                onClick={onOpenTemplates}
+                data-testid="landing-templates"
+                className="w-full flex items-center gap-4 p-4 bg-white/[0.02] border border-white/10 rounded-xl hover:border-cyan-500/30 hover:bg-white/[0.05] transition-all group"
+              >
+                <div className="w-12 h-12 rounded-xl bg-teal-500/20 flex items-center justify-center group-hover:bg-teal-500/30 transition-all">
+                  <i className="fas fa-layer-group text-teal-300 text-lg" aria-hidden="true"></i>
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-bold text-white">Depuis un modèle</p>
+                  <p className="text-[11px] text-slate-400">Pistes, bus, envois et effets déjà réglés</p>
+                </div>
+              </button>
+            )}
 
             {/* Bouton Ouvrir fichier audio */}
             <button

@@ -5,6 +5,7 @@ import { readComp, CompSegment } from '../utils/comping';
 import { fmtTime } from '../utils/takes';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { visibleEnvelope } from '../utils/waveformPeaks';
+import { canvasTheme } from '../utils/canvasTheme';
 
 /**
  * Couloirs de prises sous une piste (« Playlists » de Pro Tools, « take
@@ -202,7 +203,7 @@ const LaneCanvas: React.FC<{ lane: TakeLane; segs: CompSegment[]; zoomH: number;
     for (const sp of lane.spans) {
       const x0 = sp.start * zoomH - scrollLeft, x1 = sp.end * zoomH - scrollLeft;
       if (x1 < 0 || x0 > w) continue;
-      ctx.fillStyle = solo ? color + '30' : 'rgba(255,255,255,0.04)';
+      ctx.fillStyle = solo ? color + '30' : canvasTheme().ink(0.04);
       ctx.fillRect(x0, 2, x1 - x0, h - 4);
       ctx.strokeStyle = color + '66';
       ctx.lineWidth = 1;

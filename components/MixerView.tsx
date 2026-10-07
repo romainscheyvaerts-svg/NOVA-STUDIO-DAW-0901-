@@ -13,6 +13,7 @@ import { automationRecorder } from '../services/AutomationManager';
 import { useLiveParam } from '../utils/automationLiveStore';
 import { sendColor, sendHelp, sendLabel, trackDisplayName } from '../utils/sendLabels';
 import InsertListPopover from './InsertListPopover';
+import { canvasTheme } from '../utils/canvasTheme';
 import { MIXER_INSERT_ROWS, splitInserts } from '../utils/insertRows';
 
 // Track Group Colors (inspired by Pro Tools)
@@ -37,7 +38,7 @@ const VUMeter: React.FC<{ analyzer: AnalyserNode | null }> = ({ analyzer }) => {
       // Slightly boost visual level for better feedback
       const level = Math.min(1, (sum / data.length / 128) * 1.8);
       const w = canvas.width; const h = canvas.height;
-      ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#1e2229'; ctx.fillRect(0, 0, w, h);
+      ctx.clearRect(0, 0, w, h); ctx.fillStyle = canvasTheme().light ? 'rgba(15, 23, 42, 0.1)' : '#1e2229'; ctx.fillRect(0, 0, w, h);
       const grad = ctx.createLinearGradient(0, h, 0, 0);
       grad.addColorStop(0, '#22c55e'); grad.addColorStop(0.7, '#eab308'); grad.addColorStop(0.9, '#ef4444');
       ctx.fillStyle = grad; ctx.fillRect(0, h - (level * h), w, level * h);
@@ -72,6 +73,15 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], on
               onUpdate({ ...track, sends: newSends });
           }}
        />
+       {/* Pré / post-fader (Pro Tools « PRE ») : pré = le fader de la piste ne change pas l'envoi. */}
+       <button
+          type="button"
+          onClick={() => onUpdate({ ...track, sends: track.sends.map(s => s.id === send.id ? { ...s, preFader: !s.preFader } : s) })}
+          aria-pressed={!!send.preFader}
+          aria-label={send.preFader ? `Envoi vers ${sendLabel(send.id, allTracks)} : pré-fader (touche pour le passer après le fader)` : `Envoi vers ${sendLabel(send.id, allTracks)} : post-fader (touche pour le passer avant le fader)`}
+          title={send.preFader ? 'Pré-fader : l’envoi part avant le fader (le fader ne le change pas). Touche pour repasser en post-fader.' : 'Post-fader : l’envoi suit le fader de la piste. Touche pour le passer en pré-fader.'}
+          className={`mt-0.5 px-1 rounded text-[7px] font-black leading-[12px] tracking-wider ${send.preFader ? 'bg-amber-400/90 text-black' : 'text-slate-600 hover:text-slate-300'}`}
+       >{send.preFader ? 'PRÉ' : 'POST'}</button>
     </div>
   );
 };
@@ -217,14 +227,14 @@ const ChannelStrip: React.FC<{
     >
       
       {!isMaster && (track.type === TrackType.AUDIO || track.type === TrackType.SAMPLER) && (
-        <div className="h-[104px] shrink-0 bg-black/40 border-b border-white/5 p-2 grid grid-cols-3 gap-2 items-start overflow-hidden">
+        <div className="h-[104px] shrink-0 bg-black/20 border-b border-white/[0.04] p-2 grid grid-cols-3 gap-2 items-start overflow-hidden">
           {track.sends.map(s => <SendKnob key={s.id} send={s} track={track} allTracks={allTracks} onUpdate={onUpdate} />)}
         </div>
       )}
       
       {/* Effets : tous visibles (8 lignes à la souris, 5 au doigt), sinon « +N »
           qui ouvre la liste complète (audit B5). Hauteur fixe : les faders restent alignés. */}
-      <div className="h-[200px] shrink-0 bg-black/20 border-b border-white/5 px-2 pt-1.5 pb-2 flex flex-col gap-0.5 overflow-hidden">
+      <div className="h-[200px] shrink-0 border-b border-white/[0.04] px-2 pt-1.5 pb-2 flex flex-col gap-0.5 overflow-hidden">
         <div className="flex items-center justify-between px-1 mb-0.5">
           <span className="text-[8px] font-black text-slate-500 uppercase leading-3">{track.type === TrackType.BUS ? 'Effets du bus' : (isMaster ? 'Chaîne du master' : 'Effets')}</span>
           {track.plugins.length >= insertRows && (
@@ -361,7 +371,7 @@ const ChannelStrip: React.FC<{
                 className="h-full bg-black/40 rounded-full border border-white/5 relative cursor-pointer touch-none group/fader"
                 style={{ width: 'var(--fader-width)' }}
               >
-                 <div className={`absolute left-1/2 -translate-x-1/2 rounded border border-white/20 shadow-2xl z-20 flex items-center justify-center ${track.type === TrackType.BUS ? 'w-10 h-16 bg-amber-500 border-amber-400' : 'w-9 h-14 bg-[#1e2229]'}`} style={{ bottom: `calc(${(Math.sqrt(shownVolume / 1.5))*100}% - 28px)` }}>
+                 <div className={`absolute left-1/2 -translate-x-1/2 rounded border border-white/20 shadow-2xl z-20 flex items-center justify-center ${track.type === TrackType.BUS ? 'w-10 h-16 bg-amber-500 border-amber-400' : 'w-9 h-14 bg-nv-raised'}`} style={{ bottom: `calc(${(Math.sqrt(shownVolume / 1.5))*100}% - 28px)` }}>
                     <div className={`w-full h-0.5 ${track.type === TrackType.BUS ? 'bg-black' : 'bg-cyan-500'}`} />
                  </div>
               </div>
@@ -378,11 +388,11 @@ const ChannelStrip: React.FC<{
 
         <div className="mt-2 text-center text-[10px] font-mono tabular-nums text-slate-300">{gainToDbText(shownVolume)}</div>
         <div className="mt-2 flex space-x-2">
-           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`} title="Couper le son de cette tranche">Muet</button>
-           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`} title="N'écouter que cette tranche">Solo</button>
+           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title="Couper le son de cette tranche">Muet</button>
+           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title="N'écouter que cette tranche">Solo</button>
         </div>
         
-        <div className={`mt-3 h-10 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-black/40 border-white/10 text-white'}`}>
+        <div className={`mt-3 h-10 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-transparent text-amber-400' : 'bg-white/[0.05] border-transparent text-white'}`}>
            <div className="w-1.5 h-full mr-2 rounded-full shrink-0" style={{ backgroundColor: track.color }} />
            {renaming && !isMaster ? (
              <input ref={el => { if (el && document.activeElement !== el) { el.focus({ preventScroll: true }); el.select(); } }} defaultValue={track.name} aria-label={`Nouveau nom de ${track.name}`} data-testid={`strip-rename-${track.id}`}
@@ -741,7 +751,7 @@ const MixerView: React.FC<{
       {sendTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>)}
       <div className="w-10 shrink-0 bg-black/50 border-r border-white/5" />
       {/* Master toujours visible à droite (G20), comme Logic / Pro Tools. */}
-      <div className="snap-start sticky right-0 z-20 shrink-0 shadow-[-16px_0_24px_rgba(0,0,0,0.65)]" data-strip-id="master"><ChannelStrip track={masterTrack || { id: 'master', name: 'MASTER BUS', type: TrackType.BUS, color: '#00f2ff', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: '', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0 }} allTracks={tracks} onUpdate={onUpdateTrack} isMaster={true} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>
+      <div className="snap-start sticky right-0 z-20 shrink-0 shadow-[-16px_0_24px_rgba(0,0,0,0.65)] [[data-theme=light]_&]:shadow-[-10px_0_18px_rgba(15,23,42,0.08)]" data-strip-id="master"><ChannelStrip track={masterTrack || { id: 'master', name: 'MASTER BUS', type: TrackType.BUS, color: '#00f2ff', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: '', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0 }} allTracks={tracks} onUpdate={onUpdateTrack} isMaster={true} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>
     </div>
   );
 };

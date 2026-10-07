@@ -6,6 +6,7 @@ import { setKeyboardFocus, useKeyboardFocus } from '../utils/keyboardFocus';
 import MemoryLocations from './MemoryLocations';
 import StripSilenceDialog from './StripSilenceDialog';
 import ClipPropsDialog from './ClipPropsDialog';
+import PitchEditor from './PitchEditor';
 
 interface Props {
   tracks: Track[];
@@ -19,6 +20,9 @@ interface Props {
   onDeleteMarker: (id: string) => void;
   getPlayhead: () => number;
   onOpenShortcuts: () => void;
+  /** Tonalité du projet (justesse note par note). */
+  projectKey?: number;
+  projectScale?: string;
 }
 
 /**
@@ -27,10 +31,11 @@ interface Props {
  * couleur de piste ; plus le témoin Commands Keyboard Focus.
  * App.tsx ne fait que monter ce composant.
  */
-const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEditClip, onSeek, onAddMarker, onUpdateMarker, onDeleteMarker, getPlayhead, onOpenShortcuts }) => {
+const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEditClip, onSeek, onAddMarker, onUpdateMarker, onDeleteMarker, getPlayhead, onOpenShortcuts, projectKey, projectScale }) => {
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [strip, setStrip] = useState<NovaWindowDetail | null>(null);
   const [props, setProps] = useState<NovaWindowDetail | null>(null);
+  const [pitch, setPitch] = useState<NovaWindowDetail | null>(null);
   const focus = useKeyboardFocus();
 
   useEffect(() => {
@@ -41,6 +46,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       else if (d.name === 'strip-silence') setStrip(d);
       else if (d.name === 'clip-props' || d.name === 'track-color') setProps(d);
       else if (d.name === 'shortcuts') onOpenShortcuts();
+      else if (d.name === 'pitch-editor' && d.targets?.length) setPitch(d);
     };
     window.addEventListener(NOVA_WINDOW_EVENT, onOpen);
     return () => window.removeEventListener(NOVA_WINDOW_EVENT, onOpen);
@@ -55,6 +61,18 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
         if (t && i > -1) t.clips.splice(i, 1, ...(r.clips as any));
       }
     }));
+  }, [setState]);
+
+  // Justesse note par note (V19) : une seule étape d'annulation par correction.
+  const applyPitch = useCallback((trackId: string, clipId: string, patch: Partial<Clip>, message: string) => {
+    setState(prev => produce(prev, (draft: DAWState) => {
+      const c = draft.tracks.find(x => x.id === trackId)?.clips.find(x => x.id === clipId);
+      if (!c) return;
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === undefined) delete (c as any)[k]; else (c as any)[k] = v;
+      }
+    }));
+    try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: message })); } catch { /* hors navigateur */ }
   }, [setState]);
 
   // Fenêtre renommer / couleur
@@ -96,6 +114,8 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
         onGoTo={onSeek} onAdd={() => onAddMarker(getPlayhead())} onUpdate={onUpdateMarker} onDelete={onDeleteMarker} />
       <StripSilenceDialog open={!!strip} tracks={tracks} targets={strip?.targets || []} onApply={applyStrip} onClose={() => setStrip(null)} />
       {propsView}
+      <PitchEditor open={!!pitch} trackId={pitch?.targets?.[0]?.trackId} clipId={pitch?.targets?.[0]?.clipId} tracks={tracks}
+        projectKey={projectKey} projectScale={projectScale} onApply={applyPitch} onClose={() => setPitch(null)} />
       {focus && (
         <button type="button" onClick={() => setKeyboardFocus(false)} data-testid="keyboard-focus-badge"
           title="Commands Keyboard Focus actif : une touche = une commande (A, S, D, G, R, T…). Clic ou Ctrl+Alt+1 pour l'arrêter. Ctrl+Espace enregistre."

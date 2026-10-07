@@ -74,6 +74,22 @@ export class ProjectIO {
                     sClip.isUnlicensed = true;
                 }
             }
+
+            // Justesse note par note (V19) : la prise d'origine voyage avec le
+            // projet, pour revenir en arrière ou retoucher après réouverture.
+            const srcId = clip.pitchEdit?.sourceBufferId;
+            if (srcId && sClip.pitchEdit) {
+                const srcBuf = audioBufferRegistry.get(srcId);
+                if (srcBuf && !isUnlicensedStoreBeat) {
+                    const filename = `${srcId}.wav`;
+                    if (!written.has(filename)) {
+                        written.add(filename);
+                        if (audioFolder) audioFolder.file(filename, wavOf(srcBuf));
+                    }
+                    sClip.pitchEdit.sourceRef = `audio/${filename}`;
+                }
+                delete sClip.pitchEdit.sourceBufferId;
+            }
         }
 
         // Samples perso des pads de batterie (V16) : un WAV par sample.
@@ -209,6 +225,24 @@ export class ProjectIO {
                 }
                 // Nettoyage de la ref interne
                 delete clip.audioRef;
+            }
+            // Prise d'origine d'un clip corrigé en justesse (V19).
+            const pe = clip.pitchEdit;
+            if (pe?.sourceRef) {
+                const ref = pe.sourceRef;
+                delete pe.sourceRef;
+                const already = decoded.get(ref);
+                const srcFile = zip.file(ref);
+                if (already) pe.sourceBufferId = already;
+                else if (srcFile) {
+                    try {
+                        const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
+                        pe.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-justesse-origine`);
+                        decoded.set(ref, pe.sourceBufferId);
+                    } catch (e) {
+                        console.warn(`[ProjectIO] Prise d'origine illisible : ${ref}`, e);
+                    }
+                }
             }
         }
 

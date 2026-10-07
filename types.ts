@@ -100,7 +100,7 @@ export interface PendingUpload {
 
 export type AuthStage = 'LOGIN' | 'REGISTER' | 'VERIFY_EMAIL' | 'FORGOT_PASSWORD';
 
-export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
+export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
 
 export interface PluginMetadata {
   id: string;
@@ -126,6 +126,11 @@ export interface TrackSend {
   id: string;          
   level: number;       
   isEnabled: boolean;
+  /**
+   * Envoi pré-fader (Pro Tools « PRE ») : le signal part après les effets mais
+   * avant le fader et le pan de la piste. Absent : post-fader (comme avant).
+   */
+  preFader?: boolean;
 }
 
 export interface MidiNote {
@@ -217,7 +222,8 @@ export interface Clip {
    */
   freezeRef?: FreezeRef;
   /** Tranche de rendu gelé fabriquée pour la lecture (jamais dans le projet). */
-  isFreezeSlice?: boolean;  /**
+  isFreezeSlice?: boolean;
+  /**
    * Point de synchro (Pro Tools : Sync Point, Ctrl+,) en temps du fichier audio
    * (même repère que offset) : c'est lui qui se cale sur la grille et en Spot.
    */
@@ -227,6 +233,51 @@ export interface Clip {
    * timeline où commençait le fichier audio à l'enregistrement.
    */
   originStart?: number;
+  /**
+   * Justesse note par note (V19) : ce clip joue un son corrigé (rendu hors
+   * ligne). La prise d'origine et les retouches sont gardées pour revenir en
+   * arrière ou retoucher. Une ancienne version ignore ce champ et joue le son
+   * corrigé comme un clip normal. Voir utils/pitchEdit.
+   */
+  pitchEdit?: PitchEditInfo;
+}
+
+/** Retouche d'une note (justesse), rangée par instant (secondes dans le son d'origine). */
+export interface StoredNoteEdit {
+  t0: number;
+  t1: number;
+  /** Décalage (demi-tons, au cent près). */
+  shift: number;
+  /** Redressement de la dérive (0 à 1). */
+  drift: number;
+  /** Vibrato (1 = intact, 0 = supprimé, 2 = doublé). */
+  vibrato: number;
+  /** Transition depuis la note précédente (ms). */
+  transitionMs?: number;
+  /** Retouchée à la main (sinon : par « Corriger tout », recalculée si on change le dosage). */
+  manual?: boolean;
+}
+
+/** Ce que le clip corrigé garde de sa correction de justesse. */
+export interface PitchEditInfo {
+  version: 1;
+  /** Son d'origine (registre audio). Absent ou introuvable : retouche depuis le son corrigé. */
+  sourceBufferId?: string;
+  /** Fichier du son d'origine dans un projet sauvegardé (le temps de la sauvegarde). */
+  sourceRef?: string;
+  /** Instant du son d'origine qui correspond au début du son corrigé (s). */
+  regionStart: number;
+  /** Retouches note par note (instants dans le son d'origine). */
+  edits: StoredNoteEdit[];
+  /** Réglage global utilisé (« Corriger tout »), pour rouvrir l'éditeur comme on l'a laissé. */
+  amount?: number;
+  style?: 'naturel' | 'robot';
+  /** Calage sur le tempo du clip d'origine (rendu au retour à l'original). */
+  sourceWarp?: WarpSettings;
+  /** Nom du clip d'origine. */
+  sourceName?: string;
+  /** Heure de la correction (ms). */
+  at?: number;
 }
 
 export interface FreezeRef {

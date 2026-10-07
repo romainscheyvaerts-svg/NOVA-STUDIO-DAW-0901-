@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import { openNovaWindow } from '../utils/novaWindows';
 import MobileContainer from './MobileContainer';
 import LiveRecordingClip from './LiveRecordingClip';
 import { Track, Clip, TrackType, TrackSend } from '../types';
@@ -912,6 +913,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     return (
                       <div
                         key={clip.id}
+                        data-clip-id={clip.id}
                         className={`absolute top-1 bottom-1 rounded-md overflow-hidden cursor-pointer transition-shadow ${
                           isSelected
                             ? 'ring-2 ring-cyan-400 shadow-lg shadow-cyan-500/30'
@@ -1064,6 +1066,22 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               <i className="fas fa-backward text-purple-400 text-sm mb-0.5"></i>
               <span className="text-[10px] font-semibold text-white/70">REV</span>
             </button>
+
+            {/* Justesse (V19) : tout corriger dans la gamme, avec le dosage */}
+            {selectedClip.clip.type !== TrackType.MIDI && (
+              <button
+                onClick={() => openNovaWindow('pitch-editor', { targets: [{ trackId: selectedClip.trackId, clipId: selectedClip.clip.id }] })}
+                aria-label="Justesse : corriger la voix dans la gamme"
+                title="Comme Flex Pitch dans Logic : ramène ta voix dans la gamme"
+                data-testid="mobile-clip-pitch"
+                className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+                  selectedClip.clip.pitchEdit ? 'bg-cyan-500/25 border border-cyan-500/50' : 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20'
+                }`}
+              >
+                <i className="fas fa-bullseye text-cyan-300 text-sm mb-0.5"></i>
+                <span className="text-[10px] font-semibold text-white/70">JUSTE</span>
+              </button>
+            )}
 
             {/* Mute */}
             <button

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Clip, Track } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { StripSilenceOptions, stripSilenceFromClip } from '../utils/stripSilence';
+import { canvasTheme } from '../utils/canvasTheme';
 
 export interface StripSilenceSettings { thresholdDb: number; minStripMs: number; startPadMs: number; endPadMs: number }
 
@@ -67,7 +68,7 @@ const StripSilenceDialog: React.FC<Props> = ({ open, tracks, targets, onApply, o
     const ctx = cv.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#0b0d10'; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = canvasTheme().light ? '#eef1f5' : '#0b0d10'; ctx.fillRect(0, 0, w, h);
     if (!first?.buffer) return;
     const { clip, buffer } = first;
     const from = clip.offset || 0, dur = Math.min(clip.duration, buffer.duration - from);

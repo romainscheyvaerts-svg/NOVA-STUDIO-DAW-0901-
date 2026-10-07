@@ -14,6 +14,18 @@
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
   <meta name="apple-mobile-web-app-title" content="Nova Studio">
+  <script>
+    // Thème mémorisé (utils/themeStore.ts) posé avant tout affichage : pas
+    // d'éclair sombre au démarrage quand on a choisi le thème clair.
+    (function () {
+      var t = 'dark';
+      try {
+        var p = localStorage.getItem('nova_theme');
+        if (p === 'light' || (p === 'system' && window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches)) t = 'light';
+      } catch (e) {}
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Polices embarquees : le DAW tourne aussi dans l'application iPhone,
        ou dependre du reseau pour la typographie n'a pas de sens.
@@ -40,146 +52,66 @@
     }
   </style>
   <style>
+    /* =================================================================
+       THÈME — direction « Épure orbitale » (07/10/2026)
+       Les couleurs (sombre ET clair) sont des variables CSS générées par
+       styles/novaTheme.js (configuration Tailwind) : --bg-main, --bg-surface,
+       --text-primary, --accent-neon… et toute la palette Tailwind.
+       Ici : seulement les tailles et le strict minimum pour l'écran de
+       chargement, affiché avant que la feuille de style n'arrive.
+       ================================================================= */
     :root {
-      /* DARK MODE (DEFAULT) - "Cyber Studio" */
       --bg-main: #0c0d10;
-      --bg-surface: #14161a;
-      --bg-panel: #08090b;
-      --bg-item: rgba(0, 0, 0, 0.4);
-      --border-dim: rgba(255, 255, 255, 0.05);
-      --border-highlight: rgba(255, 255, 255, 0.1);
-      --text-primary: #e2e8f0;
-      --text-secondary: #64748b;
-      --accent-neon: #00f2ff;
-      --grid-line: rgba(255, 255, 255, 0.08);
-      --grid-sub: rgba(255, 255, 255, 0.03);
       --safe-area-bottom: env(safe-area-inset-bottom);
-      
       /* Standard Desktop Sizes */
       --btn-height: 2.5rem; /* 40px */
       --track-header-width: 17rem; /* 272px (Desktop default) */
       --fader-width: 2.5rem;
+      /* Mouvement : 150 à 200 ms, courbe douce */
+      --nv-ease: cubic-bezier(.2, .7, .2, 1);
+      --nv-dur: 160ms;
     }
+    [data-theme="light"] { --bg-main: #f1f4f8; }
 
-    /* LIGHT MODE OVERRIDES - "Navy Pro" (Blue Tones) */
-    [data-theme="light"] {
-      --bg-main: #334155;       /* Slate 700 - Fond Timeline (Bleu Intermédiaire) */
-      --bg-surface: #0f172a;    /* Slate 900 - Headers (Bleu Profond) */
-      --bg-panel: #1e293b;      /* Slate 800 - Sidebars */
-      --bg-item: #475569;       /* Slate 600 - Elements UI */
-      --border-dim: #64748b;    /* Slate 500 */
-      --border-highlight: #94a3b8;
-      --text-primary: #f8fafc;  /* White Text on Blue */
-      --text-secondary: #cbd5e1; /* Light Grey Text */
-      --accent-neon: #38bdf8;   /* Sky Blue */
-      
-      /* Grille Timeline (Claire sur fond bleu) */
-      --grid-line: rgba(255, 255, 255, 0.1); 
-      --grid-sub: rgba(255, 255, 255, 0.05);
-    }
+    /* Fond de la zone de travail : plus de grille décorative ni de halo,
+       la timeline a déjà sa propre grille (épurer, pas charger). */
+    .nova-grille { position: relative; }
 
-    /* =================================================================
-       COUCHE VISUELLE « FUTURISTE »
-       Halos neon sur les etats actifs, panneaux en verre depoli, grille de
-       fond discrete. Tout reste subordonne a la lisibilite : le contraste du
-       texte n'est jamais reduit, seuls les fonds et les bordures changent.
-       ================================================================= */
-
-    /* Grille technique de fond, tres discrete, sur la zone de travail */
-    .nova-grille {
-      position: relative;
-      background-image:
-        linear-gradient(rgba(0, 242, 255, 0.05) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 242, 255, 0.05) 1px, transparent 1px);
-      background-size: 48px 48px;
-    }
-    /* Lueur diffuse en haut de la zone de travail : donne de la profondeur
-       sans jamais passer devant le contenu. */
-    .nova-grille::before {
-      content: '';
-      position: absolute; inset: 0; pointer-events: none; z-index: 0;
-      background: radial-gradient(1200px 320px at 50% -10%, rgba(0, 242, 255, 0.07), transparent 70%);
-    }
-
-    /* Panneau en verre depoli */
-    .nova-verre {
-      background: linear-gradient(180deg, rgba(20, 22, 26, 0.86) 0%, rgba(12, 13, 16, 0.94) 100%);
-      backdrop-filter: blur(14px) saturate(1.25);
-      -webkit-backdrop-filter: blur(14px) saturate(1.25);
-      border-color: rgba(255, 255, 255, 0.07);
-    }
-    /* Liseré lumineux sur l'arête supérieure */
+    /* Barre du haut : surface pleine, sans flou (le flou d'arrière-plan
+       coûtait à chaque image pendant la lecture). */
+    .nova-verre { background: var(--bg-surface); border-color: var(--border-dim); }
     .nova-verre-haut { position: relative; }
-    .nova-verre-haut::after {
-      content: '';
-      position: absolute; inset: 0 0 auto 0; height: 1px;
-      background: linear-gradient(90deg,
-        transparent, rgba(0, 242, 255, 0.45) 20%, rgba(0, 242, 255, 0.45) 80%, transparent);
-      pointer-events: none;
-    }
 
-    /* Halo neon d'un element actif */
+    /* Lueur : UNIQUEMENT sur ce qui est actif (lecture, sélection, REC) */
     .nova-halo {
-      box-shadow: 0 0 0 1px rgba(0, 242, 255, 0.35),
-                  0 0 18px -4px rgba(0, 242, 255, 0.55),
-                  inset 0 0 12px -8px rgba(0, 242, 255, 0.9);
+      box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35), 0 0 16px -4px rgba(34, 211, 238, 0.55);
     }
     .nova-halo-rouge {
-      box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.45),
-                  0 0 22px -4px rgba(239, 68, 68, 0.6);
+      box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.45), 0 0 18px -4px rgba(239, 68, 68, 0.6);
     }
+    [data-theme="light"] .nova-halo { box-shadow: 0 0 0 1px rgba(8, 145, 178, 0.35), 0 4px 14px -4px rgba(8, 145, 178, 0.45); }
+    [data-theme="light"] .nova-halo-rouge { box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.4), 0 4px 14px -4px rgba(220, 38, 38, 0.45); }
 
-    /* Chiffres techniques : le timecode et le tempo */
+    /* Chiffres techniques (timecode, tempo) : police mono à chasse fixe */
     .nova-chiffres {
-      text-shadow: 0 0 10px rgba(0, 242, 255, 0.45);
-      letter-spacing: 0.06em;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.04em;
     }
 
     /* Respiration lente d'un temoin d'enregistrement */
     @keyframes nova-pouls {
       0%, 100% { opacity: 1; }
-      50%      { opacity: 0.55; }
+      50%      { opacity: 0.6; }
     }
     .nova-pouls { animation: nova-pouls 2s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) { .nova-pouls { animation: none; } }
 
-    /* Le theme clair neutralise la couche neon */
-    [data-theme="light"] .nova-grille { background-image: none; }
-    [data-theme="light"] .nova-verre { background: var(--bg-surface); backdrop-filter: none; }
-    [data-theme="light"] .nova-verre-haut::after { display: none; }
-    [data-theme="light"] .nova-halo,
-    [data-theme="light"] .nova-halo-rouge { box-shadow: none; }
-    [data-theme="light"] .nova-chiffres { text-shadow: none; }
+    /* Zone qui reste sombre en thème clair (fenêtres d'effets dessinées comme
+       du matériel) : ses variables sont remises au sombre par novaTheme.js. */
+    [data-theme="light"] .nova-sombre { color: var(--text-primary); }
 
-    /* --- THEME MAPPING & OVERRIDES --- */
-    
-    body { background-color: var(--bg-main); color: var(--text-primary); transition: background-color 0.3s ease, color 0.3s ease; }
-
-    /* Surcharges Tailwind pour le thème Navy */
-    [data-theme="light"] .bg-\[\#0c0d10\] { background-color: var(--bg-main) !important; } 
-    [data-theme="light"] .bg-\[\#08090b\] { background-color: var(--bg-panel) !important; border-right-color: var(--border-dim) !important; } 
-    [data-theme="light"] .bg-\[\#14161a\] { background-color: var(--bg-surface) !important; border-color: var(--border-dim) !important; } 
-    [data-theme="light"] .bg-\[\#0f1115\] { background-color: #1e293b !important; border-color: var(--border-dim) !important; } 
-    [data-theme="light"] .bg-\[\#1a1c22\] { background-color: #334155 !important; border-color: var(--border-dim) !important; } 
-    [data-theme="light"] .bg-\[\#16191f\] { background-color: #334155 !important; }
-    [data-theme="light"] .bg-\[\#0c0e12\] { background-color: #1e293b !important; border-right-color: var(--border-dim) !important; } 
-    [data-theme="light"] .bg-black\/40 { background-color: #1e293b !important; border-color: #64748b !important; color: #f1f5f9 !important; }
-    [data-theme="light"] .bg-black\/60 { background-color: #0f172a !important; color: #f1f5f9 !important; }
-    [data-theme="light"] .bg-black\/20 { background-color: #334155 !important; border-color: #64748b !important; }
-    [data-theme="light"] .bg-black { background-color: #020617 !important; color: #fff; border-color: #475569 !important; } 
-    [data-theme="light"] .bg-white\/5 { background-color: rgba(255, 255, 255, 0.1) !important; color: #cbd5e1; }
-    [data-theme="light"] .bg-white\/10 { background-color: rgba(255, 255, 255, 0.15) !important; color: #fff; }
-    [data-theme="light"] .border-white\/5 { border-color: rgba(255, 255, 255, 0.1) !important; }
-    [data-theme="light"] .border-white\/10 { border-color: rgba(255, 255, 255, 0.15) !important; }
-    [data-theme="light"] .border-white\/20 { border-color: rgba(255, 255, 255, 0.25) !important; }
-    [data-theme="light"] .text-white { color: #f8fafc !important; }
-    [data-theme="light"] .text-slate-300 { color: #e2e8f0 !important; }
-    [data-theme="light"] .text-slate-400 { color: #cbd5e1 !important; }
-    [data-theme="light"] .text-slate-500 { color: #94a3b8 !important; }
-    [data-theme="light"] .text-slate-600 { color: #94a3b8 !important; } 
-    [data-theme="light"] .text-cyan-400 { color: var(--accent-neon) !important; }
-    [data-theme="light"] .text-cyan-500 { color: var(--accent-neon) !important; }
-    [data-theme="light"] .hover\:text-white:hover { color: #fff !important; }
-    [data-theme="light"] input[type="range"] { background: #64748b; }
+    body { background-color: var(--bg-main); color: var(--text-primary); transition: background-color var(--nv-dur) ease, color var(--nv-dur) ease; }
 
     /* --- MODE TABLETTE OPTIMISÉ --- */
     body[data-view-mode="TABLET"] {
@@ -227,13 +159,16 @@
       flex-direction: column;
     }
 
+    /* Plancher de lisibilité : les étiquettes de 6-7 px passent à 8 px. */
+    html .text-\[6px\], html .text-\[7px\] { font-size: 8px; }
+
     .mono { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
 
     /* Finitions : texte plus net sur fond sombre, sélection aux couleurs de
        Nova, et un anneau de focus visible au clavier seulement (la souris et
        le doigt n'en affichent pas). */
     body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
-    ::selection { background: rgba(34, 211, 238, 0.28); color: #fff; }
+    ::selection { background: rgba(34, 211, 238, 0.28); color: var(--text-primary); }
     :where(button, a, [role="button"], [role="tab"], [role="slider"], input, select, textarea):focus-visible {
       outline: 2px solid rgba(34, 211, 238, 0.85);
       outline-offset: 2px;
@@ -326,15 +261,11 @@
     .automation-lane-container {
         width: 100%;
         height: 80px;
-        background-color: #16191f;
+        background-color: var(--bg-surface);
         transition: height 0.3s ease;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid var(--border-dim);
         overflow: hidden;
         position: relative;
-    }
-    [data-theme="light"] .automation-lane-container {
-        background-color: #334155 !important;
-        border-bottom: 1px solid #64748b;
     }
   </style>
   <!-- Import map removed - Vite bundles all dependencies -->
@@ -369,7 +300,7 @@
 </head>
 <body>
   <!-- Loading screen visible until React mounts -->
-  <div id="loading-screen" style="position:fixed;inset:0;background:#0c0d10;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:99999;transition:opacity 0.3s ease;">
+  <div id="loading-screen" style="position:fixed;inset:0;background:var(--bg-main,#0c0d10);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:99999;transition:opacity 0.3s ease;">
     <div style="width:48px;height:48px;border:3px solid rgba(0,242,255,0.2);border-top-color:#00f2ff;border-radius:50%;animation:spin 1s linear infinite;"></div>
     <p style="margin-top:16px;color:#64748b;font-family:Inter,sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;">Nova Studio</p>
     <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
