@@ -559,7 +559,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
   }, [isDrumMode]);
 
   return (
-    <div className="w-full h-full flex flex-col bg-[#14161a] select-none text-white font-inter">
+    <div data-nova-pianoroll="" className="w-full h-full flex flex-col bg-[#14161a] select-none text-white font-inter">
        {/* TOOLBAR (Enhanced with Quantize and Actions) */}
        <div className="h-14 border-b border-white/10 flex items-center justify-between gap-4 px-4 bg-[#0c0d10] shrink-0 overflow-x-auto no-scrollbar">
           <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="md:hidden shrink-0 w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center"><i className="fas fa-times"></i></button>

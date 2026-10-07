@@ -54,6 +54,7 @@ export const anchorClipsToRender = (clips: Clip[], renderId: string): Map<string
     out.set(c.id, {
       renderId, anchor: c.start - offset, from: offset, to: offset + c.duration,
       fadeIn: c.fadeIn || 0, fadeOut: c.fadeOut || 0, gain: c.gain ?? 1, srcClipId: c.id,
+      ...(c.fadeInCurve ? { fadeInCurve: c.fadeInCurve } : {}), ...(c.fadeOutCurve ? { fadeOutCurve: c.fadeOutCurve } : {}),
     });
   }
   return out;
@@ -88,7 +89,10 @@ export const sliceAnchored = (
       let duration = b - a;
       const userFadeOut = c.fadeOut || 0;
       // Fin d'origine (pas raccourcie, pas de nouveau fondu) : on garde la queue des effets.
-      if (endsAtRenderEnd && Math.abs(userFadeOut - ref.fadeOut) < 1e-3 && userFadeOut < 0.02) {
+      // Fondu inchangé (longueur ET courbe) : il est déjà dans le rendu.
+      const sameIn = Math.abs((c.fadeIn || 0) - ref.fadeIn) < 1e-3 && (!(c.fadeIn || 0) || (c.fadeInCurve || 'LINEAR') === (ref.fadeInCurve || 'LINEAR'));
+      const sameOut = Math.abs(userFadeOut - ref.fadeOut) < 1e-3 && (!userFadeOut || (c.fadeOutCurve || 'LINEAR') === (ref.fadeOutCurve || 'LINEAR'));
+      if (endsAtRenderEnd && sameOut && userFadeOut < 0.02) {
         const renderEnd = ref.anchor + ref.to;
         const next = regionStarts.find(s => s > renderEnd + 1e-3);
         const room = Math.min(tailMax, (next ?? Infinity) - renderEnd, render.duration - renderEnd);
@@ -106,8 +110,8 @@ export const sliceAnchored = (
         duration,
         // Le rendu contient déjà le gain et les fondus d'origine : on n'applique que les changements.
         gain: (c.gain ?? 1) / (ref.gain || 1),
-        fadeIn: startsAtRenderStart && Math.abs((c.fadeIn || 0) - ref.fadeIn) < 1e-3 ? 0 : Math.max(c.fadeIn || 0, startsAtRenderStart ? 0 : 0.005),
-        fadeOut: endsAtRenderEnd && Math.abs(userFadeOut - ref.fadeOut) < 1e-3 ? 0 : Math.max(userFadeOut, endsAtRenderEnd ? 0 : 0.005),
+        fadeIn: startsAtRenderStart && sameIn ? 0 : Math.max(c.fadeIn || 0, startsAtRenderStart ? 0 : 0.005),
+        fadeOut: endsAtRenderEnd && sameOut ? 0 : Math.max(userFadeOut, endsAtRenderEnd ? 0 : 0.005),
         isFreezeSlice: true,
         freezeRef: undefined,
       });
@@ -256,6 +260,8 @@ const fnv = (s: string): string => {
 const clipSig = (c: Clip): string => [
   c.id, c.start, c.duration, c.offset, c.gain ?? 1, c.fadeIn, c.fadeOut,
   c.isMuted ? 1 : 0, c.isReversed ? 1 : 0, c.bufferId || '', c.notes ? fnv(JSON.stringify(c.notes)) : '',
+  // Courbes de fondu : ajoutées seulement si présentes (signatures des gels d'avant inchangées).
+  ...(c.fadeInCurve || c.fadeOutCurve ? [`${c.fadeInCurve || ''}/${c.fadeOutCurve || ''}`] : []),
 ].join(':');
 
 const pluginSig = (p: PluginInstance): string => {

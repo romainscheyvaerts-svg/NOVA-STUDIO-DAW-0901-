@@ -333,3 +333,40 @@ export function nudgeSeconds(unit: NudgeUnit, bpm: number, grid = '1/4', fps = 3
     }
   }
 }
+
+// ------------------------------------------------- fondus depuis une sélection
+
+/**
+ * « Créer des fondus » sur une plage (Ctrl+F de Pro Tools) : la plage couvre
+ * une jonction → crossfade de la longueur de la plage, centré sur la jonction ;
+ * elle couvre le début d'un clip → fondu d'entrée jusqu'à la fin de la plage ;
+ * la fin d'un clip → fondu de sortie depuis le début de la plage.
+ */
+export function fadesForRange(
+  clips: XClip[], s: number, e: number, curve: CrossfadeCurve,
+  bufferDuration: (c: XClip) => number | undefined,
+): Map<string, Partial<Clip>> {
+  const out = new Map<string, Partial<Clip>>();
+  const merge = (id: string, p: Partial<Clip>) => out.set(id, { ...(out.get(id) || {}), ...p });
+  const byId = new Map(clips.map(c => [c.id, c]));
+  const inXfade = new Set<string>();
+  for (const j of findJunctions(clips, 0.002)) {
+    if (j.at < s - 1e-6 || j.at > e + 1e-6) continue;
+    const a = byId.get(j.a)!, b = byId.get(j.b)!;
+    const x = makeCrossfade(a, b, Math.max(0.001, e - s), curve, handlesOf(a, b, bufferDuration));
+    if (!x) continue;
+    merge(a.id, x.a); merge(b.id, x.b);
+    inXfade.add(`${a.id}:out`); inXfade.add(`${b.id}:in`);
+  }
+  for (const c of clips) {
+    if (c.isMuted || !isAudioClip(c)) continue;
+    const cEnd = endOf(c);
+    if (!inXfade.has(`${c.id}:in`) && c.start >= s - 1e-6 && c.start < e && e < cEnd) {
+      merge(c.id, { fadeIn: Math.min(e - c.start, c.duration - (c.fadeOut || 0)), fadeInCurve: curve });
+    }
+    if (!inXfade.has(`${c.id}:out`) && cEnd <= e + 1e-6 && cEnd > s && s > c.start) {
+      merge(c.id, { fadeOut: Math.min(cEnd - s, c.duration - (out.get(c.id)?.fadeIn ?? c.fadeIn ?? 0)), fadeOutCurve: curve });
+    }
+  }
+  return out;
+}

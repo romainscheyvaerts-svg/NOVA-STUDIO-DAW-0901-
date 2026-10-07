@@ -232,6 +232,9 @@ export interface FreezeRef {
   fadeIn: number;
   fadeOut: number;
   gain: number;
+  /** Courbes de ces fondus (absent = linéaire, rendus d'avant les courbes). */
+  fadeInCurve?: CrossfadeCurve;
+  fadeOutCurve?: CrossfadeCurve;
   /**
    * Clip d'origine (au moment du rendu) dont ce clip est issu : survit aux
    * découpes. Sert au journal des éditions pré-effet (utils/preFxEdits).

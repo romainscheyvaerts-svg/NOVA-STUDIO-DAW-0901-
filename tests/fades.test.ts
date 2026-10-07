@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyGainEvents, autoCrossfadePatches, clipGainAt, clipGainEvents, crossfadeZones, fadeInShape, fadeOutShape,
-  findJunctions, junctionNear, makeCrossfade, nudgeSeconds, FADE_CURVES,
+  findJunctions, junctionNear, makeCrossfade, nudgeSeconds, FADE_CURVES, fadesForRange,
 } from '../utils/fades';
 import { CrossfadeCurve } from '../types';
 import { makeClip } from './helpers/fixtures';
@@ -206,5 +206,23 @@ describe('nudge', () => {
     expect(nudgeSeconds('GRID', 120, '1/16')).toBeCloseTo(0.125);
     expect(nudgeSeconds('GRID', 120, '1/8t')).toBeCloseTo(0.25 * 2 / 3);
     expect(nudgeSeconds('GRID', 120, '1/1')).toBeCloseTo(2);
+  });
+});
+
+describe('fondus depuis une sélection (Ctrl+F)', () => {
+  it('début de clip → fondu d\'entrée, fin → fondu de sortie, jonction → crossfade', () => {
+
+    const clips = [
+      audio({ id: 'a', start: 0, duration: 4 }),
+      audio({ id: 'b', start: 4, duration: 4, offset: 2 }),
+    ];
+    const head = fadesForRange(clips, 0, 0.5, 'S_CURVE', () => 20);
+    expect(head.get('a')).toMatchObject({ fadeIn: 0.5, fadeInCurve: 'S_CURVE' });
+    const tail = fadesForRange(clips, 7, 8, 'LINEAR', () => 20);
+    expect(tail.get('b')).toMatchObject({ fadeOut: 1, fadeOutCurve: 'LINEAR' });
+    const x = fadesForRange(clips, 3.9, 4.1, 'EQUAL_POWER', () => 20);
+    expect(x.get('a')!.fadeOut).toBeCloseTo(0.2);
+    expect(x.get('b')!.fadeIn).toBeCloseTo(0.2);
+    expect(x.get('b')!.start).toBeCloseTo(3.9);
   });
 });
