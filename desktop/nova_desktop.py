@@ -441,7 +441,7 @@ MARKER_JS = """
         version: %(version)s,
         platform: 'windows',
         ui: %(ui)s,
-        features: Object.freeze(['google-login']),
+        features: Object.freeze(['google-login', 'stems']),
         bridges: Object.freeze({ asio: %(asio)d, vst: %(vst)d })
       }),
       configurable: false, enumerable: false, writable: false

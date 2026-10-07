@@ -12,6 +12,8 @@
  *   plan sur le PC) : message au musicien, délais allongés, « C'est fait ».
  * - v7 : paramètres par valeur texte (GET_PARAMS détaillé, SET_PARAMS relu) :
  *   autotune du PC réglé sur la gamme du beat, mix piloté par Nova.
+ * - v8 : séparation de stems (module optionnel Demucs installé à la demande sur le
+ *   PC) : STEMS_STATUS / STEMS_INSTALL / STEMS_CANCEL / STEMS_SEPARATE.
  *
  * Protocole complet : bridge-python/nova_bridge_server.py.
  */
@@ -62,6 +64,56 @@ export interface BridgeState {
   instrumentsPending: [number, number] | null;
   /** (v7) Paramètres lisibles et réglables par leur valeur texte (« F# », « Minor »). */
   paramsText?: boolean;
+  /** (v8) Le pont sait séparer un clip en stems (module optionnel, installé à la demande). */
+  stems?: boolean;
+}
+
+/** Première version du pont qui sépare les stems (Demucs). */
+export const BRIDGE_STEMS_VERSION = 8;
+
+/** État du module « séparation de stems » sur le PC (STEMS_STATUS). */
+export interface StemsModuleStatus {
+  installed: boolean;
+  installing: boolean;
+  /** Dernier événement d'installation reçu (progression, erreur, fin). */
+  install: StemsEvent | null;
+  variant: 'cpu' | 'cuda' | null;
+  sizeBytes: number | null;
+  outputRoot: string | null;
+}
+
+/** Événement du pont (STEMS_EVENT) : installation ou séparation en cours. */
+export interface StemsEvent {
+  kind: 'install' | 'separate';
+  event: 'progress' | 'done' | 'error' | 'cancelled' | 'device' | 'fallback' | string;
+  jobId?: string | null;
+  pct?: number;
+  message?: string;
+  step?: string;
+  device?: string;
+}
+
+export interface SeparatedStem {
+  key: 'vocals' | 'instrumental' | 'drums' | 'bass' | 'other' | string;
+  label: string;
+  channels: Float32Array[];
+  sampleRate: number;
+  /** WAV écrit sur le PC (Documents\Nova Studio\Stems\…). */
+  path: string;
+}
+
+export interface SeparationResult {
+  stems: SeparatedStem[];
+  seconds: number;
+  device: string;
+  outdir: string;
+}
+
+/** Erreur de séparation : code « not_installed », « cancelled » ou « error ». */
+export class StemsError extends Error {
+  constructor(message: string, readonly code: 'not_installed' | 'cancelled' | 'error' | 'unavailable') {
+    super(message);
+  }
 }
 
 /** Première version du pont qui règle les paramètres par valeur texte. */
@@ -113,6 +165,11 @@ class NovaBridgeService {
   private claimedSlots = new Set<string>();
   private worker: Worker | null = null;
   private connectPromise: Promise<boolean> | null = null;
+  private stemsListeners = new Set<(e: StemsEvent) => void>();
+  /** Stems reçus (trames STEMS_STEM) en attendant la réponse finale, par req_id. */
+  private stemFrames = new Map<number, SeparatedStem[]>();
+  /** req_id de chaque séparation en cours (délai prolongé à chaque progression). */
+  private stemsJobs = new Map<string, number>();
 
   // --- État ---------------------------------------------------------------
 
@@ -164,6 +221,7 @@ class NovaBridgeService {
             status: 'connected', error: null, version: hello.version ?? null,
             instruments: !!hello.instruments && (Number(hello.version) || 0) >= BRIDGE_INSTRUMENTS_VERSION,
             paramsText: !!hello.params_text && (Number(hello.version) || 0) >= BRIDGE_PARAMS_TEXT_VERSION,
+            stems: !!hello.stems && (Number(hello.version) || 0) >= BRIDGE_STEMS_VERSION,
           });
           this.ensureWorker();
           done(true);
@@ -181,6 +239,8 @@ class NovaBridgeService {
         if (wasConnected) this.ws = null;
         this.pending.forEach(p => { window.clearTimeout(p.timer); p.reject(new Error('Pont VST déconnecté')); });
         this.pending.clear();
+        this.stemFrames.clear();
+        this.stemsJobs.clear();
         if (wasConnected) {
           this.worker?.postMessage({ type: 'close' });
           this.setBridgeState({ status: 'idle', error: 'Le pont VST a été fermé.', instrumentsPending: null });
@@ -215,6 +275,10 @@ class NovaBridgeService {
       } else p.resolve(msg);
       return;
     }
+    if (msg && msg.action === 'STEMS_EVENT') {
+      this.onStemsEventMsg(msg);
+      return;
+    }
     if (msg && msg.action === 'LICENSE_WINDOW') {
       this.onLicenseWindowMsg(msg);
       return;
@@ -231,18 +295,39 @@ class NovaBridgeService {
     const jlen = dv.getUint32(4, true);
     let meta: any;
     try { meta = JSON.parse(new TextDecoder().decode(u8.subarray(8, 8 + jlen))); } catch { return; }
+    const off = align4(8 + jlen);
+    const deinterleave = () => {
+      const nch = meta.nch || 2;
+      const nframes = meta.nframes || 0;
+      const inter = new Float32Array(buf, off, nframes * nch);
+      const channels = Array.from({ length: nch }, () => new Float32Array(nframes));
+      for (let i = 0; i < nframes; i++) for (let c = 0; c < nch; c++) channels[c][i] = inter[i * nch + c];
+      return channels;
+    };
+    // (v8) Un stem séparé : mis de côté jusqu'à la réponse finale STEMS_SEPARATE.
+    if (meta.action === 'STEMS_STEM') {
+      if (!this.pending.has(meta.req_id)) return;
+      const list = this.stemFrames.get(meta.req_id) || [];
+      list.push({ key: String(meta.key), label: String(meta.label || meta.key), channels: deinterleave(),
+        sampleRate: Number(meta.sample_rate) || 44100, path: String(meta.path || '') });
+      this.stemFrames.set(meta.req_id, list);
+      return;
+    }
     const p = this.pending.get(meta.req_id);
     if (!p) return;
     this.pending.delete(meta.req_id);
     window.clearTimeout(p.timer);
+    if (meta.action === 'STEMS_SEPARATE') {
+      const stems = this.stemFrames.get(meta.req_id) || [];
+      this.stemFrames.delete(meta.req_id);
+      if (!meta.success) {
+        const code = meta.code === 'not_installed' || meta.code === 'cancelled' ? meta.code : 'error';
+        p.reject(new StemsError(meta.error || 'Séparation impossible', code));
+      } else p.resolve({ ...meta, stems });
+      return;
+    }
     if (!meta.success) { p.reject(new Error(meta.error || 'Rendu VST impossible')); return; }
-    const off = align4(8 + jlen);
-    const nch = meta.nch || 2;
-    const nframes = meta.nframes || 0;
-    const inter = new Float32Array(buf, off, nframes * nch);
-    const channels = Array.from({ length: nch }, () => new Float32Array(nframes));
-    for (let i = 0; i < nframes; i++) for (let c = 0; c < nch; c++) channels[c][i] = inter[i * nch + c];
-    p.resolve({ ...meta, channels });
+    p.resolve({ ...meta, channels: deinterleave() });
   }
 
   /** Requête JSON avec réponse (req_id). */
@@ -430,18 +515,7 @@ class NovaBridgeService {
       plugin_name: opts.pluginName || null, state: opts.stateB64 || null,
       sample_rate: Math.round(opts.sampleRate), nch, nframes, tail_seconds: opts.tailSeconds || 0,
     });
-    const j = new TextEncoder().encode(meta);
-    const off = align4(8 + j.length);
-    const buf = new ArrayBuffer(off + nframes * nch * 4);
-    const u8 = new Uint8Array(buf);
-    u8[0] = 2;
-    new DataView(buf).setUint32(4, j.length, true);
-    u8.set(j, 8);
-    const inter = new Float32Array(buf, off, nframes * nch);
-    for (let c = 0; c < nch; c++) {
-      const ch = opts.channels[c];
-      for (let i = 0; i < nframes; i++) inter[i * nch + c] = ch[i];
-    }
+    const buf = encodeType2Frame(meta, opts.channels.slice(0, nch));
     // Le rendu d'un long morceau peut prendre du temps sur un gros plugin.
     const timeoutMs = 60000 + (nframes / Math.max(1, opts.sampleRate)) * 4000;
     const res = await new Promise<any>((resolve, reject) => {
@@ -472,6 +546,87 @@ class NovaBridgeService {
     return r.channels as Float32Array[];
   }
 
+  // --- Séparation de stems (pont v8) ----------------------------------------
+
+  /** Progression de l'installation du module ou d'une séparation. */
+  onStemsEvent(cb: (e: StemsEvent) => void): () => void {
+    this.stemsListeners.add(cb);
+    return () => { this.stemsListeners.delete(cb); };
+  }
+
+  private onStemsEventMsg(msg: any) {
+    const e: StemsEvent = {
+      kind: msg.kind === 'install' ? 'install' : 'separate', event: String(msg.event || 'progress'),
+      jobId: msg.job_id ?? null, pct: typeof msg.pct === 'number' ? msg.pct : undefined,
+      message: msg.message, step: msg.step, device: msg.device,
+    };
+    // Une séparation qui avance n'a pas expiré : on repousse son délai.
+    const reqId = e.jobId ? this.stemsJobs.get(e.jobId) : undefined;
+    const p = reqId !== undefined ? this.pending.get(reqId) : undefined;
+    if (p && reqId !== undefined) {
+      window.clearTimeout(p.timer);
+      p.timer = window.setTimeout(() => {
+        this.pending.delete(reqId);
+        this.stemFrames.delete(reqId);
+        p.reject(new StemsError('Le pont ne donne plus de nouvelles de la séparation', 'error'));
+      }, STEMS_SILENCE_MS);
+    }
+    this.stemsListeners.forEach(cb => { try { cb(e); } catch { /* écouteur fautif */ } });
+  }
+
+  private requireStems() {
+    if (!this.isConnected()) throw new StemsError('Pont non connecté', 'unavailable');
+    if (!this.state.stems) throw new StemsError('Mets à jour Nova Studio pour Windows pour séparer les stems.', 'unavailable');
+  }
+
+  async stemsStatus(): Promise<StemsModuleStatus> {
+    this.requireStems();
+    const r = await this.request({ action: 'STEMS_STATUS' });
+    return parseStemsStatus(r);
+  }
+
+  /** Installe le module (Demucs + PyTorch) sur le PC, en arrière-plan. */
+  async stemsInstall(variant: 'cpu' | 'cuda' | 'auto' = 'cpu'): Promise<StemsModuleStatus> {
+    this.requireStems();
+    const r = await this.request({ action: 'STEMS_INSTALL', variant });
+    return parseStemsStatus(r);
+  }
+
+  async stemsCancel(target: { jobId: string } | { install: true }): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    const r = await this.request('install' in target ? { action: 'STEMS_CANCEL', install: true }
+      : { action: 'STEMS_CANCEL', job_id: target.jobId });
+    return !!r.cancelled;
+  }
+
+  /** Sépare un buffer (voix / instru ou 4 stems). Rejette avec StemsError. */
+  async separateStems(opts: {
+    jobId: string; channels: Float32Array[]; sampleRate: number; stems: 2 | 4; project?: string; clip?: string;
+  }): Promise<SeparationResult> {
+    this.requireStems();
+    const ws = this.ws!;
+    const req_id = this.nextId++;
+    const buf = buildType2Frame({
+      action: 'STEMS_SEPARATE', req_id, job_id: opts.jobId, stems: opts.stems,
+      sample_rate: Math.round(opts.sampleRate), project: opts.project || 'Projet', clip: opts.clip || 'clip',
+    }, opts.channels);
+    this.stemsJobs.set(opts.jobId, req_id);
+    try {
+      const res = await new Promise<any>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+          this.pending.delete(req_id);
+          this.stemFrames.delete(req_id);
+          reject(new StemsError('Le pont ne répond pas à la séparation', 'error'));
+        }, STEMS_SILENCE_MS);
+        this.pending.set(req_id, { resolve, reject, timer });
+        ws.send(buf);
+      });
+      return { stems: res.stems, seconds: Number(res.seconds) || 0, device: String(res.device || 'cpu'), outdir: String(res.outdir || '') };
+    } finally {
+      this.stemsJobs.delete(opts.jobId);
+    }
+  }
+
   // --- Audio temps réel ---------------------------------------------------
 
   private ensureWorker() {
@@ -492,6 +647,44 @@ class NovaBridgeService {
   detachAudio(slotId: string) {
     this.worker?.postMessage({ type: 'detach', slotId });
   }
+}
+
+/** Sans nouvelles du pont pendant une séparation (pas une durée totale). */
+const STEMS_SILENCE_MS = 120000;
+
+function parseStemsStatus(r: any): StemsModuleStatus {
+  const ev = r.install;
+  return {
+    installed: !!r.installed, installing: !!r.installing,
+    install: ev ? { kind: 'install', event: String(ev.event || 'progress'), pct: ev.pct, message: ev.message, step: ev.step } : null,
+    variant: r.variant === 'cuda' ? 'cuda' : r.variant === 'cpu' ? 'cpu' : null,
+    sizeBytes: typeof r.size_bytes === 'number' ? r.size_bytes : null,
+    outputRoot: r.output_root || null,
+  };
+}
+
+/** Trame binaire type 2 : en-tête JSON + float32 entrelacés (voir nova_bridge_server.py). */
+export function encodeType2Frame(meta: string, channels: Float32Array[]): ArrayBuffer {
+  const nch = channels.length;
+  const nframes = channels[0]?.length || 0;
+  const j = new TextEncoder().encode(meta);
+  const off = align4(8 + j.length);
+  const buf = new ArrayBuffer(off + nframes * nch * 4);
+  const u8 = new Uint8Array(buf);
+  u8[0] = 2;
+  new DataView(buf).setUint32(4, j.length, true);
+  u8.set(j, 8);
+  const inter = new Float32Array(buf, off, nframes * nch);
+  for (let c = 0; c < nch; c++) {
+    const ch = channels[c];
+    for (let i = 0; i < nframes; i++) inter[i * nch + c] = ch[i];
+  }
+  return buf;
+}
+
+function buildType2Frame(meta: Record<string, any>, channels: Float32Array[]): ArrayBuffer {
+  const ch = channels.slice(0, 2);
+  return encodeType2Frame(JSON.stringify({ ...meta, nch: ch.length, nframes: ch[0]?.length || 0 }), ch);
 }
 
 export const novaBridge = new NovaBridgeService();

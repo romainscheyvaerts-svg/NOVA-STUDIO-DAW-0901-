@@ -53,8 +53,9 @@ TORCH_INDEX = {
     "cpu": "https://download.pytorch.org/whl/cpu",
     "cuda": "https://download.pytorch.org/whl/cu128",  # RTX 50xx (Blackwell) : CUDA 12.8 minimum
 }
-# Croissance du dossier pendant l'étape PyTorch (cache + copie ; mesuré le 07/10/2026 :
-# ~6,3 Go pour la variante CPU), pour la barre de progression. Les ~2,6 Go de .lib
+# Croissance du dossier pendant l'étape PyTorch (cache, liens physiques comptés deux
+# fois par la mesure ; ~6,3 Go mesurés le 07/10/2026 pour la variante CPU), pour la
+# barre de progression. Les ~2,6 Go de .lib
 # inutiles sont supprimés à la fin (voir prune) : il reste ~0,8 Go (CPU).
 TORCH_GROWTH = {"cpu": 6_400_000_000, "cuda": 11_000_000_000}
 UV_URL = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip"
@@ -182,7 +183,10 @@ class Installer:
         e.update({
             "UV_CACHE_DIR": str(self.home / "cache"),
             "UV_PYTHON_INSTALL_DIR": str(self.home / "python"),
-            "UV_LINK_MODE": "copy",          # le cache peut être effacé après coup
+            # Liens physiques (cache et environnement sur le même disque) : PyTorch n'est
+            # pas stocké deux fois pendant l'installation ; effacer le cache ensuite ne
+            # touche pas aux fichiers installés.
+            "UV_LINK_MODE": "hardlink",
             "UV_NO_PROGRESS": "1",
             "UV_PYTHON_PREFERENCE": "only-managed",  # jamais le Python du système
             "TORCH_HOME": str(self.home / "models"),
@@ -264,7 +268,7 @@ class Installer:
                     pass
         if r.returncode != 0 or not info.get("ok"):
             raise RuntimeError("Le test de séparation a échoué (voir install.log)")
-        # Le cache de téléchargement ne sert plus (copie, pas de liens).
+        # Le cache de téléchargement ne sert plus (les fichiers installés restent).
         shutil.rmtree(self.home / "cache", ignore_errors=True)
         self.prune()
         info.update({"variant": self.variant, "model": self.model, "python": PYTHON_VERSION,
