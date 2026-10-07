@@ -1354,10 +1354,14 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                     if (clip.breaths?.length && !clip.isReversed) {
                         const off = clip.offset || 0;
                         for (let i = 0; i < n; i++) env[i] *= breathGainAt(clip.breaths, off + ((px0 + i + 0.5) / largeurPx) * clip.duration);
-                        ctx.fillStyle = '#a78bfa';
                         for (const b of clip.breaths) {
                             const bx0 = x + ((b.start - off) / clip.duration) * largeurPx, bx1 = x + ((b.end - off) / clip.duration) * largeurPx;
-                            if (bx1 > x && bx0 < x + largeurPx) ctx.fillRect(Math.max(x, bx0), waveY + waveH - 2, Math.max(1, Math.min(x + largeurPx, bx1) - Math.max(x, bx0)), 2);
+                            if (bx1 <= x || bx0 >= x + largeurPx) continue;
+                            const l = Math.max(x, bx0), wd = Math.max(2, Math.min(x + largeurPx, bx1) - l);
+                            ctx.fillStyle = 'rgba(167,139,250,0.16)';
+                            ctx.fillRect(l, waveY, wd, waveH);
+                            ctx.fillStyle = '#a78bfa';
+                            ctx.fillRect(l, waveY + waveH - 3, wd, 3);
                         }
                     }
 

@@ -63,7 +63,7 @@ interface Params {
 }
 
 const PARAMS: Record<BreathSensitivity, Params> = {
-  prudente: { gapDb: 14, voicedNsdf: 0.6, maxNsdf: 0.42, minCentroid: 1000, maxCentroid: 4200, maxHf: 0.42, minFlat: 0.1, guardAfter: 0.09, guardAfterSibilant: 0.12, guardBefore: 0.05, minDur: 0.12, maxDur: 0.9, aboveNoiseDb: 6, quietDb: 24, voicedFlat: 0.045 },
+  prudente: { gapDb: 13, voicedNsdf: 0.6, maxNsdf: 0.42, minCentroid: 1000, maxCentroid: 4200, maxHf: 0.42, minFlat: 0.08, guardAfter: 0.08, guardAfterSibilant: 0.12, guardBefore: 0.045, minDur: 0.1, maxDur: 0.9, aboveNoiseDb: 6, quietDb: 24, voicedFlat: 0.045 },
   normale: { gapDb: 10, voicedNsdf: 0.65, maxNsdf: 0.5, minCentroid: 850, maxCentroid: 4500, maxHf: 0.48, minFlat: 0.07, guardAfter: 0.07, guardAfterSibilant: 0.1, guardBefore: 0.04, minDur: 0.09, maxDur: 0.9, aboveNoiseDb: 5, quietDb: 20, voicedFlat: 0.05 },
   forte: { gapDb: 7, voicedNsdf: 0.7, maxNsdf: 0.58, minCentroid: 700, maxCentroid: 4800, maxHf: 0.55, minFlat: 0.05, guardAfter: 0.05, guardAfterSibilant: 0.08, guardBefore: 0.03, minDur: 0.08, maxDur: 0.9, aboveNoiseDb: 4, quietDb: 16, voicedFlat: 0.055 },
 };
