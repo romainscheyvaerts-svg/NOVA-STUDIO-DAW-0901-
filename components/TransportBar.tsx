@@ -8,6 +8,7 @@ import { playheadStore } from '../utils/playheadStore';
 import { formatMesures, nomTonaliteCourt } from '../utils/musicKey';
 import { useSimpleMode, simpleModeStore } from '../utils/simpleMode';
 import ThemeSwitch from './ThemeSwitch';
+import { ChordLaneMenuToggle } from './ChordLane';
 import SimpleModeToggle from './SimpleModeToggle';
 import PunchControls from './PunchControls';
 import { PunchSettings } from '../types';
@@ -486,6 +487,9 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             {/* Thème Sombre / Clair / Auto : en haut aussi. Avant, « Changer le thème »
                 était tout en bas du menu (hors de l'écran sur téléphone). */}
             <ThemeSwitch />
+
+            {/* Affichage : piste d'accords (V20). Pas sur téléphone (version simple). */}
+            {!isMobileLayout && <ChordLaneMenuToggle onDone={() => setIsMobileMenuOpen(false)} />}
 
             {/* VIEW SWITCHER (inutile en mise en page téléphone : on navigue par onglets) */}
             {!isMobileLayout && !simple && (
