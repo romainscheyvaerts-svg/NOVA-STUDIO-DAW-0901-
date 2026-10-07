@@ -227,36 +227,35 @@ let flushing: Promise<void> | null = null;
 /** Envoie les signalements en attente dont l'heure est venue (un seul envoi à la fois). */
 export const flushFeedbackQueue = (opts: { force?: boolean } = {}): Promise<void> => {
   if (flushing) return flushing;
-  flushing = (async () => {
-    try {
-      const due = getQueue().filter(i => opts.force || i.nextTryAt <= Date.now());
-      for (const item of due) {
-        item.attempts++;
-        const before = item.nextTryAt;
-        const outcome = await sendItem(item);
-        const q = getQueue();
-        const idx = q.findIndex(i => i.ref === item.ref);
-        if (outcome === 'envoye') {
-          if (idx >= 0) q.splice(idx, 1);
-          saveQueue(q);
-          updateHistory(item.ref, { status: 'recu', note: undefined });
-        } else if (outcome === 'refuse') {
-          if (idx >= 0) q.splice(idx, 1);
-          saveQueue(q);
-          updateHistory(item.ref, { status: 'refuse', note: 'Le serveur l’a refusé (texte trop long ou invalide).' });
-        } else {
-          if (item.nextTryAt === before) item.nextTryAt = Date.now() + nextDelay(item.attempts);
-          if (idx >= 0) q[idx] = item; else q.push(item);
-          saveQueue(q);
-          updateHistory(item.ref, { status: 'en_attente', note: item.lastError === 'limite' ? 'Beaucoup d’envois cette heure-ci : il repartira tout seul plus tard.' : undefined });
-        }
-        emit();
+  const run = async (): Promise<void> => {
+    const due = getQueue().filter(i => opts.force || i.nextTryAt <= Date.now());
+    for (const item of due) {
+      item.attempts++;
+      const before = item.nextTryAt;
+      const outcome = await sendItem(item);
+      const q = getQueue();
+      const idx = q.findIndex(i => i.ref === item.ref);
+      if (outcome === 'envoye') {
+        if (idx >= 0) q.splice(idx, 1);
+        saveQueue(q);
+        updateHistory(item.ref, { status: 'recu', note: undefined });
+      } else if (outcome === 'refuse') {
+        if (idx >= 0) q.splice(idx, 1);
+        saveQueue(q);
+        updateHistory(item.ref, { status: 'refuse', note: 'Le serveur l’a refusé (texte trop long ou invalide).' });
+      } else {
+        if (item.nextTryAt === before) item.nextTryAt = Date.now() + nextDelay(item.attempts);
+        if (idx >= 0) q[idx] = item; else q.push(item);
+        saveQueue(q);
+        updateHistory(item.ref, { status: 'en_attente', note: item.lastError === 'limite' ? 'Beaucoup d’envois cette heure-ci : il repartira tout seul plus tard.' : undefined });
       }
-    } finally {
-      flushing = null;
+      emit();
     }
-  })();
-  return flushing;
+  };
+  // Libéré seulement quand CET envoi est fini (même s'il n'avait rien à faire).
+  const p: Promise<void> = run().catch(() => { /* jamais bloquant */ }).finally(() => { if (flushing === p) flushing = null; });
+  flushing = p;
+  return p;
 };
 
 export interface SubmitResult { ref: string; status: 'envoye' | 'en_attente'; note?: string }
