@@ -27,6 +27,8 @@ import type { EditCommands } from '../hooks/useEditCommands';
 import { bufferDurationOf } from '../hooks/useEditCommands';
 import { CrossfadeCurve } from '../types';
 import { STEMS_TOOLTIP } from '../services/StemSeparation';
+import { araAvailability } from '../utils/araEdit';
+import { useAraContext } from './AraDialog';
 import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor } from './PlaylistLanes';
 import { listLanes, mainRowClips, clipAtTime, takeCount, TakeLane } from '../utils/playlists';
 import { takeNumberOf } from '../utils/takes';
@@ -209,6 +211,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [hoveredClipId, setHoveredClipId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: (ContextMenuItem | 'separator')[] } | null>(null);
   const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
+  // Melodyne / VocAlign : pont + plugins présents ? (commandes grisées sinon)
+  const araCtx = useAraContext();
   // Reordonnancement des pistes par glisser-deposer (le TrackHeader emettait
   // deja les evenements, mais ArrangementView les ignorait).
   const dragTrackIdRef = useRef<string | null>(null);
@@ -2150,6 +2154,21 @@ useEffect(() => {
                 // Justesse note par note (V19) : Flex Pitch de Logic, Melodyne, Pitch Editor de FL.
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Justesse note par note…', icon: 'fa-wave-square', title: 'Comme Flex Pitch dans Logic : corrige la justesse de ta voix note par note',
                   onClick: () => { openNovaWindow('pitch-editor', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
+                // Melodyne / VocAlign (ARA2, hôte natif du pont) : grisés sur le site, avec la raison en infobulle.
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? (() => {
+                  const target = { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] };
+                  const mel = araAvailability('melodyne', araCtx), va = araAvailability('vocalign', araCtx);
+                  return [
+                    { label: clipContextMenu.clip.araEdit?.plugin === 'melodyne' ? 'Retoucher dans Melodyne (ARA)' : 'Ouvrir dans Melodyne (ARA)', icon: 'fa-wand-magic-sparkles', title: mel.tooltip, disabled: !mel.enabled,
+                      onClick: () => { openNovaWindow('ara-melodyne', target); setClipContextMenu(null); } },
+                    { label: 'Aligner avec VocAlign… (ARA)', icon: 'fa-align-left', title: va.tooltip, disabled: !va.enabled,
+                      onClick: () => { openNovaWindow('ara-vocalign', target); setClipContextMenu(null); } },
+                    ...(!va.enabled ? [{ label: 'Caler sur la lead (alignement NOVA)…', icon: 'fa-align-left', title: "Cale doubles, backs et harmonies sur la voix lead, sans plugin",
+                      onClick: () => { openNovaWindow('ara-vocalign', target); setClipContextMenu(null); } }] : []),
+                    ...(clipContextMenu.clip.araEdit ? [{ label: "Revenir à l'original…", icon: 'fa-rotate-left', title: 'Remet la prise d’origine (avant Melodyne / VocAlign)',
+                      onClick: () => { openNovaWindow(clipContextMenu.clip.araEdit!.plugin === 'melodyne' ? 'ara-melodyne' : 'ara-vocalign', target); setClipContextMenu(null); } }] : []),
+                  ];
+                })() : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
                   { label: 'Séparer en stems…', icon: 'fa-layer-group', title: STEMS_TOOLTIP,
