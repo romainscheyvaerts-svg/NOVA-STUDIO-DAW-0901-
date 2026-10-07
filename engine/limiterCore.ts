@@ -21,6 +21,13 @@
  *  5. le signal est retardé d'exactement `latencySamples()` échantillons
  *     (latence déclarée au PDC), multiplié par le gain, puis écrêté au
  *     plafond par sécurité (jamais atteint en pratique).
+ *
+ * Plafond automatisé : le plafond de sécurité voyage dans la ligne à retard
+ * avec le signal. Chaque échantillon de sortie est donc écrêté au plafond
+ * qui a servi à calculer SON gain (celui en vigueur quand il a été analysé),
+ * pas au plafond du moment de sa sortie : une baisse du plafond n'écrête plus
+ * brutalement les ~3 ms déjà en attente, et la crête vraie de chaque
+ * intervalle reste sous le plafond qui lui a été appliqué.
  */
 
 export interface LimiterCoreParams {
@@ -96,6 +103,7 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
   // Retard du signal
   var DL = MAX_LA + TAPS + 8;
   var dlL = new Float64Array(DL), dlR = new Float64Array(DL), dlPos = 0;
+  var dlC = new Float64Array(DL); // plafond en vigueur à l'analyse de chaque échantillon
   var counter = 0; // index de l'échantillon d'entrée (pour le minimum glissant)
   var inGain = 1, inGainTarget = 1, gainSmooth = 1 - Math.exp(-1 / (0.01 * SR));
   var L = 1, relCoef = 0, ceilLin = 1, detLin = 1, os = 4, ph: Float64Array[] = [];
@@ -126,7 +134,7 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
     histL.fill(0); histR.fill(0); hpos = 0;
     dqHead = 0; dqLen = 0;
     relGain = 1; for (var i = 0; i < boxBuf.length; i++) boxBuf[i] = 1; boxSum = L; boxPos = 0;
-    dlL.fill(0); dlR.fill(0); dlPos = 0; counter = 0;
+    dlL.fill(0); dlR.fill(0); dlC.fill(ceilLin); dlPos = 0; counter = 0;
     inGain = inGainTarget;
   }
 
@@ -181,13 +189,13 @@ export function createLimiterCore(sampleRate: number): LimiterCore {
       if (g > 1) g = 1;
 
       // 6. Signal retardé : x[k] avec k = m - (L - 1 + HALF), m = n - HALF → retard 2·HALF + L - 1.
-      dlL[dlPos] = cL; dlR[dlPos] = cR;
+      dlL[dlPos] = cL; dlR[dlPos] = cR; dlC[dlPos] = ceilLin;
       var rd = (dlPos - (L - 1 + HALF) + DL) % DL;
       dlPos = (dlPos + 1) % DL;
-      var yl = dlL[rd] * g, yr = dlR[rd] * g;
-      // Sécurité : écrêtage au plafond (inaudible, ne sert qu'aux arrondis).
-      if (yl > ceilLin) yl = ceilLin; else if (yl < -ceilLin) yl = -ceilLin;
-      if (yr > ceilLin) yr = ceilLin; else if (yr < -ceilLin) yr = -ceilLin;
+      var yl = dlL[rd] * g, yr = dlR[rd] * g, cl = dlC[rd];
+      // Sécurité : écrêtage au plafond de CET échantillon (inaudible, ne sert qu'aux arrondis).
+      if (yl > cl) yl = cl; else if (yl < -cl) yl = -cl;
+      if (yr > cl) yr = cl; else if (yr < -cl) yr = -cl;
       outL[i] = yl;
       if (outR) outR[i] = yr;
       if (g < mGr) mGr = g;
