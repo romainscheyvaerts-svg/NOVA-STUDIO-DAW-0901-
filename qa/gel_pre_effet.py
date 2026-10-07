@@ -258,7 +258,13 @@ def export_wav(page, dest: Path, label):
     shot(page, f"{label}_export_fenetre")
     try:
         with page.expect_download(timeout=240000) as dl:
-            page.get_by_text("Mon morceau complet", exact=True).first.click()
+            quick = page.get_by_text("Mon morceau complet", exact=True).locator("visible=true")
+            if quick.count():
+                quick.first.click()
+            else:
+                # Mode avancé (ingé, collaboration) : la fenêtre s'ouvre sur Mix / Stems / Voix seules (audit G19).
+                page.locator("button", has_text=re.compile(r"^\s*Mix\s*$")).locator("visible=true").first.click(); page.wait_for_timeout(300)
+                page.locator("button", has_text=re.compile(r"^\s*EXPORTER\s*$", re.I)).locator("visible=true").last.click()
         dl.value.save_as(str(dest))
     finally:
         page.wait_for_timeout(800)

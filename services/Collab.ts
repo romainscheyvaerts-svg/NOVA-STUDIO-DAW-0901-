@@ -2,6 +2,7 @@ import { catalogSupabase } from './supabase';
 import { call, sha1, CHUNK, CloudLink } from './SessionCloud';
 import { wavOf } from './AudioUtils';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
+import { padSampleKey } from '../utils/drumSamples';
 import { audioEngine } from '../engine/AudioEngine';
 import { Clip, CollabRole, Track } from '../types';
 import { CollabOutbox, CollabOutboxOptions, CollabOutboxStore } from '../utils/collabOutbox';
@@ -523,10 +524,13 @@ export const contentOf = (t: Track) => ({
     : undefined,
 });
 
-/** Audio à envoyer avec le contenu d'une piste (prises + rendu d'instrument VST). */
+/** Audio à envoyer avec le contenu d'une piste (prises, rendu d'instrument VST, samples perso des pads). */
 export const contentBufferIds = (t: Track): string[] => Array.from(new Set([
   ...(t.clips || []).map(c => c.bufferId),
   t.vstInstrument && t.isFrozen ? t.frozenClip?.bufferId : undefined,
+  // Batterie : sans eux, les pads perso (samples glissés, tranches d'une découpe)
+  // restaient muets chez l'autre (motifs et réglages arrivaient, pas le son).
+  ...Object.keys((t as any).drumMachine?.samples || {}).map(padSampleKey),
 ].filter(Boolean) as string[]));
 export const mixOf = (t: Track) => ({
   volume: t.volumeLock ? undefined : t.volume, pan: t.pan, isMuted: t.isMuted,
