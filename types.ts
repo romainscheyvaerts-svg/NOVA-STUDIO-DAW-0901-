@@ -417,6 +417,12 @@ export interface Track {
    */
   remote?: RemoteTrackInfo;
   /**
+   * Collaboration « En direct », chez l'ingé : la piste joue l'APERÇU rendu par
+   * le pont VST de l'artiste (ses VST, que l'ingé n'a pas) sur une fenêtre du
+   * morceau. Voir services/LivePreview.
+   */
+  livePreview?: { renderId: string; from: number; to: number; at: number };
+  /**
    * Volume verrouillé par l'artiste (« c'est ce volume-là que je veux ») :
    * l'ingé son le voit, peut le déverrouiller, mais le message est clair.
    */

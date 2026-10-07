@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CollabRole } from '../types';
 import { CollabMember, ROLE_LABEL } from '../services/Collab';
+import type { CollabStatusView } from '../utils/collabStatus';
 
 /**
  * Collaboration à distance : inviter un ingé son / un beatmaker / un artiste
@@ -8,7 +9,7 @@ import { CollabMember, ROLE_LABEL } from '../services/Collab';
  * l'artiste enregistre et édite ses voix, l'ingé son règle le mix (effets
  * Nova, ou ses VST en gelant la piste), le beatmaker ajoute ses pistes.
  */
-export interface CollabMessage { id: string; from: string; role: CollabRole; text: string; at: number; mine?: boolean }
+export interface CollabMessage { id: string; from: string; role: CollabRole; text: string; at: number; mine?: boolean; /** Pas encore parti (hors ligne) : « envoi… ». */ pending?: boolean }
 
 interface Props {
   open: boolean;
@@ -37,7 +38,18 @@ interface Props {
   savedRemote?: { role: 'artist' | 'engineer' } | null;
   /** En direct, côté ingé : réglage à distance des VST du PC de l'artiste. */
   liveVst?: React.ReactNode;
+  /** État de la connexion (en direct, rattrapage, hors ligne, envoi…). */
+  status?: CollabStatusView | null;
+  onRetry?: () => void;
+  onReload?: () => void;
 }
+
+const STATUS_TONE: Record<CollabStatusView['tone'], { dot: string; text: string; box: string }> = {
+  ok: { dot: 'bg-emerald-400', text: 'text-emerald-200', box: 'border-emerald-500/20 bg-emerald-500/[0.06]' },
+  busy: { dot: 'bg-sky-400 animate-pulse', text: 'text-sky-200', box: 'border-sky-500/20 bg-sky-500/[0.06]' },
+  warn: { dot: 'bg-amber-400', text: 'text-amber-100', box: 'border-amber-500/30 bg-amber-500/10' },
+  error: { dot: 'bg-red-400', text: 'text-red-100', box: 'border-red-500/30 bg-red-500/10' },
+};
 
 export type CollabMode = 'live' | 'remote';
 
@@ -92,6 +104,7 @@ const CollabPanel: React.FC<Props> = (p) => {
     <div className="fixed right-3 bottom-20 md:bottom-4 z-[640] w-[min(380px,calc(100vw-24px))] max-h-[min(640px,calc(100vh-110px))] flex flex-col rounded-3xl border border-white/10 bg-[#121418]/[0.97] shadow-2xl backdrop-blur" role="dialog" aria-labelledby="collab-title">
       <div className="flex items-center gap-2 p-4 border-b border-white/5">
         <h2 id="collab-title" className="flex-1 text-[14px] font-black text-white">👥 Collaboration</h2>
+        {p.active && p.status && <span data-testid="collab-status-short" className={`inline-flex items-center gap-1.5 text-[10px] font-black ${STATUS_TONE[p.status.tone].text}`}><span className={`w-1.5 h-1.5 rounded-full ${STATUS_TONE[p.status.tone].dot}`} />{p.status.short}</span>}
         {p.active && p.role && <span className={`text-[11px] font-black ${ROLE_COLOR[p.role]}`}>{ROLE_LABEL[p.role]}</span>}
         <button type="button" onClick={p.onClose} aria-label="Fermer" className="w-9 h-9 rounded-xl bg-white/5 text-slate-300">✕</button>
       </div>
@@ -161,6 +174,16 @@ const CollabPanel: React.FC<Props> = (p) => {
         </div>
       ) : (
         <>
+          {p.status && (p.status.code !== 'live' || p.status.action) && (
+            <div data-testid="collab-status" role="status" className={`mx-4 mt-3 rounded-2xl border p-2.5 ${STATUS_TONE[p.status.tone].box}`}>
+              <p className={`text-[11px] leading-snug ${STATUS_TONE[p.status.tone].text}`}>{p.status.label}</p>
+              {p.status.action && (
+                <button type="button" data-testid="collab-status-action"
+                  onClick={() => (p.status!.action === 'reload' ? p.onReload?.() : p.onRetry?.())}
+                  className={`${btn} mt-2 h-9 ${p.status.action === 'reload' ? 'bg-red-400 text-black' : 'bg-white/10 text-white'}`}>{p.status.actionLabel}</button>
+              )}
+            </div>
+          )}
           <div className="p-4 space-y-2 border-b border-white/5">
             <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Inviter</p>
             <div className="grid grid-cols-3 gap-1.5">
@@ -170,7 +193,8 @@ const CollabPanel: React.FC<Props> = (p) => {
                 </button>
               ))}
             </div>
-            <div className="flex flex-wrap gap-1.5 pt-1" aria-label="Connectés">
+            <div className="flex flex-wrap gap-1.5 pt-1" aria-label="Connectés" data-testid="collab-members">
+              {p.members.length === 0 && <span className="text-[11px] text-slate-500">Présence en direct indisponible pour l'instant.</span>}
               {p.members.map(m => (
                 <span key={m.member_key} className="inline-flex items-center gap-1.5 rounded-full bg-white/5 px-2.5 py-1 text-[11px] text-slate-200">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />{m.display_name} <span className={ROLE_COLOR[m.role] || ''}>· {ROLE_LABEL[m.role] || m.role}</span>
@@ -185,6 +209,7 @@ const CollabPanel: React.FC<Props> = (p) => {
               <div key={m.id} className={`max-w-[85%] rounded-2xl px-3 py-2 text-[13px] ${m.mine ? 'ml-auto bg-cyan-500/20 text-white' : 'bg-white/5 text-slate-100'}`}>
                 {!m.mine && <p className={`text-[10px] font-black ${ROLE_COLOR[m.role] || 'text-slate-400'}`}>{m.from} · {ROLE_LABEL[m.role] || m.role}</p>}
                 <p className="whitespace-pre-wrap break-words">{m.text}</p>
+                {m.pending && <p className="mt-0.5 text-[10px] text-slate-400">envoi… (partira au retour du réseau)</p>}
               </div>
             ))}
           </div>

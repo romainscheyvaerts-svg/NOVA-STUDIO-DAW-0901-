@@ -183,7 +183,7 @@ describe('CollabClient : application unique', () => {
     expect(h.server.calls.find(x => x.action === 'op')!.body).toMatchObject({ id: 's1', secret: 'sec', kind: 'mix', op: { vol: 1 } });
     expect(h.channels[0].send).toHaveBeenCalledWith({
       type: 'broadcast', event: 'op',
-      payload: { seq: 1000, kind: 'mix', op: { vol: 1 }, role: 'artist', author_name: 'Moi', member_key: 'me', created_at: 'now' },
+      payload: { seq: 1000, kind: 'mix', op: expect.objectContaining({ vol: 1, _id: expect.any(String), _d: expect.any(String) }), role: 'artist', author_name: 'Moi', member_key: 'me', created_at: 'now' },
     });
     // Écho au rattrapage, ou opération d'un autre appareil sous notre clé
     h.server.ops = [{ ...op(1000, 'me'), kind: 'mix' }, op(1001, 'me')];

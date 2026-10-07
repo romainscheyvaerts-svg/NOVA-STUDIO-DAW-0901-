@@ -4,6 +4,9 @@ import { wavOf } from './AudioUtils';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { audioEngine } from '../engine/AudioEngine';
 import { Clip, CollabRole, Track } from '../types';
+import { CollabOutbox, CollabOutboxOptions, CollabOutboxStore } from '../utils/collabOutbox';
+import { CollabStatus, initialCollabStatus } from '../utils/collabStatus';
+import { mergeQueuedOps } from '../utils/collabMerge';
 
 /**
  * Collaboration à distance (artiste, ingé son, beatmaker) sur une session en
@@ -26,6 +29,11 @@ export interface CollabOp {
   author_name: string;
   member_key: string;
   created_at?: string;
+  /**
+   * Opération d'avant notre arrivée (rattrapage du journal à la connexion) :
+   * un historique, pas une demande à traiter maintenant (réglage de VST…).
+   */
+  replay?: boolean;
 }
 export interface CollabMember { member_key: string; role: CollabRole; display_name: string; online?: boolean }
 export type AudioRefs = Record<string, { parts: string[]; size: number }>;
@@ -38,14 +46,57 @@ export const collabDeviceId = (): string => {
   } catch { return `tmp${Math.random().toString(36).slice(2, 10)}`; }
 };
 
+const newOpId = (): string => {
+  try { if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return (crypto as Crypto).randomUUID(); } catch { /* */ }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+};
+
+/** Mémoire bornée (les plus anciens sortent) : numéros et identifiants déjà vus. */
+const remember = <T,>(set: Set<T>, v: T, max = 5000) => {
+  set.add(v);
+  if (set.size > max) { const first = set.values().next().value as T; set.delete(first); }
+};
+
+const POLL_MS = 10000;
+const SUBSCRIBE_GRACE_MS = 6000;
+
+export interface CollabClientOptions {
+  /** File d'envoi gardée dans le navigateur (survit à un rechargement). */
+  outboxStore?: CollabOutboxStore;
+  /** Fusion de deux modifications en file de la même clé (mix champ par champ). */
+  merge?: CollabOutboxOptions['merge'];
+}
+
+/**
+ * Client d'une collaboration (les deux modes passent par lui).
+ *
+ * Robustesse :
+ *  - direct (Supabase Realtime) ET journal (fonction daw-session) : le direct
+ *    peut tomber, le rattrapage toutes les 10 s (et à chaque reconnexion, au
+ *    retour du réseau) récupère tout, sans trou ni doublon ;
+ *  - doublons : même numéro (seq) ou même identifiant d'opération (`_id`,
+ *    renvoi après une réponse perdue) → appliquée une seule fois ;
+ *  - nos propres opérations reconnues à l'appareil (`_d`) : un autre appareil
+ *    du MÊME compte (iPad + PC) reçoit bien les modifications de l'autre ;
+ *  - file d'envoi : rien ne se perd hors ligne, tout repart dans l'ordre ;
+ *  - état exposé (onStatus) : en direct, rattrapage, hors ligne, envoi…
+ */
 export class CollabClient {
   memberKey = '';
   lastSeq = 0;
+  readonly deviceId = collabDeviceId();
+  readonly outbox: CollabOutbox;
   private channel: ReturnType<typeof catalogSupabase.channel> | null = null;
   /** Rattrapage en cours : un second appel attend la fin de celui-ci. */
   private catchUpRun: Promise<void> | null = null;
   /** Opérations en file ou en cours d'application (pas de second essai en parallèle). */
   private pending = new Set<number>();
+  private closed = false;
+  /** Dernier numéro du journal au moment de rejoindre : ce qui est avant est de l'historique. */
+  private joinSeq = 0;
+  private status: CollabStatus = initialCollabStatus();
+  private statusListeners = new Set<(s: CollabStatus) => void>();
+  private unlisten: (() => void)[] = [];
 
   constructor(
     public link: CloudLink,
@@ -53,18 +104,55 @@ export class CollabClient {
     public name: string,
     private onOp: (op: CollabOp) => Promise<void> | void,
     private onPresence: (members: CollabMember[]) => void,
-  ) {}
+    opts: CollabClientOptions = {},
+  ) {
+    this.outbox = new CollabOutbox((kind, op) => this.send(kind, op), {
+      store: opts.outboxStore, merge: opts.merge || mergeQueuedOps, onChange: () => this.setStatus({ pending: this.outbox?.size() ?? 0 }),
+    });
+    this.status.pending = this.outbox.size();
+  }
 
   private body(extra: Record<string, unknown> = {}) {
-    return { id: this.link.id, secret: this.link.secret, device_id: collabDeviceId(), ...extra };
+    return { id: this.link.id, secret: this.link.secret, device_id: this.deviceId, ...extra };
   }
+
+  // --- État -------------------------------------------------------------------------------
+
+  getStatus(): CollabStatus { return this.status; }
+  onStatus(cb: (s: CollabStatus) => void): () => void {
+    this.statusListeners.add(cb);
+    cb(this.status);
+    return () => { this.statusListeners.delete(cb); };
+  }
+  private setStatus(patch: Partial<CollabStatus>) {
+    const next = { ...this.status, ...patch };
+    if (JSON.stringify(next) === JSON.stringify(this.status)) return;
+    this.status = next;
+    this.statusListeners.forEach(cb => { try { cb(next); } catch { /* */ } });
+  }
+  /** Progression d'un envoi d'audio (null : terminé). */
+  reportUpload(sent: number, total: number) {
+    this.setStatus({ upload: total > 0 && sent < total ? { sent, total } : null });
+  }
+
+  // --- Connexion ----------------------------------------------------------------------------
 
   /** Rejoint la session (rôle), se branche au canal en direct, rattrape les opérations depuis `fromSeq`. */
   async join(fromSeq: number): Promise<CollabMember[]> {
-    const r = await call<{ member_key: string; last_seq: number; members: CollabMember[]; channel: string }>('join', this.body({ role: this.role, name: this.name }));
+    this.closed = false;
+    this.setStatus({ realtime: 'connecting', lastError: null });
+    let r: { member_key: string; last_seq: number; members: CollabMember[]; channel: string };
+    try {
+      r = await call('join', this.body({ role: this.role, name: this.name }));
+    } catch (e: any) {
+      this.setStatus({ reachable: false, lastError: e?.message || 'Connexion impossible' });
+      throw e;
+    }
     this.memberKey = r.member_key;
+    this.joinSeq = Number(r.last_seq) || 0;
     this.lastSeq = Math.max(0, fromSeq);
     this.floorSeq = this.lastSeq;
+    this.setStatus({ joined: true, reachable: true });
     const ch = catalogSupabase.channel(r.channel, { config: { broadcast: { self: false }, presence: { key: this.memberKey } } });
     ch.on('broadcast', { event: 'op' }, ({ payload }) => { void this.receive(payload as CollabOp); });
     ch.on('presence', { event: 'sync' }, () => {
@@ -72,48 +160,126 @@ export class CollabClient {
       const online = Object.entries(state).map(([key, metas]) => ({ member_key: key, role: metas[0]?.role, display_name: metas[0]?.name, online: true }));
       this.onPresence(online as CollabMember[]);
     });
+    let subscribedOnce = false;
     await new Promise<void>((resolve) => {
-      ch.subscribe(async (status) => {
+      ch.subscribe(async (status: string) => {
+        if (this.closed) return;
         if (status === 'SUBSCRIBED') {
-          await ch.track({ name: this.name, role: this.role });
+          this.setStatus({ realtime: 'live' });
+          try { await ch.track({ name: this.name, role: this.role }); } catch { /* présence : réessayée à la reconnexion */ }
+          // Reconnexion du direct : on rattrape ce qui a été manqué et on vide la file.
+          if (subscribedOnce) { void this.catchUp(); void this.flush(); }
+          subscribedOnce = true;
           resolve();
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          // Le client Supabase se reconnecte tout seul ; en attendant, le rattrapage (10 s) prend le relais.
+          this.setStatus({ realtime: 'down' });
+          this.onPresence([]);
         }
-        // Reconnexion : on rattrape ce qui a été manqué.
-        if (status === 'SUBSCRIBED' && this.lastSeq > 0) void this.catchUp();
       });
-      setTimeout(resolve, 6000);
+      setTimeout(() => { if (!subscribedOnce && !this.closed) this.setStatus({ realtime: 'down' }); resolve(); }, SUBSCRIBE_GRACE_MS);
     });
+    if (this.closed) return r.members;
     this.channel = ch;
+    this.listenNetwork();
+    if (!this.timer) this.timer = setInterval(() => { void this.catchUp(); void this.flush(); }, POLL_MS);
     await this.catchUp();
+    void this.flush();
     return r.members;
   }
 
-  /** Publie une opération (journal + direct). */
+  private listenNetwork() {
+    if (this.unlisten.length || typeof window === 'undefined' || !window.addEventListener) return;
+    const w = window;
+    const online = () => { this.setStatus({ browserOffline: false }); void this.catchUp(); void this.flush(); };
+    const offline = () => this.setStatus({ browserOffline: true });
+    w.addEventListener('online', online);
+    w.addEventListener('offline', offline);
+    this.unlisten.push(() => w.removeEventListener('online', online), () => w.removeEventListener('offline', offline));
+    try { if (typeof navigator !== 'undefined' && navigator.onLine === false) this.setStatus({ browserOffline: true }); } catch { /* */ }
+  }
+
+  /** « Réessayer » : rattrapage et envoi tout de suite (sans attendre les 10 s). */
+  async retryNow(): Promise<void> {
+    this.setStatus({ lastError: null });
+    await this.catchUp();
+    await this.flush();
+  }
+
+  // --- Envoi ----------------------------------------------------------------------------------
+
+  /**
+   * Publie une opération (journal + direct). Lève une erreur si le serveur ne
+   * répond pas : préférer `queue` (file d'envoi) pour ce qui ne doit pas se perdre.
+   */
   async send(kind: string, op: unknown): Promise<number> {
-    const r = await call<{ seq: number; role: CollabRole; author_name: string; member_key: string; created_at: string }>('op', this.body({ kind, op }));
-    const full: CollabOp = { seq: r.seq, kind, op, role: r.role, author_name: r.author_name, member_key: r.member_key, created_at: r.created_at };
-    this.applied.add(r.seq); // nos propres opérations ne sont jamais rejouées
-    void this.channel?.send({ type: 'broadcast', event: 'op', payload: full });
+    const body = { ...(op as Record<string, unknown>), _id: (op as any)?._id || newOpId(), _d: this.deviceId };
+    remember(this.seenIds, body._id as string); // notre écho n'est jamais rejoué
+    let r: { seq: number; role: CollabRole; author_name: string; member_key: string; created_at: string };
+    try {
+      r = await call('op', this.body({ kind, op: body }));
+    } catch (e: any) {
+      this.setStatus({ reachable: false, lastError: e?.message || 'Erreur réseau' });
+      throw e;
+    }
+    this.setStatus({ reachable: true });
+    const full: CollabOp = { seq: r.seq, kind, op: body, role: r.role, author_name: r.author_name, member_key: r.member_key, created_at: r.created_at };
+    remember(this.applied, r.seq); // nos propres opérations ne sont jamais rejouées
+    try { void Promise.resolve(this.channel?.send({ type: 'broadcast', event: 'op', payload: full })).catch(() => { /* le rattrapage la livrera */ }); } catch { /* */ }
+    this.onSent?.(kind, body, r.seq);
     return r.seq;
   }
+
+  /** Notre opération est enregistrée (numéro du journal) : pour la règle « dernière écriture gagne ». */
+  onSent?: (kind: string, op: Record<string, unknown>, seq: number) => void;
+
+  /** Met une modification dans la file d'envoi (une par clé) et l'envoie dès que possible. */
+  queue(key: string, kind: string, op: Record<string, unknown>) {
+    this.outbox.put(key, kind, op);
+    void this.flush();
+  }
+
+  flush() {
+    if (this.closed || !this.memberKey) return Promise.resolve({ sent: 0, failed: false });
+    return this.outbox.flush();
+  }
+
+  // --- Réception ------------------------------------------------------------------------------
 
   // Les numéros sont communs à toutes les sessions : on ne compte pas sur une
   // suite continue. Chaque opération est appliquée une seule fois ; le
   // rattrapage (connexion, puis toutes les 10 s) récupère ce qui a été manqué.
   private applied = new Set<number>();
+  private seenIds = new Set<string>();
   private chain: Promise<void> = Promise.resolve();
   /** Opérations antérieures à l'instantané chargé : déjà dedans. */
   private floorSeq = 0;
   /** Opérations dont l'application a échoué (audio non téléchargé…) : réessayées. */
   private failed = new Map<number, { o: CollabOp; tries: number }>();
 
+  /** Opération envoyée par cet appareil (ou, pour les anciennes, par notre clé de membre). */
+  private isMine(o: CollabOp): boolean {
+    const d = o.op && typeof o.op === 'object' ? o.op._d : undefined;
+    if (typeof d === 'string') return d === this.deviceId;
+    return o.member_key === this.memberKey;
+  }
+
   private apply(o: CollabOp) {
-    if (!o || typeof o.seq !== 'number' || this.applied.has(o.seq) || o.seq <= this.floorSeq) return;
-    this.applied.add(o.seq);
-    if (o.member_key === this.memberKey) return;
+    if (!o || typeof o.seq !== 'number' || !Number.isFinite(o.seq) || typeof o.kind !== 'string') return;
+    if (this.applied.has(o.seq) || o.seq <= this.floorSeq) return;
+    remember(this.applied, o.seq);
+    const id = o.op && typeof o.op === 'object' && typeof o.op._id === 'string' ? o.op._id : null;
+    // Même opération renvoyée (réponse perdue puis nouvel essai) : un autre numéro, le même identifiant.
+    if (id) { if (this.seenIds.has(id)) return; remember(this.seenIds, id); }
+    if (this.isMine(o)) return;
+    this.enqueue(o.seq <= this.joinSeq ? { ...o, replay: true } : o);
+  }
+
+  private enqueue(o: CollabOp) {
     this.pending.add(o.seq);
     // Application en série : une opération lente (téléchargement) ne double pas la suivante.
     this.chain = this.chain.then(async () => {
+      if (this.closed) return;
       try {
         await this.onOp(o);
         this.failed.delete(o.seq);
@@ -121,7 +287,7 @@ export class CollabClient {
         // Avant : marquée appliquée quand même, le clip restait muet sans retour.
         const tries = (this.failed.get(o.seq)?.tries || 0) + 1;
         if (tries < 6) this.failed.set(o.seq, { o, tries });
-        else { this.failed.delete(o.seq); this.onFailure?.(o); }
+        else { this.failed.delete(o.seq); this.setStatus({ failedOps: this.status.failedOps + 1 }); this.onFailure?.(o); }
         console.warn('[Collab] opération', o.kind, e);
       } finally {
         this.pending.delete(o.seq);
@@ -138,17 +304,18 @@ export class CollabClient {
   // Un appel pendant un rattrapage attend celui-ci (avant : il rendait la main
   // aussitôt, et join() se terminait avant d'avoir lu les opérations manquées).
   catchUp(): Promise<void> {
+    if (this.closed) return Promise.resolve();
     if (!this.catchUpRun) this.catchUpRun = this.runCatchUp().finally(() => { this.catchUpRun = null; });
     return this.catchUpRun;
   }
 
   private async runCatchUp() {
+    this.setStatus({ catchingUp: true });
     try {
       // Réessai des opérations en échec (sauf celles déjà en file : sinon appliquées deux fois).
       for (const { o } of this.failed.values()) {
         if (this.pending.has(o.seq)) continue;
-        this.applied.delete(o.seq);
-        this.apply(o);
+        this.enqueue(o);
       }
       // Numéros communs à toutes les sessions : une opération validée un instant
       // après une autre peut porter un numéro plus petit. On relit donc une petite
@@ -156,22 +323,27 @@ export class CollabClient {
       let after = Math.max(this.floorSeq, this.lastSeq - 50);
       for (let round = 0; round < 20; round++) {
         const r = await call<{ ops: CollabOp[] }>('ops_since', this.body({ after }));
-        r.ops.forEach(o => this.apply(o));
-        if (r.ops.length) { this.lastSeq = Math.max(this.lastSeq, ...r.ops.map(o => o.seq)); after = Math.max(after, ...r.ops.map(o => o.seq)); }
-        if (r.ops.length < 500) break;
+        if (this.closed) return;
+        const ops = Array.isArray(r?.ops) ? r.ops : [];
+        ops.forEach(o => this.apply(o));
+        if (ops.length) { this.lastSeq = Math.max(this.lastSeq, ...ops.map(o => o.seq)); after = Math.max(after, ...ops.map(o => o.seq)); }
+        if (ops.length < 500) break;
       }
-      // Hors de la marge relue, plus besoin de mémoriser.
-      this.applied.forEach(seq => { if (seq < this.lastSeq - 200) this.applied.delete(seq); });
-      if (!this.timer) this.timer = setInterval(() => { void this.catchUp(); }, 10000);
-    } catch (e) {
+      this.setStatus({ reachable: true, catchingUp: false, lastSyncAt: Date.now(), lastError: null });
+    } catch (e: any) {
       console.warn('[Collab] rattrapage', e);
+      if (!this.closed) this.setStatus({ reachable: false, catchingUp: false, lastError: e?.message || 'Erreur réseau' });
     }
   }
 
   async leave() {
+    this.closed = true;
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    this.unlisten.forEach(u => u());
+    this.unlisten = [];
     try { if (this.channel) await catalogSupabase.removeChannel(this.channel); } catch { /* */ }
     this.channel = null;
+    this.statusListeners.clear();
   }
 }
 
@@ -179,8 +351,13 @@ export class CollabClient {
 
 const uploaded = new Map<string, { parts: string[]; size: number }>();
 
-/** Envoie l'audio des buffers donnés (si pas déjà en ligne) ; renvoie leurs morceaux. */
-export async function uploadBuffers(link: CloudLink, bufferIds: string[]): Promise<AudioRefs> {
+/**
+ * Envoie l'audio des buffers donnés (si pas déjà en ligne) ; renvoie leurs morceaux.
+ * Reprise : le serveur ne redemande que les morceaux absents (SHA-1) ; un envoi
+ * coupé reprend donc là où il s'était arrêté, sans renvoyer ce qui est parti.
+ * onProgress : octets envoyés / à envoyer (pour la barre de progression).
+ */
+export async function uploadBuffers(link: CloudLink, bufferIds: string[], onProgress?: (sent: number, total: number) => void): Promise<AudioRefs> {
   const out: AudioRefs = {};
   const chunks = new Map<string, Uint8Array>();
   for (const id of bufferIds) {
@@ -199,13 +376,25 @@ export async function uploadBuffers(link: CloudLink, bufferIds: string[]): Promi
     out[id] = { parts, size: bytes.length };
   }
   const hashes = Array.from(chunks.keys());
+  const missing: { hash: string; path: string; token: string }[] = [];
   for (let i = 0; i < hashes.length; i += 150) {
     const r = await call<{ uploads: Record<string, { path: string; token: string }> }>('sign_upload', { id: link.id, secret: link.secret, parts: hashes.slice(i, i + 150) });
-    for (const [hash, u] of Object.entries(r.uploads || {})) {
+    for (const [hash, u] of Object.entries(r.uploads || {})) if (chunks.has(hash)) missing.push({ hash, ...u });
+  }
+  const total = missing.reduce((s, m) => s + chunks.get(m.hash)!.length, 0);
+  let sent = 0;
+  if (total > 0) onProgress?.(0, total);
+  try {
+    for (const m of missing) {
+      const data = chunks.get(m.hash)!;
       const { error } = await catalogSupabase.storage.from('daw-sessions')
-        .uploadToSignedUrl(u.path.replace(/^daw-sessions\//, ''), u.token, new Blob([chunks.get(hash)!], { type: 'application/octet-stream' }));
+        .uploadToSignedUrl(m.path.replace(/^daw-sessions\//, ''), m.token, new Blob([data], { type: 'application/octet-stream' }));
       if (error) throw new Error(`Envoi de l'audio impossible : ${error.message}`);
+      sent += data.length;
+      onProgress?.(sent, total);
     }
+  } finally {
+    if (total > 0 && sent < total) onProgress?.(total, total); // fin (réussie ou non) : plus de barre
   }
   Object.entries(out).forEach(([id, ref]) => uploaded.set(id, ref));
   return out;
@@ -226,6 +415,8 @@ export async function ensureBuffers(link: CloudLink, audio: AudioRefs | undefine
     const buf = new Uint8Array(ref.size);
     let off = 0;
     for (const p of ref.parts) {
+      // Morceau pas encore en ligne (l'autre est encore en train de l'envoyer) : réessayé au rattrapage.
+      if (!urls[p]) throw new Error("Audio pas encore en ligne : il arrive dans un instant.");
       const res = await fetch(urls[p]);
       if (!res.ok) throw new Error(`Audio introuvable (${res.status})`);
       const b = new Uint8Array(await res.arrayBuffer());

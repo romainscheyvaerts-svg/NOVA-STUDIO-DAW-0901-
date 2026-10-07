@@ -86,6 +86,9 @@ import ProGateModal from './components/ProGateModal';
 import CollabPanel, { CollabMessage } from './components/CollabPanel';
 import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
 import { collabRoleStore } from './utils/collabStore';
+import { localCollabOutboxStore } from './utils/collabOutbox';
+import { applyMixFields, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf } from './utils/collabMerge';
+import { CollabStatus, collabStatusView } from './utils/collabStatus';
 import RemoteIngePanel from './components/RemoteIngePanel';
 import LiveVstRemotePanel from './components/LiveVstRemotePanel';
 import { useRemoteInge } from './hooks/useRemoteInge';
@@ -3438,6 +3441,7 @@ function Studio() {
   }, []);
 
   // --- Collaboration à distance (artiste, ingé son, beatmaker) -----------------------
+  const COLLAB_ACTIVE_KEY = 'nova_collab_active';
   const [collabOpen, setCollabOpen] = useState(false);
   const collabOpenRef = useRef(false);
   collabOpenRef.current = collabOpen;
@@ -3454,6 +3458,17 @@ function Studio() {
   const remoteTouchedRef = useRef(new Set<string>());
   const contentDirtyRef = useRef(new Set<string>());
   const mixTimersRef = useRef(new Map<string, number>());
+  // Mix champ par champ (règle : dernière écriture gagne, par paramètre ; utils/collabMerge).
+  const knownFieldsRef = useRef(new Map<string, Record<string, string>>());
+  /** Champs modifiés ici, pas encore mis en file (250 ms) : jamais écrasés par ceux de l'autre. */
+  const pendingMixRef = useRef(new Map<string, Set<string>>());
+  const lwwRef = useRef(new LwwClock());
+  const freezeDirtyRef = useRef(new Set<string>());
+  const [collabStatus, setCollabStatus] = useState<CollabStatus | null>(null);
+  const [peerSeenAt, setPeerSeenAt] = useState<number | null>(null);
+  /** Mix envoyé (ingé) / reçu (artiste) : l'aperçu des VST de l'artiste suit (voir plus bas). */
+  const onLocalMixRef = useRef<((trackId: string, fields: MixFields) => void) | null>(null);
+  const onRemoteMixRef = useRef<((trackId: string, fields: MixFields) => void) | null>(null);
 
   // En direct : VST de l'artiste réglés à distance par l'ingé (services/LiveVstRemote).
   const vstReqsRef = useRef(new VstRemoteRequests<any>());
@@ -3507,8 +3522,9 @@ function Studio() {
     if (old) setTimeout(() => releaseBufferIfUnused(old, []), 0);
   }, [setState]);
 
-  const rememberTrack = (t: Track) => {
-    knownSigRef.current.set('mix:' + t.id, sigOf(mixOf(t)));
+  /** Ce que tout le monde a déjà (rien n'est renvoyé). mix:false : le mix est suivi champ par champ à part. */
+  const rememberTrack = (t: Track, opts: { mix?: boolean } = {}) => {
+    if (opts.mix !== false || !knownFieldsRef.current.has(t.id)) knownFieldsRef.current.set(t.id, fieldSigsOf(mixFieldsOf(t)));
     knownSigRef.current.set('content:' + t.id, sigOf(contentOf(t)));
     if (t.frozenClip) knownFreezeRef.current.set(t.id, t.frozenClip.id);
   };
@@ -3523,14 +3539,17 @@ function Studio() {
     // n'importe quel membre pouvait écraser les prises ou le mix d'un autre).
     const existing = typeof p.trackId === 'string' ? stateRef.current.tracks.find(x => x.id === p.trackId) : undefined;
     const refuse = (why: string) => { console.warn('[Collab] opération refusée', o.kind, o.role, why); };
+    if (!o.replay) setPeerSeenAt(Date.now());
     if ((o.kind === 'mix' || o.kind === 'freeze') && o.role !== 'engineer') return refuse('réservé à l’ingé son');
     if (o.kind === 'lock' && !(o.role === 'artist' || (o.role === 'engineer' && !p.lock))) return refuse('verrou');
     if (o.kind === 'content' && existing && !ownsContent(existing, o.role)) return refuse('piste d’un autre rôle');
     // En direct : l'ingé règle les VST hébergés par le pont du PC de l'artiste.
     if (LIVE_VST_KINDS.has(o.kind)) {
       if ((o.kind === 'vst_param' || o.kind === 'vst_params_get') && o.role === 'engineer' && c.role === 'artist') {
+        // Demande d'avant notre arrivée (rattrapage du journal) : l'ingé n'attend plus la réponse.
+        if (o.replay) return;
         const reply = o.kind === 'vst_param' ? await applyRemoteVstParams(p, liveVstDeps) : await readRemoteVstParams(p, liveVstDeps);
-        await c.client.send(o.kind === 'vst_param' ? 'vst_param_ack' : 'vst_params', reply);
+        c.client.queue(`${o.kind}:${p.reqId}`, o.kind === 'vst_param' ? 'vst_param_ack' : 'vst_params', reply as unknown as Record<string, unknown>);
         if (o.kind === 'vst_param' && (reply as VstParamAck).ok) setAiNotification(`🎛️ ${o.author_name} (ingé) a réglé ${(existing?.plugins.find(x => x.id === p.pluginId)?.name) || 'un VST'} sur ton PC.`);
       } else if ((o.kind === 'vst_param_ack' || o.kind === 'vst_params') && o.role === 'artist' && c.role === 'engineer') {
         if (o.kind === 'vst_param_ack' && p.ok && typeof p.stateB64 === 'string') {
@@ -3547,25 +3566,27 @@ function Studio() {
       case 'chat': {
         const text = String(p.text || '').slice(0, 2000);
         setCollabMessages(m => [...m.slice(-199), { id: String(o.seq), from: o.author_name, role: o.role, text, at: Date.parse(o.created_at || '') || Date.now() }]);
-        if (!collabOpenRef.current) setAiNotification(`💬 ${o.author_name} (${ROLE_LABEL[o.role] || o.role}) : ${text.slice(0, 140)}`);
+        if (!collabOpenRef.current && !o.replay) setAiNotification(`💬 ${o.author_name} (${ROLE_LABEL[o.role] || o.role}) : ${text.slice(0, 140)}`);
         break;
       }
       case 'mix': {
-        touch(p.trackId);
-        setState(produce((d: DAWState) => {
-          const t = d.tracks.find(x => x.id === p.trackId);
-          const m = p.mix || {};
-          if (!t) return;
-          if (typeof m.volume === 'number' && !t.volumeLock) t.volume = m.volume;
-          if (typeof m.pan === 'number') t.pan = m.pan;
-          if (typeof m.isMuted === 'boolean') t.isMuted = m.isMuted;
-          if (Array.isArray(m.sends)) t.sends = m.sends;
-          if (Array.isArray(m.plugins)) t.plugins = m.plugins;
-          if (typeof m.outputTrackId === 'string') t.outputTrackId = m.outputTrackId;
-        }));
+        // Champ par champ : le plus récent du journal gagne ; un champ modifié ici et
+        // pas encore parti n'est pas écrasé (le nôtre partira après et gagnera partout).
+        const tid = String(p.trackId || '');
+        const fields: MixFields = p.fields && typeof p.fields === 'object' ? p.fields : legacyMixToFields(p.mix);
+        const pend = pendingMixRef.current.get(tid);
+        const queued = (c.client.outbox.peek('mix:' + tid)?.fields || {}) as MixFields;
+        const ok = new Set(Object.keys(fields).filter(f => lwwRef.current.accept(`${tid}:${f}`, o.seq) && !pend?.has(f) && !(f in queued)));
+        if (!ok.size) break;
+        const known = { ...(knownFieldsRef.current.get(tid) || {}) };
+        ok.forEach(f => { known[f] = fieldSig(fields[f]); });
+        knownFieldsRef.current.set(tid, known);
+        setState(produce((d: DAWState) => { const t = d.tracks.find(x => x.id === tid); if (t) applyMixFields(t as Track, fields, f => ok.has(f)); }));
+        onRemoteMixRef.current?.(tid, fields);
         break;
       }
       case 'lock': {
+        if (!lwwRef.current.accept(`lock:${p.trackId}`, o.seq)) break;
         touch(p.trackId);
         setState(produce((d: DAWState) => {
           const t = d.tracks.find(x => x.id === p.trackId);
@@ -3577,6 +3598,8 @@ function Studio() {
         break;
       }
       case 'content': {
+        // Version plus ancienne arrivée en retard : ignorée.
+        if (!lwwRef.current.accept(`content:${p.trackId}`, o.seq)) break;
         await ensureBuffers(c.client.link, p.audio);
         touch(p.trackId);
         setState(produce((d: DAWState) => {
@@ -3622,6 +3645,7 @@ function Studio() {
       }
       case 'freeze': {
         // Piste gelée par l'ingé son avec ses VST : on reçoit le rendu, la piste reste éditable.
+        if (!lwwRef.current.accept(`freeze:${p.trackId}`, o.seq)) break;
         await ensureBuffers(c.client.link, p.audio);
         touch(p.trackId);
         setState(produce((d: DAWState) => {
@@ -3650,18 +3674,18 @@ function Studio() {
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!c || !t) return;
     const content = contentOf(t);
-    const audio = await uploadBuffers(c.client.link, contentBufferIds(t));
-    const isNew = !knownSigRef.current.has('mix:' + t.id);
+    const audio = await uploadBuffers(c.client.link, contentBufferIds(t), (sent, total) => c.client.reportUpload(sent, total));
+    const isNew = !knownFieldsRef.current.has(t.id);
     await c.client.send('content', { trackId, content, audio, ...(isNew ? { mix: mixOf(t) } : {}) });
     knownSigRef.current.set('content:' + t.id, sigOf(content));
-    if (isNew) knownSigRef.current.set('mix:' + t.id, sigOf(mixOf(t)));
+    if (isNew) knownFieldsRef.current.set(t.id, fieldSigsOf(mixFieldsOf(t)));
   }, []);
 
   const sendFreeze = useCallback(async (trackId: string) => {
     const c = collabRef.current;
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!c || !t?.frozenClip?.bufferId) return;
-    const audio = await uploadBuffers(c.client.link, [t.frozenClip.bufferId]);
+    const audio = await uploadBuffers(c.client.link, [t.frozenClip.bufferId], (sent, total) => c.client.reportUpload(sent, total));
     const { buffer: _b, ...frozenClip } = t.frozenClip as Clip & { buffer?: AudioBuffer };
     const refs: Record<string, unknown> = {};
     t.clips.forEach(cl => { if (cl.freezeRef) refs[cl.id] = cl.freezeRef; });
@@ -3676,7 +3700,8 @@ function Studio() {
     const c = collabRef.current;
     if (!c) return;
     for (const t of state.tracks) {
-      if (remoteTouchedRef.current.has(t.id)) { rememberTrack(t); remoteTouchedRef.current.delete(t.id); continue; }
+      // Reçu de l'autre : contenu / gel connus (le mix, lui, est suivi champ par champ à la réception).
+      if (remoteTouchedRef.current.has(t.id)) { rememberTrack(t, { mix: false }); remoteTouchedRef.current.delete(t.id); continue; }
       const isNew = !knownSigRef.current.has('content:' + t.id);
       if (isNew) {
         // Piste créée ici pendant la collaboration : elle appartient à son créateur.
@@ -3688,20 +3713,36 @@ function Studio() {
         continue;
       }
       if (c.role === 'engineer') {
-        const s = sigOf(mixOf(t));
-        if (knownSigRef.current.get('mix:' + t.id) !== s) {
-          knownSigRef.current.set('mix:' + t.id, s);
+        // Seuls les réglages modifiés partent (les autres ne sont jamais écrasés chez l'artiste).
+        const changed = changedFields(knownFieldsRef.current.get(t.id), mixFieldsOf(t));
+        const names = Object.keys(changed);
+        if (names.length) {
+          knownFieldsRef.current.set(t.id, { ...(knownFieldsRef.current.get(t.id) || {}), ...fieldSigsOf(changed) });
+          const pend = pendingMixRef.current.get(t.id) || new Set<string>();
+          names.forEach(n => pend.add(n));
+          pendingMixRef.current.set(t.id, pend);
           const old = mixTimersRef.current.get(t.id);
           if (old) window.clearTimeout(old);
           mixTimersRef.current.set(t.id, window.setTimeout(() => {
             mixTimersRef.current.delete(t.id);
+            const wanted = pendingMixRef.current.get(t.id);
+            pendingMixRef.current.delete(t.id);
             const cur = stateRef.current.tracks.find(x => x.id === t.id);
-            if (cur) void collabRef.current?.client.send('mix', { trackId: t.id, mix: mixOf(cur) }).catch(e => console.warn('[Collab] mix', e));
+            const cc = collabRef.current;
+            if (!cur || !cc || !wanted?.size) return;
+            const all = mixFieldsOf(cur);
+            const fields: MixFields = {};
+            wanted.forEach(f => { if (f in all) fields[f] = all[f]; });
+            if (!Object.keys(fields).length) return;
+            // File d'envoi : hors ligne, ça part au retour du réseau (rien ne se perd).
+            cc.client.queue('mix:' + t.id, 'mix', { trackId: t.id, fields });
+            onLocalMixRef.current?.(t.id, fields);
           }, 250));
         }
-        if (t.isFrozen && t.frozenClip && knownFreezeRef.current.get(t.id) !== t.frozenClip.id) {
+        // Gel avec ses VST (pas l'aperçu reçu de l'artiste) : le rendu part chez l'artiste.
+        if (t.isFrozen && t.frozenClip && !t.livePreview && knownFreezeRef.current.get(t.id) !== t.frozenClip.id) {
           knownFreezeRef.current.set(t.id, t.frozenClip.id);
-          void sendFreeze(t.id).catch(e => console.warn('[Collab] gel', e));
+          void sendFreeze(t.id).catch(e => { console.warn('[Collab] gel', e); freezeDirtyRef.current.add(t.id); });
         }
       }
       if (ownsContent(t, c.role) && knownSigRef.current.get('content:' + t.id) !== sigOf(contentOf(t))) contentDirtyRef.current.add(t.id);
@@ -3713,17 +3754,23 @@ function Studio() {
     if (!collab) return;
     let busy = false;
     const id = window.setInterval(async () => {
-      if (busy || stateRef.current.isRecording || contentDirtyRef.current.size === 0) return;
+      if (busy || stateRef.current.isRecording || (contentDirtyRef.current.size === 0 && freezeDirtyRef.current.size === 0)) return;
       busy = true;
       const ids = Array.from(contentDirtyRef.current);
       contentDirtyRef.current.clear();
       for (const tid of ids) {
         try { await sendTrackContent(tid); } catch (e) { console.warn('[Collab] contenu', e); contentDirtyRef.current.add(tid); }
       }
+      // Gels de l'ingé pas partis (réseau coupé pendant l'envoi) : renvoyés.
+      const fz = Array.from(freezeDirtyRef.current);
+      freezeDirtyRef.current.clear();
+      for (const tid of fz) {
+        try { await sendFreeze(tid); } catch (e) { console.warn('[Collab] gel', e); freezeDirtyRef.current.add(tid); }
+      }
       busy = false;
     }, 10000);
     return () => window.clearInterval(id);
-  }, [collab, sendTrackContent]);
+  }, [collab, sendTrackContent, sendFreeze]);
 
   /** Démarre (ou rejoint) la collaboration avec un rôle. */
   // --- Nova Pro : verrou des fonctions payantes ---------------------------------------
@@ -3741,16 +3788,17 @@ function Studio() {
   };
 
   const [collabGate, setCollabGate] = useState<'login' | 'subscribe' | null>(null);
-  const startCollab = useCallback(async (role: CollabRole, name: string) => {
+  /** quiet : reprise automatique après un rechargement de la page (pas de fenêtre de connexion). */
+  const startCollab = useCallback(async (role: CollabRole, name: string, opts: { quiet?: boolean } = {}) => {
     if (remoteRef.current?.active) await remoteRef.current.leave(false);
-    setCollabBusy('Mise en ligne de la session…');
+    setCollabBusy(opts.quiet ? 'Reconnexion à la collaboration…' : 'Mise en ligne de la session…');
     setCollabGate(null);
     try {
       // Collaboration = compte Make Music + abonnement 5 €/mois (vérifié aussi par le serveur).
       const st = await billingStatus();
       const { data: who } = await catalogSupabase.auth.getUser();
-      if (!who?.user) { setCollabGate('login'); pendingStartRef.current = { role, name }; return; }
-      if (!hasPlan(st, 'collab')) { track('pro_gate_shown', { reason: 'collab' }); setCollabGate('subscribe'); pendingStartRef.current = { role, name }; return; }
+      if (!who?.user) { if (!opts.quiet) setCollabGate('login'); pendingStartRef.current = { role, name }; return; }
+      if (!hasPlan(st, 'collab')) { if (!opts.quiet) { track('pro_gate_shown', { reason: 'collab' }); setCollabGate('subscribe'); } pendingStartRef.current = { role, name }; return; }
       if (!(cloudRef.current && stateRef.current.id === cloudProjectId(cloudRef.current.id))) {
         const ok = await syncCloudRef.current({ interactive: true });
         if (!ok) throw new Error("la session n'a pas pu être mise en ligne");
@@ -3759,25 +3807,40 @@ function Studio() {
       setCollabBusy('Connexion aux collaborateurs…');
       const client = new CollabClient({ id: cs.id, secret: cs.secret }, role, name,
         (op) => applyCollabOp(op),
-        (online) => setCollabOnline(online));
-      client.onFailure = (o) => setAiNotification(`⚠️ Une modification de ${o.author_name} n'a pas pu être reçue (connexion). Demande-lui de la renvoyer, ou recharge la session.`);
+        (online) => setCollabOnline(online),
+        // File d'envoi gardée dans le navigateur : un rechargement ne perd rien.
+        { outboxStore: localCollabOutboxStore(`nova_collab_outbox_${cs.id}_${role}`) });
+      client.onFailure = (o) => setAiNotification(`⚠️ Une modification de ${o.author_name} n'a pas pu être reçue (connexion). Demande-lui de la renvoyer, ou recharge la session (panneau Collaboration).`);
+      client.onSent = (kind, op, seq) => {
+        const tid = typeof op.trackId === 'string' ? op.trackId : '';
+        if (kind === 'mix' && op.fields && typeof op.fields === 'object') Object.keys(op.fields).forEach(f => lwwRef.current.note(`${tid}:${f}`, seq));
+        else if (kind === 'content' || kind === 'lock' || kind === 'freeze') lwwRef.current.note(`${kind}:${tid}`, seq);
+        else if (kind === 'chat' && typeof op.localId === 'string') setCollabMessages(m => m.map(x => (x.id === op.localId ? { ...x, pending: false } : x)));
+      };
+      client.onStatus(s => setCollabStatus(s));
+      lwwRef.current.clear();
       // Le projet en cours devient la base : on ne renvoie pas ce que tout le monde a déjà.
       stateRef.current.tracks.forEach(t => rememberTrack(t));
       setCollab({ client, role, name });
       collabRef.current = { client, role, name };
       collabRoleStore.set(role);
       await client.join(stateRef.current.collabSeq || 0);
+      try { localStorage.setItem(COLLAB_ACTIVE_KEY, JSON.stringify({ sessionId: cs.id, role, name })); } catch { /* */ }
       track('collab_started', { role });
-      setAiNotification(`👥 Collaboration ouverte (${ROLE_LABEL[role]}). ${role === 'artist' ? 'Tes prises partent toutes les 10 s chez l\'ingé son.' : role === 'engineer' ? 'Tes réglages partent en direct chez l\'artiste ; avec tes VST, gèle la piste pour l\'envoyer.' : 'Tes pistes partent toutes les 10 s chez les autres.'}`);
+      if (opts.quiet) setAiNotification(`👥 Collaboration reprise (${ROLE_LABEL[role]}) : les modifications manquées ont été rattrapées.`);
+      else setAiNotification(`👥 Collaboration ouverte (${ROLE_LABEL[role]}). ${role === 'artist' ? 'Tes prises partent toutes les 10 s chez l\'ingé son.' : role === 'engineer' ? 'Tes réglages partent en direct chez l\'artiste ; avec tes VST, gèle la piste pour l\'envoyer.' : 'Tes pistes partent toutes les 10 s chez les autres.'}`);
     } catch (e: any) {
       const msg = String(e?.message || 'erreur');
-      if (/Connecte-toi/.test(msg)) setCollabGate('login');
-      else if (/Abonnement/.test(msg)) setCollabGate('subscribe');
-      else setAiNotification(`⚠️ Collaboration impossible : ${msg}`);
+      if (/Connecte-toi/.test(msg) && !opts.quiet) setCollabGate('login');
+      else if (/Abonnement/.test(msg) && !opts.quiet) setCollabGate('subscribe');
+      else setAiNotification(opts.quiet
+        ? `⚠️ Reconnexion à la collaboration impossible (${msg}). Ouvre « Collaborer » pour réessayer.`
+        : `⚠️ Collaboration impossible : ${msg}. Vérifie ta connexion puis réessaie.`);
       pendingStartRef.current = { role, name };
       void collabRef.current?.client.leave();
       collabRoleStore.set(null);
       setCollab(null);
+      setCollabStatus(null);
       collabRef.current = null;
     } finally {
       setCollabBusy(null);
@@ -3806,14 +3869,52 @@ function Studio() {
     }
   }, [startCollab]);
 
-  const leaveCollab = useCallback(async () => {
+  /** keepResume : on garde la reprise automatique (« Recharger la session »). */
+  const leaveCollab = useCallback(async (opts: { keepResume?: boolean } = {}) => {
     const c = collabRef.current;
     collabRoleStore.set(null);
     setCollab(null);
     collabRef.current = null;
     setCollabOnline([]);
+    setCollabStatus(null);
+    setPeerSeenAt(null);
+    mixTimersRef.current.forEach(t => window.clearTimeout(t));
+    mixTimersRef.current.clear();
+    pendingMixRef.current.clear();
+    contentDirtyRef.current.clear();
+    freezeDirtyRef.current.clear();
+    knownFieldsRef.current.clear();
+    lwwRef.current.clear();
+    leaveLivePreviewRef.current?.();
+    if (!opts.keepResume) { try { localStorage.removeItem(COLLAB_ACTIVE_KEY); } catch { /* */ } }
     if (c) await c.client.leave();
   }, []);
+  const leaveLivePreviewRef = useRef<(() => void) | null>(null);
+
+  // Page rechargée en pleine collaboration : on rejoint tout seul (même rôle), le
+  // journal rattrape ce qui a été manqué, la file d'envoi repart.
+  const resumeCollabTriedRef = useRef('');
+  useEffect(() => {
+    if (collab || showLanding || !cloudSession || state.id !== cloudProjectId(cloudSession.id) || pendingCollabRoleRef.current) return;
+    let saved: { sessionId: string; role: CollabRole; name: string } | null = null;
+    try { saved = JSON.parse(localStorage.getItem(COLLAB_ACTIVE_KEY) || 'null'); } catch { /* */ }
+    if (!saved || saved.sessionId !== cloudSession.id || resumeCollabTriedRef.current === cloudSession.id) return;
+    const s = saved;
+    const t = window.setTimeout(() => {
+      resumeCollabTriedRef.current = cloudSession.id;
+      void startCollab(s.role, s.name || ROLE_LABEL[s.role], { quiet: true });
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [state.id, cloudSession, collab, showLanding, startCollab]);
+
+  /** « Recharger la session » : on repart de la version en ligne, puis on rejoint. */
+  const reloadCollabSession = useCallback(async () => {
+    const cs = cloudRef.current;
+    if (!cs) return;
+    await leaveCollab({ keepResume: true });
+    resumeCollabTriedRef.current = '';
+    await openCloudSession({ id: cs.id, secret: cs.secret });
+  }, [leaveCollab, openCloudSession]);
 
   // En direct, côté artiste avec le pont : la liste de ses VST part chez l'ingé.
   const catalogSigRef = useRef('');
@@ -3925,7 +4026,7 @@ function Studio() {
         if (!x) return;
         if (lock) x.volumeLock = lock; else delete x.volumeLock;
       }));
-      if (c) void c.client.send('lock', { trackId, lock }).catch(err => console.warn('[Collab] verrou', err));
+      if (c) c.client.queue(`lock:${trackId}`, 'lock', { trackId, lock });
       setAiNotification(lock ? `🔒 Volume de « ${t.name} » verrouillé à ${gainToDbText(t.volume)}${c ? ' : l\'ingé son le voit' : ''}.` : `🔓 Volume de « ${t.name} » déverrouillé.`);
     };
     window.addEventListener('nova:volume-lock', onLock);
@@ -5662,6 +5763,9 @@ function Studio() {
         members={collabOnline}
         messages={collabMessages}
         busy={collabBusy}
+        status={collab && collabStatus ? collabStatusView(collabStatus, { othersOnline: collabOnline.filter(m => m.member_key !== collab.client.memberKey).length, peerSeenAt }) : null}
+        onRetry={() => { void collabRef.current?.client.retryNow(); }}
+        onReload={() => { void reloadCollabSession(); }}
         inviteUrl={(r) => (cloudSession?.secret ? `${sessionUrl({ id: cloudSession.id, secret: cloudSession.secret })}&role=${r}` : null)}
         onStart={(r, n) => { void startCollab(r, n); }}
         gate={collabGate}
@@ -5704,8 +5808,10 @@ function Studio() {
         onSend={(text) => {
           const c = collabRef.current;
           if (!c) return;
-          setCollabMessages(m => [...m.slice(-199), { id: `me-${Date.now()}`, from: c.name, role: c.role, text, at: Date.now(), mine: true }]);
-          void c.client.send('chat', { text }).catch(() => setAiNotification("⚠️ Message non envoyé (connexion)."));
+          const localId = `me-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          setCollabMessages(m => [...m.slice(-199), { id: localId, from: c.name, role: c.role, text, at: Date.now(), mine: true, pending: true }]);
+          // File d'envoi : hors ligne, le message part au retour du réseau (« envoi… » en attendant).
+          c.client.queue(`chat:${localId}`, 'chat', { text, localId });
         }}
       />
       {/* « Collaborer » (ordinateur / tablette) : dans le bandeau du bas ; flottant,
