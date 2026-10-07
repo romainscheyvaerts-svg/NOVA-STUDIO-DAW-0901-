@@ -19,7 +19,7 @@ export type EditCommandId =
   | 'split' | 'duplicate' | 'copy' | 'cut' | 'paste' | 'delete' | 'mute'
   | 'nudgeLeft' | 'nudgeRight'
   | 'quickFades' | 'fadeInToCursor' | 'fadeOutToCursor' | 'trimStartToCursor' | 'trimEndToCursor'
-  | 'renameClip' | 'clipColor' | 'stripSilence' | 'selectAllClips'
+  | 'renameClip' | 'clipColor' | 'stripSilence' | 'breaths' | 'selectAllClips'
   | 'zoomIn' | 'zoomOut' | 'zoomPreset' | 'zoomToSelection'
   | 'trackHeight' | 'trackHeightUp' | 'trackHeightDown';
 

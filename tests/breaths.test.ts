@@ -248,3 +248,22 @@ describe('collaboration : les respirations voyagent avec le contenu de la piste'
     expect(JSON.parse(JSON.stringify(removed)).breaths[0].gainDb).toBe(BREATH_REMOVE_DB * 1.2);
   });
 });
+
+describe('commandes Nova', () => {
+  it('« baisse les respirations », « enlève les respirations des backs », mode auto, fenêtre', async () => {
+    const { parseLocalCommand } = await import('../utils/novaCommands');
+    const { makeState } = await import('./helpers/fixtures');
+    const st = makeState([makeTrack({ id: 'track-rec-main', name: 'LEAD' }), makeTrack({ id: 'b', name: 'BACK' })]);
+    const act = (m: string) => parseLocalCommand(m, st)?.actions[0];
+    expect(act('baisse les respirations')).toEqual({ action: 'BREATHS', payload: { only: undefined, remove: false } });
+    expect(act('enlève les respirations des backs')).toEqual({ action: 'BREATHS', payload: { only: 'extra', remove: false } });
+    expect(act('supprime les respirations de la lead')).toEqual({ action: 'BREATHS', payload: { only: 'lead', remove: true } });
+    expect(act('vire les respis')).toEqual({ action: 'BREATHS', payload: { only: undefined, remove: true } });
+    expect(act('traite les respirations automatiquement après chaque prise')).toEqual({ action: 'SET_BREATH_AUTO', payload: { enabled: true } });
+    expect(act('désactive les respirations automatiques')).toEqual({ action: 'SET_BREATH_AUTO', payload: { enabled: false } });
+    expect(act('ouvre les respirations')?.action).toBe('BREATHS');
+    expect((act('ouvre les respirations') as any).payload.open).toBe(true);
+    // « retire les blancs » reste le nettoyage des blancs.
+    expect(act('retire les blancs')?.action).toBe('CLEAN_SILENCE');
+  });
+});

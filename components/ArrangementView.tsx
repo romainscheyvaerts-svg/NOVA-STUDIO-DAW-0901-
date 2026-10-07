@@ -1,6 +1,8 @@
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { breathGainAt } from '../utils/breathEnvelope';
+import { requestBreaths } from '../utils/breathBus';
+import { isVoiceTrack } from '../utils/vocalRoles';
 import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint, Marker } from '../types';
 import TrackHeader from './TrackHeader';
 import ContextMenu from './ContextMenu';
@@ -722,8 +724,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     e.preventDefault();
     const menuItems: (ContextMenuItem | 'separator')[] = [ { label: 'Dupliquer la piste', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' },
       { label: 'Couleur de la piste…', onClick: () => openNovaWindow('track-color', { trackId }), icon: 'fa-palette' }, ];
-    if (trackId !== 'track-rec-main') menuItems.push({ label: 'Supprimer la piste', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
     const target = tracks.find(t => t.id === trackId);
+    if (isVoiceTrack(target)) menuItems.push({ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => requestBreaths({ mode: 'dialog', trackIds: [trackId], reason: 'menu' }) });
+    if (trackId !== 'track-rec-main') menuItems.push({ label: 'Supprimer la piste', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
     if (!simple || target?.isFrozen) menuItems.push({
       label: target?.isFrozen ? 'Dégeler la piste' : 'Geler la piste (freeze)',
       onClick: () => onFreezeTrack?.(trackId),
@@ -2118,6 +2121,7 @@ useEffect(() => {
                 { label: 'Renommer…', icon: 'fa-i-cursor', shortcut: 'Ctrl+Maj+R', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'name' }); setClipContextMenu(null); }},
                 { label: 'Couleur du clip…', icon: 'fa-palette', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'color' }); setClipContextMenu(null); }},
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => { const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id]; requestBreaths({ mode: 'dialog', clipIds: ids, reason: 'menu' }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
                   { label: 'Séparer en stems…', icon: 'fa-layer-group', title: STEMS_TOOLTIP,
                     onClick: () => { onSeparateStems(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); } }

@@ -737,6 +737,9 @@ export type AIActionType =
   | 'VST_MIX' | 'VST_LIST' | 'VST_SHOW_PARAMS' | 'VST_SET_PARAM' | 'VST_REMOVE' | 'VST_MOVE' | 'VST_MIX_FALLBACK'
   | 'CLEAN_SILENCE'
   | 'SET_AUTO_CLEAN'
+  // Respirations (utils/breaths) : baisser sur la lead, supprimer sur les backs
+  | 'BREATHS'
+  | 'SET_BREATH_AUTO'
   // Ingé son : session guidée, écoute du mix, montrer un réglage
   | 'PREPARE_PART'
   | 'ANALYZE_MIX'

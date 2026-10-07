@@ -153,6 +153,8 @@ import { editSelectionStore } from './utils/editSelection';
 import { useEditCommands } from './hooks/useEditCommands';
 import { getRegisteredPlugin, registryMenuItems, usesProjectKey } from './engine/pluginRegistry';
 import { pluginDisplayName } from './utils/pluginLabel';
+import { BreathHost, BreathMixOption, BreathPanelTools, breathsAfterMixStyle } from './components/BreathTools';
+import { requestBreaths } from './utils/breathBus';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -1638,6 +1640,12 @@ function Studio() {
         }
       }
     }));
+    // Respirations traitées automatiquement (si activé) : seulement le passage
+    // qui vient d'être enregistré (tours de boucle, morceaux nettoyés, punch).
+    if (result && result.clip.buffer) {
+      const newIds = loopTakes.length ? loopTakes.map(l => l.clip.id) : cleaned ? cleaned.clips.map(c => c.id) : [result.clip.id];
+      setTimeout(() => requestBreaths({ mode: 'auto', trackIds: [result.trackId], clipIds: newIds, reason: 'take' }), 400);
+    }
     if (loopTakes.length && result) {
       const act = loopTakes.find(l => l.active)!;
       setTakeLanesOpen(prev => ({ ...prev, [result.trackId]: true }));
@@ -6097,6 +6105,19 @@ function Studio() {
         break;
       }
 
+      case 'BREATHS': {
+        // « baisse les respirations », « enlève les respirations des backs »
+        const only = p.only === 'extra' || p.only === 'lead' ? p.only : undefined;
+        if (p.open) requestBreaths({ mode: 'dialog', only, reason: 'nova' });
+        else requestBreaths({ mode: 'apply', only, remove: !!p.remove, trackIds: p.trackId ? [String(p.trackId)] : undefined, reason: 'nova' });
+        break;
+      }
+
+      case 'SET_BREATH_AUTO':
+        setState(prev => ({ ...prev, breathAuto: p.enabled !== false }));
+        setAiNotification(p.enabled !== false ? '🌬️ Respirations traitées automatiquement après chaque prise.' : '🌬️ Traitement automatique des respirations désactivé.');
+        break;
+
       case 'SET_AUTO_CLEAN':
         setAutoCleanSilence(p.enabled !== false);
         break;
@@ -6722,7 +6743,10 @@ function Studio() {
         open={vocalToolsOpen}
         onClose={() => setVocalToolsOpen(false)}
         currentStyleId={state.vocalMixStyle}
-        onApplyStyle={handleApplyMixStyle}
+        onApplyStyle={(id: string) => { if (handleApplyMixStyle(id) !== false) breathsAfterMixStyle(); }}
+        breathMixOption={<BreathMixOption />}
+        breathTools={<BreathPanelTools canTreat={state.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0)}
+          projectAuto={state.breathAuto} onProjectAutoChange={(on) => setState(prev => ({ ...prev, breathAuto: on }))} />}
         canClean={!!getTargetVoiceTrack()?.clips.length}
         onCleanSilences={() => { const t = getTargetVoiceTrack(); if (t) handleCleanSilences(t.id); }}
         autoClean={autoCleanSilence}
@@ -6887,6 +6911,8 @@ function Studio() {
         onSeek={handleSeek} onAddMarker={handleAddMarker} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
         getPlayhead={() => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime)}
         onOpenShortcuts={() => setShortcutsOpen(true)} />
+      {/* Respirations : fenêtre, traitement en un clic, mode auto après chaque prise (components/BreathTools). */}
+      <BreathHost tracks={state.tracks} setState={setState} undo={undo} breakHistory={breakHistory} projectAuto={state.breathAuto} isMobile={isMobile} />
       <TakeHomeModal
         open={takeHomeOpen}
         onClose={() => setTakeHomeOpen(false)}
