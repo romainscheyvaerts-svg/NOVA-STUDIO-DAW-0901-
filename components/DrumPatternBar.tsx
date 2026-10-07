@@ -64,7 +64,7 @@ const DrumPatternBar: React.FC<Props> = ({ dm: raw, onChange, bpm, loopEnd, mark
   const commitRename = () => { if (renaming) onChange(renamePattern(dm, renaming, name)); setRenaming(null); };
 
   const fillEvery = dm.fill?.every || 0;
-  const btn = 'nova-hit h-9 px-2.5 rounded-lg text-[11px] font-bold bg-white/5 text-slate-200 hover:bg-white/10 disabled:opacity-40';
+  const btn = 'nova-hit shrink-0 whitespace-nowrap h-9 px-2.5 rounded-lg text-[11px] font-bold bg-white/5 text-slate-200 hover:bg-white/10 disabled:opacity-40';
 
   return (
     <div className="space-y-2">
