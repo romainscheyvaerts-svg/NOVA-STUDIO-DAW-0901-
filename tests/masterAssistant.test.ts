@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { spectralBalance, eqCorrections, eqParamsFor, proposeChain, nextLimiterGain, analyzeMix, PLATFORM_TARGETS, eqMoveLabel, fmtDb } from '../utils/masterAssistant';
+import { spectralBalance, eqCorrections, eqParamsFor, proposeChain, nextLimiterGain, analyzeMix, PLATFORM_TARGETS, eqMoveLabel, fmtDb, referenceMatchGainDb } from '../utils/masterAssistant';
 import { createLimiterCore } from '../engine/limiterCore';
 import { lufsOf, truePeakOf } from '../utils/audioMeasure';
 
@@ -47,6 +47,16 @@ describe('Master Nova : analyse', () => {
     expect(c.limiterParams.ceiling).toBe(-1);
     expect(c.limiterParams.inputGain).toBeGreaterThan(0);
     expect(c.compParams.ratio).toBe(2);
+  });
+});
+
+describe('morceau de référence', () => {
+  it('aligné sur la loudness du mix, sans dépasser −1 dBTP', () => {
+    expect(referenceMatchGainDb(-8, -0.2, -14).gainDb).toBeCloseTo(-6);
+    const up = referenceMatchGainDb(-16, -3, -9);
+    expect(up.limited).toBe(true);
+    expect(up.gainDb).toBeCloseTo(2);
+    expect(referenceMatchGainDb(-8, -1, NaN).gainDb).toBe(0);
   });
 });
 

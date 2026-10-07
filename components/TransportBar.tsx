@@ -12,6 +12,8 @@ import PunchControls from './PunchControls';
 import { PunchSettings } from '../types';
 
 interface TransportProps {
+  /** Ouvre « Master Nova » (mastering en un clic, V15). */
+  onOpenMasterNova?: () => void;
   isPlaying: boolean;
   onTogglePlay: () => void;
   onStop: () => void;
@@ -172,7 +174,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isMetronomeEnabled = false, onToggleMetronome, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
-  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
+  onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
   onUndo, onRedo, canUndo, canRedo,
   user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar, isMobileLayout = false,
@@ -334,6 +336,9 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                  <button onClick={onShareProject} title="Partager le projet" aria-label="Partager le projet" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Partager</span></button>
              )}
              
+             {/* MASTER NOVA (V15) */}
+             {onOpenMasterNova && <button onClick={onOpenMasterNova} data-nova-open-master="" title="Master Nova : mastering en un clic pour Spotify, Apple Music, YouTube… (comme le Mastering Assistant de Logic)" aria-label="Master Nova" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-amber-400/40 bg-amber-400/10 text-amber-300 hover:bg-amber-400 hover:text-black"><i className="fas fa-crown text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Master</span></button>}
+
              {/* EXPORT BUTTON */}
              <button onClick={onExportMix} title="Exporter le mix" aria-label="Exporter le mix" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Exporter</span></button>
              
@@ -524,6 +529,12 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <button onClick={() => { onShareProject?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-blue-500/10 text-blue-400 font-black transition-all flex items-center justify-center space-x-2">
                     <i className="fas fa-share-alt"></i>
                     <span>Partager</span>
+                  </button>
+                )}
+                {onOpenMasterNova && (
+                  <button onClick={() => { onOpenMasterNova(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-amber-500/10 text-amber-300 font-black transition-all flex items-center justify-center space-x-2">
+                    <i className="fas fa-crown"></i>
+                    <span>Master Nova</span>
                   </button>
                 )}
                 <button onClick={() => { onExportMix?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-purple-500/10 text-purple-400 font-black transition-all flex items-center justify-center space-x-2">

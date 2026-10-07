@@ -209,6 +209,15 @@ export function nextLimiterGain(history: { gain: number; lufs: number }[], targe
   return clamp(last.gain + err / s, 0, 24);
 }
 
+/** Morceau de référence : Gain (dB) qui amène la référence au niveau du mix, sans dépasser −1 dBTP. */
+export function referenceMatchGainDb(refLufs: number, refTruePeak: number, mixLufs: number, ceiling = -1): { gainDb: number; limited: boolean } {
+  if (!Number.isFinite(refLufs) || !Number.isFinite(mixLufs)) return { gainDb: 0, limited: false };
+  let g = mixLufs - refLufs;
+  let limited = false;
+  if (Number.isFinite(refTruePeak) && refTruePeak + g > ceiling) { g = ceiling - refTruePeak; limited = true; }
+  return { gainDb: g, limited };
+}
+
 /** Phrase lisible pour une correction d'EQ (« +1,5 dB sur le sub (808) vers 45 Hz »). */
 export const eqMoveLabel = (m: EqMove) =>
   `${m.gainDb > 0 ? '+' : m.gainDb < 0 ? '−' : ''}${Math.abs(m.gainDb).toFixed(1).replace('.', ',')} dB sur ${m.label} (${m.freq >= 1000 ? `${(m.freq / 1000).toString().replace('.', ',')} kHz` : `${m.freq} Hz`})`;

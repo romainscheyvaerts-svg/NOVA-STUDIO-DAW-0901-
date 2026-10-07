@@ -20,6 +20,7 @@ const ShareModal = lazy(() => import('./components/ShareModal'));
 const SaveProjectModal = lazy(() => import('./components/SaveProjectModal'));
 const LoadProjectModal = lazy(() => import('./components/LoadProjectModal'));
 const ExportModal = lazy(() => import('./components/ExportModal'));
+const MasterAssistantPanel = lazy(() => import('./components/MasterAssistantPanel'));
 
 const AudioSettingsPanel = lazy(() => import('./components/AudioSettingsPanel'));
 
@@ -623,6 +624,7 @@ function Studio() {
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false); 
   const [isLoadMenuOpen, setIsLoadMenuOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [masterNovaOpen, setMasterNovaOpen] = useState(false);
   const [midiEditorOpen, setMidiEditorOpen] = useState<{trackId: string, clipId: string} | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeSideBrowserTab, setActiveSideBrowserTab] = useState<'STORE' | 'FX' | 'BRIDGE'>('STORE');
@@ -3126,6 +3128,30 @@ function Studio() {
    * Tonalité du projet ET de tous les Auto-Tune, en une seule étape d'historique :
    * la gamme indiquée sur le beat règle la correction sans que l'artiste y touche.
    */
+  // --- Master Nova (V15) : la chaîne va en fin de piste master, en une étape d'annulation ---
+  const applyMasterNova = useCallback((plugins: PluginInstance[]) => {
+    setState(produce((draft: DAWState) => {
+      const m = draft.tracks.find(t => t.id === 'master');
+      if (!m) return;
+      m.plugins = [...m.plugins.filter(p => !(p.params as any)?.masterNova), ...plugins];
+      m.volume = 1; // le limiteur fixe le niveau final : fader master à 0 dB
+    }));
+    setAiNotification('👑 Master Nova appliqué sur le master (Ctrl+Z pour annuler).');
+  }, [setState]);
+  const removeMasterNova = useCallback(() => {
+    setState(produce((draft: DAWState) => {
+      const m = draft.tracks.find(t => t.id === 'master');
+      if (m) m.plugins = m.plugins.filter(p => !(p.params as any)?.masterNova);
+    }));
+  }, [setState]);
+  // A/B : écoute seulement, aucune étape d'annulation.
+  const bypassMasterNova = useCallback((off: boolean) => {
+    setSilently(prev => produce(prev, (draft: DAWState) => {
+      const m = draft.tracks.find(t => t.id === 'master');
+      m?.plugins.forEach(p => { if ((p.params as any)?.masterNova) p.isEnabled = !off; });
+    }));
+  }, [setSilently]);
+
   const applyProjectKey = (rootKey: number, scale: string) => {
     setState(produce((draft: DAWState) => {
       draft.projectKey = rootKey;
@@ -5544,7 +5570,7 @@ function Studio() {
           statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
           currentTheme={theme} onToggleTheme={toggleTheme}
           onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
-          onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)}
+          onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)} onOpenMasterNova={() => setMasterNovaOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo}
           user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
@@ -6076,6 +6102,8 @@ function Studio() {
           </div>
         </div>
       )}
+      {masterNovaOpen && <MasterAssistantPanel tracks={state.tracks} isPlaying={state.isPlaying} onTogglePlay={handleTogglePlay}
+        onApply={applyMasterNova} onRemove={removeMasterNova} onSetBypass={bypassMasterNova} onClose={() => setMasterNovaOpen(false)} />}
       <ShareClipModal open={shareOpen} onClose={() => setShareOpen(false)} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} onClose={() => setIsAuthOpen(false)} />}
       </Suspense>
