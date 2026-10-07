@@ -1,5 +1,6 @@
 import { Clip, CrossfadeCurve, TrackType } from '../types';
 import { breathGainAt, breathRampsInClip, clipHasBreaths } from './breathEnvelope';
+import { timeGridStep } from './grid';
 
 /**
  * Fondus et crossfades « façon Pro Tools » : logique pure, partagée par la
@@ -383,7 +384,9 @@ export function nudgeSeconds(unit: NudgeUnit, bpm: number, grid = '1/4', fps = 3
     case 'BAR': return beat * 4;
     case 'GRID':
     default: {
-      const m = /^1\/(\d+)(t?)$/.exec(grid || '');
+      const tg = timeGridStep(grid);
+      if (tg) return tg;
+      const m = /^1\/(\d+)(t?)$/i.exec(grid || '');
       if (!m) return beat;
       const div = Number(m[1]) || 4;
       return (beat * 4) / div * (m[2] ? 2 / 3 : 1);

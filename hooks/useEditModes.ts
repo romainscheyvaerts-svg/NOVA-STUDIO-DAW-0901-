@@ -7,7 +7,7 @@ import { chooseEditMode, EditMode, editModeStore, sanitizeEditMode, sessionSampl
 import { audioEngine } from '../engine/AudioEngine';
 import { editPrefsStore, editSelectionStore } from '../utils/editSelection';
 import { playheadStore } from '../utils/playheadStore';
-import { shuffleInsert, shuffleMove, shuffleRemove, shuffleTrimEnd, shuffleTrimStart, ShuffleOptions } from '../utils/shuffle';
+import { shuffleInsert, shuffleMove, shuffleMoveGroup, shuffleRemove, shuffleTrimEnd, shuffleTrimStart, ShuffleOptions, ShuffleTrackIn } from '../utils/shuffle';
 import { clipTransients, nextIn, transientsOf } from '../utils/transients';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
@@ -103,6 +103,32 @@ export function shuffleDrag(trackId: string, initial: Clip[], clipId: string, ki
   else next = shuffleTrimStart(initial, clipId, t, o);
   updateTrackClips(trackId, () => next);
   return start;
+}
+
+/**
+ * Glissement Shuffle d'une sélection (un ou plusieurs clips, une ou plusieurs
+ * pistes, changement de piste compris) : toutes les pistes touchées changent
+ * dans UN setState (une seule annulation). Recalculé depuis les pistes du
+ * DÉBUT du geste. Renvoie le début du clip saisi et le décalage de piste retenu.
+ */
+export function shuffleGroupDrag(initial: ShuffleTrackIn[], ids: string[], anchorId: string, t: number, trackShift: number): { start: number; trackShift: number } | null {
+  if (!deps) return null;
+  const r = shuffleMoveGroup(initial, ids, anchorId, t, trackShift, shuffleOpts());
+  if (!r) return null;
+  // Pistes touchées par un mouvement précédent du même geste (passage par une
+  // autre piste) mais plus maintenant : elles reprennent leurs clips du début.
+  const init = new Map(initial.map(x => [x.id, x.clips]));
+  deps.setState(prev => {
+    let changed = false;
+    const tracks = prev.tracks.map(tr => {
+      const next = r.tracks.get(tr.id) ?? init.get(tr.id);
+      if (!next || next === tr.clips) return tr;
+      changed = true;
+      return { ...tr, clips: next };
+    });
+    return changed ? { ...prev, tracks } : prev;
+  });
+  return { start: r.start, trackShift: r.trackShift };
 }
 
 /** Sélectionne un clip dans l'arrangement (Alt+Tab : clip suivant). */

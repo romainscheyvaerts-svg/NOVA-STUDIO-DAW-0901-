@@ -10,9 +10,9 @@ import TimelineGridMenu from './TimelineGridMenu';
 import LiveRecordingClip from './LiveRecordingClip'; 
 import AutomationLaneComponent from './AutomationLane';
 import { drawExpandedLanes } from '../utils/automationDraw';
-import { snapToGrid, gridSubdivisionsPerBar, isBeatLine } from '../utils/grid';
-import { editModeStore, effectiveMode, EDIT_MODE_INFO, GRID_KIND_LABEL, moveClipStart, snapPoint, sessionSampleRate, snapsToGrid, syncOffsetOf, syncPointAt, toSample, useEditMode } from '../utils/editModes';
-import { SELECT_CLIP_EVENT, shuffleDrag, shuffleEditClip } from '../hooks/useEditModes';
+import { snapToGrid, gridSubdivisionsPerBar, isBeatLine, timeGridStep } from '../utils/grid';
+import { editModeStore, effectiveMode, EDIT_MODE_INFO, GRID_KIND_LABEL, moveClipStart, snapPoint, sessionSampleRate, snapsToGrid, syncOffsetOf, syncPointAt, toSample, trimEdgeTime, useEditMode } from '../utils/editModes';
+import { SELECT_CLIP_EVENT, shuffleDrag, shuffleEditClip, shuffleGroupDrag } from '../hooks/useEditModes';
 import EditModeSelector from './EditModeSelector';
 import SpotDialog from './SpotDialog';
 import { useArrangementCommands } from '../hooks/useArrangementCommands';
@@ -171,7 +171,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     isShiftDownRef.current || ctrlDownRef.current || !!(ev && (ev.ctrlKey || ev.metaKey || ev.shiftKey));
   const snapNow = (ev?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } | null) => snapsToGrid(effectiveMode(editModeStore.get(), invertOf(ev)));
   // Shuffle : clips de la piste au début du glissement (chaque mouvement repart d'eux).
-  const shuffleInitRef = useRef<{ trackId: string; clips: Clip[] } | null>(null);
+  // group : toutes les pistes (ordre affiché) pour déplacer la sélection, changement de piste compris.
+  const shuffleInitRef = useRef<{ trackId: string; clips: Clip[]; group: { id: string; kind: string; clips: Clip[] }[]; ids: string[]; shift: number } | null>(null);
   // Le clip a-t-il vraiment bougé (Spot : un simple clic ouvre « Position exacte ») ?
   const movedRef = useRef(false);
   const [dragInvert, setDragInvert] = useState(false);
@@ -969,7 +970,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 setInitialClipState({ ...clip });
                 movedRef.current = false;
                 // Shuffle : photo des clips de la piste (Alt+glisser = copie libre, hors Shuffle).
-                shuffleInitRef.current = editModeStore.get().mode === 'SHUFFLE' && !e.altKey ? { trackId: t.id, clips: t.clips.map(c => ({ ...c })) } : null;
+                shuffleInitRef.current = editModeStore.get().mode === 'SHUFFLE' && !e.altKey ? {
+                    trackId: t.id, clips: t.clips.map(c => ({ ...c })),
+                    group: visibleTracks.map(tr => ({ id: tr.id, kind: tr.type === TrackType.MIDI ? 'MIDI' : tr.type === TrackType.AUDIO ? 'AUDIO' : String(tr.type), clips: tr.clips })),
+                    ids: multiDragRef.current && multiDragRef.current.length > 1 ? multiDragRef.current.map(it => it.clipId) : [clip.id], shift: 0,
+                } : null;
                 // Ne re-sélectionner la piste que si elle change : chaque setState du
                 // studio relance l'anti-rebond de l'historique (300 ms), et le début
                 // d'un glissement (déplacement, rognage, fondu, gain) n'était alors
@@ -1260,10 +1265,24 @@ const handleMouseMove = (e: React.MouseEvent) => {
         const dt = dx / zoomH;
         const inv = invertOf(e);
         if (inv !== dragInvert) setDragInvert(inv);
-        // Shuffle : le clip s'insère au bord le plus proche, la suite se recolle / avance.
+        // Shuffle (Pro Tools) : toute la sélection s'insère au bord le plus proche, les
+        // pistes de départ se recollent, celles d'arrivée avancent ; on peut changer de piste.
         const shInit = shuffleInitRef.current;
-        if (editModeStore.get().mode === 'SHUFFLE' && shInit && shInit.trackId === activeClip.trackId) {
-            shuffleDrag(shInit.trackId, shInit.clips, activeClip.clip.id, 'MOVE', initialClipState.start + dt);
+        if (editModeStore.get().mode === 'SHUFFLE' && shInit) {
+            const from = shInit.group.findIndex(g => g.id === shInit.trackId);
+            let row = -1, yy = 40;
+            for (let i = 0; i < visibleTracks.length; i++) {
+                const hh = zoomV + extraH(visibleTracks[i]);
+                if (y >= yy && y < yy + hh) { row = i; break; }
+                yy += hh;
+            }
+            const wantShift = row >= 0 && from >= 0 ? row - from : shInit.shift;
+            const r = shuffleGroupDrag(shInit.group, shInit.ids, activeClip.clip.id, initialClipState.start + dt, wantShift);
+            if (r && r.trackShift !== shInit.shift) {
+                shInit.shift = r.trackShift;
+                const dest = shInit.group[from + r.trackShift];
+                if (dest) setActiveClip({ trackId: dest.id, clip: activeClip.clip });
+            }
             return;
         }
         // Grid relatif : on aimante le déplacement (la prise garde son décalage) ;
@@ -1313,7 +1332,8 @@ const handleMouseMove = (e: React.MouseEvent) => {
             shuffleDrag(shInit.trackId, shInit.clips, activeClip.clip.id, 'TRIM_START', toSample(init.start + (x - dragStartX) / zoomH));
             return;
         }
-        const rawStart = getSnappedTime(init.start + (x - dragStartX) / zoomH, bpm, gridSize, useSnap);
+        // Grid relatif : le bord avance par pas de grille en gardant son décalage (Pro Tools).
+        const rawStart = trimEdgeTime({ settings: editModeStore.get(), invert: invertOf(e), bpm, origEdge: init.start, rawEdge: init.start + (x - dragStartX) / zoomH });
         const maxStart = init.start + init.duration - 0.05;
         const minStart = init.start - (init.offset || 0);
         const newStart = Math.min(maxStart, Math.max(0, Math.max(minStart, rawStart)));
@@ -1331,7 +1351,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
             shuffleDrag(shInit.trackId, shInit.clips, activeClip.clip.id, 'TRIM_END', toSample(init.start + init.duration + (x - dragStartX) / zoomH));
             return;
         }
-        const rawEnd = getSnappedTime(init.start + init.duration + (x - dragStartX) / zoomH, bpm, gridSize, useSnap);
+        const rawEnd = trimEdgeTime({ settings: editModeStore.get(), invert: invertOf(e), bpm, origEdge: init.start + init.duration, rawEdge: init.start + init.duration + (x - dragStartX) / zoomH });
         const newDuration = Math.max(0.05, rawEnd - init.start);
         onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', {
             duration: newDuration,
@@ -1630,6 +1650,8 @@ const drawTimeline = useCallback(() => {
     
     const subDivisionsPerBar = gridSubdivisionsPerBar(gridSize);
     const subStepPx = (4 * beatPx) / subDivisionsPerBar;
+    // Grille en temps (ms, images) : traits réguliers indépendants du tempo, par-dessus les mesures.
+    const timeStep = timeGridStep(gridSize);
 
     ctx.lineWidth = 1;
     for (let i = startBar; i <= endBar; i++) {
@@ -1638,7 +1660,7 @@ const drawTimeline = useCallback(() => {
         ctx.strokeStyle = cv.ink(0.08);
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
         
-        if (subStepPx > 5 && subDivisionsPerBar > 1) {
+        if (!timeStep && subStepPx > 5 && subDivisionsPerBar > 1) {
             for (let j = 1; j < subDivisionsPerBar; j++) {
                 const subX = x + j * subStepPx;
                 if (isBeatLine(j, subDivisionsPerBar)) {
@@ -1648,6 +1670,13 @@ const drawTimeline = useCallback(() => {
                 }
                 ctx.beginPath(); ctx.moveTo(subX, 0); ctx.lineTo(subX, h); ctx.stroke();
             }
+        }
+    }
+    if (timeStep && timeToPixels(timeStep) > 5) {
+        ctx.strokeStyle = cv.ink(0.04);
+        for (let k = Math.max(0, Math.floor(startTime / timeStep)); k * timeStep <= endTime; k++) {
+            const tx = timeToPixels(k * timeStep) - scrollX;
+            ctx.beginPath(); ctx.moveTo(tx, 0); ctx.lineTo(tx, h); ctx.stroke();
         }
     }
 
