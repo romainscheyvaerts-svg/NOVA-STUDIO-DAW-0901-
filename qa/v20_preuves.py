@@ -133,6 +133,23 @@ def set_range(page, testid, value):
     page.wait_for_timeout(250)
 
 
+def listen_check(page):
+    """« Écouter » : l'aperçu démarre (bouton Stop) et le son sort (niveau mesuré sur la sortie de l'aperçu)."""
+    page.evaluate("""() => { window.__a2mPeak = 0; const C = window.AudioContext; if (C.__spied) return; C.__spied = true;
+      const orig = C.prototype.createGain; C.prototype.createGain = function () { const g = orig.call(this);
+        if (!this.__an) { const an = this.createAnalyser(); an.fftSize = 2048; this.__an = an; const buf = new Float32Array(2048);
+          const tick = () => { an.getFloatTimeDomainData(buf); let m = 0; for (const v of buf) m = Math.max(m, Math.abs(v)); window.__a2mPeak = Math.max(window.__a2mPeak, m); if (this.state !== 'closed') setTimeout(tick, 30); }; tick();
+          const od = this.destination; const ctx = this; const oc = AudioNode.prototype.connect;
+          AudioNode.prototype.connect = function (dst, ...a) { if (dst === od && this.context === ctx) { oc.call(this, an); } return oc.call(this, dst, ...a); }; }
+        return g; }; }""")
+    page.get_by_test_id("a2m-listen").click()
+    page.wait_for_timeout(1800)
+    playing = "Stop" in page.get_by_test_id("a2m-listen").inner_text()
+    peak = page.evaluate("() => window.__a2mPeak")
+    page.get_by_test_id("a2m-listen").click(); page.wait_for_timeout(200)
+    return {"lecture": playing, "crete_sortie": round(float(peak or 0), 3)}
+
+
 def wait_dialog_ready(page, timeout=60000):
     page.wait_for_selector("[data-testid=audio-to-midi]", timeout=10000)
     page.wait_for_function("() => { const d = document.querySelector('[data-testid=audio-to-midi]'); return d && !/J’écoute/.test(d.innerText); }", timeout=timeout)
@@ -228,6 +245,7 @@ def scenario_a(p):
     set_range(page, "hum-scale", 100); set_range(page, "hum-grid", 100)
     res["gamme_utilisee"] = page.locator("label", has=page.get_by_test_id("hum-scale")).inner_text().splitlines()[0]
     shot(page, "A3_fredonne_808_gamme_grille")
+    res["ecoute_808"] = listen_check(page)
     res["resume_808"] = page.get_by_test_id("hum-summary").inner_text()
     page.get_by_test_id("a2m-create").click(); page.wait_for_timeout(600)
     b808 = st(page, "s => { const t = s.tracks.filter(x => x.id.startsWith('track-hum-')).find(x => x.bass808); const c = t.clips[0]; return { name: t.name, bass808: t.bass808, notes: c.notes.map(n => [n.pitch, +(c.start + n.start).toFixed(4), +n.duration.toFixed(4)]) }; }")
@@ -302,6 +320,7 @@ def scenario_b(p):
     page.get_by_text("Batterie → MIDI…", exact=True).first.click()
     wait_dialog_ready(page)
     shot(page, "B2_batterie_apercu")
+    res["ecoute"] = listen_check(page)
     res["resume"] = page.get_by_test_id("drum-summary").inner_text()
     found = page.evaluate("""() => { const rows = Array.from(document.querySelectorAll('[data-testid=drum-preview] > div'));
       return rows.map(r => Array.from(r.querySelectorAll('[data-step]')).filter(c => c.dataset.on).map(c => +c.dataset.step)); }""")
@@ -401,6 +420,34 @@ def hit_rate(found, truth, beat, same_triad=False):
     return ok, n
 
 
+def bass_pitch(x, sr, t0, t1):
+    """Note de la basse (MIDI) entre t0 et t1 : YIN sur la basse filtrée sous 400 Hz,
+    pour des notes de 808 jusqu'à ~30 Hz (trames de 4096), médiane des trames."""
+    a, z = int(t0 * sr), int(t1 * sr)
+    seg = x[a:z].astype(np.float64)
+    if len(seg) < 4096:
+        return float("nan")
+    X = np.fft.rfft(seg)
+    f = np.fft.rfftfreq(len(seg), 1 / sr)
+    seg = np.fft.irfft(np.where(f < 400, X, 0), n=len(seg))
+    if np.sqrt(np.mean(seg ** 2)) < 1e-3:
+        return float("nan")
+    v = []
+    for s0 in range(0, len(seg) - 4096, 1024):
+        fr = seg[s0:s0 + 4096]
+        W = 2048
+        tmax, tmin = int(sr / 28), int(sr / 400)
+        d = np.array([np.sum((fr[:W] - fr[t:t + W]) ** 2) for t in range(tmax + 2)])
+        cm = np.ones_like(d); cs = np.cumsum(d[1:]); cm[1:] = d[1:] * np.arange(1, len(d)) / np.maximum(cs, 1e-12)
+        cand = np.where(cm[tmin:tmax] < 0.2)[0]
+        if not len(cand):
+            continue
+        t = cand[0] + tmin
+        while t + 1 < len(cm) - 1 and cm[t + 1] < cm[t]: t += 1
+        v.append(69 + 12 * np.log2(sr / t / 440))
+    return float(np.median(v)) if v else float("nan")
+
+
 def scenario_c(p):
     log = Log("C_pc_accords")
     res = {}
@@ -458,6 +505,7 @@ def scenario_c(p):
     page.get_by_text("Accords → MIDI…", exact=True).first.click()
     wait_dialog_ready(page)
     shot(page, "C4_accords_vers_midi")
+    res["C1_ecoute_accords"] = listen_check(page)
     page.get_by_test_id("a2m-create").click(); page.wait_for_timeout(800)
     harm_track = st(page, "s => { const t = s.tracks.find(x => x.id.startsWith('track-harm-')); return { name: t.name, preset: t.novaSynth && t.novaSynth.presetId, notes: t.clips[0].notes.length }; }")
     res["C1_piste_accords_midi"] = harm_track
@@ -504,7 +552,7 @@ def scenario_c(p):
     for kb in range(int(dur / beat)):
         a = kb * beat
         f = next((c for c in found if c[0] <= a + beat / 2 < c[1]), None)
-        m = note_pitch(bass, SR, a + 0.05, a + beat - 0.05)
+        m = bass_pitch(bass, SR, a + 0.03, a + beat - 0.03)
         if np.isnan(m) or f is None:
             continue
         pc = int(round(m)) % 12
@@ -530,8 +578,8 @@ def scenario_d(p):
     res = {}
     v, i, dur, t0 = voice_material()
     proj = MAT / "D_projet_tablette.zip"
-    make_project(proj, "Tablette", [("instrumental", "Silence blanc (instru)", wav_bytes(i), dur, 0), ("voix", "Silence blanc (voix)", wav_bytes(v), dur, 0)], key=(5, "MINOR"),
-                 chords=[{"id": "c1", "start": 0, "end": 2 * BAR, "root": 5, "quality": "min"}, {"id": "c2", "start": 2 * BAR, "end": 4 * BAR, "root": 1, "quality": "maj"}])
+    make_project(proj, "Tablette", [("instrumental", "Silence blanc (instru)", wav_bytes(i), dur, 0), ("voix", "Silence blanc (voix)", wav_bytes(v), dur, 0)], key=(7, "MINOR"),
+                 chords=[{"id": f"c{k}", "start": k * BAR, "end": (k + 1) * BAR, "root": 7 if k % 2 == 0 else 0, "quality": "min"} for k in range(4)])
     b = launch(p)
     ctx, page = new_page(b, "tab", log)
     prepare(page)  # mode simple (par défaut sur le web) : couloir masqué
@@ -568,7 +616,7 @@ def scenario_e(p):
     mic_wav = MAT / "E_micro_voix.wav"
     mic_wav.write_bytes(wav_bytes(np.concatenate([pad, v, np.zeros((2, SR), np.float32)], axis=1)))
     proj = MAT / "E_projet_tel.zip"
-    make_project(proj, "Téléphone", [("instrumental", "Silence blanc (instru)", wav_bytes(i), dur, 0)], key=(5, "MINOR"))
+    make_project(proj, "Téléphone", [("instrumental", "Silence blanc (instru)", wav_bytes(i), dur, 0)], key=(7, "MINOR"))
     b = p.chromium.launch(headless=True, executable_path=CHROME, args=[
         "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", f"--use-file-for-fake-audio-capture={mic_wav}%noloop",
         "--autoplay-policy=no-user-gesture-required"])
