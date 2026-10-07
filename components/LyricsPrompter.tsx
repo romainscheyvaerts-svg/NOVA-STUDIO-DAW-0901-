@@ -101,7 +101,7 @@ const LyricsPrompter: React.FC<LyricsPrompterProps> = (p) => {
 
   return (
     <div
-      className="fixed z-[420] left-1/2 -translate-x-1/2 w-[min(94vw,560px)] top-[150px] md:top-[170px] rounded-2xl border border-white/15 bg-black/85 backdrop-blur-md shadow-2xl flex flex-col"
+      className="fixed z-[420] left-1/2 -translate-x-1/2 w-[min(94vw,560px)] top-[150px] md:top-[170px] rounded-2xl border border-white/10 bg-nv-surface/[0.97] shadow-2xl flex flex-col"
       style={{ height: editing ? 'min(60vh, 460px)' : 'min(44vh, 380px)' }}
       role="region"
       aria-label="Prompteur de paroles"

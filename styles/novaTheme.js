@@ -221,6 +221,12 @@ export function novaThemePlugin(root) {
       // bg-white plein devient l'encre en clair : son texte noir passe en blanc.
       '[data-theme="light"] :is([class~="bg-white"], [class~="hover:bg-white"]:hover)': { '--nv-t-black': '255 255 255' },
       '[data-theme="light"] .nova-sombre': dark,
+      // Voiles noirs épais : en clair, un panneau flottant (prompteur, bulles)
+      // devient une surface blanche, et un fond de fenêtre (inset-0) un voile
+      // d'encre léger, au lieu d'un gris boueux.
+      '[data-theme="light"] :is(.bg-black\\/80, .bg-black\\/85, .bg-black\\/90, .bg-black\\/95):not(.inset-0):not(.nova-sombre *)': { backgroundColor: 'rgb(255 255 255 / 0.96)' },
+      '[data-theme="light"] :is(.bg-black\\/50, .bg-black\\/60, .bg-black\\/70).inset-0:not(.nova-sombre *)': { backgroundColor: 'rgb(15 23 42 / 0.3)' },
+      '[data-theme="light"] :is(.bg-black\\/80, .bg-black\\/85, .bg-black\\/90, .bg-black\\/95).inset-0:not(.nova-sombre *)': { backgroundColor: 'rgb(226 232 240 / 0.88)' },
       ...hexOverrides(root),
     });
   };
