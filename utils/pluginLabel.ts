@@ -9,7 +9,7 @@ import { PluginInstance } from '../types';
 export const NOVA_FX_NAMES: Record<string, string> = {
   REVERB: 'Réverbe', DELAY: 'Delay', CHORUS: 'Chorus', FLANGER: 'Flanger', DOUBLER: 'Doubleur',
   STEREOSPREADER: 'Stéréo', COMPRESSOR: 'Compresseur', AUTOTUNE: 'Autotune', DEESSER: 'De-esser',
-  DENOISER: 'Anti-bruit', PROEQ12: 'Égaliseur', VOCALSATURATOR: 'Saturation', MASTERSYNC: 'Master',
+  DENOISER: 'Anti-bruit', PROEQ12: 'Égaliseur', VOCALSATURATOR: 'Saturation', MASTERSYNC: 'Master', LIMITER: 'Limiteur',
   SAMPLER: 'Sampler', DRUM_SAMPLER: 'Drum sampler', MELODIC_SAMPLER: 'Sampler mélodique', DRUM_RACK_UI: 'Drum Rack',
 };
 
@@ -17,7 +17,7 @@ const ICONS: Record<string, string> = {
   AUTOTUNE: 'fa-microphone-alt', COMPRESSOR: 'fa-compress-alt', DEESSER: 'fa-wind', DENOISER: 'fa-volume-mute',
   PROEQ12: 'fa-sliders-h', VOCALSATURATOR: 'fa-fire', REVERB: 'fa-water', DELAY: 'fa-history',
   CHORUS: 'fa-wave-square', FLANGER: 'fa-wave-square', DOUBLER: 'fa-clone', STEREOSPREADER: 'fa-arrows-alt-h',
-  MASTERSYNC: 'fa-crown', VST3: 'fa-plug',
+  MASTERSYNC: 'fa-crown', VST3: 'fa-plug', LIMITER: 'fa-compress-arrows-alt',
 };
 
 /** Ce que l'autotune du PC publie (services/AutotuneVst : autotuneLive). */

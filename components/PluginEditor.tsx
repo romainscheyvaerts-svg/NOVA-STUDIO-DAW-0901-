@@ -22,6 +22,7 @@ import MelodicSamplerEditor from './MelodicSamplerEditor';
 import DrumRack from './DrumRack';
 import FitToWidth from './FitToWidth';
 import { PluginName } from './PluginName';
+import { getRegisteredPlugin } from '../engine/pluginRegistry';
 
 interface PluginEditorProps {
   plugin: PluginInstance;
@@ -237,7 +238,11 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       case 'PROEQ12': return <ProEQ12UI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
       case 'VOCALSATURATOR': return <VocalSaturatorUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
       case 'MASTERSYNC': return <MasterSyncUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      default: return <div className="p-20 text-white">Plugin UI Not Found</div>;
+      default: {
+        const reg = getRegisteredPlugin(plugin.type);
+        if (reg) { const UI = reg.ui; return <UI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />; }
+        return <div className="p-20 text-white">Plugin UI Not Found</div>;
+      }
     }
   };
 

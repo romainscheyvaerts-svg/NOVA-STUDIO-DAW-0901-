@@ -20,6 +20,7 @@ const ShareModal = lazy(() => import('./components/ShareModal'));
 const SaveProjectModal = lazy(() => import('./components/SaveProjectModal'));
 const LoadProjectModal = lazy(() => import('./components/LoadProjectModal'));
 const ExportModal = lazy(() => import('./components/ExportModal'));
+const MasterAssistantPanel = lazy(() => import('./components/MasterAssistantPanel'));
 
 const AudioSettingsPanel = lazy(() => import('./components/AudioSettingsPanel'));
 
@@ -125,6 +126,7 @@ import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone } from './utils/punch';
 import { editSelectionStore } from './utils/editSelection';
 import { useEditCommands } from './hooks/useEditCommands';
+import { getRegisteredPlugin, registryMenuItems } from './engine/pluginRegistry';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -138,7 +140,8 @@ const AVAILABLE_FX_MENU = [
     { id: 'CHORUS', name: 'Vocal Chorus', icon: 'fa-layer-group' },
     { id: 'FLANGER', name: 'Studio Flanger', icon: 'fa-wind' },
     { id: 'DOUBLER', name: 'Vocal Doubler', icon: 'fa-people-arrows' },
-    { id: 'DEESSER', name: 'S-Killer', icon: 'fa-scissors' }
+    { id: 'DEESSER', name: 'S-Killer', icon: 'fa-scissors' },
+    ...registryMenuItems()
 ];
 
 const createDefaultAutomation = (param: string, color: string): AutomationLane => ({
@@ -224,6 +227,7 @@ const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number =
   if (type === 'DEESSER') params = { threshold: -25, frequency: 6500, q: 1.0, reduction: 0.6, mode: 'BELL', isEnabled: true };
   if (type === 'DENOISER') params = { threshold: -45, range: -20, attack: 0.005, hold: 0.05, release: 0.15, scFreq: 1000, flip: false, isEnabled: true };
   if (type === 'VOCALSATURATOR') params = { drive: 20, mix: 0.5, tone: 0.0, eqLow: 0, eqMid: 0, eqHigh: 0, mode: 'TAPE', isEnabled: true, outputGain: 1.0 };
+  { const reg = getRegisteredPlugin(type); if (reg) { params = reg.defaultParams(); name = paramsOverride?.name || reg.name; } }
   if (type === 'MASTERSYNC') params = { detectedBpm: 120, detectedKey: 0, isMinor: false, isAnalyzing: false, analysisProgress: 0, isEnabled: true, hasResult: false };
   if (type === 'PROEQ12') {
      const defaultFreqs = [80, 150, 300, 500, 1000, 2000, 4000, 6000, 8000, 10000, 12000, 18000];
@@ -627,6 +631,7 @@ function Studio() {
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false); 
   const [isLoadMenuOpen, setIsLoadMenuOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [masterNovaOpen, setMasterNovaOpen] = useState(false);
   const [midiEditorOpen, setMidiEditorOpen] = useState<{trackId: string, clipId: string} | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeSideBrowserTab, setActiveSideBrowserTab] = useState<'STORE' | 'FX' | 'BRIDGE'>('STORE');
@@ -3155,6 +3160,30 @@ function Studio() {
    * Tonalité du projet ET de tous les Auto-Tune, en une seule étape d'historique :
    * la gamme indiquée sur le beat règle la correction sans que l'artiste y touche.
    */
+  // --- Master Nova (V15) : la chaîne va en fin de piste master, en une étape d'annulation ---
+  const applyMasterNova = useCallback((plugins: PluginInstance[]) => {
+    setState(produce((draft: DAWState) => {
+      const m = draft.tracks.find(t => t.id === 'master');
+      if (!m) return;
+      m.plugins = [...m.plugins.filter(p => !(p.params as any)?.masterNova), ...plugins];
+      m.volume = 1; // le limiteur fixe le niveau final : fader master à 0 dB
+    }));
+    setAiNotification('👑 Master Nova appliqué sur le master (Ctrl+Z pour annuler).');
+  }, [setState]);
+  const removeMasterNova = useCallback(() => {
+    setState(produce((draft: DAWState) => {
+      const m = draft.tracks.find(t => t.id === 'master');
+      if (m) m.plugins = m.plugins.filter(p => !(p.params as any)?.masterNova);
+    }));
+  }, [setState]);
+  // A/B : écoute seulement, aucune étape d'annulation.
+  const bypassMasterNova = useCallback((off: boolean) => {
+    setSilently(prev => produce(prev, (draft: DAWState) => {
+      const m = draft.tracks.find(t => t.id === 'master');
+      m?.plugins.forEach(p => { if ((p.params as any)?.masterNova) p.isEnabled = !off; });
+    }));
+  }, [setSilently]);
+
   const applyProjectKey = (rootKey: number, scale: string) => {
     setState(produce((draft: DAWState) => {
       draft.projectKey = rootKey;
@@ -5577,7 +5606,7 @@ function Studio() {
           statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
           currentTheme={theme} onToggleTheme={toggleTheme}
           onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
-          onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)}
+          onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)} onOpenMasterNova={() => setMasterNovaOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
           onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo}
           user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
@@ -6113,6 +6142,8 @@ function Studio() {
           </div>
         </div>
       )}
+      {masterNovaOpen && <MasterAssistantPanel tracks={state.tracks} isPlaying={state.isPlaying} onTogglePlay={handleTogglePlay}
+        onApply={applyMasterNova} onRemove={removeMasterNova} onSetBypass={bypassMasterNova} onClose={() => setMasterNovaOpen(false)} />}
       <ShareClipModal open={shareOpen} onClose={() => setShareOpen(false)} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} onClose={() => setIsAuthOpen(false)} />}
       </Suspense>
@@ -6125,6 +6156,7 @@ function Studio() {
              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement de l'éditeur…</div>}>
                <PianoRoll track={state.tracks.find(t => t.id === midiEditorOpen.trackId)!} clipId={midiEditorOpen.clipId} bpm={state.bpm} currentTime={state.currentTime} onUpdateTrack={handleUpdateTrack} onClose={() => setMidiEditorOpen(null)}
                  isPlaying={state.isPlaying} onTogglePlay={handleTogglePlay}
+                 projectKey={state.projectKey} projectScale={state.projectScale} onSetProjectKey={applyProjectKey} allTracks={state.tracks}
                  toolbarExtra={(() => {
                    // Mode instru seulement : le mode voix reste épuré.
                    const t = state.tracks.find(x => x.id === midiEditorOpen.trackId);
