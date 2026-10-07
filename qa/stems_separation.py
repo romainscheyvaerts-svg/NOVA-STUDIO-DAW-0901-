@@ -122,13 +122,38 @@ def prepare(page, port=None, desktop=True):
                body=json.dumps({"plans": [], "admin": True, "unlocked": True, "free_exports_left": 10})))
 
 
+def dismiss_popups(page, wait_ms=5000):
+    """Appli Windows + vrai pont : NOVA propose l'autotune du PC, puis la prise en main.
+    Hors sujet ici : « Plus tard » tant qu'une telle fenêtre apparaît."""
+    t0 = time.time()
+    quiet = 0
+    while (time.time() - t0) * 1000 < wait_ms + 10000 and quiet < 6:
+        b = page.get_by_role("button", name="Plus tard", exact=True).locator("visible=true")
+        if b.count():
+            try:
+                b.first.click(timeout=3000, force=True)
+            except Exception:
+                page.keyboard.press("Escape")
+            quiet = 0
+            page.wait_for_timeout(400)
+        else:
+            quiet += 1 if (time.time() - t0) * 1000 > wait_ms * 0.4 else 0
+            page.wait_for_timeout(300)
+
+
 def open_stems_menu(page, label):
+    dismiss_popups(page)
     # Les clips sont dessinés (pas de texte dans la page) : on vise la piste « Beat »,
     # à droite de son en-tête, sous la ligne de gain du clip (début du clip : 2 s).
-    head = page.get_by_text("Beat", exact=True).locator("visible=true").first
-    head.wait_for(timeout=20000)
-    box = head.bounding_box()
-    page.mouse.click(900, box["y"] + 70, button="right")
+    y = None
+    for _ in range(40):
+        y = page.evaluate("""() => { for (const e of document.querySelectorAll('span, div')) {
+            if (e.children.length || (e.textContent || '').trim() !== 'Beat') continue;
+            const r = e.getBoundingClientRect(); if (r.x > 320 && r.x < 620 && r.height) return r.y; } return null; }""")
+        if y:
+            break
+        page.wait_for_timeout(500)
+    page.mouse.click(900, y + 60, button="right")
     page.wait_for_timeout(400)
     item = page.get_by_role("button", name=re.compile("Séparer en stems")).first
     title = item.get_attribute("title")
@@ -230,8 +255,10 @@ def scenario_separation(page, log, res, vp):
     page.get_by_test_id("stems-start").click()
     page.get_by_test_id("stems-running").wait_for(timeout=15000)
     page.wait_for_timeout(2500)
-    page.get_by_role("button", name="Annuler", exact=True).click()
+    res["avant_annulation"] = page.get_by_test_id("stems-running").inner_text()[:80]
+    page.get_by_test_id("stems-running").get_by_role("button", name="Annuler", exact=True).click()
     page.get_by_test_id("stems-ready").wait_for(timeout=30000)
+    res["sorties_partielles"] = [str(p) for p in SORTIES.rglob(".partiel")]
     page.wait_for_timeout(500)
     shot(page, "C8_separation_annulee")
 

@@ -58,7 +58,7 @@ interface Props {
   onClose: () => void;
 }
 
-const btn = 'h-11 rounded-xl text-[12px] font-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
+const btn = 'min-h-11 px-3 py-2 rounded-xl text-[12px] leading-tight font-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
 const primary = `${btn} bg-cyan-500 text-black hover:bg-cyan-400`;
 const secondary = `${btn} bg-white/5 text-slate-300 hover:bg-white/10 font-bold`;
 
@@ -282,7 +282,8 @@ const StemSeparationDialog: React.FC<Props> = ({ target, projectName, getClipBuf
       <div className="w-full max-w-md rounded-3xl border border-cyan-500/30 bg-[#121418] p-6 shadow-2xl space-y-4">
         <div>
           <h2 id="stems-title" className="text-lg font-black text-white" title={STEMS_TOOLTIP}>Séparer en stems</h2>
-          <p className="mt-1 text-[12px] text-slate-400 truncate">« {target.clipName} » · comme Stem Splitter (Logic) et Stem Separation (FL Studio)</p>
+          <p className="mt-1 text-[12px] text-slate-300 truncate">« {target.clipName} »</p>
+          <p className="text-[11px] text-slate-500">Comme Stem Splitter (Logic) et Stem Separation (FL Studio)</p>
         </div>
         {body}
       </div>
