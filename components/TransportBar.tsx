@@ -10,6 +10,7 @@ import { useSimpleMode, simpleModeStore } from '../utils/simpleMode';
 import SimpleModeToggle from './SimpleModeToggle';
 import PunchControls from './PunchControls';
 import { PunchSettings } from '../types';
+import { openFeedback } from '../services/feedback';
 
 interface TransportProps {
   /** Ouvre « Master Nova » (mastering en un clic, V15). */
@@ -401,6 +402,19 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         </div>
         )}
 
+        {/* SIGNALER UN BUG / UNE IDÉE : discret, toujours là (Ctrl+Maj+B) */}
+        <button
+            type="button"
+            onClick={() => openFeedback()}
+            data-nova-action="feedback"
+            className="w-9 h-9 rounded-full hidden sm:flex items-center justify-center border transition-all text-slate-400 hover:text-white hover:bg-white/10"
+            title="Signaler un bug ou proposer une idée (Ctrl+Maj+B)"
+            aria-label="Signaler un bug ou proposer une idée"
+            style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}
+        >
+            <i className="fas fa-comment-dots text-[13px]" aria-hidden="true"></i>
+        </button>
+
         {/* THEME TOGGLE */}
         {/* Sous 768 px, thème / compte / mode sont dans le menu : dans la barre ils
             la faisaient déborder (déconnexion et mode hors de l'écran en 390 px). */}
@@ -599,6 +613,19 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 )}
                 <button onClick={() => onBpmChange(Math.min(999, bpm + 1))} aria-label="Tempo +1" className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">+</button>
               </div>
+            </div>
+
+            {/* AIDE : signaler un bug ou proposer une idée */}
+            <div className="space-y-2">
+              <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Aide</div>
+              <button onClick={() => { openFeedback(); setIsMobileMenuOpen(false); }} data-nova-action="feedback-menu" className="w-full px-4 py-3 rounded-lg bg-white/5 text-slate-200 font-black transition-all flex items-center justify-center space-x-2">
+                <i className="fas fa-comment-dots"></i>
+                <span>Signaler un bug / proposer une idée</span>
+              </button>
+              <button onClick={() => { openFeedback({ tab: 'historique' }); setIsMobileMenuOpen(false); }} className="w-full px-4 py-2 rounded-lg text-slate-400 text-[12px] font-bold transition-all flex items-center justify-center space-x-2 hover:text-white">
+                <i className="fas fa-inbox"></i>
+                <span>Mes signalements</span>
+              </button>
             </div>
 
             {/* USER SECTION */}

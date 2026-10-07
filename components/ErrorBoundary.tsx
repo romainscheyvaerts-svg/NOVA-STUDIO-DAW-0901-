@@ -1,4 +1,5 @@
 import { logClientError } from '../utils/errorLog';
+import { openFeedback } from '../services/feedback';
 import React, { ErrorInfo, ReactNode } from 'react';
 import { ContextMenuItem } from '../types';
 
@@ -64,6 +65,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
               <button onClick={() => window.location.reload()} className="h-12 rounded-xl bg-cyan-400 text-black font-black">Recharger</button>
               <button onClick={() => { const r = (window as any).novaRepair; if (typeof r === 'function') r(); else window.location.reload(); }} className="h-12 rounded-xl border border-white/15 text-white font-bold">Réparer</button>
               <button onClick={this.handleReset} className="h-10 text-sm text-slate-400 underline">Réessayer sans recharger</button>
+              <button onClick={() => openFeedback({ category: 'bug', title: 'Nova s’est arrêté (écran « problème »)' })} className="h-10 text-sm text-cyan-300 underline">Signaler ce problème</button>
             </div>
             {this.state.error && <p className="mt-5 text-[11px] text-slate-600 break-words">{String(this.state.error.message).slice(0, 200)}</p>}
           </div>

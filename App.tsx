@@ -128,6 +128,8 @@ import StemSeparationDialog, { StemTarget } from './components/StemSeparationDia
 import { buildStemTracks, insertStemTracks } from './services/StemSeparation';
 import { track, trackOnce } from './utils/analytics';
 import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
+import { setFeedbackAppState } from './utils/feedbackContext';
+import { setFeedbackUserEmail } from './services/feedback';
 import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone } from './utils/punch';
 import { splitLoopPasses, keptLoopPasses, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
 import { compSwipe, compTapRange } from './utils/comping';
@@ -5749,6 +5751,27 @@ function Studio() {
     if (simpleMode && (activeMobileTab === 'TRACKS' || activeMobileTab === 'MIXER' || activeMobileTab === 'PLUGINS')) setActiveMobileTab('ARRANGEMENT');
   }, [simpleMode, activeMobileTab]);
   const shownView = simpleMode ? 'ARRANGEMENT' : state.currentView;
+
+  // --- Signalements (« Signaler un bug / proposer une idée ») ---------------------
+  // Contexte joint : seulement des réglages (mode, vue, nombre de pistes, rôle),
+  // jamais de nom de piste ni de contenu. L'e-mail sert seulement à préremplir.
+  const feedbackStateRef = useRef({ showLanding, simpleMode, shownView, isMobile, activeMobileTab, role: remote.active ? 'ingé à distance' : (collab?.role || null) });
+  feedbackStateRef.current = { showLanding, simpleMode, shownView, isMobile, activeMobileTab, role: remote.active ? 'ingé à distance' : (collab?.role || null) };
+  useEffect(() => {
+    setFeedbackAppState(() => {
+      const f = feedbackStateRef.current;
+      return {
+        mode: f.simpleMode ? 'simple' : 'avance',
+        view: f.showLanding ? 'accueil' : String(f.shownView).toLowerCase(),
+        trackCount: stateRef.current.tracks.filter(t => t.type !== 'SEND' && t.id !== 'master').length,
+        collabRole: f.role,
+        mobileTab: f.isMobile ? String(f.activeMobileTab).toLowerCase() : null,
+        layout: f.isMobile ? 'téléphone' : 'ordinateur / tablette',
+      };
+    });
+    return () => setFeedbackAppState(null);
+  }, []);
+  useEffect(() => { setFeedbackUserEmail(user && user.id !== 'guest' ? user.email : null); }, [user]);
 
   // --- Mesure d'audience (parcours) ------------------------------------------------
   useEffect(() => {
