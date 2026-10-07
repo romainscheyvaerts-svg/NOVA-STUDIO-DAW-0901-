@@ -252,3 +252,32 @@ describe('ProjectIO : piste 808', () => {
     expect(t.clips[0].notes).toEqual(notes);
   });
 });
+
+describe('couloirs de prises (V4) : sauvegarde et anciens projets', () => {
+  it('les couloirs (prises mutées + takeMeta) et le comp survivent à la sauvegarde', async () => {
+    const { compSwipe, readComp } = await import('../utils/comping');
+    const { listLanes } = await import('../utils/playlists');
+    const st = project();
+    const lead = st.tracks[1];
+    lead.clips = [
+      makeClip({ id: 'p1', name: 'Prise 1', takeNumber: 1, bufferId: 'rec-1', start: 0, duration: 0.2, isMuted: true }),
+      makeClip({ id: 'p2', name: 'Prise 2', takeNumber: 2, bufferId: 'rec-2', start: 0, duration: 0.05 }),
+    ];
+    lead.clips = compSwipe(lead.clips, 1, 0.1, 0.2, { xfade: 0.01 }).clips;
+    lead.takeMeta = [{ n: 1, name: 'Couplet', recordedAt: 123, loopPass: 2 }];
+    const loaded = await reload(await ProjectIO.saveProject(st, []));
+    const l2 = loaded!.tracks.find(t => t.id === lead.id)!;
+    expect(l2.takeMeta).toEqual(lead.takeMeta);
+    expect(readComp(l2.clips)).toEqual(readComp(lead.clips));
+    expect(listLanes(l2).map(l => l.n)).toEqual([1, 2]);
+    expect(l2.clips.every(c => !c.bufferId || audioBufferRegistry.has(c.bufferId))).toBe(true);
+  });
+
+  it('ancien projet sans takeMeta (prises « Prise N ») : s’ouvre, couloirs déduits', async () => {
+    const { listLanes } = await import('../utils/playlists');
+    const loaded = await reload(await ProjectIO.saveProject(project(), []));
+    const lead = loaded!.tracks.find(t => t.id === 'track-rec-main')!;
+    expect(lead.takeMeta).toBeUndefined();
+    expect(listLanes(lead).map(l => [l.n, l.name])).toEqual([[1, 'Prise 1'], [2, 'Prise 2']]);
+  });
+});

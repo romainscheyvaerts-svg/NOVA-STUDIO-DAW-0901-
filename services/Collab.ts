@@ -452,6 +452,11 @@ export const contentOf = (t: Track) => ({
   name: t.name, type: t.type, color: t.color, outputTrackId: t.outputTrackId,
   collabOwner: t.collabOwner, drumMachine: t.drumMachine, bass808: t.bass808, drumPads: t.drumPads?.map(p => { const { buffer: _b, ...r } = p as any; return r; }),
   clips: (t.clips || []).map(clipForWire),
+  // Couloirs de prises (noms, heures, tours de boucle) : champ ajouté. L'audio
+  // des prises et le comp sont déjà dans les clips ; une ancienne version
+  // ignore ce champ et joue le comp. Absent (piste sans prise) : rien
+  // d'envoyé, le contenu reste identique à celui d'une ancienne version.
+  takeMeta: t.takeMeta && t.takeMeta.length ? t.takeMeta : undefined,
   // Instrument VST du PC : le rendu des notes voyage avec la piste (sans
   // l'état du plugin, lourd et inutile à qui n'a pas le VST).
   vstInstrument: t.vstInstrument ? { ...t.vstInstrument, stateB64: undefined } : undefined,

@@ -118,7 +118,7 @@ import NextStepCard, { NextStepAction } from './components/NextStepCard';
 import { track, trackOnce } from './utils/analytics';
 import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone } from './utils/punch';
-import { splitLoopPasses, keptLoopPasses, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount } from './utils/playlists';
+import { splitLoopPasses, keptLoopPasses, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
 import { compSwipe, compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
 import { editSelectionStore } from './utils/editSelection';
@@ -3928,6 +3928,8 @@ function Studio() {
           if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
           if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
           t.clips = Array.isArray(ct.clips) ? ct.clips : t.clips;
+          // Couloirs de prises (champ ajouté) : absent = envoyé par une ancienne version, on garde les noms locaux.
+          t.takeMeta = mergeIncomingTakeMeta(t.takeMeta as TakeMeta[] | undefined, ct.takeMeta);
           // Instrument VST du beatmaker : on reçoit le rendu de ses notes.
           if (ct.vstInstrument) {
             const keep = t.vstInstrument?.path === ct.vstInstrument.path ? t.vstInstrument.stateB64 : undefined;
