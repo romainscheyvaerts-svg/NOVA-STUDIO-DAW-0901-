@@ -5464,8 +5464,10 @@ function Studio() {
             // Message compréhensible et actionnable (avant : « Erreur de connexion: Erreur serveur: réseau »).
             text: navigator.onLine === false
               ? "📡 Pas de connexion internet : je ne peux pas répondre aux questions libres pour l'instant. Reconnecte-toi puis renvoie ton message. Les boutons (Mix auto, Mes paroles, tempo…) marchent toujours."
-              : "😕 Je n'arrive pas à joindre mon serveur pour l'instant. Réessaie dans un moment (renvoie ton message). Les boutons ci-dessus et les demandes simples (« mets le tempo à 90 », « mix trap ») marchent toujours.",
-            actions: []
+              : "😕 Je n'arrive pas à joindre mon serveur pour l'instant : réessaie dans un moment. En attendant, choisis un style de mix ci-dessous (ça marche sans serveur), ou demande-moi « mets le tempo à 90 ».",
+            actions: [],
+            // G25 : les 6 styles en boutons, directement sous le message d'erreur.
+            offerStyles: true
         };
     }
   };

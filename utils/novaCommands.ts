@@ -193,15 +193,18 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   const styleWords: [RegExp, string][] = [
     [/\btrap\b/, 'trap-autotune'], [/\bdrill\b/, 'drill'], [/\b(chant|rnb|r ?n ?b|r&b|chante)\b/, 'chant-rnb'],
     [/\b(telephone|radio)\b/, 'telephone'], [/\b(brute|sans effet|naturelle?)\b/, 'voix-brute'], [/\b(rap clair|boom ?bap|old ?school|clair)\b/, 'rap-clair'],
+    // G25 : demandes naturelles (« un mix propre pour ma voix », « mets de l'autotune »).
+    [/\b(auto ?tune)\b/, 'trap-autotune'], [/\b(propre|net|nette|clean|pro)\b/, 'rap-clair'],
   ];
-  if (/\b(style|mix|mixe|son|effet)\b/.test(msg) || styleWords.some(([re]) => re.test(msg))) {
+  const wantsProMix = /\b(faire mixer|fais mixer|par un pro|mixage pro|ingenieur|inge son)\b/.test(msg);
+  if (!wantsProMix && (/\b(style|mix|mixe|son|effet)\b/.test(msg) || styleWords.some(([re]) => re.test(msg)))) {
     const hit = styleWords.find(([re]) => re.test(msg));
     if (hit) {
       const style = findVocalMixStyle(hit[1]);
       return say(`${style?.emoji || '🎚️'} Style « ${style?.name} » appliqué. Lance la lecture pour écouter, et dis-moi si tu veux plus ou moins de réverb.`,
         { action: 'APPLY_MIX_STYLE', payload: { style: hit[1] } });
     }
-    if (/\b(mix auto|styles?|choisis un style|mixe ma voix)\b/.test(msg)) return say('Voici les styles de mix : choisis-en un, je règle tout.', { action: 'OPEN_MIX_STYLES', payload: {} });
+    if (/\b(mix auto|styles?|choisis un style|mixe ma voix|mix|mixe)\b/.test(msg) && !/\b(ecoute|analyse|verifie|check)\b|\bmon mix\b/.test(msg)) return say('Voici les styles de mix : choisis-en un, je règle tout.', { action: 'OPEN_MIX_STYLES', payload: {} });
   }
 
   // --- Session ---

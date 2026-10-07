@@ -708,6 +708,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           onRemove={(e, id) => handleRemoveFX(e, id)}
           onDragStart={(e, id) => handleFXDragStart(e, id)}
           onShowAll={() => setFxMenu(true)}
+          idle={track.clips.length === 0 && !track.isTrackArmed}
         />
       )}
     </div>

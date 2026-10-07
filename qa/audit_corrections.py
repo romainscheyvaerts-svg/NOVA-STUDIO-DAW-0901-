@@ -338,7 +338,23 @@ def fin(b, R):
     ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin}
+def g25(b, R):
+    ctx, pg = mk(b, "pc", "simple", "g25")
+    ctx.route(re.compile(r"(/api/chat|nova-chat)"), lambda route, req: route.abort())
+    open_studio(pg, R)
+    pg.get_by_role("button", name="Ouvrir l'assistante Nova").first.click(); pg.wait_for_timeout(600)
+    box = pg.get_by_placeholder(re.compile("rends ma voix"))
+    box.fill("fais-moi un mix propre pour ma voix"); box.press("Enter"); pg.wait_for_timeout(1500)
+    S(pg, "g25", "01_mix_propre")
+    R["reponse_mix"] = [l for l in body(pg).split(chr(10)) if "Style" in l or "appliqué" in l][:3]
+    box.fill("pourquoi ma voix sonne loin ?"); box.press("Enter"); pg.wait_for_timeout(3000)
+    S(pg, "g25", "02_serveur_injoignable")
+    R["boutons_styles"] = pg.get_by_role("button", name=re.compile("Trap autotune|Rap clair|Drill")).count()
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]

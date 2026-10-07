@@ -187,7 +187,9 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         content: responseText || "Réglages de mixage effectués.",
         timestamp: Date.now(),
         // Les codes internes (SET_SEND_LEVEL…) ne veulent rien dire pour l'artiste.
-        executedAction: (responseActions || []).map((a: any) => a.description).filter(Boolean).join(', ') || undefined
+        executedAction: (responseActions || []).map((a: any) => a.description).filter(Boolean).join(', ') || undefined,
+        // Serveur injoignable : les styles de mix en boutons (ils marchent hors ligne).
+        choices: response?.offerStyles ? MIX_STYLE_CHOICES : undefined,
       };
       
       setMessages(prev => [...prev, assistantMsg]);
