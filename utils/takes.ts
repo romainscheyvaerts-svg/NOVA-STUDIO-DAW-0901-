@@ -1,4 +1,5 @@
 import { AIAction, Track } from '../types';
+import { compSwipe, readComp } from './comping';
 
 /**
  * Prises d'une piste voix (« Prise 1 », « Prise 2 · 3 »…). Une nouvelle prise
@@ -60,53 +61,24 @@ export const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor
 // --- Comping par zone ------------------------------------------------------------
 //
 // Comme les « take lanes » d'Ableton / les playlists de Pro Tools : on garde la
-// prise n seulement dans une zone (une partie du morceau, la boucle…). Les clips
-// des prises sont coupés aux bords de la zone (fondus de 5 ms, pas de clic) ;
-// dans la zone, seule la prise n reste audible ; hors zone, rien ne change.
-// Les clips coupés gardent leur numéro de prise et leur ancrage de gel.
+// prise n seulement dans une zone (une partie du morceau, la boucle…). C'est le
+// même comp que le balayage à la souris dans les couloirs (utils/comping) :
+// crossfades à puissance égale aux raccords, les autres prises restent dans
+// leurs couloirs (mutées), hors zone rien ne change.
 
 export interface CompZone { start: number; end: number; label: string }
 
-const EDGE_FADE = 0.005;
-
 export function compTakeInZone(track: Track, n: number, zone: CompZone): Track['clips'] {
-  const { start: a, end: b } = zone;
-  if (!(b > a)) return track.clips;
-  const out: Track['clips'] = [];
-  let k = 0;
-  for (const c of track.clips) {
-    const tn = takeNumberOf(c);
-    const cEnd = c.start + c.duration;
-    if (tn === null || cEnd <= a || c.start >= b) { out.push(c); continue; }
-    const off = c.offset || 0;
-    const piece = (from: number, to: number, inside: boolean) => {
-      const isFirst = from <= c.start + 1e-9;
-      const isLast = to >= cEnd - 1e-9;
-      out.push({
-        ...c,
-        id: isFirst && isLast ? c.id : `${c.id}-c${Date.now().toString(36)}${k++}`,
-        start: from,
-        offset: off + (from - c.start),
-        duration: to - from,
-        fadeIn: isFirst ? c.fadeIn : EDGE_FADE,
-        fadeOut: isLast ? c.fadeOut : EDGE_FADE,
-        isMuted: inside ? tn !== n : c.isMuted,
-      });
-    };
-    if (c.start < a) piece(c.start, a, false);
-    piece(Math.max(a, c.start), Math.min(b, cEnd), true);
-    if (cEnd > b) piece(b, cEnd, false);
-  }
-  return out;
+  if (!(zone.end > zone.start)) return track.clips;
+  const r = compSwipe(track.clips, n, zone.start, zone.end);
+  return r.changed ? r.clips : track.clips;
 }
 
-/** Prise audible dans la zone (null : aucune ou plusieurs). */
+/** Prise entendue dans la zone (null : aucune ou plusieurs). */
 export function activeTakeInZone(track: Track, zone: CompZone): number | null {
   const set = new Set<number>();
-  for (const c of track.clips) {
-    const tn = takeNumberOf(c);
-    if (tn === null || c.isMuted) continue;
-    if (c.start < zone.end && c.start + c.duration > zone.start) set.add(tn);
+  for (const s of readComp(track.clips)) {
+    if (Math.min(s.end, zone.end) - Math.max(s.start, zone.start) > 0.001) set.add(s.n);
   }
   return set.size === 1 ? Array.from(set)[0] : null;
 }

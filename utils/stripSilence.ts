@@ -169,7 +169,8 @@ export function stripSilenceFromClip(
     duration: s.end - s.start,
     fadeIn: Math.min(0.01, (s.end - s.start) / 4),
     fadeOut: Math.min(0.04, (s.end - s.start) / 4),
-    name: segments.length > 1 ? `${clip.name} · ${i + 1}` : clip.name,
+    // « Prise 3 (partie 2) » : lisible (avant « Prise 3 · 2 », incompréhensible).
+    name: segments.length > 1 ? `${clip.name} (partie ${i + 1})` : clip.name,
   }));
   return { clips, removedSec };
 }

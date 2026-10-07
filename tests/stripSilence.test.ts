@@ -49,6 +49,6 @@ describe('stripSilenceFromClip', () => {
     const res = stripSilenceFromClip(makeClip({ id: 'p', name: 'Prise 1', start: 0, offset: 0, duration: 10 }), buf);
     expect(res).not.toBeNull();
     for (const c of res!.clips) expect(c.duration).toBeGreaterThanOrEqual(0.5);
-    expect(res!.clips.map(c => c.name)).toEqual(['Prise 1 · 1', 'Prise 1 · 2', 'Prise 1 · 3']);
+    expect(res!.clips.map(c => c.name)).toEqual(['Prise 1 (partie 1)', 'Prise 1 (partie 2)', 'Prise 1 (partie 3)']);
   });
 });

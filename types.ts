@@ -444,6 +444,28 @@ export interface Track {
   groupId?: string;            // NEW: Track group reference
   height?: number;             // NEW: Custom track height
   isMinimized?: boolean;       // NEW: Collapsed state
+  /**
+   * Couloirs de prises (« Playlists » de Pro Tools, « take lanes » d'Ableton) :
+   * l'audio des prises reste dans `clips` (clips portant `takeNumber`, les
+   * passages non retenus sont mutés) ; ce tableau ne porte que ce qui décore
+   * chaque couloir (nom choisi, heure, tour de boucle, note de l'IA). Une
+   * ancienne version l'ignore et joue simplement le comp. Voir utils/playlists.
+   */
+  takeMeta?: TakeMeta[];
+}
+
+/** Infos d'un couloir de prise (Track.takeMeta). */
+export interface TakeMeta {
+  /** Numéro de la prise (Clip.takeNumber). */
+  n: number;
+  /** Nom choisi par l'utilisateur (sinon « Prise N »). */
+  name?: string;
+  /** Heure de l'enregistrement (ms depuis 1970). */
+  recordedAt?: number;
+  /** Loop Record : numéro du tour de boucle (1, 2, 3…). */
+  loopPass?: number;
+  /** « Meilleure prise » : note de l'IA locale (0-100) et détail. */
+  score?: { total: number; pitch: number; timing: number; level: number; noise: number };
 }
 
 /** Instrument VST3 du PC choisi pour une piste MIDI (voir Track.vstInstrument). */

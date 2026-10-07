@@ -46,27 +46,23 @@ describe('listTakes / selectTakeActions', () => {
   });
 });
 
-describe('comping par zone', () => {
+describe('comping par zone (même comp que le balayage des couloirs)', () => {
   const track = () => makeTrack({
     clips: [
-      makeClip({ id: 'p1', takeNumber: 1, start: 0, duration: 10, fadeIn: 0.02, fadeOut: 0.03 }),
-      makeClip({ id: 'p2', takeNumber: 2, start: 0, duration: 10, isMuted: true }),
+      makeClip({ id: 'p1', takeNumber: 1, start: 0, duration: 10, fadeIn: 0.02, fadeOut: 0.03, bufferId: 'b1' }),
+      makeClip({ id: 'p2', takeNumber: 2, start: 0, duration: 10, isMuted: true, bufferId: 'b2' }),
       makeClip({ id: 'beat', name: 'Beat', start: 0, duration: 10 }),
     ],
   });
   const zone = { start: 4, end: 6, label: 'refrain' };
 
-  it('coupe aux bords de la zone : seule la prise choisie sonne dedans', () => {
+  it('seule la prise choisie sonne dans la zone, crossfades aux bords, rien d’effacé', () => {
     const t = track();
     const out = compTakeInZone(t, 2, zone);
-    const p1 = out.filter(c => c.takeNumber === 1);
-    const p2 = out.filter(c => c.takeNumber === 2);
-    expect(p1.map(c => [c.start, c.duration, c.offset, !!c.isMuted])).toEqual([[0, 4, 0, false], [4, 2, 4, true], [6, 4, 6, false]]);
-    expect(p2.map(c => [c.start, c.duration, c.offset, !!c.isMuted])).toEqual([[0, 4, 0, true], [4, 2, 4, false], [6, 4, 6, true]]);
-    // Fondus d'origine aux vrais bords, 5 ms aux coupes
-    expect([p1[0].fadeIn, p1[0].fadeOut]).toEqual([0.02, 0.005]);
-    expect([p1[1].fadeIn, p1[1].fadeOut]).toEqual([0.005, 0.005]);
-    expect([p1[2].fadeIn, p1[2].fadeOut]).toEqual([0.005, 0.03]);
+    const audible = out.filter(c => c.takeNumber && !c.isMuted).sort((a, b) => a.start - b.start);
+    expect(audible.map(c => [c.takeNumber, +c.start.toFixed(3), +(c.start + c.duration).toFixed(3)])).toEqual([[1, 0, 4.01], [2, 3.99, 6.01], [1, 5.99, 10]]);
+    // Fondus d'origine aux vrais bords
+    expect([audible[0].fadeIn, audible[2].fadeOut]).toEqual([0.02, 0.03]);
     // Clips hors prises intacts, identifiants uniques
     expect(out).toContain(t.clips[2]);
     expect(new Set(out.map(c => c.id)).size).toBe(out.length);
@@ -74,24 +70,17 @@ describe('comping par zone', () => {
     expect(activeTakeInZone({ ...t, clips: out }, { start: 0, end: 4, label: '' })).toBe(1);
   });
 
-  it('clip entièrement dans la zone : garde son id', () => {
-    const t = makeTrack({ clips: [makeClip({ id: 'x', takeNumber: 1, start: 4.5, duration: 1, isMuted: true })] });
-    const out = compTakeInZone(t, 1, zone);
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ id: 'x', isMuted: false });
-  });
-
-  it('zone vide ou inversée : rien ne change', () => {
+  it('zone vide ou inversée, prise inconnue : rien ne change', () => {
     const t = track();
     expect(compTakeInZone(t, 2, { start: 5, end: 5, label: '' })).toBe(t.clips);
     expect(compTakeInZone(t, 2, { start: 6, end: 4, label: '' })).toBe(t.clips);
+    expect(compTakeInZone(t, 7, zone)).toBe(t.clips);
   });
 
   it('activeTakeInZone : null si aucune ou plusieurs prises audibles', () => {
     const t = track();
     expect(activeTakeInZone(t, zone)).toBe(1);
-    t.clips[1].isMuted = false;
-    expect(activeTakeInZone(t, zone)).toBeNull();
+    expect(activeTakeInZone({ ...t, clips: compTakeInZone(t, 2, zone) }, { start: 3, end: 7, label: '' })).toBeNull();
     expect(activeTakeInZone(t, { start: 50, end: 60, label: '' })).toBeNull();
   });
 });
