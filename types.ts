@@ -576,6 +576,8 @@ export interface ContextMenuItem {
   component?: React.ReactNode;
   shortcut?: string;
   disabled?: boolean;
+  /** Infobulle (ex. l'équivalent dans Logic / FL Studio). */
+  title?: string;
 }
 
 export type AIChatRole = 'user' | 'assistant' | 'system';

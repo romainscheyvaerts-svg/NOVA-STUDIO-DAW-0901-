@@ -82,6 +82,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }) => {
                 }
               }}
               disabled={item.disabled}
+              title={item.title}
               className={`w-full px-4 py-2 flex items-center justify-between text-[11px] font-medium transition-colors group ${
                   item.disabled 
                   ? 'opacity-40 cursor-not-allowed' 

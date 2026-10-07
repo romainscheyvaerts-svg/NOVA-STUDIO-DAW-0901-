@@ -30,7 +30,7 @@ import { dailyChallengeId } from './utils/dailyChallenge';
 import { detectSections, sectionColor } from './utils/songSections';
 import { SessionSerializer } from './services/SessionSerializer';
 // import { getAIProductionAssistance } from './services/AIService'; 
-import { novaBridge, BridgePlugin } from './services/NovaBridge';
+import { novaBridge, BridgePlugin, SeparationResult } from './services/NovaBridge';
 import { clearInstrumentRender, instrumentFromPlugin, isInstrumentRenderCurrent } from './services/VstInstrument';
 import { useVstInstruments } from './hooks/useVstInstruments';
 import VstInstrumentPicker from './components/VstInstrumentPicker';
@@ -115,6 +115,8 @@ import { loadDrumSound } from './utils/drumSounds';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import VocalToolsPanel from './components/VocalToolsPanel';
 import NextStepCard, { NextStepAction } from './components/NextStepCard';
+import StemSeparationDialog, { StemTarget } from './components/StemSeparationDialog';
+import { buildStemTracks, insertStemTracks } from './services/StemSeparation';
 import { track, trackOnce } from './utils/analytics';
 import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone } from './utils/punch';
@@ -5427,6 +5429,35 @@ function Studio() {
   const onRequestAddPluginMenu = useLatestCallback((tid: string, x: number, y: number) => setAddPluginMenu({ trackId: tid, x, y }));
   const onEditClipStable = useLatestCallback(handleEditClip);
   const onEditMidiStable = useLatestCallback((trackId: string, clipId: string) => setMidiEditorOpen({ trackId, clipId }));
+
+  // --- Séparation de stems (menu du clip ; calcul dans l'appli Windows) ---------------
+  const [stemTarget, setStemTarget] = useState<StemTarget | null>(null);
+  const onSeparateStemsStable = useLatestCallback((trackId: string, clipId: string) => {
+    const clip = stateRef.current.tracks.find(t => t.id === trackId)?.clips.find(c => c.id === clipId);
+    if (clip) setStemTarget({ trackId, clipId, clipName: clip.name || 'Clip' });
+  });
+  const getStemClipBuffer = useCallback((trackId: string, clipId: string): AudioBuffer | null => {
+    const clip = stateRef.current.tracks.find(t => t.id === trackId)?.clips.find(c => c.id === clipId);
+    return clip?.buffer || (clip?.bufferId ? audioBufferRegistry.get(clip.bufferId) || null : null);
+  }, []);
+  const applyStems = useCallback((target: StemTarget, res: SeparationResult): string[] | null => {
+    const track = stateRef.current.tracks.find(t => t.id === target.trackId);
+    const clip = track?.clips.find(c => c.id === target.clipId);
+    const ctx = audioEngine.ctx;
+    if (!track || !clip || !ctx || res.stems.length === 0) return null;
+    const uid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const stems = res.stems.map(s => {
+      const len = s.channels[0]?.length || 0;
+      const buf = ctx.createBuffer(Math.max(1, s.channels.length), Math.max(1, len), s.sampleRate);
+      s.channels.forEach((ch, c) => buf.copyToChannel(ch, c));
+      const bufferId = audioBufferRegistry.register(buf, `stem-${uid}-${s.key}`);
+      return { key: s.key, bufferId };
+    });
+    const stemTracks = buildStemTracks({ track, clip }, stems, uid);
+    // Piste et clip vérifiés juste au-dessus : la mise à jour (différée par React) les retrouve.
+    setState(produce((draft: DAWState) => { insertStemTracks(draft, target.trackId, target.clipId, stemTracks); }));
+    return stemTracks.map(t => t.name);
+  }, [setState]);
   const onArrangementAudioDrop = useLatestCallback((trackId: string, url: string, name: string, time: number) => {
     // Beat du catalogue : même chemin que « Essayer » (remplace le beat, règle tempo et Auto-Tune).
     const beat = takeDraggedBeat(url);
@@ -5612,7 +5643,7 @@ function Studio() {
                    onAddTrack={handleCreateTrack} onDuplicateTrack={handleDuplicateTrack} onDeleteTrack={handleDeleteTrack}
                    onFreezeTrack={handleFreezeTrack}
                    onEditClip={onEditClipStable} isRecording={state.isRecording} isPlaying={state.isPlaying} recStartTime={state.recStartTime}
-                   onMoveClip={handleMoveClip} onEditMidi={onEditMidiStable}
+                   onMoveClip={handleMoveClip} onEditMidi={onEditMidiStable} onSeparateStems={onSeparateStemsStable}
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
                    onMoveClipsBy={handleMoveClipsBy}
                    onAudioDrop={onArrangementAudioDrop}
@@ -6143,6 +6174,8 @@ function Studio() {
         />
       </div>
       
+      <StemSeparationDialog target={stemTarget} projectName={state.name || 'Projet'} getClipBuffer={getStemClipBuffer}
+        onApply={applyStems} onClose={() => setStemTarget(null)} />
       {isShareModalOpen && user && <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={handleShareProject} projectName={state.name} />}
       
       {/* Modal Récupération de Backup Automatique */}

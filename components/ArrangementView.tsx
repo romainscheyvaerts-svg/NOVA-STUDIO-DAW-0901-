@@ -22,6 +22,7 @@ import RangeActionsBar from './RangeActionsBar';
 import type { EditCommands } from '../hooks/useEditCommands';
 import { bufferDurationOf } from '../hooks/useEditCommands';
 import { CrossfadeCurve } from '../types';
+import { STEMS_TOOLTIP } from '../services/StemSeparation';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -69,6 +70,8 @@ interface ArrangementViewProps {
   onMoveClipsBy?: (items: {trackId:string, clipId:string, start:number}[], delta: number) => void;
   onSwapInstrument?: (trackId: string) => void; 
   onEditMidi?: (trackId: string, clipId: string) => void;
+  /** « Séparer en stems » (menu du clip audio) : voix, batterie, basse, autres. */
+  onSeparateStems?: (trackId: string, clipId: string) => void;
   onAudioDrop?: (trackId: string, url: string, name: string, time: number) => void;
   /** Points de punch (poignées rouges dans la règle). utils/punch */
   punch?: PunchSettings;
@@ -138,7 +141,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   markers = [], onAddMarker, onUpdateMarker, onDeleteMarker, onAddRegion, isPlaying = false,
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip, isRecording, recStartTime,
-  onCreatePattern, onSwapInstrument, onEditMidi, onAudioDrop, onMoveClipsBy,
+  onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy,
   punch, onUpdatePunch, editCommands
 }) => {
   const editPrefs = useEditPrefs();
@@ -1939,6 +1942,10 @@ useEffect(() => {
                 { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE'); setClipContextMenu(null); }},
                 { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: playheadStore.get() }); setClipContextMenu(null); }},
                 { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE'); setClipContextMenu(null); }},
+                ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
+                  { label: 'Séparer en stems…', icon: 'fa-layer-group', title: STEMS_TOOLTIP,
+                    onClick: () => { onSeparateStems(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); } }
+                ] : []),
                 ...(clipContextMenu.clip.type === TrackType.MIDI && onEditMidi ? [
                   { label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); }}
                 ] : []),
