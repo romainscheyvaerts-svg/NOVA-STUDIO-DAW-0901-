@@ -217,7 +217,16 @@ export interface Clip {
    */
   freezeRef?: FreezeRef;
   /** Tranche de rendu gelé fabriquée pour la lecture (jamais dans le projet). */
-  isFreezeSlice?: boolean;
+  isFreezeSlice?: boolean;  /**
+   * Point de synchro (Pro Tools : Sync Point, Ctrl+,) en temps du fichier audio
+   * (même repère que offset) : c'est lui qui se cale sur la grille et en Spot.
+   */
+  syncPoint?: number;
+  /**
+   * Position d'origine (Pro Tools : Original Time Stamp) : instant de la
+   * timeline où commençait le fichier audio à l'enregistrement.
+   */
+  originStart?: number;
 }
 
 export interface FreezeRef {
@@ -611,6 +620,8 @@ export interface DAWState {
   isDelayCompEnabled: boolean;
   metronome: MetronomeSettings;   // NEW
   punch: PunchSettings;           // NEW
+  /** Mode d'édition Pro Tools (Shuffle, Slip, Spot, Grid) et grille : utils/editModes. */
+  editMode?: import('./utils/editModes').EditModeSettings;
 }
 
 export interface ContextMenuItem {

@@ -21,7 +21,9 @@ export type EditCommandId =
   | 'quickFades' | 'fadeInToCursor' | 'fadeOutToCursor' | 'trimStartToCursor' | 'trimEndToCursor'
   | 'renameClip' | 'clipColor' | 'stripSilence' | 'selectAllClips'
   | 'zoomIn' | 'zoomOut' | 'zoomPreset' | 'zoomToSelection'
-  | 'trackHeight' | 'trackHeightUp' | 'trackHeightDown';
+  | 'trackHeight' | 'trackHeightUp' | 'trackHeightDown'
+  // Modes d'édition Pro Tools (hooks/useEditModes) : F1–F4, Tab to Transient, point de synchro.
+  | 'editMode' | 'tabToTransient' | 'syncPoint';
 
 export type EditCommandHandler = (arg?: any) => boolean | void;
 

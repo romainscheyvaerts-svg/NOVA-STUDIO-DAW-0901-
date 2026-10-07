@@ -1,6 +1,9 @@
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { GRID_OPTIONS } from '../utils/grid';
+import { chooseEditMode, EDIT_MODE_INFO, EDIT_MODES, useEditMode } from '../utils/editModes';
+
+const notifyMode = (msg: string) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: msg })); } catch { /* rien */ } };
 import { runEditCommand } from '../utils/editCommands';
 import { openNovaWindow } from '../utils/novaWindows';
 import { TRACK_HEIGHTS } from '../utils/trackHeights';
@@ -25,6 +28,8 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
   onAddTrack, onResetZoom, onPaste
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
+  const em = useEditMode();
+  void onToggleSnap;
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -75,7 +80,7 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
       </div>
 
       <div className="p-1">
-        <div className="px-3 py-1.5 mt-1 text-[10px] font-bold text-slate-500" title="Les clips et les points se calent sur ces divisions quand l'aimant est actif">Grille</div>
+        <div className="px-3 py-1.5 mt-1 text-[10px] font-bold text-slate-500" title="Les clips et les points se calent sur ces divisions en mode Grid">Grille</div>
         <div className="grid grid-cols-3 gap-0.5">
           {GRID_OPTIONS.map((opt) => (
             <button
@@ -93,21 +98,22 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
 
         <div className="h-px bg-white/5 my-2 mx-2" />
 
-        <div className="px-3 py-1.5 text-[10px] font-bold text-slate-500">Édition</div>
-        <button
-          onClick={() => { onToggleSnap(); onClose(); }}
-          role="menuitemcheckbox" aria-checked={snapEnabled}
-          title="Aimanter à la grille : les clips se calent sur les temps (Maj pendant un glissement = libre)"
-          className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/5 text-slate-300 group"
-        >
-          <div className="flex items-center space-x-2">
-            <i className={`fas ${snapEnabled ? 'fa-magnet text-green-400' : 'fa-slash text-slate-500'} w-4 text-center`}></i>
-            <span className={snapEnabled ? 'text-white' : 'text-slate-400'}>{snapEnabled ? 'Aimanter à la grille : oui' : 'Aimanter à la grille : non (libre)'}</span>
-          </div>
-          <div className={`w-8 h-4 rounded-full p-0.5 ${snapEnabled ? 'bg-green-500/20' : 'bg-white/10'}`}>
-            <div className={`w-3 h-3 rounded-full bg-white transition-transform ${snapEnabled ? 'translate-x-4 bg-green-400' : 'translate-x-0 bg-slate-500'}`} />
-          </div>
-        </button>
+        <div className="px-3 py-1.5 text-[10px] font-bold text-slate-500" title="Modes d'édition de Pro Tools (F1 à F4, ou Alt+1 à 4)">Mode d’édition</div>
+        <div className="grid grid-cols-4 gap-0.5 px-1" role="radiogroup" aria-label="Mode d'édition">
+          {EDIT_MODES.map(m => {
+            const info = EDIT_MODE_INFO[m];
+            const on = em.mode === m;
+            return (
+              <button key={m} role="menuitemradio" aria-checked={on} title={`${info.hint} (${info.keys})`}
+                onClick={() => { notifyMode(chooseEditMode(m).message); onClose(); }}
+                className={`rounded-lg py-1.5 [@media(pointer:coarse)]:py-2.5 text-[9px] font-black tracking-wider ${on ? 'text-black' : 'text-slate-300 hover:bg-white/5'}`}
+                style={on ? { background: info.color } : undefined}>
+                {info.short}{m === 'GRID' && on && em.gridKind === 'RELATIVE' ? ' REL' : ''}
+              </button>
+            );
+          })}
+        </div>
+        <p className="px-3 pt-1 text-[9px] text-slate-500">{snapEnabled ? 'Grille active' : 'Libre'} · Ctrl ou Maj pendant un glissement : inverse</p>
 
         <div className="h-px bg-white/5 my-2 mx-2" />
 

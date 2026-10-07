@@ -7,7 +7,11 @@ import TimelineGridMenu from './TimelineGridMenu';
 import LiveRecordingClip from './LiveRecordingClip'; 
 import AutomationLaneComponent from './AutomationLane';
 import { drawExpandedLanes } from '../utils/automationDraw';
-import { snapToGrid, gridSubdivisionsPerBar, isBeatLine, gridLabel } from '../utils/grid';
+import { snapToGrid, gridSubdivisionsPerBar, isBeatLine } from '../utils/grid';
+import { editModeStore, effectiveMode, EDIT_MODE_INFO, GRID_KIND_LABEL, moveClipStart, snapPoint, snapsToGrid, syncOffsetOf, syncPointAt, toSample, useEditMode } from '../utils/editModes';
+import { SELECT_CLIP_EVENT, shuffleDrag, shuffleEditClip } from '../hooks/useEditModes';
+import EditModeSelector from './EditModeSelector';
+import SpotDialog from './SpotDialog';
 import { useArrangementCommands } from '../hooks/useArrangementCommands';
 import { openNovaWindow } from '../utils/novaWindows';
 import WaveformRenderer from './WaveformRenderer';
@@ -134,19 +138,38 @@ const clipGainHandleY = (clipH: number, gain: number): number => 18 + Math.max(4
 type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | 'GAIN' | 'XFADE' | 'RANGE' | null;
 type LoopDragMode = 'START' | 'END' | 'BODY' | null;
 
-// Grille : 1/1 à 1/32 et triolets (utils/grid).
-const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: boolean): number => snapToGrid(time, bpm, gridSize, enabled);
+// Grille : 1/1 à 1/32 et triolets (utils/grid) ; hors grille, à l'échantillon près (Slip).
+const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: boolean): number => (enabled ? snapToGrid(time, bpm, gridSize, true) : toSample(time));
 
 const ArrangementView: React.FC<ArrangementViewProps> = ({ 
   tracks, selectedTrackId, onSelectTrack, onUpdateTrack, onReorderTracks, 
   isLoopActive, loopStart, loopEnd, onSetLoop, onSeek, bpm, 
   markers = [], onAddMarker, onUpdateMarker, onDeleteMarker, onAddRegion, isPlaying = false,
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
-  onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip, isRecording, recStartTime,
+  onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip: onEditClipRaw, isRecording, recStartTime,
   onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy,
   punch, onUpdatePunch, editCommands, takeLanes
 }) => {
   const editPrefs = useEditPrefs();
+  // Modes d'édition Pro Tools (utils/editModes) : Shuffle / Slip / Spot / Grid.
+  const em = useEditMode();
+  // En Shuffle, supprimer / couper / coller / dupliquer un clip recolle ou pousse
+  // la suite (hooks/useEditModes) ; tout le reste passe tel quel.
+  const onEditClip = useCallback((trackId: string, clipId: string, action: string, payload?: any) => {
+    if (editModeStore.get().mode === 'SHUFFLE' && shuffleEditClip(trackId, clipId, action, payload)) return;
+    onEditClipRaw?.(trackId, clipId, action, payload);
+  }, [onEditClipRaw]);
+  /** Inversion temporaire Grid ⇄ Slip : Ctrl (Pro Tools) ou Maj (habitude NOVA) pendant le geste. */
+  const invertOf = (ev?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } | null) =>
+    isShiftDownRef.current || ctrlDownRef.current || !!(ev && (ev.ctrlKey || ev.metaKey || ev.shiftKey));
+  const snapNow = (ev?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } | null) => snapsToGrid(effectiveMode(editModeStore.get(), invertOf(ev)));
+  // Shuffle : clips de la piste au début du glissement (chaque mouvement repart d'eux).
+  const shuffleInitRef = useRef<{ trackId: string; clips: Clip[] } | null>(null);
+  // Le clip a-t-il vraiment bougé (Spot : un simple clic ouvre « Position exacte ») ?
+  const movedRef = useRef(false);
+  const [dragInvert, setDragInvert] = useState(false);
+  const [spotTarget, setSpotTarget] = useState<{ trackId: string; clipId: string } | null>(null);
+  const longPressRef = useRef<{ timer: number; x: number; y: number } | null>(null);
   // Crossfade en cours de réglage (Smart Tool : bas d'une jonction entre deux clips).
   const xfadeDragRef = useRef<{ trackId: string; a: Clip; b: Clip; at: number } | null>(null);
   const [xfadeTip, setXfadeTip] = useState<{ x: number; y: number; text: string } | null>(null);
@@ -160,9 +183,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const rangeDragRef = useRef<{ anchor: number; anchorTrack: string; clickClip?: { trackId: string; clip: Clip } } | null>(null);
   const [zoomV, setZoomV] = useState(120); 
   const [zoomH, setZoomH] = useState(40);  
-  const [snapEnabled, setSnapEnabled] = useState(true);
-  
-  const [gridSize, setGridSize] = useState<string>('1/4');
+  // Grille et mode : préférence + projet (utils/editModes), plus un état local.
+  const gridSize = em.gridSize;
+  const setGridSize = (g: string) => editModeStore.set({ gridSize: g });
+  const snapEnabled = em.mode === 'GRID';
   const [gridMenu, setGridMenu] = useState<{ x: number, y: number } | null>(null);
 
   const [dragAction, setDragAction] = useState<DragAction | null>(null);
@@ -178,6 +202,19 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     editSelectionStore.set({ clipIds: ids });
   }, [selectedClipIds, selectedClip]);
   useEffect(() => { editSelectionStore.set({ focusTrackId: selectedTrackId }); }, [selectedTrackId]);
+  // Alt+Tab / Ctrl+Alt+→ (clip suivant) : hooks/useEditModes demande la sélection d'un clip.
+  useEffect(() => {
+    const onSelect = (ev: Event) => {
+      const d = (ev as CustomEvent<{ trackId: string; clipId: string }>).detail;
+      const c = d && tracks.find(t => t.id === d.trackId)?.clips.find(x => x.id === d.clipId);
+      if (!c) return;
+      setSelectedClip({ trackId: d.trackId, clip: c });
+      setSelectedClipIds(new Set([c.id]));
+      editSelectionStore.set({ time: null });
+    };
+    window.addEventListener(SELECT_CLIP_EVENT, onSelect);
+    return () => window.removeEventListener(SELECT_CLIP_EVENT, onSelect);
+  }, [tracks]);
   const [marquee, setMarquee] = useState<{x0:number,y0:number,x1:number,y1:number} | null>(null);
   const marqueeOriginRef = useRef<{x:number,y:number} | null>(null);
   // Positions de depart des clips selectionnes, capturees au debut du glissement.
@@ -244,6 +281,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [isDraggingMinimap, setIsDraggingMinimap] = useState(false);
 
   const isShiftDownRef = useRef(false);
+  const ctrlDownRef = useRef(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -258,10 +296,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const timeToPixels = useCallback((time: number) => time * zoomH, [zoomH]);
   const pixelsToTime = useCallback((pixels: number) => pixels / zoomH, [zoomH]);
 
-  useEffect(() => {
-    (window as any).gridSize = gridSize;
-    (window as any).isSnapEnabled = snapEnabled;
-  }, [gridSize, snapEnabled]);
+  // (window.gridSize / isSnapEnabled sont publiés par utils/editModes.)
 
   useEffect(() => {
     const isTypingTarget = (target: EventTarget | null) => {
@@ -273,6 +308,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
     const handleKD = (e: KeyboardEvent) => {
       if (e.key === 'Shift') isShiftDownRef.current = true;
+      if (e.key === 'Control' || e.key === 'Meta') ctrlDownRef.current = true;
       if (isTypingTarget(e.target)) return;
 
       const mod = e.ctrlKey || e.metaKey;
@@ -363,10 +399,13 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       }
     };
 
-    const handleKU = (e: KeyboardEvent) => { if (e.key === 'Shift') isShiftDownRef.current = false; };
+    const handleKU = (e: KeyboardEvent) => { if (e.key === 'Shift') isShiftDownRef.current = false; if (e.key === 'Control' || e.key === 'Meta') ctrlDownRef.current = false; };
+    // Fenêtre quittée touche enfoncée (Alt+Tab…) : on ne garde pas une inversion fantôme.
+    const handleBlur = () => { isShiftDownRef.current = false; ctrlDownRef.current = false; };
+    window.addEventListener('blur', handleBlur);
     window.addEventListener('keydown', handleKD);
     window.addEventListener('keyup', handleKU);
-    return () => { window.removeEventListener('keydown', handleKD); window.removeEventListener('keyup', handleKU); };
+    return () => { window.removeEventListener('keydown', handleKD); window.removeEventListener('keyup', handleKU); window.removeEventListener('blur', handleBlur); };
   }, [selectedClip, selectedClipIds, tracks, selectedTrackId, onEditClip, editCommands]);
 
   useEffect(() => {
@@ -776,7 +815,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
     const time = (x / zoomH);
-    const useSnap = snapEnabled && !isShiftDownRef.current;
+    const useSnap = snapNow(e);
 
     if (e.clientY - rect.top < 40) {
         // --- Marqueurs (drapeaux dessines dans les 14 premiers pixels du ruler)
@@ -895,6 +934,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
                 setDragStartX(x); setDragStartY(y);
                 setInitialClipState({ ...clip });
+                movedRef.current = false;
+                // Shuffle : photo des clips de la piste (Alt+glisser = copie libre, hors Shuffle).
+                shuffleInitRef.current = editModeStore.get().mode === 'SHUFFLE' && !e.altKey ? { trackId: t.id, clips: t.clips.map(c => ({ ...c })) } : null;
                 // Ne re-sélectionner la piste que si elle change : chaque setState du
                 // studio relance l'anti-rebond de l'historique (300 ms), et le début
                 // d'un glissement (déplacement, rognage, fondu, gain) n'était alors
@@ -1027,7 +1069,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
     const rect = scrollContainerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
-    const useSnap = snapEnabled && !isShiftDownRef.current;
+    const useSnap = snapNow(e);
     if (dragAction === 'MOVE' || dragAction === 'TRIM_START' || dragAction === 'TRIM_END' || dragAction === 'FADE_IN' || dragAction === 'FADE_OUT') {
         setDragTipPos({ x: e.clientX, y: e.clientY });
         if (hoverHint) setHoverHint(null);
@@ -1147,7 +1189,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
             laneY += laneH;
         }
         const ids = tracksBetween(visibleTracks.map(t => t.id), rd.anchorTrack, overId);
-        const tNow = Math.max(0, getSnappedTime(x / zoomH, bpm, gridSize, snapEnabled && !isShiftDownRef.current));
+        const tNow = Math.max(0, getSnappedTime(x / zoomH, bpm, gridSize, useSnap));
         editSelectionStore.set({ time: makeSelection(rd.anchor, tNow, ids) });
         return;
     }
@@ -1180,13 +1222,22 @@ const handleMouseMove = (e: React.MouseEvent) => {
         const dx = x - dragStartX;
         // Seuil de 4 px : un simple clic (ou une main qui tremble) ne déplace plus
         // la prise. Avant, le moindre mouvement la recalait sur la grille.
-        if (Math.abs(dx) < 4 && Math.abs(y - dragStartY) < 4) return;
+        if (!movedRef.current && Math.abs(dx) < 4 && Math.abs(y - dragStartY) < 4) return;
+        movedRef.current = true;
         const dt = dx / zoomH;
-        // Magnétisme RELATIF : on aimante le déplacement, pas la position. Une prise
-        // enregistrée (souvent hors grille, recalée de la latence) garde son
-        // décalage par rapport au temps au lieu d'être tirée jusqu'à 1/8 de temps.
-        const snappedDt = Math.sign(dt) * getSnappedTime(Math.abs(dt), bpm, gridSize, useSnap);
-        const newStart = Math.max(0, initialClipState.start + snappedDt);
+        const inv = invertOf(e);
+        if (inv !== dragInvert) setDragInvert(inv);
+        // Shuffle : le clip s'insère au bord le plus proche, la suite se recolle / avance.
+        const shInit = shuffleInitRef.current;
+        if (editModeStore.get().mode === 'SHUFFLE' && shInit && shInit.trackId === activeClip.trackId) {
+            shuffleDrag(shInit.trackId, shInit.clips, activeClip.clip.id, 'MOVE', initialClipState.start + dt);
+            return;
+        }
+        // Grid relatif : on aimante le déplacement (la prise garde son décalage) ;
+        // Grid absolu : le début (ou le point de synchro) tombe sur la grille ;
+        // Slip / Spot : libre, à l'échantillon près (utils/editModes).
+        const newStart = moveClipStart({ settings: editModeStore.get(), invert: inv, bpm, origStart: initialClipState.start,
+            rawStart: initialClipState.start + dt, syncOffset: syncOffsetOf(initialClipState) });
 
         // Détecter la piste cible en fonction de la position Y
         let targetTrackId = activeClip.trackId;
@@ -1202,7 +1253,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
 
         // Si changement de piste, déplacer le clip vers la nouvelle piste
         // (uniquement en selection simple : un groupe se deplace dans le temps).
-        if (targetTrackId !== activeClip.trackId && !(multiDragRef.current && multiDragRef.current.length > 1)) {
+        if (targetTrackId !== activeClip.trackId && !(multiDragRef.current && multiDragRef.current.length > 1) && editModeStore.get().mode !== 'SHUFFLE') {
             onMoveClip?.(activeClip.trackId, targetTrackId, activeClip.clip.id);
             setActiveClip({ trackId: targetTrackId, clip: activeClip.clip });
         }
@@ -1223,6 +1274,12 @@ const handleMouseMove = (e: React.MouseEvent) => {
         // Rogner le debut : on avance le point de depart ET la lecture dans le
         // buffer, pour que le contenu audio ne glisse pas.
         const init = initialClipState;
+        const shInit = shuffleInitRef.current;
+        if (editModeStore.get().mode === 'SHUFFLE' && shInit && shInit.trackId === activeClip.trackId) {
+            // Shuffle : le clip reste en place, la suite recule / avance d'autant.
+            shuffleDrag(shInit.trackId, shInit.clips, activeClip.clip.id, 'TRIM_START', toSample(init.start + (x - dragStartX) / zoomH));
+            return;
+        }
         const rawStart = getSnappedTime(init.start + (x - dragStartX) / zoomH, bpm, gridSize, useSnap);
         const maxStart = init.start + init.duration - 0.05;
         const minStart = init.start - (init.offset || 0);
@@ -1236,6 +1293,11 @@ const handleMouseMove = (e: React.MouseEvent) => {
         });
     } else if (dragAction === 'TRIM_END' && activeClip && initialClipState) {
         const init = initialClipState;
+        const shInit = shuffleInitRef.current;
+        if (editModeStore.get().mode === 'SHUFFLE' && shInit && shInit.trackId === activeClip.trackId) {
+            shuffleDrag(shInit.trackId, shInit.clips, activeClip.clip.id, 'TRIM_END', toSample(init.start + init.duration + (x - dragStartX) / zoomH));
+            return;
+        }
         const rawEnd = getSnappedTime(init.start + init.duration + (x - dragStartX) / zoomH, bpm, gridSize, useSnap);
         const newDuration = Math.max(0.05, rawEnd - init.start);
         onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', {
@@ -1258,6 +1320,13 @@ const handleMouseMove = (e: React.MouseEvent) => {
 
 const handleMouseUp = () => {
     setDragTipPos(null);
+    if (longPressRef.current) { clearTimeout(longPressRef.current.timer); longPressRef.current = null; }
+    // Spot (Pro Tools) : un clic (sans glisser) sur un clip ouvre « Position exacte ».
+    if (dragAction === 'MOVE' && activeClip && !movedRef.current && editModeStore.get().mode === 'SPOT' && !touchRef.current) {
+        setSpotTarget({ trackId: activeClip.trackId, clipId: activeClip.clip.id });
+    }
+    shuffleInitRef.current = null;
+    if (dragInvert) setDragInvert(false);
     regionDragRef.current = null;
     punchDragRef.current = null;
     if (xfadeDragRef.current) { xfadeDragRef.current = null; setXfadeTip(null); }
@@ -1390,7 +1459,21 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     ctx.stroke();
     ctx.restore();
 
-    
+    // Point de synchro (Pro Tools : Sync Point) : trait pointillé + petit triangle en bas.
+    const syncRel = syncOffsetOf(clip);
+    if (syncRel !== null && w > 6) {
+        const sx = Math.round(x + syncRel * zoomH) + 0.5;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(234,179,8,0.85)';
+        ctx.setLineDash([3, 3]);
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(sx, y + 4); ctx.lineTo(sx, y + h - 2); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#eab308';
+        ctx.beginPath(); ctx.moveTo(sx - 5, y + h - 1); ctx.lineTo(sx + 5, y + h - 1); ctx.lineTo(sx, y + h - 8); ctx.closePath(); ctx.fill();
+        ctx.restore();
+    }
+
     // Fondus : zone assombrie + poignee dans le coin superieur.
     // Ils etaient appliques a la lecture mais totalement invisibles et non
     // reglables depuis l'arrangement.
@@ -1859,9 +1942,8 @@ useEffect(() => {
               title="Sélecteur (comme dans Pro Tools) (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
-          {!simple && <button onClick={() => setSnapEnabled(!snapEnabled)} aria-pressed={snapEnabled} title="Aimanter à la grille : les clips et les points se calent sur les temps (Maj pendant un glissement = libre). Clic droit sur la timeline : choisir la valeur (jusqu'à 1/32, triolets). Pro Tools : Grid / Slip." className={`px-4 h-9 [@media(pointer:coarse)]:h-10 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
-            <i className="fas fa-magnet mr-2"></i> {snapEnabled ? `Grille ${gridLabel(gridSize)}` : 'Grille : non'}
-          </button>}
+          {/* Modes d'édition Pro Tools (remplacent l'aimant oui / non) : SHUF / SLIP / SPOT / GRID + valeur de grille. */}
+          {!simple && <EditModeSelector />}
           {!simple && (
             <div className="hidden xl:flex items-center gap-1" data-nova-target="nudge">
               <label className="text-[10px] font-bold text-slate-500" htmlFor="nova-nudge" title="Décalage (« nudge » de Pro Tools) : ← / → déplacent la sélection d'un pas ; Maj = 10 pas.">Décalage</label>
@@ -1910,6 +1992,7 @@ useEffect(() => {
             if (sel && sel.clip.type === TrackType.MIDI) onEditMidi?.(sel.trackId, sel.clip.id);
             // Double-clic sur un clip audio : le renommer (Pro Tools : double-clic avec le Grabber).
             // (pas sur la poignée de gain, dont le double-clic remet 0 dB).
+            else if (sel && editModeStore.get().mode === 'SPOT') setSpotTarget({ trackId: sel.trackId, clipId: sel.clip.id });
             else if (sel && !dragActionRef.current && !gainTip) openNovaWindow('clip-props', { targets: [{ trackId: sel.trackId, clipId: sel.clip.id }], focus: 'name' });
           }} 
           onMouseMove={handleMouseMove} 
@@ -1921,8 +2004,31 @@ useEffect(() => {
             e.preventDefault();
             touchRef.current = true;
             handleMouseDown(e);
+            // Appui long sur un clip (doigt immobile 0,55 s) : « Position exacte » (Spot).
+            if (longPressRef.current) clearTimeout(longPressRef.current.timer);
+            const px = e.clientX, py = e.clientY;
+            longPressRef.current = { x: px, y: py, timer: window.setTimeout(() => {
+              longPressRef.current = null;
+              const sc = scrollContainerRef.current; if (!sc) return;
+              const r = sc.getBoundingClientRect();
+              const lx = px - r.left - headerWidth + sc.scrollLeft, ly = py - r.top + sc.scrollTop;
+              let laneY = 40;
+              for (const tr of visibleTracks) {
+                if (ly >= laneY && ly < laneY + zoomV) {
+                  const c = clipAtTime(rowClips(tr), lx / zoomH);
+                  if (c) { handleMouseUp(); setSpotTarget({ trackId: tr.id, clipId: c.id }); }
+                  return;
+                }
+                laneY += zoomV + extraH(tr);
+              }
+            }, 550) };
           }}
-          onPointerMove={(e) => { if (e.pointerType !== 'mouse') handleMouseMove(e); }}
+          onPointerMove={(e) => {
+            if (e.pointerType === 'mouse') return;
+            const lp = longPressRef.current;
+            if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 8) { clearTimeout(lp.timer); longPressRef.current = null; }
+            handleMouseMove(e);
+          }}
           onPointerUp={(e) => { if (e.pointerType !== 'mouse') { touchRef.current = false; handleMouseUp(); } }}
           onPointerCancel={(e) => { if (e.pointerType !== 'mouse') { touchRef.current = false; handleMouseUp(); } }}
           onScroll={(e) => { setScrollLeft(e.currentTarget.scrollLeft); setScrollTop(e.currentTarget.scrollTop); }}
@@ -2076,16 +2182,31 @@ useEffect(() => {
         );
       })()}
       {editCommands && <RangeActionsBar commands={editCommands} />}
+      {spotTarget && (() => {
+        const tr = tracks.find(t => t.id === spotTarget.trackId);
+        const c = tr?.clips.find(x => x.id === spotTarget.clipId);
+        if (!tr || !c) return null;
+        const sr = (c.bufferId && audioBufferRegistry.get(c.bufferId)?.sampleRate) || 48000;
+        return <SpotDialog clip={c} trackName={tr.name} bpm={bpm} sampleRate={sr} onClose={() => setSpotTarget(null)}
+          onApply={(start) => {
+            onEditClipRaw?.(tr.id, c.id, 'UPDATE_PROPS', { start });
+            if (editCommands) setTimeout(() => editCommands.autoCrossfade(tr.id, [c.id]), 0);
+          }} />;
+      })()}
       {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
-      {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled(!snapEnabled)} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
+      {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => editModeStore.set({ mode: snapEnabled ? 'SLIP' : 'GRID' })} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
       {xfadeTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300" style={{ left: xfadeTip.x + 14, top: xfadeTip.y - 28 }}>{xfadeTip.text}</div>}
       {gainTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300 font-mono tabular-nums" style={{ left: gainTip.x + 14, top: gainTip.y - 28 }}>Gain {gainTip.text}</div>}
       {(() => {
         // Bulle de glissement (G8) : « Fondu d'entrée · 0,25 s », « Déplacer · mes. 5.2 ».
         if (!dragTipPos || !activeClip) return null;
         const live = tracks.find(t => t.id === activeClip.trackId)?.clips.find(c => c.id === activeClip.clip.id) || activeClip.clip;
-        const text = dragTipText(dragAction, live, bpm);
-        if (!text) return null;
+        const base = dragTipText(dragAction, live, bpm);
+        if (!base) return null;
+        // Mode appliqué pendant le geste (avec l'inversion Ctrl / Maj) : on voit tout de suite si on est calé ou libre.
+        const eff = effectiveMode(em, dragInvert);
+        const modeTxt = eff === 'SHUFFLE' ? 'Shuffle' : eff === 'GRID_ABS' ? 'Grille absolue' : eff === 'GRID_REL' ? 'Grille relative' : eff === 'SPOT' ? 'Spot (libre)' : 'Slip (libre)';
+        const text = (dragAction === 'MOVE' || dragAction === 'TRIM_START' || dragAction === 'TRIM_END') ? `${base} · ${modeTxt}${dragInvert && em.mode !== 'SHUFFLE' ? ' (Ctrl/Maj)' : ''}` : base;
         return <div role="status" data-testid="drag-tip" className="fixed z-[200] px-3 py-1.5 bg-black/90 border border-cyan-500/30 rounded-lg shadow-2xl pointer-events-none text-[11px] font-bold text-cyan-200" style={{ left: dragTipPos.x + 15, top: dragTipPos.y + 12 }}>{text}</div>;
       })()}
       {hoverHint && !dragAction && (
@@ -2102,6 +2223,14 @@ useEffect(() => {
                 { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE'); setClipContextMenu(null); }},
                 { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: playheadStore.get() }); setClipContextMenu(null); }},
                 { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE'); setClipContextMenu(null); }},
+                // Modes d'édition Pro Tools : Spot (position exacte) et point de synchro.
+                { label: 'Position exacte (Spot)…', icon: 'fa-crosshairs', shortcut: 'F3 + clic', onClick: () => { setSpotTarget({ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }); setClipContextMenu(null); }},
+                { label: 'Point de synchro à la tête de lecture', icon: 'fa-location-dot', shortcut: 'Ctrl+,', onClick: () => {
+                    const sp = syncPointAt(clipContextMenu.clip, playheadStore.get());
+                    if (sp === null) window.dispatchEvent(new CustomEvent('nova:notify', { detail: 'Point de synchro : place d’abord la tête de lecture DANS ce clip, sur l’attaque à caler.' }));
+                    else onEditClipRaw?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { syncPoint: sp });
+                    setClipContextMenu(null); }},
+                ...(syncOffsetOf(clipContextMenu.clip) !== null ? [{ label: 'Enlever le point de synchro', icon: 'fa-location-pin-lock', onClick: () => { onEditClipRaw?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { syncPoint: undefined }); setClipContextMenu(null); }}] : []),
                 // Pro Tools : Rename (Ctrl+Maj+R), couleur de clip, Strip Silence (Ctrl+U).
                 { label: 'Renommer…', icon: 'fa-i-cursor', shortcut: 'Ctrl+Maj+R', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'name' }); setClipContextMenu(null); }},
                 { label: 'Couleur du clip…', icon: 'fa-palette', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'color' }); setClipContextMenu(null); }},

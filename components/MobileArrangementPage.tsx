@@ -8,6 +8,7 @@ import { gainToDbText } from '../utils/db';
 import { useSimpleMode } from '../utils/simpleMode';
 import { sendLabel } from '../utils/sendLabels';
 import { openSynthPanel } from '../utils/synthPanelStore';
+import { editModeStore, useEditMode } from '../utils/editModes';
 
 /** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
 const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
@@ -140,7 +141,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [pinchStart, setPinchStart] = useState<{ dist: number; zoom: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
-  const [snapToGrid, setSnapToGrid] = useState(true);
+  // Libre / Grille : même réglage que les modes Slip / Grid du PC (utils/editModes).
+  const editMode = useEditMode();
+  const snapToGrid = editMode.mode === 'GRID';
+  const setSnapToGrid = (on: boolean) => editModeStore.set({ mode: on ? 'GRID' : 'SLIP' });
   const [gridDivision, setGridDivision] = useState<number>(1); // 1 = beat, 0.5 = 1/8, 0.25 = 1/16
   
   // NEW: Clipboard and editing states
@@ -614,21 +618,18 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
         <div className="flex-1" />
 
-        {/* Snap toggle */}
-        {!simple && <><button
-          onClick={() => setSnapToGrid(!snapToGrid)}
-          aria-label="Magnétisme sur la grille"
-          title="Magnétisme sur la grille"
-          aria-pressed={snapToGrid}
-          className={`nova-hit shrink-0 flex items-center gap-1.5 px-3 h-7 rounded-md text-[10px] font-bold transition-all ${
-            snapToGrid
-              ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/40'
-              : 'bg-white/5 text-white/40'
-          }`}
-        >
-          <i className="fas fa-magnet"></i>
-          <span className="hidden sm:inline">Snap</span>
-        </button>
+        {/* Libre / Grille (modes Slip / Grid de Pro Tools, version téléphone) */}
+        <div role="radiogroup" aria-label="Placement des clips" className="shrink-0 flex rounded-md bg-white/5 border border-white/10 p-0.5">
+          {([false, true] as const).map(on => (
+            <button key={String(on)} type="button" role="radio" aria-checked={snapToGrid === on}
+              onClick={() => setSnapToGrid(on)}
+              title={on ? 'Grille : les clips se calent sur les temps (mode Grid de Pro Tools)' : 'Libre : les clips vont exactement où tu les poses (mode Slip de Pro Tools)'}
+              className={`nova-hit h-9 px-2.5 rounded text-[10px] font-bold transition-all ${snapToGrid === on ? (on ? 'bg-blue-500/25 text-blue-200' : 'bg-green-500/20 text-green-300') : 'text-white/45'}`}>
+              {on ? 'Grille' : 'Libre'}
+            </button>
+          ))}
+        </div>
+        {!simple && <>
 
         {/* Grid division */}
         <select
