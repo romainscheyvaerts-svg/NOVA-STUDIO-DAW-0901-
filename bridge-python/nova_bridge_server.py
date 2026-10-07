@@ -55,6 +55,17 @@ Protocole (WebSocket ws://127.0.0.1:8765)
                                   Si la latence annoncée change (mode basse latence), le plugin est
                                   re-préparé et un événement LATENCY suit.
     PROCESS_AUDIO               (ancien format JSON, conservé pour compatibilité)
+    (v8) Séparation de stems (module optionnel Demucs, voir stems_service.py) :
+    STEMS_STATUS                → installed, installing, install (dernier événement), variant, size_bytes
+    STEMS_INSTALL [variant]     → installation en arrière-plan (événements STEMS_EVENT kind=install)
+    STEMS_CANCEL job_id | install=true
+    STEMS_SEPARATE              en trame binaire type 2 : {action, req_id, job_id, stems:2|4,
+                                  sample_rate, nch, nframes, project, clip} + float32 entrelacés.
+                                  Progression : STEMS_EVENT {kind:"separate", job_id, event, pct, message}.
+                                  Puis une trame type 2 par stem : {action:"STEMS_STEM", req_id, job_id,
+                                  key, label, index, count, nch, nframes, sample_rate, path} + audio,
+                                  et la réponse finale {action:"STEMS_SEPARATE", req_id, success,
+                                  stems, seconds, device, outdir | error, code: not_installed|cancelled|error}.
   Événements : EDITOR_CLOSED (avec l'état), LATENCY (latence mesurée qui change),
     (v6) LICENSE_WINDOW {type:"license_window", plugin, path, plugin_name, title,
       status: activation|nag, source: load|render, slot_id?} : un plugin vient
@@ -102,11 +113,12 @@ import websockets
 from websockets.asyncio.server import serve, ServerConnection
 
 import license_watch
+import stems_service
 import vst_host
 import vst_probe
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events
 
-VERSION = 7
+VERSION = 8
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
@@ -208,6 +220,9 @@ class NovaBridgeServer:
         # Fenêtres de licence : connexions à prévenir, mémoire entre lancements.
         self.clients: set = set()
         self.licenses = license_watch.LicenseLog()
+        # Séparation de stems (module optionnel installé à la demande)
+        self.stems = stems_service.StemsService()
+        self.stems_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stems")
 
     # --- démarrage ---------------------------------------------------------
 
@@ -450,7 +465,7 @@ class NovaBridgeServer:
                               "pedalboard": vst_host.HAS_PEDALBOARD,
                               "instruments": vst_host.HAS_PEDALBOARD,
                               "license_events": license_watch.IS_WINDOWS,
-                              "params_text": True})
+                              "params_text": True, "stems": True})
 
     async def _a_get_plugin_list(self, ws, req):
         if req.get("rescan"):
@@ -757,6 +772,9 @@ class NovaBridgeServer:
             if meta.get("action") == "RENDER_INSTRUMENT":
                 await self._render_instrument(ws, meta)
                 return
+            if meta.get("action") == "STEMS_SEPARATE":
+                await self._stems_separate(ws, meta, data)
+                return
             nch = int(meta.get("nch") or 2)
             nframes = int(meta.get("nframes") or (data.size // nch))
             sr = int(meta.get("sample_rate") or 48000)
@@ -781,6 +799,83 @@ class NovaBridgeServer:
             logger.error(f"RENDER : {e}")
             await self._send(ws, build_render_frame({"action": "RENDER", "req_id": meta.get("req_id"),
                                                      "success": False, "error": str(e)}, None))
+
+
+def _stems_server_methods():
+    """Actions de séparation de stems (ajoutées à NovaBridgeServer)."""
+
+    async def _a_stems_status(self, ws, req):
+        self._reply(ws, req, {"success": True, **self.stems.status()})
+
+    async def _a_stems_install(self, ws, req):
+        variant = str(req.get("variant") or "cpu")
+        if variant not in ("cpu", "cuda", "auto"):
+            variant = "cpu"
+
+        def on_event(ev):
+            msg = {"action": "STEMS_EVENT", "kind": "install", **ev}
+            for c in list(self.clients):
+                self.loop.call_soon_threadsafe(lambda c=c: asyncio.ensure_future(self._send(c, msg)))
+
+        started = self.stems.start_install(on_event, variant=variant)
+        logger.info("🧩 Installation de la séparation de stems " + ("lancée" if started else "déjà en cours"))
+        self._reply(ws, req, {"success": True, "started": started, **self.stems.status()})
+
+    async def _a_stems_cancel(self, ws, req):
+        if req.get("install"):
+            ok = self.stems.cancel_install()
+        else:
+            ok = self.stems.cancel(str(req.get("job_id") or ""))
+        self._reply(ws, req, {"success": True, "cancelled": ok})
+
+    async def _stems_separate(self, ws, meta: dict, data):
+        req_id = meta.get("req_id")
+        job_id = str(meta.get("job_id") or req_id)
+        try:
+            nch = max(1, min(2, int(meta.get("nch") or 2)))
+            nframes = int(meta.get("nframes") or (data.size // nch))
+            sr = int(meta.get("sample_rate") or 48000)
+            if nframes < sr // 2:
+                raise stems_service.StemsError("Clip trop court pour être séparé (une demi-seconde minimum).")
+            if nframes > sr * stems_service.MAX_SECONDS:
+                raise stems_service.StemsError("Clip trop long (20 minutes maximum) : coupe-le avant de le séparer.")
+            if not self.stems.installed():
+                raise stems_service.StemsNotInstalled()
+            audio = data[: nframes * nch].reshape(nframes, nch).T
+            outdir = self.stems.output_dir(str(meta.get("project") or "Projet"), str(meta.get("clip") or "clip"))
+            outdir.mkdir(parents=True, exist_ok=True)
+            src = outdir / "Original.wav"
+            stems_service.write_wav_float(src, audio, sr)
+
+            def on_event(ev):
+                msg = {"action": "STEMS_EVENT", "kind": "separate", "job_id": job_id, **ev}
+                self.loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._send(ws, msg)))
+
+            t = time.time()
+            res = await self.loop.run_in_executor(
+                self.stems_pool, lambda: self.stems.separate(job_id, src, outdir, int(meta.get("stems") or 4), on_event))
+            logger.info(f"🎚️ Stems ({len(res['stems'])}) : {nframes / sr:.1f} s séparées en {time.time() - t:.1f} s ({res['device']})")
+            for i, s in enumerate(res["stems"]):
+                audio_s, sr_s = await self.loop.run_in_executor(self.misc_pool, stems_service.read_wav, s["path"])
+                head = {"action": "STEMS_STEM", "req_id": req_id, "job_id": job_id, "key": s["key"],
+                        "label": s["label"], "index": i, "count": len(res["stems"]), "nch": int(audio_s.shape[0]),
+                        "nframes": int(audio_s.shape[1]), "sample_rate": sr_s, "path": s["path"]}
+                await self._send(ws, build_render_frame(head, audio_s.T.reshape(-1)))
+            await self._send(ws, build_render_frame({"action": "STEMS_SEPARATE", "req_id": req_id, "job_id": job_id,
+                                                     "success": True, "nch": 0, "nframes": 0, **res}, None))
+        except Exception as e:
+            code = ("not_installed" if isinstance(e, stems_service.StemsNotInstalled)
+                    else "cancelled" if isinstance(e, stems_service.StemsCancelled) else "error")
+            if code != "cancelled":
+                logger.error(f"STEMS_SEPARATE : {e}")
+            await self._send(ws, build_render_frame({"action": "STEMS_SEPARATE", "req_id": req_id, "job_id": job_id,
+                                                     "success": False, "error": str(e), "code": code}, None))
+
+    for fn in (_a_stems_status, _a_stems_install, _a_stems_cancel, _stems_separate):
+        setattr(NovaBridgeServer, fn.__name__, fn)
+
+
+_stems_server_methods()
 
 
 def main():

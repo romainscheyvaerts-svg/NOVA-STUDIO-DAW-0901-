@@ -17,7 +17,10 @@ if not os.path.isfile('build/ui-bundle/desktop-ui.json'):
 datas += [('build/ui-bundle', 'ui')]
 binaries = []
 hiddenimports = ['asio_bridge', 'asio_control_panel', 'nova_bridge_server', 'vst_host', 'vst_probe', 'license_watch',
-                 'comtypes', 'comtypes.client']
+                 'stems_service', 'stems_install', 'comtypes', 'comtypes.client']
+# Séparation de stems (module optionnel installé à la demande) : le moteur est copié
+# depuis l'appli vers %LOCALAPPDATA%\NovaStudio\stems et lancé avec le Python de ce module.
+datas += [('../bridge-python/stems_worker.py', '.')]
 hiddenimports += collect_submodules('websockets')
 
 # pont ASIO : PortAudio compilé avec ASIO (_sounddevice_data)

@@ -26,6 +26,7 @@ import RangeActionsBar from './RangeActionsBar';
 import type { EditCommands } from '../hooks/useEditCommands';
 import { bufferDurationOf } from '../hooks/useEditCommands';
 import { CrossfadeCurve } from '../types';
+import { STEMS_TOOLTIP } from '../services/StemSeparation';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -73,6 +74,8 @@ interface ArrangementViewProps {
   onMoveClipsBy?: (items: {trackId:string, clipId:string, start:number}[], delta: number) => void;
   onSwapInstrument?: (trackId: string) => void; 
   onEditMidi?: (trackId: string, clipId: string) => void;
+  /** « Séparer en stems » (menu du clip audio) : voix, batterie, basse, autres. */
+  onSeparateStems?: (trackId: string, clipId: string) => void;
   onAudioDrop?: (trackId: string, url: string, name: string, time: number) => void;
   /** Points de punch (poignées rouges dans la règle). utils/punch */
   punch?: PunchSettings;
@@ -134,7 +137,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   markers = [], onAddMarker, onUpdateMarker, onDeleteMarker, onAddRegion, isPlaying = false,
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip, isRecording, recStartTime,
-  onCreatePattern, onSwapInstrument, onEditMidi, onAudioDrop, onMoveClipsBy,
+  onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy,
   punch, onUpdatePunch, editCommands
 }) => {
   const editPrefs = useEditPrefs();
@@ -1945,6 +1948,10 @@ useEffect(() => {
                 { label: 'Renommer…', icon: 'fa-i-cursor', shortcut: 'Ctrl+Maj+R', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'name' }); setClipContextMenu(null); }},
                 { label: 'Couleur du clip…', icon: 'fa-palette', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'color' }); setClipContextMenu(null); }},
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
+                ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
+                  { label: 'Séparer en stems…', icon: 'fa-layer-group', title: STEMS_TOOLTIP,
+                    onClick: () => { onSeparateStems(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); } }
+                ] : []),
                 ...(clipContextMenu.clip.type === TrackType.MIDI && onEditMidi ? [
                   { label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); }}
                 ] : []),

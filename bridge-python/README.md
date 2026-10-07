@@ -41,6 +41,29 @@ Les plugins VST3 installés sur le PC, utilisables dans Nova Studio (navigateur)
 
 Le protocole complet est décrit en tête de `nova_bridge_server.py`.
 
+### v8 – séparation de stems (module optionnel)
+Comme Stem Splitter (Logic) ou Stem Separation (FL Studio) : clic droit sur un clip
+audio → « Séparer en stems… » → 2 stems (voix / instru) ou 4 (voix, batterie, basse,
+autres), en nouvelles pistes calées sur le clip.
+
+- **Rien dans l'installateur** : le module (~0,7 Go une fois installé) est téléchargé
+  à la demande par `stems_install.py`, bouton « Installer la séparation de stems »
+  dans NOVA, dans `%LOCALAPPDATA%\NovaStudio\stems\` (Python 3.12 via `uv`,
+  PyTorch 2.8 CPU, Demucs 4.0.1, modèle `htdemucs`). Supprimer ce dossier le désinstalle.
+  `--variant cuda` installe PyTorch CUDA 12.8 (bien plus gros, plus rapide si la
+  carte NVIDIA est active ; repli CPU automatique sinon).
+- `stems_service.py` (dans le pont) lance `stems_worker.py` avec le Python du module,
+  caché (CREATE_NO_WINDOW), progression JSON, annulation (processus tué), erreurs claires.
+- WAV écrits dans `Documents\Nova Studio\Stems\<projet>\<clip> <date>\`
+  (`Original.wav`, `Voix.wav`, `Instru.wav` ou `Batterie.wav`, `Basse.wav`, `Autres.wav`).
+- Tests : `venv\Scripts\python.exe -m unittest discover -s tests -p "test_stems*.py"`.
+- Licences : Demucs (code et modèles pré-entraînés publiés avec) MIT, Meta Platforms ;
+  PyTorch BSD-3 ; torchaudio BSD-2 ; uv MIT/Apache-2.0 ; python-build-standalone
+  (Python PSF) ; soundfile BSD-3 / libsndfile LGPL-2.1 (bibliothèque dynamique) ;
+  julius, openunmix, dora-search, einops MIT ; lameenc LGPL-3 (dépendance de Demucs pour
+  le MP3, inutilisée par NOVA). Tout est téléchargé depuis PyPI / pytorch.org sur le PC
+  de l'utilisateur : rien n'est redistribué dans l'installateur de Nova Studio.
+
 **Pour l'artiste :** lancer `NovaVSTBridge.exe`, laisser la fenêtre ouverte,
 puis dans Nova Studio (sur ordinateur) : onglet **VST** → « Connecter le pont VST ».
 
