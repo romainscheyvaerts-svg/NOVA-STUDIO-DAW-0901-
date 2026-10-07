@@ -13,6 +13,8 @@ import { visibleEnvelope } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
 import { useSimpleMode } from '../utils/simpleMode';
 import { gainToDbText } from '../utils/db';
+import { PunchSettings } from '../types';
+import { hasPunchZone, movePunchPoint } from '../utils/punch';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -61,6 +63,9 @@ interface ArrangementViewProps {
   onSwapInstrument?: (trackId: string) => void; 
   onEditMidi?: (trackId: string, clipId: string) => void;
   onAudioDrop?: (trackId: string, url: string, name: string, time: number) => void;
+  /** Points de punch (poignées rouges dans la règle). utils/punch */
+  punch?: PunchSettings;
+  onUpdatePunch?: (patch: Partial<PunchSettings>) => void;
 }
 
 const FADE_HANDLE_PX = 14;
@@ -106,8 +111,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   markers = [], onAddMarker, onUpdateMarker, onDeleteMarker, onAddRegion, isPlaying = false,
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip, isRecording, recStartTime,
-  onCreatePattern, onSwapInstrument, onEditMidi, onAudioDrop, onMoveClipsBy
+  onCreatePattern, onSwapInstrument, onEditMidi, onAudioDrop, onMoveClipsBy,
+  punch, onUpdatePunch
 }) => {
+  // Poignée de punch en cours de déplacement (règle).
+  const punchDragRef = useRef<'IN' | 'OUT' | null>(null);
   const [activeTool, setActiveTool] = useState<EditorTool>('SELECT');
   const [zoomV, setZoomV] = useState(120); 
   const [zoomH, setZoomH] = useState(40);  
@@ -639,11 +647,35 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
             return;
         }
 
+        // Poignées de punch (bas de la règle) : avant la boucle, qui a une grande zone d'accroche.
+        if (e.button !== 2 && onUpdatePunch && punch && hasPunchZone(punch) && localY >= 22) {
+            const grab = touchRef.current ? 14 : 7;
+            const dIn = Math.abs(x - punch.punchIn * zoomH), dOut = Math.abs(x - punch.punchOut * zoomH);
+            if (Math.min(dIn, dOut) <= grab) {
+                e.preventDefault();
+                punchDragRef.current = dIn <= dOut ? 'IN' : 'OUT';
+                return;
+            }
+        }
+
         if (e.button === 2 && onAddMarker) {
             e.preventDefault();
             const markerTime = getSnappedTime(time, bpm, gridSize, useSnap);
             const bar = (60 / (bpm || 120)) * 4;
+            const pz = punch || { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 };
+            const punchItems: ContextMenuItem[] = onUpdatePunch ? [
+                { label: 'Punch-in ici', icon: 'fa-right-to-bracket', onClick: () => {
+                    const base = hasPunchZone(pz) && pz.punchOut > markerTime ? pz : { ...pz, punchOut: markerTime + bar };
+                    onUpdatePunch(movePunchPoint({ ...base, punchIn: markerTime }, 'IN', markerTime)); setContextMenu(null); } },
+                { label: 'Punch-out ici', icon: 'fa-right-from-bracket', onClick: () => {
+                    const base = hasPunchZone(pz) && pz.punchIn < markerTime ? pz : { ...pz, punchIn: Math.max(0, markerTime - bar) };
+                    onUpdatePunch(movePunchPoint({ ...base, punchOut: markerTime }, 'OUT', markerTime)); setContextMenu(null); } },
+                ...(loopEnd > loopStart + 0.05 ? [{ label: 'Punch = la boucle', icon: 'fa-repeat', onClick: () => { onUpdatePunch({ punchIn: loopStart, punchOut: loopEnd }); setContextMenu(null); } }] : []),
+                ...(hasPunchZone(pz) ? [{ label: 'Effacer les points de punch', icon: 'fa-xmark', onClick: () => { onUpdatePunch({ enabled: false, punchIn: 0, punchOut: 0 }); setContextMenu(null); } }] : []),
+            ] : [];
             setContextMenu({ x: e.clientX, y: e.clientY, items: [
+                ...punchItems,
+                ...(punchItems.length ? ['separator' as const] : []),
                 { label: 'Ajouter un marqueur ici', icon: 'fa-map-pin', onClick: () => { onAddMarker(markerTime); setContextMenu(null); } },
                 ...(onAddRegion ? [
                     { label: 'Créer une région ici (8 mesures)', icon: 'fa-arrows-left-right', onClick: () => { onAddRegion(markerTime, markerTime + bar * 8); setContextMenu(null); } },
@@ -802,6 +834,13 @@ const handleMouseMove = (e: React.MouseEvent) => {
     const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
     const useSnap = snapEnabled && !isShiftDownRef.current;
+
+    if (punchDragRef.current && punch && onUpdatePunch) {
+        const tSnap = Math.max(0, getSnappedTime(x / zoomH, bpm, gridSize, useSnap));
+        const next = movePunchPoint(punch, punchDragRef.current, tSnap);
+        onUpdatePunch({ punchIn: next.punchIn, punchOut: next.punchOut });
+        return;
+    }
 
     const rd = regionDragRef.current;
     if (rd && onUpdateMarker) {
@@ -979,6 +1018,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
 
 const handleMouseUp = () => {
     regionDragRef.current = null;
+    punchDragRef.current = null;
     if (gainDragRef.current) { gainDragRef.current = null; setGainTip(null); }
     setDragAction(null);
     setActiveClip(null);
@@ -1373,6 +1413,35 @@ const drawTimeline = useCallback(() => {
         }
     });
 
+    // Zone de punch (Pro Tools : barre rouge dans la règle, points d'entrée / de sortie).
+    if (punch && hasPunchZone(punch)) {
+        const px0 = timeToPixels(punch.punchIn) - scrollX;
+        const px1 = timeToPixels(punch.punchOut) - scrollX;
+        if (px1 > -20 && px0 < w + 20) {
+            const on = !!punch.enabled;
+            ctx.fillStyle = on ? 'rgba(239, 68, 68, 0.55)' : 'rgba(239, 68, 68, 0.2)';
+            ctx.fillRect(px0, 31, px1 - px0, 8);
+            if (on) {
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.06)';
+                ctx.fillRect(px0, 40, px1 - px0, h - 40);
+                ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath(); ctx.moveTo(px0 + 0.5, 40); ctx.lineTo(px0 + 0.5, h); ctx.moveTo(px1 - 0.5, 40); ctx.lineTo(px1 - 0.5, h); ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            // Poignées : crochets d'entrée et de sortie.
+            ctx.fillStyle = on ? '#ef4444' : 'rgba(239, 68, 68, 0.6)';
+            ctx.beginPath(); ctx.moveTo(px0, 26); ctx.lineTo(px0 + 7, 26); ctx.lineTo(px0, 40); ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(px1, 26); ctx.lineTo(px1 - 7, 26); ctx.lineTo(px1, 40); ctx.closePath(); ctx.fill();
+            if (px1 - px0 > 50) {
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 8px Inter';
+                ctx.fillText('PUNCH', px0 + 9, 38);
+            }
+        }
+    }
+
     // Rectangle de selection
     if (marquee) {
         const mx = marquee.x0 - scrollX, my = marquee.y0 - scrollTop;
@@ -1387,7 +1456,7 @@ const drawTimeline = useCallback(() => {
     }
 
     // La tete de lecture est dessinee sur le calque superieur (drawPlayhead).
-}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee]);
+}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch]);
 
 // Calque statique (grille, clips, formes d'onde, reperes) : redessine seulement
 // quand son contenu change, plus a chaque image de la lecture.

@@ -486,6 +486,16 @@ export interface PunchSettings {
   punchOut: number;   // time in seconds
   preRoll: number;    // seconds before punch in
   postRoll: number;   // seconds after punch out
+  /** Pré-roll / post-roll en mesures (prioritaires sur les secondes ci-dessus). utils/punch.ts */
+  preRollBars?: number;
+  postRollBars?: number;
+  /** Pré-roll actif. Non réglé : actif en punch seulement (comportement d'origine). */
+  preRollOn?: boolean;
+  postRollOn?: boolean;
+  /** Crossfade aux bords du punch (ms). 10 par défaut. */
+  crossfadeMs?: number;
+  /** QuickPunch : REC bascule l'enregistrement pendant la lecture, sans l'arrêter. */
+  quickPunch?: boolean;
 }
 
 // Automation curve types (inspired by Ableton/Logic)
