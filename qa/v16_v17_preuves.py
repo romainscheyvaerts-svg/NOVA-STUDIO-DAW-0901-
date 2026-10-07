@@ -275,6 +275,13 @@ with sync_playwright() as p:
         "tranches_par_pas_apres_remix": r5["slotOrder"], "positions_remixe_en_pas": [h["inBar"] for h in r5["hits"] if h["bar"] == 1],
         "verdict": "OK : 8 tranches rejouées, même ensemble de notes, ordre différent" if seq0 == LOOP_FREQS and seq1 == expect1 and sorted(seq1) == sorted(LOOP_FREQS) and seq1 != seq0 else "À VÉRIFIER",
     }
+    # ===== 4. Annuler (Ctrl+Z) : le remix est défait, l'ordre d'origine revient =====
+    page.mouse.click(5, 450); page.keyboard.press("Control+z"); page.wait_for_timeout(900)
+    r6 = render(page, 1, None, cands=LOOP_FREQS)
+    preuves["4_annuler"] = {
+        "ordre_apres_ctrl_z": [h["note"] for h in r6["hits"] if h["bar"] == 1],
+        "verdict": "OK : Ctrl+Z défait le remix (ordre d'origine)" if r6["slotOrder"] == r4["slotOrder"] and [h["note"] for h in r6["hits"] if h["bar"] == 1] == LOOP_FREQS else "À VÉRIFIER",
+    }
     btn(page, "Son et mix du pad Tranche 3").click(); page.wait_for_timeout(600)
     page.screenshot(path=str(OUT / "pc_06_pad_tranche_reglages.png"))
     preuves["erreurs_page"] = log.errors()[:10]
