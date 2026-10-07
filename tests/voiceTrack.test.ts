@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TrackType } from '../types';
-import { nextVoiceName, planVoiceTrack } from '../utils/voiceTrack';
+import { nextNumberedName, nextVoiceName, planVoiceTrack } from '../utils/voiceTrack';
 import { makeTrack } from './helpers/fixtures';
 
 const session = () => [
@@ -35,6 +35,11 @@ describe('planVoiceTrack (B2 : « + Piste voix »)', () => {
   it('sans bus des voix : sortie master', () => {
     const t = session().filter(x => x.id !== 'bus-vox');
     expect(planVoiceTrack(t, null).outputTrackId).toBe('master');
+  });
+
+  it('bus numérotés : Bus 1, Bus 2 (plus de « Group Bus »)', () => {
+    expect(nextNumberedName([makeTrack({ name: 'BUS VOX' })], 'Bus')).toBe('Bus 1');
+    expect(nextNumberedName([makeTrack({ name: 'BUS 1' })], 'Bus')).toBe('Bus 2');
   });
 
   it('nom unique : VOIX, VOIX 2, VOIX 3…', () => {

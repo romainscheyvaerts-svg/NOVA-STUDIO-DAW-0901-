@@ -112,7 +112,7 @@ const IOSection: React.FC<{ track: Track, allTracks: Track[], onUpdate: (t: Trac
                     onChange={(e) => onUpdate({ ...track, outputTrackId: e.target.value })}
                 >
                     {validDestinations.map(dest => (
-                        <option key={dest.id} value={dest.id}>{dest.name}</option>
+                        <option key={dest.id} value={dest.id}>{dest.id === 'master' ? 'Master (sortie)' : trackDisplayName(dest, allTracks)}</option>
                     ))}
                 </select>
             </div>
@@ -131,9 +131,15 @@ const ChannelStrip: React.FC<{
   onDropPlugin?: (trackId: string, type: PluginType, metadata?: any) => void,
   onRequestAddPlugin?: (trackId: string, x: number, y: number) => void,
   onCopyPluginToTrack?: (sourceTrackId: string, plugin: PluginInstance, destTrackId: string) => void,
-  onReorderPlugins?: (trackId: string, fromIndex: number, toIndex: number) => void
-}> = ({ track, allTracks, onUpdate, isMaster = false, onOpenPlugin, onToggleBypass, onRemovePlugin, onDropPlugin, onRequestAddPlugin, onCopyPluginToTrack, onReorderPlugins }) => {
+  onReorderPlugins?: (trackId: string, fromIndex: number, toIndex: number) => void,
+  /** Ouvrir tout de suite le renommage (nouveau bus, audit G20). */
+  autoRename?: boolean,
+  onRenameDone?: () => void
+}> = ({ track, allTracks, onUpdate, isMaster = false, onOpenPlugin, onToggleBypass, onRemovePlugin, onDropPlugin, onRequestAddPlugin, onCopyPluginToTrack, onReorderPlugins, autoRename, onRenameDone }) => {
   const [isDragOver, setIsDragOver] = useState(false);
+  // Renommer la tranche : double-clic sur le nom (G12), ou tout de suite pour un nouveau bus.
+  const [renaming, setRenaming] = useState(!!autoRename);
+  useEffect(() => { if (autoRename) setRenaming(true); }, [autoRename]);
   const faderTrackRef = useRef<HTMLDivElement>(null);
   const [insertList, setInsertList] = useState<DOMRect | null>(null);
   const insertRows = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? MIXER_INSERT_ROWS.touch : MIXER_INSERT_ROWS.mouse;
@@ -363,12 +369,34 @@ const ChannelStrip: React.FC<{
         </div>
         
         <div className={`mt-3 h-10 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-black/40 border-white/10 text-white'}`}>
-           <div className="w-1.5 h-full mr-2 rounded-full" style={{ backgroundColor: track.color }} />
-           <span className="truncate">{track.name}</span>
+           <div className="w-1.5 h-full mr-2 rounded-full shrink-0" style={{ backgroundColor: track.color }} />
+           {renaming && !isMaster ? (
+             <input ref={el => { if (el && document.activeElement !== el) { el.focus({ preventScroll: true }); el.select(); } }} defaultValue={track.name} aria-label={`Nouveau nom de ${track.name}`} data-testid={`strip-rename-${track.id}`}
+               onKeyDown={e => {
+                 if (e.key === 'Enter') e.currentTarget.blur();
+                 if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setRenaming(false); onRenameDone?.(); }
+               }}
+               onBlur={e => { const v = e.currentTarget.value.trim(); setRenaming(false); onRenameDone?.(); if (v && v !== track.name) onUpdate({ ...track, name: v }); }}
+               className="min-w-0 flex-1 bg-black/60 border border-cyan-500/50 rounded px-1 text-[11px] font-bold normal-case text-white outline-none" />
+           ) : (
+             <span className="truncate" title={isMaster ? undefined : `${trackDisplayName(track, allTracks)} : double-clic pour renommer`}
+               onDoubleClick={() => { if (!isMaster) setRenaming(true); }}>{trackDisplayName(track, allTracks)}</span>
+           )}
         </div>
       </div>
     </div>
   );
+};
+
+/** Menu « Créer un groupe » ancré à son bouton (G21), recalé dans l'écran, liste entière visible. */
+const groupMenuPos = (btn: HTMLElement | null, rows: number): React.CSSProperties => {
+  const vh = window.innerHeight, vw = window.innerWidth, w = 256;
+  const h = Math.min(vh - 16, 130 + rows * 36);
+  const r = btn?.getBoundingClientRect();
+  if (!r) return { left: 8, top: 8, maxHeight: vh - 16 };
+  const left = r.right + 8 + w <= vw - 8 ? r.right + 8 : Math.max(8, r.left - 8 - w);
+  const top = Math.max(8, Math.min(r.top + r.height / 2 - h / 2, vh - 8 - h));
+  return { left, top, maxHeight: vh - 16 };
 };
 
 // Track Group Header Panel (inspired by Pro Tools/Reaper)
@@ -509,6 +537,32 @@ const MixerView: React.FC<{
   // Get selected tracks for grouping
   const [selectedForGroup, setSelectedForGroup] = useState<Set<string>>(new Set());
   const [showGroupMenu, setShowGroupMenu] = useState(false);
+  const groupBtnRef = useRef<HTMLButtonElement>(null);
+  const mixerScrollRef = useRef<HTMLDivElement>(null);
+  // Nouveau bus (G20) : on le montre et on ouvre son renommage tout de suite.
+  const busWanted = useRef(false);
+  const knownBuses = useRef<Set<string>>(new Set(busTracks.map(t => t.id)));
+  const [renameBusId, setRenameBusId] = useState<string | null>(null);
+  const busKey = busTracks.map(t => t.id).join('|');
+  useEffect(() => {
+    const fresh = busTracks.find(t => !knownBuses.current.has(t.id));
+    knownBuses.current = new Set(busTracks.map(t => t.id));
+    if (fresh && busWanted.current) {
+      busWanted.current = false;
+      setRenameBusId(fresh.id);
+      // Défilement de la console seulement (scrollIntoView faisait aussi glisser toute la page),
+      // en laissant le bus à gauche du master collé à droite.
+      requestAnimationFrame(() => {
+        const c = mixerScrollRef.current;
+        const el = c?.querySelector<HTMLElement>(`[data-strip-id="${CSS.escape(fresh.id)}"]`);
+        const master = c?.querySelector<HTMLElement>('[data-strip-id="master"]');
+        if (!c || !el) return;
+        const visibleW = c.clientWidth - (master?.offsetWidth || 0);
+        c.scrollTo({ left: Math.max(0, el.offsetLeft - Math.max(0, (visibleW - el.offsetWidth) / 2)), behavior: 'smooth' });
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busKey]);
   
   // Handle linked group actions
   const handleGroupedTrackUpdate = useCallback((previous: Track, updated: Track) => {
@@ -542,7 +596,7 @@ const MixerView: React.FC<{
   }, [trackGroups, tracks, onUpdateTrack]);
   
   return (
-    <div className="flex-1 flex overflow-x-auto bg-[#08090b] custom-scroll h-full snap-x snap-mandatory">
+    <div ref={mixerScrollRef} className="flex-1 flex overflow-x-auto bg-[#08090b] custom-scroll h-full snap-x snap-mandatory">
       {/* Track Groups Panel (inspired by Pro Tools) */}
       {trackGroups.length > 0 && (
         <div className="flex border-r border-white/10 bg-black/20">
@@ -590,16 +644,17 @@ const MixerView: React.FC<{
       
       {/* ADD BUS / CREATE GROUP Section */}
       <div className="flex flex-col items-center justify-center px-2 border-r border-white/5 min-w-[60px] space-y-3">
-         <button onClick={onAddBus} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group" title="Ajouter un bus" aria-label="Ajouter un bus">
+         <button onClick={() => { busWanted.current = true; onAddBus?.(); }} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group" title="Ajouter un bus (piste de regroupement : plusieurs pistes y passent pour être traitées ensemble)" aria-label="Ajouter un bus">
             <i className="fas fa-plus group-hover:scale-125 transition-transform"></i>
          </button>
-         <span className="text-[8px] font-black text-amber-600 uppercase writing-vertical rotate-180">+ BUS</span>
+         <span className="text-[10px] font-bold text-amber-500 whitespace-nowrap">+ Bus</span>
          
          {/* Create Group Button (inspired by Pro Tools) */}
          {onCreateGroup && (
            <>
              <div className="w-8 h-px bg-white/10 my-1"></div>
              <button 
+               ref={groupBtnRef}
                onClick={() => setShowGroupMenu(!showGroupMenu)}
                className="w-10 h-10 rounded-xl border border-dashed border-purple-500/30 text-purple-400 hover:bg-purple-500/10 flex items-center justify-center transition-all relative"
                title="Créer un groupe de pistes"
@@ -608,14 +663,16 @@ const MixerView: React.FC<{
              >
                <i className="fas fa-layer-group text-[11px]"></i>
              </button>
-             <span className="text-[7px] font-black text-purple-500 uppercase writing-vertical rotate-180">GROUP</span>
+             <span className="text-[10px] font-bold text-purple-400 whitespace-nowrap">Grouper</span>
              
              {/* Group Creation Menu */}
              {showGroupMenu && (
-               <div className="absolute left-16 bottom-20 bg-[#1a1c22] border border-white/20 rounded-xl shadow-2xl z-[100] p-3 w-64">
-                 <div className="text-[10px] font-black uppercase text-slate-400 mb-3">Créer un groupe</div>
+               <div data-testid="group-menu" className="fixed bg-[#1a1c22] border border-white/20 rounded-xl shadow-2xl z-[700] p-3 w-64 flex flex-col"
+                 style={groupMenuPos(groupBtnRef.current, audioTracks.length)}>
+                 <div className="text-[11px] font-bold text-slate-300 mb-1">Créer un groupe</div>
+                 <p className="text-[10px] text-slate-500 mb-2">Coche les pistes qui bougent ensemble (volume, muet, solo).</p>
                  
-                 <div className="space-y-2 max-h-40 overflow-y-auto mb-3">
+                 <div className="space-y-1 min-h-0 overflow-y-auto mb-3">
                    {audioTracks.map(t => (
                      <label 
                        key={t.id}
@@ -665,11 +722,12 @@ const MixerView: React.FC<{
          )}
       </div>
 
-      {busTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={(updatedTrack) => onUpdateTrack(updatedTrack)} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>)}
+      {busTracks.map(t => <div key={t.id} data-strip-id={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} autoRename={renameBusId === t.id} onRenameDone={() => setRenameBusId(null)} onUpdate={(updatedTrack) => onUpdateTrack(updatedTrack)} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>)}
       <div className="w-4 bg-black/30 border-r border-white/5" />
       {sendTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>)}
-      <div className="w-10 bg-black/50 border-r border-white/5" />
-      <div className="snap-start"><ChannelStrip track={masterTrack || { id: 'master', name: 'MASTER BUS', type: TrackType.BUS, color: '#00f2ff', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: '', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0 }} allTracks={tracks} onUpdate={onUpdateTrack} isMaster={true} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>
+      <div className="w-10 shrink-0 bg-black/50 border-r border-white/5" />
+      {/* Master toujours visible à droite (G20), comme Logic / Pro Tools. */}
+      <div className="snap-start sticky right-0 z-20 shrink-0 shadow-[-16px_0_24px_rgba(0,0,0,0.65)]" data-strip-id="master"><ChannelStrip track={masterTrack || { id: 'master', name: 'MASTER BUS', type: TrackType.BUS, color: '#00f2ff', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: '', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0 }} allTracks={tracks} onUpdate={onUpdateTrack} isMaster={true} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>
     </div>
   );
 };

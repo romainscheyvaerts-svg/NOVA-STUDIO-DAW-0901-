@@ -99,7 +99,7 @@ import { anchorClipsToWindow, applyPreviewOnEngineer, clearPreviewOnEngineer, ha
 import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from './services/Billing';
 import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
-import { planVoiceTrack, revealTrack } from './utils/voiceTrack';
+import { nextNumberedName, planVoiceTrack, revealTrack } from './utils/voiceTrack';
 import { SEND_LABELS } from './utils/sendLabels';
 import { BeatLoadCancelled, beatLoadCancelledByUser, isBeatLoading, loadBeatAudio } from './utils/beatLoad';
 import BeatLoadBanner from './components/BeatLoadBanner';
@@ -2727,7 +2727,8 @@ function Studio() {
     setAiNotification("🎹 Choisis un instrument dans le navigateur");
     setTimeout(() => setAiNotification(null), 2500);
   }, [setState, isMobile]);
-  const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, "Group Bus"); }, [handleCreateTrack]);
+  // « Bus 1 », « Bus 2 »… (la console le montre et ouvre tout de suite son renommage).
+  const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, nextNumberedName(stateRef.current.tracks, 'Bus')); }, [handleCreateTrack]);
   const handleToggleBypass = useCallback((trackId: string, pluginId: string) => {
     setState(produce((draft: DAWState) => {
         const track = draft.tracks.find(t => t.id === trackId);
@@ -5575,7 +5576,7 @@ function Studio() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full overflow-hidden relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
+    <div className="flex flex-col h-full w-full overflow-hidden [overflow:clip] relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
       {saveState.isSaving && <SaveOverlay progress={saveState.progress} message={saveState.message} />}
 
       {/* TransportBar - Desktop, Tablet ET Mobile avec menu hamburger */}

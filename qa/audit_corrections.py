@@ -220,7 +220,46 @@ def g2(b, R):
     ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2}
+def g20(b, R):
+    ctx, pg = mk(b, "pc", "avance", "g20")
+    open_studio(pg, R)
+    open_console(pg)
+    S(pg, "g20", "01_console")
+    m = pg.locator("[data-strip-id='master']")
+    if m.count():
+        bb = m.first.bounding_box()
+        R["master_visible"] = bool(bb) and bb["x"] + bb["width"] <= 1600 + 2
+    pg.get_by_role("button", name="Ajouter un bus").first.click(); pg.wait_for_timeout(900)
+    S(pg, "g20", "02_nouveau_bus")
+    inp = pg.locator("[data-testid^='strip-rename-']")
+    R["renommage_ouvert"] = inp.count() > 0
+    if inp.count():
+        R["nom_propose"] = inp.first.input_value()
+        inp.first.fill("Bus voix"); inp.first.press("Enter"); pg.wait_for_timeout(400)
+    R["bus_affiche"] = "Bus voix" in body(pg) or "BUS VOIX" in body(pg)
+    S(pg, "g20", "03_renomme")
+    g = pg.get_by_role("button", name="Créer un groupe de pistes")
+    if g.count():
+        g.first.click(); pg.wait_for_timeout(500)
+        S(pg, "g21", "01_menu_groupe")
+        menu = pg.locator("[data-testid=group-menu]")
+        if menu.count():
+            bb = menu.first.bounding_box()
+            R["menu_groupe"] = {"x": round(bb["x"]), "y": round(bb["y"]), "h": round(bb["height"]), "dans_ecran": bb["y"] >= 0 and bb["y"] + bb["height"] <= 900}
+            R["menu_pistes"] = menu.first.inner_text()[:300]
+        pg.keyboard.press("Escape")
+    # Export (G19) : en mode avancé, on arrive directement sur Mix / Stems / Voix seules.
+    pg.mouse.click(800, 450); pg.wait_for_timeout(200)
+    ex = pg.locator("button[title*='Exporter'], button[aria-label*='Exporter']").locator("visible=true")
+    if ex.count():
+        ex.first.click(); pg.wait_for_timeout(1200)
+        S(pg, "g19", "01_export_avance")
+        R["export_stems_visible"] = pg.locator("[data-testid=export-source-STEMS]").count() > 0
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]

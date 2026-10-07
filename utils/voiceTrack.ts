@@ -26,6 +26,14 @@ export function nextVoiceName(tracks: Track[], base = 'VOIX'): string {
   return `${base} ${n}`;
 }
 
+/** « Bus 1 », « Bus 2 »… : premier numéro libre (audit G20, avant « Group Bus »). */
+export function nextNumberedName(tracks: Track[], base: string): string {
+  const used = new Set(tracks.map(t => (t.name || '').trim().toUpperCase()));
+  let n = 1;
+  while (used.has(`${base} ${n}`.toUpperCase())) n++;
+  return `${base} ${n}`;
+}
+
 export function planVoiceTrack(tracks: Track[], selectedTrackId: string | null | undefined): VoiceTrackPlan {
   const selIdx = tracks.findIndex(t => t.id === selectedTrackId);
   const sel = selIdx >= 0 ? tracks[selIdx] : undefined;
