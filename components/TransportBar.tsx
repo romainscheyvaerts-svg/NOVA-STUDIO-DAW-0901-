@@ -283,22 +283,21 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             >
               <i className="fas fa-columns text-xs"></i>
             </button>
-            <div className="h-6 w-px bg-white/5" style={{ backgroundColor: 'var(--border-dim)' }}></div>
-             <div className="flex items-center space-x-1 pr-2 border-r border-white/5" style={{ borderColor: 'var(--border-dim)' }}>
+             <div className="flex items-center space-x-1 pr-1">
                 <button onClick={onUndo} disabled={!canUndo} title="Annuler (Ctrl+Z)" aria-label="Annuler" className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${canUndo ? 'bg-white/[0.05] hover:bg-white/10' : 'opacity-30 cursor-not-allowed'}`} style={{ color: canUndo ? 'var(--text-primary)' : 'var(--text-secondary)' }}><i className="fas fa-undo text-[10px]"></i></button>
                 <button onClick={onRedo} disabled={!canRedo} title="Rétablir (Ctrl+Y)" aria-label="Rétablir" className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${canRedo ? 'bg-white/[0.05] hover:bg-white/10' : 'opacity-30 cursor-not-allowed'}`} style={{ color: canRedo ? 'var(--text-primary)' : 'var(--text-secondary)' }}><i className="fas fa-redo text-[10px]"></i></button>
              </div>
              
              {/* FILE ACTIONS GROUP */}
-             <div className="flex items-center space-x-1 pr-2 border-r border-white/5" style={{ borderColor: 'var(--border-dim)' }}>
+             <div className="flex items-center space-x-1 pr-1">
                 {/* OPEN / LOAD */}
-                <button onClick={onOpenLoadMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white" title="Ouvrir un projet" aria-label="Ouvrir un projet">
+                <button onClick={onOpenLoadMenu} className="h-8 px-3 rounded-lg hidden min-[1700px]:flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white" title="Ouvrir un projet" aria-label="Ouvrir un projet">
                     <i className="fas fa-folder-open text-[10px]"></i>
                     <span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Ouvrir</span>
                 </button>
 
                 {/* SAVE */}
-                <button onClick={onOpenSaveMenu} className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white" title="Sauvegarder" aria-label="Sauvegarder">
+                <button onClick={onOpenSaveMenu} className="h-8 px-3 rounded-lg hidden min-[1700px]:flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white" title="Sauvegarder" aria-label="Sauvegarder">
                     <i className="fas fa-save text-[10px]"></i>
                     <span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Sauver</span>
                 </button>
@@ -335,7 +334,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              
              {/* SHARE (Only if logged in) */}
              {user && (
-                 <button onClick={onShareProject} title="Partager le projet" aria-label="Partager le projet" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Partager</span></button>
+                 <button onClick={onShareProject} title="Partager le projet" aria-label="Partager le projet" className="h-8 px-3 rounded-lg hidden min-[1700px]:flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-share-alt text-[10px]"></i><span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Partager</span></button>
              )}
              
              {/* MASTER NOVA (V15) */}
@@ -345,7 +344,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              <button onClick={onExportMix} title="Exporter le mix" aria-label="Exporter le mix" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span className="hidden 2xl:inline text-[10px] font-bold tracking-wide">Exporter</span></button>
              
              {/* ENGINE BUTTON */}
-             <button onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Audio</span></button>
+             <button onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg hidden min-[1700px]:flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Audio</span></button>
              
              {/* PDC Toggle */}
              {!simple && <button onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="PDC = calage de latence : NOVA retarde les autres pistes pour que les effets lents (VST, autotune) restent pile en rythme. Laisse-le allumé.">

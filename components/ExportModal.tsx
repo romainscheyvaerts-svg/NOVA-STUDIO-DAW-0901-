@@ -526,8 +526,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     <div className="space-y-3">
                         <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">1. Quoi et quelle durée</span>
                         
-                        <div className="grid grid-cols-2 gap-3">
-                             <div className="space-y-1 col-span-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                             <div className="space-y-1 sm:col-span-2">
                                 <span className="text-[9px] font-bold text-slate-400">Quoi</span>
                                 {/* Choix visibles d'un coup d'œil (avant : caché dans une liste) : Mix / Stems / Voix seules. */}
                                 <div role="radiogroup" aria-label="Quoi exporter" className="grid grid-cols-3 gap-1 rounded-lg border border-white/10 bg-black/40 p-1">
@@ -568,7 +568,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     <div className="space-y-3">
                         <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">2. Format et qualité</span>
                         
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-1">
                                 <label className="text-[9px] font-bold text-slate-400">Type de fichier</label>
                                 <select 
@@ -633,10 +633,10 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     <div className="space-y-3">
                         <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">3. Volume final</span>
                         <div className="flex flex-wrap gap-x-6 gap-y-2">
-                            <label className="flex items-center space-x-2 text-[10px] font-bold text-slate-300">
+                            <label className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-[10px] font-bold text-slate-300">
                                 <span>Volume</span>
                                 <select value={normalize} onChange={e => setNormalize(e.target.value as typeof normalize)} disabled={isRendering}
-                                    className="h-8 bg-black/40 border border-white/10 rounded-lg px-2 text-[10px] text-white font-bold focus:border-cyan-500 outline-none">
+                                    className="h-8 min-w-0 max-w-full bg-black/40 border border-white/10 rounded-lg px-2 text-[10px] text-white font-bold focus:border-cyan-500 outline-none">
                                     <option value="off">Tel quel (MP3 : plafonné vers -1 dB)</option>
                                     <option value="peak">Au plus fort sans saturer</option>
                                     <option value="lufs14">-14 LUFS (Spotify, YouTube)</option>
