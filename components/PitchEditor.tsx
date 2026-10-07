@@ -101,6 +101,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
     let alive = true;
     setStatus('loading'); setError(''); setAnalysis(null); setSel(new Set()); setManual(new Set());
     undoRef.current = []; renderCache.current = null;
+    if (clip.isReversed) { setStatus('error'); setError('Ce clip est inversé : remets-le à l’endroit (menu du clip) pour corriger sa justesse.'); return; }
     const src = editingSource(clip, id => audioBufferRegistry.has(id));
     const buffer = bufferOf(src.bufferId);
     if (!buffer || !src.bufferId) { setStatus('error'); setError("Le son de ce clip n'est pas chargé : lance la lecture une fois puis réessaie."); return; }
@@ -625,7 +626,10 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
           title="Remet la voix telle que tu l’as chantée (la version corrigée reste dans Ctrl+Z)"
           className="min-h-[42px] rounded-lg px-3 text-[12px] font-bold text-amber-300 hover:bg-amber-400/10">↩ Revenir à la prise d’origine</button>
       )}
-      <span className={`mr-auto text-[11px] text-slate-500 ${phone ? 'w-full' : ''}`}>{changed ? 'Rien n’est effacé : la prise d’origine est gardée.' : 'Aucune note retouchée pour l’instant.'}</span>
+      <span className={`mr-auto text-[11px] text-slate-500 ${phone ? 'w-full' : ''}`}>
+        {changed ? 'Rien n’est effacé : la prise d’origine est gardée.' : 'Aucune note retouchée pour l’instant.'}
+        {clip?.warp?.enabled && <span className="block text-amber-300/90">Ce clip suit le tempo : une fois corrigé, il ne se recalera plus tout seul si tu changes le BPM.</span>}
+      </span>
       <button type="button" onClick={onClose} className={`min-h-[42px] rounded-lg bg-white/5 px-4 text-[12px] font-bold text-slate-300 ${phone ? 'min-h-[48px] flex-1' : ''}`}>Annuler</button>
       <button type="button" onClick={() => void apply()} disabled={!changed || busy} data-testid="pitch-apply"
         title="Crée la version corrigée du clip (même durée, timbre gardé). Ctrl+Z pour annuler."

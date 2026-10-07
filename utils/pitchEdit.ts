@@ -104,7 +104,6 @@ export function correctedClipPatch(clip: Clip, opts: {
     offset: Math.max(0, opts.sourceOffset - opts.regionStart),
     // Un calage sur le tempo repartirait du son d'origine et perdrait la correction.
     warp: undefined,
-    isReversed: false,
     name: /justesse/i.test(baseName) ? baseName : `${baseName} (justesse)`,
     pitchEdit: info,
   };
