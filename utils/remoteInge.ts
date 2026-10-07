@@ -2,6 +2,7 @@ import {
   AutomationPoint, Clip, FreezeRef, PluginInstance, RemoteIngePhase, RemoteTrackInfo, SendFreeze, Track, TrackSend, TrackType,
 } from '../types';
 import { classifyPlugin } from './vstKnowledge';
+import { participantOf } from './collabPeers';
 import { freezeIndex, isFrozenBus, isTrackFrozen, isVst, pluginsSignature } from './freeze';
 import { makeFreezeBase, PRE_VOLUME } from './preFxEdits';
 import type { KnownPlugin, MixPlan } from './mixPlanner';
@@ -247,20 +248,42 @@ export const SLOT_LABEL: Record<string, string> = { lead: 'Lead', back: 'Backs',
  * l'audio sec : les éditions passent avant les effets). Ses effets et ses
  * envois (le travail de l'ingé) ne bougent pas.
  */
-export function applySendOnEngineer(tracks: Track[], p: RemoteSendPayload): { trackId: string; created: boolean } {
-  let t = tracks.find(x => x.remote?.peerTrackId === p.trackId);
+/**
+ * Ingé : la piste reçue de CET artiste (plusieurs artistes sur le même lien
+ * peuvent avoir une piste au même identifiant). Une piste reçue avant (sans
+ * auteur connu) revient au premier qui la renvoie ; sans auteur connu (ancien
+ * artiste), comme avant.
+ */
+export function engineerTrackFor(tracks: Track[], trackId: string, fromKey?: string | null): Track | undefined {
+  const k = fromKey ? participantOf(fromKey) : null;
+  const same = tracks.filter(x => x.remote?.peerTrackId === trackId);
+  if (!k) return same[0];
+  return same.find(x => x.remote?.peerKey === k) || same.find(x => !x.remote?.peerKey);
+}
+
+/** Le message (retour, accusé de réception) est-il pour moi ? Sans destinataire (ancien ingé) : oui. */
+export const remoteForMe = (to: string | null | undefined, myMemberKey: string | null | undefined): boolean =>
+  !to || participantOf(to) === participantOf(myMemberKey);
+
+export function applySendOnEngineer(tracks: Track[], p: RemoteSendPayload, from?: { key: string; name: string }): { trackId: string; created: boolean } {
+  let t = engineerTrackFor(tracks, p.trackId, from?.key);
   let created = false;
+  const fromKey = from?.key ? participantOf(from.key) : undefined;
   if (!t) {
     let id = p.trackId;
     for (let k = 2; tracks.some(x => x.id === id); k++) id = `${p.trackId}-ri${k > 2 ? k : ''}`;
     const slot = p.slot && SLOT_LABEL[p.slot];
+    let name = (slot && !p.name.toUpperCase().includes(slot.toUpperCase()) ? `${p.name} · ${slot}` : p.name).slice(0, 40);
+    // Deux artistes, même nom de piste : on précise de qui (« Voix · Sam »).
+    if (from?.name && tracks.some(x => x.name === name)) name = `${name} · ${from.name}`.slice(0, 48);
     t = {
-      id, name: (slot && !p.name.toUpperCase().includes(slot.toUpperCase()) ? `${p.name} · ${slot}` : p.name).slice(0, 40),
+      id, name,
       type: TrackType.AUDIO, color: p.color || '#22d3ee',
       isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1, pan: 0,
       outputTrackId: 'master', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0,
       collabOwner: 'artist',
-      remote: { peerTrackId: p.trackId },
+      ...(fromKey ? { collabOwnerKey: fromKey, collabOwnerName: from!.name, collabOwnerColor: p.color || '#22d3ee' } : {}),
+      remote: { peerTrackId: p.trackId, ...(fromKey ? { peerKey: fromKey } : {}) },
     };
     const at = tracks.findIndex(x => isBusTrack(x) || x.id === 'master');
     tracks.splice(at >= 0 ? at : tracks.length, 0, t);
@@ -275,7 +298,11 @@ export function applySendOnEngineer(tracks: Track[], p: RemoteSendPayload): { tr
   // Dégel : le rendu reste en cache (périmé), la chaîne réelle rejoue l'audio sec.
   t.isFrozen = false;
   delete t.frozenAuto;
-  t.remote = { ...(t.remote || { peerTrackId: p.trackId }), peerTrackId: p.trackId, recvV: p.v, recvSig: p.sig, ...(p.slot ? { slot: p.slot } : {}) };
+  t.remote = {
+    ...(t.remote || { peerTrackId: p.trackId }), peerTrackId: p.trackId, recvV: p.v, recvSig: p.sig, ...(p.slot ? { slot: p.slot } : {}),
+    ...(fromKey && !t.remote?.peerKey ? { peerKey: fromKey } : {}),
+  };
+  if (fromKey && !t.collabOwnerKey) { t.collabOwnerKey = fromKey; t.collabOwnerName = from!.name; }
   return { trackId: t.id, created };
 }
 
@@ -322,6 +349,8 @@ export interface RemoteReturnPayload {
   pan: number;
   /** Compensation de latence de la chaîne de l'ingé (affichage). */
   latencyMs?: number;
+  /** Artiste destinataire (plusieurs artistes sur le lien) ; absent chez un ancien ingé. */
+  to?: string;
 }
 
 const busWire = (b: Track, opts: { nativeOnly?: boolean } = {}): RemoteBusWire => {
@@ -353,6 +382,7 @@ export function buildReturnPayload(t: Track, tracks: Track[], phase: RemoteIngeP
   const payload: RemoteReturnPayload = {
     trackId: t.remote?.peerTrackId || t.id, forV, sig, phase, plugins, ...(frozen ? { frozen } : {}), rendered, sends, buses, sendFreezes, pan: t.pan,
     ...(typeof latencyMs === 'number' ? { latencyMs } : {}),
+    ...(t.remote?.peerKey ? { to: t.remote.peerKey } : {}),
   };
   const bufferIds = Array.from(new Set([
     frozen?.clip.bufferId,
@@ -528,8 +558,8 @@ export function revertOnArtist(tracks: Track[], trackId: string, lastReturn?: Re
 
 export interface RemoteFxPayload {
   buses: RemoteBusWire[];
-  /** Envois des pistes échangées (id chez l'artiste). */
-  tracks: { trackId: string; sends: TrackSend[] }[];
+  /** Envois des pistes échangées (id chez l'artiste, et l'artiste quand ils sont plusieurs). */
+  tracks: { trackId: string; sends: TrackSend[]; to?: string }[];
 }
 
 /**
@@ -544,7 +574,10 @@ export function buildFxPayload(tracks: Track[]): RemoteFxPayload {
   for (const t of remoteTracks) {
     const native = busesFedBy(t, tracks).filter(b => !(b.plugins || []).some(p => isVst(p) && p.isEnabled) && !isFrozenBus(b));
     native.forEach(b => buses.set(b.id, busWire(b, { nativeOnly: true })));
-    out.push({ trackId: t.remote!.peerTrackId, sends: (t.sends || []).filter(s => busesFedBy(t, tracks).some(b => b.id === s.id)).map(s => ({ ...s })) });
+    out.push({
+      trackId: t.remote!.peerTrackId, sends: (t.sends || []).filter(s => busesFedBy(t, tracks).some(b => b.id === s.id)).map(s => ({ ...s })),
+      ...(t.remote!.peerKey ? { to: t.remote!.peerKey } : {}),
+    });
   }
   return { buses: Array.from(buses.values()), tracks: out };
 }
@@ -552,7 +585,7 @@ export function buildFxPayload(tracks: Track[]): RemoteFxPayload {
 export const fxSignature = (p: RemoteFxPayload): string => hashOf(p);
 
 /** Artiste : applique les réglages d'effets natifs de l'ingé (il les entend en direct). Mutation. */
-export function applyFxOnArtist(tracks: Track[], p: RemoteFxPayload): number {
+export function applyFxOnArtist(tracks: Track[], p: RemoteFxPayload, myMemberKey?: string | null): number {
   let n = 0;
   for (const b of p.buses) {
     const cur = tracks.find(x => x.id === artistBusId(b.id));
@@ -561,6 +594,8 @@ export function applyFxOnArtist(tracks: Track[], p: RemoteFxPayload): number {
     upsertArtistBus(tracks, b);
   }
   for (const x of p.tracks) {
+    // Plusieurs artistes : seulement les envois de MES pistes.
+    if (myMemberKey && !remoteForMe(x.to, myMemberKey)) continue;
     const t = tracks.find(y => y.id === x.trackId && !!y.remote);
     if (!t || t.remote?.reverted) continue;
     rememberBefore(t);
@@ -608,7 +643,8 @@ export function artistStatus(t: Track, ack: { v: number; state: EngineerAckState
  */
 export function pairEngineer(peerKey: string | undefined, memberKey: string): 'new' | 'same' | 'other' {
   if (!peerKey) return 'new';
-  return peerKey === memberKey ? 'same' : 'other';
+  // La personne, pas l'appareil (clé de membre par appareil côté serveur).
+  return participantOf(peerKey) === participantOf(memberKey) ? 'same' : 'other';
 }
 
 // --- File d'attente hors ligne -----------------------------------------------------------------

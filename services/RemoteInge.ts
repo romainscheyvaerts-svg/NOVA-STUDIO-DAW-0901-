@@ -29,7 +29,7 @@ export type RemoteRole = 'artist' | 'engineer';
 
 export const REMOTE_KINDS = new Set(['ri_send', 'ri_return', 'ri_fx', 'ri_phase', 'ri_ack', 'ri_peer']);
 
-export interface RemoteAck { trackId: string; v: number; state: EngineerAckState; detail?: string }
+export interface RemoteAck { trackId: string; v: number; state: EngineerAckState; detail?: string; /** Artiste destinataire (plusieurs artistes sur le lien). */ to?: string }
 
 /** Lien d'invitation de l'ingé (il garde sa session : seul le lien s'ouvre). */
 export const remoteInviteUrl = (l: CloudLink): string => {
@@ -37,6 +37,9 @@ export const remoteInviteUrl = (l: CloudLink): string => {
   try { base = `${window.location.origin}${window.location.pathname}`; } catch { /* hors navigateur */ }
   return `${base}?inge=${encodeURIComponent(linkToString(l))}`;
 };
+
+/** Lien pour un 2e artiste sur le même lien (même ingé, chacun ses pistes). */
+export const remoteArtistInviteUrl = (l: CloudLink): string => `${remoteInviteUrl(l)}&ri=artist`;
 
 export class RemoteIngeClient {
   readonly collab: CollabClient;

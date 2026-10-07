@@ -266,7 +266,7 @@ const CollabPanel: React.FC<Props> = (p) => {
             </select>
           </label>
           <p className="text-[11px] text-slate-500">{ROLE_LABEL[startRole]} : {mode === 'remote' ? REMOTE_ROLE_HELP[startRole] : ROLE_HELP[startRole]}.</p>
-          {mode === 'remote' && (startRole === 'engineer' || remoteIncoming) && (
+          {mode === 'remote' && (
             <input value={remoteLink} onChange={e => setRemoteLink(e.target.value)} placeholder={startRole === 'engineer' ? "Colle le lien envoyé par l'artiste (…?inge=…)" : 'Lien du premier artiste (laisse vide pour en créer un)'} aria-label="Lien de l'artiste" data-testid="remote-link-input"
               className="h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-[12px] text-white" />
           )}

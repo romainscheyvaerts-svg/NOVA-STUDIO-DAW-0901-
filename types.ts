@@ -770,6 +770,12 @@ export interface RemoteBefore {
 export interface RemoteTrackInfo {
   /** Piste correspondante dans la session de l'autre. */
   peerTrackId: string;
+  /**
+   * Ingé : l'artiste qui a envoyé la piste (« u:<compte> »). Plusieurs artistes
+   * sur le même lien peuvent avoir une piste au même identifiant : chez l'ingé
+   * ce sont deux pistes, et le rendu ne revient qu'à son artiste.
+   */
+  peerKey?: string;
   /** Emplacement choisi par l'artiste en glissant la piste (lead, backs…). */
   slot?: string;
   /** Artiste : dernière version envoyée et empreinte de l'audio brut + éditions. */
