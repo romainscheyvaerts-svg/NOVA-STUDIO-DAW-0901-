@@ -1,4 +1,5 @@
 import { Clip, CrossfadeCurve, TrackType } from '../types';
+import { breathGainAt, breathRampsInClip, clipHasBreaths } from './breathEnvelope';
 
 /**
  * Fondus et crossfades « façon Pro Tools » : logique pure, partagée par la
@@ -54,9 +55,14 @@ export function fadeOutShape(curve: CrossfadeCurve | undefined, x: number): numb
 }
 
 /** Gain du clip (fondus + gain de clip) à la position t (s, depuis le début du clip). */
-export function clipGainAt(clip: Pick<Clip, 'duration' | 'fadeIn' | 'fadeOut' | 'fadeInCurve' | 'fadeOutCurve' | 'gain'>, t: number): number {
+/** Champs d'un clip qui comptent pour son plan de gain (respirations traitées comprises). */
+type GainClip = Pick<Clip, 'duration' | 'fadeIn' | 'fadeOut' | 'fadeInCurve' | 'fadeOutCurve' | 'gain'> & Partial<Pick<Clip, 'offset' | 'breaths' | 'isReversed'>>;
+
+export function clipGainAt(clip: GainClip, t: number): number {
   const { fi, fo } = fadeLengths(clip);
   let g = clip.gain ?? 1;
+  // Respirations baissées / supprimées (utils/breaths) : zones de l'audio source.
+  if (clip.breaths?.length && !clip.isReversed) g *= breathGainAt(clip.breaths, (clip.offset || 0) + t);
   if (fi > 0 && t < fi) g *= fadeInShape(clip.fadeInCurve, t / fi);
   if (fo > 0 && t > clip.duration - fo) g *= fadeOutShape(clip.fadeOutCurve, (t - (clip.duration - fo)) / fo);
   if (t < 0 || t > clip.duration) return 0;
@@ -92,9 +98,10 @@ function sampleCurve(fn: (x: number) => number, x0: number, x1: number, gain: nu
  * Jamais deux évènements qui se chevauchent (contrainte de la Web Audio API).
  */
 export function clipGainEvents(
-  clip: Pick<Clip, 'duration' | 'fadeIn' | 'fadeOut' | 'fadeInCurve' | 'fadeOutCurve' | 'gain'>,
+  clip: GainClip,
   from = 0,
 ): GainEvent[] {
+  if (clipHasBreaths(clip)) return breathAwareGainEvents(clip, from);
   const d = Math.max(0, clip.duration || 0);
   const g = clip.gain ?? 1;
   const { fi, fo } = fadeLengths(clip);
@@ -119,6 +126,48 @@ export function clipGainEvents(
       ev.push({ kind: 'set', t: p0, v: 0 });
     }
   }
+  return ev;
+}
+
+/**
+ * Plan de gain d'un clip dont des respirations sont traitées : le gain
+ * (fondus × gain de clip × respirations) est constant entre les zones où il
+ * varie (fondus du clip, fondus d'entrée / sortie de chaque respiration). Une
+ * courbe échantillonnée par zone qui varie, la valeur tenue entre deux : pas
+ * d'évènements superposés, et le même rendu en lecture et à l'export.
+ */
+function breathAwareGainEvents(clip: GainClip, from: number): GainEvent[] {
+  const d = Math.max(0, clip.duration || 0);
+  const p0 = Math.max(0, Math.min(from, d));
+  const { fi, fo } = fadeLengths(clip);
+  const zones: [number, number][] = [];
+  if (fi > 0) zones.push([0, fi]);
+  if (fo > 0) zones.push([d - fo, d]);
+  zones.push(...breathRampsInClip(clip.breaths, clip.offset || 0, d));
+  zones.sort((a, b) => a[0] - b[0]);
+  // Zones qui se touchent ou se chevauchent : une seule courbe.
+  const merged: [number, number][] = [];
+  for (const z of zones) {
+    const last = merged[merged.length - 1];
+    if (last && z[0] <= last[1] + 1e-6) last[1] = Math.max(last[1], z[1]);
+    else merged.push([z[0], z[1]]);
+  }
+  const ev: GainEvent[] = [];
+  let first = true;
+  for (const [a, b] of merged) {
+    if (b <= p0 + 1e-6) continue;
+    const s = Math.max(a, p0);
+    if (first && s > p0 + 1e-6) ev.push({ kind: 'set', t: p0, v: clipGainAt(clip, p0) });
+    first = false;
+    const dur = b - s;
+    const n = curvePoints(dur);
+    const values = new Float32Array(n);
+    for (let i = 0; i < n; i++) values[i] = clipGainAt(clip, Math.min(b, s + (dur * i) / (n - 1)));
+    // Fin de clip : la dernière valeur tombe pile sur d (gain 0 hors clip) → valeur juste avant.
+    if (b >= d - 1e-9 && n > 1) values[n - 1] = fo > 0 ? 0 : clipGainAt(clip, d - 1e-6);
+    ev.push({ kind: 'curve', t: s, d: dur, values });
+  }
+  if (first) ev.push({ kind: 'set', t: p0, v: p0 >= d ? 0 : clipGainAt(clip, p0) });
   return ev;
 }
 

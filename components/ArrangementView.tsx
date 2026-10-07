@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { breathGainAt } from '../utils/breathEnvelope';
 import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint, Marker } from '../types';
 import TrackHeader from './TrackHeader';
 import ContextMenu from './ContextMenu';
@@ -1345,6 +1346,17 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                     const clipGain = clip.gain ?? 1;
                     if (clipGain !== 1) for (let i = 0; i < n; i++) env[i] = Math.min(1, env[i] * clipGain);
                     const x0 = x + px0;
+                    // Respirations baissées / supprimées (utils/breaths) : la forme d'onde
+                    // montre le creux, et un trait violet en bas du clip les repère.
+                    if (clip.breaths?.length && !clip.isReversed) {
+                        const off = clip.offset || 0;
+                        for (let i = 0; i < n; i++) env[i] *= breathGainAt(clip.breaths, off + ((px0 + i + 0.5) / largeurPx) * clip.duration);
+                        ctx.fillStyle = '#a78bfa';
+                        for (const b of clip.breaths) {
+                            const bx0 = x + ((b.start - off) / clip.duration) * largeurPx, bx1 = x + ((b.end - off) / clip.duration) * largeurPx;
+                            if (bx1 > x && bx0 < x + largeurPx) ctx.fillRect(Math.max(x, bx0), waveY + waveH - 2, Math.max(1, Math.min(x + largeurPx, bx1) - Math.max(x, bx0)), 2);
+                        }
+                    }
 
                     // ===== STYLE PRO TOOLS: Filled waveform avec outline =====
                     ctx.fillStyle = waveColor + '55';  // Semi-transparent fill
