@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta } from './types';
+import { themeStore, useTheme } from './utils/themeStore';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
 import MobileTransport from './components/MobileTransport';
@@ -771,9 +772,9 @@ function Studio() {
 
   const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, breakHistory, checkpoint, canUndo, canRedo } = useUndoRedo(initialState);
   
-  const [theme, setTheme] = useState<Theme>('dark');
-  useEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
-  const toggleTheme = () => { setTheme(prev => prev === 'dark' ? 'light' : 'dark'); };
+  // Thème mémorisé sur l'appareil (sombre / clair / auto) : utils/themeStore.
+  const { theme } = useTheme();
+  const toggleTheme = () => themeStore.toggle();
 
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
     // Bridge VST (ws://localhost) plus connecté automatiquement : l'onglet

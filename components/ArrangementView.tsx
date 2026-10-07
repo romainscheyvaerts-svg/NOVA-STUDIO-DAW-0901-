@@ -31,6 +31,8 @@ import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor
 import { listLanes, mainRowClips, clipAtTime, takeCount, TakeLane } from '../utils/playlists';
 import { takeNumberOf } from '../utils/takes';
 import { dragTipText, FADE_PRESETS, fadeWithPreset } from '../utils/dragLabels';
+import { canvasTheme } from '../utils/canvasTheme';
+import { useTheme } from '../utils/themeStore';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -97,7 +99,7 @@ const drawFadeShape = (ctx: CanvasRenderingContext2D, x0: number, fw: number, y:
         const g = dir === 'in' ? fadeInShape(curve, u) : fadeOutShape(curve, u);
         return [x0 + fw * u, y + h * (1 - g)] as const;
     };
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillStyle = canvasTheme().veil(0.55);
     ctx.beginPath();
     ctx.moveTo(x0, y); ctx.lineTo(x0 + fw, y);
     for (let i = n; i >= 0; i--) { const [px, py] = pt(i / n); ctx.lineTo(px, py); }
@@ -146,6 +148,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy,
   punch, onUpdatePunch, editCommands, takeLanes
 }) => {
+  // Thème affiché : le canvas se redessine quand on passe en clair / sombre.
+  const { theme: uiTheme } = useTheme();
   const editPrefs = useEditPrefs();
   // Crossfade en cours de réglage (Smart Tool : bas d'une jonction entre deux clips).
   const xfadeDragRef = useRef<{ trackId: string; a: Clip; b: Clip; at: number } | null>(null);
@@ -661,15 +665,15 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (canvas.width !== minimapSize.w || canvas.height !== minimapSize.h) { canvas.width = minimapSize.w; canvas.height = minimapSize.h; }
     const ctx = canvas.getContext('2d'); if (!ctx) return;
     const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#08090b'; ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = '#1e2229'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
+    ctx.clearRect(0, 0, w, h); const cv = canvasTheme(); ctx.fillStyle = cv.panel; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = cv.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
     const scale = w / Math.max(totalContentWidth, 1);
     minimapScaleRef.current = scale;
     if (minimapPlayheadRef.current) minimapPlayheadRef.current.style.transform = `translateX(${playheadStore.get() * zoomH * scale}px)`;
     const trackHeight = h / Math.max(visibleTracks.length, 1);
     visibleTracks.forEach((t, tIdx) => {
         const y = tIdx * trackHeight;
-        if (tIdx % 2 === 0) { ctx.fillStyle = 'rgba(255,255,255,0.02)'; ctx.fillRect(0, y, w, trackHeight); }
+        if (tIdx % 2 === 0) { ctx.fillStyle = cv.ink(0.03); ctx.fillRect(0, y, w, trackHeight); }
         ctx.fillStyle = t.color; ctx.globalAlpha = 0.4;
         t.clips.forEach(c => {
              const cx = (c.start * zoomH) * scale;
@@ -682,9 +686,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (isLoopActive && loopEnd > loopStart) {
         const loopX = (loopStart * zoomH) * scale;
         const loopW = ((loopEnd - loopStart) * zoomH) * scale;
-        ctx.fillStyle = 'rgba(0, 242, 255, 0.3)';
+        ctx.fillStyle = cv.accentFill(0.3);
         ctx.fillRect(loopX, 0, loopW, h);
-        ctx.strokeStyle = '#00f2ff';
+        ctx.strokeStyle = cv.accent;
         ctx.lineWidth = 1.5;
         ctx.strokeRect(loopX, 0, loopW, h);
     }
@@ -692,10 +696,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const viewportWidth = Math.max(0, viewportSize.width - headerWidth);
     const vx = scrollLeft * scale;
     const vw = viewportWidth * scale;
-    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, vx, h); ctx.fillRect(vx + vw, 0, w - (vx + vw), h);
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.strokeRect(vx, 0, vw, h);
-    ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(vx, 0, vw, h);
-  }, [visibleTracks, totalContentWidth, scrollLeft, viewportSize, headerWidth, zoomH, isLoopActive, loopStart, loopEnd, minimapSize]);
+    ctx.fillStyle = cv.veil(0.5); ctx.fillRect(0, 0, vx, h); ctx.fillRect(vx + vw, 0, w - (vx + vw), h);
+    ctx.strokeStyle = cv.ink(0.9); ctx.lineWidth = 1.5; ctx.strokeRect(vx, 0, vw, h);
+    ctx.fillStyle = cv.ink(0.05); ctx.fillRect(vx, 0, vw, h);
+  }, [visibleTracks, totalContentWidth, scrollLeft, viewportSize, headerWidth, zoomH, isLoopActive, loopStart, loopEnd, minimapSize, uiTheme]);
 
   const handleMinimapMouseDown = (e: React.MouseEvent) => {
       const canvas = minimapRef.current; if (!canvas || !scrollContainerRef.current) return;
@@ -1290,6 +1294,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     if (x + w < 0 || x > ctx.canvas.width) return;
 
     const clipColor = clip.color || trackColor;
+    const cv = canvasTheme();
     
     ctx.save();
     ctx.beginPath();
@@ -1298,8 +1303,8 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
 
     // Fond du clip
     const gradient = ctx.createLinearGradient(x, y, x, y + h);
-    gradient.addColorStop(0, clip.isMuted ? '#0a0a0a' : '#1a1d24');
-    gradient.addColorStop(1, clip.isMuted ? '#050505' : '#12151a');
+    gradient.addColorStop(0, clip.isMuted ? cv.clipMutedTop : cv.clipTop);
+    gradient.addColorStop(1, clip.isMuted ? cv.clipMutedBottom : cv.clipBottom);
     ctx.fillStyle = gradient;
     ctx.fillRect(x, y, w, h);
 
@@ -1328,7 +1333,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
             const centerY = waveY + waveH / 2;
 
             if (w > 2 && totalSamples > 0 && waveH > 4) {
-                const waveColor = clip.isMuted ? '#333' : clipColor;
+                const waveColor = clip.isMuted ? cv.mutedWave : clipColor;
                 const largeurPx = Math.max(1, Math.round(w));
                 // Pixels du clip reellement visibles dans le canvas.
                 const px0 = Math.max(0, Math.floor(-x));
@@ -1366,7 +1371,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                     ctx.stroke();
 
                     // Ligne centrale (0 dB)
-                    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                    ctx.strokeStyle = cv.ink(0.1);
                     ctx.lineWidth = 1;
                     ctx.setLineDash([2, 4]);
                     ctx.beginPath();
@@ -1385,7 +1390,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     ctx.save();
     ctx.beginPath();
     ctx.roundRect(x, y, w, h, 4);
-    ctx.strokeStyle = isSelected ? '#fff' : (clipColor + '66');
+    ctx.strokeStyle = isSelected ? cv.ink(0.95) : (clipColor + '66');
     ctx.lineWidth = isSelected ? 2 : 1;
     ctx.stroke();
     ctx.restore();
@@ -1403,13 +1408,13 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     ctx.clip();
 
     // Courbe réelle du fondu (linéaire, puissance égale, exponentielle, en S).
-    if (fadeInW > 1) drawFadeShape(ctx, x, fadeInW, y, h, clip.fadeInCurve, 'in', 'rgba(255,255,255,0.75)');
-    if (fadeOutW > 1) drawFadeShape(ctx, x + w - fadeOutW, fadeOutW, y, h, clip.fadeOutCurve, 'out', 'rgba(255,255,255,0.75)');
+    if (fadeInW > 1) drawFadeShape(ctx, x, fadeInW, y, h, clip.fadeInCurve, 'in', cv.ink(0.75));
+    if (fadeOutW > 1) drawFadeShape(ctx, x + w - fadeOutW, fadeOutW, y, h, clip.fadeOutCurve, 'out', cv.ink(0.75));
     ctx.restore();
 
     // Poignees de fondu : bien visibles au survol et sur le clip selectionne (G7)
     if (isSelected || isHovered || w > 60) {
-        ctx.fillStyle = isSelected || isHovered ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)';
+        ctx.fillStyle = isSelected || isHovered ? cv.ink(0.9) : cv.ink(0.35);
         const hx = x + Math.max(0, fadeInW);
         ctx.fillRect(Math.min(hx, x + w - 6), y + 2, 6, 6);
         const hx2 = x + w - Math.max(0, fadeOutW) - 6;
@@ -1419,9 +1424,9 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     // Nom du clip avec fond, dessiné APRÈS les fondus : la ligne de fondu ne le traverse plus (F3).
     if (w > 30) {
         ctx.font = '600 11px Inter';
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillStyle = cv.labelBg;
         ctx.fillRect(x + 4, y + 3, Math.min(ctx.measureText(clip.name).width + 10, w - 8), 15);
-        ctx.fillStyle = clip.isMuted ? '#666' : '#fff';
+        ctx.fillStyle = clip.isMuted ? cv.labelMuted : cv.labelText;
         ctx.fillText(clip.name, x + 9, y + 14, w - 18);
     }
 
@@ -1434,13 +1439,13 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
         ctx.beginPath();
         ctx.roundRect(x, y, w, h, 4);
         ctx.clip();
-        ctx.strokeStyle = modified ? 'rgba(251,191,36,0.9)' : (isSelected ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.22)');
+        ctx.strokeStyle = modified ? 'rgba(251,191,36,0.9)' : (isSelected ? cv.ink(0.55) : cv.ink(0.22));
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(x + 2, hy); ctx.lineTo(x + w - 2, hy); ctx.stroke();
         // petit curseur au centre (zone visible du clip)
         const vx0 = Math.max(x, 0), vx1 = Math.min(x + w, ctx.canvas.width);
         const cxm = (vx0 + vx1) / 2;
-        ctx.fillStyle = modified ? '#fbbf24' : (isSelected ? '#ffffff' : 'rgba(255,255,255,0.5)');
+        ctx.fillStyle = modified ? '#fbbf24' : (isSelected ? cv.ink(1) : cv.ink(0.5));
         ctx.fillRect(Math.round(cxm - 7), Math.round(hy - 2.5), 14, 5);
         if (modified && w > 50) {
             const label = gainToDbText(g);
@@ -1451,7 +1456,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
             const right = Math.min(x + w, ctx.canvas.width) - 2;
             const lx = cxm + 10 + tw + 6 <= right ? cxm + 10 : (cxm - 10 - tw - 6 >= Math.max(x, 0) + 2 ? cxm - 10 - tw - 6 : null);
             if (lx !== null) {
-                ctx.fillStyle = 'rgba(0,0,0,0.65)';
+                ctx.fillStyle = cv.labelBg;
                 ctx.fillRect(lx, ly - 10, tw + 6, 13);
                 ctx.fillStyle = '#fbbf24';
                 ctx.fillText(label, lx + 3, ly);
@@ -1488,6 +1493,7 @@ const drawTimeline = useCallback(() => {
     const scrollTop = scroll.scrollTop;
     
     ctx.clearRect(0, 0, w, h);
+    const cv = canvasTheme();
     
     const beatPx = (60 / bpm) * zoomH;
     const startTime = pixelsToTime(scrollX);
@@ -1502,16 +1508,16 @@ const drawTimeline = useCallback(() => {
     for (let i = startBar; i <= endBar; i++) {
         const time = i * 4 * (60 / bpm);
         const x = timeToPixels(time) - scrollX;
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.strokeStyle = cv.ink(0.08);
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
         
         if (subStepPx > 5 && subDivisionsPerBar > 1) {
             for (let j = 1; j < subDivisionsPerBar; j++) {
                 const subX = x + j * subStepPx;
                 if (isBeatLine(j, subDivisionsPerBar)) {
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+                    ctx.strokeStyle = cv.ink(0.05);
                 } else {
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+                    ctx.strokeStyle = cv.ink(0.035);
                 }
                 ctx.beginPath(); ctx.moveTo(subX, 0); ctx.lineTo(subX, h); ctx.stroke();
             }
@@ -1524,11 +1530,11 @@ const drawTimeline = useCallback(() => {
         const loopWidth = timeToPixels(loopEnd - loopStart);
         if (loopStartX + loopWidth > 0 && loopStartX < w) {
             // Zone de loop avec opacité augmentée
-            ctx.fillStyle = 'rgba(0, 242, 255, 0.15)';
+            ctx.fillStyle = cv.accentFill(0.15);
             ctx.fillRect(loopStartX, 40, loopWidth, h - 40);
 
             // Lignes verticales de début et fin de loop plus visibles
-            ctx.strokeStyle = '#00f2ff';
+            ctx.strokeStyle = cv.accent;
             ctx.lineWidth = 3;
 
             // Ligne de début
@@ -1544,7 +1550,7 @@ const drawTimeline = useCallback(() => {
             ctx.stroke();
 
             // Poignées en haut pour mieux visualiser les curseurs
-            ctx.fillStyle = '#00f2ff';
+            ctx.fillStyle = cv.accent;
             // Poignée début (triangle)
             ctx.beginPath();
             ctx.moveTo(loopStartX - 8, 40);
@@ -1586,13 +1592,13 @@ const drawTimeline = useCallback(() => {
                             const n = lanesByTrack.get(track.id)!.length;
                             const x0 = bx - scrollX, y0 = viewportY + 3;
                             ctx.save();
-                            ctx.fillStyle = 'rgba(8,10,14,0.85)';
+                            ctx.fillStyle = cv.labelBg;
                             ctx.strokeStyle = takeColor(takeNumberOf(clip)!);
                             ctx.lineWidth = 1;
                             ctx.beginPath();
                             (ctx as any).roundRect ? (ctx as any).roundRect(x0, y0, TAKE_BADGE_W, TAKE_BADGE_H, 9) : ctx.rect(x0, y0, TAKE_BADGE_W, TAKE_BADGE_H);
                             ctx.fill(); ctx.stroke();
-                            ctx.fillStyle = '#fff';
+                            ctx.fillStyle = cv.labelText;
                             ctx.font = '700 10px Inter, sans-serif';
                             ctx.textBaseline = 'middle';
                             ctx.fillText(`Prises (${n}) ▾`, x0 + 9, y0 + TAKE_BADGE_H / 2 + 0.5);
@@ -1632,7 +1638,7 @@ const drawTimeline = useCallback(() => {
         // Dessiner les séparateurs de pistes (position relative au viewport)
         if (viewportY + trackH + totalAutomationHeight > 40 && viewportY < h) {
             const lineY = viewportY + trackH + totalAutomationHeight;
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.strokeStyle = cv.ink(0.1);
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(0, lineY);
@@ -1643,12 +1649,12 @@ const drawTimeline = useCallback(() => {
         currentY += trackH + totalAutomationHeight;
     });
 
-    ctx.fillStyle = '#14161a';
+    ctx.fillStyle = cv.surface;
     ctx.fillRect(0, 0, w, 40);
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.strokeStyle = cv.ink(0.1);
     ctx.beginPath(); ctx.moveTo(0, 40); ctx.lineTo(w, 40); ctx.stroke();
 
-    ctx.fillStyle = '#94a3b8';
+    ctx.fillStyle = cv.textMuted;
     ctx.font = '600 11px Inter';
     for (let i = startBar; i <= endBar; i++) {
         const time = i * 4 * (60 / bpm);
@@ -1771,7 +1777,7 @@ const drawTimeline = useCallback(() => {
     }
 
     // La tete de lecture est dessinee sur le calque superieur (drawPlayhead).
-}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, lanesKey, lanesByTrack, hoveredClipId]);
+}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, lanesKey, lanesByTrack, hoveredClipId, uiTheme]);
 
 // Calque statique (grille, clips, formes d'onde, reperes) : redessine seulement
 // quand son contenu change, plus a chaque image de la lecture.
@@ -1943,12 +1949,12 @@ useEffect(() => {
                   width: `${headerWidth}px`, 
                   height: 'fit-content',
                   minHeight: totalArrangementHeight,
-                  backgroundColor: '#14161a',
-                  borderRight: '1px solid rgba(255,255,255,0.1)'
+                  backgroundColor: 'var(--bg-surface)',
+                  borderRight: '1px solid var(--border-dim)'
               }}
           >
             {/* Ruler spacer */}
-            <div style={{ height: 40, flexShrink: 0, backgroundColor: '#14161a' }} />
+            <div style={{ height: 40, flexShrink: 0, backgroundColor: 'var(--bg-surface)' }} />
             {/* Track Headers */}
             {visibleTracks.map((track) => (
               <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>

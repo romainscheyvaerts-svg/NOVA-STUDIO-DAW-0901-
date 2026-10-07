@@ -185,7 +185,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
       {/* TOOLBAR */}
       <div className="h-10 border-b flex items-center justify-between px-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}>
          <div className="flex items-center space-x-4">
-            <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: 'var(--accent-neon)' }}>Automation</span>
+            <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: 'var(--accent-text)' }}>Automation</span>
             <div className="h-4 w-px bg-white/10"></div>
             <div className="flex items-center space-x-2">
                 <i className="fas fa-search-plus text-[10px]" style={{ color: 'var(--text-secondary)' }}></i>
