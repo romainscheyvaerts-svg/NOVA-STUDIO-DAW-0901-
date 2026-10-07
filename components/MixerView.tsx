@@ -8,6 +8,8 @@ import ProMasterMeter from './ProMasterMeter';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { getValidDestinations, getRouteLabel } from './RoutingManager';
 import { PluginName } from './PluginName';
+import InsertListPopover from './InsertListPopover';
+import { MIXER_INSERT_ROWS, splitInserts } from '../utils/insertRows';
 
 // Track Group Colors (inspired by Pro Tools)
 const GROUP_COLORS = [
@@ -136,6 +138,9 @@ const ChannelStrip: React.FC<{
 }> = ({ track, allTracks, onUpdate, isMaster = false, onOpenPlugin, onToggleBypass, onRemovePlugin, onDropPlugin, onRequestAddPlugin, onCopyPluginToTrack, onReorderPlugins }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const faderTrackRef = useRef<HTMLDivElement>(null);
+  const [insertList, setInsertList] = useState<DOMRect | null>(null);
+  const insertRows = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? MIXER_INSERT_ROWS.touch : MIXER_INSERT_ROWS.mouse;
+  const { shown: shownInserts, hidden: hiddenInserts } = splitInserts(track.plugins, insertRows);
   
   // Use Engine Analyzers: Master uses Left/Right, Tracks use single
   const analyzer = isMaster ? audioEngine.masterAnalyzerL : audioEngine.getTrackAnalyzer(track.id);
@@ -198,17 +203,25 @@ const ChannelStrip: React.FC<{
     >
       
       {!isMaster && (track.type === TrackType.AUDIO || track.type === TrackType.SAMPLER) && (
-        <div className="h-20 bg-black/40 border-b border-white/5 p-2 grid grid-cols-3 gap-2 items-center">
+        <div className="h-[104px] shrink-0 bg-black/40 border-b border-white/5 p-2 grid grid-cols-3 gap-2 items-start overflow-hidden">
           {track.sends.map(s => <SendKnob key={s.id} send={s} track={track} onUpdate={onUpdate} />)}
         </div>
       )}
       
-      <div className={`${track.type === TrackType.BUS ? 'h-52' : 'h-40'} bg-black/20 border-b border-white/5 p-2 space-y-1.5 overflow-y-auto custom-scroll`}>
-        <span className="text-[7px] font-black text-slate-600 uppercase px-1 mb-1 block">{track.type === TrackType.BUS ? 'Bus Inserts' : (isMaster ? 'Master Chain' : 'Inserts')}</span>
-        {track.plugins.map((p, idx) => (
+      {/* Effets : tous visibles (8 lignes à la souris, 5 au doigt), sinon « +N »
+          qui ouvre la liste complète (audit B5). Hauteur fixe : les faders restent alignés. */}
+      <div className="h-[200px] shrink-0 bg-black/20 border-b border-white/5 px-2 pt-1.5 pb-2 flex flex-col gap-0.5 overflow-hidden">
+        <div className="flex items-center justify-between px-1 mb-0.5">
+          <span className="text-[8px] font-black text-slate-500 uppercase leading-3">{track.type === TrackType.BUS ? 'Effets du bus' : (isMaster ? 'Chaîne du master' : 'Effets')}</span>
+          {track.plugins.length >= insertRows && (
+            <button type="button" onClick={handleEmptySlotClick} title="Ajouter un effet" aria-label={`Ajouter un effet sur ${track.name}`}
+              className="nova-hit-tactile w-4 h-3 rounded text-[8px] leading-3 text-slate-500 hover:text-cyan-300"><i className="fas fa-plus"></i></button>
+          )}
+        </div>
+        {shownInserts.map((p, idx) => (
           <div 
             key={p.id} 
-            className="relative group/fxslot w-full h-8 [@media(pointer:coarse)]:h-10 mb-1 fx-slot"
+            className="relative group/fxslot w-full h-5 [@media(pointer:coarse)]:h-8 fx-slot"
             draggable
             onDragStart={(e) => {
               e.dataTransfer.setData('pluginData', JSON.stringify(p));
@@ -251,9 +264,9 @@ const ChannelStrip: React.FC<{
           >
             <button 
               onClick={(e) => handleFXClick(e, p)}
-              className={`w-full h-full bg-black/40 rounded border border-white/5 text-[9px] font-black hover:border-cyan-500/40 transition-all px-2 text-left truncate flex items-center pr-20 cursor-grab active:cursor-grabbing ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}
+              className={`w-full h-full bg-black/40 rounded border border-white/5 text-[10px] font-black hover:border-cyan-500/40 transition-all px-1.5 text-left truncate flex items-center pr-12 cursor-grab active:cursor-grabbing ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}
             >
-               <i className="fas fa-grip-vertical text-slate-700 mr-2 text-[8px]"></i>
+               <i className="fas fa-grip-vertical text-slate-700 mr-1.5 text-[8px]"></i>
                <PluginName plugin={p} className="font-semibold" />
             </button>
             <div className="absolute right-1 top-0 bottom-0 flex items-center space-x-0.5">
@@ -261,7 +274,7 @@ const ChannelStrip: React.FC<{
                <div className="flex flex-col opacity-0 group-hover/fxslot:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                   <button 
                     onClick={(e) => { e.stopPropagation(); if (idx > 0 && onReorderPlugins) onReorderPlugins(track.id, idx, idx - 1); }}
-                    className={`w-4 h-3 rounded-t flex items-center justify-center text-[6px] ${idx > 0 ? 'text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/20' : 'text-slate-800 cursor-not-allowed'}`}
+                    className={`w-4 h-2.5 rounded-t flex items-center justify-center text-[6px] ${idx > 0 ? 'text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/20' : 'text-slate-800 cursor-not-allowed'}`}
                     disabled={idx === 0}
                     title="Monter"
                   >
@@ -269,30 +282,43 @@ const ChannelStrip: React.FC<{
                   </button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); if (idx < track.plugins.length - 1 && onReorderPlugins) onReorderPlugins(track.id, idx, idx + 1); }}
-                    className={`w-4 h-3 rounded-b flex items-center justify-center text-[6px] ${idx < track.plugins.length - 1 ? 'text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/20' : 'text-slate-800 cursor-not-allowed'}`}
+                    className={`w-4 h-2.5 rounded-b flex items-center justify-center text-[6px] ${idx < track.plugins.length - 1 ? 'text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/20' : 'text-slate-800 cursor-not-allowed'}`}
                     disabled={idx === track.plugins.length - 1}
                     title="Descendre"
                   >
                     <i className="fas fa-chevron-down"></i>
                   </button>
                </div>
-               <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} title={p.isEnabled ? 'Désactiver l\'effet' : 'Activer l\'effet'} aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.type}`} aria-pressed={p.isEnabled} className={`w-5 h-5 [@media(pointer:coarse)]:w-8 [@media(pointer:coarse)]:h-8 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
+               <button onClick={(e) => { e.stopPropagation(); onToggleBypass?.(track.id, p.id); }} title={p.isEnabled ? 'Désactiver l\'effet' : 'Activer l\'effet'} aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.type}`} aria-pressed={p.isEnabled} className={`w-4 h-4 [@media(pointer:coarse)]:w-8 [@media(pointer:coarse)]:h-8 rounded flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-600'}`}><i className="fas fa-power-off text-[7px]"></i></button>
             </div>
             <button onClick={(e) => { e.stopPropagation(); onRemovePlugin?.(track.id, p.id); }} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${p.type}`}><i className="fas fa-times"></i></button>
           </div>
         ))}
-        {/* Boutons + pour ajouter des plugins */}
-        {Array.from({ length: Math.max(0, 6 - track.plugins.length) }).map((_, i) => (
+        {hiddenInserts.length > 0 && (
+          <button type="button" data-testid={`mixer-inserts-plus-${track.id}`}
+            onClick={(e) => { e.stopPropagation(); setInsertList((e.currentTarget as HTMLElement).getBoundingClientRect()); }}
+            title={`Encore ${hiddenInserts.length} effet${hiddenInserts.length > 1 ? 's' : ''} : ${hiddenInserts.map(p => p.name || p.type).join(', ')}`}
+            aria-label={`Voir les ${track.plugins.length} effets de ${track.name}`}
+            className="w-full h-5 [@media(pointer:coarse)]:h-8 shrink-0 rounded border border-cyan-500/30 bg-cyan-500/10 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/20">
+            +{hiddenInserts.length} effet{hiddenInserts.length > 1 ? 's' : ''}
+          </button>
+        )}
+        {track.plugins.length < insertRows && (
           <button
-            key={`empty-${i}`}
             onClick={handleEmptySlotClick}
             title="Ajouter un effet"
             aria-label={`Ajouter un effet sur ${track.name}`}
-            className="w-full h-8 [@media(pointer:coarse)]:h-10 rounded border border-dashed border-white/10 bg-black/5 opacity-40 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center"
+            className="w-full h-5 [@media(pointer:coarse)]:h-8 shrink-0 rounded border border-dashed border-white/10 bg-black/5 opacity-50 hover:opacity-100 hover:border-cyan-500/50 transition-all flex items-center justify-center gap-1 text-[9px] text-slate-500"
           >
-            <i className="fas fa-plus text-[8px] text-slate-600"></i>
+            <i className="fas fa-plus text-[8px]"></i>{track.plugins.length === 0 && <span>Effet</span>}
           </button>
-        ))}
+        )}
+        {insertList && (
+          <InsertListPopover anchor={insertList} title={`Effets de ${track.name}`} plugins={track.plugins}
+            onOpen={(p) => onOpenPlugin?.(track.id, p)} onToggle={(p) => onToggleBypass?.(track.id, p.id)}
+            onAdd={onRequestAddPlugin ? (x, y) => onRequestAddPlugin(track.id, x, y) : undefined}
+            onClose={() => setInsertList(null)} />
+        )}
       </div>
 
       <div className="flex-1 p-3 flex flex-col">

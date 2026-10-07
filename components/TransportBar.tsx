@@ -471,11 +471,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               <div className="grid grid-cols-3 gap-2">
                 <button onClick={() => { onChangeView('ARRANGEMENT'); setIsMobileMenuOpen(false); }} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${currentView === 'ARRANGEMENT' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-400'}`}>
                   <i className="fas fa-grip-horizontal block mb-1"></i>
-                  Arrangement
+                  Pistes
                 </button>
                 <button onClick={() => { onChangeView('MIXER'); setIsMobileMenuOpen(false); }} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${currentView === 'MIXER' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-400'}`}>
                   <i className="fas fa-sliders-h block mb-1"></i>
-                  Mixer
+                  Console
                 </button>
                 <button onClick={() => { onChangeView('AUTOMATION'); setIsMobileMenuOpen(false); }} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${currentView === 'AUTOMATION' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-400'}`}>
                   <i className="fas fa-project-diagram block mb-1"></i>

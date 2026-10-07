@@ -142,10 +142,14 @@ def g1_all(b, R):
 
 # ------------------------------------------------------------------ B5
 def open_console(pg):
-    for label in ("Console", "Mixage", "Mixer", "Mix"):
-        t = pg.get_by_role("button", name=re.compile(f"^{label}$", re.I))
-        if t.count() and visible(t.first):
+    for attempt in range(2):
+        t = pg.locator("button", has_text=re.compile(r"^\s*(Console|Mixer)\s*$", re.I)).locator("visible=true")
+        if t.count():
             t.first.click(); pg.wait_for_timeout(1200); return True
+        m = pg.get_by_role("button", name="Ouvrir le menu").locator("visible=true")
+        if not m.count():
+            break
+        m.first.click(); pg.wait_for_timeout(500)
     return False
 
 
@@ -157,20 +161,22 @@ def trap(pg):
 
 
 def b5(b, R):
-    ctx, pg = mk(b, "pc", "avance", "b5")
-    open_studio(pg, R)
-    trap(pg)
-    open_console(pg)
-    S(pg, "b5", "01_console")
-    R["slots"] = pg.locator(".fx-slot").all_inner_texts()[:20]
-    more = pg.locator("[data-testid^='mixer-inserts-plus-']")
-    R["plus"] = more.first.inner_text().strip() if more.count() else None
-    if more.count():
-        more.first.click(); pg.wait_for_timeout(500)
-        S(pg, "b5", "02_liste")
-        pg.keyboard.press("Escape")
-    R["errors"] = errors(pg)
-    ctx.close()
+    for vp in ("pc", "tab"):
+        ctx, pg = mk(b, vp, "avance", f"b5_{vp}")
+        open_studio(pg, R)
+        trap(pg)
+        open_console(pg)
+        S(pg, "b5", f"{vp}_01_console")
+        R[f"{vp}_slots"] = pg.locator(".fx-slot").all_inner_texts()[:10]
+        more = pg.locator("[data-testid^='mixer-inserts-plus-']")
+        R[f"{vp}_plus"] = more.first.inner_text().strip() if more.count() else None
+        if more.count():
+            more.first.click(); pg.wait_for_timeout(500)
+            S(pg, "b5", f"{vp}_02_liste")
+            R[f"{vp}_liste"] = pg.locator("[data-testid=insert-list]").first.inner_text()[:300] if pg.locator("[data-testid=insert-list]").count() else None
+            pg.keyboard.press("Escape")
+        R[f"{vp}_errors"] = errors(pg)
+        ctx.close()
 
 
 SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5}
