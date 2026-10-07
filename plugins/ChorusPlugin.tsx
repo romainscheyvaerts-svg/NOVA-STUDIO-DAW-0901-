@@ -503,7 +503,7 @@ export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusPa
             <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-1">Multi-Voice Modulation Engine</p>
           </div>
         </div>
-        <button 
+        <button data-plugin-power 
           onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
           className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/30' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
         >

@@ -608,7 +608,7 @@ export const StereoSpreaderUI: React.FC<{ node: StereoSpreaderNode, initialParam
             <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-1">M/S Width & Correlation</p>
           </div>
         </div>
-        <button 
+        <button data-plugin-power 
           onClick={() => updateParam('isEnabled', !params.isEnabled)}
           className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/40' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
         >

@@ -249,7 +249,7 @@ export const StudioFlangerUI: React.FC<{ node: FlangerNode, initialParams: Flang
           >
             Phase Inv
           </button>
-          <button 
+          <button data-plugin-power 
             onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
             className={`w-12 h-12 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-blue-500 border-blue-400 text-black shadow-lg shadow-blue-500/30' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >

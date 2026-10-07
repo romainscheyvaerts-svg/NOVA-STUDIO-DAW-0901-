@@ -254,6 +254,8 @@
       cursor: pointer;
     }
     .fx-slot:hover .delete-fx { opacity: 1; }
+    /* Un seul marche / arrêt par fenêtre d'effet : celui de la barre (audit G17). */
+    .nova-hosted-plugin [data-plugin-power] { display: none !important; }
 
     /* Zones de sécurité iPhone (encoche, barre d'accueil) : ces classes étaient
        utilisées par les composants mobiles mais définies nulle part. */

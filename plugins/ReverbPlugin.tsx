@@ -823,7 +823,7 @@ export const ProfessionalReverbUI: React.FC<{
           </button>
           
           {/* Power */}
-          <button 
+          <button data-plugin-power 
             onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
             className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${
               params.isEnabled 

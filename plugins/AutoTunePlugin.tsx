@@ -840,7 +840,7 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
             <p className="text-[9px] font-bold text-slate-500 tracking-wide mt-2">Correction de justesse en temps réel</p>
           </div>
         </div>
-        <button 
+        <button data-plugin-power 
           onClick={() => updateParam('isEnabled', !params.isEnabled)}
           title={params.isEnabled ? 'Autotune actif : clic pour le couper' : 'Autotune coupé : clic pour le réactiver'}
           aria-label={params.isEnabled ? "Couper l'autotune" : "Activer l'autotune"}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { termHelp } from '../utils/pluginUi';
 
 /**
  * DENOISER PRO - Professional Noise Gate/Expander
@@ -34,12 +35,12 @@ export interface DenoiserParams {
 const MANUAL = { autoThreshold: false, lowCut: 0, humFilter: false };
 const DENOISER_PRESETS = [
   // Reglage des styles voix : seuil appris sur le bruit de la piece, coupe-bas, anti-ronflette.
-  { name: "Voix auto (piece bruyante)", threshold: -60, range: -30, attack: 0.002, hold: 0.08, release: 0.08, scFreq: 250, flip: false, autoThreshold: true, lowCut: 80, humFilter: true },
-  { name: "Gentle Denoise", threshold: -45, range: -20, attack: 0.005, hold: 0.05, release: 0.15, scFreq: 1000, flip: false, ...MANUAL },
-  { name: "Vocal Gate", threshold: -35, range: -80, attack: 0.001, hold: 0.02, release: 0.1, scFreq: 800, flip: false, ...MANUAL },
-  { name: "Drum Gate", threshold: -25, range: -80, attack: 0.0001, hold: 0.01, release: 0.05, scFreq: 100, flip: false, ...MANUAL },
-  { name: "Broadcast", threshold: -40, range: -30, attack: 0.01, hold: 0.1, release: 0.3, scFreq: 2000, flip: false, ...MANUAL },
-  { name: "Ducking", threshold: -30, range: -12, attack: 0.005, hold: 0.05, release: 0.2, scFreq: 1000, flip: true, ...MANUAL },
+  { name: "Voix auto (pièce bruyante)", threshold: -60, range: -30, attack: 0.002, hold: 0.08, release: 0.08, scFreq: 250, flip: false, autoThreshold: true, lowCut: 80, humFilter: true },
+  { name: "Anti-bruit doux", threshold: -45, range: -20, attack: 0.005, hold: 0.05, release: 0.15, scFreq: 1000, flip: false, ...MANUAL },
+  { name: "Porte voix (net)", threshold: -35, range: -80, attack: 0.001, hold: 0.02, release: 0.1, scFreq: 800, flip: false, ...MANUAL },
+  { name: "Porte batterie", threshold: -25, range: -80, attack: 0.0001, hold: 0.01, release: 0.05, scFreq: 100, flip: false, ...MANUAL },
+  { name: "Radio / podcast", threshold: -40, range: -30, attack: 0.01, hold: 0.1, release: 0.3, scFreq: 2000, flip: false, ...MANUAL },
+  { name: "Baisse auto (ducking)", threshold: -30, range: -12, attack: 0.005, hold: 0.05, release: 0.2, scFreq: 1000, flip: true, ...MANUAL },
 ];
 
 // Porte de bruit echantillon par echantillon dans un AudioWorklet (v2 : seuil
@@ -469,9 +470,9 @@ export const VocalDenoiserUI: React.FC<VocalDenoiserUIProps> = ({ node, initialP
     // Labels
     ctx.fillStyle = '#64748b';
     ctx.font = '9px monospace';
-    ctx.fillText('IN', 14, h - 5);
-    ctx.fillText('GR', w - 26, h - 5);
-    ctx.fillText(status.isOpen ? 'OPEN' : 'CLOSED', w/2 - 18, 35);
+    ctx.fillText('ENTRÉE', 14, h - 5);
+    ctx.fillText('RÉD.', w - 34, h - 5);
+    ctx.fillText(status.isOpen ? 'OUVERTE' : 'FERMÉE', w/2 - 24, 35);
     
     // dB values
     ctx.fillStyle = '#fff';
@@ -507,21 +508,22 @@ export const VocalDenoiserUI: React.FC<VocalDenoiserUIProps> = ({ node, initialP
             <i className="fas fa-broom text-xl"></i>
           </div>
           <div>
-            <h2 className="text-lg font-black italic text-white uppercase tracking-tighter leading-none">Gate <span className="text-teal-400">Pro</span></h2>
-            <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-1">Professional Noise Gate</p>
+            <h2 className="text-lg font-black text-white tracking-tight leading-none">Anti-bruit</h2>
+            <p className="text-[11px] text-slate-400 mt-1">Coupe le souffle et les bruits de la pièce entre tes phrases.</p>
           </div>
         </div>
         <div className="flex items-center space-x-3">
           <select
             onChange={(e) => loadPreset(parseInt(e.target.value))}
-            className="bg-[#14161a] border border-white/10 rounded-xl px-3 py-2 text-[9px] font-black text-white uppercase tracking-wider cursor-pointer hover:border-teal-500/50 transition-all"
+            aria-label="Préréglages de l'anti-bruit"
+            className="bg-[#14161a] border border-white/10 rounded-xl px-3 py-2 text-[11px] font-bold text-white cursor-pointer hover:border-teal-500/50 transition-all"
           >
-            <option value="-1">— PRESETS —</option>
+            <option value="-1">Préréglages…</option>
             {DENOISER_PRESETS.map((p, i) => (
-              <option key={i} value={i}>{p.name.toUpperCase()}</option>
+              <option key={i} value={i}>{p.name}</option>
             ))}
           </select>
-          <button 
+          <button data-plugin-power 
             onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
             className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-teal-500 border-teal-400 text-black shadow-lg shadow-teal-500/30' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
@@ -537,30 +539,31 @@ export const VocalDenoiserUI: React.FC<VocalDenoiserUIProps> = ({ node, initialP
 
       {/* Main Controls Row 1 */}
       <div className="grid grid-cols-4 gap-4">
-        <ProKnob label="Threshold" value={params.threshold} min={-60} max={0} suffix="dB" color="#14b8a6" onChange={(v) => handleParamChange('threshold', v)} />
-        <ProKnob label="Range" value={params.range} min={-80} max={0} suffix="dB" color="#f59e0b" onChange={(v) => handleParamChange('range', v)} />
+        <ProKnob label="Seuil" value={params.threshold} min={-60} max={0} suffix="dB" color="#14b8a6" onChange={(v) => handleParamChange('threshold', v)} />
+        <ProKnob label="Plage" value={params.range} min={-80} max={0} suffix="dB" color="#f59e0b" onChange={(v) => handleParamChange('range', v)} />
         <ProKnob label="Attack" value={params.attack} min={0.0001} max={0.1} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('attack', v)} />
-        <ProKnob label="Hold" value={params.hold} min={0} max={0.5} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('hold', v)} />
+        <ProKnob label="Maintien" value={params.hold} min={0} max={0.5} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('hold', v)} />
       </div>
 
       {/* Main Controls Row 2 */}
       <div className="grid grid-cols-4 gap-4">
         <ProKnob label="Release" value={params.release} min={0.01} max={2.0} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('release', v)} />
-        <ProKnob label="SC Freq" value={params.scFreq} min={20} max={20000} suffix="Hz" color="#8b5cf6" log onChange={(v) => handleParamChange('scFreq', v)} />
+        <ProKnob label="Filtre de détection" value={params.scFreq} min={20} max={20000} suffix="Hz" color="#8b5cf6" log onChange={(v) => handleParamChange('scFreq', v)} />
         <div className="flex flex-col items-center justify-center">
           <button
             onClick={() => handleParamChange('flip', !params.flip)}
+            title={params.flip ? 'Baisse auto (ducking) : baisse le son quand il dépasse le seuil' : 'Porte (gate) : coupe le son sous le seuil (entre les phrases)'}
             className={`w-16 h-10 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border ${params.flip ? 'bg-purple-500 border-purple-400 text-white shadow-lg shadow-purple-500/30' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
           >
-            {params.flip ? 'DUCK' : 'GATE'}
+            {params.flip ? 'Baisse' : 'Porte'}
           </button>
-          <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest mt-2">Mode</span>
+          <span className="text-[9px] font-bold text-slate-400 mt-2">Mode</span>
         </div>
         <div className="flex flex-col items-center justify-center">
           <div className={`w-16 h-10 rounded-xl flex items-center justify-center text-[10px] font-black uppercase tracking-wider border ${status.isOpen ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' : 'bg-red-500/20 border-red-500/30 text-red-400'}`}>
-            {status.isOpen ? 'OPEN' : 'CLOSED'}
+            {status.isOpen ? 'Ouverte' : 'Fermée'}
           </div>
-          <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest mt-2">State</span>
+          <span className="text-[9px] font-bold text-slate-400 mt-2" title="Ouverte : ta voix passe. Fermée : le bruit est coupé.">État</span>
         </div>
       </div>
     </div>
@@ -591,7 +594,7 @@ const ProKnob: React.FC<{
   const displayVal = log ? Math.round(safeVal) : Math.round(safeVal * factor);
 
   return (
-    <div className="flex flex-col items-center space-y-2">
+    <div className="flex flex-col items-center space-y-2" title={termHelp(label) || undefined}>
       <div
         {...knob.bind}
         className="w-14 h-14 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-teal-500/50 transition-all shadow-xl relative"
@@ -608,7 +611,7 @@ const ProKnob: React.FC<{
         <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />
       </div>
       <div className="text-center">
-        <span className="block text-[7px] font-black text-slate-600 uppercase tracking-widest mb-1">{label}</span>
+        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>
         <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5 min-w-[50px]">
           <span className="text-[9px] font-mono font-bold text-white">{displayVal}{suffix}</span>
         </div>

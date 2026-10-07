@@ -655,7 +655,7 @@ export const SyncDelayUI: React.FC<{ node: SyncDelayNode, initialParams: DelayPa
           >
             Multi-Tap
           </button>
-          <button 
+          <button data-plugin-power 
             onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
             className={`w-8 h-8 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/40' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >

@@ -179,7 +179,29 @@ def b5(b, R):
         ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5}
+def g16(b, R):
+    """Fenêtres d'effet de la chaîne « Trap autotune » : titres, réglages, gains, bypass."""
+    ctx, pg = mk(b, "pc", "avance", "g16")
+    open_studio(pg, R)
+    trap(pg)
+    chips = pg.locator(".fx-slot button[aria-label^='Ouvrir']")
+    chips.first.click(); pg.wait_for_timeout(1000)
+    seen = []
+    for i in range(8):
+        txt = pg.locator("body").inner_text()
+        S(pg, "g16", f"{i + 1:02d}")
+        seen.append({"i": i + 1, "power_buttons": pg.locator("button[aria-label*='ctiver'], button[title*='ctiver'], button[title*='Bypass'], button[aria-label*='Bypass']").locator("visible=true").count(),
+                     "x_mult": re.findall(r"\d+[.,]\d+x", txt)[:4], "anglais": re.findall(r"(THRESHOLD|RANGE|MAKEUP|ATTACK|RELEASE|BYPASS|SURGICAL|PROFESSIONAL|DYNAMIC|BELL|SHELF|DRIVE|MIX|OUTPUT|INPUT|HOLD|RATIO|KNEE)", txt)[:12]})
+        nxt = pg.get_by_role("button", name="Effet suivant")
+        if not nxt.count() or nxt.first.is_disabled():
+            break
+        nxt.first.click(); pg.wait_for_timeout(900)
+    R["fenetres"] = seen
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]
