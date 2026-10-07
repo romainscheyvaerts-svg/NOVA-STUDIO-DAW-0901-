@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { paramFr, termHelp } from '../utils/pluginUi';
 import { PluginParameter } from '../types';
 import { EnvelopeDucker, SMOOTH, setParamSmooth } from './vocalDspUtils';
 
@@ -779,7 +780,7 @@ export const ProfessionalReverbUI: React.FC<{
     const percent = Math.max(0, Math.min(100, ((level + 60) / 60) * 100));
     return (
       <div className="flex flex-col items-center">
-        <span className="text-[6px] font-black text-slate-600 uppercase mb-1">{label}</span>
+        <span className="text-[6px] font-black text-slate-600 uppercase mb-1">{paramFr(label)}</span>
         <div className="w-3 h-24 bg-black/60 rounded relative overflow-hidden border border-white/5">
           <div 
             className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-indigo-500 via-indigo-400 to-cyan-400 transition-all duration-75"
@@ -800,12 +801,8 @@ export const ProfessionalReverbUI: React.FC<{
             <i className="fas fa-mountain-sun text-xl"></i>
           </div>
           <div>
-            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter">
-              Spatial <span className="text-indigo-400">Verb</span>
-            </h2>
-            <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-1">
-              Algorithmic Reverb Engine v3.0
-            </p>
+            <h2 className="text-xl font-black text-white tracking-tight">Réverbe</h2>
+            <p className="text-[11px] text-slate-400 mt-1">Place la voix dans une pièce : de la petite cabine à la grande salle.</p>
           </div>
         </div>
         
@@ -819,7 +816,7 @@ export const ProfessionalReverbUI: React.FC<{
                 : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'
             }`}
           >
-            <i className="fas fa-snowflake mr-2"></i>Freeze
+            <i className="fas fa-snowflake mr-2"></i>Figer
           </button>
           
           {/* Power */}
@@ -859,7 +856,7 @@ export const ProfessionalReverbUI: React.FC<{
           className="bg-[#14161a] border border-white/10 rounded-xl px-4 py-2 text-[9px] font-black text-white hover:border-indigo-500/50 outline-none cursor-pointer"
           defaultValue="-1"
         >
-          <option disabled value="-1">PRESETS</option>
+          <option disabled value="-1">Préréglages</option>
           {REVERB_PRESETS.map((p, i) => (
             <option key={i} value={i}>{p.name.toUpperCase()}</option>
           ))}
@@ -871,7 +868,7 @@ export const ProfessionalReverbUI: React.FC<{
         <div className="flex-1 h-36 bg-black/60 rounded-[24px] border border-white/5 relative overflow-hidden">
           <canvas ref={canvasRef} width={520} height={144} className="w-full h-full" />
           <div className="absolute top-2 left-3 text-[7px] font-black text-slate-600 uppercase tracking-widest">
-            Impulse Response
+            Réponse de la salle
           </div>
         </div>
         
@@ -943,7 +940,7 @@ const ReverbKnob: React.FC<{
         />
       </div>
       <div className="text-center">
-        <span className="block text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</span>
+        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>
         <div className="bg-black/60 px-2 py-0.5 rounded border border-white/5 min-w-[44px]">
           <span className="text-[8px] font-mono font-bold text-white">{displayValue}{suffix}</span>
         </div>

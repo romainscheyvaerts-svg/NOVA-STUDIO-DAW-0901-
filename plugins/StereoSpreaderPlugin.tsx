@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { paramFr, termHelp } from '../utils/pluginUi';
 
 /**
  * PROFESSIONAL STEREO IMAGER v3.0
@@ -467,7 +468,7 @@ const SpreaderKnob: React.FC<{ label: string, value: number, onChange: (v: numbe
         <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />
       </div>
       <div className="text-center">
-        <span className="block text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</span>
+        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>
         <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5 min-w-[45px]">
           <span className="text-[8px] font-mono font-bold" style={{ color }}>{display}{suffix}</span>
         </div>
@@ -601,11 +602,8 @@ export const StereoSpreaderUI: React.FC<{ node: StereoSpreaderNode, initialParam
             <i className="fas fa-arrows-alt-h text-xl"></i>
           </div>
           <div>
-            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">
-              Stereo <span className="text-cyan-400">Imager</span>
-              <span className="text-[8px] ml-2 font-normal text-slate-600">v3.0</span>
-            </h2>
-            <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-1">M/S Width & Correlation</p>
+            <h2 className="text-xl font-black text-white tracking-tight leading-none">Stéréo</h2>
+            <p className="text-[11px] text-slate-400 mt-1">Élargit ou resserre l’image stéréo, sans casser le son en mono.</p>
           </div>
         </div>
         <button data-plugin-power 
@@ -621,7 +619,7 @@ export const StereoSpreaderUI: React.FC<{ node: StereoSpreaderNode, initialParam
         {/* Vectorscope */}
         <div className="flex-1 h-44 bg-black/60 rounded-[24px] border border-white/5 relative overflow-hidden shadow-inner">
           <canvas ref={canvasRef} width={340} height={176} className="w-full h-full" />
-          <div className="absolute top-3 left-4 text-[7px] font-black text-slate-600 uppercase tracking-widest">Vectorscope</div>
+          <div className="absolute top-3 left-4 text-[7px] font-black text-slate-600 uppercase tracking-widest">Image stéréo</div>
           <div className="absolute bottom-2 left-0 right-0 flex justify-between px-4 text-[6px] font-black text-slate-700 uppercase">
             <span>L</span>
             <span>Mono</span>
@@ -631,7 +629,7 @@ export const StereoSpreaderUI: React.FC<{ node: StereoSpreaderNode, initialParam
         
         {/* Correlation Meter */}
         <div className="w-24 h-44 bg-black/60 rounded-[24px] border border-white/5 p-3 flex flex-col justify-between">
-          <div className="text-[6px] font-black text-slate-600 uppercase tracking-widest text-center">Correlation</div>
+          <div className="text-[6px] font-black text-slate-600 uppercase tracking-widest text-center">Compatibilité mono</div>
           
           {/* Vertical meter */}
           <div className="flex-1 flex flex-col items-center justify-center space-y-1">
@@ -726,7 +724,7 @@ export const StereoSpreaderUI: React.FC<{ node: StereoSpreaderNode, initialParam
       {/* Footer */}
       <div className="pt-4 border-t border-white/5 flex justify-between items-center">
         <div className="flex flex-col">
-          <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Processing</span>
+          <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Traitement</span>
           <span className="text-[9px] font-black text-slate-400">
             {params.multiBand ? '3-Band M/S' : 'Full-Range M/S'}
           </span>

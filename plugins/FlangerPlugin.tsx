@@ -1,5 +1,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
+import { paramFr, termHelp } from '../utils/pluginUi';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 /**
@@ -165,7 +166,7 @@ const FlangerKnob: React.FC<{
         <div className="absolute inset-4 rounded-full bg-[#181a21] border border-white/5" />
       </div>
       <div className="text-center">
-        <span className="block text-[7px] font-black text-slate-600 uppercase tracking-widest mb-1">{label}</span>
+        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>
         <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5">
           <span className="text-[9px] font-mono font-bold text-blue-400">
             {Math.round(safeValue * factor)}{suffix}
@@ -238,8 +239,8 @@ export const StudioFlangerUI: React.FC<{ node: FlangerNode, initialParams: Flang
             <i className="fas fa-wind text-2xl"></i>
           </div>
           <div>
-            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">Studio <span className="text-blue-400">Flanger</span></h2>
-            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-2">High-Feedback Jet Engine</p>
+            <h2 className="text-xl font-black text-white tracking-tight leading-none">Flanger</h2>
+            <p className="text-[11px] text-slate-400 mt-2">Effet « avion » qui balaie le son : à doser léger sur la voix.</p>
           </div>
         </div>
         <div className="flex items-center space-x-4">
@@ -259,7 +260,7 @@ export const StudioFlangerUI: React.FC<{ node: FlangerNode, initialParams: Flang
       </div>
 
       <div className="h-28 bg-black/60 rounded-[28px] border border-white/5 relative overflow-hidden flex items-center justify-center shadow-inner group">
-        <div className="absolute top-4 left-6 text-[7px] font-black text-slate-600 uppercase tracking-widest z-10">Comb Filter Response</div>
+        <div className="absolute top-4 left-6 text-[7px] font-black text-slate-600 uppercase tracking-widest z-10">Réponse du filtre</div>
         <canvas ref={canvasRef} width={400} height={112} className="w-full h-full opacity-60" />
         <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-transparent to-blue-500/5 pointer-events-none" />
       </div>
@@ -273,10 +274,10 @@ export const StudioFlangerUI: React.FC<{ node: FlangerNode, initialParams: Flang
       </div>
 
       <div className="pt-6 border-t border-white/5 flex justify-between items-center text-slate-700">
-        <span className="text-[7px] font-black uppercase tracking-[0.3em]">Resonance: {Math.round(params.feedback * 100)}%</span>
+        <span className="text-[10px] font-bold text-slate-500">Résonance : {Math.round(params.feedback * 100)} %</span>
         <div className="flex items-center space-x-2">
            <div className={`w-2 h-2 rounded-full ${params.isEnabled ? 'bg-blue-500 shadow-[0_0_8px_#3b82f6]' : 'bg-slate-800'}`} />
-           <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">JetCore v1.0</span>
+           <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest"></span>
         </div>
       </div>
     </div>

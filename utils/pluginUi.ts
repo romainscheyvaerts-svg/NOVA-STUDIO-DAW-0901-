@@ -42,6 +42,17 @@ export const TERM_HELP: Record<string, string> = {
   Sortie: 'Sortie : volume après l’effet, pour comparer à volume égal.',
   Désaccord: 'Désaccord : écart de justesse entre les deux voix doublées (en cents).',
   'Écart G/D': 'Écart gauche / droite : ouvre la voix doublée dans la stéréo.',
+  Durée: 'Durée (decay) : temps que met la réverbe à s’éteindre.',
+  'Pré-délai': 'Pré-délai (pre-delay) : petit temps avant la réverbe, garde la voix nette devant.',
+  Taille: 'Taille : petite pièce ou grande salle.',
+  Amorti: 'Amorti (damping) : adoucit les aigus de la réverbe.',
+  'Coupe-bas': 'Coupe-bas : retire les graves de l’effet (moins de boue).',
+  'Coupe-haut': 'Coupe-haut : retire les aigus de l’effet (plus doux, plus loin).',
+  'Retrait sous la voix': 'Ducking : l’effet baisse quand tu chantes et revient dans les silences.',
+  Répétitions: 'Feedback : nombre de répétitions de l’écho.',
+  'Largeur stéréo': 'Largeur : de mono (au centre) à très large.',
+  Vitesse: 'Vitesse (rate) : rapidité de l’ondulation.',
+  Profondeur: 'Profondeur (depth) : intensité de l’ondulation.',
 };
 
 /** Infobulle d'un réglage (vide si on n'a rien d'utile à dire). */
@@ -57,3 +68,15 @@ export function foldInternalPower(params: Record<string, any> | undefined, plugi
   if (!params || params.isEnabled !== false) return null;
   return { params: { ...params, isEnabled: true }, toggleBypass: pluginEnabled };
 }
+
+/** Libellés des réglages des autres effets (Reverb, Delay, Chorus, Flanger, Stéréo). */
+export const PARAM_FR: Record<string, string> = {
+  IN: 'Entrée', OUT: 'Sortie', Decay: 'Durée', 'Pre-Delay': 'Pré-délai', Size: 'Taille', Damping: 'Amorti',
+  Diffusion: 'Diffusion', Mix: 'Mélange', 'ER Level': 'Premières réflexions', 'Low Cut': 'Coupe-bas',
+  'High Cut': 'Coupe-haut', 'Bass Boost': 'Graves', Width: 'Largeur stéréo', Mod: 'Modulation',
+  Ducking: 'Retrait sous la voix', Feedback: 'Répétitions', 'Tone LP': 'Coupe-haut', 'Tone HP': 'Coupe-bas',
+  Saturation: 'Saturation', 'Mod Rate': 'Vitesse modul.', 'Mod Depth': 'Profondeur modul.', Rate: 'Vitesse',
+  Depth: 'Profondeur', Spread: 'Ouverture', Manual: 'Position', Balance: 'Balance', 'Haas Delay': 'Décalage Haas',
+  'Haas Mix': 'Dose Haas', 'Low Width': 'Largeur graves', 'Mid Width': 'Largeur médiums', 'High Width': 'Largeur aigus',
+};
+export const paramFr = (label: string) => PARAM_FR[label] || label;

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { paramFr, termHelp } from '../utils/pluginUi';
 import { PluginParameter } from '../types';
 import { EnvelopeDucker, makeCurve, SMOOTH, setParamSmooth } from './vocalDspUtils';
 
@@ -628,11 +629,8 @@ export const SyncDelayUI: React.FC<{ node: SyncDelayNode, initialParams: DelayPa
             <i className="fas fa-history text-xl"></i>
           </div>
           <div>
-            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">
-              Echo <span className="text-cyan-400">Engine</span>
-              <span className="text-[8px] ml-2 font-normal text-slate-600">v3.0</span>
-            </h2>
-            <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-1">Multi-Tap Delay Processor</p>
+            <h2 className="text-xl font-black text-white tracking-tight leading-none">Écho (delay)</h2>
+            <p className="text-[11px] text-slate-400 mt-1">Répète la fin des mots en rythme avec le beat.</p>
           </div>
         </div>
         
@@ -721,7 +719,7 @@ export const SyncDelayUI: React.FC<{ node: SyncDelayNode, initialParams: DelayPa
           <DelayKnob label="Mod Depth" value={params.modDepth || 0.15} min={0} max={1} factor={100} suffix="%" color="#8b5cf6" onChange={v => handleParamChange('modDepth', v)} />
           <DelayKnob label="Ducking" value={params.ducking || 0} min={0} max={1} factor={100} suffix="%" color="#10b981" onChange={v => handleParamChange('ducking', v)} />
           <div className="flex flex-col items-center justify-center">
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest mb-2">R. Time</span>
+            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest mb-2">Temps D</span>
             <select 
               value={params.divisionR || params.division}
               onChange={(e) => handleParamChange('divisionR', e.target.value as DelayDivision)}
@@ -739,13 +737,13 @@ export const SyncDelayUI: React.FC<{ node: SyncDelayNode, initialParams: DelayPa
       <div className="pt-4 border-t border-white/5 flex justify-between items-center text-slate-700">
         <div className="flex items-center space-x-4">
           <div className="flex flex-col">
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Engine</span>
+            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Moteur</span>
             <span className="text-[9px] font-black text-slate-400">{params.mode} DSP</span>
           </div>
           {params.multiTap && (
             <div className="flex flex-col">
-              <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Taps</span>
-              <span className="text-[9px] font-black text-amber-400">4 Active</span>
+              <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Répétitions</span>
+              <span className="text-[9px] font-black text-amber-400">4 actives</span>
             </div>
           )}
         </div>
@@ -789,7 +787,7 @@ const DelayKnob: React.FC<{
         <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />
       </div>
       <div className="text-center">
-        <span className="block text-[7px] font-black text-slate-600 uppercase tracking-widest mb-1">{label}</span>
+        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>
         <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5 min-w-[50px]">
           <span className="text-[9px] font-mono font-bold text-white">
             {Math.round(safeValue * factor * 10) / 10}{suffix}

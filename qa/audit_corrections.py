@@ -410,7 +410,24 @@ def f4(b, R):
     ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25, "mob": mob, "g18": g18, "f4": f4}
+def g16b(b, R):
+    ctx, pg = mk(b, "pc", "avance", "g16b")
+    open_studio(pg, R)
+    trap(pg)
+    open_console(pg)
+    pg.evaluate("() => document.querySelectorAll('.custom-scroll').forEach(e => e.scrollLeft = 99999)")
+    pg.wait_for_timeout(400)
+    for i, name in enumerate(("Réverbe", "Delay")):
+        chip = pg.locator(".fx-slot button").filter(has_text=name).locator("visible=true")
+        if chip.count():
+            chip.first.click(); pg.wait_for_timeout(1200)
+            S(pg, "g16", f"autres_{i + 1:02d}_{name}")
+            pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25, "mob": mob, "g18": g18, "f4": f4, "g16b": g16b}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]
