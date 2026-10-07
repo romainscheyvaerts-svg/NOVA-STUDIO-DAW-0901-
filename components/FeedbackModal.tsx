@@ -193,10 +193,11 @@ const FeedbackModal: React.FC<{ open: boolean; initial?: OpenFeedbackOptions; on
     if (!open) return;
     setContext(collectFeedbackContext());
     setError(null);
-    if (initial?.tab) setTab(initial.tab);
+    // Chaque ouverture repart sur un formulaire (le brouillon non envoyé est gardé),
+    // sauf demande explicite de « Mes signalements ».
+    setTab(initial?.tab || 'nouveau');
+    if (done) { setDone(null); setShot(null); setMasks([]); setBlurAll(false); }
     if (initial?.category || initial?.title) {
-      setDone(null);
-      setTab('nouveau');
       update({ ...(initial.category ? { category: initial.category } : {}), ...(initial.title && !draft.title ? { title: initial.title } : {}) });
     }
     let alive = true;
@@ -356,7 +357,7 @@ const FeedbackModal: React.FC<{ open: boolean; initial?: OpenFeedbackOptions; on
                 {done.note
                   ? done.note
                   : done.status === 'envoye'
-                    ? 'Tu peux suivre ce qu’il devient dans « Mes signalements ».'
+                    ? 'Tu peux suivre ce qu’il devient dans « Mes signalements ».'
                     : 'Pas de connexion pour l’instant : il est gardé sur cet appareil et partira tout seul dès que la connexion revient.'}
               </p>
               <div className="mt-6 flex flex-col sm:flex-row gap-2 justify-center">
