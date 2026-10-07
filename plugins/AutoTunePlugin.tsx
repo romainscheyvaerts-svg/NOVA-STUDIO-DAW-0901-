@@ -6,6 +6,10 @@ import { useKnobInteraction } from '../hooks/useKnobInteraction';
 // Export constants for use in other plugins (MasterSync)
 export const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const SCALES = ['CHROMATIC', 'MAJOR', 'MINOR', 'MINOR_HARMONIC', 'PENTATONIC'];
+/** Libellés français des gammes (les valeurs restent celles du moteur). */
+export const SCALE_LABELS: Record<string, string> = {
+  CHROMATIC: 'Chromatique (toutes les notes)', MAJOR: 'Majeure', MINOR: 'Mineure', MINOR_HARMONIC: 'Mineure harmonique', PENTATONIC: 'Pentatonique',
+};
 
 // --- WORKLET CODE INLINED TO PREVENT 404 ERRORS ---
 // Moteur v2 : detection YIN + transposition PSOLA (grains synchrones de la
@@ -832,12 +836,15 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
             <i className="fas fa-microphone-alt text-2xl"></i>
           </div>
           <div>
-            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">Auto-Tune <span className="text-cyan-400">Pro</span></h2>
-            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-2">Real-Time DSP Worklet</p>
+            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">Nova <span className="text-cyan-400">Tune</span></h2>
+            <p className="text-[9px] font-bold text-slate-500 tracking-wide mt-2">Correction de justesse en temps réel</p>
           </div>
         </div>
         <button 
           onClick={() => updateParam('isEnabled', !params.isEnabled)}
+          title={params.isEnabled ? 'Autotune actif : clic pour le couper' : 'Autotune coupé : clic pour le réactiver'}
+          aria-label={params.isEnabled ? "Couper l'autotune" : "Activer l'autotune"}
+          aria-pressed={params.isEnabled}
           className={`w-12 h-12 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/40' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
         >
           <i className="fas fa-power-off"></i>
@@ -847,19 +854,19 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
       <div className="h-44 bg-black/60 rounded-[32px] border border-white/5 relative flex flex-col items-center justify-center overflow-hidden shadow-inner group">
         <canvas ref={canvasRef} width={400} height={176} className="absolute inset-0 opacity-60" />
         <div className="relative text-center z-10 pointer-events-none">
-           <span className="block text-[9px] font-black text-cyan-500/50 uppercase tracking-[0.5em] mb-2">Correction Target</span>
+           <span className="block text-[9px] font-black text-cyan-500/50 uppercase tracking-[0.3em] mb-2">Note visée</span>
            <span className="text-7xl font-black text-white font-mono tracking-tighter leading-none text-shadow-glow">
              {vizData.targetFreq > 0 ? getNoteName(vizData.targetFreq) : '--'}
            </span>
            <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">
-             In: {getNoteName(vizData.detectedFreq)}
+             Chantée : {getNoteName(vizData.detectedFreq)}
            </span>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-6 bg-white/[0.02] p-6 rounded-[24px] border border-white/5">
         <div className="space-y-3">
-          <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">Key</label>
+          <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">Tonalité</label>
           <select 
             value={params.rootKey} 
             onChange={(e) => updateParam('rootKey', parseInt(e.target.value))}
@@ -869,21 +876,21 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
           </select>
         </div>
         <div className="space-y-3">
-          <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">Scale</label>
+          <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">Gamme</label>
           <select 
             value={params.scale} 
             onChange={(e) => updateParam('scale', e.target.value as any)}
             className="w-full bg-[#14161a] border border-white/10 rounded-xl p-3 text-[11px] font-black text-white hover:border-cyan-500/50 outline-none appearance-none cursor-pointer"
           >
-            {SCALES.map(s => <option key={s} value={s}>{s.replace('_', ' ').toUpperCase()}</option>)}
+            {SCALES.map(s => <option key={s} value={s}>{SCALE_LABELS[s] || s}</option>)}
           </select>
         </div>
       </div>
 
       <div className="grid grid-cols-3 gap-8 pt-2">
-        <TuneKnob label="Retune Speed" value={params.speed} defaultValue={0.1} onChange={(v) => updateParam('speed', v)} factor={100} suffix="%" inverseLabel={true} />
-        <TuneKnob label="Humanize" value={params.humanize} defaultValue={0.2} onChange={(v) => updateParam('humanize', v)} factor={100} suffix="%" />
-        <TuneKnob label="Amount" value={params.mix} defaultValue={1} onChange={(v) => updateParam('mix', v)} factor={100} suffix="%" />
+        <TuneKnob label="Vitesse" value={params.speed} defaultValue={0.1} onChange={(v) => updateParam('speed', v)} factor={100} suffix="%" inverseLabel={true} />
+        <TuneKnob label="Naturel" value={params.humanize} defaultValue={0.2} onChange={(v) => updateParam('humanize', v)} factor={100} suffix="%" />
+        <TuneKnob label="Dosage" value={params.mix} defaultValue={1} onChange={(v) => updateParam('mix', v)} factor={100} suffix="%" />
       </div>
     </div>
   );

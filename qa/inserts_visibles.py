@@ -37,6 +37,16 @@ with sync_playwright() as p:
         if chips.count():
             chips.first.click(); pg.wait_for_timeout(900)
             shot(pg, f"inserts_{mode}_effet_ouvert")
+            nxt = pg.get_by_role("button", name="Effet suivant")
+            r["fleche_suivant"] = nxt.count() > 0
+            if nxt.count():
+                nxt.first.click(); pg.wait_for_timeout(700)
+                shot(pg, f"inserts_{mode}_effet_suivant")
+                byp = pg.get_by_role("button", name=re.compile("Désactiver l'effet|Activer l'effet"))
+                if byp.count():
+                    byp.first.click(); pg.wait_for_timeout(400)
+                    r["bypass_affiche"] = "Bypass" in body(pg)
+                    byp.first.click(); pg.wait_for_timeout(300)
             r["clic_ouvre"] = bool(re.search(r"Autotune|Compresseur|Égaliseur|De-esser|Saturation", body(pg)))
             pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
         if mode == "avance":

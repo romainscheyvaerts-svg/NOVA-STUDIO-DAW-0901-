@@ -21,6 +21,7 @@ import DrumSamplerEditor from './DrumSamplerEditor';
 import MelodicSamplerEditor from './MelodicSamplerEditor';
 import DrumRack from './DrumRack';
 import FitToWidth from './FitToWidth';
+import { PluginName } from './PluginName';
 
 interface PluginEditorProps {
   plugin: PluginInstance;
@@ -32,9 +33,28 @@ interface PluginEditorProps {
   onUpdateTrack?: (track: Track) => void; // Needed for Drum Rack
   /** Gèle / dégèle la piste (effets VST3 du PC). */
   onToggleFreeze?: (trackId: string) => void;
+  /** Active / désactive l'effet (bypass), comme le bouton de la fenêtre d'un plugin Pro Tools. */
+  onToggleBypass?: (trackId: string, pluginId: string) => void;
+  /** Ouvre un autre effet de la piste (flèches précédent / suivant). */
+  onOpenPlugin?: (trackId: string, plugin: PluginInstance) => void;
 }
 
-const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, onUpdateParams, isMobile, track, onUpdateTrack, onToggleFreeze }) => {
+const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, onUpdateParams, isMobile, track, onUpdateTrack, onToggleFreeze, onToggleBypass, onOpenPlugin }) => {
+  // État à jour de l'effet (actif / bypass) et voisins dans la chaîne de la piste.
+  const live = track?.plugins.find(p => p.id === plugin.id) || plugin;
+  const chain = (track?.plugins || []).filter(p => p.type !== 'MELODIC_SAMPLER' && p.type !== 'DRUM_SAMPLER' && p.type !== 'SAMPLER');
+  const pos = chain.findIndex(p => p.id === plugin.id);
+  const prev = pos > 0 ? chain[pos - 1] : null;
+  const next = pos >= 0 && pos < chain.length - 1 ? chain[pos + 1] : null;
+  // Échap ferme la fenêtre (sauf pendant une saisie).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key === 'Escape' && !(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
   const [nodeInstance, setNodeInstance] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -227,13 +247,32 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
     <div className={`relative group/plugin ${isMobile ? 'w-full h-full flex flex-col items-center justify-center pt-16' : ''}`}>
       {/* Header Bar */}
       <div className={`absolute left-0 right-0 h-12 bg-black/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between px-6 z-50 shadow-2xl ${isMobile ? 'top-0 fixed' : '-top-14 rounded-full border border-white/10'}`}>
-         <div className="flex items-center space-x-3">
-            <div className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse"></div>
-            <span className="text-[10px] font-black text-white uppercase tracking-widest">{plugin.name} // NODE ACTIVE</span>
+         <div className="flex min-w-0 items-center gap-3">
+            {onToggleBypass && (
+              <button type="button" onClick={() => onToggleBypass(trackId, plugin.id)} aria-pressed={live.isEnabled}
+                title={live.isEnabled ? "Effet actif : clic pour le désactiver (bypass)" : "Effet désactivé (bypass) : clic pour le réactiver"}
+                aria-label={live.isEnabled ? "Désactiver l'effet" : "Activer l'effet"}
+                className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center transition-colors ${live.isEnabled ? 'bg-cyan-500/25 text-cyan-300 hover:bg-cyan-500/40' : 'bg-white/5 text-slate-500 hover:text-white'}`}>
+                <i className="fas fa-power-off text-[10px]" />
+              </button>
+            )}
+            <span className="min-w-0 text-[12px] font-bold text-white"><PluginName plugin={live} showDetail /></span>
+            {track && <span className="hidden sm:inline shrink-0 text-[11px] text-slate-400">sur <b className="text-slate-200">{track.name}</b>{chain.length > 1 && pos >= 0 ? ` · ${pos + 1}/${chain.length}` : ''}</span>}
+            {!live.isEnabled && <span className="shrink-0 rounded bg-amber-500/20 px-1.5 text-[10px] font-bold text-amber-300">Bypass</span>}
          </div>
-         <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-8 h-8 rounded-full bg-white/5 hover:bg-red-500 text-slate-500 hover:text-white transition-all flex items-center justify-center">
+         <div className="flex shrink-0 items-center gap-1">
+         {onOpenPlugin && chain.length > 1 && (
+           <>
+             <button type="button" disabled={!prev} onClick={() => prev && onOpenPlugin(trackId, prev)} aria-label="Effet précédent" title={prev ? `Effet précédent : ${prev.name || prev.type}` : 'Premier effet de la piste'}
+               className="w-8 h-8 rounded-full bg-white/5 text-slate-300 hover:bg-white/15 disabled:opacity-30 flex items-center justify-center"><i className="fas fa-chevron-left text-xs" /></button>
+             <button type="button" disabled={!next} onClick={() => next && onOpenPlugin(trackId, next)} aria-label="Effet suivant" title={next ? `Effet suivant : ${next.name || next.type}` : 'Dernier effet de la piste'}
+               className="w-8 h-8 rounded-full bg-white/5 text-slate-300 hover:bg-white/15 disabled:opacity-30 flex items-center justify-center"><i className="fas fa-chevron-right text-xs" /></button>
+           </>
+         )}
+         <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="w-8 h-8 rounded-full bg-white/5 hover:bg-red-500 text-slate-500 hover:text-white transition-all flex items-center justify-center">
             <i className="fas fa-times text-xs"></i>
          </button>
+         </div>
       </div>
       
       {/* Container */}
