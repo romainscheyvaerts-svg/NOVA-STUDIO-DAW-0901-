@@ -451,7 +451,18 @@ def g26(b, R):
     ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25, "mob": mob, "g18": g18, "f4": f4, "g16b": g16b, "g26": g26}
+def mob2(b, R):
+    ctx, pg = mk(b, "tel", "avance", "mob2")
+    open_studio(pg, R, vp="tel")
+    pg.wait_for_timeout(4000)
+    pg.get_by_text("REC", exact=True).first.click(); pg.wait_for_timeout(500)
+    S(pg, "g15", "tel_avance_01_outils_envois")
+    R["outils"] = [pg.locator("button[aria-pressed]").nth(i).get_attribute("aria-label") for i in range(min(6, pg.locator("button[aria-pressed]").count()))]
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25, "mob": mob, "g18": g18, "f4": f4, "g16b": g16b, "g26": g26, "mob2": mob2}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]

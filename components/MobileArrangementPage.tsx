@@ -543,12 +543,13 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
   // Tools config - Extended
   const tools: { id: EditTool; icon: string; label: string }[] = [
-    { id: 'SELECT', icon: 'fa-arrow-pointer', label: 'Select' },
-    { id: 'TRIM', icon: 'fa-scissors', label: 'Trim' },
-    { id: 'SPLIT', icon: 'fa-cut', label: 'Split' },
-    { id: 'ERASE', icon: 'fa-eraser', label: 'Erase' },
-    { id: 'FADE', icon: 'fa-wave-square', label: 'Fade' },
-    { id: 'DUPLICATE', icon: 'fa-clone', label: 'Dup' },
+    { id: 'SELECT', icon: 'fa-arrow-pointer', label: 'Sélection' },
+    // Deux icônes distinctes (G15) : avant, deux ciseaux identiques côte à côte.
+    { id: 'TRIM', icon: 'fa-arrows-left-right', label: 'Rogner' },
+    { id: 'SPLIT', icon: 'fa-scissors', label: 'Couper ici' },
+    { id: 'ERASE', icon: 'fa-eraser', label: 'Gomme' },
+    { id: 'FADE', icon: 'fa-wave-square', label: 'Fondus' },
+    { id: 'DUPLICATE', icon: 'fa-clone', label: 'Dupliquer' },
   ];
 
   return (
@@ -1124,9 +1125,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           onClick={handleOpenSends}
           aria-label="Envois (delay, réverbes) de la piste sélectionnée"
           title="Envois de la piste"
-          className="fixed bottom-[calc(8.5rem+env(safe-area-inset-bottom))] right-4 w-14 h-14 rounded-full bg-gradient-to-br from-purple-600 to-pink-500 shadow-lg shadow-purple-500/30 flex items-center justify-center z-40 active:scale-95 transition-transform"
+          // F6 : bouton libellé et plus compact (le rond rose sans texte recouvrait la timeline).
+          className="fixed bottom-[calc(8.5rem+env(safe-area-inset-bottom))] right-3 h-10 px-3 rounded-full bg-gradient-to-br from-purple-600/90 to-pink-500/90 shadow-lg shadow-purple-500/30 flex items-center gap-1.5 z-40 active:scale-95 transition-transform text-white text-[12px] font-bold"
         >
-          <i className="fas fa-share-nodes text-white text-lg"></i>
+          <i className="fas fa-share-nodes text-white text-sm" aria-hidden="true"></i>Envois
         </button>
       )}
 
@@ -1146,7 +1148,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             {/* Header */}
             <div className="flex items-center justify-between px-4 pb-3 border-b border-white/10">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-wide">Envois / Sends</h3>
+                <h3 className="text-sm font-black text-white uppercase tracking-wide">Envois</h3>
                 <p className="text-[10px] text-white/40">
                   Track: {tracks.find(t => t.id === selectedTrackForSends)?.name || 'N/A'}
                 </p>
