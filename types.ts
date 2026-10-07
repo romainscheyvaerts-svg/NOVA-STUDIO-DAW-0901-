@@ -126,6 +126,11 @@ export interface TrackSend {
   id: string;          
   level: number;       
   isEnabled: boolean;
+  /**
+   * Envoi pré-fader (Pro Tools « PRE ») : le signal part après les effets mais
+   * avant le fader et le pan de la piste. Absent : post-fader (comme avant).
+   */
+  preFader?: boolean;
 }
 
 export interface MidiNote {
