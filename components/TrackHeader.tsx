@@ -31,6 +31,8 @@ import { isPluginBaked, isFreezeStale, isTrackFrozen } from '../utils/freeze';
 import { useRecFrozen } from '../utils/recFreezeStore';
 import { useInstrumentStatus } from '../utils/instrumentStore';
 import MonitorControl from './MonitorControl';
+import { PluginName } from './PluginName';
+import TrackInsertStrip from './TrackInsertStrip';
 
 interface TrackHeaderProps {
   track: Track;
@@ -395,7 +397,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={() => { setIsDragOverFX(false); }}
       onDrop={handleOnDrop}
-      className={`group border-b border-white/10 p-3 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${frozen ? 'bg-cyan-500/[0.03]' : ''}${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
+      className={`group border-b border-white/10 px-3 py-2 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${frozen ? 'bg-cyan-500/[0.03]' : ''}${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
       style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined }}
     >
       <div className="flex justify-between items-start mb-2">
@@ -475,7 +477,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         
         {/* Écran tactile en mode PC (iPad paysage) : boutons espacés au pas de 40 px, zones .nova-hit-tactile */}
         <div className="flex nova-hit-gap shrink-0">
-          {track.id !== 'master' && !simple && (
+          {track.id !== 'master' && (!simple || insertPlugins.length > 0) && (
             <div className="relative">
               <button
                 ref={fxBtnRef}
@@ -502,7 +504,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                         <button type="button" disabled={baked && p.type !== 'VST3'}
                           onClick={(e) => { setFxMenu(false); handleFXClick(e, p); }}
                           className={`flex-1 min-w-0 truncate px-2 py-1.5 [@media(pointer:coarse)]:py-3 text-left text-[12px] font-semibold ${p.isEnabled ? 'text-white' : 'text-slate-500 line-through'}`}>
-                          {p.name || getAbbr(p.type, p.name)}
+                          <PluginName plugin={p} showDetail className="max-w-full" />
                         </button>
                         <button type="button" disabled={baked} onClick={(e) => togglePluginBypass(e, p)}
                           title={p.isEnabled ? 'Désactiver' : 'Activer'}
@@ -574,10 +576,11 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       </div>
       
       {/* Autotune du PC : « Auto-Tune Pro · F# mineur » (ou l'autotune de NOVA en repli). */}
-      <AutotuneBadge track={track} />
+      {/* Piste armée : la ligne des effets laisse place au retour casque ; l'autotune reste visible ici. */}
+      {track.isTrackArmed && <AutotuneBadge track={track} onOpen={(e) => { const at = track.plugins.find(x => x.type === 'AUTOTUNE'); if (at) handleFXClick(e, at); }} />}
       {track.isTrackArmed && <div className="mt-1 relative z-10"><MonitorControl compact trackId={track.id} /></div>}
 
-      <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-2 rounded-lg border border-white/5 relative z-10">
+      <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-1.5 rounded-lg border border-white/5 relative z-10">
         <div
           {...panKnob.bind}
           title={`Panoramique ${panToText(track.pan)} : glisser (Maj = fin), molette, double-clic = centre`}
@@ -676,44 +679,19 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       {/* Une seule ligne, défilante : avec un style de mix (5-6 effets) la grille
           passait sur deux lignes et débordait sur la piste suivante. */}
       {/* Piste armée : la ligne vumètre / retour prend la place des pastilles (le bouton FX reste). */}
-      {!track.isTrackArmed && !simple && <div className="mt-2 flex gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-h-0">
-        {insertPlugins.map(p => {
-          // Effet compris dans le rendu gelé : lecture seule. Un VST3 reste
-          // ouvrable (son panneau explique « Rendu (VST du PC) » / Dégeler).
-          const baked = isPluginBaked(track, track.plugins.indexOf(p));
-          const bakedVst = baked && p.type === 'VST3';
-          return (
-          <div
-            key={p.id}
-            draggable={!baked}
-            onDragStart={(e) => { if (baked) return; e.stopPropagation(); handleFXDragStart(e, p.id); }}
-            title={bakedVst ? "Rendu (VST du PC) : déjà inclus dans l'audio de la piste. Pour le régler, ouvre le projet sur ton PC avec le pont VST." : baked ? 'Inclus dans le rendu gelé de la piste' : undefined}
-            data-fx-baked={baked ? '1' : undefined}
-            className={`relative group/fxitem flex flex-col items-center fx-slot shrink-0 basis-[calc(25%-3px)] ${baked ? (bakedVst ? 'opacity-70' : 'pointer-events-none opacity-40') : ''}`}
-          >
-            <div className="flex w-full overflow-hidden rounded-md border border-white/5 bg-black/40">
-              <button 
-                onClick={(e) => handleFXClick(e, p)}
-                className={`flex-1 h-7 text-[9px] font-bold uppercase truncate px-1 text-center flex items-center justify-center transition-all ${p.isEnabled ? 'text-cyan-300' : 'text-slate-600 bg-black/20'}`}
-              >
-                {getAbbr(p.type, p.name)}
-              </button>
-              <button
-                disabled={baked}
-                onClick={(e) => togglePluginBypass(e, p)}
-                title={p.isEnabled ? 'Désactiver l\'effet' : 'Activer l\'effet'}
-                aria-label={`${p.isEnabled ? 'Désactiver' : 'Activer'} ${p.name || p.type}`}
-                aria-pressed={p.isEnabled}
-                className={`w-4 h-6 flex items-center justify-center transition-all ${p.isEnabled ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/40' : 'bg-white/5 text-slate-800'}`}
-              >
-                <i className="fas fa-power-off text-[6px]"></i>
-              </button>
-            </div>
-            {!baked && <button onClick={(e) => handleRemoveFX(e, p.id)} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${p.name || p.type}`}><i className="fas fa-times"></i></button>}
-          </div>
-          );
-        })}
-      </div>}
+      {/* Les effets restent visibles même en mode simple : on doit toujours voir ce qui traite la voix. */}
+      {!track.isTrackArmed && insertPlugins.length > 0 && (
+        <TrackInsertStrip
+          trackId={track.id}
+          plugins={insertPlugins}
+          isBaked={(p) => isPluginBaked(track, track.plugins.indexOf(p))}
+          onOpen={(e, p) => handleFXClick(e, p)}
+          onToggle={(e, p) => togglePluginBypass(e, p)}
+          onRemove={(e, id) => handleRemoveFX(e, id)}
+          onDragStart={(e, id) => handleFXDragStart(e, id)}
+          onShowAll={() => setFxMenu(true)}
+        />
+      )}
     </div>
   );
 };

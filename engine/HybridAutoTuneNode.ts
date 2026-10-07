@@ -29,6 +29,9 @@ import {
  * Qualité : « faible latence » par défaut (Auto-Tune Pro : mode Low Latency,
  * 2 670 → 112 échantillons annoncés) ou « qualité maximale » (réglage de l'onglet VST).
  */
+/** Autotunes en service, par id d'effet : l'interface peut ouvrir la fenêtre du VST. */
+export const liveAutotuneNodes = new Map<string, HybridAutoTuneNode>();
+
 export class HybridAutoTuneNode {
   public readonly input: GainNode;
   public readonly output: GainNode;
@@ -68,6 +71,7 @@ export class HybridAutoTuneNode {
     this.nova.output.connect(this.output);
     this.realtime = typeof AudioContext !== 'undefined' && ctx instanceof AudioContext;
     if (!this.realtime) return;
+    liveAutotuneNodes.set(plugin.id, this);
     this.unsubs.push(autotunePrefs.subscribe(() => this.syncCandidate()));
     this.unsubs.push(novaBridge.subscribe(() => this.publish()));
     this.syncCandidate();
@@ -99,12 +103,19 @@ export class HybridAutoTuneNode {
     else this.publish();
   }
 
+  /** Ouvre la fenêtre du plugin du PC (Auto-Tune Pro, MetaTune…) qui traite la voix. */
+  async openVstEditor(): Promise<void> {
+    if (!this.vst || !this.vstReady) throw new Error("L'autotune de ton PC n'est pas encore chargé (pont VST).");
+    await this.vst.openEditor();
+  }
+
   dispose() {
     this.disposed = true;
     this.unsubs.forEach(u => u());
     this.unsubs = [];
     if (this.applyTimer) clearTimeout(this.applyTimer);
     this.dropVst();
+    if (liveAutotuneNodes.get(this.plugin.id) === this) liveAutotuneNodes.delete(this.plugin.id);
     autotuneLive.set(this.plugin.id, null);
     try { this.input.disconnect(); } catch { /* */ }
     try { this.output.disconnect(); } catch { /* */ }

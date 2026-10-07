@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { novaBridge } from '../services/NovaBridge';
 import { autotuneLive, autotunePrefs, effectiveAutotune } from '../services/AutotuneVst';
+import { liveAutotuneNodes } from '../engine/HybridAutoTuneNode';
 import { AutotuneCandidate, recommendedAutotune } from '../utils/autotuneVst';
 import { Track } from '../types';
 
@@ -214,8 +215,19 @@ export const AutotuneVstSettings: React.FC = () => {
 const useLive = (pluginId: string | null) =>
   useSyncExternalStore(autotuneLive.subscribe, () => (pluginId ? autotuneLive.get(pluginId) : null));
 
+/** État en direct d'un autotune (plugin du PC ou NOVA) : nom affiché partout. */
+export const useAutotuneLive = useLive;
+
+/** Ouvre la fenêtre du plugin du PC qui traite la voix ; renvoie un message d'erreur clair sinon. */
+export const openAutotuneWindow = async (pluginId: string): Promise<string | null> => {
+  const node = liveAutotuneNodes.get(pluginId);
+  if (!node) return "L'autotune n'est pas encore démarré : lance la lecture ou ouvre le projet sur ton PC.";
+  try { await node.openVstEditor(); return null; }
+  catch (e: any) { return e?.message || "La fenêtre de l'autotune n'a pas pu s'ouvrir."; }
+};
+
 /** Badge de la piste voix : « Auto-Tune Pro · F# mineur » (ou l'autotune de NOVA). */
-export const AutotuneBadge: React.FC<{ track: Track }> = ({ track }) => {
+export const AutotuneBadge: React.FC<{ track: Track; onOpen?: (e: React.MouseEvent) => void }> = ({ track, onOpen }) => {
   const at = useMemo(() => track.plugins.find(p => p.type === 'AUTOTUNE' && p.isEnabled), [track.plugins]);
   const info = useLive(at?.id || null);
   if (!at || !info || !info.pluginName) return null;
@@ -227,15 +239,18 @@ export const AutotuneBadge: React.FC<{ track: Track }> = ({ track }) => {
       : `Autotune de NOVA en ${info.keyText}${info.fallback ? ` (${info.pluginName} : ${info.fallback})` : ''}`;
   return (
     <div className="-mt-1 mb-0.5 flex min-w-0 relative z-10">
-      <span
+      <button
+        type="button"
         data-testid="autotune-badge"
-        title={title}
-        aria-label={title}
-        className={`min-w-0 max-w-full truncate px-1.5 h-4 rounded text-[9px] font-bold leading-4 ${vst ? 'bg-fuchsia-500/15 text-fuchsia-200' : 'bg-white/5 text-slate-400'}`}
+        title={`${title} — clic pour l'ouvrir`}
+        aria-label={`${title}. Ouvrir l'autotune`}
+        onClick={(e) => { e.stopPropagation(); onOpen?.(e); }}
+        disabled={!onOpen}
+        className={`min-w-0 max-w-full truncate px-1.5 h-5 rounded text-[10px] font-bold leading-5 transition-colors ${vst ? 'bg-fuchsia-500/15 text-fuchsia-200 hover:bg-fuchsia-500/30' : 'bg-white/5 text-slate-300 hover:bg-white/10'} ${onOpen ? 'cursor-pointer' : ''}`}
       >
         {info.loading && !vst ? <i className="fas fa-circle-notch fa-spin mr-1 text-[7px]" /> : <i className={`fas fa-microphone-alt mr-1 text-[7px] ${vst ? 'text-fuchsia-300' : 'text-slate-500'}`} />}
         {label}{info.keyText ? ` · ${info.keyText}` : ''}
-      </span>
+      </button>
     </div>
   );
 };
@@ -243,10 +258,20 @@ export const AutotuneBadge: React.FC<{ track: Track }> = ({ track }) => {
 /** Dans la fenêtre de l'autotune : qui traite vraiment le son. */
 export const AutotuneEngineNote: React.FC<{ pluginId: string }> = ({ pluginId }) => {
   const info = useLive(pluginId);
+  const [opening, setOpening] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
   if (!info || !info.pluginName) return null;
   const vst = info.engine === 'vst';
+  const open = async () => { setOpening(true); setOpenError(await openAutotuneWindow(pluginId)); setOpening(false); };
   return (
     <div role="status" className={`mb-2 rounded-lg px-3 py-2 text-[11px] ${vst ? 'bg-fuchsia-500/10 text-fuchsia-100' : 'bg-white/5 text-slate-300'}`}>
+      {vst && (
+        <button type="button" onClick={open} disabled={opening} data-testid="autotune-open-window"
+          className="float-right ml-2 rounded-md bg-fuchsia-500/25 px-2 py-1 text-[11px] font-bold text-white hover:bg-fuchsia-500/40 disabled:opacity-60">
+          <i className={`fas ${opening ? 'fa-circle-notch fa-spin' : 'fa-external-link-alt'} mr-1`} />Ouvrir {info.pluginName}
+        </button>
+      )}
+      {openError && <p className="mb-1 text-amber-300"><i className="fas fa-exclamation-triangle mr-1" />{openError}</p>}
       {vst
         ? <>Ta voix passe par <b>{info.pluginName}</b> ({info.vendor}), réglé en <b>{info.keyText}</b>. Les réglages ci-dessous (vitesse, naturel, dosage) lui sont recopiés.</>
         : <>Autotune de NOVA en service{info.fallback ? <> : {info.pluginName} reprendra dès que possible ({info.fallback})</> : info.loading ? <> : {info.pluginName} se prépare</> : null}.</>}

@@ -7,6 +7,7 @@ import { SmartKnob } from './SmartKnob';
 import ProMasterMeter from './ProMasterMeter';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { getValidDestinations, getRouteLabel } from './RoutingManager';
+import { PluginName } from './PluginName';
 
 // Track Group Colors (inspired by Pro Tools)
 const GROUP_COLORS = [
@@ -253,7 +254,7 @@ const ChannelStrip: React.FC<{
               className={`w-full h-full bg-black/40 rounded border border-white/5 text-[9px] font-black hover:border-cyan-500/40 transition-all px-2 text-left truncate flex items-center pr-20 cursor-grab active:cursor-grabbing ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}
             >
                <i className="fas fa-grip-vertical text-slate-700 mr-2 text-[8px]"></i>
-               {p.type}
+               <PluginName plugin={p} className="font-semibold" />
             </button>
             <div className="absolute right-1 top-0 bottom-0 flex items-center space-x-0.5">
                {/* Move Up/Down Buttons (toujours visibles au doigt : pas de survol) */}

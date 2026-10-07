@@ -1,17 +1,23 @@
 import { useSyncExternalStore } from 'react';
 import { track } from './analytics';
+import { isNovaDesktop } from './desktopApp';
 
 /**
  * Mode simple : l'artiste ne voit que ce qui sert à poser sa voix (beat, REC,
  * prises, Mix auto, Paroles, Nova, partage). Le mode avancé ré-affiche tout
  * (console, effets, VST, automation) ; rien n'est retiré du projet.
  *
- * Choix mémorisé (nova_simple_mode, activé par défaut). Le mode instru et les
- * rôles ingé son / beatmaker passent d'office en mode avancé (`forced`).
+ * Choix mémorisé (nova_simple_mode). Par défaut : simple sur le web et le
+ * téléphone, AVANCÉ dans l'appli Windows (studio, VST du PC). Le mode instru et
+ * les rôles ingé son / beatmaker passent d'office en mode avancé (`forced`).
  */
 const KEY = 'nova_simple_mode';
 const readPref = (): boolean => {
-  try { return localStorage.getItem(KEY) !== '0'; } catch { return true; }
+  let saved: string | null = null;
+  try { saved = localStorage.getItem(KEY); } catch { /* stockage indisponible */ }
+  if (saved === '0' || saved === '1') return saved === '1';
+  try { if (isNovaDesktop()) return false; } catch { /* hors navigateur */ }
+  return true;
 };
 
 export interface SimpleModeState {
