@@ -285,11 +285,58 @@ def scenario_captures(page, res, vp):
         res["panneau"] = f"non trouvé : {str(e)[:120]}"
 
 
+def scenario_auto(page, res):
+    """Mode auto : prise au micro (micro simulé = la vraie voix), traitée à la fin de la prise.
+    Seule la nouvelle prise est touchée ; « Annuler » retire le traitement, pas la prise."""
+    f = OUT / "projet_auto.zip"
+    tracks = [track("track-rec-main", "LEAD", [clip("old-1", "Ancienne prise", 20, 10, "audio/voix.wav", takeNumber=1, offset=0)])]
+    state = json.loads(json.dumps({"tracks": tracks}))
+    with zipfile.ZipFile(f, "w") as z:
+        st0 = {"id": "proj-auto", "name": "Respirations auto", "bpm": 140, "timeSignature": {"numerator": 4, "denominator": 4},
+               "isPlaying": False, "isRecording": False, "currentTime": 0, "isLoopActive": False, "loopStart": 0, "loopEnd": 8,
+               "tracks": state["tracks"], "trackGroups": [], "markers": [], "selectedTrackId": "track-rec-main", "currentView": "ARRANGEMENT",
+               "projectPhase": "RECORDING", "isLowLatencyMode": False, "isRecModeActive": False, "systemMaxLatency": 0,
+               "recStartTime": None, "isDelayCompEnabled": True, "breathAuto": True,
+               "metronome": {"enabled": False, "volume": 0.7, "countIn": 0, "accentDownbeat": True, "sound": "CLICK"},
+               "punch": {"enabled": False, "punchIn": 0, "punchOut": 0, "preRoll": 0, "postRoll": 0}}
+        z.writestr("project.json", json.dumps(st0))
+        z.write(VOIX, "audio/voix.wav")
+    open_project(page, f, "20_auto_projet")
+    close_overlays(page)
+    res["auto_projet"] = st(page, "s => s.breathAuto")
+    page.mouse.click(800, 700); page.wait_for_timeout(200)
+    page.keyboard.press("r")
+    t0 = time.time()
+    while time.time() - t0 < 15 and not st(page, "s => s.isRecording"):
+        page.wait_for_timeout(50)
+    res["enregistre"] = st(page, "s => s.isRecording")
+    page.wait_for_timeout(13000)
+    page.keyboard.press("r")
+    page.get_by_test_id("breath-undo").wait_for(timeout=60000)
+    res["notification"] = page.get_by_test_id("breath-toast").inner_text()
+    shot(page, "21_auto_apres_prise")
+    clips = "s => s.tracks[0].clips.map(c => [c.name, +c.start.toFixed(2), +c.duration.toFixed(2), (c.breaths || []).length, !!c.isMuted])"
+    res["clips_apres_prise"] = st(page, clips)
+    page.get_by_test_id("breath-undo").click(); page.wait_for_timeout(600)
+    res["clips_apres_annuler"] = st(page, clips)
+    res["ok"] = (any(c[3] > 0 for c in res["clips_apres_prise"] if c[0] != "Ancienne prise")
+                 and all(c[3] == 0 for c in res["clips_apres_prise"] if c[0] == "Ancienne prise")
+                 and len(res["clips_apres_annuler"]) == len(res["clips_apres_prise"])
+                 and all(c[3] == 0 for c in res["clips_apres_annuler"]))
+
+
+def launch_voice_mic(p):
+    from qalib import CHROME
+    return p.chromium.launch(headless=True, executable_path=CHROME, args=[
+        "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
+        f"--use-file-for-fake-audio-capture={VOIX}", "--autoplay-policy=no-user-gesture-required"])
+
+
 def run(name, fn, vp="pc", **kw):
     log = Log(name)
     res = {"name": name, "vp": vp}
     with sync_playwright() as p:
-        b = launch(p)
+        b = launch_voice_mic(p) if name == "auto" else launch(p)
         ctx, page = new_page(b, vp, log)
         page.set_default_timeout(30000)
         try:
@@ -310,6 +357,8 @@ if __name__ == "__main__":
     allres = {}
     if "mesure" in which:
         allres["mesure"] = run("mesure", scenario_mesure)
+    if "auto" in which:
+        allres["auto"] = run("auto", scenario_auto)
     if "captures" in which:
         for vp in ("pc", "tab", "tel"):
             allres[f"captures_{vp}"] = run(f"captures_{vp}", lambda page, res, v=vp: scenario_captures(page, res, v), vp)

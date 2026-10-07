@@ -529,14 +529,35 @@ export function applyBreathPlan(tracks: Track[], plans: BreathTrackPlan[]): Trac
   return tracks.map(t => {
     const p = byTrack.get(t.id);
     if (!p) return t;
-    const byClip = new Map(p.clips.map(c => [c.clipId, c]));
+    // Par audio source (bufferId) : fenêtres traitées et leurs nouvelles zones.
+    // Tous les clips de la piste qui partagent cet audio (morceaux d'une même
+    // prise, tours de Loop Record, segments du comp) reçoivent la même liste :
+    // un comp reconstruit plus tard depuis n'importe quel morceau la garde.
+    const srcKey = (c: Clip) => c.bufferId || c.id;
+    const bySrc = new Map<string, { windows: [number, number][]; edits: BreathEdit[] }>();
+    for (const cp of p.clips) {
+      const c = t.clips.find(x => x.id === cp.clipId);
+      if (!c) continue;
+      const k = srcKey(c);
+      const e = bySrc.get(k) || { windows: [], edits: [] };
+      const a = c.offset || 0;
+      e.windows.push([a, a + c.duration]);
+      e.edits.push(...cp.edits.filter(x => x.end > a && x.start < a + c.duration));
+      bySrc.set(k, e);
+    }
     let changed = false;
     const clips = t.clips.map(c => {
-      const cp = byClip.get(c.id);
-      if (!cp) return c;
-      const next = withBreaths(c, cp.edits);
-      if (JSON.stringify(next.breaths || []) === JSON.stringify(c.breaths || [])) return c;
+      const e = bySrc.get(srcKey(c));
+      if (!e || !canTreatBreaths(c)) return c;
+      const inWin = (x: BreathEdit) => e.windows.some(([a, b]) => x.end > a && x.start < b);
+      const kept = (c.breaths || []).filter(x => !inWin(x));
+      const uniq = new Map<string, BreathEdit>();
+      for (const x of [...kept, ...e.edits]) uniq.set(`${x.start}|${x.end}`, x);
+      const all = Array.from(uniq.values()).sort((u, v) => u.start - v.start);
+      if (JSON.stringify(all) === JSON.stringify(c.breaths || [])) return c;
       changed = true;
+      const next = { ...c };
+      if (all.length) next.breaths = all; else delete next.breaths;
       return next;
     });
     return changed ? { ...t, clips } : t;

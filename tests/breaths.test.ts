@@ -267,3 +267,22 @@ describe('commandes Nova', () => {
     expect(act('retire les blancs')?.action).toBe('CLEAN_SILENCE');
   });
 });
+
+describe('comp, Loop Record, punch : même audio partagé entre plusieurs clips', () => {
+  it('les morceaux d’une même prise portent toute la liste ; seule la fenêtre visée change', () => {
+    const v = rapPhrases(3);
+    const buf = bufferOf(v.x);
+    const mk = (id: string, offset: number, duration: number, extra: any = {}) => makeClip({ id, bufferId: 'take', buffer: buf, start: offset, offset, duration, ...extra });
+    const t = makeTrack({ id: 'lead', name: 'LEAD', clips: [mk('a', 0, 6), mk('b', 6, buf.duration - 6), mk('muet', 0, buf.duration, { isMuted: true, bufferId: 'autre' })] });
+    // Seulement le morceau « b » (comme une nouvelle prise / un punch).
+    const plans = planBreaths([t], c => c.buffer, DEFAULT_BREATH_SETTINGS, { clipIds: ['b'] });
+    const next = applyBreathPlan([t], plans)[0];
+    const [a, b, muet] = next.clips;
+    expect(b.breaths!.length).toBeGreaterThan(0);
+    expect(b.breaths!.every(e => e.start >= 6)).toBe(true);
+    // « a » (même audio) reçoit la liste : un comp rebâti depuis « a » la garde ; il ne joue rien de nouveau dans sa fenêtre.
+    expect(a.breaths).toEqual(b.breaths);
+    for (let x = 0; x < 6; x += 0.01) expect(clipGainAt(a, x)).toBe(clipGainAt(t.clips[0], x));
+    expect(muet.breaths).toBeUndefined();
+  });
+});
