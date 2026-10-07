@@ -101,4 +101,12 @@ describe('comp à la souris (balayage sur un couloir)', () => {
     const r = compSwipe(cs, 1, 0, 5);
     expect(readComp(r.clips).map(s => [s.n, s.start, s.end])).toEqual([[1, 0, 2], [1, 3, 5], [2, 5, 10]]);
   });
+
+  it('deux balayages bout à bout sur la même prise : un seul clip, pas de creux au milieu', () => {
+    let cs = compSwipe(base(), 1, 2, 4).clips;
+    cs = compSwipe(cs, 1, 4, 6).clips;
+    const t1 = audibleOf(cs).filter(c => c.takeNumber === 1);
+    expect(t1).toHaveLength(1);
+    expect([+t1[0].start.toFixed(3), +(t1[0].start + t1[0].duration).toFixed(3)]).toEqual([1.99, 6.01]);
+  });
 });

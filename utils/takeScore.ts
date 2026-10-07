@@ -112,7 +112,8 @@ export function scoreTake(samples: Float32Array, sampleRate: number, opts: Score
   const rmsDb = frames.map(f => dbOf(f.rms));
   const floorDb = pct(rmsDb, 0.1);
   const loudDb = pct(rmsDb, 0.9);
-  const voicedThr = Math.max(floorDb + 10, loudDb - 25, -55);
+  // Voix sans silence (aucun écart de niveau) : tout ce qui dépasse -55 dBFS est chanté.
+  const voicedThr = loudDb - floorDb >= 10 ? Math.max(floorDb + 10, loudDb - 25, -55) : -55;
   const voiced = frames.map((f, i) => rmsDb[i] >= voicedThr);
 
   // Justesse
@@ -152,8 +153,10 @@ export function scoreTake(samples: Float32Array, sampleRate: number, opts: Score
   const level = clamp(100 - off * 4 - (clipped / Math.max(1, samples.length)) * 20000);
 
   // Bruit : voix contre bruit de fond (trames non voisées), en dB.
-  const snr = (vDb.length ? median(vDb) : -120) - floorDb;
-  const noise = clamp((snr - 10) * 2.5);
+  // Sans passage silencieux, le bruit de fond n'est pas mesurable : note neutre.
+  const quiet = rmsDb.filter((_, i) => !voiced[i]);
+  const snr = (vDb.length ? median(vDb) : -120) - (quiet.length ? median(quiet) : floorDb);
+  const noise = quiet.length >= Math.max(3, frames.length * 0.05) ? clamp((snr - 10) * 2.5) : 70;
 
   const total = Math.round(0.4 * pitch + 0.25 * timing + 0.15 * level + 0.2 * noise);
   return { total, pitch: Math.round(pitch), timing: Math.round(timing), level: Math.round(level), noise: Math.round(noise) };

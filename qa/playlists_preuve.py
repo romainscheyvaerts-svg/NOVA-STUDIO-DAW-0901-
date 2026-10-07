@@ -386,6 +386,32 @@ def scenario_b3(page, res, vp):
     res["ok"] = bool(res["mes_prises_avant_achat"] and res["mes_prises_visible_sans_defiler"] and (vp == "tel" or (res.get("couloirs_entetes") == 3 and len(res.get("menu_pastille") or []) >= 4)))
 
 
+def scenario_ia(page, res):
+    """V22 : 3 prises (2 fausses de 40 cents, 1 juste) → l'IA garde la juste partout ; « Revenir » rend le comp d'avant."""
+    f = OUT / "ia_projet.zip"
+    clips = [clip("p1", "Prise 1", 2, 8, "audio/p1.wav", takeNumber=1, isMuted=True),
+             clip("p2", "Prise 2", 2, 8, "audio/p2.wav", takeNumber=2, isMuted=True),
+             clip("p3", "Prise 3", 2, 8, "audio/p3.wav", takeNumber=3)]
+    det = 440 * 2 ** (0.4 / 12)
+    make_project(f, [track("track-rec-main", "Voix lead", clips)],
+                 {"audio/p1.wav": sine_wav(det, 8), "audio/p2.wav": sine_wav(440, 8), "audio/p3.wav": sine_wav(440 * 2 ** (-0.4 / 12), 8)}, "Meilleure prise V22")
+    open_project(page, f, "ia_01_session")
+    res["comp_avant"] = comp_of(page, "track-rec-main")
+    page.get_by_role("button", name=re.compile("Mix auto|Choisir un style", re.I)).locator("visible=true").first.click(); page.wait_for_timeout(500)
+    shot(page, "ia_02_bouton_meilleure_prise")
+    t0 = time.time()
+    page.get_by_role("button", name=re.compile("Meilleure prise")).first.click()
+    page.locator("[data-auto-comp]").wait_for(timeout=15000)
+    res["calcul_s"] = round(time.time() - t0, 2)
+    page.wait_for_timeout(400)
+    shot(page, "ia_03_proposition")
+    res["comp_ia"] = comp_of(page, "track-rec-main")
+    res["notes"] = st(page, "s => s.tracks.find(t => t.id === 'track-rec-main').takeMeta")
+    page.get_by_role("button", name=re.compile("Revenir à mon comp")).click(); page.wait_for_timeout(500)
+    res["comp_apres_revenir"] = comp_of(page, "track-rec-main")
+    res["ok_ia"] = bool(res["comp_ia"] and all(c["n"] == 2 for c in res["comp_ia"]) and res["comp_apres_revenir"] == res["comp_avant"])
+
+
 def run(name, fn, vp="pc", **kw):
     log = Log(name)
     res = {"name": name, "vp": vp}
@@ -410,6 +436,8 @@ if __name__ == "__main__":
     allres = {}
     if "loop" in which:
         allres["loop_comp"] = run("loop_comp", scenario_loop)
+    if "ia" in which:
+        allres["ia"] = run("ia", scenario_ia)
     if "b3" in which:
         for vp in ("pc", "tab", "tel"):
             allres[f"b3_{vp}"] = run(f"b3_{vp}", lambda page, res: scenario_b3(page, res, vp), vp)

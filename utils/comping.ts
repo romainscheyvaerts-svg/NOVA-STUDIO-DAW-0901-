@@ -168,7 +168,15 @@ export function rebuildTakeClips(clips: Clip[], spans: TakeSpan[], segs: CompSeg
   const stamp = Date.now().toString(36);
   const gen = opts.newId || ((base: string) => `${base}-k${stamp}${k++}`);
   const byKey = new Map(spans.map(s => [s.key, s]));
-  segs = segs.filter(s => byKey.has(s.span)).sort((a, b) => a.start - b.start);
+  // Passages voisins d'un même morceau : recollés (sinon un fondu de sortie
+  // puis d'entrée creuserait le son au milieu d'une phrase).
+  const sorted = segs.filter(s => byKey.has(s.span)).sort((a, b) => a.start - b.start);
+  segs = [];
+  for (const s of sorted) {
+    const last = segs[segs.length - 1];
+    if (last && last.span === s.span && Math.abs(last.end - s.start) < 1e-4) last.end = Math.max(last.end, s.end);
+    else segs.push({ ...s });
+  }
 
   // Fenêtre de crossfade de chaque raccord (entre segs[i] et segs[i + 1]).
   const win: ({ S: number; E: number } | null)[] = [];
