@@ -295,6 +295,62 @@ export const SYNTH_PRESETS: SynthPreset[] = [
   }),
 ];
 
+/**
+ * Volume de chaque son, calibré à l'export (qa/synth_v24_preuve.py --niveaux) pour
+ * que tous sonnent au même niveau ressenti (-18 dB RMS sur 300 ms, accord de 5 notes
+ * ou note seule pour les sons mono) avec au moins 2 dB de marge sous 0 dBFS.
+ */
+const CALIBRATED_LEVEL: Record<string, number> = {
+  'rhodes-soul': 0.319,
+  'rhodes-lofi': 0.266,
+  'piano-wurli': 0.306,
+  'piano-doux': 0.24,
+  'keys-rnb': 0.286,
+  'orgue-gospel': 0.151,
+  'nappe-chaude': 0.336,
+  'nappe-trap-sombre': 0.209,
+  'nappe-aerienne': 0.342,
+  'nappe-verre': 0.217,
+  'nappe-rnb-90s': 0.155,
+  'nappe-evolutive': 0.263,
+  'pluck-trap': 0.456,
+  'pluck-doux': 0.452,
+  'pluck-guitare': 0.267,
+  'kalimba': 0.376,
+  'harpe': 0.359,
+  'lead-trap-glisse': 0.291,
+  'lead-sifflet': 0.292,
+  'lead-supersaw': 0.273,
+  'lead-carre-retro': 0.336,
+  'lead-rnb-sinus': 0.346,
+  'lead-acide': 0.272,
+  'cloche-trap': 0.234,
+  'cloche-sombre': 0.257,
+  'marimba': 0.456,
+  'vibraphone': 0.266,
+  'boite-a-musique': 0.384,
+  'cordes-ensemble': 0.332,
+  'cordes-pizz': 0.458,
+  'violon-solo': 0.532,
+  'cordes-cinema': 0.334,
+  'flute-trap': 0.33,
+  'flute-de-pan': 0.212,
+  'cuivres-synth': 0.218,
+  'choeur-ah': 0.968,
+  'choeur-ouh': 0.179,
+  'voix-angeliques': 0.873,
+  'basse-sub': 0.323,
+  'basse-reese': 0.332,
+  'basse-rnb': 0.422,
+  'basse-pluck': 0.624,
+  'arp-cristal': 0.583,
+  'arp-scie': 0.474,
+  'arp-retro': 0.381,
+  'arp-nuit': 0.583,
+  'nova-saw-classique': 0.437,
+  'init': 0.232,
+};
+
 const byId = new Map(SYNTH_PRESETS.map(p => [p.id, p]));
 export const presetById = (id: string) => byId.get(id);
 export const DEFAULT_PRESET_ID = 'keys-rnb';
@@ -310,7 +366,8 @@ const merge = (base: any, over: any): any => {
 /** Réglages complets d'un préréglage (préréglage inconnu : le son par défaut). */
 export function presetSettings(id: string): NovaSynthSettings {
   const p = byId.get(id) ?? byId.get(DEFAULT_PRESET_ID)!;
-  return { ...normalizeSynth(merge(defaultSynth(), p.over)), presetId: p.id, name: p.name };
+  const level = CALIBRATED_LEVEL[p.id] ?? p.over.level;
+  return { ...normalizeSynth(merge(defaultSynth(), { ...p.over, level })), presetId: p.id, name: p.name };
 }
 
 /** Notes jouées par l'aperçu : accord (Do mineur 9) ou note seule pour les sons mono. */

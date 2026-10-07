@@ -624,6 +624,8 @@ export class AudioEngine {
         pendingPlugins.push(rt.bass808.ready);
       } else if (track.type === TrackType.MIDI) {
         rt.synth = makeTrackSynth(renderCtx, track);
+        // Chorus du synthé NOVA calé sur le temps du morceau (comme en lecture).
+        if (rt.synth instanceof NovaSynthNode) { rt.synth.syncTimeline(-startOffset, 0); pendingPlugins.push(rt.synth.ready); }
         rt.synth.output.connect(input);
       } else if (track.type === TrackType.SAMPLER) {
         rt.sampler = new AudioSampler(renderCtx, this.currentBpm);
@@ -1363,6 +1365,8 @@ export class AudioEngine {
     // exactement là (1er kick de la batterie, 1re 808) était sautée.
     this.playbackStartTime = this.nextScheduleTime - startOffset;
     this.midiRunStart = startOffset;
+    // Synthé NOVA : chorus calé sur le temps du morceau (identique à l'export).
+    this.tracksDSP.forEach(d => { if (d.synth instanceof NovaSynthNode) d.synth.syncTimeline(this.playbackStartTime, this.nextScheduleTime); });
     if (this.recSession && this.recPlayStart === null) this.recPlayStart = this.playbackStartTime; 
 
     // Valeur correcte au demarrage : sans ca, une piste dont tous les points
@@ -2142,6 +2146,7 @@ export class AudioEngine {
           setTimeout(() => { try { old.output.disconnect(); if (old instanceof NovaSynthNode) old.destroy(); } catch (e) {} }, 60);
           dsp.synth = makeTrackSynth(this.ctx, track);
           dsp.synth.output.connect(dsp.input);
+          if (this.isPlaying && dsp.synth instanceof NovaSynthNode) dsp.synth.syncTimeline(this.playbackStartTime, this.ctx.currentTime);
         } else if (dsp.synth instanceof NovaSynthNode && track.novaSynth) {
           dsp.synth.setSettings(track.novaSynth);
         }
