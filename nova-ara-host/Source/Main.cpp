@@ -770,7 +770,10 @@ public:
                 if (auto* pt = k["click"].getArray(); pt != nullptr && pt->size() == 2)
                 {
                     // Descend jusqu'à la fenêtre enfant la plus profonde sous le point (boutons MFC…).
-                    POINT p { (int) (*pt)[0], (int) (*pt)[1] };
+                    // Valeurs < 1 : fractions de la taille de la fenêtre (indépendant de l'échelle d'affichage).
+                    RECT cr; GetClientRect (target, &cr);
+                    const double fx = (double) (*pt)[0], fy = (double) (*pt)[1];
+                    POINT p { (int) (fx < 1.0 ? fx * (cr.right - cr.left) : fx), (int) (fy < 1.0 ? fy * (cr.bottom - cr.top) : fy) };
                     HWND hit = target;
                     for (int depth = 0; depth < 16; ++depth)
                     {
@@ -968,46 +971,19 @@ public:
         }
         const int passes = (int) req.getProperty ("passes", 2);
         const double waitS = (double) req.getProperty ("wait_s", 3.0);
-        const int64 len = dub.getNumSamples();
-        AudioBuffer<float> out (jmax (1, jmin (2, totalOut)), (int) len);
-        AudioBuffer<float> block (jmax (totalIn, totalOut, 2), blockSize);
-        MidiBuffer midi;
+        cap.dub = std::move (dub);
+        cap.guide = std::move (guide);
+        cap.sr = sr; cap.mainIn = mainIn; cap.scIn = scIn; cap.totalIn = totalIn; cap.totalOut = totalOut; cap.ready = true;
+        AudioBuffer<float> out;
         for (int pass = 0; pass < passes; ++pass)
         {
-            playHead.playing = true;
-            for (int64 pos = 0; pos < len; pos += blockSize)
-            {
-                const int n = (int) jmin ((int64) blockSize, len - pos);
-                block.setSize (block.getNumChannels(), n, false, false, true);
-                block.clear();
-                for (int ch = 0; ch < mainIn; ++ch)
-                    block.copyFrom (ch, 0, dub, jmin (ch, dub.getNumChannels() - 1), (int) pos, n);
-                for (int ch = 0; ch < scIn; ++ch)
-                    if (pos < guide.getNumSamples())
-                        block.copyFrom (mainIn + ch, 0, guide, jmin (ch, guide.getNumChannels() - 1), (int) pos, (int) jmin ((int64) n, guide.getNumSamples() - pos));
-                playHead.timeInSamples = pos;
-                instance->processBlock (block, midi);
-                if (pass == passes - 1)
-                    for (int ch = 0; ch < out.getNumChannels(); ++ch)
-                        out.copyFrom (ch, (int) pos, block, ch, 0, n);
-                if (realtime) Thread::sleep ((int) (1000.0 * n / sr));
-            }
-            playHead.playing = false;
-            // Quelques blocs à l'arrêt, puis le temps que le plugin aligne (fil de fond du plugin).
-            for (int i = 0; i < 8; ++i) { block.clear(); instance->processBlock (block, midi); }
+            capturePass (realtime, pass == passes - 1 ? &out : nullptr);
             if (pass < passes - 1) MessageManager::getInstance()->runDispatchLoopUntil ((int) (waitS * 1000));
         }
-        instance->releaseResources();
+        const bool keep = (bool) req.getProperty ("keep", false);
+        if (! keep) { instance->releaseResources(); cap.ready = false; }
         File f (req["out"].toString());
-        f.deleteFile();
-        WavAudioFormat wav;
-        std::unique_ptr<OutputStream> os (f.createOutputStream().release());
-        auto opts = AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (out.getNumChannels()).withBitsPerSample (32)
-                        .withSampleFormat (AudioFormatWriterOptions::SampleFormat::floatingPoint);
-        auto writer = wav.createWriterFor (os, opts);
-        if (writer == nullptr) throw std::runtime_error ("Encodeur WAV indisponible");
-        writer->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
-        writer.reset();
+        if (passes > 0 && req["out"].toString().isNotEmpty()) writeWav (f, out, sr);
         auto o = io::obj();
         o->setProperty ("path", f.getFullPathName());
         o->setProperty ("sidechain", sidechain);
@@ -1015,9 +991,85 @@ public:
         o->setProperty ("sidechain_in", scIn);
         o->setProperty ("layout", layout.getMainInputChannelSet().getDescription() + " / bus 2 : "
                                     + (layout.inputBuses.size() > 1 ? layout.inputBuses[1].getDescription() : String ("aucun")));
+        o->setProperty ("peak", out.getNumSamples() > 0 ? out.getMagnitude (0, out.getNumSamples()) : 0.0f);
+        return var (o.get());
+    }
+
+    // Passe de sortie après la capture (fenêtre éventuellement retouchée par l'utilisateur).
+    var captureOutput (const var& req)
+    {
+        if (instance == nullptr || ! cap.ready) throw std::runtime_error ("Rien de capturé : lance d'abord capture_align avec keep=true");
+        AudioBuffer<float> out;
+        capturePass ((bool) req.getProperty ("realtime", true), &out);
+        File f (req["out"].toString());
+        writeWav (f, out, cap.sr);
+        if (! (bool) req.getProperty ("keep", true)) { instance->releaseResources(); cap.ready = false; }
+        auto o = io::obj();
+        o->setProperty ("path", f.getFullPathName());
         o->setProperty ("peak", out.getMagnitude (0, out.getNumSamples()));
         return var (o.get());
     }
+
+private:
+    struct CaptureState
+    {
+        AudioBuffer<float> dub, guide;
+        double sr = 44100;
+        int mainIn = 1, scIn = 0, totalIn = 2, totalOut = 2;
+        bool ready = false;
+    } cap;
+
+    void capturePass (bool realtime, AudioBuffer<float>* out)
+    {
+        const int64 len = cap.dub.getNumSamples();
+        if (out != nullptr) { out->setSize (jmax (1, jmin (2, cap.totalOut)), (int) len); out->clear(); }
+        AudioBuffer<float> block (jmax (cap.totalIn, cap.totalOut, 2), blockSize);
+        MidiBuffer midi;
+        playHead.sampleRate = cap.sr;
+        playHead.playing = true;
+        const double t0 = Time::getMillisecondCounterHiRes();
+        for (int64 pos = 0; pos < len; pos += blockSize)
+        {
+            const int n = (int) jmin ((int64) blockSize, len - pos);
+            block.setSize (block.getNumChannels(), n, false, false, true);
+            block.clear();
+            for (int ch = 0; ch < cap.mainIn; ++ch)
+                block.copyFrom (ch, 0, cap.dub, jmin (ch, cap.dub.getNumChannels() - 1), (int) pos, n);
+            for (int ch = 0; ch < cap.scIn; ++ch)
+                if (pos < cap.guide.getNumSamples())
+                    block.copyFrom (cap.mainIn + ch, 0, cap.guide, jmin (ch, cap.guide.getNumChannels() - 1), (int) pos,
+                                    (int) jmin ((int64) n, cap.guide.getNumSamples() - pos));
+            playHead.timeInSamples = pos;
+            instance->processBlock (block, midi);
+            if (out != nullptr)
+                for (int ch = 0; ch < out->getNumChannels(); ++ch)
+                    out->copyFrom (ch, (int) pos, block, ch, 0, n);
+            if (realtime)
+            {
+                // Au rythme de la lecture (VocAlign ne capture qu'en temps réel), interface vivante.
+                const double due = t0 + 1000.0 * (double) (pos + n) / cap.sr;
+                const double wait = due - Time::getMillisecondCounterHiRes();
+                if (wait > 1) MessageManager::getInstance()->runDispatchLoopUntil ((int) wait);
+            }
+        }
+        playHead.playing = false;
+        for (int i = 0; i < 8; ++i) { block.clear(); instance->processBlock (block, midi); }
+    }
+
+    static void writeWav (const File& f, const AudioBuffer<float>& b, double sr)
+    {
+        f.deleteFile();
+        WavAudioFormat wav;
+        std::unique_ptr<OutputStream> os (f.createOutputStream().release());
+        if (os == nullptr) throw std::runtime_error ("Écriture WAV impossible");
+        auto opts = AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (b.getNumChannels()).withBitsPerSample (32)
+                        .withSampleFormat (AudioFormatWriterOptions::SampleFormat::floatingPoint);
+        auto writer = wav.createWriterFor (os, opts);
+        if (writer == nullptr) throw std::runtime_error ("Encodeur WAV indisponible");
+        writer->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+    }
+
+public:
 
 private:
 
@@ -1462,6 +1514,7 @@ private:
             else if (cmd == "show_editor") replyOk (id, session->showEditor (req));
             else if (cmd == "hide_editor") replyOk (id, session->hideEditor());
             else if (cmd == "snapshot") replyOk (id, session->snapshot (req));
+            else if (cmd == "capture_output") replyOk (id, session->captureOutput (req));
             else if (cmd == "capture_align") replyOk (id, session->captureAlign (req));
             else if (cmd == "select") replyOk (id, session->select());
             else if (cmd == "keys") replyOk (id, session->keys (req));

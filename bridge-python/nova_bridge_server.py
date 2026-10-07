@@ -66,6 +66,8 @@ Protocole (WebSocket ws://127.0.0.1:8765)
                                   key, label, index, count, nch, nframes, sample_rate, path} + audio,
                                   et la réponse finale {action:"STEMS_SEPARATE", req_id, success,
                                   stems, seconds, device, outdir | error, code: not_installed|cancelled|error}.
+    (v9) Plugins ARA2 (Melodyne, VocAlign) par l'hôte natif NovaARAHost.exe : voir ara_service.py
+    (ARA_STATUS, ARA_OPEN, ARA_ALIGN, ARA_COMMIT, ARA_SHOW, ARA_TRANSPORT, ARA_CLOSE, ARA_EVENT).
   Événements : EDITOR_CLOSED (avec l'état), LATENCY (latence mesurée qui change),
     (v6) LICENSE_WINDOW {type:"license_window", plugin, path, plugin_name, title,
       status: activation|nag, source: load|render, slot_id?} : un plugin vient
@@ -112,13 +114,14 @@ import numpy as np
 import websockets
 from websockets.asyncio.server import serve, ServerConnection
 
+import ara_service
 import license_watch
 import stems_service
 import vst_host
 import vst_probe
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events
 
-VERSION = 8
+VERSION = 9
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
@@ -373,6 +376,7 @@ class NovaBridgeServer:
                     logger.info(f"🗑️ Slot orphelin libéré : {slot.name}")
             # Instances hors ligne inutilisées / mémoire presque pleine
             await self.loop.run_in_executor(self.misc_pool, vst_host.OFFLINE.reap)
+            self.ara_reap()
 
     def _drop_slot(self, slot_id: str):
         slot = self.slots.pop(slot_id, None)
@@ -465,7 +469,8 @@ class NovaBridgeServer:
                               "pedalboard": vst_host.HAS_PEDALBOARD,
                               "instruments": vst_host.HAS_PEDALBOARD,
                               "license_events": license_watch.IS_WINDOWS,
-                              "params_text": True, "stems": True})
+                              "params_text": True, "stems": True,
+                              "ara": bool(ara_service.ara_host.find_host_exe())})
 
     async def _a_get_plugin_list(self, ws, req):
         if req.get("rescan"):
@@ -775,6 +780,12 @@ class NovaBridgeServer:
             if meta.get("action") == "STEMS_SEPARATE":
                 await self._stems_separate(ws, meta, data)
                 return
+            if meta.get("action") == "ARA_OPEN":
+                await self._ara_open(ws, meta, data)
+                return
+            if meta.get("action") == "ARA_ALIGN":
+                await self._ara_align(ws, meta, data)
+                return
             nch = int(meta.get("nch") or 2)
             nframes = int(meta.get("nframes") or (data.size // nch))
             sr = int(meta.get("sample_rate") or 48000)
@@ -876,6 +887,7 @@ def _stems_server_methods():
 
 
 _stems_server_methods()
+ara_service.install(NovaBridgeServer, build_render_frame)
 
 
 def main():
