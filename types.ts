@@ -724,6 +724,9 @@ export interface RemoteIngeLinkInfo {
   phase: RemoteIngePhase;
   /** Dernière opération du lien déjà appliquée (rattrapage à la reconnexion). */
   seq?: number;
+  /** Artiste : l'ingé avec qui ce lien travaille (le premier arrivé) ; un 2e ingé est ignoré. */
+  peerKey?: string;
+  peerName?: string;
 }
 
 /** Réglages de l'artiste sur une piste avant les réglages de l'ingé (retour possible). */
