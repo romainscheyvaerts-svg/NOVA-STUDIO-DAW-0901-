@@ -138,7 +138,7 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
           <div className="min-w-0 flex-1">
             <h2 id="tpl-title" className="text-[15px] font-black">Modèles de session</h2>
             <p className="text-[11px] text-slate-400" data-testid="tpl-account">
-              {email === undefined ? 'Vérification du compte…' : email ? <>Connecté : <span className="text-slate-200">{email}</span>{groups.length ? <> · tu vois aussi les modèles {groups.map(privateLabel).join(', ')}</> : null}</> : 'Invité : les modèles privés ne s’affichent pas. Connecte-toi pour les voir.'}
+              {email === undefined ? 'Vérification du compte…' : email ? <>Connecté : <span className="text-slate-200">{email}</span>{groups.length ? <> · tu vois aussi les modèles « {groups.map(privateLabel).join(', ')} »</> : null}</> : 'Invité : les modèles privés ne s’affichent pas. Connecte-toi pour les voir.'}
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Fermer" className="w-10 h-10 shrink-0 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white">✕</button>
