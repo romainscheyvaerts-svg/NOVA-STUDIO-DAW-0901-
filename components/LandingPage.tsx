@@ -10,6 +10,7 @@ import InstallAppButton from './InstallAppButton';
 import { SavedSessionMeta, formatAgo } from '../utils/sessionStore';
 import { DESKTOP_APP_DOWNLOAD_URL, getNovaDesktop, isNovaDesktop } from '../utils/desktopApp';
 import { tonaliteFr } from '../utils/keyName';
+import { ThemeToggleButton } from './ThemeSwitch';
 
 interface LandingPageProps {
   user: User | null;
@@ -258,7 +259,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
       />
 
       {/* Header avec bouton connexion */}
-      <header className="nova-brandbar shrink-0 flex items-center justify-between px-6 py-4 border-b border-white/5 bg-[#0c0d10]">
+      <header className="nova-brandbar shrink-0 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-white/5 bg-[#0c0d10]">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center">
             <i className="fas fa-wave-square text-white text-sm"></i>
@@ -272,6 +273,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+        <ThemeToggleButton />
         <InstallAppButton />
         {/* Bouton connexion / menu utilisateur */}
         {user && user.id !== 'guest' ? (

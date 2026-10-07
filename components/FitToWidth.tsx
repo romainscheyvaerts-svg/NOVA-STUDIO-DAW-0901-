@@ -16,10 +16,16 @@ const FitToWidth: React.FC<{ children: React.ReactNode; padding?: number }> = ({
     const el = ref.current;
     if (!el) return;
     const fit = () => {
-      // Largeur naturelle = largeur affichée / zoom courant
-      const natural = el.scrollWidth / (parseFloat(el.style.zoom || '1') || 1);
+      // Largeur naturelle mesurée sans zoom : selon le navigateur, scrollWidth
+      // est déjà corrigé du zoom ou non ; diviser par le zoom faisait boucler la
+      // mesure (zoom 1e-12, éditeur d'effet invisible sur téléphone, 07/10/2026).
+      const prev = el.style.zoom;
+      el.style.zoom = '1';
+      const natural = el.scrollWidth;
+      el.style.zoom = prev;
       if (!natural) return;
-      setZoom(Math.min(1, (window.innerWidth - padding) / natural));
+      const next = Math.max(0.2, Math.min(1, (window.innerWidth - padding) / natural));
+      setZoom(z => (Math.abs(z - next) < 0.001 ? z : next));
     };
     fit();
     const ro = new ResizeObserver(fit);

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { audioEngine } from '../engine/AudioEngine';
+import { canvasTheme } from '../utils/canvasTheme';
 import { playheadStore } from '../utils/playheadStore';
 
 /**
@@ -129,7 +130,8 @@ const ProMasterMeter: React.FC<Props> = ({ orientation = 'horizontal', className
     const draw = () => {
       if (!W) resize();
       const { peak, rms, hold, clip } = levels;
-      const key = `${peak[0].toFixed(1)}|${peak[1].toFixed(1)}|${rms[0].toFixed(1)}|${rms[1].toFixed(1)}|${hold[0].toFixed(1)}|${hold[1].toFixed(1)}`;
+      const cv = canvasTheme();
+      const key = `${cv.light ? 'c' : 's'}|${peak[0].toFixed(1)}|${peak[1].toFixed(1)}|${rms[0].toFixed(1)}|${rms[1].toFixed(1)}|${hold[0].toFixed(1)}|${hold[1].toFixed(1)}`;
       if (key !== lastKey) {
         lastKey = key;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -141,7 +143,7 @@ const ProMasterMeter: React.FC<Props> = ({ orientation = 'horizontal', className
         for (let ch = 0; ch < 2; ch++) {
           const off = 1 + ch * (thick + 1);
           // fond
-          ctx.fillStyle = '#0b0d10';
+          ctx.fillStyle = cv.light ? 'rgba(15, 23, 42, 0.08)' : '#0b0d10';
           if (vertical) ctx.fillRect(off, 2, thick, len); else ctx.fillRect(1, off, len, thick);
           const fp = dbToFrac(peak[ch]) * len;
           const fr = dbToFrac(rms[ch]) * len;
@@ -154,21 +156,21 @@ const ProMasterMeter: React.FC<Props> = ({ orientation = 'horizontal', className
           if (vertical) ctx.fillRect(off, 2 + len - fr, thick, fr); else ctx.fillRect(1, off, fr, thick);
           // maintien de crête
           if (hold[ch] > FLOOR_DB) {
-            ctx.fillStyle = hold[ch] >= -0.05 ? '#ef4444' : '#ffffff';
+            ctx.fillStyle = hold[ch] >= -0.05 ? '#ef4444' : cv.ink(1);
             if (vertical) ctx.fillRect(off, 2 + len - fh - 1, thick, 2); else ctx.fillRect(1 + Math.min(len - 2, fh), off, 2, thick);
           }
         }
         // graduations
-        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.fillStyle = cv.ink(0.35);
         ctx.font = `600 ${vertical ? 8 : 7}px Inter, system-ui, sans-serif`;
         ctx.textBaseline = vertical ? 'middle' : 'top';
         ctx.textAlign = vertical ? 'left' : 'center';
         const barsEnd = 1 + 2 * (thick + 1);
         for (const m of MARKS) {
           const f = dbToFrac(m) * len;
-          ctx.fillStyle = 'rgba(255,255,255,0.28)';
+          ctx.fillStyle = cv.ink(cv.light ? 0.2 : 0.28);
           if (vertical) ctx.fillRect(0, 2 + len - f, barsEnd, 1); else ctx.fillRect(1 + f - (m === 0 ? 1 : 0), 0, 1, barsEnd);
-          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.fillStyle = cv.light ? cv.ink(0.7) : cv.ink(0.5);
           // Course courte (transport compact) : pas d'étiquette -3, collée à 0
           if (m === -3 && len < 110) continue;
           const label = m === 0 ? '0' : String(-m);
