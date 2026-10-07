@@ -7,6 +7,7 @@ import { Clip, CollabRole, Track } from '../types';
 import { CollabOutbox, CollabOutboxOptions, CollabOutboxStore } from '../utils/collabOutbox';
 import { CollabStatus, initialCollabStatus } from '../utils/collabStatus';
 import { mergeQueuedOps } from '../utils/collabMerge';
+import { isVocalTrack as isVocalTrackPure, ownsContent as ownsContentPure } from '../utils/collabPeers';
 
 /**
  * Collaboration à distance (artiste, ingé son, beatmaker) sur une session en
@@ -35,7 +36,15 @@ export interface CollabOp {
    */
   replay?: boolean;
 }
-export interface CollabMember { member_key: string; role: CollabRole; display_name: string; online?: boolean }
+export interface CollabMember {
+  member_key: string; role: CollabRole; display_name: string; online?: boolean;
+  /** Présence en direct (« Feat à distance ») : couleur, piste en cours d'enregistrement, lecture, état de sa connexion, hôte. */
+  color?: string; rec?: string | null; playing?: boolean; st?: 'ok' | 'late'; host?: boolean;
+  last_seen?: string;
+}
+
+/** Ce que chacun annonce dans la présence en direct (en plus de son nom et de son rôle). */
+export interface PresenceMeta { color?: string; rec?: string | null; playing?: boolean; st?: 'ok' | 'late'; host?: boolean }
 export type AudioRefs = Record<string, { parts: string[]; size: number }>;
 
 export const collabDeviceId = (): string => {
@@ -154,10 +163,23 @@ export class CollabClient {
     this.floorSeq = this.lastSeq;
     this.setStatus({ joined: true, reachable: true });
     const ch = catalogSupabase.channel(r.channel, { config: { broadcast: { self: false }, presence: { key: this.memberKey } } });
+    this.channelRef = ch;
     ch.on('broadcast', { event: 'op' }, ({ payload }) => { void this.receive(payload as CollabOp); });
+    // Messages éphémères (lecture de l'hôte pour « Écouter ensemble ») : pas de journal.
+    ch.on('broadcast', { event: 'tp' }, ({ payload }) => { try { this.onEphemeral?.('tp', payload); } catch { /* */ } });
     ch.on('presence', { event: 'sync' }, () => {
-      const state = ch.presenceState() as Record<string, { name: string; role: CollabRole }[]>;
-      const online = Object.entries(state).map(([key, metas]) => ({ member_key: key, role: metas[0]?.role, display_name: metas[0]?.name, online: true }));
+      const state = ch.presenceState() as Record<string, ({ name: string; role: CollabRole } & PresenceMeta)[]>;
+      // Une clé = un membre ; plusieurs appareils du même compte (ancienne fonction) : le plus récent.
+      const online = Object.entries(state).map(([key, metas]) => {
+        const m = metas[metas.length - 1] || ({} as any);
+        const extra: PresenceMeta = {};
+        if (m.color) extra.color = m.color;
+        if (m.rec) extra.rec = m.rec;
+        if (m.playing) extra.playing = true;
+        if (m.st) extra.st = m.st;
+        if (m.host) extra.host = true;
+        return { member_key: key, role: m.role, display_name: m.name, online: true, ...extra };
+      });
       this.onPresence(online as CollabMember[]);
     });
     let subscribedOnce = false;
@@ -166,13 +188,15 @@ export class CollabClient {
         if (this.closed) return;
         if (status === 'SUBSCRIBED') {
           this.setStatus({ realtime: 'live' });
-          try { await ch.track({ name: this.name, role: this.role }); } catch { /* présence : réessayée à la reconnexion */ }
+          this.subscribed = true;
+          try { await ch.track({ name: this.name, role: this.role, ...this.presenceMeta }); } catch { /* présence : réessayée à la reconnexion */ }
           // Reconnexion du direct : on rattrape ce qui a été manqué et on vide la file.
           if (subscribedOnce) { void this.catchUp(); void this.flush(); }
           subscribedOnce = true;
           resolve();
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           // Le client Supabase se reconnecte tout seul ; en attendant, le rattrapage (10 s) prend le relais.
+          this.subscribed = false;
           this.setStatus({ realtime: 'down' });
           this.onPresence([]);
         }
@@ -198,6 +222,37 @@ export class CollabClient {
     this.unlisten.push(() => w.removeEventListener('online', online), () => w.removeEventListener('offline', offline));
     try { if (typeof navigator !== 'undefined' && navigator.onLine === false) this.setStatus({ browserOffline: true }); } catch { /* */ }
   }
+
+  // --- Présence et messages éphémères -------------------------------------------------------
+
+  private presenceMeta: PresenceMeta = {};
+  private subscribed = false;
+  private channelRef: ReturnType<typeof catalogSupabase.channel> | null = null;
+
+  /** Met à jour ce qu'on annonce aux autres (enregistre, écoute, couleur…). */
+  setPresence(patch: PresenceMeta) {
+    const next = { ...this.presenceMeta, ...patch };
+    if (JSON.stringify(next) === JSON.stringify(this.presenceMeta)) return;
+    this.presenceMeta = next;
+    const ch = this.channel || this.channelRef;
+    if (ch && this.subscribed && !this.closed) {
+      try { void Promise.resolve(ch.track({ name: this.name, role: this.role, ...next })).catch(() => { /* réessayé à la reconnexion */ }); } catch { /* */ }
+    }
+  }
+  getPresence(): PresenceMeta { return this.presenceMeta; }
+
+  /**
+   * Message éphémère par le direct seulement (pas de journal) : la lecture de
+   * l'hôte. Renvoie false si le direct est coupé (l'appelant passe alors par le journal).
+   */
+  broadcast(event: 'tp', payload: Record<string, unknown>): boolean {
+    const ch = this.channel || this.channelRef;
+    if (!ch || !this.subscribed || this.closed) return false;
+    try { void Promise.resolve(ch.send({ type: 'broadcast', event, payload })).catch(() => { /* */ }); return true; } catch { return false; }
+  }
+
+  /** Message éphémère reçu (voir broadcast). */
+  onEphemeral?: (event: string, payload: any) => void;
 
   /** « Réessayer » : rattrapage et envoi tout de suite (sans attendre les 10 s). */
   async retryNow(): Promise<void> {
@@ -341,8 +396,10 @@ export class CollabClient {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     this.unlisten.forEach(u => u());
     this.unlisten = [];
-    try { if (this.channel) await catalogSupabase.removeChannel(this.channel); } catch { /* */ }
+    try { if (this.channel || this.channelRef) await catalogSupabase.removeChannel((this.channel || this.channelRef)!); } catch { /* */ }
     this.channel = null;
+    this.channelRef = null;
+    this.subscribed = false;
     this.statusListeners.clear();
   }
 }
@@ -432,15 +489,13 @@ export async function ensureBuffers(link: CloudLink, audio: AudioRefs | undefine
 // --- Domaines : qui possède quoi --------------------------------------------------------
 
 /** Piste dont l'artiste possède les prises (voix). */
-export const isVocalTrack = (t: Track): boolean =>
-  t.type === 'AUDIO' && t.id !== 'instrumental' && !t.instrumentId && (t.collabOwner ?? 'artist') === 'artist';
+export const isVocalTrack = isVocalTrackPure;
 
-/** Pistes dont le contenu (clips, motifs) appartient au rôle donné. */
-export const ownsContent = (t: Track, role: CollabRole): boolean => {
-  if (t.id === 'instrumental' || t.id === 'master' || t.type === 'BUS' || t.type === 'SEND') return false;
-  const owner = t.collabOwner ?? (isVocalTrack(t) ? 'artist' : t.type === 'DRUM_RACK' || t.type === 'MIDI' || t.type === 'SAMPLER' ? 'beatmaker' : null);
-  return owner === role;
-};
+/**
+ * Pistes dont le contenu (clips, motifs) appartient au rôle donné — et à
+ * cette personne si on la donne (« Feat à distance » : voir utils/collabPeers).
+ */
+export const ownsContent: (t: Track, role: CollabRole, participant?: string | null) => boolean = ownsContentPure;
 
 const clipForWire = (c: Clip): Clip => {
   const { buffer: _b, audioRef: _a, isFreezeSlice: _f, ...rest } = c as Clip & { buffer?: AudioBuffer };
@@ -450,7 +505,10 @@ const clipForWire = (c: Clip): Clip => {
 /** Contenu d'une piste à envoyer (sans les réglages de mix, qui sont à l'ingé). */
 export const contentOf = (t: Track) => ({
   name: t.name, type: t.type, color: t.color, outputTrackId: t.outputTrackId,
-  collabOwner: t.collabOwner, drumMachine: t.drumMachine, bass808: t.bass808, drumPads: t.drumPads?.map(p => { const { buffer: _b, ...r } = p as any; return r; }),
+  collabOwner: t.collabOwner,
+  // Propriétaire nommé (« Feat à distance ») : ignoré par les anciennes versions de NOVA.
+  ...(t.collabOwnerKey ? { collabOwnerKey: t.collabOwnerKey, collabOwnerName: t.collabOwnerName, collabOwnerColor: t.collabOwnerColor } : {}),
+  drumMachine: t.drumMachine, bass808: t.bass808, drumPads: t.drumPads?.map(p => { const { buffer: _b, ...r } = p as any; return r; }),
   clips: (t.clips || []).map(clipForWire),
   // Instrument VST du PC : le rendu des notes voyage avec la piste (sans
   // l'état du plugin, lourd et inutile à qui n'a pas le VST).
