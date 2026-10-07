@@ -111,10 +111,12 @@ def run():
             page.mouse.click(hb["x"] + hb["width"] + 900, hb["y"] + hb["height"] + 200, button="right")
             page.wait_for_timeout(400)
             shot(page, "v7_04_menu_grille")
-            page.get_by_role("button", name="1/32").first.click(); page.wait_for_timeout(300)
+            # Les valeurs de grille sont des « menuitemradio » depuis l'audit G3 (avant : boutons).
+            grid_item = lambda n: page.get_by_role("menuitemradio", name=n, exact=True).or_(page.get_by_role("button", name=n, exact=True)).first
+            grid_item("1/32").click(); page.wait_for_timeout(300)
             g1 = page.evaluate("() => window.gridSize")
             page.mouse.click(hb["x"] + hb["width"] + 900, hb["y"] + hb["height"] + 200, button="right"); page.wait_for_timeout(300)
-            page.get_by_role("button", name="1/8 triolet").first.click(); page.wait_for_timeout(300)
+            grid_item("1/8 triolet").click(); page.wait_for_timeout(300)
             g2 = page.evaluate("() => window.gridSize")
             label = page.get_by_role("button", name="Grille 1/8 triolet").count()
             check("Grille 1/32 puis 1/8 triolet", g1 == "1/32" and g2 == "1/8T", f"{g1} → {g2}")

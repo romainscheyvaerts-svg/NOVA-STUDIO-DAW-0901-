@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { GRID_OPTIONS, gridLabel } from '../utils/grid';
 import {
   chooseEditMode, EDIT_MODE_INFO, editModeMessage, EDIT_MODES, EditMode, editModeStore, GRID_KIND_LABEL, toggleShuffleLock, useEditMode,
@@ -17,10 +18,26 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
   const em = useEditMode();
   const [menu, setMenu] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  // Menu posé dans <body> (position fixe) : la barre d'outils est sous les en-têtes de pistes.
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  useLayoutEffect(() => {
+    if (!menu || !btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    const w = menuRef.current?.offsetWidth || 256, h = menuRef.current?.offsetHeight || 320;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    const top = r.bottom + 4 + h <= window.innerHeight - 8 ? r.bottom + 4 : Math.max(8, r.top - h - 4);
+    setPos({ left, top });
+  }, [menu]);
 
   useEffect(() => {
     if (!menu) return;
-    const onDown = (e: MouseEvent | TouchEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setMenu(false); };
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      const t = e.target as Node;
+      if (boxRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setMenu(false);
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(false); };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('touchstart', onDown);
@@ -74,14 +91,15 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
           );
         })}
       </div>
-      <button type="button" onClick={() => setMenu(v => !v)} aria-haspopup="menu" aria-expanded={menu} aria-label={`Valeur de grille : ${gridLabel(em.gridSize)}`}
+      <button ref={btnRef} type="button" onClick={() => setMenu(v => !v)} aria-haspopup="menu" aria-expanded={menu} aria-label={`Grille ${gridLabel(em.gridSize)} (valeur de grille)`}
         data-testid="grid-value"
         title="Valeur de la grille (Pro Tools : Grid value) : 1 mesure à 1/32, triolets ; grille absolue ou relative ; Tab to Transient."
         className={`h-9 [@media(pointer:coarse)]:h-10 px-2.5 rounded-lg border text-[11px] font-bold tabular-nums transition-colors ${em.mode === 'GRID' ? 'bg-blue-500/10 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
         <i className="fas fa-th mr-1.5 text-[10px]" aria-hidden />{gridLabel(em.gridSize)}<i className="fas fa-chevron-down ml-1.5 text-[8px]" aria-hidden />
       </button>
-      {menu && (
-        <div role="menu" aria-label="Grille" className="absolute left-0 top-full mt-1 z-[300] w-64 rounded-xl border border-white/10 bg-[#14161a] p-2 shadow-[0_10px_40px_rgba(0,0,0,0.8)]">
+      {menu && createPortal(
+        <div ref={menuRef} role="menu" aria-label="Grille" style={{ left: pos.left, top: pos.top }}
+          className="fixed z-[1000] w-64 rounded-xl border border-white/10 bg-[#14161a] p-2 shadow-[0_10px_40px_rgba(0,0,0,0.8)]">
           <div className="px-1 pb-1 text-[10px] font-bold text-slate-500">Valeur de grille</div>
           <div className="grid grid-cols-3 gap-0.5">
             {GRID_OPTIONS.map(o => (
@@ -118,7 +136,8 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
             <span className="text-slate-500">{em.shuffleLock ? 'oui' : 'non'}</span>
           </button>
           <p className="px-2 pt-2 text-[10px] leading-snug text-slate-500">Ctrl ou Maj pendant un glissement : Grid ⇄ Slip le temps du geste. Ctrl+, : point de synchro du clip.</p>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
