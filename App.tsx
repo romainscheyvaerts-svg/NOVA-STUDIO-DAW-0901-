@@ -857,6 +857,8 @@ function Studio() {
   // la piste d'un autre, et REC sans piste armée choisit (ou crée) une piste à soi.
   const collabRecGuardRef = useRef<(trackId: string) => string | null>(() => null);
   const collabRecTargetRef = useRef<((preferId: string | null) => { id: string; note?: string } | { error: string } | null) | null>(null);
+  /** Mix auto (style) : en collaboration, un artiste ne touche que SES pistes (pas la voix de l'autre). */
+  const collabMixScopeRef = useRef<(t: Track) => boolean>(() => true);
   /** Supprimer la piste d'un autre : refusé (elle reviendrait à sa prochaine prise). */
   const collabDeleteGuardRef = useRef<(trackId: string) => string | null>(() => null);
   // Modes d'automation Pro Tools (Touch / Latch / Write / Trim) : écriture pendant la lecture.
@@ -1635,6 +1637,7 @@ function Studio() {
       draft.tracks.forEach(t => {
         if (t.id === 'instrumental') { t.volume = style.beatVolume; return; }
         if (t.type !== TrackType.AUDIO || t.instrumentId) return;
+        if (!collabMixScopeRef.current(t as Track)) return;
         voiceTracks++;
         // Comme un ingé son : le lead devant et au centre, les voix secondaires
         // plus basses, ouvertes à gauche / à droite et un peu plus « loin ».
@@ -3670,6 +3673,7 @@ function Studio() {
   /** Arrivée par une invitation : choisir son rôle avant de rejoindre. */
   const [collabArrival, setCollabArrival] = useState<{ sessionName: string; suggestedRole: CollabRole | null } | null>(null);
   const pendingArrivalRef = useRef<CollabRole | 'any' | null>(null);
+  const [arrivalName, setArrivalName] = useState('');
   /** Met à jour ce que montrent les en-têtes de piste (qui enregistre où). */
   const refreshCollabLiveRef = useRef<() => void>(() => {});
   /** Suit la lecture de l'hôte (« Écouter ensemble »). */
@@ -4397,6 +4401,11 @@ function Studio() {
     if (!c || !t) return null;
     return recordBlock(t as Track, collabMe(), currentRecs(), Date.now(), otherArtists());
   };
+  collabMixScopeRef.current = (t) => {
+    const c = collabRef.current;
+    if (!c || c.role === 'engineer') return true;
+    return !t.collabOwnerKey || t.collabOwnerKey === c.key;
+  };
   collabDeleteGuardRef.current = (trackId) => {
     const c = collabRef.current;
     const t = stateRef.current.tracks.find(x => x.id === trackId);
@@ -4604,6 +4613,8 @@ function Studio() {
     pendingArrivalRef.current = null;
     setCollabArrival({ sessionName: cloudSession.name || state.name || 'Session', suggestedRole: wanted === 'any' ? null : wanted });
     setCollabOpen(true);
+    // Nom proposé : celui du compte (modifiable).
+    void catalogSupabase.auth.getUser().then(({ data }) => { const e = data?.user?.email; if (e) setArrivalName(n => n || e.split('@')[0]); }).catch(() => {});
   }, [state.id, state.name, cloudSession, collab]);
 
   // Diagnostic en lecture seule (console, tests de bout en bout) : état de la collaboration.
@@ -6553,7 +6564,7 @@ function Studio() {
         inviteCode={inviteCode}
         onRefreshCode={() => { void createInviteCode(); }}
         arrival={collabArrival}
-        defaultName={user && user.id !== 'guest' ? (user.username || (user.email || '').split('@')[0]) : ''}
+        defaultName={(user && user.id !== 'guest' ? (user.username || (user.email || '').split('@')[0]) : '') || arrivalName}
         onJoin={(r, n) => { void startCollab(r, n, { host: false }); }}
         onCancelArrival={() => setCollabArrival(null)}
         onJoinCode={joinWithCode}

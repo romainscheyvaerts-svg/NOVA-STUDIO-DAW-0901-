@@ -80,9 +80,14 @@ def open_panel(page):
 
 
 def close_panel(page):
+    dismiss(page)
     loc = page.locator("[aria-labelledby='collab-title']")
     if loc.count():
-        loc.get_by_role("button", name="Fermer").first.click(); page.wait_for_timeout(300)
+        try:
+            loc.get_by_role("button", name="Fermer").first.click(timeout=4000)
+        except Exception:
+            loc.get_by_role("button", name="Fermer").first.click(force=True, timeout=4000)
+        page.wait_for_timeout(300)
 
 
 def panel_text(page):

@@ -200,7 +200,7 @@ export function peerViews(peers: PeerInfo[], meKey: string | null, trackName: (i
     else if (p.online && p.st === 'late') { state = 'late'; label = 'en retard : connexion lente, ses modifications arrivent avec du retard'; }
     else if (p.online && p.playing) { state = 'listening'; label = 'écoute'; }
     else if (p.online) { state = 'online'; label = 'connecté'; }
-    else if (p.seenAt && now - p.seenAt < 60_000) { state = 'late'; label = 'en retard : sans direct, ses modifications arrivent toutes les 10 s'; }
+    else if (p.seenAt && now - p.seenAt < 60_000) { state = 'late'; label = 'en retard : sa connexion est coupée ou lente, ses modifications arriveront dès que possible'; }
     else { state = 'offline'; label = 'hors ligne'; }
     return { ...p, state, label, me };
   });

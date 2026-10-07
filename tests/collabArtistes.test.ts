@@ -146,7 +146,7 @@ describe('présence', () => {
     expect(by['Max']).toMatchObject({ state: 'listening', label: 'écoute' });
     expect(by['Kenji'].state).toBe('late');
     expect(by['Ana']).toMatchObject({ state: 'late' });
-    expect(by['Ana'].label).toMatch(/toutes les 10 s/);
+    expect(by['Ana'].label).toMatch(/coupée ou lente/);
     expect(by['Zoé']).toMatchObject({ state: 'offline', label: 'hors ligne' });
   });
 
