@@ -10,6 +10,7 @@
 import { createPsolaCore, createHarmonyMath, psolaLatencySamples } from './psolaCore';
 import { createTimeFxCore } from './timeFxCore';
 import { createDjFilterCore, createLofiCore } from './colorFxCore';
+import { createGateCore } from './gateCore';
 import { loadWorkletModule } from '../plugins/vocalDspUtils';
 import { V21Type, V21_DEFAULTS, V21_SPECS, sanitizeV21 } from './v21Params';
 import { scaleIntervals } from '../utils/scales';
@@ -51,6 +52,8 @@ class NovaV21Processor extends AudioWorkletProcessor {
     };
   }
   process(inputs, outputs, parameters) {
+    // Effets calés sur le morceau (gate) : position dans le morceau au début du bloc.
+    if (this.core.setClock && parameters.originHi) this.core.setClock(currentTime - (parameters.originHi[0] + parameters.originLo[0]));
     for (let i = 0; i < __names.length; i++) {
       const a = parameters[__names[i]];
       if (a && a.length) { const v = a[0]; if (this.ep[__names[i]] !== v) { this.ep[__names[i]] = v; this.dirty = true; } }
@@ -117,6 +120,12 @@ export function timeFxToCore(p: Record<string, any>) {
 export function djFilterToCore(p: Record<string, any>) {
   return { filter: +p.filter || 0, resonance: p.resonance === undefined ? 0.25 : +p.resonance, slope: +p.slope >= 18 ? 24 : 12, output: +p.output || 0 };
 }
+/** Réglages du gate rythmique → cœur (autonome : s1…s16 → motif). */
+export function gateToCore(p: Record<string, any>) {
+  const steps: number[] = [];
+  for (let i = 1; i <= 16; i++) { const v = +p['s' + i]; steps.push(Number.isFinite(v) ? v : 1); }
+  return { steps, rate: +p.rate || 4, length: +p.length || 16, depth: p.depth === undefined ? 1 : +p.depth, attack: p.attack === undefined ? 2 : +p.attack, release: p.release === undefined ? 20 : +p.release, bpm: +p.bpm || 120 };
+}
 export function lofiToCore(p: Record<string, any>) {
   return { bits: +p.bits || 16, rate: +p.rate || 48000, lowCut: +p.lowCut || 20, highCut: +p.highCut || 20000, drive: +p.drive || 0, noise: +p.noise || 0, mix: p.mix === undefined ? 1 : +p.mix, output: +p.output || 0 };
 }
@@ -129,6 +138,8 @@ interface WorkletSpec {
   audioParams: string[];
   /** Latence (échantillons) ; 0 par défaut. */
   latencySamples?: (sr: number) => number;
+  /** Calé sur la ligne de temps du morceau (originHi / originLo). */
+  timeline?: boolean;
 }
 
 const descriptorsOf = (type: V21Type) => {
@@ -136,9 +147,20 @@ const descriptorsOf = (type: V21Type) => {
   return V21_SPECS[type].map(s => ({ name: s.id, defaultValue: typeof d[s.id] === 'number' ? d[s.id] : s.min, minValue: s.min, maxValue: s.max }));
 };
 
-const makeSpec = (type: V21Type, processor: string, defs: string, make: string, toCore: (p: Record<string, any>) => any, latencySamples?: (sr: number) => number): WorkletSpec => {
+/**
+ * Origine de la ligne de temps (instant du contexte où le morceau commence), en
+ * deux AudioParam (partie entière + reste) : un seul float32 perdrait la
+ * précision après quelques heures de contexte.
+ */
+const TIMELINE_DESC = [
+  { name: 'originHi', defaultValue: 0, minValue: -1e9, maxValue: 1e9 },
+  { name: 'originLo', defaultValue: 0, minValue: -2, maxValue: 2 },
+];
+
+const makeSpec = (type: V21Type, processor: string, defs: string, make: string, toCore: (p: Record<string, any>) => any, latencySamples?: (sr: number) => number, timeline = false): WorkletSpec => {
   const desc = descriptorsOf(type);
-  return { key: `${processor}-2`, processor, code: processorCode(processor, defs, make, toCore.toString(), desc), audioParams: desc.map(d => d.name), latencySamples };
+  const all = timeline ? [...desc, ...TIMELINE_DESC] : desc;
+  return { key: `${processor}-2`, processor, code: processorCode(processor, defs, make, toCore.toString(), all), audioParams: desc.map(d => d.name), latencySamples, timeline };
 };
 
 let SPECS: Record<V21Type, WorkletSpec> | null = null;
@@ -149,6 +171,8 @@ const specs = (): Record<V21Type, WorkletSpec> => {
     TIMEFX: makeSpec('TIMEFX', 'nova-v21-timefx', `const createTimeFxCore = (${createTimeFxCore.toString()});`, `(sr) => { const c = createTimeFxCore(sr); c.meters = () => c.state(); return c; }`, timeFxToCore),
     DJFILTER: makeSpec('DJFILTER', 'nova-v21-djfilter', `const createDjFilterCore = (${createDjFilterCore.toString()});`, `(sr) => { const c = createDjFilterCore(sr); c.meters = () => ({ cutoff: c.cutoffHz() }); return c; }`, djFilterToCore),
     LOFI: makeSpec('LOFI', 'nova-v21-lofi', `const createLofiCore = (${createLofiCore.toString()});`, `(sr) => createLofiCore(sr)`, lofiToCore),
+    // Aucune latence (gain par échantillon) ; motif calé sur la ligne de temps du morceau.
+    GATEFX: makeSpec('GATEFX', 'nova-v21-gate', `const createGateCore = (${createGateCore.toString()});`, `(sr) => createGateCore(sr)`, gateToCore, undefined, true),
   };
   return SPECS;
 };
@@ -165,6 +189,8 @@ export class V21EffectNode {
   private meters: any = {};
   private metersAt = 0;
   private failed = false;
+  /** Instant du contexte où le morceau commence (effets calés sur la ligne de temps). */
+  private origin = 0;
 
   constructor(ctx: BaseAudioContext, type: V21Type, params?: Record<string, any>, bpm?: number) {
     this.ctx = ctx;
@@ -183,6 +209,7 @@ export class V21EffectNode {
       await loadWorkletModule(this.ctx, this.spec.key, this.spec.code);
       const parameterData: Record<string, number> = {};
       for (const k of this.spec.audioParams) if (Number.isFinite(+this.params[k])) parameterData[k] = +this.params[k];
+      if (this.spec.timeline) { const hi = Math.floor(this.origin); parameterData.originHi = hi; parameterData.originLo = this.origin - hi; }
       this.worklet = new AudioWorkletNode(this.ctx, this.spec.processor, {
         numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
         channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
@@ -219,6 +246,26 @@ export class V21EffectNode {
     }
     if ('scale' in clean) msg._scale = this.params._scale;
     if (Object.keys(msg).length) this.worklet.port.postMessage({ params: msg });
+  }
+
+  /** Effet calé sur le morceau (gate rythmique) ? */
+  public get followsTimeline(): boolean { return !!this.spec.timeline; }
+
+  /**
+   * Cale l'effet sur la ligne de temps : `origin` = instant du contexte qui
+   * correspond au début du morceau, MOINS l'avance de compensation de latence
+   * des effets qui suivent (le son arrive ici en avance d'autant). Appelé au
+   * départ de la lecture, au bouclage (`when` = instant du saut) et au début
+   * de l'export (mêmes motifs aux deux).
+   */
+  public syncTimeline(origin: number, when?: number) {
+    if (!this.spec.timeline || !Number.isFinite(origin)) return;
+    this.origin = origin;
+    if (!this.worklet) return;
+    const hi = Math.floor(origin);
+    const at = Math.max(this.ctx.currentTime, when ?? 0);
+    const P = this.worklet.parameters as any;
+    try { P.get('originHi').setValueAtTime(hi, at); P.get('originLo').setValueAtTime(origin - hi, at); } catch { /* contexte fermé */ }
   }
 
   /** La gamme (texte) est traduite ici en intervalles pour le cœur. */

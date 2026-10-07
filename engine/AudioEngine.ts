@@ -712,6 +712,8 @@ export class AudioEngine {
         if (rt.outDelay && r && main !== undefined) rt.outDelay.delayTime.value = r.delays.get(main) ?? r.down;
         rt.sendDelays?.forEach((node, sendId) => { node.delayTime.value = r?.delays.get(sendId) ?? 0; });
       });
+      // Effets calés sur le morceau (gate rythmique) : temps 0 du rendu = startOffset du morceau.
+      rendered.forEach(rt => { if (rt.pluginNodes) this.syncChainTimeline([...rt.pluginNodes.values()], -startOffset, rt.down || 0); });
     }
 
     // --- 2a. Batterie Make Music : mix par pad (effets + envois) aussi à l'export
@@ -1108,6 +1110,41 @@ export class AudioEngine {
       setDelay(d.outDelay, r && main !== undefined ? (r.delays.get(main) ?? r.down) : 0);
       d.sendDelays?.forEach((node, sendId) => setDelay(node, r?.delays.get(sendId) ?? 0));
     });
+    // Latences changées (effet ajouté, gel de prise…) : l'avance des gates aussi.
+    this.resyncTimelineEffects();
+  }
+
+  /**
+   * Effets calés sur la ligne de temps du morceau (gate rythmique) d'une chaîne :
+   * chacun reçoit l'origine du morceau MOINS son avance de compensation (latence
+   * des effets qui le suivent + retard aval du bus), comme l'automation (pluginLead).
+   */
+  private syncChainTimeline(nodes: any[], origin: number, down: number, at?: number, pdc = true) {
+    let acc = down;
+    for (let k = nodes.length - 1; k >= 0; k--) {
+      const n = nodes[k];
+      if (n?.followsTimeline && typeof n.syncTimeline === 'function') n.syncTimeline(origin - acc, at);
+      const l = n?.latency;
+      if (pdc && typeof l === 'number' && l > 0 && l < 0.5) acc += l;
+    }
+  }
+
+  /** Toutes les pistes en lecture : `origin` = instant du contexte où le morceau commence. */
+  private syncTimelineEffects(origin: number, at?: number) {
+    this.tracksDSP.forEach(d => {
+      const ids = d.chainIds || [];
+      if (!ids.length) return;
+      this.syncChainTimeline(ids.map(id => d.pluginChain.get(id)?.instance), origin, this.pdcSuspended ? 0 : (d.downLatency || 0), at, !this.pdcSuspended);
+    });
+  }
+
+  private resyncTimelineEffects() {
+    if (!this.isPlaying || !this.ctx) return;
+    const w = this.pendingLoopWrap;
+    if (w && this.ctx.currentTime < w.atContextTime) {
+      this.syncTimelineEffects(w.previousStartTime);
+      this.syncTimelineEffects(this.playbackStartTime, w.atContextTime);
+    } else this.syncTimelineEffects(this.playbackStartTime);
   }
 
   public disarmTrack() {
@@ -1390,6 +1427,8 @@ export class AudioEngine {
     this.midiRunStart = startOffset;
     // Synthé NOVA : chorus calé sur le temps du morceau (identique à l'export).
     this.tracksDSP.forEach(d => { if (d.synth instanceof NovaSynthNode) d.synth.syncTimeline(this.playbackStartTime, this.nextScheduleTime); });
+    // Gate rythmique : motif calé sur la grille du morceau (même calcul qu'à l'export).
+    this.resyncTimelineEffects();
     if (this.recSession && this.recPlayStart === null) this.recPlayStart = this.playbackStartTime; 
 
     // Valeur correcte au demarrage : sans ca, une piste dont tous les points
@@ -1596,6 +1635,7 @@ export class AudioEngine {
     const previousStartTime = this.playbackStartTime;
     this.playbackStartTime = boundaryContextTime - this.loopStart;
     this.pendingLoopWrap = { atContextTime: boundaryContextTime, previousStartTime };
+    this.syncTimelineEffects(this.playbackStartTime, boundaryContextTime);
 
     tracks.forEach(track => this.applyAutomation(track, this.loopStart));
   }

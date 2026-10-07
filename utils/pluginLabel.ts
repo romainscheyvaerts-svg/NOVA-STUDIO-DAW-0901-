@@ -10,7 +10,7 @@ export const NOVA_FX_NAMES: Record<string, string> = {
   REVERB: 'Réverbe', DELAY: 'Delay', CHORUS: 'Chorus', FLANGER: 'Flanger', DOUBLER: 'Doubleur',
   STEREOSPREADER: 'Stéréo', COMPRESSOR: 'Compresseur', AUTOTUNE: 'Nova Tune', DEESSER: 'De-esser',
   DENOISER: 'Anti-bruit', PROEQ12: 'Égaliseur', VOCALSATURATOR: 'Saturation', MASTERSYNC: 'Master', LIMITER: 'Limiteur',
-  HARMONIZER: 'Harmoniseur', VOICESHIFT: 'Voix grave/aiguë', TIMEFX: 'Tape stop', DJFILTER: 'Filtre DJ', LOFI: 'Lo-fi',
+  HARMONIZER: 'Harmoniseur', VOICESHIFT: 'Voix grave/aiguë', TIMEFX: 'Tape stop', DJFILTER: 'Filtre DJ', LOFI: 'Lo-fi', GATEFX: 'Gate rythmique',
   SAMPLER: 'Sampler', DRUM_SAMPLER: 'Drum sampler', MELODIC_SAMPLER: 'Sampler mélodique', DRUM_RACK_UI: 'Drum Rack',
 };
 
@@ -19,7 +19,7 @@ const ICONS: Record<string, string> = {
   PROEQ12: 'fa-sliders-h', VOCALSATURATOR: 'fa-fire', REVERB: 'fa-water', DELAY: 'fa-history',
   CHORUS: 'fa-wave-square', FLANGER: 'fa-wave-square', DOUBLER: 'fa-clone', STEREOSPREADER: 'fa-arrows-alt-h',
   MASTERSYNC: 'fa-crown', VST3: 'fa-plug', LIMITER: 'fa-compress-arrows-alt',
-  HARMONIZER: 'fa-users', VOICESHIFT: 'fa-theater-masks', TIMEFX: 'fa-stopwatch', DJFILTER: 'fa-filter', LOFI: 'fa-phone-alt',
+  HARMONIZER: 'fa-users', VOICESHIFT: 'fa-theater-masks', TIMEFX: 'fa-stopwatch', DJFILTER: 'fa-filter', LOFI: 'fa-phone-alt', GATEFX: 'fa-grip-lines-vertical',
 };
 
 /** Ce que l'autotune du PC publie (services/AutotuneVst : autotuneLive). */
