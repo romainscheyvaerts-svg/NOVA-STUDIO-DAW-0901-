@@ -106,6 +106,8 @@ class Installer:
     # --- sorties ------------------------------------------------------------
 
     def log(self, line: str):
+        if self.log_file.closed:
+            return
         self.log_file.write(line.rstrip() + "\n")
         self.log_file.flush()
 
@@ -117,6 +119,12 @@ class Installer:
             sys.stdout.write(json.dumps(msg, ensure_ascii=False) + "\n")
             sys.stdout.flush()
         self.log(f"[{event}] {kw.get('pct', '')} {kw.get('message', '')}")
+
+    def close(self):
+        try:
+            self.log_file.close()
+        except Exception:
+            pass
 
     def cancel(self):
         self.cancelled.set()
@@ -331,6 +339,8 @@ def main(argv=None):
     except Exception as e:  # message lisible pour le DAW + journal complet
         inst.emit("error", message=str(e))
         return 1
+    finally:
+        inst.close()
 
 
 if __name__ == "__main__":
