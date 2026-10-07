@@ -5,6 +5,7 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore, usePlayheadTime } from '../utils/playheadStore';
 import { gainToDbText } from '../utils/db';
 import { useSimpleMode } from '../utils/simpleMode';
+import { openSynthPanel } from '../utils/synthPanelStore';
 
 /** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
 const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
@@ -754,6 +755,16 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   >
                     S
                   </button>
+                  {/* Synthé NOVA (V24) : sons et réglages de l'instrument de la piste MIDI */}
+                  {track.type === TrackType.MIDI && !track.bass808 && !track.vstInstrument && !track.drumMachine && (
+                    <button type="button" data-testid={`synth-pill-${track.id}`}
+                      onClick={(e) => { e.stopPropagation(); openSynthPanel(track.id); }}
+                      aria-label={`Ouvrir le synthé de ${track.name}`}
+                      title={`Synthé NOVA : ${track.novaSynth?.name || 'synthé simple'}`}
+                      className="nova-hit w-8 h-8 rounded-md text-[11px] bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30">
+                      <i className="fas fa-sliders-h"></i>
+                    </button>
+                  )}
                   {/* Micro : seulement sur les pistes voix (pas le beat ni les bus) */}
                   {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
                   <button

@@ -457,6 +457,18 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 {freezeStale && <i className="fas fa-exclamation-triangle text-[8px] ml-1 text-amber-400" title="Les prises ont changé depuis le rendu : il sera refait à la prochaine sauvegarde sur PC (pont VST)."></i>}
               </span>
             )}
+            {/* Synthé NOVA (V24) : pastille de l'instrument de la piste MIDI, ouvre son écran
+                (dans la ligne du nom : visible quelle que soit la hauteur de la piste ; le nom
+                du son est dans l'infobulle et en tête de l'écran du synthé). */}
+            {!isRenaming && track.type === TrackType.MIDI && !track.bass808 && !track.vstInstrument && !track.drumMachine && !instrumentPlugin && (
+              <button type="button" data-testid={`synth-pill-${track.id}`}
+                onClick={(e) => { e.stopPropagation(); openSynthPanel(track.id); }}
+                title={`Synthé NOVA : ${track.novaSynth?.name || 'synthé simple'} (ouvrir les sons et réglages)`}
+                aria-label={`Ouvrir le synthé de ${track.name}`}
+                className="shrink-0 w-6 h-6 rounded-md border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
+                <i className="fas fa-sliders-h text-[9px]"></i>
+              </button>
+            )}
             {/* Ingé à distance : où en est la piste (« Chez l'ingé… », « Mise à jour reçue »), et l'envoyer. */}
             {!isRenaming && remote.role === 'artist' && remote.badge?.canSend && (
               <button type="button" onClick={(e) => { e.stopPropagation(); requestRemoteSend(track.id); }}
@@ -684,23 +696,6 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                       <i className="fas fa-sliders-h text-[9px]"></i>
                   </button>
               </div>
-          </div>
-      )}
-
-      {/* Synthé NOVA (V24) : pastille de l'instrument d'une piste MIDI, ouvre son écran. */}
-      {!instrumentPlugin && track.type === TrackType.MIDI && !track.bass808 && !track.vstInstrument && !track.drumMachine && (
-          <div className="mt-2 relative min-h-0 overflow-hidden">
-              <button type="button" data-testid={`synth-pill-${track.id}`}
-                  onClick={(e) => { e.stopPropagation(); openSynthPanel(track.id); }}
-                  title="Ouvrir le synthé NOVA (sons et réglages)" aria-label={`Ouvrir le synthé de ${track.name}`}
-                  className="flex w-full items-center overflow-hidden rounded-md border border-cyan-500/30 bg-cyan-500/5 hover:bg-cyan-500/10 text-left min-h-[32px]">
-                  <span className="w-8 self-stretch flex items-center justify-center bg-cyan-500/10 border-r border-cyan-500/20"><i className="fas fa-music text-[10px] text-cyan-400"></i></span>
-                  <span className="flex-1 min-w-0 px-2 flex flex-col justify-center">
-                      <span className="text-[9px] font-black uppercase text-cyan-100 truncate">{track.novaSynth?.name || 'Synthé simple'}</span>
-                      <span className="text-[7px] text-slate-500 font-mono">Synthé NOVA</span>
-                  </span>
-                  <span className="w-8 self-stretch flex items-center justify-center bg-black/20 text-slate-400"><i className="fas fa-sliders-h text-[9px]"></i></span>
-              </button>
           </div>
       )}
 

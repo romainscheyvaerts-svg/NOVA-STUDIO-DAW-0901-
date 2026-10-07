@@ -96,7 +96,8 @@ const Card: React.FC<{ title: string; children: React.ReactNode; right?: React.R
 
 // --- Mini clavier pour essayer le son --------------------------------------------------
 
-const KEYS = Array.from({ length: 25 }, (_, i) => 48 + i);
+/** Deux octaves sur grand écran, une seule sur téléphone (touches assez larges pour le doigt). */
+const keysFor = (narrow: boolean) => Array.from({ length: narrow ? 13 : 25 }, (_, i) => 48 + i);
 const isBlack = (p: number) => [1, 3, 6, 8, 10].includes(p % 12);
 const MiniKeyboard: React.FC<{ onNoteOn: (p: number) => void; onNoteOff: (p: number) => void; octave: number }> = ({ onNoteOn, onNoteOff, octave }) => {
   const held = useRef(new Map<number, number>());
@@ -112,6 +113,8 @@ const MiniKeyboard: React.FC<{ onNoteOn: (p: number) => void; onNoteOff: (p: num
     setDown(d => { const n = new Set(d); n.delete(p); return n; });
   };
   useEffect(() => () => { held.current.forEach(p => onNoteOff(p)); held.current.clear(); }, [onNoteOff]);
+  const [narrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
+  const KEYS = keysFor(narrow);
   const whites = KEYS.filter(k => !isBlack(k));
   return (
     <div className="relative h-16 select-none touch-none" role="group" aria-label="Clavier d'essai">
@@ -146,7 +149,8 @@ const MiniKeyboard: React.FC<{ onNoteOn: (p: number) => void; onNoteOff: (p: num
 const SynthPanel: React.FC<Props> = ({ track, onChange, onPreview, onNoteOn, onNoteOff, onClose }) => {
   const legacy = !track.novaSynth;
   const s = useMemo(() => normalizeSynth(track.novaSynth ?? presetSettings('nova-saw-classique')), [track.novaSynth]);
-  const [cat, setCat] = useState<PresetCategory | 'Tous' | 'Favoris'>(() => (s.presetId && presetById(s.presetId)?.cat) || 'Tous');
+  // Ancien synthé : on montre toute la banque ; sinon la catégorie du son en cours.
+  const [cat, setCat] = useState<PresetCategory | 'Tous' | 'Favoris'>(() => (!legacy && s.presetId && presetById(s.presetId)?.cat) || 'Tous');
   const [favs, setFavs] = useState<string[]>(readFavs);
   const [hint, setHint] = useState('Touche un réglage pour voir à quoi il sert. Ctrl+Z annule.');
   const [tab, setTab] = useState<'sons' | 'reglages'>('sons');
@@ -328,13 +332,13 @@ const SynthPanel: React.FC<Props> = ({ track, onChange, onPreview, onNoteOn, onN
       <div className="w-full sm:w-[min(1180px,96vw)] h-full sm:h-[92vh] bg-[#101218] sm:rounded-2xl border border-white/10 shadow-2xl flex flex-col overflow-hidden">
         {/* En-tête : nom du son, précédent / suivant, favori, aperçu */}
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-white/10 bg-gradient-to-r from-cyan-500/10 to-fuchsia-500/10">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="flex items-center gap-2 min-w-0 w-full sm:w-auto sm:flex-1">
             <span className="text-[11px] font-black uppercase tracking-widest text-cyan-300 shrink-0">🎹 Synthé NOVA</span>
             <span className="text-[13px] font-bold text-white truncate" data-testid="synth-preset-name">
               {legacy ? 'Synthé simple (son d\'origine)' : (s.name || preset?.name || 'Son personnalisé')}{modified && <span className="text-amber-300 text-[11px] ml-1" title="Réglages retouchés depuis le préréglage">• modifié</span>}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0 ml-auto">
             <button type="button" onClick={() => step(-1)} aria-label="Son précédent" title="Son précédent" className="w-10 h-10 rounded-lg bg-white/10 text-white hover:bg-white/20"><i className="fas fa-chevron-left" /></button>
             <button type="button" onClick={() => step(1)} aria-label="Son suivant" title="Son suivant" className="w-10 h-10 rounded-lg bg-white/10 text-white hover:bg-white/20"><i className="fas fa-chevron-right" /></button>
             <button type="button" onClick={toggleFav} disabled={!s.presetId} aria-pressed={fav} aria-label={fav ? 'Retirer des favoris' : 'Ajouter aux favoris'} title="Favori"
@@ -359,8 +363,8 @@ const SynthPanel: React.FC<Props> = ({ track, onChange, onPreview, onNoteOn, onN
         </div>
         <div className="border-t border-white/10 px-3 py-2 bg-black/30 flex items-center gap-2">
           <div className="flex flex-col gap-1 shrink-0">
-            <button type="button" onClick={() => setKbOct(o => Math.min(2, o + 1))} aria-label="Clavier une octave plus haut" className="w-9 h-7 rounded bg-white/10 text-white text-[11px]">+8ve</button>
-            <button type="button" onClick={() => setKbOct(o => Math.max(-3, o - 1))} aria-label="Clavier une octave plus bas" className="w-9 h-7 rounded bg-white/10 text-white text-[11px]">-8ve</button>
+            <button type="button" onClick={() => setKbOct(o => Math.min(2, o + 1))} aria-label="Clavier une octave plus haut" className="w-10 h-8 rounded bg-white/10 text-white text-[11px]">+8ve</button>
+            <button type="button" onClick={() => setKbOct(o => Math.max(-3, o - 1))} aria-label="Clavier une octave plus bas" className="w-10 h-8 rounded bg-white/10 text-white text-[11px]">-8ve</button>
           </div>
           <div className="flex-1 min-w-0"><MiniKeyboard octave={kbOct} onNoteOn={onNoteOn} onNoteOff={onNoteOff} /></div>
         </div>
