@@ -217,6 +217,8 @@ export const busFrozenSlices = (bus: Track, tracks: Track[]): Clip[] => {
 export const trackBufferIds = (t: Track): string[] => {
   const ids: string[] = [];
   (t.clips || []).forEach(c => { if (c.bufferId) ids.push(c.bufferId); });
+  // Prise d'origine d'un clip corrigé en justesse (V19) : gardée pour revenir en arrière.
+  (t.clips || []).forEach(c => { if (c.pitchEdit?.sourceBufferId) ids.push(c.pitchEdit.sourceBufferId); });
   if (t.frozenClip?.bufferId) ids.push(t.frozenClip.bufferId);
   (t.sendFreezes || []).forEach(sf => { if (sf.clip.bufferId) ids.push(sf.clip.bufferId); });
   (t.freezeBase?.clips || []).forEach(c => { const b = (c as { bufferId?: string }).bufferId; if (b) ids.push(b); });
