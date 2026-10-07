@@ -134,7 +134,15 @@ export interface GainParamLike {
  * contexte) où le clip serait à sa position 0. Repli sur des rampes linéaires
  * par morceaux si le navigateur refuse une courbe.
  */
+/** Avance de la valeur de départ d'une courbe (≈ 5 échantillons à 48 kHz). */
+const PRE_CURVE_SEC = 1e-4;
+
 export function applyGainEvents(param: GainParamLike, events: GainEvent[], clipZero: number): void {
+  // La source peut démarrer un échantillon avant la courbe (arrondi à
+  // l'échantillon) : sans valeur posée juste avant, ce premier échantillon
+  // passait au gain par défaut (1) → un clic au début d'un fondu d'entrée.
+  const first = events[0];
+  if (first?.kind === 'curve' && clipZero + first.t > PRE_CURVE_SEC) param.setValueAtTime(first.values[0], clipZero + first.t - PRE_CURVE_SEC);
   for (const e of events) {
     const at = clipZero + e.t;
     if (e.kind === 'set') { param.setValueAtTime(e.v, at); continue; }

@@ -27,19 +27,19 @@ const RangeActionsBar: React.FC<{ commands: EditCommands }> = ({ commands }) => 
   ];
   return (
     <div role="toolbar" aria-label="Actions sur la sélection de plage" data-nova-target="range-actions"
-      className="absolute left-1/2 -translate-x-1/2 top-[52px] z-40 max-w-[calc(100%-24px)] flex flex-wrap items-center justify-center gap-1 px-2 py-1 rounded-xl border border-sky-400/30 bg-[#0d1117]/95 shadow-2xl backdrop-blur">
+      className="absolute right-3 top-[50px] z-40 max-w-[calc(100%-24px)] overflow-x-auto flex flex-nowrap items-center gap-1 px-1.5 py-0.5 rounded-xl border border-sky-400/30 bg-[#0d1117]/95 shadow-2xl backdrop-blur">
       <span className="px-2 text-[10px] font-black text-sky-300 whitespace-nowrap" title="Plage sélectionnée (Sélecteur de Pro Tools)">
         Plage {fmt(selLength(time))} · {time.trackIds.length} piste{time.trackIds.length > 1 ? 's' : ''}
       </span>
       {actions.map(a => (
         <button key={a.label} type="button" title={a.title} aria-label={a.label} onClick={() => a.run()}
-          className={`h-8 [@media(pointer:coarse)]:h-10 px-2 rounded-lg flex items-center gap-1.5 text-[10px] font-bold border border-white/10 transition-colors ${a.danger ? 'text-red-300 hover:bg-red-500/20' : 'text-slate-200 hover:bg-white/10'}`}>
+          className={`shrink-0 h-8 px-2 rounded-lg flex items-center gap-1.5 text-[10px] font-bold border border-white/10 transition-colors ${a.danger ? 'text-red-300 hover:bg-red-500/20' : 'text-slate-200 hover:bg-white/10'}`}>
           <i className={`fas ${a.icon} text-[10px]`}></i>
           <span className="hidden 2xl:inline">{a.label}</span>
         </button>
       ))}
       <button type="button" onClick={commands.clearSelection} aria-label="Désélectionner la plage" title="Désélectionner la plage"
-        className="h-8 [@media(pointer:coarse)]:h-10 w-8 rounded-lg text-slate-400 hover:text-white hover:bg-white/10">
+        className="shrink-0 h-8 w-8 rounded-lg text-slate-400 hover:text-white hover:bg-white/10">
         <i className="fas fa-times text-[11px]"></i>
       </button>
     </div>

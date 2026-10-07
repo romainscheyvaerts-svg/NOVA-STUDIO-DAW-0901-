@@ -429,7 +429,135 @@ def v2ui(page, res):
     res["ok_v2ui"] = bool(res["crossfade_ok"] and res["courbe_sortie_A"] == "S_CURVE" and res["nudge_ok"] and res["crossfade_auto_ok"])
 
 
-SCENARIOS = {"v1": v1, "v2": v2, "v2ui": v2ui}
+# ======================================================================= V3
+def cursor_at(page, x, y):
+    page.mouse.move(x, y); page.wait_for_timeout(80)
+    return page.evaluate("() => document.querySelector('.nova-grille .custom-scroll').style.cursor")
+
+
+def tsel(page):
+    return page.evaluate("() => { const s = window.__novaEdit.getTimeSelection(); return s ? { start: +s.start.toFixed(4), end: +s.end.toFixed(4), pistes: s.trackIds } : null; }")
+
+
+def spans(cl):
+    return [(c["start"], c["end"]) for c in cl if not c["muted"]]
+
+
+def drag(page, x0, y0, x1, y1, steps=6):
+    page.mouse.move(x0, y0); page.mouse.down()
+    page.mouse.move((x0 + x1) / 2, (y0 + y1) / 2, steps=steps); page.mouse.move(x1, y1, steps=steps)
+    page.mouse.up(); page.wait_for_timeout(250)
+
+
+def v3_project():
+    f = OUT / "v3_projet.zip"
+    make_project(f, [
+        track("voix", "Voix", [clip("A", "Phrase A", 0, 4, "audio/a.wav"), clip("B", "Phrase B", 5, 4, "audio/b.wav")]),
+        track("back", "Back", [clip("C", "Back C", 0, 8, "audio/c.wav")], color="#f97316"),
+    ], {"audio/a.wav": sine_wav(220, 10), "audio/b.wav": sine_wav(550, 10), "audio/c.wav": sine_wav(330, 10)}, "Plage V3")
+    return f
+
+
+def v3(page, res):
+    open_project(page, v3_project(), "v3_01_session")
+    box = canvas_box(page)
+    hi, lo = (lambda i: lane_y(box, i, 0.15)), (lambda i: lane_y(box, i, 0.85))  # 0,15 : au-dessus de la poignée de gain
+    res["outil_par_defaut"] = page.evaluate("() => { const b = document.querySelector('button[aria-label=\"Smart Tool\"]'); return b && b.getAttribute('aria-pressed'); }")
+    # --- Curseurs du Smart Tool selon la zone (comme Pro Tools)
+    res["curseurs"] = {
+        "moitie_haute": cursor_at(page, x_of(box, 2.0), lane_y(box, 0, 0.45)),
+        "moitie_basse": cursor_at(page, x_of(box, 2.0), lo(0)),
+        "bord": cursor_at(page, x_of(box, 3.97), lane_y(box, 0, 0.6)),
+        "coin_haut": cursor_at(page, x_of(box, 0.1), lane_y(box, 0, 0.05)),
+        "piste_vide_haut": cursor_at(page, x_of(box, 4.5), hi(0)),
+    }
+    res["curseurs_ok"] = res["curseurs"] == {"moitie_haute": "text", "moitie_basse": "grab", "bord": "ew-resize", "coin_haut": "nwse-resize", "piste_vide_haut": "text"}
+    # --- Plage sur deux pistes : moitié haute de A, de 1 s à 3 s, en descendant sur Back
+    drag(page, x_of(box, 1.0), hi(0), x_of(box, 3.0), hi(1))
+    res["selection"] = tsel(page)
+    res["tete_de_lecture_au_debut"] = round(engine_time(page), 3)
+    shot(page, "v3_02_selection_2_pistes")
+    res["barre_actions_visible"] = page.locator('[data-nova-target="range-actions"]').is_visible()
+    # --- Copier, coller à 10 s (clic simple = point d'insertion), annuler
+    page.keyboard.press("Control+c"); page.wait_for_timeout(200)
+    page.mouse.click(x_of(box, 10.0), hi(0)); page.wait_for_timeout(250)
+    res["apres_clic_simple"] = {"selection": tsel(page), "tete": round(engine_time(page), 3)}
+    page.keyboard.press("Control+v"); page.wait_for_timeout(400)
+    res["colle"] = {"voix": spans(clips_of(page, "voix")), "back": spans(clips_of(page, "back"))}
+    shot(page, "v3_03_colle_a_10s")
+    res["coller_ok"] = (10.0, 12.0) in res["colle"]["voix"] and (10.0, 12.0) in res["colle"]["back"]
+    page.keyboard.press("Control+z"); page.wait_for_timeout(450)
+    res["annule"] = {"voix": spans(clips_of(page, "voix")), "back": spans(clips_of(page, "back"))}
+    # --- Séparer (Ctrl+E) sur 2 → 6 s de la voix
+    drag(page, x_of(box, 2.0), hi(0), x_of(box, 6.0), hi(0))
+    res["selection_2"] = tsel(page)
+    page.keyboard.press("Control+e"); page.wait_for_timeout(350)
+    res["separe"] = spans(clips_of(page, "voix"))
+    res["separer_ok"] = res["separe"] == [(0, 2), (2, 4), (5, 6), (6, 9)]
+    # --- Consolider (Alt+Maj+3) la même plage : un seul clip 2 → 6 s
+    page.keyboard.press("Alt+Shift+Digit3"); page.wait_for_timeout(1200)
+    res["consolide"] = spans(clips_of(page, "voix"))
+    x = np.array(page.evaluate(RENDER_JS, ["voix", 9.5]), dtype=np.float64)
+    res["consolide_audio"] = {"2,5s_Hz": round(analyse_freq(x, SR, 2.3, 3.7)), "4,5s_dB": round(rms_db(x[int(4.2 * SR):int(4.8 * SR)]), 1),
+                              "5,5s_Hz": round(analyse_freq(x, SR, 5.1, 5.9)), "saut_max_aux_bords": round(max(max_step(x[int(1.9 * SR):int(2.1 * SR)]), max_step(x[int(5.9 * SR):int(6.1 * SR)])), 4)}
+    shot(page, "v3_04_consolide")
+    res["consolider_ok"] = (2.0, 6.0) in res["consolide"] and res["consolide_audio"]["2,5s_Hz"] in range(215, 226) and res["consolide_audio"]["5,5s_Hz"] in range(540, 561) and res["consolide_audio"]["4,5s_dB"] < -90
+    for _ in range(2):
+        page.keyboard.press("Control+z"); page.wait_for_timeout(450)
+    res["annule_2_fois"] = spans(clips_of(page, "voix"))
+    # --- Dupliquer, boucler, effacer (barre d'actions)
+    drag(page, x_of(box, 1.0), hi(1), x_of(box, 2.0), hi(1))
+    page.locator('[data-nova-target="range-actions"] button[aria-label="Dupliquer"]').click(); page.wait_for_timeout(350)
+    res["duplique_back"] = spans(clips_of(page, "back"))
+    res["selection_apres_dupliquer"] = tsel(page)
+    page.locator('[data-nova-target="range-actions"] button[aria-label="Boucler"]').click(); page.wait_for_timeout(250)
+    res["boucle"] = st(page, "s => ({ actif: s.isLoopActive, debut: s.loopStart, fin: s.loopEnd })")
+    page.locator('[data-nova-target="range-actions"] button[aria-label="Punch"]').click(); page.wait_for_timeout(250)
+    res["punch_depuis_plage"] = st(page, "s => ({ actif: s.punch.enabled, entree: s.punch.punchIn, sortie: s.punch.punchOut })")
+    page.keyboard.press("Delete"); page.wait_for_timeout(350)
+    res["efface_back"] = spans(clips_of(page, "back"))
+    shot(page, "v3_05_duplique_efface")
+    # --- Exporter la plage : la fenêtre d'export s'ouvre sur « Ta sélection »
+    drag(page, x_of(box, 0.5), hi(0), x_of(box, 1.5), hi(0))
+    page.locator('[data-nova-target="range-actions"] button[aria-label="Exporter"]').click(); page.wait_for_timeout(1500)
+    res["export_plage"] = page.evaluate("() => { const s = [...document.querySelectorAll('select')].find(x => [...x.options].some(o => o.value === 'SELECTION')); return s ? s.value : null; }")
+    shot(page, "v3_06_export_selection")
+    page.keyboard.press("Escape"); page.wait_for_timeout(400)
+    close = page.get_by_role("button", name="Fermer", exact=True).locator("visible=true").first
+    try:
+        if close.is_visible(): close.click(); page.wait_for_timeout(300)
+    except Exception:
+        pass
+    # --- Smart Tool : moitié basse = déplacement, bord = rognage, coin haut = fondu
+    page.keyboard.press("Escape"); page.wait_for_timeout(150)
+    page.evaluate("() => window.__novaEdit.clearSelection()")
+    drag(page, x_of(box, 7.0), lo(0), x_of(box, 8.0), lo(0))
+    res["deplace_B"] = [c for c in clips_of(page, "voix") if c["id"] == "B"]
+    drag(page, x_of(box, 3.97), lane_y(box, 0, 0.6), x_of(box, 3.5), lane_y(box, 0, 0.6))
+    res["rogne_A"] = [c for c in clips_of(page, "voix") if c["id"] == "A"]
+    drag(page, x_of(box, 0.05), lane_y(box, 0, 0.05), x_of(box, 1.0), lane_y(box, 0, 0.05))
+    res["fondu_A"] = [c for c in clips_of(page, "voix") if c["id"] == "A"]
+    res["selection_apres_gestes_bas"] = tsel(page)
+    shot(page, "v3_07_smart_tool_gestes")
+    b = res["deplace_B"][0]; a = res["fondu_A"][0]
+    res["smart_tool_ok"] = abs(b["start"] - 6.0) < 0.01 and abs(a["end"] - 3.5) < 0.01 and a["fadeIn"] > 0.5 and res["selection_apres_gestes_bas"] is None
+    res["ok_v3"] = bool(res["outil_par_defaut"] == "true" and res["curseurs_ok"] and res["selection"] == {"start": 1.0, "end": 3.0, "pistes": ["voix", "back"]}
+                        and res["coller_ok"] and res["separer_ok"] and res["consolider_ok"] and res["export_plage"] == "SELECTION" and res["smart_tool_ok"])
+
+
+def v3_ecrans(page, res, vp):
+    """Tablette et téléphone : rien ne casse (pas de défilement horizontal, Grabber par défaut au doigt)."""
+    open_project(page, v3_project(), f"v3_{vp}_01_session")
+    res[f"{vp}_outil"] = page.evaluate("() => [...document.querySelectorAll('button[aria-pressed=\"true\"]')].map(b => b.getAttribute('aria-label')).filter(Boolean)")
+    res[f"{vp}_debordements"] = qalib.overflow_report(page)[:10]
+    page.evaluate("() => window.__novaEdit.selectRange(1, 3, ['voix'])"); page.wait_for_timeout(300)
+    shot(page, f"v3_{vp}_02_plage")
+    res[f"{vp}_barre_plage_dans_ecran"] = page.evaluate("() => { const b = document.querySelector('[data-nova-target=\"range-actions\"]'); if (!b) return 'absente'; const r = b.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth + 1; }")
+    res[f"{vp}_hscroll"] = page.evaluate("() => document.documentElement.scrollWidth > innerWidth + 1")
+
+
+SCENARIOS = {"v1": v1, "v2": v2, "v2ui": v2ui, "v3": v3, "v3tab": lambda p, r: v3_ecrans(p, r, "tab"), "v3tel": lambda p, r: v3_ecrans(p, r, "tel")}
+VIEWPORT = {"v3tab": "tab", "v3tel": "tel"}
 
 
 def main(names):
@@ -439,7 +567,8 @@ def main(names):
         for n in names:
             log = Log(f"protools_{n}")
             res = {"name": n, "ok": True}
-            ctx, page = new_page(b, "pc", log, touch=False)
+            vp = VIEWPORT.get(n, "pc")
+            ctx, page = new_page(b, vp, log, touch=(vp != "pc"))
             t = time.time()
             try:
                 SCENARIOS[n](page, res)
