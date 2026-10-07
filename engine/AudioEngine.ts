@@ -70,6 +70,11 @@ interface TrackDSP {
   postFreezeLatency?: number;
   sends: Map<string, GainNode>; 
   /**
+   * Envois pré-fader (TrackSend.preFader) : prise après les effets, avant le
+   * fader et le pan (gain unité, toujours câblé entre la chaîne et le fader).
+   */
+  preFaderTap?: GainNode;
+  /**
    * Compensation de latence (PDC) : retard de la sortie principale et de chaque
    * envoi pour aligner les chemins plus courts (voir utils/pdc.ts) ; outputs =
    * destinations câblées ; downLatency = latence en aval de la chaîne (s).
@@ -549,6 +554,9 @@ export class AudioEngine {
       panner: StereoPannerNode;
       output: GainNode;
       sends: Map<string, GainNode>;
+      /** Sortie de la chaîne d'effets, avant le fader (envois pré-fader) ; piste muette / coupée par un solo. */
+      pre?: AudioNode;
+      silenced?: boolean;
       /** Effets créés pour le rendu (automation de leurs paramètres). */
       pluginNodes?: Map<string, any>;
       synth?: TrackSynth;
@@ -609,6 +617,7 @@ export class AudioEngine {
       }
       postPlugins.forEach(p => addPlugin(p, true));
       head.connect(gain);
+      const preNode = head;
       gain.connect(panner);
       panner.connect(output);
 
@@ -618,7 +627,7 @@ export class AudioEngine {
       panner.pan.value = options.preFader ? 0 : track.pan;
 
       const rt: RenderTrack = {
-        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes,
+        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pre: preNode, silenced,
         frozenInput, frozenClipId: frozen ? track.frozenClip!.id : undefined, postLatency,
       };
 
@@ -678,8 +687,9 @@ export class AudioEngine {
         const target = rendered.get(send.id);
         if (!target) return;
         const sendGain = offlineCtx.createGain();
-        sendGain.gain.value = send.level;
-        rt.panner.connect(sendGain);
+        // Pré-fader : après les effets, sans le fader ni le pan (la piste muette coupe quand même l'envoi).
+        sendGain.gain.value = send.preFader && rt.silenced ? 0 : send.level;
+        (send.preFader && rt.pre ? rt.pre : rt.panner).connect(sendGain);
         const sendDelay = offlineCtx.createDelay(PDC_MAX_SECONDS);
         sendGain.connect(sendDelay);
         sendDelay.connect(target.input);
@@ -2266,7 +2276,7 @@ export class AudioEngine {
         : 'live',
       track.outputTrackId || '',
       track.plugins.map(p => `${p.id}:${p.isEnabled ? 1 : 0}`).join(','),
-      (track.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}`).join(',')
+      (track.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}${sd.preFader ? ':pre' : ''}`).join(',')
     ].join('|');
   }
 
@@ -2295,7 +2305,7 @@ export class AudioEngine {
     dsp.sends.clear();
 
     dsp.sendDelays?.forEach(n => { try { n.disconnect(); } catch (e) {} });
-    [dsp.input, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
+    [dsp.input, dsp.preFaderTap, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
       .forEach(n => { try { n?.disconnect(); } catch (e) {} });
 
     this.tracksDSP.delete(trackId);
@@ -2362,8 +2372,10 @@ export class AudioEngine {
     // les pistes, donc un decrochage audible pendant la lecture.
     // Parts de cette piste déjà jouées depuis le rendu d'un bus VST gelé (tablette) : envoi direct coupé.
     const coveredOut = !!track.outputTrackId && isFeedCovered(track, track.outputTrackId, allTracks);
-    const sendLevelOf = (send: { id: string; isEnabled: boolean; level: number }) =>
-      (!send.isEnabled || isFeedCovered(track, send.id, allTracks)) ? 0 : send.level;
+    // Envoi pré-fader : le fader ne le baisse pas, mais couper la piste (mute / solo) le coupe.
+    const preSilenced = track.isMuted || this.soloSilencedIds.has(track.id);
+    const sendLevelOf = (send: { id: string; isEnabled: boolean; level: number; preFader?: boolean }) =>
+      (!send.isEnabled || isFeedCovered(track, send.id, allTracks) || (send.preFader && preSilenced)) ? 0 : send.level;
     const signature = this.graphSignatureOf(track, coveredOut ? 'covered-out' : '');
     if (dsp.graphSignature === signature) {
       const t = this.ctx.currentTime;
@@ -2383,7 +2395,7 @@ export class AudioEngine {
       });
       (track.sends || []).forEach(send => {
         const sendGain = dsp.sends.get(send.id);
-        const forcedOff = !send.isEnabled || isFeedCovered(track, send.id, allTracks);
+        const forcedOff = !send.isEnabled || isFeedCovered(track, send.id, allTracks) || (!!send.preFader && preSilenced);
         if (sendGain) sendGain.gain.setTargetAtTime(forcedOff ? 0 : this.automatedValue(track, `send::${send.id}`, send.level), t, 0.015);
       });
       return;
@@ -2403,6 +2415,7 @@ export class AudioEngine {
     try { dsp.panner.disconnect(); } catch (e) {}
     try { dsp.analyzer.disconnect(); } catch (e) {}
     try { dsp.output.disconnect(); } catch (e) {}
+    if (dsp.preFaderTap) { try { dsp.preFaderTap.disconnect(); } catch (e) {} }
     
     // NOTE: We do NOT disconnect plugin inputs/outputs here as that would break
     // the plugin's internal graph. The plugins manage their own internal connections.
@@ -2508,7 +2521,10 @@ export class AudioEngine {
       }
     });
 
-    link(head, dsp.gain);
+    // Point pré-fader (envois PRE) : gain unité entre la chaîne et le fader.
+    if (!dsp.preFaderTap) dsp.preFaderTap = this.ctx.createGain();
+    link(head, dsp.preFaderTap);
+    dsp.preFaderTap.connect(dsp.gain);
     dsp.gain.connect(dsp.panner);
     dsp.panner.connect(dsp.analyzer);
     dsp.analyzer.connect(dsp.output);
@@ -2562,8 +2578,10 @@ export class AudioEngine {
         const sendLevel = sendLevelOf(send);
         sendGain.gain.setTargetAtTime(sendLevel, now + fadeTime, 0.015);
         
-        // Connect from after panner (post-fader send) to send gain
-        dsp!.panner.connect(sendGain);
+        // Post-fader : après le fader et le pan ; pré-fader : après les effets, avant le fader.
+        try { dsp!.panner.disconnect(sendGain); } catch (e) {}
+        try { dsp!.preFaderTap?.disconnect(sendGain); } catch (e) {}
+        (send.preFader && dsp!.preFaderTap ? dsp!.preFaderTap : dsp!.panner).connect(sendGain);
         
         // Find the destination send/bus track and connect
         const destSendDSP = this.tracksDSP.get(send.id);

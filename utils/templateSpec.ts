@@ -384,7 +384,7 @@ export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {
     const sends: TrackSend[] = (t.sends || []).map(s => {
       const to = byName.get(compact(s.to));
       if (!to) report.warnings.push(`${t.name} : envoi vers « ${s.to} » introuvable (ignoré).`);
-      const level = s.levelDb !== undefined ? Math.min(1, dbToGain(s.levelDb)) : Math.max(0, Math.min(1, s.level ?? 0.25));
+      const level = s.levelDb !== undefined ? Math.min(1.5, dbToGain(s.levelDb)) : Math.max(0, Math.min(1.5, s.level ?? 0.25));
       return to ? { id: to, level, isEnabled: s.active !== false, ...(s.pre ? { preFader: true } : {}) } : null;
     }).filter((x): x is TrackSend => !!x);
     return {

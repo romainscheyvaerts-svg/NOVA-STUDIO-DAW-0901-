@@ -10,10 +10,12 @@ interface LoadProjectModalProps {
   onLoadCloud: (sessionId: string) => void;
   onLoadLocal: (file: File) => void;
   onOpenAuth: () => void;
+  /** « Nouveau projet depuis un modèle » (Session Templates). */
+  onOpenTemplates?: () => void;
 }
 
 const LoadProjectModal: React.FC<LoadProjectModalProps> = ({ 
-  isOpen, onClose, user, onLoadCloud, onLoadLocal, onOpenAuth
+  isOpen, onClose, user, onLoadCloud, onLoadLocal, onOpenAuth, onOpenTemplates
 }) => {
   const [activeTab, setActiveTab] = useState<'CLOUD' | 'LOCAL'>('CLOUD');
   const [sessions, setSessions] = useState<any[]>([]);
@@ -72,6 +74,14 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
                 <i className="fas fa-times"></i>
             </button>
         </div>
+
+        {onOpenTemplates && (
+            <button type="button" onClick={onOpenTemplates} data-testid="open-templates"
+                className="mx-6 mt-4 shrink-0 p-3 rounded-xl border border-cyan-500/30 bg-cyan-500/[0.06] hover:bg-cyan-500/15 text-left transition-all">
+                <span className="block text-[12px] font-black text-cyan-200">📐 Nouveau projet depuis un modèle</span>
+                <span className="block text-[11px] text-slate-400 mt-0.5">Pistes, bus, envois et effets déjà réglés (tes modèles de session).</span>
+            </button>
+        )}
 
         {/* Tabs */}
         <div className="flex border-b border-white/5 bg-black/20 shrink-0">
