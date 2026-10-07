@@ -271,6 +271,15 @@ def scenario_pc(pg, errs):
     ok("capture_clavier", badge == 4 and (len(capt) == 1 or len(host_notes) >= 4) and pg.evaluate("() => window.__novaMidi.captured()") == 0,
        {"notes_en_memoire": badge, "clips_avant": nclips_before, "clips_apres": len(t5["clips"]), "hauteurs": sorted({n["p"] for n in host_notes})})
     shot(pg, f"v25_{vp}_10_capture_faite")
+    # Raccourci Ctrl+Maj+C (comme Live) : trois notes de plus, puis le raccourci.
+    for k in ("s", "f", "h"):
+        pg.keyboard.down(k); pg.wait_for_timeout(150); pg.keyboard.up(k); pg.wait_for_timeout(120)
+    n_before = sum(len(cl["notes"]) for cl in next(t for t in tracks(pg) if t["id"] == tid)["clips"])
+    pg.locator("[data-nova-roll='clavier']").click(); pg.wait_for_timeout(200)  # le clavier musical coupé, les raccourcis reviennent
+    pg.keyboard.press("Control+Shift+C"); pg.wait_for_timeout(500)
+    n_after = sum(len(cl["notes"]) for cl in next(t for t in tracks(pg) if t["id"] == tid)["clips"])
+    ok("capture_raccourci_ctrl_maj_c", n_after == n_before + 3, {"avant": n_before, "apres": n_after})
+    pg.locator("[data-nova-roll='clavier']").click(); pg.wait_for_timeout(200)
     pg.locator("[data-nova-roll='clavier']").click(); pg.wait_for_timeout(200)
     pg.keyboard.press("Escape"); pg.wait_for_timeout(600)
 
@@ -283,7 +292,20 @@ def scenario_pc(pg, errs):
     dl2.value.save_as(str(p_all))
     allb = pg.evaluate(PARSE_JS, base64.b64encode(p_all.read_bytes()).decode())
     ok("export_toutes_pistes_format1", allb["format"] == 1 and len(allb["notes"]) >= n_notes + 17, {"notes": len(allb["notes"]), "format": allb["format"]})
-    shot(pg, f"v25_{vp}_12_fin")
+    # Menu de la piste et fenêtre d'export
+    head = pg.locator(".nova-grille").get_by_text("PIANO 6", exact=True).first
+    head.click(button="right"); pg.wait_for_timeout(400)
+    tr_item = pg.get_by_text("Exporter la piste en .mid", exact=False)
+    shot(pg, f"v25_{vp}_12_menu_piste")
+    ok("menu_piste_exporter_mid", tr_item.count() > 0 and tr_item.first.is_visible())
+    pg.keyboard.press("Escape"); pg.mouse.click(5, 450); pg.wait_for_timeout(300)
+    pg.locator("button[aria-label='Exporter le mix']").first.click(); pg.wait_for_timeout(900)
+    row = pg.locator("[data-testid='export-midi']")
+    if row.count(): row.first.scroll_into_view_if_needed()
+    shot(pg, f"v25_{vp}_13_fenetre_export")
+    ok("fenetre_export_ligne_mid", row.count() == 1, row.count() and row.first.inner_text().replace(chr(10), " · "))
+    pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
+    shot(pg, f"v25_{vp}_14_fin")
     ov = overflow_report(pg)
     ok("pas_de_debordement_pc", not [o for o in ov if o["kind"] == "page-hscroll"], ov[:3])
 

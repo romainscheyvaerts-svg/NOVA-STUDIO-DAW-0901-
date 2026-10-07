@@ -419,7 +419,7 @@ export const MIDI_TOOLS: ToolInfo[] = [
   { id: 'flam', label: 'Flam', icon: 'fa-angles-right', hint: 'Ajoute une petite note juste avant chaque note (comme Flam dans FL Studio et Ornament dans Live 12).' },
   { id: 'velocity', label: 'Courbe de vélocité', icon: 'fa-chart-line', hint: 'Montée, descente, vague ou courbe dessinée sur la force des notes (comme Velocity Shaper dans Live 12 et Scale Levels dans FL).' },
   { id: 'random', label: 'Aléatoire', icon: 'fa-dice', hint: 'Varie la hauteur (dans la gamme), la vélocité et le placement (comme Randomize dans FL Studio et les plages aléatoires de Live 12).' },
-  { id: 'chord', label: 'Accord sur chaque note', icon: 'fa-layer-group', hint: 'Chaque note devient un accord (comme Chord Trigger dans Logic et l’effet Chord de Live).' },
+  { id: 'chord', label: 'Faire des accords', icon: 'fa-layer-group', hint: 'Chaque note devient un accord (comme Chord Trigger dans Logic et l’effet Chord de Live).' },
   { id: 'legato', label: 'Legato', icon: 'fa-grip-lines', hint: 'Chaque note s’allonge jusqu’à la suivante (comme Legato dans Live et Logic, Articulate dans FL).', instant: true },
   { id: 'invert', label: 'Inversion', icon: 'fa-arrows-up-down', hint: 'Retourne les hauteurs (le grave devient aigu), dans la gamme (comme Flip vertical dans FL et Invert dans Live 12).', instant: true },
   { id: 'retro', label: 'Rétrograde', icon: 'fa-arrows-left-right', hint: 'Joue la phrase à l’envers (comme Flip horizontal dans FL et Reverse dans Live / Logic).', instant: true },
