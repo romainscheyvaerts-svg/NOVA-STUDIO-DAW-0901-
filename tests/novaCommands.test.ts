@@ -200,6 +200,11 @@ describe('parseLocalCommand : détails des actions', () => {
     expect(r.text).toMatch(/prise 9/);
   });
 
+  it('meilleure prise : AUTO_COMP sur la piste voix', () => {
+    expect(first('choisis la meilleure prise')).toEqual({ action: 'AUTO_COMP', payload: { trackId: 'track-rec-main' } });
+    expect(kinds('fais moi le meilleur comp')).toContain('AUTO_COMP');
+  });
+
   it('comping par zone : COMP_TAKE sur la piste voix, sauf « tout le morceau »', () => {
     expect(first('garde la prise 2 sur le refrain')).toEqual({ action: 'COMP_TAKE', payload: { take: 2, zone: 'refrain', trackId: 'track-rec-main' } });
     expect(kinds('garde la prise 1 sur tout le morceau')).not.toContain('COMP_TAKE');

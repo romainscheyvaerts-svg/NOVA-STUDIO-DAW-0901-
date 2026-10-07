@@ -27,6 +27,9 @@ import type { EditCommands } from '../hooks/useEditCommands';
 import { bufferDurationOf } from '../hooks/useEditCommands';
 import { CrossfadeCurve } from '../types';
 import { STEMS_TOOLTIP } from '../services/StemSeparation';
+import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor } from './PlaylistLanes';
+import { listLanes, mainRowClips, clipAtTime, takeCount, TakeLane } from '../utils/playlists';
+import { takeNumberOf } from '../utils/takes';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -82,6 +85,8 @@ interface ArrangementViewProps {
   onUpdatePunch?: (patch: Partial<PunchSettings>) => void;
   /** Commandes d'édition Pro Tools (fondus, crossfades, nudge, plage). hooks/useEditCommands */
   editCommands?: EditCommands;
+  /** Couloirs de prises (Playlists) et comp à la souris. components/PlaylistLanes */
+  takeLanes?: TakeLanesApi;
 }
 
 /** Contour d'un fondu (courbe choisie) : zone assombrie au-dessus de la courbe + trait. */
@@ -138,7 +143,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip, isRecording, recStartTime,
   onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy,
-  punch, onUpdatePunch, editCommands
+  punch, onUpdatePunch, editCommands, takeLanes
 }) => {
   const editPrefs = useEditPrefs();
   // Crossfade en cours de réglage (Smart Tool : bas d'une jonction entre deux clips).
@@ -461,12 +466,60 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       ? { ...t, automationLanes: t.automationLanes.map(l => ({ ...l, isExpanded: false })) }
       : t);
   }, [tracks, simple]);
+  // Couloirs de prises : listés pour les pistes à prises, dépliés à la demande.
+  const lanesByTrack = useMemo(() => {
+    const m = new Map<string, TakeLane[]>();
+    visibleTracks.forEach(t => { if (t.clips.some(c => takeNumberOf(c) !== null)) m.set(t.id, listLanes(t)); });
+    return m;
+  }, [visibleTracks]);
+  const openLanesOf = (t: Track): TakeLane[] => (takeLanes?.open[t.id] ? lanesByTrack.get(t.id) || [] : []);
+  /** Hauteur sous la ligne de clips : lignes d'automation + couloirs de prises. */
+  const extraH = (t: Track) => t.automationLanes.filter(l => l.isExpanded).length * 80 + openLanesOf(t).length * TAKE_LANE_H;
+  const lanesKey = visibleTracks.map(t => `${t.id}:${openLanesOf(t).length}`).join(',');
+  /** Clips de la ligne principale (les prises mutées cachées dessous vont dans les couloirs). */
+  const rowClips = (t: Track) => (lanesByTrack.has(t.id) ? mainRowClips(t) : t.clips);
+  // Pastille « Prises (N) ▾ » sur le clip entendu (B3 de l'audit) : menu Écouter / Garder.
+  const TAKE_BADGE_W = 82, TAKE_BADGE_H = 18;
+  const takeBadgeX = (t: Track, clip: Clip): number | null => {
+    if (!takeLanes || clip.isMuted || takeNumberOf(clip) === null || (lanesByTrack.get(t.id)?.length || 0) < 2) return null;
+    if (clip.duration * zoomH < TAKE_BADGE_W + 60) return null;
+    return (clip.start + clip.duration) * zoomH - TAKE_BADGE_W - 20;
+  };
+  const openTakeMenu = (trackId: string, x: number, y: number) => {
+    if (!takeLanes) return;
+    const lanes = lanesByTrack.get(trackId) || [];
+    const isOpen = !!takeLanes.open[trackId];
+    setContextMenu({ x, y, items: [
+      { label: isOpen ? 'Replier les couloirs de prises' : `Afficher les couloirs (${lanes.length} prises)`, icon: isOpen ? 'fa-chevron-up' : 'fa-layer-group',
+        onClick: () => { takeLanes.onToggle(trackId); setContextMenu(null); } },
+      ...(takeLanes.onAutoComp && lanes.length > 1 ? [{ label: '✨ Meilleure prise (IA, sur ton ordi)', icon: 'fa-wand-magic-sparkles', onClick: () => { takeLanes.onAutoComp!(trackId); setContextMenu(null); } }] : []),
+      'separator' as const,
+      ...lanes.flatMap(l => [
+        { label: `Écouter ${l.label}`, icon: 'fa-headphones', onClick: () => { takeLanes.onAudition(trackId, l.n); setContextMenu(null); } },
+        { label: l.used > 0.05 && Math.abs(l.used - l.duration) < 0.05 ? `✓ ${l.name} gardée` : `Garder ${l.name}`, icon: 'fa-check', onClick: () => { takeLanes.onKeep(trackId, l.n); setContextMenu(null); } },
+      ]),
+    ] });
+  };
+  const openLaneMenu = (trackId: string, x: number, y: number, l: TakeLane) => {
+    if (!takeLanes) return;
+    setContextMenu({ x, y, items: [
+      { label: `Écouter ${l.name} seule`, icon: 'fa-headphones', onClick: () => { takeLanes.onAudition(trackId, l.n); setContextMenu(null); } },
+      { label: 'Garder toute la prise', icon: 'fa-check', onClick: () => { takeLanes.onKeep(trackId, l.n); setContextMenu(null); } },
+      { label: 'Renommer…', icon: 'fa-pen', onClick: () => {
+          setContextMenu(null);
+          window.dispatchEvent(new CustomEvent('nova:rename-take', { detail: { trackId, n: l.n } }));
+        } },
+      { label: 'Dupliquer dans un nouveau couloir', icon: 'fa-clone', onClick: () => { takeLanes.onDuplicate(trackId, l.n); setContextMenu(null); } },
+      'separator' as const,
+      { label: 'Supprimer cette prise', icon: 'fa-trash', danger: true, onClick: () => { takeLanes.onDelete(trackId, l.n); setContextMenu(null); } },
+    ] as any });
+  };
   const projectDuration = useMemo(() => Math.max(...tracks.flatMap(t => t.clips.map(c => c.start + c.duration)), 300), [tracks]);
   const totalContentWidth = useMemo(() => projectDuration * zoomH, [projectDuration, zoomH]);
   // Raccourcis Pro Tools (utils/keymap → utils/editCommands) : versions de base sur la sélection de clips.
   useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomV, setZoomV, bpm,
     viewportWidth: viewportSize.width - headerWidth, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
-  const totalArrangementHeight = useMemo(() => 40 + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80, 0), [visibleTracks, zoomV]);
+  const totalArrangementHeight = useMemo(() => 40 + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + extraH(t), 0), [visibleTracks, zoomV, lanesKey]);
 
   const handleHeaderResizeStart = (e: React.MouseEvent) => {
       e.preventDefault();
@@ -521,7 +574,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
               targetTrackId = t.id;
               break;
           }
-          currentY += zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+          currentY += zoomV + extraH(t);
       }
       
       if (!targetTrackId) {
@@ -785,8 +838,14 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     let currentY = 40;
     for (const t of visibleTracks) {
         if (y >= currentY && y < currentY + zoomV) {
-            const clip = t.clips.find(c => time >= c.start && time <= c.start + c.duration);
+            const clip = clipAtTime(rowClips(t), time);
             if (clip) {
+                const bx = takeBadgeX(t, clip);
+                if (bx !== null && x >= bx - 2 && x <= bx + TAKE_BADGE_W + 2 && y - currentY >= 1 && y - currentY <= TAKE_BADGE_H + 6) {
+                    e.preventDefault(); e.stopPropagation();
+                    openTakeMenu(t.id, e.clientX, e.clientY);
+                    return;
+                }
                 if (e.button === 2) { e.preventDefault(); e.stopPropagation(); setClipContextMenu({ x: e.clientX, y: e.clientY, trackId: t.id, clip }); return; }
                 setActiveClip({ trackId: t.id, clip });
                 setSelectedClip({ trackId: t.id, clip });
@@ -807,7 +866,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 // Positions initiales pour un deplacement groupe.
                 if (selectedClipIds.size > 1 && selectedClipIds.has(clip.id)) {
                     const items: {trackId:string, clipId:string, start:number}[] = [];
-                    visibleTracks.forEach(tr => tr.clips.forEach(c => {
+                    visibleTracks.forEach(tr => rowClips(tr).forEach(c => {
                         if (selectedClipIds.has(c.id)) items.push({ trackId: tr.id, clipId: c.id, start: c.start });
                     }));
                     multiDragRef.current = items;
@@ -884,7 +943,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 return;
             }
         }
-        currentY += zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+        currentY += zoomV + extraH(t);
     }
     
     if (e.button === 2) {
@@ -893,7 +952,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       let laneY = 40;
       let laneTrack: Track | undefined;
       for (const t of visibleTracks) {
-        const trackHeight = zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+        const trackHeight = zoomV + extraH(t);
         if (y >= laneY && y < laneY + trackHeight) { laneTrack = t; break; }
         laneY += trackHeight;
       }
@@ -913,7 +972,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     {
       let laneY = 40;
       for (const t of visibleTracks) {
-        const laneH = zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+        const laneH = zoomV + extraH(t);
         if (y >= laneY && y < laneY + zoomV) {
           if (activeTool === 'RANGE' || (activeTool === 'SMART' && !touchRef.current && y - laneY < zoomV * 0.5)) { startRange(t.id, time, useSnap); return; }
           break;
@@ -1001,10 +1060,10 @@ const handleMouseMove = (e: React.MouseEvent) => {
             const ids = new Set<string>();
             let laneY = 40;
             for (const t of visibleTracks) {
-                const laneHeight = zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+                const laneHeight = zoomV + extraH(t);
                 // La bande de clips occupe zoomV, les voies d'automation sont ignorees.
                 if (y1 >= laneY && y0 <= laneY + zoomV) {
-                    t.clips.forEach(c => {
+                    rowClips(t).forEach(c => {
                         if (c.start < t1 && c.start + c.duration > t0) ids.add(c.id);
                     });
                 }
@@ -1022,7 +1081,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
         let laneY = 40;
         for (const t of visibleTracks) {
             if (y >= laneY && y < laneY + zoomV) {
-                const c = t.clips.find(cl => tHover >= cl.start && tHover <= cl.start + cl.duration);
+                const c = clipAtTime(rowClips(t), tHover);
                 if (c) {
                     const cx0 = c.start * zoomH, cx1 = (c.start + c.duration) * zoomH;
                     const edge = Math.min(10, Math.max(4, (cx1 - cx0) * 0.15));
@@ -1038,7 +1097,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
                 } else if (activeTool === 'RANGE' || (activeTool === 'SMART' && y - laneY < zoomV * 0.5)) cursor = 'text';
                 break;
             }
-            laneY += zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+            laneY += zoomV + extraH(t);
         }
         const el = scrollContainerRef.current;
         if (el.style.cursor !== cursor) el.style.cursor = cursor;
@@ -1051,7 +1110,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
         let overId = rd.anchorTrack;
         let laneY = 40;
         for (const t of visibleTracks) {
-            const laneH = zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+            const laneH = zoomV + extraH(t);
             if (y >= laneY && y < laneY + laneH) { overId = t.id; break; }
             laneY += laneH;
         }
@@ -1101,7 +1160,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
         let targetTrackId = activeClip.trackId;
         let currentY = 40;
         for (const t of visibleTracks) {
-            const trackHeight = zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+            const trackHeight = zoomV + extraH(t);
             if (y >= currentY && y < currentY + trackHeight) {
                 targetTrackId = t.id;
                 break;
@@ -1467,14 +1526,14 @@ const drawTimeline = useCallback(() => {
     let currentY = 40; // Position absolue dans le document
     visibleTracks.forEach((track) => {
         const trackH = zoomV;
-        const totalAutomationHeight = track.automationLanes.filter(l => l.isExpanded).length * 80;
+        const totalAutomationHeight = extraH(track);
         
         // Position Y relative au viewport (après scroll)
         const viewportY = currentY - scrollTop;
 
         // Vérifier si la piste est visible dans le viewport
         if (viewportY + trackH > 40 && viewportY < h) {
-            track.clips.forEach(clip => {
+            rowClips(track).forEach(clip => {
                 const cx = timeToPixels(clip.start) - scrollX;
                 const cw = timeToPixels(clip.duration);
                 if (cx + cw > 0 && cx < w) {
@@ -1483,6 +1542,23 @@ const drawTimeline = useCallback(() => {
                     const clipH = Math.min(trackH - 4, viewportY + trackH - 2 - clipY);
                     if (clipH > 0) {
                         drawClip(ctx, clip, track.color, cx, clipY, cw, clipH, (selectedClip?.clip.id === clip.id) || (activeClip?.clip.id === clip.id) || selectedClipIds.has(clip.id), zoomH);
+                        const bx = takeBadgeX(track, clip);
+                        if (bx !== null && viewportY + 3 >= 40) {
+                            const n = lanesByTrack.get(track.id)!.length;
+                            const x0 = bx - scrollX, y0 = viewportY + 3;
+                            ctx.save();
+                            ctx.fillStyle = 'rgba(8,10,14,0.85)';
+                            ctx.strokeStyle = takeColor(takeNumberOf(clip)!);
+                            ctx.lineWidth = 1;
+                            ctx.beginPath();
+                            (ctx as any).roundRect ? (ctx as any).roundRect(x0, y0, TAKE_BADGE_W, TAKE_BADGE_H, 9) : ctx.rect(x0, y0, TAKE_BADGE_W, TAKE_BADGE_H);
+                            ctx.fill(); ctx.stroke();
+                            ctx.fillStyle = '#fff';
+                            ctx.font = '700 10px Inter, sans-serif';
+                            ctx.textBaseline = 'middle';
+                            ctx.fillText(`Prises (${n}) ▾`, x0 + 9, y0 + TAKE_BADGE_H / 2 + 0.5);
+                            ctx.restore();
+                        }
                     }
                 }
             });
@@ -1623,7 +1699,7 @@ const drawTimeline = useCallback(() => {
         if (sx + sw > 0 && sx < w) {
             let ly = 40;
             visibleTracks.forEach(t => {
-                const laneH = zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80;
+                const laneH = zoomV + extraH(t);
                 if (timeSel.trackIds.includes(t.id)) {
                     const vy = ly - scrollTop;
                     const top = Math.max(40, vy), bottom = Math.min(h, vy + zoomV);
@@ -1656,7 +1732,7 @@ const drawTimeline = useCallback(() => {
     }
 
     // La tete de lecture est dessinee sur le calque superieur (drawPlayhead).
-}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel]);
+}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, lanesKey, lanesByTrack]);
 
 // Calque statique (grille, clips, formes d'onde, reperes) : redessine seulement
 // quand son contenu change, plus a chaque image de la lecture.
@@ -1837,7 +1913,20 @@ useEffect(() => {
             {/* Track Headers */}
             {visibleTracks.map((track) => (
               <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>
-                <div style={{ height: `${zoomV}px` }}>
+                <div style={{ height: `${zoomV}px`, position: 'relative' }}>
+                  {takeLanes && (lanesByTrack.get(track.id)?.length || 0) > 0 && (() => {
+                    const n = lanesByTrack.get(track.id)!.length;
+                    const isOpen = !!takeLanes.open[track.id];
+                    return (
+                      <button type="button" data-takes-button={track.id}
+                        onClick={(e) => { e.stopPropagation(); takeLanes.onToggle(track.id); }}
+                        aria-expanded={isOpen}
+                        title={`${isOpen ? 'Replier' : 'Déplier'} les couloirs de prises (comme les Playlists de Pro Tools ou les « take lanes » d'Ableton) : écoute chaque prise, balaie un passage pour le garder.`}
+                        className={`absolute z-10 right-1.5 bottom-1.5 h-6 px-2 rounded-full text-[10px] font-black flex items-center gap-1 border ${isOpen ? 'bg-cyan-400 text-black border-cyan-300' : 'bg-black/70 text-cyan-200 border-cyan-400/50 hover:bg-cyan-500/20'}`}>
+                        <i className="fas fa-layer-group text-[9px]" />Prises ({n})<i className={`fas ${isOpen ? 'fa-chevron-up' : 'fa-chevron-down'} text-[8px]`} />
+                      </button>
+                    );
+                  })()}
                   <TrackHeaderMemo 
                      track={track} isSelected={selectedTrackId === track.id} onSelect={selectTrackHandler(track.id)} onUpdate={headerOnUpdate} 
                      onDropPlugin={headerOnDropPlugin} onMovePlugin={headerOnMovePlugin} onSelectPlugin={headerOnSelectPlugin} onRemovePlugin={headerOnRemovePlugin} onRequestAddPlugin={headerOnRequestAddPlugin} 
@@ -1850,6 +1939,9 @@ useEffect(() => {
                        <AutomationLaneComponent trackId={track.id} lane={lane} width={0} zoomH={zoomH} scrollLeft={0} onUpdatePoints={() => {}} onRemoveLane={() => onUpdateTrack({ ...track, automationLanes: track.automationLanes.map(l => l.id === lane.id ? { ...l, isExpanded: false } : l) })} variant="header" />
                      </div>
                 ))}
+                {takeLanes && openLanesOf(track).length > 0 && (
+                  <TakeLaneHeaders track={track} lanes={openLanesOf(track)} api={takeLanes} onMenu={(x, y, l) => openLaneMenu(track.id, x, y, l)} />
+                )}
               </div>
             ))}
             <div style={{ flexGrow: 1 }} />
@@ -1864,7 +1956,7 @@ useEffect(() => {
           {isRecording && recStartTime !== null && (
              visibleTracks.map((track, idx) => {
                if (!track.isTrackArmed) return null;
-               let topY = 40; for (let i = 0; i < idx; i++) topY += zoomV + (visibleTracks[i].automationLanes.filter(l => l.isExpanded).length * 80);
+               let topY = 40; for (let i = 0; i < idx; i++) topY += zoomV + extraH(visibleTracks[i]);
                return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, left: headerWidth, height: `${zoomV - 4}px`, right: 0, pointerEvents: 'none' }}><LiveRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} /></div>;
              })
           )}
@@ -1900,6 +1992,23 @@ useEffect(() => {
               zIndex: 21
           }}
       />
+      {/* Couloirs de prises (au-dessus des calques dessinés, sous la règle) */}
+      {takeLanes && visibleTracks.some(t => openLanesOf(t).length > 0) && (
+        <div style={{ position: 'absolute', top: 48 + 40, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 22 }}>
+          {(() => {
+            let y = 40;
+            return visibleTracks.map(t => {
+              const lanes = openLanesOf(t);
+              const top = y + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80 - scrollTop - 40;
+              y += zoomV + extraH(t);
+              if (!lanes.length || top > viewportSize.height || top + lanes.length * TAKE_LANE_H < 0) return null;
+              return <TakeLanesOverlay key={t.id} track={t} lanes={lanes} api={takeLanes} top={top} zoomH={zoomH} scrollLeft={scrollLeft}
+                width={Math.max(1, viewportSize.width - headerWidth)}
+                onWheel={(e) => { const sc = scrollContainerRef.current; if (sc) { sc.scrollTop += e.deltaY; sc.scrollLeft += e.deltaX; } }} />;
+            });
+          })()}
+        </div>
+      )}
       {editingMarkerId && (() => {
         const mk = markers.find(m => m.id === editingMarkerId);
         if (!mk) return null;

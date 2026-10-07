@@ -61,6 +61,11 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
   const less = /\b(baisse|diminue|moins fort|plus bas|reduis|moins de)\b/.test(msg);
   const say = (text: string, ...actions: AIAction[]): LocalCommandResult => ({ text, actions });
 
+  // Meilleure prise (V22) : « choisis la meilleure prise », « fais-moi le meilleur comp »
+  if (voice && /\b(meilleure? (prise|comp)|meilleur des prises|comp auto\w*)\b/.test(msg)) {
+    return say('✨ Je note chaque prise phrase par phrase (justesse, calage, niveau, bruit) et je te propose le meilleur comp.',
+      { action: 'AUTO_COMP', payload: { trackId: voice.id } });
+  }
   // Comping : « garde la prise 2 sur la partie 2 / le refrain / la boucle »
   const compCmd = msg.match(/\b(garde|prends|choisis|mets)\b.*\bprise (\d+)\b.*\b(sur|pour|dans) (l |la |le |les )?(.+)$/);
   if (compCmd && voice && !/\btout\b|\bentier/.test(compCmd[5])) {

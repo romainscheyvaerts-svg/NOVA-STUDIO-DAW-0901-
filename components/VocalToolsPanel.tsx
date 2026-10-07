@@ -1,6 +1,8 @@
 import React from 'react';
 import { VOCAL_MIX_STYLES } from '../utils/vocalPresets';
-import { TakeInfo, fmtTime, CompZone } from '../utils/takes';
+import { fmtTime, CompZone } from '../utils/takes';
+import { TakeLane } from '../utils/playlists';
+import { takeColor } from './PlaylistLanes';
 
 interface VocalToolsPanelProps {
   open: boolean;
@@ -26,9 +28,16 @@ interface VocalToolsPanelProps {
   onShare: () => void;
   onOpenDrums: () => void;
   hasDrums: boolean;
-  /** Prises par piste voix (choix de la meilleure prise). */
-  takeGroups: { trackId: string; trackName: string; takes: TakeInfo[] }[];
-  onSelectTake: (trackId: string, n: number, listen: boolean) => void;
+  /** Couloirs de prises par piste voix (choix de la meilleure prise). */
+  takeGroups: { trackId: string; trackName: string; lanes: TakeLane[] }[];
+  /** Prise écoutée seule (null : le comp). */
+  audition?: { trackId: string; n: number } | null;
+  onAuditionTake: (trackId: string, n: number | null) => void;
+  onKeepTake: (trackId: string, n: number) => void;
+  /** Ouvre les couloirs de la piste dans l'arrangement. */
+  onShowLanes?: (trackId: string) => void;
+  /** « Meilleure prise » : l'IA locale note les prises et propose un comp. */
+  onAutoComp?: (trackId: string) => void;
   /** Comping : zones (parties du morceau, boucle) où garder une prise. */
   compZones?: CompZone[];
   onCompTake?: (trackId: string, n: number, zone: CompZone) => void;
@@ -94,6 +103,76 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
         </div>
 
         <div className="overflow-y-auto px-5 py-4 space-y-5">
+          {/* Mes prises : en haut (B3 de l'audit), avant tout le reste */}
+          {p.takeGroups.some(g => g.lanes.length > 1) && (
+            <div data-mes-prises className="rounded-2xl border border-cyan-400/25 bg-cyan-500/[0.04] p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className="text-[13px] font-black text-white">🎙️ Mes prises</h3>
+                <span className="text-[11px] text-slate-400">écoute-les, garde la meilleure</span>
+              </div>
+              {p.compZones && p.compZones.length > 0 && (
+                <label className="mb-2 flex items-center gap-2 text-[11px] text-slate-300">
+                  <span className="shrink-0">Garder sur</span>
+                  <select value={compZoneIdx} onChange={e => setCompZoneIdx(Number(e.target.value))}
+                    className="h-10 min-w-0 flex-1 rounded-xl border border-white/10 bg-black/40 px-2 text-[12px] font-bold text-white outline-none focus:border-cyan-500">
+                    <option value={-1}>Toute la prise</option>
+                    {p.compZones.map((z, i) => <option key={i} value={i}>{z.label} ({fmtTime(z.start)} – {fmtTime(z.end)})</option>)}
+                  </select>
+                </label>
+              )}
+              <div className="space-y-3">
+                {p.takeGroups.filter(g => g.lanes.length > 1).map(g => (
+                  <div key={g.trackId}>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <p className="text-[11px] text-slate-400 min-w-0 truncate flex-1">{g.trackName}</p>
+                      {p.onShowLanes && <button type="button" onClick={() => p.onShowLanes!(g.trackId)}
+                        title="Ouvre les couloirs sous la piste : balaie un passage d'une prise pour le garder (comme les Playlists de Pro Tools)."
+                        className="h-8 px-2.5 rounded-lg text-[11px] font-bold text-cyan-200 border border-cyan-400/40 hover:bg-cyan-500/10 shrink-0">
+                        <i className="fas fa-layer-group mr-1" />Voir les couloirs
+                      </button>}
+                    </div>
+                    {p.onAutoComp && (
+                      <button type="button" onClick={() => p.onAutoComp!(g.trackId)}
+                        title="Nova note chaque prise phrase par phrase (justesse, calage sur le temps, niveau, bruit), sur ton ordi, et monte le meilleur comp. Tu le gardes ou tu reviens en arrière."
+                        className="mb-1.5 w-full h-10 rounded-xl bg-gradient-to-r from-cyan-500/20 to-fuchsia-500/20 border border-cyan-400/40 text-[12px] font-black text-white hover:from-cyan-500/30">
+                        ✨ Meilleure prise : laisse l'IA choisir phrase par phrase
+                      </button>
+                    )}
+                    <div className="flex flex-col gap-1.5">
+                      {g.lanes.map(l => {
+                        const zone = compZoneIdx >= 0 ? p.compZones?.[compZoneIdx] : undefined;
+                        const active = zone && p.activeTakeInZone ? p.activeTakeInZone(g.trackId, zone) === l.n : Math.abs(l.used - l.duration) < 0.05 && l.used > 0;
+                        const solo = p.audition?.trackId === g.trackId && p.audition.n === l.n;
+                        return (
+                          <div key={l.n} className={`flex items-center rounded-xl border ${active ? 'border-cyan-400/60 bg-cyan-500/10' : 'border-white/10 bg-white/[0.03]'}`} title={l.title}>
+                            <span className="w-1 self-stretch rounded-l-xl" style={{ background: takeColor(l.n) }} />
+                            <button type="button" onClick={() => p.onAuditionTake(g.trackId, solo ? null : l.n)} aria-pressed={solo}
+                              aria-label={solo ? 'Revenir à ta voix finale' : `Écouter ${l.name} seule`}
+                              className="h-11 pl-2.5 pr-2 min-w-0 flex-1 text-left flex items-center gap-2">
+                              <i className={`fas ${solo ? 'fa-stop' : 'fa-headphones'} text-[11px] ${solo ? 'text-cyan-300' : 'text-slate-300'}`} />
+                              <span className="min-w-0">
+                                <span className="block truncate text-[12px] font-bold text-white">{l.label}</span>
+                                <span className="block truncate text-[10px] text-slate-400">{l.used > 0.05 ? `entendue ${fmtTime(l.used)} sur ${fmtTime(l.duration)}` : 'pas utilisée'}{l.meta?.score ? ` · note IA ${l.meta.score.total}/100` : ''}</span>
+                              </span>
+                            </button>
+                            {active ? (
+                              <span className="h-11 px-3 flex items-center text-[11px] font-black text-cyan-300 shrink-0">✓ gardée</span>
+                            ) : (
+                              <button type="button"
+                                onClick={() => (zone && p.onCompTake ? p.onCompTake(g.trackId, l.n, zone) : p.onKeepTake(g.trackId, l.n))}
+                                className="h-11 px-3 text-[12px] font-bold text-slate-200 border-l border-white/10 hover:text-white shrink-0">Garder</button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-2">Garder une prise fait taire les autres au même endroit (elles restent dans leurs couloirs). Choisis une partie pour monter ta meilleure prise morceau par morceau (le « comping »).</p>
+            </div>
+          )}
+
           {/* Styles */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {VOCAL_MIX_STYLES.map(s => {
@@ -156,53 +235,6 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
               🥁 {p.hasDrums ? 'Modifier la batterie' : 'Ajouter une batterie (pour une mélodie)'}
             </button>
           </div>
-
-          {/* Mes prises : écouter / garder la meilleure */}
-          {p.takeGroups.some(g => g.takes.length > 1) && (
-            <div className="border-t border-white/5 pt-4">
-              <h3 className="text-[12px] font-black uppercase tracking-wider text-slate-400 mb-2">Mes prises</h3>
-              {p.compZones && p.compZones.length > 0 && p.onCompTake && (
-                <label className="mb-3 flex items-center gap-2 text-[11px] text-slate-300">
-                  <span className="shrink-0">Garder sur</span>
-                  <select value={compZoneIdx} onChange={e => setCompZoneIdx(Number(e.target.value))}
-                    className="h-10 min-w-0 flex-1 rounded-xl border border-white/10 bg-black/40 px-2 text-[12px] font-bold text-white outline-none focus:border-cyan-500">
-                    <option value={-1}>Toute la prise</option>
-                    {p.compZones.map((z, i) => <option key={i} value={i}>{z.label} ({fmtTime(z.start)} – {fmtTime(z.end)})</option>)}
-                  </select>
-                </label>
-              )}
-              <div className="space-y-3">
-                {p.takeGroups.filter(g => g.takes.length > 1).map(g => (
-                  <div key={g.trackId}>
-                    <p className="text-[11px] text-slate-400 mb-1.5">{g.trackName}</p>
-                    <div className="flex flex-wrap gap-2">
-                      {g.takes.map(t => {
-                        const zone = compZoneIdx >= 0 ? p.compZones?.[compZoneIdx] : undefined;
-                        const active = zone && p.activeTakeInZone ? p.activeTakeInZone(g.trackId, zone) === t.n : t.active;
-                        return (
-                        <div key={t.n} className={`flex items-center rounded-xl border ${active ? "border-cyan-400/60 bg-cyan-500/10" : "border-white/10 bg-white/[0.03]"}`}>
-                          <button type="button" onClick={() => p.onSelectTake(g.trackId, t.n, true)} aria-label={`Écouter la prise ${t.n}`}
-                            className="h-10 pl-3 pr-2 text-[12px] font-bold text-white flex items-center gap-1.5">
-                            <i className="fas fa-play text-[9px]" /> Prise {t.n}
-                            <span className="text-[10px] font-normal text-slate-400">{fmtTime(t.start)}</span>
-                          </button>
-                          {active ? (
-                            <span className="h-10 px-3 flex items-center text-[11px] font-black text-cyan-300">✓</span>
-                          ) : (
-                            <button type="button"
-                              onClick={() => (zone && p.onCompTake ? p.onCompTake(g.trackId, t.n, zone) : p.onSelectTake(g.trackId, t.n, false))}
-                              className="h-10 px-3 text-[11px] font-bold text-slate-200 border-l border-white/10 hover:text-white">Garder</button>
-                          )}
-                        </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[11px] text-slate-500 mt-2">Garder une prise coupe les autres au même endroit (elles ne sont pas effacées). Choisis une partie pour faire ta meilleure prise morceau par morceau (le « comping »).</p>
-            </div>
-          )}
 
           {/* Outils */}
           <div className="border-t border-white/5 pt-4">
