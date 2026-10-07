@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { GRID_OPTIONS } from '../utils/grid';
 import { runEditCommand } from '../utils/editCommands';
 import { openNovaWindow } from '../utils/novaWindows';
@@ -41,30 +41,47 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
     };
   }, [onClose]);
 
-  const adjustedX = Math.min(x, window.innerWidth - 240);
-  const adjustedY = Math.max(8, Math.min(y, window.innerHeight - 560));
+  // Recalé dans l'écran sur sa VRAIE hauteur (G3) : « Coller » et « Réinitialiser
+  // le zoom » sortaient de l'écran à 900 px de haut.
+  const [pos, setPos] = useState({ left: Math.min(x, window.innerWidth - 248), top: y });
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    const h = el?.offsetHeight || 0, w = el?.offsetWidth || 240;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const left = Math.max(8, Math.min(x, vw - w - 8));
+    const top = y + h <= vh - 8 ? y : Math.max(8, Math.min(y - h, vh - h - 8));
+    setPos({ left, top });
+  }, [x, y]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
 
   return (
     <div 
       ref={menuRef}
       className="fixed z-[1000] w-60 bg-[#14161a] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] overflow-hidden text-[#e2e8f0] animate-in fade-in zoom-in duration-75"
-      style={{ left: adjustedX, top: adjustedY }}
+      style={{ left: pos.left, top: pos.top }}
+      role="menu" aria-label="Grille et pistes"
       onContextMenu={(e) => e.preventDefault()}
     >
       <div className="px-4 py-2 border-b border-white/5 bg-white/[0.02]">
         <div className="flex items-center space-x-2">
           <i className="fas fa-th text-[10px] text-cyan-500"></i>
-          <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Arrangement View</span>
+          <span className="text-[11px] font-bold text-slate-300">Grille et pistes</span>
         </div>
       </div>
 
       <div className="p-1">
-        <div className="px-3 py-1.5 mt-1 text-[8px] font-black uppercase text-slate-600 tracking-widest">Grille</div>
+        <div className="px-3 py-1.5 mt-1 text-[10px] font-bold text-slate-500" title="Les clips et les points se calent sur ces divisions quand l'aimant est actif">Grille</div>
         <div className="grid grid-cols-3 gap-0.5">
           {GRID_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               title={opt.title}
+              role="menuitemradio" aria-checked={gridSize === opt.value}
               onClick={() => { onSetGridSize(opt.value); onClose(); }}
               className={`flex items-center justify-between px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 rounded-lg text-[10px] font-bold transition-colors ${gridSize === opt.value ? 'bg-cyan-500/10 text-cyan-400' : 'hover:bg-white/5 text-slate-300'}`}
             >
@@ -76,14 +93,16 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
 
         <div className="h-px bg-white/5 my-2 mx-2" />
 
-        <div className="px-3 py-1.5 text-[8px] font-black uppercase text-slate-600 tracking-widest">Mode d'Édition</div>
+        <div className="px-3 py-1.5 text-[10px] font-bold text-slate-500">Édition</div>
         <button
           onClick={() => { onToggleSnap(); onClose(); }}
+          role="menuitemcheckbox" aria-checked={snapEnabled}
+          title="Aimanter à la grille : les clips se calent sur les temps (Maj pendant un glissement = libre)"
           className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/5 text-slate-300 group"
         >
           <div className="flex items-center space-x-2">
             <i className={`fas ${snapEnabled ? 'fa-magnet text-green-400' : 'fa-slash text-slate-500'} w-4 text-center`}></i>
-            <span className={snapEnabled ? 'text-white' : 'text-slate-400'}>{snapEnabled ? 'SNAP (Magnétique)' : 'SLIP (Libre)'}</span>
+            <span className={snapEnabled ? 'text-white' : 'text-slate-400'}>{snapEnabled ? 'Aimanter à la grille : oui' : 'Aimanter à la grille : non (libre)'}</span>
           </div>
           <div className={`w-8 h-4 rounded-full p-0.5 ${snapEnabled ? 'bg-green-500/20' : 'bg-white/10'}`}>
             <div className={`w-3 h-3 rounded-full bg-white transition-transform ${snapEnabled ? 'translate-x-4 bg-green-400' : 'translate-x-0 bg-slate-500'}`} />
@@ -95,7 +114,7 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
         <div className="flex flex-col space-y-0.5">
           <button onClick={() => { onAddTrack(); onClose(); }} className="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/5 text-slate-300">
             <i className="fas fa-plus-circle w-4 text-center text-slate-500"></i>
-            <span>Ajouter une Piste Audio</span>
+            <span>Ajouter une piste audio</span>
           </button>
           
           <button onClick={() => { if(onPaste) onPaste(); onClose(); }} className="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/5 text-slate-300">
@@ -105,7 +124,7 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
 
           <button onClick={() => { onResetZoom(); onClose(); }} className="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/5 text-slate-300">
             <i className="fas fa-search-minus w-4 text-center text-slate-500"></i>
-            <span>Réinitialiser le Zoom</span>
+            <span>Réinitialiser le zoom</span>
           </button>
           <button onClick={() => { openNovaWindow('memory-locations'); onClose(); }} title="Liste des repères (Pro Tools : Memory Locations, Ctrl+5)" className="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/5 text-slate-300">
             <i className="fas fa-map-marker-alt w-4 text-center text-slate-500"></i>

@@ -26,7 +26,8 @@ interface NextStepCardProps {
  * Carte « Et maintenant ? » après la première bonne prise ou un export.
  * Pas une fenêtre bloquante : le studio reste utilisable, elle se ferme d'un
  * tap et ne recouvre ni REC ni le transport (en bas, au-dessus des boutons ;
- * sur ordinateur à gauche, le chat Nova occupant la droite).
+ * sur ordinateur à droite, au-dessus du bouton Nova : Nova ne s'ouvre plus
+ * seule, la carte ne couvre plus les en-têtes de pistes).
  */
 const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, beatTitle, isMobile, besideSidebar, onAction, onClose }) => {
   if (!open || actions.length === 0) return null;
@@ -39,7 +40,7 @@ const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, bea
       aria-label="Et maintenant ?"
       className={`fixed z-[160] ${isMobile
         ? 'inset-x-3 bottom-[calc(8.75rem+env(safe-area-inset-bottom))]'
-        : `${besideSidebar ? 'left-[21rem]' : 'left-4'} bottom-36 w-[340px]`} animate-in fade-in slide-in-from-bottom-2 duration-300`}
+        : 'right-6 bottom-[13.5rem] w-[340px]'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
     >
       <div className="rounded-2xl border border-cyan-400/30 bg-[#101318]/95 backdrop-blur-xl shadow-2xl p-3">
         <div className="flex items-start gap-2">

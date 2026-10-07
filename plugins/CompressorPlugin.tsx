@@ -2,6 +2,17 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginParameter } from '../types';
 import { makeCurve, loadWorkletModule } from './vocalDspUtils';
+import { gainDbFr, numFr, termHelp } from '../utils/pluginUi';
+
+/** Préréglages affichés en français (les clés restent celles des projets). */
+const PRESET_LABELS: Record<string, string> = {
+  'Vocal Smooth': 'Voix douce', 'Vocal Aggressive': 'Voix agressive', 'Mix Bus Glue': 'Colle de mix',
+  'Parallel Punch': 'Punch parallèle', 'Transparent Limiter': 'Limiteur transparent',
+};
+const MODE_HELP: Record<string, string> = {
+  CLEAN: 'Clean : compression neutre, sans couleur.', VCA: 'VCA : rapide et précis, garde le punch.',
+  OPTO: 'Opto : lent et doux, très musical sur la voix.', FET: 'FET : nerveux et coloré, la voix passe devant.',
+};
 
 export interface CompressorParams {
   threshold: number;      // -60 to 0 dB
@@ -729,8 +740,8 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
     const meterPercent = Math.min(100, (redDb / 24) * 100);
     
     return (
-      <div className="flex flex-col items-center">
-        <span className="text-[6px] font-black text-slate-600 uppercase mb-1">GR</span>
+      <div className="flex flex-col items-center" title="Réduction de gain : de combien (dB) le compresseur baisse la voix en ce moment">
+        <span className="text-[6px] font-black text-slate-600 uppercase mb-1">Réd.</span>
         <div className="w-4 h-28 bg-black/60 rounded relative overflow-hidden border border-white/5">
           <div 
             className="absolute top-0 left-0 right-0 bg-orange-500 transition-all duration-75"
@@ -751,15 +762,15 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
             <i className="fas fa-compress-alt text-xl"></i>
           </div>
           <div>
-            <h2 className="text-lg font-black italic text-white uppercase tracking-tighter">
-              Leveler <span className="text-orange-500">Pro</span>
+            <h2 className="text-lg font-black text-white tracking-tight">
+              Compresseur
             </h2>
-            <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-1">
-              Professional Dynamics Processor
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Rend le volume de la voix plus régulier pour qu'elle reste devant le beat.
             </p>
           </div>
         </div>
-        <button 
+        <button data-plugin-power 
           onClick={togglePower}
           className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${params.isEnabled 
             ? 'bg-orange-500 border-orange-400 text-black shadow-lg shadow-orange-500/40' 
@@ -777,7 +788,7 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
             onClick={() => applyPreset(name)}
             className="px-3 py-1.5 bg-white/5 hover:bg-orange-500/20 border border-white/10 hover:border-orange-500/50 rounded-lg text-[8px] font-black text-slate-400 hover:text-orange-400 uppercase tracking-wider transition-all"
           >
-            {name}
+            {PRESET_LABELS[name] || name}
           </button>
         ))}
       </div>
@@ -788,7 +799,7 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
         <div className="flex-1 bg-black/60 rounded-[24px] border border-white/5 relative overflow-hidden h-40">
           <canvas ref={curveCanvasRef} width={400} height={160} className="w-full h-full opacity-90" />
           <div className="absolute top-3 left-4 text-[7px] font-black text-slate-600 uppercase tracking-widest">
-            Transfer Curve
+            Courbe de compression
           </div>
           {/* Mode indicator */}
           <div className="absolute bottom-3 right-4 text-[8px] font-black text-orange-500 uppercase">
@@ -798,19 +809,20 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
         
         {/* Meters */}
         <div className="flex space-x-2 bg-black/40 rounded-[24px] border border-white/5 p-3">
-          <MeterBar level={inputLevel} peak={inputPeak} label="IN" />
+          <MeterBar level={inputLevel} peak={inputPeak} label="Entrée" />
           <GRMeter reduction={reduction} />
-          <MeterBar level={outputLevel} peak={outputPeak} label="OUT" />
+          <MeterBar level={outputLevel} peak={outputPeak} label="Sortie" />
         </div>
       </div>
 
       {/* Mode selector */}
       <div className="flex items-center space-x-4">
-        <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">Character:</span>
+        <span className="text-[9px] font-bold text-slate-400">Caractère</span>
         <div className="flex space-x-1">
           {(['CLEAN', 'VCA', 'OPTO', 'FET'] as const).map(mode => (
             <button
               key={mode}
+              title={MODE_HELP[mode]}
               onClick={() => updateParam('mode', mode)}
               className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border ${
                 params.mode === mode 
@@ -826,24 +838,26 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
 
       {/* Main controls */}
       <div className="grid grid-cols-6 gap-4">
-        <CompressorKnob label="Threshold" defaultValue={-18} value={params.threshold} min={-60} max={0} suffix="dB" color="#f97316" onChange={(v) => updateParam('threshold', v)} displayVal={Math.round(params.threshold)} />
-        <CompressorKnob label="Ratio" defaultValue={4} value={params.ratio} min={1} max={20} suffix=":1" color="#f97316" onChange={(v) => updateParam('ratio', v)} displayVal={params.ratio.toFixed(1)} />
-        <CompressorKnob label="Knee" defaultValue={12} value={params.knee} min={0} max={40} suffix="dB" color="#f97316" onChange={(v) => updateParam('knee', v)} displayVal={Math.round(params.knee)} />
-        <CompressorKnob label="Attack" defaultValue={0.003} value={params.attack} min={0.0001} max={0.1} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('attack', v)} displayVal={(params.attack * 1000).toFixed(1)} />
+        <CompressorKnob label="Seuil" defaultValue={-18} value={params.threshold} min={-60} max={0} suffix="dB" color="#f97316" onChange={(v) => updateParam('threshold', v)} displayVal={Math.round(params.threshold)} />
+        <CompressorKnob label="Ratio" defaultValue={4} value={params.ratio} min={1} max={20} suffix=":1" color="#f97316" onChange={(v) => updateParam('ratio', v)} displayVal={numFr(params.ratio)} />
+        <CompressorKnob label="Genou" defaultValue={12} value={params.knee} min={0} max={40} suffix="dB" color="#f97316" onChange={(v) => updateParam('knee', v)} displayVal={Math.round(params.knee)} />
+        <CompressorKnob label="Attack" defaultValue={0.003} value={params.attack} min={0.0001} max={0.1} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('attack', v)} displayVal={numFr(params.attack * 1000)} />
         <CompressorKnob label="Release" defaultValue={0.25} value={params.release} min={0.01} max={1.0} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('release', v)} displayVal={Math.round(params.release * 1000)} />
-        <CompressorKnob label="Makeup" defaultValue={1.6} value={params.makeupGain} min={0.25} max={4} factor={1} suffix="x" color="#fff" onChange={(v) => updateParam('makeupGain', v)} displayVal={params.makeupGain.toFixed(2)} disabled={params.autoMakeup} />
+        <CompressorKnob label="Gain de sortie" defaultValue={1.6} value={params.makeupGain} min={0.25} max={4} factor={1} suffix="" color="#fff" onChange={(v) => updateParam('makeupGain', v)} displayVal={params.autoMakeup ? 'auto' : gainDbFr(params.makeupGain)} disabled={params.autoMakeup} />
       </div>
 
       {/* Advanced controls */}
       <div className="grid grid-cols-4 gap-4 pt-2 border-t border-white/5">
-        <CompressorKnob label="Mix" defaultValue={1} value={params.mix} min={0} max={1} factor={100} suffix="%" color="#06b6d4" onChange={(v) => updateParam('mix', v)} displayVal={Math.round(params.mix * 100)} />
-        <CompressorKnob label="Lookahead" value={params.lookahead} min={0} max={0.005} factor={1000} suffix="ms" color="#06b6d4" onChange={(v) => updateParam('lookahead', v)} displayVal={(params.lookahead * 1000).toFixed(1)} />
+        <CompressorKnob label="Mélange" defaultValue={1} value={params.mix} min={0} max={1} factor={100} suffix="%" color="#06b6d4" onChange={(v) => updateParam('mix', v)} displayVal={Math.round(params.mix * 100)} />
+        <CompressorKnob label="Anticipation" value={params.lookahead} min={0} max={0.005} factor={1000} suffix="ms" color="#06b6d4" onChange={(v) => updateParam('lookahead', v)} displayVal={numFr(params.lookahead * 1000)} />
         
         {/* Auto Makeup toggle */}
         <div className="flex flex-col items-center justify-center space-y-2">
-          <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">Auto Gain</span>
+          <span className="text-[9px] font-bold text-slate-400">Gain auto</span>
           <button
             onClick={() => updateParam('autoMakeup', !params.autoMakeup)}
+            role="switch" aria-checked={params.autoMakeup} aria-label="Gain de sortie automatique"
+            title="Gain auto : NOVA remonte tout seul le volume perdu par la compression"
             className={`w-14 h-7 rounded-full transition-all relative ${params.autoMakeup ? 'bg-cyan-500' : 'bg-white/10'}`}
           >
             <div className={`w-5 h-5 rounded-full bg-white absolute top-1 transition-all ${params.autoMakeup ? 'left-8' : 'left-1'}`} />
@@ -875,7 +889,7 @@ const CompressorKnob: React.FC<{
 
 
   return (
-    <div className={`flex flex-col items-center space-y-2 group touch-none ${disabled ? 'opacity-40' : ''}`}>
+    <div title={termHelp(label) || undefined} className={`flex flex-col items-center space-y-2 group touch-none ${disabled ? 'opacity-40' : ''}`}>
       <div 
         {...knob.bind}
         className={`w-11 h-11 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center transition-all shadow-xl relative ${disabled ? 'cursor-not-allowed' : 'cursor-ns-resize hover:border-orange-500/50'}`}
@@ -887,7 +901,7 @@ const CompressorKnob: React.FC<{
         />
       </div>
       <div className="text-center">
-        <span className="block text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</span>
+        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>
         <div className="bg-black/60 px-2 py-0.5 rounded border border-white/5">
           <span className="text-[8px] font-mono font-bold text-white">{displayVal}{suffix}</span>
         </div>

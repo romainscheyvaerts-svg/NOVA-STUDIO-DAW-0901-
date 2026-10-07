@@ -2,6 +2,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { createEnvelopeFollower, makeCurve } from './vocalDspUtils';
+import { termHelp } from '../utils/pluginUi';
+
+const MODE_LABELS: Record<string, { label: string; help: string }> = {
+  BELL: { label: 'Ciblé (cloche)', help: 'Ciblé : baisse seulement la zone des « s » autour de la fréquence. Le plus naturel.' },
+  SHELF: { label: 'Tous les aigus (plateau)', help: 'Tous les aigus : baisse tout ce qui est au-dessus de la fréquence quand un « s » arrive. Plus fort.' },
+};
 
 /**
  * MODULE FX_12 : PRO VOCAL DE-ESSER (v2.0)
@@ -298,11 +304,11 @@ export const VocalDeEsserUI: React.FC<VocalDeEsserUIProps> = ({ node, initialPar
             <i className="fas fa-scissors text-2xl"></i>
           </div>
           <div>
-            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">S-Killer <span className="text-red-400">Pro</span></h2>
-            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-2">Dynamic Sibilance Suppression</p>
+            <h2 className="text-xl font-black text-white tracking-tight leading-none">De-esser</h2>
+            <p className="text-[12px] text-slate-400 mt-2">Adoucit les « s » et les « ch » qui sifflent, sans ternir la voix.</p>
           </div>
         </div>
-        <button 
+        <button data-plugin-power 
           onClick={togglePower}
           className={`w-12 h-12 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-red-500 border-red-400 text-black shadow-lg shadow-red-500/40' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
         >
@@ -312,21 +318,21 @@ export const VocalDeEsserUI: React.FC<VocalDeEsserUIProps> = ({ node, initialPar
       <div className="h-32 bg-black/60 rounded-[28px] border border-white/5 relative overflow-hidden flex items-center justify-center shadow-inner group">
         <canvas ref={canvasRef} width={420} height={128} className="w-full h-full opacity-60" />
         <div className="absolute top-4 left-6 flex flex-col">
-           <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">S-Frequency: {Math.round(params.frequency)} Hz</span>
+           <span className="text-[10px] font-bold text-slate-500">Zone des « s » : {Math.round(params.frequency)} Hz</span>
         </div>
-        <div className="absolute right-6 top-1/2 -translate-y-1/2 w-4 h-24 bg-black/40 rounded-full border border-white/5 overflow-hidden">
+        <div title="Réduction en cours sur les « s »" className="absolute right-6 top-1/2 -translate-y-1/2 w-4 h-24 bg-black/40 rounded-full border border-white/5 overflow-hidden">
            <div className="w-full bg-red-500 transition-all duration-75" style={{ height: `${Math.min(100, Math.abs(reduction) * 10)}%` }} />
         </div>
       </div>
       <div className="grid grid-cols-4 gap-4 px-2">
-        <DeEsserKnob label="Threshold" value={params.threshold} min={-60} max={0} suffix="dB" color="#ef4444" defaultValue={-25} onChange={(v) => setParam('threshold', v)} displayVal={Math.round(params.threshold)} />
-        <DeEsserKnob label="Frequency" value={params.frequency} min={2000} max={12000} suffix="Hz" color="#ef4444" defaultValue={6500} onChange={(v) => setParam('frequency', v)} displayVal={Math.round(params.frequency)} />
-        <DeEsserKnob label="Q Factor" value={params.q} min={0.1} max={10.0} suffix="" color="#ef4444" defaultValue={1} onChange={(v) => setParam('q', v)} displayVal={Number(params.q.toFixed(1))} />
-        <DeEsserKnob label="Reduction" value={params.reduction} min={0} max={1.0} factor={100} suffix="%" color="#fff" defaultValue={0.6} onChange={(v) => setParam('reduction', v)} displayVal={Math.round(params.reduction * 100)} />
+        <DeEsserKnob label="Seuil" value={params.threshold} min={-60} max={0} suffix="dB" color="#ef4444" defaultValue={-25} onChange={(v) => setParam('threshold', v)} displayVal={Math.round(params.threshold)} />
+        <DeEsserKnob label="Fréquence" value={params.frequency} min={2000} max={12000} suffix="Hz" color="#ef4444" defaultValue={6500} onChange={(v) => setParam('frequency', v)} displayVal={Math.round(params.frequency)} />
+        <DeEsserKnob label="Largeur" value={params.q} min={0.1} max={10.0} suffix="" color="#ef4444" defaultValue={1} onChange={(v) => setParam('q', v)} displayVal={Number(params.q.toFixed(1))} />
+        <DeEsserKnob label="Réduction" value={params.reduction} min={0} max={1.0} factor={100} suffix="%" color="#fff" defaultValue={0.6} onChange={(v) => setParam('reduction', v)} displayVal={Math.round(params.reduction * 100)} />
       </div>
       <div className="flex bg-black/40 p-1 rounded-2xl border border-white/5">
         {(['BELL', 'SHELF'] as DeEsserMode[]).map(m => (
-          <button key={m} onClick={() => updateMode(m)} className={`flex-1 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${params.mode === m ? 'bg-red-500 text-white shadow-lg shadow-red-500/40' : 'text-slate-500 hover:text-white'}`}>{m}</button>
+          <button key={m} onClick={() => updateMode(m)} title={MODE_LABELS[m].help} aria-pressed={params.mode === m} className={`flex-1 py-2 rounded-xl text-[11px] font-bold transition-all ${params.mode === m ? 'bg-red-500 text-white shadow-lg shadow-red-500/40' : 'text-slate-500 hover:text-white'}`}>{MODE_LABELS[m].label}</button>
         ))}
       </div>
     </div>
@@ -338,13 +344,13 @@ const DeEsserKnob: React.FC<{ label: string, value: number, onChange: (v: number
   const norm = (value - min) / (max - min);
   const rotation = (norm * 270) - 135;
   return (
-    <div className="flex flex-col items-center space-y-2 group">
+    <div className="flex flex-col items-center space-y-2 group" title={termHelp(label) || undefined}>
       <div {...knob.bind} className="w-12 h-12 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-red-500/50 transition-all shadow-xl relative">
         <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
         <div className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full transition-transform duration-75" style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: color }} />
       </div>
       <div className="text-center">
-        <span className="block text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</span>
+        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>
         <div className="bg-black/60 px-2 py-0.5 rounded border border-white/5"><span className="text-[8px] font-mono font-bold text-white">{displayVal}{suffix}</span></div>
       </div>
     </div>

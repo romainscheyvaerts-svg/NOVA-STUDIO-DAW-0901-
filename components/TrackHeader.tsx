@@ -36,6 +36,7 @@ import TrackInsertStrip from './TrackInsertStrip';
 import AutomationModeSelector from './AutomationModeSelector';
 import { automationRecorder } from '../services/AutomationManager';
 import { useLiveParam } from '../utils/automationLiveStore';
+import { SEND_LABELS } from '../utils/sendLabels';
 
 interface TrackHeaderProps {
   track: Track;
@@ -412,13 +413,18 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   return (
     <div 
       data-nova-target={`track-${track.id}`}
+      data-track-header={track.id}
+      data-track-name={track.name}
+      data-armed={track.isTrackArmed ? '1' : '0'}
+      data-selected={isSelected ? '1' : '0'}
+      data-clips={track.clips.length}
       onClick={onSelect}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, track.id); }}
       onDragOver={handleDragOver}
       onDragLeave={() => { setIsDragOverFX(false); }}
       onDrop={handleOnDrop}
       className={`group border-b border-white/10 px-3 py-2 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${frozen ? 'bg-cyan-500/[0.03]' : ''}${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
-      style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined }}
+      style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined, scrollMarginTop: 44, scrollMarginBottom: 8 }}
     >
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center truncate flex-1 pr-2">
@@ -482,16 +488,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 <i className="fas fa-paper-plane"></i>
               </button>
             )}
-            {/* Les pastilles d effets ne tiennent pas quand la piste est basse :
-                ce badge indique toujours combien d effets sont actifs. */}
-            {!isRenaming && !simple && insertPlugins.length > 0 && (
-              <span
-                className="shrink-0 px-1 h-4 rounded bg-cyan-500/15 text-cyan-300 text-[9px] font-black leading-4"
-                title={insertPlugins.map(pl => pl.name).join(" → ")}
-              >
-                FX {insertPlugins.length}
-              </span>
-            )}
+            {/* G13 : le compte d'effets est sur le bouton FX ; l'ancien badge « FX 8 » en double mangeait le nom. */}
           </div>
         </div>
         
@@ -571,7 +568,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {canHaveSends && !simple && (
             <button
                 onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
-                title="Envois (delay, réverbes)"
+                title="Envois : écho et reverbs"
                 aria-label={`Envois de ${track.name}`}
                 aria-expanded={showSends}
                 className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
@@ -608,7 +605,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       )}
 
-      <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-1.5 rounded-lg border border-white/5 relative z-10">
+      <div ref={controlsRef} className={`${canHaveSends && showSends && !simple ? 'hidden' : 'flex'} items-center space-x-2 mt-1 bg-black/20 p-1.5 rounded-lg border border-white/5 relative z-10`}>
         {/* Mode d'automation (Read vert, Touch/Latch jaune, Write rouge) — masqué en mode simple. */}
         {!simple && track.id !== 'master' && <AutomationModeSelector track={track} onUpdate={onUpdate} />}
         <div
@@ -621,6 +618,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         >
           <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${shownPan * 140}deg) translateY(-1px)` }} />
         </div>
+        {/* Valeur du panoramique lisible (F2) : « C », « G 30 », « D 30 ». */}
+        <span className="w-7 shrink-0 text-[9px] font-mono tabular-nums text-slate-400 pointer-events-none" aria-hidden="true">{panToText(track.pan)}</span>
         
         <div className="flex-1 flex items-center gap-1 h-6 relative">
           {/* Verrou de volume (collaboration) : « c'est ce volume-là que veut l'artiste ». */}
@@ -661,22 +660,22 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 }}
               />
             </div>
-            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono tabular-nums text-white/70 [text-shadow:0_1px_2px_rgba(0,0,0,0.95)] pointer-events-none group-hover/vol:text-white transition-colors">
-              {gainToDbText(shownVolume)}
-            </span>
           </div>
           </div>
+          {/* Valeur à droite, hors de la barre colorée (F2) : lisible à tout volume. */}
+          <span className="w-12 shrink-0 text-right text-[9px] font-mono tabular-nums text-slate-300 pointer-events-none">{gainToDbText(shownVolume)}</span>
         </div>
       </div>
       
       {canHaveSends && showSends && !simple && (
-        <div 
-          className="absolute left-3 right-3 mt-1 p-2 bg-[#08090b] rounded-lg border border-cyan-500/30 shadow-2xl space-y-1 animate-in fade-in duration-150 z-20"
-          style={{ top: `${sendsTop}px` }}
+        // G24 : les envois prennent la place de la ligne volume / effets DANS la piste
+        // (avant, le panneau flottait par-dessus la piste suivante et cachait son volume).
+        <div data-testid={`sends-panel-${track.id}`}
+          className="relative mt-1 p-1 bg-[#08090b] rounded-lg border border-cyan-500/30 space-y-0.5 animate-in fade-in duration-150 z-10"
         >
-            <HorizontalSendFader trackId={track.id} label="Delay 1/4" color="#00f2ff" send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-delay', lvl)} />
-            <HorizontalSendFader trackId={track.id} label="Verb Pro" color="#10b981" send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-short', lvl)} />
-            <HorizontalSendFader trackId={track.id} label="Hall Space" color="#a855f7" send={track.sends.find(s => s.id === 'send-verb-long') || { id: 'send-verb-long', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-long', lvl)} />
+            <HorizontalSendFader trackId={track.id} label={SEND_LABELS['send-delay'].label} color={SEND_LABELS['send-delay'].color} send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-delay', lvl)} />
+            <HorizontalSendFader trackId={track.id} label={SEND_LABELS['send-verb-short'].label} color={SEND_LABELS['send-verb-short'].color} send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-short', lvl)} />
+            <HorizontalSendFader trackId={track.id} label={SEND_LABELS['send-verb-long'].label} color={SEND_LABELS['send-verb-long'].color} send={track.sends.find(s => s.id === 'send-verb-long') || { id: 'send-verb-long', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-long', lvl)} />
         </div>
       )}
       
@@ -710,7 +709,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           passait sur deux lignes et débordait sur la piste suivante. */}
       {/* Piste armée : la ligne vumètre / retour prend la place des pastilles (le bouton FX reste). */}
       {/* Les effets restent visibles même en mode simple : on doit toujours voir ce qui traite la voix. */}
-      {!(track.isTrackArmed && showInputRow) && (insertPlugins.length > 0 || track.isTrackArmed) && (
+      {!(track.isTrackArmed && showInputRow) && !(canHaveSends && showSends && !simple) && (insertPlugins.length > 0 || track.isTrackArmed) && (
         <TrackInsertStrip
           leading={track.isTrackArmed ? <MonitorControl mini trackId={track.id} onExpand={() => setShowInputRow(true)} /> : undefined}
           trackId={track.id}
@@ -721,6 +720,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           onRemove={(e, id) => handleRemoveFX(e, id)}
           onDragStart={(e, id) => handleFXDragStart(e, id)}
           onShowAll={() => setFxMenu(true)}
+          idle={track.clips.length === 0 && !track.isTrackArmed}
         />
       )}
     </div>

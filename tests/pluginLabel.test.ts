@@ -7,7 +7,7 @@ describe('noms lisibles des effets', () => {
     expect(pluginDetail({ type: 'AUTOTUNE' } as any, { engine: 'vst', pluginName: 'Auto-Tune Pro', keyText: 'F# mineur' })).toBe('F# mineur');
   });
   it("sans pont : l'autotune de NOVA", () => {
-    expect(pluginDisplayName({ type: 'AUTOTUNE', name: 'AutoTune' } as any, null)).toBe('Autotune');
+    expect(pluginDisplayName({ type: 'AUTOTUNE', name: 'AutoTune' } as any, null)).toBe('Nova Tune');
   });
   it('un VST garde son nom complet (plus de « PRO- » sur 4 lettres)', () => {
     expect(pluginDisplayName({ type: 'VST3', name: 'Pro-C 3' } as any)).toBe('Pro-C 3');

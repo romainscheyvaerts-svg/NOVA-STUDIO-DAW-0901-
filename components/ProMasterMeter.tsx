@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { audioEngine } from '../engine/AudioEngine';
+import { playheadStore } from '../utils/playheadStore';
 
 /**
  * Vumètre master « pro » : crête et RMS en dBFS par canal, maintien de crête
@@ -31,6 +32,9 @@ interface Levels { peak: [number, number]; rms: [number, number]; hold: [number,
 // ---------- Échantillonneur partagé (une seule boucle) ----------
 const levels: Levels = { peak: [-90, -90], rms: [-90, -90], hold: [-90, -90], clip: false };
 const holdAt = [0, 0];
+// Moment (position du morceau) de la première saturation : dit OÙ ça a saturé (G10).
+let clipAt = 0;
+const fmtPos = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const msq = [0, 0];
 const listeners = new Set<() => void>();
 let raf = 0;
@@ -52,7 +56,7 @@ const sample = (an: AnalyserNode | null, ch: 0 | 1, now: number, dt: number) => 
   const pkDb = lin2db(pk);
   levels.peak[ch] = Math.max(pkDb, levels.peak[ch] - PEAK_FALL_DB_S * dt);
   if (pkDb >= levels.hold[ch] || now - holdAt[ch] > HOLD_MS) { levels.hold[ch] = pkDb; holdAt[ch] = now; }
-  if (pk >= 0.99995) levels.clip = true; // ≥ 0 dBFS : vraie saturation
+  if (pk >= 0.99995) { if (!levels.clip) clipAt = playheadStore.get(); levels.clip = true; } // ≥ 0 dBFS : vraie saturation
 };
 
 const tick = (now: number) => {
@@ -185,7 +189,7 @@ const ProMasterMeter: React.FC<Props> = ({ orientation = 'horizontal', className
         b.dataset.clip = clip ? '1' : '0';
         b.className = clip ? clipOn : clipOff;
         b.setAttribute('aria-label', clip ? 'Saturation du master détectée. Cliquer pour effacer' : 'Pas de saturation du master');
-        b.title = clip ? 'Le master a dépassé 0 dBFS (saturation). Clic pour effacer.' : 'Diode de saturation du master (reste allumée jusqu’au clic)';
+        b.title = clip ? `Le son a saturé à ${fmtPos(clipAt)} (au-dessus de 0 dB) : baisse le volume du beat ou de la voix, ou le gain d'entrée du micro. Clic pour effacer.` : 'Témoin de saturation du master : il s’allume si le son dépasse 0 dB et reste allumé jusqu’au clic';
       }
     };
 

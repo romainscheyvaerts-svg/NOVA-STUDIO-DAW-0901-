@@ -260,7 +260,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
       )}
 
       {/* LEFT CONTROLS */}
-      <div className="flex items-center space-x-2 2xl:space-x-3">
+      <div className="flex items-center space-x-2">
           {/* MOBILE HAMBURGER MENU BUTTON */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -347,7 +347,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              <button onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span className="hidden min-[2300px]:inline text-[10px] font-bold tracking-wide">Audio</span></button>
              
              {/* PDC Toggle */}
-             {!simple && <button onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="Compensation de latence des effets (PDC)">
+             {!simple && <button onClick={onToggleDelayComp} aria-pressed={!!isDelayCompEnabled} aria-label="Compensation de latence des effets (PDC)" className={`h-8 px-2 rounded-lg flex items-center space-x-1 transition-all border ${isDelayCompEnabled ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`} title="PDC = calage de latence : NOVA retarde les autres pistes pour que les effets lents (VST, autotune) restent pile en rythme. Laisse-le allumé.">
                 <div className={`w-1.5 h-1.5 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400 animate-pulse' : 'bg-slate-600'}`}></div>
                 <span className="text-[9px] font-black uppercase tracking-wider">PDC</span>
              </button>}
@@ -361,7 +361,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
       </div>
 
       {/* CENTER: TRANSPORT */}
-      <div className="flex flex-1 md:flex-none justify-center items-center space-x-2 md:space-x-3 2xl:space-x-4">
+      <div className="flex flex-1 md:flex-none justify-center items-center space-x-2">
         <div className="hidden xl:block"><ProMasterMeter /></div>
         
         <div className="flex items-center space-x-2 md:space-x-3 bg-black/40 px-3 md:px-4 py-1.5 rounded-xl border border-white/5" style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}>
@@ -380,8 +380,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         <PlayheadClock bpm={bpm} numerator={tsNum} denominator={tsDen} />
       </div>
 
-      {/* RIGHT SIDE CONTROLS */}
-      <div className="flex items-center space-x-2 md:space-x-3 2xl:space-x-4">
+      {/* RIGHT SIDE CONTROLS (espacements serrés : à 1600 px le BPM sortait de l'écran, audit G23) */}
+      <div className="flex items-center space-x-2 shrink-0 pr-1">
         
         {/* VISUALIZER (Only on very large screens to save space) */}
         <div className="hidden min-[2200px]:block opacity-80 hover:opacity-100 transition-opacity">
@@ -396,9 +396,9 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           </button>
         ) : (
         <div className="hidden min-[1536px]:flex items-center space-x-1 bg-black/40 rounded-xl p-1 border border-white/5" style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}>
-            <button onClick={() => onChangeView('ARRANGEMENT')} aria-pressed={currentView === 'ARRANGEMENT'} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'ARRANGEMENT' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'ARRANGEMENT' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'ARRANGEMENT' ? '#000' : 'var(--text-secondary)' }}>Pistes</button>
-            <button onClick={() => onChangeView('MIXER')} aria-pressed={currentView === 'MIXER'} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'MIXER' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'MIXER' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'MIXER' ? '#000' : 'var(--text-secondary)' }}>Console</button>
-            <button onClick={() => onChangeView('AUTOMATION')} aria-pressed={currentView === 'AUTOMATION'} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${currentView === 'AUTOMATION' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'AUTOMATION' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'AUTOMATION' ? '#000' : 'var(--text-secondary)' }}>Auto</button>
+            <button onClick={() => onChangeView('ARRANGEMENT')} aria-pressed={currentView === 'ARRANGEMENT'} className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${currentView === 'ARRANGEMENT' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'ARRANGEMENT' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'ARRANGEMENT' ? '#000' : 'var(--text-secondary)' }}>Pistes</button>
+            <button onClick={() => onChangeView('MIXER')} aria-pressed={currentView === 'MIXER'} className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${currentView === 'MIXER' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'MIXER' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'MIXER' ? '#000' : 'var(--text-secondary)' }}>Console</button>
+            <button onClick={() => onChangeView('AUTOMATION')} aria-pressed={currentView === 'AUTOMATION'} className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${currentView === 'AUTOMATION' ? 'bg-[#00f2ff] text-black' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: currentView === 'AUTOMATION' ? 'var(--accent-neon)' : 'transparent', color: currentView === 'AUTOMATION' ? '#000' : 'var(--text-secondary)' }}>Auto</button>
         </div>
         )}
 
@@ -490,11 +490,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               <div className="grid grid-cols-3 gap-2">
                 <button onClick={() => { onChangeView('ARRANGEMENT'); setIsMobileMenuOpen(false); }} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${currentView === 'ARRANGEMENT' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-400'}`}>
                   <i className="fas fa-grip-horizontal block mb-1"></i>
-                  Arrangement
+                  Pistes
                 </button>
                 <button onClick={() => { onChangeView('MIXER'); setIsMobileMenuOpen(false); }} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${currentView === 'MIXER' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-400'}`}>
                   <i className="fas fa-sliders-h block mb-1"></i>
-                  Mixer
+                  Console
                 </button>
                 <button onClick={() => { onChangeView('AUTOMATION'); setIsMobileMenuOpen(false); }} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${currentView === 'AUTOMATION' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-400'}`}>
                   <i className="fas fa-project-diagram block mb-1"></i>
@@ -508,7 +508,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             {children && (
               <div className="space-y-2">
                 <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Mode d'affichage</div>
-                <div className="bg-white/5 p-3 rounded-lg">
+                <div className="group vm-labeled bg-white/5 p-3 rounded-lg">
                   {children}
                 </div>
               </div>

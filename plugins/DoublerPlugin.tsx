@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { setParamSmooth } from './vocalDspUtils';
+import { termHelp } from '../utils/pluginUi';
 
 /**
  * MODULE FX_10 : VOCAL DOUBLER
@@ -195,7 +196,7 @@ const DoublerKnob: React.FC<{
   const rotation = (safeValue * 270) - 135;
 
   return (
-    <div className="flex flex-col items-center space-y-2 select-none group touch-none">
+    <div className="flex flex-col items-center space-y-2 select-none group touch-none" title={termHelp(label) || undefined}>
       <div 
         {...knob.bind}
         className="w-14 h-14 rounded-full bg-[#121418] border-2 border-white/5 flex items-center justify-center cursor-pointer hover:border-violet-500/50 transition-all shadow-xl relative"
@@ -208,7 +209,7 @@ const DoublerKnob: React.FC<{
         <div className="absolute inset-4 rounded-full bg-[#1a1c22] border border-white/5" />
       </div>
       <div className="text-center">
-        <span className="block text-[7px] font-black text-slate-600 uppercase tracking-widest mb-1">{label}</span>
+        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>
         <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5 min-w-[45px]">
           <span className="text-[9px] font-mono font-bold text-violet-400">
             {Math.round(safeValue * factor)}{suffix}
@@ -289,18 +290,20 @@ export const VocalDoublerUI: React.FC<{ node: VocalDoublerNode, initialParams: D
             <i className="fas fa-people-arrows text-2xl"></i>
           </div>
           <div>
-            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">Vocal <span className="text-violet-400">Doubler</span></h2>
-            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-2">Haas-Based Stereo Imager</p>
+            <h2 className="text-xl font-black text-white tracking-tight leading-none">Doubleur</h2>
+            <p className="text-[12px] text-slate-400 mt-2">Simule une 2e prise à gauche et à droite : la voix s'élargit.</p>
           </div>
         </div>
         <div className="flex items-center space-x-3">
           <button 
             onClick={() => handleParamChange('directOn', !params.directOn)}
-            className={`px-3 py-2 rounded-xl text-[8px] font-black uppercase transition-all border ${params.directOn ? 'bg-white/10 text-white' : 'bg-red-500/20 border-red-500/40 text-red-500'}`}
+            aria-pressed={params.directOn}
+            title="Voix d'origine : l'entendre au centre en plus des doublures (coupée = seulement les doublures)"
+            className={`px-3 py-2 rounded-xl text-[11px] font-bold transition-all border ${params.directOn ? 'bg-white/10 text-white' : 'bg-red-500/20 border-red-500/40 text-red-500'}`}
           >
-            Direct: {params.directOn ? 'ON' : 'OFF'}
+            Voix d'origine : {params.directOn ? 'oui' : 'non'}
           </button>
-          <button 
+          <button data-plugin-power 
             onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
             className={`w-12 h-12 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-violet-500 border-violet-400 text-black shadow-lg shadow-violet-500/30' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
           >
@@ -310,32 +313,23 @@ export const VocalDoublerUI: React.FC<{ node: VocalDoublerNode, initialParams: D
       </div>
 
       <div className="h-32 bg-black/60 rounded-[32px] border border-white/5 relative overflow-hidden flex items-center justify-center shadow-inner group">
-        <div className="absolute top-4 left-6 text-[7px] font-black text-slate-600 uppercase tracking-widest z-10">Stereo Projection</div>
+        <div className="absolute top-4 left-6 text-[7px] font-black text-slate-600 uppercase tracking-widest z-10">Image stéréo</div>
         <canvas ref={canvasRef} width={400} height={128} className="w-full h-full opacity-60" />
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex space-x-16 text-[6px] font-black text-slate-700 uppercase">
-           <span>Left</span>
-           <span>Center</span>
-           <span>Right</span>
+           <span>Gauche</span>
+           <span>Centre</span>
+           <span>Droite</span>
         </div>
       </div>
 
       <div className="grid grid-cols-4 gap-4 px-2">
-        <DoublerKnob label="Fine Tune" value={params.detune} factor={15} suffix="ct" onChange={v => handleParamChange('detune', v)} defaultValue={0.4} />
-        <DoublerKnob label="Width" value={params.width} factor={100} suffix="%" onChange={v => handleParamChange('width', v)} defaultValue={0.8} />
-        <DoublerKnob label="Gain L" value={params.gainL} factor={100} suffix="%" onChange={v => handleParamChange('gainL', v)} defaultValue={0.7} />
-        <DoublerKnob label="Gain R" value={params.gainR} factor={100} suffix="%" onChange={v => handleParamChange('gainR', v)} defaultValue={0.7} />
+        <DoublerKnob label="Désaccord" value={params.detune} factor={15} suffix="ct" onChange={v => handleParamChange('detune', v)} defaultValue={0.4} />
+        <DoublerKnob label="Écart G/D" value={params.width} factor={100} suffix="%" onChange={v => handleParamChange('width', v)} defaultValue={0.8} />
+        <DoublerKnob label="Volume gauche" value={params.gainL} factor={100} suffix="%" onChange={v => handleParamChange('gainL', v)} defaultValue={0.7} />
+        <DoublerKnob label="Volume droite" value={params.gainR} factor={100} suffix="%" onChange={v => handleParamChange('gainR', v)} defaultValue={0.7} />
       </div>
 
-      <div className="pt-6 border-t border-white/5 flex justify-between items-center text-slate-700">
-        <div className="flex flex-col">
-          <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">Haas Offset</span>
-          <span className="text-[9px] font-mono text-violet-400/60 mt-1">16ms / 24ms</span>
-        </div>
-        <div className="flex items-center space-x-2">
-           <div className={`w-2 h-2 rounded-full ${params.isEnabled ? 'bg-violet-500 shadow-[0_0_8px_#a855f7]' : 'bg-slate-800'}`} />
-           <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">DualCore Engine v1.1</span>
-        </div>
-      </div>
+      <p className="pt-4 border-t border-white/5 text-[11px] text-slate-400" title="Effet Haas : doublures décalées de 16 ms (gauche) et 24 ms (droite)">Doublures décalées de 16 ms à gauche et 24 ms à droite.</p>
     </div>
   );
 };

@@ -4,6 +4,8 @@ import { findVocalMixStyle } from '../utils/vocalPresets';
 
 interface TrackCreationBarProps {
   onCreateTrack: (type: TrackType, name?: string, initialPluginType?: PluginType) => void;
+  /** « + Piste voix » : piste insérée sous la sélection, sélectionnée, armée et montrée. */
+  onAddVoiceTrack?: () => void;
   /** Ouvre le panneau « Mix auto » (styles de mix, outils voix). */
   onOpenVocalTools?: () => void;
   currentStyleId?: string;
@@ -32,7 +34,7 @@ interface TrackCreationBarProps {
  * pas. La barre flottante propose donc les deux gestes utiles : ajouter une
  * piste voix et choisir un style de mix.
  */
-const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen, beatmaking, onNewMidiTrack, onOpenDrums, onOpen808, docked }) => {
+const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAddVoiceTrack, onOpenVocalTools, currentStyleId, onOpenLyrics, lyricsOpen, beatmaking, onNewMidiTrack, onOpenDrums, onOpen808, docked }) => {
   const style = findVocalMixStyle(currentStyleId);
   return (
     <div className={docked
@@ -40,9 +42,9 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onOp
       : 'fixed bottom-20 left-1/2 -translate-x-1/2 z-[150] flex items-center gap-1 sm:gap-2 max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-hide'}>
       <button
         type="button"
-        onClick={() => onCreateTrack(TrackType.AUDIO, 'VOIX')}
+        onClick={() => (onAddVoiceTrack ? onAddVoiceTrack() : onCreateTrack(TrackType.AUDIO, 'VOIX'))}
         aria-label="Ajouter une piste voix"
-        title="Ajouter une piste voix"
+        title="Ajouter une piste voix sous la piste sélectionnée : elle est armée, ta prochaine prise part dessus"
         className="shrink-0 h-12 pl-3 pr-4 sm:pl-4 sm:pr-5 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 bg-[#1a1c21] border border-white/20 text-white/80 hover:text-white hover:border-cyan-500/50 whitespace-nowrap"
       >
         <i className="fas fa-plus text-sm"></i>

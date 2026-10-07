@@ -266,3 +266,19 @@ describe('parseLocalCommand : détails des actions', () => {
     expect(kinds('stop', st)).toEqual(['STOP']);
   });
 });
+
+describe('parseLocalCommand : demandes naturelles de mix (G25)', () => {
+  it('« fais-moi un mix propre pour ma voix » marche sans serveur', () => {
+    expect(first('fais-moi un mix propre pour ma voix')).toMatchObject({ action: 'APPLY_MIX_STYLE', payload: { style: 'rap-clair' } });
+  });
+  it('« mets de l’autotune » : compris sans serveur', () => {
+    expect(parseLocalCommand("mets de l'autotune sur ma voix", studio())).not.toBeNull();
+  });
+  it('« mixe ma voix » sans style → ouvre les styles', () => {
+    expect(first('mix ma voix stp')?.action).toBe('OPEN_MIX_STYLES');
+  });
+  it('« faire mixer par un pro » reste l’offre de mixage', () => {
+    expect(first('je veux faire mixer mon son')?.payload).toEqual({ offer: 'mix' });
+    expect(first('fais mixer ma voix par un pro')?.action).toBe('OPEN_STUDIO_OFFER');
+  });
+});

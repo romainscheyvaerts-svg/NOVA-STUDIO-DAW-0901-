@@ -16,6 +16,7 @@ import { ProEQ12UI } from '../plugins/ProEQ12Plugin';
 import { VocalSaturatorUI } from '../plugins/VocalSaturatorPlugin';
 import { MasterSyncUI } from '../plugins/MasterSyncPlugin';
 import VSTPluginWindow from './VSTPluginWindow';
+import { foldInternalPower } from '../utils/pluginUi';
 import SamplerEditor from './SamplerEditor'; 
 import DrumSamplerEditor from './DrumSamplerEditor';
 import MelodicSamplerEditor from './MelodicSamplerEditor';
@@ -40,6 +41,9 @@ interface PluginEditorProps {
   onOpenPlugin?: (trackId: string, plugin: PluginInstance) => void;
 }
 
+/** Position de la fenêtre d'effet (gardée d'un effet à l'autre pendant la session). */
+let windowOffset = { x: 0, y: 0 };
+
 const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, onUpdateParams, isMobile, track, onUpdateTrack, onToggleFreeze, onToggleBypass, onOpenPlugin }) => {
   // Rappel STABLE vers le projet : App en recrée un à chaque rendu ; les effets qui
   // remontent leurs réglages dans un useEffect([params, onParamsChange]) bouclaient
@@ -62,6 +66,20 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+  // Déplacement par la barre du haut (G18 : fenêtre flottante).
+  const [offset, setOffset] = useState(windowOffset);
+  const startDrag = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button, a, input, select')) return;
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY, o = offset;
+    const move = (ev: PointerEvent) => {
+      const next = { x: o.x + ev.clientX - sx, y: Math.max(-window.innerHeight / 2 + 80, o.y + ev.clientY - sy) };
+      windowOffset = next; setOffset(next);
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
   const [nodeInstance, setNodeInstance] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -106,6 +124,21 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
     return () => clearTimeout(timer);
   }, [trackId, plugin.id, plugin.type, plugin.name, retryCount]);
 
+  // Un seul interrupteur (G17) : l'ancien marche / arrêt interne de l'effet est
+  // masqué ; s'il était coupé, on le rallume dedans et on passe l'effet en
+  // bypass dans la barre (même résultat à l'oreille, un seul endroit pour le changer).
+  const hostParams = React.useMemo(() => ((plugin.params as any)?.isEnabled === false ? { ...(plugin.params as any), isEnabled: true } : plugin.params) as any, [plugin.params]);
+  const folded = useRef(false);
+  useEffect(() => {
+    if (!nodeInstance || folded.current) return;
+    folded.current = true;
+    const f = foldInternalPower(plugin.params as any, live.isEnabled);
+    if (!f) return;
+    try { nodeInstance.updateParams?.({ isEnabled: true }); } catch { /* nœud sans réglage isEnabled */ }
+    stableUpdateParams(f.params);
+    if (f.toggleBypass) onToggleBypass?.(trackId, plugin.id);
+  }, [nodeInstance]);
+
   const handleRetry = () => {
     setError(null);
     setNodeInstance(null);
@@ -118,7 +151,17 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   const mobileShell = (content: React.ReactNode) => (
       <div className="fixed inset-0 z-[300] overflow-y-auto bg-[#0c0d10] pt-14 pb-8">
           <div className="fixed top-0 left-0 right-0 z-[310] h-12 bg-black/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between pl-4 pr-1">
-              <span className="text-xs font-black text-white uppercase tracking-widest truncate">{plugin.name}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                {onToggleBypass && plugin.type !== 'VST3' && (
+                  <button type="button" onClick={() => onToggleBypass(trackId, plugin.id)} aria-pressed={live.isEnabled}
+                    aria-label={live.isEnabled ? "Désactiver l'effet" : "Activer l'effet"}
+                    className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center ${live.isEnabled ? 'bg-cyan-500/25 text-cyan-300' : 'bg-white/5 text-slate-500'}`}>
+                    <i className="fas fa-power-off text-xs" />
+                  </button>
+                )}
+                <span className="min-w-0 truncate text-[13px] font-bold text-white"><PluginName plugin={live} showDetail /></span>
+                {!live.isEnabled && <span className="shrink-0 rounded bg-amber-500/20 px-1.5 text-[10px] font-bold text-amber-300">Bypass</span>}
+              </span>
               <button onClick={onClose} aria-label="Fermer" className="w-11 h-11 rounded-full flex items-center justify-center text-white hover:bg-white/10">
                   <i className="fas fa-times"></i>
               </button>
@@ -225,22 +268,22 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
 
   const renderPluginUI = () => {
     switch(plugin.type) {
-      case 'AUTOTUNE': return <><AutotuneEngineNote pluginId={plugin.id} /><AutoTuneUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} /></>;
-      case 'REVERB': return <ProfessionalReverbUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      case 'COMPRESSOR': return <VocalCompressorUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      case 'DELAY': return <SyncDelayUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      case 'CHORUS': return <VocalChorusUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      case 'FLANGER': return <StudioFlangerUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      case 'DOUBLER': return <VocalDoublerUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      case 'STEREOSPREADER': return <StereoSpreaderUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      case 'DEESSER': return <VocalDeEsserUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      case 'DENOISER': return <VocalDenoiserUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      case 'PROEQ12': return <ProEQ12UI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      case 'VOCALSATURATOR': return <VocalSaturatorUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
-      case 'MASTERSYNC': return <MasterSyncUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'AUTOTUNE': return <><AutotuneEngineNote pluginId={plugin.id} /><AutoTuneUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} /></>;
+      case 'REVERB': return <ProfessionalReverbUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'COMPRESSOR': return <VocalCompressorUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'DELAY': return <SyncDelayUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'CHORUS': return <VocalChorusUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'FLANGER': return <StudioFlangerUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'DOUBLER': return <VocalDoublerUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'STEREOSPREADER': return <StereoSpreaderUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'DEESSER': return <VocalDeEsserUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'DENOISER': return <VocalDenoiserUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'PROEQ12': return <ProEQ12UI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'VOCALSATURATOR': return <VocalSaturatorUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
+      case 'MASTERSYNC': return <MasterSyncUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
       default: {
         const reg = getRegisteredPlugin(plugin.type);
-        if (reg) { const UI = reg.ui; return <UI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />; }
+        if (reg) { const UI = reg.ui; return <UI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />; }
         return <div className="p-20 text-white">Plugin UI Not Found</div>;
       }
     }
@@ -248,16 +291,18 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
 
   if (isMobile) {
     return mobileShell(
-      <div className="shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden rounded-none">
+      <div className="nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden rounded-none">
         {renderPluginUI()}
       </div>
     );
   }
 
   return (
-    <div className={`relative group/plugin ${isMobile ? 'w-full h-full flex flex-col items-center justify-center pt-16' : ''}`}>
-      {/* Header Bar */}
-      <div className={`absolute left-0 right-0 h-12 bg-black/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between px-6 z-50 shadow-2xl ${isMobile ? 'top-0 fixed' : '-top-14 rounded-full border border-white/10'}`}>
+    <div className={`relative group/plugin ${isMobile ? 'w-full h-full flex flex-col items-center justify-center pt-16' : ''}`}
+      style={isMobile ? undefined : { transform: `translate(${offset.x}px, ${offset.y}px)` }}>
+      {/* Header Bar (poignée de déplacement) */}
+      <div onPointerDown={isMobile ? undefined : startDrag} title={isMobile ? undefined : 'Glisse la barre pour déplacer la fenêtre'}
+        className={`absolute left-0 right-0 h-12 bg-black/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between px-6 z-50 shadow-2xl ${isMobile ? 'top-0 fixed' : '-top-14 rounded-full border border-white/10 cursor-move'}`}>
          <div className="flex min-w-0 items-center gap-3">
             {onToggleBypass && (
               <button type="button" onClick={() => onToggleBypass(trackId, plugin.id)} aria-pressed={live.isEnabled}
@@ -287,7 +332,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       </div>
       
       {/* Container */}
-      <div className={`shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden ${isMobile ? 'rounded-none scale-[0.85] origin-top' : 'rounded-[40px]'}`}>
+      <div className={`nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden ${isMobile ? 'rounded-none scale-[0.85] origin-top' : 'rounded-[40px]'}`}>
         {renderPluginUI()}
       </div>
     </div>

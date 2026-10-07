@@ -384,7 +384,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                 {/* Info */}
                 <div className="flex-1 min-w-0 pr-2">
                     <div className="flex items-center space-x-2">
-                        <h3 className={`text-[12px] font-semibold truncate ${playingId === inst.id ? 'text-cyan-400' : 'text-white'}`}>{inst.title}</h3>
+                        <h3 title={inst.title} className={`text-[12px] font-semibold leading-tight line-clamp-2 break-words ${playingId === inst.id ? 'text-cyan-400' : 'text-white'}`}>{inst.title}</h3>
                         {hasLicense(inst.id) && <i className="fas fa-check-circle text-[8px] text-green-500" title="Purchased"></i>}
                     </div>
                     <div className="flex items-center text-[10px] text-slate-400 gap-x-1.5 mt-1 min-w-0 whitespace-nowrap">

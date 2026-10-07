@@ -11,6 +11,7 @@ import { openBuyBeat, openProMix } from '../utils/studioLinks';
 import { prepareTracksForOffline } from '../services/VstFreeze';
 import { track } from '../utils/analytics';
 import { consumeSelectionExport, editSelectionStore } from '../utils/editSelection';
+import { simpleModeStore } from '../utils/simpleMode';
 
 // Compte admin du studio (tout gratuit pour tester) : lu une fois par session.
 let adminCache: boolean | null = null;
@@ -154,6 +155,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
         setProgress(0);
         setStatusText('');
         setIsRendering(false);
+        // Mode avancé (ingé) : on arrive directement sur Mix / Stems / Voix seules (audit G19).
+        if (!simpleModeStore.get().simple) setAdvanced(true);
         if (consumeSelectionExport() && editSelectionStore.get().time) { setRangeMode('SELECTION'); setAdvanced(true); }
         else if (rangeMode === 'SELECTION' && !editSelectionStore.get().time) setRangeMode('FULL');
     }
@@ -524,18 +527,20 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                         <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">1. Quoi et quelle durée</span>
                         
                         <div className="grid grid-cols-2 gap-3">
-                             <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400">Quoi</label>
-                                <select 
-                                    value={source} 
-                                    onChange={e => { sourceTouched.current = true; setSource(e.target.value as any); }}
-                                    disabled={isRendering}
-                                    className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
-                                >
-                                    <option value="MASTER">Mon morceau (mix stéréo)</option>
-                                    <option value="STEMS">Toutes les pistes séparées (.zip)</option>
-                                    <option value="VOCALS">Mes pistes seules : voix, batterie (.zip)</option>
-                                </select>
+                             <div className="space-y-1 col-span-2">
+                                <span className="text-[9px] font-bold text-slate-400">Quoi</span>
+                                {/* Choix visibles d'un coup d'œil (avant : caché dans une liste) : Mix / Stems / Voix seules. */}
+                                <div role="radiogroup" aria-label="Quoi exporter" className="grid grid-cols-3 gap-1 rounded-lg border border-white/10 bg-black/40 p-1">
+                                  {([['MASTER', 'Mix', 'Le morceau mixé, en stéréo'], ['STEMS', 'Stems', 'Toutes les pistes séparées, alignées au début (.zip)'], ['VOCALS', 'Voix seules', 'Tes pistes sans le beat : voix, batterie (.zip)']] as const).map(([v, l, h]) => (
+                                    <button key={v} type="button" role="radio" aria-checked={source === v} title={h} disabled={isRendering}
+                                      data-testid={`export-source-${v}`}
+                                      onClick={() => { sourceTouched.current = true; setSource(v); }}
+                                      className={`h-8 rounded-md text-[11px] font-bold transition-colors ${source === v ? 'bg-cyan-500 text-black' : 'text-slate-300 hover:bg-white/10'}`}>
+                                      {l}
+                                    </button>
+                                  ))}
+                                </div>
+                                <p className="text-[10px] text-slate-500">{source === 'MASTER' ? 'Le morceau mixé, en stéréo.' : source === 'STEMS' ? 'Toutes les pistes séparées, alignées au début (.zip).' : 'Tes pistes sans le beat (.zip).'}</p>
                                 {source === 'VOCALS' && (
                                   <label className="mt-1.5 flex items-center gap-2 text-[10px] text-slate-300">
                                     <input type="checkbox" checked={vocalsDry} onChange={e => setVocalsDry(e.target.checked)} disabled={isRendering} />

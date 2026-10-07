@@ -1,6 +1,7 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { AutomationLane as IAutomationLane, AutomationPoint, AutomationCurveType } from '../types';
+import { automationParamLabel, automationRangeText, automationValueText, CURVE_LABELS_FR } from '../utils/automationLabels';
 
 // Curve interpolation for rendering (same as AutomationManager)
 const interpolateCurve = (
@@ -57,11 +58,11 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
   
   // Curve type icons/labels
   const CURVE_TYPES: { type: AutomationCurveType; label: string; icon: string }[] = [
-    { type: 'LINEAR', label: 'Linear', icon: '/' },
-    { type: 'EXPONENTIAL', label: 'Exponential', icon: '⌒' },
-    { type: 'LOGARITHMIC', label: 'Logarithmic', icon: '⌓' },
-    { type: 'S_CURVE', label: 'S-Curve', icon: '∿' },
-    { type: 'HOLD', label: 'Hold/Step', icon: '⌐' },
+    { type: 'LINEAR', label: CURVE_LABELS_FR.LINEAR, icon: '/' },
+    { type: 'EXPONENTIAL', label: CURVE_LABELS_FR.EXPONENTIAL, icon: '⌒' },
+    { type: 'LOGARITHMIC', label: CURVE_LABELS_FR.LOGARITHMIC, icon: '⌓' },
+    { type: 'S_CURVE', label: CURVE_LABELS_FR.S_CURVE, icon: '∿' },
+    { type: 'HOLD', label: CURVE_LABELS_FR.HOLD, icon: '⌐' },
   ];
 
   // --- HELPERS DE CONVERSION ---
@@ -133,7 +134,7 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
         ctx.fillStyle = isLight ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.5)';
         ctx.font = 'bold 10px Inter';
         ctx.textAlign = 'left';
-        ctx.fillText(`Click to automate ${lane.parameterName}`, scrollLeft + 20, defaultY - 5);
+        ctx.fillText(`Clique pour dessiner : ${automationParamLabel(lane.parameterName)}`, scrollLeft + 20, defaultY - 5);
         return;
     }
 
@@ -237,7 +238,7 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
       ctx.fill();
 
       if (isHovered || isDragging) {
-        const text = p.value.toFixed(2);
+        const text = automationValueText(lane.parameterName, p.value);
         const textWidth = ctx.measureText(text).width;
         ctx.fillStyle = isLight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.8)';
         ctx.fillRect(cx - textWidth/2 - 4, cy - 25, textWidth + 8, 16);
@@ -359,7 +360,7 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
     }
   };
 
-  const displayName = lane.parameterName === 'preVolume' ? 'VOLUME AVANT EFFETS' : lane.parameterName.replace('plugin::', '').replace('send::', 'Send ').toUpperCase();
+  const displayName = automationParamLabel(lane.parameterName);
 
   if (variant === 'header') {
     return (
@@ -376,7 +377,7 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
                 {displayName}
               </span>
               <span className="text-[7px] font-mono" style={{ color: 'var(--text-secondary)' }}>
-                {lane.min.toFixed(1)} - {lane.max.toFixed(1)}
+                {automationRangeText(lane.parameterName, lane.min, lane.max)}
               </span>
            </div>
         </div>

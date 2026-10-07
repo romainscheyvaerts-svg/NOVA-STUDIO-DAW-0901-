@@ -1,5 +1,6 @@
 
 import { Track, TrackType } from '../types';
+import { trackDisplayName } from '../utils/sendLabels';
 
 /**
  * RoutingManager
@@ -16,7 +17,7 @@ export const getValidDestinations = (sourceTrackId: string, tracks: Track[]): Tr
   // On injecte TOUJOURS le Master virtuellement s'il n'est pas dans la liste des pistes
   const masterTrack = tracks.find(t => t.id === 'master') || {
     id: 'master',
-    name: 'STEREO OUT (MASTER)',
+    name: 'Master (sortie)',
     type: TrackType.BUS,
     color: '#00f2ff',
     isMuted: false,
@@ -72,9 +73,9 @@ export const getValidDestinations = (sourceTrackId: string, tracks: Track[]): Tr
 };
 
 export const getRouteLabel = (trackId: string, tracks: Track[]): string => {
-    if (trackId === 'master' || !trackId) return 'STEREO OUT';
+    if (trackId === 'master' || !trackId) return 'Master';
     const t = tracks.find(trk => trk.id === trackId);
-    return t ? t.name : 'DISCONNECTED';
+    return t ? trackDisplayName(t, tracks) : 'Non reliée';
 };
 
 /**

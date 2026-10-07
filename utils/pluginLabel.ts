@@ -8,7 +8,7 @@ import { PluginInstance } from '../types';
  */
 export const NOVA_FX_NAMES: Record<string, string> = {
   REVERB: 'Réverbe', DELAY: 'Delay', CHORUS: 'Chorus', FLANGER: 'Flanger', DOUBLER: 'Doubleur',
-  STEREOSPREADER: 'Stéréo', COMPRESSOR: 'Compresseur', AUTOTUNE: 'Autotune', DEESSER: 'De-esser',
+  STEREOSPREADER: 'Stéréo', COMPRESSOR: 'Compresseur', AUTOTUNE: 'Nova Tune', DEESSER: 'De-esser',
   DENOISER: 'Anti-bruit', PROEQ12: 'Égaliseur', VOCALSATURATOR: 'Saturation', MASTERSYNC: 'Master', LIMITER: 'Limiteur',
   SAMPLER: 'Sampler', DRUM_SAMPLER: 'Drum sampler', MELODIC_SAMPLER: 'Sampler mélodique', DRUM_RACK_UI: 'Drum Rack',
 };

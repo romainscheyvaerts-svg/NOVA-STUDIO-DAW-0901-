@@ -116,7 +116,7 @@ const LiveRecordingClip: React.FC<LiveRecordingClipProps> = ({
       {/* Indicateur "REC" clignotant */}
       <div className="absolute top-1 left-2 flex items-center space-x-2 z-20">
         <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_10px_red]"></div>
-        <span className="text-[9px] font-black text-red-100 uppercase tracking-widest animate-pulse">Recording...</span>
+        <span className="text-[9px] font-black text-red-100 uppercase tracking-widest animate-pulse">Enregistrement…</span>
       </div>
 
       {/* Canvas Waveform */}

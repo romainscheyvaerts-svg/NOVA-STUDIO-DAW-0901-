@@ -1,5 +1,6 @@
 import MonitorControl from './MonitorControl';
 import { gainToDbText } from '../utils/db';
+import { SEND_LABELS, trackDisplayName } from '../utils/sendLabels';
 import React, { useState } from 'react';
 import MobileContainer from './MobileContainer';
 import { Track, Clip, TrackType, TrackSend } from '../types';
@@ -297,25 +298,25 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
             {canHaveSends(track) && expandedSends[track.id] && (
               <div className="px-4 pb-3 border-t border-white/5 pt-3 bg-black/20">
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">
-                  <i className="fas fa-share-alt mr-1"></i> Sends
+                  <i className="fas fa-share-alt mr-1"></i> Envois
                 </div>
                 <div className="space-y-1">
                   <MobileSendFader
                     send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }}
-                    label="Delay 1/4"
-                    color="#00f2ff"
+                    label={SEND_LABELS['send-delay'].label}
+                    color={SEND_LABELS['send-delay'].color}
                     onChange={(lvl) => handleSendChange(track, 'send-delay', lvl)}
                   />
                   <MobileSendFader
                     send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }}
-                    label="Verb Pro"
-                    color="#10b981"
+                    label={SEND_LABELS['send-verb-short'].label}
+                    color={SEND_LABELS['send-verb-short'].color}
                     onChange={(lvl) => handleSendChange(track, 'send-verb-short', lvl)}
                   />
                   <MobileSendFader
                     send={track.sends.find(s => s.id === 'send-verb-long') || { id: 'send-verb-long', level: 0, isEnabled: true }}
-                    label="Hall Space"
-                    color="#a855f7"
+                    label={SEND_LABELS['send-verb-long'].label}
+                    color={SEND_LABELS['send-verb-long'].color}
                     onChange={(lvl) => handleSendChange(track, 'send-verb-long', lvl)}
                   />
                 </div>
@@ -369,7 +370,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                     >
                       {getValidDestinations(track.id, tracks).map(dest => (
                         <option key={dest.id} value={dest.id}>
-                          {dest.id === 'master' ? 'STEREO OUT (MASTER)' : dest.name}
+                          {dest.id === 'master' ? 'Master (sortie)' : trackDisplayName(dest, tracks)}
                         </option>
                       ))}
                     </select>

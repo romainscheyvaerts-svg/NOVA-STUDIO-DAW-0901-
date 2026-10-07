@@ -100,6 +100,11 @@ import { anchorClipsToWindow, applyPreviewOnEngineer, clearPreviewOnEngineer, ha
 import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from './services/Billing';
 import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
+import { nextNumberedName, planVoiceTrack, revealTrack } from './utils/voiceTrack';
+import { countVoiceTakes } from './utils/sessionSummary';
+import { SEND_LABELS } from './utils/sendLabels';
+import { BeatLoadCancelled, beatLoadCancelledByUser, isBeatLoading, loadBeatAudio } from './utils/beatLoad';
+import BeatLoadBanner from './components/BeatLoadBanner';
 import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
 import { AutotuneVstManager } from './components/AutotuneVstPanel';
@@ -269,7 +274,7 @@ const MAKE_MUSIC_VOCAL_IR = `${import.meta.env.BASE_URL}ir/make-music-vocal.wav`
 const createInitialSends = (bpm: number, outputId: string = 'master'): Track[] => [
   { 
     id: 'send-delay', 
-    name: 'DELAY 1/4', 
+    name: SEND_LABELS['send-delay'].label, 
     type: TrackType.SEND, 
     color: '#00f2ff', 
     isMuted: false, 
@@ -287,7 +292,7 @@ const createInitialSends = (bpm: number, outputId: string = 'master'): Track[] =
   },
   { 
     id: 'send-verb-short', 
-    name: 'VERB PRO', 
+    name: SEND_LABELS['send-verb-short'].label, 
     type: TrackType.SEND, 
     color: '#10b981', 
     isMuted: false, 
@@ -312,7 +317,7 @@ const createInitialSends = (bpm: number, outputId: string = 'master'): Track[] =
   },
   { 
     id: 'send-verb-long', 
-    name: 'HALL SPACE', 
+    name: SEND_LABELS['send-verb-long'].label, 
     type: TrackType.SEND, 
     color: '#a855f7', 
     isMuted: false, 
@@ -957,6 +962,8 @@ function Studio() {
   // bilan de prise, consignes de session, écoute du mix.
   const [novaFeed, setNovaFeed] = useState<NovaFeedMessage[]>([]);
   const [novaUnread, setNovaUnread] = useState(false);
+  // Nova ouverte (ordinateur) : la carte « Et maintenant ? » attend (une seule carte à la fois).
+  const [novaOpen, setNovaOpen] = useState(false);
   const postNova = useCallback((content: string, choices?: NovaFeedMessage['choices']) => {
     setNovaFeed(prev => [...prev.slice(-40), { id: `nova-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, content, choices }]);
     if (isMobileRef.current && activeTabRef.current !== 'NOVA') setNovaUnread(true);
@@ -1751,6 +1758,41 @@ function Studio() {
   }, [setState]);
 
   /**
+   * « + Piste voix » (audit B2) : la piste arrive sous la piste sélectionnée,
+   * reprend le traitement de la voix (style de mix), devient la piste
+   * sélectionnée ET armée, et l'écran défile jusqu'à elle : la prise suivante
+   * part dessus. Une seule étape d'annulation (création), l'armement n'en est pas une.
+   */
+  const handleAddVoiceTrack = useCallback(async () => {
+    const st = stateRef.current;
+    if (st.isRecording) { setAiNotification('⏺️ Arrête la prise en cours avant d’ajouter une piste.'); return; }
+    const plan = planVoiceTrack(st.tracks, st.selectedTrackId);
+    const id = `track-voix-${Date.now().toString(36)}`;
+    setState(produce((draft: DAWState) => {
+      const tpl = plan.templateId && draft.vocalMixStyle ? draft.tracks.find(t => t.id === plan.templateId) : undefined;
+      const color = UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length];
+      const newTrack: Track = {
+        id, name: plan.name, type: TrackType.AUDIO, color,
+        isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+        volume: tpl ? tpl.volume : 1.0, pan: 0, outputTrackId: plan.outputTrackId,
+        sends: tpl ? tpl.sends.map(s => ({ ...s })) : createInitialSends(draft.bpm).map(s => ({ id: s.id, level: 0, isEnabled: true })),
+        clips: [],
+        plugins: tpl ? tpl.plugins.map(p => ({ ...JSON.parse(JSON.stringify(p)), id: `pl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` })) : [],
+        automationLanes: [createDefaultAutomation('volume', color)],
+        totalLatency: 0,
+      };
+      draft.tracks.splice(Math.min(plan.index, draft.tracks.length), 0, newTrack);
+      draft.selectedTrackId = id;
+    }));
+    revealTrack(id);
+    await ensureAudioEngine();
+    // Laisse le moteur câbler la nouvelle piste avant de l'armer.
+    await new Promise(r => setTimeout(r, 80));
+    const armed = await armForRecording(id);
+    if (armed) setAiNotification(`🎤 Piste ${plan.name} prête : ta prochaine prise part dessus.`);
+  }, [setState, armForRecording]);
+
+  /**
    * L'ingé son prépare la partie suivante de la session : choisit (ou crée) la
    * bonne piste, l'arme, se cale sur le début du lead et briefe l'artiste.
    */
@@ -2021,6 +2063,12 @@ function Studio() {
         return;
     }
 
+    // Beat en cours de chargement (B6) : la prise partirait sur du silence.
+    if (isBeatLoading()) {
+      setAiNotification('⏳ Attends la fin du chargement du beat : sans lui, ta prise partirait sur du silence.');
+      return;
+    }
+
     // Armement automatique : plus besoin de trouver le bouton R d'abord.
     let armedTrack = currentState.tracks.find(t => t.isTrackArmed);
     if (!armedTrack) {
@@ -2242,8 +2290,8 @@ function Studio() {
    * Reverbs et délais : toujours sur une piste d'envoi, jamais en insert d'une
    * piste source. Ainsi une piste peut être gelée (VST du PC rendus) et rester
    * éditable ailleurs (iPad, navigateur) sans figer l'ambiance, et toutes les
-   * voix partagent la même reverb. Reverb native → « VERB PRO » (notre reverb),
-   * délai natif → « DELAY 1/4 », reverb / délai VST → nouvelle piste d'envoi.
+   * voix partagent la même reverb. Reverb native → « Reverb courte » (notre reverb),
+   * délai natif → « Écho 1/4 », reverb / délai VST → nouvelle piste d'envoi.
    * Renvoie la piste d'envoi et l'effet, ou null si l'aiguillage ne s'applique pas.
    */
   const routeAmbienceToSend = useCallback((tid: string, plugin: PluginInstance, displayName: string): { sendId: string; name: string; plugin: PluginInstance; created: boolean } | null => {
@@ -2762,7 +2810,8 @@ function Studio() {
     setAiNotification("🎹 Choisis un instrument dans le navigateur");
     setTimeout(() => setAiNotification(null), 2500);
   }, [setState, isMobile]);
-  const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, "Group Bus"); }, [handleCreateTrack]);
+  // « Bus 1 », « Bus 2 »… (la console le montre et ouvre tout de suite son renommage).
+  const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, nextNumberedName(stateRef.current.tracks, 'Bus')); }, [handleCreateTrack]);
   const handleToggleBypass = useCallback((trackId: string, pluginId: string) => {
     setState(produce((draft: DAWState) => {
         const track = draft.tracks.find(t => t.id === trackId);
@@ -3114,7 +3163,10 @@ function Studio() {
           } else {
               audioRef = source;
               // Cache local : un beat déjà écouté se rouvre sans réseau.
-              const arrayBuffer = await fetchAudio(source);
+              // Le beat du catalogue est surveillé (B6) : message au bout de
+              // 15 s, Réessayer / Choisir un autre beat, REC bloqué en attendant.
+              const isBeat = instrumentId !== undefined || forcedTrackId === 'instrumental';
+              const arrayBuffer = isBeat ? await loadBeatAudio(source, name, fetchAudio) : await fetchAudio(source);
               audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
           }
 
@@ -3207,10 +3259,11 @@ function Studio() {
           return audioBuffer;
 
       } catch (e: any) {
+          if (e instanceof BeatLoadCancelled) { setExternalImportNotice(null); return null as any; }
           console.error("[Import Error]", e);
           setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
       } finally {
-          setTimeout(() => setExternalImportNotice(null), 3000);
+          setTimeout(() => setExternalImportNotice(n => (n && n.startsWith('Chargement') && isBeatLoading() ? n : null)), 3000);
       }
   }, [setState, ensureAudioEngine]);
 
@@ -3634,8 +3687,7 @@ function Studio() {
     const st = stateRef.current;
     if (st.isRecording) return;
     autosaveBusy.current = true;
-    const voiceTakes = st.tracks.filter(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId)
-      .reduce((n, t) => n + t.clips.filter(c => takeNumberOf(c) !== null).length, 0);
+    const voiceTakes = countVoiceTakes(st.tracks); // prises, pas fragments (F10)
     const hasAudio = st.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0);
     if (!hasAudio && !(st.lyrics || '').trim()) { autosaveBusy.current = false; return; } // rien à garder : on n'écrase pas une session précédente
     try {
@@ -4654,15 +4706,20 @@ function Studio() {
     setAiNotification(`⏳ Chargement de « ${inst.title} »…`);
     const beatBuffer = await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0, inst.bpm, inst.id);
     if (!beatBuffer) {
-      // Échec réseau : on remet l'ancien beat au lieu d'annoncer « prêt » sur une piste vide.
+      // Un autre beat est en route (il a remplacé celui-ci) : il s'occupe de la piste.
+      if (isBeatLoading()) return;
+      // Échec ou abandon : on remet l'ancien beat au lieu d'annoncer « prêt » sur une piste vide.
       setState(produce((draft: DAWState) => {
         const beat = draft.tracks.find(t => t.id === 'instrumental');
         if (beat && !beat.clips.length) beat.clips = previousBeatClips as any;
       }));
-      setAiNotification(`⚠️ « ${inst.title} » n'a pas pu être chargé (connexion ?). Réessaie depuis la bibliothèque.`);
+      if (!beatLoadCancelledByUser()) setAiNotification(`⚠️ « ${inst.title} » n'a pas pu être chargé (connexion ?). Réessaie depuis la bibliothèque.`);
       return;
     }
     if (inst.bpm) handleUpdateBpm(inst.bpm);
+    // Tablette / petit écran (G14) : le store prenait 320 px et ne laissait que
+    // 370 px de timeline. Beat choisi → on le replie (▤ en haut à gauche le rouvre).
+    if (!isMobileRef.current && window.innerWidth < 1280) setIsSidebarOpen(false);
     if (stateRef.current.projectMode !== 'BEATMAKING') track('beat_tried', { beat_id: String(inst.id ?? ''), title: String(inst.title || '') });
     setState(prev => ({ ...prev, beatGenre: inst.genre || undefined, beatTitle: inst.title || undefined }));
     let tonalite = lireTonalite(inst.key);
@@ -5686,8 +5743,10 @@ function Studio() {
             // Message compréhensible et actionnable (avant : « Erreur de connexion: Erreur serveur: réseau »).
             text: navigator.onLine === false
               ? "📡 Pas de connexion internet : je ne peux pas répondre aux questions libres pour l'instant. Reconnecte-toi puis renvoie ton message. Les boutons (Mix auto, Mes paroles, tempo…) marchent toujours."
-              : "😕 Je n'arrive pas à joindre mon serveur pour l'instant. Réessaie dans un moment (renvoie ton message). Les boutons ci-dessus et les demandes simples (« mets le tempo à 90 », « mix trap ») marchent toujours.",
-            actions: []
+              : "😕 Je n'arrive pas à joindre mon serveur pour l'instant : réessaie dans un moment. En attendant, choisis un style de mix ci-dessous (ça marche sans serveur), ou demande-moi « mets le tempo à 90 ».",
+            actions: [],
+            // G25 : les 6 styles en boutons, directement sous le message d'erreur.
+            offerStyles: true
         };
     }
   };
@@ -5848,7 +5907,7 @@ function Studio() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full overflow-hidden relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
+    <div className="flex flex-col h-full w-full overflow-hidden [overflow:clip] relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
       {saveState.isSaving && <SaveOverlay progress={saveState.progress} message={saveState.message} />}
 
       {/* TransportBar - Desktop, Tablet ET Mobile avec menu hamburger */}
@@ -5897,6 +5956,7 @@ function Studio() {
       {isMobile && (activeMobileTab === 'TRACKS' || activeMobileTab === 'ARRANGEMENT') && (
         <TrackCreationBar
           onCreateTrack={handleCreateTrack}
+          onAddVoiceTrack={handleAddVoiceTrack}
           beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
           onOpenDrums={() => setDrumsOpen(true)}
           onNewMidiTrack={handleNewMidiTrack}
@@ -5993,6 +6053,7 @@ function Studio() {
                 <TrackCreationBar
                   docked
                   onCreateTrack={handleCreateTrack}
+                  onAddVoiceTrack={handleAddVoiceTrack}
                   beatmaking={state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker'}
                   onOpenDrums={() => setDrumsOpen(true)}
                   onNewMidiTrack={handleNewMidiTrack}
@@ -6030,6 +6091,8 @@ function Studio() {
               {activeMobileTab === 'ARRANGEMENT' && (
                 <MobileArrangementPage
                   tracks={state.tracks}
+                  isRecording={state.isRecording}
+                  recStartTime={state.recStartTime}
                   currentTime={state.currentTime}
                   isPlaying={state.isPlaying}
                   bpm={state.bpm}
@@ -6097,10 +6160,11 @@ function Studio() {
           puis jamais rendue. Charger un beat ouvrait donc un studio vide
           pendant plusieurs secondes, sans le moindre signe d'activite. */}
       {externalImportNotice && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
+        // Téléphone (G15) : en bas, au-dessus des onglets ; en haut, il cachait le zoom (− / +).
+        <div className={`fixed ${isMobile ? 'bottom-[calc(8.5rem+env(safe-area-inset-bottom))]' : 'top-20'} left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
                         bg-[#14161a]/95 border border-white/10 shadow-2xl backdrop-blur-sm
                         flex items-center gap-2.5 text-[12px] font-medium text-slate-200
-                        animate-in fade-in slide-in-from-top-2 duration-200">
+                        animate-in fade-in slide-in-from-top-2 duration-200`}>
           {!/^[✅❌]/.test(externalImportNotice) && (
             <i className="fas fa-circle-notch fa-spin text-cyan-400"></i>
           )}
@@ -6108,11 +6172,16 @@ function Studio() {
         </div>
       )}
 
+      <BeatLoadBanner isMobile={isMobile} onPickOther={() => {
+        if (isMobile) setActiveMobileTab('BROWSER');
+        else { setIsSidebarOpen(true); setActiveSideBrowserTab('STORE'); }
+      }} />
+
       {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} novaBadge={novaUnread}
         onToggleLyrics={() => setLyricsOpen(o => !o)} lyricsOpen={lyricsOpen} />}
 
       <NextStepCard
-        open={!!nextStep && !state.isRecording && countInBeat === null && !(isMobile && activeMobileTab === 'NOVA')}
+        open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen && !(isMobile && activeMobileTab === 'NOVA')}
         trigger={nextStep || 'take'}
         actions={nextStepActions}
         beatTitle={getCatalogBeat(state.tracks)?.title}
@@ -6452,8 +6521,10 @@ function Studio() {
       )}
       
       {activePlugin && (
-        <div className={`fixed inset-0 flex items-center justify-center z-[200] ${isMobile ? 'bg-[#0c0d10]' : 'bg-black/60 backdrop-blur-sm'}`} onMouseDown={() => !isMobile && setActivePlugin(null)}>
-           <div className={`relative ${isMobile ? 'w-full h-full p-4 overflow-y-auto' : ''}`} onMouseDown={e => e.stopPropagation()}>
+        // Fenêtre d'effet NON modale sur ordinateur (G18) : pas de voile, la console
+        // et les pistes restent utilisables derrière ; on la déplace par sa barre.
+        <div className={`fixed inset-0 flex items-center justify-center z-[200] ${isMobile ? 'bg-[#0c0d10]' : 'pointer-events-none'}`}>
+           <div className={`relative ${isMobile ? 'w-full h-full p-4 overflow-y-auto' : 'pointer-events-auto'}`} onMouseDown={e => e.stopPropagation()}>
               <Suspense fallback={<div className="w-64 h-32 flex items-center justify-center text-slate-400 text-[11px] bg-[#14161a] border border-white/10 rounded-2xl"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}>
               <PluginEditor key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} onToggleFreeze={handleFreezeTrack} onToggleBypass={handleToggleBypass} onOpenPlugin={(tid, p) => setActivePlugin({ trackId: tid, plugin: p })} />
               </Suspense>
@@ -6480,6 +6551,7 @@ function Studio() {
             onRequestOpen={isMobile ? () => setActiveMobileTab('NOVA') : undefined}
             mixGuideRequest={mixGuideRequest}
             novaFeed={novaFeed}
+            onOpenChange={setNovaOpen}
             onClose={() => setActiveMobileTab('ARRANGEMENT')}
         />
       </div>

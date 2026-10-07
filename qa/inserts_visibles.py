@@ -47,10 +47,10 @@ with sync_playwright() as p:
                     byp.first.click(); pg.wait_for_timeout(400)
                     r["bypass_affiche"] = "Bypass" in body(pg)
                     byp.first.click(); pg.wait_for_timeout(300)
-            r["clic_ouvre"] = bool(re.search(r"Autotune|Compresseur|Égaliseur|De-esser|Saturation", body(pg)))
+            r["clic_ouvre"] = bool(re.search(r"Autotune|Nova Tune|Compresseur|Égaliseur|De-esser|Saturation", body(pg)))
             pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
         # Piste REC (armée) : ses effets doivent être visibles ; Saturation ne doit pas planter.
-        rec = pg.locator("[data-testid='inserts-rec'] button[aria-label^='Ouvrir']")
+        rec = pg.locator("[data-testid='inserts-track-rec-main'] button[aria-label^='Ouvrir']")
         r["rec_pastilles"] = [rec.nth(i).inner_text().strip() for i in range(rec.count())]
         sat = pg.locator(".fx-slot button[aria-label='Ouvrir VOCALSATURATOR'], .fx-slot button[aria-label^='Ouvrir Satur']")
         tous = pg.locator(".fx-slot button[aria-label^='Ouvrir']")

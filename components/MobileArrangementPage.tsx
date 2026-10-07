@@ -1,10 +1,12 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import MobileContainer from './MobileContainer';
+import LiveRecordingClip from './LiveRecordingClip';
 import { Track, Clip, TrackType, TrackSend } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore, usePlayheadTime } from '../utils/playheadStore';
 import { gainToDbText } from '../utils/db';
 import { useSimpleMode } from '../utils/simpleMode';
+import { sendLabel } from '../utils/sendLabels';
 
 /** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
 const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
@@ -56,6 +58,9 @@ interface MobileArrangementPageProps {
   onUpdateSend?: (trackId: string, sendId: string, level: number, isEnabled: boolean) => void;
   onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
   sendTracks?: Track[]; // Send tracks for the sends panel
+  /** Prise en cours (G26) : la région rouge grandit pendant l'enregistrement. */
+  isRecording?: boolean;
+  recStartTime?: number | null;
 }
 
 type EditTool = 'SELECT' | 'TRIM' | 'SPLIT' | 'ERASE' | 'FADE' | 'DUPLICATE';
@@ -108,7 +113,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   onOpenSends,
   onUpdateSend,
   onRequestAddPlugin,
-  sendTracks
+  sendTracks,
+  isRecording,
+  recStartTime
 }) => {
   const timelineRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -536,12 +543,13 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
   // Tools config - Extended
   const tools: { id: EditTool; icon: string; label: string }[] = [
-    { id: 'SELECT', icon: 'fa-arrow-pointer', label: 'Select' },
-    { id: 'TRIM', icon: 'fa-scissors', label: 'Trim' },
-    { id: 'SPLIT', icon: 'fa-cut', label: 'Split' },
-    { id: 'ERASE', icon: 'fa-eraser', label: 'Erase' },
-    { id: 'FADE', icon: 'fa-wave-square', label: 'Fade' },
-    { id: 'DUPLICATE', icon: 'fa-clone', label: 'Dup' },
+    { id: 'SELECT', icon: 'fa-arrow-pointer', label: 'Sélection' },
+    // Deux icônes distinctes (G15) : avant, deux ciseaux identiques côte à côte.
+    { id: 'TRIM', icon: 'fa-arrows-left-right', label: 'Rogner' },
+    { id: 'SPLIT', icon: 'fa-scissors', label: 'Couper ici' },
+    { id: 'ERASE', icon: 'fa-eraser', label: 'Gomme' },
+    { id: 'FADE', icon: 'fa-wave-square', label: 'Fondus' },
+    { id: 'DUPLICATE', icon: 'fa-clone', label: 'Dupliquer' },
   ];
 
   return (
@@ -645,7 +653,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             className="flex items-center justify-center border-b border-white/10 bg-[#0f1114]"
             style={{ height: TIMELINE_HEIGHT }}
           >
-            <span className="text-[9px] font-bold text-white/30 uppercase">Tracks</span>
+            <span className="text-[9px] font-bold text-white/30 uppercase">Pistes</span>
           </div>
 
           {/* Track headers */}
@@ -671,6 +679,14 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   <span title={track.name} className="text-[11px] leading-4 font-semibold text-white/90 truncate flex-1">
                     {track.name}
                   </span>
+                  {/* G26 : en mode simple aussi, on voit que la voix a des effets. */}
+                  {track.plugins.length > 0 && (
+                    <span className="shrink-0 text-[9px] leading-4 text-cyan-300" role="img"
+                      aria-label={`${track.plugins.length} effets sur ${track.name}`}
+                      title={`${track.plugins.length} effets : ${track.plugins.map(p => p.name || p.type).join(', ')}`}>
+                      <i className="fas fa-wand-magic-sparkles text-[8px] mr-0.5" aria-hidden="true"></i>{track.plugins.length}
+                    </span>
+                  )}
                 </div>
 
                 {/* Volume (zone de 40 px de haut) + FX (zone tactile 40 px) */}
@@ -868,6 +884,12 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   style={{ height: TRACK_HEIGHT }}
                   onClick={() => onSelectTrack(track.id)}
                 >
+                  {/* Prise en cours (G26) : dessinée en direct sur la piste armée. */}
+                  {isRecording && recStartTime != null && track.isTrackArmed && (
+                    <div className="absolute pointer-events-none z-10" style={{ left: timeToX(recStartTime), top: 2, right: 0, height: TRACK_HEIGHT - 4 }}>
+                      <LiveRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={pixelsPerSecond} height={TRACK_HEIGHT - 4} />
+                    </div>
+                  )}
                   {/* Clips */}
                   {track.clips.map(clip => {
                     const clipX = timeToX(clip.start);
@@ -1103,9 +1125,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           onClick={handleOpenSends}
           aria-label="Envois (delay, réverbes) de la piste sélectionnée"
           title="Envois de la piste"
-          className="fixed bottom-[calc(8.5rem+env(safe-area-inset-bottom))] right-4 w-14 h-14 rounded-full bg-gradient-to-br from-purple-600 to-pink-500 shadow-lg shadow-purple-500/30 flex items-center justify-center z-40 active:scale-95 transition-transform"
+          // F6 : bouton libellé et plus compact (le rond rose sans texte recouvrait la timeline).
+          className="fixed bottom-[calc(8.5rem+env(safe-area-inset-bottom))] right-3 h-10 px-3 rounded-full bg-gradient-to-br from-purple-600/90 to-pink-500/90 shadow-lg shadow-purple-500/30 flex items-center gap-1.5 z-40 active:scale-95 transition-transform text-white text-[12px] font-bold"
         >
-          <i className="fas fa-share-nodes text-white text-lg"></i>
+          <i className="fas fa-share-nodes text-white text-sm" aria-hidden="true"></i>Envois
         </button>
       )}
 
@@ -1125,7 +1148,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             {/* Header */}
             <div className="flex items-center justify-between px-4 pb-3 border-b border-white/10">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-wide">Envois / Sends</h3>
+                <h3 className="text-sm font-black text-white uppercase tracking-wide">Envois</h3>
                 <p className="text-[10px] text-white/40">
                   Track: {tracks.find(t => t.id === selectedTrackForSends)?.name || 'N/A'}
                 </p>
@@ -1169,13 +1192,13 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                             style={{ backgroundColor: sendTrack?.color || '#666' }}
                           />
                           <span className="text-xs font-bold text-white">
-                            {sendTrack?.name || send.id}
+                            {sendLabel(send.id, availableSendTracks)}
                           </span>
                         </div>
                         <button
                           onClick={() => handleSendToggle(send.id)}
                           aria-pressed={send.isEnabled}
-                          aria-label={`Envoi ${sendTrack?.name || send.id}`}
+                          aria-label={`Envoi ${sendLabel(send.id, availableSendTracks)}`}
                           className={`nova-hit w-10 h-6 rounded-full transition-all ${
                             send.isEnabled 
                               ? 'bg-cyan-500' 

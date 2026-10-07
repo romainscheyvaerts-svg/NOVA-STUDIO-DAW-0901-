@@ -188,8 +188,8 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
             <i className="fas fa-sync-alt text-2xl"></i>
           </div>
           <div>
-            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">Master <span className="text-cyan-400">Sync</span></h2>
-            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-2">Neural Metadata Injector v2.0</p>
+            <h2 className="text-xl font-black text-white tracking-tight leading-none">Master</h2>
+            <p className="text-[11px] text-slate-400 mt-2">Détecte le tempo et la tonalité, et cale la session dessus.</p>
           </div>
         </div>
       </div>
@@ -198,14 +198,14 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
       <div className="relative group">
         <div className="grid grid-cols-2 gap-6">
           <div className="bg-black/60 rounded-[32px] border border-white/5 p-6 flex flex-col items-center justify-center space-y-2 group-hover:border-cyan-500/30 transition-all min-h-[140px]">
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Detected Tempo</span>
+            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Tempo détecté</span>
             <span className={`text-4xl font-black font-mono leading-none transition-all ${params.hasResult ? 'text-white' : 'text-slate-800'}`}>
               {params.hasResult ? params.detectedBpm : '--'}
             </span>
             <span className="text-[8px] font-black text-cyan-500/50 uppercase">BPM</span>
           </div>
           <div className="bg-black/60 rounded-[32px] border border-white/5 p-6 flex flex-col items-center justify-center space-y-2 group-hover:border-cyan-500/30 transition-all min-h-[140px]">
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Detected Key</span>
+            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Tonalité détectée</span>
             <span className={`text-4xl font-black font-mono leading-none transition-all ${params.hasResult ? 'text-white' : 'text-slate-800'}`}>
               {params.hasResult ? NOTES[params.detectedKey] : '--'}
             </span>
@@ -219,7 +219,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
             {params.isAnalyzing ? (
               <div className="text-center space-y-4">
                 <div className="w-16 h-16 rounded-full border-4 border-cyan-500/20 border-t-cyan-500 animate-spin mx-auto" />
-                <span className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.2em] animate-pulse">DSP Analysis...</span>
+                <span className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.2em] animate-pulse">Analyse en cours…</span>
               </div>
             ) : (
               <button 
@@ -276,7 +276,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
             </div>
             <div className="flex flex-col text-left">
                <span className="text-[12px] font-black uppercase tracking-widest">Appliquer Tout</span>
-               <span className="text-[8px] font-mono opacity-60 uppercase">BPM + Key + Calage Grille</span>
+               <span className="text-[8px] font-mono opacity-60 uppercase">Tempo + tonalité + calage de la grille</span>
             </div>
           </div>
           <i className="fas fa-chevron-right text-xs opacity-20 group-hover:opacity-100"></i>
@@ -296,10 +296,10 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
       </div>
 
       <div className="pt-4 border-t border-white/5 flex justify-between items-center text-slate-700">
-         <span className="text-[7px] font-black uppercase tracking-[0.3em]">Smart Session Sync v2.1</span>
+         <span className="text-[7px] font-black uppercase tracking-[0.3em]"></span>
          <div className="flex items-center space-x-2">
             <div className={`w-2 h-2 rounded-full ${params.isEnabled ? 'bg-cyan-500 shadow-[0_0_8px_cyan]' : 'bg-slate-800'}`} />
-            <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Auto-Align Active</span>
+            <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Calage automatique actif</span>
          </div>
       </div>
     </div>

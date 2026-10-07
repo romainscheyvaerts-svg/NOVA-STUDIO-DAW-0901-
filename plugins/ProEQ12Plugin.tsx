@@ -1,6 +1,17 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { termHelp } from '../utils/pluginUi';
+
+/** Types de filtre en français, avec ce qu'ils font. */
+const FILTER_LABELS: Record<string, { label: string; help: string }> = {
+  highpass: { label: 'Coupe-bas', help: 'Coupe-bas (passe-haut) : retire les graves sous la fréquence (souffle, pas, vibrations).' },
+  lowshelf: { label: 'Graves', help: 'Plateau grave (low shelf) : monte ou baisse tout ce qui est sous la fréquence.' },
+  peaking: { label: 'Cloche', help: 'Cloche (bell) : monte ou baisse une zone autour de la fréquence.' },
+  highshelf: { label: 'Aigus', help: 'Plateau aigu (high shelf) : monte ou baisse tout ce qui est au-dessus de la fréquence (brillance, air).' },
+  lowpass: { label: 'Coupe-haut', help: 'Coupe-haut (passe-bas) : retire les aigus au-dessus de la fréquence.' },
+  notch: { label: 'Encoche', help: 'Encoche (notch) : retire une fréquence très précise (sifflement, larsen).' },
+};
 
 /**
  * MODULE FX_01 : PRO-EQ 12 (SURGICAL GRADE)
@@ -236,14 +247,14 @@ const EQKnob: React.FC<{
 
   const rotation = (norm * 270) - 135;
   return (
-    <div className={`flex flex-col items-center space-y-2 select-none touch-none ${disabled ? 'opacity-20 grayscale' : ''}`}>
+    <div title={termHelp(label) || undefined} className={`flex flex-col items-center space-y-2 select-none touch-none ${disabled ? 'opacity-20 grayscale' : ''}`}>
       <div {...knob.bind} className="relative w-12 h-12 rounded-full bg-[#14161a] border border-white/10 flex items-center justify-center cursor-ns-resize shadow-xl hover:border-white/30 transition-all">
         <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full transition-transform duration-75" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}`, transform: `rotate(${rotation}deg) translateY(2px)` }} />
         <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />
       </div>
       <div className="text-center">
-        <span className="block text-[6px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</span>
+        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>
         <div className="bg-black/60 px-1.5 py-0.5 rounded border border-white/5 min-w-[45px]">
           <span className="text-[8px] font-mono font-bold text-white">{safeValue.toFixed(precision)}{suffix}</span>
         </div>
@@ -410,7 +421,7 @@ export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Para
       <div className="p-8 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
         <div className="flex items-center space-x-6">
           <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 border border-cyan-500/20 shadow-lg shadow-cyan-500/5"><i className="fas fa-wave-square text-2xl"></i></div>
-          <div><h2 className="text-2xl font-black italic text-white uppercase tracking-tighter leading-none">Pro-Q <span className="text-cyan-400">Nova</span> <span className="text-[10px] ml-2 font-normal text-slate-500">11-BAND</span></h2><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-2">Surgical Mastering Equalizer</p></div>
+          <div><h2 className="text-2xl font-black text-white tracking-tight leading-none">Égaliseur <span className="text-[11px] ml-2 font-normal text-slate-500">{params.bands.length} bandes</span></h2><p className="text-[12px] text-slate-400 mt-2">Sculpte le son : retire ce qui gêne, ajoute de la présence ou de l'air.</p></div>
         </div>
         
         <div className="flex items-center space-x-4">
@@ -418,7 +429,7 @@ export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Para
             {params.bands.map((b, i) => (
               <button 
                 key={i} 
-                onClick={() => setSelectedBandIdx(i)} 
+ onClick={() => setSelectedBandIdx(i)} title={`Bande ${i + 1} : ${(FILTER_LABELS[b.type] || { label: b.type }).label}, ${Math.round(b.frequency)} Hz`} aria-label={`Bande ${i + 1}`} 
                 className={`w-8 h-8 rounded-lg text-[9px] font-black transition-all border ${selectedBandIdx === i ? 'bg-white text-black border-white' : 'bg-transparent text-slate-600 border-transparent hover:text-slate-400'}`}
                 style={{ color: selectedBandIdx === i ? '#000' : b.color || '#fff' }}
               >
@@ -426,7 +437,7 @@ export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Para
               </button>
             ))}
           </div>
-          <button 
+          <button data-plugin-power 
             onClick={() => { const newState = !params.isEnabled; setParams({...params, isEnabled: newState}); node.updateParams({isEnabled: newState}); }}
             className={`w-12 h-12 rounded-full border transition-all flex items-center justify-center ${params.isEnabled ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/40' : 'bg-white/5 border-white/10 text-slate-600'}`}
           >
@@ -438,22 +449,23 @@ export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Para
       <div ref={containerRef} className="relative h-[320px] bg-black/40 cursor-crosshair border-b border-white/5 overflow-hidden" onWheel={(e) => { const delta = e.deltaY > 0 ? -0.1 : 0.1; updateBand(selectedBandIdx, { q: Math.max(0.1, Math.min(10, currentBand.q + delta)) }); }}>
         <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,rgba(0,242,255,0.03),transparent)]" />
         <canvas ref={canvasRef} className="w-full h-full touch-none" onMouseDown={handleMouseDown} onTouchStart={handleTouchStart} />
-        <div className="absolute bottom-4 right-6 text-[8px] font-black text-slate-700 uppercase tracking-[0.3em]">Bilateral Frequency Map</div>
+        <div className="absolute bottom-4 right-6 text-[10px] font-bold text-slate-600">Glisse un point pour régler · molette = largeur</div>
       </div>
 
       <div className="p-10 bg-white/[0.01] flex flex-col space-y-10">
         <div className="flex items-center justify-between">
            <div className="flex items-center space-x-10">
               <div className="space-y-4">
-                <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1">Band Mode</label>
+                <label className="text-[11px] font-bold text-slate-400 ml-1">Type de filtre (bande {selectedBandIdx + 1})</label>
                 <div className="grid grid-cols-3 gap-2">
                   {(['highpass', 'lowshelf', 'peaking', 'highshelf', 'lowpass', 'notch'] as ProEQFilterType[]).map(t => (
                     <button 
                       key={t} 
+                      title={FILTER_LABELS[t].help}
                       onClick={() => updateBand(selectedBandIdx, { type: t, gain: (t.includes('pass') || t === 'notch') ? 0 : currentBand.gain })} 
-                      className={`px-4 py-2 rounded-xl text-[8px] font-black uppercase border transition-all ${currentBand.type === t ? 'bg-cyan-500 text-black border-cyan-500 shadow-lg shadow-cyan-500/20' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
+                      className={`px-3 py-2 rounded-xl text-[10px] font-bold border transition-all ${currentBand.type === t ? 'bg-cyan-500 text-black border-cyan-500 shadow-lg shadow-cyan-500/20' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
                     >
-                      {t.replace('pass', '').replace('shelf', '')}
+                      {FILTER_LABELS[t].label}
                     </button>
                   ))}
                 </div>
@@ -462,23 +474,21 @@ export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Para
               <div className="h-16 w-px bg-white/5 self-end mb-1" />
 
               <div className="flex space-x-8">
-                <EQKnob label="Frequency" value={currentBand.frequency} min={MIN_FREQ} max={MAX_FREQ} log suffix="Hz" onChange={v => updateBand(selectedBandIdx, { frequency: v })} color={currentBand.color || '#fff'} />
+                <EQKnob label="Fréquence" value={currentBand.frequency} min={MIN_FREQ} max={MAX_FREQ} log suffix="Hz" onChange={v => updateBand(selectedBandIdx, { frequency: v })} color={currentBand.color || '#fff'} />
                 <EQKnob label="Gain" value={currentBand.gain} min={MIN_GAIN} max={MAX_GAIN} suffix="dB" onChange={v => updateBand(selectedBandIdx, { gain: v })} color={currentBand.color || '#fff'} disabled={currentBand.type.includes('pass') || currentBand.type === 'notch'} precision={1} />
-                <EQKnob label="Q Factor" value={currentBand.q} min={0.1} max={10} suffix="" onChange={v => updateBand(selectedBandIdx, { q: v })} color={currentBand.color || '#fff'} precision={2} />
+                <EQKnob label="Largeur" value={currentBand.q} min={0.1} max={10} suffix="" onChange={v => updateBand(selectedBandIdx, { q: v })} color={currentBand.color || '#fff'} precision={2} />
               </div>
            </div>
 
            <div className="flex flex-col items-end space-y-4">
               <button 
                 onClick={() => updateBand(selectedBandIdx, { isEnabled: !currentBand.isEnabled })}
-                className={`h-10 px-8 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${currentBand.isEnabled ? 'bg-white/5 border-white/20 text-white' : 'bg-red-500/20 border-red-500/40 text-red-500'}`}
+                aria-pressed={currentBand.isEnabled}
+                title="Active ou coupe seulement cette bande (l'égaliseur entier se coupe avec le bouton de la barre du haut)"
+                className={`h-10 px-6 rounded-xl text-[11px] font-bold border transition-all ${currentBand.isEnabled ? 'bg-white/5 border-white/20 text-white' : 'bg-red-500/20 border-red-500/40 text-red-500'}`}
               >
-                {currentBand.isEnabled ? 'Band Active' : 'Band Muted'}
+                {currentBand.isEnabled ? `Bande ${selectedBandIdx + 1} active` : `Bande ${selectedBandIdx + 1} coupée`}
               </button>
-              <div className="flex items-center space-x-2">
-                 <div className="w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_8px_cyan]" />
-                 <span className="text-[7px] font-black text-slate-700 uppercase tracking-[0.4em]">Surgical Precision Enabled</span>
-              </div>
            </div>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { paramFr, termHelp } from '../utils/pluginUi';
 
 /**
  * PROFESSIONAL DIMENSION CHORUS v3.0
@@ -380,7 +381,7 @@ const ChorusKnob: React.FC<{
         <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />
       </div>
       <div className="text-center">
-        <span className="block text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</span>
+        <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>
         <div className="bg-black/60 px-2 py-0.5 rounded-lg border border-white/5">
           <span className="text-[8px] font-mono font-bold" style={{ color }}>
             {Math.round(safeValue * factor * 10) / 10}{suffix}
@@ -496,14 +497,11 @@ export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusPa
             <i className="fas fa-layer-group text-xl"></i>
           </div>
           <div>
-            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">
-              Dimension <span className="text-cyan-400">Chorus</span>
-              <span className="text-[8px] ml-2 font-normal text-slate-600">v3.0</span>
-            </h2>
-            <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-1">Multi-Voice Modulation Engine</p>
+            <h2 className="text-xl font-black text-white tracking-tight leading-none">Chorus</h2>
+            <p className="text-[11px] text-slate-400 mt-1">Épaissit la voix avec de légères copies qui ondulent.</p>
           </div>
         </div>
-        <button 
+        <button data-plugin-power 
           onClick={() => handleParamChange('isEnabled', !params.isEnabled)}
           className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${params.isEnabled ? 'bg-cyan-500 border-cyan-400 text-black shadow-lg shadow-cyan-500/30' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
         >
@@ -526,7 +524,7 @@ export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusPa
 
       {/* Visualization */}
       <div className="h-32 bg-black/60 rounded-[24px] border border-white/5 relative overflow-hidden shadow-inner">
-        <div className="absolute top-3 left-5 text-[7px] font-black text-slate-600 uppercase tracking-widest">Lissajous Scope</div>
+        <div className="absolute top-3 left-5 text-[7px] font-black text-slate-600 uppercase tracking-widest">Image des voix</div>
         <canvas ref={canvasRef} width={520} height={128} className="w-full h-full" />
         <div className="absolute bottom-3 right-5 flex items-center space-x-2">
           <span className="text-[7px] font-mono text-slate-600">{params.voices || 2} VOICES</span>
@@ -546,7 +544,7 @@ export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusPa
       <div className="flex items-center justify-between pt-4 border-t border-white/5">
         <div className="flex items-center space-x-4">
           <div>
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest block mb-2">LFO Shape</span>
+            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest block mb-2">Forme de l’ondulation</span>
             <div className="flex bg-black/40 p-0.5 rounded-lg border border-white/5">
               {(['SINE', 'TRIANGLE', 'RANDOM'] as LFOShape[]).map(s => (
                 <button 
@@ -561,7 +559,7 @@ export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusPa
           </div>
           
           <div>
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest block mb-2">Voices</span>
+            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest block mb-2">Voix</span>
             <div className="flex bg-black/40 p-0.5 rounded-lg border border-white/5">
               {[1, 2, 3, 4].map(v => (
                 <button 
@@ -592,7 +590,7 @@ export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusPa
           <ChorusKnob label="Low Cut" value={(params.lowCut || 100) / 500} factor={500} suffix="Hz" onChange={v => handleParamChange('lowCut', Math.max(20, v * 500))} defaultValue={0.2} color="#f43f5e" />
           <ChorusKnob label="High Cut" value={(params.highCut || 12000) / 20000} factor={20} suffix="kHz" onChange={v => handleParamChange('highCut', Math.max(2000, v * 20000))} defaultValue={0.6} color="#f43f5e" />
           <div className="flex flex-col items-center justify-center">
-            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest mb-2">Mode Info</span>
+            <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest mb-2">À propos du mode</span>
             <div className="bg-black/40 px-3 py-2 rounded-lg border border-white/5 text-center">
               <span className="text-[8px] font-mono text-cyan-400">
                 {params.mode === 'TRI_CHORUS' && '3-Voice 120° Phase'}
@@ -609,7 +607,7 @@ export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusPa
       {/* Footer */}
       <div className="pt-4 border-t border-white/5 flex justify-between items-center">
         <div className="flex flex-col">
-          <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Engine</span>
+          <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">Moteur</span>
           <span className="text-[9px] font-black text-slate-400">{params.mode?.replace('_', ' ') || 'CLASSIC'}</span>
         </div>
         <div className="flex items-center space-x-2">
