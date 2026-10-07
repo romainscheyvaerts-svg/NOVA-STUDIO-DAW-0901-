@@ -120,6 +120,7 @@ import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone } from './utils/punch';
 import { editSelectionStore } from './utils/editSelection';
 import { useEditCommands } from './hooks/useEditCommands';
+import { getRegisteredPlugin, registryMenuItems } from './engine/pluginRegistry';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -133,7 +134,8 @@ const AVAILABLE_FX_MENU = [
     { id: 'CHORUS', name: 'Vocal Chorus', icon: 'fa-layer-group' },
     { id: 'FLANGER', name: 'Studio Flanger', icon: 'fa-wind' },
     { id: 'DOUBLER', name: 'Vocal Doubler', icon: 'fa-people-arrows' },
-    { id: 'DEESSER', name: 'S-Killer', icon: 'fa-scissors' }
+    { id: 'DEESSER', name: 'S-Killer', icon: 'fa-scissors' },
+    ...registryMenuItems()
 ];
 
 const createDefaultAutomation = (param: string, color: string): AutomationLane => ({
@@ -219,6 +221,7 @@ const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number =
   if (type === 'DEESSER') params = { threshold: -25, frequency: 6500, q: 1.0, reduction: 0.6, mode: 'BELL', isEnabled: true };
   if (type === 'DENOISER') params = { threshold: -45, range: -20, attack: 0.005, hold: 0.05, release: 0.15, scFreq: 1000, flip: false, isEnabled: true };
   if (type === 'VOCALSATURATOR') params = { drive: 20, mix: 0.5, tone: 0.0, eqLow: 0, eqMid: 0, eqHigh: 0, mode: 'TAPE', isEnabled: true, outputGain: 1.0 };
+  { const reg = getRegisteredPlugin(type); if (reg) { params = reg.defaultParams(); name = paramsOverride?.name || reg.name; } }
   if (type === 'MASTERSYNC') params = { detectedBpm: 120, detectedKey: 0, isMinor: false, isAnalyzing: false, analysisProgress: 0, isEnabled: true, hasResult: false };
   if (type === 'PROEQ12') {
      const defaultFreqs = [80, 150, 300, 500, 1000, 2000, 4000, 6000, 8000, 10000, 12000, 18000];

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { registryBrowserItems } from '../engine/pluginRegistry';
 import MobileContainer from './MobileContainer';
 import { PluginType, User, PluginMetadata } from '../types';
 import InstrumentCatalog from './InstrumentCatalog';
@@ -27,7 +28,9 @@ const INTERNAL_PLUGINS = [
   { id: 'DOUBLER', name: 'Vocal Doubler', category: 'Stereo', icon: 'fa-people-arrows', color: '#8b5cf6' },
   { id: 'DEESSER', name: 'S-Killer', category: 'Dynamics', icon: 'fa-scissors', color: '#ef4444' },
   { id: 'DENOISER', name: 'Denoiser X', category: 'Restoration', icon: 'fa-broom', color: '#14b8a6' },
-  { id: 'MASTERSYNC', name: 'Master Sync', category: 'Utility', icon: 'fa-sync-alt', color: '#ffffff' }
+  { id: 'MASTERSYNC', name: 'Master Sync', category: 'Utility', icon: 'fa-sync-alt', color: '#ffffff' },
+    // Effets du registre (engine/pluginRegistry.ts) : limiteur NOVA…
+    ...registryBrowserItems()
   // Instruments (samplers, drum rack) retirés : le DAW sert aux voix, pas à composer.
 ];
 

@@ -1,4 +1,5 @@
 
+import { getRegisteredPlugin, isTruePeakLimiter } from './pluginRegistry';
 import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad, AutomationPoint } from '../types';
 import { getASIOBridge, ASIOBridgeClient, ASIOConfig, AudioDevice, ASIOStats } from '../services/ASIOBridge';
 import { ASIOInput } from './ASIOInput';
@@ -1949,7 +1950,11 @@ export class AudioEngine {
       case 'MASTERSYNC': node = new MasterSyncNode(ctx); break;
       // Effet VST3 du PC via le pont local (passe-plat sans pont ou hors ligne).
       case 'VST3': node = new VSTPluginNode(ctx, plugin); break;
-      default:
+      default: {
+        // Effets déclarés dans le registre (engine/pluginRegistry.ts), ex. le limiteur NOVA.
+        const reg = getRegisteredPlugin(plugin.type);
+        if (reg) { node = reg.create(ctx, plugin); break; }
+      }
         const bypassIn = ctx.createGain();
         const bypassOut = ctx.createGain();
         bypassIn.connect(bypassOut);
@@ -2262,6 +2267,8 @@ export class AudioEngine {
     postPlugins.forEach(p => wire(p, true));
     dsp.chainIds = chainIds;
     dsp.postChainIds = postIds;
+    // Un limiteur à crête vraie sur le master remplace le limiteur de sécurité (jamais deux à la suite).
+    if (track.id === 'master') this.setSafetyLimiter(!track.plugins.some(p => p.isEnabled && isTruePeakLimiter(p.type)));
     this.recomputeTrackLatency(track.id);
 
     dsp.pluginChain.forEach((val, id) => {
@@ -2417,6 +2424,36 @@ export class AudioEngine {
 
   public getTrackPluginParameters(trackId: string): { pluginId: string, pluginName: string, params: PluginParameter[] }[] { return []; }
   public getMasterAnalyzer() { return this.masterAnalyzer; }
+
+  /**
+   * Limiteur de sécurité du master (DynamicsCompressor à -1 dB) : branché par
+   * défaut, effacé quand un limiteur NOVA à crête vraie est sur le master (V15).
+   */
+  private safetyLimiterOn = true;
+  public setSafetyLimiter(on: boolean) {
+    if (!this.masterOutput || !this.masterLimiter || !this.masterAnalyzer || on === this.safetyLimiterOn) return;
+    this.safetyLimiterOn = on;
+    try { this.masterOutput.disconnect(); } catch (e) {}
+    if (on) this.masterOutput.connect(this.masterLimiter);
+    else this.masterOutput.connect(this.masterAnalyzer);
+  }
+  public isSafetyLimiterOn() { return this.safetyLimiterOn; }
+
+  /** Niveau d'écoute du mix (A/B : morceau de référence, comparaison à niveau égal). N'affecte pas l'export. */
+  public setMixMonitorLevel(gain: number, rampSec = 0.03) {
+    if (!this.ctx || !this.masterOutput) return;
+    const g = Number.isFinite(gain) ? Math.max(0, Math.min(4, gain)) : 1;
+    const t = this.ctx.currentTime;
+    this.masterOutput.gain.cancelScheduledValues(t);
+    this.masterOutput.gain.setValueAtTime(this.masterOutput.gain.value, t);
+    this.masterOutput.gain.linearRampToValueAtTime(g, t + rampSec);
+  }
+
+  /** Contexte audio de lecture (lecteur du morceau de référence). */
+  public getAudioContext(): AudioContext | null { return this.ctx; }
+
+  /** Entrée des mesures du master (après limiteur de sécurité) : la référence y passe pour être entendue et mesurée. */
+  public getMasterMeterInput(): AudioNode | null { return this.masterAnalyzer; }
   /** Où envoyer les sons de service (décompte) : le master, pour qu'ils sortent aussi en ASIO. */
   public getMonitorBus(): AudioNode | null { return this.masterOutput || this.ctx?.destination || null; }
 
