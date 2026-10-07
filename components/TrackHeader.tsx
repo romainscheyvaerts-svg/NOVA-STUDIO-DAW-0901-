@@ -470,16 +470,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 <i className="fas fa-paper-plane"></i>
               </button>
             )}
-            {/* Les pastilles d effets ne tiennent pas quand la piste est basse :
-                ce badge indique toujours combien d effets sont actifs. */}
-            {!isRenaming && !simple && insertPlugins.length > 0 && (
-              <span
-                className="shrink-0 px-1 h-4 rounded bg-cyan-500/15 text-cyan-300 text-[9px] font-black leading-4"
-                title={insertPlugins.map(pl => pl.name).join(" → ")}
-              >
-                FX {insertPlugins.length}
-              </span>
-            )}
+            {/* G13 : le compte d'effets est sur le bouton FX ; l'ancien badge « FX 8 » en double mangeait le nom. */}
           </div>
         </div>
         
@@ -596,7 +587,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       )}
 
-      <div ref={controlsRef} className="flex items-center space-x-2 mt-1 bg-black/20 p-1.5 rounded-lg border border-white/5 relative z-10">
+      <div ref={controlsRef} className={`${canHaveSends && showSends && !simple ? 'hidden' : 'flex'} items-center space-x-2 mt-1 bg-black/20 p-1.5 rounded-lg border border-white/5 relative z-10`}>
         <div
           {...panKnob.bind}
           title={`Panoramique ${panToText(track.pan)} : glisser (Maj = fin), molette, double-clic = centre`}
@@ -657,9 +648,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       </div>
       
       {canHaveSends && showSends && !simple && (
-        <div 
-          className="absolute left-3 right-3 mt-1 p-2 bg-[#08090b] rounded-lg border border-cyan-500/30 shadow-2xl space-y-1 animate-in fade-in duration-150 z-20"
-          style={{ top: `${sendsTop}px` }}
+        // G24 : les envois prennent la place de la ligne volume / effets DANS la piste
+        // (avant, le panneau flottait par-dessus la piste suivante et cachait son volume).
+        <div data-testid={`sends-panel-${track.id}`}
+          className="relative mt-1 p-1 bg-[#08090b] rounded-lg border border-cyan-500/30 space-y-0.5 animate-in fade-in duration-150 z-10"
         >
             <HorizontalSendFader trackId={track.id} label={SEND_LABELS['send-delay'].label} color={SEND_LABELS['send-delay'].color} send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-delay', lvl)} />
             <HorizontalSendFader trackId={track.id} label={SEND_LABELS['send-verb-short'].label} color={SEND_LABELS['send-verb-short'].color} send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-short', lvl)} />
@@ -697,7 +689,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           passait sur deux lignes et débordait sur la piste suivante. */}
       {/* Piste armée : la ligne vumètre / retour prend la place des pastilles (le bouton FX reste). */}
       {/* Les effets restent visibles même en mode simple : on doit toujours voir ce qui traite la voix. */}
-      {!(track.isTrackArmed && showInputRow) && (insertPlugins.length > 0 || track.isTrackArmed) && (
+      {!(track.isTrackArmed && showInputRow) && !(canHaveSends && showSends && !simple) && (insertPlugins.length > 0 || track.isTrackArmed) && (
         <TrackInsertStrip
           leading={track.isTrackArmed ? <MonitorControl mini trackId={track.id} onExpand={() => setShowInputRow(true)} /> : undefined}
           trackId={track.id}
