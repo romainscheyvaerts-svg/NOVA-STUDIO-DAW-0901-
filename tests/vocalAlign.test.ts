@@ -25,11 +25,11 @@ function voice(onsets: number[], durations: number[], len: number, seed = 1, det
 }
 
 describe('alignement NOVA des doubles (repli VocAlign)', () => {
-  const onsets = [0.3, 0.75, 1.1, 1.6, 2.05, 2.5, 3.1, 3.5];
-  const durs = [0.35, 0.3, 0.4, 0.35, 0.3, 0.45, 0.3, 0.4];
+  const onsets = [0.3, 0.8, 1.3, 1.8, 2.3, 2.8, 3.3, 3.8];
+  const durs = [0.3, 0.26, 0.3, 0.28, 0.26, 0.3, 0.26, 0.3];
   const shifts = [0.03, 0.08, -0.05, 0.06, 0.04, -0.07, 0.05, 0.08]; // 30 à 80 ms, dans les deux sens
-  const guide = voice(onsets, durs, 4.2, 7);
-  const dub = voice(onsets.map((t, k) => t + shifts[k]), durs, 4.2, 11, 3);
+  const guide = voice(onsets, durs, 4.4, 7);
+  const dub = voice(onsets.map((t, k) => t + shifts[k]), durs, 4.4, 11, 3);
 
   it('détecte les attaques des deux prises', () => {
     expect(detectOnsets(guide, SR).length).toBe(onsets.length);

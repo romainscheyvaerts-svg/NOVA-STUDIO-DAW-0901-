@@ -91,6 +91,9 @@ export function dtwPath(g: Float32Array[], d: Float32Array[], band: number): Int
   const cost = new Float64Array(n * W).fill(INF);
   const from = new Int8Array(n * W); // 0 diag, 1 du guide seul (le double ralentit), 2 du double seul
   const wts = [1, 1.5, 0.6];
+  // Pénalité des pas non diagonaux : forte quand la voix sonne (on ne déforme pas une note),
+  // presque nulle dans les silences : c'est là que le double rattrape son décalage.
+  const loud = (i: number) => Math.min(1, Math.max(0, (g[0][i] + 0.5) / 1.5));
   const local = (i: number, j: number) => {
     let c = 0;
     for (let f = 0; f < g.length; f++) c += wts[f] * Math.abs(g[f][i] - d[f][j]);
@@ -110,9 +113,9 @@ export function dtwPath(g: Float32Array[], d: Float32Array[], band: number): Int
       const a = i > 0 && j > 0 ? idx(i - 1, j - 1) : -1;
       if (a >= 0 && cost[a] + 2 * c < best) { best = cost[a] + 2 * c; dir = 0; }
       const b = i > 0 ? idx(i - 1, j) : -1;
-      if (b >= 0 && cost[b] + c * 1.2 < best) { best = cost[b] + c * 1.2; dir = 1; }
+      if (b >= 0 && cost[b] + c * 1.2 + 0.05 + 0.6 * loud(i) < best) { best = cost[b] + c * 1.2 + 0.05 + 0.6 * loud(i); dir = 1; }
       const e = j > 0 ? idx(i, j - 1) : -1;
-      if (e >= 0 && cost[e] + c * 1.2 < best) { best = cost[e] + c * 1.2; dir = 2; }
+      if (e >= 0 && cost[e] + c * 1.2 + 0.05 + 0.6 * loud(i) < best) { best = cost[e] + c * 1.2 + 0.05 + 0.6 * loud(i); dir = 2; }
       if (best < INF) { cost[i * W + o] = best; from[i * W + o] = dir; }
     }
   }
@@ -137,7 +140,7 @@ export function dtwPath(g: Float32Array[], d: Float32Array[], band: number): Int
   return path;
 }
 
-/** Carte lissée, croissante, pente bornée [0.5, 2], en secondes. */
+/** Carte lissée, croissante, pente bornée [0.3, 3], en secondes. */
 export function smoothMap(path: Int32Array, hop: number, tightness = 1, maxShift = 0.25): Float32Array {
   const n = path.length;
   const off = new Float32Array(n);
@@ -152,7 +155,7 @@ export function smoothMap(path: Int32Array, hop: number, tightness = 1, maxShift
     buf.sort((a, b) => a - b);
     med[k] = buf[buf.length >> 1];
   }
-  const A = Math.max(1, Math.round(0.03 / hop));
+  const A = Math.max(1, Math.round(0.02 / hop));
   const sm = new Float32Array(n);
   for (let k = 0; k < n; k++) {
     let s = 0, c = 0;
@@ -162,7 +165,7 @@ export function smoothMap(path: Int32Array, hop: number, tightness = 1, maxShift
   const map = new Float32Array(n);
   for (let k = 0; k < n; k++) map[k] = k * hop + sm[k];
   for (let k = 1; k < n; k++) {
-    const lo = map[k - 1] + 0.5 * hop, hi = map[k - 1] + 2 * hop;
+    const lo = map[k - 1] + 0.3 * hop, hi = map[k - 1] + 3 * hop;
     map[k] = Math.min(hi, Math.max(lo, map[k]));
   }
   return map;

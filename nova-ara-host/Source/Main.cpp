@@ -114,6 +114,7 @@ public:
     ARA::ARAAudioReaderHostRef createAudioReaderForSource (ARA::ARAAudioSourceHostRef src, bool use64) noexcept override
     {
         auto r = std::make_unique<Reader> (Reader { HostClip::Converter::fromHostRef (src), use64 });
+        readersCreated++;
         auto ref = Conv::toHostRef (r.get());
         std::lock_guard<std::mutex> l (lock);
         readers.emplace (r.get(), std::move (r));
@@ -144,6 +145,8 @@ public:
         std::lock_guard<std::mutex> l (lock);
         readers.erase (Conv::fromHostRef (ref));
     }
+
+    std::atomic<int> readersCreated { 0 };
 
 private:
     std::mutex lock;
@@ -414,6 +417,18 @@ public:
         instance->setPlayHead (&playHead);
         playHead.sampleRate = sampleRate;
 
+        if (! (bool) req.getProperty ("ara", true))
+        {
+            // Mode sans ARA (capture) : plugin seul, entrées principale + sidechain.
+            auto out = io::obj();
+            out->setProperty ("name", description.name);
+            out->setProperty ("vendor", description.manufacturerName);
+            out->setProperty ("ara", false);
+            out->setProperty ("has_ara_extension", description.hasARAExtension);
+            out->setProperty ("input_buses", instance->getBusCount (true));
+            out->setProperty ("editor", instance->hasEditor());
+            return var (out.get());
+        }
         ARAFactoryWrapper factory;
         bool done = false;
         createARAFactoryAsync (*instance, [&] (ARAFactoryWrapper f) { factory = std::move (f); done = true; });
@@ -441,8 +456,12 @@ public:
             if (fac->analyzeableContentTypes[i] == ARA::kARAContentTypeNotes) canAnalyzeNotes = true;
 
         auto audio = std::make_unique<AudioAccess>();
+        audioAccess = audio.get();
         auto arch = std::make_unique<Archiving>();
         archiving = arch.get();
+        // Identifiant des archives écrites par ce plugin : demandé par le plugin à la restauration.
+        archiving->archiveId = fac->documentArchiveID != nullptr ? fac->documentArchiveID : "";
+        out->setProperty ("archive_id", String (archiving->archiveId));
         auto content = std::make_unique<ContentAccess>();
         contentAccess = content.get();
         documentController = ARAHostDocumentController::create (std::move (factory), "Nova Studio",
@@ -606,13 +625,14 @@ public:
         }
         out->setProperty ("clips", arr);
         out->setProperty ("can_analyze_notes", canAnalyzeNotes);
+        out->setProperty ("audio_readers", audioAccess != nullptr ? audioAccess->readersCreated.load() : 0);
         return var (out.get());
     }
 
     //==========================================================================
     var showEditor (const var& req)
     {
-        requireLoaded();
+        if (instance == nullptr) throw std::runtime_error ("Aucun plugin chargé");
         if (! instance->hasEditor()) throw std::runtime_error ("Ce plugin n'a pas de fenêtre");
         const bool offscreen = (bool) req.getProperty ("offscreen", false);
         if (editorWindow == nullptr || editorWindow->offscreen != offscreen)
@@ -624,7 +644,7 @@ public:
                                                            [] { io::event ("editor_closed"); });
             editorWindow->setContentOwned (ed, true);
         }
-        notifySelection();
+        if (documentController != nullptr) notifySelection();
         if (offscreen)
         {
             editorWindow->setTopLeftPosition (-20000, -20000);
@@ -641,6 +661,13 @@ public:
         out->setProperty ("width", editorWindow->getWidth());
         out->setProperty ("height", editorWindow->getHeight());
         return var (out.get());
+    }
+
+    var select()
+    {
+        requireLoaded();
+        notifySelection();
+        return notes();
     }
 
     var hideEditor()
@@ -740,6 +767,33 @@ public:
         {
             for (auto& k : *arr)
             {
+                if (auto* pt = k["click"].getArray(); pt != nullptr && pt->size() == 2)
+                {
+                    // Descend jusqu'à la fenêtre enfant la plus profonde sous le point (boutons MFC…).
+                    POINT p { (int) (*pt)[0], (int) (*pt)[1] };
+                    HWND hit = target;
+                    for (int depth = 0; depth < 16; ++depth)
+                    {
+                        HWND c = ChildWindowFromPointEx (hit, p, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
+                        if (c == nullptr || c == hit) break;
+                        MapWindowPoints (hit, c, &p, 1);
+                        hit = c;
+                    }
+                    const LPARAM xy = MAKELPARAM (p.x, p.y);
+                    auto* savedTarget = target;
+                    target = hit;
+                    const bool post = (bool) req.getProperty ("post", false);
+                    auto send = [&] (UINT m, WPARAM w) { if (post) PostMessageA (target, m, w, xy); else SendMessageA (target, m, w, xy); };
+                    send (WM_MOUSEACTIVATE, 0);
+                    send (WM_MOUSEMOVE, 0);
+                    MessageManager::getInstance()->runDispatchLoopUntil (40);
+                    send (WM_LBUTTONDOWN, MK_LBUTTON);
+                    MessageManager::getInstance()->runDispatchLoopUntil (60);
+                    send (WM_LBUTTONUP, 0);
+                    MessageManager::getInstance()->runDispatchLoopUntil (80);
+                    target = savedTarget;
+                    continue;
+                }
                 const int vk = (int) k["vk"];
                 BYTE saved[256], ks[256];
                 GetKeyboardState (saved);
@@ -850,6 +904,122 @@ private:
     {
         if (instance == nullptr || documentController == nullptr) throw std::runtime_error ("Aucun plugin ARA chargé");
     }
+
+public:
+    //==========================================================================
+    // Mode capture (sans ARA), comme VocAlign dans un hôte sans ARA : le double sur l'entrée
+    // principale, le guide sur l'entrée sidechain, transport en lecture. Passe 1 = capture,
+    // attente de l'alignement, passe 2 = sortie alignée.
+    var captureAlign (const var& req)
+    {
+        if (instance == nullptr) throw std::runtime_error ("Aucun plugin chargé");
+        AudioFormatManager afm;
+        afm.registerBasicFormats();
+        auto readAll = [&] (const String& path, AudioBuffer<float>& b) -> double
+        {
+            std::unique_ptr<AudioFormatReader> r (afm.createReaderFor (File (path)));
+            if (r == nullptr) throw std::runtime_error (("Audio illisible : " + path).toStdString());
+            b.setSize ((int) r->numChannels, (int) r->lengthInSamples);
+            r->read (&b, 0, (int) r->lengthInSamples, 0, true, true);
+            return r->sampleRate;
+        };
+        AudioBuffer<float> dub, guide;
+        const double sr = readAll (req["dub"].toString(), dub);
+        readAll (req["guide"].toString(), guide);
+        instance->releaseResources();
+        auto layout = instance->getBusesLayout();
+        bool sidechain = false;
+        if (instance->getBusCount (true) > 1)
+        {
+            const AudioChannelSet sets[] { AudioChannelSet::stereo(), AudioChannelSet::mono() };
+            for (auto& a : sets)
+            {
+                for (auto& b : sets)
+                {
+                    auto l2 = layout;
+                    l2.inputBuses.getReference (0) = a;
+                    l2.inputBuses.getReference (1) = b;
+                    if (instance->checkBusesLayoutSupported (l2) && instance->setBusesLayout (l2)) { sidechain = true; layout = l2; break; }
+                }
+                if (sidechain) break;
+            }
+            if (! sidechain)
+            {
+                instance->enableAllBuses();
+                layout = instance->getBusesLayout();
+                sidechain = layout.inputBuses.size() > 1 && layout.getNumChannels (true, 1) > 0;
+            }
+        }
+        const int mainIn = layout.getNumChannels (true, 0);
+        const int scIn = sidechain ? layout.getNumChannels (true, 1) : 0;
+        const int totalIn = instance->getTotalNumInputChannels();
+        const int totalOut = instance->getTotalNumOutputChannels();
+        const bool realtime = (bool) req.getProperty ("realtime", false);
+        instance->setNonRealtime (! realtime);
+        instance->prepareToPlay (sr, blockSize);
+        playHead.sampleRate = sr;
+        // Clics dans la fenêtre du plugin une fois prêt (ex. armer « Capture » du Dub).
+        if (req.hasProperty ("clicks"))
+        {
+            auto k = io::obj();
+            k->setProperty ("keys", req["clicks"]);
+            k->setProperty ("target_index", req.getProperty ("target_index", 1));
+            keys (var (k.get()));
+        }
+        const int passes = (int) req.getProperty ("passes", 2);
+        const double waitS = (double) req.getProperty ("wait_s", 3.0);
+        const int64 len = dub.getNumSamples();
+        AudioBuffer<float> out (jmax (1, jmin (2, totalOut)), (int) len);
+        AudioBuffer<float> block (jmax (totalIn, totalOut, 2), blockSize);
+        MidiBuffer midi;
+        for (int pass = 0; pass < passes; ++pass)
+        {
+            playHead.playing = true;
+            for (int64 pos = 0; pos < len; pos += blockSize)
+            {
+                const int n = (int) jmin ((int64) blockSize, len - pos);
+                block.setSize (block.getNumChannels(), n, false, false, true);
+                block.clear();
+                for (int ch = 0; ch < mainIn; ++ch)
+                    block.copyFrom (ch, 0, dub, jmin (ch, dub.getNumChannels() - 1), (int) pos, n);
+                for (int ch = 0; ch < scIn; ++ch)
+                    if (pos < guide.getNumSamples())
+                        block.copyFrom (mainIn + ch, 0, guide, jmin (ch, guide.getNumChannels() - 1), (int) pos, (int) jmin ((int64) n, guide.getNumSamples() - pos));
+                playHead.timeInSamples = pos;
+                instance->processBlock (block, midi);
+                if (pass == passes - 1)
+                    for (int ch = 0; ch < out.getNumChannels(); ++ch)
+                        out.copyFrom (ch, (int) pos, block, ch, 0, n);
+                if (realtime) Thread::sleep ((int) (1000.0 * n / sr));
+            }
+            playHead.playing = false;
+            // Quelques blocs à l'arrêt, puis le temps que le plugin aligne (fil de fond du plugin).
+            for (int i = 0; i < 8; ++i) { block.clear(); instance->processBlock (block, midi); }
+            if (pass < passes - 1) MessageManager::getInstance()->runDispatchLoopUntil ((int) (waitS * 1000));
+        }
+        instance->releaseResources();
+        File f (req["out"].toString());
+        f.deleteFile();
+        WavAudioFormat wav;
+        std::unique_ptr<OutputStream> os (f.createOutputStream().release());
+        auto opts = AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (out.getNumChannels()).withBitsPerSample (32)
+                        .withSampleFormat (AudioFormatWriterOptions::SampleFormat::floatingPoint);
+        auto writer = wav.createWriterFor (os, opts);
+        if (writer == nullptr) throw std::runtime_error ("Encodeur WAV indisponible");
+        writer->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
+        writer.reset();
+        auto o = io::obj();
+        o->setProperty ("path", f.getFullPathName());
+        o->setProperty ("sidechain", sidechain);
+        o->setProperty ("main_in", mainIn);
+        o->setProperty ("sidechain_in", scIn);
+        o->setProperty ("layout", layout.getMainInputChannelSet().getDescription() + " / bus 2 : "
+                                    + (layout.inputBuses.size() > 1 ? layout.inputBuses[1].getDescription() : String ("aucun")));
+        o->setProperty ("peak", out.getMagnitude (0, out.getNumSamples()));
+        return var (o.get());
+    }
+
+private:
 
     static String contentTypeName (ARA::ARAContentType t)
     {
@@ -1179,6 +1349,7 @@ private:
     ARAHostModel::PlaybackRendererInterface playbackRenderer;
     ARAHostModel::EditorRendererInterface editorRenderer;
     Archiving* archiving = nullptr;
+    AudioAccess* audioAccess = nullptr;
     ContentAccess* contentAccess = nullptr;
     std::unique_ptr<ARAHostModel::MusicalContext> musicalContext;
     std::vector<std::unique_ptr<HostTrack>> tracks;
@@ -1291,6 +1462,8 @@ private:
             else if (cmd == "show_editor") replyOk (id, session->showEditor (req));
             else if (cmd == "hide_editor") replyOk (id, session->hideEditor());
             else if (cmd == "snapshot") replyOk (id, session->snapshot (req));
+            else if (cmd == "capture_align") replyOk (id, session->captureAlign (req));
+            else if (cmd == "select") replyOk (id, session->select());
             else if (cmd == "keys") replyOk (id, session->keys (req));
             else if (cmd == "render") replyOk (id, session->render (req));
             else if (cmd == "archive") replyOk (id, session->archive());
