@@ -8,7 +8,7 @@ import InputMeter from './InputMeter';
  * couper / rallumer le retour. Avec le vumètre d'entrée et la latence mesurée.
  * `compact` (en-tête de piste sur PC) : tout tient sur une ligne.
  */
-const MonitorControl: React.FC<{ compact?: boolean; trackId?: string }> = ({ compact, trackId }) => {
+const MonitorControl: React.FC<{ compact?: boolean; mini?: boolean; trackId?: string; onExpand?: () => void }> = ({ compact, mini, trackId, onExpand }) => {
   const [level, setLevel] = useState(() => audioEngine.getMonitorLevel());
   const [on, setOn] = useState(() => audioEngine.isInputMonitoring());
   const [lat, setLat] = useState<{ ms: number; mode: string } | null>(() => {
@@ -55,6 +55,24 @@ const MonitorControl: React.FC<{ compact?: boolean; trackId?: string }> = ({ com
       className={`${compact ? 'w-14' : 'flex-1'} min-w-0 accent-red-500 disabled:opacity-30`}
     />
   );
+
+  // Mini (piste armée, devant ses effets) : vumètre + retour casque + accès aux réglages.
+  if (mini) {
+    return (
+      <div className="flex shrink-0 items-center gap-1" onClick={stop} onMouseDown={stop} onTouchStart={stop} data-nova-target="monitor-level">
+        <div className="w-10 min-w-0">{trackId && <InputMeter trackId={trackId} />}</div>
+        <button type="button" onClick={toggle} aria-pressed={on}
+          aria-label={on ? 'Couper le retour casque' : 'Activer le retour casque'}
+          title={on ? 'Retour de ta voix dans le casque : actif (clic pour couper)' : "Retour casque coupé (clic pour l'activer, avec un casque seulement)"}
+          className={`shrink-0 h-5 w-6 rounded text-[11px] ${on ? 'bg-red-500 text-white' : 'bg-white/10 text-slate-500'}`}>🎧</button>
+        {onExpand && (
+          <button type="button" onClick={onExpand} aria-label="Réglages d'entrée (volume du retour, latence)"
+            title="Réglages d'entrée : volume du retour casque, latence"
+            className="shrink-0 h-5 w-5 rounded bg-white/5 text-[9px] text-slate-400 hover:text-white"><i className="fas fa-cog" /></button>
+        )}
+      </div>
+    );
+  }
 
   if (compact) {
     return (

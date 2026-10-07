@@ -49,6 +49,26 @@ with sync_playwright() as p:
                     byp.first.click(); pg.wait_for_timeout(300)
             r["clic_ouvre"] = bool(re.search(r"Autotune|Compresseur|Égaliseur|De-esser|Saturation", body(pg)))
             pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
+        # Piste REC (armée) : ses effets doivent être visibles ; Saturation ne doit pas planter.
+        rec = pg.locator("[data-testid='inserts-rec'] button[aria-label^='Ouvrir']")
+        r["rec_pastilles"] = [rec.nth(i).inner_text().strip() for i in range(rec.count())]
+        sat = pg.locator(".fx-slot button[aria-label='Ouvrir VOCALSATURATOR'], .fx-slot button[aria-label^='Ouvrir Satur']")
+        tous = pg.locator(".fx-slot button[aria-label^='Ouvrir']")
+        cible = None
+        for i in range(tous.count()):
+            if "Saturation" in tous.nth(i).inner_text():
+                cible = tous.nth(i); break
+        if cible is None:
+            plus2 = pg.locator("[data-testid^='inserts-plus-']")
+            if plus2.count():
+                plus2.first.click(); pg.wait_for_timeout(400)
+                m = pg.locator("div.fixed.z-\[600\] button", has_text="Saturation")
+                if m.count(): m.first.click(); pg.wait_for_timeout(1500)
+        else:
+            cible.click(); pg.wait_for_timeout(1500)
+        r["saturation_ok"] = "Nova a rencontré un problème" not in body(pg)
+        shot(pg, f"inserts_{mode}_saturation")
+        pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
         if mode == "avance":
             for label in ("Console", "Mixage", "Mixer", "Mix"):
                 t = pg.get_by_role("button", name=re.compile(f"^{label}$", re.I))

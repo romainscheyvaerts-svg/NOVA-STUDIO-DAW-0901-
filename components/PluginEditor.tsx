@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PluginInstance, Track } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { AutoTuneUI } from '../plugins/AutoTunePlugin';
@@ -40,6 +40,12 @@ interface PluginEditorProps {
 }
 
 const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, onUpdateParams, isMobile, track, onUpdateTrack, onToggleFreeze, onToggleBypass, onOpenPlugin }) => {
+  // Rappel STABLE vers le projet : App en recrée un à chaque rendu ; les effets qui
+  // remontent leurs réglages dans un useEffect([params, onParamsChange]) bouclaient
+  // à l'infini (Saturation : « Maximum update depth exceeded », NOVA planté).
+  const updateRef = useRef(onUpdateParams);
+  updateRef.current = onUpdateParams;
+  const stableUpdateParams = useCallback((p: Record<string, any>) => updateRef.current(p), []);
   // État à jour de l'effet (actif / bypass) et voisins dans la chaîne de la piste.
   const live = track?.plugins.find(p => p.id === plugin.id) || plugin;
   const chain = (track?.plugins || []).filter(p => p.type !== 'MELODIC_SAMPLER' && p.type !== 'DRUM_SAMPLER' && p.type !== 'SAMPLER');
@@ -218,19 +224,19 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
 
   const renderPluginUI = () => {
     switch(plugin.type) {
-      case 'AUTOTUNE': return <><AutotuneEngineNote pluginId={plugin.id} /><AutoTuneUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} /></>;
-      case 'REVERB': return <ProfessionalReverbUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
-      case 'COMPRESSOR': return <VocalCompressorUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
-      case 'DELAY': return <SyncDelayUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
-      case 'CHORUS': return <VocalChorusUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
-      case 'FLANGER': return <StudioFlangerUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
-      case 'DOUBLER': return <VocalDoublerUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
-      case 'STEREOSPREADER': return <StereoSpreaderUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
-      case 'DEESSER': return <VocalDeEsserUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
-      case 'DENOISER': return <VocalDenoiserUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
-      case 'PROEQ12': return <ProEQ12UI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
-      case 'VOCALSATURATOR': return <VocalSaturatorUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
-      case 'MASTERSYNC': return <MasterSyncUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={onUpdateParams} />;
+      case 'AUTOTUNE': return <><AutotuneEngineNote pluginId={plugin.id} /><AutoTuneUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} /></>;
+      case 'REVERB': return <ProfessionalReverbUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'COMPRESSOR': return <VocalCompressorUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'DELAY': return <SyncDelayUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'CHORUS': return <VocalChorusUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'FLANGER': return <StudioFlangerUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'DOUBLER': return <VocalDoublerUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'STEREOSPREADER': return <StereoSpreaderUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'DEESSER': return <VocalDeEsserUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'DENOISER': return <VocalDenoiserUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'PROEQ12': return <ProEQ12UI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'VOCALSATURATOR': return <VocalSaturatorUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
+      case 'MASTERSYNC': return <MasterSyncUI node={nodeInstance} initialParams={plugin.params as any} onParamsChange={stableUpdateParams} />;
       default: return <div className="p-20 text-white">Plugin UI Not Found</div>;
     }
   };

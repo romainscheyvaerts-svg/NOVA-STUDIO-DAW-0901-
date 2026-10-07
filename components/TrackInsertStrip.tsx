@@ -16,6 +16,8 @@ export interface TrackInsertStripProps {
   onRemove: (e: React.MouseEvent, id: string) => void;
   onDragStart: (e: React.DragEvent, id: string) => void;
   onShowAll: (e: React.MouseEvent) => void;
+  /** Avant les effets (piste armée : vumètre + retour casque). */
+  leading?: React.ReactNode;
 }
 
 const Chip: React.FC<{ p: PluginInstance; baked: boolean } & Omit<TrackInsertStripProps, 'trackId' | 'plugins' | 'isBaked' | 'onShowAll'>> = ({ p, baked, onOpen, onToggle, onRemove, onDragStart }) => {
@@ -79,6 +81,7 @@ const TrackInsertStrip: React.FC<TrackInsertStripProps> = (props) => {
 
   return (
     <div className="mt-1 flex items-center gap-1 min-h-0 shrink-0">
+      {props.leading}
       <div ref={box} className="flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden no-scrollbar" data-testid={`inserts-${trackId}`}>
         {plugins.map(p => <Chip key={p.id} p={p} baked={isBaked(p)} {...props} />)}
       </div>

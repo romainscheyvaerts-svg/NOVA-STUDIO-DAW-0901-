@@ -388,6 +388,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const inst = track.vstInstrument;
   const instStatus = useInstrumentStatus(track.id);
   const freezeStale = !inst && isFreezeStale(track);
+  // Piste armée : ligne d'entrée complète (⚙) au lieu des effets.
+  const [showInputRow, setShowInputRow] = useState(false);
 
   return (
     <div 
@@ -577,8 +579,16 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       
       {/* Autotune du PC : « Auto-Tune Pro · F# mineur » (ou l'autotune de NOVA en repli). */}
       {/* Piste armée : la ligne des effets laisse place au retour casque ; l'autotune reste visible ici. */}
-      {track.isTrackArmed && <AutotuneBadge track={track} onOpen={(e) => { const at = track.plugins.find(x => x.type === 'AUTOTUNE'); if (at) handleFXClick(e, at); }} />}
-      {track.isTrackArmed && <div className="mt-1 relative z-10"><MonitorControl compact trackId={track.id} /></div>}
+      {track.isTrackArmed && showInputRow && <AutotuneBadge track={track} onOpen={(e) => { const at = track.plugins.find(x => x.type === 'AUTOTUNE'); if (at) handleFXClick(e, at); }} />}
+      {/* Piste armée : réglages d'entrée complets sur demande (⚙), sinon ses effets restent visibles. */}
+      {track.isTrackArmed && showInputRow && (
+        <div className="mt-1 relative z-10 flex items-center gap-1">
+          <div className="min-w-0 flex-1"><MonitorControl compact trackId={track.id} /></div>
+          <button type="button" onClick={(e) => { e.stopPropagation(); setShowInputRow(false); }}
+            title="Revenir aux effets de la piste" aria-label="Revenir aux effets de la piste"
+            className="shrink-0 h-5 rounded bg-cyan-500/20 px-1.5 text-[10px] font-bold text-cyan-200">FX</button>
+        </div>
+      )}
 
       <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-1.5 rounded-lg border border-white/5 relative z-10">
         <div
@@ -680,8 +690,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           passait sur deux lignes et débordait sur la piste suivante. */}
       {/* Piste armée : la ligne vumètre / retour prend la place des pastilles (le bouton FX reste). */}
       {/* Les effets restent visibles même en mode simple : on doit toujours voir ce qui traite la voix. */}
-      {!track.isTrackArmed && insertPlugins.length > 0 && (
+      {!(track.isTrackArmed && showInputRow) && (insertPlugins.length > 0 || track.isTrackArmed) && (
         <TrackInsertStrip
+          leading={track.isTrackArmed ? <MonitorControl mini trackId={track.id} onExpand={() => setShowInputRow(true)} /> : undefined}
           trackId={track.id}
           plugins={insertPlugins}
           isBaked={(p) => isPluginBaked(track, track.plugins.indexOf(p))}
