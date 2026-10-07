@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import MobileContainer from './MobileContainer';
+import LiveRecordingClip from './LiveRecordingClip';
 import { Track, Clip, TrackType, TrackSend } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore, usePlayheadTime } from '../utils/playheadStore';
@@ -57,6 +58,9 @@ interface MobileArrangementPageProps {
   onUpdateSend?: (trackId: string, sendId: string, level: number, isEnabled: boolean) => void;
   onRequestAddPlugin?: (trackId: string, x: number, y: number) => void;
   sendTracks?: Track[]; // Send tracks for the sends panel
+  /** Prise en cours (G26) : la région rouge grandit pendant l'enregistrement. */
+  isRecording?: boolean;
+  recStartTime?: number | null;
 }
 
 type EditTool = 'SELECT' | 'TRIM' | 'SPLIT' | 'ERASE' | 'FADE' | 'DUPLICATE';
@@ -109,7 +113,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   onOpenSends,
   onUpdateSend,
   onRequestAddPlugin,
-  sendTracks
+  sendTracks,
+  isRecording,
+  recStartTime
 }) => {
   const timelineRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -672,6 +678,14 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   <span title={track.name} className="text-[11px] leading-4 font-semibold text-white/90 truncate flex-1">
                     {track.name}
                   </span>
+                  {/* G26 : en mode simple aussi, on voit que la voix a des effets. */}
+                  {track.plugins.length > 0 && (
+                    <span className="shrink-0 text-[9px] leading-4 text-cyan-300" role="img"
+                      aria-label={`${track.plugins.length} effets sur ${track.name}`}
+                      title={`${track.plugins.length} effets : ${track.plugins.map(p => p.name || p.type).join(', ')}`}>
+                      <i className="fas fa-wand-magic-sparkles text-[8px] mr-0.5" aria-hidden="true"></i>{track.plugins.length}
+                    </span>
+                  )}
                 </div>
 
                 {/* Volume (zone de 40 px de haut) + FX (zone tactile 40 px) */}
@@ -869,6 +883,12 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   style={{ height: TRACK_HEIGHT }}
                   onClick={() => onSelectTrack(track.id)}
                 >
+                  {/* Prise en cours (G26) : dessinée en direct sur la piste armée. */}
+                  {isRecording && recStartTime != null && track.isTrackArmed && (
+                    <div className="absolute pointer-events-none z-10" style={{ left: timeToX(recStartTime), top: 2, right: 0, height: TRACK_HEIGHT - 4 }}>
+                      <LiveRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={pixelsPerSecond} height={TRACK_HEIGHT - 4} />
+                    </div>
+                  )}
                   {/* Clips */}
                   {track.clips.map(clip => {
                     const clipX = timeToX(clip.start);

@@ -114,6 +114,11 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
 
   // Étapes de session que l'artiste a choisi de passer / déjà faites.
   const [sautBacks, setSautBacks] = useState(false);
+  // Bloc « Étape n/6 » repliable (G26) : sur téléphone il prenait la moitié de l'écran.
+  const [stepCollapsed, setStepCollapsed] = useState<boolean>(() => {
+    try { const v = localStorage.getItem('nova_step_collapsed'); return v === null ? !!isMobile : v === '1'; } catch { return !!isMobile; }
+  });
+  const toggleStep = () => setStepCollapsed(c => { const n = !c; try { localStorage.setItem('nova_step_collapsed', n ? '1' : '0'); } catch { /* */ } return n; });
   const [mixEcoute, setMixEcoute] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -360,15 +365,19 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-bold text-cyan-400/80 tracking-wide">ÉTAPE {etape.numero} / 6</span>
+                  <button type="button" onClick={toggleStep} aria-expanded={!stepCollapsed} data-testid="nova-step-toggle"
+                    className="ml-auto text-[10px] font-bold text-slate-400 hover:text-white">
+                    {stepCollapsed ? 'Afficher' : 'Réduire'} <i className={`fas ${stepCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'} text-[8px]`}></i>
+                  </button>
                 </div>
                 <h4 className="text-[14px] font-bold text-white mt-0.5">{etape.titre}</h4>
-                <p className="text-[12px] leading-relaxed text-slate-300/90 mt-1">{etape.detail}</p>
-                {etape.mix && (
+                {!stepCollapsed && <p className="text-[12px] leading-relaxed text-slate-300/90 mt-1">{etape.detail}</p>}
+                {!stepCollapsed && etape.mix && (
                   <button type="button" onClick={pushMixGuide} className="mt-2 h-9 px-3 rounded-lg bg-cyan-500 text-black text-[11px] font-black">
                     Voir les styles
                   </button>
                 )}
-                {etape.boutons && (
+                {!stepCollapsed && etape.boutons && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     {etape.boutons.map((b, i) => (
                       <button

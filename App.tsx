@@ -5765,6 +5765,8 @@ function Studio() {
               {activeMobileTab === 'ARRANGEMENT' && (
                 <MobileArrangementPage
                   tracks={state.tracks}
+                  isRecording={state.isRecording}
+                  recStartTime={state.recStartTime}
                   currentTime={state.currentTime}
                   isPlaying={state.isPlaying}
                   bpm={state.bpm}

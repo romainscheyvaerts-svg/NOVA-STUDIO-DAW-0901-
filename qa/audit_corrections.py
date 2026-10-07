@@ -427,7 +427,31 @@ def g16b(b, R):
     ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25, "mob": mob, "g18": g18, "f4": f4, "g16b": g16b}
+def g26(b, R):
+    ctx, pg = mk(b, "tel", "simple", "g26")
+    open_studio(pg, R, vp="tel")
+    mx = pg.get_by_role("button", name=re.compile("Mix auto")).locator("visible=true")
+    if mx.count():
+        mx.first.click(); pg.wait_for_timeout(800)
+        tr = pg.get_by_role("button", name="Trap autotune").locator("visible=true")
+        if tr.count():
+            tr.first.click(); pg.wait_for_timeout(1200)
+        pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
+    S(pg, "g26", "01_badge_effets")
+    pg.keyboard.press("Home"); pg.keyboard.press("r"); pg.wait_for_timeout(3500)
+    S(pg, "g26", "02_prise_en_direct")
+    R["region_live"] = pg.get_by_text("Enregistrement…").count() > 0
+    pg.keyboard.press("r"); pg.wait_for_timeout(4000)
+    nav = pg.get_by_text("Nova", exact=True).locator("visible=true")
+    if nav.count():
+        nav.last.click(); pg.wait_for_timeout(1200)
+    S(pg, "g26", "03_nova_etape_reduite")
+    R["etape_reduite"] = pg.locator("[data-testid=nova-step-toggle]").count() > 0
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25, "mob": mob, "g18": g18, "f4": f4, "g16b": g16b, "g26": g26}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]
