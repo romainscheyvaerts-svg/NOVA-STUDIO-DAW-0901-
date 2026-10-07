@@ -1,330 +1,379 @@
-
-import { AutomationPoint, AutomationCurveType } from '../types';
+import type { AutomationPoint, Track } from '../types';
+import {
+  AUTOMATCH_SEC, AutomationMode, ParamSpec, Sample, WriteKind,
+  automationModeOf, commitSegment, findLane, isFaderParam, isWriteMode,
+  paramSpec, parsePluginParam, pluginParamName, sendParamName, sortedPoints,
+  staticParamValue, trimValue, valueAtPoints, widenSpec,
+} from '../utils/automationWrite';
 
 /**
- * AUTOMATION MANAGER (Observer Pattern)
- * -------------------------------------
- * Orchestre l'enregistrement et la lecture des automations pour:
- * 1. WebAudio (Natif) -> Haute fréquence (Sample accurate-ish)
- * 2. VST (Bridge Python) -> Basse fréquence (Throttled ~30ms)
- * 
- * INSPIRED BY: Reaper, Ableton Live, Logic Pro automation systems
- * - Support for multiple curve types (LINEAR, EXPONENTIAL, S_CURVE, etc.)
- * - Touch/Latch/Write modes
- * - Automation snapshots
+ * ÉCRITURE D'AUTOMATION (modes Touch / Latch / Write / Trim façon Pro Tools)
+ * -------------------------------------------------------------------------
+ * Ce module était du code mort (un registre de potards jamais relié aux voies
+ * des pistes). Il pilote maintenant l'écriture réelle :
+ *
+ * - les faders, potards et effets signalent `touch` / `change` / `release` ;
+ * - pendant la lecture, sur une piste en Touch, Latch, Write ou Trim, la valeur
+ *   entendue est échantillonnée, imposée au moteur (`setOverride`) puis, à la
+ *   fin du passage, fusionnée dans `track.automationLanes` (points simplifiés) ;
+ * - une seule étape d'annulation par passe (`beginUndoStep`).
+ *
+ * Le module ne dépend ni de React ni du moteur audio : l'hôte (hooks/
+ * useAutomationWrite) les branche. Les tests l'utilisent avec un hôte factice.
  */
 
-type ParamCallback = (value: number) => void;
+export { interpolateCurve } from '../utils/automationWrite';
+export type { AutomationMode } from '../utils/automationWrite';
 
-interface RegisteredParam {
-  id: string;
-  targetId: string; // Track ID ou Plugin ID
-  defaultValue: number;
-  callback: ParamCallback;
-  isBridged: boolean; // True si c'est un VST (nécessite throttling)
-  lastUpdate: number; // Pour le throttling
+export interface AutomationCommit {
+  trackId: string;
+  param: string;
+  points: AutomationPoint[];
+  spec: ParamSpec;
+  /** Valeur du fader à la fin du passage (il reste là où on l'entend). */
+  staticValue: number | null;
 }
 
-export type AutomationMode = 'OFF' | 'READ' | 'WRITE' | 'TOUCH' | 'LATCH';
+export interface AutomationHost {
+  getTracks(): Track[];
+  /** Temps du projet (s). */
+  getTime(): number;
+  isPlaying(): boolean;
+  /** Valeur imposée pendant l'écriture ; null rend la main à l'automation (nouveaux points fournis). */
+  setOverride(trackId: string, param: string, value: number | null, points?: AutomationPoint[]): void;
+  /** Avant la 1re écriture d'une passe : une seule étape d'annulation par passe. */
+  beginUndoStep(): void;
+  commit(c: AutomationCommit): void;
+  /** Après une passe Write, la piste repasse en Touch (préférence par défaut de Pro Tools). */
+  setTrackMode(trackId: string, mode: AutomationMode): void;
+  /** Horloge murale (ms), pour relâcher un réglage fait à la molette. */
+  wallClock?(): number;
+}
 
-/**
- * Curve interpolation functions (inspired by Ableton/Logic)
- */
-export const interpolateCurve = (
-  v1: number, 
-  v2: number, 
-  t: number, 
-  curveType: AutomationCurveType = 'LINEAR'
-): number => {
-  switch (curveType) {
-    case 'LINEAR':
-      return v1 + (v2 - v1) * t;
-      
-    case 'EXPONENTIAL':
-      // Fast start, slow end
-      return v1 + (v2 - v1) * (1 - Math.pow(1 - t, 3));
-      
-    case 'LOGARITHMIC':
-      // Slow start, fast end
-      return v1 + (v2 - v1) * Math.pow(t, 3);
-      
-    case 'S_CURVE':
-      // Smooth S-curve (slow-fast-slow)
-      const s = t * t * (3 - 2 * t); // Hermite interpolation
-      return v1 + (v2 - v1) * s;
-      
-    case 'HOLD':
-      // Step/hold - no interpolation
-      return t < 1 ? v1 : v2;
-      
-    default:
-      return v1 + (v2 - v1) * t;
+interface ActiveWrite {
+  key: string;
+  trackId: string;
+  param: string;
+  kind: WriteKind;
+  start: number;
+  lastTime: number;
+  lastSampleTime: number;
+  samples: Sample[];
+  /** Position du fader. */
+  ctrl: number;
+  touched: boolean;
+  /** Touché par un changement de valeur (molette, groupe, effet) plutôt que par un appui. */
+  implicit: boolean;
+  lastChangeWall: number;
+  trimRef: number;
+  orig: AutomationPoint[];
+  baseline: number;
+  spec: ParamSpec;
+}
+
+/** Réglage à la molette / au clavier : relâché après ce délai sans mouvement. */
+const IMPLICIT_RELEASE_MS = 700;
+/** Échantillons plus rapprochés que ça : on garde le dernier (≈ une demi-image). */
+const SAMPLE_INTERVAL = 0.008;
+
+export const automationKey = (trackId: string, param: string) => `${trackId}|${param}`;
+
+export class AutomationRecorder {
+  private host: AutomationHost | null = null;
+  private active = new Map<string, ActiveWrite>();
+  private undoTaken = false;
+  private writePassTracks = new Set<string>();
+  private pointerDown = false;
+  /** Points déjà écrits mais pas encore revenus de l'état React (passes rapprochées). */
+  private written = new Map<string, { points: AutomationPoint[]; staleRef: AutomationPoint[] | undefined }>();
+  private counter = 0;
+  private listeners = new Set<() => void>();
+  private version = 0;
+
+  configure(host: AutomationHost | null) { this.host = host; }
+
+  /** Abonnement de l'interface : un passage commence ou se termine. */
+  subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
+  getVersion() { return this.version; }
+  private emit() { this.version++; this.listeners.forEach(fn => { try { fn(); } catch { /* */ } }); }
+
+  // --- Lecture de l'état -------------------------------------------------------------
+
+  private track(trackId: string): Track | undefined {
+    return this.host?.getTracks().find(t => t.id === trackId);
   }
-};
 
-class AutomationManager {
-  private static instance: AutomationManager;
-  
-  // Registre des paramètres pilotables
-  private registry: Map<string, RegisteredParam> = new Map();
-  
-  // Données d'automation (Courbes)
-  // Map<ParamID, Points[]>
-  private automationData: Map<string, AutomationPoint[]> = new Map();
-  
-  // État global
-  private mode: AutomationMode = 'READ';
-  private recordingParams: Set<string> = new Set(); // Paramètres en cours de modification (Touch)
-  
-  // Throttling configuration
-  private readonly VST_THROTTLE_MS = 30;
-
-  private constructor() {
-    this.loop = this.loop.bind(this);
-    // Démarrer la boucle de lecture (RAF)
-    if (typeof window !== 'undefined') {
-      requestAnimationFrame(this.loop);
-    }
+  private wall(): number {
+    return this.host?.wallClock ? this.host.wallClock() : Date.now();
   }
 
-  public static getInstance(): AutomationManager {
-    if (!AutomationManager.instance) {
-      AutomationManager.instance = new AutomationManager();
-    }
-    return AutomationManager.instance;
+  private lanePoints(track: Track, param: string): AutomationPoint[] {
+    const host = findLane(track, param)?.points;
+    const w = this.written.get(automationKey(track.id, param));
+    if (w && w.staleRef === host) return w.points;
+    if (w) this.written.delete(automationKey(track.id, param));
+    return sortedPoints(host);
+  }
+
+  /** Valeur entendue d'un paramètre à un instant (automation rejouée, sinon réglage). */
+  displayedValue(track: Track, param: string, time: number): number {
+    const stat = staticParamValue(track, param) ?? (param === 'volume' ? 1 : 0);
+    if (automationModeOf(track) === 'off') return stat;
+    return valueAtPoints(this.lanePoints(track, param), time, stat);
+  }
+
+  isCapturing(trackId: string, param?: string): boolean {
+    if (param) return this.active.has(automationKey(trackId, param));
+    for (const a of this.active.values()) if (a.trackId === trackId) return true;
+    return false;
+  }
+
+  /** Valeur imposée en ce moment (null si ce paramètre n'est pas en écriture). */
+  activeOutput(trackId: string, param: string): number | null {
+    const a = this.active.get(automationKey(trackId, param));
+    return a ? this.output(a, a.lastTime) : null;
+  }
+
+  activeKeys(): { trackId: string; param: string }[] {
+    return [...this.active.values()].map(a => ({ trackId: a.trackId, param: a.param }));
+  }
+
+  // --- Gestes ---------------------------------------------------------------------
+
+  setPointerDown(down: boolean) { this.pointerDown = down; }
+
+  /** Appui sur un fader / potard. */
+  touch(trackId: string, param: string) {
+    const ctx = this.writable(trackId, param);
+    if (!ctx) return;
+    const a = this.active.get(automationKey(trackId, param));
+    if (a) { a.touched = true; a.implicit = false; a.lastChangeWall = this.wall(); return; }
+    this.begin(ctx.track, param, ctx.kind, ctx.now, true, false);
   }
 
   /**
-   * PILIER 1 : LE REGISTRE
-   * Chaque bouton s'enregistre ici au montage.
+   * Nouvelle valeur d'un fader. Renvoie true si elle est écrite (l'appelant
+   * met alors l'état à jour sans créer d'étape d'annulation).
    */
-  public register(
-    paramId: string, 
-    targetId: string, 
-    callback: ParamCallback, 
-    defaultValue: number = 0,
-    isBridged: boolean = false
-  ) {
-    this.registry.set(paramId, {
-      id: paramId,
-      targetId,
-      callback,
-      defaultValue,
-      isBridged,
-      lastUpdate: 0
-    });
+  change(trackId: string, param: string, value: number): boolean {
+    if (!Number.isFinite(value)) return false;
+    const ctx = this.writable(trackId, param);
+    if (!ctx) return false;
+    let a = this.active.get(automationKey(trackId, param));
+    if (!a) a = this.begin(ctx.track, param, ctx.kind, ctx.now, true, true);
+    if (!a.touched) { a.touched = true; a.implicit = !this.pointerDown; }
+    a.ctrl = value;
+    a.lastChangeWall = this.wall();
+    if (a.kind !== 'trim' && parsePluginParam(param)) a.spec = widenSpec(a.spec, [value]);
+    this.sample(a, Math.max(ctx.now, a.lastTime), true);
+    return true;
   }
 
-  public unregister(paramId: string) {
-    this.registry.delete(paramId);
-  }
-
-  /**
-   * PILIER 2 : ENREGISTREMENT (WRITE)
-   * Appelé par l'UI quand un bouton bouge.
-   */
-  public setValue(paramId: string, value: number, time: number) {
-    const param = this.registry.get(paramId);
-    if (!param) return;
-
-    // 1. Application immédiate (Feedback visuel + Audio)
-    this.applyValue(param, value);
-
-    // 2. Logique d'enregistrement
-    if (this.mode === 'WRITE' && this.recordingParams.has(paramId)) {
-      this.addPoint(paramId, time, value);
-    }
-  }
-
-  // Appelé quand l'utilisateur clique/touche le bouton
-  public touch(paramId: string) {
-    this.recordingParams.add(paramId);
-    // En mode LATCH, on pourrait effacer la courbe future ici
-  }
-
-  // Appelé quand l'utilisateur relâche
-  public release(paramId: string) {
-    this.recordingParams.delete(paramId);
-  }
-
-  private addPoint(paramId: string, time: number, value: number) {
-    let lane = this.automationData.get(paramId);
-    if (!lane) {
-      lane = [];
-      this.automationData.set(paramId, lane);
-    }
-
-    // Optimisation simple: remplacer le dernier point si très proche dans le temps
-    const lastPoint = lane[lane.length - 1];
-    if (lastPoint && Math.abs(lastPoint.time - time) < 0.05) {
-      lastPoint.value = value;
-      lastPoint.time = time;
+  /** Relâchement : Touch et Trim reviennent à la courbe ; Latch et Write gardent la valeur. */
+  release(trackId: string, param: string) {
+    const a = this.active.get(automationKey(trackId, param));
+    if (!a) return;
+    if (a.kind === 'touch' || a.kind === 'trim') {
+      const now = this.host?.isPlaying() ? this.host.getTime() : a.lastTime;
+      if (now >= a.lastTime - 0.05) this.sample(a, Math.max(now, a.lastTime), false);
+      this.finish(a, Math.max(a.lastTime, a.start));
     } else {
-      lane.push({ id: `pt-${Date.now()}`, time, value });
+      a.touched = false;
+      a.implicit = false;
     }
-    
-    // Trier par temps pour lecture rapide (même si l'ajout est séquentiel, sécurité)
-    // lane.sort((a, b) => a.time - b.time); 
   }
 
-  /**
-   * PILIER 3 : LECTURE (READ)
-   * Boucle principale
-   */
-  private loop() {
-    // Si on a accès au temps global du DAW (via window.DAW_CONTROL ou autre)
-    const currentTime = window.DAW_CONTROL ? window.DAW_CONTROL.getState().currentTime : 0;
-    const isPlaying = window.DAW_CONTROL ? window.DAW_CONTROL.getState().isPlaying : false;
+  /** Fin d'un appui quelque part dans la page : relâche les réglages « implicites ». */
+  releaseImplicit() {
+    for (const a of [...this.active.values()]) if (a.touched && a.implicit) this.release(a.trackId, a.param);
+  }
 
-    if (this.mode === 'READ' && isPlaying) {
-      this.registry.forEach((param, id) => {
-        // Ne pas lire l'automation si l'utilisateur est en train de toucher le bouton (Override)
-        if (this.recordingParams.has(id)) return;
+  // --- Transport ---------------------------------------------------------------------
 
-        const points = this.automationData.get(id);
-        if (points && points.length > 0) {
-          const value = this.interpolate(points, currentTime);
-          if (value !== null) {
-            this.applyValue(param, value);
-            // TODO: Mettre à jour l'UI visuelle du bouton (via un EventSystem ou React State externe)
-            // Pour l'instant, le callback gère l'audio, mais l'UI React ne sera pas mise à jour 
-            // à 60fps sans un système de subscription dédié pour éviter les re-renders massifs.
-            this.notifyUI(id, value);
-          }
+  onPlay() {
+    const host = this.host;
+    if (!host) return;
+    this.undoTaken = false;
+    this.writePassTracks.clear();
+    const now = host.getTime();
+    // Write : tout le passage lu est écrasé, même sans toucher le fader.
+    for (const track of host.getTracks()) {
+      if (automationModeOf(track) !== 'write') continue;
+      const params = new Set<string>(['volume']);
+      (track.automationLanes || []).forEach(l => { if (l.points?.length && isFaderParam(l.parameterName)) params.add(l.parameterName); });
+      params.forEach(p => { if (!this.active.has(automationKey(track.id, p))) this.begin(track, p, 'write', now, false, false); });
+      this.writePassTracks.add(track.id);
+    }
+  }
+
+  onStop(time?: number) {
+    for (const a of [...this.active.values()]) {
+      const end = typeof time === 'number' && time >= a.start && time <= a.lastTime + 0.25 ? time : a.lastTime;
+      if (end > a.lastTime) this.sample(a, end, false);
+      this.finish(a, Math.max(a.start, end));
+    }
+    this.writePassTracks.forEach(id => this.host?.setTrackMode(id, 'touch'));
+    this.writePassTracks.clear();
+    this.undoTaken = false;
+  }
+
+  /** Appelé à chaque image pendant la lecture. */
+  tick() {
+    const host = this.host;
+    if (!host || !host.isPlaying() || this.active.size === 0) return;
+    const now = host.getTime();
+    const wall = this.wall();
+    for (const a of [...this.active.values()]) {
+      // Bouclage ou saut : le passage se termine où on était, un autre commence.
+      if (now < a.lastTime - 0.05 || now > a.lastTime + 1) {
+        const { kind, touched, implicit, ctrl, trackId, param } = a;
+        this.finish(a, a.lastTime);
+        const track = this.track(trackId);
+        if (track && (touched || kind === 'latch' || kind === 'write')) {
+          const b = this.begin(track, param, kind, now, touched, implicit);
+          if (kind !== 'trim') { b.ctrl = ctrl; b.samples = [{ time: now, value: ctrl }]; host.setOverride(trackId, param, ctrl); }
         }
-      });
+        continue;
+      }
+      if (a.touched && a.implicit && !this.pointerDown && wall - a.lastChangeWall > IMPLICIT_RELEASE_MS) {
+        this.release(a.trackId, a.param);
+        continue;
+      }
+      if (a.touched || a.kind === 'latch' || a.kind === 'write') this.sample(a, now, a.kind === 'trim');
+      else a.lastTime = Math.max(a.lastTime, now);
     }
-
-    requestAnimationFrame(this.loop);
   }
+
+  /** Changement de mode : les passages en cours se terminent proprement. */
+  stopTrack(trackId: string) {
+    for (const a of [...this.active.values()]) if (a.trackId === trackId) this.finish(a, a.lastTime);
+    this.writePassTracks.delete(trackId);
+  }
+
+  // --- Captures depuis l'état de l'application --------------------------------------
 
   /**
-   * OPTIMISATION VST (THROTTLING)
-   * N'envoie la valeur que si nécessaire.
+   * Mise à jour d'une piste venant d'un fader (volume, pan, envois). Renvoie
+   * true si TOUT le changement est de l'automation écrite : l'appelant le
+   * range alors sans nouvelle étape d'annulation (une seule par passe).
    */
-  private applyValue(param: RegisteredParam, value: number) {
-    const now = Date.now();
-
-    if (param.isBridged) {
-      // VST : Limite à 1 envoi toutes les 30ms
-      if (now - param.lastUpdate >= this.VST_THROTTLE_MS) {
-        param.callback(value);
-        param.lastUpdate = now;
-      }
-    } else {
-      // WebAudio : Pas de limite (Sample accurate idéalement, ici Frame accurate)
-      param.callback(value);
-    }
-  }
-
-  private interpolate(points: AutomationPoint[], time: number): number | null {
-    // Recherche dichotomique ou linéaire simple pour trouver les points entourants
-    // Optimisation: On pourrait stocker le dernier index lu pour aller plus vite
-    
-    if (time < points[0].time) return points[0].value;
-    if (time > points[points.length - 1].time) return points[points.length - 1].value;
-
-    for (let i = 0; i < points.length - 1; i++) {
-      const p1 = points[i];
-      const p2 = points[i + 1];
-
-      if (time >= p1.time && time < p2.time) {
-        const ratio = (time - p1.time) / (p2.time - p1.time);
-        // Use curve type from the point (or default to LINEAR)
-        const curveType = p1.curveType || 'LINEAR';
-        return interpolateCurve(p1.value, p2.value, ratio, curveType);
+  captureTrackUpdate(prev: Track, next: Track): boolean {
+    if (!this.host?.isPlaying() || prev.id !== next.id) return false;
+    if (!isWriteMode(automationModeOf(next))) return false;
+    const changes: [string, number][] = [];
+    if (prev.volume !== next.volume) changes.push(['volume', next.volume]);
+    if (prev.pan !== next.pan) changes.push(['pan', next.pan]);
+    if (prev.sends !== next.sends) {
+      const a = prev.sends || [], b = next.sends || [];
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if (a[i].id !== b[i].id || a[i].isEnabled !== b[i].isEnabled) return false;
+        if (a[i].level !== b[i].level) changes.push([sendParamName(b[i].id), b[i].level]);
       }
     }
-    return null;
+    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    for (const k of keys) {
+      if (k === 'volume' || k === 'pan' || k === 'sends') continue;
+      if ((prev as any)[k] !== (next as any)[k]) return false;
+    }
+    if (!changes.length) return false;
+    let all = true;
+    for (const [p, v] of changes) all = this.change(next.id, p, v) && all;
+    return all;
   }
-  
-  /**
-   * Create automation snapshot - capture current values (inspired by Pro Tools)
-   */
-  public takeSnapshot(): Record<string, number> {
-    const snapshot: Record<string, number> = {};
-    this.registry.forEach((param, id) => {
-      const points = this.automationData.get(id);
-      if (points && points.length > 0) {
-        snapshot[id] = points[points.length - 1].value;
-      } else {
-        snapshot[id] = param.defaultValue;
-      }
+
+  /** Réglage d'un effet natif depuis sa fenêtre (les VST3 passent par le pont : non automatisés). */
+  capturePluginParams(trackId: string, pluginId: string, params: Record<string, any>): boolean {
+    if (!this.host?.isPlaying()) return false;
+    const track = this.track(trackId);
+    if (!track || !isWriteMode(automationModeOf(track))) return false;
+    const plugin = (track.plugins || []).find(p => p.id === pluginId);
+    if (!plugin || plugin.type === 'VST3') return false;
+    const before = plugin.params || {};
+    let any = false, all = true;
+    for (const [k, v] of Object.entries(params || {})) {
+      if (before[k] === v) continue;
+      if (typeof v !== 'number' || typeof before[k] !== 'number') { all = false; continue; }
+      any = true;
+      all = this.change(trackId, pluginParamName(pluginId, k), v) && all;
+    }
+    return any && all;
+  }
+
+  // --- Interne -----------------------------------------------------------------------
+
+  private writable(trackId: string, param: string): { track: Track; kind: WriteKind; now: number } | null {
+    const host = this.host;
+    if (!host || !host.isPlaying() || !isFaderParam(param)) return null;
+    const track = this.track(trackId);
+    if (!track) return null;
+    const mode = automationModeOf(track);
+    if (!isWriteMode(mode)) return null;
+    return { track, kind: mode as WriteKind, now: host.getTime() };
+  }
+
+  private begin(track: Track, param: string, kind: WriteKind, now: number, touched: boolean, implicit: boolean): ActiveWrite {
+    const host = this.host!;
+    if (!this.undoTaken) { host.beginUndoStep(); this.undoTaken = true; }
+    const orig = this.lanePoints(track, param);
+    const stat = staticParamValue(track, param);
+    const baseline = stat ?? (param === 'volume' ? 1 : 0);
+    const shown = valueAtPoints(orig, now, baseline);
+    const lane = findLane(track, param);
+    let spec = paramSpec(param, shown);
+    if (lane && parsePluginParam(param)) spec = widenSpec({ ...spec, min: lane.min, max: lane.max }, [shown]);
+    const a: ActiveWrite = {
+      key: automationKey(track.id, param), trackId: track.id, param, kind,
+      start: now, lastTime: now, lastSampleTime: now,
+      samples: [{ time: now, value: shown }],
+      ctrl: shown, touched, implicit, lastChangeWall: this.wall(), trimRef: shown,
+      orig, baseline, spec,
+    };
+    this.active.set(a.key, a);
+    host.setOverride(track.id, param, shown);
+    this.emit();
+    return a;
+  }
+
+  private output(a: ActiveWrite, t: number): number {
+    if (a.kind === 'trim') return trimValue(a.spec, valueAtPoints(a.orig, t, a.baseline), a.ctrl, a.trimRef);
+    return a.ctrl;
+  }
+
+  private sample(a: ActiveWrite, t: number, pushOverride: boolean) {
+    const v = a.kind === 'trim' ? a.ctrl : this.output(a, t);
+    const last = a.samples[a.samples.length - 1];
+    if (last && t - last.time < SAMPLE_INTERVAL && Math.abs(t - last.time) < 1) {
+      // Échantillons trop rapprochés : on garde la dernière valeur à la date la plus récente.
+      if (t >= last.time) a.samples[a.samples.length - 1] = { time: t, value: v };
+    } else if (!last || t > last.time) {
+      a.samples.push({ time: t, value: v });
+    }
+    a.lastTime = Math.max(a.lastTime, t);
+    a.lastSampleTime = t;
+    if (pushOverride) this.host?.setOverride(a.trackId, a.param, this.output(a, t));
+  }
+
+  private finish(a: ActiveWrite, end: number) {
+    const host = this.host;
+    this.active.delete(a.key);
+    this.emit();
+    if (!host) return;
+    const points = commitSegment(a.orig, {
+      kind: a.kind, start: a.start, end: Math.max(a.start, end), samples: a.samples, trimRef: a.trimRef,
+    }, { spec: a.spec, baseline: a.baseline, idPrefix: `aw${(++this.counter).toString(36)}${Date.now().toString(36)}` });
+    const track = this.track(a.trackId);
+    const staleRef = track ? findLane(track, a.param)?.points : undefined;
+    this.written.set(a.key, { points, staleRef });
+    const spec = parsePluginParam(a.param) ? widenSpec(a.spec, points.map(p => p.value)) : a.spec;
+    host.commit({
+      trackId: a.trackId, param: a.param, points, spec,
+      // Réglage de la piste = ce que la courbe rejoue après le passage (retour AutoMatch compris) :
+      // effacer l'automation plus tard ne laisse pas le fader coincé sur la valeur du geste.
+      staticValue: valueAtPoints(points, Math.max(a.start, end) + AUTOMATCH_SEC + 0.001, a.baseline),
     });
-    return snapshot;
-  }
-  
-  /**
-   * Apply automation snapshot
-   */
-  public applySnapshot(snapshot: Record<string, number>, time: number) {
-    Object.entries(snapshot).forEach(([paramId, value]) => {
-      this.addPoint(paramId, time, value);
-    });
-  }
-  
-  /**
-   * Clear all automation for a parameter
-   */
-  public clearAutomation(paramId: string) {
-    this.automationData.delete(paramId);
-  }
-  
-  /**
-   * Thin automation points (reduce density while preserving shape)
-   * Inspired by Pro Tools "Thin Automation" feature
-   */
-  public thinAutomation(paramId: string, threshold: number = 0.01) {
-    const points = this.automationData.get(paramId);
-    if (!points || points.length < 3) return;
-    
-    const thinned: AutomationPoint[] = [points[0]];
-    
-    for (let i = 1; i < points.length - 1; i++) {
-      const prev = thinned[thinned.length - 1];
-      const curr = points[i];
-      const next = points[i + 1];
-      
-      // Check if current point is significantly different from interpolated value
-      const expectedValue = prev.value + (next.value - prev.value) * 
-        ((curr.time - prev.time) / (next.time - prev.time));
-      
-      if (Math.abs(curr.value - expectedValue) > threshold * (Math.abs(next.value - prev.value) + 0.001)) {
-        thinned.push(curr);
-      }
-    }
-    
-    thinned.push(points[points.length - 1]);
-    this.automationData.set(paramId, thinned);
-  }
-
-  // Système simple pour notifier l'UI sans re-render React complet
-  private uiListeners: Map<string, (val: number) => void> = new Map();
-  
-  public subscribeUI(paramId: string, cb: (val: number) => void) {
-    this.uiListeners.set(paramId, cb);
-  }
-  
-  public unsubscribeUI(paramId: string) {
-    this.uiListeners.delete(paramId);
-  }
-
-  private notifyUI(paramId: string, value: number) {
-    const cb = this.uiListeners.get(paramId);
-    if (cb) cb(value);
-  }
-
-  // API Publique
-  public setMode(m: AutomationMode) { this.mode = m; }
-  public getMode() { return this.mode; }
-  public getAutomationData(paramId: string) { return this.automationData.get(paramId) || []; }
-  
-  // Import/Export
-  public loadAutomation(data: Record<string, AutomationPoint[]>) {
-      Object.entries(data).forEach(([key, points]) => {
-          this.automationData.set(key, points);
-      });
+    host.setOverride(a.trackId, a.param, null, points);
   }
 }
 
-export const automationManager = AutomationManager.getInstance();
+export const automationRecorder = new AutomationRecorder();

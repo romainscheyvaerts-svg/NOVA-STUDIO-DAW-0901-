@@ -106,6 +106,11 @@ import {
 } from './services/SessionCloud';
 import DrumMachinePanel from './components/DrumMachinePanel';
 import ShortcutsHelp from './components/ShortcutsHelp';
+import { useAutomationWrite } from './hooks/useAutomationWrite';
+import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
+import ProToolsWindows from './components/ProToolsWindows';
+import { nextMarkerNumber } from './utils/memoryLocations';
+import { automationRecorder } from './services/AutomationManager';
 import { DrumMachine, makeDrumMachineLib, drumPadsFor, drumClipFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
 import { loadDrumSound } from './utils/drumSounds';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
@@ -458,7 +463,9 @@ const useUndoRedo = (initialState: DAWState) => {
   }, []);
   // Prochaine modification = nouvelle étape d'annulation, même dans l'anti-rebond.
   const breakHistory = useCallback(() => setHistory(curr => ({ ...curr, lastChangeAt: 0 })), []);
-  return { state: history.present, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, breakHistory, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
+  // Étape d'annulation posée MAINTENANT (une passe d'automation = une seule étape).
+  const checkpoint = useCallback(() => setHistory(curr => ({ past: [...curr.past, cleanStateForHistory(curr.present)].slice(-MAX_HISTORY), present: curr.present, future: [], lastChangeAt: Date.now() })), []);
+  return { state: history.present, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, breakHistory, checkpoint, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
 };
 
 /** Onglet ouvert au retour de Stripe (?nova_paid=…) : confirme et invite à revenir au studio. */
@@ -729,7 +736,7 @@ function Studio() {
     punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 }
   };
 
-  const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, breakHistory, canUndo, canRedo } = useUndoRedo(initialState);
+  const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, breakHistory, checkpoint, canUndo, canRedo } = useUndoRedo(initialState);
   
   const [theme, setTheme] = useState<Theme>('dark');
   useEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
@@ -830,6 +837,8 @@ function Studio() {
   const setAiNotification = useCallback((text: string | null) => {
     setAiNotice(text ? { text, id: Date.now() + Math.random() } : null);
   }, []);
+  // Modes d'automation Pro Tools (Touch / Latch / Write / Trim) : écriture pendant la lecture.
+  useAutomationWrite({ stateRef, setSilently, checkpoint, notify: setAiNotification });
   // Nova Pro (5 €/mois) : importer ses propres instrus + collaborer. Défini plus bas.
   const requireProRef = useRef<(reason: string) => Promise<boolean>>(async () => true);
 
@@ -1367,6 +1376,10 @@ function Studio() {
         }
     }
 
+    // Automation en écriture (Touch / Latch / Write / Trim) : la passe entière
+    // sera UNE étape d'annulation, pas une par mouvement de fader.
+    const automationCaptured = !!previousTrack && automationRecorder.captureTrackUpdate(previousTrack, updatedTrack);
+
     // Detect atomic updates (volume/pan only) to avoid expensive graph rebuild
     if (previousTrack) {
         const isVolumeOnlyChange = previousTrack.volume !== updatedTrack.volume &&
@@ -1394,16 +1407,17 @@ function Studio() {
         }
     }
 
-    setState(produce(draft => {
+    (automationCaptured ? setSilently : setState)(produce(draft => {
         const trackIndex = draft.tracks.findIndex(t => t.id === updatedTrack.id);
         if (trackIndex !== -1) {
             draft.tracks[trackIndex] = updatedTrack;
         }
     }));
-  }, [setState]);
+  }, [setState, setSilently]);
 
   const handleUpdatePluginParams = useCallback((trackId: string, pluginId: string, params: Record<string, any>) => {
-    setState(produce((draft: DAWState) => {
+    const automationCaptured = automationRecorder.capturePluginParams(trackId, pluginId, params);
+    (automationCaptured ? setSilently : setState)(produce((draft: DAWState) => {
       const track = draft.tracks.find(t => t.id === trackId);
       if (track) {
           const plugin = track.plugins.find(p => p.id === pluginId);
@@ -1412,7 +1426,7 @@ function Studio() {
     }));
     const pluginNode = audioEngine.getPluginNodeInstance(trackId, pluginId);
     if (pluginNode && pluginNode.updateParams) { pluginNode.updateParams(params); }
-  }, [setState]);
+  }, [setState, setSilently]);
 
   const handleSeek = useCallback((time: number) => { 
     // Pendant une prise, déplacer la lecture la désynchroniserait.
@@ -2741,9 +2755,12 @@ function Studio() {
   const handleAddMarker = useCallback((time: number, name?: string) => {
     setState(produce((draft: DAWState) => {
       const index = draft.markers.length;
+      // Numéro fixe (Pro Tools : Memory Location n°), rappel au pavé « . N . ».
+      const number = nextMarkerNumber(draft.markers);
       draft.markers.push({
         id: `mk-${Date.now()}-${index}`,
-        name: name || `Marqueur ${index + 1}`,
+        number,
+        name: name || `Marqueur ${number}`,
         time: Math.max(0, time),
         type: 'MARKER',
         color: MARKER_COLORS[index % MARKER_COLORS.length]
@@ -2920,6 +2937,21 @@ function Studio() {
     window.addEventListener('keyup', onKeyUp);
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
   }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, handleAddMarker, undo, redo, setState]);
+
+  // Raccourcis Pro Tools (utils/keymap) : pavé numérique, Ctrl+E, Keyboard Focus…
+  useProToolsShortcuts({
+    stateRef,
+    getTime: () => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime),
+    togglePlay: () => { void handleTogglePlay(); },
+    toggleRecord: () => { void handleToggleRecord(); },
+    seek: handleSeek,
+    toggleLoop: () => setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive })),
+    toggleMetronome: () => { void handleToggleMetronome(); },
+    addMarker: (t) => handleAddMarker(t),
+    selectTrack: (id) => setVisualState({ selectedTrackId: id }),
+    undo,
+    notify: setAiNotification,
+  });
 
   const handleRequestAddPlugin = useCallback((trackId: string, x: number, y: number) => {
     setAddPluginMenu({ trackId, x, y });
@@ -5627,6 +5659,10 @@ function Studio() {
         has808={state.tracks.some(t => t.id === BASS808_TRACK_ID)}
       />
       <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <ProToolsWindows tracks={state.tracks} markers={state.markers} bpm={state.bpm} setState={setState} onEditClip={handleEditClip}
+        onSeek={handleSeek} onAddMarker={handleAddMarker} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
+        getPlayhead={() => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime)}
+        onOpenShortcuts={() => setShortcutsOpen(true)} />
       <TakeHomeModal
         open={takeHomeOpen}
         onClose={() => setTakeHomeOpen(false)}
