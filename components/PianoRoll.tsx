@@ -5,6 +5,17 @@ import { NOTES } from '../plugins/AutoTunePlugin';
 import { audioEngine } from '../engine/AudioEngine';
 import { midiEffectsService } from '../services/MidiEffectsService';
 import { usePlayheadTime } from '../utils/playheadStore';
+import { isInScale, snapToScale, scaleRows, buildChord, chordLabelFr, keyLabelFr, noteNameFr, CHORD_CHOICES, SCALE_CHOICES, NOTE_NAMES_FR, ChordKind } from '../utils/scales';
+import { ComputerKeyboard, NoteRecorder, isComputerKeyboardCode, defaultKeyLabel, octaveBase, KEY_TO_SEMITONE, DEFAULT_KEYBOARD_STATE, KeyboardState } from '../utils/computerKeyboard';
+
+/** Préférences d'affichage du piano roll, gardées sur cet appareil. */
+const PREFS_KEY = 'nova.pianoroll.prefs';
+type RollPrefs = { highlight: boolean; snap: boolean; fold: boolean; ghosts: boolean };
+const readPrefs = (): RollPrefs => {
+  const def: RollPrefs = { highlight: true, snap: false, fold: false, ghosts: true };
+  try { return { ...def, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch { return def; }
+};
+const writePrefs = (p: RollPrefs) => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* stockage indisponible */ } };
 
 /** Trait de lecture : seul lui se re-rend pendant la lecture, pas tout le piano roll. */
 const PianoRollPlayhead: React.FC<{ clipStart: number; zoomX: number }> = ({ clipStart, zoomX }) => {
@@ -41,6 +52,13 @@ interface PianoRollProps {
   /** Lecture / pause du projet depuis l'éditeur (il couvre la barre de transport). */
   isPlaying?: boolean;
   onTogglePlay?: () => void;
+  /** Tonalité du projet (0 = Do … 11 = Si), détectée à l'import ou lue sur le beat. */
+  projectKey?: number;
+  projectScale?: string;
+  /** Change la tonalité du projet (une étape d'annulation). */
+  onSetProjectKey?: (root: number, scale: string) => void;
+  /** Toutes les pistes : notes fantômes des autres pistes MIDI. */
+  allTracks?: Track[];
 }
 
 // Configuration
@@ -50,13 +68,52 @@ const VELOCITY_HEIGHT = 150;
 
 type DragMode = 'MOVE' | 'RESIZE_R' | 'VELOCITY' | 'SELECT' | 'DRAW' | null;
 
-const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack, onClose, toolbarExtra, isPlaying, onTogglePlay }) => {
+const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack, onClose, toolbarExtra, isPlaying, onTogglePlay, projectKey, projectScale, onSetProjectKey, allTracks }) => {
   const clipIndex = track.clips.findIndex(c => c.id === clipId);
   const clip = track.clips[clipIndex];
   
   const isDrumMode = track.type === TrackType.DRUM_RACK;
   const currentRowHeight = isDrumMode ? DRUM_ROW_HEIGHT : ROW_HEIGHT;
-  const totalRows = isDrumMode ? 30 : 128; // 30 Pads vs 128 Keys
+
+  // --- GAMME (Scale Highlighting de FL, Keys and Scales de Live 12) ---
+  const [prefs, setPrefsState] = useState<RollPrefs>(readPrefs);
+  const setPrefs = (patch: Partial<RollPrefs>) => setPrefsState(p => { const n = { ...p, ...patch }; writePrefs(n); return n; });
+  // Tonalité choisie ici quand le projet n'en a pas (ou sans branchement).
+  const [localKey, setLocalKey] = useState<{ root: number; scale: string } | null>(null);
+  const keyRoot = typeof projectKey === 'number' && Number.isFinite(projectKey) ? ((projectKey % 12) + 12) % 12 : localKey?.root;
+  const keyScale = (typeof projectKey === 'number' ? projectScale : localKey?.scale) || 'MINOR';
+  const hasKey = !isDrumMode && typeof keyRoot === 'number' && keyScale.toUpperCase() !== 'CHROMATIC';
+  const highlight = hasKey && prefs.highlight;
+  const snapOn = hasKey && prefs.snap;
+  const foldOn = hasKey && prefs.fold;
+  const inKey = useCallback((p: number) => !hasKey || isInScale(p, keyRoot!, keyScale), [hasKey, keyRoot, keyScale]);
+  const setKey = (root: number, scale: string) => {
+    if (onSetProjectKey) onSetProjectKey(root, scale); else setLocalKey({ root, scale });
+  };
+
+  // Lignes affichées, de haut en bas (toutes, ou seulement celles de la gamme).
+  const rows = useMemo<number[]>(() => {
+    if (isDrumMode) return Array.from({ length: 30 }, (_, i) => 89 - i);
+    if (foldOn) return scaleRows(keyRoot!, keyScale, true);
+    return Array.from({ length: 128 }, (_, i) => 127 - i);
+  }, [isDrumMode, foldOn, keyRoot, keyScale]);
+  const rowIndex = useMemo(() => { const m = new Map<number, number>(); rows.forEach((p, i) => m.set(p, i)); return m; }, [rows]);
+  const totalRows = rows.length;
+
+  /** Ligne d'une note ; une note hors gamme en mode « seulement la gamme » s'affiche sur la note de gamme juste en dessous. */
+  const rowOf = (pitch: number) => {
+    const i = rowIndex.get(pitch);
+    if (i !== undefined) return i;
+    if (foldOn) { const j = rowIndex.get(snapToScale(pitch, keyRoot!, keyScale, 'down')); if (j !== undefined) return j; }
+    return Math.max(0, Math.min(rows.length - 1, isDrumMode ? 89 - pitch : 127 - pitch));
+  };
+  /** Déplace une note de `delta` lignes (en mode gamme : de degré en degré). */
+  const shiftPitch = (pitch: number, deltaRows: number) => {
+    if (isDrumMode) return Math.max(60, Math.min(89, pitch + deltaRows));
+    if (foldOn) return rows[Math.max(0, Math.min(rows.length - 1, rowOf(pitch) - deltaRows))];
+    const p = Math.max(0, Math.min(127, pitch + deltaRows));
+    return snapOn && deltaRows !== 0 ? snapToScale(p, keyRoot!, keyScale, deltaRows > 0 ? 'up' : 'down') : p;
+  };
 
   // --- STATE ---
   const [zoomX, setZoomX] = useState(100); 
@@ -87,34 +144,23 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
     return Math.round(t / gridSize) * gridSize;
   }, [bpm, quantize]);
 
-  // Y Axis:
-  // Standard: 127 (Top) -> 0 (Bottom)
-  // Drum: Pad 30 (Top, Index 29) -> Pad 1 (Bottom, Index 0)
-  // Pad Index = y / H
-  // Note Pitch:
-  // Standard: 127 - (y/H)
-  // Drum: For rendering, Pad 30 is top. We want Pad 30 to be MIDI 89. Pad 1 is MIDI 60.
-  // Top Row (0) -> Pad 30 (89)
-  // Bottom Row (29) -> Pad 1 (60)
-  // Pitch = (60 + 29) - RowIndex
+  // --- OUTILS : accords, clavier d'ordinateur, fantômes ---
+  const [chordKind, setChordKind] = useState<ChordKind | null>(null);
+  const [menu, setMenu] = useState<{ kind: 'scale' | 'chord'; x: number; y: number } | null>(null);
+  const [lastChord, setLastChord] = useState<string | null>(null);
+  useEffect(() => { if (!lastChord) return; const id = window.setTimeout(() => setLastChord(null), 4000); return () => window.clearTimeout(id); }, [lastChord]);
+  const openMenu = (kind: 'scale' | 'chord', e: React.MouseEvent) => {
+    if (menu?.kind === kind) { setMenu(null); return; }
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const w = 288;
+    setMenu({ kind, x: Math.max(8, Math.min(window.innerWidth - w - 8, r.left)), y: r.bottom + 6 });
+  };
   const getPitchFromY = (y: number, scrollTop: number) => {
-      const rowIndex = Math.floor((y + scrollTop) / currentRowHeight);
-      if (isDrumMode) {
-          // Row 0 is Pad 30 (89)
-          // Row 29 is Pad 1 (60)
-          return 89 - rowIndex; 
-      }
-      return 127 - rowIndex;
+      const i = Math.max(0, Math.min(rows.length - 1, Math.floor((y + scrollTop) / currentRowHeight)));
+      return rows[i];
   };
 
-  const getYFromPitch = (pitch: number) => {
-      if (isDrumMode) {
-          // Pitch 89 -> Row 0
-          // Pitch 60 -> Row 29
-          return (89 - pitch) * currentRowHeight;
-      }
-      return (127 - pitch) * currentRowHeight;
-  };
+  const getYFromPitch = (pitch: number) => rowOf(pitch) * currentRowHeight;
 
   const getTimeFromX = (x: number, scrollLeft: number) => {
     return (x + scrollLeft) / zoomX;
@@ -151,15 +197,24 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
   const addNoteAt = (absTime: number, pitch: number) => {
     const start = snapTime(absTime);
     const duration = isDrumMode ? 0.1 : (60 / bpm * quantize * 4); // Short fixed duration for drums
-    const newNote: MidiNote = {
+    const mk = (p: number): MidiNote => ({
         id: `n-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        pitch,
+        pitch: p,
         start,
         duration,
         velocity: 0.8
-    };
+    });
+    // Tampon d'accord (Chord Stamp de FL) : toutes les notes de l'accord en un clic.
+    if (chordKind && !isDrumMode) {
+      const pitches = buildChord(pitch, chordKind, { root: hasKey ? keyRoot : undefined, scale: keyScale, snap: snapOn || chordKind === 'SCALE' });
+      const notes = pitches.map(mk);
+      updateNotes([...(clip.notes || []), ...notes]);
+      setLastChord(chordLabelFr(pitches));
+      return notes[0];
+    }
+    const newNote = mk(snapOn ? snapToScale(pitch, keyRoot!, keyScale) : pitch);
     updateNotes([...(clip.notes || []), newNote]);
-    playPreview(pitch);
+    playPreview(newNote.pitch);
     return newNote;
   };
   const addNoteRef = useRef(addNoteAt);
@@ -195,7 +250,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
         if (isTouch) { pendingDrawRef.current = { x: e.clientX, y: e.clientY, time: absTime, pitch }; return; }
         const n = addNoteAt(absTime, pitch);
         // Clavier : glisser après le clic allonge la note posée (longueur au tracé).
-        if (!isDrumMode) {
+        if (!isDrumMode && !chordKind) {
             setSelectedNoteIds(new Set([n.id]));
             setInitialNotes([...(clip.notes || []), n]);
             setDragMode('RESIZE_R');
@@ -248,12 +303,11 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
         const updatedNotes = initialNotes.map(n => {
             if (selectedNoteIds.has(n.id)) {
                 let newStart = n.start + deltaTime;
-                let newPitch = n.pitch + deltaPitch;
                 if (quantize > 0) newStart = snapTime(newStart);
                 return { 
                     ...n, 
                     start: Math.max(0, newStart), 
-                    pitch: isDrumMode ? Math.max(60, Math.min(89, newPitch)) : Math.max(0, Math.min(127, newPitch)) 
+                    pitch: shiftPitch(n.pitch, deltaPitch)
                 };
             }
             return n;
@@ -425,11 +479,31 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
       if (isDrumMode) {
         return { ...note, pitch: Math.max(60, Math.min(89, newPitch)) };
       }
+      // Aimant de gamme : ↑ / ↓ passent à la note de gamme suivante (comme Live en Scale Mode).
+      if (snapOn && Math.abs(semitones) < 12) {
+        return { ...note, pitch: Math.max(0, Math.min(127, snapToScale(newPitch, keyRoot!, keyScale, semitones > 0 ? 'up' : 'down'))) };
+      }
       return { ...note, pitch: Math.max(0, Math.min(127, newPitch)) };
     });
     
     updateNotes(transposedNotes);
-  }, [selectedNoteIds, clip.notes, isDrumMode]);
+  }, [selectedNoteIds, clip.notes, isDrumMode, snapOn, keyRoot, keyScale]);
+
+  /** Ramène les notes (sélection, sinon tout le clip) dans la gamme : une seule étape d'annulation. */
+  const fitToScale = useCallback(() => {
+    if (!hasKey) return;
+    const all = clip.notes || [];
+    const target = selectedNoteIds.size > 0 ? selectedNoteIds : new Set(all.map(n => n.id));
+    let moved = 0;
+    const next = all.map(n => {
+      if (!target.has(n.id)) return n;
+      const p = snapToScale(n.pitch, keyRoot!, keyScale);
+      if (p !== n.pitch) moved++;
+      return p === n.pitch ? n : { ...n, pitch: p };
+    });
+    if (moved > 0) updateNotes(next);
+    setLastChord(moved > 0 ? `${moved} note${moved > 1 ? 's' : ''} remise${moved > 1 ? 's' : ''} dans la gamme` : 'Toutes les notes sont déjà dans la gamme');
+  }, [hasKey, clip.notes, selectedNoteIds, keyRoot, keyScale]);
   
   // --- HUMANIZE (inspired by Ableton) ---
   const humanizeNotes = useCallback(() => {
@@ -453,6 +527,133 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
     updateNotes(humanizedNotes);
   }, [selectedNoteIds, clip.notes]);
   
+  // --- CLAVIER DE L'ORDINATEUR (Computer MIDI Keyboard de Live, Typing Keyboard de FL) ---
+  const [kbOn, setKbOn] = useState(false);
+  const [kbState, setKbState] = useState<KeyboardState>(DEFAULT_KEYBOARD_STATE);
+  const [heldPitches, setHeldPitches] = useState<number[]>([]);
+  const [recArmed, setRecArmed] = useState(false);
+  const [recPreview, setRecPreview] = useState<{ pitch: number; start: number; duration: number; velocity: number }[]>([]);
+  const [keyLabels, setKeyLabels] = useState<Record<string, string>>({});
+  const kbRef = useRef<ComputerKeyboard | null>(null);
+  const recRef = useRef<NoteRecorder | null>(null);
+  // Dernières valeurs pour les écouteurs clavier (sans les ré-enregistrer à chaque rendu).
+  const liveRef = useRef({ track, clip, isPlaying: !!isPlaying });
+  liveRef.current = { track, clip, isPlaying: !!isPlaying };
+
+  // Lettres du clavier RÉEL (AZERTY : Q S D F… au lieu de A S D F…) quand le navigateur les donne.
+  useEffect(() => {
+    if (!kbOn) return;
+    const kb: any = (navigator as any).keyboard;
+    if (!kb?.getLayoutMap) return;
+    kb.getLayoutMap().then((m: Map<string, string>) => {
+      const out: Record<string, string> = {};
+      [...Object.keys(KEY_TO_SEMITONE), 'KeyZ', 'KeyX', 'KeyC', 'KeyV'].forEach(c => { const v = m.get(c); if (v) out[c] = v.toUpperCase(); });
+      setKeyLabels(out);
+    }).catch(() => {});
+  }, [kbOn]);
+  const keyLabel = (code: string) => keyLabels[code] || defaultKeyLabel(code);
+
+  /** Temps de la tête de lecture dans le clip (s). */
+  const clipTimeNow = () => audioEngine.getCurrentTime() - liveRef.current.clip.start;
+
+  /** Écrit la prise dans le clip : une seule étape d'annulation. */
+  const commitRecording = useCallback(() => {
+    const rec = recRef.current;
+    if (!rec) return;
+    recRef.current = null;
+    const played = rec.finish(clipTimeNow()).filter(n => n.start >= 0);
+    setRecPreview([]);
+    if (!played.length) return;
+    const { track: t, clip: c } = liveRef.current;
+    const notes: MidiNote[] = played.map(n => ({
+      id: `n-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      pitch: n.pitch, start: n.start, duration: n.duration, velocity: Math.max(0.05, Math.min(1, n.velocity / 127)),
+    }));
+    const end = Math.max(...notes.map(n => n.start + n.duration));
+    onUpdateTrack({ ...t, clips: t.clips.map(x => x.id === c.id ? { ...x, notes: [...(x.notes || []), ...notes], duration: Math.max(x.duration, end) } : x) });
+    setLastChord(`${notes.length} note${notes.length > 1 ? 's' : ''} enregistrée${notes.length > 1 ? 's' : ''} (Ctrl+Z pour annuler)`);
+  }, [onUpdateTrack]);
+
+  // La prise démarre avec la lecture et s'écrit à l'arrêt.
+  useEffect(() => {
+    if (recArmed && isPlaying && !recRef.current) recRef.current = new NoteRecorder();
+    if ((!isPlaying || !recArmed) && recRef.current) commitRecording();
+  }, [recArmed, isPlaying, commitRecording]);
+  useEffect(() => () => { commitRecording(); }, [commitRecording]);
+
+  // Affichage des notes en cours de prise.
+  useEffect(() => {
+    if (!recArmed || !isPlaying) return;
+    const id = window.setInterval(() => { if (recRef.current) setRecPreview(recRef.current.pending(clipTimeNow())); }, 80);
+    return () => window.clearInterval(id);
+  }, [recArmed, isPlaying]);
+
+  useEffect(() => {
+    if (!kbOn) return;
+    const kb = kbRef.current || (kbRef.current = new ComputerKeyboard(kbState));
+    const typing = (el: EventTarget | null) => {
+      const n = el as HTMLElement | null;
+      if (!n || !n.tagName) return false;
+      const tag = n.tagName.toLowerCase();
+      if (tag === 'input') return !['range', 'button', 'checkbox'].includes((n as HTMLInputElement).type);
+      return tag === 'textarea' || tag === 'select' || n.isContentEditable;
+    };
+    const release = (pitch: number) => {
+      audioEngine.triggerTrackRelease(liveRef.current.track.id, pitch);
+      if (recRef.current && liveRef.current.isPlaying) recRef.current.noteOff(pitch, clipTimeNow());
+    };
+    const onDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || typing(e.target) || !isComputerKeyboardCode(e.code)) return;
+      // Touche du clavier musical : elle ne déclenche aucun autre raccourci.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const a = kb.keyDown(e.code, e.repeat);
+      if (a.type === 'state') setKbState(a.state);
+      if (a.type === 'noteOn') {
+        void audioEngine.resume();
+        audioEngine.triggerTrackAttack(liveRef.current.track.id, a.pitch, a.velocity / 127);
+        if (recRef.current && liveRef.current.isPlaying) recRef.current.noteOn(a.pitch, clipTimeNow(), a.velocity);
+        setHeldPitches(kb.heldPitches());
+      }
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (!isComputerKeyboardCode(e.code)) return;
+      const a = kb.keyUp(e.code);
+      if (a.type === 'noteOff') { e.stopImmediatePropagation(); release(a.pitch); setHeldPitches(kb.heldPitches()); }
+    };
+    const onBlur = () => { kb.releaseAll().forEach(release); setHeldPitches([]); };
+    window.addEventListener('keydown', onDown, true);
+    window.addEventListener('keyup', onUp, true);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onDown, true);
+      window.removeEventListener('keyup', onUp, true);
+      window.removeEventListener('blur', onBlur);
+      onBlur();
+    };
+  }, [kbOn]);
+
+  // --- NOTES FANTÔMES (Ghost notes de FL) : les autres pistes MIDI en filigrane ---
+  const ghostNotes = useMemo(() => {
+    if (!prefs.ghosts || isDrumMode || !allTracks) return [] as { key: string; pitch: number; start: number; duration: number; color: string; name: string }[];
+    const out: { key: string; pitch: number; start: number; duration: number; color: string; name: string }[] = [];
+    const span = clip.duration + 4;
+    for (const t of allTracks) {
+      if (t.id === track.id || t.type === TrackType.DRUM_RACK) continue;
+      for (const c of t.clips || []) {
+        if (!c.notes?.length) continue;
+        for (const n of c.notes) {
+          const start = c.start + n.start - clip.start;
+          if (start + n.duration < 0 || start > span) continue;
+          out.push({ key: `${t.id}:${c.id}:${n.id}`, pitch: n.pitch, start, duration: n.duration, color: t.color || '#94a3b8', name: t.name });
+          if (out.length >= 3000) return out;
+        }
+      }
+    }
+    return out;
+  }, [prefs.ghosts, isDrumMode, allTracks, track.id, clip.start, clip.duration]);
+  const ghostTrackCount = useMemo(() => new Set(ghostNotes.map(g => g.name)).size, [ghostNotes]);
+
   // --- KEYBOARD SHORTCUTS ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -513,34 +714,45 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
           });
       }
 
-      // Standard Piano
-      return Array.from({ length: 128 }).map((_, i) => {
-        const pitch = 127 - i;
+      // Clavier : notes hors gamme estompées, tonique marquée, touches jouées allumées.
+      const held = new Set([...heldPitches]);
+      return rows.map(pitch => {
         const isBlack = [1, 3, 6, 8, 10].includes(pitch % 12);
         const isC = pitch % 12 === 0;
+        const out = highlight && !inKey(pitch);
+        const isRoot = hasKey && ((pitch - keyRoot!) % 12 + 12) % 12 === 0;
+        const showName = foldOn || isC || isRoot;
         return (
             <div 
                 key={pitch} 
-                className={`flex items-center justify-end pr-1 text-[9px] font-mono border-b border-black/20 box-border ${isBlack ? 'bg-black text-slate-600' : 'bg-white text-slate-400'}`}
-                style={{ height: currentRowHeight }}
-                onPointerDown={() => playPreview(pitch)}
+                data-pitch={pitch}
+                className={`flex items-center justify-end pr-1 text-[9px] font-mono border-b border-black/20 box-border cursor-pointer ${held.has(pitch) ? 'bg-cyan-400 text-black' : isBlack ? 'bg-black text-slate-500' : 'bg-white text-slate-500'}`}
+                style={{ height: currentRowHeight, opacity: out && !held.has(pitch) ? 0.45 : 1 }}
+                title={`${noteNameFr(pitch)}${hasKey ? (out ? ' · hors gamme' : ' · dans la gamme') : ''} (clic : écouter)`}
+                onPointerDown={() => audioEngine.previewMidiNote(track.id, pitch, 0.4)}
             >
-                {isC && <span className="opacity-100 font-bold text-cyan-600 mr-1">C{Math.floor(pitch/12)-1}</span>}
+                {isRoot && !held.has(pitch) && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mr-auto ml-1" aria-hidden />}
+                {showName && <span className={`font-bold mr-0.5 ${isRoot ? 'text-amber-600' : 'text-cyan-700'}`}>{noteNameFr(pitch)}</span>}
             </div>
         );
       });
   };
 
   const renderGridRows = () => {
-     return Array.from({ length: totalRows }).map((_, i) => {
-         const pitch = isDrumMode ? (89 - i) : (127 - i);
+     return rows.map((pitch, i) => {
          const isBlack = !isDrumMode && [1, 3, 6, 8, 10].includes(pitch % 12);
          const isAlt = isDrumMode && (i % 2 === 0);
+         const out = highlight && !inKey(pitch);
+         const isRoot = hasKey && ((pitch - keyRoot!) % 12 + 12) % 12 === 0;
+         // Gamme surlignée : lignes de la gamme claires, hors gamme hachurées (Scale Highlighting de FL).
+         const bg = highlight
+           ? (out ? 'repeating-linear-gradient(135deg, #0b0c0f 0 4px, #101217 4px 8px)' : isRoot ? 'rgba(251,191,36,0.10)' : 'rgba(34,211,238,0.06)')
+           : undefined;
          return (
              <div 
                  key={`bg-${pitch}`} 
-                 className={`absolute left-0 right-0 border-b border-white/[0.03] ${isBlack ? 'bg-[#0f1115]' : (isAlt ? 'bg-[#1a1c22]' : '')}`}
-                 style={{ top: i * currentRowHeight, height: currentRowHeight }}
+                 className={`absolute left-0 right-0 border-b border-white/[0.03] ${!highlight ? (isBlack ? 'bg-[#0f1115]' : (isAlt ? 'bg-[#1a1c22]' : '')) : ''}`}
+                 style={{ top: i * currentRowHeight, height: currentRowHeight, background: bg }}
              />
          );
      });
@@ -553,10 +765,10 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
              containerRef.current.scrollTop = 0; // Top for drums
           } else {
              // 808 : registre grave (Do 1 – Do 3) au centre.
-             containerRef.current.scrollTop = (127 - (track.bass808 ? 36 : 72)) * currentRowHeight - (containerRef.current.clientHeight / 2);
+             containerRef.current.scrollTop = rowOf(track.bass808 ? 36 : 72) * currentRowHeight - (containerRef.current.clientHeight / 2);
           }
       }
-  }, [isDrumMode]);
+  }, [isDrumMode, foldOn]);
 
   return (
     <div data-nova-pianoroll="" className="w-full h-full flex flex-col bg-[#14161a] select-none text-white font-inter">
@@ -595,6 +807,45 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
              
              <div className="h-8 w-px bg-white/10"></div>
              
+             {/* Gamme, accords, fantômes, clavier de l'ordinateur (V14) */}
+             {!isDrumMode && (
+               <div className="flex items-center gap-1.5 shrink-0">
+                 <button type="button" data-nova-roll="gamme" onClick={e => openMenu('scale', e)} aria-expanded={menu?.kind === 'scale'}
+                   title="Gamme du morceau : grise les notes hors gamme, aimant, seulement la gamme (comme Scale Highlighting dans FL Studio et Scale Mode dans Live)"
+                   className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${hasKey ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+                   <i className="fas fa-music text-[9px]"></i>
+                   <span>{hasKey ? keyLabelFr(keyRoot, keyScale) : 'Gamme'}</span>
+                   {snapOn && <i className="fas fa-magnet text-[8px]" title="Aimant de gamme actif"></i>}
+                   <i className="fas fa-chevron-down text-[8px]"></i>
+                 </button>
+                 <button type="button" data-nova-roll="accords" onClick={e => openMenu('chord', e)} aria-pressed={!!chordKind}
+                   title="Outil accords : un clic pose tout l'accord, dans la gamme (comme Chord Stamp dans FL Studio)"
+                   className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${chordKind ? 'bg-fuchsia-500 border-fuchsia-400 text-black' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+                   <i className="fas fa-layer-group text-[9px]"></i>
+                   <span>{chordKind ? CHORD_CHOICES.find(c => c.id === chordKind)?.label : 'Accords'}</span>
+                 </button>
+                 <button type="button" data-nova-roll="fantomes" onClick={() => setPrefs({ ghosts: !prefs.ghosts })} aria-pressed={prefs.ghosts}
+                   title={`Notes fantômes : les notes des autres pistes MIDI en filigrane, pour écrire la 808 en voyant la mélodie (comme Ghost Notes dans FL Studio)${ghostTrackCount ? ` · ${ghostTrackCount} piste${ghostTrackCount > 1 ? 's' : ''}` : ''}`}
+                   className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${prefs.ghosts ? 'bg-slate-200/10 border-slate-300/40 text-slate-200' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
+                   <i className="fas fa-ghost text-[9px]"></i><span>Fantômes</span>
+                 </button>
+                 <button type="button" data-nova-roll="clavier" onClick={() => { setKbOn(v => !v); if (kbOn) setRecArmed(false); }} aria-pressed={kbOn}
+                   title={kbOn ? "Clavier de l'ordinateur ACTIF : les lettres jouent des notes. Clic pour le couper et retrouver les raccourcis." : "Jouer avec le clavier de l'ordinateur (comme Computer MIDI Keyboard dans Live et Typing Keyboard dans FL Studio)"}
+                   className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${kbOn ? 'bg-cyan-400 border-cyan-300 text-black' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+                   <i className="fas fa-keyboard text-[9px]"></i><span>{kbOn ? 'Clavier actif' : 'Clavier'}</span>
+                 </button>
+                 {kbOn && (
+                   <button type="button" data-nova-roll="rec-midi" onClick={() => { const on = !recArmed; setRecArmed(on); if (on && !isPlaying) onTogglePlay?.(); }} aria-pressed={recArmed}
+                     title={recArmed ? 'Prise MIDI armée : ce que tu joues pendant la lecture s’écrit dans le clip (à l’arrêt). Clic pour désarmer.' : 'Enregistrer ce que tu joues au clavier dans le clip (lance la lecture)'}
+                     className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-black ${recArmed ? 'bg-red-600 border-red-400 text-white animate-pulse' : 'bg-white/5 border-white/10 text-red-400 hover:text-white'}`}>
+                     <span className={`w-2 h-2 rounded-full ${recArmed ? 'bg-white' : 'bg-red-500'}`}></span><span>{recArmed ? 'Prise…' : 'Enregistrer'}</span>
+                   </button>
+                 )}
+               </div>
+             )}
+
+             <div className="h-8 w-px bg-white/10"></div>
+
              {/* Quantize Controls (inspired by Ableton) */}
              <div className="flex items-center space-x-2 relative">
                 <button
@@ -720,6 +971,80 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
           </div>
        </div>
 
+       {/* Bandeau d'état : clavier de l'ordinateur, accord posé, gamme */}
+       {!isDrumMode && (kbOn || lastChord || chordKind) && (
+         <div data-nova-roll="bandeau" className="shrink-0 min-h-8 px-4 py-1 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-white/10 bg-[#101216] text-[11px] text-slate-300">
+           {kbOn && (
+             <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+               <span className="text-cyan-300 font-bold"><i className="fas fa-keyboard mr-1"></i>Joue avec les lettres</span>
+               <span className="font-mono text-slate-400">{['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK'].map(keyLabel).join(' ')} = Do Ré Mi Fa Sol La Si Do · {['KeyW', 'KeyE', 'KeyT', 'KeyY', 'KeyU'].map(keyLabel).join(' ')} = dièses</span>
+               <span>Octave <b className="text-white">Do{kbState.octave}</b> <span className="text-slate-500">({keyLabel('KeyZ')} / {keyLabel('KeyX')})</span></span>
+               <span>Vélocité <b className="text-white">{kbState.velocity}</b> <span className="text-slate-500">({keyLabel('KeyC')} / {keyLabel('KeyV')})</span></span>
+               {heldPitches.length > 0 && <span className="text-cyan-300 font-bold">{heldPitches.length > 2 ? chordLabelFr([...heldPitches].sort((a, b) => a - b)) : heldPitches.map(noteNameFr).join(' + ')}</span>}
+               <span className="text-slate-500">Sur la piste « {track.name} »</span>
+             </span>
+           )}
+           {chordKind && <span className="text-fuchsia-300"><i className="fas fa-layer-group mr-1"></i>Clique dans la grille pour poser un accord {CHORD_CHOICES.find(c => c.id === chordKind)?.label.toLowerCase()}{hasKey ? ` dans ${keyLabelFr(keyRoot, keyScale)}` : ''}</span>}
+           {lastChord && <span className="text-amber-200" role="status">{lastChord}</span>}
+         </div>
+       )}
+
+       {menu && (
+         <>
+           <div className="fixed inset-0 z-[290]" onPointerDown={() => setMenu(null)} />
+           <div role="dialog" aria-label={menu.kind === 'scale' ? 'Gamme du morceau' : 'Outil accords'} data-nova-roll-menu={menu.kind}
+             className="fixed z-[300] w-72 max-h-[70vh] overflow-y-auto rounded-xl border border-white/15 bg-[#1a1c22] p-3 shadow-2xl text-[11px] text-slate-200"
+             style={{ left: menu.x, top: menu.y }}>
+             {menu.kind === 'scale' ? (
+               <div className="space-y-3">
+                 <div>
+                   <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Tonalité du morceau</div>
+                   <div className="flex gap-2">
+                     <select aria-label="Note de la tonalité" value={typeof keyRoot === 'number' ? keyRoot : ''} onChange={e => setKey(Number(e.target.value), keyScale)}
+                       className="flex-1 h-9 rounded-lg bg-black/40 border border-white/15 px-2 text-white">
+                       {typeof keyRoot !== 'number' && <option value="">Choisir…</option>}
+                       {NOTE_NAMES_FR.map((n, i) => <option key={n} value={i}>{n}</option>)}
+                     </select>
+                     <select aria-label="Gamme" value={keyScale.toUpperCase()} onChange={e => setKey(typeof keyRoot === 'number' ? keyRoot : 0, e.target.value)}
+                       className="flex-1 h-9 rounded-lg bg-black/40 border border-white/15 px-2 text-white">
+                       {SCALE_CHOICES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                     </select>
+                   </div>
+                   <p className="mt-1 text-[10px] text-slate-500">{typeof projectKey === 'number' ? 'Détectée sur ton beat. La changer règle aussi tes Auto-Tune (annulable).' : "Pas encore de tonalité : choisis-la, Nova s'en souviendra pour le projet."}</p>
+                 </div>
+                 {([
+                   ['highlight', 'Griser les notes hors gamme', 'Les lignes et les notes hors gamme sont hachurées et grisées (comme Scale Highlighting dans FL Studio).'],
+                   ['snap', 'Coller à la gamme', 'Chaque note posée ou déplacée tombe sur une note de la gamme ; ↑ / ↓ passent de note en note (comme Scale Snap dans FL Studio).'],
+                   ['fold', 'Montrer seulement la gamme', 'Cache les lignes hors gamme : impossible de jouer faux (comme Fold to Scale dans Live).'],
+                 ] as [keyof RollPrefs, string, string][]).map(([k, label, hint]) => (
+                   <label key={k} className={`flex items-start gap-2 rounded-lg p-2 ${hasKey ? 'hover:bg-white/5 cursor-pointer' : 'opacity-40'}`} title={hint}>
+                     <input type="checkbox" className="mt-0.5 accent-amber-400" disabled={!hasKey} checked={!!prefs[k]} onChange={e => setPrefs({ [k]: e.target.checked } as Partial<RollPrefs>)} />
+                     <span><b className="text-white">{label}</b><br /><span className="text-slate-400 text-[10px]">{hint}</span></span>
+                   </label>
+                 ))}
+                 <button type="button" disabled={!hasKey} onClick={() => { fitToScale(); setMenu(null); }}
+                   title="Ramène sur la gamme les notes sélectionnées (ou toutes les notes du clip) : une seule étape d'annulation"
+                   className="w-full h-9 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-200 font-bold disabled:opacity-40">
+                   <i className="fas fa-compress-arrows-alt mr-1.5"></i>Remettre {selectedNoteIds.size > 0 ? 'la sélection' : 'tout le clip'} dans la gamme
+                 </button>
+               </div>
+             ) : (
+               <div className="space-y-1">
+                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Accord posé en un clic</div>
+                 {CHORD_CHOICES.map(c => (
+                   <button key={c.id} type="button" onClick={() => { setChordKind(c.id); setTool('DRAW'); setMenu(null); setLastChord(null); }} title={c.hint}
+                     className={`w-full text-left rounded-lg px-2.5 py-1.5 ${chordKind === c.id ? 'bg-fuchsia-500 text-black' : 'hover:bg-white/5'}`}>
+                     <b>{c.label}</b> <span className={chordKind === c.id ? 'text-black/70' : 'text-slate-500'}>· {c.hint}</span>
+                   </button>
+                 ))}
+                 <button type="button" onClick={() => { setChordKind(null); setMenu(null); setLastChord(null); }} disabled={!chordKind}
+                   className="mt-2 w-full h-9 rounded-lg bg-white/5 border border-white/10 font-bold disabled:opacity-40">Notes simples (couper l'outil accords)</button>
+               </div>
+             )}
+           </div>
+         </>
+       )}
+
        <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 flex overflow-hidden relative" style={{ minHeight: '70%' }}>
               
@@ -750,28 +1075,45 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                         />
                     ))}
 
+                    {/* NOTES FANTÔMES : autres pistes MIDI, non cliquables */}
+                    {ghostNotes.map(g => (
+                      <div key={`gh-${g.key}`} className="absolute rounded-[2px] pointer-events-none" data-nova-ghost=""
+                        style={{ left: g.start * zoomX, top: getYFromPitch(g.pitch) + 2, width: Math.max(4, g.duration * zoomX - 1), height: currentRowHeight - 4,
+                          border: `1px dashed ${g.color}`, backgroundColor: `${g.color}22`, opacity: 0.55 }} />
+                    ))}
+
                     {/* NOTES */}
                     {(clip.notes || []).map(note => {
                         const isSelected = selectedNoteIds.has(note.id);
+                        const outOfKey = highlight && !inKey(note.pitch);
                         return (
                             <div
                                 key={note.id}
-                                className={`absolute rounded-[2px] border border-black/30 flex items-center overflow-hidden`}
+                                data-nova-note={note.pitch}
+                                data-hors-gamme={outOfKey ? '1' : undefined}
+                                title={`${noteNameFr(note.pitch)}${outOfKey ? ' · hors gamme' : ''}`}
+                                className={`absolute rounded-[2px] border flex items-center overflow-hidden ${outOfKey && !isSelected ? 'border-red-400/70' : 'border-black/30'}`}
                                 style={{
                                     left: note.start * zoomX,
                                     top: getYFromPitch(note.pitch) + 1,
                                     width: Math.max(5, note.duration * zoomX - 1),
                                     height: currentRowHeight - 2,
-                                    backgroundColor: isSelected ? '#fff' : (isDrumMode ? '#f97316' : track.color),
-                                    opacity: isSelected ? 1 : 0.8,
+                                    backgroundColor: isSelected ? '#fff' : (isDrumMode ? '#f97316' : outOfKey ? '#64748b' : track.color),
+                                    opacity: isSelected ? 1 : outOfKey ? 0.55 : 0.8,
                                     // Glisser une note au doigt la déplace (pas de défilement)
                                     touchAction: 'none'
                                 }}
                             >
-                                {!isDrumMode && (note.duration * zoomX) > 20 && <span className="text-[7px] text-black ml-1 font-bold">{getNoteName(note.pitch)}</span>}
+                                {!isDrumMode && (note.duration * zoomX) > 20 && <span className="text-[7px] text-black ml-1 font-bold">{noteNameFr(note.pitch)}</span>}
                             </div>
                         );
                     })}
+
+                    {/* Notes en cours de prise au clavier */}
+                    {recPreview.map((n, i) => (
+                      <div key={`rec-${i}`} className="absolute rounded-[2px] pointer-events-none bg-red-500/80 border border-red-300"
+                        style={{ left: n.start * zoomX, top: getYFromPitch(n.pitch) + 1, width: Math.max(4, n.duration * zoomX), height: currentRowHeight - 2 }} />
+                    ))}
 
                     {/* Playhead */}
                     <PianoRollPlayhead clipStart={clip.start} zoomX={zoomX} />

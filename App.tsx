@@ -6085,6 +6085,7 @@ function Studio() {
              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement de l'éditeur…</div>}>
                <PianoRoll track={state.tracks.find(t => t.id === midiEditorOpen.trackId)!} clipId={midiEditorOpen.clipId} bpm={state.bpm} currentTime={state.currentTime} onUpdateTrack={handleUpdateTrack} onClose={() => setMidiEditorOpen(null)}
                  isPlaying={state.isPlaying} onTogglePlay={handleTogglePlay}
+                 projectKey={state.projectKey} projectScale={state.projectScale} onSetProjectKey={applyProjectKey} allTracks={state.tracks}
                  toolbarExtra={(() => {
                    // Mode instru seulement : le mode voix reste épuré.
                    const t = state.tracks.find(x => x.id === midiEditorOpen.trackId);
