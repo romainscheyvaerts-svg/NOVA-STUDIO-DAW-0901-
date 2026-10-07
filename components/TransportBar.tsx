@@ -12,6 +12,7 @@ import SimpleModeToggle from './SimpleModeToggle';
 import PunchControls from './PunchControls';
 import { PunchSettings } from '../types';
 import { openFeedback } from '../services/feedback';
+import { MidiFileMenu, MidiMobileMenuItems } from './MidiFileMenu';
 
 interface TransportProps {
   /** Ouvre « Master Nova » (mastering en un clic, V15). */
@@ -330,6 +331,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                         />
                     </>
                 )}
+                {/* Fichiers .mid et Capture MIDI (V25) */}
+                {!simple && <MidiFileMenu />}
              </div>
              
              {/* SHARE (Only if logged in) */}
@@ -559,6 +562,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <i className="w-5 text-center text-purple-400 fas fa-compact-disc"></i>
                   <span>Exporter</span>
                 </button>
+                <MidiMobileMenuItems onDone={() => setIsMobileMenuOpen(false)} />
                 {onOpenTakeHome && (
                   <button onClick={() => { onOpenTakeHome(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
                     <i className="w-5 text-center text-cyan-300 fas fa-cloud-arrow-up"></i>

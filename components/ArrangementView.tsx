@@ -6,6 +6,8 @@ import { isVoiceTrack } from '../utils/vocalRoles';
 import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint, Marker } from '../types';
 import TrackHeader from './TrackHeader';
 import ContextMenu from './ContextMenu';
+import { midiClipMenuItems, midiTrackMenuItems } from './MidiFileMenu';
+import { midiBus, isMidiFile } from '../utils/midiBus';
 import TimelineGridMenu from './TimelineGridMenu'; 
 import LiveRecordingClip from './LiveRecordingClip'; 
 import AutomationLaneComponent from './AutomationLane';
@@ -643,6 +645,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           }
           currentY += zoomV + extraH(t);
       }
+
+      // Fichiers .mid (V25) : pistes ou clips créés à l'endroit du dépôt (components/MidiHost).
+      const midiDropped = Array.from(e.dataTransfer.files || []).filter(isMidiFile);
+      midiDropped.forEach(f => midiBus.emit({ type: 'import-file', file: f, trackId: targetTrackId, time: dropTime }));
+      if (midiDropped.length && midiDropped.length === e.dataTransfer.files.length) return;
       
       if (!targetTrackId) {
           targetTrackId = visibleTracks.find(t => t.id === 'instrumental')?.id || 
@@ -668,7 +675,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           const AUDIO_EXT = /\.(wav|wave|mp3|aif|aiff|flac|ogg|oga|opus|m4a|aac|webm|caf)$/i;
           const files = Array.from(e.dataTransfer.files);
           const audio = files.filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
-          const refused = files.length - audio.length;
+          const refused = files.length - audio.length - midiDropped.length;
           // Plusieurs fichiers : un par piste, à partir de celle visée (comme dans les autres DAW).
           const startIdx = Math.max(0, visibleTracks.findIndex(t => t.id === targetTrackId));
           const targets = visibleTracks.slice(startIdx).filter(t => t.type === TrackType.AUDIO);
@@ -780,6 +787,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (onSwapInstrument && target && (target.type === TrackType.MIDI || target.type === TrackType.SAMPLER || target.type === TrackType.DRUM_RACK)) {
       menuItems.push({ label: "Changer d'instrument", onClick: () => onSwapInstrument(trackId), icon: 'fa-exchange-alt' });
     }
+    menuItems.push(...midiTrackMenuItems(target, () => setContextMenu(null)));
     setContextMenu({ x: e.clientX, y: e.clientY, items: menuItems });
   };
   
@@ -2294,6 +2302,7 @@ useEffect(() => {
                 ...(clipContextMenu.clip.type === TrackType.MIDI && onEditMidi ? [
                   { label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); }}
                 ] : []),
+                ...midiClipMenuItems(clipContextMenu.trackId, clipContextMenu.clip, () => setClipContextMenu(null)),
                 'separator',
                 { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
                 { label: clipContextMenu.clip.isReversed ? 'Remettre à l’endroit' : 'Inverser', icon: 'fa-rotate-left', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { isReversed: !clipContextMenu.clip.isReversed }); setClipContextMenu(null); }},

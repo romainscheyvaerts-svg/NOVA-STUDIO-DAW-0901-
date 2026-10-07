@@ -15,6 +15,13 @@ class MidiManager {
   
   // Event listeners for visual feedback
   private noteListeners: Set<MidiMessageCallback> = new Set();
+  /** Capture MIDI (V25) : notes jouées au clavier MIDI, même sans piste choisie. */
+  private captureListeners: Set<(on: boolean, note: number, velocity: number) => void> = new Set();
+
+  public addCaptureListener(cb: (on: boolean, note: number, velocity: number) => void) {
+      this.captureListeners.add(cb);
+      return () => { this.captureListeners.delete(cb); };
+  }
 
   private constructor() {}
 
@@ -113,6 +120,10 @@ class MidiManager {
 
     // Filter Channel (if not Omni)
     if (this.selectedChannel !== 0 && channel !== this.selectedChannel) return;
+
+    // Capture MIDI (V25) : tout ce qui est joué est gardé, piste choisie ou non.
+    if (command === 144 && velocity > 0) this.captureListeners.forEach(cb => cb(true, note, velocity));
+    else if (command === 128 || (command === 144 && velocity === 0)) this.captureListeners.forEach(cb => cb(false, note, 0));
 
     // Routing to Audio Engine
     if (this.selectedTrackId) {
