@@ -15,7 +15,7 @@
 import type { EditCommandId } from './editCommands';
 
 export type ShortcutContext = 'global' | 'focus';
-export type ShortcutCategory = 'Transport' | 'Édition' | 'Navigation' | 'Zoom et affichage' | 'Repères' | 'Fenêtres' | 'Keyboard Focus';
+export type ShortcutCategory = 'Transport' | 'Édition' | 'Modes d’édition' | 'Navigation' | 'Zoom et affichage' | 'Repères' | 'Fenêtres' | 'Keyboard Focus';
 
 export interface ShortcutDef {
   id: string;
@@ -89,6 +89,19 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.zoomOut', keys: ['ctrl+['], label: 'Zoom arrière', pt: 'Ctrl+[', category: 'Zoom et affichage', command: 'zoomOut' }),
   g({ id: 'pt.heightUp', keys: ['ctrl+arrowup'], label: 'Pistes plus hautes', pt: 'Ctrl+↑ (Track Height)', category: 'Zoom et affichage', command: 'trackHeightUp' }),
   g({ id: 'pt.heightDown', keys: ['ctrl+arrowdown'], label: 'Pistes plus basses', pt: 'Ctrl+↓ (Track Height)', category: 'Zoom et affichage', command: 'trackHeightDown' }),
+  // --- Modes d'édition (hooks/useEditModes, utils/editModes) -----------------------
+  // F1–F4 comme Pro Tools ; Alt+1–4 en repli quand le navigateur ou Windows prend F1–F4.
+  // Ctrl ou Maj maintenus PENDANT un glissement inversent Grid et Slip (Pro Tools : Ctrl).
+  g({ id: 'pt.modeShuffle', keys: ['f1', 'alt+1'], label: 'Mode Shuffle : les clips se collent, supprimer recolle la suite, coller pousse le reste', pt: 'F1 (Shuffle)', category: 'Modes d’édition', command: 'editMode', arg: 'SHUFFLE' }),
+  g({ id: 'pt.modeSlip', keys: ['f2', 'alt+2'], label: 'Mode Slip : déplacement et rognage libres, à l’échantillon près', pt: 'F2 (Slip)', category: 'Modes d’édition', command: 'editMode', arg: 'SLIP' }),
+  g({ id: 'pt.modeSpot', keys: ['f3', 'alt+3'], label: 'Mode Spot : un clic sur un clip ouvre « Position exacte »', pt: 'F3 (Spot)', category: 'Modes d’édition', command: 'editMode', arg: 'SPOT' }),
+  g({ id: 'pt.modeGrid', keys: ['f4', 'alt+4'], label: 'Mode Grid (2e appui : Grid relatif, le clip garde son décalage)', pt: 'F4 (Grid, F4 deux fois = Relative Grid)', category: 'Modes d’édition', command: 'editMode', arg: 'GRID' }),
+  g({ id: 'pt.tabTransient', keys: ['tab'], label: 'Tête de lecture à l’attaque suivante du clip sélectionné (Tab to Transient), sinon au bord de clip suivant', pt: 'Tab (Tab to Transient)', category: 'Modes d’édition', command: 'tabToTransient', arg: { dir: 1 } }),
+  g({ id: 'pt.tabTransientBack', keys: ['shift+tab'], label: 'Tête de lecture à l’attaque précédente', pt: 'Ctrl+Tab (Windows) / Option+Tab (Mac)', category: 'Modes d’édition', command: 'tabToTransient', arg: { dir: -1 } }),
+  g({ id: 'pt.tabClip', keys: ['alt+tab', 'ctrl+alt+arrowright'], label: 'Clip suivant de la piste (le sélectionne). Sous Windows, Alt+Tab est pris par le système : Ctrl+Alt+→', pt: 'Ctrl+Tab (clip suivant, Tab to Transient éteint)', category: 'Modes d’édition', command: 'tabToTransient', arg: { dir: 1, clip: true } }),
+  g({ id: 'pt.tabClipBack', keys: ['alt+shift+tab', 'ctrl+alt+arrowleft'], label: 'Clip précédent de la piste (le sélectionne)', pt: 'Ctrl+Maj+Tab', category: 'Modes d’édition', command: 'tabToTransient', arg: { dir: -1, clip: true } }),
+  g({ id: 'pt.syncPoint', keys: ['ctrl+,'], label: 'Point de synchro du clip à la tête de lecture (ou au début de la plage) : c’est lui qui se cale sur la grille et en Spot', pt: 'Ctrl+, (Identify Sync Point)', category: 'Modes d’édition', command: 'syncPoint' }),
+  g({ id: 'pt.syncPointRemove', keys: ['ctrl+alt+,'], label: 'Enlever le point de synchro des clips sélectionnés', pt: 'Alt+clic sur le point (Remove Sync Point)', category: 'Modes d’édition', command: 'syncPoint', arg: { remove: true } }),
   g({ id: 'pt.focus', keys: ['ctrl+alt+1'], label: 'Commands Keyboard Focus on / off (une touche = une commande)', pt: 'Ctrl+Alt+1 (bouton a–z)', category: 'Keyboard Focus' }),
 
   // --- Commands Keyboard Focus (une touche = une commande) ------------------------
@@ -200,7 +213,7 @@ export const chordLabel = (chord: string): string =>
 
 export const shortcutKeysLabel = (s: ShortcutDef): string => s.keys.map(chordLabel).join(' · ');
 
-export const SHORTCUT_CATEGORIES: ShortcutCategory[] = ['Transport', 'Édition', 'Navigation', 'Zoom et affichage', 'Repères', 'Fenêtres', 'Keyboard Focus'];
+export const SHORTCUT_CATEGORIES: ShortcutCategory[] = ['Transport', 'Édition', 'Modes d’édition', 'Navigation', 'Zoom et affichage', 'Repères', 'Fenêtres', 'Keyboard Focus'];
 
 /** Recherche dans l'aide : libellé, touches, équivalent Pro Tools (sans accents ni casse). */
 export const searchShortcuts = (query: string, map: ShortcutDef[] = KEYMAP): ShortcutDef[] => {

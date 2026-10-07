@@ -35,6 +35,13 @@ const isTypingTarget = (el: EventTarget | null) => {
   return tag === 'textarea' || tag === 'select' || node.isContentEditable;
 };
 
+/** Tab (Tab to Transient) : focus nulle part, ou dans l'arrangement. */
+const tabBelongsToTimeline = (el: EventTarget | null) => {
+  const node = el as HTMLElement | null;
+  if (!node || !node.tagName || node === document.body || node === document.documentElement) return true;
+  return !!node.closest?.('.nova-grille');
+};
+
 /** Fenêtre modale ouverte (export, sauvegarde, Strip Silence…) : on laisse faire. */
 const modalOpen = () => Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"]')).some(el => el.getClientRects().length > 0);
 
@@ -120,8 +127,11 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
 
       const sc = findShortcut(chordFromEvent(e), isKeyboardFocus());
       if (!sc) return;
-      // Touche maintenue : seuls le nudge, le zoom et la hauteur se répètent.
-      if (e.repeat && !/^(nudge|zoom|trackHeight)/.test(sc.command || '')) { e.preventDefault(); e.stopPropagation(); return; }
+      // Tab to Transient : seulement depuis l'arrangement (ou sans focus) ; ailleurs,
+      // Tab garde son rôle de navigation au clavier entre les boutons.
+      if (keyToken(e) === 'tab' && !tabBelongsToTimeline(e.target)) return;
+      // Touche maintenue : seuls le nudge, le zoom, la hauteur et Tab se répètent.
+      if (e.repeat && !/^(nudge|zoom|trackHeight|tabToTransient)/.test(sc.command || '')) { e.preventDefault(); e.stopPropagation(); return; }
       e.preventDefault();
       e.stopPropagation();
       recordAction(`raccourci:${sc.id}`);

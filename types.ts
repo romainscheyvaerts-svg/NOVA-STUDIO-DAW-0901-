@@ -224,6 +224,16 @@ export interface Clip {
   /** Tranche de rendu gelé fabriquée pour la lecture (jamais dans le projet). */
   isFreezeSlice?: boolean;
   /**
+   * Point de synchro (Pro Tools : Sync Point, Ctrl+,) en temps du fichier audio
+   * (même repère que offset) : c'est lui qui se cale sur la grille et en Spot.
+   */
+  syncPoint?: number;
+  /**
+   * Position d'origine (Pro Tools : Original Time Stamp) : instant de la
+   * timeline où commençait le fichier audio à l'enregistrement.
+   */
+  originStart?: number;
+  /**
    * Justesse note par note (V19) : ce clip joue un son corrigé (rendu hors
    * ligne). La prise d'origine et les retouches sont gardées pour revenir en
    * arrière ou retoucher. Une ancienne version ignore ce champ et joue le son
@@ -661,6 +671,8 @@ export interface DAWState {
   isDelayCompEnabled: boolean;
   metronome: MetronomeSettings;   // NEW
   punch: PunchSettings;           // NEW
+  /** Mode d'édition Pro Tools (Shuffle, Slip, Spot, Grid) et grille : utils/editModes. */
+  editMode?: import('./utils/editModes').EditModeSettings;
 }
 
 export interface ContextMenuItem {

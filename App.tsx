@@ -154,6 +154,7 @@ import AutoCompCard, { AutoCompProposal } from './components/AutoCompCard';
 import { autoComp, SpanReader } from './utils/autoComp';
 import { editSelectionStore } from './utils/editSelection';
 import { useEditCommands } from './hooks/useEditCommands';
+import { useEditModes } from './hooks/useEditModes';
 import { getRegisteredPlugin, registryMenuItems, usesProjectKey } from './engine/pluginRegistry';
 import { pluginDisplayName } from './utils/pluginLabel';
 
@@ -1629,7 +1630,8 @@ function Studio() {
         const clipId = clip.id;
         audioBufferRegistry.registerWithUrl(clip.buffer, clip.audioRef!, clipId);
 
-        const toStore = (c: Clip): Clip => { const x: Clip = { ...c, bufferId: clipId, gain: (c.gain ?? 1) * takeGain }; delete x.buffer; return x; };
+        // originStart : position d'origine (Pro Tools : Original Time Stamp), pour le Spot.
+        const toStore = (c: Clip): Clip => { const x: Clip = { ...c, bufferId: clipId, gain: (c.gain ?? 1) * takeGain, originStart: c.originStart ?? Math.max(0, c.start - (c.offset || 0)) }; delete x.buffer; return x; };
         const track = draft.tracks.find(t => t.id === result.trackId);
         if (track) {
           const takeStart = loopTakes.length ? Math.min(...loopTakes.map(l => l.clip.start)) : clip.start;
@@ -3624,6 +3626,11 @@ function Studio() {
     setPunchZone: (a, b) => { const p = punchFromRange(stateRef.current.punch, a, b); if (p) handleUpdatePunch(p); },
     openExport: () => setIsExportMenuOpen(true),
   });
+  // Modes d'édition Pro Tools (Shuffle / Slip / Spot / Grid), Tab to Transient, point de synchro.
+  useEditModes({
+    stateRef, setState, setVisualState, seek: handleSeek, notify: setAiNotification,
+    getClipboardClip: () => clipboardClipRef.current, setClipboardClip: (c) => { clipboardClipRef.current = c; },
+  }, { id: state.id, editMode: state.editMode });
 
   // Aide-mémoire des raccourcis (touche « ? »)
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
