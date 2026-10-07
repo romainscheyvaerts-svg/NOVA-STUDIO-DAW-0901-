@@ -30,6 +30,7 @@ import { Track, PluginType, PluginInstance, TrackType, TrackSend } from '../type
 import { isPluginBaked, isFreezeStale, isTrackFrozen } from '../utils/freeze';
 import { useRecFrozen } from '../utils/recFreezeStore';
 import { useInstrumentStatus } from '../utils/instrumentStore';
+import { openSynthPanel } from '../utils/synthPanelStore';
 import MonitorControl from './MonitorControl';
 import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
@@ -497,6 +498,18 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 style={{ color: track.collabOwnerColor || '#e2e8f0', backgroundColor: `${track.collabOwnerColor || '#94a3b8'}26` }}>
                 {ownerName}
               </span>
+            )}
+            {/* Synthé NOVA (V24) : pastille de l'instrument de la piste MIDI, ouvre son écran
+                (dans la ligne du nom : visible quelle que soit la hauteur de la piste ; le nom
+                du son est dans l'infobulle et en tête de l'écran du synthé). */}
+            {!isRenaming && track.type === TrackType.MIDI && !track.bass808 && !track.vstInstrument && !track.drumMachine && !instrumentPlugin && (
+              <button type="button" data-testid={`synth-pill-${track.id}`}
+                onClick={(e) => { e.stopPropagation(); openSynthPanel(track.id); }}
+                title={`Synthé NOVA : ${track.novaSynth?.name || 'synthé simple'} (ouvrir les sons et réglages)`}
+                aria-label={`Ouvrir le synthé de ${track.name}`}
+                className="shrink-0 w-6 h-6 rounded-md border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
+                <i className="fas fa-sliders-h text-[9px]"></i>
+              </button>
             )}
             {/* Ingé à distance : où en est la piste (« Chez l'ingé… », « Mise à jour reçue »), et l'envoyer. */}
             {!isRenaming && remote.role === 'artist' && remote.badge?.canSend && (

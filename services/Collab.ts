@@ -509,7 +509,10 @@ export const contentOf = (t: Track) => ({
   collabOwner: t.collabOwner,
   // Propriétaire nommé (« Feat à distance ») : ignoré par les anciennes versions de NOVA.
   ...(t.collabOwnerKey ? { collabOwnerKey: t.collabOwnerKey, collabOwnerName: t.collabOwnerName, collabOwnerColor: t.collabOwnerColor } : {}),
-  drumMachine: t.drumMachine, bass808: t.bass808, drumPads: t.drumPads?.map(p => { const { buffer: _b, ...r } = p as any; return r; }),
+  drumMachine: t.drumMachine, bass808: t.bass808,
+  // Synthé NOVA : null = ancien synthé (les versions précédentes ignorent ce champ).
+  ...(t.type === 'MIDI' ? { novaSynth: t.novaSynth ?? null } : {}),
+  drumPads: t.drumPads?.map(p => { const { buffer: _b, ...r } = p as any; return r; }),
   clips: (t.clips || []).map(clipForWire),
   // Couloirs de prises (noms, heures, tours de boucle) : champ ajouté. L'audio
   // des prises et le comp sont déjà dans les clips ; une ancienne version

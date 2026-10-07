@@ -17,6 +17,19 @@ import { ProEQ12Node } from '../plugins/ProEQ12Plugin';
 import { VocalSaturatorNode } from '../plugins/VocalSaturatorPlugin';
 import { MasterSyncNode } from '../plugins/MasterSyncPlugin';
 import { Synthesizer } from './Synthesizer';
+import { NovaSynthNode } from './NovaSynthNode';
+
+/** Synthé d'une piste MIDI : synthé NOVA (track.novaSynth) ou ancien synthé simple (anciens projets). */
+type TrackSynth = Synthesizer | NovaSynthNode;
+const makeTrackSynth = (ctx: BaseAudioContext, track: Track): TrackSynth =>
+  track.novaSynth ? new NovaSynthNode(ctx, track.novaSynth) : new Synthesizer(ctx as AudioContext);
+/** Notes dans l'ordre du temps (synthé NOVA : mono et glissé décidés d'après l'instant). */
+const sortedNotesCache = new WeakMap<object, any[]>();
+const notesInTimeOrder = <T extends { start: number }>(notes: T[]): T[] => {
+  let r = sortedNotesCache.get(notes) as T[] | undefined;
+  if (!r) { r = [...notes].sort((a, b) => a.start - b.start); sortedNotesCache.set(notes, r); }
+  return r;
+};
 import { AudioSampler } from './AudioSampler';
 import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
@@ -67,7 +80,7 @@ interface TrackDSP {
   downLatency?: number;
   inputStream?: MediaStreamAudioSourceNode | null;
   currentInputDeviceId?: string | null;
-  synth?: Synthesizer; // PolySynth for MIDI tracks
+  synth?: TrackSynth; // Synthé NOVA ou ancien synthé simple (pistes MIDI)
   sampler?: AudioSampler; // Legacy/Chromatic Sampler
   drumSampler?: DrumSamplerNode; // Pro Drum Sampler (Single)
   melodicSampler?: MelodicSamplerNode; // New Pro Melodic Sampler
@@ -538,7 +551,7 @@ export class AudioEngine {
       sends: Map<string, GainNode>;
       /** Effets créés pour le rendu (automation de leurs paramètres). */
       pluginNodes?: Map<string, any>;
-      synth?: Synthesizer;
+      synth?: TrackSynth;
       sampler?: AudioSampler;
       drumRack?: DrumRackNode;
       bass808?: Bass808Node;
@@ -616,7 +629,9 @@ export class AudioEngine {
         rt.bass808.output.connect(input);
         pendingPlugins.push(rt.bass808.ready);
       } else if (track.type === TrackType.MIDI) {
-        rt.synth = new Synthesizer(renderCtx);
+        rt.synth = makeTrackSynth(renderCtx, track);
+        // Chorus du synthé NOVA calé sur le temps du morceau (comme en lecture).
+        if (rt.synth instanceof NovaSynthNode) { rt.synth.syncTimeline(-startOffset, 0); pendingPlugins.push(rt.synth.ready); }
         rt.synth.output.connect(input);
       } else if (track.type === TrackType.SAMPLER) {
         rt.sampler = new AudioSampler(renderCtx, this.currentBpm);
@@ -792,7 +807,7 @@ export class AudioEngine {
 
         // PDC : notes avancées de la latence de tout le chemin (comme en lecture).
         const lat = (rt.latency || 0) + (rt.down || 0);
-        for (const note of clip.notes) {
+        for (const note of (rt.synth instanceof NovaSynthNode ? notesInTimeOrder(clip.notes) : clip.notes)) {
           const noteStart = clip.start + note.start - startOffset - lat;
           const noteEnd = noteStart + note.duration;
           if (noteEnd <= 0 || noteStart >= totalDuration) continue;
@@ -1362,6 +1377,8 @@ export class AudioEngine {
     // exactement là (1er kick de la batterie, 1re 808) était sautée.
     this.playbackStartTime = this.nextScheduleTime - startOffset;
     this.midiRunStart = startOffset;
+    // Synthé NOVA : chorus calé sur le temps du morceau (identique à l'export).
+    this.tracksDSP.forEach(d => { if (d.synth instanceof NovaSynthNode) d.synth.syncTimeline(this.playbackStartTime, this.nextScheduleTime); });
     if (this.recSession && this.recPlayStart === null) this.recPlayStart = this.playbackStartTime; 
 
     // Valeur correcte au demarrage : sans ca, une piste dont tous les points
@@ -1654,6 +1671,7 @@ export class AudioEngine {
           return;
         }
 
+        const novaSynth = this.tracksDSP.get(track.id)?.synth instanceof NovaSynthNode;
         midiClips.forEach(clip => {
            if (clip.type !== TrackType.MIDI || !clip.notes) return;
            
@@ -1662,7 +1680,7 @@ export class AudioEngine {
            // la fenêtre peut déjà avoir des notes à programmer.
            if (clip.start >= we || clipEnd <= projectWindowStart) return;
 
-           clip.notes.forEach(note => {
+           (novaSynth ? notesInTimeOrder(clip.notes) : clip.notes).forEach(note => {
                const noteAbsStart = clip.start + note.start;
                const noteAbsEnd = noteAbsStart + note.duration;
 
@@ -2184,7 +2202,7 @@ export class AudioEngine {
       dsp.bass808 = new Bass808Node(this.ctx, track.bass808.style);
       dsp.bass808.output.connect(dsp.input);
     } else if (track.type === TrackType.MIDI) {
-      dsp.synth = new Synthesizer(this.ctx);
+      dsp.synth = makeTrackSynth(this.ctx, track);
       dsp.synth.output.connect(dsp.input);
     }
     if (track.type === TrackType.SAMPLER) {
@@ -2306,12 +2324,26 @@ export class AudioEngine {
       } else if (!track.bass808 && dsp.bass808) {
         try { dsp.bass808.stopAll(); dsp.bass808.output.disconnect(); } catch (e) {}
         dsp.bass808 = undefined;
-        dsp.synth = new Synthesizer(this.ctx);
+        dsp.synth = makeTrackSynth(this.ctx, track);
         dsp.synth.output.connect(dsp.input);
       }
       if (track.bass808 && dsp.bass808) {
         dsp.bass808.setStyle(track.bass808.style);
         dsp.bass808.setGlideTime(track.bass808.glideTime);
+      }
+      // Synthé NOVA <-> ancien synthé (choix d'un préréglage, annuler, collaboration).
+      if (!track.bass808 && dsp.synth) {
+        const wantNova = !!track.novaSynth;
+        if (wantNova !== (dsp.synth instanceof NovaSynthNode)) {
+          const old = dsp.synth;
+          try { old.releaseAll(); } catch (e) {}
+          setTimeout(() => { try { old.output.disconnect(); if (old instanceof NovaSynthNode) old.destroy(); } catch (e) {} }, 60);
+          dsp.synth = makeTrackSynth(this.ctx, track);
+          dsp.synth.output.connect(dsp.input);
+          if (this.isPlaying && dsp.synth instanceof NovaSynthNode) dsp.synth.syncTimeline(this.playbackStartTime, this.ctx.currentTime);
+        } else if (dsp.synth instanceof NovaSynthNode && track.novaSynth) {
+          dsp.synth.setSettings(track.novaSynth);
+        }
       }
     }
     

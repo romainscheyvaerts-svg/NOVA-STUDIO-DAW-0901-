@@ -25,7 +25,7 @@ async () => {
   const starts = []; const orig = AudioBufferSourceNode.prototype.start;
   AudioBufferSourceNode.prototype.start = function (when, off, dur) { if (this.buffer === buf) starts.push([when, off || 0]); return orig.call(this, when, off, dur); };
   e.startPlayback(0, tr); const t0 = e.playbackStartTime;
-  await new Promise(r => setTimeout(r, 1500)); e.stopAll();
+  { const c0 = e.ctx.currentTime; const w0 = performance.now(); while (e.ctx.currentTime - c0 < 1.5 && performance.now() - w0 < 20000) await new Promise(r => setTimeout(r, 50)); } e.stopAll();
   AudioBufferSourceNode.prototype.start = orig;
   const ms = x => Math.round((x[0] - t0) * 1e6) / 1000;
   // Retards appliqués aux sorties : arrivée au master = départ + latences du chemin + retard PDC.

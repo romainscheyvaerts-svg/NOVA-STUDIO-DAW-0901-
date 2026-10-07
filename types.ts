@@ -444,6 +444,11 @@ export interface Track {
   /** Piste MIDI jouée par la basse 808 mélodique (piano roll, glissés). */
   bass808?: import('./utils/bass808').Bass808Settings;
   /**
+   * Piste MIDI jouée par le synthé NOVA (3 oscillateurs, filtre, préréglages).
+   * Absent : l'ancien synthé simple (les anciens projets sonnent comme avant).
+   */
+  novaSynth?: import('./utils/novaSynth').NovaSynthSettings;
+  /**
    * Piste MIDI (mode instru) jouée par un instrument VST3 du PC (pont VST).
    * Les notes sont rendues hors temps réel dans frozenClip (isFrozen, aucun
    * effet inclus : frozenUpToPluginIndex = -1) : le son est sauvegardé avec
