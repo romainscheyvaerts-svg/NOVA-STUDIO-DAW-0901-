@@ -10,6 +10,8 @@
  * - Humanizer (timing/velocity variations)
  */
 
+import { CHORD_INTERVALS as SHARED_CHORD_INTERVALS } from '../utils/scales';
+
 import { MidiNote } from '../types';
 
 // ============================================
@@ -284,25 +286,10 @@ export const DEFAULT_CHORD_SETTINGS: ChordGeneratorSettings = {
   strumDelay: 0,
 };
 
-// Chord intervals from root
-const CHORD_INTERVALS: Record<ChordType, number[]> = {
-  'MAJOR': [0, 4, 7],
-  'MINOR': [0, 3, 7],
-  'DIM': [0, 3, 6],
-  'AUG': [0, 4, 8],
-  'SUS2': [0, 2, 7],
-  'SUS4': [0, 5, 7],
-  'MAJ7': [0, 4, 7, 11],
-  'MIN7': [0, 3, 7, 10],
-  'DOM7': [0, 4, 7, 10],
-  'DIM7': [0, 3, 6, 9],
-  'MAJ9': [0, 4, 7, 11, 14],
-  'MIN9': [0, 3, 7, 10, 14],
-  'ADD9': [0, 4, 7, 14],
-  'POWER': [0, 7],
-};
+// Intervalles partagés avec le tampon d'accord du piano roll (utils/scales.ts).
+const CHORD_INTERVALS: Record<ChordType, number[]> = SHARED_CHORD_INTERVALS;
 
-class ChordGenerator {
+export class ChordGenerator {
   private settings: ChordGeneratorSettings = { ...DEFAULT_CHORD_SETTINGS };
   
   public setSettings(settings: Partial<ChordGeneratorSettings>) {
