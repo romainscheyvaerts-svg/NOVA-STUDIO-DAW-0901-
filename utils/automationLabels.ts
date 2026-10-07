@@ -5,6 +5,7 @@ import { sendLabel } from './sendLabels';
 import { parsePluginParam } from './automationWrite';
 import { v21ParamLabel, V21_SPECS } from '../engine/v21Params';
 import { pluginDisplayName } from './pluginLabel';
+import { LIMITER_AUTOMATABLE } from '../engine/LimiterNode';
 
 /**
  * Automation en français et en vraies unités (audit G22) : « Volume » en dB
@@ -18,11 +19,12 @@ export function automationParamLabel(param: string, tracks?: Track[] | null): st
   if (param === 'preVolume') return 'Volume avant effets';
   if (param === 'pan') return 'Panoramique';
   if (param.startsWith('send::')) return `Envoi ${sendLabel(param.slice(6), tracks)}`;
-  // Réglage d'un effet NOVA V21 (harmoniseur, tape stop…) : « Tape stop · Durée de l'arrêt ».
+  // Réglage d'un effet NOVA (limiteur, V21 : harmoniseur, tape stop…) : « Tape stop · Durée de l'arrêt ».
   const pp = parsePluginParam(param);
   if (pp) {
     const pl = tracks?.flatMap(t => t.plugins || []).find(x => x.id === pp.pluginId);
-    const label = pl ? v21ParamLabel(pl.type, pp.key) : Object.keys(V21_SPECS).map(t => v21ParamLabel(t, pp.key)).find(Boolean) || null;
+    const limiterLabel = pl?.type === 'LIMITER' ? LIMITER_AUTOMATABLE.find(a => a.id === pp.key)?.label || null : null;
+    const label = limiterLabel || (pl ? v21ParamLabel(pl.type, pp.key) : Object.keys(V21_SPECS).map(t => v21ParamLabel(t, pp.key)).find(Boolean) || null);
     if (label) return pl ? `${pluginDisplayName(pl)} · ${label}` : label;
   }
   return param.replace(/^plugin::/, '');

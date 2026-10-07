@@ -4,6 +4,15 @@
  *
  * Latence = anticipation + filtre de détection, déclarée par `latency` (s) :
  * le moteur la compense (PDC) comme celle d'un plugin VST.
+ *
+ * Réglages automatisables (plafond, gain d'entrée, relâchement) : AudioParam
+ * k-rate du worklet, lus à chaque bloc de 128 échantillons, en lecture comme
+ * à l'export. À l'export, l'automation est posée pendant une pause du rendu
+ * hors ligne ; un message du port arrivait, lui, après la reprise du rendu
+ * (mesuré : un plafond automatisé de −1 à −8 dBTP restait à −1, un
+ * relâchement automatisé était ignoré). L'anticipation et le
+ * suréchantillonnage (qui fixent la latence déclarée au PDC) ne sont pas
+ * automatisables et passent par message.
  */
 import { createLimiterCore, limiterLatencySamples } from './limiterCore';
 import { loadWorkletModule } from '../plugins/vocalDspUtils';
@@ -24,9 +33,27 @@ export interface LimiterParams {
 
 export const DEFAULT_LIMITER_PARAMS: LimiterParams = { ceiling: -1, inputGain: 0, release: 100, lookahead: 3, oversample: 4, isEnabled: true };
 
+/** Réglages automatisables : nom de l'AudioParam (= clé des réglages) → clé du cœur, bornes. */
+export const LIMITER_AUDIO_PARAMS = [
+  { name: 'ceiling', core: 'ceilingDb', minValue: -12, maxValue: 0, defaultValue: DEFAULT_LIMITER_PARAMS.ceiling },
+  { name: 'inputGain', core: 'inputGainDb', minValue: -12, maxValue: 30, defaultValue: DEFAULT_LIMITER_PARAMS.inputGain },
+  { name: 'release', core: 'releaseMs', minValue: 5, maxValue: 2000, defaultValue: DEFAULT_LIMITER_PARAMS.release },
+] as const;
+
+/** Liste de l'éditeur d'automation (registre des effets). */
+export const LIMITER_AUTOMATABLE = [
+  { id: 'ceiling', label: 'Plafond', min: -12, max: 0, unit: 'dBTP' },
+  { id: 'inputGain', label: "Gain d'entrée", min: -12, max: 30, unit: 'dB' },
+  { id: 'release', label: 'Relâchement', min: 5, max: 2000, unit: 'ms' },
+];
+
 const WORKLET_CODE = `
 const createLimiterCore = (${createLimiterCore.toString()});
+const __ap = ${JSON.stringify(LIMITER_AUDIO_PARAMS.map(a => ({ name: a.name, core: a.core })))};
 class NovaLimiterProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return ${JSON.stringify(LIMITER_AUDIO_PARAMS.map(({ core: _c, ...d }) => ({ ...d, automationRate: 'k-rate' })))};
+  }
   constructor(options) {
     super();
     this.core = createLimiterCore(sampleRate);
@@ -34,6 +61,8 @@ class NovaLimiterProcessor extends AudioWorkletProcessor {
     // tard dans un rendu hors ligne (export), qui démarre aussitôt.
     const init = options && options.processorOptions && options.processorOptions.params;
     if (init) this.core.setParams(init);
+    this.last = __ap.map(() => NaN);
+    this.patch = {};
     this.zero = new Float32Array(128);
     this.blocks = 0;
     this.port.onmessage = (e) => {
@@ -42,7 +71,15 @@ class NovaLimiterProcessor extends AudioWorkletProcessor {
       if (d.reset) this.core.reset();
     };
   }
-  process(inputs, outputs) {
+  process(inputs, outputs, parameters) {
+    // Réglages automatisables : lus au bloc près (lecture ET export).
+    let changed = false;
+    for (let i = 0; i < __ap.length; i++) {
+      const a = parameters[__ap[i].name];
+      const v = a && a.length ? a[0] : NaN;
+      if (v === v && v !== this.last[i]) { this.last[i] = v; this.patch[__ap[i].core] = v; changed = true; }
+    }
+    if (changed) this.core.setParams(this.patch);
     const out = outputs[0];
     if (!out || !out[0]) return true;
     const n = out[0].length;
@@ -58,12 +95,14 @@ class NovaLimiterProcessor extends AudioWorkletProcessor {
     return true;
   }
 }
-try { registerProcessor('nova-limiter-processor', NovaLimiterProcessor); } catch (e) {}
+try { registerProcessor('nova-limiter-processor-v3', NovaLimiterProcessor); } catch (e) {}
 `;
 
 const toCore = (p: LimiterParams) => ({
   ceilingDb: p.ceiling, inputGainDb: p.inputGain, releaseMs: p.release, lookaheadMs: p.lookahead, oversample: p.oversample,
 });
+/** Réglages non automatisables (latence, structure) : seuls à passer par message. */
+const structuralToCore = (p: LimiterParams) => ({ lookaheadMs: p.lookahead, oversample: p.oversample });
 
 export class LimiterNode {
   public input: GainNode;
@@ -87,17 +126,20 @@ export class LimiterNode {
 
   private async init() {
     try {
-      await loadWorkletModule(this.ctx, 'nova-limiter-v2', WORKLET_CODE);
-      this.worklet = new AudioWorkletNode(this.ctx, 'nova-limiter-processor', {
+      await loadWorkletModule(this.ctx, 'nova-limiter-v3', WORKLET_CODE);
+      const parameterData: Record<string, number> = {};
+      for (const a of LIMITER_AUDIO_PARAMS) parameterData[a.name] = this.params[a.name];
+      this.worklet = new AudioWorkletNode(this.ctx, 'nova-limiter-processor-v3', {
         numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
         channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
+        parameterData,
         processorOptions: { params: toCore(this.params) },
       });
       this.worklet.port.onmessage = (e) => {
         const d = e.data || {};
         if (Number.isFinite(d.grDb)) this.meters = { grDb: d.grDb, outPeakDb: d.outPeakDb, inPeakDb: d.inPeakDb, at: Date.now() };
       };
-      this.worklet.port.postMessage({ params: toCore(this.params) });
+      // Réglages reçus pendant le chargement du module : déjà dans parameterData / processorOptions.
       this.input.connect(this.worklet);
       this.worklet.connect(this.output);
     } catch (e) {
@@ -115,11 +157,29 @@ export class LimiterNode {
   }
 
   public updateParams(p: Partial<LimiterParams> & Record<string, any>) {
-    this.params = { ...this.params, ...sanitize(p) };
-    this.worklet?.port.postMessage({ params: toCore(this.params) });
+    const clean = sanitize(p);
+    this.params = { ...this.params, ...clean };
+    if (!this.worklet) return;
+    // Automatisables : AudioParam, pris en compte au bloc près (lecture ET export).
+    for (const a of LIMITER_AUDIO_PARAMS) {
+      const v = clean[a.name];
+      if (v === undefined) continue;
+      const ap = this.worklet.parameters.get(a.name);
+      if (!ap) continue;
+      try { ap.setValueAtTime(v, this.ctx.currentTime); } catch { ap.value = v; }
+    }
+    if (clean.lookahead !== undefined || clean.oversample !== undefined) {
+      this.worklet.port.postMessage({ params: structuralToCore(this.params) });
+    }
   }
 
   public getParams(): LimiterParams { return { ...this.params }; }
+
+  /** AudioParam d'un réglage automatisable (l'export y programme toute la voie d'automation), sinon null. */
+  public automationParam(key: string): AudioParam | null {
+    if (!this.worklet || !LIMITER_AUDIO_PARAMS.some(a => a.name === key)) return null;
+    return this.worklet.parameters.get(key) ?? null;
+  }
 
   /** Mesures récentes (réduction de gain, crêtes) ; remises à zéro après 0,5 s sans nouvelles. */
   public getMeters() {

@@ -9,7 +9,7 @@
  */
 import type React from 'react';
 import type { PluginInstance, PluginType } from '../types';
-import { LimiterNode, DEFAULT_LIMITER_PARAMS } from './LimiterNode';
+import { LimiterNode, DEFAULT_LIMITER_PARAMS, LIMITER_AUTOMATABLE } from './LimiterNode';
 import { NovaLimiterUI } from '../plugins/LimiterPlugin';
 import { V21EffectNode } from './v21Nodes';
 import { V21_DEFAULTS, v21Automatable } from './v21Params';
@@ -51,6 +51,8 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     defaultParams: () => ({ ...DEFAULT_LIMITER_PARAMS }),
     create: (ctx, plugin) => new LimiterNode(ctx, plugin.params || {}),
     ui: NovaLimiterUI as any,
+    // Anticipation et suréchantillonnage fixent la latence (PDC) : non automatisables.
+    automatable: LIMITER_AUTOMATABLE,
   },
   // --- V21 : voix créatives et effets trap -------------------------------------
   {

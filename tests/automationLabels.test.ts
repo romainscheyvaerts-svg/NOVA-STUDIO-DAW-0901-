@@ -7,6 +7,12 @@ describe('automationLabels (G22 : volume en dB, en français)', () => {
     expect(automationParamLabel('pan')).toBe('Panoramique');
     expect(automationParamLabel('send::send-verb-short')).toBe('Envoi Reverb courte');
   });
+  it('réglages automatisables du limiteur nommés en français', () => {
+    const tracks = [{ id: 'm', plugins: [{ id: 'lim', type: 'LIMITER', name: 'Nova Limiter', isEnabled: true, params: {} }] }] as any;
+    expect(automationParamLabel('plugin::lim::ceiling', tracks)).toBe('Limiteur · Plafond');
+    expect(automationParamLabel('plugin::lim::inputGain', tracks)).toBe("Limiteur · Gain d'entrée");
+    expect(automationParamLabel('plugin::lim::release', tracks)).toBe('Limiteur · Relâchement');
+  });
   it('valeurs en vraies unités', () => {
     expect(automationValueText('volume', 0.5)).toBe('−6,0 dB');
     expect(automationValueText('volume', 0)).toBe('−∞ dB');

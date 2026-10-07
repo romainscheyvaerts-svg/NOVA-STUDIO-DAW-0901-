@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createLimiterCore, limiterLatencySamples } from '../engine/limiterCore';
 import { truePeakOf, lufsOf } from '../utils/audioMeasure';
+import { getRegisteredPlugin } from '../engine/pluginRegistry';
 
 const SR = 48000;
 
@@ -112,5 +113,62 @@ describe('limiteur NOVA : la crête vraie ne dépasse jamais le plafond', () => 
     expect(lb).toBeGreaterThan(la + 3);
     expect(lc).toBeGreaterThan(lb + 1);
     expect(truePeakOf([c.L, c.R])).toBeLessThanOrEqual(-1);
+  });
+});
+
+/** Comme `run`, mais le plafond change à chaque bloc de 128 (automation k-rate de l'AudioWorklet). */
+function runAutomated(L: Float32Array, R: Float32Array, ceilingAtBlock: (b: number) => number, params: Parameters<ReturnType<typeof createLimiterCore>['setParams']>[0]) {
+  const core = createLimiterCore(SR);
+  core.setParams({ ...params, ceilingDb: ceilingAtBlock(0) });
+  const lat = core.latencySamples();
+  const n = L.length + lat;
+  const inL = new Float32Array(n), inR = new Float32Array(n);
+  inL.set(L); inR.set(R);
+  const outL = new Float32Array(n), outR = new Float32Array(n);
+  for (let s = 0, b = 0; s < n; s += 128, b++) {
+    core.setParams({ ceilingDb: ceilingAtBlock(b) });
+    const k = Math.min(128, n - s);
+    core.process(inL.subarray(s, s + k), inR.subarray(s, s + k), outL.subarray(s, s + k), outR.subarray(s, s + k), k);
+  }
+  return { L: outL.subarray(lat), R: outR.subarray(lat), lat };
+}
+
+describe('limiteur NOVA : plafond automatisé', () => {
+  it('rampe −1 → −9 dBTP : chaque tranche reste sous le plafond en vigueur', () => {
+    const { L, R } = loudBeat(3, SR, 0.9);
+    const blocks = Math.ceil(3 * SR / 128) + 4;
+    const ceilAt = (b: number) => -1 - 8 * Math.min(1, b / (blocks - 1));
+    const { L: oL, R: oR } = runAutomated(L, R, ceilAt, { inputGainDb: 12, releaseMs: 80, lookaheadMs: 3, oversample: 4 });
+    const W = 2400;
+    for (let s = 0; s + W <= oL.length; s += W) {
+      // Plafond en vigueur au début de la tranche (rampe descendante : le plus haut de la tranche).
+      const lim = ceilAt(Math.floor(s / 128));
+      expect(truePeakOf([oL.subarray(s, s + W), oR.subarray(s, s + W)])).toBeLessThanOrEqual(lim + 1e-9);
+    }
+  });
+
+  it('une baisse brutale du plafond n’écrête pas le son déjà en attente (plafond retardé avec le signal)', () => {
+    const n = SR, x = new Float32Array(n);
+    for (let i = 0; i < n; i++) x[i] = 0.5 * Math.sin(2 * Math.PI * 997 * i / SR);
+    const CHANGE_BLOCK = 100, at = CHANGE_BLOCK * 128;
+    const { L: o } = runAutomated(x, x, b => (b < CHANGE_BLOCK ? 0 : -12), { inputGainDb: 0, releaseMs: 100, lookaheadMs: 3, oversample: 4 });
+    // Avant le changement (moins l'anticipation et le filtre) : intact, sans écrêtage.
+    const before = at - limiterLatencySamples(SR, 3) - 2;
+    let maxDiff = 0;
+    for (let i = 0; i < before; i++) maxDiff = Math.max(maxDiff, Math.abs(o[i] - x[i]));
+    expect(maxDiff).toBeLessThan(1e-6);
+    // Les ~3 ms analysées AVANT la baisse (en attente dans la ligne à retard) gardent leur
+    // plafond : le gain y descend en douceur, sans être aplaties net à −12 dB (écrêtage).
+    const pending = o.subarray(at - limiterLatencySamples(SR, 3), at - 17);
+    let pk = 0;
+    for (let i = 0; i < pending.length; i++) pk = Math.max(pk, Math.abs(pending[i]));
+    expect(pk).toBeGreaterThan(0.3);
+    expect(truePeakOf([pending])).toBeLessThanOrEqual(0);
+    // Après : sous le nouveau plafond (−12 dB), crête vraie comprise.
+    expect(truePeakOf([o.subarray(at + 200, n - 200)])).toBeLessThanOrEqual(-12 + 1e-9);
+  });
+
+  it('automatisables : plafond, gain d’entrée, relâchement (pas l’anticipation ni le suréchantillonnage, qui fixent la latence)', () => {
+    expect(getRegisteredPlugin('LIMITER')!.automatable!.map(a => a.id)).toEqual(['ceiling', 'inputGain', 'release']);
   });
 });
