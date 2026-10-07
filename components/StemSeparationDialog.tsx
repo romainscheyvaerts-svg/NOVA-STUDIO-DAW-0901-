@@ -80,6 +80,14 @@ const StemSeparationDialog: React.FC<Props> = ({ target, projectName, getClipBuf
   const [connecting, setConnecting] = useState(false);
   const availability = stemsAvailability(bridge, isNovaDesktop());
 
+  // Appli Windows : le pont démarre avec elle, on s'y connecte tout seul (un essai).
+  useEffect(() => {
+    if (!target || availability !== 'connect') return;
+    setConnecting(true);
+    novaBridge.connect().finally(() => setConnecting(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target]);
+
   // État du module à l'ouverture, puis suivi de l'installation.
   useEffect(() => {
     if (!target || availability !== 'ok') return;
