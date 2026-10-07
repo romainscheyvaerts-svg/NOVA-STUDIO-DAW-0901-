@@ -4,7 +4,7 @@ import {
   myRecordTarget, myTrackName, needsResync, normalizeInviteCode, ownerFromContent, ownsContent, participantOf, parseTimeMentions,
   peerViews, pickPeerColor, PEER_COLORS, recordBlock, withPosition, PeerInfo, PeerRec, REC_LOCK_TTL_MS,
 } from '../utils/collabPeers';
-import { applyMixFields, legacyMixToFields } from '../utils/collabMerge';
+import { applyMixFields, legacyMixToFields, mergeQueuedOps } from '../utils/collabMerge';
 import { Marker, TrackType } from '../types';
 import { makeClip, makeTrack } from './helpers/fixtures';
 
@@ -105,6 +105,13 @@ describe("verrou d'enregistrement", () => {
     expect(recordBlock(libre, sam, recs, now + REC_LOCK_TTL_MS + 1)).toBeNull();
   });
 
+  it('plusieurs artistes : une piste sans propriétaire ne se partage plus (chacun la sienne)', () => {
+    expect(recordBlock(libre, sam, [], now, true)).toMatch(/ta propre piste/);
+    expect(recordBlock(libre, sam, [], now, false)).toBeNull(); // seul artiste : comme avant
+    expect(recordBlock(mine, sam, [], now, true)).toBeNull();
+    expect(myRecordTarget([couplet, libre], sam, [], 'voix', true, now)).toBeNull(); // « Créer ma piste »
+  });
+
   it("l'ingé n'enregistre pas sur la voix d'un artiste", () => {
     expect(recordBlock(libre, { role: 'engineer', key: 'u:inge', name: 'Max' }, [], now)).toMatch(/appartient à l'artiste/);
   });
@@ -202,6 +209,18 @@ describe('repères partagés', () => {
     expect(out.map(m => [m.id, m.time, m.name])).toEqual([['c', 5, 'couplet 2 ici'], ['a', 10, 'Repère']]);
     expect(applyMarkerOps(out, [], ['c']).map(m => m.id)).toEqual(['a']);
     expect(applyMarkerOps(out, 'pas une liste', null).length).toBe(2);
+  });
+});
+
+describe('repères en file hors ligne', () => {
+  it('deux lots se cumulent, le plus récent gagne repère par repère', () => {
+    const a = { upsert: [{ id: 'a', time: 1 }, { id: 'b', time: 2 }], remove: ['z'] };
+    const b = { upsert: [{ id: 'b', time: 3 }, { id: 'z', time: 9 }], remove: ['a'] };
+    const m = mergeQueuedOps('markers', a, b);
+    expect(m.upsert).toEqual([{ id: 'b', time: 3 }, { id: 'z', time: 9 }]);
+    expect(m.remove).toEqual(['a']);
+    // Les autres opérations : la plus récente remplace.
+    expect(mergeQueuedOps('chat', { text: 'a' }, { text: 'b' })).toEqual({ text: 'b' });
   });
 });
 

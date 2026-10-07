@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { AutotuneBadge } from './AutotuneVstPanel';
-import { useCollabRole, requestVolumeLock } from '../utils/collabStore';
+import { useCollabRole, requestVolumeLock, useCollabLive } from '../utils/collabStore';
 import { requestRemoteSend, useRemoteBadge } from '../utils/remoteStore';
 import { useSimpleMode } from '../utils/simpleMode';
 import { gainToDbText, panToText } from '../utils/db';
@@ -398,6 +398,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const insertPlugins = track.plugins.filter(p => p.id !== instrumentPlugin?.id);
   const frozen = isTrackFrozen(track);
   const collabRole = useCollabRole();
+  // « Feat à distance » : à qui est la piste, et qui enregistre dessus en ce moment.
+  const collabLive = useCollabLive();
+  const recBy = collabRole ? collabLive.recs[track.id] : undefined;
+  const ownerName = collabRole && track.collabOwnerKey ? (track.collabOwnerKey === collabLive.meKey ? 'à toi' : track.collabOwnerName || '') : '';
   const remote = useRemoteBadge(track.id);
   // Mode simple : ni effets ni envois dans l'en-tête (Mix auto s'en charge).
   const { simple } = useSimpleMode();
@@ -472,6 +476,20 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 {!frozen && recFrozen === 'frozen' && <i className="fas fa-snowflake text-[8px] ml-1 text-sky-300" title="Figée pendant l'enregistrement (effets à latence)" aria-label="Figée pendant l'enregistrement (effets à latence)"></i>}
                 {!frozen && recFrozen === 'pending' && <i className="fas fa-snowflake text-[8px] ml-1 text-sky-300/60 animate-pulse" title="Préparation de la prise…" aria-label="Préparation de la prise"></i>}
                 {freezeStale && <i className="fas fa-exclamation-triangle text-[8px] ml-1 text-amber-400" title="Les prises ont changé depuis le rendu : il sera refait à la prochaine sauvegarde sur PC (pont VST)."></i>}
+              </span>
+            )}
+            {/* Feat à distance : propriétaire (son nom, sa couleur) et pastille REC quand il enregistre (piste verrouillée). */}
+            {!isRenaming && recBy && (
+              <span data-testid={`collab-rec-${track.id}`} role="status" title={`${recBy} enregistre sur cette piste : elle est verrouillée pour les autres`}
+                className="shrink-0 inline-flex items-center gap-1 h-4 rounded bg-red-600 px-1 text-[9px] font-black uppercase text-white animate-pulse">
+                <i className="fas fa-lock text-[7px]" aria-hidden></i>REC {recBy}
+              </span>
+            )}
+            {!isRenaming && !recBy && ownerName && (
+              <span data-testid={`collab-owner-${track.id}`} title={ownerName === 'à toi' ? 'Ta piste : les autres l’entendent, personne ne peut l’écraser' : `Piste de ${ownerName} : seul(e) ${ownerName} peut y enregistrer`}
+                className="shrink-0 max-w-[5.5rem] truncate h-4 rounded px-1 text-[9px] font-black leading-4"
+                style={{ color: track.collabOwnerColor || '#e2e8f0', backgroundColor: `${track.collabOwnerColor || '#94a3b8'}26` }}>
+                {ownerName}
               </span>
             )}
             {/* Ingé à distance : où en est la piste (« Chez l'ingé… », « Mise à jour reçue »), et l'envoyer. */}
@@ -584,8 +602,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
               <button
                 onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
-                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'}`}
-                title={track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer" : "Enregistrer sur cette piste (sinon REC choisit la piste sélectionnée)"}
+                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
+                title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : ownerName && ownerName !== 'à toi' ? `Piste de ${ownerName} : enregistre sur ta propre piste` : track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer" : "Enregistrer sur cette piste (sinon REC choisit la piste sélectionnée)"}
                 aria-label={`Armer l'enregistrement : ${track.name}`}
                 aria-pressed={!!track.isTrackArmed}
               >

@@ -79,7 +79,7 @@ export interface TrackOwner { key: string; name: string; color: string }
 export const ownerOf = (t: Track): TrackOwner | null =>
   t.collabOwnerKey ? { key: t.collabOwnerKey, name: t.collabOwnerName || 'un autre', color: t.collabOwnerColor || '#94a3b8' } : null;
 
-export type ContentVerdict = { ok: true } | { ok: false; reason: string };
+export interface ContentVerdict { ok: boolean; reason?: string }
 
 /**
  * Une version reçue du contenu d'une piste est-elle acceptable ? Seulement de
@@ -125,13 +125,19 @@ export const recOn = (trackId: string, recs: PeerRec[], me: { key: string } | nu
 
 /**
  * Puis-je enregistrer sur cette piste ? null : oui ; sinon la phrase qui dit
- * pourquoi et quoi faire.
+ * pourquoi et quoi faire. otherArtists : un autre artiste est dans la session
+ * (une piste sans propriétaire n'est alors plus partagée : chacun la sienne).
  */
-export function recordBlock(t: Track, me: CollabMe | null, recs: PeerRec[], now = Date.now()): string | null {
+export function recordBlock(t: Track, me: CollabMe | null, recs: PeerRec[], now = Date.now(), otherArtists = false): string | null {
   if (!me) return null;
   const r = recOn(t.id, recs, me, now);
   if (r) return `${r.name} enregistre sur « ${t.name} » en ce moment : la piste est verrouillée. Attends la fin de sa prise, ou enregistre sur ta propre piste.`;
-  if (ownsContent(t, me.role, me.key)) return null;
+  if (ownsContent(t, me.role, me.key)) {
+    if (otherArtists && me.role === 'artist' && !t.collabOwnerKey) {
+      return `« ${t.name} » n'appartient à personne et vous êtes plusieurs artistes : pour que personne n'écrase la prise de l'autre, enregistre sur ta propre piste (« Créer ma piste » dans Collaboration).`;
+    }
+    return null;
+  }
   const o = ownerOf(t);
   if (o) return `« ${t.name} » est la piste de ${o.name} : sa prise ne peut pas être écrasée. Enregistre sur ta propre piste (« Créer ma piste » dans Collaboration).`;
   return me.role === 'artist'
@@ -140,8 +146,8 @@ export function recordBlock(t: Track, me: CollabMe | null, recs: PeerRec[], now 
 }
 
 /** Une piste de voix où je peux enregistrer (la sélectionnée d'abord). */
-export function myRecordTarget(tracks: Track[], me: CollabMe, recs: PeerRec[], preferId?: string | null): Track | null {
-  const ok = (t: Track) => t.type === 'AUDIO' && t.id !== 'instrumental' && !t.instrumentId && recordBlock(t, me, recs) === null;
+export function myRecordTarget(tracks: Track[], me: CollabMe, recs: PeerRec[], preferId?: string | null, otherArtists = false, now = Date.now()): Track | null {
+  const ok = (t: Track) => t.type === 'AUDIO' && t.id !== 'instrumental' && !t.instrumentId && recordBlock(t, me, recs, now, otherArtists) === null;
   const pref = preferId ? tracks.find(t => t.id === preferId) : undefined;
   if (pref && ok(pref)) return pref;
   // D'abord mes pistes à moi (nommées), puis une piste de voix libre.
