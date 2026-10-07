@@ -52,7 +52,7 @@ from urllib.parse import unquote, urlparse
 T_START = time.perf_counter()
 
 APP_NAME = "Nova Studio"
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.3"
 ASIO_PORT = 8766
 VST_PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
 CLOSE_TIMEOUT_S = float(os.environ.get("NOVA_DESKTOP_CLOSE_TIMEOUT", "90"))
