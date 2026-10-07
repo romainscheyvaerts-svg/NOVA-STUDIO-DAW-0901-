@@ -396,7 +396,21 @@ def g18(b, R):
     ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25, "mob": mob, "g18": g18}
+def f4(b, R):
+    ctx, pg = mk(b, "pc", "simple", "f4")
+    open_studio(pg, R)
+    take(pg, 3)
+    pg.keyboard.press("Escape"); pg.mouse.click(1000, 600); pg.wait_for_timeout(300)
+    rec = pg.locator("[data-track-header='track-rec-main']").first.bounding_box()
+    x0 = rec["x"] + rec["width"] + 25
+    pg.mouse.dblclick(x0, rec["y"] + 60); pg.wait_for_timeout(600)
+    S(pg, "f4", "01_double_clic_clip")
+    R["menu_ouvert"] = pg.locator("[data-testid=fade-in-10ms]").count() > 0
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25, "mob": mob, "g18": g18, "f4": f4}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]

@@ -1825,11 +1825,18 @@ useEffect(() => {
           ref={scrollContainerRef} 
           className="flex-1 overflow-auto relative custom-scroll"
           onMouseDown={handleMouseDown}
-          onDoubleClick={() => {
+          onDoubleClick={(e) => {
             // Un clip MIDI etait une impasse : une fois le piano roll ferme,
             // rien ne permettait de le rouvrir depuis l'arrangement.
             const sel = selectedClip;
-            if (sel && sel.clip.type === TrackType.MIDI) onEditMidi?.(sel.trackId, sel.clip.id);
+            if (sel && sel.clip.type === TrackType.MIDI) { onEditMidi?.(sel.trackId, sel.clip.id); return; }
+            // Clip audio (F4) : le double-clic ouvre son menu (fondus, diviser, gain…).
+            if (sel && scrollContainerRef.current) {
+              const live = tracks.find(t => t.id === sel.trackId)?.clips.find(c => c.id === sel.clip.id) || sel.clip;
+              const r = scrollContainerRef.current.getBoundingClientRect();
+              const tAt = (e.clientX - r.left - headerWidth + scrollContainerRef.current.scrollLeft) / zoomH;
+              if (tAt >= live.start && tAt <= live.start + live.duration) setClipContextMenu({ x: e.clientX, y: e.clientY, trackId: sel.trackId, clip: live });
+            }
           }} 
           onMouseMove={handleMouseMove} 
           onMouseUp={handleMouseUp} 
