@@ -334,11 +334,6 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
       ctx.beginPath(); ctx.roundRect(x0, yOf(c) - h / 2, Math.max(2, x1 - x0), h, r); ctx.fill();
       ctx.globalAlpha = 1;
       if (isSel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke(); }
-      if (x1 - x0 > 26) {
-        ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.font = `bold ${Math.max(9, Math.min(12, rowH * 0.5))}px ui-sans-serif, system-ui`; ctx.textBaseline = 'middle';
-        const label = Math.abs(cents) >= 3 ? fmtCents(cents) : '✓';
-        ctx.fillText(x1 - x0 > 70 ? `${noteNameFr(Math.round(c))} ${label}` : label, x0 + 5, yOf(c));
-      }
     });
     // Courbes : hauteur chantée (gris) et hauteur corrigée (cyan).
     const drawCurve = (v: Float32Array | Float32Array | null, color: string, w: number) => {
@@ -354,6 +349,31 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
     };
     drawCurve(midi, 'rgba(203,213,225,0.55)', 1.2);
     if (changed) drawCurve(target, '#67e8f9', 1.8);
+    // Étiquettes des notes (par-dessus les courbes) : nom et écart à la gamme.
+    const fs = Math.max(9, Math.min(12, rowH * 0.55));
+    ctx.font = `bold ${fs}px ui-sans-serif, system-ui`; ctx.textBaseline = 'middle';
+    notes.forEach((n, i) => {
+      const x0 = n.start * pps, x1 = n.end * pps;
+      if (x1 - x0 < 26) return;
+      const c = targetCenter(n, edits[i]);
+      const cents = centsFromScale(c, key.root, key.scale);
+      const label = Math.abs(cents) >= 3 ? fmtCents(cents) : '✓';
+      const text = x1 - x0 > 80 ? `${noteNameFr(Math.round(c))} ${label}` : label;
+      const tw = ctx.measureText(text).width;
+      // Au-dessus du bloc, dans un petit cartouche lisible.
+      const ty = yOf(c) - Math.max(6, rowH * 0.72) / 2 - fs * 0.75;
+      ctx.fillStyle = 'rgba(11,13,16,0.82)';
+      ctx.beginPath(); ctx.roundRect(x0, ty - fs * 0.65, tw + 8, fs * 1.3, 4); ctx.fill();
+      ctx.fillStyle = noteColor(cents);
+      ctx.fillText(text, x0 + 4, ty);
+    });
+    // Repères de temps (secondes depuis le début du clip).
+    if (source) {
+      const zero = source.offset - source.region.start;
+      ctx.font = '10px ui-sans-serif, system-ui'; ctx.textBaseline = 'top'; ctx.fillStyle = 'rgba(148,163,184,0.8)';
+      const lab = pps > 120 ? 0.5 : pps > 40 ? 1 : 2;
+      for (let t = 0; zero + t < dur; t += lab) ctx.fillText(`${(t).toFixed(lab < 1 ? 1 : 0).replace('.', ',')} s`, (zero + t) * pps + 3, 3);
+    }
     if (playhead !== null) { ctx.fillStyle = '#f472b6'; ctx.fillRect(playhead * pps, 0, 2, H); }
   }, [open, analysis, notes, edits, sel, box.h, width, pps, range, rowH, yOf, key, source, clip?.duration, dur, hopSec, target, changed, playhead]);
 
@@ -575,6 +595,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
       <div ref={scrollRef} className="relative min-w-0 flex-1 overflow-x-auto overflow-y-hidden" data-testid="pitch-grid">
         {analysis && notes.length > 0 && (
           <canvas ref={canvasRef} role="img" aria-label={`Notes de ${clipName} sur une grille de piano, avec la courbe de hauteur`}
+            data-geom={JSON.stringify(notes.map((n, i) => ({ i, x0: Math.round(n.start * pps), x1: Math.round(n.end * pps), y: Math.round(yOf(targetCenter(n, edits[i]))), c: +targetCenter(n, edits[i]).toFixed(3) })))}
             className="block touch-none select-none" style={{ cursor: 'ns-resize' }}
             onPointerDown={onPointerDown} onPointerMove={onPointerMove}
             onPointerUp={onPointerUp} onPointerCancel={() => { drag.current = null; setRubber(null); }}

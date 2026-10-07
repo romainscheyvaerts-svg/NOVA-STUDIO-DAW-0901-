@@ -901,6 +901,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     return (
                       <div
                         key={clip.id}
+                        data-clip-id={clip.id}
                         className={`absolute top-1 bottom-1 rounded-md overflow-hidden cursor-pointer transition-shadow ${
                           isSelected
                             ? 'ring-2 ring-cyan-400 shadow-lg shadow-cyan-500/30'

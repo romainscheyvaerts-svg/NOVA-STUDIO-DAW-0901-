@@ -768,6 +768,28 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     return () => el.removeEventListener('touchmove', onTouchMove);
   }, []);
 
+  /** Clip sous un point de l'écran (même calcul que le clic), ou null. */
+  const clipAtPoint = (clientX: number, clientY: number): { trackId: string; clip: Clip } | null => {
+    const sc = scrollContainerRef.current;
+    if (!sc) return null;
+    const rect = sc.getBoundingClientRect();
+    if (clientX - rect.left < headerWidth || clientY - rect.top < 40) return null;
+    const x = clientX - rect.left - headerWidth + sc.scrollLeft;
+    const y = clientY - rect.top + sc.scrollTop;
+    let currentY = 40;
+    for (const t of visibleTracks) {
+      if (y >= currentY && y < currentY + zoomV) {
+        const clip = clipAtTime(rowClips(t), x / zoomH);
+        return clip ? { trackId: t.id, clip } : null;
+      }
+      currentY += zoomV + extraH(t);
+    }
+    return null;
+  };
+  /** Appui long du doigt sur un clip (tablette) : son menu, comme le clic droit. */
+  const longPressRef = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const cancelLongPress = () => { if (longPressRef.current) { window.clearTimeout(longPressRef.current.timer); longPressRef.current = null; } };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
     const rect = scrollContainerRef.current.getBoundingClientRect();
@@ -1921,10 +1943,24 @@ useEffect(() => {
             e.preventDefault();
             touchRef.current = true;
             handleMouseDown(e);
+            const cx = e.clientX, cy = e.clientY;
+            cancelLongPress();
+            longPressRef.current = { x: cx, y: cy, timer: window.setTimeout(() => {
+              longPressRef.current = null;
+              const hit = clipAtPoint(cx, cy);
+              if (!hit) return;
+              touchRef.current = false; handleMouseUp();
+              setClipContextMenu({ x: cx, y: cy, trackId: hit.trackId, clip: hit.clip });
+            }, 550) };
           }}
-          onPointerMove={(e) => { if (e.pointerType !== 'mouse') handleMouseMove(e); }}
-          onPointerUp={(e) => { if (e.pointerType !== 'mouse') { touchRef.current = false; handleMouseUp(); } }}
-          onPointerCancel={(e) => { if (e.pointerType !== 'mouse') { touchRef.current = false; handleMouseUp(); } }}
+          onPointerMove={(e) => {
+            if (e.pointerType === 'mouse') return;
+            const lp = longPressRef.current;
+            if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancelLongPress();
+            handleMouseMove(e);
+          }}
+          onPointerUp={(e) => { if (e.pointerType !== 'mouse') { cancelLongPress(); touchRef.current = false; handleMouseUp(); } }}
+          onPointerCancel={(e) => { if (e.pointerType !== 'mouse') { cancelLongPress(); touchRef.current = false; handleMouseUp(); } }}
           onScroll={(e) => { setScrollLeft(e.currentTarget.scrollLeft); setScrollTop(e.currentTarget.scrollTop); }}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
