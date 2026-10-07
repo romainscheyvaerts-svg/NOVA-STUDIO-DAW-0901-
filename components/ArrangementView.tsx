@@ -223,6 +223,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   }, [dragOverTrackId, onReorderTracks]);
 
   const [markerContextMenu, setMarkerContextMenu] = useState<{ x: number; y: number; marker: Marker } | null>(null);
+  // Un seul menu à la fois (G3) : ouvrir un menu ferme les autres (avant, le
+  // menu de la grille restait ouvert sous le menu de la règle).
+  useEffect(() => { if (contextMenu || markerContextMenu || clipContextMenu) setGridMenu(null); }, [contextMenu, markerContextMenu, clipContextMenu]);
+  useEffect(() => { if (gridMenu) { setContextMenu(null); setMarkerContextMenu(null); setClipContextMenu(null); } }, [gridMenu]);
   // Bord de région en cours de déplacement (début ou fin) : règle aussi la vitesse du prompteur.
   const regionDragRef = useRef<{ marker: Marker; edge: 'START' | 'END' } | null>(null);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
@@ -1761,24 +1765,24 @@ useEffect(() => {
               title="Sélecteur (comme dans Pro Tools) (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
-          {!simple && <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 h-9 [@media(pointer:coarse)]:h-10 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
-            <i className="fas fa-magnet mr-2"></i> {snapEnabled ? 'Grille ON' : 'Grille OFF'}
+          {!simple && <button onClick={() => setSnapEnabled(!snapEnabled)} aria-pressed={snapEnabled} title="Aimanter à la grille : les clips et les points se calent sur les temps (Maj pendant un glissement = libre)" className={`px-4 h-9 [@media(pointer:coarse)]:h-10 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+            <i className="fas fa-magnet mr-2"></i> {snapEnabled ? 'Grille : oui' : 'Grille : non'}
           </button>}
           {!simple && (
             <div className="hidden xl:flex items-center gap-1" data-nova-target="nudge">
-              <label className="text-[10px] font-bold text-slate-500" htmlFor="nova-nudge" title="Nudge (comme dans Pro Tools) : ← / → déplacent la sélection d'un pas ; Maj = 10 pas.">Nudge</label>
+              <label className="text-[10px] font-bold text-slate-500" htmlFor="nova-nudge" title="Décalage (« nudge » de Pro Tools) : ← / → déplacent la sélection d'un pas ; Maj = 10 pas.">Décalage</label>
               <select id="nova-nudge" value={editPrefs.nudge} onChange={e => editCommands ? editCommands.setNudgeUnit(e.target.value as NudgeUnit) : editPrefsStore.set({ nudge: e.target.value as NudgeUnit })}
-                title="Pas du nudge (comme la « Nudge value » de Pro Tools) : ← / → sur la sélection, Maj = 10 pas"
+                title="Pas du décalage (« Nudge value » de Pro Tools) : ← / → sur la sélection, Maj = 10 pas" aria-label="Pas du décalage"
                 className="h-8 bg-black/40 border border-white/10 rounded-lg px-1 text-[11px] text-slate-300">
                 {NUDGE_UNITS.map(u => <option key={u.id} value={u.id}>{u.label}</option>)}
               </select>
               <button onClick={() => editPrefsStore.set({ autoXfade: !editPrefs.autoXfade })} aria-pressed={editPrefs.autoXfade}
-                title="Crossfade auto : quand tu poses un clip contre un autre ou par-dessus (≤ 2 s), un fondu enchaîné est créé tout seul (comme les crossfades de Pro Tools)."
-                className={`h-8 px-2 rounded-lg border text-[10px] font-black tracking-wide ${editPrefs.autoXfade ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
-                <i className="fas fa-xmark mr-1"></i>X-FADE AUTO
+                title="Fondu enchaîné auto : quand tu poses un clip contre un autre ou par-dessus (≤ 2 s), un fondu enchaîné (crossfade) est créé tout seul."
+                className={`h-8 px-2 rounded-lg border text-[10px] font-bold ${editPrefs.autoXfade ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
+                <i className="fas fa-xmark mr-1"></i>Fondu enchaîné auto
               </button>
               <select value={editPrefs.xfadeCurve} onChange={e => editPrefsStore.set({ xfadeCurve: e.target.value as CrossfadeCurve })}
-                aria-label="Courbe des crossfades"
+                aria-label="Courbe des fondus enchaînés"
                 title="Courbe des crossfades posés à la souris (bas d'une jonction), avec Ctrl+F ou automatiquement. Puissance égale = « Equal Power » de Pro Tools, sans creux de niveau."
                 className="h-8 bg-black/40 border border-white/10 rounded-lg px-1 text-[11px] text-slate-300">
                 {FADE_CURVES.map(cv => <option key={cv} value={cv}>{FADE_CURVE_INFO[cv].label}</option>)}

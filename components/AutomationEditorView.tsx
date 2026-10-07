@@ -78,7 +78,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
           { id: 'volume', name: 'Volume', min: 0, max: 1.5 },
           // Avant les effets : un fondu attaque le compresseur et la reverb (piste gelée : rejoué au dégel).
           { id: 'preVolume', name: 'Volume avant effets', min: 0, max: 1.5 },
-          { id: 'pan', name: 'Pan', min: -1, max: 1 }
+          { id: 'pan', name: 'Panoramique', min: -1, max: 1 }
       ];
       
       // Sends
@@ -185,14 +185,14 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
       {/* TOOLBAR */}
       <div className="h-10 border-b flex items-center justify-between px-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}>
          <div className="flex items-center space-x-4">
-            <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: 'var(--accent-neon)' }}>Automation Editor</span>
+            <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: 'var(--accent-neon)' }}>Automation</span>
             <div className="h-4 w-px bg-white/10"></div>
             <div className="flex items-center space-x-2">
                 <i className="fas fa-search-plus text-[10px]" style={{ color: 'var(--text-secondary)' }}></i>
                 <input type="range" min="10" max="200" value={zoomH} onChange={e => setZoomH(Number(e.target.value))} className="w-20 h-1 bg-white/10 rounded-full accent-cyan-500" />
             </div>
          </div>
-         <div className="text-[9px] font-mono" style={{ color: 'var(--text-secondary)' }}>SHIFT + Click to snap</div>
+         <div className="text-[9px] font-mono" style={{ color: 'var(--text-secondary)' }}>Clic : ajouter un point · glisser : le déplacer · double-clic : le supprimer</div>
       </div>
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -208,14 +208,14 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
                                 <button 
                                     onClick={() => setParamMenuOpen(paramMenuOpen === track.id ? null : track.id)}
                                     className="w-5 h-5 rounded flex items-center justify-center bg-white/10 hover:bg-cyan-500 hover:text-black text-slate-400 transition-colors"
-                                    title="Add Automation Parameter"
+                                    title="Ajouter un paramètre à automatiser (volume, panoramique, envois, réglages d'effet)" aria-label={`Ajouter un paramètre à automatiser sur ${track.name}`}
                                 >
                                     <i className="fas fa-plus text-[8px]"></i>
                                 </button>
                                 {/* Dropdown Menu for Parameters */}
                                 {paramMenuOpen === track.id && (
                                     <div className="absolute top-6 right-0 w-48 border shadow-2xl rounded-lg z-50 max-h-60 overflow-y-auto" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}>
-                                        <div className="px-2 py-1 text-[8px] font-black uppercase bg-black/20" style={{ color: 'var(--text-secondary)' }}>Add Parameter</div>
+                                        <div className="px-2 py-1 text-[8px] font-black uppercase bg-black/20" style={{ color: 'var(--text-secondary)' }}>Paramètre à automatiser</div>
                                         {getAvailableParameters(track).map(p => (
                                             <button 
                                                 key={p.id}

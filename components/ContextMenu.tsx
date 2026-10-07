@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ContextMenuItem } from '../types';
 
 interface ContextMenuProps {
@@ -13,32 +13,18 @@ const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ x, y });
 
-  useEffect(() => {
-    // Smart Positioning Logic
-    if (menuRef.current) {
-        const rect = menuRef.current.getBoundingClientRect();
-        const screenW = window.innerWidth;
-        const screenH = window.innerHeight;
-        
-        let newX = x;
-        let newY = y;
-
-        // Check Right Edge
-        if (x + rect.width > screenW) {
-            newX = x - rect.width;
-        }
-
-        // Check Bottom Edge
-        if (y + rect.height > screenH) {
-            newY = y - rect.height;
-        }
-
-        // Prevent top/left overflow
-        newX = Math.max(0, newX);
-        newY = Math.max(0, newY);
-
-        setPosition({ x: newX, y: newY });
-    }
+  // Recalage dans l'écran (G3) sur la taille réelle (offset*, insensible à
+  // l'animation de zoom), et défilement interne si le menu est plus haut que l'écran.
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const screenW = window.innerWidth, screenH = window.innerHeight;
+    let newX = x + w > screenW - 4 ? x - w : x;
+    let newY = y + h > screenH - 4 ? Math.min(y - h, screenH - h - 4) : y;
+    newX = Math.max(4, Math.min(newX, screenW - w - 4));
+    newY = Math.max(4, newY);
+    setPosition({ x: newX, y: newY });
   }, [x, y]);
 
   useEffect(() => {
@@ -62,8 +48,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }) => {
   return (
     <div 
       ref={menuRef}
-      className="fixed z-[9999] min-w-[200px] bg-[#1a1c22] border border-white/10 shadow-[0_10px_40px_rgba(0,0,0,0.8)] rounded-lg py-1.5 overflow-hidden animate-in fade-in zoom-in duration-75 text-[#e2e8f0]"
-      style={{ left: position.x, top: position.y }}
+      className="fixed z-[9999] min-w-[200px] bg-[#1a1c22] border border-white/10 shadow-[0_10px_40px_rgba(0,0,0,0.8)] rounded-lg py-1.5 animate-in fade-in zoom-in duration-75 text-[#e2e8f0]"
+      style={{ left: position.x, top: position.y, maxHeight: 'calc(100vh - 8px)', overflowY: 'auto' }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {items.map((item, idx) => {

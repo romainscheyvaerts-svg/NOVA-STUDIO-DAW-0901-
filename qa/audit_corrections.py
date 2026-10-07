@@ -288,7 +288,39 @@ def g7(b, R):
     ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7}
+def g3(b, R):
+    ctx, pg = mk(b, "pc", "simple", "g3")
+    open_studio(pg, R)
+    pg.mouse.click(1000, 600); pg.wait_for_timeout(200)
+    pg.mouse.click(1200, 132, button="right"); pg.wait_for_timeout(600)
+    S(pg, "g3", "01_clic_droit_regle")
+    R["menus"] = pg.evaluate("() => Array.from(document.querySelectorAll('div.fixed')).filter(d => /Ajouter|Grille|Quantization|ARRANGEMENT|marqueur/i.test(d.innerText) && d.getBoundingClientRect().width < 400).map(d => { const r = d.getBoundingClientRect(); return {t: d.innerText.slice(0,60), x: Math.round(r.x), y: Math.round(r.y), b: Math.round(r.bottom)}; })")
+    pg.keyboard.press("Escape"); pg.mouse.click(1000, 600); pg.wait_for_timeout(300)
+    pg.mouse.click(1450, 820, button="right"); pg.wait_for_timeout(600)
+    S(pg, "g4", "01_menu_grille")
+    R["menu_grille"] = pg.evaluate("() => { const d = Array.from(document.querySelectorAll('div.fixed')).find(d => /Grille|Quantization/i.test(d.innerText)); if (!d) return null; const r = d.getBoundingClientRect(); return {t: d.innerText.slice(0,300), b: Math.round(r.bottom), r: Math.round(r.right)}; }")
+    # Menu grille ouvert, puis clic droit sur la règle : un seul menu doit rester.
+    pg.mouse.click(1200, 132, button="right"); pg.wait_for_timeout(600)
+    S(pg, "g3", "02_grille_puis_regle")
+    R["menus_apres_2_clics"] = pg.evaluate("() => Array.from(document.querySelectorAll('div.fixed')).filter(d => /Grille et pistes|Quantization|marqueur ici/i.test(d.innerText) && d.getBoundingClientRect().width < 400).length")
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+def g22(b, R):
+    ctx, pg = mk(b, "pc", "avance", "g22")
+    open_studio(pg, R)
+    t = pg.locator("button", has_text=re.compile(r"^\s*Auto\s*$")).locator("visible=true")
+    if t.count():
+        t.first.click(); pg.wait_for_timeout(1200)
+    S(pg, "g22", "01_automation")
+    R["texte"] = [l for l in body(pg).split(chr(10)) if re.search(r"Automation|Clic|Volume|dB", l)][:8]
+    R["anglais"] = re.findall(r"(AUTOMATION EDITOR|Click to|SHIFT|Add Parameter)", body(pg))
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]
