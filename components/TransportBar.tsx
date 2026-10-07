@@ -489,7 +489,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             {children && (
               <div className="space-y-2">
                 <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Mode d'affichage</div>
-                <div className="bg-white/5 p-3 rounded-lg">
+                <div className="group vm-labeled bg-white/5 p-3 rounded-lg">
                   {children}
                 </div>
               </div>

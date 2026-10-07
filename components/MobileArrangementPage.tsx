@@ -646,7 +646,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             className="flex items-center justify-center border-b border-white/10 bg-[#0f1114]"
             style={{ height: TIMELINE_HEIGHT }}
           >
-            <span className="text-[9px] font-bold text-white/30 uppercase">Tracks</span>
+            <span className="text-[9px] font-bold text-white/30 uppercase">Pistes</span>
           </div>
 
           {/* Track headers */}

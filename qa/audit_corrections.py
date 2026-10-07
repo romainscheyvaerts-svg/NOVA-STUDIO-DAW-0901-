@@ -354,7 +354,26 @@ def g25(b, R):
     ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25}
+def mob(b, R):
+    for vp in ("tab", "tel"):
+        ctx, pg = mk(b, vp, "simple", f"mob_{vp}")
+        try:
+            open_studio(pg, R, vp=vp)
+        except Exception as e:
+            R[f"{vp}_open"] = str(e)[:200]
+        pg.wait_for_timeout(800)
+        S(pg, "g14" if vp == "tab" else "g15", f"{vp}_01_studio")
+        if vp == "tab":
+            R["tab_store_visible"] = pg.get_by_text("BEAT STORE").count() > 0 and pg.get_by_text("BEAT STORE").first.is_visible()
+            m = pg.get_by_role("button", name="Ouvrir le menu").locator("visible=true")
+            if m.count():
+                m.first.click(); pg.wait_for_timeout(500)
+                S(pg, "f9", "tab_01_menu")
+        R[f"{vp}_errors"] = errors(pg)
+        ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25, "mob": mob}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]

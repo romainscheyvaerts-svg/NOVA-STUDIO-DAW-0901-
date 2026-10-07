@@ -4448,6 +4448,9 @@ function Studio() {
       return;
     }
     if (inst.bpm) handleUpdateBpm(inst.bpm);
+    // Tablette / petit écran (G14) : le store prenait 320 px et ne laissait que
+    // 370 px de timeline. Beat choisi → on le replie (▤ en haut à gauche le rouvre).
+    if (!isMobileRef.current && window.innerWidth < 1280) setIsSidebarOpen(false);
     if (stateRef.current.projectMode !== 'BEATMAKING') track('beat_tried', { beat_id: String(inst.id ?? ''), title: String(inst.title || '') });
     setState(prev => ({ ...prev, beatGenre: inst.genre || undefined, beatTitle: inst.title || undefined }));
     let tonalite = lireTonalite(inst.key);
@@ -5829,10 +5832,11 @@ function Studio() {
           puis jamais rendue. Charger un beat ouvrait donc un studio vide
           pendant plusieurs secondes, sans le moindre signe d'activite. */}
       {externalImportNotice && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
+        // Téléphone (G15) : en bas, au-dessus des onglets ; en haut, il cachait le zoom (− / +).
+        <div className={`fixed ${isMobile ? 'bottom-[calc(8.5rem+env(safe-area-inset-bottom))]' : 'top-20'} left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
                         bg-[#14161a]/95 border border-white/10 shadow-2xl backdrop-blur-sm
                         flex items-center gap-2.5 text-[12px] font-medium text-slate-200
-                        animate-in fade-in slide-in-from-top-2 duration-200">
+                        animate-in fade-in slide-in-from-top-2 duration-200`}>
           {!/^[✅❌]/.test(externalImportNotice) && (
             <i className="fas fa-circle-notch fa-spin text-cyan-400"></i>
           )}
