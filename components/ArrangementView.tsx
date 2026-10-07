@@ -16,7 +16,9 @@ import { gainToDbText } from '../utils/db';
 import { PunchSettings } from '../types';
 import { hasPunchZone, movePunchPoint } from '../utils/punch';
 import { crossfadeZones, fadeInShape, fadeOutShape, FADE_CURVES, FADE_CURVE_INFO, junctionNear, makeCrossfade, handlesOf, NUDGE_UNITS, NudgeUnit } from '../utils/fades';
-import { editSelectionStore, editPrefsStore, useEditPrefs } from '../utils/editSelection';
+import { editSelectionStore, editPrefsStore, useEditPrefs, useEditSelection } from '../utils/editSelection';
+import { makeSelection, tracksBetween } from '../utils/timeSelection';
+import RangeActionsBar from './RangeActionsBar';
 import type { EditCommands } from '../hooks/useEditCommands';
 import { bufferDurationOf } from '../hooks/useEditCommands';
 import { CrossfadeCurve } from '../types';
@@ -116,7 +118,7 @@ const fracToClipGain = (f: number): number => {
 /** Ordonnée de la poignée de gain, relative au haut du clip (zone de forme d'onde : y+18 … y+h-4). */
 const clipGainHandleY = (clipH: number, gain: number): number => 18 + Math.max(4, clipH - 22) * (1 - clipGainToFrac(gain));
 
-type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | 'GAIN' | 'XFADE' | null;
+type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | 'GAIN' | 'XFADE' | 'RANGE' | null;
 type LoopDragMode = 'START' | 'END' | 'BODY' | null;
 
 const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: boolean): number => {
@@ -145,7 +147,12 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [xfadeTip, setXfadeTip] = useState<{ x: number; y: number; text: string } | null>(null);
   // Poignée de punch en cours de déplacement (règle).
   const punchDragRef = useRef<'IN' | 'OUT' | null>(null);
-  const [activeTool, setActiveTool] = useState<EditorTool>('SELECT');
+  // Smart Tool (Pro Tools) par défaut à la souris ; au doigt, le Grabber (déplacement) comme avant.
+  const [activeTool, setActiveTool] = useState<EditorTool>(() =>
+    typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? 'SELECT' : 'SMART');
+  // Sélection de plage (Sélecteur / moitié haute du Smart Tool) : partagée avec les commandes.
+  const { time: timeSel } = useEditSelection();
+  const rangeDragRef = useRef<{ anchor: number; anchorTrack: string; clickClip?: { trackId: string; clip: Clip } } | null>(null);
   const [zoomV, setZoomV] = useState(120); 
   const [zoomH, setZoomH] = useState(40);  
   const [snapEnabled, setSnapEnabled] = useState(true);
@@ -260,6 +267,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
       // Outils : 1 sélection, 2 ciseaux, 3 gomme (annoncés dans les infobulles)
       if (!mod && !e.altKey) {
+        if (e.key === '4') { setActiveTool('RANGE'); return; }
+        if (e.key === '5') { setActiveTool('SMART'); return; }
         if (e.key === '1') { setActiveTool('SELECT'); return; }
         if (e.key === '2') { setActiveTool('SPLIT'); return; }
         if (e.key === '3') { setActiveTool('ERASE'); return; }
@@ -277,6 +286,21 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       }
 
       // Coller se fait sur la piste selectionnee, meme sans clip selectionne.
+      // Sélection de plage (Pro Tools) : Ctrl+E séparer, Ctrl+F fondus, Alt+Maj+3 consolider,
+      // Ctrl+C / X / D et Suppr sur la plage, Ctrl+V colle une plage copiée.
+      if (editCommands) {
+        const ts = editSelectionStore.get().time;
+        if (mod && !e.shiftKey && (e.key === 'e' || e.key === 'E')) { e.preventDefault(); editCommands.separate(); return; }
+        if (ts && mod && !e.shiftKey && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); editCommands.fadesFromSelection(); return; }
+        if (ts && e.altKey && e.shiftKey && e.code === 'Digit3') { e.preventDefault(); void editCommands.consolidateSelection(); return; }
+        if (ts && mod && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); editCommands.copySelection(); return; }
+        if (ts && mod && (e.key === 'x' || e.key === 'X')) { e.preventDefault(); editCommands.cutSelection(); return; }
+        if (ts && mod && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); editCommands.duplicateSelection(); return; }
+        if (ts && !mod && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); editCommands.deleteSelection(); return; }
+        if (mod && (e.key === 'v' || e.key === 'V') && editCommands.hasRangeClipboard()) { e.preventDefault(); editCommands.pasteRange(); return; }
+        if (mod && (e.key === 'c' || e.key === 'C' || e.key === 'x' || e.key === 'X')) editCommands.markClipClipboard();
+      }
+
       if (mod && (e.key === 'v' || e.key === 'V')) {
         const target = sel?.trackId || selectedTrackId;
         if (target) { e.preventDefault(); onEditClip?.(target, '', 'PASTE', { time: playheadStore.get() }); }
@@ -828,6 +852,15 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                     setDragAction('XFADE');
                     return;
                 }
+                // Sélecteur, ou moitié haute du clip avec le Smart Tool (hors bords, coins de fondu et poignée de gain).
+                const nearEdge = x - clipStartX < edge || clipEndX - x < edge;
+                const onFadeCorner = inFadeRow && (x - clipStartX < FADE_HANDLE_PX || clipEndX - x < FADE_HANDLE_PX);
+                if (activeTool === 'RANGE' || (activeTool === 'SMART' && !touchRef.current && relY < zoomV * 0.5 && !onGainHandle && !nearEdge && !onFadeCorner)) {
+                    // Simple clic (sans glisser) dans le haut du clip : le clip est sélectionné, comme avant.
+                    startRange(t.id, time, useSnap, { trackId: t.id, clip });
+                    return;
+                }
+                editSelectionStore.set({ time: null });
                 if (inFadeRow && x - clipStartX < FADE_HANDLE_PX) setDragAction('FADE_IN');
                 else if (inFadeRow && clipEndX - x < FADE_HANDLE_PX) setDragAction('FADE_OUT');
                 else if (onGainHandle) {
@@ -873,6 +906,19 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       return;
     }
 
+    // Zone vide d'une piste : Sélecteur, ou moitié haute avec le Smart Tool → plage de temps.
+    {
+      let laneY = 40;
+      for (const t of visibleTracks) {
+        const laneH = zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+        if (y >= laneY && y < laneY + zoomV) {
+          if (activeTool === 'RANGE' || (activeTool === 'SMART' && !touchRef.current && y - laneY < zoomV * 0.5)) { startRange(t.id, time, useSnap); return; }
+          break;
+        }
+        laneY += laneH;
+      }
+    }
+    editSelectionStore.set({ time: null });
     setSelectedClip(null);
     if (!(e.shiftKey || e.ctrlKey || e.metaKey)) setSelectedClipIds(new Set());
     // Un simple clic deplace la tete de lecture ; si l'utilisateur glisse, cela
@@ -882,6 +928,17 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (touchRef.current) { marqueeOriginRef.current = null; setDragAction(null); return; }
     marqueeOriginRef.current = { x, y };
     setDragAction('SCRUB');
+};
+
+/** Début d'une sélection de plage (point d'ancrage) : la tête de lecture y va, comme dans Pro Tools. */
+const startRange = (trackId: string, rawTime: number, useSnap: boolean, clickClip?: { trackId: string; clip: Clip }) => {
+    const t0 = Math.max(0, getSnappedTime(rawTime, bpm, gridSize, useSnap));
+    rangeDragRef.current = { anchor: t0, anchorTrack: trackId, clickClip };
+    setSelectedClip(null); setSelectedClipIds(new Set()); setActiveClip(null);
+    editSelectionStore.set({ time: null });
+    if (selectedTrackId !== trackId) onSelectTrack(trackId);
+    onSeek(t0);
+    setDragAction('RANGE');
 };
 
 const handleMouseMove = (e: React.MouseEvent) => {
@@ -972,7 +1029,10 @@ const handleMouseMove = (e: React.MouseEvent) => {
                     else if (editCommands && relY > zoomV * 0.55 && junctionNear(t.clips, tHover, Math.max(6, edge) / zoomH)) cursor = 'col-resize';
                     else if (relY < zoomV * 0.35 && (x - cx0 < FADE_HANDLE_PX || cx1 - x < FADE_HANDLE_PX)) cursor = 'nwse-resize';
                     else if (x - cx0 < edge || cx1 - x < edge) cursor = 'ew-resize';
-                }
+                    // Smart Tool : moitié haute = Sélecteur (curseur texte), moitié basse = Grabber (main).
+                    else if (activeTool === 'RANGE' || (activeTool === 'SMART' && relY < zoomV * 0.5)) cursor = 'text';
+                    else if (activeTool === 'SMART') cursor = 'grab';
+                } else if (activeTool === 'RANGE' || (activeTool === 'SMART' && y - laneY < zoomV * 0.5)) cursor = 'text';
                 break;
             }
             laneY += zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
@@ -982,6 +1042,21 @@ const handleMouseMove = (e: React.MouseEvent) => {
     }
 
     const time = getSnappedTime(x / zoomH, bpm, gridSize, useSnap);
+    if (dragAction === 'RANGE' && rangeDragRef.current) {
+        // Plage : du point d'ancrage au pointeur, sur toutes les pistes traversées.
+        const rd = rangeDragRef.current;
+        let overId = rd.anchorTrack;
+        let laneY = 40;
+        for (const t of visibleTracks) {
+            const laneH = zoomV + (t.automationLanes.filter(l => l.isExpanded).length * 80);
+            if (y >= laneY && y < laneY + laneH) { overId = t.id; break; }
+            laneY += laneH;
+        }
+        const ids = tracksBetween(visibleTracks.map(t => t.id), rd.anchorTrack, overId);
+        const tNow = Math.max(0, getSnappedTime(x / zoomH, bpm, gridSize, snapEnabled && !isShiftDownRef.current));
+        editSelectionStore.set({ time: makeSelection(rd.anchor, tNow, ids) });
+        return;
+    }
     if (dragAction === 'XFADE' && xfadeDragRef.current && editCommands) {
         // Longueur = 2 × la distance à la jonction (crossfade centré, comme Pro Tools).
         const xf = xfadeDragRef.current;
@@ -1091,6 +1166,12 @@ const handleMouseUp = () => {
     regionDragRef.current = null;
     punchDragRef.current = null;
     if (xfadeDragRef.current) { xfadeDragRef.current = null; setXfadeTip(null); }
+    const rd = rangeDragRef.current;
+    if (rd?.clickClip && !editSelectionStore.get().time) {
+        setSelectedClip(rd.clickClip);
+        setSelectedClipIds(new Set([rd.clickClip.clip.id]));
+    }
+    rangeDragRef.current = null;
     // Crossfade automatique quand un clip déplacé / rogné touche ou chevauche un voisin.
     if (editCommands && activeClip && (dragAction === 'MOVE' || dragAction === 'TRIM_START' || dragAction === 'TRIM_END')) {
         const ids = multiDragRef.current && multiDragRef.current.length > 1 ? multiDragRef.current : [{ trackId: activeClip.trackId, clipId: activeClip.clip.id }];
@@ -1533,6 +1614,32 @@ const drawTimeline = useCallback(() => {
         }
     }
 
+    // Sélection de plage (Sélecteur / Smart Tool) : bande claire sur les pistes choisies + repère dans la règle.
+    if (timeSel) {
+        const sx = timeToPixels(timeSel.start) - scrollX;
+        const sw = Math.max(1, timeToPixels(timeSel.end - timeSel.start));
+        if (sx + sw > 0 && sx < w) {
+            let ly = 40;
+            visibleTracks.forEach(t => {
+                const laneH = zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80;
+                if (timeSel.trackIds.includes(t.id)) {
+                    const vy = ly - scrollTop;
+                    const top = Math.max(40, vy), bottom = Math.min(h, vy + zoomV);
+                    if (bottom > top) {
+                        ctx.fillStyle = 'rgba(186, 230, 253, 0.22)';
+                        ctx.fillRect(sx, top, sw, bottom - top);
+                        ctx.strokeStyle = 'rgba(125, 211, 252, 0.9)';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(sx + 0.5, top + 0.5, sw - 1, bottom - top - 1);
+                    }
+                }
+                ly += laneH;
+            });
+            ctx.fillStyle = 'rgba(125, 211, 252, 0.8)';
+            ctx.fillRect(sx, 22, sw, 4);
+        }
+    }
+
     // Rectangle de selection
     if (marquee) {
         const mx = marquee.x0 - scrollX, my = marquee.y0 - scrollTop;
@@ -1547,7 +1654,7 @@ const drawTimeline = useCallback(() => {
     }
 
     // La tete de lecture est dessinee sur le calque superieur (drawPlayhead).
-}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch]);
+}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel]);
 
 // Calque statique (grille, clips, formes d'onde, reperes) : redessine seulement
 // quand son contenu change, plus a chaque image de la lecture.
@@ -1629,6 +1736,10 @@ useEffect(() => {
           <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
             <button onClick={() => setActiveTool('SELECT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SELECT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Sélection / déplacement (1)" aria-label="Outil sélection"><i className="fas fa-mouse-pointer text-[12px]"></i></button>
             <button onClick={() => setActiveTool('SPLIT')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SPLIT' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`} title="Ciseaux : couper un clip (2)" aria-label="Outil ciseaux"><i className="fas fa-cut text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SMART')} aria-pressed={activeTool === 'SMART'} className={`hidden [@media(pointer:fine)]:flex w-9 h-9 rounded-lg items-center justify-center transition-all ${activeTool === 'SMART' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
+              title="Smart Tool (comme dans Pro Tools) (5) : moitié haute du clip = sélection de plage, moitié basse = déplacement, bords = rognage, coins hauts = fondus, bas d'une jonction = crossfade" aria-label="Smart Tool"><i className="fas fa-wand-magic-sparkles text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('RANGE')} aria-pressed={activeTool === 'RANGE'} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'RANGE' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
+              title="Sélecteur (comme dans Pro Tools) (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
           {!simple && <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 h-9 [@media(pointer:coarse)]:h-10 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
@@ -1811,6 +1922,7 @@ useEffect(() => {
           />
         );
       })()}
+      {editCommands && <RangeActionsBar commands={editCommands} />}
       {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
       {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled(!snapEnabled)} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
       {xfadeTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300" style={{ left: xfadeTip.x + 14, top: xfadeTip.y - 28 }}>{xfadeTip.text}</div>}

@@ -80,3 +80,11 @@ export const editPrefsStore = {
 export function useEditPrefs(): EditPrefs {
   return useSyncExternalStore(editPrefsStore.subscribe, editPrefsStore.get, editPrefsStore.get);
 }
+
+// ------------------------------------------- export de la sélection de plage
+
+let selectionExportRequested = false;
+/** « Exporter la plage » : la fenêtre d'export s'ouvrira sur la sélection. */
+export const requestSelectionExport = () => { selectionExportRequested = true; };
+/** Lu une fois par la fenêtre d'export à son ouverture. */
+export const consumeSelectionExport = (): boolean => { const v = selectionExportRequested; selectionExportRequested = false; return v; };
