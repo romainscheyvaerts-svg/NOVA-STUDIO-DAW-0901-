@@ -259,7 +259,36 @@ def g20(b, R):
     ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20}
+def g7(b, R):
+    ctx, pg = mk(b, "pc", "simple", "g7")
+    open_studio(pg, R)
+    take(pg, 3)
+    pg.keyboard.press("Escape"); pg.mouse.click(1000, 600); pg.wait_for_timeout(300)
+    rec = pg.locator("[data-track-header='track-rec-main']").first.bounding_box()
+    tl = pg.locator("[data-track-header='track-rec-main']").first.bounding_box()
+    tl = tl["x"] + tl["width"] + 2
+    cy = rec["y"] + 4
+    pg.mouse.move(tl + 5, cy + 12); pg.wait_for_timeout(400)
+    S(pg, "g7", "01_survol_coin")
+    h = pg.locator("[data-testid=fade-hint]")
+    R["aide_survol"] = h.first.inner_text() if h.count() else None
+    pg.mouse.down(); pg.mouse.move(tl + 30, cy + 14, steps=5); pg.mouse.move(tl + 60, cy + 14, steps=5); pg.wait_for_timeout(200)
+    S(pg, "g8", "01_glisser_fondu")
+    t = pg.locator("[data-testid=drag-tip]")
+    R["bulle_glisser"] = t.first.inner_text() if t.count() else None
+    pg.mouse.up(); pg.wait_for_timeout(300)
+    pg.mouse.click(tl + 25, cy + 45, button="right"); pg.wait_for_timeout(500)
+    S(pg, "g7", "02_menu_clip")
+    btns = pg.locator("[data-testid^=fade-out-]")
+    R["boutons_fondu"] = btns.count()
+    if btns.count():
+        pg.locator("[data-testid=fade-out-beat]").first.click(); pg.wait_for_timeout(500)
+        S(pg, "g7", "03_fondu_sortie_1temps")
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]

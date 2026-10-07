@@ -22,6 +22,7 @@ import RangeActionsBar from './RangeActionsBar';
 import type { EditCommands } from '../hooks/useEditCommands';
 import { bufferDurationOf } from '../hooks/useEditCommands';
 import { CrossfadeCurve } from '../types';
+import { dragTipText, FADE_PRESETS, fadeWithPreset } from '../utils/dragLabels';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -194,6 +195,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [gainTip, setGainTip] = useState<{ x: number; y: number; text: string } | null>(null);
   const gainDragRef = useRef<{ lastY: number; frac: number } | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  // Bulle de glissement en français (G8) et aide au survol des coins de fondu (G7).
+  const [dragTipPos, setDragTipPos] = useState<{ x: number; y: number } | null>(null);
+  const [hoverHint, setHoverHint] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [hoveredClipId, setHoveredClipId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: (ContextMenuItem | 'separator')[] } | null>(null);
   const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
   // Reordonnancement des pistes par glisser-deposer (le TrackHeader emettait
@@ -947,6 +952,10 @@ const handleMouseMove = (e: React.MouseEvent) => {
     const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
     const useSnap = snapEnabled && !isShiftDownRef.current;
+    if (dragAction === 'MOVE' || dragAction === 'TRIM_START' || dragAction === 'TRIM_END' || dragAction === 'FADE_IN' || dragAction === 'FADE_OUT') {
+        setDragTipPos({ x: e.clientX, y: e.clientY });
+        if (hoverHint) setHoverHint(null);
+    }
 
     if (punchDragRef.current && punch && onUpdatePunch) {
         const tSnap = Math.max(0, getSnappedTime(x / zoomH, bpm, gridSize, useSnap));
@@ -1015,19 +1024,25 @@ const handleMouseMove = (e: React.MouseEvent) => {
     // Survol (aucun glissement) : curseur adapté à la zone du clip.
     if (!dragAction && !loopDragMode) {
         let cursor = '';
+        let hint: string | null = null;
+        let hovered: string | null = null;
         const tHover = x / zoomH;
         let laneY = 40;
         for (const t of visibleTracks) {
             if (y >= laneY && y < laneY + zoomV) {
                 const c = t.clips.find(cl => tHover >= cl.start && tHover <= cl.start + cl.duration);
                 if (c) {
+                    hovered = c.id;
                     const cx0 = c.start * zoomH, cx1 = (c.start + c.duration) * zoomH;
                     const edge = Math.min(10, Math.max(4, (cx1 - cx0) * 0.15));
                     const relY = y - laneY;
                     if (c.bufferId && (cx1 - cx0) > 16 && x - cx0 >= edge && cx1 - x >= edge
                         && Math.abs(relY - (2 + clipGainHandleY(zoomV - 4, c.gain ?? 1))) <= CLIP_GAIN_GRAB_PX) cursor = 'ns-resize';
                     else if (editCommands && relY > zoomV * 0.55 && junctionNear(t.clips, tHover, Math.max(6, edge) / zoomH)) cursor = 'col-resize';
-                    else if (relY < zoomV * 0.35 && (x - cx0 < FADE_HANDLE_PX || cx1 - x < FADE_HANDLE_PX)) cursor = 'nwse-resize';
+                    else if (relY < zoomV * 0.35 && (x - cx0 < FADE_HANDLE_PX || cx1 - x < FADE_HANDLE_PX)) {
+                        cursor = 'nwse-resize';
+                        hint = x - cx0 < FADE_HANDLE_PX ? "Glisser vers la droite : fondu d'entrée" : 'Glisser vers la gauche : fondu de sortie';
+                    }
                     else if (x - cx0 < edge || cx1 - x < edge) cursor = 'ew-resize';
                     // Smart Tool : moitié haute = Sélecteur (curseur texte), moitié basse = Grabber (main).
                     else if (activeTool === 'RANGE' || (activeTool === 'SMART' && relY < zoomV * 0.5)) cursor = 'text';
@@ -1039,6 +1054,9 @@ const handleMouseMove = (e: React.MouseEvent) => {
         }
         const el = scrollContainerRef.current;
         if (el.style.cursor !== cursor) el.style.cursor = cursor;
+        if (hint) setHoverHint({ x: e.clientX, y: e.clientY, text: hint });
+        else if (hoverHint) setHoverHint(null);
+        if (hovered !== hoveredClipId) setHoveredClipId(hovered);
     }
 
     const time = getSnappedTime(x / zoomH, bpm, gridSize, useSnap);
@@ -1163,6 +1181,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
 };
 
 const handleMouseUp = () => {
+    setDragTipPos(null);
     regionDragRef.current = null;
     punchDragRef.current = null;
     if (xfadeDragRef.current) { xfadeDragRef.current = null; setXfadeTip(null); }
@@ -1191,7 +1210,7 @@ const handleMouseUp = () => {
     setMarquee(null);
 };
 
-const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string, x: number, y: number, w: number, h: number, isSelected: boolean, zoomH: number) => {
+const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string, x: number, y: number, w: number, h: number, isSelected: boolean, zoomH: number, isHovered = false) => {
     if (x + w < 0 || x > ctx.canvas.width) return;
 
     const clipColor = clip.color || trackColor;
@@ -1320,9 +1339,9 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     if (fadeOutW > 1) drawFadeShape(ctx, x + w - fadeOutW, fadeOutW, y, h, clip.fadeOutCurve, 'out', 'rgba(255,255,255,0.75)');
     ctx.restore();
 
-    // Poignees de fondu (visibles sur le clip selectionne ou assez large)
-    if (isSelected || w > 60) {
-        ctx.fillStyle = isSelected ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)';
+    // Poignees de fondu : bien visibles au survol et sur le clip selectionne (G7)
+    if (isSelected || isHovered || w > 60) {
+        ctx.fillStyle = isSelected || isHovered ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)';
         const hx = x + Math.max(0, fadeInW);
         ctx.fillRect(Math.min(hx, x + w - 6), y + 2, 6, 6);
         const hx2 = x + w - Math.max(0, fadeOutW) - 6;
@@ -1482,7 +1501,7 @@ const drawTimeline = useCallback(() => {
                     const clipY = Math.max(viewportY + 2, 40); // Ne pas dessiner au-dessus du ruler
                     const clipH = Math.min(trackH - 4, viewportY + trackH - 2 - clipY);
                     if (clipH > 0) {
-                        drawClip(ctx, clip, track.color, cx, clipY, cw, clipH, (selectedClip?.clip.id === clip.id) || (activeClip?.clip.id === clip.id) || selectedClipIds.has(clip.id), zoomH);
+                        drawClip(ctx, clip, track.color, cx, clipY, cw, clipH, (selectedClip?.clip.id === clip.id) || (activeClip?.clip.id === clip.id) || selectedClipIds.has(clip.id), zoomH, hoveredClipId === clip.id);
                     }
                 }
             });
@@ -1654,7 +1673,7 @@ const drawTimeline = useCallback(() => {
     }
 
     // La tete de lecture est dessinee sur le calque superieur (drawPlayhead).
-}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel]);
+}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, hoveredClipId]);
 
 // Calque statique (grille, clips, formes d'onde, reperes) : redessine seulement
 // quand son contenu change, plus a chaque image de la lecture.
@@ -1927,7 +1946,17 @@ useEffect(() => {
       {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled(!snapEnabled)} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
       {xfadeTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300" style={{ left: xfadeTip.x + 14, top: xfadeTip.y - 28 }}>{xfadeTip.text}</div>}
       {gainTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300 font-mono tabular-nums" style={{ left: gainTip.x + 14, top: gainTip.y - 28 }}>Gain {gainTip.text}</div>}
-      {hoverTime !== null && dragAction !== null && <div className="fixed z-[200] px-3 py-1.5 bg-black/90 border border-cyan-500/30 rounded-lg shadow-2xl pointer-events-none text-[10px] font-black text-cyan-400 font-mono" style={{ left: tooltipPos.x + 15, top: tooltipPos.y }}>{hoverTime.toFixed(3)}s {dragAction && <span className="ml-2 text-white opacity-50">[{dragAction}]</span>}</div>}
+      {(() => {
+        // Bulle de glissement (G8) : « Fondu d'entrée · 0,25 s », « Déplacer · mes. 5.2 ».
+        if (!dragTipPos || !activeClip) return null;
+        const live = tracks.find(t => t.id === activeClip.trackId)?.clips.find(c => c.id === activeClip.clip.id) || activeClip.clip;
+        const text = dragTipText(dragAction, live, bpm);
+        if (!text) return null;
+        return <div role="status" data-testid="drag-tip" className="fixed z-[200] px-3 py-1.5 bg-black/90 border border-cyan-500/30 rounded-lg shadow-2xl pointer-events-none text-[11px] font-bold text-cyan-200" style={{ left: dragTipPos.x + 15, top: dragTipPos.y + 12 }}>{text}</div>;
+      })()}
+      {hoverHint && !dragAction && (
+        <div role="tooltip" data-testid="fade-hint" className="fixed z-[200] px-2.5 py-1 bg-black/90 border border-white/15 rounded-md shadow-xl pointer-events-none text-[11px] text-slate-100" style={{ left: hoverHint.x + 14, top: hoverHint.y + 14 }}>{hoverHint.text}</div>
+      )}
       {clipContextMenu && (
         <ContextMenu
             x={clipContextMenu.x} y={clipContextMenu.y} onClose={() => setClipContextMenu(null)}
@@ -1951,6 +1980,25 @@ useEffect(() => {
                   { label: `Caler sur le tempo (${Math.round(clipContextMenu.clip.warp.originalBpm)} → ${Math.round(bpm)} BPM)`, icon: 'fa-clock-rotate-left',
                     onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'FIT_TEMPO'); setClipContextMenu(null); } }
                 ] : []),
+                // Fondus en un clic (G7) : avant, seul le glissement du coin (sans indice) en créait.
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{
+                  label: 'Fondus', icon: 'fa-signal', onClick: () => {}, disabled: true,
+                  component: (
+                    <div className="px-1 space-y-1" onMouseDown={e => e.stopPropagation()}>
+                      {(['in', 'out'] as const).map(which => (
+                        <div key={which} className="flex items-center gap-1">
+                          <span className="w-24 text-[11px] text-slate-200">{which === 'in' ? "Fondu d'entrée" : 'Fondu de sortie'}</span>
+                          {FADE_PRESETS.map(fp => (
+                            <button key={fp.id} type="button" data-testid={`fade-${which}-${fp.id}`}
+                              title={`${which === 'in' ? "Fondu d'entrée" : 'Fondu de sortie'} de ${fp.label}`}
+                              onClick={() => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', fadeWithPreset(clipContextMenu.clip, which, fp.id, bpm)); setClipContextMenu(null); }}
+                              className="px-1.5 h-6 rounded text-[10px] font-bold border border-white/10 text-slate-300 hover:text-white hover:border-cyan-500/50">{fp.label}</button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  ),
+                }] : []),
                 ...((clipContextMenu.clip.fadeIn || clipContextMenu.clip.fadeOut) ? [
                   { label: 'Effacer les fondus', icon: 'fa-eraser', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { fadeIn: 0, fadeOut: 0 }); setClipContextMenu(null); } }
                 ] : []),
@@ -1985,8 +2033,8 @@ useEffect(() => {
                     const prev = t?.clips.filter(o => o.id !== c.id && !o.isMuted && o.start < c.start && o.start + o.duration >= c.start - 0.002 && o.start + o.duration < c.start + c.duration)
                       .sort((p, q) => q.start - p.start)[0];
                     const items: ContextMenuItem[] = [];
-                    if (next) items.push({ label: 'Crossfade avec le clip suivant', icon: 'fa-shuffle', onClick: () => { editCommands.crossfade(clipContextMenu.trackId, c.id, next.id); setClipContextMenu(null); } });
-                    if (prev) items.push({ label: 'Crossfade avec le clip précédent', icon: 'fa-shuffle', onClick: () => { editCommands.crossfade(clipContextMenu.trackId, prev.id, c.id); setClipContextMenu(null); } });
+                    if (next) items.push({ label: 'Fondu enchaîné avec le clip suivant', icon: 'fa-shuffle', onClick: () => { editCommands.crossfade(clipContextMenu.trackId, c.id, next.id); setClipContextMenu(null); } });
+                    if (prev) items.push({ label: 'Fondu enchaîné avec le clip précédent', icon: 'fa-shuffle', onClick: () => { editCommands.crossfade(clipContextMenu.trackId, prev.id, c.id); setClipContextMenu(null); } });
                     return items;
                   })(),
                 ] : []),
