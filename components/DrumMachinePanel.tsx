@@ -1,5 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { DRUM_KITS, DrumMachine, DrumRow, setBars, PadMix, DEFAULT_PAD_MIX, PAD_MIX_PRESETS, libraryChoices, libSoundLabel } from '../utils/drumKits';
+import { DRUM_KITS, DrumMachine, DrumRow, setBars, PadMix, DEFAULT_PAD_MIX, PAD_MIX_PRESETS, libraryChoices, libSoundLabel, makeDrumMachine } from '../utils/drumKits';
+import { ensurePatterns, GROOVES, whereAt } from '../utils/drumPatterns';
+import { assignSample, MAX_PADS, userSampleId } from '../utils/drumSamples';
+import { reorderSlices, shuffledOrder } from '../utils/chop';
+import { sampleFromFile } from '../utils/padBuffers';
+import { isTypingTarget, padIndexForCode, padKeyCodes, padKeyLabel } from '../utils/padKeys';
+import DrumPatternBar from './DrumPatternBar';
+import PadSampleTools, { SessionClipRef } from './PadSampleTools';
+import ChopPanel from './ChopPanel';
 import { libUrl } from '../utils/drumLibrary';
 import { DRUM_SOUNDS, DrumCategory } from '../utils/drumSounds';
 import { audioEngine } from '../engine/AudioEngine';
@@ -19,6 +27,14 @@ interface DrumMachinePanelProps {
   /** Ouvre (ou crée) la piste 808 dans le piano roll. */
   onOpen808?: () => void;
   has808?: boolean;
+  /** V16 : fin de la boucle du morceau (s), pour le placement des motifs. */
+  loopEnd?: number;
+  /** Repères du morceau (régions Intro, Partie, Refrain…). */
+  markers?: { type?: string; name: string; time: number; endTime?: number; color?: string }[];
+  /** Clips audio de la session (à poser sur un pad ou à découper). */
+  sessionClips?: SessionClipRef[];
+  ensureEngine?: () => Promise<unknown>;
+  notify?: (msg: string) => void;
 }
 
 const CAT_OF: Record<string, DrumCategory[]> = {
@@ -61,25 +77,94 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
     return () => window.removeEventListener('resize', checkScroll);
   }, [p.open, p.dm?.bars, !!p.dm, narrow]);
 
-  // Tête de lecture sur le motif
+  // Tête de lecture : pas du motif affiché (s'il joue à cet endroit) et mesure du morceau.
+  const [playBar, setPlayBar] = useState(-1);
   useEffect(() => {
     if (!p.open || !p.dm) return;
     let raf = 0;
+    const dmP = ensurePatterns(p.dm);
     const tick = () => {
-      if (p.isPlaying && p.dm) {
-        const t = audioEngine.getCurrentTime() - p.clipStart;
-        const stepDur = 60 / p.bpm / 4;
-        const len = 16 * p.dm.bars;
-        setPlayStep(t >= 0 ? Math.floor(t / stepDur) % len : -1);
-      } else setPlayStep(-1);
+      if (p.isPlaying) {
+        const w = whereAt(dmP, p.bpm, audioEngine.getCurrentTime() - p.clipStart);
+        setPlayStep(w && w.patternId === dmP.activePattern ? w.step : -1);
+        setPlayBar(w ? w.bar : -1);
+      } else { setPlayStep(-1); setPlayBar(-1); }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [p.open, p.isPlaying, p.bpm, p.clipStart, p.dm]);
 
+  // V16/V17 : découpe, pads perso, clavier.
+  const [chop, setChop] = useState<null | { buffer: AudioBuffer; name: string } | 'new'>(null);
+  const padFileRef = useRef<HTMLInputElement>(null);
+  const [keysOn, setKeysOn] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: fine)').matches);
+  const [layout, setLayout] = useState<Map<string, string> | null>(null);
+  const [flash, setFlash] = useState(-1);
+  useEffect(() => {
+    try { (navigator as any).keyboard?.getLayoutMap?.().then((m: any) => setLayout(new Map(m))).catch(() => {}); } catch { /* navigateur sans l'API */ }
+  }, []);
+  const auditionRef = useRef(p.onAudition);
+  auditionRef.current = p.onAudition;
+  const visibleRows = (d: DrumMachine) => d.rows.map((r, ri) => ({ r, ri })).filter(({ r }) => r.id !== '808' || r.steps.some(v => v > 0)).map(x => x.ri);
+  useEffect(() => {
+    if (!p.open || !keysOn || !p.dm) return;
+    const visible = visibleRows(p.dm);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
+      const k = padIndexForCode(e.code, visible.length);
+      if (k < 0) return;
+      // Le pad prend la touche (sinon R = enregistrer, L = boucle…).
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (e.repeat) return;
+      const ri = visible[k];
+      auditionRef.current(ri);
+      setFlash(ri);
+      window.setTimeout(() => setFlash(f => (f === ri ? -1 : f)), 140);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [p.open, keysOn, p.dm]);
+
   if (!p.open) return null;
   const dm = p.dm;
+
+  /** Fichiers audio → pads (sur un pad précis, ou un nouveau pad par fichier). Une seule étape d'annulation. */
+  const importFiles = async (files: File[], rowIndex: number | null) => {
+    const audio = files.filter(f => /^audio\//.test(f.type) || /\.(wav|mp3|aiff?|flac|ogg|m4a)$/i.test(f.name));
+    if (!audio.length) { p.notify?.('Glisse un fichier audio (WAV, MP3, AIFF, FLAC…).'); return; }
+    try {
+      await p.ensureEngine?.();
+      if (!audioEngine.ctx) return;
+      let cur = p.dm || makeDrumMachine('empty');
+      let last = -1;
+      for (const [i, f] of (rowIndex !== null ? audio.slice(0, 1) : audio).entries()) {
+        const s = await sampleFromFile(audioEngine.ctx, f);
+        const r = assignSample(cur, s.id, s.info, { rowIndex: rowIndex !== null && i === 0 ? rowIndex : null });
+        if (!r) { p.notify?.(`${MAX_PADS} pads au plus : pose ton son sur un pad existant (bouton réglages du pad → « Ton son »).`); break; }
+        cur = r.dm; last = r.rowIndex;
+      }
+      if (last < 0) return;
+      p.onChange(cur);
+      setSelPad(last); setSoundMenu(last);
+      window.setTimeout(() => p.onAudition(last), 200);
+      p.notify?.(`🥁 ${audio.length > 1 && rowIndex === null ? `${audio.length} sons ajoutés` : `« ${cur.rows[last].name} » posé`} sur ${rowIndex === null ? 'de nouveaux pads' : 'le pad'} : allume ses pas dans la grille. Annuler (Ctrl+Z) pour revenir.`);
+    } catch {
+      p.notify?.('Ce fichier ne se lit pas : essaie un WAV, MP3, AIFF ou FLAC.');
+    }
+  };
+  const onDropFiles = (e: React.DragEvent, rowIndex: number | null) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault(); e.stopPropagation();
+    void importFiles(Array.from(e.dataTransfer.files), rowIndex);
+  };
+  const allowDrop = (e: React.DragEvent) => { if (Array.from(e.dataTransfer?.types || []).includes('Files')) e.preventDefault(); };
+  const sliceCount = dm ? dm.rows.filter(r => r.slice).length : 0;
+  const keyOf = (ri: number) => {
+    if (!dm || !keysOn) return '';
+    const k = visibleRows(dm).indexOf(ri);
+    return k >= 0 && k < 30 ? padKeyLabel(padKeyCodes(30)[k], layout) : '';
+  };
 
   const editRow = (ri: number, patch: (r: DrumRow) => DrumRow) => {
     if (!dm) return;
@@ -123,15 +208,28 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
     <div data-nova-transport="" className={narrow
       ? 'fixed inset-0 z-[560] flex items-end justify-center bg-black/50'
       : 'fixed inset-x-0 bottom-0 z-[560] flex justify-center px-4 pb-3 pointer-events-none'}
-      onClick={narrow ? p.onClose : undefined} role="dialog" aria-modal={narrow ? 'true' : undefined} aria-labelledby="drums-title">
-      <div className={`w-full flex flex-col bg-[#121418] border border-white/10 shadow-2xl pb-[env(safe-area-inset-bottom)] pointer-events-auto ${narrow ? 'max-h-[92vh] rounded-t-3xl' : 'max-w-4xl max-h-[min(64vh,600px)] rounded-3xl shadow-black/60'}`} onClick={e => e.stopPropagation()}>
+      onClick={narrow ? p.onClose : undefined} role="dialog" aria-modal={narrow ? 'true' : undefined} aria-labelledby="drums-title"
+      onDragOver={allowDrop} onDrop={e => onDropFiles(e, null)}>
+      <div className={`w-full flex flex-col bg-[#121418] border border-white/10 shadow-2xl pb-[env(safe-area-inset-bottom)] pointer-events-auto ${narrow ? 'max-h-[92vh] rounded-t-3xl' : 'max-w-4xl max-h-[min(80vh,760px)] rounded-3xl shadow-black/60'}`} onClick={e => e.stopPropagation()}>
         {/* En-tête */}
         <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-white/5">
-          <h2 id="drums-title" className="text-[16px] font-black text-white mr-auto">🥁 Batterie <span className="text-slate-400 font-bold text-[12px]">Make Music</span></h2>
+          <h2 id="drums-title" className="text-[16px] font-black text-white mr-auto whitespace-nowrap">🥁 Batterie <span className="hidden sm:inline text-slate-400 font-bold text-[12px]">Make Music</span></h2>
           {p.onOpen808 && (
             <button type="button" onClick={p.onOpen808} title="Basse 808 : joue-la au piano roll, accordée sur la tonalité, avec glissés"
-              className="h-10 px-3 rounded-xl text-[12px] font-black bg-fuchsia-500/20 text-fuchsia-100 border border-fuchsia-400/40 hover:bg-fuchsia-500/30">
+              className="h-10 px-3 rounded-xl whitespace-nowrap text-[12px] font-black bg-fuchsia-500/20 text-fuchsia-100 border border-fuchsia-400/40 hover:bg-fuchsia-500/30">
               🔊 808{p.has808 ? '' : ' +'}
+            </button>
+          )}
+          <button type="button" onClick={() => setChop(chop ? null : 'new')} aria-expanded={!!chop}
+            title="Découper une boucle en tranches sur des pads (comme Slicex dans FL Studio, ou Simpler en mode Slice dans Ableton)"
+            className={`h-10 px-3 rounded-xl text-[12px] font-black border ${chop ? 'bg-pink-500 text-black border-pink-400' : 'bg-pink-500/15 text-pink-100 border-pink-400/40 hover:bg-pink-500/25'}`}>
+            ✂️<span className="hidden sm:inline"> Découper</span>
+          </button>
+          {dm && !narrow && (
+            <button type="button" onClick={() => setKeysOn(v => !v)} aria-pressed={keysOn}
+              title={keysOn ? "Clavier de l'ordinateur → pads : activé (rangée du milieu = pads 1 à 10). Clique pour le couper." : "Jouer les pads au clavier de l'ordinateur (comme le « typing keyboard » de FL Studio)"}
+              className={`h-10 px-3 rounded-xl text-[12px] font-black border ${keysOn ? 'bg-white text-black border-white' : 'bg-white/5 text-slate-200 border-white/10'}`}>
+              <i className="fas fa-keyboard" />
             </button>
           )}
           {dm && (
@@ -153,14 +251,29 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
             ))}
           </div>
 
+          <input ref={padFileRef} type="file" multiple accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" className="hidden"
+            onChange={e => { const fs = Array.from(e.target.files || []); e.target.value = ''; if (fs.length) void importFiles(fs, null); }} />
+          {chop && (
+            <ChopPanel dm={dm} onChange={p.onChange} onClose={() => setChop(null)} bpm={p.bpm} sessionClips={p.sessionClips || []}
+              ensureEngine={p.ensureEngine || (async () => {})} initial={chop === 'new' ? null : chop} notify={p.notify} />
+          )}
+
           {!dm ? (
-            <p className="text-sm text-slate-300">Choisis un style de batterie : elle se cale sur le tempo et la tonalité de ta mélodie.</p>
+            <div className="space-y-2">
+              <p className="text-sm text-slate-300">Choisis un style de batterie : elle se cale sur le tempo et la tonalité de ta mélodie.</p>
+              <button type="button" onClick={() => padFileRef.current?.click()}
+                className="w-full rounded-2xl border-2 border-dashed border-white/15 hover:border-cyan-400/60 px-4 py-4 text-[13px] font-bold text-slate-200">
+                <i className="fas fa-file-import mr-2" />Ou commence avec TES sons : choisis ou glisse ici tes fichiers audio (un pad par son)
+              </button>
+            </div>
           ) : (
             <>
+              <DrumPatternBar dm={dm} onChange={p.onChange} bpm={p.bpm} loopEnd={p.loopEnd || 0} markers={p.markers} playBar={playBar} />
+
               {/* Téléphone : choix de la moitié de mesure + réglages du pad choisi */}
               {narrow && (
                 <div className="flex items-center gap-2">
-                  <div className="flex shrink-0 rounded-xl overflow-hidden border border-white/10" role="group" aria-label="Pas affichés">
+                  <div className="flex min-w-0 shrink overflow-x-auto no-scrollbar rounded-xl border border-white/10" role="group" aria-label="Pas affichés">
                     {Array.from({ length: pages }, (_, pi) => (
                       <button key={pi} type="button" onClick={() => setPage(pi)} aria-pressed={curPage === pi}
                         aria-label={`Pas ${pi * 8 + 1} à ${pi * 8 + 8}`}
@@ -190,14 +303,18 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                       {narrow ? (
                         <button type="button" onClick={() => { p.onAudition(ri); setSelPad(ri); if (soundMenu !== null) setSoundMenu(ri); }}
                           aria-label={`Écouter ${r.name}`} aria-pressed={selPad === ri} title="Écouter et choisir ce pad"
-                          className={`shrink-0 w-10 h-10 rounded-lg px-0.5 text-[9px] leading-[10px] font-bold text-center break-words overflow-hidden ${selPad === ri ? 'bg-cyan-500/20 text-white ring-1 ring-cyan-400/60' : 'bg-white/5 text-slate-200'}`}>
+                          className={`shrink-0 w-10 h-10 rounded-lg px-0.5 text-[9px] leading-[10px] font-bold text-center break-words overflow-hidden ${flash === ri ? 'bg-cyan-400 text-black' : selPad === ri ? 'bg-cyan-500/20 text-white ring-1 ring-cyan-400/60' : 'bg-white/5 text-slate-200'}`}>
                           <span className={r.muted ? 'line-through opacity-50' : ''}>{r.name}</span>
                           {r.solo && <span className="text-amber-300"> S</span>}
                         </button>
                       ) : (
                       <div className="sticky left-0 z-10 bg-[#121418] pr-1 flex items-center gap-1 w-[118px] shrink-0">
-                        <button type="button" onClick={() => p.onAudition(ri)} title="Écouter le son"
-                          className="flex-1 min-w-0 h-9 rounded-lg bg-white/5 text-left px-2 text-[11px] font-bold text-white truncate hover:bg-white/10">
+                        <button type="button" onClick={() => p.onAudition(ri)}
+                          title={`Écouter le son${keyOf(ri) ? ` (touche ${keyOf(ri)})` : ''}. Glisse un fichier audio ici pour mettre TON son sur ce pad.`}
+                          onDragOver={allowDrop} onDrop={e => onDropFiles(e, ri)}
+                          className={`flex-1 min-w-0 h-9 rounded-lg text-left px-2 text-[11px] font-bold truncate ${flash === ri ? 'bg-cyan-400 text-black' : 'bg-white/5 text-white hover:bg-white/10'}`}>
+                          {keyOf(ri) && <span className="mr-1 inline-block min-w-[14px] px-0.5 rounded bg-white/10 text-[9px] text-center text-slate-300">{keyOf(ri)}</span>}
+                          {userSampleId(r.sound) && <i className={`fas ${r.slice ? 'fa-cut text-pink-300' : 'fa-user text-amber-300'} mr-1 text-[9px]`} />}
                           <span className={r.muted ? 'line-through opacity-50' : ''}>{r.name}</span>
                           {r.solo && <span className="ml-1 text-amber-300">S</span>}
                           {r.mix && Object.values(r.mix).some(v => v) && <span className="ml-1 text-violet-300" title="Effets sur ce pad">✦</span>}
@@ -248,27 +365,51 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                   onEdit={patch => editRow(soundMenu, patch)}
                   onAudition={() => setTimeout(() => p.onAudition(soundMenu), 120)}
                   onClose={() => setSoundMenu(null)}
+                  extra={
+                    <PadSampleTools dm={dm} rowIndex={soundMenu} onChange={d => { p.onChange(d); if (!d.rows[soundMenu]) setSoundMenu(null); }}
+                      onAudition={() => p.onAudition(soundMenu)} sessionClips={p.sessionClips || []}
+                      ensureEngine={p.ensureEngine || (async () => {})} onChop={src => setChop(src)} notify={p.notify} />
+                  }
                 />
               )}
 
               {/* Réglages */}
               <div className="flex flex-wrap items-center gap-3 text-[12px] text-slate-300">
                 <div className="flex rounded-xl overflow-hidden border border-white/10">
-                  {[1, 2].map(b => (
-                    <button key={b} type="button" onClick={() => p.onChange(setBars(dm, b as 1 | 2))}
+                  {[1, 2, 4].map(b => (
+                    <button key={b} type="button" onClick={() => p.onChange(setBars(dm, b as 1 | 2 | 4))} title={`Motif de ${b} mesure${b > 1 ? 's' : ''}`}
                       className={`h-10 px-3 font-bold ${dm.bars === b ? 'bg-white text-black' : 'bg-white/5 text-white'}`}>{b} mesure{b > 1 ? 's' : ''}</button>
                   ))}
                 </div>
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2" title="Swing : décale les doubles-croches paires, comme le swing global de FL Studio">
                   Swing
                   <input type="range" min={0} max={0.6} step={0.05} value={dm.swing} onChange={e => p.onChange({ ...dm, swing: parseFloat(e.target.value) })} />
                   <span className="tabular-nums w-8">{Math.round(dm.swing * 100)}%</span>
                 </label>
+                <label className="flex items-center gap-1.5" title={`Groove : ${GROOVES.find(g => g.id === (dm.groove || 'none'))?.hint} Comme le Groove Pool d'Ableton.`}>
+                  Groove
+                  <select value={dm.groove || 'none'} onChange={e => p.onChange({ ...dm, groove: e.target.value === 'none' ? undefined : e.target.value })}
+                    className="h-10 rounded-lg bg-white/5 border border-white/10 px-1.5 text-[12px] text-white">
+                    {GROOVES.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                  {dm.groove && dm.groove !== 'none' && (
+                    <input type="range" min={0} max={1} step={0.05} value={dm.grooveAmount ?? 1} aria-label="Dosage du groove"
+                      onChange={e => p.onChange({ ...dm, grooveAmount: parseFloat(e.target.value) })} className="w-20" />
+                  )}
+                </label>
+                <button type="button" onClick={() => padFileRef.current?.click()} disabled={dm.rows.length >= MAX_PADS}
+                  title="Ajouter un pad avec TON son (fichier audio). Tu peux aussi glisser des fichiers sur la batterie."
+                  className="h-10 px-3 rounded-lg bg-white/5 text-slate-200 hover:text-white disabled:opacity-40"><i className="fas fa-plus mr-1" />Pad</button>
+                {sliceCount > 1 && (
+                  <button type="button" onClick={() => p.onChange(reorderSlices(dm, shuffledOrder(sliceCount, Date.now())))}
+                    title="Rejoue les tranches dans un autre ordre (comme « Randomize » dans Slicex). Annuler pour revenir."
+                    className="h-10 px-3 rounded-lg bg-pink-500/15 text-pink-100 hover:bg-pink-500/25">🎲 Remixer</button>
+                )}
                 <button type="button" onClick={p.onRemove} className="ml-auto h-10 px-3 rounded-lg bg-white/5 text-slate-300 hover:text-white">Retirer la batterie</button>
               </div>
               <p className="text-[11px] text-slate-500">
                 {narrow && "Touche le nom d'un pad pour l'écouter et le choisir ; 1–8 / 9–16 change de moitié de mesure (le point bleu montre où joue la lecture). "}
-                Tap : allumer → accent léger → éteindre. Appui long (ou clic droit) : roll ×2 ×3 ×4. Bouton réglages d'un pad : son, accordage, longueur et mix (EQ, compression, saturation, réverb, délai). Le log drum est accordé sur la tonalité du morceau ; la 808 se joue au piano roll (bouton « 🔊 808 »). Barre d'espace : lecture / pause.
+                Motifs : comme les Patterns de FL Studio — crée A, B, C…, puis peins les mesures du morceau. Glisse tes fichiers audio sur un pad (ou « + Pad ») ; ✂️ découpe une boucle sur les pads.{keysOn && !narrow ? ' Clavier : rangée du milieu = pads 1 à 10.' : ''} Tap : allumer → accent léger → éteindre. Appui long (ou clic droit) : roll ×2 ×3 ×4. Bouton réglages d'un pad : son, accordage, longueur et mix (EQ, compression, saturation, réverb, délai). Le log drum est accordé sur la tonalité du morceau ; la 808 se joue au piano roll (bouton « 🔊 808 »). Barre d'espace : lecture / pause.
               </p>
             </>
           )}
@@ -279,6 +420,8 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
 };
 
 interface PadEditorProps {
+  /** Réglages du sample (V16). */
+  extra?: React.ReactNode;
   kitId: string;
   row: DrumRow;
   onEdit: (patch: (r: DrumRow) => DrumRow) => void;
@@ -302,7 +445,7 @@ const Knob: React.FC<KnobProps> = k => (
 );
 
 /** Réglages d'un pad : son, niveau, panoramique, accordage, longueur, mute / solo et mix par effets natifs. */
-const PadEditor: React.FC<PadEditorProps> = ({ kitId, row, onEdit, onAudition, onClose }) => {
+const PadEditor: React.FC<PadEditorProps> = ({ kitId, row, onEdit, onAudition, onClose, extra }) => {
   const [allStyles, setAllStyles] = React.useState(false);
   const lib = libraryChoices(row.id, kitId);
   const synths = DRUM_SOUNDS.filter(s => (CAT_OF[row.id] || []).includes(s.category)).map(s => `synth:${s.id}`);
@@ -384,6 +527,8 @@ const PadEditor: React.FC<PadEditorProps> = ({ kitId, row, onEdit, onAudition, o
         <Knob label="Longueur" value={row.decay ?? 1} min={0.05} max={1} step={0.01} fmt={pct}
           onChange={v => onEdit(r => ({ ...r, decay: v }))} onReset={() => onEdit(r => ({ ...r, decay: 1 }))} />
       </div>
+
+      {extra}
 
       <div>
         <div className="flex items-center gap-2 mb-1.5">
