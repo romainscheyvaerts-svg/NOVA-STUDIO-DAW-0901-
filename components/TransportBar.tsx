@@ -522,10 +522,10 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             <div className="space-y-2">
               <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Historique</div>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => { onUndo?.(); setIsMobileMenuOpen(false); }} disabled={!canUndo} className={`min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors ${canUndo ? 'bg-white/[0.06] text-white' : 'bg-white/[0.03] text-slate-500'}`}>
+                <button onClick={() => { onUndo?.(); setIsMobileMenuOpen(false); }} disabled={!canUndo} className={`min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors ${canUndo ? 'bg-white/[0.06] text-white' : 'bg-white/[0.03] text-slate-500 opacity-60 cursor-not-allowed'}`}>
                   <i className="fas fa-undo mr-2"></i>Annuler
                 </button>
-                <button onClick={() => { onRedo?.(); setIsMobileMenuOpen(false); }} disabled={!canRedo} className={`min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors ${canRedo ? 'bg-white/[0.06] text-white' : 'bg-white/[0.03] text-slate-500'}`}>
+                <button onClick={() => { onRedo?.(); setIsMobileMenuOpen(false); }} disabled={!canRedo} className={`min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors ${canRedo ? 'bg-white/[0.06] text-white' : 'bg-white/[0.03] text-slate-500 opacity-60 cursor-not-allowed'}`}>
                   <i className="fas fa-redo mr-2"></i>Refaire
                 </button>
               </div>
