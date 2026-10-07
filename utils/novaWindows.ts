@@ -4,7 +4,7 @@
  * descendre de nouvelles props dans l'arrangement : un simple événement que
  * components/ProToolsWindows écoute.
  */
-export type NovaWindowName = 'memory-locations' | 'strip-silence' | 'clip-props' | 'track-color' | 'shortcuts' | 'pitch-editor';
+export type NovaWindowName = 'memory-locations' | 'strip-silence' | 'clip-props' | 'track-color' | 'shortcuts' | 'pitch-editor' | 'pitch-batch';
 
 export interface NovaWindowDetail {
   name: NovaWindowName;

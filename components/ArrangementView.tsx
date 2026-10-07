@@ -2314,6 +2314,14 @@ useEffect(() => {
                 // Justesse note par note (V19) : Flex Pitch de Logic, Melodyne, Pitch Editor de FL.
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Justesse note par note…', icon: 'fa-wave-square', title: 'Comme Flex Pitch dans Logic : corrige la justesse de ta voix note par note',
                   onClick: () => { openNovaWindow('pitch-editor', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
+                // Plusieurs clips sélectionnés : « Corriger tout » sur toute la sélection (une annulation).
+                ...(() => {
+                    if (clipContextMenu.clip.type === TrackType.MIDI || !selectedClipIds?.has(clipContextMenu.clip.id) || selectedClipIds.size < 2) return [];
+                    const targets: { trackId: string; clipId: string }[] = [];
+                    tracks.forEach(tr => { if (tr.type !== TrackType.MIDI) tr.clips.forEach(c => { if (selectedClipIds.has(c.id) && c.type !== TrackType.MIDI) targets.push({ trackId: tr.id, clipId: c.id }); }); });
+                    return targets.length > 1 ? [{ label: `Justesse : corriger tout (${targets.length} clips)…`, icon: 'fa-wand-magic-sparkles', title: 'Ramène toutes les notes des clips sélectionnés dans la gamme, avec dosage et style. Une seule annulation.',
+                      onClick: () => { openNovaWindow('pitch-batch', { targets }); setClipContextMenu(null); } }] : [];
+                })(),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => { const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id]; requestBreaths({ mode: 'dialog', clipIds: ids, reason: 'menu' }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [

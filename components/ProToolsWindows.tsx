@@ -7,6 +7,7 @@ import MemoryLocations from './MemoryLocations';
 import StripSilenceDialog from './StripSilenceDialog';
 import ClipPropsDialog from './ClipPropsDialog';
 import PitchEditor from './PitchEditor';
+import PitchBatchDialog from './PitchBatchDialog';
 
 interface Props {
   tracks: Track[];
@@ -36,6 +37,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
   const [strip, setStrip] = useState<NovaWindowDetail | null>(null);
   const [props, setProps] = useState<NovaWindowDetail | null>(null);
   const [pitch, setPitch] = useState<NovaWindowDetail | null>(null);
+  const [pitchBatch, setPitchBatch] = useState<NovaWindowDetail | null>(null);
   const focus = useKeyboardFocus();
 
   useEffect(() => {
@@ -47,6 +49,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       else if (d.name === 'clip-props' || d.name === 'track-color') setProps(d);
       else if (d.name === 'shortcuts') onOpenShortcuts();
       else if (d.name === 'pitch-editor' && d.targets?.length) setPitch(d);
+      else if (d.name === 'pitch-batch' && d.targets?.length) setPitchBatch(d);
     };
     window.addEventListener(NOVA_WINDOW_EVENT, onOpen);
     return () => window.removeEventListener(NOVA_WINDOW_EVENT, onOpen);
@@ -70,6 +73,20 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       if (!c) return;
       for (const [k, v] of Object.entries(patch)) {
         if (v === undefined) delete (c as any)[k]; else (c as any)[k] = v;
+      }
+    }));
+    try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: message })); } catch { /* hors navigateur */ }
+  }, [setState]);
+
+  // Justesse sur plusieurs clips : tous les changements en UN setState (une seule annulation).
+  const applyPitchMany = useCallback((patches: { trackId: string; clipId: string; patch: Partial<Clip> }[], message: string) => {
+    setState(prev => produce(prev, (draft: DAWState) => {
+      for (const { trackId, clipId, patch } of patches) {
+        const c = draft.tracks.find(x => x.id === trackId)?.clips.find(x => x.id === clipId);
+        if (!c) continue;
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === undefined) delete (c as any)[k]; else (c as any)[k] = v;
+        }
       }
     }));
     try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: message })); } catch { /* hors navigateur */ }
@@ -116,6 +133,8 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       {propsView}
       <PitchEditor open={!!pitch} trackId={pitch?.targets?.[0]?.trackId} clipId={pitch?.targets?.[0]?.clipId} tracks={tracks}
         projectKey={projectKey} projectScale={projectScale} onApply={applyPitch} onClose={() => setPitch(null)} />
+      <PitchBatchDialog open={!!pitchBatch} targets={pitchBatch?.targets || []} tracks={tracks}
+        projectKey={projectKey} projectScale={projectScale} onApply={applyPitchMany} onClose={() => setPitchBatch(null)} />
       {focus && (
         <button type="button" onClick={() => setKeyboardFocus(false)} data-testid="keyboard-focus-badge"
           title="Commands Keyboard Focus actif : une touche = une commande (A, S, D, G, R, T…). Clic ou Ctrl+Alt+1 pour l'arrêter. Ctrl+Espace enregistre."
