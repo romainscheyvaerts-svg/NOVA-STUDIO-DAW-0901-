@@ -161,7 +161,7 @@ export const BreathHost: React.FC<HostProps> = ({ tracks, setState, undo, breakH
             <button type="button" onClick={() => { undo(); setToast(null); }} data-testid="breath-undo"
               className="shrink-0 rounded-lg bg-violet-500/20 px-3 py-2 text-[12px] font-black text-violet-200 hover:bg-violet-500/30">Annuler</button>
           )}
-          {!toast.busy && <button type="button" aria-label="Fermer" onClick={() => setToast(null)} className="shrink-0 h-8 w-8 rounded-lg text-violet-300/70 hover:text-white">✕</button>}
+          {!toast.busy && <button type="button" aria-label="Fermer" onClick={() => setToast(null)} className="nova-hit shrink-0 h-8 w-8 rounded-lg text-violet-300/70 hover:text-white">✕</button>}
         </div>
       )}
     </>
@@ -272,7 +272,7 @@ const BreathDialog: React.FC<DialogProps> = ({ request, tracks, targetIds, isMob
       <span className="text-[12px] font-bold text-slate-300">Sensibilité</span>
       {BREATH_SENSITIVITIES.map(o => (
         <button key={o.id} type="button" role="radio" aria-checked={s.sensitivity === o.id} title={o.hint} onClick={() => setS({ sensitivity: o.id })}
-          className={`h-10 rounded-lg px-3 text-[12px] font-bold ${s.sensitivity === o.id ? 'bg-violet-500 text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>{o.label}</button>
+          className={`h-10 rounded-lg px-3 text-[12px] font-bold ${s.sensitivity === o.id ? 'bg-violet-600 text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>{o.label}</button>
       ))}
       {!isMobile && (
         <label className="ml-auto flex items-center gap-2 text-[11.5px] text-slate-400" title="Fondus d’entrée et de sortie de chaque respiration, dans la zone : jamais de clic, jamais sur le mot">
@@ -297,7 +297,7 @@ const BreathDialog: React.FC<DialogProps> = ({ request, tracks, targetIds, isMob
       <button type="button" onClick={() => setBreathPrefs({ settings: DEFAULT_BREATH_SETTINGS })} className="mr-auto h-11 rounded-lg px-3 text-[12px] font-bold text-slate-400 hover:text-white">Réglages par défaut</button>
       <button type="button" onClick={onClose} className="h-11 rounded-lg bg-white/5 px-4 text-[12px] font-bold text-slate-300">Annuler</button>
       <button type="button" disabled={!!progress || !plans.length} data-testid="breath-apply" onClick={() => onApply(plans, kinds)}
-        className="h-11 rounded-lg bg-violet-500 px-4 text-[12px] font-black text-white disabled:cursor-not-allowed disabled:opacity-40">
+        className="h-11 rounded-lg bg-violet-600 px-4 text-[12px] font-black text-white disabled:cursor-not-allowed disabled:opacity-40">
         {plans.length > 1 ? `Traiter ${plans.length} voix` : 'Appliquer'}
       </button>
     </div>
@@ -326,7 +326,7 @@ const BreathDialog: React.FC<DialogProps> = ({ request, tracks, targetIds, isMob
                       <button type="button" aria-label="Baisser plus" onClick={() => setS({ leadDb: Math.min(40, s.leadDb + 5) })} className="h-11 w-11 rounded-lg bg-white/5 text-white">+</button>
                     </>}
                     <button type="button" disabled={!pl || !!progress} onClick={() => pl && onApply([pl], { [t.id]: k })}
-                      className="h-11 rounded-lg bg-violet-500 px-4 text-[12px] font-black text-white disabled:opacity-40">Appliquer</button>
+                      className="h-11 rounded-lg bg-violet-600 px-4 text-[12px] font-black text-white disabled:opacity-40">Appliquer</button>
                   </div>
                 </div>
               );
@@ -335,7 +335,7 @@ const BreathDialog: React.FC<DialogProps> = ({ request, tracks, targetIds, isMob
           {sensitivity}
           {status}
           <button type="button" disabled={!!progress || !plans.length} onClick={() => onApply(plans, kinds)} data-testid="breath-apply"
-            className="mt-3 h-12 w-full rounded-xl bg-violet-500 text-[13px] font-black text-white disabled:opacity-40">Toutes les voix ({total})</button>
+            className="mt-3 h-12 w-full rounded-xl bg-violet-600 text-[13px] font-black text-white disabled:opacity-40">Toutes les voix ({total})</button>
         </div>
       </div>
     );
@@ -536,7 +536,7 @@ const BreathPreview: React.FC<PreviewProps> = ({ clip, regions, detected, exclud
         <button type="button" onClick={() => (playMode === 'avant' ? stop() : play('avant'))} data-testid="breath-play-before"
           className={`h-10 rounded-lg px-3 text-[12px] font-bold ${playMode === 'avant' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-200'}`}>{playMode === 'avant' ? '■ Stop' : '▶ Avant'}</button>
         <button type="button" onClick={() => (playMode === 'apres' ? stop() : play('apres'))} data-testid="breath-play-after"
-          className={`h-10 rounded-lg px-3 text-[12px] font-bold ${playMode === 'apres' ? 'bg-violet-500 text-white' : 'bg-white/5 text-slate-200'}`}>{playMode === 'apres' ? '■ Stop' : '▶ Après'}</button>
+          className={`h-10 rounded-lg px-3 text-[12px] font-bold ${playMode === 'apres' ? 'bg-violet-600 text-white' : 'bg-white/5 text-slate-200'}`}>{playMode === 'apres' ? '■ Stop' : '▶ Après'}</button>
         <span className="text-[11px] text-slate-500">Touche une zone pour l’exclure ou la remettre · glisse pour en ajouter une.</span>
       </div>
     </div>
@@ -561,12 +561,12 @@ export const BreathPanelTools: React.FC<PanelProps> = ({ canTreat, projectAuto, 
     <div className="mt-3 rounded-xl border border-violet-400/25 bg-violet-500/[0.06] p-3" data-testid="breath-panel">
       <button type="button" disabled={!canTreat} onClick={() => requestBreaths({ mode: 'apply', reason: 'panel' })} data-testid="breath-all"
         title="Comme Breath Control de Waves / De-breath de RX : la lead est baissée, les backs, doubles et ad-libs sont nettoyés. Une seule annulation."
-        className="w-full h-11 rounded-xl bg-violet-500 text-white font-black text-[13px] disabled:opacity-40 hover:bg-violet-400">
+        className="w-full h-11 rounded-xl bg-violet-600 text-white font-black text-[13px] disabled:opacity-40 hover:bg-violet-700">
         🌬️ Traiter les respirations de toutes les voix
       </button>
       <p className="mt-1.5 text-[11px] text-slate-400">
         Lead : {s.leadRemove ? 'supprimées' : `−${s.leadDb} dB`} · Backs / ad-libs : {s.extraRemove ? 'supprimées' : `−${s.extraDb} dB`} · Sensibilité {BREATH_SENSITIVITIES.find(o => o.id === s.sensitivity)?.label.toLowerCase()}
-        {' · '}<button type="button" className="font-bold text-violet-300 underline-offset-2 hover:underline" onClick={() => requestBreaths({ mode: 'dialog', reason: 'panel' })}>Réglages et aperçu…</button>
+        {' · '}<button type="button" className="nova-hit-tactile font-bold text-violet-300 underline-offset-2 hover:underline" onClick={() => requestBreaths({ mode: 'dialog', reason: 'panel' })}>Réglages et aperçu…</button>
       </p>
       <label className="mt-2 flex min-h-10 cursor-pointer items-start gap-2 text-[12.5px] text-white">
         <input type="checkbox" checked={auto} onChange={e => { setBreathPrefs({ auto: e.target.checked }); onProjectAutoChange?.(e.target.checked); }}

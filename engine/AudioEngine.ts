@@ -570,6 +570,10 @@ export class AudioEngine {
     // attend qu'ils soient prets avant de lancer le rendu.
     const pendingPlugins: Promise<unknown>[] = [];
 
+    // Pistes qui reçoivent du son d'autres pistes (sortie ou envoi) : bus, retours d'effets.
+    const feeders = new Set<string>();
+    tracks.forEach(t => { if (t.outputTrackId) feeders.add(t.outputTrackId); (t.sends || []).forEach(sd => { if (sd.id) feeders.add(sd.id); }); });
+
     // --- 1. Une chaine par piste : input -> [plugins] -> gain -> panner -> output
     for (const track of tracks) {
       const input = offlineCtx.createGain();
@@ -586,7 +590,13 @@ export class AudioEngine {
       // Piste gelee : meme cablage qu'en lecture (rendu -> effets restants).
       const frozen = isTrackFrozen(track);
       // Bus d'effets gelé : ce qui y entre encore en direct (envoi ajouté ailleurs) passe par ses effets non rendus.
-      const prePlugins = frozen ? ((uncoveredClips(track).length > 0 || isFrozenBus(track)) ? preFreezePlugins(track) : []) : (track.plugins || []);
+      // Piste vide par construction (aucun clip à jouer, rien n'y entre) : ses effets ne
+      // rendraient que du silence (ou le souffle d'un Lo-fi). Le Mix auto pose 8 effets,
+      // dont l'Auto-Tune, sur chaque piste voix, même vide : la démo MP3 d'un artiste
+      // (1 prise, 4 pistes vides) prenait ~4 min au lieu d'environ 1 (audit UX du 08/10).
+      const silentTrack = !frozen && (track.type === TrackType.AUDIO || track.type === TrackType.BUS) && !feeders.has(track.id)
+        && !this.getPlayableClips(track, tracks).some(c => !c.isMuted);
+      const prePlugins = silentTrack ? [] : frozen ? ((uncoveredClips(track).length > 0 || isFrozenBus(track)) ? preFreezePlugins(track) : []) : (track.plugins || []);
       const postPlugins = frozen ? postFreezePlugins(track) : [];
       let offlineLatency = 0;
       let postLatency = 0;

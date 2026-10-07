@@ -280,7 +280,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
           <div className="flex items-center gap-3">
             <div className="text-right">
               <p className="text-xs font-bold text-white">{user.username || user.email}</p>
-              <p className="text-[10px] text-slate-500">{user.plan || 'FREE'}</p>
+              <p className="text-[10px] text-slate-500">{!user.plan || /^free$/i.test(user.plan) ? 'Gratuit' : user.plan}</p>
             </div>
             <button
               onClick={onLogout}
@@ -293,8 +293,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
         ) : (
           <button
             onClick={() => setShowAuthModal(true)}
-            className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-lg text-sm font-bold text-white hover:opacity-90 transition-all shadow-lg shadow-cyan-500/20"
+            className="px-4 py-2.5 bg-cyan-500 rounded-lg text-sm font-bold text-black hover:opacity-90 transition-all shadow-lg shadow-cyan-500/20"
           >
+            {/* Texte noir sur l'accent : le blanc sur le dégradé cyan → bleu ne faisait que 3:1. */}
             <i className="fas fa-user mr-2"></i>
             Connexion
           </button>

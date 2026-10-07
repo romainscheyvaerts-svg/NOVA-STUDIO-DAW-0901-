@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { DAWState } from '../types';
 import { saveBlob } from '../utils/saveBlob';
 import { canMakeVideo, clipAudioMp3, clipVideo, demoMp3, fileBaseName, shareOrSave, projectEnd } from '../utils/demoExport';
@@ -9,6 +9,9 @@ interface ShareClipModalProps {
   onClose: () => void;
   state: DAWState;
   onBuyBeat: () => void;
+  /** Lancer tout de suite un fichier (« Démo gratuite du morceau complet » de la fenêtre Exporter) :
+   *  sans ça, l'artiste devait choisir une 2e fois la même chose ici. */
+  autoRun?: 'demo' | 'audio' | null;
 }
 
 /**
@@ -16,12 +19,12 @@ interface ShareClipModalProps {
  * complète en MP3, avec le tag « Make Music ». La version propre (WAV sans
  * tag) reste liée à l'achat de la licence.
  */
-const ShareClipModal: React.FC<ShareClipModalProps> = ({ open, onClose, state, onBuyBeat }) => {
+const ShareClipModal: React.FC<ShareClipModalProps> = ({ open, onClose, state, onBuyBeat, autoRun }) => {
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  if (!open) return null;
+  const autoStarted = useRef(false);
 
   const hasVoice = state.tracks.some(t => t.type === 'AUDIO' && t.id !== 'instrumental' && !t.instrumentId && t.clips.some(c => !c.isMuted));
   const base = fileBaseName(state);
@@ -39,13 +42,21 @@ const ShareClipModal: React.FC<ShareClipModalProps> = ({ open, onClose, state, o
         blob = await demoMp3(state, setProgress); name = `${base} - démo.mp3`;
       }
       const r = await shareOrSave(blob, name, saveBlob);
-      setDone(r === 'shared' ? 'Partagé ✓' : r === 'saved' ? 'Fichier enregistré ✓' : null);
+      setDone(r === 'shared' ? 'Partagé ✓' : r === 'saved' ? `Fichier enregistré ✓ (${name}, dans tes téléchargements)` : null);
     } catch (e: any) {
-      setError(e?.message || 'Création impossible');
+      // Une erreur sans piste de solution laissait l'artiste bloqué.
+      setError(`Création impossible${e?.message ? ` (${e.message})` : ''}. Réessaie ; si ça recommence, recharge la page (ta session est sauvegardée) ou passe par Exporter → Réglages avancés.`);
     } finally {
       setBusy(null);
     }
   };
+
+  useEffect(() => {
+    if (!open) { autoStarted.current = false; return; }
+    if (autoRun && !autoStarted.current && !busy) { autoStarted.current = true; run(autoRun); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, autoRun]);
+  if (!open) return null;
 
   const btn = 'w-full rounded-2xl border p-4 text-left transition-all active:scale-[0.99] disabled:opacity-40';
   return (

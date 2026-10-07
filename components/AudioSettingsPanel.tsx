@@ -312,7 +312,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                     <span className="text-[9px] font-mono text-white">{Math.round(cpuUsage)}%</span>
                 </div>
 
-                <button aria-label="Fermer" title="Fermer" onClick={onClose} className="absolute right-4 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center transition-colors">
+                <button aria-label="Fermer" title="Fermer" onClick={onClose} className="nova-hit absolute right-4 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center transition-colors">
                     <i className="fas fa-times"></i>
                 </button>
             </div>

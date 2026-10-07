@@ -225,7 +225,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
               <div className="nova-sombre pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px] relative">
-                  <button aria-label="Fermer" title="Fermer" onClick={onClose} className="absolute top-4 right-4 z-50 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"><i className="fas fa-times"></i></button>
+                  <button aria-label="Fermer" title="Fermer" onClick={onClose} className="nova-hit absolute top-4 right-4 z-50 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"><i className="fas fa-times"></i></button>
                   <DrumRack track={track} onUpdateTrack={onUpdateTrack} />
               </div>
           </div>
@@ -325,7 +325,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
                className="w-8 h-8 rounded-full bg-white/5 text-slate-300 hover:bg-white/15 disabled:opacity-30 flex items-center justify-center"><i className="fas fa-chevron-right text-xs" /></button>
            </>
          )}
-         <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="w-8 h-8 rounded-full bg-white/5 hover:bg-red-500 text-slate-500 hover:text-white transition-all flex items-center justify-center">
+         <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="nova-hit w-8 h-8 rounded-full bg-white/5 hover:bg-red-500 text-slate-500 hover:text-white transition-all flex items-center justify-center">
             <i className="fas fa-times text-xs"></i>
          </button>
          </div>

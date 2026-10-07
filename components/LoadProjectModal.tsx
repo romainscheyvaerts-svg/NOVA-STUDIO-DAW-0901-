@@ -70,7 +70,7 @@ const LoadProjectModal: React.FC<LoadProjectModalProps> = ({
                     <p className="text-[11px] text-slate-400">Tes projets enregistrés</p>
                 </div>
             </div>
-            <button aria-label="Fermer" title="Fermer" onClick={onClose} className="w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
+            <button aria-label="Fermer" title="Fermer" onClick={onClose} className="nova-hit w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
                 <i className="fas fa-times"></i>
             </button>
         </div>

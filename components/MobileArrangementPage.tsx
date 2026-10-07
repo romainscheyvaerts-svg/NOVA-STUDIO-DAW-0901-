@@ -20,7 +20,7 @@ const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) =>
       <span className="text-cyan-400 font-mono text-sm font-bold tracking-wider">
         {format(t + 1e-6)}
       </span>
-      <span className="text-white/30 font-mono text-xs ml-2">
+      <span className="text-white/50 font-mono text-xs ml-2">
         {(t + 1e-6).toFixed(1)}s
       </span>
     </>
@@ -568,7 +568,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         {/* Lecture / stop : déjà dans la barre du haut (il y avait deux transports). */}
         {/* Time Display */}
         <div className="flex-1 flex items-center justify-center">
-          <div className="bg-black/40 rounded-lg px-3 py-1 border border-white/10">
+          <div className="bg-black/40 [[data-theme=light]_&]:bg-nv-surface rounded-lg px-3 py-1 border border-white/10">
             <MobileClock format={formatBarsBeat} />
           </div>
         </div>
@@ -657,7 +657,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             className="flex items-center justify-center border-b border-white/10 bg-[#0f1114]"
             style={{ height: TIMELINE_HEIGHT }}
           >
-            <span className="text-[9px] font-bold text-white/30 uppercase">Pistes</span>
+            <span className="text-[9px] font-bold text-white/50 uppercase">Pistes</span>
           </div>
 
           {/* Track headers */}
@@ -966,7 +966,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   {/* Empty track hint */}
                   {track.clips.length === 0 && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <span className="text-[10px] text-white/20 font-medium">Vide</span>
+                      <span className="text-[10px] text-white/40 font-medium">Vide</span>
                     </div>
                   )}
                 </div>

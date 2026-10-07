@@ -3435,6 +3435,7 @@ function Studio() {
   const [lyricsOpen, setLyricsOpen] = useState(false);
   // Extrait 30 s / démo taguée
   const [shareOpen, setShareOpen] = useState(false);
+  const [shareAuto, setShareAuto] = useState<'demo' | null>(null);
   // Comping : zones où garder une prise (parties du morceau, boucle).
   const compZones = useMemo<CompZone[]>(() => {
     const zones: CompZone[] = [];
@@ -6481,7 +6482,7 @@ function Studio() {
         <div className="fixed top-3 inset-x-0 z-[999] flex justify-center px-4 pointer-events-none">
           <div role="status" className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-amber-400/40 bg-[#14161a] px-4 py-3 text-[13px] text-amber-100 shadow-2xl">
             <span>{landingNotice}</span>
-            <button type="button" aria-label="Fermer" onClick={() => setLandingNotice(null)} className="w-8 h-8 shrink-0 rounded-lg bg-white/10 text-white">✕</button>
+            <button type="button" aria-label="Fermer" onClick={() => setLandingNotice(null)} className="nova-hit w-8 h-8 shrink-0 rounded-lg bg-white/10 text-white">✕</button>
           </div>
         </div>
       )}
@@ -6840,7 +6841,7 @@ function Studio() {
       />
 
       <WelcomeSteps
-        open={welcomeOpen}
+        open={welcomeOpen && !proGate}
         beatLoaded={!!state.tracks.find(t => t.id === 'instrumental')?.clips.length}
         beatLoading={externalImportNotice?.startsWith('Chargement') ? externalImportNotice.replace(/^Chargement\s*:\s*/, '').replace(/\.{3}$/, '') : null}
         isMobile={isMobile}
@@ -6949,7 +6950,7 @@ function Studio() {
           />
         </Suspense>
       )}
-      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={() => { setIsExportMenuOpen(false); setShareOpen(true); }}
+      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
         onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} />}
       <DrumMachinePanel
         open={drumsOpen}
@@ -7134,7 +7135,7 @@ function Studio() {
       )}
       {masterNovaOpen && <MasterAssistantPanel tracks={state.tracks} isPlaying={state.isPlaying} onTogglePlay={handleTogglePlay}
         onApply={applyMasterNova} onRemove={removeMasterNova} onSetBypass={bypassMasterNova} onClose={() => setMasterNovaOpen(false)} />}
-      <ShareClipModal open={shareOpen} onClose={() => setShareOpen(false)} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
+      <ShareClipModal open={shareOpen} autoRun={shareAuto} onClose={() => { setShareOpen(false); setShareAuto(null); }} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
       {(() => {
         const st = synthPanelTrackId ? state.tracks.find(t => t.id === synthPanelTrackId && t.type === TrackType.MIDI && !t.bass808) : undefined;
         if (!st) return null;
