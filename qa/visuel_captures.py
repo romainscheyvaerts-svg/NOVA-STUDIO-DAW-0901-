@@ -166,7 +166,7 @@ def run(b, vp, theme, R):
         if vp == "tel":
             pg.locator("nav, [role=navigation], div.fixed.bottom-0").filter(has_text="Morceau").last.get_by_text("FX", exact=True).first.click(); pg.wait_for_timeout(800)
             S("onglet_FX")
-            pg.locator("button[aria-label^='Ouvrir ']").locator("visible=true").first.click(timeout=4000)
+            pg.get_by_text(re.compile("^(DENOISER|AUTOTUNE|Anti-bruit)$")).locator("visible=true").first.click(timeout=4000)
         else:
             pg.locator(".fx-slot button[aria-label^='Ouvrir']").locator("visible=true").first.click(timeout=4000)
         pg.wait_for_timeout(1200)
