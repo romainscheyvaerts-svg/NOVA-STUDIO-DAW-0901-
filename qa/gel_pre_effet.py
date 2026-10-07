@@ -147,6 +147,10 @@ class FakeBridge:
         else:
             ws.send(json.dumps({"req_id": rid, "success": True}))
 
+    def process(self, meta, x, sr):
+        """Effet du « plugin » de test (surchargé par le pont v7 de qa/collab_sim.py)."""
+        return fx_verb(x, sr) if "Verb" in (meta.get("path") or "") else fx_comp(x, sr)
+
     def on_binary(self, ws, buf):
         if buf[0] != 2:
             return
@@ -161,7 +165,7 @@ class FakeBridge:
             if path not in self.installed:
                 raise RuntimeError("Plugin introuvable sur ce PC")
             x = np.vstack([data[0], data[min(1, nch - 1)]]).astype(np.float32)
-            y = fx_verb(x, sr) if "Verb" in path else fx_comp(x, sr)
+            y = self.process(meta, x, sr)
             self.renders.append({"plugin": Path(path).stem, "seconds": round(nframes / sr, 2), "in_rms": float(np.sqrt(np.mean(x ** 2))), "out_rms": float(np.sqrt(np.mean(y ** 2)))})
             j = json.dumps({"action": "RENDER", "req_id": rid, "success": True, "nch": 2, "nframes": y.shape[1], "sample_rate": sr}).encode()
             o = (8 + len(j) + 3) & ~3
@@ -179,10 +183,28 @@ DESKTOP_INIT = "window.__novaDesktop = { version: 'test', platform: 'windows', u
 WORKER_STUB = "onmessage = () => {};"
 
 
+SUPA_URL = "https://mxdrxpzxbgybchzzvpkf.supabase.co"
+
+
+def fake_login(page, uid="33333333-3333-4333-8333-333333333333", email="studio@test.local"):
+    """Compte Make Music simulé : l'appli Windows exige d'être connecté pour démarrer
+    (porte d'entrée components/DesktopAccessGate). Aucun appel réel à Supabase."""
+    import base64
+    enc = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")  # noqa
+    tok = f"{enc({'alg': 'HS256', 'typ': 'JWT'})}.{enc({'sub': uid, 'email': email, 'role': 'authenticated', 'aud': 'authenticated', 'exp': int(time.time()) + 86400 * 30})}.sig"
+    user = {"id": uid, "email": email, "aud": "authenticated", "role": "authenticated", "app_metadata": {}, "user_metadata": {}, "created_at": "2026-01-01T00:00:00Z"}
+    sess = {"access_token": tok, "token_type": "bearer", "expires_in": 86400 * 30, "expires_at": int(time.time()) + 86400 * 30, "refresh_token": "qa-refresh", "user": user}
+    page.add_init_script(f"try {{ localStorage.setItem('sb-mxdrxpzxbgybchzzvpkf-auth-token', {json.dumps(json.dumps(sess))}); }} catch (e) {{}}")
+    page.route(f"{SUPA_URL}/auth/v1/user*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(user)))
+    page.route(f"{SUPA_URL}/auth/v1/token*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(sess)))
+
+
 def prepare(page, bridge=None, desktop=False):
-    """Pont simulé (ou absent), worker audio du pont neutralisé, facturation simulée (admin)."""
+    """Pont simulé (ou absent), worker audio du pont neutralisé, facturation simulée (admin).
+    Appli Windows simulée : compte connecté simulé (sinon la porte d'entrée bloque)."""
     if desktop:
         page.add_init_script(DESKTOP_INIT)
+        fake_login(page)
     if bridge is not None:
         page.route_web_socket(re.compile(r"^ws://(127\.0\.0\.1|localhost):8765"), bridge.handler)
     else:
@@ -222,30 +244,29 @@ def save_zip(page, dest: Path):
 
 
 def export_wav(page, dest: Path, label):
+    """Export du morceau complet (WAV). La fenêtre d'export a changé : on choisit
+    « Mon morceau complet » (le téléchargement part tout de suite), au lieu de
+    l'ancien bouton « WAV » puis « EXPORTER »."""
+    page.keyboard.press("Escape")
     b = page.get_by_role("button", name=re.compile(r"^\W*Exporter( le mix)?\s*$")).locator("visible=true").first
     if not b.is_visible():
         page.get_by_role("button", name=re.compile("Ouvrir le menu")).first.click(); page.wait_for_timeout(500)
         b = page.get_by_role("button", name=re.compile(r"^\W*Exporter( le mix)?\s*$")).locator("visible=true").first
-    b.click(); page.wait_for_timeout(1500)
+    b.click(); page.wait_for_timeout(1200)
     shot(page, f"{label}_export_fenetre")
-    wav = page.get_by_role("button", name=re.compile(r"^WAV$")).locator("visible=true").first
     try:
-        if wav.is_visible(): wav.click()
-    except Exception:
-        pass
-    go = page.locator("button").filter(has_text=re.compile(r"^\s*EXPORTER\s*$")).locator("visible=true").first
-    with page.expect_download(timeout=240000) as dl:
-        go.click()
-    dl.value.save_as(str(dest))
-    page.wait_for_timeout(1200)
-    shot(page, f"{label}_export_fini")
-    for _ in range(3):
-        close = page.get_by_role("button", name="Fermer", exact=True).locator("visible=true").first
-        try:
-            if close.is_visible(): close.click(); page.wait_for_timeout(400)
-            else: break
-        except Exception:
-            break
+        with page.expect_download(timeout=240000) as dl:
+            page.get_by_text("Mon morceau complet", exact=True).first.click()
+        dl.value.save_as(str(dest))
+    finally:
+        page.wait_for_timeout(800)
+        for _ in range(3):
+            close = page.get_by_role("button", name=re.compile("^(Fermer|Close)$")).locator("visible=true")
+            try:
+                if close.count() and page.get_by_text("Exporter ton morceau", exact=False).count(): close.last.click(); page.wait_for_timeout(300)
+            except Exception:
+                break
+        page.keyboard.press("Escape")
     return dest
 
 

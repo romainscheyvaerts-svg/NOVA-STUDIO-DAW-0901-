@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-mode-inge")
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:4010/")
 from qalib import *  # noqa
-from gel_pre_effet import FakeBridge, prepare, open_project_file, rms_db, duration_s, voice_wav, PHRASES, SR  # noqa
+from gel_pre_effet import FakeBridge, prepare, open_project_file, rms_db, duration_s, voice_wav, export_wav, PHRASES, SR  # noqa
 
 SUPA = "https://mxdrxpzxbgybchzzvpkf.supabase.co"
 STORE = "https://fake-storage.test"
@@ -177,31 +177,6 @@ def engineer_project(path: Path):
 
 
 # ------------------------------------------------------------ outils
-def export_wav(page, dest: Path, label):
-    """Export du morceau complet (WAV) par la fenêtre d'export de cette version."""
-    page.keyboard.press("Escape")
-    b = page.get_by_role("button", name=re.compile(r"^\W*Exporter( le mix)?\s*$")).locator("visible=true").first
-    if not b.is_visible():
-        page.get_by_role("button", name=re.compile("Ouvrir le menu")).first.click(); page.wait_for_timeout(500)
-        b = page.get_by_role("button", name=re.compile(r"^\W*Exporter( le mix)?\s*$")).locator("visible=true").first
-    b.click(); page.wait_for_timeout(1200)
-    shot(page, f"{label}_export_fenetre")
-    try:
-        with page.expect_download(timeout=240000) as dl:
-            page.get_by_text("Mon morceau complet", exact=True).first.click()
-        dl.value.save_as(str(dest))
-    finally:
-        page.wait_for_timeout(800)
-        for _ in range(3):
-            close = page.get_by_role("button", name=re.compile("^(Fermer|Close)$")).locator("visible=true")
-            try:
-                if close.count() and page.get_by_text("Exporter ton morceau", exact=False).count(): close.last.click(); page.wait_for_timeout(300)
-            except Exception:
-                break
-        page.keyboard.press("Escape")
-    return dest
-
-
 def dismiss(page):
     for name in ("C'est parti", "Plus tard", "C'est noté"):
         b = page.get_by_role("button", name=name, exact=True).locator("visible=true").first
