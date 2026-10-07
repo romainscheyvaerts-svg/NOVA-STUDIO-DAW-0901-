@@ -10,6 +10,7 @@ import { saveBlob } from '../utils/saveBlob';
 import { openBuyBeat, openProMix } from '../utils/studioLinks';
 import { prepareTracksForOffline } from '../services/VstFreeze';
 import { track } from '../utils/analytics';
+import { consumeSelectionExport, editSelectionStore } from '../utils/editSelection';
 
 // Compte admin du studio (tout gratuit pour tester) : lu une fois par session.
 let adminCache: boolean | null = null;
@@ -122,7 +123,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
     }
   };
   const handleExportRef = React.useRef<(() => Promise<void>) | null>(null);
-  const [rangeMode, setRangeMode] = useState<'FULL' | 'LOOP'>('FULL');
+  // SELECTION : la plage choisie au Sélecteur / Smart Tool (comme l'export d'une sélection dans Pro Tools).
+  const [rangeMode, setRangeMode] = useState<'FULL' | 'LOOP' | 'SELECTION'>('FULL');
+  const selRange = editSelectionStore.get().time;
 
   // FORMAT & QUALITÉ
   const [format, setFormat] = useState<AudioFormat>('WAV');
@@ -151,7 +154,10 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
         setProgress(0);
         setStatusText('');
         setIsRendering(false);
+        if (consumeSelectionExport() && editSelectionStore.get().time) { setRangeMode('SELECTION'); setAdvanced(true); }
+        else if (rangeMode === 'SELECTION' && !editSelectionStore.get().time) setRangeMode('FULL');
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, projectState.name]);
 
   if (!isOpen) return null;
@@ -162,12 +168,14 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
       if (rangeMode === 'LOOP') {
           return Math.max(1, projectState.loopEnd - projectState.loopStart);
       }
+      if (rangeMode === 'SELECTION' && selRange) return Math.max(0.05, selRange.end - selRange.start);
       // Full Project + Tail
       const maxTime = Math.max(...projectState.tracks.flatMap(t => t.clips.map(c => c.start + c.duration)), 0);
       return maxTime + 2; // +2s tail reverb
   };
 
   const getStartOffset = () => {
+      if (rangeMode === 'SELECTION' && selRange) return selRange.start;
       return rangeMode === 'LOOP' ? projectState.loopStart : 0;
   };
 
@@ -275,7 +283,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
             // Durée : jusqu'à la fin de la dernière voix + 4 s de queue (reverb),
             // pas la longueur du beat. Tous les fichiers démarrent au même point.
             const finVoix = Math.max(...voix.flatMap(t => t.clips.map(c => c.start + c.duration)));
-            const dureeVoix = rangeMode === 'LOOP' ? getDuration() : Math.max(1, finVoix + 4);
+            const dureeVoix = rangeMode !== 'FULL' ? getDuration() : Math.max(1, finVoix + 4);
             const zip = new JSZip();
             for (let i = 0; i < voix.length; i++) {
                 const track = voix[i];
@@ -545,6 +553,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                                 >
                                     <option value="FULL">Tout le morceau</option>
                                     <option value="LOOP">Zone de boucle ({projectState.loopStart.toFixed(1)}s - {projectState.loopEnd.toFixed(1)}s)</option>
+                                    {selRange && <option value="SELECTION">Ta sélection ({selRange.start.toFixed(2)}s - {selRange.end.toFixed(2)}s)</option>}
                                 </select>
                              </div>
                         </div>

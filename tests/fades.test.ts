@@ -117,6 +117,22 @@ describe('plan de gain d\'un clip (lecture = export)', () => {
   });
 });
 
+describe("anti-clic au début d'une courbe", () => {
+  it('la valeur de départ est posée juste avant la courbe (la source peut partir un échantillon plus tôt)', () => {
+    const calls: [string, number, number][] = [];
+    const param = {
+      setValueAtTime: (v: number, t: number) => calls.push(['set', v, t]),
+      setValueCurveAtTime: (vals: Float32Array, t: number) => calls.push(['curve', vals[0], t]),
+    };
+    applyGainEvents(param, clipGainEvents(audio({ duration: 1, fadeIn: 0.5, fadeInCurve: 'S_CURVE' }), 0), 2);
+    expect(calls[0][0]).toBe('set');
+    expect(calls[0][1]).toBe(0);
+    expect(calls[0][2]).toBeLessThan(2);
+    expect(calls[0][2]).toBeGreaterThan(1.999);
+    expect(calls[1]).toEqual(['curve', 0, 2]);
+  });
+});
+
 describe('crossfades', () => {
   it('jonctions : bout à bout et chevauchement, pas un clip caché dans un autre', () => {
     const clips = [

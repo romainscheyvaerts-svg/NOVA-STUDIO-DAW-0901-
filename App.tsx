@@ -3216,7 +3216,11 @@ function Studio() {
       : 'QuickPunch désactivé.');
   }, [handleUpdatePunch]);
   // Commandes d'édition Pro Tools (hooks/useEditCommands) : appelables par le clavier, les menus, l'IA.
-  const editCommands = useEditCommands({ stateRef, setState, notify: setAiNotification, togglePunch: handleTogglePunch, toggleQuickPunch: handleToggleQuickPunch });
+  const editCommands = useEditCommands({
+    stateRef, setState, notify: setAiNotification, togglePunch: handleTogglePunch, toggleQuickPunch: handleToggleQuickPunch,
+    setPunchZone: (a, b) => { const p = punchFromRange(stateRef.current.punch, a, b); if (p) handleUpdatePunch(p); },
+    openExport: () => setIsExportMenuOpen(true),
+  });
 
   // Aide-mémoire des raccourcis (touche « ? »)
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
