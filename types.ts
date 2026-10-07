@@ -318,6 +318,8 @@ export interface FreezeRef {
    * découpes. Sert au journal des éditions pré-effet (utils/preFxEdits).
    */
   srcClipId?: string;
+  /** Respirations traitées (Clip.breaths) déjà contenues dans le rendu. */
+  breaths?: BreathEdit[];
 }
 
 /** Clip tel qu'il était au moment du gel (référence des éditions pré-effet). */

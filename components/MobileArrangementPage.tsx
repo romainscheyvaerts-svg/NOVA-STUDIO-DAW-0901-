@@ -11,6 +11,7 @@ import { useSimpleMode } from '../utils/simpleMode';
 import { sendLabel } from '../utils/sendLabels';
 import { openSynthPanel } from '../utils/synthPanelStore';
 import { editModeStore, useEditMode } from '../utils/editModes';
+import { breathGainAt, breathSig } from '../utils/breathEnvelope';
 
 /** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
 const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
@@ -370,13 +371,17 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     if (!buffer) return null;
 
     const centerY = height / 2;
-    const cacheKey = `${bufferKeyOf(buffer)}|${clip.offset || 0}|${Math.round(width)}|${height}`;
+    // Respirations traitées (utils/breaths) : la forme d'onde montre le creux.
+    const breaths = clip.breaths?.length && !clip.isReversed ? clip.breaths : undefined;
+    const off = clip.offset || 0;
+    const cacheKey = `${bufferKeyOf(buffer)}|${off}|${clip.duration}|${Math.round(width)}|${height}|${breathSig(breaths)}`;
     let polygon = wavePointsCache.get(cacheKey);
     if (polygon === undefined) {
     const channelData = buffer.getChannelData(0);
     const samples = channelData.length;
-    const step = Math.max(1, Math.floor(samples / width));
-    const offsetSamples = Math.floor((clip.offset || 0) * buffer.sampleRate);
+    // Seulement la partie jouée du fichier (offset → offset + durée), pas tout le fichier.
+    const step = Math.max(1, Math.floor((clip.duration * buffer.sampleRate) / Math.max(1, width)));
+    const offsetSamples = Math.floor(off * buffer.sampleRate);
     
     const points: string[] = [];
     const pointsNeg: string[] = [];
@@ -392,8 +397,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         if (sample > max) max = sample;
       }
 
-      const y1 = centerY + max * centerY * 0.85;
-      const y2 = centerY + min * centerY * 0.85;
+      const g = breaths ? breathGainAt(breaths, off + ((i + 0.5) / width) * clip.duration) : 1;
+      const y1 = centerY + max * g * centerY * 0.85;
+      const y2 = centerY + min * g * centerY * 0.85;
       points.push(`${i},${y1}`);
       pointsNeg.unshift(`${i},${y2}`);
     }
@@ -416,6 +422,18 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           fill={`url(#waveGrad-${clip.id})`}
         />
         <line x1="0" y1={centerY} x2={width} y2={centerY} stroke={color} strokeOpacity="0.2" strokeWidth="1" />
+        {/* Repère violet des respirations traitées, comme sur l'ordinateur. */}
+        {breaths?.map((b, i) => {
+          const x0 = ((b.start - off) / clip.duration) * width, x1 = ((b.end - off) / clip.duration) * width;
+          if (x1 <= 0 || x0 >= width) return null;
+          const l = Math.max(0, x0), w = Math.max(2, Math.min(width, x1) - l);
+          return (
+            <g key={i} data-testid="mobile-breath-mark">
+              <rect x={l} y={0} width={w} height={height} fill="rgba(167,139,250,0.16)" />
+              <rect x={l} y={height - 3} width={w} height={3} fill="#a78bfa" />
+            </g>
+          );
+        })}
       </svg>
     );
   }, []);

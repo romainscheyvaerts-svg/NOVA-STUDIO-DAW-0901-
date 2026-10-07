@@ -46,7 +46,7 @@ import { normalizeSynth } from './utils/novaSynth';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
 import { renderTrackFreeze, renderTrackPreview, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
-import { canBakeTrack, hasVst, freezeSignature, trackBufferIds } from './utils/freeze';
+import { canBakeTrack, hasVst, freezeSignature, trackBufferIds, isTrackFrozen, preFreezePlugins, isVst, freezeIndex, breathsNeedRefreeze } from './utils/freeze';
 import { getEditAuthor, setEditAuthor } from './utils/preFxEdits';
 import { usePreFxReplay } from './hooks/usePreFxReplay';
 import { mergeSessionEdits } from './utils/preFxMerge';
@@ -1774,6 +1774,10 @@ function Studio() {
     }));
     setAiNotification(`${style.emoji} Mix « ${style.name} » appliqué sur tes pistes voix — Annuler pour revenir`);
     track('mix_style_applied', { style: style.id, auto });
+    // Case « Traiter les respirations » du Mix auto (cochée par défaut) : suivie
+    // par tous les chemins (menu, Nova, style mis tout seul après la 1re prise).
+    // Après la prise, on laisse la nouvelle prise arriver dans l'état.
+    setTimeout(breathsAfterMixStyle, auto ? 400 : 0);
     return true;
   }, [setState]);
 
@@ -2667,6 +2671,57 @@ function Studio() {
       notify(`❌ Gel impossible : ${e?.message || 'erreur'}`);
     }
   }, [setState]);
+
+  /**
+   * Respirations traitées sur une piste gelée : son rendu contient encore
+   * l'ancienne version. On la regèle (même plage d'effets) quand c'est sûr :
+   * aucun VST dans le rendu, ou pont connecté. Le regel n'est pas une étape
+   * d'annulation : Ctrl+Z revient à l'état d'avant (ancien rendu compris).
+   * blocked : pistes à dégeler pour entendre le traitement (VST sans le pont).
+   */
+  const refreezeAfterEdit = useCallback(async (trackIds: string[]): Promise<{ refrozen: string[]; blocked: string[] }> => {
+    // Laisse le traitement arriver dans l'état avant de regarder les pistes.
+    const before = stateRef.current;
+    for (let i = 0; i < 40 && stateRef.current === before; i++) await new Promise(r => setTimeout(r, 25));
+    const refrozen: string[] = [];
+    const blocked: string[] = [];
+    for (const id of trackIds) {
+      const t = stateRef.current.tracks.find(x => x.id === id);
+      if (!t || !isTrackFrozen(t) || t.vstInstrument) continue;
+      // Rendu fait par l'ingé à distance (ses VST) : on ne peut pas le refaire ici.
+      const remoteRender = !!t.remote && stateRef.current.remoteInge?.role === 'artist';
+      if (remoteRender || (preFreezePlugins(t).some(isVst) && !novaBridge.isConnected())) {
+        if (breathsNeedRefreeze(t)) blocked.push(id);
+        continue;
+      }
+      try {
+        await ensureAudioEngine();
+        const renderId = t.frozenClip!.id;
+        const r = await renderTrackFreeze(t, freezeIndex(t));
+        // Modifiée pendant le rendu (ou Annuler) : ce rendu ne correspond plus.
+        const matches = (tt: Track | undefined) => !!tt && !!tt.isFrozen && tt.frozenClip?.id === renderId
+          && freezeSignature(tt.clips || [], tt.plugins || [], r.upTo) === r.sig;
+        if (!matches(stateRef.current.tracks.find(x => x.id === id))) {
+          if (r.clip.bufferId) audioBufferRegistry.remove(r.clip.bufferId);
+          continue;
+        }
+        const oldBufferId = t.frozenClip!.bufferId;
+        setSilently(produce((draft: DAWState) => {
+          const tt = draft.tracks.find(x => x.id === id);
+          // (L'état a pu bouger entre-temps : on revérifie au moment d'appliquer.)
+          if (!matches(tt as Track | undefined)) { setTimeout(() => releaseBufferIfUnused(r.clip.bufferId, []), 0); return; }
+          applyFreezeResult(tt as Track, r, getEditAuthor() || undefined);
+        }));
+        refrozen.push(id);
+        if (oldBufferId && oldBufferId !== r.clip.bufferId) setTimeout(() => releaseBufferIfUnused(oldBufferId, []), 50);
+      } catch (e) {
+        console.warn('[Respirations] Regel impossible', e);
+        const cur = stateRef.current.tracks.find(x => x.id === id);
+        if (cur && breathsNeedRefreeze(cur)) blocked.push(id);
+      }
+    }
+    return { refrozen, blocked };
+  }, [setSilently, releaseBufferIfUnused]);
 
   // --- Effets VST3 : état remonté au projet, rendu à la sauvegarde ----------------
 
@@ -6805,7 +6860,7 @@ function Studio() {
         open={vocalToolsOpen}
         onClose={() => setVocalToolsOpen(false)}
         currentStyleId={state.vocalMixStyle}
-        onApplyStyle={(id: string) => { if (handleApplyMixStyle(id) !== false) breathsAfterMixStyle(); }}
+        onApplyStyle={(id: string) => { handleApplyMixStyle(id); }}
         breathMixOption={<BreathMixOption />}
         breathTools={<BreathPanelTools canTreat={state.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0)}
           projectAuto={state.breathAuto} onProjectAutoChange={(on) => setState(prev => ({ ...prev, breathAuto: on }))} />}
@@ -6991,7 +7046,8 @@ function Studio() {
         getPlayhead={() => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime)}
         onOpenShortcuts={() => setShortcutsOpen(true)} projectKey={state.projectKey} projectScale={state.projectScale} />
       {/* Respirations : fenêtre, traitement en un clic, mode auto après chaque prise (components/BreathTools). */}
-      <BreathHost tracks={state.tracks} setState={setState} undo={undo} breakHistory={breakHistory} projectAuto={state.breathAuto} isMobile={isMobile} />
+      <BreathHost tracks={state.tracks} setState={setState} undo={undo} breakHistory={breakHistory} projectAuto={state.breathAuto} isMobile={isMobile}
+        onFrozenTreated={refreezeAfterEdit} onUnfreeze={(id) => { void handleFreezeTrack(id); }} />
       <TakeHomeModal
         open={takeHomeOpen}
         onClose={() => setTakeHomeOpen(false)}
