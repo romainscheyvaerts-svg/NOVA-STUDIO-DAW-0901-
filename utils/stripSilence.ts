@@ -24,6 +24,11 @@ export interface StripSilenceOptions {
   minClipSec?: number;
   /** Un passage trop court rejoint un voisin à moins de cette distance (sinon : bruit retiré). */
   joinGapSec?: number;
+  /**
+   * Seuil fixe en dBFS (fenêtre Strip Silence, comme Pro Tools). Absent : seuil
+   * automatique adapté à la prise (nettoyage après l'enregistrement).
+   */
+  thresholdDb?: number;
 }
 
 export interface VoiceSegment {
@@ -32,7 +37,7 @@ export interface VoiceSegment {
   end: number;
 }
 
-const DEFAULTS: Required<StripSilenceOptions> = {
+const DEFAULTS: Required<Omit<StripSilenceOptions, 'thresholdDb'>> = {
   windowSec: 0.02,
   minSilenceSec: 0.35,
   minSoundSec: 0.08,
@@ -79,9 +84,10 @@ export function detectVoiceSegments(
   const sorted = [...rmsDb].sort((a, b) => a - b);
   const noiseFloor = sorted[Math.floor(sorted.length * 0.1)];
   const peak = sorted[sorted.length - 1];
-  const threshold = Math.max(-50, noiseFloor + 8, peak - 40);
-  // Prise entièrement silencieuse (ou quasi) : rien à garder.
-  if (peak < -60) return [];
+  const manual = typeof options.thresholdDb === 'number' && Number.isFinite(options.thresholdDb);
+  const threshold = manual ? options.thresholdDb! : Math.max(-50, noiseFloor + 8, peak - 40);
+  // Prise entièrement silencieuse (ou quasi) / sous le seuil choisi : rien à garder.
+  if (manual ? peak < threshold : peak < -60) return [];
 
   // Fenêtres au-dessus du seuil → intervalles bruts
   const raw: VoiceSegment[] = [];

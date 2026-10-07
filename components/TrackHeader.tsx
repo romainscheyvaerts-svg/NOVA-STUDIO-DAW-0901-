@@ -33,6 +33,9 @@ import { useInstrumentStatus } from '../utils/instrumentStore';
 import MonitorControl from './MonitorControl';
 import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
+import AutomationModeSelector from './AutomationModeSelector';
+import { automationRecorder } from '../services/AutomationManager';
+import { useLiveParam } from '../utils/automationLiveStore';
 
 interface TrackHeaderProps {
   track: Track;
@@ -59,22 +62,28 @@ const HorizontalSendFader: React.FC<{
   label: string, 
   onChange: (level: number) => void 
 }> = ({ send, trackId, color, label, onChange }) => {
+  // Pendant la lecture, l'envoi suit son automation (comme la console Pro Tools).
+  const shown = useLiveParam(trackId, `send::${send.id}`, send.level);
   const handleInteraction = (clientX: number, rect: DOMRect) => {
     const x = clientX - rect.left;
     const progress = Math.max(0, Math.min(1, x / rect.width));
     onChange(progress * 1.5);
   };
   // Molette / double-clic (0 dB) partagés avec les autres potards
-  const knob = useKnobInteraction(send.level / 1.5, (p) => onChange(p * 1.5), { min: 0, max: 1, defaultValue: 1 / 1.5, wheelStep: 0.01 });
+  const knob = useKnobInteraction(shown / 1.5, (p) => onChange(p * 1.5), { min: 0, max: 1, defaultValue: 1 / 1.5, wheelStep: 0.01 });
 
+  const param = `send::${send.id}`;
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation(); e.preventDefault();
     if (e.detail >= 2) { knob.handleDoubleClick(); return; }
-    dragHorizontal(e, send.level / 1.5, (p) => onChange(p * 1.5));
+    // Automation (Touch / Latch…) : l'appui et le relâchement bornent l'écriture.
+    automationRecorder.touch(trackId, param);
+    dragHorizontal(e, shown / 1.5, (p) => onChange(p * 1.5), () => automationRecorder.release(trackId, param));
   };
   
   const handleTouchStart = (e: React.TouchEvent) => {
     e.stopPropagation();
+    automationRecorder.touch(trackId, param);
     const rect = e.currentTarget.getBoundingClientRect();
     handleInteraction(e.touches[0].clientX, rect);
   };
@@ -84,7 +93,7 @@ const HorizontalSendFader: React.FC<{
     handleInteraction(e.touches[0].clientX, rect);
   };
 
-  const percent = (send.level / 1.5) * 100;
+  const percent = (shown / 1.5) * 100;
 
   return (
     <div
@@ -92,9 +101,10 @@ const HorizontalSendFader: React.FC<{
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
+      onTouchEnd={() => automationRecorder.release(trackId, param)}
       role="slider"
       aria-label={`Envoi ${label}`}
-      aria-valuetext={gainToDbText(send.level)}
+      aria-valuetext={gainToDbText(shown)}
       title={`Envoi ${label} : glisser (Maj = fin), molette, double-clic = 0 dB`}
       className="relative h-5 bg-black/60 rounded-md overflow-hidden border border-white/5 cursor-ew-resize group/fader transition-all hover:border-white/20 touch-none"
     >
@@ -104,11 +114,11 @@ const HorizontalSendFader: React.FC<{
       />
       <div 
         className="absolute inset-y-0 left-0 border-r transition-all duration-75"
-        style={{ width: `${percent}%`, borderColor: color, boxShadow: send.level > 0.05 ? `0 0 8px ${color}` : 'none' }}
+        style={{ width: `${percent}%`, borderColor: color, boxShadow: shown > 0.05 ? `0 0 8px ${color}` : 'none' }}
       />
       <div className="absolute inset-0 flex items-center justify-between px-2 pointer-events-none">
         <span className="text-[9px] font-bold text-white/70 uppercase tracking-tight">{label}</span>
-        <span className="text-[9px] font-mono tabular-nums text-white/50">{gainToDbText(send.level)}</span>
+        <span className="text-[9px] font-mono tabular-nums text-white/50">{gainToDbText(shown)}</span>
       </div>
     </div>
   );
@@ -278,10 +288,16 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     }
   };
 
+  // Pendant la lecture, volume et pan suivent leur automation (comme Pro Tools en Read / Touch).
+  const shownVolume = useLiveParam(track.id, 'volume', track.volume);
+  const shownPan = useLiveParam(track.id, 'pan', track.pan);
   // Pan : glisser vertical, Maj = fin, molette, double-clic = centre
-  const panKnob = useKnobInteraction(track.pan, (v) => onUpdate({ ...track, pan: Math.abs(v) < 0.005 ? 0 : v }), { min: -1, max: 1, sensitivity: 200, defaultValue: 0 });
+  const panKnob = useKnobInteraction(shownPan, (v) => onUpdate({ ...track, pan: Math.abs(v) < 0.005 ? 0 : v }), {
+    min: -1, max: 1, sensitivity: 200, defaultValue: 0,
+    onStart: () => automationRecorder.touch(track.id, 'pan'), onEnd: () => automationRecorder.release(track.id, 'pan'),
+  });
   // Volume : molette et double-clic = 0 dB (course en racine du gain)
-  const volKnob = useKnobInteraction(Math.sqrt(Math.max(0, track.volume) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }), { min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005 });
+  const volKnob = useKnobInteraction(Math.sqrt(Math.max(0, shownVolume) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }), { min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005 });
 
   const handleVolumeInteraction = (clientX: number, rect: DOMRect) => {
       const x = clientX - rect.left;
@@ -293,12 +309,14 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     e.stopPropagation(); e.preventDefault();
     if (e.detail >= 2) { volKnob.handleDoubleClick(); return; }
     setIsAdjustingVolume(true);
-    dragHorizontal(e, Math.sqrt(Math.max(0, track.volume) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }), () => setIsAdjustingVolume(false));
+    automationRecorder.touch(track.id, 'volume');
+    dragHorizontal(e, Math.sqrt(Math.max(0, shownVolume) / 1.5), (p) => onUpdate({ ...track, volume: p * p * 1.5 }), () => { setIsAdjustingVolume(false); automationRecorder.release(track.id, 'volume'); });
   };
 
   const handleVolumeTouchStart = (e: React.TouchEvent) => {
     e.stopPropagation();
     setIsAdjustingVolume(true);
+    automationRecorder.touch(track.id, 'volume');
     const rect = e.currentTarget.getBoundingClientRect();
     handleVolumeInteraction(e.touches[0].clientX, rect);
   };
@@ -308,7 +326,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     handleVolumeInteraction(e.touches[0].clientX, rect);
   };
 
-  const handleVolumeTouchEnd = () => setIsAdjustingVolume(false);
+  const handleVolumeTouchEnd = () => { setIsAdjustingVolume(false); automationRecorder.release(track.id, 'volume'); };
 
   const toggleAutomation = (e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation();
@@ -591,15 +609,17 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       )}
 
       <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-1.5 rounded-lg border border-white/5 relative z-10">
+        {/* Mode d'automation (Read vert, Touch/Latch jaune, Write rouge) — masqué en mode simple. */}
+        {!simple && track.id !== 'master' && <AutomationModeSelector track={track} onUpdate={onUpdate} />}
         <div
           {...panKnob.bind}
-          title={`Panoramique ${panToText(track.pan)} : glisser (Maj = fin), molette, double-clic = centre`}
+          title={`Panoramique ${panToText(shownPan)} : glisser (Maj = fin), molette, double-clic = centre`}
           role="slider"
           aria-label={`Panoramique ${track.name}`}
-          aria-valuetext={panToText(track.pan)}
+          aria-valuetext={panToText(shownPan)}
           className="nova-hit-tactile relative w-7 h-7 rounded-full bg-black border border-white/10 flex items-center justify-center cursor-ns-resize shadow-lg hover:border-cyan-500/30 transition-all touch-none group/pan"
         >
-          <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${track.pan * 140}deg) translateY(-1px)` }} />
+          <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${shownPan * 140}deg) translateY(-1px)` }} />
         </div>
         
         <div className="flex-1 flex items-center gap-1 h-6 relative">
@@ -627,7 +647,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             title="Volume : glisser (Maj = fin), molette, double-clic = 0 dB"
             role="slider"
             aria-label={`Volume ${track.name}`}
-            aria-valuetext={gainToDbText(track.volume)}
+            aria-valuetext={gainToDbText(shownVolume)}
             className={`nova-hit-tactile h-3 relative cursor-ew-resize group/vol touch-none ${track.volumeLock && collabRole && collabRole !== 'artist' ? 'pointer-events-none opacity-60' : ''}`}
           >
             {/* Cadre arrondi à part : son overflow-hidden coupait la zone tactile (.nova-hit-tactile) */}
@@ -635,14 +655,14 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               <div
                 className={`h-full transition-all duration-75 ${isAdjustingVolume ? 'brightness-150' : 'brightness-100'}`}
                 style={{
-                  width: `${(Math.sqrt(track.volume / 1.5)) * 100}%`,
+                  width: `${(Math.sqrt(shownVolume / 1.5)) * 100}%`,
                   backgroundColor: track.color,
                   boxShadow: isAdjustingVolume ? `0 0 10px ${track.color}` : 'none'
                 }}
               />
             </div>
             <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono tabular-nums text-white/70 [text-shadow:0_1px_2px_rgba(0,0,0,0.95)] pointer-events-none group-hover/vol:text-white transition-colors">
-              {gainToDbText(track.volume)}
+              {gainToDbText(shownVolume)}
             </span>
           </div>
           </div>

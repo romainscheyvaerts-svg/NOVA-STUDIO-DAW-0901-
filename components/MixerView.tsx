@@ -8,6 +8,9 @@ import ProMasterMeter from './ProMasterMeter';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { getValidDestinations, getRouteLabel } from './RoutingManager';
 import { PluginName } from './PluginName';
+import AutomationModeSelector from './AutomationModeSelector';
+import { automationRecorder } from '../services/AutomationManager';
+import { useLiveParam } from '../utils/automationLiveStore';
 
 // Track Group Colors (inspired by Pro Tools)
 const GROUP_COLORS = [
@@ -43,6 +46,8 @@ const VUMeter: React.FC<{ analyzer: AnalyserNode | null }> = ({ analyzer }) => {
 };
 
 const SendKnob: React.FC<{ send: TrackSend, track: Track, onUpdate: (t: Track) => void }> = ({ send, track, onUpdate }) => {
+  // Pendant la lecture, l'envoi suit son automation.
+  const shownLevel = useLiveParam(track.id, `send::${send.id}`, send.level);
   const getSendColor = (id: string) => {
     if (id === 'send-delay') return '#00f2ff';
     if (id === 'send-verb-short') return '#6366f1';
@@ -56,7 +61,7 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, onUpdate: (t: Track) =
           targetId={track.id}
           paramId={`send::${send.id}`} 
           label={send.id.replace('send-', '').substring(0, 4)}
-          value={send.level}
+          value={shownLevel}
           min={0}
           max={1.5}
           size={26} // Slightly bigger
@@ -163,10 +168,16 @@ const ChannelStrip: React.FC<{
 
   // Fader de volume : course en racine du gain (0…1.5), glissement RELATIF
   // (le fader ne saute plus sous le clic), Maj = fin, molette, double-clic = 0 dB.
-  const faderPos = Math.sqrt(Math.max(0, track.volume) / 1.5);
+  // Pendant la lecture, fader et pan suivent l'automation (comme la console Pro Tools).
+  const shownVolume = useLiveParam(track.id, 'volume', track.volume);
+  const shownPan = useLiveParam(track.id, 'pan', track.pan);
+  const faderPos = Math.sqrt(Math.max(0, shownVolume) / 1.5);
   const fader = useKnobInteraction(faderPos, (p) => onUpdate({ ...track, volume: p * p * 1.5 }), {
       min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005,
       sensitivity: Math.max(120, faderTrackRef.current?.clientHeight || 300),
+      // Automation Touch / Latch / Write / Trim : l'appui et le relâchement bornent l'écriture.
+      onStart: () => automationRecorder.touch(track.id, 'volume'),
+      onEnd: () => automationRecorder.release(track.id, 'volume'),
   });
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -300,9 +311,12 @@ const ChannelStrip: React.FC<{
         {!isMaster && (
             <IOSection track={track} allTracks={allTracks} onUpdate={onUpdate} />
         )}
+        {!isMaster && (
+            <div className="mb-2 px-1"><AutomationModeSelector track={track} onUpdate={onUpdate} variant="mixer" /></div>
+        )}
 
         <div className="mb-2 flex flex-col items-center">
-           <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="PAN" value={track.pan} min={-1} max={1} size={36} color="#06b6d4" defaultValue={0} format={panToText} onChange={(val) => onUpdate({...track, pan: val})} />
+           <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="PAN" value={shownPan} min={-1} max={1} size={36} color="#06b6d4" defaultValue={0} format={panToText} onChange={(val) => onUpdate({...track, pan: val})} />
         </div>
 
         <div className="flex-1 flex space-x-3 px-2">
@@ -314,11 +328,11 @@ const ChannelStrip: React.FC<{
                 title="Volume : glisser (Maj = fin), molette, double-clic = 0 dB"
                 role="slider"
                 aria-label={`Volume ${track.name}`}
-                aria-valuetext={gainToDbText(track.volume)}
+                aria-valuetext={gainToDbText(shownVolume)}
                 className="h-full bg-black/40 rounded-full border border-white/5 relative cursor-pointer touch-none group/fader"
                 style={{ width: 'var(--fader-width)' }}
               >
-                 <div className={`absolute left-1/2 -translate-x-1/2 rounded border border-white/20 shadow-2xl z-20 flex items-center justify-center ${track.type === TrackType.BUS ? 'w-10 h-16 bg-amber-500 border-amber-400' : 'w-9 h-14 bg-[#1e2229]'}`} style={{ bottom: `calc(${(Math.sqrt(track.volume / 1.5))*100}% - 28px)` }}>
+                 <div className={`absolute left-1/2 -translate-x-1/2 rounded border border-white/20 shadow-2xl z-20 flex items-center justify-center ${track.type === TrackType.BUS ? 'w-10 h-16 bg-amber-500 border-amber-400' : 'w-9 h-14 bg-[#1e2229]'}`} style={{ bottom: `calc(${(Math.sqrt(shownVolume / 1.5))*100}% - 28px)` }}>
                     <div className={`w-full h-0.5 ${track.type === TrackType.BUS ? 'bg-black' : 'bg-cyan-500'}`} />
                  </div>
               </div>
@@ -333,7 +347,7 @@ const ChannelStrip: React.FC<{
            )}
         </div>
 
-        <div className="mt-2 text-center text-[10px] font-mono tabular-nums text-slate-300">{gainToDbText(track.volume)}</div>
+        <div className="mt-2 text-center text-[10px] font-mono tabular-nums text-slate-300">{gainToDbText(shownVolume)}</div>
         <div className="mt-2 flex space-x-2">
            <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>MUTE</button>
            <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>SOLO</button>

@@ -442,6 +442,11 @@ export interface Track {
    */
   vstInstrument?: VstInstrument;
   groupId?: string;            // NEW: Track group reference
+  /**
+   * Mode d'automation façon Pro Tools (voir utils/automationWrite). Absent :
+   * Read (l'automation est rejouée), comme avant l'ajout des modes.
+   */
+  automationMode?: 'off' | 'read' | 'touch' | 'latch' | 'write' | 'trim';
   height?: number;             // NEW: Custom track height
   isMinimized?: boolean;       // NEW: Collapsed state
 }
@@ -477,6 +482,8 @@ export interface Marker {
   type: MarkerType;
   endTime?: number;  // Only for REGION type
   color: string;
+  /** Numéro du repère (Pro Tools : Memory Location n°) ; absent sur les anciens projets. */
+  number?: number;
 }
 
 // Metronome settings

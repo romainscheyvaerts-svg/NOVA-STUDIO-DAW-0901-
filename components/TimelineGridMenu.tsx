@@ -1,5 +1,9 @@
 
 import React, { useEffect, useRef } from 'react';
+import { GRID_OPTIONS } from '../utils/grid';
+import { runEditCommand } from '../utils/editCommands';
+import { openNovaWindow } from '../utils/novaWindows';
+import { TRACK_HEIGHTS } from '../utils/trackHeights';
 
 interface TimelineGridMenuProps {
   x: number;
@@ -38,14 +42,7 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
   }, [onClose]);
 
   const adjustedX = Math.min(x, window.innerWidth - 240);
-  const adjustedY = Math.min(y, window.innerHeight - 300);
-
-  const GRID_OPTIONS = [
-    { label: '1/4 (Beat)', value: '1/4' },
-    { label: '1/8', value: '1/8' },
-    { label: '1/16', value: '1/16' },
-    { label: 'Bar (Mesure)', value: '1/1' },
-  ];
+  const adjustedY = Math.max(8, Math.min(y, window.innerHeight - 560));
 
   return (
     <div 
@@ -62,13 +59,14 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
       </div>
 
       <div className="p-1">
-        <div className="px-3 py-1.5 mt-1 text-[8px] font-black uppercase text-slate-600 tracking-widest">Quantization (Grid)</div>
-        <div className="flex flex-col space-y-0.5">
+        <div className="px-3 py-1.5 mt-1 text-[8px] font-black uppercase text-slate-600 tracking-widest">Grille</div>
+        <div className="grid grid-cols-3 gap-0.5">
           {GRID_OPTIONS.map((opt) => (
             <button
               key={opt.value}
+              title={opt.title}
               onClick={() => { onSetGridSize(opt.value); onClose(); }}
-              className={`flex items-center justify-between px-3 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${gridSize === opt.value ? 'bg-cyan-500/10 text-cyan-400' : 'hover:bg-white/5 text-slate-300'}`}
+              className={`flex items-center justify-between px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 rounded-lg text-[10px] font-bold transition-colors ${gridSize === opt.value ? 'bg-cyan-500/10 text-cyan-400' : 'hover:bg-white/5 text-slate-300'}`}
             >
               <span>{opt.label}</span>
               {gridSize === opt.value && <i className="fas fa-check text-[8px]"></i>}
@@ -109,6 +107,25 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
             <i className="fas fa-search-minus w-4 text-center text-slate-500"></i>
             <span>Réinitialiser le Zoom</span>
           </button>
+          <button onClick={() => { openNovaWindow('memory-locations'); onClose(); }} title="Liste des repères (Pro Tools : Memory Locations, Ctrl+5)" className="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/5 text-slate-300">
+            <i className="fas fa-map-marker-alt w-4 text-center text-slate-500"></i>
+            <span>Repères (Memory Locations)</span>
+          </button>
+          <button onClick={() => { openNovaWindow('shortcuts'); onClose(); }} title="Tous les raccourcis, avec recherche (touche ?)" className="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/5 text-slate-300">
+            <i className="fas fa-keyboard w-4 text-center text-slate-500"></i>
+            <span>Raccourcis clavier</span>
+          </button>
+        </div>
+
+        <div className="h-px bg-white/5 my-2 mx-2" />
+        <div className="px-3 py-1.5 text-[8px] font-black uppercase text-slate-600 tracking-widest" title="Pro Tools : Track Height (Ctrl+↑ / Ctrl+↓)">Hauteur des pistes</div>
+        <div className="grid grid-cols-5 gap-0.5 px-1 pb-1">
+          {TRACK_HEIGHTS.map(h => (
+            <button key={h.id} title={`${h.label} (${h.px} px) · Pro Tools : ${h.pt}`} onClick={() => { runEditCommand('trackHeight', h.px); onClose(); }}
+              className="rounded-lg px-1 py-1.5 [@media(pointer:coarse)]:py-2.5 text-[9px] font-bold text-slate-300 hover:bg-white/5">
+              {h.short}
+            </button>
+          ))}
         </div>
       </div>
     </div>

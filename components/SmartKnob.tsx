@@ -1,14 +1,13 @@
-
 import React, { useEffect, useRef, useState } from 'react';
-import { automationManager } from '../services/AutomationManager';
+import { automationRecorder } from '../services/AutomationManager';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 interface SmartKnobProps {
-  id: string;           // ID unique pour le registre automation (ex: 'track-1-vol')
-  targetId: string;     // ID de l'objet cible (ex: 'track-1')
-  paramId?: string;     // ID du paramètre pour le moteur audio (ex: 'pan', 'volume', 'send::delay')
+  id: string;           // Identifiant unique du potard (ex: 'track-1-pan')
+  targetId: string;     // Piste pilotée (ex: 'track-1')
+  paramId?: string;     // Paramètre automatisable (ex: 'pan', 'volume', 'send::send-delay')
   label: string;
-  value: number;        // Valeur initiale (state React parent)
+  value: number;        // Valeur affichée (réglage, ou automation entendue pendant la lecture)
   min: number;
   max: number;
   onChange: (val: number) => void; // Callback "réel" (ex: updateTrack)
@@ -23,59 +22,32 @@ interface SmartKnobProps {
 }
 
 export const SmartKnob: React.FC<SmartKnobProps> = ({
-  id, targetId, paramId, label, value, min, max, onChange, 
-  isBridged = false, color = '#00f2ff', suffix = '', size = 50, defaultValue, format
+  id, targetId, paramId, label, value, min, max, onChange,
+  color = '#00f2ff', suffix = '', size = 50, defaultValue, format
 }) => {
-  // État local visuel (découplé du parent pour performance 60fps en lecture)
+  // État local visuel (découplé du parent pour un geste fluide)
   const [visualValue, setVisualValue] = useState(value);
   const internalValueRef = useRef(value);
-  
-  // Synchro avec les props (si changement externe hors automation)
+  const [held, setHeld] = useState(false);
+
+  // Synchro avec les props (réglage changé ailleurs, ou automation rejouée)
   useEffect(() => {
     setVisualValue(value);
     internalValueRef.current = value;
   }, [value]);
 
-  // ENREGISTREMENT AU MANAGER
-  useEffect(() => {
-    // On enregistre le paramètre dans le cerveau
-    automationManager.register(
-      id, 
-      targetId, 
-      (val) => {
-        // Callback appelé par le moteur (Read Mode)
-        // On ne déclenche PAS onChange ici pour éviter la boucle infinie React
-        // On applique directement l'effet si possible ou on laisse le moteur le faire via le callback passé
-        // Ici, l'onChange passé en props est souvent une mise à jour d'état React.
-        // Pour l'audio pur, on devrait idéalement bypasser React.
-        // Mais pour rester compatible avec l'existant :
-        onChange(val);
-      }, 
-      value, 
-      isBridged
-    );
-
-    // Souscription pour la mise à jour visuelle fluide (bypass React re-render complet)
-    automationManager.subscribeUI(id, (val) => {
-      setVisualValue(val);
-      internalValueRef.current = val;
-    });
-
-    return () => {
-      automationManager.unregister(id);
-      automationManager.unsubscribeUI(id);
-    };
-  }, [id, targetId, isBridged]); // Dependencies minimales
-
-  // GESTES (WRITE MODE) : glisser, Maj = fin, molette, double-clic = défaut.
-  // Le moteur d'automation enregistre pendant que le potard est « touché ».
+  // GESTES : glisser, Maj = fin, molette, double-clic = défaut.
+  // Pendant la lecture, sur une piste en Touch / Latch / Write / Trim, l'appui
+  // et le relâchement bornent l'écriture d'automation (services/AutomationManager).
   const knob = useKnobInteraction(visualValue, (newVal) => {
     setVisualValue(newVal);
     internalValueRef.current = newVal;
-    // Envoi au moteur (qui gère le throttling VST et l'enregistrement)
-    const currentTime = window.DAW_CONTROL ? window.DAW_CONTROL.getState().currentTime : 0;
-    automationManager.setValue(id, newVal, currentTime);
-  }, { min, max, sensitivity: 150, defaultValue, onStart: () => automationManager.touch(id), onEnd: () => automationManager.release(id) });
+    onChange(newVal);
+  }, {
+    min, max, sensitivity: 150, defaultValue,
+    onStart: () => { setHeld(true); if (paramId) automationRecorder.touch(targetId, paramId); },
+    onEnd: () => { setHeld(false); if (paramId) automationRecorder.release(targetId, paramId); },
+  });
 
   // RENDER (CANVAS ou SVG simple)
   // On utilise un SVG pour la netteté et la performance CSS
@@ -108,8 +80,8 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
           }}
         />
         
-        {/* Status Automation (Point Rouge si Write) */}
-        <div className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 opacity-0 group-active:opacity-100 transition-opacity pointer-events-none" />
+        {/* Écriture d'automation en cours (point rouge tant que le potard est tenu) */}
+        <div data-knob-id={id} className={`absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 transition-opacity pointer-events-none ${held && paramId && automationRecorder.isCapturing(targetId, paramId) ? 'opacity-100' : 'opacity-0'}`} />
       </div>
       
       <div className="text-center">

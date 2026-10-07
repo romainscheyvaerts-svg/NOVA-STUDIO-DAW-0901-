@@ -9,6 +9,7 @@ import {
   pasteRange, RangeClipboard, replaceWithConsolidated, selLength, separateAtSelection, shiftSelection, TimeSelection,
 } from '../utils/timeSelection';
 import { playheadStore } from '../utils/playheadStore';
+import { registerEditCommands } from '../utils/editCommands';
 
 /**
  * Commandes d'édition « façon Pro Tools » appelables de partout (clavier,
@@ -408,6 +409,26 @@ export function useEditCommands(deps: EditCommandDeps): EditCommands {
       if (current === commands) current = null;
       if ((window as any).__novaEdit === commands) delete (window as any).__novaEdit;
     };
+  }, [commands]);
+  // Raccourcis Pro Tools (utils/keymap → bus utils/editCommands) : avec une sélection de
+  // plage ou de clips, ces commandes passent EN PREMIER ; sinon elles rendent la main
+  // (false) aux versions de base (clip sous la tête de lecture). Sans ce branchement,
+  // le gestionnaire global des raccourcis interceptait ← / →, Ctrl+E, Ctrl+C/X/V/D et
+  // Suppr avant l'arrangement : nudge des clips et commandes de plage restaient muets.
+  useEffect(() => {
+    const range = () => !!editSelectionStore.get().time;
+    const anySel = () => { const s = editSelectionStore.get(); return !!(s.time || s.clipIds.length); };
+    return registerEditCommands({
+      nudgeLeft: (arg?: { fine?: boolean }) => (anySel() && !arg?.fine ? (commands.nudge(-1, 1), true) : false),
+      nudgeRight: (arg?: { fine?: boolean }) => (anySel() && !arg?.fine ? (commands.nudge(1, 1), true) : false),
+      split: () => (range() ? commands.separate() : false),
+      copy: () => { if (range()) return commands.copySelection(); commands.markClipClipboard(); return false; },
+      cut: () => { if (range()) return commands.cutSelection(); commands.markClipClipboard(); return false; },
+      paste: () => (commands.hasRangeClipboard() ? commands.pasteRange() : false),
+      delete: () => (range() ? commands.deleteSelection() : false),
+      duplicate: () => (range() ? commands.duplicateSelection() : false),
+      quickFades: () => (range() ? commands.fadesFromSelection() : false),
+    }, 10);
   }, [commands]);
   return commands;
 }

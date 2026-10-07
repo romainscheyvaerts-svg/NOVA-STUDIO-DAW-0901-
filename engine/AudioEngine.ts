@@ -19,7 +19,7 @@ import { Synthesizer } from './Synthesizer';
 import { AudioSampler } from './AudioSampler';
 import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
-import { interpolateCurve } from '../services/AutomationManager';
+import { interpolateCurve, playedLanes, parsePluginParam, valueAtPoints, sortedPoints } from '../utils/automationWrite';
 import { DrumRackNode } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
@@ -534,6 +534,8 @@ export class AudioEngine {
       panner: StereoPannerNode;
       output: GainNode;
       sends: Map<string, GainNode>;
+      /** Effets créés pour le rendu (automation de leurs paramètres). */
+      pluginNodes?: Map<string, any>;
       synth?: Synthesizer;
       sampler?: AudioSampler;
       drumRack?: DrumRackNode;
@@ -565,11 +567,13 @@ export class AudioEngine {
       let offlineLatency = 0;
       let postLatency = 0;
       let frozenInput: GainNode | undefined;
+      const pluginNodes = new Map<string, any>();
       const addPlugin = (plugin: PluginInstance, isPost: boolean) => {
         if (!plugin.isEnabled) return;
         try {
           const entry = this.createPluginNode(plugin, this.currentBpm, renderCtx);
           if (!entry) return;
+          pluginNodes.set(plugin.id, entry.node);
           if (entry.node?.ready instanceof Promise) pendingPlugins.push(entry.node.ready);
           head.connect(entry.input);
           head = entry.output;
@@ -599,7 +603,7 @@ export class AudioEngine {
       panner.pan.value = options.preFader ? 0 : track.pan;
 
       const rt: RenderTrack = {
-        input, gain, panner, output, sends: new Map(), latency: offlineLatency,
+        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes,
         frozenInput, frozenClipId: frozen ? track.frozenClip!.id : undefined, postLatency,
       };
 
@@ -649,7 +653,9 @@ export class AudioEngine {
       }
 
       (track.sends || []).forEach(send => {
-        if (!send.id || !send.isEnabled || send.level <= 0) return;
+        // Un envoi à zéro mais automatisé doit exister à l'export (comme en lecture).
+        const autoSend = playedLanes(track).some(l => l.parameterName === `send::${send.id}` && l.points.length > 0);
+        if (!send.id || !send.isEnabled || (send.level <= 0 && !autoSend)) return;
         if (send.id === track.id) return;
         if (isFeedCovered(track, send.id, tracks)) return;
         const target = rendered.get(send.id);
@@ -698,7 +704,7 @@ export class AudioEngine {
       // Gel : volume/pan appliqués à la lecture ; le volume avant effets seulement si demandé (export).
       if (options.preFader && !options.keepPreVolume) continue;
 
-      (track.automationLanes || []).forEach(lane => {
+      playedLanes(track).forEach(lane => {
         if (options.preFader && lane.parameterName !== PRE_VOLUME) return;
         const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends, (rt.frozenInput || rt.input).gain);
         if (!cible || !lane.points || lane.points.length === 0) return;
@@ -818,6 +824,9 @@ export class AudioEngine {
       const clips = isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []);
       rt.bass808.playVoices(planOfClips(clips, track.bass808), startOffset + (rt.latency || 0) + (rt.down || 0));
     }
+
+    // --- 5c. Automation des paramètres d'effets : mêmes valeurs qu'en lecture.
+    if (!options.preFader) this.scheduleOfflinePluginAutomation(offlineCtx, tracks, rendered, totalDuration, startOffset);
 
     if (onProgress) onProgress(85);
 
@@ -1345,6 +1354,7 @@ export class AudioEngine {
     this.isPlaying = true;
     this.pendingLoopWrap = null;
     this.pausedAt = startOffset;
+    this.pluginAutoSent.clear();
     this.nextScheduleTime = this.ctx.currentTime + 0.01;
     // Le point de départ tombe pile au début de la 1re fenêtre : une note posée
     // exactement là (1er kick de la batterie, 1re 808) était sautée.
@@ -1369,8 +1379,12 @@ export class AudioEngine {
   public stopAll() {
     // On memorise la position reelle d'arret : sans ca getCurrentTime() renvoyait
     // apres un stop la position de DEPART de la lecture, pas celle de l'arret.
+    const wasPlaying = this.isPlaying;
     if (this.isPlaying) this.pausedAt = this.getCurrentTime();
     this.isPlaying = false;
+    // Fin de passe d'automation (modes Touch / Latch / Write) : à la position d'arrêt.
+    if (wasPlaying) { try { window.dispatchEvent(new CustomEvent('nova:transport-stop', { detail: { time: this.pausedAt } })); } catch { /* hors navigateur */ } }
+    this.autoOverrides.clear();
     this.pendingLoopWrap = null;
     if (this.schedulerTimer) {
       clearInterval(this.schedulerTimer);
@@ -1784,6 +1798,153 @@ export class AudioEngine {
     }
   }
 
+  // --- Automation écrite (Touch / Latch / Write / Trim) et paramètres d'effets ---------
+  // Voir services/AutomationManager : pendant l'écriture, le paramètre suit le
+  // fader (« override ») et la voie n'est plus rejouée ; au relâchement, elle
+  // reprend depuis la position de lecture avec ses nouveaux points.
+  private autoOverrides = new Map<string, number>();
+  /** Dernière valeur envoyée à un effet (un appel par changement réel). */
+  private pluginAutoSent = new Map<string, number>();
+  private sortedLaneCache = new WeakMap<AutomationPoint[], AutomationPoint[]>();
+
+  private sortedOf(points: AutomationPoint[]): AutomationPoint[] {
+    let s = this.sortedLaneCache.get(points);
+    if (!s) { s = sortedPoints(points); this.sortedLaneCache.set(points, s); }
+    return s;
+  }
+
+  public setAutomationOverride(trackId: string, param: string, value: number | null, points?: AutomationPoint[]) {
+    const key = `${trackId}|${param}`;
+    if (value === null) {
+      if (this.autoOverrides.delete(key)) this.resumeAutomation(trackId, param, points);
+      return;
+    }
+    this.autoOverrides.set(key, value);
+    if (parsePluginParam(param)) { this.applyPluginAutomation(trackId, param, value); return; }
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp || !this.ctx) return;
+    const track = this.liveTracks?.find(t => t.id === trackId);
+    if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+    if (!cible) return;
+    const now = this.ctx.currentTime;
+    try { cible.cancelScheduledValues(now); cible.setTargetAtTime(value, now, 0.01); } catch { /* valeur hors limites */ }
+  }
+
+  /** Paramètre écrit ou automatisé pendant la lecture : le réglage statique ne s'applique pas. */
+  private automationOwns(track: Track, param: string): boolean {
+    if (this.autoOverrides.has(`${track.id}|${param}`)) return true;
+    return this.isPlaying && playedLanes(track).some(l => l.parameterName === param && l.points.length > 0);
+  }
+
+  /** Valeur à appliquer à un paramètre : écrite, automatisée, sinon le réglage de la piste. */
+  private automatedValue(track: Track, param: string, stat: number): number {
+    const key = `${track.id}|${param}`;
+    if (this.autoOverrides.has(key)) return this.autoOverrides.get(key)!;
+    if (!this.isPlaying) return stat;
+    const lane = playedLanes(track).find(l => l.parameterName === param && l.points.length > 0);
+    return lane ? this.valeurAutomationA(this.sortedOf(lane.points), this.getCurrentTime()) : stat;
+  }
+
+  /** Fin d'écriture : la voie reprend depuis la position de lecture (rampe vers le point suivant comprise). */
+  private resumeAutomation(trackId: string, param: string, points?: AutomationPoint[]) {
+    if (!this.ctx) return;
+    const track = this.liveTracks?.find(t => t.id === trackId);
+    const lane = track && playedLanes(track).find(l => l.parameterName === param);
+    if (track && !lane && !points) return;
+    const pts = sortedPoints(points ?? lane?.points ?? []);
+    if (!pts.length || (track && !playedLanes(track).length)) return;
+    const time = this.getCurrentTime();
+    if (parsePluginParam(param)) { this.applyPluginAutomation(trackId, param, valueAtPoints(pts, time, 0)); return; }
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp) return;
+    if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+    if (!cible) return;
+    const now = this.ctx.currentTime;
+    const t0 = now + 0.01;
+    const v = this.valeurAutomationA(pts, time);
+    try {
+      cible.cancelScheduledValues(now);
+      cible.setValueAtTime(cible.value, now);
+      cible.linearRampToValueAtTime(v, t0);
+      if (!this.isPlaying) return;
+      // Les points entre maintenant et la fenêtre déjà planifiée ont été sautés pendant l'écriture.
+      const base = this.playbackStartTime;
+      const horizon = this.nextScheduleTime - base;
+      const i = pts.findIndex(p => p.time > time + 0.01);
+      if (i < 0) return;
+      this.programmerSegment(cible, { ...pts[Math.max(0, i - 1)], time, value: v }, pts[i], t0, Math.max(t0, base + pts[i].time));
+      for (let k = i; k < pts.length && pts[k].time < horizon; k++) {
+        const at = Math.max(t0, base + pts[k].time);
+        cible.setValueAtTime(pts[k].value, at);
+        const nx = pts[k + 1];
+        if (nx) this.programmerSegment(cible, pts[k], nx, at, Math.max(at, base + nx.time));
+      }
+    } catch { /* paramètre déjà libéré */ }
+  }
+
+  /** Paramètre d'un effet natif (les VST3 du pont ne sont pas automatisés). */
+  private applyPluginAutomation(trackId: string, param: string, value: number) {
+    const p = parsePluginParam(param);
+    if (!p || !Number.isFinite(value)) return;
+    const key = `${trackId}|${param}`;
+    if (this.pluginAutoSent.get(key) === value) return;
+    const inst = this.tracksDSP.get(trackId)?.pluginChain.get(p.pluginId)?.instance;
+    if (!inst || typeof inst.updateParams !== 'function' || inst instanceof VSTPluginNode) return;
+    this.pluginAutoSent.set(key, value);
+    try { inst.updateParams({ [p.key]: value }); } catch { /* effet en cours de reconstruction */ }
+  }
+
+  private schedulePluginAutomation(trackId: string, param: string, points: AutomationPoint[], start: number, when: number) {
+    const v = valueAtPoints(this.sortedOf(points), start, 0);
+    const key = `${trackId}|${param}`;
+    if (this.pluginAutoSent.get(key) === v || !this.ctx) return;
+    const delay = Math.max(0, (when - this.ctx.currentTime) * 1000);
+    window.setTimeout(() => {
+      if (this.isPlaying && !this.autoOverrides.has(key)) this.applyPluginAutomation(trackId, param, v);
+    }, delay);
+  }
+
+  /**
+   * Export : l'automation des effets est appliquée pendant le rendu hors ligne,
+   * par pauses du contexte (toutes les 20 ms, seulement quand la valeur change).
+   */
+  private scheduleOfflinePluginAutomation(
+    offlineCtx: OfflineAudioContext, tracks: Track[],
+    rendered: Map<string, { pluginNodes?: Map<string, any> }>, totalDuration: number, startOffset: number
+  ) {
+    const STEP = 0.02;
+    const quantum = 128 / offlineCtx.sampleRate;
+    const events = new Map<number, (() => void)[]>();
+    for (const track of tracks) {
+      if (track.isMuted) continue;
+      const nodes = rendered.get(track.id)?.pluginNodes;
+      if (!nodes) continue;
+      for (const lane of playedLanes(track)) {
+        const p = parsePluginParam(lane.parameterName);
+        const node = p && nodes.get(p.pluginId);
+        if (!p || !lane.points.length || !node || typeof node.updateParams !== 'function' || node instanceof VSTPluginNode) continue;
+        const pts = this.sortedOf(lane.points);
+        let last = valueAtPoints(pts, startOffset, 0);
+        try { node.updateParams({ [p.key]: last }); } catch { /* */ }
+        for (let t = STEP; t < totalDuration; t += STEP) {
+          const v = valueAtPoints(pts, startOffset + t, 0);
+          if (Math.abs(v - last) < 1e-6) continue;
+          last = v;
+          const q = Math.round(t / quantum) * quantum;
+          if (q <= 0 || q >= totalDuration) continue;
+          const list = events.get(q) || [];
+          list.push(() => { try { node.updateParams({ [p.key]: v }); } catch { /* */ } });
+          events.set(q, list);
+        }
+      }
+    }
+    for (const [q, list] of events) {
+      offlineCtx.suspend(q).then(() => { list.forEach(fn => fn()); return offlineCtx.resume(); }).catch(() => { /* */ });
+    }
+  }
+
   private scheduleAutomation(tracks: Track[], start: number, end: number, when: number) {
     tracks.forEach(track => {
         const dsp = this.tracksDSP.get(track.id);
@@ -1792,10 +1953,12 @@ export class AudioEngine {
         // garde-fou, une piste mutee (ou coupee par un solo) redevenait audible
         // des qu'elle portait de l'automation de volume.
         if (track.isMuted || this.soloSilencedIds.has(track.id)) return;
-        
-        track.automationLanes.forEach(lane => {
-            if (lane.points.length === 0) return;
-            
+
+        // Mode Off : rien n'est rejoué ; un paramètre en cours d'écriture suit le fader.
+        playedLanes(track).forEach(lane => {
+            if (lane.points.length === 0 || this.autoOverrides.has(`${track.id}|${lane.parameterName}`)) return;
+            if (parsePluginParam(lane.parameterName)) { this.schedulePluginAutomation(track.id, lane.parameterName, lane.points, start, when); return; }
+
             lane.points.forEach((point, index) => {
                 if (point.time >= start && point.time < end) {
                     const scheduleTime = when + (point.time - start);
@@ -2141,9 +2304,11 @@ export class AudioEngine {
     const signature = this.graphSignatureOf(track, coveredOut ? 'covered-out' : '');
     if (dsp.graphSignature === signature) {
       const t = this.ctx.currentTime;
-      const target = (track.isMuted || this.soloSilencedIds.has(track.id)) ? 0 : track.volume;
+      // Pendant la lecture, un paramètre automatisé garde la valeur de sa courbe.
+      const target = (track.isMuted || this.soloSilencedIds.has(track.id)) ? 0 : this.automatedValue(track, 'volume', track.volume);
       dsp.gain.gain.setTargetAtTime(target, t, 0.015);
-      dsp.panner.pan.setTargetAtTime(track.pan, t, 0.015);
+      dsp.panner.pan.setTargetAtTime(this.automatedValue(track, 'pan', track.pan), t, 0.015);
+      this.pluginAutoSent.forEach((_, k) => { if (k.startsWith(`${track.id}|`)) this.pluginAutoSent.delete(k); });
 
       // Seuls les effets cables ont une entree (sur une piste gelee : ceux
       // apres le rendu, qui restent reglables).
@@ -2155,7 +2320,8 @@ export class AudioEngine {
       });
       (track.sends || []).forEach(send => {
         const sendGain = dsp.sends.get(send.id);
-        if (sendGain) sendGain.gain.setTargetAtTime(sendLevelOf(send), t, 0.015);
+        const forcedOff = !send.isEnabled || isFeedCovered(track, send.id, allTracks);
+        if (sendGain) sendGain.gain.setTargetAtTime(forcedOff ? 0 : this.automatedValue(track, `send::${send.id}`, send.level), t, 0.015);
       });
       return;
     }
@@ -2369,10 +2535,11 @@ export class AudioEngine {
     if (!dsp || !this.ctx) return;
     this.resetPreVolume(track, dsp);
     if (track.isMuted || this.soloSilencedIds.has(track.id)) return;
-    
-    track.automationLanes.forEach(lane => {
-        if (lane.points.length === 0) return;
-        
+
+    playedLanes(track).forEach(lane => {
+        if (lane.points.length === 0 || this.autoOverrides.has(`${track.id}|${lane.parameterName}`)) return;
+        if (parsePluginParam(lane.parameterName)) { this.applyPluginAutomation(track.id, lane.parameterName, valueAtPoints(sortedPoints(lane.points), time, 0)); return; }
+
         let prevPoint = lane.points[0];
         let nextPoint = lane.points[lane.points.length - 1];
         
@@ -2707,6 +2874,9 @@ export class AudioEngine {
 
   public setTrackVolume(trackId: string, volume: number, isMuted: boolean) {
     const dsp = this.tracksDSP.get(trackId);
+    const live = this.liveTracks?.find(t => t.id === trackId);
+    // Read : la courbe garde la main pendant la lecture (le fader ne la combat pas).
+    if (!isMuted && live && this.automationOwns(live, 'volume')) return;
     if (dsp && this.ctx) {
         const targetGain = (isMuted || this.soloSilencedIds.has(trackId)) ? 0 : volume;
         dsp.gain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.015);
@@ -2714,6 +2884,8 @@ export class AudioEngine {
   }
 
   public setTrackPan(trackId: string, pan: number) {
+    const live = this.liveTracks?.find(t => t.id === trackId);
+    if (live && this.automationOwns(live, 'pan')) return;
     const dsp = this.tracksDSP.get(trackId);
     if (dsp && this.ctx) {
         dsp.panner.pan.setTargetAtTime(pan, this.ctx.currentTime, 0.015);

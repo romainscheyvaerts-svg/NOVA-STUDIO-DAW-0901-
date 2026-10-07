@@ -6,6 +6,10 @@ import ContextMenu from './ContextMenu';
 import TimelineGridMenu from './TimelineGridMenu'; 
 import LiveRecordingClip from './LiveRecordingClip'; 
 import AutomationLaneComponent from './AutomationLane';
+import { drawExpandedLanes } from '../utils/automationDraw';
+import { snapToGrid, gridSubdivisionsPerBar, isBeatLine, gridLabel } from '../utils/grid';
+import { useArrangementCommands } from '../hooks/useArrangementCommands';
+import { openNovaWindow } from '../utils/novaWindows';
 import WaveformRenderer from './WaveformRenderer';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore } from '../utils/playheadStore';
@@ -121,16 +125,8 @@ const clipGainHandleY = (clipH: number, gain: number): number => 18 + Math.max(4
 type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | 'GAIN' | 'XFADE' | 'RANGE' | null;
 type LoopDragMode = 'START' | 'END' | 'BODY' | null;
 
-const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: boolean): number => {
-    if (!enabled) return time;
-    const beatDuration = 60 / bpm;
-    let subDiv = beatDuration; // 1/4 default
-    if (gridSize === '1/8') subDiv = beatDuration / 2;
-    else if (gridSize === '1/16') subDiv = beatDuration / 4;
-    else if (gridSize === '1/1') subDiv = beatDuration * 4; 
-    
-    return Math.round(time / subDiv) * subDiv;
-};
+// Grille : 1/1 à 1/32 et triolets (utils/grid).
+const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: boolean): number => snapToGrid(time, bpm, gridSize, enabled);
 
 const ArrangementView: React.FC<ArrangementViewProps> = ({ 
   tracks, selectedTrackId, onSelectTrack, onUpdateTrack, onReorderTracks, 
@@ -464,6 +460,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   }, [tracks, simple]);
   const projectDuration = useMemo(() => Math.max(...tracks.flatMap(t => t.clips.map(c => c.start + c.duration)), 300), [tracks]);
   const totalContentWidth = useMemo(() => projectDuration * zoomH, [projectDuration, zoomH]);
+  // Raccourcis Pro Tools (utils/keymap → utils/editCommands) : versions de base sur la sélection de clips.
+  useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomV, setZoomV, bpm,
+    viewportWidth: viewportSize.width - headerWidth, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
   const totalArrangementHeight = useMemo(() => 40 + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80, 0), [visibleTracks, zoomV]);
 
   const handleHeaderResizeStart = (e: React.MouseEvent) => {
@@ -645,7 +644,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
   const handleTrackContextMenu = (e: React.MouseEvent, trackId: string) => {
     e.preventDefault();
-    const menuItems: (ContextMenuItem | 'separator')[] = [ { label: 'Dupliquer la piste', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' }, ];
+    const menuItems: (ContextMenuItem | 'separator')[] = [ { label: 'Dupliquer la piste', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' },
+      { label: 'Couleur de la piste…', onClick: () => openNovaWindow('track-color', { trackId }), icon: 'fa-palette' }, ];
     if (trackId !== 'track-rec-main') menuItems.push({ label: 'Supprimer la piste', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
     const target = tracks.find(t => t.id === trackId);
     if (!simple || target?.isFrozen) menuItems.push({
@@ -1394,10 +1394,7 @@ const drawTimeline = useCallback(() => {
     const startBar = Math.floor(startTime * (bpm / 60) / 4);
     const endBar = Math.ceil(endTime * (bpm / 60) / 4);
     
-    let subDivisionsPerBar = 4;
-    if (gridSize === '1/1') subDivisionsPerBar = 1;
-    else if (gridSize === '1/8') subDivisionsPerBar = 8;
-    else if (gridSize === '1/16') subDivisionsPerBar = 16;
+    const subDivisionsPerBar = gridSubdivisionsPerBar(gridSize);
     const subStepPx = (4 * beatPx) / subDivisionsPerBar;
 
     ctx.lineWidth = 1;
@@ -1410,7 +1407,7 @@ const drawTimeline = useCallback(() => {
         if (subStepPx > 5 && subDivisionsPerBar > 1) {
             for (let j = 1; j < subDivisionsPerBar; j++) {
                 const subX = x + j * subStepPx;
-                if (j % (subDivisionsPerBar / 4) === 0) {
+                if (isBeatLine(j, subDivisionsPerBar)) {
                     ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
                 } else {
                     ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
@@ -1511,6 +1508,8 @@ const drawTimeline = useCallback(() => {
                 ctx.restore();
             }
         }
+        // Voies d'automation ouvertes : la courbe écrite ou dessinée (utils/automationDraw).
+        if (totalAutomationHeight > 0) drawExpandedLanes(ctx, track, viewportY + trackH, w, h, zoomH, scrollX);
 
         // Dessiner les séparateurs de pistes (position relative au viewport)
         if (viewportY + trackH + totalAutomationHeight > 40 && viewportY < h) {
@@ -1742,8 +1741,8 @@ useEffect(() => {
               title="Sélecteur (comme dans Pro Tools) (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
-          {!simple && <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 h-9 [@media(pointer:coarse)]:h-10 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
-            <i className="fas fa-magnet mr-2"></i> {snapEnabled ? 'Grille ON' : 'Grille OFF'}
+          {!simple && <button onClick={() => setSnapEnabled(!snapEnabled)} title="Grille on / off (Pro Tools : Grid / Slip). Clic droit sur la timeline : choisir la valeur (jusqu'à 1/32, triolets)." className={`px-4 h-9 [@media(pointer:coarse)]:h-10 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+            <i className="fas fa-magnet mr-2"></i> {snapEnabled ? `Grille ${gridLabel(gridSize)}` : 'Grille OFF'}
           </button>}
           {!simple && (
             <div className="hidden xl:flex items-center gap-1" data-nova-target="nudge">
@@ -1791,6 +1790,9 @@ useEffect(() => {
             // rien ne permettait de le rouvrir depuis l'arrangement.
             const sel = selectedClip;
             if (sel && sel.clip.type === TrackType.MIDI) onEditMidi?.(sel.trackId, sel.clip.id);
+            // Double-clic sur un clip audio : le renommer (Pro Tools : double-clic avec le Grabber).
+            // (pas sur la poignée de gain, dont le double-clic remet 0 dB).
+            else if (sel && !dragActionRef.current && !gainTip) openNovaWindow('clip-props', { targets: [{ trackId: sel.trackId, clipId: sel.clip.id }], focus: 'name' });
           }} 
           onMouseMove={handleMouseMove} 
           onMouseUp={handleMouseUp} 
@@ -1939,6 +1941,10 @@ useEffect(() => {
                 { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE'); setClipContextMenu(null); }},
                 { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: playheadStore.get() }); setClipContextMenu(null); }},
                 { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE'); setClipContextMenu(null); }},
+                // Pro Tools : Rename (Ctrl+Maj+R), couleur de clip, Strip Silence (Ctrl+U).
+                { label: 'Renommer…', icon: 'fa-i-cursor', shortcut: 'Ctrl+Maj+R', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'name' }); setClipContextMenu(null); }},
+                { label: 'Couleur du clip…', icon: 'fa-palette', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'color' }); setClipContextMenu(null); }},
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type === TrackType.MIDI && onEditMidi ? [
                   { label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); }}
                 ] : []),
