@@ -171,3 +171,19 @@ describe('groove et swing', () => {
     expect(whereAt(dm, BPM, 5)).toEqual({ bar: 2, patternId: b, step: 8 });
   });
 });
+
+import { padIndexForCode, padKeyLabel, isTypingTarget } from '../utils/padKeys';
+describe('pads au clavier', () => {
+  it('touches physiques : rangée du milieu = pads 1 à 10, libellé AZERTY par défaut', () => {
+    expect(padIndexForCode('KeyA', 8)).toBe(0);
+    expect(padIndexForCode('KeyK', 8)).toBe(7);
+    expect(padIndexForCode('KeyL', 8)).toBe(-1);
+    expect(padIndexForCode('KeyQ', 30)).toBe(10);
+    expect(padIndexForCode('Space', 30)).toBe(-1);
+    expect(padKeyLabel('KeyA')).toBe('Q');
+    expect(padKeyLabel('KeyA', new Map([['KeyA', 'a']]))).toBe('A');
+    expect(padKeyLabel('KeyD')).toBe('D');
+    expect(isTypingTarget({ tagName: 'INPUT', type: 'range' } as any)).toBe(false);
+    expect(isTypingTarget({ tagName: 'INPUT', type: 'text' } as any)).toBe(true);
+  });
+});

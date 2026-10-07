@@ -110,7 +110,10 @@ import {
 } from './services/SessionCloud';
 import DrumMachinePanel from './components/DrumMachinePanel';
 import ShortcutsHelp from './components/ShortcutsHelp';
-import { DrumMachine, makeDrumMachineLib, drumPadsFor, drumClipFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
+import { DrumMachine, makeDrumMachineLib, drumPadsFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
+import { commitActive, drumRhythmSig, drumSongClips, drumSongEnd } from './utils/drumPatterns';
+import { padLoadKey } from './utils/drumSamples';
+import { loadPadBuffer } from './utils/padBuffers';
 import { loadDrumSound } from './utils/drumSounds';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import VocalToolsPanel from './components/VocalToolsPanel';
@@ -3238,7 +3241,8 @@ function Studio() {
   };
 
   /** Applique un motif : pads + clip régénérés (une étape d'historique). */
-  const applyDrumMachine = useCallback((dm: DrumMachine) => {
+  const applyDrumMachine = useCallback((dmIn: DrumMachine) => {
+    let dm = dmIn;
     setState(produce((draft: DAWState) => {
       let t = draft.tracks.find(x => x.id === DRUM_TRACK_ID);
       if (!t) {
@@ -3252,13 +3256,14 @@ function Studio() {
         draft.tracks.splice(beatIdx + 1, 0, newTrack);
         t = draft.tracks.find(x => x.id === DRUM_TRACK_ID)!;
       }
-      // Le clip n'est régénéré que si le rythme change (pas pour un réglage de son ou de mix).
-      const sig = (m: DrumMachine) => JSON.stringify([m.bars, m.swing, m.rows.map(r => [r.steps, r.ratchet])]);
-      const end = drumLoopEnd(draft as DAWState);
+      // Les clips (un par motif placé, V16) ne sont régénérés que si le rythme
+      // change (pas pour un réglage de son ou de mix).
+      dm = commitActive(dm);
+      const end = drumSongEnd(dm, draft.bpm, drumLoopEnd(draft as DAWState));
       const prev = t.drumMachine as DrumMachine | undefined;
-      const cur = t.clips[0];
-      if (!prev || !cur || sig(prev) !== sig(dm) || Math.abs(cur.start + cur.duration - end) > 0.01 || prev.bpmUsed !== draft.bpm) {
-        t.clips = [drumClipFor(dm, draft.bpm, 0, end, `clip-drums-${Date.now()}`) as any];
+      const curEnd = t.clips.length ? Math.max(...t.clips.map(c => c.start + c.duration)) : 0;
+      if (!prev || !t.clips.length || drumRhythmSig(prev) !== drumRhythmSig(dm) || Math.abs(curEnd - end) > 0.01 || prev.bpmUsed !== draft.bpm) {
+        t.clips = drumSongClips(dm, draft.bpm, end, `clip-drums-${Date.now().toString(36)}`) as any;
       }
       t.drumMachine = { ...dm, bpmUsed: draft.bpm } as any;
       t.drumPads = drumPadsFor(dm) as any;
@@ -3321,10 +3326,10 @@ function Studio() {
     const root = typeof state.projectKey === 'number' ? state.projectKey : 0;
     const timer = setTimeout(() => {
       t.drumMachine!.rows.forEach((r, i) => {
-        const key = `${r.sound}|${root}`;
+        const key = padLoadKey(r, root);
         const padKey = `${t.id}:${i + 1}`;
         if (loadedPads.current.get(padKey) === key && audioEngine.getDrumRackNode(t.id)?.getBuffers().has(i + 1)) return;
-        loadDrumSound(r.sound, ctx, root).then(buf => {
+        loadPadBuffer(r, ctx, root).then(buf => {
           audioEngine.loadDrumRackSample(t.id, i + 1, buf);
           loadedPads.current.set(padKey, key);
         }).catch(() => { /* son indisponible */ });
@@ -5942,8 +5947,9 @@ function Studio() {
             if (row && audioEngine.ctx) {
               try {
                 const pk = stateRef.current.projectKey;
-                const buf = await loadDrumSound(row.sound, audioEngine.ctx, typeof pk === "number" ? pk : 0);
+                const buf = await loadPadBuffer(row, audioEngine.ctx, typeof pk === "number" ? pk : 0);
                 audioEngine.loadDrumRackSample(DRUM_TRACK_ID, ri + 1, buf);
+                loadedPads.current.set(`${DRUM_TRACK_ID}:${ri + 1}`, padLoadKey(row, typeof pk === "number" ? pk : 0));
               } catch { /* son indisponible */ }
             }
             audioEngine.triggerTrackAttack(DRUM_TRACK_ID, 60 + ri, 1);
@@ -5955,6 +5961,11 @@ function Studio() {
         clipStart={0}
         onOpen808={handleOpen808}
         has808={state.tracks.some(t => t.id === BASS808_TRACK_ID)}
+        loopEnd={drumsOpen ? drumLoopEnd(state) : 0}
+        markers={state.markers}
+        sessionClips={drumsOpen ? state.tracks.filter(t => t.type === TrackType.AUDIO).flatMap(t => t.clips.filter(c => c.bufferId).map(c => ({ ...c, trackName: t.name }))) : []}
+        ensureEngine={ensureAudioEngine}
+        notify={setAiNotification}
       />
       <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <TakeHomeModal

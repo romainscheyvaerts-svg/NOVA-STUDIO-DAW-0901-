@@ -7,6 +7,7 @@ import { shouldPersistFrozen } from './VstFreeze';
 import { novaBridge } from './NovaBridge';
 import { isTrackFrozen } from '../utils/freeze';
 import { getEditAuthor, SESSION_SCHEMA_VERSION, stampJournal } from '../utils/preFxEdits';
+import { padSampleFiles, restorePadSamples } from '../utils/drumSamples';
 
 export class ProjectIO {
   
@@ -73,6 +74,12 @@ export class ProjectIO {
                     sClip.isUnlicensed = true;
                 }
             }
+        }
+
+        // Samples perso des pads de batterie (V16) : un WAV par sample.
+        for (const f of padSampleFiles(track, k => audioBufferRegistry.get(k))) {
+            if (!written.has(f.filename)) { written.add(f.filename); if (audioFolder) audioFolder.file(f.filename, wavOf(f.buffer)); }
+            sTrack.drumMachine.samples[f.id].audioRef = `audio/${f.filename}`;
         }
 
         // RENDU GELÉ (effets VST3 du PC rendus dans l'audio) : il permet de
@@ -204,6 +211,11 @@ export class ProjectIO {
                 delete clip.audioRef;
             }
         }
+
+        // Samples perso des pads de batterie (V16).
+        await restorePadSamples(track,
+            async ref => { const f = zip.file(ref); return f ? await audioEngine.ctx!.decodeAudioData(await f.async("arraybuffer")) : null; },
+            (b, k) => audioBufferRegistry.register(b, k));
 
         // Rendu gelé : décodé à la fréquence de l'appareil (rééchantillonné si
         // le téléphone tourne en 48 kHz et le PC en 44,1 kHz).

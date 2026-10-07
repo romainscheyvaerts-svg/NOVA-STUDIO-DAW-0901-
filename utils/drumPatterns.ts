@@ -199,6 +199,22 @@ export function songFromSections(
   return { ...d, song };
 }
 
+/** Fin de la batterie : la boucle du morceau, ou plus loin si des motifs y sont placés. */
+export function drumSongEnd(dm: DrumMachine, bpm: number, loopEnd: number): number {
+  return Math.max(loopEnd, (dm.song?.length || 0) * (240 / bpm));
+}
+
+/** Régions du morceau (repères Intro, Partie, Refrain…) → sections pour `songFromSections`. */
+export function sectionsFromMarkers(markers: { type?: string; name: string; time: number; endTime?: number; color?: string }[]) {
+  return markers
+    .filter(m => m.type === 'REGION' && typeof m.endTime === 'number' && m.endTime > m.time)
+    .map(m => ({
+      start: m.time, end: m.endTime!, name: m.name,
+      full: (m.color || '').toLowerCase() === '#f472b6' || /refrain|chorus|hook|drop/i.test(m.name),
+      kind: /intro/i.test(m.name) ? 'intro' : /outro/i.test(m.name) ? 'outro' : 'part',
+    }));
+}
+
 export interface BarPlan {
   /** Motif placé sur la mesure ('' = silence). */
   patternId: string;
