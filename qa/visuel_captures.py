@@ -121,14 +121,14 @@ def run(b, vp, theme, R):
     def menu():
         if open_menu(pg):
             S("menu")
-            pg.mouse.wheel(0, 900); pg.wait_for_timeout(300)
+            pg.mouse.move(180, 500); pg.mouse.wheel(0, 1400); pg.wait_for_timeout(400)
             S("menu_bas")
             close_menu(pg)
     tryit("menu", menu)
 
     if vp == "tel":
         nav = pg.locator("nav, [role=navigation], div.fixed.bottom-0").filter(has_text="Morceau").last
-        for tab in ("Sons", "Paroles", "Nova", "Morceau"):
+        for tab in ("Sons", "Nova", "Mixer", "Pistes", "Morceau"):
             def t(tab=tab):
                 nav.get_by_text(tab, exact=True).first.click(); pg.wait_for_timeout(900)
                 S(f"onglet_{tab}")
@@ -158,7 +158,20 @@ def run(b, vp, theme, R):
             S(label)
         return f
 
-    tryit("effet", lambda: (pg.locator(".fx-slot button[aria-label^='Ouvrir']").first.click(timeout=4000), pg.wait_for_timeout(1000), S("effet")))
+    def effet():
+        # Un style de Mix auto pose des effets sur les voix, puis on ouvre le premier.
+        pg.locator("button[title='Choisir un style de mix pour ta voix']").locator("visible=true").first.click(); pg.wait_for_timeout(800)
+        pg.get_by_role("dialog", name=re.compile("Mix auto")).get_by_role("button", name="Trap autotune").first.click()
+        pg.wait_for_timeout(1500); esc(pg, 1); pg.mouse.click(5, 5); pg.wait_for_timeout(400)
+        if vp == "tel":
+            pg.locator("nav, [role=navigation], div.fixed.bottom-0").filter(has_text="Morceau").last.get_by_text("FX", exact=True).first.click(); pg.wait_for_timeout(800)
+            S("onglet_FX")
+            pg.locator("button[aria-label^='Ouvrir ']").locator("visible=true").first.click(timeout=4000)
+        else:
+            pg.locator(".fx-slot button[aria-label^='Ouvrir']").locator("visible=true").first.click(timeout=4000)
+        pg.wait_for_timeout(1200)
+        S("effet")
+    tryit("effet", effet)
     tryit("export", via_menu(r"^\W*Exporter( le mix)?\s*$", "export"))
     tryit("master", via_menu(r"^\W*Master( Nova)?\s*$", "master_nova", 1400))
     tryit("collab", via_menu(r"Collabor", "collaboration"))

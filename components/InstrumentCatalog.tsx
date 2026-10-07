@@ -411,7 +411,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                   <button
                     type="button"
                     onClick={() => onLoadBeat(inst)}
-                    className={`nova-hit mr-2 h-9 px-3 rounded-lg border text-[11px] font-black uppercase active:scale-95 transition-all ${playingId === inst.id ? 'bg-cyan-500 border-cyan-400 text-black hover:bg-cyan-400' : 'bg-cyan-400/[0.08] border-cyan-400/40 text-cyan-300 hover:bg-cyan-500 hover:border-cyan-400 hover:text-black'}`}
+                    className={`nova-hit mr-2 h-9 px-3 rounded-lg border text-[11px] font-black uppercase active:scale-95 transition-all ${playingId === inst.id ? 'bg-cyan-500 border-cyan-400 text-black hover:bg-cyan-400' : 'bg-cyan-400/10 border-transparent text-cyan-300 hover:bg-cyan-500 hover:text-black'}`}
                     title="Charger ce beat pour poser ta voix dessus"
                   >
                     Essayer
@@ -432,10 +432,10 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
             ))}
             
             {displayedInstrumentals.length === 0 && (
-                <div className="text-center py-10 text-[9px] text-slate-600">
-                    <i className="fas fa-music text-3xl text-slate-700 mb-3"></i>
+                <div className="text-center py-10 text-[12px] text-slate-400">
+                    <i className="fas fa-music text-3xl text-slate-600 mb-3"></i>
                     <p>{shelf === 'MELODIES' ? 'Aucune mélodie disponible.' : 'Aucun beat disponible.'}</p>
-                    <p className="text-[8px] text-slate-700 mt-1">Revenez bientôt !</p>
+                    <p className="text-[11px] text-slate-500 mt-1">Reviens bientôt !</p>
                 </div>
             )}
           </div>
