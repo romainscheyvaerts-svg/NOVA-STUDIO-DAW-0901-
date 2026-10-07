@@ -37,9 +37,11 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
   const [error, setError] = useState<string | null>(null);
   const [ab, setAb] = useState<'avec' | 'sans'>('avec');
   const [equalLevel, setEqualLevel] = useState(true);
+  // Le niveau égal ne s'applique qu'une fois la comparaison commencée (premier passage sur B).
+  const [abUsed, setAbUsed] = useState(false);
   const [, force] = useState(0);
   const [refBusy, setRefBusy] = useState<string | null>(null);
-  const [exportCheck, setExportCheck] = useState<{ lufs: number; truePeak: number; busy: boolean } | null>(null);
+  const [exportCheck, setExportCheck] = useState<{ lufs: number; truePeak: number; busy: boolean; duration?: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const target = PLATFORM_TARGETS.find(t => t.id === targetId) || PLATFORM_TARGETS[0];
 
@@ -61,7 +63,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
       measureCurrentMix(tracks).then(m => {
         if (!alive) return;
         const ch = [m.buffer.getChannelData(0), m.buffer.getChannelData(m.buffer.numberOfChannels > 1 ? 1 : 0)];
-        setExportCheck({ lufs: m.lufs, truePeak: truePeakOf(ch, 4, 48), busy: false });
+        setExportCheck({ lufs: m.lufs, truePeak: truePeakOf(ch, 4, 48), busy: false, duration: m.buffer.duration });
       }).catch(() => alive && setExportCheck(null));
     }, 400);
     return () => { alive = false; window.clearTimeout(id); };
@@ -69,7 +71,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
   }, [mnSig, applied, bypassed]);
 
   // Niveau d'écoute : en « avec » à niveau égal, le master est ramené au niveau d'avant.
-  const levelDb = applied && ab === 'avec' && equalLevel && result && Number.isFinite(result.before.lufs) && Number.isFinite(result.after.lufs)
+  const levelDb = applied && abUsed && ab === 'avec' && equalLevel && result && Number.isFinite(result.before.lufs) && Number.isFinite(result.after.lufs)
     ? result.before.lufs - result.after.lufs : 0;
   useEffect(() => { referencePlayer.setMixLevel(Math.pow(10, levelDb / 20)); }, [levelDb]);
 
@@ -95,6 +97,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
   const switchAb = (v: 'avec' | 'sans') => {
     if (referencePlayer.active) referencePlayer.setActive(false);
     setAb(v);
+    if (v === 'sans') setAbUsed(true);
     onSetBypass(v === 'sans');
   };
 
@@ -131,7 +134,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-5 py-3 bg-[#0f1013]/95 backdrop-blur border-b border-white/10">
           <div className="min-w-0">
             <h2 className="text-base font-black tracking-tight"><i className="fas fa-crown text-amber-400 mr-2"></i>Master Nova</h2>
-            <p className="text-[11px] text-slate-400 truncate">Ton morceau prêt pour les plateformes en un clic, comme le Mastering Assistant de Logic Pro</p>
+            <p className="text-[11px] text-slate-400 leading-snug">Ton morceau prêt pour les plateformes en un clic, comme le Mastering Assistant de Logic Pro</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button type="button" onClick={onTogglePlay} aria-label={isPlaying ? 'Pause' : 'Lecture'} title="Écouter / pause (barre d'espace)"
@@ -230,12 +233,12 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
                 </div>
                 <label className="flex items-center gap-2 text-[12px] text-slate-300" title="Le master est baissé au niveau du mix d'origine pendant la comparaison : on juge le son, pas le volume (le plus fort paraît toujours meilleur).">
                   <input type="checkbox" checked={equalLevel} onChange={e => setEqualLevel(e.target.checked)} className="accent-amber-400" disabled={!result} />
-                  À niveau égal{result && equalLevel ? ` (${fmtDb(levelDb)} dB pendant l'écoute)` : ''}
+                  À niveau égal{result && equalLevel && result ? ` (A baissé de ${fmtDb(Math.abs(result.before.lufs - result.after.lufs))} dB pendant la comparaison)` : ''}
                 </label>
               </div>
               {!result && <p className="mt-2 text-[11px] text-slate-500">Relance l’analyse pour comparer à niveau égal.</p>}
               {exportCheck && (
-                <p className="mt-2 text-[12px]" data-nova-master-export="" data-lufs={Number.isFinite(exportCheck.lufs) ? exportCheck.lufs.toFixed(2) : ''} data-tp={Number.isFinite(exportCheck.truePeak) ? exportCheck.truePeak.toFixed(2) : ''}
+                <p className="mt-2 text-[12px]" data-nova-master-export="" data-lufs={Number.isFinite(exportCheck.lufs) ? exportCheck.lufs.toFixed(2) : ''} data-tp={Number.isFinite(exportCheck.truePeak) ? exportCheck.truePeak.toFixed(2) : ''} data-duree={exportCheck.duration ? exportCheck.duration.toFixed(2) : ''}
                   title="Le projet est rendu exactement comme à l’export (même moteur), master Nova compris.">
                   {exportCheck.busy ? <span className="text-slate-400"><i className="fas fa-circle-notch fa-spin mr-1.5"></i>Vérification du fichier exporté…</span>
                     : <span className={Math.abs(exportCheck.lufs - target.lufs) <= 0.5 && exportCheck.truePeak <= target.ceiling ? 'text-emerald-300' : 'text-amber-300'}>
@@ -263,7 +266,7 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
             </div>
             {refBusy && <p className="mt-2 text-[12px] text-slate-300"><i className="fas fa-circle-notch fa-spin mr-1.5"></i>{refBusy}</p>}
             {ref && (
-              <p className="mt-2 text-[12px] text-slate-300" data-nova-ref-info="">
+              <p className="mt-2 text-[12px] text-slate-300" data-nova-ref-info="" data-mix-lufs={referencePlayer.mixLufs !== null ? referencePlayer.mixLufs.toFixed(2) : ''}>
                 <b className="text-white">{ref.name}</b> · {fmtDb(ref.lufs)} LUFS · crête {fmtDb(ref.truePeak)} dBTP
                 {referencePlayer.mixLufs !== null && <> · écoutée à <b className="text-white">{fmtDb(referencePlayer.match.gainDb)} dB</b> pour être au niveau de ton mix ({fmtDb(referencePlayer.mixLufs)} LUFS){referencePlayer.match.limited ? ' — un peu moins fort pour ne pas saturer' : ''}</>}
               </p>

@@ -46,9 +46,11 @@ export const BANDS: SpectralBand[] = [
 
 /**
  * Courbe cible (dB par octave, relatifs aux médiums) d'un master rap / trap /
- * R&B actuel : sub et basses en avant, aigus en pente douce.
+ * R&B actuel : un bruit rose penché d'environ −3 dB par octave (sub et 808 en
+ * avant, aigus en pente douce), comme les courbes « hip-hop » des outils
+ * d'équilibre tonal.
  */
-export const TARGET_CURVE: Record<string, number> = { sub: 3, bass: 4, lowmid: 1, mid: 0, presence: -3.5, air: -8 };
+export const TARGET_CURVE: Record<string, number> = { sub: 12, bass: 11, lowmid: 5, mid: 0, presence: -5, air: -9 };
 
 /** FFT réelle (radix 2, en place) ; renvoie les puissances |X|² des bins 0..N/2. */
 function powerSpectrum(frame: Float64Array): Float64Array {
