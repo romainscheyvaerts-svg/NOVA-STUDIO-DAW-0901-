@@ -31,6 +31,7 @@ import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { computePdc, PdcNode, PDC_MAX_SECONDS } from '../utils/pdc';
 import { applyGainEvents, clipGainEvents } from '../utils/fades';
+import { auditionClips } from '../utils/playlists';
 
 interface TrackDSP {
   input: GainNode;          
@@ -1434,7 +1435,7 @@ export class AudioEngine {
 
   private computeClipSigs(tracks: Track[]): Map<string, string> {
     const m = new Map<string, string>();
-    tracks.forEach(t => this.getPlayableClips(t).forEach(c => {
+    tracks.forEach(t => this.livePlayableClips(t).forEach(c => {
       m.set(c.id, `${t.id}|${c.start}|${c.offset}|${c.duration}|${c.isMuted ? 1 : 0}|${c.bufferId || ''}|${c.gain ?? 1}|${c.fadeIn}|${c.fadeOut}|${c.fadeInCurve || ''}|${c.fadeOutCurve || ''}|${c.isReversed ? 1 : 0}`);
     }));
     return m;
@@ -1556,6 +1557,31 @@ export class AudioEngine {
     tracks.forEach(track => this.applyAutomation(track, this.loopStart));
   }
 
+  /**
+   * Écoute d'une prise en solo (couloirs de prises, comme le solo d'une
+   * playlist de Pro Tools) : en lecture seulement, jamais à l'export, rien
+   * n'est écrit dans le projet.
+   */
+  private takeAudition: { trackId: string; n: number } | null = null;
+  private auditionCache: { src: Clip[]; n: number; out: Clip[] } | null = null;
+  public setTakeAudition(a: { trackId: string; n: number } | null) {
+    this.takeAudition = a;
+    this.auditionCache = null;
+    if (this.liveTracks) this.setLiveTracks(this.liveTracks);
+  }
+  public getTakeAudition() { return this.takeAudition; }
+  private livePlayableClips(track: Track, all?: Track[]): Clip[] {
+    const a = this.takeAudition;
+    if (a && a.trackId === track.id && !isTrackFrozen(this.eff(track))) {
+      const c = this.auditionCache;
+      if (c && c.src === track.clips && c.n === a.n) return c.out;
+      const out = auditionClips(track.clips || [], a.n);
+      this.auditionCache = { src: track.clips, n: a.n, out };
+      return out;
+    }
+    return this.getPlayableClips(track, all);
+  }
+
   /** Clips reellement joues : le rendu gele remplace les clips d'origine. */
   private getPlayableClips(track: Track, all?: Track[]): Clip[] {
     track = this.eff(track);
@@ -1574,7 +1600,7 @@ export class AudioEngine {
       const isFrozenRender = isTrackFrozen(track);
       if (!isFrozenRender && track.type !== TrackType.AUDIO && track.type !== TrackType.SAMPLER && track.type !== TrackType.BUS && track.type !== TrackType.SEND) return;
 
-      this.getPlayableClips(track, tracks).forEach(clip => {
+      this.livePlayableClips(track, tracks).forEach(clip => {
         const sourceKey = `${clip.id}`; 
         if (this.activeSources.has(sourceKey)) return;
         

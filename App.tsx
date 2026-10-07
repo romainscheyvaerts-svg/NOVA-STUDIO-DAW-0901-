@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
-import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup, CollabRole } from './types';
+import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta } from './types';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
 import MobileTransport from './components/MobileTransport';
@@ -73,7 +73,7 @@ import { analyseMix, takeStats, levelsForAI } from './utils/mixAnalysis';
 import { novaSpotlight } from './utils/novaSpotlight';
 import { openBuyBeat, openProMix, openStudioSession, openBattle, getCatalogBeat } from './utils/studioLinks';
 import { parseLocalCommand } from './utils/novaCommands';
-import { listTakes, selectTakeActions, takeNumberOf, compTakeInZone, activeTakeInZone, CompZone } from './utils/takes';
+import { listTakes, selectTakeActions, takeNumberOf, compTakeInZone, activeTakeInZone, CompZone, fmtTime } from './utils/takes';
 import { playheadStore } from './utils/playheadStore';
 import { useLatestCallback } from './utils/useLatestCallback';
 import RecordingCoach from './components/RecordingCoach';
@@ -118,6 +118,9 @@ import NextStepCard, { NextStepAction } from './components/NextStepCard';
 import { track, trackOnce } from './utils/analytics';
 import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone } from './utils/punch';
+import { splitLoopPasses, keptLoopPasses, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount } from './utils/playlists';
+import { compSwipe, compTapRange } from './utils/comping';
+import type { TakeLanesApi } from './components/PlaylistLanes';
 import { editSelectionStore } from './utils/editSelection';
 import { useEditCommands } from './hooks/useEditCommands';
 
@@ -1458,6 +1461,10 @@ function Studio() {
    *   nouvelle prise doublait la voix ;
    * - blancs retirés si le nettoyage auto est actif (non destructif).
    */
+  // Couloirs de prises dépliés sous chaque piste (affichage seulement, pas dans le projet).
+  const [takeLanesOpen, setTakeLanesOpen] = useState<Record<string, boolean>>({});
+  // Prise écoutée en solo (couloirs) : jamais écrite dans le projet.
+  const [takeAudition, setTakeAuditionState] = useState<{ trackId: string; n: number } | null>(null);
   const finalizeRecording = useCallback(async () => {
     const result = await audioEngine.stopRecording();
     const rec = punchRecRef.current;
@@ -1489,13 +1496,34 @@ function Studio() {
     let mutedOld = 0;
     let takeGain = 1;
     let takeGainDb = 0;
+    // Loop Record : un clip par tour gardé (même audio, offsets différents).
+    let loopTakes: { clip: Clip; pass: number; active: boolean; wall: number }[] = [];
+    let firstTake = 0;
     if (result && result.clip.buffer) {
       const track = stateRef.current.tracks.find(t => t.id === result.trackId);
-      const takeNumber = 1 + (track?.clips || []).reduce((max, c) => Math.max(max, takeNumberOf(c) ?? 0), 0);
+      const takeNumber = nextTakeNumber(track || { clips: [] });
+      firstTake = takeNumber;
       takeName = `Prise ${takeNumber}`;
       result.clip.name = takeName;
       result.clip.takeNumber = takeNumber;
-      if (autoCleanRef.current && !punch) {
+      if (rec?.loop) {
+        const { kept, active } = keptLoopPasses(splitLoopPasses(result.clip, rec.loop.start, rec.loop.end));
+        if (kept.length > 1) {
+          const off0 = result.clip.offset || 0;
+          loopTakes = kept.map((ps, i) => ({
+            pass: ps.pass,
+            active: ps.pass === active,
+            wall: (rec.wall || Date.now()) + Math.max(0, ps.offset - off0) * 1000,
+            clip: {
+              ...result.clip, id: `${result.clip.id}-l${ps.pass}`, start: ps.start, duration: ps.duration, offset: ps.offset,
+              takeNumber: takeNumber + i, name: `Prise ${takeNumber + i}`, fadeIn: 0.01, fadeOut: 0.01,
+              ...(ps.pass === active ? {} : { isMuted: true }),
+            },
+          }));
+          takeName = `Prises ${takeNumber} à ${takeNumber + kept.length - 1}`;
+        }
+      }
+      if (autoCleanRef.current && !punch && !loopTakes.length) {
         cleaned = stripSilenceFromClip({ ...result.clip, bufferId: result.clip.id }, result.clip.buffer);
       }
       // Niveau automatique : qu'on chante fort ou doucement, chaque prise arrive
@@ -1509,6 +1537,7 @@ function Studio() {
         if (Math.abs(g) >= 1) { takeGain = Math.pow(10, g / 20); takeGainDb = g; }
       }
     }
+    const recWall = rec?.wall || Date.now();
     setState(produce(draft => {
       draft.isRecording = false;
       draft.recStartTime = null;
@@ -1520,25 +1549,42 @@ function Studio() {
         const toStore = (c: Clip): Clip => { const x: Clip = { ...c, bufferId: clipId, gain: (c.gain ?? 1) * takeGain }; delete x.buffer; return x; };
         const track = draft.tracks.find(t => t.id === result.trackId);
         if (track) {
-          const takeStart = clip.start;
-          const takeEnd = clip.start + clip.duration;
+          const takeStart = loopTakes.length ? Math.min(...loopTakes.map(l => l.clip.start)) : clip.start;
+          const takeEnd = loopTakes.length ? Math.max(...loopTakes.map(l => l.clip.start + l.clip.duration)) : clip.start + clip.duration;
           if (punch && punchOut > punchIn) {
             // Punch : l'ancienne prise est découpée autour de la zone (avant /
-            // après gardés, le passage remplacé retiré — Annuler le rend), avec
-            // un crossfade à puissance égale centré sur chaque point de punch.
-            const cut = cutAroundPunch(track.clips as Clip[], punchIn, punchOut, xfade, Date.now().toString(36));
+            // après gardés), avec un crossfade à puissance égale centré sur
+            // chaque point de punch. Le passage remplacé reste dans le couloir
+            // de l'ancienne prise (muté) : on peut y revenir par le comp.
+            const stamp = Date.now().toString(36);
+            const before = track.clips as Clip[];
+            const cut = cutAroundPunch(before, punchIn, punchOut, xfade, stamp);
             mutedOld += cut.replaced;
-            track.clips = cut.clips as any;
+            track.clips = [...cut.clips, ...punchedPassages(before, punchIn, punchOut, stamp)] as any;
           } else {
             track.clips.forEach(c => {
               if (!c.isMuted && c.start < takeEnd && c.start + c.duration > takeStart) { c.isMuted = true; mutedOld++; }
             });
           }
-          if (cleaned) track.clips.push(...cleaned.clips.map(toStore));
-          else track.clips.push(toStore(clip));
+          if (loopTakes.length) {
+            track.clips.push(...loopTakes.map(l => toStore(l.clip)));
+            let meta = track.takeMeta as TakeMeta[] | undefined;
+            for (const l of loopTakes) meta = patchMeta(meta, l.clip.takeNumber!, { recordedAt: Math.round(l.wall), loopPass: l.pass });
+            track.takeMeta = meta;
+          } else {
+            if (cleaned) track.clips.push(...cleaned.clips.map(toStore));
+            else track.clips.push(toStore(clip));
+            track.takeMeta = patchMeta(track.takeMeta as TakeMeta[] | undefined, clip.takeNumber!, { recordedAt: recWall });
+          }
         }
       }
     }));
+    if (loopTakes.length && result) {
+      const act = loopTakes.find(l => l.active)!;
+      setTakeLanesOpen(prev => ({ ...prev, [result.trackId]: true }));
+      setAiNotification(`🔁 ${loopTakes.length} prises enregistrées en boucle (Prise ${firstTake} à ${firstTake + loopTakes.length - 1}) — tu entends la Prise ${act.clip.takeNumber}. Balaie un passage dans un couloir pour le garder. Annuler pour revenir.`);
+      return result;
+    }
     if (result && result.clip.buffer) {
       const parts: string[] = [`🎤 ${takeName} enregistrée`];
       if (cleaned) parts.push(`${cleaned.removedSec.toFixed(1)} s de blanc retirées`);
@@ -1976,15 +2022,23 @@ function Studio() {
     // Punch et pré-roll (utils/punch) : la lecture repart avant le point
     // d'entrée, seule la zone est gardée, arrêt auto après le post-roll.
     const st0 = stateRef.current;
-    const plan = planRecording({ playhead: playheadStore.get(), punch: st0.punch, bpm: st0.bpm, ts: st0.timeSignature });
+    let plan = planRecording({ playhead: playheadStore.get(), punch: st0.punch, bpm: st0.bpm, ts: st0.timeSignature });
+    // Loop Record (comme Pro Tools / Logic) : boucle active, pas de punch →
+    // la prise part du début de la boucle (pré-roll compris) et chaque tour
+    // devient une prise, rangée dans son couloir.
+    const loopRec = !plan.isPunch && st0.isLoopActive && st0.loopEnd - st0.loopStart >= 0.5;
+    if (loopRec) plan = planRecording({ playhead: st0.loopStart, punch: st0.punch, bpm: st0.bpm, ts: st0.timeSignature });
     const startAt = plan.startAt;
     punchRecRef.current = null;
-    if (plan.isPunch || plan.keepFrom !== null) {
+    if (plan.isPunch || plan.keepFrom !== null || loopRec) {
       if (plan.isPunch) audioEngine.setLoop(false, st0.loopStart, st0.loopEnd);
       audioEngine.seekTo(startAt, st0.tracks, false);
       playheadStore.set(startAt);
-      punchRecRef.current = { in: plan.keepFrom, out: plan.keepTo, isPunch: plan.isPunch, autoStopAt: plan.autoStopAt };
+      punchRecRef.current = { in: plan.keepFrom, out: plan.keepTo, isPunch: plan.isPunch, autoStopAt: plan.autoStopAt, ...(loopRec ? { loop: { start: st0.loopStart, end: st0.loopEnd }, wall: Date.now() } : {}) };
+      if (loopRec) setAiNotification('🔁 Loop Record : chante sur chaque tour, une prise par tour de boucle. Stop quand tu as fini (la dernière prise complète est gardée, les autres vont dans les couloirs).');
     }
+    // Une prise écoutée en solo ne doit pas rester en solo pendant l'enregistrement.
+    if (audioEngine.getTakeAudition()) { audioEngine.setTakeAudition(null); setTakeAuditionState(null); }
     const success = await audioEngine.startRecording(startAt, armedTrack.id);
     if (success) {
       recStartRef.current = startAt;
@@ -3172,6 +3226,7 @@ function Studio() {
     return zones;
   }, [state.loopStart, state.loopEnd, state.markers]);
   const handleCompTake = useCallback((trackId: string, n: number, zone: CompZone) => {
+    breakHistory();
     setState(produce((draft: DAWState) => {
       const t = draft.tracks.find(x => x.id === trackId);
       if (t) t.clips = compTakeInZone(t as Track, n, zone);
@@ -3179,9 +3234,100 @@ function Studio() {
     setAiNotification(`🎚️ Prise ${n} gardée sur « ${zone.label} » (les autres prises restent dessous, Annuler pour revenir).`);
   }, [setState]);
 
+  // ===== Couloirs de prises (V4) et comp à la souris (V5) ==========================
+  const takeName = (t: Track | undefined, n: number) => listLanes(t || { clips: [] }).find(l => l.n === n)?.name || `Prise ${n}`;
+  const handleToggleTakeLanes = useCallback((trackId: string, open?: boolean) => {
+    setTakeLanesOpen(prev => ({ ...prev, [trackId]: open === undefined ? !prev[trackId] : open }));
+  }, []);
+  /** Écouter une prise en solo (null : revenir au comp). Lance la lecture au début de la prise. */
+  const handleAuditionTake = useCallback((trackId: string, n: number | null) => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    const lane = n === null ? null : listLanes(t || { clips: [] }).find(l => l.n === n);
+    const next = lane ? { trackId, n: lane.n } : null;
+    setTakeAuditionState(next);
+    audioEngine.setTakeAudition(next);
+    if (lane) {
+      const pos = playheadStore.get();
+      if (!(pos >= lane.start && pos < lane.end)) handleSeek(lane.start);
+      if (!stateRef.current.isPlaying) void handleTogglePlay();
+      setAiNotification(`🎧 Tu écoutes « ${lane.name} » seule — clique encore sur le casque pour revenir à ta voix finale.`);
+    }
+  }, [handleSeek, handleTogglePlay]);
+  /** Balayage (ou tap) sur un couloir : ce passage de la prise n passe dans la piste. */
+  const handleCompSwipe = useCallback((trackId: string, n: number, a: number, b: number | null) => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t) return;
+    const range = b === null ? compTapRange(t.clips, n, a) : { start: Math.min(a, b), end: Math.max(a, b) };
+    if (!range) return;
+    const r = compSwipe(t.clips, n, range.start, range.end);
+    if (!r.changed || !r.zone) return;
+    breakHistory();
+    setState(produce((draft: DAWState) => {
+      const d = draft.tracks.find(x => x.id === trackId);
+      if (d) d.clips = r.clips as any;
+    }));
+    breakHistory();
+    if (takeAudition) { setTakeAuditionState(null); audioEngine.setTakeAudition(null); }
+    setAiNotification(`✂️ ${takeName(t, n)} gardée de ${fmtTime(r.zone.start)} à ${fmtTime(r.zone.end)} (crossfades posés aux raccords) — Annuler pour revenir.`);
+  }, [setState, breakHistory, takeAudition]);
+  const handleKeepTake = useCallback((trackId: string, n: number) => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t) return;
+    breakHistory();
+    setState(produce((draft: DAWState) => {
+      const d = draft.tracks.find(x => x.id === trackId);
+      if (d) d.clips = keepTake(d.clips as Clip[], n) as any;
+    }));
+    breakHistory();
+    setAiNotification(`✓ ${takeName(t, n)} gardée en entier (les autres prises restent dans leurs couloirs) — Annuler pour revenir.`);
+  }, [setState, breakHistory]);
+  const handleRenameTake = useCallback((trackId: string, n: number, name: string) => {
+    breakHistory();
+    setState(produce((draft: DAWState) => {
+      const d = draft.tracks.find(x => x.id === trackId);
+      if (d) d.takeMeta = renameTake(d.takeMeta as TakeMeta[] | undefined, n, name);
+    }));
+    breakHistory();
+  }, [setState, breakHistory]);
+  const handleDuplicateTake = useCallback((trackId: string, n: number) => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    const r = t ? duplicateTake(t, n) : null;
+    if (!r) return;
+    breakHistory();
+    setState(produce((draft: DAWState) => {
+      const d = draft.tracks.find(x => x.id === trackId);
+      if (d) { d.clips = r.clips as any; d.takeMeta = r.takeMeta; }
+    }));
+    breakHistory();
+    setTakeLanesOpen(prev => ({ ...prev, [trackId]: true }));
+    setAiNotification(`⧉ ${takeName(t, n)} dupliquée dans un nouveau couloir (Prise ${r.newN}).`);
+  }, [setState, breakHistory]);
+  const handleDeleteTake = useCallback((trackId: string, n: number) => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t) return;
+    const name = takeName(t, n);
+    const r = deleteTake(t, n);
+    const bufs = Array.from(new Set(t.clips.filter(c => r.removedClipIds.includes(c.id)).map(c => c.bufferId).filter(Boolean))) as string[];
+    if (takeAudition?.trackId === trackId && takeAudition.n === n) { setTakeAuditionState(null); audioEngine.setTakeAudition(null); }
+    breakHistory();
+    setState(produce((draft: DAWState) => {
+      const d = draft.tracks.find(x => x.id === trackId);
+      if (d) { d.clips = r.clips as any; d.takeMeta = r.takeMeta; }
+    }));
+    breakHistory();
+    setTimeout(() => bufs.forEach(id => releaseBufferIfUnused(id, r.removedClipIds)), 0);
+    setAiNotification(`🗑️ ${name} supprimée${r.replacedBy.length ? ` — la Prise ${r.replacedBy.join(', ')} la remplace dans ta voix finale` : ''}. Annuler pour la retrouver.`);
+  }, [setState, breakHistory, releaseBufferIfUnused, takeAudition]);
+
+  const takeLanesApi = useMemo<TakeLanesApi>(() => ({
+    open: takeLanesOpen, audition: takeAudition,
+    onToggle: handleToggleTakeLanes, onAudition: handleAuditionTake, onComp: handleCompSwipe, onKeep: handleKeepTake,
+    onRename: handleRenameTake, onDuplicate: handleDuplicateTake, onDelete: handleDeleteTake,
+  }), [takeLanesOpen, takeAudition, handleToggleTakeLanes, handleAuditionTake, handleCompSwipe, handleKeepTake, handleRenameTake, handleDuplicateTake, handleDeleteTake]);
+
   // Punch-in / punch-out (utils/punch) : points indépendants de la boucle, posés
   // dans la règle ou depuis la sélection ; pré/post-roll réglables ; QuickPunch.
-  const punchRecRef = useRef<{ in: number | null; out: number | null; isPunch: boolean; autoStopAt: number | null; quick?: boolean; stopping?: boolean } | null>(null);
+  const punchRecRef = useRef<{ in: number | null; out: number | null; isPunch: boolean; autoStopAt: number | null; quick?: boolean; stopping?: boolean; loop?: { start: number; end: number }; wall?: number } | null>(null);
   /** Réglages du punch : pas une édition du projet (pas d'étape d'annulation, comme Pro Tools). */
   const handleUpdatePunch = useCallback((patch: Partial<DAWState['punch']>) => {
     const p = { ...stateRef.current.punch, ...patch };
@@ -4783,7 +4929,7 @@ function Studio() {
         if (!track || !Number.isFinite(take)) { notify(`Je ne trouve pas la prise ${p.take}`); break; }
         if (want && !zone) { notify(`Je ne trouve pas la partie « ${p.zone} » (ajoute des repères de structure ou une boucle)`); break; }
         if (zone) handleCompTake(track.id, take, zone);
-        else (selectTakeActions(track, take) || []).forEach(a => executeAIAction(a));
+        else handleKeepTake(track.id, take);
         break;
       }
 
@@ -5616,7 +5762,7 @@ function Studio() {
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
                    onMoveClipsBy={handleMoveClipsBy}
                    onAudioDrop={onArrangementAudioDrop}
-                   punch={state.punch} onUpdatePunch={handleUpdatePunch} editCommands={editCommands}
+                   punch={state.punch} onUpdatePunch={handleUpdatePunch} editCommands={editCommands} takeLanes={takeLanesApi}
                    markers={state.markers} onAddMarker={handleAddMarker}
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker} onAddRegion={handleAddRegion}
                 />
@@ -5819,14 +5965,11 @@ function Studio() {
         onOpenDrums={() => { setVocalToolsOpen(false); setDrumsOpen(true); }}
         hasDrums={!!state.tracks.find(t => t.id === DRUM_TRACK_ID)}
         takeGroups={state.tracks.filter(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId)
-          .map(t => ({ trackId: t.id, trackName: t.name, takes: listTakes(t) }))}
-        onSelectTake={(trackId, n, listen) => {
-          const t = stateRef.current.tracks.find(x => x.id === trackId);
-          if (!t) return;
-          (selectTakeActions(t, n) || []).forEach(a => executeAIAction(a));
-          const take = listTakes(t).find(x => x.n === n);
-          if (listen && take) { handleSeek(take.start); if (!stateRef.current.isPlaying) void handleTogglePlay(); }
-        }}
+          .map(t => ({ trackId: t.id, trackName: t.name, lanes: listLanes(t) }))}
+        audition={takeAudition}
+        onAuditionTake={handleAuditionTake}
+        onKeepTake={handleKeepTake}
+        onShowLanes={(trackId) => { setVocalToolsOpen(false); handleToggleTakeLanes(trackId, true); if (isMobile) setActiveMobileTab('ARRANGEMENT'); }}
         compZones={compZones}
         onCompTake={(trackId, n, zone) => handleCompTake(trackId, n, zone)}
         activeTakeInZone={(trackId, zone) => { const t = state.tracks.find(x => x.id === trackId); return t ? activeTakeInZone(t, zone) : null; }}
