@@ -787,8 +787,10 @@ export class AudioEngine {
       for (const clip of (isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []))) {
         if (clip.isMuted || clip.type !== TrackType.MIDI || !clip.notes) continue;
 
+        // PDC : notes avancées de la latence de tout le chemin (comme en lecture).
+        const lat = (rt.latency || 0) + (rt.down || 0);
         for (const note of clip.notes) {
-          const noteStart = clip.start + note.start - startOffset;
+          const noteStart = clip.start + note.start - startOffset - lat;
           const noteEnd = noteStart + note.duration;
           if (noteEnd <= 0 || noteStart >= totalDuration) continue;
 
@@ -819,7 +821,7 @@ export class AudioEngine {
       const rt = rendered.get(track.id)!;
       if (!rt.bass808 || !track.bass808) continue;
       const clips = isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []);
-      rt.bass808.playVoices(planOfClips(clips, track.bass808), startOffset);
+      rt.bass808.playVoices(planOfClips(clips, track.bass808), startOffset + (rt.latency || 0) + (rt.down || 0));
     }
 
     if (onProgress) onProgress(85);
@@ -966,6 +968,8 @@ export class AudioEngine {
   private recFreezes = new Map<string, { clip: Clip; upTo: number; clipIds: string[] }>();
   /** Compensation de latence suspendue pendant une prise (pistes figées : inutile). */
   private pdcSuspended = false;
+  /** Début du passage en cours (lecture ou bouclage) : 1re fenêtre MIDI (PDC). */
+  private midiRunStart: number | null = null;
 
   public setRecordingFreeze(trackId: string, freeze: { clip: Clip; upTo: number; clipIds: string[] } | null) {
     if (freeze) this.recFreezes.set(trackId, freeze); else this.recFreezes.delete(trackId);
@@ -1342,6 +1346,7 @@ export class AudioEngine {
     // Le point de départ tombe pile au début de la 1re fenêtre : une note posée
     // exactement là (1er kick de la batterie, 1re 808) était sautée.
     this.playbackStartTime = this.nextScheduleTime - startOffset;
+    this.midiRunStart = startOffset;
     if (this.recSession && this.recPlayStart === null) this.recPlayStart = this.playbackStartTime; 
 
     // Valeur correcte au demarrage : sans ca, une piste dont tous les points
@@ -1491,6 +1496,7 @@ export class AudioEngine {
         const projectTimeEnd = projectTimeStart + windowSec;
         this.scheduleClips(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime, 0, new Map());
         this.scheduleMidi(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
+        this.midiRunStart = null;
         this.scheduleAutomation(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
         this.nextScheduleTime += windowSec;
       }
@@ -1506,6 +1512,7 @@ export class AudioEngine {
   private wrapLoopAt(boundaryContextTime: number, tracks: Track[]) {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
+    this.midiRunStart = this.loopStart;
 
     // Fondu de 5 ms avant la coupure pour eviter le clic.
     this.activeSources.forEach(({ source, gain }) => {
@@ -1585,11 +1592,21 @@ export class AudioEngine {
         // Piste gelee : seules les notes ajoutees apres le rendu sont jouees.
         const midiClips = isTrackFrozen(track) ? uncoveredClips(track) : track.clips;
 
+        // Compensation de latence (PDC) : un instrument suivi d'effets à latence
+        // (VST, bus, envois) joue ses notes d'autant plus tôt, comme l'audio.
+        const lat = this.pdcSuspended ? 0 : this.getTrackLatency(track.id);
+        const ws = projectWindowStart + lat;
+        const we = projectWindowEnd + lat;
+        // Boucle : rien au-delà de la fin de boucle ; 1re fenêtre d'un passage :
+        // les notes des `lat` premières secondes partent tout de suite.
+        const loopEnd = this.isLoopActive && this.loopEnd > this.loopStart ? this.loopEnd : Infinity;
+        const firstWindow = this.midiRunStart !== null && Math.abs(projectWindowStart - this.midiRunStart) < 1e-6;
+
         // 808 : plan monophonique (glissés) joué dans l'ordre du temps.
         const b808 = this.tracksDSP.get(track.id)?.bass808;
         if (track.bass808 && b808) {
-          const evs = events808(planOfClips(midiClips, track.bass808), projectWindowStart, projectWindowEnd);
-          b808.play(evs, t => contextScheduleTime + (t - projectWindowStart));
+          const evs = events808(planOfClips(midiClips, track.bass808), ws, Math.min(we, loopEnd));
+          b808.play(evs, t => contextScheduleTime + (t - ws));
           return;
         }
 
@@ -1597,22 +1614,26 @@ export class AudioEngine {
            if (clip.type !== TrackType.MIDI || !clip.notes) return;
            
            const clipEnd = clip.start + clip.duration;
-           if (clip.start >= projectWindowEnd || clipEnd <= projectWindowStart) return;
+           // Fenêtre décalée de la latence (PDC) : un clip qui commence juste après
+           // la fenêtre peut déjà avoir des notes à programmer.
+           if (clip.start >= we || clipEnd <= projectWindowStart) return;
 
            clip.notes.forEach(note => {
                const noteAbsStart = clip.start + note.start;
                const noteAbsEnd = noteAbsStart + note.duration;
 
-               if (noteAbsStart >= projectWindowStart && noteAbsStart < projectWindowEnd) {
-                   const timeOffset = noteAbsStart - projectWindowStart;
-                   const scheduleTime = contextScheduleTime + timeOffset;
-                   this.triggerTrackAttack(track.id, note.pitch, note.velocity, scheduleTime);
+               if (noteAbsStart >= loopEnd) return;
+               if (noteAbsStart >= ws && noteAbsStart < we) {
+                   this.triggerTrackAttack(track.id, note.pitch, note.velocity, contextScheduleTime + (noteAbsStart - ws));
+               } else if (firstWindow && lat > 0 && noteAbsStart >= projectWindowStart && noteAbsStart < ws) {
+                   // Trop tard pour être calée : jouée tout de suite plutôt que perdue.
+                   this.triggerTrackAttack(track.id, note.pitch, note.velocity, contextScheduleTime);
                }
 
-               if (noteAbsEnd >= projectWindowStart && noteAbsEnd < projectWindowEnd) {
-                   const timeOffset = noteAbsEnd - projectWindowStart;
-                   const scheduleTime = contextScheduleTime + timeOffset;
-                   this.triggerTrackRelease(track.id, note.pitch, scheduleTime);
+               if (noteAbsEnd >= ws && noteAbsEnd < we) {
+                   this.triggerTrackRelease(track.id, note.pitch, contextScheduleTime + (noteAbsEnd - ws));
+               } else if (firstWindow && lat > 0 && noteAbsEnd >= projectWindowStart && noteAbsEnd < ws) {
+                   this.triggerTrackRelease(track.id, note.pitch, contextScheduleTime);
                }
            });
         });
