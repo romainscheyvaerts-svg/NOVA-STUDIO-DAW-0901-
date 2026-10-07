@@ -169,6 +169,39 @@ export async function renderTrackFreeze(track: Track, upTo: number, onStep?: (ms
   };
 }
 
+/**
+ * Collaboration « En direct » (PC de l'artiste) : aperçu de la piste à travers
+ * ses VST sur une fenêtre du morceau, pour l'ingé qui n'a pas ces VST (voir
+ * services/LivePreview). Le rendu commence à win.from ; ancrages : refs.
+ * Les réglages actuels des VST chargés sont pris (instance en cours du pont).
+ */
+export async function renderTrackPreview(
+  track: Track, win: { from: number; to: number }, tail: number, onStep?: (msg: string) => void,
+): Promise<{ clip: Clip; upTo: number }> {
+  if (!canBakeTrack(track)) throw new Error("Le beat n'est jamais rendu dans un fichier (licence).");
+  const upTo = lastVstIndex(track);
+  if (upTo < 0) throw new Error('Aucun VST sur cette piste.');
+  if (!novaBridge.isConnected()) throw new Error("Le pont VST n'est pas connecté sur ce PC.");
+  await audioEngine.init();
+  const sr = audioEngine.ctx!.sampleRate;
+  const plugins = (track.plugins || []).slice(0, upTo + 1);
+  const segments = splitSegments(plugins);
+  const duration = Math.max(0.5, win.to - win.from) + tail;
+  const firstNative = segments[0]?.kind === 'native' ? (segments[0] as { kind: 'native'; plugins: PluginInstance[] }).plugins : [];
+  const dry = await audioEngine.renderProject([isolated(track, firstNative)], duration, Math.max(0, win.from), sr, undefined, { preFader: true });
+  const rest = segments[0]?.kind === 'native' ? plugins.slice(plugins.indexOf(firstNative[firstNative.length - 1]) + 1) : plugins;
+  const buffer = await renderThroughChain(dry, rest, track, onStep);
+  const id = `preview-${track.id}-${Date.now()}`;
+  audioBufferRegistry.register(buffer, id);
+  return {
+    upTo,
+    clip: {
+      id, start: 0, duration, offset: 0, fadeIn: 0, fadeOut: 0, name: `${track.name} (aperçu)`, color: track.color,
+      type: TrackType.AUDIO, bufferId: id, isMuted: false, gain: 1,
+    },
+  };
+}
+
 // --- Bus / envois à effets VST (reverb VST de l'ingé…) ----------------------------
 
 /** Effets VST3 actifs dans les effets [0..upTo] d'une piste. */

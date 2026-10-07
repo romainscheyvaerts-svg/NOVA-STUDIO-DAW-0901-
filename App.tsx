@@ -38,7 +38,7 @@ import Bass808Controls from './components/Bass808Controls';
 import { BASS808_TRACK_ID, kit808Style, starter808Notes } from './utils/bass808';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
-import { renderTrackFreeze, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
+import { renderTrackFreeze, renderTrackPreview, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
 import { canBakeTrack, hasVst, freezeSignature, trackBufferIds } from './utils/freeze';
 import { getEditAuthor, setEditAuthor } from './utils/preFxEdits';
 import { usePreFxReplay } from './hooks/usePreFxReplay';
@@ -87,7 +87,7 @@ import CollabPanel, { CollabMessage } from './components/CollabPanel';
 import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
 import { collabRoleStore } from './utils/collabStore';
 import { localCollabOutboxStore } from './utils/collabOutbox';
-import { applyMixFields, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf } from './utils/collabMerge';
+import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
 import RemoteIngePanel from './components/RemoteIngePanel';
 import LiveVstRemotePanel from './components/LiveVstRemotePanel';
@@ -95,6 +95,7 @@ import { useRemoteInge } from './hooks/useRemoteInge';
 import { parseRemoteLink } from './utils/remoteInge';
 import { applyRemoteVstParams, catalogOf, LIVE_VST_KINDS, LiveVstDeps, readRemoteVstParams, VstCatalogEntry, VstParamAck, VstParamsReply, VstRemoteRequests } from './services/LiveVstRemote';
 import { liveVstNodes } from './engine/VSTPluginNode';
+import { anchorClipsToWindow, applyPreviewOnEngineer, clearPreviewOnEngineer, hasArtistVst, LIVE_PREVIEW_KINDS, PREVIEW_TAIL, PreviewScheduler, PreviewState, PreviewTracker, previewView, previewWindowOf } from './services/LivePreview';
 import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from './services/Billing';
 import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
@@ -3482,6 +3483,54 @@ function Studio() {
     syncState: async (id) => (await liveVstNodes.get(id)?.syncState()) || null,
   }), []);
 
+  // En direct : l'ingé ENTEND les VST de l'artiste (services/LivePreview). Le pont de
+  // l'artiste rend la piste sur une fenêtre du morceau, l'aperçu joue chez l'ingé.
+  const previewWantedRef = useRef(new Set<string>());
+  const previewTrackerRef = useRef(new PreviewTracker());
+  const [previewStates, setPreviewStates] = useState<Record<string, PreviewState>>({});
+  const syncPreviewStates = useCallback(() => setPreviewStates(previewTrackerRef.current.all()), []);
+  const previewSchedRef = useRef<PreviewScheduler | null>(null);
+  if (!previewSchedRef.current) {
+    previewSchedRef.current = new PreviewScheduler({
+      blockedReason: () => (stateRef.current.isRecording ? "l'artiste enregistre une prise" : null),
+      onState: (trackId, st, message) => {
+        collabRef.current?.client.queue(`pvs:${trackId}`, 'vst_preview_state', { trackId, state: st, ...(message ? { message } : {}) });
+      },
+      run: async (trackId, win) => {
+        const c = collabRef.current;
+        if (!c || c.role !== 'artist') return;
+        const t = stateRef.current.tracks.find(x => x.id === trackId);
+        if (!t || !hasArtistVst(t)) throw new Error("Il n'y a plus de VST de l'artiste sur cette piste.");
+        if (!novaBridge.isConnected()) throw new Error("Le pont VST de l'artiste n'est pas connecté : il doit ouvrir NOVA Studio pour Windows.");
+        const w = win || previewWindowOf(t, stateRef.current.currentTime || 0, null);
+        const r = await renderTrackPreview(t, w, PREVIEW_TAIL);
+        try {
+          const audio = await uploadBuffers(c.client.link, [r.clip.bufferId!], (sent, total) => c.client.reportUpload(sent, total));
+          const { buffer: _b, ...clip } = r.clip as Clip & { buffer?: AudioBuffer };
+          c.client.queue(`pv:${trackId}`, 'vst_preview', { trackId, clip, upTo: r.upTo, refs: anchorClipsToWindow(t.clips || [], r.clip.id, w), win: w, audio });
+        } finally {
+          audioBufferRegistry.remove(r.clip.bufferId!);
+        }
+      },
+    });
+  }
+  /** Ingé : fenêtre écoutée (boucle active, sinon autour de la tête de lecture). */
+  const previewWinFor = (trackId: string) => {
+    const st = stateRef.current;
+    const t = st.tracks.find(x => x.id === trackId);
+    return t ? previewWindowOf(t, st.currentTime || 0, st.isLoopActive ? { start: st.loopStart, end: st.loopEnd } : null) : undefined;
+  };
+  /** Ingé : demande un aperçu à jour (bouton, arrivée dans la session). */
+  const requestArtistPreview = useCallback((trackId: string) => {
+    const c = collabRef.current;
+    if (!c || c.role !== 'engineer') return;
+    const win = previewWinFor(trackId);
+    previewTrackerRef.current.expect(trackId, win);
+    syncPreviewStates();
+    c.client.queue(`pvg:${trackId}`, 'vst_preview_get', { trackId, ...(win ? { win } : {}) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncPreviewStates]);
+
   // --- Instruments VST3 du PC sur les pistes MIDI (mode instru) ---------------------
   // Les notes sont rendues par le pont et jouées comme un rendu gelé (sauvegardé,
   // exporté, envoyé en collaboration) : le son du VST se joue aussi sans pont.
@@ -3544,12 +3593,43 @@ function Studio() {
     if (o.kind === 'lock' && !(o.role === 'artist' || (o.role === 'engineer' && !p.lock))) return refuse('verrou');
     if (o.kind === 'content' && existing && !ownsContent(existing, o.role)) return refuse('piste d’un autre rôle');
     // En direct : l'ingé règle les VST hébergés par le pont du PC de l'artiste.
+    if (LIVE_PREVIEW_KINDS.has(o.kind)) {
+      if (o.replay) return; // ancien aperçu : l'ingé en redemande un à jour
+      if (o.kind === 'vst_preview_get' && o.role === 'engineer' && c.role === 'artist') {
+        previewWantedRef.current.add(String(p.trackId));
+        previewSchedRef.current?.request(String(p.trackId), p.win);
+      } else if (o.kind === 'vst_preview_state' && o.role === 'artist' && c.role === 'engineer') {
+        previewTrackerRef.current.remote(String(p.trackId), p.state === 'waiting' || p.state === 'error' ? p.state : 'rendering', typeof p.message === 'string' ? p.message.slice(0, 300) : undefined);
+        syncPreviewStates();
+      } else if (o.kind === 'vst_preview' && o.role === 'artist' && c.role === 'engineer') {
+        if (!lwwRef.current.accept(`preview:${p.trackId}`, o.seq)) return;
+        await ensureBuffers(c.client.link, p.audio);
+        let released: string[] = [];
+        let posed = false;
+        touch(p.trackId);
+        setSilently(produce((d: DAWState) => {
+          const t = d.tracks.find(x => x.id === p.trackId);
+          const r = t ? applyPreviewOnEngineer(t as Track, p) : null;
+          if (r) { released = r.released; posed = true; }
+        }));
+        setTimeout(() => released.forEach(id => releaseBufferIfUnused(id, [])), 0);
+        previewTrackerRef.current.ready(String(p.trackId), p.win);
+        syncPreviewStates();
+        void posed;
+      }
+      return;
+    }
     if (LIVE_VST_KINDS.has(o.kind)) {
       if ((o.kind === 'vst_param' || o.kind === 'vst_params_get') && o.role === 'engineer' && c.role === 'artist') {
         // Demande d'avant notre arrivée (rattrapage du journal) : l'ingé n'attend plus la réponse.
         if (o.replay) return;
         const reply = o.kind === 'vst_param' ? await applyRemoteVstParams(p, liveVstDeps) : await readRemoteVstParams(p, liveVstDeps);
         c.client.queue(`${o.kind}:${p.reqId}`, o.kind === 'vst_param' ? 'vst_param_ack' : 'vst_params', reply as unknown as Record<string, unknown>);
+        if (o.kind === 'vst_param' && (reply as VstParamAck).ok) {
+          // L'ingé n'a pas ce VST : son pont rend un aperçu (~1 s après le dernier réglage).
+          previewWantedRef.current.add(String(p.trackId));
+          previewSchedRef.current?.request(String(p.trackId), p.win);
+        }
         if (o.kind === 'vst_param' && (reply as VstParamAck).ok) setAiNotification(`🎛️ ${o.author_name} (ingé) a réglé ${(existing?.plugins.find(x => x.id === p.pluginId)?.name) || 'un VST'} sur ton PC.`);
       } else if ((o.kind === 'vst_param_ack' || o.kind === 'vst_params') && o.role === 'artist' && c.role === 'engineer') {
         if (o.kind === 'vst_param_ack' && p.ok && typeof p.stateB64 === 'string') {
@@ -3679,6 +3759,7 @@ function Studio() {
     await c.client.send('content', { trackId, content, audio, ...(isNew ? { mix: mixOf(t) } : {}) });
     knownSigRef.current.set('content:' + t.id, sigOf(content));
     if (isNew) knownFieldsRef.current.set(t.id, fieldSigsOf(mixFieldsOf(t)));
+    if (c.role === 'artist' && previewWantedRef.current.has(t.id) && hasArtistVst(t)) previewSchedRef.current?.request(t.id);
   }, []);
 
   const sendFreeze = useCallback(async (trackId: string) => {
@@ -3890,6 +3971,50 @@ function Studio() {
     if (c) await c.client.leave();
   }, []);
   const leaveLivePreviewRef = useRef<(() => void) | null>(null);
+  leaveLivePreviewRef.current = () => {
+    previewSchedRef.current?.dispose();
+    previewWantedRef.current.clear();
+    previewTrackerRef.current.clear();
+    setPreviewStates({});
+    // Les aperçus reçus de l'artiste disparaissent (la piste rejoue sans ses VST).
+    if (stateRef.current.tracks.some(t => t.livePreview)) {
+      const released: string[] = [];
+      setSilently(produce((d: DAWState) => { d.tracks.forEach(t => { const b = clearPreviewOnEngineer(t as Track); if (b) released.push(b); }); }));
+      setTimeout(() => released.forEach(id => releaseBufferIfUnused(id, [])), 0);
+    }
+  };
+  onLocalMixRef.current = (trackId, fields) => {
+    // Ingé : effets changés sur une piste avec un VST de l'artiste → son pont refait l'aperçu.
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (collabRef.current?.role === 'engineer' && t && touchesPlugins(fields) && hasArtistVst(t)) {
+      previewTrackerRef.current.expect(trackId, previewWinFor(trackId));
+      syncPreviewStates();
+    }
+  };
+  onRemoteMixRef.current = (trackId, fields) => {
+    // Artiste : l'ingé a changé les effets d'une piste qui passe par mes VST → nouvel aperçu.
+    if (collabRef.current?.role !== 'artist' || !touchesPlugins(fields)) return;
+    setTimeout(() => {
+      const t = stateRef.current.tracks.find(x => x.id === trackId);
+      if (t && hasArtistVst(t)) { previewWantedRef.current.add(trackId); previewSchedRef.current?.request(trackId); }
+    }, 0);
+  };
+  // Délais d'attente de l'aperçu (pont de l'artiste qui ne répond pas → message clair).
+  useEffect(() => {
+    if (!collab || collab.role !== 'engineer') return;
+    const id = window.setInterval(() => { if (previewTrackerRef.current.tick()) syncPreviewStates(); }, 3000);
+    return () => window.clearInterval(id);
+  }, [collab, syncPreviewStates]);
+  // Prise terminée : les aperçus qui attendaient partent.
+  useEffect(() => { if (!state.isRecording) previewSchedRef.current?.resume(); }, [state.isRecording]);
+  // Ingé qui arrive : un aperçu pour chaque piste qui a déjà un VST de l'artiste.
+  useEffect(() => {
+    if (!collab || collab.role !== 'engineer') return;
+    const t = window.setTimeout(() => {
+      stateRef.current.tracks.filter(hasArtistVst).forEach(x => { if (!x.livePreview) requestArtistPreview(x.id); });
+    }, 2500);
+    return () => window.clearTimeout(t);
+  }, [collab, requestArtistPreview]);
 
   // Page rechargée en pleine collaboration : on rejoint tout seul (même rôle), le
   // journal rattrape ce qui a été manqué, la file d'envoi repart.
@@ -3939,7 +4064,10 @@ function Studio() {
     const c = collabRef.current;
     if (!c) throw new Error('Collaboration fermée');
     const { reqId, promise } = vstReqsRef.current.create();
-    await c.client.send(kind, { ...body, reqId });
+    const trackId = String(body.trackId || '');
+    const win = kind === 'vst_param' ? previewWinFor(trackId) : undefined;
+    await c.client.send(kind, { ...body, reqId, ...(win ? { win } : {}) });
+    if (kind === 'vst_param') { previewTrackerRef.current.expect(trackId, win); syncPreviewStates(); }
     // Le canal en direct peut manquer la réponse : on relit le journal en attendant.
     const poll = window.setInterval(() => { void c.client.catchUp(); }, 2500);
     try { return await promise; } finally { window.clearInterval(poll); }
@@ -5787,6 +5915,8 @@ function Studio() {
             tracks={state.tracks}
             catalog={artistVstCatalog}
             selectedTrackId={state.selectedTrackId}
+            previews={state.tracks.filter(hasArtistVst).map(t => ({ trackId: t.id, name: t.name, view: previewView(previewStates[t.id]) }))}
+            onRefreshPreview={(trackId) => requestArtistPreview(trackId)}
             onRead={(trackId, pluginId) => askArtistVst<VstParamsReply>('vst_params_get', { trackId, pluginId })}
             onSet={(trackId, pluginId, name, value) => {
               const num = Number(value.replace(',', '.'));
