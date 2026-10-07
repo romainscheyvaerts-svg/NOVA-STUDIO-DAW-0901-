@@ -1,5 +1,6 @@
 
 import React, { useEffect, useRef } from 'react';
+import { canvasTheme } from '../utils/canvasTheme';
 
 interface WaveformRendererProps {
   buffer?: AudioBuffer;
@@ -36,7 +37,7 @@ const WaveformRenderer: React.FC<WaveformRendererProps> = ({
 
     // Dessiner la ligne de 0dB (Silence)
     ctx.beginPath();
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.strokeStyle = canvasTheme().ink(0.05);
     ctx.moveTo(0, centerY);
     ctx.lineTo(w, centerY);
     ctx.stroke();

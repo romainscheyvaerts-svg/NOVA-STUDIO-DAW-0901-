@@ -1702,7 +1702,7 @@ const drawTimeline = useCallback(() => {
             ctx.setLineDash([]);
             
             // Marker name
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = cv.text;
             ctx.font = 'bold 8px Inter';
             ctx.fillText(marker.name, markerX + 14, 10);
         }

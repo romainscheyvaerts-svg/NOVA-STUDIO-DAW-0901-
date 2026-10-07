@@ -40,9 +40,12 @@ const v = (name) => `rgb(var(--nv-${name}) / <alpha-value>)`;
 // --- Correspondances du thème clair ---------------------------------------
 const INV = { 50: 950, 100: 900, 200: 800, 300: 700, 400: 600, 500: 500, 600: 400, 700: 300, 800: 200, 900: 100, 950: 50 };
 // Textes neutres : 600 (gris discret sur fond sombre) passe à 500 (#64748b, 4,8:1 sur blanc).
-const NEUTRAL_TEXT = { 50: 900, 100: 900, 200: 800, 300: 700, 400: 600, 500: 600, 600: 500, 700: 400, 800: 300, 900: 200, 950: 100 };
+const NEUTRAL_TEXT = { 50: 900, 100: 900, 200: 800, 300: 700, 400: 600, 500: 600, 600: 600, 700: 400, 800: 300, 900: 200, 950: 100 };
 const CHROMA_BG = { 800: 200, 900: 100, 950: 50 };
 const CHROMA_TEXT = { 50: 900, 100: 900, 200: 800, 300: 800, 400: 700, 500: 700, 600: 700 };
+// Teintes chaudes / vertes : le 700 reste sous 4,5:1 sur le gris clair, on prend le 800.
+const CHROMA_TEXT_CHAUD = { 50: 900, 100: 900, 200: 900, 300: 800, 400: 800, 500: 800, 600: 800, 700: 800 };
+const CHAUDS = ['orange', 'amber', 'yellow', 'lime', 'green'];
 
 // Encre et papier du thème clair
 const INK = '15 23 42';          // slate-900
@@ -76,10 +79,19 @@ const semantic = {
 };
 
 // --- Variables ----------------------------------------------------------------
+// Textes gris du thème sombre éclaircis pour atteindre l'AA sur les fonds
+// sombres (#0c0d10 / #14161a) : slate-500 #64748b ne donnait que 3,8:1.
+const DARK_TEXT_FIX = { 500: '#8794a8', 600: '#7a879b', 700: '#64718a' };
+// Couleurs dont le 500 est trop sombre pour du texte sur fond sombre : on prend le 400.
+const SOMBRES_500 = ['red', 'blue', 'indigo', 'violet', 'purple', 'rose'];
+
 function darkVars(kind /* 'bg' | 'text' */) {
   const p = kind === 'text' ? 't-' : '';
   const o = { [`--nv-${p}white`]: '255 255 255', [`--nv-${p}black`]: '0 0 0' };
-  for (const c of [...NEUTRAL, ...CHROMA]) for (const s of SHADES) o[`--nv-${p}${c}-${s}`] = ch(colors[c][s]);
+  for (const c of [...NEUTRAL, ...CHROMA]) for (const s of SHADES) {
+    const fix = kind !== 'text' ? null : NEUTRAL.includes(c) ? DARK_TEXT_FIX[s] : (s === '500' && SOMBRES_500.includes(c) ? colors[c]['400'] : null);
+    o[`--nv-${p}${c}-${s}`] = ch(fix || colors[c][s]);
+  }
   return o;
 }
 function lightVars(kind) {
@@ -93,7 +105,7 @@ function lightVars(kind) {
     o[`--nv-${p}${c}-${s}`] = ch(colors[c][m[s]]);
   }
   for (const c of CHROMA) for (const s of SHADES) {
-    const m = kind === 'text' ? CHROMA_TEXT : CHROMA_BG;
+    const m = kind === 'text' ? (CHAUDS.includes(c) ? CHROMA_TEXT_CHAUD : CHROMA_TEXT) : CHROMA_BG;
     o[`--nv-${p}${c}-${s}`] = ch(colors[c][m[s] || s]);
   }
   return o;
@@ -148,7 +160,7 @@ function scanHexClasses(root) {
     };
     walk(dir);
   }
-  const rx = /\b((?:hover:)?(?:bg|from|via|to|ring|border|text))-\[#([0-9a-fA-F]{6})\](?:\/(\d+))?/g;
+  const rx = /\b((?:hover:)?(?:bg|from|via|to|ring|border|text))-\[#([0-9a-fA-F]{6})\](?:\/(\d+|\[[0-9.]+\]))?/g;
   for (const f of files) {
     let src = '';
     try { src = fs.readFileSync(path.join(root, f), 'utf8'); } catch { continue; }
@@ -175,11 +187,11 @@ function lightOf(hex) {
 function hexOverrides(root) {
   const rules = {};
   for (const cls of scanHexClasses(root)) {
-    const m = cls.match(/^((?:hover:)?)(bg|from|via|to|ring|border|text)-\[#([0-9a-fA-F]{6})\](?:\/(\d+))?$/);
+    const m = cls.match(/^((?:hover:)?)(bg|from|via|to|ring|border|text)-\[#([0-9a-fA-F]{6})\](?:\/(\d+|\[[0-9.]+\]))?$/);
     if (!m) continue;
     const [, hover, kind, hex, alpha] = m;
-    const a = alpha ? Number(alpha) / 100 : 1;
-    const esc = cls.replace(/([:\[\]#\/])/g, '\\$1');
+    const a = !alpha ? 1 : alpha.startsWith('[') ? Number(alpha.slice(1, -1)) : Number(alpha) / 100;
+    const esc = cls.replace(/([:\[\]#\/.])/g, '\\$1');
     const sel = `[data-theme="light"] :not(.nova-sombre *):not(.nova-sombre).${esc}${hover ? ':hover' : ''}`;
     if (kind === 'text') {
       const lum = Math.max(...ch(hex).split(' ').map(Number));
@@ -214,6 +226,7 @@ export function novaThemePlugin(root) {
   };
 }
 
+export const novaContrastData = { darkVars, lightVars, SEM_DARK, SEM_LIGHT, CHROMA, NEUTRAL, SHADES };
 export const novaColors = palette('');
 export const novaTextColors = palette('t-');
 export const novaSemantic = semantic;

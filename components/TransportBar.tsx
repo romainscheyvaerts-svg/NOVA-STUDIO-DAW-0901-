@@ -471,11 +471,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
             {/* Téléphone : métronome et boucle (masqués dans la barre sous 768 px) */}
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => onToggleMetronome?.()} aria-pressed={isMetronomeEnabled} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${isMetronomeEnabled ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300'}`}>
+              <button onClick={() => onToggleMetronome?.()} aria-pressed={isMetronomeEnabled} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${isMetronomeEnabled ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-200'}`}>
                 <i className="fas fa-drum block mb-1"></i>
                 Métronome
               </button>
-              <button onClick={() => onToggleLoop?.()} aria-pressed={isLoopActive} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${isLoopActive ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300'}`}>
+              <button onClick={() => onToggleLoop?.()} aria-pressed={isLoopActive} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${isLoopActive ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-200'}`}>
                 <i className="fas fa-sync-alt block mb-1"></i>
                 Boucle
               </button>
@@ -491,17 +491,17 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             {/* VIEW SWITCHER (inutile en mise en page téléphone : on navigue par onglets) */}
             {!isMobileLayout && !simple && (
             <div className="space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Vues</div>
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Vues</div>
               <div className="grid grid-cols-3 gap-2">
-                <button onClick={() => { onChangeView('ARRANGEMENT'); setIsMobileMenuOpen(false); }} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${currentView === 'ARRANGEMENT' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-400'}`}>
+                <button onClick={() => { onChangeView('ARRANGEMENT'); setIsMobileMenuOpen(false); }} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${currentView === 'ARRANGEMENT' ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-300'}`}>
                   <i className="fas fa-grip-horizontal block mb-1"></i>
                   Pistes
                 </button>
-                <button onClick={() => { onChangeView('MIXER'); setIsMobileMenuOpen(false); }} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${currentView === 'MIXER' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-400'}`}>
+                <button onClick={() => { onChangeView('MIXER'); setIsMobileMenuOpen(false); }} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${currentView === 'MIXER' ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-300'}`}>
                   <i className="fas fa-sliders-h block mb-1"></i>
                   Console
                 </button>
-                <button onClick={() => { onChangeView('AUTOMATION'); setIsMobileMenuOpen(false); }} className={`px-4 py-3 rounded-lg text-[11px] font-black uppercase transition-all ${currentView === 'AUTOMATION' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-400'}`}>
+                <button onClick={() => { onChangeView('AUTOMATION'); setIsMobileMenuOpen(false); }} className={`px-3 py-3 rounded-xl text-[12px] font-semibold transition-colors ${currentView === 'AUTOMATION' ? 'bg-cyan-500 text-black' : 'bg-white/[0.04] text-slate-300'}`}>
                   <i className="fas fa-project-diagram block mb-1"></i>
                   Auto
                 </button>
@@ -512,8 +512,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             {/* VIEW MODE SWITCHER (PC/MOBILE) */}
             {children && (
               <div className="space-y-2">
-                <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Mode d'affichage</div>
-                <div className="group vm-labeled bg-white/5 p-3 rounded-lg">
+                <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Mode d'affichage</div>
+                <div className="group vm-labeled [&>div]:ml-0 [&>div]:border-0 [&>div]:pl-0">
                   {children}
                 </div>
               </div>
@@ -521,12 +521,12 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
             {/* UNDO / REDO */}
             <div className="space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Historique</div>
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Historique</div>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => { onUndo?.(); setIsMobileMenuOpen(false); }} disabled={!canUndo} className={`px-4 py-3 rounded-lg font-black transition-all ${canUndo ? 'bg-white/10 text-white' : 'bg-white/5 text-slate-600 opacity-50'}`}>
+                <button onClick={() => { onUndo?.(); setIsMobileMenuOpen(false); }} disabled={!canUndo} className={`min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors ${canUndo ? 'bg-white/[0.06] text-white' : 'bg-white/[0.03] text-slate-500'}`}>
                   <i className="fas fa-undo mr-2"></i>Annuler
                 </button>
-                <button onClick={() => { onRedo?.(); setIsMobileMenuOpen(false); }} disabled={!canRedo} className={`px-4 py-3 rounded-lg font-black transition-all ${canRedo ? 'bg-white/10 text-white' : 'bg-white/5 text-slate-600 opacity-50'}`}>
+                <button onClick={() => { onRedo?.(); setIsMobileMenuOpen(false); }} disabled={!canRedo} className={`min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors ${canRedo ? 'bg-white/[0.06] text-white' : 'bg-white/[0.03] text-slate-500'}`}>
                   <i className="fas fa-redo mr-2"></i>Refaire
                 </button>
               </div>
@@ -534,40 +534,42 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
             {/* FILE ACTIONS */}
             <div className="space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Fichiers</div>
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Fichiers</div>
               <div className="space-y-2">
-                <button onClick={() => { onOpenLoadMenu?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-amber-500/10 text-amber-400 font-black transition-all flex items-center justify-center space-x-2">
-                  <i className="fas fa-folder-open"></i>
+                <button onClick={() => { onOpenLoadMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                  <i className="w-5 text-center text-amber-400 fas fa-folder-open"></i>
                   <span>Ouvrir un projet</span>
                 </button>
-                <button onClick={() => { onOpenSaveMenu?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-green-500/10 text-green-400 font-black transition-all flex items-center justify-center space-x-2">
-                  <i className="fas fa-save"></i>
+                <button onClick={() => { onOpenSaveMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                  <i className="w-5 text-center text-green-400 fas fa-save"></i>
                   <span>Sauvegarder</span>
                 </button>
                 {user && (
-                  <button onClick={() => { onShareProject?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-blue-500/10 text-blue-400 font-black transition-all flex items-center justify-center space-x-2">
-                    <i className="fas fa-share-alt"></i>
+                  <button onClick={() => { onShareProject?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                    <i className="w-5 text-center text-blue-400 fas fa-share-alt"></i>
                     <span>Partager</span>
                   </button>
                 )}
                 {onOpenMasterNova && (
-                  <button onClick={() => { onOpenMasterNova(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-amber-500/10 text-amber-300 font-black transition-all flex items-center justify-center space-x-2">
-                    <i className="fas fa-crown"></i>
+                  <button onClick={() => { onOpenMasterNova(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                    <i className="w-5 text-center text-amber-300 fas fa-crown"></i>
                     <span>Master Nova</span>
                   </button>
                 )}
-                <button onClick={() => { onExportMix?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-purple-500/10 text-purple-400 font-black transition-all flex items-center justify-center space-x-2">
-                  <i className="fas fa-compact-disc"></i>
+                <button onClick={() => { onExportMix?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                  <i className="w-5 text-center text-purple-400 fas fa-compact-disc"></i>
                   <span>Exporter</span>
                 </button>
                 {onOpenTakeHome && (
-                  <button onClick={() => { onOpenTakeHome(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-cyan-500/10 text-cyan-300 font-black transition-all flex items-center justify-center space-x-2">
-                    <span>☁️ {takeHomeLabel || 'Emporter la session'}</span>
+                  <button onClick={() => { onOpenTakeHome(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                    <i className="w-5 text-center text-cyan-300 fas fa-cloud-arrow-up"></i>
+                    <span>{takeHomeLabel || 'Emporter la session'}</span>
                   </button>
                 )}
                 {onOpenCollab && (
-                  <button onClick={() => { onOpenCollab(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-violet-500/10 text-violet-200 font-black transition-all flex items-center justify-center space-x-2">
-                    <span>👥 {collabLabel || 'Collaborer'}</span>
+                  <button onClick={() => { onOpenCollab(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                    <i className="w-5 text-center text-violet-300 fas fa-user-group"></i>
+                    <span>{collabLabel || 'Collaborer'}</span>
                   </button>
                 )}
               </div>
@@ -575,19 +577,19 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
             {/* SETTINGS */}
             <div className="space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Paramètres</div>
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Paramètres</div>
               <div className="space-y-2">
-                <button onClick={() => { onOpenAudioEngine?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-orange-500/10 text-orange-400 font-black transition-all flex items-center justify-center space-x-2">
-                  <i className="fas fa-microchip"></i>
+                <button onClick={() => { onOpenAudioEngine?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                  <i className="w-5 text-center text-orange-400 fas fa-microchip"></i>
                   <span>{simple ? 'Réglages audio (micro, latence)' : 'Réglages audio (moteur, latence)'}</span>
                 </button>
-                {!simple && <button onClick={() => { onToggleDelayComp?.(); setIsMobileMenuOpen(false); }} aria-pressed={!!isDelayCompEnabled} className={`w-full px-4 py-3 rounded-lg font-black transition-all flex items-center justify-center space-x-2 ${isDelayCompEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-400'}`}>
-                  <div className={`w-2 h-2 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400' : 'bg-slate-600'}`}></div>
+                {!simple && <button onClick={() => { onToggleDelayComp?.(); setIsMobileMenuOpen(false); }} aria-pressed={!!isDelayCompEnabled} className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isDelayCompEnabled ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/[0.04] text-slate-300'}`}>
+                  <span className="w-5 flex justify-center"><span className={`w-2 h-2 rounded-full ${isDelayCompEnabled ? 'bg-cyan-400' : 'bg-slate-500'}`}></span></span>
                   <span>Compensation de latence (PDC)</span>
                 </button>}
                 {!isMobileLayout && (
-                <button onClick={() => { onToggleSidebar?.(); setIsMobileMenuOpen(false); }} className={`w-full px-4 py-3 rounded-lg font-black transition-all flex items-center justify-center space-x-2 ${isSidebarOpen ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-400'}`}>
-                  <i className="fas fa-columns"></i>
+                <button onClick={() => { onToggleSidebar?.(); setIsMobileMenuOpen(false); }} className={`w-full min-h-12 px-4 py-3 rounded-xl font-semibold transition-colors flex items-center gap-3 ${isSidebarOpen ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/[0.04] text-slate-300'}`}>
+                  <i className="w-5 text-center fas fa-columns"></i>
                   <span>{isSidebarOpen ? 'Masquer' : 'Afficher'} le navigateur</span>
                 </button>
                 )}
@@ -596,7 +598,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
             {/* BPM CONTROL */}
             <div className="space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Tempo (BPM)</div>
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Tempo (BPM)</div>
               <div className="bg-white/5 p-4 rounded-lg flex items-center justify-center space-x-3">
                 <button onClick={() => onBpmChange(Math.max(20, bpm - 1))} aria-label="Tempo -1" className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">-</button>
                 {isEditingBpm ? (
@@ -618,9 +620,9 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
             {/* AIDE : signaler un bug ou proposer une idée */}
             <div className="space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Aide</div>
-              <button onClick={() => { openFeedback(); setIsMobileMenuOpen(false); }} data-nova-action="feedback-menu" className="w-full px-4 py-3 rounded-lg bg-white/5 text-slate-200 font-black transition-all flex items-center justify-center space-x-2">
-                <i className="fas fa-comment-dots"></i>
+              <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Aide</div>
+              <button onClick={() => { openFeedback(); setIsMobileMenuOpen(false); }} data-nova-action="feedback-menu" className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
+                <i className="w-5 text-center text-slate-400 fas fa-comment-dots"></i>
                 <span>Signaler un bug / proposer une idée</span>
               </button>
               <button onClick={() => { openFeedback({ tab: 'historique' }); setIsMobileMenuOpen(false); }} className="w-full px-4 py-2 rounded-lg text-slate-400 text-[12px] font-bold transition-all flex items-center justify-center space-x-2 hover:text-white">
@@ -647,7 +649,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   </button>
                 </div>
               ) : (
-                <button onClick={() => { onOpenAuth?.(); setIsMobileMenuOpen(false); }} className="w-full px-4 py-3 rounded-lg bg-cyan-500/10 text-cyan-400 font-black transition-all flex items-center justify-center space-x-2">
+                <button onClick={() => { onOpenAuth?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-cyan-500/10 text-cyan-300 font-semibold transition-colors flex items-center justify-center gap-3">
                   <i className="fas fa-user-circle"></i>
                   <span>Se connecter</span>
                 </button>

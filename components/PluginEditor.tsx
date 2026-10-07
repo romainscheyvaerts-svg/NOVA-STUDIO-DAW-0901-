@@ -149,7 +149,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   // de fermeture finissait hors écran, sans autre moyen de sortir. Plein écran
   // défilable, barre de fermeture fixe, contenu ajusté à la largeur.
   const mobileShell = (content: React.ReactNode) => (
-      <div className="fixed inset-0 z-[300] overflow-y-auto bg-[#0c0d10] pt-14 pb-8">
+      <div className="nova-sombre fixed inset-0 z-[300] overflow-y-auto bg-[#0c0d10] pt-14 pb-8">
           <div className="fixed top-0 left-0 right-0 z-[310] h-12 bg-black/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between pl-4 pr-1">
               <span className="flex min-w-0 items-center gap-2">
                 {onToggleBypass && plugin.type !== 'VST3' && (
@@ -176,7 +176,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       if (isMobile) return mobileShell(vstWindow);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
-              <div className="pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-lg">
+              <div className="nova-sombre pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-lg">
                   {vstWindow}
               </div>
           </div>
@@ -188,7 +188,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       if (isMobile) return mobileShell(<SamplerEditor plugin={plugin} trackId={trackId} onClose={onClose} />);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
-              <div className="pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px]">
+              <div className="nova-sombre pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px]">
                   <SamplerEditor plugin={plugin} trackId={trackId} onClose={onClose} />
               </div>
           </div>
@@ -199,7 +199,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       if (isMobile) return mobileShell(<DrumSamplerEditor plugin={plugin} trackId={trackId} onClose={onClose} />);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
-              <div className="pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px]">
+              <div className="nova-sombre pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px]">
                   <DrumSamplerEditor plugin={plugin} trackId={trackId} onClose={onClose} />
               </div>
           </div>
@@ -210,7 +210,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       if (isMobile) return mobileShell(<MelodicSamplerEditor plugin={plugin} trackId={trackId} onClose={onClose} />);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
-              <div className="pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px]">
+              <div className="nova-sombre pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px]">
                   <MelodicSamplerEditor plugin={plugin} trackId={trackId} onClose={onClose} />
               </div>
           </div>
@@ -224,7 +224,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       if (isMobile) return mobileShell(<DrumRack track={track} onUpdateTrack={onUpdateTrack} />);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
-              <div className="pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px] relative">
+              <div className="nova-sombre pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] rounded-[40px] relative">
                   <button aria-label="Fermer" title="Fermer" onClick={onClose} className="absolute top-4 right-4 z-50 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"><i className="fas fa-times"></i></button>
                   <DrumRack track={track} onUpdateTrack={onUpdateTrack} />
               </div>
@@ -236,7 +236,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   if (error) {
     return (
       <div className="fixed inset-0 flex items-center justify-center z-[300]">
-        <div className="bg-[#0f1115] border border-red-500/30 p-10 rounded-[32px] text-center w-80 shadow-2xl relative">
+        <div className="nova-sombre bg-[#0f1115] border border-red-500/30 p-10 rounded-[32px] text-center w-80 shadow-2xl relative">
           <button aria-label="Fermer" title="Fermer" onClick={onClose} className="absolute top-4 right-4 text-white"><i className="fas fa-times"></i></button>
           <i className="fas fa-bug text-4xl text-red-500 mb-4"></i>
           <p className="text-red-400 font-bold text-xs mb-4">{error}</p>
@@ -255,7 +255,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   if (!nodeInstance) {
     return (
       <div className="fixed inset-0 flex items-center justify-center z-[300]">
-        <div className="bg-[#0f1115] border border-white/10 p-10 rounded-[32px] text-center w-80 shadow-2xl relative">
+        <div className="nova-sombre bg-[#0f1115] border border-white/10 p-10 rounded-[32px] text-center w-80 shadow-2xl relative">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
             <div className="w-12 h-12 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin mb-4 mx-auto"></div>
             <p className="text-slate-500 font-black uppercase text-[10px] tracking-widest animate-pulse">Initialisation DSP...</p>
@@ -291,14 +291,14 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
 
   if (isMobile) {
     return mobileShell(
-      <div className="nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden rounded-none">
+      <div className="nova-sombre nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden rounded-none">
         {renderPluginUI()}
       </div>
     );
   }
 
   return (
-    <div className={`relative group/plugin ${isMobile ? 'w-full h-full flex flex-col items-center justify-center pt-16' : ''}`}
+    <div className={`nova-sombre relative group/plugin ${isMobile ? 'w-full h-full flex flex-col items-center justify-center pt-16' : ''}`}
       style={isMobile ? undefined : { transform: `translate(${offset.x}px, ${offset.y}px)` }}>
       {/* Header Bar (poignée de déplacement) */}
       <div onPointerDown={isMobile ? undefined : startDrag} title={isMobile ? undefined : 'Glisse la barre pour déplacer la fenêtre'}

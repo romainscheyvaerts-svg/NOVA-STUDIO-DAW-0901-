@@ -13,6 +13,7 @@ import { automationRecorder } from '../services/AutomationManager';
 import { useLiveParam } from '../utils/automationLiveStore';
 import { sendColor, sendHelp, sendLabel, trackDisplayName } from '../utils/sendLabels';
 import InsertListPopover from './InsertListPopover';
+import { canvasTheme } from '../utils/canvasTheme';
 import { MIXER_INSERT_ROWS, splitInserts } from '../utils/insertRows';
 
 // Track Group Colors (inspired by Pro Tools)
@@ -37,7 +38,7 @@ const VUMeter: React.FC<{ analyzer: AnalyserNode | null }> = ({ analyzer }) => {
       // Slightly boost visual level for better feedback
       const level = Math.min(1, (sum / data.length / 128) * 1.8);
       const w = canvas.width; const h = canvas.height;
-      ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#1e2229'; ctx.fillRect(0, 0, w, h);
+      ctx.clearRect(0, 0, w, h); ctx.fillStyle = canvasTheme().light ? 'rgba(15, 23, 42, 0.1)' : '#1e2229'; ctx.fillRect(0, 0, w, h);
       const grad = ctx.createLinearGradient(0, h, 0, 0);
       grad.addColorStop(0, '#22c55e'); grad.addColorStop(0.7, '#eab308'); grad.addColorStop(0.9, '#ef4444');
       ctx.fillStyle = grad; ctx.fillRect(0, h - (level * h), w, level * h);

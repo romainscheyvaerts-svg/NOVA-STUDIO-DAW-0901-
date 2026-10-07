@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { canvasTheme } from '../utils/canvasTheme';
 
 interface Props {
   buffer: AudioBuffer | null;
@@ -27,7 +28,7 @@ const MiniWave: React.FC<Props> = ({ buffer, height = 72, region, markers, hot =
       if (!g) return;
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, w, h);
-      g.fillStyle = 'rgba(255,255,255,0.04)'; g.fillRect(0, 0, w, h);
+      g.fillStyle = canvasTheme().ink(0.04); g.fillRect(0, 0, w, h);
       if (!buffer) return;
       const d = buffer.getChannelData(0);
       const per = Math.max(1, Math.floor(d.length / w));
@@ -35,7 +36,7 @@ const MiniWave: React.FC<Props> = ({ buffer, height = 72, region, markers, hot =
       if (markers && markers.length) {
         const pts = [...markers, 1];
         for (let k = 0; k < markers.length; k++) {
-          g.fillStyle = k === hot ? 'rgba(34,211,238,0.28)' : k % 2 ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)';
+          g.fillStyle = k === hot ? 'rgba(34,211,238,0.28)' : k % 2 ? canvasTheme().ink(0.05) : canvasTheme().ink(0.02);
           g.fillRect(pts[k] * w, 0, (pts[k + 1] - pts[k]) * w, h);
         }
       }
@@ -47,7 +48,7 @@ const MiniWave: React.FC<Props> = ({ buffer, height = 72, region, markers, hot =
         g.fillRect(x, mid - mx * mid * 0.95, 1, Math.max(1, (mx - mn) * mid * 0.95));
       }
       if (region) {
-        g.fillStyle = 'rgba(10,12,16,0.72)';
+        g.fillStyle = canvasTheme().labelBg;
         g.fillRect(0, 0, region.start * w, h);
         g.fillRect(region.end * w, 0, (1 - region.end) * w, h);
         g.fillStyle = '#facc15';

@@ -427,7 +427,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={() => { setIsDragOverFX(false); }}
       onDrop={handleOnDrop}
-      className={`group border-b border-white/10 px-3 py-2 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${frozen ? 'bg-cyan-500/[0.03]' : ''}${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
+      className={`group border-b border-white/[0.06] px-3 py-2 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${frozen ? 'bg-cyan-500/[0.03]' : ''}${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
       style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined, scrollMarginTop: 44, scrollMarginBottom: 8 }}
     >
       <div className="flex justify-between items-start mb-2">
@@ -523,7 +523,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 aria-label={`Effets de ${track.name}`}
                 aria-expanded={fxMenu}
                 aria-haspopup="menu"
-                className={`nova-hit-tactile relative w-7 h-7 rounded-md flex items-center justify-center transition-all border text-[9px] font-black ${fxMenu ? 'bg-cyan-500 border-cyan-400 text-black' : insertPlugins.length ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
+                className={`nova-hit-tactile relative w-7 h-7 rounded-md flex items-center justify-center transition-all border text-[9px] font-black ${fxMenu ? 'bg-cyan-500 border-cyan-400 text-black' : insertPlugins.length ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
               >
                 FX
                 {insertPlugins.length > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] rounded-full bg-cyan-400 text-black text-[8px] leading-[14px] text-center">{insertPlugins.length}</span>}
@@ -569,7 +569,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             onClick={handleMuteToggle}
             // Pas de onTouchStart : React l'écoute en passif, preventDefault échouait et le
             // clic qui suit rebasculait (M / S / R / envois sans effet au doigt).
-            className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
+            className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isMuted ? 'bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
           >
             <span className="text-[11px] font-bold">M</span>
           </button>
@@ -578,7 +578,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             aria-label={`Solo : ${track.name}`}
             aria-pressed={!!track.isSolo}
             onClick={handleSoloToggle}
-            className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/5 border-white/10 text-slate-600 hover:text-white'}`}
+            className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
           >
             <span className="text-[11px] font-bold">S</span>
           </button>
@@ -589,7 +589,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 title="Envois : écho et reverbs"
                 aria-label={`Envois de ${track.name}`}
                 aria-expanded={showSends}
-                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
+                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-400 hover:text-white'}`}
             >
                 <i className="fas fa-sliders-h text-[10px]"></i>
             </button>
@@ -599,7 +599,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
               <button
                 onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
-                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-slate-600 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
+                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
                 title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : ownerName && ownerName !== 'à toi' ? `Piste de ${ownerName} : enregistre sur ta propre piste` : track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer" : "Enregistrer sur cette piste (sinon REC choisit la piste sélectionnée)"}
                 aria-label={`Armer l'enregistrement : ${track.name}`}
                 aria-pressed={!!track.isTrackArmed}
@@ -623,7 +623,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       )}
 
-      <div ref={controlsRef} className={`${canHaveSends && showSends && !simple ? 'hidden' : 'flex'} items-center space-x-2 mt-1 bg-black/20 p-1.5 rounded-lg border border-white/5 relative z-10`}>
+      <div ref={controlsRef} className={`${canHaveSends && showSends && !simple ? 'hidden' : 'flex'} items-center space-x-2 mt-1 bg-white/[0.03] p-1.5 rounded-lg relative z-10`}>
         {/* Mode d'automation (Read vert, Touch/Latch jaune, Write rouge) — masqué en mode simple. */}
         {!simple && track.id !== 'master' && <AutomationModeSelector track={track} onUpdate={onUpdate} />}
         <div
@@ -632,7 +632,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           role="slider"
           aria-label={`Panoramique ${track.name}`}
           aria-valuetext={panToText(shownPan)}
-          className="nova-hit-tactile relative w-7 h-7 rounded-full bg-black border border-white/10 flex items-center justify-center cursor-ns-resize shadow-lg hover:border-cyan-500/30 transition-all touch-none group/pan"
+          className="nova-hit-tactile relative w-7 h-7 rounded-full bg-nv-raised border border-white/10 flex items-center justify-center cursor-ns-resize shadow-sm hover:border-cyan-500/30 transition-all touch-none group/pan"
         >
           <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${shownPan * 140}deg) translateY(-1px)` }} />
         </div>
