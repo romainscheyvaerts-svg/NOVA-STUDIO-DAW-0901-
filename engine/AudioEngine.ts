@@ -2142,7 +2142,7 @@ export class AudioEngine {
       default: {
         // Effets déclarés dans le registre (engine/pluginRegistry.ts), ex. le limiteur NOVA.
         const reg = getRegisteredPlugin(plugin.type);
-        if (reg) { node = reg.create(ctx, plugin); break; }
+        if (reg) { node = reg.create(ctx, plugin, bpm); break; }
       }
         const bypassIn = ctx.createGain();
         const bypassOut = ctx.createGain();
@@ -2615,7 +2615,15 @@ export class AudioEngine {
     });
   }
 
-  public getTrackPluginParameters(trackId: string): { pluginId: string, pluginName: string, params: PluginParameter[] }[] { return []; }
+  /** Réglages automatisables des effets du registre (V21 : harmoniseur, tape stop…) de la piste. */
+  public getTrackPluginParameters(trackId: string): { pluginId: string, pluginName: string, params: PluginParameter[] }[] {
+    const track = this.liveTracks?.find(t => t.id === trackId);
+    return (track?.plugins || []).flatMap(pl => {
+      const reg = getRegisteredPlugin(pl.type);
+      if (!reg?.automatable?.length) return [];
+      return [{ pluginId: pl.id, pluginName: reg.name, params: reg.automatable.map(a => ({ id: a.id, name: a.label, type: 'float' as const, min: a.min, max: a.max, value: pl.params?.[a.id], unit: a.unit })) }];
+    });
+  }
   public getMasterAnalyzer() { return this.masterAnalyzer; }
 
   /**
