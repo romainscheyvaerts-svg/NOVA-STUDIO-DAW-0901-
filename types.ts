@@ -142,6 +142,33 @@ export interface MidiNote {
   isSelected?: boolean;
 }
 
+/** Groove (V25, utils/groove) : décalage et vélocité par case de grille, comme le Groove Pool de Live. */
+export interface GrooveTemplate {
+  id: string;
+  name: string;
+  /** Cases par temps : 2 = croches, 4 = doubles-croches. */
+  stepsPerBeat: number;
+  /** Longueur du motif en temps (4 = une mesure en 4/4). */
+  lengthBeats: number;
+  /** Décalage de chaque case, en fraction de case (+ = en retard). */
+  timing: number[];
+  /** Multiplicateur de vélocité de chaque case. */
+  velocity: number[];
+}
+
+/** Groove posé sur un clip MIDI, réglable tant qu'il n'est pas appliqué (Commit Groove). */
+export interface ClipGroove {
+  template: GrooveTemplate;
+  /** Intensité du décalage (0-1, comme Timing dans Live). */
+  amount: number;
+  /** Effet sur la vélocité (0-1). */
+  velocity: number;
+  /** Calage sur la grille avant le groove (0-1, comme Quantize dans Live). */
+  quantize?: number;
+  /** Notes d'origine (sans groove). */
+  source: MidiNote[];
+}
+
 // Crossfade curve types (inspired by Pro Tools)
 export type CrossfadeCurve = 'LINEAR' | 'EQUAL_POWER' | 'S_CURVE' | 'EXPONENTIAL';
 
@@ -247,6 +274,12 @@ export interface Clip {
    * avec le clip (collaboration). Absent : rien de traité.
    */
   breaths?: BreathEdit[];
+  /**
+   * Groove / swing en cours de réglage (V25, utils/groove) : `notes` contient
+   * déjà le résultat (une ancienne version joue donc le clip groové) ; la
+   * source sert à changer de réglage. Absent : pas de groove.
+   */
+  groove?: ClipGroove;
 }
 
 /** Retouche d'une note (justesse), rangée par instant (secondes dans le son d'origine). */
@@ -432,6 +465,8 @@ export interface DrumPad {
 
 export interface Track {
   id: string;
+  /** Canal MIDI d'un .mid importé (V25) : 10 = batterie General MIDI gardée en notes brutes. */
+  midiChannel?: number;
   name: string;
   type: TrackType;
   color: string;

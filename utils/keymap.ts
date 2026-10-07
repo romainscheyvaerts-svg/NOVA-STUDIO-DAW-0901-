@@ -63,6 +63,8 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.mute', keys: ['m'], label: 'Rendre le clip muet / le réactiver', pt: 'Ctrl+M (Clip Mute)', category: 'Édition' }),
   nova({ id: 'nova.split', keys: ['s'], label: 'Couper le clip à la tête de lecture', pt: 'Ctrl+E ou B', category: 'Édition' }),
   nova({ id: 'nova.tools', keys: ['1', '2', '3'], label: 'Outil sélection / ciseaux / gomme', pt: 'F6 / F7 / F8', category: 'Édition' }),
+  // Géré par components/MidiHost (V25). Ctrl+Alt+C : repli quand le navigateur garde Ctrl+Maj+C (outils de développement).
+  nova({ id: 'nova.captureMidi', keys: ['ctrl+shift+c', 'ctrl+alt+c'], label: 'Capturer ce que tu viens de jouer (clip MIDI créé après coup)', pt: 'Pas dans Pro Tools : Capture MIDI de Live (Ctrl+Maj+C)', category: 'Transport' }),
 
   // --- Ajoutés façon Pro Tools (toujours actifs) ----------------------------------
   g({ id: 'pt.split', keys: ['ctrl+e'], label: 'Séparer le clip à la tête de lecture', pt: 'Ctrl+E (Separate Clip at Selection)', category: 'Édition', command: 'split' }),

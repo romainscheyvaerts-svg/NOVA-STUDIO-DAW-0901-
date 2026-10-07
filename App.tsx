@@ -55,6 +55,7 @@ import FrozenEditsNotice from './components/FrozenEditsNotice';
 import { recFreezeStore } from './utils/recFreezeStore';
 import { ProjectIO } from './services/ProjectIO';
 const PianoRoll = lazy(() => import('./components/PianoRoll'));
+import MidiHost from './components/MidiHost'; // V25 : .mid, groove, capture MIDI
 import { midiManager } from './services/MidiManager';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
@@ -815,6 +816,7 @@ function Studio() {
   const clipboardClipRef = useRef<Clip | null>(null);
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
+  const getStateForMidi = useCallback(() => stateRef.current, []);
 
   // --- Protection contre la perte de travail ---
   // Fermer l'onglet ou recharger detruisait toute la session sans le moindre
@@ -7151,6 +7153,7 @@ function Studio() {
       {addPluginMenu && <ContextMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)} items={AVAILABLE_FX_MENU.map(fx => ({ label: fx.name, icon: fx.icon, onClick: () => handleAddPluginFromContext(addPluginMenu.trackId, fx.id as PluginType, {}, { openUI: true }) }))} />}
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}
       
+      <MidiHost state={state} getState={getStateForMidi} setState={setState} pianoRoll={midiEditorOpen} />
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
           <div data-nova-transport="" className="fixed inset-0 z-[250] bg-[#0c0d10] flex flex-col animate-in slide-in-from-bottom-10 duration-200">
              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement de l'éditeur…</div>}>

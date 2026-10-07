@@ -157,96 +157,66 @@ class Arpeggiator {
   }
   
   private buildPattern() {
-    if (this.heldNotes.length === 0) {
-      this.patternSequence = [];
-      return;
-    }
-    
-    // Expand to multiple octaves
-    let expandedNotes: number[] = [];
-    for (let oct = 0; oct < this.settings.octaves; oct++) {
-      expandedNotes = expandedNotes.concat(this.heldNotes.map(n => n + oct * 12));
-    }
-    
-    switch (this.settings.pattern) {
-      case 'UP':
-        this.patternSequence = [...expandedNotes];
-        break;
-        
-      case 'DOWN':
-        this.patternSequence = [...expandedNotes].reverse();
-        break;
-        
-      case 'UP_DOWN':
-        this.patternSequence = [
-          ...expandedNotes, 
-          ...expandedNotes.slice(1, -1).reverse()
-        ];
-        break;
-        
-      case 'DOWN_UP':
-        this.patternSequence = [
-          ...expandedNotes.reverse(),
-          ...expandedNotes.reverse().slice(1, -1).reverse()
-        ];
-        break;
-        
-      case 'RANDOM':
-        this.patternSequence = [...expandedNotes].sort(() => Math.random() - 0.5);
-        break;
-        
-      case 'ORDER':
-        // Play in the order notes were pressed (use heldNotes order)
-        this.patternSequence = [];
-        for (let oct = 0; oct < this.settings.octaves; oct++) {
-          this.patternSequence = this.patternSequence.concat(this.heldNotes.map(n => n + oct * 12));
-        }
-        break;
-        
-      case 'CONVERGE':
-        // Outside notes first, converging to middle
-        const sorted = [...expandedNotes];
-        this.patternSequence = [];
-        while (sorted.length > 0) {
-          if (sorted.length > 0) this.patternSequence.push(sorted.shift()!);
-          if (sorted.length > 0) this.patternSequence.push(sorted.pop()!);
-        }
-        break;
-        
-      case 'DIVERGE':
-        // Middle notes first, diverging outward
-        const sorted2 = [...expandedNotes];
-        this.patternSequence = [];
-        const mid = Math.floor(sorted2.length / 2);
-        let left = mid - 1;
-        let right = mid;
-        while (left >= 0 || right < sorted2.length) {
-          if (right < sorted2.length) this.patternSequence.push(sorted2[right++]);
-          if (left >= 0) this.patternSequence.push(sorted2[left--]);
-        }
-        break;
-        
-      case 'PINKY_UP':
-        // Thumb (lowest) + alternating upward
-        this.patternSequence = [];
-        for (let i = 1; i < expandedNotes.length; i++) {
-          this.patternSequence.push(expandedNotes[0]);
-          this.patternSequence.push(expandedNotes[i]);
-        }
-        break;
-        
-      case 'PINKY_DOWN':
-        // Pinky (highest) + alternating downward
-        this.patternSequence = [];
-        const last = expandedNotes.length - 1;
-        for (let i = last - 1; i >= 0; i--) {
-          this.patternSequence.push(expandedNotes[last]);
-          this.patternSequence.push(expandedNotes[i]);
-        }
-        break;
-    }
+    this.patternSequence = arpSequence(this.heldNotes, this.settings.pattern, this.settings.octaves);
   }
 }
+
+/**
+ * Suite de notes jouée par l'arpégiateur (pure, réutilisée par l'outil
+ * « Arpège » du piano roll, V25). `notes` : hauteurs dans l'ordre joué
+ * (ORDER) ; les autres motifs les trient.
+ */
+export function arpSequence(notes: number[], pattern: ArpPattern, octaves = 1, rand: () => number = Math.random): number[] {
+  if (notes.length === 0) return [];
+  const oct = Math.max(1, Math.min(4, Math.round(octaves)));
+  const sortedIn = [...notes].sort((a, b) => a - b);
+  const expanded: number[] = [];
+  for (let o = 0; o < oct; o++) expanded.push(...sortedIn.map(n => n + o * 12));
+  switch (pattern) {
+    case 'UP': return [...expanded];
+    case 'DOWN': return [...expanded].reverse();
+    case 'UP_DOWN': return [...expanded, ...expanded.slice(1, -1).reverse()];
+    case 'DOWN_UP': { const down = [...expanded].reverse(); return [...down, ...expanded.slice(1, -1)]; }
+    case 'RANDOM': {
+      const a = [...expanded];
+      for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+      return a;
+    }
+    case 'ORDER': {
+      const out: number[] = [];
+      for (let o = 0; o < oct; o++) out.push(...notes.map(n => n + o * 12));
+      return out;
+    }
+    case 'CONVERGE': {
+      const a = [...expanded]; const out: number[] = [];
+      while (a.length) { out.push(a.shift()!); if (a.length) out.push(a.pop()!); }
+      return out;
+    }
+    case 'DIVERGE': {
+      const out: number[] = [];
+      const mid = Math.floor(expanded.length / 2);
+      let l = mid - 1, r = mid;
+      while (l >= 0 || r < expanded.length) { if (r < expanded.length) out.push(expanded[r++]); if (l >= 0) out.push(expanded[l--]); }
+      return out;
+    }
+    case 'PINKY_UP': {
+      if (expanded.length < 2) return [...expanded];
+      const out: number[] = [];
+      for (let i = 1; i < expanded.length; i++) out.push(expanded[0], expanded[i]);
+      return out;
+    }
+    case 'PINKY_DOWN': {
+      if (expanded.length < 2) return [...expanded];
+      const out: number[] = []; const last = expanded.length - 1;
+      for (let i = last - 1; i >= 0; i--) out.push(expanded[last], expanded[i]);
+      return out;
+    }
+  }
+  return [...expanded];
+}
+
+/** Durée (temps) d'un pas de l'arpégiateur. */
+export const arpRateBeats = (rate: ArpRate): number => RATE_TO_BEATS[rate];
 
 // ============================================
 // CHORD GENERATOR (inspired by Logic/Ableton)
@@ -436,6 +406,16 @@ class ScaleQuantizer {
     return this.settings.rootNote + octave * 12 + quantizedNote;
   }
 }
+
+/** Ramène une note dans une gamme (ScaleQuantizer, réutilisé par les outils du piano roll). */
+export function quantizePitchToScale(pitch: number, rootNote: number, scale: ScaleType, direction: 'NEAREST' | 'UP' | 'DOWN' = 'NEAREST'): number {
+  const q = new ScaleQuantizer();
+  q.setSettings({ enabled: true, rootNote: ((rootNote % 12) + 12) % 12, scale, direction });
+  return q.quantize(pitch);
+}
+
+/** Notes de la gamme (intervalles depuis la tonique). */
+export const scaleIntervals = (scale: ScaleType): number[] => SCALE_INTERVALS[scale] || SCALE_INTERVALS.CHROMATIC;
 
 // ============================================
 // HUMANIZER (timing/velocity variations)

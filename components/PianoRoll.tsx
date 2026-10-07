@@ -6,6 +6,10 @@ import { audioEngine } from '../engine/AudioEngine';
 import { midiEffectsService } from '../services/MidiEffectsService';
 import { usePlayheadTime } from '../utils/playheadStore';
 import { isInScale, snapToScale, scaleRows, buildChord, chordLabelFr, keyLabelFr, noteNameFr, CHORD_CHOICES, SCALE_CHOICES, NOTE_NAMES_FR, ChordKind } from '../utils/scales';
+import MidiToolsPanel from './MidiToolsPanel';
+import { useCaptureCount, CAPTURE_HINT } from './MidiFileMenu';
+import { midiBus } from '../utils/midiBus';
+import { midiCapture } from '../utils/midiCapture';
 import { ComputerKeyboard, NoteRecorder, isComputerKeyboardCode, defaultKeyLabel, octaveBase, KEY_TO_SEMITONE, DEFAULT_KEYBOARD_STATE, KeyboardState } from '../utils/computerKeyboard';
 
 /** Préférences d'affichage du piano roll, gardées sur cet appareil. */
@@ -130,6 +134,20 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
   const [selectionBox, setSelectionBox] = useState<{ startX: number, startY: number, endX: number, endY: number } | null>(null);
   
   const [hoveredNoteId, setHoveredNoteId] = useState<string | null>(null);
+
+  // --- OUTILS MIDI (V25) : menu « Outils » avec aperçu, groove, capture ---
+  const [toolsAnchor, setToolsAnchor] = useState<{ x: number; y: number } | null | false>(false);
+  const [toolPreview, setToolPreview] = useState<MidiNote[] | null>(null);
+  const captureCount = useCaptureCount();
+  const toolCtx = useMemo(() => ({ bpm, clipStart: clip?.start || 0, keyRoot: hasKey ? keyRoot : undefined, keyScale }), [bpm, clip?.start, hasKey, keyRoot, keyScale]);
+  /** Résultat d'un outil : une seule écriture (une étape d'annulation, une opération de collaboration). */
+  const applyToolResult = (next: MidiNote[], label: string) => {
+    const end = next.reduce((m, n) => Math.max(m, n.start + n.duration), 0);
+    const ids = new Set(next.map(n => n.id));
+    onUpdateTrack({ ...track, clips: track.clips.map(c => (c.id === clipId ? { ...c, notes: next, duration: Math.max(c.duration, end) } : c)) });
+    setSelectedNoteIds(prev => new Set(Array.from(prev).filter(id => ids.has(id))));
+    window.dispatchEvent(new CustomEvent('nova:notify', { detail: `${label} appliqué : ${next.length} note${next.length > 1 ? 's' : ''} (Ctrl+Z pour annuler).` }));
+  };
 
   const gridRef = useRef<HTMLDivElement>(null);
   const keysRef = useRef<HTMLDivElement>(null);
@@ -600,6 +618,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
     };
     const release = (pitch: number) => {
       audioEngine.triggerTrackRelease(liveRef.current.track.id, pitch);
+      midiCapture.noteOff(pitch);
       if (recRef.current && liveRef.current.isPlaying) recRef.current.noteOff(pitch, clipTimeNow());
     };
     const onDown = (e: KeyboardEvent) => {
@@ -612,6 +631,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
       if (a.type === 'noteOn') {
         void audioEngine.resume();
         audioEngine.triggerTrackAttack(liveRef.current.track.id, a.pitch, a.velocity / 127);
+        midiCapture.noteOn(a.pitch, a.velocity, liveRef.current.track.id); // Capture MIDI (V25)
         if (recRef.current && liveRef.current.isPlaying) recRef.current.noteOn(a.pitch, clipTimeNow(), a.velocity);
         setHeldPitches(kb.heldPitches());
       }
@@ -948,6 +968,27 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                   <i className="fas fa-random mr-1"></i>H
                 </button>
              </div>
+
+             {/* Outils MIDI, groove, capture (V25) */}
+             <div className="h-8 w-px bg-white/10"></div>
+             <div className="flex items-center gap-1.5 shrink-0">
+                <button type="button" data-nova-roll="outils" aria-haspopup="dialog" aria-expanded={toolsAnchor !== false}
+                  onClick={e => { if (toolsAnchor !== false) { setToolsAnchor(false); return; } const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setToolsAnchor(window.innerWidth < 640 ? null : { x: r.left, y: r.bottom + 6 }); }}
+                  title="Outils : strum, arpège, roll de hi-hats, chop, flam, courbe de vélocité, aléatoire, legato… sur la sélection ou tout le clip (comme les MIDI Transformations de Live 12 et les outils du piano roll de FL Studio)"
+                  className={`hidden sm:flex h-8 px-2.5 rounded-lg border items-center gap-1.5 text-[10px] font-bold ${toolsAnchor !== false ? 'bg-cyan-400 border-cyan-300 text-black' : 'bg-white/5 border-white/10 text-slate-300 hover:text-white'}`}>
+                  <i className="fas fa-toolbox text-[9px]"></i><span>Outils</span>
+                </button>
+                <button type="button" data-nova-roll="groove" onClick={() => midiBus.emit({ type: 'groove', trackId: track.id, clipId })} aria-pressed={!!clip.groove}
+                  title="Swing et groove de ce clip : 50 à 75 %, grooves MPC et trap, groove extrait d’une boucle (Groove Pool de Live, swing de FL Studio)"
+                  className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${clip.groove ? 'bg-amber-400 border-amber-300 text-black' : 'bg-white/5 border-white/10 text-amber-300 hover:text-white'}`}>
+                  <i className="fas fa-drum text-[9px]"></i><span>Swing</span>
+                </button>
+                <button type="button" data-nova-roll="capturer" onClick={() => midiBus.emit({ type: 'capture', trackId: track.id })} title={CAPTURE_HINT}
+                  className={`relative h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${captureCount > 0 ? 'bg-red-500/15 border-red-400/50 text-red-200' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+                  <i className="fas fa-hand-sparkles text-[9px]"></i><span>Capturer</span>
+                  {captureCount > 0 && <span className="ml-0.5 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black leading-4 text-center">{captureCount > 99 ? '99+' : captureCount}</span>}
+                </button>
+             </div>
           </div>
           
           {/* Right side: Info and Close */}
@@ -987,6 +1028,11 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
            {chordKind && <span className="text-fuchsia-300"><i className="fas fa-layer-group mr-1"></i>Clique dans la grille pour poser un accord {CHORD_CHOICES.find(c => c.id === chordKind)?.label.toLowerCase()}{hasKey ? ` dans ${keyLabelFr(keyRoot, keyScale)}` : ''}</span>}
            {lastChord && <span className="text-amber-200" role="status">{lastChord}</span>}
          </div>
+       )}
+
+       {toolsAnchor !== false && (
+         <MidiToolsPanel notes={clip.notes || []} selectedIds={selectedNoteIds} ctx={toolCtx} anchor={toolsAnchor}
+           onPreview={setToolPreview} onApply={applyToolResult} onClose={() => { setToolsAnchor(false); setToolPreview(null); }} />
        )}
 
        {menu && (
@@ -1099,7 +1145,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                                     width: Math.max(5, note.duration * zoomX - 1),
                                     height: currentRowHeight - 2,
                                     backgroundColor: isSelected ? '#fff' : (isDrumMode ? '#f97316' : outOfKey ? '#64748b' : track.color),
-                                    opacity: isSelected ? 1 : outOfKey ? 0.55 : 0.8,
+                                    opacity: toolPreview ? 0.2 : isSelected ? 1 : outOfKey ? 0.55 : 0.8,
                                     // Glisser une note au doigt la déplace (pas de défilement)
                                     touchAction: 'none'
                                 }}
@@ -1108,6 +1154,12 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                             </div>
                         );
                     })}
+
+                    {/* Aperçu d'un outil MIDI (V25) : contours, les notes actuelles s'estompent */}
+                    {toolPreview && toolPreview.map(n => (
+                      <div key={`pv-${n.id}-${n.start}`} data-nova-preview={n.pitch} className="absolute rounded-[2px] pointer-events-none border-2 border-cyan-300 bg-cyan-300/25 z-10"
+                        style={{ left: n.start * zoomX, top: getYFromPitch(n.pitch) + 1, width: Math.max(4, n.duration * zoomX - 1), height: currentRowHeight - 2, opacity: 0.35 + 0.65 * n.velocity }} />
+                    ))}
 
                     {/* Notes en cours de prise au clavier */}
                     {recPreview.map((n, i) => (
