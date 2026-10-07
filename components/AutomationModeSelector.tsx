@@ -85,8 +85,9 @@ const AutomationModeSelector: React.FC<Props> = ({ track, onUpdate, variant = 'h
         aria-expanded={open}
         className={`nova-hit-tactile relative shrink-0 rounded-md border font-black tracking-wide transition-colors ${variant === 'mixer' ? 'w-full h-7 text-[9px]' : 'h-7 px-1.5 min-w-[2.6rem] text-[8px]'}`}
         style={{
-          color: mode === 'off' ? '#94a3b8' : info.color,
-          borderColor: `${info.color}${mode === 'off' ? '55' : '99'}`,
+          // Mélangée au texte du thème : lisible sur fond sombre comme sur fond blanc.
+          color: mode === 'off' ? 'var(--text-secondary)' : `color-mix(in srgb, ${info.color} 62%, var(--text-primary))`,
+          borderColor: `${info.color}${mode === 'off' ? '33' : '66'}`,
           backgroundColor: `${info.color}${mode === 'read' || mode === 'off' ? '14' : '26'}`,
         }}
       >
