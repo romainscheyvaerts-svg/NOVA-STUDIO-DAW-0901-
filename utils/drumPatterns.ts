@@ -119,7 +119,11 @@ export function addPattern(dm: DrumMachine, opts: { copyFrom?: string; name?: st
     id: newId(d), name: opts.name || nextPatternName(d),
     color: PATTERN_COLORS[d.patterns!.length % PATTERN_COLORS.length], bars, steps, ratchet,
   };
-  return selectPattern({ ...d, patterns: [...d.patterns!, p] }, p.id);
+  // Comme dans FL Studio, créer un motif ne change pas ce que joue le morceau :
+  // sans placement, l'ancien motif reste partout (un placement d'une seule
+  // mesure vaut pour tout le morceau).
+  const song = d.song && d.song.length ? d.song : [d.activePattern!];
+  return selectPattern({ ...d, song, patterns: [...d.patterns!, p] }, p.id);
 }
 
 export const duplicatePattern = (dm: DrumMachine, id: string) => addPattern(dm, { copyFrom: id });

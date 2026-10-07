@@ -40,6 +40,9 @@ const ChopPanel: React.FC<Props> = ({ dm, onChange, onClose, bpm, sessionClips, 
   const [busy, setBusy] = useState(false);
   const [hot, setHot] = useState(-1);
   const fileRef = useRef<HTMLInputElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  // Ouvert en bas d'un panneau défilé : on le ramène sous les yeux.
+  useEffect(() => { boxRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); }, [src]);
   const playing = useRef<AudioBufferSourceNode | null>(null);
 
   useEffect(() => {
@@ -133,7 +136,7 @@ const ChopPanel: React.FC<Props> = ({ dm, onChange, onClose, bpm, sessionClips, 
   );
 
   return (
-    <div className="rounded-2xl border border-pink-400/30 bg-pink-500/[0.04] p-3 space-y-3" role="region" aria-label="Découper en pads">
+    <div ref={boxRef} className="rounded-2xl border border-pink-400/30 bg-pink-500/[0.04] p-3 space-y-3 scroll-mt-2" role="region" aria-label="Découper en pads">
       <div className="flex items-center gap-2">
         <p className="text-[13px] font-black text-white mr-auto" title="Comme Slicex / Fruity Slicer dans FL Studio, ou Simpler en mode Slice dans Ableton">
           ✂️ Découper en pads {src && <span className="font-normal text-slate-400 text-[12px]">· {src.name} · {src.buffer.duration.toFixed(2)} s</span>}
@@ -142,7 +145,7 @@ const ChopPanel: React.FC<Props> = ({ dm, onChange, onClose, bpm, sessionClips, 
       </div>
 
       <div className="flex flex-wrap gap-1.5">
-        <input ref={fileRef} type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" className="hidden"
+        <input ref={fileRef} data-nova-chop-file="" type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" className="hidden"
           onChange={e => { void pickFile(e.target.files?.[0]); e.target.value = ''; }} />
         <button type="button" onClick={() => fileRef.current?.click()} className="nova-hit h-9 px-3 rounded-lg text-[11px] font-bold bg-white/10 text-white hover:bg-white/15">
           <i className="fas fa-file-import mr-1" />{src ? 'Autre boucle' : 'Importer une boucle'}

@@ -187,3 +187,14 @@ describe('pads au clavier', () => {
     expect(isTypingTarget({ tagName: 'INPUT', type: 'text' } as any)).toBe(true);
   });
 });
+
+describe('créer un motif ne change pas ce que joue le morceau', () => {
+  it('sans placement, A reste partout quand on crée B (comme dans FL Studio)', () => {
+    let dm = makeDrumMachine('empty');
+    dm = { ...dm, rows: dm.rows.map(r => (r.id === 'kick' ? { ...r, steps: r.steps.map((_, i) => (i === 0 ? 110 : 0)) } : r)) };
+    const a = ensurePatterns(dm).activePattern!;
+    const withB = addPattern(dm);
+    expect(songBars(withB, 4)).toEqual([a, a, a, a]);
+    expect(drumSongClips(withB, BPM, 4 * bar, 'c')[0].notes!.length).toBe(4);
+  });
+});

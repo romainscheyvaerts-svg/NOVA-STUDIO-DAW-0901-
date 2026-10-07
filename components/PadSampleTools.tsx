@@ -89,7 +89,7 @@ const PadSampleTools: React.FC<Props> = ({ dm, rowIndex, onChange, onAudition, s
         <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mr-auto">
           Sample {info ? <span className="normal-case font-normal text-slate-300">· {info.name}{row.slice ? ` · tranche ${row.slice}` : ''}</span> : null}
         </p>
-        <input ref={fileRef} type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" className="hidden"
+        <input ref={fileRef} data-nova-pad-file="" type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" className="hidden"
           onChange={e => { void importFile(e.target.files?.[0]); e.target.value = ''; }} />
         <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} className={btn}
           title="Mets TON son sur ce pad (comme glisser un sample dans le Drum Rack d'Ableton). Tu peux aussi glisser un fichier sur le nom du pad.">

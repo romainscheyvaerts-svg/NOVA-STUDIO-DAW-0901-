@@ -193,6 +193,8 @@ export function chopIntoPads(dm: DrumMachine, sampleId: string, info: PadSampleI
   const usedSamples = new Set(d.rows.map(r => userSampleId(r.sound)).filter(Boolean) as string[]);
   d.samples = Object.fromEntries(Object.entries(d.samples!).filter(([id]) => usedSamples.has(id)));
   if (opts.makePattern !== false && newRows.length) {
+    // Morceau sans placement (un seul motif partout) : la découpe y joue tout de suite.
+    const unplaced = !d.song || d.song.length <= 1;
     const totalSteps = Math.ceil(opts.duration / (60 / opts.bufferBpm / 4) - 0.25);
     const bars = totalSteps > 32 ? 4 : totalSteps > 16 ? 2 : 1;
     d = addPattern(d, { name: 'Découpe' });
@@ -206,6 +208,7 @@ export function chopIntoPads(dm: DrumMachine, sampleId: string, info: PadSampleI
         return { ...r, steps, ratchet: new Array(L).fill(1) };
       }),
     };
+    if (unplaced) d = { ...d, song: [d.activePattern!] };
   }
   return { dm: d, padIndexes: newRows.map((_, i) => first + i) };
 }
