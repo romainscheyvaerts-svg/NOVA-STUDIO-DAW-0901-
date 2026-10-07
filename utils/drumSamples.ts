@@ -75,7 +75,8 @@ export function renderRegion(channels: Float32Array[], sampleRate: number, regio
   });
   // Bords : le début réel du son sonne déjà ; une coupe franche, non.
   const startCut = region.reverse ? e < len : s > 0;
-  const endCut = region.reverse ? s > 0 : e < len;
+  // À l'envers, le son finit sur son attaque : toujours un micro-fondu de sortie.
+  const endCut = region.reverse ? true : e < len;
   const fi = Math.min(n >> 1, Math.round(Math.max(region.fadeIn, startCut ? 0.001 : 0) * sampleRate));
   const fo = Math.min(n >> 1, Math.round(Math.max(region.fadeOut, endCut ? 0.003 : 0) * sampleRate));
   out.forEach(o => {
