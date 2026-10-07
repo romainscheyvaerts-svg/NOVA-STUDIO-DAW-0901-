@@ -100,6 +100,8 @@ import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from '.
 import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
 import { planVoiceTrack, revealTrack } from './utils/voiceTrack';
+import { BeatLoadCancelled, beatLoadCancelledByUser, isBeatLoading, loadBeatAudio } from './utils/beatLoad';
+import BeatLoadBanner from './components/BeatLoadBanner';
 import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
 import { AutotuneVstManager } from './components/AutotuneVstPanel';
@@ -1983,6 +1985,12 @@ function Studio() {
         return;
     }
 
+    // Beat en cours de chargement (B6) : la prise partirait sur du silence.
+    if (isBeatLoading()) {
+      setAiNotification('⏳ Attends la fin du chargement du beat : sans lui, ta prise partirait sur du silence.');
+      return;
+    }
+
     // Armement automatique : plus besoin de trouver le bouton R d'abord.
     let armedTrack = currentState.tracks.find(t => t.isTrackArmed);
     if (!armedTrack) {
@@ -3050,7 +3058,10 @@ function Studio() {
           } else {
               audioRef = source;
               // Cache local : un beat déjà écouté se rouvre sans réseau.
-              const arrayBuffer = await fetchAudio(source);
+              // Le beat du catalogue est surveillé (B6) : message au bout de
+              // 15 s, Réessayer / Choisir un autre beat, REC bloqué en attendant.
+              const isBeat = instrumentId !== undefined || forcedTrackId === 'instrumental';
+              const arrayBuffer = isBeat ? await loadBeatAudio(source, name, fetchAudio) : await fetchAudio(source);
               audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
           }
 
@@ -3143,10 +3154,11 @@ function Studio() {
           return audioBuffer;
 
       } catch (e: any) {
+          if (e instanceof BeatLoadCancelled) { setExternalImportNotice(null); return null as any; }
           console.error("[Import Error]", e);
           setExternalImportNotice(`❌ Erreur: ${e.message || "Import échoué"}`);
       } finally {
-          setTimeout(() => setExternalImportNotice(null), 3000);
+          setTimeout(() => setExternalImportNotice(n => (n && n.startsWith('Chargement') && isBeatLoading() ? n : null)), 3000);
       }
   }, [setState, ensureAudioEngine]);
 
@@ -4421,12 +4433,14 @@ function Studio() {
     setAiNotification(`⏳ Chargement de « ${inst.title} »…`);
     const beatBuffer = await handleUniversalAudioImport(audioUrl, inst.title, 'instrumental', 0, inst.bpm, inst.id);
     if (!beatBuffer) {
-      // Échec réseau : on remet l'ancien beat au lieu d'annoncer « prêt » sur une piste vide.
+      // Un autre beat est en route (il a remplacé celui-ci) : il s'occupe de la piste.
+      if (isBeatLoading()) return;
+      // Échec ou abandon : on remet l'ancien beat au lieu d'annoncer « prêt » sur une piste vide.
       setState(produce((draft: DAWState) => {
         const beat = draft.tracks.find(t => t.id === 'instrumental');
         if (beat && !beat.clips.length) beat.clips = previousBeatClips as any;
       }));
-      setAiNotification(`⚠️ « ${inst.title} » n'a pas pu être chargé (connexion ?). Réessaie depuis la bibliothèque.`);
+      if (!beatLoadCancelledByUser()) setAiNotification(`⚠️ « ${inst.title} » n'a pas pu être chargé (connexion ?). Réessaie depuis la bibliothèque.`);
       return;
     }
     if (inst.bpm) handleUpdateBpm(inst.bpm);
@@ -5819,6 +5833,11 @@ function Studio() {
           <span>{externalImportNotice}</span>
         </div>
       )}
+
+      <BeatLoadBanner isMobile={isMobile} onPickOther={() => {
+        if (isMobile) setActiveMobileTab('BROWSER');
+        else { setIsSidebarOpen(true); setActiveSideBrowserTab('STORE'); }
+      }} />
 
       {isMobile && <MobileBottomNav activeTab={activeMobileTab} onTabChange={setActiveMobileTab} novaBadge={novaUnread}
         onToggleLyrics={() => setLyricsOpen(o => !o)} lyricsOpen={lyricsOpen} />}

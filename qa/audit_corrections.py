@@ -98,6 +98,19 @@ def b6(b, R):
     R["enregistre"] = pg.evaluate("() => /Enregistrement|● REC|REC ·/.test(document.body.innerText)")
     R["texte_rec"] = re.findall(r"[^\n]*(?:beat|Beat|chargement|Chargement)[^\n]*", body(pg))[:8]
     R["requetes_bloquees"] = hang["n"]
+    # Le réseau revient : « Réessayer » charge le beat.
+    retry = pg.get_by_role("button", name=re.compile("Réessayer"))
+    if retry.count():
+        ctx.unroute(re.compile(r"(storage/v1/object/public/instruments|stream-instrumental)"))
+        retry.first.click()
+        try:
+            wait_text_gone(pg, "Chargement", 30)
+        except Exception:
+            pass
+        pg.wait_for_timeout(1500)
+        S(pg, "b6", "04_reessayer_ok")
+        R["apres_reessayer_beat_clips"] = pg.evaluate("() => +(document.querySelector('[data-track-header=instrumental]')?.getAttribute('data-clips') || 0)")
+        R["bandeau_encore"] = pg.locator("[data-testid=beat-load-banner]").count()
     R["errors"] = errors(pg)
     ctx.close()
 

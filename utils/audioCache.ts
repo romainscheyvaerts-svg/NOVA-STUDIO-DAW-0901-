@@ -25,9 +25,9 @@ const remember = async (cache: Cache, url: string) => {
 const cacheable = (url: string) => /^https?:\/\//.test(url) && typeof caches !== 'undefined';
 
 /** Télécharge un fichier audio, en passant par le cache quand c'est possible. */
-export async function fetchAudio(url: string): Promise<ArrayBuffer> {
+export async function fetchAudio(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
   if (!cacheable(url)) {
-    const r = await fetch(url);
+    const r = await fetch(url, { signal });
     if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
     return r.arrayBuffer();
   }
@@ -45,7 +45,7 @@ export async function fetchAudio(url: string): Promise<ArrayBuffer> {
     void remember(cache!, url);
     return hit.arrayBuffer();
   }
-  const r = await fetch(url);
+  const r = await fetch(url, { signal });
   if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
   if (cache && r.type !== 'opaque') {
     try { await cache.put(url, r.clone()); void remember(cache, url); } catch { /* quota plein : tant pis */ }
