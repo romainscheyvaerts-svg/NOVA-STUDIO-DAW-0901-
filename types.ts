@@ -232,6 +232,9 @@ export interface FreezeRef {
   fadeIn: number;
   fadeOut: number;
   gain: number;
+  /** Courbes de ces fondus (absent = linéaire, rendus d'avant les courbes). */
+  fadeInCurve?: CrossfadeCurve;
+  fadeOutCurve?: CrossfadeCurve;
   /**
    * Clip d'origine (au moment du rendu) dont ce clip est issu : survit aux
    * découpes. Sert au journal des éditions pré-effet (utils/preFxEdits).
@@ -492,6 +495,16 @@ export interface PunchSettings {
   punchOut: number;   // time in seconds
   preRoll: number;    // seconds before punch in
   postRoll: number;   // seconds after punch out
+  /** Pré-roll / post-roll en mesures (prioritaires sur les secondes ci-dessus). utils/punch.ts */
+  preRollBars?: number;
+  postRollBars?: number;
+  /** Pré-roll actif. Non réglé : actif en punch seulement (comportement d'origine). */
+  preRollOn?: boolean;
+  postRollOn?: boolean;
+  /** Crossfade aux bords du punch (ms). 10 par défaut. */
+  crossfadeMs?: number;
+  /** QuickPunch : REC bascule l'enregistrement pendant la lecture, sans l'arrêter. */
+  quickPunch?: boolean;
 }
 
 // Automation curve types (inspired by Ableton/Logic)

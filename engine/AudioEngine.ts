@@ -30,6 +30,7 @@ import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, fre
 import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { computePdc, PdcNode, PDC_MAX_SECONDS } from '../utils/pdc';
+import { applyGainEvents, clipGainEvents } from '../utils/fades';
 
 interface TrackDSP {
   input: GainNode;          
@@ -757,20 +758,14 @@ export class AudioEngine {
         const playOffset = clip.offset || 0;
         const startTime = Math.max(0, clipStartInProject);
         const offsetIntoClip = clipStartInProject < 0 ? -clipStartInProject + playOffset : playOffset;
-        const remainingDuration = Math.min(clip.duration, totalDuration - startTime, buffer.duration - offsetIntoClip);
+        // Export d'une boucle qui commence au milieu du clip : il ne reste que la fin du clip à jouer.
+        const playedSoFar = Math.max(0, offsetIntoClip - playOffset);
+        const remainingDuration = Math.min(clip.duration - playedSoFar, totalDuration - startTime, buffer.duration - offsetIntoClip);
 
         if (remainingDuration > 0 && offsetIntoClip < buffer.duration) {
-          if (clip.fadeIn > 0) {
-            clipGain.gain.setValueAtTime(0, startTime);
-            clipGain.gain.linearRampToValueAtTime(clip.gain ?? 1.0, startTime + clip.fadeIn);
-          }
-          if (clip.fadeOut > 0) {
-            const fadeOutStart = startTime + remainingDuration - clip.fadeOut;
-            if (fadeOutStart > startTime) {
-              clipGain.gain.setValueAtTime(clip.gain ?? 1.0, fadeOutStart);
-              clipGain.gain.linearRampToValueAtTime(0, startTime + remainingDuration);
-            }
-          }
+          // Fondus et crossfades : même plan de gain qu'en lecture (utils/fades),
+          // calé sur la position réelle dans le clip (export d'une boucle compris).
+          applyGainEvents(clipGain.gain, clipGainEvents(clip, playedSoFar), startTime - playedSoFar);
           source.start(startTime, offsetIntoClip, remainingDuration);
         }
 
@@ -1440,7 +1435,7 @@ export class AudioEngine {
   private computeClipSigs(tracks: Track[]): Map<string, string> {
     const m = new Map<string, string>();
     tracks.forEach(t => this.getPlayableClips(t).forEach(c => {
-      m.set(c.id, `${t.id}|${c.start}|${c.offset}|${c.duration}|${c.isMuted ? 1 : 0}|${c.bufferId || ''}|${c.gain ?? 1}|${c.fadeIn}|${c.fadeOut}|${c.isReversed ? 1 : 0}`);
+      m.set(c.id, `${t.id}|${c.start}|${c.offset}|${c.duration}|${c.isMuted ? 1 : 0}|${c.bufferId || ''}|${c.gain ?? 1}|${c.fadeIn}|${c.fadeOut}|${c.fadeInCurve || ''}|${c.fadeOutCurve || ''}|${c.isReversed ? 1 : 0}`);
     }));
     return m;
   }
@@ -1898,23 +1893,10 @@ export class AudioEngine {
         // offline). Avant, ils partaient de l'instant de planification : en
         // lançant la lecture au milieu d'un clip, le fondu de sortie tombait
         // après la fin du clip et chaque reprise créait un faux fondu d'entrée.
+        // Courbes de fondu (linéaire, puissance égale, exponentielle, en S) et
+        // crossfades : même plan de gain qu'à l'export (utils/fades).
         const clipZero = when - playedSoFar;               // instant où le clip serait à 0
-        const clipEnd = clipZero + clip.duration;
-        const fi = Math.min(clip.fadeIn || 0, clip.duration);
-        const fo = Math.min(clip.fadeOut || 0, clip.duration - fi);
-        const gainAt = (t: number) => {                     // t = position dans le clip (s)
-            let g = clipGain;
-            if (fi > 0 && t < fi) g *= Math.max(0, t / fi);
-            if (fo > 0 && t > clip.duration - fo) g *= Math.max(0, (clip.duration - t) / fo);
-            return g;
-        };
-        gainNode.gain.setValueAtTime(gainAt(playedSoFar), when);
-        if (fi > 0 && playedSoFar < fi) gainNode.gain.linearRampToValueAtTime(gainAt(fi), clipZero + fi);
-        if (fo > 0) {
-            const foStart = clip.duration - fo;
-            if (playedSoFar < foStart) gainNode.gain.setValueAtTime(gainAt(foStart), clipZero + foStart);
-            gainNode.gain.linearRampToValueAtTime(0, clipEnd);
-        }
+        applyGainEvents(gainNode.gain, clipGainEvents({ ...clip, gain: clipGain }, playedSoFar), clipZero);
         
         if (remainingDuration > 0 && offsetIntoClip < bufferToPlay.duration) {
             const actualDuration = Math.min(remainingDuration, bufferToPlay.duration - offsetIntoClip);

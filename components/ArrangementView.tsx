@@ -13,6 +13,13 @@ import { visibleEnvelope } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
 import { useSimpleMode } from '../utils/simpleMode';
 import { gainToDbText } from '../utils/db';
+import { PunchSettings } from '../types';
+import { hasPunchZone, movePunchPoint } from '../utils/punch';
+import { crossfadeZones, fadeInShape, fadeOutShape, FADE_CURVES, FADE_CURVE_INFO, junctionNear, makeCrossfade, handlesOf, NUDGE_UNITS, NudgeUnit } from '../utils/fades';
+import { editSelectionStore, editPrefsStore, useEditPrefs } from '../utils/editSelection';
+import type { EditCommands } from '../hooks/useEditCommands';
+import { bufferDurationOf } from '../hooks/useEditCommands';
+import { CrossfadeCurve } from '../types';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -61,7 +68,30 @@ interface ArrangementViewProps {
   onSwapInstrument?: (trackId: string) => void; 
   onEditMidi?: (trackId: string, clipId: string) => void;
   onAudioDrop?: (trackId: string, url: string, name: string, time: number) => void;
+  /** Points de punch (poignées rouges dans la règle). utils/punch */
+  punch?: PunchSettings;
+  onUpdatePunch?: (patch: Partial<PunchSettings>) => void;
+  /** Commandes d'édition Pro Tools (fondus, crossfades, nudge, plage). hooks/useEditCommands */
+  editCommands?: EditCommands;
 }
+
+/** Contour d'un fondu (courbe choisie) : zone assombrie au-dessus de la courbe + trait. */
+const drawFadeShape = (ctx: CanvasRenderingContext2D, x0: number, fw: number, y: number, h: number, curve: CrossfadeCurve | undefined, dir: 'in' | 'out', stroke: string) => {
+    const n = Math.max(8, Math.min(64, Math.round(fw / 2)));
+    const pt = (u: number) => {
+        const g = dir === 'in' ? fadeInShape(curve, u) : fadeOutShape(curve, u);
+        return [x0 + fw * u, y + h * (1 - g)] as const;
+    };
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.beginPath();
+    ctx.moveTo(x0, y); ctx.lineTo(x0 + fw, y);
+    for (let i = n; i >= 0; i--) { const [px, py] = pt(i / n); ctx.lineTo(px, py); }
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = stroke; ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) { const [px, py] = pt(i / n); if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
+    ctx.stroke();
+};
 
 const FADE_HANDLE_PX = 14;
 
@@ -86,7 +116,7 @@ const fracToClipGain = (f: number): number => {
 /** Ordonnée de la poignée de gain, relative au haut du clip (zone de forme d'onde : y+18 … y+h-4). */
 const clipGainHandleY = (clipH: number, gain: number): number => 18 + Math.max(4, clipH - 22) * (1 - clipGainToFrac(gain));
 
-type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | 'GAIN' | null;
+type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | 'GAIN' | 'XFADE' | null;
 type LoopDragMode = 'START' | 'END' | 'BODY' | null;
 
 const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: boolean): number => {
@@ -106,8 +136,15 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   markers = [], onAddMarker, onUpdateMarker, onDeleteMarker, onAddRegion, isPlaying = false,
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip, isRecording, recStartTime,
-  onCreatePattern, onSwapInstrument, onEditMidi, onAudioDrop, onMoveClipsBy
+  onCreatePattern, onSwapInstrument, onEditMidi, onAudioDrop, onMoveClipsBy,
+  punch, onUpdatePunch, editCommands
 }) => {
+  const editPrefs = useEditPrefs();
+  // Crossfade en cours de réglage (Smart Tool : bas d'une jonction entre deux clips).
+  const xfadeDragRef = useRef<{ trackId: string; a: Clip; b: Clip; at: number } | null>(null);
+  const [xfadeTip, setXfadeTip] = useState<{ x: number; y: number; text: string } | null>(null);
+  // Poignée de punch en cours de déplacement (règle).
+  const punchDragRef = useRef<'IN' | 'OUT' | null>(null);
   const [activeTool, setActiveTool] = useState<EditorTool>('SELECT');
   const [zoomV, setZoomV] = useState(120); 
   const [zoomH, setZoomH] = useState(40);  
@@ -123,6 +160,12 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   // Selection multiple : selectedClip reste l'ancre (celle qu'on manipule),
   // selectedClipIds contient l'ensemble des clips selectionnes.
   const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set());
+  // Sélection partagée avec les commandes d'édition (nudge, Ctrl+F…).
+  useEffect(() => {
+    const ids = selectedClipIds.size ? Array.from(selectedClipIds) : (selectedClip ? [selectedClip.clip.id] : []);
+    editSelectionStore.set({ clipIds: ids });
+  }, [selectedClipIds, selectedClip]);
+  useEffect(() => { editSelectionStore.set({ focusTrackId: selectedTrackId }); }, [selectedTrackId]);
   const [marquee, setMarquee] = useState<{x0:number,y0:number,x1:number,y1:number} | null>(null);
   const marqueeOriginRef = useRef<{x:number,y:number} | null>(null);
   // Positions de depart des clips selectionnes, capturees au debut du glissement.
@@ -222,6 +265,17 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         if (e.key === '3') { setActiveTool('ERASE'); return; }
       }
 
+      // Nudge (Pro Tools) : ← / → déplacent la sélection d'un pas (réglable), Maj = 10 pas.
+      if (!mod && !e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && editCommands
+          && !document.querySelector('[data-nova-pianoroll]')) {
+        const s = editSelectionStore.get();
+        if (s.clipIds.length || s.time) {
+          e.preventDefault();
+          editCommands.nudge(e.key === 'ArrowRight' ? 1 : -1, e.shiftKey ? 10 : 1);
+          return;
+        }
+      }
+
       // Coller se fait sur la piste selectionnee, meme sans clip selectionne.
       if (mod && (e.key === 'v' || e.key === 'V')) {
         const target = sel?.trackId || selectedTrackId;
@@ -276,7 +330,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     window.addEventListener('keydown', handleKD);
     window.addEventListener('keyup', handleKU);
     return () => { window.removeEventListener('keydown', handleKD); window.removeEventListener('keyup', handleKU); };
-  }, [selectedClip, selectedClipIds, tracks, selectedTrackId, onEditClip]);
+  }, [selectedClip, selectedClipIds, tracks, selectedTrackId, onEditClip, editCommands]);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -639,11 +693,35 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
             return;
         }
 
+        // Poignées de punch (bas de la règle) : avant la boucle, qui a une grande zone d'accroche.
+        if (e.button !== 2 && onUpdatePunch && punch && hasPunchZone(punch) && localY >= 22) {
+            const grab = touchRef.current ? 14 : 7;
+            const dIn = Math.abs(x - punch.punchIn * zoomH), dOut = Math.abs(x - punch.punchOut * zoomH);
+            if (Math.min(dIn, dOut) <= grab) {
+                e.preventDefault();
+                punchDragRef.current = dIn <= dOut ? 'IN' : 'OUT';
+                return;
+            }
+        }
+
         if (e.button === 2 && onAddMarker) {
             e.preventDefault();
             const markerTime = getSnappedTime(time, bpm, gridSize, useSnap);
             const bar = (60 / (bpm || 120)) * 4;
+            const pz = punch || { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 };
+            const punchItems: ContextMenuItem[] = onUpdatePunch ? [
+                { label: 'Punch-in ici', icon: 'fa-right-to-bracket', onClick: () => {
+                    const base = hasPunchZone(pz) && pz.punchOut > markerTime ? pz : { ...pz, punchOut: markerTime + bar };
+                    onUpdatePunch(movePunchPoint({ ...base, punchIn: markerTime }, 'IN', markerTime)); setContextMenu(null); } },
+                { label: 'Punch-out ici', icon: 'fa-right-from-bracket', onClick: () => {
+                    const base = hasPunchZone(pz) && pz.punchIn < markerTime ? pz : { ...pz, punchIn: Math.max(0, markerTime - bar) };
+                    onUpdatePunch(movePunchPoint({ ...base, punchOut: markerTime }, 'OUT', markerTime)); setContextMenu(null); } },
+                ...(loopEnd > loopStart + 0.05 ? [{ label: 'Punch = la boucle', icon: 'fa-repeat', onClick: () => { onUpdatePunch({ punchIn: loopStart, punchOut: loopEnd }); setContextMenu(null); } }] : []),
+                ...(hasPunchZone(pz) ? [{ label: 'Effacer les points de punch', icon: 'fa-xmark', onClick: () => { onUpdatePunch({ enabled: false, punchIn: 0, punchOut: 0 }); setContextMenu(null); } }] : []),
+            ] : [];
             setContextMenu({ x: e.clientX, y: e.clientY, items: [
+                ...punchItems,
+                ...(punchItems.length ? ['separator' as const] : []),
                 { label: 'Ajouter un marqueur ici', icon: 'fa-map-pin', onClick: () => { onAddMarker(markerTime); setContextMenu(null); } },
                 ...(onAddRegion ? [
                     { label: 'Créer une région ici (8 mesures)', icon: 'fa-arrows-left-right', onClick: () => { onAddRegion(markerTime, markerTime + bar * 8); setContextMenu(null); } },
@@ -740,6 +818,16 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                     && x - clipStartX >= edge && clipEndX - x >= edge
                     && Math.abs(relY - (2 + clipGainHandleY(zoomV - 4, clip.gain ?? 1))) <= CLIP_GAIN_GRAB_PX;
 
+                // Bas d'une jonction entre deux clips : crossfade (Smart Tool de Pro Tools).
+                const junction = !touchRef.current && editCommands && relY > zoomV * 0.55
+                    ? junctionNear(t.clips, time, Math.max(6, edge) / zoomH) : null;
+                if (junction) {
+                    const a = t.clips.find(c => c.id === junction.a)!, b = t.clips.find(c => c.id === junction.b)!;
+                    xfadeDragRef.current = { trackId: t.id, a: { ...a }, b: { ...b }, at: junction.at };
+                    setActiveClip(null);
+                    setDragAction('XFADE');
+                    return;
+                }
                 if (inFadeRow && x - clipStartX < FADE_HANDLE_PX) setDragAction('FADE_IN');
                 else if (inFadeRow && clipEndX - x < FADE_HANDLE_PX) setDragAction('FADE_OUT');
                 else if (onGainHandle) {
@@ -802,6 +890,13 @@ const handleMouseMove = (e: React.MouseEvent) => {
     const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
     const useSnap = snapEnabled && !isShiftDownRef.current;
+
+    if (punchDragRef.current && punch && onUpdatePunch) {
+        const tSnap = Math.max(0, getSnappedTime(x / zoomH, bpm, gridSize, useSnap));
+        const next = movePunchPoint(punch, punchDragRef.current, tSnap);
+        onUpdatePunch({ punchIn: next.punchIn, punchOut: next.punchOut });
+        return;
+    }
 
     const rd = regionDragRef.current;
     if (rd && onUpdateMarker) {
@@ -874,6 +969,8 @@ const handleMouseMove = (e: React.MouseEvent) => {
                     const relY = y - laneY;
                     if (c.bufferId && (cx1 - cx0) > 16 && x - cx0 >= edge && cx1 - x >= edge
                         && Math.abs(relY - (2 + clipGainHandleY(zoomV - 4, c.gain ?? 1))) <= CLIP_GAIN_GRAB_PX) cursor = 'ns-resize';
+                    else if (editCommands && relY > zoomV * 0.55 && junctionNear(t.clips, tHover, Math.max(6, edge) / zoomH)) cursor = 'col-resize';
+                    else if (relY < zoomV * 0.35 && (x - cx0 < FADE_HANDLE_PX || cx1 - x < FADE_HANDLE_PX)) cursor = 'nwse-resize';
                     else if (x - cx0 < edge || cx1 - x < edge) cursor = 'ew-resize';
                 }
                 break;
@@ -885,6 +982,19 @@ const handleMouseMove = (e: React.MouseEvent) => {
     }
 
     const time = getSnappedTime(x / zoomH, bpm, gridSize, useSnap);
+    if (dragAction === 'XFADE' && xfadeDragRef.current && editCommands) {
+        // Longueur = 2 × la distance à la jonction (crossfade centré, comme Pro Tools).
+        const xf = xfadeDragRef.current;
+        const len = Math.max(0.002, 2 * Math.abs(x / zoomH - xf.at));
+        const r = makeCrossfade(xf.a, xf.b, len, editPrefsStore.get().xfadeCurve, handlesOf(xf.a, xf.b, bufferDurationOf));
+        if (r) {
+            editCommands.patchClips(xf.trackId, { [xf.a.id]: r.a, [xf.b.id]: r.b });
+            setXfadeTip({ x: e.clientX, y: e.clientY, text: `Crossfade ${Math.round((r.end - r.start) * 1000)} ms · ${FADE_CURVE_INFO[editPrefsStore.get().xfadeCurve].label}` });
+        } else {
+            setXfadeTip({ x: e.clientX, y: e.clientY, text: 'Pas assez d\'audio au-delà des bords' });
+        }
+        return;
+    }
     if (dragAction === 'GAIN' && activeClip && gainDragRef.current) {
         // Maj = réglage fin (5x plus précis) ; cran à 0 dB.
         const g = gainDragRef.current;
@@ -979,6 +1089,16 @@ const handleMouseMove = (e: React.MouseEvent) => {
 
 const handleMouseUp = () => {
     regionDragRef.current = null;
+    punchDragRef.current = null;
+    if (xfadeDragRef.current) { xfadeDragRef.current = null; setXfadeTip(null); }
+    // Crossfade automatique quand un clip déplacé / rogné touche ou chevauche un voisin.
+    if (editCommands && activeClip && (dragAction === 'MOVE' || dragAction === 'TRIM_START' || dragAction === 'TRIM_END')) {
+        const ids = multiDragRef.current && multiDragRef.current.length > 1 ? multiDragRef.current : [{ trackId: activeClip.trackId, clipId: activeClip.clip.id }];
+        const byTrack = new Map<string, string[]>();
+        ids.forEach(it => byTrack.set(it.trackId, [...(byTrack.get(it.trackId) || []), it.clipId]));
+        // Après le dernier rendu (la position finale du clip est dans l'état).
+        setTimeout(() => byTrack.forEach((cids, tid) => editCommands.autoCrossfade(tid, cids)), 0);
+    }
     if (gainDragRef.current) { gainDragRef.current = null; setGainTip(null); }
     setDragAction(null);
     setActiveClip(null);
@@ -1114,22 +1234,9 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     ctx.roundRect(x, y, w, h, 4);
     ctx.clip();
 
-    if (fadeInW > 1) {
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.beginPath();
-        ctx.moveTo(x, y); ctx.lineTo(x + fadeInW, y); ctx.lineTo(x, y + h);
-        ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x + fadeInW, y); ctx.stroke();
-    }
-    if (fadeOutW > 1) {
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.beginPath();
-        ctx.moveTo(x + w, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - fadeOutW, y);
-        ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x + w - fadeOutW, y); ctx.lineTo(x + w, y + h); ctx.stroke();
-    }
+    // Courbe réelle du fondu (linéaire, puissance égale, exponentielle, en S).
+    if (fadeInW > 1) drawFadeShape(ctx, x, fadeInW, y, h, clip.fadeInCurve, 'in', 'rgba(255,255,255,0.75)');
+    if (fadeOutW > 1) drawFadeShape(ctx, x + w - fadeOutW, fadeOutW, y, h, clip.fadeOutCurve, 'out', 'rgba(255,255,255,0.75)');
     ctx.restore();
 
     // Poignees de fondu (visibles sur le clip selectionne ou assez large)
@@ -1300,6 +1407,30 @@ const drawTimeline = useCallback(() => {
             });
         }
         
+        // Crossfades (zone commune de deux clips en fondu croisé) : les deux courbes, en ambre.
+        if (viewportY + trackH > 40 && viewportY < h) {
+            for (const z of crossfadeZones(track.clips)) {
+                const a = track.clips.find(c => c.id === z.a)!, b = track.clips.find(c => c.id === z.b)!;
+                const zx = timeToPixels(z.start) - scrollX, zw = timeToPixels(z.end - z.start);
+                if (zx + zw < 0 || zx > w || zw < 2) continue;
+                const zy = Math.max(viewportY + 2, 40), zh = Math.min(trackH - 4, viewportY + trackH - 2 - zy);
+                if (zh <= 0) continue;
+                ctx.save();
+                ctx.fillStyle = 'rgba(251,191,36,0.10)';
+                ctx.fillRect(zx, zy, zw, zh);
+                const n = Math.max(8, Math.min(64, Math.round(zw / 2)));
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = 'rgba(251,191,36,0.95)';
+                ctx.beginPath();
+                for (let i = 0; i <= n; i++) { const u = i / n; const py = zy + zh * (1 - fadeOutShape(a.fadeOutCurve, u)); if (i) ctx.lineTo(zx + zw * u, py); else ctx.moveTo(zx, py); }
+                ctx.stroke();
+                ctx.beginPath();
+                for (let i = 0; i <= n; i++) { const u = i / n; const py = zy + zh * (1 - fadeInShape(b.fadeInCurve, u)); if (i) ctx.lineTo(zx + zw * u, py); else ctx.moveTo(zx, py); }
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
         // Dessiner les séparateurs de pistes (position relative au viewport)
         if (viewportY + trackH + totalAutomationHeight > 40 && viewportY < h) {
             const lineY = viewportY + trackH + totalAutomationHeight;
@@ -1373,6 +1504,35 @@ const drawTimeline = useCallback(() => {
         }
     });
 
+    // Zone de punch (Pro Tools : barre rouge dans la règle, points d'entrée / de sortie).
+    if (punch && hasPunchZone(punch)) {
+        const px0 = timeToPixels(punch.punchIn) - scrollX;
+        const px1 = timeToPixels(punch.punchOut) - scrollX;
+        if (px1 > -20 && px0 < w + 20) {
+            const on = !!punch.enabled;
+            ctx.fillStyle = on ? 'rgba(239, 68, 68, 0.55)' : 'rgba(239, 68, 68, 0.2)';
+            ctx.fillRect(px0, 31, px1 - px0, 8);
+            if (on) {
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.06)';
+                ctx.fillRect(px0, 40, px1 - px0, h - 40);
+                ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath(); ctx.moveTo(px0 + 0.5, 40); ctx.lineTo(px0 + 0.5, h); ctx.moveTo(px1 - 0.5, 40); ctx.lineTo(px1 - 0.5, h); ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            // Poignées : crochets d'entrée et de sortie.
+            ctx.fillStyle = on ? '#ef4444' : 'rgba(239, 68, 68, 0.6)';
+            ctx.beginPath(); ctx.moveTo(px0, 26); ctx.lineTo(px0 + 7, 26); ctx.lineTo(px0, 40); ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(px1, 26); ctx.lineTo(px1 - 7, 26); ctx.lineTo(px1, 40); ctx.closePath(); ctx.fill();
+            if (px1 - px0 > 50) {
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 8px Inter';
+                ctx.fillText('PUNCH', px0 + 9, 38);
+            }
+        }
+    }
+
     // Rectangle de selection
     if (marquee) {
         const mx = marquee.x0 - scrollX, my = marquee.y0 - scrollTop;
@@ -1387,7 +1547,7 @@ const drawTimeline = useCallback(() => {
     }
 
     // La tete de lecture est dessinee sur le calque superieur (drawPlayhead).
-}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee]);
+}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch]);
 
 // Calque statique (grille, clips, formes d'onde, reperes) : redessine seulement
 // quand son contenu change, plus a chaque image de la lecture.
@@ -1474,6 +1634,27 @@ useEffect(() => {
           {!simple && <button onClick={() => setSnapEnabled(!snapEnabled)} className={`px-4 h-9 [@media(pointer:coarse)]:h-10 rounded-lg border transition-all text-[11px] font-semibold tracking-wide ${snapEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 nova-halo' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
             <i className="fas fa-magnet mr-2"></i> {snapEnabled ? 'Grille ON' : 'Grille OFF'}
           </button>}
+          {!simple && (
+            <div className="hidden xl:flex items-center gap-1" data-nova-target="nudge">
+              <label className="text-[10px] font-bold text-slate-500" htmlFor="nova-nudge" title="Nudge (comme dans Pro Tools) : ← / → déplacent la sélection d'un pas ; Maj = 10 pas.">Nudge</label>
+              <select id="nova-nudge" value={editPrefs.nudge} onChange={e => editCommands ? editCommands.setNudgeUnit(e.target.value as NudgeUnit) : editPrefsStore.set({ nudge: e.target.value as NudgeUnit })}
+                title="Pas du nudge (comme la « Nudge value » de Pro Tools) : ← / → sur la sélection, Maj = 10 pas"
+                className="h-8 bg-black/40 border border-white/10 rounded-lg px-1 text-[11px] text-slate-300">
+                {NUDGE_UNITS.map(u => <option key={u.id} value={u.id}>{u.label}</option>)}
+              </select>
+              <button onClick={() => editPrefsStore.set({ autoXfade: !editPrefs.autoXfade })} aria-pressed={editPrefs.autoXfade}
+                title="Crossfade auto : quand tu poses un clip contre un autre ou par-dessus (≤ 2 s), un fondu enchaîné est créé tout seul (comme les crossfades de Pro Tools)."
+                className={`h-8 px-2 rounded-lg border text-[10px] font-black tracking-wide ${editPrefs.autoXfade ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
+                <i className="fas fa-xmark mr-1"></i>X-FADE AUTO
+              </button>
+              <select value={editPrefs.xfadeCurve} onChange={e => editPrefsStore.set({ xfadeCurve: e.target.value as CrossfadeCurve })}
+                aria-label="Courbe des crossfades"
+                title="Courbe des crossfades posés à la souris (bas d'une jonction), avec Ctrl+F ou automatiquement. Puissance égale = « Equal Power » de Pro Tools, sans creux de niveau."
+                className="h-8 bg-black/40 border border-white/10 rounded-lg px-1 text-[11px] text-slate-300">
+                {FADE_CURVES.map(cv => <option key={cv} value={cv}>{FADE_CURVE_INFO[cv].label}</option>)}
+              </select>
+            </div>
+          )}
         </div>
         <div className="flex-1 h-full py-2 px-4 flex items-center min-w-0 justify-center">
             <div 
@@ -1632,6 +1813,7 @@ useEffect(() => {
       })()}
       {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
       {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled(!snapEnabled)} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
+      {xfadeTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300" style={{ left: xfadeTip.x + 14, top: xfadeTip.y - 28 }}>{xfadeTip.text}</div>}
       {gainTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300 font-mono tabular-nums" style={{ left: gainTip.x + 14, top: gainTip.y - 28 }}>Gain {gainTip.text}</div>}
       {hoverTime !== null && dragAction !== null && <div className="fixed z-[200] px-3 py-1.5 bg-black/90 border border-cyan-500/30 rounded-lg shadow-2xl pointer-events-none text-[10px] font-black text-cyan-400 font-mono" style={{ left: tooltipPos.x + 15, top: tooltipPos.y }}>{hoverTime.toFixed(3)}s {dragAction && <span className="ml-2 text-white opacity-50">[{dragAction}]</span>}</div>}
       {clipContextMenu && (
@@ -1659,6 +1841,42 @@ useEffect(() => {
                 ] : []),
                 ...((clipContextMenu.clip.fadeIn || clipContextMenu.clip.fadeOut) ? [
                   { label: 'Effacer les fondus', icon: 'fa-eraser', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { fadeIn: 0, fadeOut: 0 }); setClipContextMenu(null); } }
+                ] : []),
+                ...(editCommands && clipContextMenu.clip.type !== TrackType.MIDI ? [
+                  { label: 'Courbes des fondus (Pro Tools)', icon: 'fa-bezier-curve', onClick: () => {}, disabled: true,
+                    component: (
+                      <div className="px-3 pb-2 pt-1 space-y-1" onMouseDown={e => e.stopPropagation()}>
+                        {(['in', 'out'] as const).map(which => {
+                          const cur = (which === 'in' ? clipContextMenu.clip.fadeInCurve : clipContextMenu.clip.fadeOutCurve) || 'LINEAR';
+                          return (
+                            <div key={which} className="flex items-center gap-1">
+                              <span className="w-12 text-[10px] text-slate-400">{which === 'in' ? 'Entrée' : 'Sortie'}</span>
+                              {FADE_CURVES.map(cv => (
+                                <button key={cv} title={FADE_CURVE_INFO[cv].hint} aria-pressed={cur === cv}
+                                  onClick={() => { const ids = selectedClipIds.has(clipContextMenu.clip.id) ? Array.from(selectedClipIds) : [clipContextMenu.clip.id];
+                                    editCommands.setFadeCurve(clipContextMenu.trackId, ids, which, cv); setClipContextMenu(null); }}
+                                  className={`px-1.5 h-6 rounded text-[10px] font-bold border ${cur === cv ? 'bg-amber-500/20 border-amber-500/50 text-amber-200' : 'border-white/10 text-slate-400 hover:text-white'}`}>
+                                  {FADE_CURVE_INFO[cv].short}
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) },
+                  ...(() => {
+                    // Crossfade avec le clip qui suit (jonction ou chevauchement).
+                    const t = tracks.find(tr => tr.id === clipContextMenu.trackId);
+                    const c = clipContextMenu.clip;
+                    const next = t?.clips.filter(o => o.id !== c.id && !o.isMuted && o.start >= c.start && o.start <= c.start + c.duration + 0.002 && o.start + o.duration > c.start + c.duration)
+                      .sort((p, q) => p.start - q.start)[0];
+                    const prev = t?.clips.filter(o => o.id !== c.id && !o.isMuted && o.start < c.start && o.start + o.duration >= c.start - 0.002 && o.start + o.duration < c.start + c.duration)
+                      .sort((p, q) => q.start - p.start)[0];
+                    const items: ContextMenuItem[] = [];
+                    if (next) items.push({ label: 'Crossfade avec le clip suivant', icon: 'fa-shuffle', onClick: () => { editCommands.crossfade(clipContextMenu.trackId, c.id, next.id); setClipContextMenu(null); } });
+                    if (prev) items.push({ label: 'Crossfade avec le clip précédent', icon: 'fa-shuffle', onClick: () => { editCommands.crossfade(clipContextMenu.trackId, prev.id, c.id); setClipContextMenu(null); } });
+                    return items;
+                  })(),
                 ] : []),
                 'separator',
                 { label: 'Supprimer', icon: 'fa-trash', shortcut: 'Suppr', danger: true, onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DELETE'); setClipContextMenu(null); }}

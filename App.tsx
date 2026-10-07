@@ -117,6 +117,9 @@ import VocalToolsPanel from './components/VocalToolsPanel';
 import NextStepCard, { NextStepAction } from './components/NextStepCard';
 import { track, trackOnce } from './utils/analytics';
 import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
+import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone } from './utils/punch';
+import { editSelectionStore } from './utils/editSelection';
+import { useEditCommands } from './hooks/useEditCommands';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -1434,7 +1437,11 @@ function Studio() {
   const handleTogglePlay = useCallback(async () => {
       // Pendant une prise, Lecture / Espace la terminent (sinon la lecture
       // redémarrait alors que l'enregistreur continuait : prise décalée).
-      if (stateRef.current.isRecording) { await toggleRecordRef.current?.(); return; }
+      if (stateRef.current.isRecording) {
+        // QuickPunch : Espace sort de l'enregistrement ET arrête la lecture.
+        if (punchRecRef.current?.quick) { await quickPunchOutRef.current?.(true); return; }
+        await toggleRecordRef.current?.(); return;
+      }
       await ensureAudioEngine();
       if (stateRef.current.isPlaying) {
         pausePlayback();
@@ -1453,26 +1460,28 @@ function Studio() {
    */
   const finalizeRecording = useCallback(async () => {
     const result = await audioEngine.stopRecording();
-    const punch = punchRecRef.current;
+    const rec = punchRecRef.current;
     punchRecRef.current = null;
-    if (punch) {
+    // Punch (zone ou QuickPunch) et pré-roll : on ne garde que la fenêtre utile,
+    // élargie d'un demi-crossfade de chaque côté (utils/punch).
+    const punch = rec?.isPunch ? rec : null;
+    const xfade = punchXfadeSec(stateRef.current.punch);
+    let punchIn = 0, punchOut = 0;
+    if (rec) {
       // La boucle avait été suspendue pendant le punch : on la remet.
       const st = stateRef.current;
-      audioEngine.setLoop(st.isLoopActive, st.loopStart, st.loopEnd);
+      if (rec.isPunch) audioEngine.setLoop(st.isLoopActive, st.loopStart, st.loopEnd);
       if (result && result.clip.buffer) {
         const c = result.clip;
-        const from = Math.max(punch.in, c.start);
-        const to = Math.min(punch.out, c.start + c.duration);
-        if (to - from < 0.05) {
+        const t = trimTake(c, rec.in, rec.out, rec.isPunch ? xfade : 0.01);
+        if (!t) {
           setState(produce(draft => { draft.isRecording = false; draft.recStartTime = null; }));
-          setAiNotification('Punch : rien n\'a été enregistré dans la zone (la prise s\'est arrêtée avant).');
+          setAiNotification(rec.isPunch ? 'Punch : rien n\'a été enregistré dans la zone (la prise s\'est arrêtée avant).' : 'Rien n\'a été enregistré après le pré-roll.');
           return null;
         }
-        c.offset = (c.offset || 0) + (from - c.start);
-        c.start = from;
-        c.duration = to - from;
-        c.fadeIn = 0.01;
-        c.fadeOut = 0.01;
+        Object.assign(c, t);
+        punchIn = rec.in ?? c.start;
+        punchOut = rec.out ?? (c.start + c.duration);
       }
     }
     let cleaned: StripSilenceResult | null = null;
@@ -1513,18 +1522,13 @@ function Studio() {
         if (track) {
           const takeStart = clip.start;
           const takeEnd = clip.start + clip.duration;
-          if (punch) {
+          if (punch && punchOut > punchIn) {
             // Punch : l'ancienne prise est découpée autour de la zone (avant /
-            // après gardés, le passage remplacé retiré — Annuler le rend).
-            const next: Clip[] = [];
-            track.clips.forEach(c => {
-              const cEnd = c.start + c.duration;
-              if (c.isMuted || cEnd <= takeStart || c.start >= takeEnd) { next.push(c); return; }
-              if (c.start < takeStart) next.push({ ...c, id: `${c.id}-a${Date.now()}`, duration: takeStart - c.start, fadeOut: 0.01 });
-              if (cEnd > takeEnd) next.push({ ...c, id: `${c.id}-b${Date.now()}`, start: takeEnd, offset: (c.offset || 0) + (takeEnd - c.start), duration: cEnd - takeEnd, fadeIn: 0.01 });
-              mutedOld++;
-            });
-            track.clips = next;
+            // après gardés, le passage remplacé retiré — Annuler le rend), avec
+            // un crossfade à puissance égale centré sur chaque point de punch.
+            const cut = cutAroundPunch(track.clips as Clip[], punchIn, punchOut, xfade, Date.now().toString(36));
+            mutedOld += cut.replaced;
+            track.clips = cut.clips as any;
           } else {
             track.clips.forEach(c => {
               if (!c.isMuted && c.start < takeEnd && c.start + c.duration > takeStart) { c.isMuted = true; mutedOld++; }
@@ -1544,7 +1548,8 @@ function Studio() {
       setAiNotification(parts.join(' — '));
       const buf = result.clip.buffer;
       const start = result.clip.start;
-      setTimeout(() => coachAfterTakeRef.current?.(result.trackId, buf, takeName, start), 120);
+      // QuickPunch : la lecture continue, pas de carte de coaching au milieu.
+      if (!rec?.quick) setTimeout(() => coachAfterTakeRef.current?.(result.trackId, buf, takeName, start), 120);
     }
     return result;
   }, [setState]);
@@ -1880,12 +1885,56 @@ function Studio() {
   const [headphonePromptOpen, setHeadphonePromptOpen] = useState(false);
   const toggleRecordRef = useRef<(() => Promise<void>) | null>(null);
 
+  // ===== QuickPunch (Pro Tools) : entrer / sortir de l'enregistrement pendant la lecture
+  const quickPunchOutRef = useRef<((stopTransport: boolean) => Promise<void>) | null>(null);
+  const quickPunchIn = useCallback(async () => {
+    const st = stateRef.current;
+    let armed = st.tracks.find(t => t.isTrackArmed);
+    if (!armed) {
+      const sel = st.tracks.find(t => t.id === st.selectedTrackId);
+      const target = isVoiceTrack(sel) ? sel : st.tracks.find(t => t.id === 'track-rec-main') ?? st.tracks.find(t => isVoiceTrack(t));
+      if (!target) { setNoArmedTrackError(true); setTimeout(() => setNoArmedTrackError(false), 2000); return; }
+      if (!(await armForRecording(target.id))) return;
+      armed = target;
+    }
+    // Boucle suspendue pendant la prise : un retour au début décalerait l'audio.
+    audioEngine.setLoop(false, st.loopStart, st.loopEnd);
+    const at = audioEngine.getCurrentTime();
+    const ok = await audioEngine.startRecording(at, armed.id);
+    if (!ok) {
+      audioEngine.setLoop(st.isLoopActive, st.loopStart, st.loopEnd);
+      setAiNotification("🎤 QuickPunch : l'enregistrement n'a pas pu démarrer. Vérifie que le micro est autorisé.");
+      return;
+    }
+    punchRecRef.current = { in: at, out: null, isPunch: true, autoStopAt: null, quick: true };
+    recStartRef.current = at;
+    track('rec_started', { role: getVocalRole(armed), punch: true, quick: true });
+    setState(produce(draft => { draft.isRecording = true; draft.recStartTime = at; }));
+  }, [setState, armForRecording]);
+  quickPunchOutRef.current = async (stopTransport: boolean) => {
+    const z = punchRecRef.current;
+    if (!z?.quick || z.stopping) return;
+    const now = audioEngine.getCurrentTime();
+    z.out = Math.max((z.in ?? now) + 0.05, now);
+    z.stopping = true;
+    if (stopTransport) { metronomeService.stop(); pausePlayback(); }
+    // La prise arrive en retard de la latence : on capte encore un peu avant d'arrêter l'enregistreur.
+    const lat = audioEngine.measureRecordLatency().total + audioEngine.getRecordOffsetMs() / 1000;
+    await new Promise(r => setTimeout(r, quickPunchStopDelay(lat, punchXfadeSec(stateRef.current.punch)) * 1000));
+    await finalizeRecording();
+  };
+
   const handleToggleRecordInner = useCallback(async () => {
     await ensureAudioEngine();
     const currentState = stateRef.current;
 
     // Pendant le décompte : REC l'annule.
     if (countInBeat !== null) { countInCancelRef.current = true; return; }
+
+    // QuickPunch (comme dans Pro Tools) : pendant la lecture, REC entre dans
+    // l'enregistrement et en ressort sans arrêter la lecture.
+    if (currentState.isRecording && punchRecRef.current?.quick) { await quickPunchOutRef.current?.(false); return; }
+    if (!currentState.isRecording && currentState.isPlaying && currentState.punch?.quickPunch) { await quickPunchIn(); return; }
 
     if (currentState.isRecording) {
         audioEngine.stopAll();
@@ -1924,15 +1973,17 @@ function Studio() {
     try { countIn = localStorage.getItem('nova_count_in') !== '0'; } catch { /* défaut : oui */ }
     if (countIn && !(await runCountIn(currentState.bpm))) return;
 
-    let startAt = playheadStore.get();
-    const pz = stateRef.current.punch;
-    if (pz?.enabled && pz.punchOut > pz.punchIn) {
-      // Punch : on repart un peu avant la zone (pré-roll) pour se caler.
-      startAt = Math.max(0, pz.punchIn - (pz.preRoll || (240 / (stateRef.current.bpm || 120)) * 2));
-      audioEngine.setLoop(false, stateRef.current.loopStart, stateRef.current.loopEnd);
-      audioEngine.seekTo(startAt, stateRef.current.tracks, false);
+    // Punch et pré-roll (utils/punch) : la lecture repart avant le point
+    // d'entrée, seule la zone est gardée, arrêt auto après le post-roll.
+    const st0 = stateRef.current;
+    const plan = planRecording({ playhead: playheadStore.get(), punch: st0.punch, bpm: st0.bpm, ts: st0.timeSignature });
+    const startAt = plan.startAt;
+    punchRecRef.current = null;
+    if (plan.isPunch || plan.keepFrom !== null) {
+      if (plan.isPunch) audioEngine.setLoop(false, st0.loopStart, st0.loopEnd);
+      audioEngine.seekTo(startAt, st0.tracks, false);
       playheadStore.set(startAt);
-      punchRecRef.current = { in: pz.punchIn, out: pz.punchOut };
+      punchRecRef.current = { in: plan.keepFrom, out: plan.keepTo, isPunch: plan.isPunch, autoStopAt: plan.autoStopAt };
     }
     const success = await audioEngine.startRecording(startAt, armedTrack.id);
     if (success) {
@@ -1946,6 +1997,8 @@ function Studio() {
         draft.recStartTime = startAt;
       }));
     } else {
+      punchRecRef.current = null;
+      if (plan.isPunch) audioEngine.setLoop(st0.isLoopActive, st0.loopStart, st0.loopEnd);
       setAiNotification("🎤 L'enregistrement n'a pas pu démarrer. Vérifie que le micro est autorisé, puis réessaie.");
     }
   }, [setState, finalizeRecording, armForRecording, runCountIn, countInBeat]);
@@ -1972,6 +2025,14 @@ function Studio() {
     countInCancelRef.current = true;
     metronomeService.stop();
     const wasRecording = stateRef.current.isRecording;
+    // QuickPunch : le point de sortie est l'instant du STOP (relevé avant l'arrêt).
+    if (wasRecording && punchRecRef.current?.quick) {
+      await quickPunchOutRef.current?.(true);
+      const back = recStartRef.current ?? 0;
+      audioEngine.seekTo(back, stateRef.current.tracks, false);
+      setState(prev => ({ ...prev, isPlaying: false, currentTime: back, isRecording: false }));
+      return;
+    }
     audioEngine.stopAll();
     // STOP pendant un enregistrement conserve la prise et revient à son début.
     if (wasRecording) {
@@ -1985,15 +2046,14 @@ function Studio() {
     setState(prev => ({ ...prev, isPlaying: false, currentTime: 0, isRecording: false }));
   }, [setState, finalizeRecording]);
 
-  // Punch : la prise s'arrête toute seule une mesure après la fin de la zone.
+  // Punch : la prise s'arrête toute seule à la fin du post-roll (utils/punch).
   useEffect(() => {
     if (!state.isRecording) return;
     const id = setInterval(() => {
       const z = punchRecRef.current;
-      if (!z || z.stopping) return;
-      const bar = 240 / (stateRef.current.bpm || 120);
-      if (audioEngine.getCurrentTime() > z.out + bar) { z.stopping = true; void toggleRecordRef.current?.(); }
-    }, 100);
+      if (!z || z.stopping || z.quick || z.autoStopAt === null) return;
+      if (audioEngine.getCurrentTime() > z.autoStopAt) { z.stopping = true; void toggleRecordRef.current?.(); }
+    }, 50);
     return () => clearInterval(id);
   }, [state.isRecording]);
 
@@ -3119,29 +3179,44 @@ function Studio() {
     setAiNotification(`🎚️ Prise ${n} gardée sur « ${zone.label} » (les autres prises restent dessous, Annuler pour revenir).`);
   }, [setState]);
 
-  // Punch-in / punch-out : zone de la boucle, pré-roll, arrêt automatique
-  const punchRecRef = useRef<{ in: number; out: number; stopping?: boolean } | null>(null);
+  // Punch-in / punch-out (utils/punch) : points indépendants de la boucle, posés
+  // dans la règle ou depuis la sélection ; pré/post-roll réglables ; QuickPunch.
+  const punchRecRef = useRef<{ in: number | null; out: number | null; isPunch: boolean; autoStopAt: number | null; quick?: boolean; stopping?: boolean } | null>(null);
+  /** Réglages du punch : pas une édition du projet (pas d'étape d'annulation, comme Pro Tools). */
+  const handleUpdatePunch = useCallback((patch: Partial<DAWState['punch']>) => {
+    const p = { ...stateRef.current.punch, ...patch };
+    if (p.preRollBars !== undefined) p.preRoll = p.preRollBars * (240 / (stateRef.current.bpm || 120));
+    if (p.postRollBars !== undefined) p.postRoll = p.postRollBars * (240 / (stateRef.current.bpm || 120));
+    setVisualState({ punch: p });
+  }, [setVisualState]);
   const handleTogglePunch = useCallback(() => {
     const st = stateRef.current;
     if (st.punch?.enabled) {
-      setState(prev => ({ ...prev, punch: { ...prev.punch, enabled: false } }));
-      setAiNotification('Punch désactivé');
+      setVisualState({ punch: { ...st.punch, enabled: false } });
+      setAiNotification('Punch désactivé : REC enregistre de nouveau à partir de la tête de lecture.');
       return;
     }
-    if (!(st.loopEnd > st.loopStart + 0.2)) {
-      setAiNotification('Punch : définis d\'abord la zone à refaire avec la boucle (glisse dans la règle en haut de la timeline).');
+    // Zone : la sélection de plage, sinon les points déjà posés, sinon la boucle.
+    const sel = editSelectionStore.get().time;
+    let next = sel ? punchFromRange(st.punch, sel.start, sel.end) : null;
+    if (!next && hasPunchZone(st.punch)) next = { ...st.punch, enabled: true };
+    if (!next && st.loopEnd > st.loopStart + 0.2) next = punchFromRange(st.punch, st.loopStart, st.loopEnd);
+    if (!next) {
+      setAiNotification('Punch : pose d\'abord la zone à refaire. Sélectionne une plage (moitié haute d\'un clip) ou clic droit dans la règle → « Punch-in ici » / « Punch-out ici ».');
       return;
     }
-    const bar = 240 / (st.bpm || 120);
-    setState(prev => ({ ...prev, punch: { enabled: true, punchIn: prev.loopStart, punchOut: prev.loopEnd, preRoll: bar * 2, postRoll: bar } }));
-    setAiNotification(`🎯 Punch : REC repart 2 mesures avant la zone et ne remplace que ${st.loopStart.toFixed(1)} s → ${st.loopEnd.toFixed(1)} s.`);
-  }, [setState]);
-  // La zone de punch suit la zone de boucle quand on la déplace.
-  useEffect(() => {
-    if (!state.punch?.enabled) return;
-    if (state.punch.punchIn === state.loopStart && state.punch.punchOut === state.loopEnd) return;
-    setVisualState({ punch: { ...state.punch, punchIn: state.loopStart, punchOut: state.loopEnd } });
-  }, [state.loopStart, state.loopEnd, state.punch, setVisualState]);
+    setVisualState({ punch: next });
+    setAiNotification(`🎯 Punch : REC ne remplace que ${next.punchIn.toFixed(2)} s → ${next.punchOut.toFixed(2)} s (crossfades aux bords). Règle le pré-roll et le post-roll à côté du bouton PUNCH.`);
+  }, [setVisualState]);
+  const handleToggleQuickPunch = useCallback(() => {
+    const on = !stateRef.current.punch?.quickPunch;
+    handleUpdatePunch({ quickPunch: on });
+    setAiNotification(on
+      ? '⚡ QuickPunch activé : lance la lecture, puis REC (ou R) pour entrer dans l\'enregistrement et REC pour en sortir, sans arrêter la musique.'
+      : 'QuickPunch désactivé.');
+  }, [handleUpdatePunch]);
+  // Commandes d'édition Pro Tools (hooks/useEditCommands) : appelables par le clavier, les menus, l'IA.
+  const editCommands = useEditCommands({ stateRef, setState, notify: setAiNotification, togglePunch: handleTogglePunch, toggleQuickPunch: handleToggleQuickPunch });
 
   // Aide-mémoire des raccourcis (touche « ? »)
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -4717,8 +4792,7 @@ function Studio() {
         // { start, end } en secondes : zone de boucle + punch activé
         const a = Math.max(0, Number(p.start) || 0), b = Number(p.end) || 0;
         if (b > a + 0.2) {
-          const bar = 240 / (stateRef.current.bpm || 120);
-          setState(prev => ({ ...prev, loopStart: a, loopEnd: b, punch: { enabled: true, punchIn: a, punchOut: b, preRoll: bar * 2, postRoll: bar } }));
+          setState(prev => ({ ...prev, loopStart: a, loopEnd: b, punch: { ...prev.punch, enabled: true, punchIn: a, punchOut: b } }));
         } else handleTogglePunch();
         break;
       }
@@ -5458,6 +5532,7 @@ function Studio() {
           timeSignature={state.timeSignature} projectKey={state.projectKey} projectScale={state.projectScale}
           isRecording={state.isRecording} isLoopActive={state.isLoopActive}
           isPunchActive={!!state.punch?.enabled} onTogglePunch={handleTogglePunch}
+          punch={state.punch} onUpdatePunch={handleUpdatePunch} onToggleQuickPunch={handleToggleQuickPunch}
           onToggleLoop={() => setState(p => ({ ...p, isLoopActive: !p.isLoopActive }))}
           isMetronomeEnabled={state.metronome.enabled}
           onToggleMetronome={handleToggleMetronome}
@@ -5537,6 +5612,7 @@ function Studio() {
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
                    onMoveClipsBy={handleMoveClipsBy}
                    onAudioDrop={onArrangementAudioDrop}
+                   punch={state.punch} onUpdatePunch={handleUpdatePunch} editCommands={editCommands}
                    markers={state.markers} onAddMarker={handleAddMarker}
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker} onAddRegion={handleAddRegion}
                 />

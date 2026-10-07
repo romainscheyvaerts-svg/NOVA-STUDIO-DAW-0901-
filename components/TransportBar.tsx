@@ -8,6 +8,8 @@ import { playheadStore } from '../utils/playheadStore';
 import { formatMesures, nomTonaliteCourt } from '../utils/musicKey';
 import { useSimpleMode, simpleModeStore } from '../utils/simpleMode';
 import SimpleModeToggle from './SimpleModeToggle';
+import PunchControls from './PunchControls';
+import { PunchSettings } from '../types';
 
 interface TransportProps {
   isPlaying: boolean;
@@ -19,6 +21,10 @@ interface TransportProps {
   onToggleLoop: () => void;
   isPunchActive?: boolean;
   onTogglePunch?: () => void;
+  /** Réglages du punch (pré/post-roll, QuickPunch) : components/PunchControls. */
+  punch?: PunchSettings;
+  onUpdatePunch?: (patch: Partial<PunchSettings>) => void;
+  onToggleQuickPunch?: () => void;
   isMetronomeEnabled?: boolean;
   onToggleMetronome?: () => void;
   bpm: number;
@@ -162,6 +168,7 @@ const KeyBadge: React.FC<{ projectKey?: number; projectScale?: string; numerator
 
 const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, isPunchActive = false, onTogglePunch,
+  punch, onUpdatePunch, onToggleQuickPunch,
   isMetronomeEnabled = false, onToggleMetronome, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
@@ -357,13 +364,11 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" aria-pressed={isLoopActive} className={`nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
           <OverloadBadge />
           {onTogglePunch && !simple && (
-            <button onClick={onTogglePunch} title="Punch-in / punch-out : REC ne remplace que la zone de la boucle (pré-roll de 2 mesures, arrêt automatique)" aria-pressed={isPunchActive}
-              className={`nova-hit-tactile hidden md:flex h-8 px-2 rounded-lg items-center justify-center text-[9px] font-black tracking-wider transition-all ${isPunchActive ? 'bg-red-500/25 text-red-300 border border-red-500/50' : 'text-slate-500 hover:text-white border border-transparent'}`}>
-              PUNCH
-            </button>
+            <PunchControls punch={punch} bpm={bpm} isPunchActive={isPunchActive} onTogglePunch={onTogglePunch}
+              onUpdatePunch={onUpdatePunch} onToggleQuickPunch={onToggleQuickPunch} />
           )}
           <button onClick={onToggleMetronome} title="Métronome" aria-label="Métronome" aria-pressed={isMetronomeEnabled} className={`nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-neon)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
-          <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" aria-label={isRecording ? "Arrêter l'enregistrement" : 'Enregistrer'} aria-pressed={isRecording} className={`h-12 px-4 2xl:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'var(--border-highlight)' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">Rec</span></button>
+          <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" aria-label={isRecording ? "Arrêter l'enregistrement" : 'Enregistrer'} aria-pressed={isRecording} className={`h-12 px-4 2xl:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'var(--border-highlight)' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">{punch?.quickPunch && !simple ? 'QP' : 'Rec'}</span></button>
         </div>
         
         <PlayheadClock bpm={bpm} numerator={tsNum} denominator={tsDen} />
