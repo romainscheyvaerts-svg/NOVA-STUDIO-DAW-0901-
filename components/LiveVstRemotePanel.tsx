@@ -1,12 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import type { Track } from '../types';
 import type { VstCatalogEntry, VstParamAck, VstParamInfo, VstParamsReply } from '../services/LiveVstRemote';
+import type { PreviewView } from '../services/LivePreview';
 
 /**
  * Collaboration « En direct », côté ingé : les VST hébergés par le PC de
  * l'artiste. On lit leurs réglages, on les change ; le pont de l'artiste
  * applique et RELIT la valeur, affichée ici. On peut aussi poser un des VST
  * installés chez l'artiste sur une piste.
+ *
+ * Aperçu : l'ingé n'a pas ces VST. Le pont de l'artiste rend la piste ~1 s
+ * après chaque réglage, l'aperçu joue ici à la place du son sans VST.
  */
 interface Props {
   tracks: Track[];
@@ -15,11 +19,16 @@ interface Props {
   onRead: (trackId: string, pluginId: string) => Promise<VstParamsReply>;
   onSet: (trackId: string, pluginId: string, name: string, value: string) => Promise<VstParamAck>;
   onAdd: (entry: VstCatalogEntry, trackId: string) => void;
+  /** Pistes qui passent par un VST de l'artiste, et l'état de leur aperçu. */
+  previews?: { trackId: string; name: string; view: PreviewView | null }[];
+  onRefreshPreview?: (trackId: string) => void;
 }
+
+const PREVIEW_TONE: Record<PreviewView['tone'], string> = { ok: 'text-emerald-300', busy: 'text-sky-300', warn: 'text-amber-300', error: 'text-red-300' };
 
 const btn = 'h-9 rounded-xl px-3 text-[11px] font-black transition-colors disabled:opacity-40';
 
-const LiveVstRemotePanel: React.FC<Props> = ({ tracks, catalog, selectedTrackId, onRead, onSet, onAdd }) => {
+const LiveVstRemotePanel: React.FC<Props> = ({ tracks, catalog, selectedTrackId, onRead, onSet, onAdd, previews = [], onRefreshPreview }) => {
   const vsts = useMemo(() => tracks.flatMap(t => (t.plugins || []).filter(p => p.type === 'VST3' && p.params?.localPath).map(p => ({ t, p }))), [tracks]);
   const [pick, setPick] = useState('');
   const [params, setParams] = useState<VstParamInfo[] | null>(null);
@@ -61,6 +70,24 @@ const LiveVstRemotePanel: React.FC<Props> = ({ tracks, catalog, selectedTrackId,
       <div className="mt-2 space-y-2">
         {vsts.length === 0 && !catalog?.length && (
           <p className="text-[11px] text-slate-500">L'artiste n'a pas encore partagé ses VST : il doit ouvrir NOVA Studio pour Windows (pont VST connecté).</p>
+        )}
+        {previews.length > 0 && (
+          <div data-testid="live-preview" className="space-y-1.5 rounded-xl border border-white/10 bg-white/[0.03] p-2" aria-live="polite">
+            <p className="text-[11px] font-bold text-white">🔊 Ce que tu entends</p>
+            {previews.map(pv => (
+              <div key={pv.trackId} data-testid={`live-preview-${pv.trackId}`} className="flex items-start gap-1.5">
+                <p className={`flex-1 text-[11px] leading-snug ${pv.view ? PREVIEW_TONE[pv.view.tone] : 'text-slate-400'}`}>
+                  <span className="font-bold text-slate-200">{pv.name} : </span>
+                  {pv.view ? pv.view.label : "pas encore d'aperçu (tu entends la piste sans ses VST). Clique « Écouter son son »."}
+                </p>
+                <button type="button" onClick={() => onRefreshPreview?.(pv.trackId)} disabled={pv.view?.tone === 'busy'}
+                  className={`${btn} h-8 shrink-0 ${pv.view?.retry ? 'bg-amber-400 text-black' : 'bg-white/10 text-white'}`}>
+                  {pv.view?.retry ? 'Réessayer' : pv.view ? 'Actualiser' : 'Écouter son son'}
+                </button>
+              </div>
+            ))}
+            <p className="text-[10px] text-slate-500">Rendu par le PC de l'artiste (ses VST) ~1 s après chaque réglage, sur le passage que tu écoutes (ta boucle, sinon 30 s autour de la tête de lecture).</p>
+          </div>
         )}
         {vsts.length > 0 && (
           <>

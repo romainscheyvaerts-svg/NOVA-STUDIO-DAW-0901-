@@ -17,7 +17,11 @@ interface Props {
 }
 
 const TONE: Record<string, string> = {
-  info: 'text-slate-300', busy: 'text-sky-300', ok: 'text-emerald-300', warn: 'text-amber-300',
+  info: 'text-slate-300', busy: 'text-sky-300', ok: 'text-emerald-300', warn: 'text-amber-300', error: 'text-red-300',
+};
+const BOX: Record<string, string> = {
+  ok: 'border-emerald-500/20 bg-emerald-500/[0.06]', busy: 'border-sky-500/20 bg-sky-500/[0.06]',
+  warn: 'border-amber-500/30 bg-amber-500/10', error: 'border-red-500/30 bg-red-500/10',
 };
 const ago = (at: number): string => {
   const s = Math.max(0, Math.round((Date.now() - at) / 1000));
@@ -58,6 +62,15 @@ const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {r.connecting && <p role="status" className="text-[12px] text-sky-300"><i className="fas fa-circle-notch fa-spin mr-1.5" />{r.connecting}</p>}
+        {r.status && r.status.code !== 'live' && r.status.code !== 'waiting_peer' && (
+          <div data-testid="remote-conn" role="status" className={`rounded-2xl border p-2.5 ${BOX[r.status.tone]}`}>
+            <p className={`text-[11px] leading-snug ${TONE[r.status.tone]}`}>{r.status.label}</p>
+            {r.status.action && (
+              <button type="button" data-testid="remote-conn-action" onClick={() => (r.status!.action === 'reload' ? void r.reconnect() : r.retry())}
+                className={`${btn} mt-2 h-9 ${r.status.action === 'reload' ? 'bg-red-400 text-black' : 'bg-white/10 text-white'}`}>{r.status.action === 'reload' ? 'Se reconnecter au lien' : r.status.actionLabel}</button>
+            )}
+          </div>
+        )}
         <p data-testid="remote-peer" className="text-[12px] text-slate-300">
           {r.peerName
             ? <><span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5" />{who(r.peerName, isArtist)} est connecté.</>
@@ -138,7 +151,7 @@ const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
             )}
             <div className="space-y-2" aria-live="polite">
               {r.engineerRows.length === 0 && <p className="text-[12px] text-slate-500">Aucune piste reçue pour l'instant. Quand l'artiste t'en envoie une, elle arrive ici et dans ta session.</p>}
-              {r.engineerRows.map(({ track: t, label, tone, issues, busy, latencyMs }) => (
+              {r.engineerRows.map(({ track: t, label, tone, issues, busy, latencyMs, failed }) => (
                 <div key={t.id} data-testid={`remote-row-${t.id}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-6 rounded-full" style={{ background: t.color }} />
@@ -155,8 +168,8 @@ const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
                       </button>
                     </div>
                   ))}
-                  <button type="button" data-testid={`remote-return-${t.id}`} disabled={!!busy || issues.length > 0} onClick={() => { void r.returnTrack(t.id); }}
-                    className={`${btn} w-full bg-cyan-500 text-black`}>{busy ? 'En cours…' : "Geler et envoyer à l'artiste"}</button>
+                  <button type="button" data-testid={`remote-return-${t.id}`} disabled={!!busy || issues.length > 0 || !!r.otherEngineer} onClick={() => { void r.returnTrack(t.id); }}
+                    className={`${btn} w-full ${failed ? 'bg-amber-400' : 'bg-cyan-500'} text-black`}>{busy ? 'En cours…' : failed ? 'Réessayer : geler et envoyer' : "Geler et envoyer à l'artiste"}</button>
                   {t.remote?.auto && <p className="text-[10px] text-slate-500">Renvoi automatique activé : ses prochaines coupes reviennent ici, sont regelées et repartent toutes seules.</p>}
                 </div>
               ))}

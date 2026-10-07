@@ -20,9 +20,12 @@ const h = vi.hoisted(() => {
     offline: false,
     clients: [] as any[],
     uploads: 0,
+    /** Livraison retenue (pour la rejouer dans le désordre, en double…). */
+    hold: false,
+    held: [] as { c: any; o: any }[],
   };
   let renders = 0;
-  const bridge = { on: true, listeners: new Set<(s: any) => void>() };
+  const bridge = { on: true, listeners: new Set<(s: any) => void>(), renderFail: null as null | string, renderGate: null as null | Promise<void> };
   return { server, bridge, nextRender: () => ++renders, renderCount: () => renders, resetRenders: () => { renders = 0; } };
 });
 
@@ -41,7 +44,9 @@ vi.mock('../services/RemoteInge', () => {
     lastSeq = 0;
     memberKey: string;
     constructor(public link: any, public role: string, public name: string, private onOp: (o: any) => any, private onPresence: (m: any) => void) {
-      this.memberKey = `${role}-${Math.random().toString(36).slice(2, 6)}`;
+      // Clé de membre = le compte (la même après une réouverture de l'onglet).
+      const account: Record<string, string> = { Max: 'max', 'Ingé': 'max', Sam: 'sam', Lina: 'lina', Artiste: 'lina' };
+      this.memberKey = `u:${account[name] || name}`;
     }
     static async createLink() { return { id: 'abcdefghijk1', secret: 'ABCDEFGHJKLMNPQRSTUVWXYZ23' }; }
     async join(fromSeq: number) {
@@ -57,9 +62,16 @@ vi.mock('../services/RemoteInge', () => {
       if (h.server.offline) throw new Error('hors ligne');
       const o = { seq: ++h.server.seq, kind, op: JSON.parse(JSON.stringify(op)), role: this.role, author_name: this.name, member_key: this.memberKey };
       h.server.ops.push(o);
-      for (const c of h.server.clients) if (c !== this) queueMicrotask(() => { void c.onOp(o); });
+      for (const c of h.server.clients) {
+        if (c === this) continue;
+        if (h.server.hold) h.server.held.push({ c, o });
+        else queueMicrotask(() => { void c.onOp(o); });
+      }
       return o.seq;
     }
+    sendPeer(p: any) { void this.send('ri_peer', p).catch(() => {}); }
+    onStatus() { return () => {}; }
+    async retryNow() {}
     sendTrack(p: any, ids: string[]) { h.server.uploads += ids.length; return this.send('ri_send', { ...p, audio: {} }); }
     sendReturn(p: any, ids: string[]) { h.server.uploads += ids.length; return this.send('ri_return', { ...p, audio: {} }); }
     sendFx(p: any) { return this.send('ri_fx', p); }
@@ -67,13 +79,15 @@ vi.mock('../services/RemoteInge', () => {
     sendAck(a: any) { return this.send('ri_ack', a); }
     async ensureAudio() {}
   }
-  return { RemoteIngeClient, REMOTE_KINDS: new Set(['ri_send', 'ri_return', 'ri_fx', 'ri_phase', 'ri_ack']), remoteInviteUrl: (l: any) => `https://nova.test/daw?inge=${l.id}.${l.secret}` };
+  return { RemoteIngeClient, REMOTE_KINDS: new Set(['ri_send', 'ri_return', 'ri_fx', 'ri_phase', 'ri_ack', 'ri_peer']), remoteInviteUrl: (l: any) => `https://nova.test/daw?inge=${l.id}.${l.secret}` };
 });
 vi.mock('../services/VstFreeze', async () => {
   const { anchorClipsToRender, pluginsSignature, freezeSignature } = await import('../utils/freeze');
   const { makeFreezeBase } = await import('../utils/preFxEdits');
   return {
     renderTrackFreeze: async (t: Track, upTo: number) => {
+      if (h.bridge.renderGate) await h.bridge.renderGate;
+      if (h.bridge.renderFail) { const m = h.bridge.renderFail; throw new Error(m); }
       const id = `frozen-${t.id}-${h.nextRender()}`;
       return {
         clip: { id, bufferId: id, start: 0, offset: 0, duration: 12, fadeIn: 0, fadeOut: 0, name: 'rendu', color: '#000', type: 'AUDIO' },
@@ -146,6 +160,10 @@ beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   h.server.ops = []; h.server.clients = []; h.server.offline = false; h.server.uploads = 0;
   h.bridge.on = true;
+  h.bridge.renderFail = null;
+  h.bridge.renderGate = null;
+  h.server.hold = false;
+  h.server.held = [];
   h.resetRenders();
   try { localStorage.clear(); } catch { /* */ }
 });
@@ -293,5 +311,173 @@ describe('Ingé à distance : aller-retour dans les deux sessions', () => {
     expect(inge.api.remote.checkAdd(et().id, vst('v', 'ValhallaRoom'))).toEqual({ ok: true });
     expect(inge.api.remote.mixRule()).toEqual({ phase: 'mixing', trackIds: [et().id] });
     await act(async () => { expect(await inge.api.remote.returnTrack(et().id)).toBe(true); });
+  });
+});
+
+// --- Pannes injectées -------------------------------------------------------------------------
+
+describe('Ingé à distance : pannes', () => {
+  const et = (inge: Side) => inge.api.get().tracks.find(t => t.remote?.peerTrackId === 'lead')!;
+  const withVst = (inge: Side) => act(() => inge.api.set(s => ({ ...s, tracks: s.tracks.map(t => (t.remote ? { ...t, plugins: [vst('i-comp', 'Pro-C 2')], sends: [{ id: 'send-verb-short', level: 0.3, isEnabled: true }] } : t)) })));
+
+  it("réglages d'effets reçus dans le désordre : le plus ancien n'écrase pas le plus récent", async () => {
+    const { artist, inge } = await linked();
+    await act(async () => { artist.api.remote.sendTrack('lead'); });
+    await flush(10);
+    h.server.hold = true;
+    withVst(inge);
+    await flush(400);
+    act(() => inge.api.set(s => ({ ...s, tracks: s.tracks.map(t => (t.id === 'send-verb-short' ? { ...t, plugins: [{ ...t.plugins[0], params: { decay: 5 } }] } : t)) })));
+    await flush(400);
+    expect(opsOf('ri_fx')).toHaveLength(2);
+    const held = h.server.held.filter(x => x.o.kind === 'ri_fx');
+    h.server.hold = false;
+    // Le plus récent arrive d'abord, l'ancien ensuite (réseau capricieux), puis l'ancien en double.
+    await act(async () => { for (const x of [held[1], held[0], held[0]]) await x.c.onOp(x.o); });
+    expect(artist.api.get().tracks.find(t => t.id === 'ri-send-verb-short')!.plugins[0].params.decay).toBe(5);
+  });
+
+  it('opérations livrées deux fois : une seule application, un seul rendu, un seul retour', async () => {
+    const { artist, inge } = await linked();
+    h.server.hold = true;
+    await act(async () => { artist.api.remote.sendTrack('lead'); });
+    await flush(10);
+    const send = h.server.held.find(x => x.o.kind === 'ri_send')!;
+    h.server.hold = false;
+    await act(async () => { await send.c.onOp(send.o); await send.c.onOp(send.o); });
+    expect(inge.api.get().tracks.filter(t => t.remote?.peerTrackId === 'lead')).toHaveLength(1);
+    withVst(inge);
+    await act(async () => { await inge.api.remote.returnTrack(et(inge).id); });
+    await flush(10);
+    const ret = opsOf('ri_return')[0];
+    const artistClient = h.server.clients.find(c => c.role === 'artist');
+    await act(async () => { await artistClient.onOp(ret); });
+    await act(async () => { await artist.api.remote.receive('lead'); });
+    await act(async () => { await artistClient.onOp(ret); });
+    expect(artist.api.get().tracks.find(t => t.id === 'lead')!.remote).toMatchObject({ appliedV: 1, accepted: true });
+    expect(h.renderCount()).toBe(1);
+  });
+
+  it("pont VST coupé PENDANT le gel : l'artiste n'est plus bloqué sur « il applique ses effets » ; repart au retour du pont", async () => {
+    const { artist, inge } = await linked();
+    await act(async () => { artist.api.remote.sendTrack('lead'); });
+    await flush(10);
+    withVst(inge);
+    await act(async () => { await inge.api.remote.returnTrack(et(inge).id); });
+    await flush(10);
+    await act(async () => { await artist.api.remote.receive('lead'); });
+    // Nouvelle coupe de l'artiste ; le pont tombe pendant le rendu.
+    let open!: () => void;
+    h.bridge.renderGate = new Promise<void>(r => { open = r; });
+    act(() => artist.api.set(s => ({ ...s, tracks: s.tracks.map(t => (t.id === 'lead' ? { ...t, clips: [t.clips[0]] } : t)) })));
+    await flush(2600);
+    await flush(1300);
+    expect(artist.api.remote.artistRows[0].status.code).toBe('processing');
+    h.bridge.on = false;
+    h.bridge.renderFail = 'Pont VST non connecté';
+    act(() => h.bridge.listeners.forEach(l => l({ status: 'idle' })));
+    h.bridge.renderGate = null;
+    await act(async () => { open(); });
+    await flush(10);
+    expect(artist.api.remote.artistRows[0].status.label).toMatch(/pont VST est fermé/);
+    expect(inge.notes.join('\n')).toMatch(/Pont VST coupé pendant le gel/);
+    expect(inge.api.remote.engineerRows[0].failed).toBe(true);
+    // Le pont revient : traité et renvoyé tout seul.
+    h.bridge.renderFail = null;
+    h.bridge.on = true;
+    act(() => h.bridge.listeners.forEach(l => l({ status: 'connected' })));
+    await flush(1300);
+    await flush(10);
+    expect(opsOf('ri_return')).toHaveLength(2);
+    expect(artist.api.get().tracks.find(t => t.id === 'lead')!.remote?.appliedV).toBe(2);
+    expect(inge.api.remote.engineerRows[0].failed).toBe(false);
+  });
+
+  it("gel qui échoue (plugin planté, pont connecté) : l'artiste le sait, nouvel essai automatique", async () => {
+    const { artist, inge } = await linked();
+    await act(async () => { artist.api.remote.sendTrack('lead'); });
+    await flush(10);
+    withVst(inge);
+    await act(async () => { await inge.api.remote.returnTrack(et(inge).id); });
+    await flush(10);
+    await act(async () => { await artist.api.remote.receive('lead'); });
+    h.bridge.renderFail = 'Le plugin a planté';
+    act(() => artist.api.set(s => ({ ...s, tracks: s.tracks.map(t => (t.id === 'lead' ? { ...t, clips: [t.clips[0]] } : t)) })));
+    await flush(2600);
+    await flush(1300);
+    await flush(10);
+    expect(artist.api.remote.artistRows[0].status).toMatchObject({ code: 'error' });
+    expect(artist.api.remote.artistRows[0].status.label).toMatch(/a échoué \(Le plugin a planté\) : il réessaie/);
+    expect(inge.api.remote.engineerRows[0].label).toMatch(/Gel impossible : Le plugin a planté \(nouvel essai automatique\)/);
+    h.bridge.renderFail = null;
+    await flush(15000);
+    await flush(10);
+    expect(opsOf('ri_return')).toHaveLength(2);
+    expect(artist.api.get().tracks.find(t => t.id === 'lead')!.remote?.appliedV).toBe(2);
+  });
+
+  it("artiste hors ligne pendant que l'ingé renvoie : il reçoit tout en revenant", async () => {
+    const { artist, inge } = await linked();
+    await act(async () => { artist.api.remote.sendTrack('lead'); });
+    await flush(10);
+    await act(async () => { await artist.api.remote.leave(false); }); // onglet fermé, lien gardé
+    withVst(inge);
+    await act(async () => { await inge.api.remote.returnTrack(et(inge).id); });
+    await flush(10);
+    expect(artist.api.get().tracks.find(t => t.id === 'lead')!.remote?.pending).toBeFalsy();
+    const saved = artist.api.get().remoteInge!;
+    await act(async () => { await artist.api.remote.start('artist', 'Lina', saved.link, { quiet: true }); });
+    await flush(10);
+    expect(artist.api.get().tracks.find(t => t.id === 'lead')!.remote?.pending).toBeTruthy();
+    expect(artist.api.remote.artistRows[0].status.label).toBe("Réglages de l'ingé prêts");
+  });
+
+  it("onglet de l'ingé fermé pendant un gel : à la réouverture, la piste est retraitée et renvoyée", async () => {
+    const { artist, inge } = await linked();
+    await act(async () => { artist.api.remote.sendTrack('lead'); });
+    await flush(10);
+    withVst(inge);
+    await act(async () => { await inge.api.remote.returnTrack(et(inge).id); });
+    await flush(10);
+    await act(async () => { await artist.api.remote.receive('lead'); });
+    h.bridge.renderGate = new Promise<void>(() => { /* ne se termine jamais : l'onglet est fermé */ });
+    act(() => artist.api.set(s => ({ ...s, tracks: s.tracks.map(t => (t.id === 'lead' ? { ...t, clips: [t.clips[0]] } : t)) })));
+    await flush(2600);
+    await flush(1300);
+    expect(artist.api.remote.artistRows[0].status.code).toBe('processing');
+    // Fermeture de l'onglet : la session (sauvegardée) garde la version reçue, pas encore renvoyée.
+    const savedState = inge.api.get();
+    act(() => inge.root.unmount());
+    sides = sides.filter(s => s !== inge);
+    h.server.clients = h.server.clients.filter(c => c.role !== 'engineer');
+    h.bridge.renderGate = null;
+    const inge2 = mount(savedState);
+    sides.push(inge2);
+    await flush(2600); // reprise automatique du lien
+    await flush(1300);
+    await flush(10);
+    expect(opsOf('ri_return')).toHaveLength(2);
+    expect(artist.api.get().tracks.find(t => t.id === 'lead')!.remote?.appliedV).toBe(2);
+  });
+
+  it('deux ingés sur le même lien : le premier est retenu, le second est prévenu et ignoré', async () => {
+    const { artist, inge } = await linked();
+    const inge2 = mount(engineerProject());
+    sides.push(inge2);
+    await act(async () => { await inge2.api.remote.start('engineer', 'Sam', artist.api.remote.inviteUrl!); });
+    await act(async () => { artist.api.remote.sendTrack('lead'); });
+    await flush(10);
+    await flush(10);
+    expect(artist.api.get().remoteInge).toMatchObject({ peerName: 'Max' });
+    expect(artist.notes.join('\n')).toMatch(/Sam essaie aussi de travailler sur ce lien : ignoré, ton ingé est Max/);
+    expect(inge2.api.remote.otherEngineer).toBe('Max');
+    expect(inge2.api.remote.error).toMatch(/travaille déjà avec Max/);
+    const t2 = inge2.api.get().tracks.find(t => t.remote?.peerTrackId === 'lead')!;
+    await act(async () => { expect(await inge2.api.remote.returnTrack(t2.id)).toBe(false); });
+    withVst(inge);
+    await act(async () => { await inge.api.remote.returnTrack(et(inge).id); });
+    await flush(10);
+    expect(artist.api.get().tracks.find(t => t.id === 'lead')!.remote?.pending?.forV).toBe(1);
+    expect(inge.api.remote.otherEngineer).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import { AudioRefs, CollabClient, CollabMember, CollabOp, ensureBuffers, uploadBuffers } from './Collab';
+import type { CollabStatus } from '../utils/collabStatus';
 import { CloudLink, createCloudSession, linkToString } from './SessionCloud';
 import type { EngineerAckState, RemoteFxPayload, RemoteReturnPayload, RemoteSendPayload } from '../utils/remoteInge';
 import type { RemoteIngePhase } from '../types';
@@ -20,11 +21,13 @@ import type { RemoteIngePhase } from '../types';
  *  ri_fx     ingé → artiste : réglages des reverbs / délais de NOVA (en direct)
  *  ri_phase  ingé → artiste : enregistrement / mix
  *  ri_ack    ingé → artiste : « reçue », « en cours », « pont VST fermé »…
+ *  ri_peer   artiste → ingés : l'ingé avec qui le lien travaille (le premier
+ *            arrivé) ; un 2e ingé est prévenu et ignoré.
  */
 
 export type RemoteRole = 'artist' | 'engineer';
 
-export const REMOTE_KINDS = new Set(['ri_send', 'ri_return', 'ri_fx', 'ri_phase', 'ri_ack']);
+export const REMOTE_KINDS = new Set(['ri_send', 'ri_return', 'ri_fx', 'ri_phase', 'ri_ack', 'ri_peer']);
 
 export interface RemoteAck { trackId: string; v: number; state: EngineerAckState; detail?: string }
 
@@ -55,24 +58,29 @@ export class RemoteIngeClient {
   }
 
   get lastSeq() { return this.collab.lastSeq; }
+  get memberKey() { return this.collab.memberKey; }
+  onStatus(cb: (s: CollabStatus) => void) { return this.collab.onStatus(cb); }
+  retryNow() { return this.collab.retryNow(); }
 
   join(fromSeq: number) { return this.collab.join(fromSeq); }
   catchUp() { return this.collab.catchUp(); }
   leave() { return this.collab.leave(); }
 
   async sendTrack(p: RemoteSendPayload, bufferIds: string[]): Promise<number> {
-    const audio = await uploadBuffers(this.link, bufferIds);
+    const audio = await uploadBuffers(this.link, bufferIds, (s, t) => this.collab.reportUpload(s, t));
     return this.collab.send('ri_send', { ...p, audio });
   }
 
   async sendReturn(p: RemoteReturnPayload, bufferIds: string[]): Promise<number> {
-    const audio = await uploadBuffers(this.link, bufferIds);
+    const audio = await uploadBuffers(this.link, bufferIds, (s, t) => this.collab.reportUpload(s, t));
     return this.collab.send('ri_return', { ...p, audio });
   }
 
   sendFx(p: RemoteFxPayload) { return this.collab.send('ri_fx', p); }
   sendPhase(phase: RemoteIngePhase) { return this.collab.send('ri_phase', { phase }); }
   sendAck(a: RemoteAck) { return this.collab.send('ri_ack', a); }
+  /** Artiste : annonce l'ingé du lien (file d'envoi : rien ne se perd). */
+  sendPeer(p: { engineerKey: string; name: string }) { this.collab.queue('ri_peer', 'ri_peer', p); }
 
   /** Télécharge l'audio d'une opération reçue (déjà là : rien). */
   ensureAudio(audio: AudioRefs | undefined) { return ensureBuffers(this.link, audio); }

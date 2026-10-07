@@ -573,10 +573,10 @@ export function applyFxOnArtist(tracks: Track[], p: RemoteFxPayload): number {
 
 // --- État affiché chez l'artiste -------------------------------------------------------------
 
-export type EngineerAckState = 'received' | 'processing' | 'waiting_bridge' | 'waiting_engineer' | 'blocked';
+export type EngineerAckState = 'received' | 'processing' | 'waiting_bridge' | 'waiting_engineer' | 'blocked' | 'error';
 
 export interface ArtistStatus {
-  code: 'queued' | 'sending' | 'at_engineer' | 'processing' | 'waiting_bridge' | 'blocked' | 'ready' | 'updated' | 'reverted' | 'none';
+  code: 'queued' | 'sending' | 'at_engineer' | 'processing' | 'waiting_bridge' | 'blocked' | 'error' | 'ready' | 'updated' | 'reverted' | 'none';
   label: string;
   tone: 'info' | 'busy' | 'ok' | 'warn';
 }
@@ -593,10 +593,22 @@ export function artistStatus(t: Track, ack: { v: number; state: EngineerAckState
     if (ack.state === 'processing') return { code: 'processing', label: "Chez l'ingé… il applique ses effets", tone: 'busy' };
     if (ack.state === 'waiting_bridge') return { code: 'waiting_bridge', label: "Chez l'ingé… (son pont VST est fermé : ça repartira dès qu'il le rouvre)", tone: 'warn' };
     if (ack.state === 'blocked') return { code: 'blocked', label: `Chez l'ingé… ${ack.detail || 'il doit ajuster ses effets'}`, tone: 'warn' };
+    if (ack.state === 'error') return { code: 'error', label: `Chez l'ingé… son traitement a échoué (${ack.detail || 'erreur'}) : il réessaie.`, tone: 'warn' };
     return { code: 'at_engineer', label: "Chez l'ingé…", tone: 'busy' };
   }
   if (r.appliedV) return { code: 'updated', label: 'Mise à jour reçue', tone: 'ok' };
   return { code: 'none', label: '', tone: 'info' };
+}
+
+/**
+ * Artiste : un seul ingé par lien. Le premier qui se manifeste est retenu
+ * ('new'), lui seul compte ensuite ('same') ; un autre ('other') est ignoré
+ * (avant : deux ingés renvoyaient chacun leur rendu, la piste changeait de son
+ * à chaque retour).
+ */
+export function pairEngineer(peerKey: string | undefined, memberKey: string): 'new' | 'same' | 'other' {
+  if (!peerKey) return 'new';
+  return peerKey === memberKey ? 'same' : 'other';
 }
 
 // --- File d'attente hors ligne -----------------------------------------------------------------
