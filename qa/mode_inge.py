@@ -187,7 +187,7 @@ def dismiss(page):
 
 
 def open_collab(page):
-    b = page.get_by_role("button", name=re.compile(r"(Collaborer|Ingé à distance|en ligne · Chat)$")).locator("visible=true").first
+    b = page.get_by_role("button", name=re.compile(r"(Collaborer|Ingé à distance( · en ligne)?|en ligne · Chat)$")).locator("visible=true").first
     b.click(); page.wait_for_timeout(600)
 
 

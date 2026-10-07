@@ -199,12 +199,14 @@ def fake_login(page, uid="33333333-3333-4333-8333-333333333333", email="studio@t
     page.route(f"{SUPA_URL}/auth/v1/token*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(sess)))
 
 
-def prepare(page, bridge=None, desktop=False):
+def prepare(page, bridge=None, desktop=False, login=True):
     """Pont simulé (ou absent), worker audio du pont neutralisé, facturation simulée (admin).
-    Appli Windows simulée : compte connecté simulé (sinon la porte d'entrée bloque)."""
+    Appli Windows simulée : compte connecté simulé (sinon la porte d'entrée bloque) ;
+    login=False quand le scénario connecte lui-même un compte (vrai ou simulé)."""
     if desktop:
         page.add_init_script(DESKTOP_INIT)
-        fake_login(page)
+        if login:
+            fake_login(page)
     if bridge is not None:
         page.route_web_socket(re.compile(r"^ws://(127\.0\.0\.1|localhost):8765"), bridge.handler)
     else:
