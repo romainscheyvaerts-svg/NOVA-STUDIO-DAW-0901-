@@ -69,6 +69,7 @@ RES_DIR = getattr(sys, "_MEIPASS", HERE)
 if not FROZEN:
     sys.path.insert(0, HERE)
 
+import google_login  # noqa: E402
 import ui_bundle  # noqa: E402
 
 DEFAULT_URL = ui_bundle.PROD_ORIGIN + "/"
@@ -440,6 +441,7 @@ MARKER_JS = """
         version: %(version)s,
         platform: 'windows',
         ui: %(ui)s,
+        features: Object.freeze(['google-login']),
         bridges: Object.freeze({ asio: %(asio)d, vst: %(vst)d })
       }),
       configurable: false, enumerable: false, writable: false
@@ -561,6 +563,37 @@ BROWSER_ARGS = [
 # Fenêtre (WinForms + WebView2 via pythonnet)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def bring_window_to_front(hwnd_value: int) -> bool:
+    """Ramène la fenêtre au premier plan après la connexion Google (le navigateur a le focus).
+    Windows bloque souvent SetForegroundWindow depuis un processus en arrière-plan : on se
+    rattache un instant au fil de la fenêtre active ; à défaut, le bouton de la barre des
+    tâches clignote."""
+    u32 = ctypes.WinDLL("user32", use_last_error=True)
+    u32.GetForegroundWindow.restype = wintypes.HWND
+    u32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.c_void_p]
+    u32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    u32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+    for name in ("SetForegroundWindow", "BringWindowToTop", "IsIconic", "FlashWindow"):
+        getattr(u32, name).argtypes = [wintypes.HWND] + ([wintypes.BOOL] if name == "FlashWindow" else [])
+    u32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    hwnd = wintypes.HWND(hwnd_value)
+    if u32.IsIconic(hwnd):
+        u32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    fg = u32.GetForegroundWindow()
+    cur = _k32.GetCurrentThreadId()
+    other = u32.GetWindowThreadProcessId(fg, None) if fg else 0
+    attached = bool(other and other != cur and u32.AttachThreadInput(other, cur, True))
+    try:
+        u32.BringWindowToTop(hwnd)
+        ok = bool(u32.SetForegroundWindow(hwnd))
+    finally:
+        if attached:
+            u32.AttachThreadInput(other, cur, False)
+    if not ok:
+        u32.FlashWindow(hwnd, True)
+    return ok
+
+
 def _set_dpi_awareness() -> None:
     try:
         ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # PER_MONITOR_AWARE_V2
@@ -652,6 +685,9 @@ def run_window(url: str, url_mode: bool) -> None:
             self.updater_started = False
             self.crashes = []
             self.tuned = set()
+            self.no_focus = bool(os.environ.get("NOVA_DESKTOP_WINDOW"))  # tests : jamais de vol du focus
+            self.google = google_login.GoogleLoginBridge(
+                post=self.post_to_page, open_url=webbrowser.open, focus=self.bring_to_front, log=log.info)
             form = self.form = WinForms.Form()
             form.Text = APP_NAME
             try:
@@ -675,6 +711,7 @@ def run_window(url: str, url_mode: bool) -> None:
             form.Controls.Add(web)
             web.CoreWebView2InitializationCompleted += self.on_ready
             form.FormClosing += self.on_closing
+            form.FormClosed += lambda s_, e_: self.google.shutdown()  # aucun port qui reste ouvert
             web.EnsureCoreWebView2Async(None)
 
         # ── initialisation ──────────────────────────────────────────────
@@ -939,12 +976,55 @@ def run_window(url: str, url_mode: bool) -> None:
                 msg = str(args.TryGetWebMessageAsString())
             except Exception:
                 return
+            google_msg = google_login.parse_page_message(msg)
+            if google_msg is not None:
+                # Connexion Google : seulement depuis le DAW lui-même (pas d'une page tierce).
+                if (urlparse(str(args.Source)).hostname or "").lower() == app_host:
+                    self.google.handle(google_msg)
+                return
             if msg == "nova-desktop:apply-update" and ui.pending is not None:
                 log.info(f"mise à jour appliquée tout de suite : {ui.pending.id}")
                 ui.active, ui.pending = ui.pending, None
                 ui.downloaded.append(ui.active)
                 self.boot_checked = False
                 self.navigate_app("mise à jour")
+
+        # ── connexion Google (google_login.py) ──────────────────────────
+        def post_to_page(self, payload: dict):
+            """Message JSON vers la page, depuis n'importe quel fil. Les jetons ne partent que
+            vers le DAW (jamais vers une autre page affichée dans la fenêtre) et ne sont jamais
+            journalisés."""
+            def send():
+                try:
+                    if self.core is None:
+                        return
+                    if (urlparse(str(self.core.Source)).hostname or "").lower() != app_host:
+                        log.warning("connexion Google : la page affichée n'est pas le DAW, message non transmis")
+                        return
+                    self.core.PostWebMessageAsString(json.dumps(payload))
+                except Exception as e:
+                    log.warning(f"connexion Google : envoi à la page impossible ({type(e).__name__})")
+
+            try:
+                self.form.BeginInvoke(Action(send))
+            except Exception:
+                pass
+
+        def bring_to_front(self):
+            if self.no_focus:
+                return
+
+            def go():
+                try:
+                    bring_window_to_front(self.form.Handle.ToInt64())
+                    self.form.Activate()
+                except Exception as e:
+                    log.warning(f"premier plan impossible ({e})")
+
+            try:
+                self.form.BeginInvoke(Action(go))
+            except Exception:
+                pass
 
         def on_process_failed(self, sender, args):
             kind = args.ProcessFailedKind
