@@ -1,4 +1,5 @@
 import { catalogSupabase } from '../services/supabase';
+import { recordAction } from './feedbackLog';
 
 /**
  * Mesure d'audience anonyme du parcours Nova (table analytics_events du site,
@@ -45,6 +46,8 @@ const flush = async () => {
 export const track = (event: string, props?: Record<string, unknown>): void => {
   try {
     if (!/^[a-z0-9_]{2,40}$/.test(event)) return;
+    // Journal des 20 dernières actions joint aux signalements (nom seulement).
+    recordAction(`etape:${event}`);
     // Pas de mesure en local / dans les tests automatiques.
     if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname) && !localStorage.getItem('nova_track_local')) return;
     let small: Record<string, unknown> | null = null;

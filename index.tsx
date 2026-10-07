@@ -8,8 +8,16 @@ import App from './App';
 import DesktopAccessGate from './components/DesktopAccessGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { installGlobalErrorLog } from './utils/errorLog';
+import { installActionLog, installConsoleRing } from './utils/feedbackLog';
+import { startFeedbackQueue } from './services/feedback';
+import { FeedbackHost } from './components/FeedbackModal';
 
+// Tampon des 30 dernières erreurs et des 20 dernières actions (anonymes), joint
+// aux signalements « Signaler un bug / proposer une idée » ; file d'envoi hors ligne.
+installConsoleRing();
+installActionLog();
 installGlobalErrorLog();
+startFeedbackQueue();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -43,6 +51,10 @@ root.render(
       <DesktopAccessGate>
         <App />
       </DesktopAccessGate>
+    </ErrorBoundary>
+    {/* Hors du ErrorBoundary du studio : on peut signaler un plantage. */}
+    <ErrorBoundary fallback={<span hidden />}>
+      <FeedbackHost />
     </ErrorBoundary>
   </React.StrictMode>
 );

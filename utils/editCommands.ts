@@ -1,3 +1,4 @@
+import { recordAction } from './feedbackLog';
 /**
  * Bus des commandes d'édition (point d'accroche des raccourcis Pro Tools).
  *
@@ -55,6 +56,7 @@ export function registerEditCommands(map: Partial<Record<EditCommandId, EditComm
 
 /** Lance une commande : true si quelqu'un l'a faite. */
 export function runEditCommand(id: EditCommandId, arg?: any): boolean {
+  recordAction(`edit:${id}`);
   const list = stacks.get(id);
   if (!list) return false;
   for (let i = list.length - 1; i >= 0; i--) {

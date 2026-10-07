@@ -6,6 +6,7 @@ import { isKeyboardFocus, toggleKeyboardFocus } from '../utils/keyboardFocus';
 import { MarkerRecallBuffer, markerByNumber } from '../utils/memoryLocations';
 import { openNovaWindow } from '../utils/novaWindows';
 import { gridStepSeconds } from '../utils/grid';
+import { recordAction } from '../utils/feedbackLog';
 
 /**
  * Raccourcis Pro Tools (table utils/keymap). Écoute en phase de capture : un
@@ -123,6 +124,7 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
       if (e.repeat && !/^(nudge|zoom|trackHeight)/.test(sc.command || '')) { e.preventDefault(); e.stopPropagation(); return; }
       e.preventDefault();
       e.stopPropagation();
+      recordAction(`raccourci:${sc.id}`);
       run(sc);
     };
 

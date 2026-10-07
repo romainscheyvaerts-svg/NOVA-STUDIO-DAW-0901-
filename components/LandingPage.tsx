@@ -1,3 +1,4 @@
+import { openFeedback } from '../services/feedback';
 import { dailyChallengeId } from '../utils/dailyChallenge';
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Instrumental, DAWState } from '../types';
@@ -405,6 +406,10 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
           {/* Footer sidebar */}
           <div className="nova-signature mt-auto p-4 border-t border-white/5">
+            <button type="button" onClick={() => openFeedback()} data-nova-action="feedback-accueil" title="Signaler un bug ou proposer une idée (Ctrl+Maj+B)"
+              className="w-full mb-2 min-h-[36px] rounded-lg text-[11px] font-bold text-slate-400 hover:text-white hover:bg-white/5 transition-colors">
+              <i className="fas fa-comment-dots mr-1.5" aria-hidden="true"></i>Signaler un bug / une idée
+            </button>
             <p className="text-[9px] text-slate-600 text-center">
               © 2026 Nova Studio{getNovaDesktop() ? ` • Windows v${getNovaDesktop()!.version}` : ''}
             </p>
