@@ -1941,8 +1941,31 @@ export class AudioEngine {
     try { inst.updateParams({ [p.key]: value }); } catch { /* effet en cours de reconstruction */ }
   }
 
+  /**
+   * Avance (s) d'un effet sur le temps du projet : latence de l'effet et des
+   * effets qui le suivent sur la piste. Avec la compensation (PDC), les clips
+   * partent en avance de la latence de la chaîne : à l'instant t, l'entrée de
+   * cet effet reçoit le son du projet à t + avance. Son automation doit donc
+   * lire la voie à t + avance pour tomber pile sur la musique (sinon, mesuré,
+   * le limiteur appliquait son plafond 3,6 ms trop tard).
+   */
+  private pluginLead(trackId: string, pluginId: string): number {
+    if (this.pdcSuspended) return 0;
+    const dsp = this.tracksDSP.get(trackId);
+    const ids = dsp?.chainIds || [];
+    const i = ids.indexOf(pluginId);
+    if (!dsp || i < 0) return 0;
+    let lead = 0;
+    for (let k = i; k < ids.length; k++) {
+      const l = dsp.pluginChain.get(ids[k])?.instance?.latency;
+      if (typeof l === 'number' && l > 0 && l < 0.5) lead += l;
+    }
+    return lead;
+  }
+
   private schedulePluginAutomation(trackId: string, param: string, points: AutomationPoint[], start: number, when: number) {
-    const v = valueAtPoints(this.sortedOf(points), start, 0);
+    const pp = parsePluginParam(param);
+    const v = valueAtPoints(this.sortedOf(points), start + (pp ? this.pluginLead(trackId, pp.pluginId) : 0), 0);
     const key = `${trackId}|${param}`;
     if (this.pluginAutoSent.get(key) === v || !this.ctx) return;
     const delay = Math.max(0, (when - this.ctx.currentTime) * 1000);
@@ -1953,7 +1976,11 @@ export class AudioEngine {
 
   /**
    * Export : l'automation des effets est appliquée pendant le rendu hors ligne,
-   * par pauses du contexte (toutes les 20 ms, seulement quand la valeur change).
+   * par pauses du contexte (toutes les 20 ms, seulement quand la valeur change),
+   * en avance de la latence de l'effet et des effets qui le suivent (PDC :
+   * voir pluginLead). Les effets natifs lisent leurs réglages automatisables
+   * dans des AudioParam : la valeur posée pendant la pause vaut dès le bloc
+   * suivant (un message du port arrivait après la reprise du rendu).
    */
   private scheduleOfflinePluginAutomation(
     offlineCtx: OfflineAudioContext, tracks: Track[],
@@ -1966,15 +1993,33 @@ export class AudioEngine {
       if (track.isMuted) continue;
       const nodes = rendered.get(track.id)?.pluginNodes;
       if (!nodes) continue;
+      // Avance de chaque effet : sa latence + celle des effets suivants (même filtre que le PDC du rendu).
+      const lead = new Map<string, number>();
+      let acc = 0;
+      for (const [id, n] of [...nodes.entries()].reverse()) {
+        const l = n?.latency;
+        if (typeof l === 'number' && l > 0 && l < 0.5) acc += l;
+        lead.set(id, acc);
+      }
       for (const lane of playedLanes(track)) {
         const p = parsePluginParam(lane.parameterName);
         const node = p && nodes.get(p.pluginId);
         if (!p || !lane.points.length || !node || typeof node.updateParams !== 'function' || node instanceof VSTPluginNode) continue;
         const pts = this.sortedOf(lane.points);
-        let last = valueAtPoints(pts, startOffset, 0);
+        const from = startOffset + (lead.get(p.pluginId) || 0);
+        // Réglage exposé en AudioParam (limiteur) : toute la voie est programmée
+        // d'avance sur le paramètre, sans pause du rendu (rampes exactes, au bloc près).
+        const ap: AudioParam | null = typeof node.automationParam === 'function' ? node.automationParam(p.key) : null;
+        if (ap) { this.programmerVoieHorsLigne(ap, pts, from, totalDuration); continue; }
+        let last = valueAtPoints(pts, from, 0);
         try { node.updateParams({ [p.key]: last }); } catch { /* */ }
-        for (let t = STEP; t < totalDuration; t += STEP) {
-          const v = valueAtPoints(pts, startOffset + t, 0);
+        // Grille de 20 ms + instants exacts des points (un palier tombe au bloc près, pas à 20 ms près).
+        const times: number[] = [];
+        for (let t = STEP; t < totalDuration; t += STEP) times.push(t);
+        for (const pt of pts) { const t = pt.time - from; if (t > 0 && t < totalDuration) times.push(t); }
+        times.sort((x, y) => x - y);
+        for (const t of times) {
+          const v = valueAtPoints(pts, from + t, 0);
           if (Math.abs(v - last) < 1e-6) continue;
           last = v;
           const q = Math.round(t / quantum) * quantum;
@@ -1988,6 +2033,26 @@ export class AudioEngine {
     for (const [q, list] of events) {
       offlineCtx.suspend(q).then(() => { list.forEach(fn => fn()); return offlineCtx.resume(); }).catch(() => { /* */ });
     }
+  }
+
+  /** Voie d'automation programmée sur un AudioParam d'un rendu hors ligne (temps du contexte = temps du projet − from). */
+  private programmerVoieHorsLigne(ap: AudioParam, pts: AutomationPoint[], from: number, totalDuration: number) {
+    try {
+      ap.cancelScheduledValues(0);
+      ap.setValueAtTime(valueAtPoints(pts, from, 0), 0);
+      const i0 = pts.findIndex(pt => pt.time > from);
+      if (i0 < 0) return;
+      // Segment en cours au départ : il repart de la valeur à `from`.
+      if (i0 > 0) this.programmerSegment(ap, { ...pts[i0 - 1], time: from, value: valueAtPoints(pts, from, 0) }, pts[i0], 0, pts[i0].time - from);
+      else ap.setValueAtTime(pts[0].value, pts[0].time - from);
+      for (let k = i0; k < pts.length; k++) {
+        const at = pts[k].time - from;
+        if (at > totalDuration) break;
+        ap.setValueAtTime(pts[k].value, at);
+        const nx = pts[k + 1];
+        if (nx) this.programmerSegment(ap, pts[k], nx, at, nx.time - from);
+      }
+    } catch { /* valeur hors limites : le réglage de l'effet reste */ }
   }
 
   private scheduleAutomation(tracks: Track[], start: number, end: number, when: number) {
