@@ -91,6 +91,7 @@ export function pitchMarks(x: Float32Array, track: PitchTrack): PitchMarks {
     if (first <= pos[pos.length - 1]) first = pos[pos.length - 1] + Math.max(1, Math.round(P / 2));
     if (first >= b) continue;
     fillUnvoiced(first);
+    const runStart = pos.length;
     pos.push(first); voiced.push(1);
     let cur = first;
     for (;;) {
@@ -112,10 +113,61 @@ export function pitchMarks(x: Float32Array, track: PitchTrack): PitchMarks {
       pos.push(best); voiced.push(1);
       cur = best;
     }
+    centerOnPulses(x, pos, runStart, sr / f0);
   }
   fillUnvoiced(n - 1);
   if (pos[pos.length - 1] !== n - 1 && n > 1) { pos.push(n - 1); voiced.push(0); }
   return { pos: Int32Array.from(pos), voiced: Uint8Array.from(voiced) };
+}
+
+/**
+ * Recale les marques d'un passage chanté sur le cœur d'énergie des cycles
+ * (l'impulsion de la corde vocale). Le suivi par corrélation garde une phase
+ * constante d'un cycle à l'autre, mais pas forcément la bonne : une fenêtre
+ * centrée à côté de l'impulsion fait perdre des aigus quand on recolle les
+ * grains (mesuré : jusqu'à −10 dB vers 3-4 kHz). Chaque marque est donc
+ * décalée de l'écart qui met le plus d'énergie au centre des fenêtres de ses
+ * voisines ; l'écart est suivi d'un cycle à l'autre (la phase peut glisser
+ * pendant une glissade) puis lissé.
+ */
+function centerOnPulses(x: Float32Array, pos: number[], from: number, P: number) {
+  const K = pos.length - from;
+  if (K < 3) return;
+  const lo = pos[from - 1] ?? 0;
+  // Énergie lissée sur ~1/8 de période (sommes cumulées : coût linéaire).
+  const r = Math.max(1, Math.round(P / 16));
+  const span = Math.ceil(P) + r + 2;
+  const A = Math.max(0, pos[from] - span), B = Math.min(x.length - 1, pos[pos.length - 1] + span);
+  const cum = new Float64Array(B - A + 2);
+  for (let n = A; n <= B; n++) cum[n - A + 1] = cum[n - A] + x[n] * x[n];
+  const E = (n: number) => {
+    const a = Math.max(A, n - r), b = Math.min(B, n + r);
+    return b >= a ? cum[b - A + 1] - cum[a - A] : 0;
+  };
+  // Écart de chaque marque : cherché sur ses voisines (±4 cycles), d'abord sur
+  // une période entière, puis en suivant l'écart précédent (pas de saut d'un cycle).
+  const off = new Array<number>(K).fill(0);
+  for (let q = 0; q < K; q++) {
+    const k = from + q;
+    const Pk = k + 1 < pos.length ? pos[k + 1] - pos[k] : pos[k] - pos[k - 1];
+    const half = Math.max(2, Math.floor(Pk / 2));
+    const range = q === 0 ? [-half, half] : [off[q - 1] - Math.floor(Pk / 4), off[q - 1] + Math.floor(Pk / 4)];
+    let bestD = range[0], bestE = -1;
+    for (let d = range[0]; d <= range[1]; d++) {
+      let e = 0;
+      for (let j = Math.max(from, k - 4); j <= Math.min(pos.length - 1, k + 4); j++) e += E(pos[j] + d);
+      if (e > bestE) { bestE = e; bestD = d; }
+    }
+    off[q] = bestD;
+  }
+  // Lissage (médiane de 5) : l'écart bouge doucement.
+  const sm = off.map((_, q) => {
+    const w = off.slice(Math.max(0, q - 2), Math.min(K, q + 3)).sort((a, b) => a - b);
+    return w[w.length >> 1];
+  });
+  for (let q = 0; q < K; q++) pos[from + q] = Math.min(x.length - 2, Math.max(lo + 1, pos[from + q] + sm[q]));
+  // Ordre strict conservé (marques toujours croissantes).
+  for (let k = from; k < pos.length; k++) if (k > 0 && pos[k] <= pos[k - 1]) pos[k] = pos[k - 1] + 1;
 }
 
 /** Correction (demi-tons) à un instant, interpolée entre trames. */

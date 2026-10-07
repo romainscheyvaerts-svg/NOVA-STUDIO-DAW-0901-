@@ -157,3 +157,43 @@ describe('gamme devinée d’après la voix', () => {
     expect(guessKey(mk([60]))).toBeNull();
   });
 });
+
+describe('timbre gardé (formants, aigus)', () => {
+  it('note corrigée dans une mélodie : les harmoniques suivent toujours la voyelle (aigus compris)', async () => {
+    const { harmonicsVsEnvelope } = await import('./helpers/spectrum');
+    const M: [number, number, number, number, number, number][] = [[57, 40, 0.5, 0.55, 0, 10], [60, -40, 1.05, 0.45, 0.05, 0], [62, 40, 1.5, 0.5, 0.06, 12], [64, -40, 2.2, 0.6, 0, 15]];
+    const x = synthVoice(SR, 3.0, M.map(([m, c, at, len, glide, vib]) => ({ midi: m + c / 100, at, len, glide, vibratoCents: vib })));
+    const tr = analyzePitch(x, SR);
+    const notes = segmentNotes(tr);
+    const [y] = renderPitch([x], tr, correctionCurve(tr, notes, autoCorrect(notes, { root: 9, scale: 'MINOR' }, 1, 'naturel')));
+    for (const [m, c, at, len] of M) {
+      const a = harmonicsVsEnvelope(x, SR, at + 0.08, at + len - 0.05, 440 * 2 ** ((m + c / 100 - 69) / 12));
+      const b = harmonicsVsEnvelope(y, SR, at + 0.08, at + len - 0.05, 440 * 2 ** ((m - 69) / 12));
+      const n = Math.min(a.length, b.length);
+      // Écart harmonique par harmonique (avant la correction, après) : jamais plus de 3,5 dB,
+      // moins de 1,5 dB en moyenne sur les aigus (au-dessus de la 8e harmonique, ~2 kHz).
+      // Avant le recalage des marques sur les impulsions, la 1re note perdait 10 dB vers 3-4 kHz.
+      for (let h = 0; h < n; h++) expect(Math.abs(b[h] - a[h])).toBeLessThan(3.5);
+      const hi = Array.from({ length: n - 8 }, (_, k) => Math.abs(b[k + 8] - a[k + 8]));
+      expect(hi.reduce((s, v) => s + v, 0) / hi.length).toBeLessThan(1.5);
+    }
+  });
+
+  it('note montée de 4 demi-tons : formants à leur place (contre l’effet « chipmunk » d’un changement de vitesse)', async () => {
+    const { harmonicsVsEnvelope } = await import('./helpers/spectrum');
+    const x = synthVoice(SR, 1.2, [{ midi: 57, at: 0.1, len: 1.0 }]);
+    const tr = analyzePitch(x, SR);
+    const notes = segmentNotes(tr);
+    const [y] = renderPitch([x], tr, correctionCurve(tr, notes, [{ shift: 4, drift: 0, vibrato: 1 }]));
+    const r = 2 ** (4 / 12);
+    const chip = new Float32Array(Math.floor(x.length / r));
+    for (let i = 0; i < chip.length; i++) { const p = i * r, k = Math.floor(p); chip[i] = x[k] + (x[k + 1] - x[k]) * (p - k); }
+    const f1 = 440 * 2 ** ((61 - 69) / 12);
+    const mean = (v: number[]) => v.reduce((s, q) => s + Math.abs(q), 0) / v.length;
+    const psola = mean(harmonicsVsEnvelope(y, SR, 0.3, 1.0, f1));
+    const speed = mean(harmonicsVsEnvelope(chip, SR, 0.3 / r, 1.0 / r, f1));
+    expect(psola).toBeLessThan(2);
+    expect(speed).toBeGreaterThan(psola * 2);
+    expect(Math.abs(measured(y, 0.3, 1.0) - 61) * 100).toBeLessThan(5);
+  });
+});
