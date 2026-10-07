@@ -4,6 +4,7 @@ import { AIChatMessage, AIAction, DAWState, TrackType } from '../types';
 import { VOCAL_MIX_STYLES } from '../utils/vocalPresets';
 import { getVocalRole } from '../utils/vocalRoles';
 import type { NovaFeedMessage } from '../App';
+import { novaAttention, tipPillLabel } from '../utils/novaAttention';
 
 /** Bouton de réponse rapide affiché sous un message de Nova. */
 interface ChatChoice { label: string; action?: AIAction; actions?: AIAction[]; message?: string }
@@ -39,14 +40,28 @@ interface ChatAssistantProps {
   suppressAutoOpen?: boolean;
   /** Téléphone : ouvrir Nova = aller sur son onglet. */
   onRequestOpen?: () => void;
+  /** Nova ouverte / fermée (une seule carte de coaching à la fois). */
+  onOpenChange?: (open: boolean) => void;
 }
 
-const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, externalNotificationId, isMobile, forceOpen, onClose, projectState, mixGuideRequest, novaFeed, suppressAutoOpen, onRequestOpen }) => {
+const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteAction, externalNotification, externalNotificationId, isMobile, forceOpen, onClose, projectState, mixGuideRequest, novaFeed, suppressAutoOpen, onRequestOpen, onOpenChange }) => {
   const [isOpen, setIsOpen] = useState(forceOpen || false);
   // Bandeau quand le chat est fermé : sinon les messages du studio passaient inaperçus.
   const [toast, setToast] = useState<{ id: number; text: string; hasChoices: boolean } | null>(null);
   const isOpenRef = useRef(isOpen);
   isOpenRef.current = isOpen;
+  const isRecRef = useRef(!!projectState?.isRecording);
+  isRecRef.current = !!projectState?.isRecording;
+  // Conseils non lus : pastille « 1 conseil » sur le bouton (G1), au lieu d'ouvrir Nova.
+  const [unread, setUnread] = useState<{ n: number; last: string }>({ n: 0, last: '' });
+  useEffect(() => { if (isOpen) setUnread({ n: 0, last: '' }); onOpenChange?.(isOpen); }, [isOpen]);
+  // Échap ferme Nova (sauf si un menu ou une fenêtre l'a déjà pris).
+  useEffect(() => {
+    if (!isOpen || isMobile) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { setIsOpen(false); onClose?.(); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, isMobile]);
   const showToast = (text: string, hasChoices = false) => {
     const id = Date.now();
     setToast({ id, text, hasChoices });
@@ -89,8 +104,10 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
     fresh.forEach(m => feedSeen.current.add(m.id));
     setMessages(prev => [...prev, ...fresh.map(m => ({ id: m.id, role: 'assistant' as const, content: m.content, timestamp: Date.now(), choices: m.choices }))]);
     const last = fresh[fresh.length - 1];
-    if (!isMobile && !suppressAutoOpen) setIsOpen(true);
-    else if (!isOpenRef.current) showToast(last.content, !!last.choices?.length);
+    // Plus jamais d'ouverture automatique (elle couvrait la timeline, même pendant la prise).
+    const how = novaAttention('tip', { isOpen: isOpenRef.current, isRecording: isRecRef.current, isMobile: !!isMobile });
+    if (how === 'pill') setUnread(u => ({ n: u.n + fresh.length, last: last.content }));
+    else if (how === 'toast') showToast(last.content, !!last.choices?.length);
   }, [novaFeed, isMobile]);
 
   // Étapes de session que l'artiste a choisi de passer / déjà faites.
@@ -124,7 +141,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         if (last && last.role === 'assistant' && last.content === externalNotification && Date.now() - last.timestamp < 10000) return prev;
         return [...prev, assistantMsg];
       });
-      if (!isOpenRef.current) showToast(externalNotification);
+      if (novaAttention('notice', { isOpen: isOpenRef.current, isRecording: isRecRef.current, isMobile: !!isMobile }) === 'toast') showToast(externalNotification);
     }
   }, [externalNotification, externalNotificationId]); 
 
@@ -283,7 +300,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
 
   const windowClass = isMobile
     ? "w-full h-full flex flex-col"
-    : "w-[440px] h-[600px] bg-[#0c0d10]/90 border border-cyan-500/20 rounded-[40px] shadow-[0_0_100px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden mb-4 animate-in slide-in-from-bottom-4 duration-500 backdrop-blur-3xl";
+    : "w-[440px] h-[min(600px,calc(100vh-140px))] bg-[#0c0d10]/90 border border-cyan-500/20 rounded-[40px] shadow-[0_0_100px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden mb-4 animate-in slide-in-from-bottom-4 duration-500 backdrop-blur-3xl";
 
   if (isMobile && !isOpen) return null;
 
@@ -457,6 +474,13 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
         </div>
       )}
 
+      {!isMobile && !isOpen && unread.n > 0 && !projectState?.isRecording && (
+        <button type="button" data-testid="nova-tip-pill" onClick={() => setIsOpen(true)}
+          title={unread.last} aria-label={`Nova : ${tipPillLabel(unread.n)} (ouvrir)`}
+          className="absolute right-24 bottom-5 h-9 px-3.5 whitespace-nowrap rounded-full border border-cyan-400/40 bg-[#0f1115]/95 text-[12px] font-bold text-cyan-200 shadow-lg hover:bg-cyan-500/15 flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
+          <i className="fas fa-lightbulb text-[11px] text-amber-300" aria-hidden="true"></i>{tipPillLabel(unread.n)}
+        </button>
+      )}
       {!isMobile && (
         <button 
           onClick={() => setIsOpen(!isOpen)}

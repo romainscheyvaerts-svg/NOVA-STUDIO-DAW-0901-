@@ -934,6 +934,8 @@ function Studio() {
   // bilan de prise, consignes de session, écoute du mix.
   const [novaFeed, setNovaFeed] = useState<NovaFeedMessage[]>([]);
   const [novaUnread, setNovaUnread] = useState(false);
+  // Nova ouverte (ordinateur) : la carte « Et maintenant ? » attend (une seule carte à la fois).
+  const [novaOpen, setNovaOpen] = useState(false);
   const postNova = useCallback((content: string, choices?: NovaFeedMessage['choices']) => {
     setNovaFeed(prev => [...prev.slice(-40), { id: `nova-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, content, choices }]);
     if (isMobileRef.current && activeTabRef.current !== 'NOVA') setNovaUnread(true);
@@ -5843,7 +5845,7 @@ function Studio() {
         onToggleLyrics={() => setLyricsOpen(o => !o)} lyricsOpen={lyricsOpen} />}
 
       <NextStepCard
-        open={!!nextStep && !state.isRecording && countInBeat === null && !(isMobile && activeMobileTab === 'NOVA')}
+        open={!!nextStep && !state.isRecording && countInBeat === null && !novaOpen && !(isMobile && activeMobileTab === 'NOVA')}
         trigger={nextStep || 'take'}
         actions={nextStepActions}
         beatTitle={getCatalogBeat(state.tracks)?.title}
@@ -6196,6 +6198,7 @@ function Studio() {
             onRequestOpen={isMobile ? () => setActiveMobileTab('NOVA') : undefined}
             mixGuideRequest={mixGuideRequest}
             novaFeed={novaFeed}
+            onOpenChange={setNovaOpen}
             onClose={() => setActiveMobileTab('ARRANGEMENT')}
         />
       </div>
