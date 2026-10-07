@@ -22,6 +22,13 @@ hiddenimports = ['asio_bridge', 'asio_control_panel', 'nova_bridge_server', 'vst
 # depuis l'appli vers %LOCALAPPDATA%\NovaStudio\stems et lancé avec le Python de ce module.
 datas += [('../bridge-python/stems_worker.py', '.')]
 hiddenimports += collect_submodules('websockets')
+# Hôte ARA2 (Melodyne, VocAlign) : NovaARAHost.exe à côté du pont, avec ses licences
+# (JUCE sous AGPLv3 : sources dans nova-ara-host/, voir LICENCES.md). Facultatif.
+hiddenimports += ['ara_host', 'ara_service']
+_ara = '../nova-ara-host/build/NovaARAHost_artefacts/Release/NovaARAHost.exe'
+if os.path.isfile(_ara):
+    binaries += [(_ara, '.')]
+    datas += [('../nova-ara-host/LICENCES.md', 'ara-host')]
 
 # pont ASIO : PortAudio compilé avec ASIO (_sounddevice_data)
 datas += collect_data_files('_sounddevice_data')

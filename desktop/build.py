@@ -146,6 +146,24 @@ def build_ui(argv: list) -> None:
     bu.main(args)
 
 
+ARA_HOST_EXE = os.path.join(REPO, "nova-ara-host", "build", "NovaARAHost_artefacts", "Release", "NovaARAHost.exe")
+
+
+def ara_host() -> None:
+    """Hôte ARA2 (Melodyne, VocAlign) : NovaARAHost.exe, construit depuis nova-ara-host/ s'il
+    manque (MSVC + CMake + sources JUCE / ARA SDK). Facultatif : sans lui, l'appli marche,
+    seules les commandes Melodyne / VocAlign restent grisées (« Mets à jour Nova Studio »)."""
+    if os.path.isfile(ARA_HOST_EXE) and "--rebuild-ara" not in sys.argv:
+        print(f"    hôte ARA : {os.path.relpath(ARA_HOST_EXE, REPO)} (déjà construit)")
+        return
+    bat = os.path.join(REPO, "nova-ara-host", "build.bat")
+    try:
+        subprocess.check_call(["cmd", "/c", bat], cwd=os.path.dirname(bat), creationflags=0x08000000)
+        print("    hôte ARA construit")
+    except Exception as e:  # noqa: BLE001 - non bloquant
+        print(f"    hôte ARA NON construit ({e}) : Melodyne / VocAlign indisponibles dans cette version")
+
+
 def pyinstaller() -> None:
     step(5, "PyInstaller…")
     subprocess.check_call(
@@ -278,6 +296,7 @@ def main() -> None:
     fetch_webview2_bootstrapper()
     make_icon()
     build_ui(argv)
+    ara_host()
     pyinstaller()
     check_runtime_dlls()
     if signing_command() is None:
