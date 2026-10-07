@@ -32,15 +32,40 @@ export interface DrumRow {
   solo?: boolean;
   /** Mix du pad (effets natifs du DAW). */
   mix?: Partial<PadMix>;
+  // --- Sample du pad (V16/V17, champs optionnels : une ancienne version les ignore) ---
+  /** Début et fin de la zone jouée (0-1 de la durée du son). */
+  start?: number;
+  end?: number;
+  /** Fondus d'entrée et de sortie (secondes). */
+  fadeIn?: number;
+  fadeOut?: number;
+  /** Son joué à l'envers. */
+  reverse?: boolean;
+  /** Tranche d'une boucle découpée (numéro de tranche, à partir de 1). */
+  slice?: number;
 }
 
 export interface DrumMachine {
   /** Tempo utilisé pour le dernier clip (régénération si le tempo change). */
   bpmUsed?: number;
   kitId: string;
-  bars: 1 | 2;
+  /** Longueur du motif affiché (les anciennes versions ne connaissent que 1 ou 2). */
+  bars: 1 | 2 | 4;
   swing: number; // 0 - 0.6
+  /** Pads + pas du motif affiché (le motif actif : c'est ce que lit une ancienne version). */
   rows: DrumRow[];
+  // --- V16 : motifs A, B, C… placés dans le morceau (voir utils/drumPatterns.ts) ---
+  patterns?: import('./drumPatterns').DrumPattern[];
+  activePattern?: string;
+  /** Motif joué à chaque mesure ('' = silence). Absent : le motif actif partout. */
+  song?: string[];
+  /** Variation automatique de fin de phrase (fill). */
+  fill?: import('./drumPatterns').DrumFill;
+  /** Groove (comme le Groove Pool d'Ableton) et son dosage 0-1. */
+  groove?: string;
+  grooveAmount?: number;
+  /** Samples perso des pads (le son est gardé à part, sauvé avec le projet). */
+  samples?: Record<string, import('./drumSamples').PadSampleInfo>;
 }
 
 export interface DrumKitDef {
@@ -178,15 +203,15 @@ export function makeDrumMachine(kitId: string): DrumMachine {
   return { kitId: kit.id, bars: 1, swing: kit.id === 'boombap' ? 0.25 : kit.id === 'rnb' ? 0.15 : 0, rows: kit.build() };
 }
 
-/** Passe le motif à 1 ou 2 mesures (la 2e reprend la 1re). */
-export function setBars(dm: DrumMachine, bars: 1 | 2): DrumMachine {
+/** Passe le motif à 1, 2 ou 4 mesures (les mesures ajoutées reprennent les premières). */
+export function setBars(dm: DrumMachine, bars: 1 | 2 | 4): DrumMachine {
   const len = STEPS * bars;
   return {
     ...dm, bars,
     rows: dm.rows.map(r => ({
       ...r,
-      steps: Array.from({ length: len }, (_, i) => r.steps[i] ?? r.steps[i % STEPS] ?? 0),
-      ratchet: Array.from({ length: len }, (_, i) => r.ratchet[i] ?? r.ratchet[i % STEPS] ?? 1),
+      steps: Array.from({ length: len }, (_, i) => r.steps[i] ?? r.steps[i % Math.max(1, r.steps.length)] ?? 0),
+      ratchet: Array.from({ length: len }, (_, i) => r.ratchet[i] ?? r.ratchet[i % Math.max(1, r.ratchet.length)] ?? 1),
     })),
   };
 }
