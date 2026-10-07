@@ -72,6 +72,15 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], on
               onUpdate({ ...track, sends: newSends });
           }}
        />
+       {/* Pré / post-fader (Pro Tools « PRE ») : pré = le fader de la piste ne change pas l'envoi. */}
+       <button
+          type="button"
+          onClick={() => onUpdate({ ...track, sends: track.sends.map(s => s.id === send.id ? { ...s, preFader: !s.preFader } : s) })}
+          aria-pressed={!!send.preFader}
+          aria-label={send.preFader ? `Envoi vers ${sendLabel(send.id, allTracks)} : pré-fader (touche pour le passer après le fader)` : `Envoi vers ${sendLabel(send.id, allTracks)} : post-fader (touche pour le passer avant le fader)`}
+          title={send.preFader ? 'Pré-fader : l’envoi part avant le fader (le fader ne le change pas). Touche pour repasser en post-fader.' : 'Post-fader : l’envoi suit le fader de la piste. Touche pour le passer en pré-fader.'}
+          className={`mt-0.5 px-1 rounded text-[7px] font-black leading-[12px] tracking-wider ${send.preFader ? 'bg-amber-400/90 text-black' : 'text-slate-600 hover:text-slate-300'}`}
+       >{send.preFader ? 'PRÉ' : 'POST'}</button>
     </div>
   );
 };

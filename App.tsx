@@ -20,6 +20,7 @@ const AutomationEditorView = lazy(() => import('./components/AutomationEditorVie
 const ShareModal = lazy(() => import('./components/ShareModal'));
 const SaveProjectModal = lazy(() => import('./components/SaveProjectModal'));
 const LoadProjectModal = lazy(() => import('./components/LoadProjectModal'));
+const SessionTemplatesModal = lazy(() => import('./components/SessionTemplatesModal'));
 const ExportModal = lazy(() => import('./components/ExportModal'));
 const MasterAssistantPanel = lazy(() => import('./components/MasterAssistantPanel'));
 
@@ -135,6 +136,7 @@ import { padLoadKey } from './utils/drumSamples';
 import { loadPadBuffer } from './utils/padBuffers';
 import { loadDrumSound } from './utils/drumSounds';
 import { saveSession, loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
+import type { SessionTemplate, TemplateLoadReport } from './utils/sessionTemplate';
 import VocalToolsPanel from './components/VocalToolsPanel';
 import NextStepCard, { NextStepAction } from './components/NextStepCard';
 import StemSeparationDialog, { StemTarget } from './components/StemSeparationDialog';
@@ -580,6 +582,21 @@ function Studio() {
     setShowLanding(false);
   };
 
+  // Modèles de session (Session Templates) : liste / « Enregistrer comme modèle ».
+  const [templatesModal, setTemplatesModal] = useState<null | 'browse' | 'save'>(null);
+  // Résumé du chargement d'un modèle (plugins remplacés, inactifs…), montré dans le studio.
+  const pendingTemplateNoticeRef = useRef<string | null>(null);
+  const templateNotice = (tplName: string, report: TemplateLoadReport) => {
+    const lines = report.messages.slice(0, 6);
+    const more = report.messages.length - lines.length;
+    return [`📐 Projet créé depuis le modèle « ${tplName} ».`, ...lines, ...(more > 0 ? [`… et ${more} autre(s).`] : [])].join('\n');
+  };
+  const handleEnterWithTemplate = (project: DAWState, report: TemplateLoadReport, tpl: SessionTemplate) => {
+    pendingTemplateNoticeRef.current = templateNotice(tpl.name, report);
+    setPendingProject(project);
+    setShowLanding(false);
+  };
+
   // Dernière session sauvegardée sur l'appareil (« Reprendre ma session »)
   const [savedSessionMeta, setSavedSessionMeta] = useState<SavedSessionMeta | null>(null);
   useEffect(() => { getSessionMeta().then(setSavedSessionMeta).catch(() => {}); }, []);
@@ -718,6 +735,12 @@ function Studio() {
       if (pendingProject) {
         handleLoadProject(pendingProject);
         setPendingProject(null);
+        const notice = pendingTemplateNoticeRef.current;
+        if (notice) {
+          pendingTemplateNoticeRef.current = null;
+          setAiNotification(notice);
+          setTimeout(() => setAiNotification(null), 9000);
+        }
         return;
       }
 
@@ -2651,6 +2674,26 @@ function Studio() {
     // Chargement / réglage par Nova : conséquence, pas une étape d'annulation de plus.
     if (source === 'load' || source === 'nova') setSilently(update); else setState(update);
   }), [setState, setSilently]);
+
+  /**
+   * Session à enregistrer comme modèle : l'état des VST3 chargés est relu sur le
+   * pont (réglages faits dans leurs fenêtres), sans rendu audio.
+   */
+  const stateForTemplate = useCallback(async (): Promise<DAWState> => {
+    let base = stateRef.current;
+    if (novaBridge.isConnected()) {
+      const states = await syncLiveVstStates().catch(() => new Map<string, string>());
+      if (states.size > 0) {
+        base = produce(base, (draft: DAWState) => {
+          draft.tracks.forEach(t => t.plugins.forEach(p => { const st = states.get(p.id); if (st && p.type === 'VST3') p.params.stateB64 = st; }));
+        });
+      }
+    }
+    return base;
+  }, []);
+  /** Effet de NOVA qui remplace un VST absent (mêmes réglages de départ que le studio). */
+  const makeTemplateBuiltin = useCallback((type: PluginType, o: Record<string, any>) =>
+    createDefaultPlugins(type, typeof o.mix === 'number' ? o.mix : (type === 'REVERB' || type === 'DELAY' ? 1 : 0.3), stateRef.current.bpm, o), []);
 
   /**
    * Avant une sauvegarde (fichier ou cloud), pont connecté : rend les effets
@@ -6424,7 +6467,18 @@ function Studio() {
         onResumeSession={handleResumeSession}
         onLogin={(u) => setUser(u)}
         onLogout={handleLogout}
+        onOpenTemplates={() => setTemplatesModal('browse')}
       />
+      {templatesModal && (
+        <Suspense fallback={null}>
+          <SessionTemplatesModal
+            initialMode="browse"
+            onClose={() => setTemplatesModal(null)}
+            makeBuiltin={makeTemplateBuiltin}
+            onCreateProject={handleEnterWithTemplate}
+          />
+        </Suspense>
+      )}
       </>
     );
   }
@@ -6844,8 +6898,25 @@ function Studio() {
       )}
 
       <Suspense fallback={null}>
-      {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user && user.id !== 'guest' ? user : null} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} />}
-      {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} />}
+      {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user && user.id !== 'guest' ? user : null} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} onSaveAsTemplate={() => { setIsSaveMenuOpen(false); setTemplatesModal('save'); }} />}
+      {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} onOpenTemplates={() => { setIsLoadMenuOpen(false); setTemplatesModal('browse'); }} />}
+      {templatesModal && (
+        <Suspense fallback={null}>
+          <SessionTemplatesModal
+            initialMode={templatesModal}
+            inStudio
+            onClose={() => setTemplatesModal(null)}
+            getState={stateForTemplate}
+            makeBuiltin={makeTemplateBuiltin}
+            onCreateProject={(project, report, tpl) => {
+              handleLoadProject(project);
+              hasUnsavedChangesRef.current = false;
+              setAiNotification(templateNotice(tpl.name, report));
+              setTimeout(() => setAiNotification(null), 9000);
+            }}
+          />
+        </Suspense>
+      )}
       {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={() => { setIsExportMenuOpen(false); setShareOpen(true); }}
         onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} />}
       <DrumMachinePanel

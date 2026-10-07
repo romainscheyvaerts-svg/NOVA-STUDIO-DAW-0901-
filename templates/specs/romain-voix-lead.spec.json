@@ -1,0 +1,147 @@
+{
+  "format": "nova-template-spec",
+  "version": 1,
+  "name": "Voix lead · base Romain",
+  "description": "Template de base pour tests : voix lead (Auto-Tune Pro, Pro-Q 4, Pro-C 3 2:1, Pro-DS) → bus voix (Tube-Tech CL 1B 2:1, opto) ; envois Reverb courte (VerbSuite Classics), Reverb longue (ValhallaVintageVerb), Écho 1/4 (EchoBoy) ; master (Pro-Q 4, Pro-L 2 désactivé). Exemple réaliste en attendant le relevé de la vraie session Pro Tools.",
+  "privateTo": "romain",
+  "source": "Exemple écrit à la main (08/10/2026), règles de mix du studio",
+  "bpm": 140,
+  "timeSignature": "4/4",
+  "key": "F# minor",
+  "tracks": [
+    {
+      "name": "Beat",
+      "id": "instrumental",
+      "kind": "audio",
+      "color": "#eab308",
+      "volumeDb": -3,
+      "output": "Master"
+    },
+    {
+      "name": "Voix lead",
+      "kind": "audio",
+      "color": "#3b82f6",
+      "volumeDb": 0,
+      "pan": "C",
+      "output": "Bus voix",
+      "inserts": [
+        {
+          "vendor": "Antares",
+          "plugin": "Auto-Tune Pro",
+          "active": true,
+          "params": { "Key": "F#", "Scale": "Minor", "Retune Speed": "20", "Humanize": "10" },
+          "note": "Tonalité du beat ; vitesse rapide (rap / trap)."
+        },
+        {
+          "vendor": "FabFilter",
+          "plugin": "Pro-Q 4",
+          "active": true,
+          "params": {
+            "Band 1 Used": "Used", "Band 1 Shape": "Low Cut", "Band 1 Frequency": "90 Hz",
+            "Band 2 Used": "Used", "Band 2 Shape": "Bell", "Band 2 Frequency": "300 Hz", "Band 2 Gain": "-2.5 dB", "Band 2 Q": "1.4",
+            "Band 3 Used": "Used", "Band 3 Shape": "High Shelf", "Band 3 Frequency": "10 kHz", "Band 3 Gain": "2 dB"
+          }
+        },
+        {
+          "vendor": "FabFilter",
+          "plugin": "Pro-C 3",
+          "active": true,
+          "params": { "Style": "Vocal", "Ratio": "2.00:1", "Threshold": "-18 dB", "Attack": "5 ms", "Release": "80 ms", "Auto Gain": "On" },
+          "note": "1er étage de compression voix : 2:1."
+        },
+        {
+          "vendor": "FabFilter",
+          "plugin": "Pro-DS",
+          "active": true,
+          "params": { "Threshold": "-30 dB", "Range": "6 dB", "High-Pass Frequency": "6 kHz" }
+        }
+      ],
+      "sends": [
+        { "to": "Reverb courte", "levelDb": -14, "pre": false },
+        { "to": "Reverb longue", "levelDb": -22, "pre": false },
+        { "to": "Écho 1/4", "levelDb": -18, "pre": false }
+      ]
+    },
+    {
+      "name": "Bus voix",
+      "kind": "bus",
+      "color": "#fbbf24",
+      "volumeDb": 0,
+      "output": "Master",
+      "inserts": [
+        {
+          "vendor": "Softube",
+          "plugin": "Tube-Tech CL 1B mk II",
+          "active": true,
+          "params": { "Ratio": "2:1", "Attack": "3", "Release": "4" },
+          "note": "2e étage de compression voix : 2:1, autre type (optique)."
+        }
+      ]
+    },
+    {
+      "name": "Reverb courte",
+      "kind": "aux",
+      "color": "#10b981",
+      "volumeDb": -2,
+      "output": "Master",
+      "inserts": [
+        {
+          "vendor": "Slate Digital",
+          "plugin": "VerbSuite Classics",
+          "active": true,
+          "params": { "Dry/Wet": "100 %", "Reverb Decay": "70 %", "Reverb Pre-Delay": "10 ms" }
+        }
+      ]
+    },
+    {
+      "name": "Reverb longue",
+      "kind": "aux",
+      "color": "#a855f7",
+      "volumeDb": -4,
+      "output": "Master",
+      "inserts": [
+        {
+          "vendor": "Valhalla DSP, LLC",
+          "plugin": "ValhallaVintageVerb",
+          "active": true,
+          "params": { "Mix": "100 %", "Decay": "3.5 s", "PreDelay": "30 ms", "HighCut": "6000 Hz", "LowCut": "200 Hz" }
+        }
+      ]
+    },
+    {
+      "name": "Écho 1/4",
+      "kind": "aux",
+      "color": "#00f2ff",
+      "volumeDb": -3,
+      "output": "Master",
+      "inserts": [
+        {
+          "vendor": "Soundtoys",
+          "plugin": "EchoBoy",
+          "active": true,
+          "params": { "Mix": "100", "Mode": "Single", "Feedback": "0.35", "Tempo": "140" },
+          "note": "Écho calé sur la noire (Echo Time en 1/4 dans le plugin)."
+        }
+      ]
+    },
+    {
+      "name": "Master",
+      "kind": "master",
+      "inserts": [
+        {
+          "vendor": "FabFilter",
+          "plugin": "Pro-Q 4",
+          "active": true,
+          "params": { "Band 1 Used": "Used", "Band 1 Shape": "Low Cut", "Band 1 Frequency": "25 Hz" }
+        },
+        {
+          "vendor": "FabFilter",
+          "plugin": "Pro-L 2",
+          "active": false,
+          "params": { "Output Level": "-1.0 dBTP", "True Peak Limiting": "On", "Release": "100 ms" },
+          "note": "Désactivé dans la session d'origine, sert au mix : à activer avec « Activer tous les effets »."
+        }
+      ]
+    }
+  ]
+}

@@ -13,10 +13,12 @@ interface SaveProjectModalProps {
   onOpenAuth: () => void;
   /** Session à emporter : en ligne (Supabase Make Music), lien + QR code + compte client. */
   onTakeHome?: () => void;
+  /** « Enregistrer comme modèle » : structure de la session sans audio (Session Template). */
+  onSaveAsTemplate?: () => void;
 }
 
 const SaveProjectModal: React.FC<SaveProjectModalProps> = ({ 
-  isOpen, onClose, currentName, user, onSaveCloud, onSaveLocal, onSaveAsCopy, onOpenAuth, onTakeHome
+  isOpen, onClose, currentName, user, onSaveCloud, onSaveLocal, onSaveAsCopy, onOpenAuth, onTakeHome, onSaveAsTemplate
 }) => {
   const [name, setName] = useState(currentName);
   const [error, setError] = useState<string | null>(null);
@@ -162,6 +164,13 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
                 <p className="col-span-2 -mt-2 text-[10px] text-slate-500 text-center">
                   Pour le rouvrir plus tard : accueil → « Charger Projet ». Ta session se sauvegarde aussi toute seule dans ce navigateur.
                 </p>
+                {onSaveAsTemplate && (
+                  <button type="button" onClick={onSaveAsTemplate} data-testid="save-as-template"
+                    className="col-span-2 p-4 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/10 text-left transition-all">
+                    <span className="block text-[12px] font-black text-white">📐 Enregistrer comme modèle</span>
+                    <span className="block text-[11px] text-slate-400 mt-1">Pistes, bus, envois et effets réglés, sans l'audio : pour démarrer tes prochains projets avec le même routage.</span>
+                  </button>
+                )}
             </div>
         </div>
 

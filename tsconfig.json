@@ -45,7 +45,8 @@
     "api/**/*.ts",
     "utils/**/*.ts",
     "types/**/*.ts",
-    "hooks/**/*.ts"
+    "hooks/**/*.ts",
+    "config/**/*.ts"
   ],
   "exclude": [
     "node_modules",
