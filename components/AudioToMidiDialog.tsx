@@ -16,6 +16,7 @@ import { makeDrumMachineLib, suggestDrumKit, DrumMachine } from '../utils/drumKi
 import { playheadStore } from '../utils/playheadStore';
 import { presetSettings } from '../utils/novaSynthPresets';
 import { plan808 } from '../utils/bass808';
+import { guessKey } from '../utils/pitchCorrect';
 import { chordColor } from './ChordLane';
 import { openNovaWindow } from '../utils/novaWindows';
 
@@ -314,14 +315,20 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, source && source !== 'mic' ? `${source.trackId}/${source.clipId}` : source, mode, mode === 'drums' ? sens : 0]);
 
+  // Gamme : celle du projet, sinon devinée sur la mélodie chantée (comme l'éditeur de justesse).
+  const key = useMemo<{ root: number; scale: string; guessed?: boolean } | null>(() => {
+    if (hasKey) return { root: projectKey!, scale: projectScale! };
+    const g = melody ? guessKey(melody.analysis.notes) : null;
+    return g ? { ...g, guessed: true } : null;
+  }, [hasKey, projectKey, projectScale, melody]);
   // Notes de la mélodie avec les réglages.
   const notes: MelodyNote[] = useMemo(() => {
     if (!melody) return [];
     return melodyNotes(melody.analysis.notes, melody.analysis.track, {
-      bpm, keyRoot: hasKey ? projectKey : undefined, scale: hasKey ? projectScale : undefined, scaleAmount: scaleAmt / 100,
+      bpm, keyRoot: key?.root, scale: key?.scale, scaleAmount: scaleAmt / 100,
       gridAmount: gridAmt / 100, gridBeats, keepVelocity: keepVel, instrument, timeOffset: melody.timeOffset,
     });
-  }, [melody, bpm, hasKey, projectKey, projectScale, scaleAmt, gridAmt, gridBeats, keepVel, instrument]);
+  }, [melody, bpm, key, scaleAmt, gridAmt, gridBeats, keepVel, instrument]);
 
   const drumBars = drums ? loopBars(drums.duration, bpm, beatsPerBar) : 1;
   const drumOrigin = drums ? Math.floor(drums.clipStart / bar + 1e-6) * bar - drums.clipStart : 0;
@@ -383,7 +390,7 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
       const inst = humInstrument(instrument);
       const track = buildMidiTrack({ id: `track-hum-${stamp}`, clipId: `clip-hum-${stamp}`, name: `Fredonne → ${inst.label}`, kind: instrument, start, duration: clipDurationFor(mids, bpm, beatsPerBar), notes: mids });
       insertTrack(track, sourceTrack?.id);
-      notify(`${inst.emoji} Piste « ${track.name} » créée : ${mids.length} notes${hasKey && scaleAmt > 0 ? `, dans la gamme ${keyLabelFr(projectKey, projectScale)}` : ''}. Double-clique le clip pour l’ouvrir au piano roll (Ctrl+Z pour revenir).`);
+      notify(`${inst.emoji} Piste « ${track.name} » créée : ${mids.length} notes${key && scaleAmt > 0 ? `, dans la gamme ${keyLabelFr(key.root, key.scale)}` : ''}. Double-clique le clip pour l’ouvrir au piano roll (Ctrl+Z pour revenir).`);
     } else if (mode === 'drums' && drums && steps) {
       if (drumDest === 'machine') {
         const cur = tracks.find(t => t.id === 'track-drums')?.drumMachine as DrumMachine | undefined;
@@ -504,7 +511,7 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
             </p>
             {(!simple || showSettings) && (
               <div className="mb-3 space-y-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                <Slider label={hasKey ? `Caler sur la gamme (${keyLabelFr(projectKey, projectScale)})` : 'Caler sur la gamme (pas de tonalité dans le projet)'} value={scaleAmt} onChange={setScaleAmt} disabled={!hasKey}
+                <Slider label={key ? `Caler sur la gamme (${keyLabelFr(key.root, key.scale)}${key.guessed ? ', devinée sur ta mélodie' : ''})` : 'Caler sur la gamme (gamme inconnue)'} value={scaleAmt} onChange={setScaleAmt} disabled={!key}
                   hint="0 % : la note la plus proche de ce que tu chantes ; 100 % : toujours une note de la gamme (comme le Scale de Live ou la gamme du Flex Pitch de Logic)." testId="hum-scale" />
                 <div className="flex items-end gap-2">
                   <div className="flex-1"><Slider label="Caler sur la grille" value={gridAmt} onChange={setGridAmt} hint="0 % : ton timing exact ; 100 % : pile sur la grille (quantification, comme le Quantize de Logic et Live)." testId="hum-grid" /></div>
@@ -624,14 +631,15 @@ const MelodyPreview: React.FC<{ notes: MelodyNote[]; analysis: AnalysisResult; t
   const y = (p: number) => H - ((p - lo) / Math.max(1, hi - lo)) * H;
   const tr = analysis.track;
   const hopSec = tr.hop / tr.sr;
+  // Hauteur chantée : coupée hors du cadre et aux sauts (souffle, octave) pour rester lisible.
   let path = '';
-  let pen = false;
+  let last = NaN;
   for (let i = 0; i < tr.midi.length; i += 2) {
-    const m = tr.midi[i];
+    const m = tr.midi[i] + shift;
     const t = timeOffset + i * hopSec;
-    if (Number.isNaN(m) || t < t0 || t > t1) { pen = false; continue; }
-    path += `${pen ? 'L' : 'M'}${x(t).toFixed(1)},${y(m + shift).toFixed(1)}`;
-    pen = true;
+    if (Number.isNaN(m) || t < t0 || t > t1 || m < lo - 1 || m > hi + 1) { last = NaN; continue; }
+    path += `${Number.isNaN(last) || Math.abs(m - last) > 1.5 ? 'M' : 'L'}${x(t).toFixed(1)},${y(m).toFixed(1)}`;
+    last = m;
   }
   const lines: React.ReactNode[] = [];
   for (let b = t0; b <= t1 + 1e-6; b += beat) {

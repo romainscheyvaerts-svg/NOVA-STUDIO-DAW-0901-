@@ -107,7 +107,6 @@ describe('détection des accords d’un beat synthétique', () => {
     const prog: Ch[] = [{ root: 9, quality: 'min', beats: 4 }, { root: 5, quality: 'maj', beats: 4 }, { root: 0, quality: 'maj', beats: 4 }, { root: 7, quality: 'maj', beats: 4 }];
     const { x, truth } = renderBeat([...prog, ...prog], bpm, { drums: true });
     const found = detectChords(x, SR, { bpm });
-    if (process.env.DBG) process.stdout.write(String.fromCharCode(10) + found.map(f => `${(f.start / beat).toFixed(1)}-${(f.end / beat).toFixed(1)} ${chordSymbol(f.root, f.quality)} ${f.score.toFixed(2)}`).join(String.fromCharCode(10)));
     expect(hitRate(found, truth, beat)).toBeGreaterThan(0.9);
     // Les changements tombent sur les temps.
     for (const f of found) expect(Math.abs(f.start / beat - Math.round(f.start / beat))).toBeLessThan(1e-6);
@@ -134,7 +133,6 @@ describe('détection des accords d’un beat synthétique', () => {
     const prog: Ch[] = [{ root: 4, quality: 'min', beats: 8 }, { root: 0, quality: 'maj', beats: 8 }, { root: 9, quality: 'min', beats: 8 }, { root: 11, quality: 'maj', beats: 8 }];
     const { x, truth } = renderBeat(prog, bpm, { drums: true, bass: false, detune: 0.2 });
     const found = detectChords(x, SR, { bpm });
-    if (process.env.DBG) process.stdout.write(String.fromCharCode(10) + found.map(f => `${(f.start / beat).toFixed(1)}-${(f.end / beat).toFixed(1)} ${chordSymbol(f.root, f.quality)} ${f.score.toFixed(2)}`).join(String.fromCharCode(10)));
     expect(hitRate(found, truth, beat)).toBeGreaterThan(0.9);
   });
 

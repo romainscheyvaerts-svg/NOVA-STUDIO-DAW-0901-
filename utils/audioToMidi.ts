@@ -122,9 +122,17 @@ export function melodyNotes(notes: PitchNote[], track: Pick<PitchTrack, 'rmsDb'>
   });
   const loud = lev.length ? Math.max(...lev) : 0;
 
+  // Éclats isolés : une note très courte qui saute loin de ses deux voisines
+  // (harmonique prise pour la note, consonne, souffle) n'est pas une note chantée.
+  const spike = notes.map((n, i) => {
+    if (n.end - n.start >= 0.16) return false;
+    const near = (m?: PitchNote) => !!m && Math.abs(m.start - n.end) < 1 && Math.abs(m.end - n.start) < 1 && Math.abs(Math.round(m.center) - Math.round(n.center)) <= 7;
+    return !near(notes[i - 1]) && !near(notes[i + 1]) && (notes[i - 1] || notes[i + 1]) !== undefined;
+  });
+
   let out: MelodyNote[] = [];
   notes.forEach((n, i) => {
-    if (n.end - n.start < minLen || !Number.isFinite(n.center)) return;
+    if (n.end - n.start < minLen || !Number.isFinite(n.center) || spike[i]) return;
     const pitch = pitchForSung(n.center, o);
     const velocity = o.keepVelocity === false ? 0.8 : clamp(0.3 + 0.7 * (lev[i] - (loud - 24)) / 24, 0.3, 1);
     let s = off + n.start, e = off + n.end;
@@ -150,6 +158,8 @@ export function melodyNotes(notes: PitchNote[], track: Pick<PitchTrack, 'rmsDb'>
   if (o.fitOctave !== false) {
     const k = octaveShiftFor(out.map(n => n.pitch), inst.range);
     if (k) out.forEach(n => { n.pitch = clamp(n.pitch + 12 * k, 0, 127); });
+    // 808 : une note trop grave ne s'entend plus (sous ~Mi0), trop aiguë n'est plus une basse.
+    if (inst.id === '808') out.forEach(n => { while (n.pitch < 28) n.pitch += 12; while (n.pitch > 52) n.pitch -= 12; });
   }
   return out;
 }
@@ -275,9 +285,12 @@ export function detectDrumHits(input: Float32Array, sr: number, o: DrumDetectOpt
   const typed = kept.map(r => {
     const tot = r.inc.reduce((a, b) => a + b, 0) || 1e-12;
     const share = r.inc.map(v => v / tot) as [number, number, number, number];
+    // Kick : l'énergie arrive sous ~600 Hz (sub, ou « punch » de 100-250 Hz quand le
+    // sub est dans la 808), spectre sombre. Hat : surtout au-dessus de 6 kHz.
+    // Snare / clap : le reste (bruit de 1 à 5 kHz, corps éventuel).
     let kind: DrumKind;
-    if (share[0] >= 0.45 || (r.centroid < 450 && share[0] + share[1] > 0.5)) kind = 'kick';
-    else if (r.centroid >= 5200 && share[3] >= share[2] * 0.6) kind = 'hat';
+    if (share[0] >= 0.45 || (share[0] + share[1] >= 0.6 && share[2] < 0.12 && r.centroid < 1600)) kind = 'kick';
+    else if (share[3] >= 0.55 || (r.centroid >= 5200 && share[3] >= share[2] * 0.6 && share[0] + share[1] < 0.3)) kind = 'hat';
     else kind = 'snare';
     return { r, share, kind };
   });

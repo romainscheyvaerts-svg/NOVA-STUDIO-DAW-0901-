@@ -61,6 +61,15 @@ describe('Fredonne → MIDI : mélodie', () => {
     expect(new Set(flat.map(n => n.velocity))).toEqual(new Set([0.8]));
   });
 
+  it('éclat isolé (harmonique, consonne) ignoré ; 808 jamais inaudible', () => {
+    const mk = (center: number, start: number, end: number, i: number) => ({ index: i, i0: 0, i1: 0, start, end, center, spread: 0 });
+    const ns = [mk(62, 0, 0.4, 0), mk(81, 0.45, 0.55, 1), mk(62, 0.6, 1, 2), mk(60, 1.05, 1.5, 3), mk(36, 1.55, 1.65, 4), mk(60, 1.7, 2.2, 5)];
+    const out = melodyNotes(ns, { rmsDb: new Float32Array(0) }, { bpm: 120, gridAmount: 0, scaleAmount: 0, fitOctave: false });
+    expect(out.map(n => n.pitch)).toEqual([62, 62, 60, 60]);
+    const low = melodyNotes([mk(62, 0, 0.4, 0), mk(43, 0.5, 1, 1), mk(62, 1.1, 1.5, 2)], { rmsDb: new Float32Array(0) }, { bpm: 120, gridAmount: 0, scaleAmount: 0, instrument: '808' });
+    expect(low.every(n => n.pitch >= 28 && n.pitch <= 52)).toBe(true);
+  });
+
   it('calage gamme dosé', () => {
     // Fa# (66) chanté 65,65 : Fa (65) est à 0,65 demi-ton, Fa# à 0,35.
     expect(pitchForSung(65.65, { keyRoot: 9, scale: 'MINOR', scaleAmount: 1 })).toBe(65);
@@ -122,6 +131,16 @@ describe('Audio → batterie', () => {
       if (h && h.kind === k) ok++;
     });
     expect(ok / truth.length).toBeGreaterThanOrEqual(0.99);
+  });
+
+  it('kick « punch » sans sub (le sub est dans la 808) : reste un kick', () => {
+    const x = new Float32Array(SR * 2);
+    const punch = (at: number) => {
+      const a = Math.round(at * SR); let ph = 0;
+      for (let i = 0; i < 0.2 * SR; i++) { const t = i / SR; ph += 2 * Math.PI * (95 + 160 * Math.exp(-t * 25)) / SR; x[a + i] += 0.8 * Math.sin(ph) * Math.exp(-t * 14) * Math.min(1, (0.2 - t) / 0.02); }
+    };
+    punch(0.1); addSnare(x, 0.5); punch(0.9); addHat(x, 1.3); addSnare(x, 1.6);
+    expect(detectDrumHits(x, SR).map(h => h.kind)).toEqual(['kick', 'snare', 'kick', 'hat', 'snare']);
   });
 
   it('boucle trap (kick + hat ensemble, snare sur 2 et 4) → motif de la boîte à rythmes', () => {
