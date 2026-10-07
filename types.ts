@@ -240,6 +240,13 @@ export interface Clip {
    * corrigé comme un clip normal. Voir utils/pitchEdit.
    */
   pitchEdit?: PitchEditInfo;
+  /**
+   * Respirations baissées ou supprimées (utils/breaths) : zones de l'audio
+   * SOURCE (secondes du buffer, comme `offset`) où le gain du clip descend,
+   * avec de courts fondus. Non destructif ; survit aux découpes et voyage
+   * avec le clip (collaboration). Absent : rien de traité.
+   */
+  breaths?: BreathEdit[];
 }
 
 /** Retouche d'une note (justesse), rangée par instant (secondes dans le son d'origine). */
@@ -278,6 +285,17 @@ export interface PitchEditInfo {
   sourceName?: string;
   /** Heure de la correction (ms). */
   at?: number;
+}
+
+/** Une respiration traitée : zone de l'audio source et gain appliqué. */
+export interface BreathEdit {
+  /** Début / fin dans l'audio source (s, même repère que Clip.offset). */
+  start: number;
+  end: number;
+  /** Gain au creux de la respiration (dB, ≤ 0) ; -120 ou moins = supprimée. */
+  gainDb: number;
+  /** Durée de chaque fondu (s), dans la zone ; absent = 10 ms. */
+  fade?: number;
 }
 
 export interface FreezeRef {
@@ -470,6 +488,11 @@ export interface Track {
   /** Rendus des envois de cette piste vers des bus à effets VST gelés. */
   sendFreezes?: SendFreeze[];
   /**
+   * Respirations (utils/breaths) : type de voix choisi à la main quand la
+   * devinette par le nom se trompe. Absent : deviné (LEAD, BACK, ADLIB…).
+   */
+  breathKind?: 'lead' | 'extra' | 'skip';
+  /**
    * Collaboration : rôle qui possède le contenu de la piste (prises, motifs).
    * Absent : les pistes voix sont à l'artiste, le beat à personne.
    */
@@ -630,6 +653,11 @@ export interface DAWState {
   /** Dernier style de mix voix appliqué (utils/vocalPresets). */
   vocalMixStyle?: string;
   /**
+   * Respirations traitées automatiquement après chaque prise (utils/breaths).
+   * Absent : on suit la préférence de l'appareil (désactivé par défaut).
+   */
+  breathAuto?: boolean;
+  /**
    * Type de projet : VOCAL = poser sa voix sur une instru (par défaut) ;
    * BEATMAKING = faire une instru (batterie) sur une mélodie du studio, avec
    * la possibilité d'y poser ensuite sa voix.
@@ -771,6 +799,9 @@ export type AIActionType =
   | 'VST_MIX' | 'VST_LIST' | 'VST_SHOW_PARAMS' | 'VST_SET_PARAM' | 'VST_REMOVE' | 'VST_MOVE' | 'VST_MIX_FALLBACK'
   | 'CLEAN_SILENCE'
   | 'SET_AUTO_CLEAN'
+  // Respirations (utils/breaths) : baisser sur la lead, supprimer sur les backs
+  | 'BREATHS'
+  | 'SET_BREATH_AUTO'
   // Ingé son : session guidée, écoute du mix, montrer un réglage
   | 'PREPARE_PART'
   | 'ANALYZE_MIX'

@@ -15,6 +15,9 @@ interface VocalToolsPanelProps {
   onCleanSilences: () => void;
   autoClean: boolean;
   onAutoCleanChange: (on: boolean) => void;
+  /** Respirations (components/BreathTools) : bloc des outils voix et case du Mix auto. */
+  breathTools?: React.ReactNode;
+  breathMixOption?: React.ReactNode;
   countIn: boolean;
   onCountInChange: (on: boolean) => void;
   monitoring: boolean;
@@ -197,6 +200,7 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
               );
             })}
           </div>
+          {p.breathMixOption}
           <p className="text-[11px] text-slate-500">
             Lance la lecture et change de style pour comparer. <b className="text-slate-300">Annuler</b> (Ctrl+Z) revient au réglage précédent.
           </p>
@@ -248,6 +252,7 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
               🧹 Retirer les blancs de ma voix
             </button>
             {!p.canClean && <p className="text-[11px] text-slate-500 mt-1">Enregistre d'abord une prise.</p>}
+            {p.breathTools}
             <div className="mt-2 divide-y divide-white/5">
               <Toggle
                 checked={p.autoClean}

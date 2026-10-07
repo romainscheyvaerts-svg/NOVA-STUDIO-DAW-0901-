@@ -141,6 +141,25 @@ export function parseLocalCommand(raw: string, st: DAWState): LocalCommandResult
     return say(`🗑 Dernière prise supprimée sur ${voice.name} (Annuler pour la récupérer).`,
       ...last.parts.map(c => ({ action: 'DELETE_CLIP', payload: { trackId: voice.id, clipId: c.id } } as AIAction)));
   }
+  // --- Respirations (utils/breaths) : « baisse les respirations », « enlève les respirations des backs » ---
+  if (/\b(respirations?|respis?|breaths?|inspirations?)\b/.test(msg)) {
+    const backs = /\b(backs?|doubles?|dbl|ad ?libs?|harmo\w*|choeurs?|voix additionnelles?|secondaires?)\b/.test(msg);
+    const leadOnly = /\b(lead|voix principale|voix lead)\b/.test(msg) && !backs;
+    const only = backs ? 'extra' : leadOnly ? 'lead' : undefined;
+    if (/\bauto(matique\w*)?\b|apres chaque prise|a chaque prise/.test(msg)) {
+      const off = /\b(arrete|desactive|coupe|plus|stop|sans)\b/.test(msg);
+      return say(off ? '🌬️ Je ne traite plus les respirations après chaque prise.' : '🌬️ D\'accord : après chaque prise, je baisse les respirations de la lead et je supprime celles des backs.',
+        { action: 'SET_BREATH_AUTO', payload: { enabled: !off } });
+    }
+    if (/\b(ouvre|montre|regle\w*|reglages?|apercu|fenetre)\b/.test(msg)) return say('🌬️ Voici la fenêtre des respirations : vérifie l\'aperçu, écoute avant / après, puis applique.', { action: 'BREATHS', payload: { open: true, only } });
+    const remove = /\b(enleve|supprime|retire|vire|efface|coupe|degage)\b/.test(msg);
+    if (remove || /\b(baisse|diminue|reduis|attenue|traite|nettoie|calme|moins)\b/.test(msg)) {
+      const text = only === 'extra' ? '🌬️ Je supprime les respirations des backs, doubles et ad-libs.'
+        : only === 'lead' ? (remove ? '🌬️ Je supprime les respirations de la voix principale.' : '🌬️ Je baisse les respirations de la voix principale.')
+        : remove ? '🌬️ Je supprime les respirations de toutes tes voix.' : '🌬️ Je baisse les respirations de la lead et je supprime celles des backs.';
+      return say(text, { action: 'BREATHS', payload: { only, remove: remove && only !== 'extra' } });
+    }
+  }
   if (/\b(nettoie|nettoyer|retire|enleve|supprime)\b.*\b(blanc|silence|souffle)/.test(msg))
     return say('🧹 Je retire les blancs de ta voix.', { action: 'CLEAN_SILENCE', payload: voice ? { trackId: voice.id } : {} });
 

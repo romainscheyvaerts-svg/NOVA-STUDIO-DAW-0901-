@@ -3,6 +3,7 @@ import type { Clip, Track } from '../types';
 import { TrackType } from '../types';
 import { registerEditCommands } from '../utils/editCommands';
 import { openNovaWindow } from '../utils/novaWindows';
+import { requestBreaths } from '../utils/breathBus';
 import { playheadStore } from '../utils/playheadStore';
 import { fadeInTo, fadeOutTo, quickFades, trimEndTo, trimStartTo } from '../utils/clipKeyCommands';
 import { clampTrackHeight, stepTrackHeight } from '../utils/trackHeights';
@@ -115,6 +116,13 @@ export function useArrangementCommands(ctx: ArrangementCommandContext) {
           l = (track?.clips || []).filter(cl => cl.type !== TrackType.MIDI && !cl.isMuted).map(clip => ({ trackId: track!.id, clip }));
         }
         openNovaWindow('strip-silence', { targets: l.map(x => ({ trackId: x.trackId, clipId: x.clip.id })) });
+        return true;
+      },
+      // Respirations (Ctrl+Alt+R) : clips sélectionnés, sinon la piste sélectionnée, sinon toutes les voix.
+      breaths: () => {
+        const l = targets().filter(({ clip }) => clip.type !== TrackType.MIDI);
+        if (l.length) requestBreaths({ mode: 'dialog', clipIds: l.map(x => x.clip.id), trackIds: Array.from(new Set(l.map(x => x.trackId))), reason: 'shortcut' });
+        else requestBreaths({ mode: 'dialog', trackIds: c().selectedTrackId ? [c().selectedTrackId!] : undefined, reason: 'shortcut' });
         return true;
       },
       selectAllClips: () => {

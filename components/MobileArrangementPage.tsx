@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { openNovaWindow } from '../utils/novaWindows';
+import { requestBreaths } from '../utils/breathBus';
 import MobileContainer from './MobileContainer';
 import LiveRecordingClip from './LiveRecordingClip';
 import { Track, Clip, TrackType, TrackSend } from '../types';
@@ -1130,6 +1131,17 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 <button onClick={() => handleGainChange(0.1)} aria-label="Monter le gain du clip" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
               </div>
             </div>
+
+            {/* Respirations (components/BreathTools) : version simple, le dosage dans la fenêtre */}
+            {selectedClip.clip.type !== 'MIDI' && (
+              <button type="button" data-testid="mobile-breaths"
+                onClick={() => requestBreaths({ mode: 'dialog', trackIds: [selectedClip.trackId], reason: 'menu' })}
+                title="Respirations : baissées sur la lead, supprimées sur les backs (comme Breath Control de Waves)"
+                className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 active:bg-violet-500/30 transition-all">
+                <i className="fas fa-wind text-violet-300 text-sm" aria-hidden />
+                <span className="text-[8px] font-bold text-violet-200 mt-0.5">RESPIRATIONS</span>
+              </button>
+            )}
 
             {/* Divider */}
             <div className="flex-shrink-0 w-px h-8 bg-white/10 mx-1"></div>

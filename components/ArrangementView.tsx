@@ -1,5 +1,8 @@
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { breathGainAt } from '../utils/breathEnvelope';
+import { requestBreaths } from '../utils/breathBus';
+import { isVoiceTrack } from '../utils/vocalRoles';
 import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint, Marker } from '../types';
 import TrackHeader from './TrackHeader';
 import ContextMenu from './ContextMenu';
@@ -766,8 +769,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     e.preventDefault();
     const menuItems: (ContextMenuItem | 'separator')[] = [ { label: 'Dupliquer la piste', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' },
       { label: 'Couleur de la piste…', onClick: () => openNovaWindow('track-color', { trackId }), icon: 'fa-palette' }, ];
-    if (trackId !== 'track-rec-main') menuItems.push({ label: 'Supprimer la piste', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
     const target = tracks.find(t => t.id === trackId);
+    if (isVoiceTrack(target)) menuItems.push({ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => requestBreaths({ mode: 'dialog', trackIds: [trackId], reason: 'menu' }) });
+    if (trackId !== 'track-rec-main') menuItems.push({ label: 'Supprimer la piste', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
     if (!simple || target?.isFrozen) menuItems.push({
       label: target?.isFrozen ? 'Dégeler la piste' : 'Geler la piste (freeze)',
       onClick: () => onFreezeTrack?.(trackId),
@@ -1444,6 +1448,21 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                     const clipGain = clip.gain ?? 1;
                     if (clipGain !== 1) for (let i = 0; i < n; i++) env[i] = Math.min(1, env[i] * clipGain);
                     const x0 = x + px0;
+                    // Respirations baissées / supprimées (utils/breaths) : la forme d'onde
+                    // montre le creux, et un trait violet en bas du clip les repère.
+                    if (clip.breaths?.length && !clip.isReversed) {
+                        const off = clip.offset || 0;
+                        for (let i = 0; i < n; i++) env[i] *= breathGainAt(clip.breaths, off + ((px0 + i + 0.5) / largeurPx) * clip.duration);
+                        for (const b of clip.breaths) {
+                            const bx0 = x + ((b.start - off) / clip.duration) * largeurPx, bx1 = x + ((b.end - off) / clip.duration) * largeurPx;
+                            if (bx1 <= x || bx0 >= x + largeurPx) continue;
+                            const l = Math.max(x, bx0), wd = Math.max(2, Math.min(x + largeurPx, bx1) - l);
+                            ctx.fillStyle = 'rgba(167,139,250,0.16)';
+                            ctx.fillRect(l, waveY, wd, waveH);
+                            ctx.fillStyle = '#a78bfa';
+                            ctx.fillRect(l, waveY + waveH - 3, wd, 3);
+                        }
+                    }
 
                     // ===== STYLE PRO TOOLS: Filled waveform avec outline =====
                     ctx.fillStyle = waveColor + '55';  // Semi-transparent fill
@@ -2267,6 +2286,7 @@ useEffect(() => {
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Justesse note par note…', icon: 'fa-wave-square', title: 'Comme Flex Pitch dans Logic : corrige la justesse de ta voix note par note',
                   onClick: () => { openNovaWindow('pitch-editor', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => { const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id]; requestBreaths({ mode: 'dialog', clipIds: ids, reason: 'menu' }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
                   { label: 'Séparer en stems…', icon: 'fa-layer-group', title: STEMS_TOOLTIP,
                     onClick: () => { onSeparateStems(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); } }
