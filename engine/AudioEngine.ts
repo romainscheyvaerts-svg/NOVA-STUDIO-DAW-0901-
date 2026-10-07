@@ -970,6 +970,8 @@ export class AudioEngine {
   private pdcSuspended = false;
   /** Début du passage en cours (lecture ou bouclage) : 1re fenêtre MIDI (PDC). */
   private midiRunStart: number | null = null;
+  /** Dernier retard PDC demandé par nœud (delayTime.value est en retard d'un rendu). */
+  private pdcSet = new WeakMap<DelayNode, number>();
 
   public setRecordingFreeze(trackId: string, freeze: { clip: Clip; upTo: number; clipIds: string[] } | null) {
     if (freeze) this.recFreezes.set(trackId, freeze); else this.recFreezes.delete(trackId);
@@ -1059,7 +1061,13 @@ export class AudioEngine {
     const setDelay = (node: DelayNode | undefined, sec: number) => {
       if (!node) return;
       const v = this.pdcSuspended ? 0 : sec;
-      if (Math.abs(node.delayTime.value - v) > 1e-6) node.delayTime.setValueAtTime(v, t);
+      // Comparer à la DERNIÈRE valeur demandée, pas à delayTime.value : celle-ci
+      // n'est mise à jour qu'au rendu suivant, et une correction rapide (latence
+      // connue juste après le câblage) était sautée (mesuré : envoi reverb +30 ms).
+      if (Math.abs((this.pdcSet.get(node) ?? -1) - v) <= 1e-9) return;
+      this.pdcSet.set(node, v);
+      node.delayTime.cancelScheduledValues(t);
+      node.delayTime.setValueAtTime(v, t);
     };
     this.tracksDSP.forEach((d, id) => {
       const r = res.get(id);
