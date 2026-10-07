@@ -29,7 +29,12 @@ def _id(n, alphabet=string.ascii_lowercase + string.digits):
 class FakeNovaCloud:
     """daw-session simulée : sessions (manifeste + version), membres, journal, morceaux audio."""
 
-    def __init__(self):
+    def __init__(self, per_device=False, codes=False):
+        # per_device / codes : la fonction avec le patch « Feat à distance »
+        # (clé de membre par appareil, codes d'invitation) ; sinon la fonction en ligne.
+        self.per_device = per_device
+        self.codes = codes
+        self.invites = {}
         self.sessions = {}
         self.members = {}
         self.ops = []
@@ -72,6 +77,16 @@ class FakeNovaCloud:
             return None
 
     def act(self, a, b, request):
+        if a == "resolve_code":
+            if not self.codes:
+                raise RuntimeError("Action inconnue")
+            if not self._user(request):
+                raise RuntimeError("Connecte-toi à ton compte Make Music pour collaborer")
+            inv = self.invites.get(str(b.get("code") or "").upper().replace(" ", ""))
+            if not inv or inv["exp"] < time.time():
+                raise RuntimeError("Code introuvable ou expiré")
+            s = self.sessions[inv["sid"]]
+            return {"link": f"{inv['sid']}.{s['secret']}", "name": s["name"]}
         if a == "create":
             sid = _id(12)
             self.sessions[sid] = {"secret": _id(32, string.ascii_letters + "23456789"), "name": b.get("name"), "version": 0, "manifest": None,
@@ -82,7 +97,20 @@ class FakeNovaCloud:
         if not s or s["secret"] != b.get("secret"):
             raise RuntimeError("Session introuvable")
         uid = self._user(request)
-        key = f"u:{uid}" if uid else "d:" + str(b.get("device_id") or "")
+        dev = re.sub(r"[^a-zA-Z0-9_-]", "", str(b.get("device_id") or ""))[:40]
+        if self.per_device:
+            key = (f"u:{uid}:{dev}" if dev else f"u:{uid}") if uid else "d:" + dev
+        else:
+            key = f"u:{uid}" if uid else "d:" + str(b.get("device_id") or "")
+        if a == "invite_code":
+            if not self.codes:
+                raise RuntimeError("Action inconnue")
+            for c, inv in self.invites.items():
+                if inv["sid"] == sid and inv["exp"] > time.time() + 3600:
+                    return {"code": c, "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(inv["exp"]))}
+            c = "".join(random.choice("ABCDEFGHJKMNPQRSTUVWXYZ23456789") for _ in range(6))
+            self.invites[c] = {"sid": sid, "exp": time.time() + 86400}
+            return {"code": c, "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.invites[c]["exp"]))}
         if a == "sign_upload":
             return {"uploads": {p: {"path": f"daw-sessions/{sid}/{p}", "token": "tok"} for p in b.get("parts", []) if p not in self.parts}}
         if a == "commit":
@@ -109,6 +137,9 @@ class FakeNovaCloud:
             return {"member_key": key, "last_seq": last, "members": mem, "channel": f"nova-collab-{sid}-test"}
         if a == "op":
             m = self.members.get((sid, key))
+            if not m and self.per_device and uid and (sid, f"u:{uid}") in self.members:
+                key = f"u:{uid}"  # rejoint avant la mise à jour de la fonction
+                m = self.members.get((sid, key))
             if not m:
                 raise RuntimeError("Rejoins d'abord la session")
             self.seq += 1

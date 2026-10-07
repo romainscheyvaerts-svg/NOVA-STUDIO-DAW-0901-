@@ -3,6 +3,7 @@ import { produce } from 'immer';
 import { DAWState, PluginInstance, RemoteIngePhase, Track, TrackType } from '../types';
 import type { CollabMember, CollabOp } from '../services/Collab';
 import { RemoteAck, RemoteIngeClient, RemoteRole, remoteInviteUrl, REMOTE_KINDS } from '../services/RemoteInge';
+import { participantOf } from '../utils/collabPeers';
 import { CloudLink, linkToString } from '../services/SessionCloud';
 import { novaBridge } from '../services/NovaBridge';
 import { useBridgeState } from './useNovaBridge';
@@ -11,7 +12,7 @@ import { applyBusFreezeResult, applyFreezeResult, busesNeedingVstRender, renderB
 import { canBakeTrack, freezeIndex, isFreezeStale, isVst, lastVstIndex } from '../utils/freeze';
 import {
   acceptReturn, acceptSend, applyFxOnArtist, applyReturnOnArtist, applySendOnEngineer, artistNeedsSend, artistStatus,
-  buildFxPayload, buildReturnPayload, buildSendPayload, busesFedBy, checkPluginAdd, EngineerAckState, fxSignature,
+  buildFxPayload, buildReturnPayload, buildSendPayload, busesFedBy, checkPluginAdd, EngineerAckState, engineerTrackFor, fxSignature, remoteForMe,
   localOutboxStore, moveInsertToSend, needsProcessing, pairEngineer, rawSignature, parseRemoteLink, RemoteMixRule, RemoteOutbox, RemoteReturnPayload,
   RemoteRuleIssue, remoteRuleIssues, RemoteSendPayload, revertOnArtist, sendBufferIds, shouldSendReturn, SLOT_LABEL,
 } from '../utils/remoteInge';
@@ -108,12 +109,12 @@ export function useRemoteInge(o: RemoteIngeOptions) {
   const findTrack = (id: string) => stateRef.current.tracks.find(t => t.id === id);
   const refreshQueue = () => setQueued(outboxRef.current?.list() || []);
 
-  const ack = useCallback((trackId: string, v: number, state: EngineerAckState, detail?: string) => {
-    const key = `${trackId}:${v}`;
+  const ack = useCallback((trackId: string, v: number, state: EngineerAckState, detail?: string, to?: string) => {
+    const key = `${to || ''}:${trackId}:${v}`;
     const val = `${state}:${detail || ''}`;
     if (ackedRef.current.get(key) === val) return; // déjà dit à l'artiste
     ackedRef.current.set(key, val);
-    void clientRef.current?.sendAck({ trackId, v, state, ...(detail ? { detail } : {}) }).catch(() => { ackedRef.current.delete(key); });
+    void clientRef.current?.sendAck({ trackId, v, state, ...(detail ? { detail } : {}), ...(to ? { to } : {}) }).catch(() => { ackedRef.current.delete(key); });
   }, []);
 
   // --- Envois (passent par la file : hors ligne, ils partent à la reconnexion) ------------
@@ -197,10 +198,10 @@ export function useRemoteInge(o: RemoteIngeOptions) {
     } else if (op.kind === 'ri_peer') {
       // L'artiste annonce son ingé : si ce n'est pas nous, on s'arrête (message clair).
       const mineKey = me.memberKey;
-      if (p.engineerKey && mineKey && p.engineerKey !== mineKey) {
+      if (p.engineerKey && mineKey && participantOf(p.engineerKey) !== participantOf(mineKey)) {
         setOtherEngineer(String(p.name || 'un autre ingé'));
         setError(`L'artiste travaille déjà avec ${String(p.name || 'un autre ingé')} sur ce lien : tes envois ne lui arrivent pas. Demande-lui un nouveau lien.`);
-      } else if (p.engineerKey === mineKey) {
+      } else if (p.engineerKey && participantOf(p.engineerKey) === participantOf(mineKey)) {
         setOtherEngineer(null);
       }
       return;
@@ -208,6 +209,8 @@ export function useRemoteInge(o: RemoteIngeOptions) {
     // Signe de vie de l'autre (le direct peut être coupé : la présence ne suffit pas).
     if (!op.replay) setPeerSeen({ name: op.author_name, at: Date.now() });
     if (me.role === 'artist') {
+      // Plusieurs artistes sur le lien : le retour (ou l'accusé) d'un autre artiste n'est pas pour moi.
+      if ((op.kind === 'ri_ack' || op.kind === 'ri_return') && !remoteForMe(p.to, me.memberKey)) return;
       if (op.kind === 'ri_ack') {
         setAcks(a => (a[p.trackId] && a[p.trackId].v > p.v ? a : { ...a, [p.trackId]: p as RemoteAck }));
       } else if (op.kind === 'ri_return') {
@@ -225,7 +228,7 @@ export function useRemoteInge(o: RemoteIngeOptions) {
         }
       } else if (op.kind === 'ri_fx') {
         if (!orderRef.current.accept('fx', op.seq)) return;
-        mutateSilently(d => { applyFxOnArtist(d.tracks, p); });
+        mutateSilently(d => { applyFxOnArtist(d.tracks, p, me.memberKey); });
       } else if (op.kind === 'ri_phase') {
         if (!orderRef.current.accept('phase', op.seq)) return;
         const next: RemoteIngePhase = p.phase === 'mixing' ? 'mixing' : 'recording';
@@ -236,21 +239,24 @@ export function useRemoteInge(o: RemoteIngeOptions) {
           : `🎙️ ${op.author_name} repasse en enregistrement : reverbs et délais de NOVA, que tu entends en direct comme lui.`, 7000);
       }
     } else if (op.kind === 'ri_send') {
-      const existing = stateRef.current.tracks.find(x => x.remote?.peerTrackId === p.trackId);
+      // Plusieurs artistes : la piste de CET artiste (même identifiant possible chez l'autre).
+      const from = { key: op.member_key, name: op.author_name };
+      const to = participantOf(op.member_key);
+      const existing = engineerTrackFor(stateRef.current.tracks, p.trackId, op.member_key);
       const verdict = acceptSend(existing?.remote, p);
       if (verdict === 'old') return;
-      if (verdict === 'dup') { ack(p.trackId, p.v, 'received'); return; }
+      if (verdict === 'dup') { ack(p.trackId, p.v, 'received', undefined, to); return; }
       await me.ensureAudio(p.audio);
       const { audio: _a, ...payload } = p;
       let res = { trackId: '', created: false };
-      mutateSilently(d => { res = applySendOnEngineer(d.tracks, payload as RemoteSendPayload); });
+      mutateSilently(d => { res = applySendOnEngineer(d.tracks, payload as RemoteSendPayload, from); });
       const t = findTrack(res.trackId);
       const auto = !!t?.remote?.auto;
       const slot = p.slot && SLOT_LABEL[p.slot] ? ` (${SLOT_LABEL[p.slot]})` : '';
       notify(res.created
         ? `🎤 Nouvelle piste de ${op.author_name}${slot} : « ${t?.name || p.name} » est dans ta session. Traite-la avec tes VST, puis « Geler et envoyer à l'artiste ».`
         : `🎤 ${op.author_name} a modifié « ${t?.name || p.name} » (coupes, prises, fondus) : piste dégelée, ses éditions passent AVANT tes effets.${auto ? ' Renvoi automatique…' : ''}`, 7000);
-      ack(p.trackId, p.v, auto ? (novaBridge.isConnected() || !t || !activeVst(t) ? 'processing' : 'waiting_bridge') : 'received');
+      ack(p.trackId, p.v, auto ? (novaBridge.isConnected() || !t || !activeVst(t) ? 'processing' : 'waiting_bridge') : 'received', undefined, to);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stateRef, mutateSilently, applyReturn, notify, ack]);
@@ -425,20 +431,20 @@ export function useRemoteInge(o: RemoteIngeOptions) {
     const v = t.remote.recvV ?? 0;
     const issues = remoteRuleIssues(st.tracks, [trackId], ph);
     if (issues.length) {
-      ack(t.remote.peerTrackId, v, 'blocked', issues[0].code === 'temporal-insert' ? 'il déplace une reverb en envoi' : 'il remplace sa reverb VST par celle de NOVA');
+      ack(t.remote.peerTrackId, v, 'blocked', issues[0].code === 'temporal-insert' ? 'il déplace une reverb en envoi' : 'il remplace sa reverb VST par celle de NOVA', t.remote.peerKey);
       if (manual) notify(`⛔ ${issues[0].message} Clique « ${issues[0].fix === 'move-to-send' ? 'Déplacer en envoi' : 'Mettre en pause'} » dans le panneau Ingé à distance.`, 9000);
       return false;
     }
     const fed = busesFedBy(t, st.tracks);
     if ((activeVst(t) || fed.some(activeVst)) && !novaBridge.isConnected()) {
-      ack(t.remote.peerTrackId, v, 'waiting_bridge');
+      ack(t.remote.peerTrackId, v, 'waiting_bridge', undefined, t.remote.peerKey);
       if (manual) notify("🔌 Tes VST tournent sur ton PC : ouvre NOVA Studio pour Windows (ou connecte le pont dans l'onglet VST) pour geler et envoyer. Sans pont, seuls les effets de NOVA marchent.", 8000);
       return false;
     }
     processingRef.current.add(trackId);
     const step = (msg: string) => setBusy(b => ({ ...b, [trackId]: msg }));
     step('Gel de la piste…');
-    ack(t.remote.peerTrackId, v, 'processing');
+    ack(t.remote.peerTrackId, v, 'processing', undefined, t.remote.peerKey);
     const by = o.author() || "l'ingé";
     try {
       const old: string[] = [];
@@ -494,10 +500,10 @@ export function useRemoteInge(o: RemoteIngeOptions) {
       setFailures(f => ({ ...f, [trackId]: { n, message } }));
       // Avant : l'artiste restait sur « il applique ses effets » pour toujours.
       if (!novaBridge.isConnected()) {
-        ack(t.remote.peerTrackId, v, 'waiting_bridge');
+        ack(t.remote.peerTrackId, v, 'waiting_bridge', undefined, t.remote.peerKey);
         notify(`🔌 Pont VST coupé pendant le gel de « ${t.name} » : rouvre NOVA Studio pour Windows, la piste repartira toute seule.`, 8000);
       } else {
-        ack(t.remote.peerTrackId, v, 'error', message.slice(0, 80));
+        ack(t.remote.peerTrackId, v, 'error', message.slice(0, 80), t.remote.peerKey);
         if (n <= MAX_AUTO_RETRIES) {
           const old = retryTimersRef.current.get(trackId);
           if (old) window.clearTimeout(old);
@@ -620,6 +626,11 @@ export function useRemoteInge(o: RemoteIngeOptions) {
   useEffect(() => () => remoteStore.set({ role: null, badges: {} }), []);
 
   const peer = members.find(m => m.role !== role && m.online);
+  // Ingé : tous les artistes connectés (« Léo et Sam »).
+  const peerNames = (() => {
+    const names = Array.from(new Set(members.filter(m => m.role !== role && m.online).map(m => m.display_name).filter(Boolean)));
+    return names.length > 1 ? `${names.slice(0, -1).join(', ')} et ${names[names.length - 1]}` : names[0] || '';
+  })();
   const statusView = status && active ? collabStatusView(status, { othersOnline: peer ? 1 : 0, peerSeenAt: peerSeen?.at ?? null }) : null;
   /** « Recharger » : on se reconnecte au lien (le journal rattrape tout). */
   const reconnect = useCallback(async () => {
@@ -633,7 +644,9 @@ export function useRemoteInge(o: RemoteIngeOptions) {
     status: statusView, retry: () => { void clientRef.current?.retryNow(); }, reconnect, otherEngineer,
     active: !!active, role, phase, name: active?.name || '', connecting, error, setError,
     inviteUrl: active && role === 'artist' ? remoteInviteUrl(active.link) : null,
-    peerName: peer?.display_name || null,
+    /** Artiste : inviter un 2e artiste sur le même lien (même ingé, chacun ses pistes). */
+    artistInviteUrl: active && role === 'artist' ? `${remoteInviteUrl(active.link)}&ri=artist` : null,
+    peerName: peerNames || null,
     /** Dernier signe de vie de l'autre (envoi, accusé de réception), si la présence en direct manque. */
     peerSeen: peer ? null : peerSeen,
     bridgeConnected: bridgeOk,

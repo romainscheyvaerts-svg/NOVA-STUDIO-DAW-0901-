@@ -74,9 +74,24 @@ export function legacyMixToFields(m: Record<string, any> | undefined | null): Mi
 export const mergeMixOps = (older: Record<string, any>, newer: Record<string, any>): Record<string, any> =>
   ({ ...older, ...newer, fields: { ...(older.fields || {}), ...(newer.fields || {}) } });
 
-/** Fusion par défaut de la file d'envoi : le mix champ par champ, le reste remplacé par le plus récent. */
+/**
+ * Repères en file (hors ligne) : deux lots se cumulent, repère par repère (le
+ * plus récent l'emporte) ; un repère supprimé puis recréé reste, et inversement.
+ */
+export const mergeMarkerOps = (older: Record<string, any>, newer: Record<string, any>): Record<string, any> => {
+  const up = new Map<string, any>();
+  const rm = new Set<string>();
+  for (const batch of [older, newer]) {
+    for (const m of Array.isArray(batch?.upsert) ? batch.upsert : []) if (m && typeof m.id === 'string') { up.set(m.id, m); rm.delete(m.id); }
+    for (const id of Array.isArray(batch?.remove) ? batch.remove : []) if (typeof id === 'string') { rm.add(id); up.delete(id); }
+  }
+  return { ...older, ...newer, upsert: [...up.values()], remove: [...rm] };
+};
+
+/** Fusion par défaut de la file d'envoi : le mix champ par champ, les repères repère par repère, le reste remplacé par le plus récent. */
 export const mergeQueuedOps = (kind: string, older: Record<string, any>, newer: Record<string, any>): Record<string, any> =>
-  (kind === 'mix' && older?.fields && newer?.fields ? mergeMixOps(older, newer) : newer);
+  (kind === 'mix' && older?.fields && newer?.fields ? mergeMixOps(older, newer)
+    : kind === 'markers' ? mergeMarkerOps(older, newer) : newer);
 
 /**
  * Horloge « dernière écriture gagne » : le numéro (seq) du journal le plus

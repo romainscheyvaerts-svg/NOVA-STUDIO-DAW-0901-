@@ -25,3 +25,25 @@ export const useCollabRole = (): CollabRole | null =>
 /** Demande de (dé)verrouillage du volume d'une piste, traitée par App. */
 export const requestVolumeLock = (trackId: string) =>
   window.dispatchEvent(new CustomEvent('nova:volume-lock', { detail: trackId }));
+
+/**
+ * « Feat à distance » : ce que les en-têtes de piste montrent en direct —
+ * qui je suis (pour « à toi ») et qui enregistre sur quelle piste (pastille
+ * REC, piste verrouillée chez les autres).
+ */
+export interface CollabLive { meKey: string | null; recs: Record<string, string> }
+let live: CollabLive = { meKey: null, recs: {} };
+const liveListeners = new Set<() => void>();
+
+export const collabLiveStore = {
+  get: () => live,
+  set(next: CollabLive) {
+    if (next.meKey === live.meKey && JSON.stringify(next.recs) === JSON.stringify(live.recs)) return;
+    live = next;
+    liveListeners.forEach(l => l());
+  },
+  subscribe(l: () => void) { liveListeners.add(l); return () => { liveListeners.delete(l); }; },
+};
+
+export const useCollabLive = (): CollabLive =>
+  useSyncExternalStore(collabLiveStore.subscribe, collabLiveStore.get, collabLiveStore.get);

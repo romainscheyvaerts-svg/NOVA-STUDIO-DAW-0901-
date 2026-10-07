@@ -415,6 +415,15 @@ export interface Track {
    */
   collabOwner?: CollabRole;
   /**
+   * « Feat à distance » : personne qui possède la piste (« u:<compte> »), son
+   * nom et sa couleur. Seul son propriétaire peut en changer le contenu : la
+   * prise d'un artiste n'écrase jamais celle d'un autre. Absent : la piste est
+   * à tout le rôle (anciennes sessions).
+   */
+  collabOwnerKey?: string;
+  collabOwnerName?: string;
+  collabOwnerColor?: string;
+  /**
    * Mode « Ingé à distance » : piste envoyée par l'artiste à l'ingé (chez
    * l'artiste) ou reçue de l'artiste (chez l'ingé). Voir utils/remoteInge.
    */
@@ -506,6 +515,8 @@ export interface Marker {
   color: string;
   /** Numéro du repère (Pro Tools : Memory Location n°) ; absent sur les anciens projets. */
   number?: number;
+  /** Collaboration : qui a posé ce repère (affiché aux autres). */
+  by?: string;
 }
 
 // Metronome settings
@@ -784,6 +795,12 @@ export interface RemoteBefore {
 export interface RemoteTrackInfo {
   /** Piste correspondante dans la session de l'autre. */
   peerTrackId: string;
+  /**
+   * Ingé : l'artiste qui a envoyé la piste (« u:<compte> »). Plusieurs artistes
+   * sur le même lien peuvent avoir une piste au même identifiant : chez l'ingé
+   * ce sont deux pistes, et le rendu ne revient qu'à son artiste.
+   */
+  peerKey?: string;
   /** Emplacement choisi par l'artiste en glissant la piste (lead, backs…). */
   slot?: string;
   /** Artiste : dernière version envoyée et empreinte de l'audio brut + éditions. */

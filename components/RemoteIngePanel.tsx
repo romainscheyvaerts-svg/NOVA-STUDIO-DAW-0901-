@@ -36,6 +36,7 @@ const btn = 'h-10 rounded-xl px-3 text-[12px] font-black transition-colors disab
 
 const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
   const [copied, setCopied] = useState(false);
+  const [copiedArtist, setCopiedArtist] = useState(false);
   const [over, setOver] = useState<string | null>(null);
   if (!open) return null;
   const isArtist = r.role === 'artist';
@@ -43,6 +44,10 @@ const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
   const copy = async () => {
     if (!r.inviteUrl) return;
     try { await navigator.clipboard.writeText(r.inviteUrl); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch { /* */ }
+  };
+  const copyArtist = async () => {
+    if (!r.artistInviteUrl) return;
+    try { await navigator.clipboard.writeText(r.artistInviteUrl); setCopiedArtist(true); setTimeout(() => setCopiedArtist(false), 1600); } catch { /* */ }
   };
   const dropProps = (slot: string) => ({
     onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes('trackid') || e.dataTransfer.types.includes('trackId')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setOver(slot); } },
@@ -90,6 +95,11 @@ const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
                     className="h-10 flex-1 min-w-0 rounded-xl border border-white/10 bg-black/40 px-2 text-[11px] text-slate-300" onFocus={e => e.currentTarget.select()} />
                   <button type="button" onClick={copy} className={`${btn} bg-white/10 text-white`}>{copied ? 'Copié ✓' : 'Copier'}</button>
                 </div>
+                {r.artistInviteUrl && (
+                  <button type="button" onClick={copyArtist} data-testid="remote-invite-artist" className="text-[11px] text-cyan-300 underline">
+                    {copiedArtist ? 'Lien copié ✓ (pour un autre artiste)' : '+ Inviter un autre artiste sur ce lien (même ingé, chacun ses pistes)'}
+                  </button>
+                )}
               </div>
             )}
 
@@ -155,7 +165,7 @@ const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
                 <div key={t.id} data-testid={`remote-row-${t.id}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-6 rounded-full" style={{ background: t.color }} />
-                    <span className="flex-1 truncate text-[13px] font-bold text-white">{t.name}</span>
+                    <span className="flex-1 truncate text-[13px] font-bold text-white">{t.name}{t.collabOwnerName && !t.name.includes(t.collabOwnerName) ? <span className="ml-1 text-[11px] font-normal text-slate-400">· de {t.collabOwnerName}</span> : null}</span>
                     <span className="text-[10px] text-slate-500">v{t.remote?.recvV ?? 0}</span>
                   </div>
                   <p data-testid={`remote-status-${t.id}`} className={`text-[11px] ${TONE[tone]}`}>{label}</p>
