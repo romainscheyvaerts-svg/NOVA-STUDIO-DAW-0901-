@@ -3,7 +3,8 @@ import { produce } from 'immer';
 import type { Clip, DAWState } from '../types';
 import { TrackType } from '../types';
 import { registerEditCommands } from '../utils/editCommands';
-import { chooseEditMode, EditMode, editModeStore, sanitizeEditMode, syncPointAt } from '../utils/editModes';
+import { chooseEditMode, EditMode, editModeStore, sanitizeEditMode, sessionSampleRate, setSampleRateProvider, syncPointAt } from '../utils/editModes';
+import { audioEngine } from '../engine/AudioEngine';
 import { editPrefsStore, editSelectionStore } from '../utils/editSelection';
 import { playheadStore } from '../utils/playheadStore';
 import { shuffleInsert, shuffleMove, shuffleRemove, shuffleTrimEnd, shuffleTrimStart, ShuffleOptions } from '../utils/shuffle';
@@ -111,7 +112,13 @@ export function useEditModes(d: EditModeDeps, project: { id: string; editMode?: 
   const ref = useRef(d);
   ref.current = d;
   deps = d;
-  useEffect(() => () => { if (deps === ref.current) deps = null; }, []);
+  useEffect(() => {
+    // « À l'échantillon près » = à la fréquence de la session (contexte audio du moteur).
+    setSampleRateProvider(() => audioEngine.getAudioContext()?.sampleRate);
+    // Accès pour les tests de bout en bout (navigateur headless) et la console.
+    (window as any).__novaEditMode = { get: editModeStore.get, set: editModeStore.set, sampleRate: sessionSampleRate };
+    return () => { if (deps === ref.current) deps = null; setSampleRateProvider(null); delete (window as any).__novaEditMode; };
+  }, []);
 
   // --- Mode sauvé avec le projet : à l'ouverture, le projet donne son mode ;
   // ensuite chaque changement est recopié dans le projet (sans étape d'annulation).

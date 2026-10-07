@@ -155,9 +155,17 @@ export function toggleShuffleLock(): { locked: boolean; message: string } {
 
 // ------------------------------------------------------------- positions
 
-/** Fréquence d'échantillonnage de référence pour l'arrondi « à l'échantillon ». */
+/** Fréquence d'échantillonnage par défaut (avant que le moteur audio ne soit lancé). */
 export const SAMPLE_RATE = 48000;
-export const toSample = (t: number, sr = SAMPLE_RATE): number => Math.round(t * sr) / sr;
+let rateProvider: (() => number | undefined | null) | null = null;
+/** Le studio donne la vraie fréquence de la session (contexte audio du moteur). */
+export const setSampleRateProvider = (fn: (() => number | undefined | null) | null) => { rateProvider = fn; };
+/** Fréquence de la session : « à l'échantillon près » et format Échantillons du Spot. */
+export const sessionSampleRate = (): number => {
+  const r = rateProvider?.();
+  return r && r > 0 ? r : SAMPLE_RATE;
+};
+export const toSample = (t: number, sr = sessionSampleRate()): number => Math.round(t * sr) / sr;
 
 /** Mode réellement appliqué pendant un geste (avec la touche d'inversion). */
 export type EffectiveMode = 'SLIP' | 'GRID_ABS' | 'GRID_REL' | 'SHUFFLE' | 'SPOT';
@@ -177,7 +185,7 @@ export const snapsToGrid = (e: EffectiveMode): boolean => e === 'GRID_ABS' || e 
  * Point posé à la souris (curseur, sélection de plage, bord rogné, boucle,
  * repère) : sur la grille en Grid (absolu comme relatif), sinon à l'échantillon.
  */
-export function snapPoint(t: number, s: Pick<EditModeSettings, 'mode' | 'gridKind' | 'gridSize'>, bpm: number, invert = false, sr = SAMPLE_RATE): number {
+export function snapPoint(t: number, s: Pick<EditModeSettings, 'mode' | 'gridKind' | 'gridSize'>, bpm: number, invert = false, sr = sessionSampleRate()): number {
   return snapsToGrid(effectiveMode(s, invert)) ? snapToGrid(t, bpm, s.gridSize, true) : toSample(t, sr);
 }
 
@@ -197,7 +205,7 @@ export function syncOffsetOf(c: SyncClip): number | null {
 }
 
 /** Valeur de Clip.syncPoint pour un point de synchro posé à l'instant `t` de la timeline. */
-export function syncPointAt(c: SyncClip, t: number, sr = SAMPLE_RATE): number | null {
+export function syncPointAt(c: SyncClip, t: number, sr = sessionSampleRate()): number | null {
   if (t < c.start - 1e-9 || t > c.start + c.duration + 1e-9) return null;
   return toSample((c.offset || 0) + (t - c.start), sr);
 }

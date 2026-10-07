@@ -8,7 +8,7 @@ import LiveRecordingClip from './LiveRecordingClip';
 import AutomationLaneComponent from './AutomationLane';
 import { drawExpandedLanes } from '../utils/automationDraw';
 import { snapToGrid, gridSubdivisionsPerBar, isBeatLine } from '../utils/grid';
-import { editModeStore, effectiveMode, EDIT_MODE_INFO, GRID_KIND_LABEL, moveClipStart, snapPoint, snapsToGrid, syncOffsetOf, syncPointAt, toSample, useEditMode } from '../utils/editModes';
+import { editModeStore, effectiveMode, EDIT_MODE_INFO, GRID_KIND_LABEL, moveClipStart, snapPoint, sessionSampleRate, snapsToGrid, syncOffsetOf, syncPointAt, toSample, useEditMode } from '../utils/editModes';
 import { SELECT_CLIP_EVENT, shuffleDrag, shuffleEditClip } from '../hooks/useEditModes';
 import EditModeSelector from './EditModeSelector';
 import SpotDialog from './SpotDialog';
@@ -170,6 +170,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [dragInvert, setDragInvert] = useState(false);
   const [spotTarget, setSpotTarget] = useState<{ trackId: string; clipId: string } | null>(null);
   const longPressRef = useRef<{ timer: number; x: number; y: number } | null>(null);
+  // Après un appui long qui a ouvert le Spot, Chrome envoie encore un clic droit
+  // synthétique (menu du clip) : on l'ignore un instant.
+  const suppressCtxUntilRef = useRef(0);
   // Crossfade en cours de réglage (Smart Tool : bas d'une jonction entre deux clips).
   const xfadeDragRef = useRef<{ trackId: string; a: Clip; b: Clip; at: number } | null>(null);
   const [xfadeTip, setXfadeTip] = useState<{ x: number; y: number; text: string } | null>(null);
@@ -812,6 +815,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const rect = scrollContainerRef.current.getBoundingClientRect();
     // La colonne des en-tetes gere ses propres evenements.
     if (e.clientX - rect.left < headerWidth) return;
+    if (e.button === 2 && Date.now() < suppressCtxUntilRef.current) { e.preventDefault(); return; }
     const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
     const time = (x / zoomH);
@@ -1322,7 +1326,7 @@ const handleMouseUp = () => {
     setDragTipPos(null);
     if (longPressRef.current) { clearTimeout(longPressRef.current.timer); longPressRef.current = null; }
     // Spot (Pro Tools) : un clic (sans glisser) sur un clip ouvre « Position exacte ».
-    if (dragAction === 'MOVE' && activeClip && !movedRef.current && editModeStore.get().mode === 'SPOT' && !touchRef.current) {
+    if (dragAction === 'MOVE' && activeClip && !movedRef.current && editModeStore.get().mode === 'SPOT') {
         setSpotTarget({ trackId: activeClip.trackId, clipId: activeClip.clip.id });
     }
     shuffleInitRef.current = null;
@@ -1943,7 +1947,7 @@ useEffect(() => {
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
           {/* Modes d'édition Pro Tools (remplacent l'aimant oui / non) : SHUF / SLIP / SPOT / GRID + valeur de grille. */}
-          {!simple && <EditModeSelector />}
+          <EditModeSelector compact={simple} />
           {!simple && (
             <div className="hidden xl:flex items-center gap-1" data-nova-target="nudge">
               <label className="text-[10px] font-bold text-slate-500" htmlFor="nova-nudge" title="Décalage (« nudge » de Pro Tools) : ← / → déplacent la sélection d'un pas ; Maj = 10 pas.">Décalage</label>
@@ -2004,8 +2008,11 @@ useEffect(() => {
             e.preventDefault();
             touchRef.current = true;
             handleMouseDown(e);
-            // Appui long sur un clip (doigt immobile 0,55 s) : « Position exacte » (Spot).
+            // Mode Spot : appui long sur un clip (doigt immobile 0,55 s) = « Position exacte ».
+            // (Dans les autres modes, l'appui long garde le menu du clip, qui propose aussi le Spot.)
             if (longPressRef.current) clearTimeout(longPressRef.current.timer);
+            longPressRef.current = null;
+            if (editModeStore.get().mode !== 'SPOT') return;
             const px = e.clientX, py = e.clientY;
             longPressRef.current = { x: px, y: py, timer: window.setTimeout(() => {
               longPressRef.current = null;
@@ -2016,7 +2023,7 @@ useEffect(() => {
               for (const tr of visibleTracks) {
                 if (ly >= laneY && ly < laneY + zoomV) {
                   const c = clipAtTime(rowClips(tr), lx / zoomH);
-                  if (c) { handleMouseUp(); setSpotTarget({ trackId: tr.id, clipId: c.id }); }
+                  if (c) { suppressCtxUntilRef.current = Date.now() + 1500; handleMouseUp(); setSpotTarget({ trackId: tr.id, clipId: c.id }); }
                   return;
                 }
                 laneY += zoomV + extraH(tr);
@@ -2186,7 +2193,7 @@ useEffect(() => {
         const tr = tracks.find(t => t.id === spotTarget.trackId);
         const c = tr?.clips.find(x => x.id === spotTarget.clipId);
         if (!tr || !c) return null;
-        const sr = (c.bufferId && audioBufferRegistry.get(c.bufferId)?.sampleRate) || 48000;
+        const sr = sessionSampleRate();
         return <SpotDialog clip={c} trackName={tr.name} bpm={bpm} sampleRate={sr} onClose={() => setSpotTarget(null)}
           onApply={(start) => {
             onEditClipRaw?.(tr.id, c.id, 'UPDATE_PROPS', { start });

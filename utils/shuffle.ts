@@ -26,6 +26,8 @@ import { toSample } from './editModes';
  */
 
 const EPS = 1e-6;
+/** Morceau le plus court qu'une insertion Shuffle accepte de couper (20 ms). */
+const MIN_PIECE = 0.02;
 const endOf = (c: Clip) => c.start + c.duration;
 
 export interface ShuffleOptions {
@@ -182,25 +184,52 @@ export function shuffleTrimStart(clips: Clip[], id: string, newStart: number, o:
   return recrossfade(out, touched, o);
 }
 
-/** Ouvre un trou de `len` secondes à `at` (pour coller / insérer en Shuffle). */
-export function openGap(clips: Clip[], at: number, len: number, o: ShuffleOptions = {}): Clip[] {
-  // Un crossfade à cheval sur le point d'insertion est défait d'abord.
+/**
+ * Ouvre un trou de `len` secondes à `at` (pour coller / insérer en Shuffle).
+ * Un point d'insertion tombé dans un crossfade va à la jonction (le crossfade
+ * est défait) ; à 1 ms d'un bord de clip, il se colle à ce bord. Renvoie le
+ * point d'insertion retenu.
+ */
+export function openGapAt(clips: Clip[], at: number, len: number, o: ShuffleOptions = {}): { clips: Clip[]; at: number } {
   let out = clips;
+  let pos = Math.max(0, at);
+  // Pas de miette : un point à moins de 20 ms d'un bord de clip va sur ce bord.
   for (const c of clips) {
-    if (!c.isMuted && c.start < at - EPS && endOf(c) > at + EPS) out = detachCrossfades(out, c.id, 'right');
+    if (c.isMuted || !(c.start < pos && endOf(c) > pos)) continue;
+    if (pos - c.start < MIN_PIECE) pos = c.start;
+    else if (endOf(c) - pos < MIN_PIECE) pos = endOf(c);
   }
-  out = splitAt(out, at, o.makeId || defaultId);
-  return shiftFrom(out, at, len);
+  for (const a of clips) {
+    if (a.isMuted) continue;
+    const aE = endOf(a);
+    const b = clips.find(x => !x.isMuted && x.id !== a.id && x.start > a.start + EPS && x.start < aE - EPS && endOf(x) > aE + EPS && aE - x.start <= AUTO_XFADE_MAX_OVERLAP + EPS);
+    if (b && pos >= b.start - EPS && pos <= aE + EPS) {
+      out = detachCrossfades(out, a.id, 'right');
+      pos = (b.start + aE) / 2;
+      break;
+    }
+  }
+  for (const c of out) {
+    if (c.isMuted) continue;
+    for (const t of [c.start, endOf(c)]) if (Math.abs(t - pos) < 0.001) pos = t;
+  }
+  out = splitAt(out, pos, o.makeId || defaultId);
+  return { clips: shiftFrom(out, pos, len), at: pos };
 }
 
-/** Insère des clips (déjà positionnés à partir de `at`) en Shuffle : la suite avance. */
+export const openGap = (clips: Clip[], at: number, len: number, o: ShuffleOptions = {}): Clip[] => openGapAt(clips, at, len, o).clips;
+
+/** Insère des clips (positionnés à partir de `at`) en Shuffle : la suite avance. */
 export function shuffleInsert(clips: Clip[], inserted: Clip[], at: number, o: ShuffleOptions = {}): Clip[] {
   if (!inserted.length) return clips;
   const len = Math.max(...inserted.map(c => endOf(c))) - at;
-  const out = [...openGap(clips, at, len, o), ...inserted];
-  const touched = new Set(inserted.map(c => c.id));
-  touchingAt(out, at, touched);
-  touchingAt(out, at + len, touched);
+  const g = openGapAt(clips, at, len, o);
+  const d = g.at - at;
+  const placed = Math.abs(d) > 1e-12 ? inserted.map(c => ({ ...c, start: c.start + d })) : inserted;
+  const out = [...g.clips, ...placed];
+  const touched = new Set(placed.map(c => c.id));
+  touchingAt(out, g.at, touched);
+  touchingAt(out, g.at + len, touched);
   return recrossfade(out, touched, o);
 }
 

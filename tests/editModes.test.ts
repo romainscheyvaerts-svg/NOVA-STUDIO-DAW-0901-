@@ -108,6 +108,17 @@ describe('Shuffle', () => {
     expect(spans(r)).toEqual([['A', 0, 2], ['X', 2, 4], ['A2-1', 4, 6], ['B', 6, 10]]);
     expect(r.find(c => c.id === 'A2-1')!.offset).toBeCloseTo(2);
   });
+  it('coller dans un crossfade ou à 5 ms d’un bord : à la jonction, sans miette', () => {
+    const xf = [C('A', 0, 2.01, { fadeOut: 0.01, bufferId: 'a' }), C('B', 2, 2, { fadeIn: 0.01, offset: 1, bufferId: 'b' })];
+    // 2,005 s : dans le crossfade → jonction à 2,005 (milieu), aucun morceau de moins de 20 ms
+    const r = shuffleInsert(xf, [C('X', 2.005, 1)], 2.005);
+    expect(r.every(c => c.duration >= 0.02 - 1e-9)).toBe(true);
+    expect(spans(r)).toEqual([['A', 0, 2.005], ['X', 2.005, 3.005], ['B', 3.005, 5]]);
+    // 1,995 s : 5 ms avant la fin de A (bord) → même résultat
+    const r2 = shuffleInsert(xf, [C('Y', 1.995, 1)], 1.995);
+    expect(r2.length).toBe(3);
+    expect(r2.every(c => c.duration >= 0.02 - 1e-9)).toBe(true);
+  });
   it('déplacer : le clip s’insère au bord le plus proche, les clips s’échangent', () => {
     expect(spans(shuffleMove(abc(), 'B', 10.5).clips)).toEqual([['A', 0, 4], ['C', 4, 8], ['B', 8, 12]]);
     expect(spans(shuffleMove(abc(), 'A', 3).clips)).toEqual([['B', 0, 4], ['A', 4, 8], ['C', 8, 12]]);

@@ -624,7 +624,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             <button key={String(on)} type="button" role="radio" aria-checked={snapToGrid === on}
               onClick={() => setSnapToGrid(on)}
               title={on ? 'Grille : les clips se calent sur les temps (mode Grid de Pro Tools)' : 'Libre : les clips vont exactement où tu les poses (mode Slip de Pro Tools)'}
-              className={`nova-hit h-9 px-2.5 rounded text-[10px] font-bold transition-all ${snapToGrid === on ? (on ? 'bg-blue-500/25 text-blue-200' : 'bg-green-500/20 text-green-300') : 'text-white/45'}`}>
+              className={`nova-hit h-10 px-2.5 rounded text-[11px] font-bold transition-all ${snapToGrid === on ? (on ? 'bg-blue-500/25 text-blue-200' : 'bg-green-500/20 text-green-300') : 'text-white/45'}`}>
               {on ? 'Grille' : 'Libre'}
             </button>
           ))}

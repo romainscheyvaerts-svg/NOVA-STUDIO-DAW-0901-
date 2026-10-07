@@ -11,7 +11,7 @@ import {
 import { playheadStore } from '../utils/playheadStore';
 import { registerEditCommands } from '../utils/editCommands';
 import { editModeStore } from '../utils/editModes';
-import { closeRange, openGap, ShuffleOptions } from '../utils/shuffle';
+import { closeRange, openGapAt, ShuffleOptions } from '../utils/shuffle';
 
 /**
  * Commandes d'édition « façon Pro Tools » appelables de partout (clavier,
@@ -179,11 +179,15 @@ function rangeCommands(
     playheadStore.set(s.start);
     return out;
   };
-  const withGap = (clips: ClipsByTrack, at: number, len: number): ClipsByTrack => {
-    if (!shuffle()) return clips;
+  /** Ouvre le trou sur chaque piste ; le point d'insertion retenu (jonction de crossfade) est celui de la 1re piste. */
+  const withGap = (clips: ClipsByTrack, at: number, len: number): { clips: ClipsByTrack; at: number } => {
+    if (!shuffle()) return { clips, at };
     const out: ClipsByTrack = {};
-    Object.entries(clips).forEach(([id, list]) => { out[id] = openGap(list as Clip[], at, len, { ...shOpts(), makeId: (() => { const g = idGenerator('g'); return () => g('gap'); })() }) as any; });
-    return out;
+    const gen = idGenerator('g');
+    const ids = Object.keys(clips);
+    const first = ids.length ? openGapAt(clips[ids[0]] as Clip[], at, len, { ...shOpts(), makeId: () => gen('gap') }).at : at;
+    ids.forEach(id => { out[id] = openGapAt(clips[id] as Clip[], first, len, { ...shOpts(), makeId: () => gen('gap') }).clips as any; });
+    return { clips: out, at: first };
   };
   const what = (s: TimeSelection) => `${fmtMs(selLength(s))} sur ${s.trackIds.length} piste${s.trackIds.length > 1 ? 's' : ''}`;
 
@@ -218,8 +222,9 @@ function rangeCommands(
       const focus = editSelectionStore.get().focusTrackId;
       const startIdx = Math.max(0, order.indexOf(s?.trackIds[0] || focus || rangeClipboard.trackIds[0]));
       const targets = s ? [...s.trackIds, ...order.slice(order.indexOf(s.trackIds[s.trackIds.length - 1]) + 1)] : order.slice(startIdx);
-      const at = s ? s.start : playheadStore.get();
-      const clips = pasteRange(withGap(byTrack(targets.slice(0, rangeClipboard.lanes.length)), at, rangeClipboard.length), rangeClipboard, at, targets, idGenerator('p'));
+      const gap = withGap(byTrack(targets.slice(0, rangeClipboard.lanes.length)), s ? s.start : playheadStore.get(), rangeClipboard.length);
+      const at = gap.at;
+      const clips = pasteRange(gap.clips, rangeClipboard, at, targets, idGenerator('p'));
       if (!Object.keys(clips).length) return false;
       apply(clips);
       const used = targets.slice(0, rangeClipboard.lanes.length);
@@ -238,7 +243,7 @@ function rangeCommands(
     },
     duplicateSelection: () => {
       const s = need(); if (!s) return false;
-      const r = duplicateRange(withGap(byTrack(s.trackIds), s.end, selLength(s)), s, idGenerator('u'));
+      const r = duplicateRange(withGap(byTrack(s.trackIds), s.end, selLength(s)).clips, s, idGenerator('u'));
       apply(r.clips);
       editSelectionStore.set({ time: r.selection });
       d().notify(`⧉ Plage dupliquée juste après (${what(s)}).`);

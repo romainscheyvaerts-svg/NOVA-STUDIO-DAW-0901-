@@ -13,7 +13,7 @@ export const notify = (msg: string) => {
   try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: msg })); } catch { /* hors navigateur */ }
 };
 
-const EditModeSelector: React.FC = () => {
+const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) => {
   const em = useEditMode();
   const [menu, setMenu] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -34,6 +34,23 @@ const EditModeSelector: React.FC = () => {
   };
 
   const gridRel = em.mode === 'GRID' && em.gridKind === 'RELATIVE';
+
+  // Mode simple : juste Libre / Grille (Slip / Grid de Pro Tools), comme sur téléphone.
+  if (compact) {
+    const grid = em.mode === 'GRID';
+    return (
+      <div role="radiogroup" aria-label="Placement des clips" className="flex bg-black/40 rounded-lg p-0.5 border border-white/5 shrink-0" data-nova-target="edit-modes">
+        {([false, true] as const).map(on => (
+          <button key={String(on)} type="button" role="radio" aria-checked={grid === on}
+            onClick={() => notify(chooseEditMode(on ? 'GRID' : 'SLIP').message)}
+            title={on ? 'Grille : les clips se calent sur les temps (mode Grid de Pro Tools, F4)' : 'Libre : les clips vont exactement où tu les poses (mode Slip de Pro Tools, F2)'}
+            className={`h-9 [@media(pointer:coarse)]:h-10 px-3 rounded-md text-[11px] font-bold transition-colors ${grid === on ? (on ? 'bg-blue-500/25 text-blue-200' : 'bg-green-500/20 text-green-300') : 'text-slate-400 hover:text-white'}`}>
+            {on ? 'Grille' : 'Libre'}
+          </button>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div ref={boxRef} className="relative flex items-center gap-1 shrink-0" data-nova-target="edit-modes">

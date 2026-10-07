@@ -6,7 +6,7 @@
  * - SAMPLES : échantillons.
  * Logique pure, testée dans tests/editModes.test.ts.
  */
-import { SAMPLE_RATE, syncOffsetOf, SyncClip } from './editModes';
+import { sessionSampleRate, syncOffsetOf, SyncClip } from './editModes';
 
 export type SpotFormat = 'BARS' | 'MINSEC' | 'SAMPLES';
 export type SpotAnchor = 'START' | 'SYNC' | 'END';
@@ -43,7 +43,7 @@ export function formatMinSec(t: number): string {
 }
 
 export function formatSamples(t: number, c: SpotContext): string {
-  return String(Math.round(Math.max(0, t) * (c.sr || SAMPLE_RATE)));
+  return String(Math.round(Math.max(0, t) * (c.sr || sessionSampleRate())));
 }
 
 export function formatSpot(t: number, f: SpotFormat, c: SpotContext): string {
@@ -82,7 +82,7 @@ export function parseMinSec(str: string): number | null {
 export function parseSamples(str: string, c: SpotContext): number | null {
   const s = str.trim().replace(/[\s _']/g, '');
   if (!/^\d+$/.test(s)) return null;
-  return Number(s) / (c.sr || SAMPLE_RATE);
+  return Number(s) / (c.sr || sessionSampleRate());
 }
 
 /**
