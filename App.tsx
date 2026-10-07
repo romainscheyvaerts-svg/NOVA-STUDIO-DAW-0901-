@@ -100,6 +100,7 @@ import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from '.
 import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
 import { planVoiceTrack, revealTrack } from './utils/voiceTrack';
+import { SEND_LABELS } from './utils/sendLabels';
 import { BeatLoadCancelled, beatLoadCancelledByUser, isBeatLoading, loadBeatAudio } from './utils/beatLoad';
 import BeatLoadBanner from './components/BeatLoadBanner';
 import { gainToDbText } from './utils/db';
@@ -251,7 +252,7 @@ const MAKE_MUSIC_VOCAL_IR = `${import.meta.env.BASE_URL}ir/make-music-vocal.wav`
 const createInitialSends = (bpm: number, outputId: string = 'master'): Track[] => [
   { 
     id: 'send-delay', 
-    name: 'DELAY 1/4', 
+    name: SEND_LABELS['send-delay'].label, 
     type: TrackType.SEND, 
     color: '#00f2ff', 
     isMuted: false, 
@@ -269,7 +270,7 @@ const createInitialSends = (bpm: number, outputId: string = 'master'): Track[] =
   },
   { 
     id: 'send-verb-short', 
-    name: 'VERB PRO', 
+    name: SEND_LABELS['send-verb-short'].label, 
     type: TrackType.SEND, 
     color: '#10b981', 
     isMuted: false, 
@@ -294,7 +295,7 @@ const createInitialSends = (bpm: number, outputId: string = 'master'): Track[] =
   },
   { 
     id: 'send-verb-long', 
-    name: 'HALL SPACE', 
+    name: SEND_LABELS['send-verb-long'].label, 
     type: TrackType.SEND, 
     color: '#a855f7', 
     isMuted: false, 
@@ -2206,8 +2207,8 @@ function Studio() {
    * Reverbs et délais : toujours sur une piste d'envoi, jamais en insert d'une
    * piste source. Ainsi une piste peut être gelée (VST du PC rendus) et rester
    * éditable ailleurs (iPad, navigateur) sans figer l'ambiance, et toutes les
-   * voix partagent la même reverb. Reverb native → « VERB PRO » (notre reverb),
-   * délai natif → « DELAY 1/4 », reverb / délai VST → nouvelle piste d'envoi.
+   * voix partagent la même reverb. Reverb native → « Reverb courte » (notre reverb),
+   * délai natif → « Écho 1/4 », reverb / délai VST → nouvelle piste d'envoi.
    * Renvoie la piste d'envoi et l'effet, ou null si l'aiguillage ne s'applique pas.
    */
   const routeAmbienceToSend = useCallback((tid: string, plugin: PluginInstance, displayName: string): { sendId: string; name: string; plugin: PluginInstance; created: boolean } | null => {

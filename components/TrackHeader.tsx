@@ -33,6 +33,7 @@ import { useInstrumentStatus } from '../utils/instrumentStore';
 import MonitorControl from './MonitorControl';
 import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
+import { SEND_LABELS } from '../utils/sendLabels';
 
 interface TrackHeaderProps {
   track: Track;
@@ -558,7 +559,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {canHaveSends && !simple && (
             <button
                 onClick={(e) => { e.stopPropagation(); setShowSends(!showSends); }}
-                title="Envois (delay, réverbes)"
+                title="Envois : écho et reverbs"
                 aria-label={`Envois de ${track.name}`}
                 aria-expanded={showSends}
                 className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${showSends ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-600 hover:text-white'}`}
@@ -659,9 +660,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           className="absolute left-3 right-3 mt-1 p-2 bg-[#08090b] rounded-lg border border-cyan-500/30 shadow-2xl space-y-1 animate-in fade-in duration-150 z-20"
           style={{ top: `${sendsTop}px` }}
         >
-            <HorizontalSendFader trackId={track.id} label="Delay 1/4" color="#00f2ff" send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-delay', lvl)} />
-            <HorizontalSendFader trackId={track.id} label="Verb Pro" color="#10b981" send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-short', lvl)} />
-            <HorizontalSendFader trackId={track.id} label="Hall Space" color="#a855f7" send={track.sends.find(s => s.id === 'send-verb-long') || { id: 'send-verb-long', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-long', lvl)} />
+            <HorizontalSendFader trackId={track.id} label={SEND_LABELS['send-delay'].label} color={SEND_LABELS['send-delay'].color} send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-delay', lvl)} />
+            <HorizontalSendFader trackId={track.id} label={SEND_LABELS['send-verb-short'].label} color={SEND_LABELS['send-verb-short'].color} send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-short', lvl)} />
+            <HorizontalSendFader trackId={track.id} label={SEND_LABELS['send-verb-long'].label} color={SEND_LABELS['send-verb-long'].color} send={track.sends.find(s => s.id === 'send-verb-long') || { id: 'send-verb-long', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-long', lvl)} />
         </div>
       )}
       

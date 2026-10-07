@@ -201,7 +201,26 @@ def g16(b, R):
     ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16}
+def g2(b, R):
+    ctx, pg = mk(b, "pc", "avance", "g2")
+    open_studio(pg, R)
+    trap(pg)
+    sb = pg.locator("button[aria-label^='Envois de']").locator("visible=true")
+    if sb.count():
+        sb.first.click(); pg.wait_for_timeout(500)
+        S(pg, "g2", "01_envois_piste")
+        R["piste"] = re.findall(r"(Écho 1/4|Reverb courte|Reverb longue|Delay 1/4|Verb Pro|Hall Space)", body(pg))[:6]
+        sb.first.click(); pg.wait_for_timeout(300)
+    open_console(pg)
+    S(pg, "g2", "02_console")
+    k = pg.locator("[title^='Envoi vers']")
+    R["console"] = [k.nth(i).get_attribute("title")[:40] for i in range(min(3, k.count()))]
+    R["console_txt"] = [k.nth(i).inner_text()[:30] for i in range(min(3, k.count()))]
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]

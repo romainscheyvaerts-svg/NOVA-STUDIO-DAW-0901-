@@ -8,6 +8,7 @@ import ProMasterMeter from './ProMasterMeter';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { getValidDestinations, getRouteLabel } from './RoutingManager';
 import { PluginName } from './PluginName';
+import { sendColor, sendHelp, sendLabel, trackDisplayName } from '../utils/sendLabels';
 import InsertListPopover from './InsertListPopover';
 import { MIXER_INSERT_ROWS, splitInserts } from '../utils/insertRows';
 
@@ -44,20 +45,16 @@ const VUMeter: React.FC<{ analyzer: AnalyserNode | null }> = ({ analyzer }) => {
   return <canvas ref={canvasRef} width={6} height={120} className="rounded-full overflow-hidden" />;
 };
 
-const SendKnob: React.FC<{ send: TrackSend, track: Track, onUpdate: (t: Track) => void }> = ({ send, track, onUpdate }) => {
-  const getSendColor = (id: string) => {
-    if (id === 'send-delay') return '#00f2ff';
-    if (id === 'send-verb-short') return '#6366f1';
-    return '#a855f7';
-  };
+const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], onUpdate: (t: Track) => void }> = ({ send, track, allTracks, onUpdate }) => {
+  const getSendColor = sendColor;
 
   return (
-    <div className="flex flex-col items-center justify-center">
+    <div className="flex flex-col items-center justify-center min-w-0" title={`Envoi vers ${sendLabel(send.id, allTracks)}${sendHelp(send.id) ? ` : ${sendHelp(send.id)}` : ''}`}>
        <SmartKnob 
           id={`${track.id}-send-${send.id}`}
           targetId={track.id}
           paramId={`send::${send.id}`} 
-          label={send.id.replace('send-', '').substring(0, 4)}
+          label={sendLabel(send.id, allTracks, true)}
           value={send.level}
           min={0}
           max={1.5}
@@ -204,7 +201,7 @@ const ChannelStrip: React.FC<{
       
       {!isMaster && (track.type === TrackType.AUDIO || track.type === TrackType.SAMPLER) && (
         <div className="h-[104px] shrink-0 bg-black/40 border-b border-white/5 p-2 grid grid-cols-3 gap-2 items-start overflow-hidden">
-          {track.sends.map(s => <SendKnob key={s.id} send={s} track={track} onUpdate={onUpdate} />)}
+          {track.sends.map(s => <SendKnob key={s.id} send={s} track={track} allTracks={allTracks} onUpdate={onUpdate} />)}
         </div>
       )}
       

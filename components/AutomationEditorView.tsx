@@ -4,6 +4,7 @@ import { Track, AutomationLane, AutomationPoint } from '../types';
 import AutomationLaneComponent from './AutomationLane';
 import { audioEngine } from '../engine/AudioEngine';
 import { playheadStore } from '../utils/playheadStore';
+import { sendLabel } from '../utils/sendLabels';
 
 interface AutomationEditorViewProps {
   tracks: Track[];
@@ -82,7 +83,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
       
       // Sends
       track.sends.forEach(s => {
-          params.push({ id: `send::${s.id}`, name: `Send: ${s.id.replace('send-','').toUpperCase()}`, min: 0, max: 1.5 });
+          params.push({ id: `send::${s.id}`, name: `Envoi ${sendLabel(s.id, tracks)}`, min: 0, max: 1.5 });
       });
 
       // Plugins

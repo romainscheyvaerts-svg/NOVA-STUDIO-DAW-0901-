@@ -5,6 +5,7 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore, usePlayheadTime } from '../utils/playheadStore';
 import { gainToDbText } from '../utils/db';
 import { useSimpleMode } from '../utils/simpleMode';
+import { sendLabel } from '../utils/sendLabels';
 
 /** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
 const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
@@ -1169,13 +1170,13 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                             style={{ backgroundColor: sendTrack?.color || '#666' }}
                           />
                           <span className="text-xs font-bold text-white">
-                            {sendTrack?.name || send.id}
+                            {sendLabel(send.id, availableSendTracks)}
                           </span>
                         </div>
                         <button
                           onClick={() => handleSendToggle(send.id)}
                           aria-pressed={send.isEnabled}
-                          aria-label={`Envoi ${sendTrack?.name || send.id}`}
+                          aria-label={`Envoi ${sendLabel(send.id, availableSendTracks)}`}
                           className={`nova-hit w-10 h-6 rounded-full transition-all ${
                             send.isEnabled 
                               ? 'bg-cyan-500' 
