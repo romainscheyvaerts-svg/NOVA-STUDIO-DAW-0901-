@@ -89,7 +89,8 @@ const CollabPanel: React.FC<Props> = (p) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [signErr, setSignErr] = useState<string | null>(null);
-  useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [p.messages.length, p.open]);
+  // Nouveau message : on descend jusqu'à lui (pas à l'ouverture : les réglages restent en haut).
+  useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [p.messages.length]);
   if (!p.open) return null;
 
   const copy = async (r: CollabRole) => {
@@ -184,6 +185,9 @@ const CollabPanel: React.FC<Props> = (p) => {
               )}
             </div>
           )}
+          {/* Une seule zone qui défile (invitation, VST de l'artiste, messages) : la saisie
+              du message reste toujours visible (avant : poussée hors de l'écran chez l'ingé). */}
+          <div ref={listRef} data-testid="collab-scroll" className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 space-y-2 border-b border-white/5">
             <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Inviter</p>
             <div className="grid grid-cols-3 gap-1.5">
@@ -203,7 +207,7 @@ const CollabPanel: React.FC<Props> = (p) => {
             </div>
           </div>
           {p.liveVst}
-          <div ref={listRef} className="flex-1 min-h-[160px] overflow-y-auto p-4 space-y-2" aria-live="polite">
+          <div className="min-h-[120px] p-4 space-y-2" aria-live="polite">
             {p.messages.length === 0 && <p className="text-[12px] text-slate-500">Pas encore de message. Dis bonjour !</p>}
             {p.messages.map(m => (
               <div key={m.id} className={`max-w-[85%] rounded-2xl px-3 py-2 text-[13px] ${m.mine ? 'ml-auto bg-cyan-500/20 text-white' : 'bg-white/5 text-slate-100'}`}>
@@ -212,6 +216,7 @@ const CollabPanel: React.FC<Props> = (p) => {
                 {m.pending && <p className="mt-0.5 text-[10px] text-slate-400">envoi… (partira au retour du réseau)</p>}
               </div>
             ))}
+          </div>
           </div>
           <div className="flex gap-2 p-3 border-t border-white/5">
             <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') send(); }}
