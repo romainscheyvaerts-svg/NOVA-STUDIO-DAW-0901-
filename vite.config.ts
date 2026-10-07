@@ -89,6 +89,9 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        // F11 : reconstruire l'installateur Windows (desktop/dist) faisait tomber le
+        // serveur de dev (EPERM sur les fichiers temporaires de l'installateur).
+        watch: { ignored: ['**/desktop/dist/**', '**/public/downloads/**', '**/desktop/node_modules/**'] },
       },
       plugins: [react(), devApiPlugin(), {
         // Date de construction dans la page : l'application Windows ne se met à

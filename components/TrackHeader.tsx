@@ -596,7 +596,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
       )}
 
-      <div ref={controlsRef} className="flex items-center space-x-3 mt-1 bg-black/20 p-1.5 rounded-lg border border-white/5 relative z-10">
+      <div ref={controlsRef} className="flex items-center space-x-2 mt-1 bg-black/20 p-1.5 rounded-lg border border-white/5 relative z-10">
         <div
           {...panKnob.bind}
           title={`Panoramique ${panToText(track.pan)} : glisser (Maj = fin), molette, double-clic = centre`}
@@ -607,6 +607,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         >
           <div className="w-0.5 h-3 bg-cyan-400 rounded-full" style={{ transform: `rotate(${track.pan * 140}deg) translateY(-1px)` }} />
         </div>
+        {/* Valeur du panoramique lisible (F2) : « C », « G 30 », « D 30 ». */}
+        <span className="w-7 shrink-0 text-[9px] font-mono tabular-nums text-slate-400 pointer-events-none" aria-hidden="true">{panToText(track.pan)}</span>
         
         <div className="flex-1 flex items-center gap-1 h-6 relative">
           {/* Verrou de volume (collaboration) : « c'est ce volume-là que veut l'artiste ». */}
@@ -647,11 +649,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 }}
               />
             </div>
-            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono tabular-nums text-white/70 [text-shadow:0_1px_2px_rgba(0,0,0,0.95)] pointer-events-none group-hover/vol:text-white transition-colors">
-              {gainToDbText(track.volume)}
-            </span>
           </div>
           </div>
+          {/* Valeur à droite, hors de la barre colorée (F2) : lisible à tout volume. */}
+          <span className="w-12 shrink-0 text-right text-[9px] font-mono tabular-nums text-slate-300 pointer-events-none">{gainToDbText(track.volume)}</span>
         </div>
       </div>
       

@@ -80,9 +80,9 @@ const IOSection: React.FC<{ track: Track, allTracks: Track[], onUpdate: (t: Trac
             {track.id === 'track-rec-main' && (
                 <div className="relative group/io">
                     <div className="h-6 bg-black/60 rounded flex items-center px-2 border border-white/5 cursor-pointer hover:border-white/20">
-                        <span className="text-[8px] font-black text-slate-500 mr-2">IN</span>
+                        <span className="text-[8px] font-black text-slate-500 mr-2" title="Entrée : d'où vient le son enregistré">Entrée</span>
                         <span className="text-[8px] font-mono text-cyan-400 truncate flex-1">
-                            {track.inputDeviceId === 'mic-default' ? 'MIC 1' : (track.inputDeviceId ? 'EXT' : 'NO IN')}
+                            {track.inputDeviceId === 'mic-default' ? 'Micro 1' : (track.inputDeviceId ? 'Externe' : 'Aucune')}
                         </span>
                         <i className="fas fa-caret-down text-[8px] text-slate-600"></i>
                     </div>
@@ -100,7 +100,7 @@ const IOSection: React.FC<{ track: Track, allTracks: Track[], onUpdate: (t: Trac
             {/* OUTPUT SELECTOR */}
             <div className="relative group/io">
                 <div className="h-6 bg-black/60 rounded flex items-center px-2 border border-white/5 cursor-pointer hover:border-white/20">
-                    <span className="text-[8px] font-black text-slate-500 mr-2">OUT</span>
+                    <span className="text-[8px] font-black text-slate-500 mr-2" title="Sortie : où part le son de la tranche (master ou un bus)">Sortie</span>
                     <span className="text-[8px] font-mono text-amber-400 truncate flex-1">
                         {getRouteLabel(track.outputTrackId, allTracks)}
                     </span>
@@ -331,7 +331,7 @@ const ChannelStrip: React.FC<{
         )}
 
         <div className="mb-2 flex flex-col items-center">
-           <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="PAN" value={track.pan} min={-1} max={1} size={36} color="#06b6d4" defaultValue={0} format={panToText} onChange={(val) => onUpdate({...track, pan: val})} />
+           <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="Pan" value={track.pan} min={-1} max={1} size={36} color="#06b6d4" defaultValue={0} format={panToText} onChange={(val) => onUpdate({...track, pan: val})} />
         </div>
 
         <div className="flex-1 flex space-x-3 px-2">
@@ -364,8 +364,8 @@ const ChannelStrip: React.FC<{
 
         <div className="mt-2 text-center text-[10px] font-mono tabular-nums text-slate-300">{gainToDbText(track.volume)}</div>
         <div className="mt-2 flex space-x-2">
-           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>MUTE</button>
-           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`}>SOLO</button>
+           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/5 border-white/5 text-slate-600'}`} title="Couper le son de cette tranche">Muet</button>
+           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/5 border-white/5 text-slate-600'}`} title="N'écouter que cette tranche">Solo</button>
         </div>
         
         <div className={`mt-3 h-10 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-black/40 border-white/10 text-white'}`}>

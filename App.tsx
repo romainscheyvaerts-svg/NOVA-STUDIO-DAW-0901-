@@ -100,6 +100,7 @@ import { openCheckout, waitPaid, billingStatus, hasPlan, verifyPayment } from '.
 import { catalogSupabase } from './services/supabase';
 import { fetchAudio } from './utils/audioCache';
 import { nextNumberedName, planVoiceTrack, revealTrack } from './utils/voiceTrack';
+import { countVoiceTakes } from './utils/sessionSummary';
 import { SEND_LABELS } from './utils/sendLabels';
 import { BeatLoadCancelled, beatLoadCancelledByUser, isBeatLoading, loadBeatAudio } from './utils/beatLoad';
 import BeatLoadBanner from './components/BeatLoadBanner';
@@ -3419,8 +3420,7 @@ function Studio() {
     const st = stateRef.current;
     if (st.isRecording) return;
     autosaveBusy.current = true;
-    const voiceTakes = st.tracks.filter(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId)
-      .reduce((n, t) => n + t.clips.filter(c => takeNumberOf(c) !== null).length, 0);
+    const voiceTakes = countVoiceTakes(st.tracks); // prises, pas fragments (F10)
     const hasAudio = st.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0);
     if (!hasAudio && !(st.lyrics || '').trim()) { autosaveBusy.current = false; return; } // rien à garder : on n'écrase pas une session précédente
     try {

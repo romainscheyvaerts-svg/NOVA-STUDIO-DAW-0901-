@@ -6,7 +6,7 @@ import { audioEngine } from '../engine/AudioEngine';
  * maintien (1,5 s), barre RMS, et diode CLIP qui reste allumée après une
  * saturation (clic pour l'éteindre). Rafraîchi ~30 fois par seconde.
  */
-const InputMeter: React.FC<{ trackId: string }> = ({ trackId }) => {
+const InputMeter: React.FC<{ trackId: string; compact?: boolean }> = ({ trackId, compact }) => {
   const [v, setV] = useState({ rms: -90, peak: -90, hold: -90 });
   const [clip, setClip] = useState(false);
   const raf = useRef(0);
@@ -40,7 +40,7 @@ const InputMeter: React.FC<{ trackId: string }> = ({ trackId }) => {
 
   return (
     <div className="flex items-center gap-1.5" data-nova-target="input-meter" title="Niveau du micro (dBFS). Vise -12 à -6 dB sur les passages forts.">
-      <span className="text-[8px] font-black text-slate-500">IN</span>
+      {!compact && <span className="text-[8px] font-bold text-slate-400">Entrée</span>}
       <div className="relative flex-1 h-2 rounded-full bg-black/60 overflow-hidden">
         <div className={`absolute inset-y-0 left-0 ${color} opacity-50`} style={{ width: `${pos(v.peak)}%` }} />
         <div className={`absolute inset-y-0 left-0 ${color}`} style={{ width: `${pos(v.rms)}%` }} />
@@ -49,7 +49,7 @@ const InputMeter: React.FC<{ trackId: string }> = ({ trackId }) => {
         <div className="absolute inset-y-0 w-px bg-white/25" style={{ left: `${pos(-12)}%` }} />
         <div className="absolute inset-y-0 w-px bg-white/25" style={{ left: `${pos(-6)}%` }} />
       </div>
-      <span className="w-8 text-right text-[9px] font-mono tabular-nums text-slate-300">{v.hold <= -89 ? '-∞' : v.hold.toFixed(1)}</span>
+      <span className="w-8 text-right text-[9px] font-mono tabular-nums text-slate-300" title="Crête du micro en dB (0 = saturation). Vise -12 à -6 dB.">{v.hold <= -89 ? '-∞' : v.hold.toFixed(1)}</span>
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setClip(false); }}

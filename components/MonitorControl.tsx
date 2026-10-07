@@ -60,7 +60,7 @@ const MonitorControl: React.FC<{ compact?: boolean; mini?: boolean; trackId?: st
   if (mini) {
     return (
       <div className="flex shrink-0 items-center gap-1" onClick={stop} onMouseDown={stop} onTouchStart={stop} data-nova-target="monitor-level">
-        <div className="w-10 min-w-0">{trackId && <InputMeter trackId={trackId} />}</div>
+        <div className="w-10 min-w-0" title="Entrée : niveau du micro">{trackId && <InputMeter trackId={trackId} compact />}</div>
         <button type="button" onClick={toggle} aria-pressed={on}
           aria-label={on ? 'Couper le retour casque' : 'Activer le retour casque'}
           title={on ? 'Retour de ta voix dans le casque : actif (clic pour couper)' : "Retour casque coupé (clic pour l'activer, avec un casque seulement)"}

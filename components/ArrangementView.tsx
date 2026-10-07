@@ -1318,14 +1318,6 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     ctx.stroke();
     ctx.restore();
 
-    // Nom du clip avec fond
-    if (w > 30) {
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(x + 4, y + 3, Math.min(ctx.measureText(clip.name).width + 10, w - 8), 15);
-        ctx.fillStyle = clip.isMuted ? '#666' : '#fff';
-        ctx.font = '600 11px Inter';
-        ctx.fillText(clip.name, x + 9, y + 14, w - 18);
-    }
     
     // Fondus : zone assombrie + poignee dans le coin superieur.
     // Ils etaient appliques a la lecture mais totalement invisibles et non
@@ -1352,6 +1344,15 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
         ctx.fillRect(Math.max(hx2, x), y + 2, 6, 6);
     }
 
+    // Nom du clip avec fond, dessiné APRÈS les fondus : la ligne de fondu ne le traverse plus (F3).
+    if (w > 30) {
+        ctx.font = '600 11px Inter';
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(x + 4, y + 3, Math.min(ctx.measureText(clip.name).width + 10, w - 8), 15);
+        ctx.fillStyle = clip.isMuted ? '#666' : '#fff';
+        ctx.fillText(clip.name, x + 9, y + 14, w - 18);
+    }
+
     // Poignée de gain de clip
     if (clip.bufferId && w > 16 && h > 30) {
         const g = clip.gain ?? 1;
@@ -1369,15 +1370,20 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
         const cxm = (vx0 + vx1) / 2;
         ctx.fillStyle = modified ? '#fbbf24' : (isSelected ? '#ffffff' : 'rgba(255,255,255,0.5)');
         ctx.fillRect(Math.round(cxm - 7), Math.round(hy - 2.5), 14, 5);
-        if (modified && w > 70) {
+        if (modified && w > 50) {
             const label = gainToDbText(g);
             ctx.font = '700 10px Inter';
             const tw = ctx.measureText(label).width;
             const ly = hy - 4 < y + 30 ? hy + 13 : hy - 5;
-            ctx.fillStyle = 'rgba(0,0,0,0.65)';
-            ctx.fillRect(cxm + 10, ly - 10, tw + 6, 13);
-            ctx.fillStyle = '#fbbf24';
-            ctx.fillText(label, cxm + 13, ly);
+            // Étiquette entière ou rien (F3 : « -4.8 d » coupé au bord du clip).
+            const right = Math.min(x + w, ctx.canvas.width) - 2;
+            const lx = cxm + 10 + tw + 6 <= right ? cxm + 10 : (cxm - 10 - tw - 6 >= Math.max(x, 0) + 2 ? cxm - 10 - tw - 6 : null);
+            if (lx !== null) {
+                ctx.fillStyle = 'rgba(0,0,0,0.65)';
+                ctx.fillRect(lx, ly - 10, tw + 6, 13);
+                ctx.fillStyle = '#fbbf24';
+                ctx.fillText(label, lx + 3, ly);
+            }
         }
         ctx.restore();
     }

@@ -320,7 +320,25 @@ def g22(b, R):
     ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22}
+def fin(b, R):
+    ctx, pg = mk(b, "pc", "simple", "fin")
+    open_studio(pg, R)
+    pg.keyboard.press("Home"); pg.keyboard.press("r"); pg.wait_for_timeout(2500)
+    S(pg, "f1", "01_enregistrement")
+    R["bandeau"] = [l for l in body(pg).split(chr(10)) if "Enregistrement" in l or "REC ·" in l][:3]
+    pg.wait_for_timeout(2000)
+    pg.keyboard.press("r"); pg.wait_for_timeout(4000)
+    S(pg, "f2", "01_entete_piste")
+    pg.wait_for_timeout(3000)
+    pg.goto(os.environ.get("NOVA_URL", "http://localhost:3418/"), wait_until="domcontentloaded")
+    pg.wait_for_timeout(3000)
+    S(pg, "f10", "01_reprendre")
+    R["reprendre"] = [l for l in body(pg).split(chr(10)) if "prise" in l][:3]
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]

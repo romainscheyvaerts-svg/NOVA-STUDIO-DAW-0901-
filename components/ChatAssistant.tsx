@@ -52,6 +52,8 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
   isOpenRef.current = isOpen;
   const isRecRef = useRef(!!projectState?.isRecording);
   isRecRef.current = !!projectState?.isRecording;
+  // Une prise démarre : on retire le bandeau en cours (rien par-dessus l'enregistrement, G1).
+  useEffect(() => { if (projectState?.isRecording) setToast(null); }, [projectState?.isRecording]);
   // Conseils non lus : pastille « 1 conseil » sur le bouton (G1), au lieu d'ouvrir Nova.
   const [unread, setUnread] = useState<{ n: number; last: string }>({ n: 0, last: '' });
   useEffect(() => { if (isOpen) setUnread({ n: 0, last: '' }); onOpenChange?.(isOpen); }, [isOpen]);

@@ -75,11 +75,11 @@ const RecordingCoach: React.FC<RecordingCoachProps> = ({ isRecording, trackId, t
   const ss = Math.floor(elapsed % 60).toString().padStart(2, '0');
 
   return (
-    <div className="fixed left-1/2 -translate-x-1/2 top-[72px] z-[400] w-[min(92vw,420px)] pointer-events-none" role="status" aria-live="polite">
+    <div className="fixed left-1/2 -translate-x-1/2 top-[72px] md:top-auto md:bottom-28 z-[400] w-[min(92vw,420px)] pointer-events-none" role="status" aria-live="polite">
       <div className="rounded-2xl bg-black/85 border border-red-500/40 shadow-2xl px-4 py-3 backdrop-blur">
-        <div className="flex items-center gap-2 text-[11px] font-bold text-red-300 uppercase tracking-wider">
+        <div className="flex items-center gap-2 text-[12px] font-bold text-red-300">
           <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-          <span className="truncate">Rec {partLabel ? `· ${partLabel}` : ''}{trackName ? ` · ${trackName}` : ''}</span>
+          <span className="truncate">Enregistrement{trackName ? ` · ${trackName}` : ''}{partLabel && partLabel.toUpperCase() !== (trackName || '').toUpperCase() ? ` (${partLabel.toLowerCase()})` : ''}</span>
           <span className="ml-auto tabular-nums text-white/80">{mm}:{ss}</span>
         </div>
         <div className="mt-2 h-2.5 rounded-full bg-white/10 overflow-hidden" aria-hidden="true">
