@@ -76,6 +76,10 @@ def open_panel(page):
     if page.locator("[aria-labelledby='collab-title']").count():
         return
     b = page.get_by_role("button", name=re.compile(r"(Collaborer|en ligne · Chat)")).locator("visible=true").first
+    if not b.count():
+        # Téléphone : l'entrée « Collaborer » est dans le menu.
+        page.get_by_role("button", name=re.compile("Ouvrir le menu")).first.click(); page.wait_for_timeout(500)
+        b = page.get_by_role("button", name=re.compile(r"(Collaborer|Collaboration ·)")).locator("visible=true").first
     b.click(); page.wait_for_timeout(600)
 
 

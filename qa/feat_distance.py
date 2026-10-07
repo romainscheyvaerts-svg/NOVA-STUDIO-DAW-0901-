@@ -64,7 +64,8 @@ def take_ids(page):
 
 
 def notice(page):
-    return page.evaluate("() => Array.from(document.querySelectorAll('[role=status], [role=alert], .nova-notif, [aria-live]')).map(e => e.innerText).join(' | ').slice(0, 1500)")
+    """Annonces visibles (bandeaux, assistant Nova) : le texte de la page."""
+    return page.locator("body").inner_text()[-4000:]
 
 
 def run():
@@ -203,7 +204,8 @@ def run():
             msg = notice(B)
             shot(B, "B5_sam_piste_de_leo_refusee")
             armed = B.evaluate("() => window.__novaEdit.getState().tracks.find(t => t.id === 'voix').isTrackArmed")
-            return {"message": msg[:400], "armee": armed}
+            m = re.search(r".*piste de Léo.*", msg)
+            return {"message": m.group(0) if m else msg[-300:], "armee": armed}
         o = step("Sam essaie d'armer la piste de Léo : refusé", locked)
         if o:
             check("piste de Léo : Sam ne peut pas l'armer (message clair)", (not o["armee"]) and "piste de Léo" in o["message"])
