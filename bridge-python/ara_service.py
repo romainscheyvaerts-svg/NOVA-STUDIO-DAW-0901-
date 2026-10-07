@@ -288,6 +288,16 @@ def install(Server, build_render_frame):
         await self._ara_run(lambda: h.call("show_editor", offscreen=False))
         self._reply(ws, req, {"success": True})
 
+    async def _a_ara_snapshot(self, ws, req):
+        """Capture PNG de la fenêtre du plugin (même hors écran) : preuves et assistance."""
+        sess = self._ara_session(req)
+        h = next(iter(sess.hosts.values()), None)
+        path = str(req.get("path") or "")
+        if h is None or not path.lower().endswith(".png"):
+            raise ValueError("Capture impossible")
+        res = await self._ara_run(lambda: h.call("snapshot", path=path))
+        self._reply(ws, req, {"success": True, "path": res.get("path"), "width": res.get("width"), "height": res.get("height")})
+
     async def _a_ara_transport(self, ws, req):
         sess = self._ara_session(req)
         h = next(iter(sess.hosts.values()), None)
@@ -310,5 +320,5 @@ def install(Server, build_render_frame):
                 threading.Thread(target=s.close, daemon=True).start()
 
     for fn in (_sessions, _ara_plugins, _ara_event, _a_ara_status, _ara_run, _new_host, _ara_open, _ara_align,
-               _ara_send_renders, _ara_session, _a_ara_commit, _a_ara_show, _a_ara_transport, _a_ara_close, ara_reap):
+               _ara_send_renders, _ara_session, _a_ara_commit, _a_ara_show, _a_ara_snapshot, _a_ara_transport, _a_ara_close, ara_reap):
         setattr(Server, fn.__name__, fn)

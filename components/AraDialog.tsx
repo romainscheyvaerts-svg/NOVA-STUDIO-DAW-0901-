@@ -39,6 +39,9 @@ interface Props {
 
 const has = (id: string) => audioBufferRegistry.has(id);
 
+/** Essais automatiques : fenêtre du plugin hors écran (localStorage « nova.ara.offscreen » = 1). */
+const offscreenForTests = () => { try { return localStorage.getItem('nova.ara.offscreen') === '1'; } catch { return false; } };
+
 const toBuffer = (channels: Float32Array[], sampleRate: number): AudioBuffer => {
   const b = new AudioBuffer({ length: Math.max(1, channels[0]?.length || 1), numberOfChannels: Math.max(1, channels.length), sampleRate });
   channels.forEach((c, i) => b.copyToChannel(c, i));
@@ -151,16 +154,17 @@ const AraDialog: React.FC<Props> = ({ open, plugin, trackId, clipId, tracks, bpm
     setPhase('sending'); setError('');
     try {
       const r = await novaBridge.araOpen({
-        sessionId: sid, plugin: 'melodyne', sampleRate: buf.sampleRate, tempo: bpm, archive: archiveFor(clip, persistentId),
+        sessionId: sid, plugin: 'melodyne', sampleRate: buf.sampleRate, tempo: bpm, archive: archiveFor(clip, persistentId), offscreen: offscreenForTests(),
         clips: [{ id: clip.id, name: clip.name.replace(/\s*\((Melodyne|calé|justesse)\)$/, ''), track: track.name, role: 'edit',
           start: region.songStart, persistentId, channels: sliceChannels(buf, region.start, region.end) }],
       });
       if (sessionRef.current !== sid) return;
       const n = r.notes[clip.id];
       setInfo(`${n?.count ?? 0} note${(n?.count ?? 0) > 1 ? 's' : ''} trouvée${(n?.count ?? 0) > 1 ? 's' : ''}`
-        + (r.analysisSeconds ? ` en ${r.analysisSeconds.toFixed(1).replace('.', ',')} s` : '')
+        + (r.analysisSeconds && r.analysisSeconds >= 0.1 ? ` en ${r.analysisSeconds.toFixed(1).replace('.', ',')} s` : '')
         + (r.restored ? ' · tes retouches précédentes sont rechargées' : ''));
       setPhase('open');
+      try { (window as any).__novaAraSession = sid; } catch { /* */ }
       melRef.current = { src, region, persistentId, pluginName: [r.pluginName, r.pluginVersion].filter(Boolean).join(' ') };
     } catch (e: any) {
       if (sessionRef.current !== sid) return;
