@@ -1,9 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { catalogSupabase } from '../services/supabase';
 import { isNovaDesktop } from '../utils/desktopApp';
 import {
   decideGate, friendlyAuthError, isNetworkError, readAccessCache, writeAccessCache,
 } from '../utils/desktopAccess';
+import {
+  desktopSupportsGoogle, getDesktopTransport, googleLoginErrorMessage, startDesktopGoogleLogin,
+  type GoogleLoginController, type GooglePhase,
+} from '../utils/desktopGoogleLogin';
 
 /**
  * Application Windows uniquement : connexion obligatoire (compte Make Music
@@ -63,6 +67,10 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  // Connexion Google en cours (navigateur par défaut + retour sur 127.0.0.1, cf. desktopGoogleLogin.ts)
+  const [google, setGoogle] = useState<Extract<GooglePhase, { phase: 'preparing' | 'waiting' | 'finishing' }> | null>(null);
+  const googleCtrl = useRef<GoogleLoginController | null>(null);
+  const canGoogle = desktopSupportsGoogle();
 
   const check = useCallback(async () => {
     setError(null);
@@ -104,6 +112,49 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     setBusy(false);
   };
 
+  const openWith = (u: { id: string; email: string }) => {
+    writeAccessCache({ userId: u.id, email: u.email, checkedAt: Date.now() });
+    setPassword('');
+    setAccount({ email: u.email, offline: false });
+    setMounted(true);
+    setStage('open');
+  };
+
+  // Fenêtre fermée / porte démontée pendant l'attente : le serveur local se ferme.
+  useEffect(() => () => { googleCtrl.current?.cancel(); googleCtrl.current = null; }, []);
+
+  const startGoogle = () => {
+    setError(null); setInfo(null);
+    const transport = getDesktopTransport();
+    if (!transport) { setError(googleLoginErrorMessage('no_app')); return; }
+    googleCtrl.current?.cancel();
+    googleCtrl.current = startDesktopGoogleLogin({
+      auth: catalogSupabase.auth as any,
+      transport,
+      onPhase: (p) => {
+        if (p.phase === 'done') {
+          googleCtrl.current = null;
+          setGoogle(null);
+          openWith(p.user);
+        } else if (p.phase === 'error') {
+          googleCtrl.current = null;
+          setGoogle(null);
+          setError(p.message);
+        } else {
+          setGoogle(p);
+        }
+      },
+    });
+  };
+
+  const cancelGoogle = () => {
+    googleCtrl.current?.cancel();
+    googleCtrl.current = null;
+    setGoogle(null);
+    setInfo(null);
+    setError(googleLoginErrorMessage('cancelled'));
+  };
+
   const login = (e: React.FormEvent) => {
     e.preventDefault();
     void run(async () => {
@@ -111,11 +162,7 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       if (error) throw error;
       const u = data?.user;
       if (!u) throw new Error('Connexion impossible, réessaie.');
-      writeAccessCache({ userId: u.id, email: u.email || email.trim(), checkedAt: Date.now() });
-      setPassword('');
-      setAccount({ email: u.email || email.trim(), offline: false });
-      setMounted(true);
-      setStage('open');
+      openWith({ id: u.id, email: u.email || email.trim() });
     });
   };
 
@@ -200,12 +247,21 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 </div>
               )}
 
-              {stage === 'login' && (
+              {google && (stage === 'login' || stage === 'signup') && (
+                <GoogleWaiting
+                  phase={google.phase}
+                  onReopen={() => googleCtrl.current?.reopen()}
+                  onCancel={cancelGoogle}
+                />
+              )}
+
+              {!google && stage === 'login' && (
                 <form onSubmit={login} className="space-y-4">
                   <div>
                     <h1 id="gate-title" className="text-2xl font-black text-white">Connecte-toi pour démarrer Nova Studio</h1>
                     <p className="mt-2 text-[13px] text-slate-400">Avec ton compte Make Music (gratuit). Une fois connecté, le studio est à toi : seul l'export est payant sans abonnement.</p>
                   </div>
+                  {canGoogle && <GoogleButton onClick={startGoogle} disabled={busy} />}
                   <label className="block space-y-1.5"><span className="text-[12px] font-bold text-slate-300">E-mail</span>
                     <input className={input} type="email" autoComplete="email" autoFocus value={email} onChange={e => setEmail(e.target.value)} placeholder="toi@exemple.com" required />
                   </label>
@@ -221,12 +277,13 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 </form>
               )}
 
-              {stage === 'signup' && (
+              {!google && stage === 'signup' && (
                 <form onSubmit={signup} className="space-y-4">
                   <div>
                     <h1 id="gate-title" className="text-2xl font-black text-white">Crée ton compte gratuit</h1>
                     <p className="mt-2 text-[13px] text-slate-400">Il sert aussi sur studiomakemusic.com (réservations, instrus, Nova Pro).</p>
                   </div>
+                  {canGoogle && <GoogleButton onClick={startGoogle} disabled={busy} />}
                   <label className="block space-y-1.5"><span className="text-[12px] font-bold text-slate-300">Nom ou nom d'artiste</span>
                     <input className={input} autoComplete="name" autoFocus value={name} onChange={e => setName(e.target.value)} required />
                   </label>
@@ -288,6 +345,73 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     </>
   );
 };
+
+/** Logo Google officiel (même rendu que sur studiomakemusic.com). */
+const GoogleLogo: React.FC<{ className?: string }> = ({ className }) => (
+  <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+  </svg>
+);
+
+/** « Continuer avec Google » + séparateur « ou », au-dessus du formulaire e-mail (comme sur le site). */
+const GoogleButton: React.FC<{ onClick: () => void; disabled?: boolean }> = ({ onClick, disabled }) => (
+  <>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex h-12 w-full items-center justify-center rounded-xl border border-white/15 bg-white/[0.04] text-[14px] font-bold text-white transition hover:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-cyan-400/30 disabled:opacity-40"
+    >
+      <GoogleLogo className="mr-2 h-5 w-5" />
+      Continuer avec Google
+    </button>
+    <div className="relative" aria-hidden="true">
+      <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-white/10" /></div>
+      <div className="relative flex justify-center text-[11px] uppercase tracking-wider">
+        <span className="bg-[#111318] px-2 text-slate-500">ou</span>
+      </div>
+    </div>
+  </>
+);
+
+/** Attente du retour de Google (la page s'est ouverte dans le navigateur par défaut). */
+const GoogleWaiting: React.FC<{ phase: 'preparing' | 'waiting' | 'finishing'; onReopen: () => void; onCancel: () => void }> = ({ phase, onReopen, onCancel }) => (
+  <div className="flex min-h-[320px] flex-col items-center justify-center gap-4 text-center" role="status" aria-live="polite" data-testid="google-waiting">
+    <div className="relative flex h-14 w-14 items-center justify-center">
+      <div className="absolute inset-0 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+      <GoogleLogo className="h-6 w-6" />
+    </div>
+    <h1 id="gate-title" className="text-xl font-black text-white">
+      {phase === 'preparing' ? 'Préparation de la connexion Google…'
+        : phase === 'finishing' ? 'Ouverture de ta session…'
+          : 'Termine la connexion dans ton navigateur…'}
+    </h1>
+    {phase === 'waiting' && (
+      <>
+        <p className="max-w-sm text-[13px] text-slate-300">
+          Une page Google s'est ouverte dans ton navigateur. Choisis ton compte : Nova Studio s'ouvrira tout seul ensuite.
+        </p>
+        <p className="max-w-sm text-[12px] text-slate-500">Tu ne vois pas la page ? Rouvre-la. La demande expire au bout de 5 minutes.</p>
+      </>
+    )}
+    {phase === 'finishing' && <p className="text-[13px] text-slate-300">C'est presque fini, Google a répondu.</p>}
+    <div className="mt-2 flex w-full max-w-xs flex-col gap-2">
+      {phase === 'waiting' && (
+        <button type="button" onClick={onReopen} className="flex h-11 w-full items-center justify-center rounded-xl border border-white/15 bg-white/[0.04] text-[13px] font-bold text-white transition hover:bg-white/[0.08]">
+          <GoogleLogo className="mr-2 h-4 w-4" />Rouvrir la page Google
+        </button>
+      )}
+      {phase !== 'finishing' && (
+        <button type="button" onClick={onCancel} className="h-10 w-full rounded-xl text-[13px] text-slate-300 underline-offset-2 hover:text-white hover:underline">
+          Annuler
+        </button>
+      )}
+    </div>
+  </div>
+);
 
 /** Ouvert hors ligne grâce à la dernière vérification : petit rappel discret. */
 const OfflineNote: React.FC = () => {

@@ -157,6 +157,7 @@ Tests automatiques :
 
 ```bat
 venv\Scripts\python.exe test\test_ui_bundle.py
+venv\Scripts\python.exe test\test_google_login.py
 venv\Scripts\python.exe test\run_tests.py dist\NovaStudio\NovaStudio.exe
 venv\Scripts\python.exe test\bridge_smoke.py dist\NovaStudio\NovaStudio.exe
 venv\Scripts\python.exe test\measure_startup.py dist\NovaStudio\NovaStudio.exe --runs 3
@@ -166,6 +167,10 @@ venv\Scripts\python.exe test\measure_startup.py dist\NovaStudio\NovaStudio.exe -
 - `test_ui_bundle.py` (sans Internet, faux site local) : choix de la version, téléchargement
   d'une mise à jour, fichiers repris, fichier absent en ligne refusé, version abîmée ou
   défectueuse écartée, retour en arrière du site, nouvelle installation, nettoyage.
+- `test_google_login.py` (sans Internet ni Google) : serveur de retour de la connexion Google
+  (state invalide refusé, Host/Origin contrôlés, fermeture après usage, délai de 5 min,
+  annulation, repli de port, pont page <-> Python, aucun jeton dans le journal). Bout en bout
+  dans Chromium headless : `python ..\qa\desktop_google.py` après `VERCEL=1 npx vite build`.
 - `run_tests.py` : marqueur + user-agent, micro sans invite, autoplay, ponts lancés puis
   arrêtés, fermeture qui attend `__novaBeforeClose` (succès / exception / rejet / promesse
   bloquée → délai max), page hors ligne (mode `NOVA_DESKTOP_URL`), instance unique.
@@ -200,3 +205,14 @@ désinstallation : `"C:\chemin\unins000.exe" /VERYSILENT`.
 - `build.bat`, `build.py`, `requirements.txt`, `package.json` — construction
 - `assets/nova.ico` — icône
 - `test/` — tests automatiques et mesures
+
+## Connexion Google (google_login.py)
+
+Google refuse la WebView (« disallowed_useragent ») : « Continuer avec Google » ouvre la page
+dans le navigateur par défaut, et le retour arrive sur un serveur local temporaire
+`http://127.0.0.1:<port>/cb?nova_state=<aléatoire>` (port 48817 à 48821, sinon port libre),
+ouvert seulement pendant la connexion (5 min max). La page /cb transmet les jetons du fragment
+(#access_token…) en même origine ; le state est vérifié, la fenêtre reçoit les jetons
+(`supabase.auth.setSession`) et revient au premier plan. Supabase accepte d'office les retours
+en IP de bouclage (127.0.0.1, n'importe quel port) : rien à ajouter dans les Redirect URLs
+(`localhost` serait refusé).
