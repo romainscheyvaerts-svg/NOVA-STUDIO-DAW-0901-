@@ -373,7 +373,30 @@ def mob(b, R):
         ctx.close()
 
 
-SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25, "mob": mob}
+def g18(b, R):
+    ctx, pg = mk(b, "pc", "avance", "g18")
+    open_studio(pg, R)
+    trap(pg)
+    open_console(pg)
+    pg.locator(".fx-slot button").filter(has_text="Compresseur").first.click(); pg.wait_for_timeout(1200)
+    bar = pg.get_by_role("button", name="Effet suivant").first.bounding_box()
+    pg.mouse.move(bar["x"] - 250, bar["y"] + 10); pg.mouse.down(); pg.mouse.move(bar["x"] - 650, bar["y"] + 60, steps=8); pg.mouse.up(); pg.wait_for_timeout(300)
+    S(pg, "g18", "01_fenetre_deplacee")
+    mute = pg.get_by_role("button", name=re.compile("^Muet : BACK 2")).locator("visible=true")
+    R["muet_cliquable"] = False
+    if mute.count():
+        try:
+            mute.first.click(timeout=3000); pg.wait_for_timeout(300)
+            R["muet_cliquable"] = mute.first.get_attribute("aria-pressed") == "true"
+        except Exception as e:
+            R["muet_err"] = str(e)[:120]
+    R["fenetre_toujours_ouverte"] = pg.get_by_role("button", name="Effet suivant").count() > 0
+    S(pg, "g18", "02_console_utilisable")
+    R["errors"] = errors(pg)
+    ctx.close()
+
+
+SCEN = {"b2": b2, "b6": b6, "g1": g1_all, "b5": b5, "g16": g16, "g2": g2, "g20": g20, "g7": g7, "g3": g3, "g22": g22, "fin": fin, "g25": g25, "mob": mob, "g18": g18}
 
 if __name__ == "__main__":
     todo = [k for k in SCEN if not ONLY or k in ONLY]

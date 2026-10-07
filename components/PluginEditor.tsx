@@ -40,6 +40,9 @@ interface PluginEditorProps {
   onOpenPlugin?: (trackId: string, plugin: PluginInstance) => void;
 }
 
+/** Position de la fenêtre d'effet (gardée d'un effet à l'autre pendant la session). */
+let windowOffset = { x: 0, y: 0 };
+
 const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, onUpdateParams, isMobile, track, onUpdateTrack, onToggleFreeze, onToggleBypass, onOpenPlugin }) => {
   // Rappel STABLE vers le projet : App en recrée un à chaque rendu ; les effets qui
   // remontent leurs réglages dans un useEffect([params, onParamsChange]) bouclaient
@@ -62,6 +65,20 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+  // Déplacement par la barre du haut (G18 : fenêtre flottante).
+  const [offset, setOffset] = useState(windowOffset);
+  const startDrag = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button, a, input, select')) return;
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY, o = offset;
+    const move = (ev: PointerEvent) => {
+      const next = { x: o.x + ev.clientX - sx, y: Math.max(-window.innerHeight / 2 + 80, o.y + ev.clientY - sy) };
+      windowOffset = next; setOffset(next);
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
   const [nodeInstance, setNodeInstance] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -276,9 +293,11 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   }
 
   return (
-    <div className={`relative group/plugin ${isMobile ? 'w-full h-full flex flex-col items-center justify-center pt-16' : ''}`}>
-      {/* Header Bar */}
-      <div className={`absolute left-0 right-0 h-12 bg-black/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between px-6 z-50 shadow-2xl ${isMobile ? 'top-0 fixed' : '-top-14 rounded-full border border-white/10'}`}>
+    <div className={`relative group/plugin ${isMobile ? 'w-full h-full flex flex-col items-center justify-center pt-16' : ''}`}
+      style={isMobile ? undefined : { transform: `translate(${offset.x}px, ${offset.y}px)` }}>
+      {/* Header Bar (poignée de déplacement) */}
+      <div onPointerDown={isMobile ? undefined : startDrag} title={isMobile ? undefined : 'Glisse la barre pour déplacer la fenêtre'}
+        className={`absolute left-0 right-0 h-12 bg-black/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between px-6 z-50 shadow-2xl ${isMobile ? 'top-0 fixed' : '-top-14 rounded-full border border-white/10 cursor-move'}`}>
          <div className="flex min-w-0 items-center gap-3">
             {onToggleBypass && (
               <button type="button" onClick={() => onToggleBypass(trackId, plugin.id)} aria-pressed={live.isEnabled}

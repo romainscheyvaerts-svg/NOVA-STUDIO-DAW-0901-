@@ -475,6 +475,15 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const totalContentWidth = useMemo(() => projectDuration * zoomH, [projectDuration, zoomH]);
   const totalArrangementHeight = useMemo(() => 40 + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80, 0), [visibleTracks, zoomV]);
 
+  // Mode avancé (G13) : FX, M, S, envois et R mangeaient le nom (« LEAD C... ») ;
+  // colonne un peu plus large sur grand écran, tant que l'utilisateur ne l'a pas réglée.
+  const headerResizedRef = useRef(false);
+  useEffect(() => {
+    if (headerResizedRef.current || typeof window === 'undefined' || window.innerWidth < 1440) return;
+    if (window.matchMedia?.('(pointer: coarse)').matches) return;
+    setHeaderWidth(simple ? 296 : 336);
+  }, [simple]);
+
   const handleHeaderResizeStart = (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
@@ -483,6 +492,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       const startWidth = headerWidth;
       const onMove = (moveEvent: MouseEvent) => {
           const newWidth = Math.max(150, Math.min(600, startWidth + moveEvent.clientX - startX));
+          headerResizedRef.current = true;
           setHeaderWidth(newWidth);
       };
       const onUp = () => {
