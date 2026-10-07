@@ -2105,6 +2105,9 @@ useEffect(() => {
                 // Pro Tools : Rename (Ctrl+Maj+R), couleur de clip, Strip Silence (Ctrl+U).
                 { label: 'Renommer…', icon: 'fa-i-cursor', shortcut: 'Ctrl+Maj+R', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'name' }); setClipContextMenu(null); }},
                 { label: 'Couleur du clip…', icon: 'fa-palette', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'color' }); setClipContextMenu(null); }},
+                // Justesse note par note (V19) : Flex Pitch de Logic, Melodyne, Pitch Editor de FL.
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Justesse note par note…', icon: 'fa-wave-square', title: 'Comme Flex Pitch dans Logic : corrige la justesse de ta voix note par note',
+                  onClick: () => { openNovaWindow('pitch-editor', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
                   { label: 'Séparer en stems…', icon: 'fa-layer-group', title: STEMS_TOOLTIP,

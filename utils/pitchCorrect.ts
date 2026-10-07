@@ -189,3 +189,27 @@ export function targetPitch(track: PitchTrack, corr: Float32Array): Float32Array
 
 /** Vrai si au moins une note est retouchée. */
 export const hasEdits = (edits: (NoteEdit | undefined)[]): boolean => edits.some(e => !isNeutral(e));
+
+/**
+ * Gamme devinée d'après la voix (tonalité du projet inconnue) : la gamme
+ * majeure ou mineure qui contient le plus de temps chanté, en favorisant les
+ * notes longues et la tonique sur les notes tenues.
+ */
+export function guessKey(notes: PitchNote[]): { root: number; scale: 'MINOR' | 'MAJOR' } | null {
+  if (notes.length < 3) return null;
+  const weight = new Array(12).fill(0);
+  for (const n of notes) weight[mod12(Math.round(n.center))] += Math.max(0.02, n.end - n.start);
+  let best: { root: number; scale: 'MINOR' | 'MAJOR' } | null = null, bestScore = -Infinity;
+  for (const scale of ['MINOR', 'MAJOR'] as const) {
+    for (let root = 0; root < 12; root++) {
+      const pcs = scalePitchClasses(root, scale);
+      let s = 0;
+      for (let pc = 0; pc < 12; pc++) s += pcs.has(pc) ? weight[pc] : -1.5 * weight[pc];
+      s += 0.25 * weight[root];
+      // À égalité (relatives majeure / mineure), le rap et le R&B penchent vers le mineur.
+      if (scale === 'MINOR') s += 1e-6;
+      if (s > bestScore) { bestScore = s; best = { root, scale }; }
+    }
+  }
+  return best;
+}

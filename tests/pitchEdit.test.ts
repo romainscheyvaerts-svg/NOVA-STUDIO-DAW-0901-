@@ -148,3 +148,12 @@ describe('rendu PSOLA', () => {
     expect(Math.abs(median(gaps) - P)).toBeLessThan(1.5);
   });
 });
+
+describe('gamme devinée d’après la voix', () => {
+  it('mélodie en la mineur', async () => {
+    const { guessKey } = await import('../utils/pitchCorrect');
+    const mk = (centers: number[]) => centers.map((c, i) => ({ index: i, i0: 0, i1: 1, start: i * 0.4, end: i * 0.4 + (c % 12 === 9 ? 0.6 : 0.3), center: c, spread: 0 }));
+    expect(guessKey(mk([57, 60, 64, 62, 60, 59, 57, 55, 57, 64, 65, 64, 57]))).toEqual({ root: 9, scale: 'MINOR' });
+    expect(guessKey(mk([60]))).toBeNull();
+  });
+});
