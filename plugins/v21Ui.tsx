@@ -89,17 +89,22 @@ export const V21Toggle: React.FC<{ spec: V21ParamSpec; value: number; onChange: 
   </div>
 );
 
-/** Préréglages : un clic applique, le préréglage actif est surligné. */
+/**
+ * Préréglages : un clic applique. Est surligné le dernier préréglage choisi
+ * tant que ses réglages n'ont pas bougé (certains préréglages ne règlent
+ * qu'une partie de l'effet : plusieurs pourraient « correspondre » à la fois).
+ */
 export const V21Presets: React.FC<{ presets: V21Preset[]; current: Record<string, any>; onApply: (p: V21Preset) => void; color?: string }> = ({ presets, current, onApply, color = 'bg-cyan-400' }) => {
-  const isActive = (pr: V21Preset) => Object.entries(pr.params).every(([k, v]) => typeof v === 'number' ? Math.abs((+current[k] || 0) - v) < 1e-6 : current[k] === v);
+  const matches = (pr: V21Preset) => Object.entries(pr.params).every(([k, v]) => typeof v === 'number' ? Math.abs((+current[k] || 0) - v) < 1e-6 : current[k] === v);
+  const [lastId, setLastId] = useState<string | null>(() => presets.find(matches)?.id || null);
   return (
     <div className="mb-4" data-nova-presets>
       <div className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1.5">Préréglages</div>
       <div className="flex flex-wrap gap-1.5">
         {presets.map(pr => {
-          const active = isActive(pr);
+          const active = lastId === pr.id && matches(pr);
           return (
-            <button key={pr.id} type="button" title={pr.hint} aria-pressed={active} onClick={() => onApply(pr)} data-nova-preset={pr.id}
+            <button key={pr.id} type="button" title={pr.hint} aria-pressed={active} onClick={() => { setLastId(pr.id); onApply(pr); }} data-nova-preset={pr.id}
               className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${active ? `${color} text-black border-transparent` : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'}`}>
               {pr.name}
             </button>
@@ -114,7 +119,10 @@ export const V21Presets: React.FC<{ presets: V21Preset[]; current: Record<string
 export const V21Shell: React.FC<{ type: string; title: string; accent: string; subtitle: string; node: any; gradient: string; children: React.ReactNode }> = ({ type, title, accent, subtitle, node, gradient, children }) => {
   const latencyMs = node?.latency ? node.latency * 1000 : 0;
   return (
-    <div data-nova-plugin={type} className={`w-[600px] max-w-full ${gradient} p-5 sm:p-6 text-white`}>
+    // Tablette / PC : hauteur plafonnée, le contenu défile (la barre du haut — fermer, marche / arrêt — reste visible).
+    // Téléphone : la fenêtre est déjà plein écran et défile d'un bloc. Largeur liée à l'écran (pas « max-w-full ») :
+    // dans FitToWidth (largeur au contenu + zoom), un max-w-full faisait boucler le calcul jusqu'à un zoom ≈ 0 (fenêtre vide).
+    <div data-nova-plugin={type} className={`w-[min(600px,calc(100vw-16px))] ${gradient} p-5 sm:p-6 text-white sm:max-h-[calc(100dvh-8rem)] sm:overflow-y-auto overscroll-contain`}>
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="min-w-0">
           <h2 className="text-lg font-black tracking-tight">{title} <span className={accent}>· NOVA</span></h2>

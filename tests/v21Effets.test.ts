@@ -6,6 +6,7 @@ import { V21_SPECS, V21_PRESETS, V21_DEFAULTS, sanitizeV21, V21Type } from '../e
 import { harmonizerToCore, voiceShiftToCore } from '../engine/v21Nodes';
 import { getRegisteredPlugin, registryBrowserItems, registryMenuItems, usesProjectKey } from '../engine/pluginRegistry';
 import { NOVA_FX_NAMES, pluginIcon } from '../utils/pluginLabel';
+import { automationParamLabel } from '../utils/automationLabels';
 
 const SR = 48000;
 
@@ -189,5 +190,11 @@ describe('Latences déclarées (PDC) et registre', () => {
     expect(harmonizerToCore({ ...V21_DEFAULTS.HARMONIZER(), dry: -60 }).dry).toBe(0);
     const v = voiceShiftToCore({ pitch: -12, formant: -4, link: 0, mix: 0.5, output: 0 });
     expect(v.voices[0].semis).toBe(-12); expect(v.dry).toBeCloseTo(0.5, 9); expect(v.voices[0].follow).toBe(false);
+  });
+  it('automation : les réglages V21 ont un nom lisible', () => {
+    expect(automationParamLabel('plugin::pl-1::stop')).toBe('Tape stop');
+    const tracks: any = [{ id: 't', plugins: [{ id: 'pl-1', type: 'TIMEFX', name: 'TIMEFX', isEnabled: true, params: {} }] }];
+    expect(automationParamLabel('plugin::pl-1::stopBeats', tracks)).toBe("Tape stop · Durée de l'arrêt");
+    expect(automationParamLabel('plugin::pl-9::threshold')).toBe('pl-9::threshold');
   });
 });

@@ -144,6 +144,7 @@ import { autoComp, SpanReader } from './utils/autoComp';
 import { editSelectionStore } from './utils/editSelection';
 import { useEditCommands } from './hooks/useEditCommands';
 import { getRegisteredPlugin, registryMenuItems, usesProjectKey } from './engine/pluginRegistry';
+import { pluginDisplayName } from './utils/pluginLabel';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -2374,8 +2375,9 @@ function Studio() {
     }));
 
     // Visual feedback for user
-    const pluginName = metadata?.name || type;
-    setAiNotification(`✅ Plugin "${pluginName}" ajouté avec succès`);
+    // Nom lisible (« Harmoniseur »), jamais le type brut (« HARMONIZER »).
+    const pluginName = metadata?.name || pluginDisplayName(newPlugin);
+    setAiNotification(`✅ Effet « ${pluginName} » ajouté`);
     setTimeout(() => setAiNotification(null), 2000);
 
     if (options?.openUI) {
