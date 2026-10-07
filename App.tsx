@@ -151,7 +151,8 @@ import AutoCompCard, { AutoCompProposal } from './components/AutoCompCard';
 import { autoComp, SpanReader } from './utils/autoComp';
 import { editSelectionStore } from './utils/editSelection';
 import { useEditCommands } from './hooks/useEditCommands';
-import { getRegisteredPlugin, registryMenuItems } from './engine/pluginRegistry';
+import { getRegisteredPlugin, registryMenuItems, usesProjectKey } from './engine/pluginRegistry';
+import { pluginDisplayName } from './utils/pluginLabel';
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -2374,7 +2375,7 @@ function Studio() {
     // L'AutoTune s'accorde d'office sur la tonalite du projet, deduite de
     // l'instrumental charge. Sans ca il demarrait en do chromatique.
     let reglages = metadata;
-    if (type === 'AUTOTUNE' && stateRef.current.projectKey !== undefined) {
+    if (usesProjectKey(type) && stateRef.current.projectKey !== undefined) {
       reglages = {
         ...(metadata || {}),
         rootKey: stateRef.current.projectKey,
@@ -2413,8 +2414,9 @@ function Studio() {
     }));
 
     // Visual feedback for user
-    const pluginName = metadata?.name || type;
-    setAiNotification(`✅ Plugin "${pluginName}" ajouté avec succès`);
+    // Nom lisible (« Harmoniseur »), jamais le type brut (« HARMONIZER »).
+    const pluginName = metadata?.name || pluginDisplayName(newPlugin);
+    setAiNotification(`✅ Effet « ${pluginName} » ajouté`);
     setTimeout(() => setAiNotification(null), 2000);
 
     if (options?.openUI) {
@@ -3344,7 +3346,7 @@ function Studio() {
       draft.projectKey = rootKey;
       draft.projectScale = scale;
       draft.tracks.forEach(t => t.plugins.forEach(p => {
-        if (p.type === 'AUTOTUNE') { p.params.rootKey = rootKey; p.params.scale = scale; }
+        if (usesProjectKey(p.type)) { p.params.rootKey = rootKey; p.params.scale = scale; }
       }));
     }));
   };

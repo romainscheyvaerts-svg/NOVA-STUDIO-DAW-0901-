@@ -11,6 +11,12 @@ import type React from 'react';
 import type { PluginInstance, PluginType } from '../types';
 import { LimiterNode, DEFAULT_LIMITER_PARAMS } from './LimiterNode';
 import { NovaLimiterUI } from '../plugins/LimiterPlugin';
+import { V21EffectNode } from './v21Nodes';
+import { V21_DEFAULTS, v21Automatable } from './v21Params';
+import { NovaHarmonizerUI } from '../plugins/HarmonizerPlugin';
+import { NovaVoiceShifterUI } from '../plugins/VoiceShifterPlugin';
+import { NovaTimeFxUI } from '../plugins/TimeFxPlugin';
+import { NovaDjFilterUI, NovaLofiUI } from '../plugins/FilterPlugin';
 
 export interface RegisteredPlugin {
   type: PluginType;
@@ -24,10 +30,14 @@ export interface RegisteredPlugin {
   /** Infobulle : à quoi ça sert, avec l'équivalent dans les autres DAW. */
   description: string;
   defaultParams: () => Record<string, any>;
-  /** Nœud audio : { input, output } + updateParams, latency (s), ready éventuels. */
-  create: (ctx: BaseAudioContext, plugin: PluginInstance) => { input: AudioNode; output: AudioNode; updateParams?: (p: any) => void; latency?: number; ready?: Promise<unknown> };
+  /** Nœud audio : { input, output } + updateParams, latency (s), ready éventuels. `bpm` : tempo du projet. */
+  create: (ctx: BaseAudioContext, plugin: PluginInstance, bpm?: number) => { input: AudioNode; output: AudioNode; updateParams?: (p: any) => void; latency?: number; ready?: Promise<unknown> };
   /** Fenêtre d'édition (reçoit le nœud, les réglages et le rappel de modification). */
   ui: React.ComponentType<{ node: any; initialParams: any; onParamsChange: (p: Record<string, any>) => void }>;
+  /** Réglages automatisables (éditeur d'automation). */
+  automatable?: { id: string; label: string; min: number; max: number; unit?: string }[];
+  /** Vrai : reçoit la tonalité du projet (`rootKey`, `scale`) comme l'Auto-Tune. */
+  usesProjectKey?: boolean;
 }
 
 export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
@@ -42,6 +52,68 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     create: (ctx, plugin) => new LimiterNode(ctx, plugin.params || {}),
     ui: NovaLimiterUI as any,
   },
+  // --- V21 : voix créatives et effets trap -------------------------------------
+  {
+    type: 'HARMONIZER',
+    name: 'Harmoniseur',
+    category: 'Voix créatives',
+    icon: 'fa-users',
+    color: '#e879f9',
+    description: '1 à 4 voix d’harmonie dans la gamme du projet (tierce, quinte, octave…), timbre naturel et humanisé (comme les harmonies du Vocal Transformer de Logic ou le Pitcher de FL Studio).',
+    defaultParams: V21_DEFAULTS.HARMONIZER,
+    create: (ctx, plugin, bpm) => new V21EffectNode(ctx, 'HARMONIZER', plugin.params || {}, bpm),
+    ui: NovaHarmonizerUI as any,
+    automatable: v21Automatable('HARMONIZER'),
+    usesProjectKey: true,
+  },
+  {
+    type: 'VOICESHIFT',
+    name: 'Voix grave / aiguë',
+    category: 'Voix créatives',
+    icon: 'fa-theater-masks',
+    color: '#a78bfa',
+    description: 'Hauteur et formant séparés : voix de démon, chipmunk, ou timbre seul (comme le Vocal Transformer de Logic ou Little AlterBoy).',
+    defaultParams: V21_DEFAULTS.VOICESHIFT,
+    create: (ctx, plugin, bpm) => new V21EffectNode(ctx, 'VOICESHIFT', plugin.params || {}, bpm),
+    ui: NovaVoiceShifterUI as any,
+    automatable: v21Automatable('VOICESHIFT'),
+  },
+  {
+    type: 'TIMEFX',
+    name: 'Tape stop & half-time',
+    category: 'Effets trap',
+    icon: 'fa-stopwatch',
+    color: '#fb923c',
+    description: 'Tape stop, half-time et stutter calés sur le tempo, déclenchables et automatisables (comme Gross Beat dans FL Studio ou le Beat Repeat de Live).',
+    defaultParams: V21_DEFAULTS.TIMEFX,
+    create: (ctx, plugin, bpm) => new V21EffectNode(ctx, 'TIMEFX', plugin.params || {}, bpm),
+    ui: NovaTimeFxUI as any,
+    automatable: v21Automatable('TIMEFX'),
+  },
+  {
+    type: 'DJFILTER',
+    name: 'Filtre DJ',
+    category: 'Effets trap',
+    icon: 'fa-filter',
+    color: '#38bdf8',
+    description: 'Un seul bouton : passe-bas à gauche, passe-haut à droite, résonance (comme le filtre d’une table DJ, l’Auto Filter de Live ou le DJ Filter de Logic).',
+    defaultParams: V21_DEFAULTS.DJFILTER,
+    create: (ctx, plugin, bpm) => new V21EffectNode(ctx, 'DJFILTER', plugin.params || {}, bpm),
+    ui: NovaDjFilterUI as any,
+    automatable: v21Automatable('DJFILTER'),
+  },
+  {
+    type: 'LOFI',
+    name: 'Lo-fi / téléphone',
+    category: 'Effets trap',
+    icon: 'fa-phone-alt',
+    color: '#a3e635',
+    description: 'Téléphone, radio, cassette, bitcrush : bande passante, grain léger, réduction de bits et souffle (comme le Bitcrusher de Logic, Redux de Live ou Lo-fi de FL Studio).',
+    defaultParams: V21_DEFAULTS.LOFI,
+    create: (ctx, plugin, bpm) => new V21EffectNode(ctx, 'LOFI', plugin.params || {}, bpm),
+    ui: NovaLofiUI as any,
+    automatable: v21Automatable('LOFI'),
+  },
 ];
 
 export const getRegisteredPlugin = (type: string): RegisteredPlugin | undefined => PLUGIN_REGISTRY.find(p => p.type === type);
@@ -51,6 +123,9 @@ export const registryBrowserItems = () => PLUGIN_REGISTRY.map(p => ({ id: p.type
 
 /** Entrées pour le menu « + » d'une piste (même forme qu'AVAILABLE_FX_MENU). */
 export const registryMenuItems = () => PLUGIN_REGISTRY.map(p => ({ id: p.type, name: p.name, icon: p.icon }));
+
+/** Vrai si l'effet suit la tonalité du projet (Auto-Tune, Harmoniseur). */
+export const usesProjectKey = (type: string) => type === 'AUTOTUNE' || !!getRegisteredPlugin(type)?.usesProjectKey;
 
 /** Vrai pour un limiteur à crête vraie (le limiteur de sécurité du master s'efface alors). */
 export const isTruePeakLimiter = (type: string) => type === 'LIMITER';
