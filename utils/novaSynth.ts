@@ -226,6 +226,29 @@ export function envValue(env: SynthEnv, t: number): number {
   return env.s + (1 - env.s) * Math.exp(-(t - a) / tau);
 }
 
+/**
+ * Niveau exact du gain d'une voix à l'instant t, tel que le moteur le programme
+ * (attaque linéaire, déclin et relâchement en setTargetAtTime). Sert à couper une
+ * voix sans saut : on repart de CETTE valeur au lieu de cancelAndHoldAtTime, qui
+ * renvoyait une valeur fausse quand le relâchement était déjà programmé (clic mesuré).
+ * legatoLvl : voix legato (fondu de STEAL_FADE vers ce niveau, puis déclin).
+ */
+export function ampEnvAt(env: SynthEnv, peak: number, start: number, t: number, legatoLvl: number | null = null, release = Infinity): number {
+  const tr = Math.min(t, release);
+  const dt = tr - start;
+  const tauD = Math.max(1e-3, env.d / 4);
+  const sus = peak * env.s;
+  let v: number;
+  if (dt <= 0) v = 0;
+  else if (legatoLvl !== null) v = dt < STEAL_FADE ? legatoLvl * dt / STEAL_FADE : sus + (legatoLvl - sus) * Math.exp(-(dt - STEAL_FADE) / tauD);
+  else {
+    const a = Math.max(MIN_ATTACK, env.a);
+    v = dt < a ? peak * dt / a : sus + (peak - sus) * Math.exp(-(dt - a) / tauD);
+  }
+  if (t > release) v *= Math.exp(-(t - release) / (Math.max(MIN_RELEASE, env.r) / 4));
+  return v;
+}
+
 /** Durée totale d'une voix relâchée à `r` (relâchement + queue). */
 export const releaseTail = (env: SynthEnv) => Math.max(MIN_RELEASE, env.r) * RELEASE_TAIL;
 

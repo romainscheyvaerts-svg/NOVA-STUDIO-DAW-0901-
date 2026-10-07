@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  normalizeSynth, defaultSynth, unisonVoices, velocityGain, cutoffFor, mixNorm, envValue, noteFreq,
+  normalizeSynth, defaultSynth, unisonVoices, ampEnvAt, STEAL_FADE, velocityGain, cutoffFor, mixNorm, envValue, noteFreq,
   glideSource, voicesToCut, voiceToRelease, nextMonoStart, stepIndex, toggleFavorite, settingsKey, VoiceSlot, MAX_VOICES,
 } from '../utils/novaSynth';
 import { SYNTH_PRESETS, PRESET_CATEGORIES, presetSettings, presetById, previewNotesFor, DEFAULT_PRESET_ID } from '../utils/novaSynthPresets';
@@ -77,6 +77,23 @@ describe('Synthé NOVA : calculs du son', () => {
     expect(envValue(e, 0.1)).toBeCloseTo(1);
     expect(envValue(e, 5)).toBeCloseTo(0.5);
     expect(noteFreq(69)).toBe(440);
+  });
+});
+
+describe("Synthé NOVA : niveau exact d'une voix (coupure sans clic)", () => {
+  const e = { a: 0.1, d: 0.4, s: 0.5, r: 0.4 };
+  it("suit l'attaque, le déclin et le relâchement", () => {
+    expect(ampEnvAt(e, 1, 1, 1)).toBe(0);
+    expect(ampEnvAt(e, 1, 1, 1.05)).toBeCloseTo(0.5);
+    expect(ampEnvAt(e, 1, 1, 1.1)).toBeCloseTo(1);
+    expect(ampEnvAt(e, 1, 1, 9)).toBeCloseTo(0.5);
+    // Relâchée à 2 s : décroissance exponentielle de constante r/4.
+    expect(ampEnvAt(e, 1, 1, 2.1, null, 2)).toBeCloseTo(0.5 * Math.exp(-0.1 / 0.1));
+  });
+  it('voix legato : fondu court vers le niveau repris, puis déclin', () => {
+    expect(ampEnvAt(e, 1, 0, STEAL_FADE / 2, 0.8)).toBeCloseTo(0.4);
+    expect(ampEnvAt(e, 1, 0, STEAL_FADE, 0.8)).toBeCloseTo(0.8);
+    expect(ampEnvAt(e, 1, 0, 10, 0.8)).toBeCloseTo(0.5);
   });
 });
 

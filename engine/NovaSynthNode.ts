@@ -16,7 +16,7 @@
  */
 import {
   NovaSynthSettings, VoiceSlot, normalizeSynth, noteFreq, unisonVoices, oscCents, velocityGain, cutoffFor,
-  mixNorm, envValue, glideSource, voicesToCut, voiceToRelease, nextMonoStart,
+  mixNorm, ampEnvAt, glideSource, voicesToCut, voiceToRelease, nextMonoStart,
   MIN_ATTACK, MIN_RELEASE, STEAL_FADE, RELEASE_TAIL,
 } from '../utils/novaSynth';
 
@@ -27,10 +27,14 @@ interface Voice extends VoiceSlot {
   vel: number;
   s: NovaSynthSettings;
   amp: GainNode;
+  /** Gain de relâchement / coupure, séparé de l'enveloppe : on n'annule jamais la rampe d'attaque. */
+  rel: GainNode;
   filters: BiquadFilterNode[];
   sources: AudioScheduledSourceNode[];
   nodes: AudioNode[];
   envCents: number;
+  peak: number;
+  legatoLvl: number | null;
 }
 
 const noiseCache = new WeakMap<BaseAudioContext, AudioBuffer>();
@@ -300,12 +304,16 @@ export class NovaSynthNode {
     let head: AudioNode = mix;
     for (const f of filters) { head.connect(f); head = f; }
     head.connect(amp);
-    let tail: AudioNode = amp;
-    nodes.push(mix, amp, ...filters);
+    const rel = ctx.createGain();
+    amp.connect(rel);
+    let tail: AudioNode = rel;
+    nodes.push(mix, amp, rel, ...filters);
 
     // --- Oscillateurs (+ unisson étalé en stéréo)
     const target = noteFreq(pitch);
     // Glissé : rampe linéaire en cents sur detune (= exponentielle en fréquence).
+    // (Mesuré : -38 dB d'écart entre lecture et export sur les notes glissées, dû aux
+    // calculs d'automatisation de Chrome ; essais par tampon audio : pire.)
     const glideCents = src ? (src.pitch - pitch) * 100 : 0;
     const glideEnd = this.onGrid(t + Math.max(0.001, s.glide));
     const oscs: OscillatorNode[] = [];
@@ -371,7 +379,7 @@ export class NovaSynthNode {
         trem.gain.value = 1 - s.lfo.amount / 2;
         lg.gain.value = s.lfo.amount / 2;
         lg.connect(trem.gain);
-        amp.connect(trem);
+        rel.connect(trem);
         tail = trem;
         nodes.push(trem);
       }
@@ -400,9 +408,11 @@ export class NovaSynthNode {
     const ae = s.ampEnv;
     const a = Math.max(MIN_ATTACK, ae.a);
     amp.gain.setValueAtTime(0, t);
+    let legatoLvl: number | null = null;
     if (legatoFrom) {
       // Fondu croisé court avec la note précédente, au niveau qu'elle avait atteint.
-      const lvl = peak * envValue(ae, t - legatoFrom.start);
+      const lvl = ampEnvAt(legatoFrom.s.ampEnv, legatoFrom.peak, legatoFrom.start, t, legatoFrom.legatoLvl, legatoFrom.release);
+      legatoLvl = lvl;
       amp.gain.linearRampToValueAtTime(lvl, t + STEAL_FADE);
       amp.gain.setTargetAtTime(peak * ae.s, t + STEAL_FADE, Math.max(1e-3, ae.d / 4));
     } else {
@@ -410,7 +420,7 @@ export class NovaSynthNode {
       amp.gain.setTargetAtTime(peak * ae.s, t + a, Math.max(1e-3, ae.d / 4));
     }
 
-    const v: Voice = { id: this.nextId++, pitch, start: t, release: Infinity, end: Infinity, vel, s, amp, filters, sources, nodes, envCents };
+    const v: Voice = { id: this.nextId++, pitch, start: t, release: Infinity, end: Infinity, vel, s, amp, rel, filters, sources, nodes, envCents, peak, legatoLvl };
     // Nettoyage quand la voix s'est tue (marche aussi à l'export, sans minuterie).
     if (sources[0]) sources[0].onended = () => this.dispose(v);
     else { this.dispose(v); return; }
@@ -428,10 +438,14 @@ export class NovaSynthNode {
     const v = voiceToRelease(this.voices, pitch, t);
     if (!v) return;
     v.release = t;
-    if (v.cutAt !== undefined && v.cutAt <= t) return;
+    // Voix déjà coupée (ou dont la coupure est programmée) : la coupure l'emporte.
+    if (v.cutAt !== undefined) return;
     const r = Math.max(MIN_RELEASE, v.s.ampEnv.r);
-    hold(v.amp.gain, t);
-    v.amp.gain.setTargetAtTime(0, t, r / 4);
+    // Le relâchement agit sur un gain à part (rel = 1 jusque-là) : l'attaque en
+    // cours continue sans saut, quel que soit l'ordre de programmation.
+    v.rel.gain.cancelScheduledValues(t);
+    v.rel.gain.setValueAtTime(1, t);
+    v.rel.gain.setTargetAtTime(0, t, r / 4);
     if (v.envCents !== 0) {
       const fr = Math.max(MIN_RELEASE, v.s.filterEnv.r);
       v.filters.forEach(f => { hold(f.detune, t); f.detune.setTargetAtTime(0, t, fr / 4); });
@@ -460,27 +474,46 @@ export class NovaSynthNode {
     if (v.end <= t) return;
     v.cutAt = t;
     const at = Math.max(t, v.start);
-    hold(v.amp.gain, at);
-    v.amp.gain.linearRampToValueAtTime(0, at + STEAL_FADE);
+    this.fadeRel(v, at, STEAL_FADE);
     v.end = at + STEAL_FADE;
     this.stopSources(v, v.end + 0.002);
+  }
+
+  /**
+   * Fondu à 0 sur le gain de relâchement, depuis sa valeur exacte à `at` (1, ou la
+   * courbe de relâchement déjà commencée). Pas de cancelAndHoldAtTime : il renvoyait
+   * une valeur fausse quand le relâchement était déjà programmé (clic mesuré).
+   */
+  private fadeRel(v: Voice, at: number, fade: number) {
+    const r = Math.max(MIN_RELEASE, v.s.ampEnv.r);
+    const lvl = at > v.release ? Math.exp(-(at - v.release) / (r / 4)) : 1;
+    v.rel.gain.cancelScheduledValues(at);
+    v.rel.gain.setValueAtTime(lvl, at);
+    v.rel.gain.linearRampToValueAtTime(0, at + fade);
   }
 
   private stopSources(v: Voice, at: number) {
     for (const src of v.sources) { try { src.stop(at); } catch { /* déjà arrêtée */ } }
   }
 
+  /**
+   * Voix tue : on libère ses nœuds, mais on GARDE sa fiche (instants, touche) tant
+   * que son « note off » n'est pas arrivé. Sinon, en lecture, le note off d'une note
+   * coupée relâchait la note suivante de la même touche (à l'export, l'ordre des
+   * appels est différent) : lecture et export divergeaient au hasard (mesuré).
+   */
   private dispose(v: Voice) {
     for (const n of v.nodes) { try { n.disconnect(); } catch { /* */ } }
-    const i = this.voices.indexOf(v);
-    if (i >= 0) this.voices.splice(i, 1);
+    v.nodes = [];
   }
 
-  /** Oublie les voix terminées depuis longtemps (lecture en direct). */
+  /** Oublie les voix finies depuis longtemps et déjà relâchées (garde la dernière jouée, pour le glissé). */
   private prune() {
-    const old = this.ctx.currentTime - 1;
     if (this.voices.length < 64) return;
-    this.voices = this.voices.filter(v => v.end > old);
+    const old = this.ctx.currentTime - 2;
+    let latest: Voice | null = null;
+    for (const v of this.voices) if (!latest || v.start > latest.start) latest = v;
+    this.voices = this.voices.filter(v => v.end > old || v.release === Infinity || v === latest);
   }
 
   /** Arrêt de la lecture : tout se tait en 30 ms, y compris les notes déjà programmées. */
@@ -498,8 +531,7 @@ export class NovaSynthNode {
         this.stopSources(v, v.start);
         continue;
       }
-      hold(v.amp.gain, at);
-      v.amp.gain.linearRampToValueAtTime(0, at + 0.03);
+      this.fadeRel(v, at, 0.03);
       v.cutAt = at;
       v.end = at + 0.03;
       this.stopSources(v, v.end + 0.002);

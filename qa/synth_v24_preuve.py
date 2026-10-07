@@ -17,6 +17,7 @@ from playwright.sync_api import sync_playwright
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 URL = ARGS[0] if ARGS else "http://localhost:3422/"
 ONLY_LEVELS = "--niveaux" in sys.argv
+ONLY_LIVE = "--lecture" in sys.argv
 OUT = Path(r"D:\1 WORK\CONTENU\nova-v24")
 OUT.mkdir(parents=True, exist_ok=True)
 EXE = r"C:\Users\lenno\AppData\Local\ms-playwright\chromium_headless_shell-1243\chrome-headless-shell-win64\chrome-headless-shell.exe"
@@ -140,15 +141,26 @@ async (ids) => {
     const rec = new AudioWorkletNode(ctx, 'v24-rec', { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 2, channelCountMode: 'explicit' });
     const chunks = []; rec.port.onmessage = e => chunks.push(e.data);
     dsp.output.connect(rec);
+    const calls = []; const oa = E.triggerTrackAttack, orl = E.triggerTrackRelease;
+    E.triggerTrackAttack = function (i, p, v, t) { calls.push(['on', p, t, ctx.currentTime]); return oa.call(this, i, p, v, t); };
+    E.triggerTrackRelease = function (i, p, t) { calls.push(['off', p, t, ctx.currentTime]); return orl.call(this, i, p, t); };
     E.startPlayback(0, tr);
     const f0 = Math.round(E.playbackStartTime * SRL);
     await new Promise(r => setTimeout(r, (DUR + 0.6) * 1000));
     E.stopAll?.(); dsp.output.disconnect(rec);
-    const n = Math.floor(DUR * SRL), live = [new Float32Array(n), new Float32Array(n)];
-    for (const c of chunks) for (let i = 0; i < c.l.length; i++) { const k = c.f - f0 + i; if (k >= 0 && k < n) { live[0][k] = c.l[i]; live[1][k] = c.r[i]; } }
-    let e = 0, sref = 0, worst = 0;
-    for (const ch of [0, 1]) { const x = rb.getChannelData(ch); for (let i = 0; i < n; i++) { const d = x[i] - live[ch][i]; e += d * d; sref += x[i] * x[i]; worst = Math.max(worst, Math.abs(d)); } }
-    out[id] = { ecart_dB: L.db(Math.sqrt(e / sref)), pire_ecart_echantillon_dBFS: L.db(worst), frequence: SRL, duree_s: DUR, chorus: s.fx.chorus.mix > 0, delay: s.fx.delay.mix > 0, mono: s.mono, glisse: s.glide };
+    E.triggerTrackAttack = oa; E.triggerTrackRelease = orl;
+    const t0 = E.playbackStartTime;
+    const late = calls.filter(c => c[2] - c[3] < 0.003).map(c => [c[0], c[1], Math.round((c[2] - t0) * 1000) / 1000, Math.round((c[3] - t0) * 1000) / 1000]);
+    const n = Math.floor(DUR * SRL), live = [new Float32Array(n), new Float32Array(n)], seen = new Uint8Array(n);
+    for (const c of chunks) for (let i = 0; i < c.l.length; i++) { const k = c.f - f0 + i; if (k >= 0 && k < n) { live[0][k] = c.l[i]; live[1][k] = c.r[i]; seen[k] = 1; } }
+    // Blocs jamais reçus par l'enregistreur (le navigateur headless en saute parfois) : exclus et comptés.
+    let missing = 0; for (let i = 0; i < n; i++) if (!seen[i]) missing++;
+    // Autour d'un bloc perdu, les blocs voisins ne sont pas fiables non plus : marge de 2 blocs.
+    const ok = Uint8Array.from(seen);
+    for (let i = 0; i < n; i++) if (!seen[i]) for (let k = Math.max(0, i - 256); k < Math.min(n, i + 256); k++) ok[k] = 0;
+    let e = 0, sref = 0, worst = 0, worstAt = 0;
+    for (const ch of [0, 1]) { const x = rb.getChannelData(ch); for (let i = 0; i < n; i++) { if (!ok[i]) continue; const d = x[i] - live[ch][i]; e += d * d; sref += x[i] * x[i]; if (Math.abs(d) > worst) { worst = Math.abs(d); worstAt = i / SRL; } } }
+    out[id] = { ecart_dB: L.db(Math.sqrt(e / sref)), pire_ecart_echantillon_dBFS: L.db(worst), pire_a_s: Math.round(worstAt * 1000) / 1000, echantillons_non_recus: missing, appels: calls.length, appels_en_retard: late, frequence: SRL, duree_s: DUR, chorus: s.fx.chorus.mix > 0, delay: s.fx.delay.mix > 0, mono: s.mono, glisse: s.glide };
   }
   return out;
 }
@@ -210,6 +222,10 @@ def main():
         if ONLY_LEVELS:
             lv = pg.evaluate(LEVELS_JS)
             print(json.dumps(lv, ensure_ascii=False))
+            b.close()
+            return
+        if ONLY_LIVE:
+            print(json.dumps(pg.evaluate(LIVE_JS, ["rhodes-soul", "nappe-chaude", "pluck-trap", "cloche-trap", "choeur-ah", "lead-trap-glisse", "basse-reese", "flute-trap", "arp-nuit"]), ensure_ascii=False))
             b.close()
             return
         five = ["rhodes-soul", "nappe-chaude", "pluck-trap", "cloche-trap", "choeur-ah"]
