@@ -123,7 +123,9 @@ export interface PreviewPayload {
  * (à libérer), ou null si rien n'a été posé.
  */
 export function applyPreviewOnEngineer(t: Track, p: PreviewPayload, now = Date.now()): { released: string[] } | null {
-  if (isTrackFrozen(t) && !t.livePreview) return null; // gel de l'ingé : prioritaire
+  // Gel fait par l'ingé (ses VST) : prioritaire. Un gel automatique (rendu fait au PC de
+  // l'artiste à la sauvegarde, frozenAuto) ou un aperçu précédent : remplacé.
+  if (isTrackFrozen(t) && !t.livePreview && !t.frozenAuto) return null;
   const released: string[] = [];
   if (t.livePreview && t.frozenClip?.bufferId && t.frozenClip.bufferId !== p.clip.bufferId) released.push(t.frozenClip.bufferId);
   const upTo = Math.min(Math.max(-1, Math.floor(p.upTo)), (t.plugins || []).length - 1);

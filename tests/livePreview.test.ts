@@ -86,6 +86,13 @@ describe('aperçu chez l\'ingé', () => {
     expect(t.frozenClip!.id).toBe('gel-inge');
   });
 
+  it("remplace le gel automatique venu de la session de l'artiste (rendu fait à sa sauvegarde)", () => {
+    const t = voice({ isFrozen: true, frozenAuto: true, frozenClip: makeClip({ id: 'gel-auto', bufferId: 'gel-auto' }) });
+    expect(applyPreviewOnEngineer(t, payload('pv1'))).toEqual({ released: [] });
+    expect(t.frozenClip!.id).toBe('pv1');
+    expect(t.frozenAuto).toBeUndefined();
+  });
+
   it('fin de la collaboration : l\'aperçu disparaît, la piste rejoue normalement', () => {
     const t = voice();
     applyPreviewOnEngineer(t, payload('pv1'));

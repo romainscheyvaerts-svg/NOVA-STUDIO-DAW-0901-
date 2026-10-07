@@ -3999,6 +3999,22 @@ function Studio() {
       if (t && hasArtistVst(t)) { previewWantedRef.current.add(trackId); previewSchedRef.current?.request(trackId); }
     }, 0);
   };
+  // Diagnostic en lecture seule (console, tests de bout en bout) : état de la collaboration.
+  useEffect(() => {
+    (window as any).__novaCollab = {
+      status: () => collabRef.current?.client.getStatus() ?? null,
+      role: () => collabRef.current?.role ?? null,
+      previews: () => previewTrackerRef.current.all(),
+      track: (idOrName: string) => {
+        const t = stateRef.current.tracks.find(x => x.id === idOrName || x.name === idOrName);
+        return t ? {
+          id: t.id, name: t.name, volume: t.volume, pan: t.pan, isMuted: t.isMuted, isFrozen: !!t.isFrozen,
+          plugins: (t.plugins || []).map(x => ({ id: x.id, type: x.type, name: x.name })), livePreview: t.livePreview || null,
+        } : null;
+      },
+    };
+    return () => { delete (window as any).__novaCollab; };
+  }, []);
   // Délais d'attente de l'aperçu (pont de l'artiste qui ne répond pas → message clair).
   useEffect(() => {
     if (!collab || collab.role !== 'engineer') return;
@@ -4066,7 +4082,12 @@ function Studio() {
     const { reqId, promise } = vstReqsRef.current.create();
     const trackId = String(body.trackId || '');
     const win = kind === 'vst_param' ? previewWinFor(trackId) : undefined;
-    await c.client.send(kind, { ...body, reqId, ...(win ? { win } : {}) });
+    try {
+      await c.client.send(kind, { ...body, reqId, ...(win ? { win } : {}) });
+    } catch {
+      vstReqsRef.current.resolve(reqId, null);
+      throw new Error("Pas de connexion : ta demande n'est pas partie chez l'artiste. Réessaie quand le réseau revient.");
+    }
     if (kind === 'vst_param') { previewTrackerRef.current.expect(trackId, win); syncPreviewStates(); }
     // Le canal en direct peut manquer la réponse : on relit le journal en attendant.
     const poll = window.setInterval(() => { void c.client.catchUp(); }, 2500);
