@@ -3,6 +3,7 @@ import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, M
 import { themeStore, useTheme } from './utils/themeStore';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
+import { LoudnessPanelHost } from './components/meters/LoudnessPanel';
 import MobileTransport from './components/MobileTransport';
 import AdminTemplateButton from './components/AdminTemplateButton';
 import ArrangementView from './components/ArrangementView';
@@ -6818,6 +6819,8 @@ function Studio() {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden [overflow:clip] relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
       {saveState.isSaving && <SaveOverlay progress={saveState.progress} message={saveState.message} />}
+      {/* Fenêtre Loudness du master (R11) : ouverte depuis le transport ou la console. */}
+      <LoudnessPanelHost />
 
       {/* TransportBar - Desktop, Tablet ET Mobile avec menu hamburger */}
       <div className="relative z-50">

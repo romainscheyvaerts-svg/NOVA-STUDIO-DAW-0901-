@@ -376,3 +376,6 @@ class MeterClock {
 }
 
 export const meterClock = new MeterClock();
+
+/** Code du worklet (banc d'essai du coût processeur, qa/r11_metres.py). */
+export const __workletCodeForTests = () => WORKLET_CODE;

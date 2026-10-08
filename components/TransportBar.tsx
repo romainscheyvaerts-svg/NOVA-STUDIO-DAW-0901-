@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, PropsWithChildren } from 'react';
 import { createPortal } from 'react-dom';
 import { ViewType, Theme, User } from '../types';
 import ProMasterMeter from './ProMasterMeter';
+import { LufsChip } from './meters/LoudnessPanel';
 import MasterVisualizer from './MasterVisualizer';
 import { midiManager } from '../services/MidiManager';
 import { playheadStore } from '../utils/playheadStore';
@@ -391,6 +392,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
       {/* CENTER: TRANSPORT */}
       <div className="flex flex-1 md:flex-none justify-center items-center space-x-2">
         <div className="hidden xl:block"><ProMasterMeter /></div>
+        {/* LUFS du master en direct (R11) : ouvre la fenêtre Loudness. */}
+        <div className="hidden lg:block"><LufsChip /></div>
         
         <div className="flex items-center space-x-2 md:space-x-3 px-3 md:px-4 py-1.5 rounded-2xl" style={{ backgroundColor: 'var(--bg-item)' }}>
           <button onClick={onStop} title="Stop (Échap)" aria-label="Stop" className="nova-hit w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>

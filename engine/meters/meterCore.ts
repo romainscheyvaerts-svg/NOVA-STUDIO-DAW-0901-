@@ -115,42 +115,62 @@ export function createMeterCore(sampleRate: number, options?: MeterCoreOptions):
   var SUB = Math.max(1, Math.round(0.1 * SR)); // sous-bloc de 100 ms
 
   // --- États ---
-  var hist = [new Float64Array(2 * TAPS), new Float64Array(2 * TAPS)];
-  var hpos = [0, 0];
+  // Fenêtre de travail par canal : TAPS échantillons d'historique puis le bloc courant.
+  var wbuf = [new Float64Array(TAPS + 128), new Float64Array(TAPS + 128)];
   // Filtre K : x1, x2, y1, y2 du plateau puis du passe-haut, par canal
   var kst = [new Float64Array(8), new Float64Array(8)];
   var kbuf = new Float64Array(128);
   var subAcc = 0, subN = 0;
   var gStep = 2, gCount = 0;
 
+  // Crête vraie récente (retombe d'environ 8 dB/s) : référence du portillon des pistes.
+  var carry = [0, 0];
   var n = 0, peak = [0, 0], tp = [0, 0], sum = [0, 0], lr = 0, kOut: number[] = [], gOut: number[] = [], stereo = false;
 
   function channel(ch: number, X: Float32Array, len: number) {
-    var h = hist[ch], p = hpos[ch];
-    var pk = peak[ch], tpm = tp[ch], s = sum[ch];
-    var c = COEF, T = TAPS, H = HALF, gate = GATE;
+    var T = TAPS, H = HALF, c = COEF, gate = GATE;
+    var w = wbuf[ch];
+    if (w.length < T + len) { var nw = new Float64Array(T + len); nw.set(w.subarray(0, T)); w = wbuf[ch] = nw; }
+    var pk = peak[ch], s = sum[ch];
     for (var i = 0; i < len; i++) {
       var x = X[i];
+      w[T + i] = x;
       var ax = x < 0 ? -x : x;
       if (ax > pk) pk = ax;
       s += x * x;
-      h[p] = x; h[p + T] = x;
-      p++; if (p === T) p = 0;
-      // Fenêtre h[p .. p+T-1] (la plus ancienne en p) ; intervalle entre H-1 et H.
-      var a = h[p + H - 1], b = h[p + H];
-      var aa = a < 0 ? -a : a, ab = b < 0 ? -b : b;
-      var m = aa > ab ? aa : ab;
-      if (m > tpm) tpm = m;
-      if (m > 1e-7 && (!gate || m + m >= tpm)) {
+    }
+    var tpm = tp[ch] > pk ? tp[ch] : pk;
+    var ref = gate && carry[ch] > tpm ? carry[ch] : tpm;
+    // Intervalles nouveaux : entre w[q] et w[q+1], q de T-H à T+len-1-H (H-1 échantillons
+    // avant, H après). Sur les pistes, on saute le bloc entier s'il ne peut pas battre la
+    // crête vraie déjà trouvée (> 6 dB en dessous), puis on n'interpole qu'autour des
+    // maxima locaux de |x| (là où se trouve toute crête inter-échantillons).
+    if (!gate || pk + pk >= ref) {
+      var qEnd = T + len - 1 - H;
+      for (var q = T - H; q <= qEnd; q++) {
+        var a = w[q], b = w[q + 1];
+        var aa = a < 0 ? -a : a, ab = b < 0 ? -b : b;
+        var m = aa > ab ? aa : ab;
+        if (m < 1e-7) continue;
+        if (gate) {
+          if (m + m < (tpm > ref ? tpm : ref)) continue;
+          var a0 = w[q - 1], b1 = w[q + 2];
+          var aa0 = a0 < 0 ? -a0 : a0, ab1 = b1 < 0 ? -b1 : b1;
+          // la paire contient un maximum local de |x| ?
+          if (!((aa >= aa0 && aa >= ab) || (ab >= aa && ab >= ab1))) continue;
+        }
+        var base = q - H + 1;
         for (var ph = 0; ph < 3; ph++) {
           var o = ph * T, y = 0;
-          for (var j = 0; j < T; j++) y += h[p + j] * c[o + j];
+          for (var j = 0; j < T; j++) y += w[base + j] * c[o + j];
           if (y < 0) y = -y;
           if (y > tpm) tpm = y;
         }
       }
     }
-    hpos[ch] = p; peak[ch] = pk; tp[ch] = tpm; sum[ch] = s;
+    // Historique : les T derniers échantillons passent en tête de la fenêtre.
+    w.copyWithin(0, len, len + T);
+    peak[ch] = pk; tp[ch] = tpm; sum[ch] = s;
   }
 
   function kweight(ch: number, X: Float32Array, len: number, add: boolean) {
@@ -183,7 +203,6 @@ export function createMeterCore(sampleRate: number, options?: MeterCoreOptions):
     } else {
       // Mono : la droite est la gauche (pas de calcul en double).
       peak[1] = peak[0]; tp[1] = tp[0]; sum[1] = sum[0]; lr = sum[0];
-      hpos[1] = hpos[0];
     }
     if (LOUD) {
       if (kbuf.length < len) kbuf = new Float64Array(len);
@@ -204,6 +223,7 @@ export function createMeterCore(sampleRate: number, options?: MeterCoreOptions):
   }
 
   function take(): MeterTake {
+    for (var c = 0; c < 2; c++) { var v = tp[c] > peak[c] ? tp[c] : peak[c]; carry[c] = carry[c] * 0.97 > v ? carry[c] * 0.97 : v; }
     var t: MeterTake = {
       n: n, peakL: peak[0], peakR: peak[1],
       tpL: Math.max(tp[0], peak[0]), tpR: Math.max(tp[1], peak[1]),
@@ -214,7 +234,7 @@ export function createMeterCore(sampleRate: number, options?: MeterCoreOptions):
   }
 
   function reset() {
-    hist[0].fill(0); hist[1].fill(0); hpos = [0, 0];
+    wbuf[0].fill(0); wbuf[1].fill(0); carry = [0, 0];
     kst[0].fill(0); kst[1].fill(0); subAcc = 0; subN = 0;
     take();
   }
