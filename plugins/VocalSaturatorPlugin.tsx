@@ -11,6 +11,7 @@ const SAT_MODES: Record<string, { label: string; help: string }> = {
   SOFT_CLIP: { label: 'Écrêtage doux', help: 'Écrêtage doux (soft clip) : arrondit les crêtes, la voix paraît plus forte sans claquer.' },
 };
 import { loadWorkletModule, setParamSmooth } from './vocalDspUtils';
+import { retireWorkletNode } from '../engine/workletGuard';
 
 /**
  * MODULE FX_03 : VOCAL SATURATOR (ANALOG COLORATION v2.0)
@@ -125,6 +126,8 @@ export class VocalSaturatorNode {
   // donc sans latence.
   private shaper: WaveShaperNode;
   private adaa: AudioWorkletNode | null = null;
+  /** Saturation retirée : un worklet encore en chargement n'est pas créé (sinon il restait vivant). */
+  private disposed = false;
   private curve: Float32Array = new Float32Array([-1, 1]);
   private autoGain: GainNode;
   private dcBlock: BiquadFilterNode;
@@ -217,6 +220,7 @@ export class VocalSaturatorNode {
   private async initWorklet() {
     try {
       await loadWorkletModule(this.ctx, 'adaa-shaper', ADAA_WORKLET_CODE);
+      if (this.disposed) return;
       const node = new AudioWorkletNode(this.ctx, 'adaa-shaper-processor', {
         numberOfInputs: 1,
         numberOfOutputs: 1,
@@ -347,9 +351,10 @@ export class VocalSaturatorNode {
   public getParams() { return { ...this.params }; }
 
   public dispose() {
+    this.disposed = true;
     try { this.input.disconnect(); } catch (e) {}
     if (this.adaa) {
-      try { this.adaa.disconnect(); } catch (e) {}
+      retireWorkletNode(this.adaa);
       this.adaa = null;
     }
   }

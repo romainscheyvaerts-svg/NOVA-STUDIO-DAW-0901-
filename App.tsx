@@ -977,6 +977,12 @@ function Studio() {
     const previous = engineTracksRef.current;
     const full = !previous || routing !== engineRoutingRef.current;
     played.excluded.forEach(id => audioEngine.disposeTrack(id));
+    // Pistes qui n'existent plus (autre projet ouvert, session reprise) : leur chaîne audio
+    // est libérée. Avant, les pistes du projet précédent restaient dans le moteur (fuite).
+    if (full) {
+      const keep = new Set(played.tracks.map(t => t.id));
+      audioEngine.trackIds().forEach(id => { if (!keep.has(id) && !played.excluded.has(id)) audioEngine.disposeTrack(id); });
+    }
     played.tracks.forEach(t => {
       if (!full && atomic.get(t.id) === t) return; // volume / pan déjà réglés directement
       if (full || previous!.get(t.id) !== t) audioEngine.updateTrack(t, played.tracks);

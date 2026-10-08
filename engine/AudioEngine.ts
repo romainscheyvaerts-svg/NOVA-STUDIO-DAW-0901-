@@ -417,6 +417,11 @@ export class AudioEngine {
     return audioBufferRegistry.get(clipId);
   }
 
+  /** Pistes qui ont une chaîne audio dans le moteur. */
+  public trackIds(): string[] {
+    return [...this.tracksDSP.keys()];
+  }
+
   /** Caches du moteur dont le son d'origine a été libéré (clips inversés). */
   public pruneCaches() {
     this.reversedBufferCache.forEach((_, key) => { if (!audioBufferRegistry.has(key)) this.reversedBufferCache.delete(key); });

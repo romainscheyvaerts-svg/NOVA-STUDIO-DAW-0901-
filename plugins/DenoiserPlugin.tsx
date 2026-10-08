@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { termHelp } from '../utils/pluginUi';
+import { retireWorkletNode } from '../engine/workletGuard';
 
 /**
  * DENOISER PRO - Professional Noise Gate/Expander
@@ -379,7 +380,8 @@ export class DenoiserNode {
     this.disposed = true;
     try { this.input.disconnect(); } catch (e) {}
     if (this.worklet) {
-      try { this.worklet.port.onmessage = null; this.worklet.disconnect(); } catch (e) {}
+      // Mis à la retraite : process() renverra false (sinon il restait calculé jusqu'à la fermeture du contexte).
+      retireWorkletNode(this.worklet);
       this.worklet = null;
     }
   }

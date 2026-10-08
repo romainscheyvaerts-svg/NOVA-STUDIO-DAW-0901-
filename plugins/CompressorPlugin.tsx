@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginParameter } from '../types';
 import { makeCurve, loadWorkletModule } from './vocalDspUtils';
+import { retireWorkletNode } from '../engine/workletGuard';
 import { gainDbFr, numFr, termHelp } from '../utils/pluginUi';
 
 /** Préréglages affichés en français (les clés restent celles des projets). */
@@ -187,6 +188,8 @@ export class CompressorNode {
   // Etage de compression : AudioWorklet (sans latence). Si le worklet ne peut
   // pas se charger, repli sur DynamicsCompressorNode (ancien comportement).
   private worklet: AudioWorkletNode | null = null;
+  /** Compresseur retiré : un worklet encore en chargement n'est pas créé (sinon il restait vivant). */
+  private disposed = false;
   private compressor: DynamicsCompressorNode | null = null;
   private compIn: GainNode;
   private makeupGainNode: GainNode;
@@ -297,6 +300,7 @@ export class CompressorNode {
   private async initWorklet() {
     try {
       await loadWorkletModule(this.ctx, 'vocal-compressor', COMP_WORKLET_CODE);
+      if (this.disposed) return;
       this.worklet = new AudioWorkletNode(this.ctx, 'vocal-compressor-processor', {
         numberOfInputs: 1,
         numberOfOutputs: 1,
@@ -506,9 +510,10 @@ export class CompressorNode {
   public getParams() { return { ...this.params }; }
 
   public dispose() {
+    this.disposed = true;
     try { this.input.disconnect(); } catch (e) {}
     if (this.worklet) {
-      try { this.worklet.port.onmessage = null; this.worklet.disconnect(); } catch (e) {}
+      retireWorkletNode(this.worklet);
       this.worklet = null;
     }
   }
