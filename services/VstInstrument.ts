@@ -3,7 +3,8 @@ import { audioEngine } from '../engine/AudioEngine';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { freezeSignature } from '../utils/freeze';
 import { instrumentStore } from '../utils/instrumentStore';
-import { novaBridge, BridgePlugin, InstrumentNote } from './NovaBridge';
+import { novaBridge, BridgePlugin, InstrumentNote, InstrumentController } from './NovaBridge';
+import { playableNotes, ccNumber, PB, AT } from '../utils/midiCc';
 
 /**
  * Instruments VST3 du PC sur les pistes MIDI (mode instru).
@@ -54,7 +55,8 @@ export function instrumentNotes(t: Track): { notes: InstrumentNote[]; clipIds: s
   for (const c of clips) {
     if (c.isMuted) continue;
     const clipEnd = c.start + c.duration;
-    for (const n of c.notes || []) {
+    // Notes muettes exclues, pédale de sustain appliquée (R16).
+    for (const n of playableNotes(c)) {
       if (!(n.start >= 0) || n.start >= c.duration || !(n.duration > 0)) continue;
       const start = c.start + n.start;
       const stop = Math.min(clipEnd, start + n.duration);
@@ -67,12 +69,35 @@ export function instrumentNotes(t: Track): { notes: InstrumentNote[]; clipIds: s
   return { notes, clipIds: clips.map(c => c.id), end };
 }
 
+/**
+ * Contrôleurs MIDI (R16) envoyés au VST avec les notes : pitch bend, CC
+ * (modulation, sustain, expression…) et aftertouch, en temps absolu.
+ */
+export function instrumentControllers(t: Track): InstrumentController[] {
+  const out: InstrumentController[] = [];
+  for (const c of midiClipsOf(t)) {
+    if (c.isMuted || !c.cc) continue;
+    for (const [key, pts] of Object.entries(c.cc)) {
+      for (const p of pts || []) {
+        if (!(p.t >= 0) || p.t > c.duration) continue;
+        const time = c.start + p.t;
+        if (key === PB) { const v = Math.max(0, Math.min(16383, Math.round(p.v) + 8192)); out.push({ time, status: 0xe0, data1: v & 0x7f, data2: v >> 7 }); continue; }
+        if (key === AT) { out.push({ time, status: 0xd0, data1: Math.max(0, Math.min(127, Math.round(p.v))), data2: 0 }); continue; }
+        const n = ccNumber(key);
+        if (n !== null) out.push({ time, status: 0xb0, data1: n, data2: Math.max(0, Math.min(127, Math.round(p.v))) });
+      }
+    }
+  }
+  return out.sort((a, b) => a.time - b.time);
+}
+
 /** Empreinte de ce qui s'entend : notes, tempo, instrument et son réglé. */
 export function instrumentRenderSig(t: Track, bpm: number): string {
   const inst = t.vstInstrument;
   if (!inst) return '';
   const { notes } = instrumentNotes(t);
-  const n = notes.map(x => `${x.pitch},${x.start.toFixed(4)},${x.duration.toFixed(4)},${x.velocity.toFixed(3)}`).join(';');
+  const n = notes.map(x => `${x.pitch},${x.start.toFixed(4)},${x.duration.toFixed(4)},${x.velocity.toFixed(3)}`).join(';')
+    + instrumentControllers(t).map(x => `|${x.status},${x.data1},${x.data2},${x.time.toFixed(4)}`).join('');
   return fnv([inst.path, inst.pluginName || '', inst.stateB64 ? stateHash(inst.stateB64) : '', Math.round(bpm * 100), n].join('|'));
 }
 
@@ -251,7 +276,7 @@ export async function renderInstrumentTrack(t: Track, bpm: number): Promise<Inst
   }
   const out = await novaBridge.renderInstrument({
     slotId, path: inst.path, pluginName: inst.pluginName, stateB64: inst.stateB64,
-    sampleRate: sr, notes, lengthSeconds: end, tailSeconds: INSTRUMENT_TAIL_SECONDS,
+    sampleRate: sr, notes, controllers: instrumentControllers(t), lengthSeconds: end, tailSeconds: INSTRUMENT_TAIL_SECONDS,
   });
   const length = out[0]?.length || 0;
   if (!length) throw new Error('Rendu vide');

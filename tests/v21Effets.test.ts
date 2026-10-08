@@ -195,6 +195,7 @@ describe('Latences déclarées (PDC) et registre', () => {
     expect(automationParamLabel('plugin::pl-1::stop')).toBe('Tape stop');
     const tracks: any = [{ id: 't', plugins: [{ id: 'pl-1', type: 'TIMEFX', name: 'TIMEFX', isEnabled: true, params: {} }] }];
     expect(automationParamLabel('plugin::pl-1::stopBeats', tracks)).toBe("Tape stop · Durée de l'arrêt");
-    expect(automationParamLabel('plugin::pl-9::threshold')).toBe('pl-9::threshold');
+    // (« threshold » est désormais un réglage du Gate V21 : on teste une clé inconnue de tous les effets.)
+    expect(automationParamLabel('plugin::pl-9::zzzInconnu')).toBe('pl-9::zzzInconnu');
   });
 });

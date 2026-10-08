@@ -53,16 +53,16 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
   }, [tracks, zoomH]);
 
   // Handle adding a new lane
-  const addAutomationLane = (track: Track, paramId: string, min: number = 0, max: number = 1) => {
+  const addAutomationLane = (track: Track, paramId: string, min: number = 0, max: number = 1, value?: number) => {
       // Check if already exists
       if (track.automationLanes.some(l => l.parameterName === paramId)) return;
 
-      const initialVal = paramId === 'volume' ? track.volume : paramId === 'preVolume' ? 1 : (paramId === 'pan' ? track.pan : 0.5);
+      const initialVal = paramId === 'volume' ? track.volume : paramId === 'preVolume' ? 1 : paramId === 'pan' ? track.pan : paramId === 'mute' ? (track.isMuted ? 1 : 0) : paramId === 'trim' ? Math.pow(10, (track.inputTrimDb || 0) / 20) : paramId === 'width' ? (track.stereoWidth ?? 1) : (typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : min + (max - min) / 2);
 
       const newLane: AutomationLane = {
           id: `auto-${Date.now()}`,
           parameterName: paramId,
-          points: [{ id: 'init', time: 0, value: initialVal }],
+          points: [{ id: 'init', time: 0, value: initialVal, ...(paramId === 'mute' ? { curveType: 'HOLD' as const } : {}) }],
           color: track.color,
           isExpanded: true,
           min,
@@ -75,11 +75,16 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
 
   // Get available parameters for a track (Native + Plugins)
   const getAvailableParameters = (track: Track) => {
-      const params = [
+      const params: { id: string; name: string; min: number; max: number; value?: number }[] = [
           { id: 'volume', name: 'Volume', min: 0, max: 1.5 },
           // Avant les effets : un fondu attaque le compresseur et la reverb (piste gelée : rejoué au dégel).
           { id: 'preVolume', name: 'Volume avant effets', min: 0, max: 1.5 },
-          { id: 'pan', name: 'Panoramique', min: -1, max: 1 }
+          { id: 'pan', name: 'Panoramique', min: -1, max: 1 },
+          // Mute automatisé (R8, Pro Tools « mute ») : 0 = son, 1 = muet, en paliers.
+          { id: 'mute', name: 'Muet', min: 0, max: 1 },
+          // Tête de tranche (R11) : trim d'entrée (gain, jusqu'à +12 dB) et largeur stéréo (0 = mono, 2 = très large).
+          { id: 'trim', name: "Trim d'entrée", min: 0, max: 4 },
+          { id: 'width', name: 'Largeur stéréo', min: 0, max: 2 }
       ];
       
       // Sends
@@ -95,7 +100,8 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
                   id: `plugin::${pp.pluginId}::${p.id}`, 
                   name: `${pp.pluginName}: ${p.name}`, 
                   min: p.min, 
-                  max: p.max 
+                  max: p.max,
+                  value: typeof p.value === 'number' ? p.value : undefined,
               });
           });
       });
@@ -214,7 +220,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
                                         {getAvailableParameters(track).map(p => (
                                             <button 
                                                 key={p.id}
-                                                onClick={() => addAutomationLane(track, p.id, p.min, p.max)}
+                                                onClick={() => addAutomationLane(track, p.id, p.min, p.max, p.value)}
                                                 className="w-full text-left px-3 py-2 text-[9px] hover:bg-cyan-500/20 border-b last:border-0 truncate"
                                                 style={{ color: 'var(--text-primary)', borderColor: 'var(--border-dim)' }}
                                             >

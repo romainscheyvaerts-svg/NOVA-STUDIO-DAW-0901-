@@ -151,3 +151,38 @@ describe('De-esser NOVA (cœur engine/deesserCore.ts)', () => {
     expect(deesserMaxRangeDb(0.6)).toBeCloseTo(12.4, 5);
   });
 });
+
+describe('De-esser NOVA : écoute externe (side-chain, R7)', () => {
+  function runKey(p: DeesserCoreParams, inL: Float32Array, key: Float32Array | null) {
+    const c = createDeesserCore(SR);
+    c.setParams(p);
+    const n = inL.length;
+    const outL = new Float32Array(n), outR = new Float32Array(n);
+    let grMax = 0;
+    for (let i = 0; i < n; i += 128) {
+      const m = Math.min(128, n - i);
+      const k = key ? key.subarray(i, i + m) : null;
+      c.process(inL.subarray(i, i + m), null, outL.subarray(i, i + m), outR.subarray(i, i + m), m, k, k);
+      grMax = Math.max(grMax, c.takeMeters().grDb);
+    }
+    return { outL, grMax };
+  }
+  const n = SR;
+  const sib = add(bodyNoise(-20, n), sine(8000, -10, n));
+
+  it('la clé seule décide : clé muette = aucune réduction, clé sifflante = la bande de la piste baisse', () => {
+    expect(run({ ...DEESSER_DEFAULTS } as any, sib).grMax, 'sans clé, les « s » de la piste déclenchent').toBeGreaterThan(3);
+    expect(runKey({ ...DEESSER_DEFAULTS } as any, sib, new Float32Array(n)).grMax).toBeLessThan(0.05);
+    const quiet = bodyNoise(-20, n);
+    const keyed = runKey({ ...DEESSER_DEFAULTS } as any, add(quiet, sine(8000, -40, n)), sib);
+    expect(keyed.grMax).toBeGreaterThan(3);
+    // le son traité reste la piste : son corps (sous la bande) est intact
+    expect(Math.abs(db(ampAt(keyed.outL, 300) / Math.max(1e-9, ampAt(quiet, 300))))).toBeLessThan(0.3);
+  });
+
+  it('sans clé, le traitement est identique au dernier bit près', () => {
+    for (const p of [{ ...DEESSER_DEFAULTS }, { ...DEESSER_DEFAULTS, detection: 'ABSOLUTE', threshold: -30 }]) {
+      expect(runKey(p as any, sib, null).outL).toEqual(run(p as any, sib).outL);
+    }
+  });
+});

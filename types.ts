@@ -100,7 +100,7 @@ export interface PendingUpload {
 
 export type AuthStage = 'LOGIN' | 'REGISTER' | 'VERIFY_EMAIL' | 'FORGOT_PASSWORD';
 
-export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX' | 'OPTO_VINTAGE' | 'FET76' | 'LEVELER2A' | 'VOXSTRIP' | 'MASTERTRANSIENT' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
+export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX' | 'GATE' | 'OPTO_VINTAGE' | 'FET76' | 'LEVELER2A' | 'VOXSTRIP' | 'MASTERTRANSIENT' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
 
 export interface PluginMetadata {
   id: string;
@@ -132,6 +132,17 @@ export interface PluginInstance {
    * Absent : actif (anciens projets). Indépendant du bypass. Voir utils/trackStructure.
    */
   isInactive?: boolean;
+  /**
+   * Side-chain (R7, Pro Tools « Key Input ») : la détection du Compresseur, du
+   * Gate, du Gate rythmique ou du De-esser écoute une autre piste (son id) ou
+   * un bus nommé (« bus:<id du bus> ») au lieu du son de sa piste. Le filtre et
+   * l'écoute de la clé sont dans params (keyHpf, keyLpf, keyListen). Voir engine/sidechain.ts.
+   */
+  sidechainSourceId?: string;
+  /** Nom de la source quand elle a été choisie (retrouver la clé dans un preset de chaîne / un modèle). */
+  sidechainSourceName?: string;
+  /** Prise de la clé : « pre » (défaut) = après les effets de la source, avant son fader et son mute ; « post » = après le fader. */
+  sidechainTap?: 'pre' | 'post';
 }
 
 export interface TrackSend {
@@ -184,6 +195,11 @@ export interface MidiNote {
    * qu'elle n'a pas changé de pad.
    */
   gm?: number;
+  /**
+   * Note muette (R16, Pro Tools : Mute Notes, FL : outil Muet) : gardée dans le
+   * clip, affichée en gris, jamais jouée ni exportée.
+   */
+  muted?: boolean;
 }
 
 /** Groove (V25, utils/groove) : décalage et vélocité par case de grille, comme le Groove Pool de Live. */
@@ -258,6 +274,20 @@ export interface TrackGroup {
   linkedMute: boolean;
   linkedSolo: boolean;
   linkedPan: boolean;
+  // ─── R12 · Groupes Pro Tools complets (utils/editGroups) ─────────────────────
+  /**
+   * Édition, Mix ou les deux (Pro Tools : Edit / Mix / Edit and Mix). Absent :
+   * « mix » (les groupes d'avant R12 ne liaient que la console).
+   */
+  kind?: 'edit' | 'mix' | 'both';
+  /** Groupe actif (surligné dans la liste des groupes). Absent : actif. */
+  isActive?: boolean;
+  /** Envois liés (niveau relatif, muet). */
+  linkedSends?: boolean;
+  /** Mode d'automation lié (Read, Touch, Latch…). */
+  linkedAutomation?: boolean;
+  /** Membres déduits (modèle relevé sans la fenêtre des groupes) : à vérifier. */
+  deduced?: boolean;
 }
 
 export interface Clip {
@@ -277,6 +307,12 @@ export interface Clip {
   buffer?: AudioBuffer;
   bufferId?: string; 
   notes?: MidiNote[]; 
+  /**
+   * Contrôleurs MIDI (R16, utils/midiCc) : pitch bend (« pb »), aftertouch
+   * (« at ») et CC (« cc1 », « cc64 »…), points { t (s depuis le début du
+   * clip), v (valeur MIDI brute) }. Absent : aucun contrôleur.
+   */
+  cc?: Record<string, { t: number; v: number }[]>;
   isMuted?: boolean;
   gain?: number;
   isReversed?: boolean; 
@@ -680,6 +716,14 @@ export interface Track {
   isFrozen: boolean;
   volume: number;
   pan: number;
+  /** Tête de tranche (R11), avant les inserts : trim d'entrée en dB (−24 à +24, 0 par défaut). */
+  inputTrimDb?: number;
+  /** Inversion de polarité Ø des deux canaux. */
+  phaseInvert?: boolean;
+  /** Somme mono (prime sur la largeur). */
+  monoSum?: boolean;
+  /** Largeur stéréo : 0 = mono, 1 = inchangée (défaut), 2 = très large. */
+  stereoWidth?: number;
   inputDeviceId?: string; 
   outputTrackId: string;  
   instrumentId?: string | number; 
@@ -778,6 +822,12 @@ export interface Track {
    */
   vstInstrument?: VstInstrument;
   groupId?: string;            // NEW: Track group reference
+  /**
+   * R12 : tous les groupes de la piste quand elle en a plusieurs (Pro Tools :
+   * une piste peut être dans plusieurs groupes). Dérivé de TrackGroup.trackIds
+   * (utils/editGroups.syncGroupFields) ; `groupId` reste le premier.
+   */
+  groupIds?: string[];
   /**
    * Mode d'automation façon Pro Tools (voir utils/automationWrite). Absent :
    * Read (l'automation est rejouée), comme avant l'ajout des modes.
@@ -976,6 +1026,11 @@ export interface DAWState {
   loopEnd: number;
   tracks: Track[];
   trackGroups: TrackGroup[];      // NEW
+  /**
+   * R12 : réglages globaux des groupes (Pro Tools : « Suspendre tous les
+   * groupes », groupe <TOUT>). Absent : rien de suspendu, <TOUT> inactif.
+   */
+  groupSettings?: import('./utils/editGroups').GroupSettings;
   markers: Marker[];              // NEW
   selectedTrackId: string | null;
   currentView: ViewType;

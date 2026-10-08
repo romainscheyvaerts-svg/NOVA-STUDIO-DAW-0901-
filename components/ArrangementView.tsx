@@ -10,6 +10,8 @@ import { midiClipMenuItems, midiTrackMenuItems } from './MidiFileMenu';
 import { midiBus, isMidiFile } from '../utils/midiBus';
 import TimelineGridMenu from './TimelineGridMenu'; 
 import { ChordLaneToggleButton, ChordLaneView } from './ChordLane';
+import LiveMidiRecordingClip from './LiveMidiRecordingClip';
+import { isMidiRecordTrack } from '../utils/midiRecord';
 import LiveRecordingClip from './LiveRecordingClip'; 
 import AutomationLaneComponent from './AutomationLane';
 import { drawExpandedLanes } from '../utils/automationDraw';
@@ -51,6 +53,7 @@ import { shownTrackIds } from '../utils/trackStructure';
 import { structureMenuItems } from './TrackStructure';
 import { ClipGainToolbar, ClipToolsHost, clipGainMenuItems, useClipGainEdit } from './ClipGainTools';
 import { envelopeGainAt } from '../utils/clipGain';
+import { editGroupsStore, invertFromEvent, mateFade, mateGain, MateSnap, mateTrimEnd, mateTrimStart, snapMates } from '../utils/editGroups';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -96,6 +99,8 @@ interface ArrangementViewProps {
   onCreatePattern?: (trackId: string, time: number) => void;
   /** Decale d'un meme delta un ensemble de clips (deplacement groupe). */
   onMoveClipsBy?: (items: {trackId:string, clipId:string, start:number}[], delta: number) => void;
+  /** Fin d'un déplacement de clips (R8) : l'automation suit les clips (préférence). Positions d'AVANT le geste. */
+  onClipsMoved?: (moves: { clipId: string; fromTrackId: string; fromStart: number }[]) => void;
   onSwapInstrument?: (trackId: string) => void; 
   onEditMidi?: (trackId: string, clipId: string) => void;
   /** « Séparer en stems » (menu du clip audio) : voix, batterie, basse, autres. */
@@ -112,6 +117,8 @@ interface ArrangementViewProps {
   chordLane?: { height: number; render: (v: ChordLaneView) => React.ReactNode };
   /** Piste tempo (R2, components/TempoLane) : au-dessus du couloir d'accords, absente quand elle est masquée. */
   tempoLane?: { height: number; render: (v: ChordLaneView) => React.ReactNode };
+  /** Piste Arrangement (R12, components/ArrangeLane) : sections à glisser, juste sous la règle. */
+  arrangeLane?: { height: number; render: (v: ChordLaneView) => React.ReactNode };
 }
 
 /** Contour d'un fondu (courbe choisie) : zone assombrie au-dessus de la courbe + trait. */
@@ -175,15 +182,17 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   markers = [], onAddMarker, onUpdateMarker, onDeleteMarker, onAddRegion, isPlaying = false,
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip: onEditClipRaw, isRecording, recStartTime,
-  onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy,
-  punch, onUpdatePunch, editCommands, takeLanes, chordLane, tempoLane
+  onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy, onClipsMoved,
+  punch, onUpdatePunch, editCommands, takeLanes, chordLane, tempoLane, arrangeLane
 }) => {
   // Piste d'accords (V20) : couloir sous la règle (comme Logic), au-dessus des pistes.
   const chordH = chordLane ? chordLane.height : 0;
   // Piste tempo (R2) : juste sous la règle, au-dessus des accords.
   const tempoH = tempoLane ? tempoLane.height : 0;
-  /** Haut des pistes, dans le contenu défilant comme dans le calque : règle + piste tempo + couloir d'accords. */
-  const tracksTop = RULER_H + tempoH + chordH;
+  // Piste Arrangement (R12) : tout de suite sous la règle, au-dessus du tempo.
+  const arrangeH = arrangeLane ? arrangeLane.height : 0;
+  /** Haut des pistes, dans le contenu défilant comme dans le calque : règle + arrangement + piste tempo + couloir d'accords. */
+  const tracksTop = RULER_H + arrangeH + tempoH + chordH;
   // Carte des tempos et des mesures : la grille et la règle la suivent (3/4, 6/8, changements).
   const tempoMap = useTempoMap();
   // Thème affiché : le canvas se redessine quand on passe en clair / sombre.
@@ -263,6 +272,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const marqueeOriginRef = useRef<{x:number,y:number} | null>(null);
   // Positions de depart des clips selectionnes, capturees au debut du glissement.
   const multiDragRef = useRef<{trackId:string, clipId:string, start:number}[] | null>(null);
+  /** Piste d'origine du clip saisi (l'automation suit le clip, R8). */
+  const dragOriginTrackRef = useRef<string | null>(null);
+  // Groupe d'édition (R12) : clips jumeaux des autres pistes du groupe, photographiés au début du geste.
+  const groupMatesRef = useRef<MateSnap[]>([]);
   
   const [loopDragMode, setLoopDragMode] = useState<LoopDragMode>(null);
   // Tactile (iPad, téléphone) : vrai pendant un appui au doigt / stylet.
@@ -1006,24 +1019,31 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 setActiveClip({ trackId: t.id, clip });
                 setSelectedClip({ trackId: t.id, clip });
 
+                // Groupe d'édition (R12, Pro Tools) : le clic prend aussi les clips jumeaux des
+                // autres pistes du groupe ; Maj+Ctrl inverse le groupe pour ce geste.
+                const gInv = invertFromEvent(e);
+                const mates = snapMates(t.id, clip, { ...editGroupsStore.get(), tracks }, gInv);
+                groupMatesRef.current = mates;
+                let effSel = selectedClipIds;
                 // Shift/Ctrl : on ajoute ou retire de la selection.
                 // Sinon : clic sur un clip deja selectionne = on garde le groupe
                 // (pour pouvoir le deplacer), clic ailleurs = selection unique.
-                if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                if ((e.shiftKey || e.ctrlKey || e.metaKey) && !gInv) {
                     setSelectedClipIds(prev => {
                         const next = new Set(prev);
                         if (next.has(clip.id)) next.delete(clip.id); else next.add(clip.id);
                         return next;
                     });
-                } else if (!selectedClipIds.has(clip.id)) {
-                    setSelectedClipIds(new Set([clip.id]));
+                } else if (!selectedClipIds.has(clip.id) || gInv || mates.some(m => !selectedClipIds.has(m.clip.id))) {
+                    effSel = new Set([clip.id, ...mates.map(m => m.clip.id)]);
+                    setSelectedClipIds(effSel);
                 }
 
                 // Positions initiales pour un deplacement groupe.
-                if (selectedClipIds.size > 1 && selectedClipIds.has(clip.id)) {
+                if (effSel.size > 1 && effSel.has(clip.id)) {
                     const items: {trackId:string, clipId:string, start:number}[] = [];
                     visibleTracks.forEach(tr => rowClips(tr).forEach(c => {
-                        if (selectedClipIds.has(c.id)) items.push({ trackId: tr.id, clipId: c.id, start: c.start });
+                        if (effSel.has(c.id)) items.push({ trackId: tr.id, clipId: c.id, start: c.start });
                     }));
                     multiDragRef.current = items;
                 } else {
@@ -1032,6 +1052,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
                 setDragStartX(x); setDragStartY(y);
                 setInitialClipState({ ...clip });
+                dragOriginTrackRef.current = t.id;
                 movedRef.current = false;
                 // Shuffle : photo des clips de la piste (Alt+glisser = copie libre, hors Shuffle).
                 shuffleInitRef.current = editModeStore.get().mode === 'SHUFFLE' && !e.altKey ? {
@@ -1322,6 +1343,8 @@ const handleMouseMove = (e: React.MouseEvent) => {
         let gain = fracToClipGain(g.frac);
         if (!e.shiftKey && Math.abs(20 * Math.log10(gain)) < 0.3) gain = 1;
         onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', { gain });
+        const g0 = initialClipState?.gain ?? activeClip.clip.gain ?? 1;
+        if (g0 > 1e-9) groupMatesRef.current.forEach(m => onEditClip?.(m.trackId, m.clip.id, 'UPDATE_PROPS', mateGain(m.clip, gain / g0)));
         setGainTip({ x: e.clientX, y: e.clientY, text: gainToDbText(gain) });
         return;
     }
@@ -1399,6 +1422,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
         if (editModeStore.get().mode === 'SHUFFLE' && shInit && shInit.trackId === activeClip.trackId) {
             // Shuffle : le clip reste en place, la suite recule / avance d'autant.
             shuffleDrag(shInit.trackId, shInit.clips, activeClip.clip.id, 'TRIM_START', toSample(init.start + (x - dragStartX) / zoomH));
+            groupMatesRef.current.forEach(m => shuffleDrag(m.trackId, m.trackClips, m.clip.id, 'TRIM_START', toSample(m.clip.start + (x - dragStartX) / zoomH)));
             return;
         }
         // Grid relatif : le bord avance par pas de grille en gardant son décalage (Pro Tools).
@@ -1413,11 +1437,13 @@ const handleMouseMove = (e: React.MouseEvent) => {
             duration: Math.max(0.05, init.duration - delta),
             fadeIn: Math.min(init.fadeIn || 0, Math.max(0, init.duration - delta))
         });
+        groupMatesRef.current.forEach(m => onEditClip?.(m.trackId, m.clip.id, 'UPDATE_PROPS', mateTrimStart(m.clip, delta)));
     } else if (dragAction === 'TRIM_END' && activeClip && initialClipState) {
         const init = initialClipState;
         const shInit = shuffleInitRef.current;
         if (editModeStore.get().mode === 'SHUFFLE' && shInit && shInit.trackId === activeClip.trackId) {
             shuffleDrag(shInit.trackId, shInit.clips, activeClip.clip.id, 'TRIM_END', toSample(init.start + init.duration + (x - dragStartX) / zoomH));
+            groupMatesRef.current.forEach(m => shuffleDrag(m.trackId, m.trackClips, m.clip.id, 'TRIM_END', toSample(m.clip.start + m.clip.duration + (x - dragStartX) / zoomH)));
             return;
         }
         const rawEnd = trimEdgeTime({ settings: editModeStore.get(), invert: invertOf(e), bpm, origEdge: init.start + init.duration, rawEdge: init.start + init.duration + (x - dragStartX) / zoomH });
@@ -1426,15 +1452,18 @@ const handleMouseMove = (e: React.MouseEvent) => {
             duration: newDuration,
             fadeOut: Math.min(init.fadeOut || 0, newDuration)
         });
+        groupMatesRef.current.forEach(m => onEditClip?.(m.trackId, m.clip.id, 'UPDATE_PROPS', mateTrimEnd(m.clip, newDuration - init.duration)));
     } else if (dragAction === 'FADE_IN' && activeClip && initialClipState) {
         const init = initialClipState;
         const fadeIn = Math.min(init.duration, Math.max(0, (x - init.start * zoomH) / zoomH));
         onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', { fadeIn });
+        groupMatesRef.current.forEach(m => onEditClip?.(m.trackId, m.clip.id, 'UPDATE_PROPS', mateFade(m.clip, 'in', fadeIn)));
     } else if (dragAction === 'FADE_OUT' && activeClip && initialClipState) {
         const init = initialClipState;
         const clipEndX = (init.start + init.duration) * zoomH;
         const fadeOut = Math.min(init.duration, Math.max(0, (clipEndX - x) / zoomH));
         onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', { fadeOut });
+        groupMatesRef.current.forEach(m => onEditClip?.(m.trackId, m.clip.id, 'UPDATE_PROPS', mateFade(m.clip, 'out', fadeOut)));
     } else if (dragAction === 'SCRUB') {
         onSeek(time);
     }
@@ -1459,11 +1488,21 @@ const handleMouseUp = () => {
         setSelectedClipIds(new Set([rd.clickClip.clip.id]));
     }
     rangeDragRef.current = null;
+    // L'automation suit les clips déplacés (R8, Pro Tools « Automation Follows Edit ») : une étape, à la fin du geste.
+    if (dragAction === 'MOVE' && activeClip && initialClipState && movedRef.current && onClipsMoved && editPrefsStore.get().automationFollowsEdit !== false && editModeStore.get().mode !== 'SHUFFLE') {
+        const items = multiDragRef.current && multiDragRef.current.length > 1
+            ? multiDragRef.current.map(it => ({ clipId: it.clipId, fromTrackId: it.trackId, fromStart: it.start }))
+            : [{ clipId: activeClip.clip.id, fromTrackId: dragOriginTrackRef.current || activeClip.trackId, fromStart: initialClipState.start }];
+        setTimeout(() => onClipsMoved(items), 0);
+    }
     // Crossfade automatique quand un clip déplacé / rogné touche ou chevauche un voisin.
-    if (editCommands && activeClip && (dragAction === 'MOVE' || dragAction === 'TRIM_START' || dragAction === 'TRIM_END')) {
+    // Un simple clic (aucun déplacement) ne pose pas de crossfade.
+    if (editCommands && activeClip && ((dragAction === 'MOVE' && movedRef.current) || dragAction === 'TRIM_START' || dragAction === 'TRIM_END')) {
         const ids = multiDragRef.current && multiDragRef.current.length > 1 ? multiDragRef.current : [{ trackId: activeClip.trackId, clipId: activeClip.clip.id }];
         const byTrack = new Map<string, string[]>();
-        ids.forEach(it => byTrack.set(it.trackId, [...(byTrack.get(it.trackId) || []), it.clipId]));
+        // Clips jumeaux du groupe d'édition (R12) rognés en même temps : crossfade automatique aussi.
+        [...ids, ...groupMatesRef.current.map(m => ({ trackId: m.trackId, clipId: m.clip.id }))]
+            .forEach(it => { const l = byTrack.get(it.trackId) || []; if (!l.includes(it.clipId)) byTrack.set(it.trackId, [...l, it.clipId]); });
         // Après le dernier rendu (la position finale du clip est dans l'état).
         setTimeout(() => byTrack.forEach((cids, tid) => editCommands.autoCrossfade(tid, cids)), 0);
     }
@@ -1475,6 +1514,7 @@ const handleMouseUp = () => {
     setInitialClipState(null);
     marqueeOriginRef.current = null;
     multiDragRef.current = null;
+    groupMatesRef.current = [];
     setMarquee(null);
 };
 
@@ -2117,6 +2157,12 @@ useEffect(() => {
                 className={`h-8 px-2 rounded-lg border text-[10px] font-bold ${editPrefs.autoXfade ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
                 <i className="fas fa-xmark mr-1"></i>Fondu enchaîné auto
               </button>
+              <button onClick={() => editPrefsStore.set({ automationFollowsEdit: !editPrefs.automationFollowsEdit })} aria-pressed={editPrefs.automationFollowsEdit !== false}
+                data-nova-target="automation-follows"
+                title="L'automation suit l'édition (« Automation Follows Edit » de Pro Tools) : un clip déplacé emporte sa courbe de volume, de pan, de mute et d'effets ; copier, couper, coller, effacer ou dupliquer une plage portent aussi l'automation. Désactivé : la courbe reste où elle est."
+                className={`h-8 px-2 rounded-lg border text-[10px] font-bold ${editPrefs.automationFollowsEdit !== false ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
+                <i className="fas fa-wave-square mr-1"></i>Automation suit l'édition
+              </button>
               <select value={editPrefs.xfadeCurve} onChange={e => editPrefsStore.set({ xfadeCurve: e.target.value as CrossfadeCurve })}
                 aria-label="Courbe des fondus enchaînés"
                 title="Courbe des crossfades posés à la souris (bas d'une jonction), avec Ctrl+F ou automatiquement. Puissance égale = « Equal Power » de Pro Tools, sans creux de niveau."
@@ -2142,13 +2188,18 @@ useEffect(() => {
         </div>
       </div>
       {/* Piste d'accords : sous la règle (comme la Chord Track de Logic), fixe pendant le défilement vertical. */}
+      {arrangeLane && (
+        <div style={{ position: 'absolute', top: TOOLBAR_H + RULER_H, left: 0, right: 0, zIndex: 42 }}>
+          {arrangeLane.render({ zoomH, scrollLeft, headerWidth, width: Math.max(0, viewportSize.width - headerWidth) })}
+        </div>
+      )}
       {tempoLane && (
-        <div style={{ position: 'absolute', top: TOOLBAR_H + RULER_H, left: 0, right: 0, zIndex: 41 }}>
+        <div style={{ position: 'absolute', top: TOOLBAR_H + RULER_H + arrangeH, left: 0, right: 0, zIndex: 41 }}>
           {tempoLane.render({ zoomH, scrollLeft, headerWidth, width: Math.max(0, viewportSize.width - headerWidth) })}
         </div>
       )}
       {chordLane && (
-        <div style={{ position: 'absolute', top: TOOLBAR_H + RULER_H + tempoH, left: 0, right: 0, zIndex: 41 }}>
+        <div style={{ position: 'absolute', top: TOOLBAR_H + RULER_H + arrangeH + tempoH, left: 0, right: 0, zIndex: 41 }}>
           {chordLane.render({ zoomH, scrollLeft, headerWidth, width: Math.max(0, viewportSize.width - headerWidth) })}
         </div>
       )}
@@ -2272,7 +2323,9 @@ useEffect(() => {
              visibleTracks.map((track, idx) => {
                if (!track.isTrackArmed) return null;
                let topY = tracksTop; for (let i = 0; i < idx; i++) topY += zoomV + extraH(visibleTracks[i]);
-               return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, left: headerWidth, height: `${zoomV - 4}px`, right: 0, pointerEvents: 'none' }}><LiveRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} /></div>;
+               return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, left: headerWidth, height: `${zoomV - 4}px`, right: 0, pointerEvents: 'none', ...(isMidiRecordTrack(track) ? { zIndex: 25 } : {}) }}>{isMidiRecordTrack(track)
+                 ? <LiveMidiRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} />
+                 : <LiveRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} />}</div>;
              })
           )}
         </div>

@@ -103,6 +103,17 @@ export class HybridAutoTuneNode {
     else this.publish();
   }
 
+  /**
+   * Réglage automatisable (R8) de l'autotune de NOVA. L'autotune du PC (pont
+   * VST) ne s'automatise pas encore (R9) : null, le moteur passe alors par
+   * updateParams.
+   */
+  automationParam(key: string): any {
+    if (this.route !== 'nova') return null;
+    return (this.nova as any).automationParam?.(key) ?? null;
+  }
+  restoreStatic() { (this.nova as any).restoreStatic?.(); }
+
   /** Ouvre la fenêtre du plugin du PC (Auto-Tune Pro, MetaTune…) qui traite la voix. */
   async openVstEditor(): Promise<void> {
     if (!this.vst || !this.vstReady) throw new Error("L'autotune de ton PC n'est pas encore chargé (pont VST).");

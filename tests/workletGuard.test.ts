@@ -109,7 +109,7 @@ describe('AudioEngine.handleWorkletCrash', () => {
     } finally {
       window.removeEventListener('nova:plugin-crash', on);
     }
-  });
+  }, 60_000); // 1er import à froid du moteur (≈ 200 modules) : > 5 s sur une machine chargée.
 
   it('module hors effet (synthé) : « nova:audio-module-crash » avec un nom lisible', async () => {
     const { AudioEngine } = await import('../engine/AudioEngine');
@@ -124,7 +124,7 @@ describe('AudioEngine.handleWorkletCrash', () => {
     } finally {
       window.removeEventListener('nova:audio-module-crash', on);
     }
-  });
+  }, 60_000); // 1er import à froid du moteur (≈ 200 modules) : > 5 s sur une machine chargée.
 });
 
 describe('Fenêtre du compresseur : réglages incomplets', () => {

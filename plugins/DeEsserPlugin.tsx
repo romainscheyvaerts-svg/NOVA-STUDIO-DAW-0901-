@@ -3,6 +3,7 @@ import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { loadWorkletModule } from './vocalDspUtils';
 import { termHelp } from '../utils/pluginUi';
 import { createDeesserCore } from '../engine/deesserCore';
+import { retireWorkletNode } from '../engine/workletGuard';
 
 /**
  * DE-ESSER NOVA (v3, mesuré au labo : D:\1 WORK\CONTENU\nova-labo\deesser)
@@ -18,6 +19,12 @@ import { createDeesserCore } from '../engine/deesserCore';
  *    voyelles claires.
  *  - « Absolue » : seuil fixe en dB, comme l'ancien de-esser (projets
  *    existants : un réglage sans `detection` reste en absolu).
+ *
+ * Écoute externe (side-chain, R7) : `sidechainInput` entre sur la 2e entrée du
+ * worklet ; branchée, elle remplace le signal du détecteur (le son traité reste
+ * celui de la piste) ; « écouter la clé » (keyListen) fait entendre la clé.
+ * Automation (R8) : seuil, seuil relatif et fréquence sont des AudioParam
+ * k-rate du worklet (lus à chaque bloc de 128 échantillons, lecture et export).
  */
 
 export type DeEsserMode = 'BELL' | 'SHELF';
@@ -36,7 +43,18 @@ export interface DeEsserParams {
   relThreshold?: number;
   /** 0 normal, 1 la bande seule, 2 ce qui est retiré. */
   listen?: number;
+  /** Écoute externe (side-chain, R7) : filtre de la clé (Hz) et écoute de la clé. */
+  keyHpf?: number;
+  keyLpf?: number;
+  keyListen?: number;
 }
+
+/** Réglages automatisables (R8) : AudioParam k-rate du worklet, bornes de l'utilisateur. */
+const DEESS_AP: { name: 'threshold' | 'relThreshold' | 'frequency'; min: number; max: number; def: number }[] = [
+  { name: 'threshold', min: -60, max: 0, def: -25 },
+  { name: 'relThreshold', min: -30, max: 6, def: -6 },
+  { name: 'frequency', min: 1000, max: 20000, def: 8000 },
+];
 
 /** Réglages d'une nouvelle instance (8 kHz, détection relative). */
 export const DEESSER_DEFAULTS: DeEsserParams = {
@@ -63,21 +81,37 @@ const LISTEN_LABELS = [
 
 const WORKLET_CODE = `
 const createDeesserCore = (${createDeesserCore.toString()});
+const __ap = ${JSON.stringify(DEESS_AP)};
 class NovaDeesserProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return __ap.map(d => ({ name: d.name, minValue: d.min, maxValue: d.max, defaultValue: d.def, automationRate: 'k-rate' }))
+      // Écoute externe (R7) : détection sur l'entrée 2 (clé), écoute de la clé.
+      .concat([{ name: '__keyOn', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' },
+        { name: '__keyListen', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' }]);
+  }
   constructor(options) {
     super();
     const o = (options && options.processorOptions) || {};
+    this.params = Object.assign({}, o.params || {});
     this.core = createDeesserCore(sampleRate);
-    this.core.setParams(o.params || {});
+    this.core.setParams(this.params);
+    this.dirty = false;
     this.zero = new Float32Array(128);
     this.blocks = 0;
     this.port.onmessage = (e) => {
       const d = e.data || {};
-      if (d.params) this.core.setParams(d.params);
+      if (d.params) { Object.assign(this.params, d.params); this.dirty = true; }
       if (d.reset) this.core.reset();
     };
   }
-  process(inputs, outputs) {
+  process(inputs, outputs, parameters) {
+    // Réglages automatisables : l'AudioParam fait foi (automation programmée au bloc près).
+    for (let i = 0; i < __ap.length; i++) {
+      const a = parameters[__ap[i].name];
+      const v = a && a.length ? a[0] : NaN;
+      if (v === v && v !== this.params[__ap[i].name]) { this.params[__ap[i].name] = v; this.dirty = true; }
+    }
+    if (this.dirty) { this.dirty = false; this.core.setParams(this.params); }
     const out = outputs[0];
     if (!out || !out[0]) return true;
     const n = out[0].length;
@@ -85,7 +119,17 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
     const inp = inputs[0];
     const iL = inp && inp[0] ? inp[0] : this.zero;
     const iR = inp && inp[1] ? inp[1] : null;
-    this.core.process(iL, iR, out[0], out[1] || null, n);
+    const key = inputs[1];
+    // Clé branchée mais muette (source à l'arrêt : entrée inactive, 0 canal) = silence, pas le son de la piste.
+    const useKey = parameters.__keyOn[0] >= 0.5;
+    const kL = useKey ? (key && key[0] ? key[0] : this.zero) : null;
+    const kR = useKey ? (key && key[1] ? key[1] : kL) : null;
+    this.core.process(iL, iR, out[0], out[1] || null, n, kL, kR);
+    if (useKey && parameters.__keyListen[0] >= 0.5) {
+      // Écoute de la clé : on n'entend que la clé (filtrée par la barre « Clé »).
+      out[0].set(kL.subarray(0, n));
+      if (out[1]) out[1].set(kR.subarray(0, n));
+    }
     if (++this.blocks >= 6) { this.blocks = 0; this.port.postMessage(this.core.takeMeters()); }
     return true;
   }
@@ -99,9 +143,14 @@ export class DeEsserNode {
   private ctx: BaseAudioContext;
   public input: GainNode;
   public output: GainNode;
+  /** Entrée de l'écoute externe (side-chain, R7), câblée par le moteur (engine/sidechain.ts). */
+  public readonly sidechainInput: GainNode;
   public readonly ready: Promise<void>;
   private worklet: AudioWorkletNode | null = null;
   private failed = false;
+  private keyActive = false;
+  /** Effet retiré : un worklet encore en chargement n'est pas créé (sinon il restait vivant). */
+  private disposed = false;
   private meters: DeEsserMeters & { at: number } = { grDb: 0, grNowDb: 0, detDb: -120, at: 0 };
   // Projet sans « detection » = réglage d'avant la v3 : détection absolue.
   private params: DeEsserParams = { ...DEESSER_DEFAULTS, threshold: -25, detection: 'ABSOLUTE' };
@@ -112,6 +161,10 @@ export class DeEsserNode {
     this.output = ctx.createGain();
     this.input.channelCount = 2;
     this.input.channelCountMode = 'explicit';
+    this.sidechainInput = ctx.createGain();
+    this.sidechainInput.channelCount = 2;
+    this.sidechainInput.channelCountMode = 'explicit';
+    this.sidechainInput.channelInterpretation = 'speakers';
     if (params) this.params = { ...this.params, ...DeEsserNode.clean(params) };
     this.ready = this.init();
   }
@@ -125,9 +178,11 @@ export class DeEsserNode {
   private async init() {
     try {
       await loadWorkletModule(this.ctx, 'nova-deesser-v3', WORKLET_CODE);
+      if (this.disposed) return;
       this.worklet = new AudioWorkletNode(this.ctx, 'nova-deesser-v3', {
-        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+        numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [2],
         channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
+        parameterData: this.apValues(),
         // Réglages passés à la construction : un message arriverait trop tard à l'export.
         processorOptions: { params: { ...this.params } },
       });
@@ -136,6 +191,8 @@ export class DeEsserNode {
         if (Number.isFinite(d.grDb)) this.meters = { grDb: d.grDb, grNowDb: d.grNowDb, detDb: d.detDb, at: Date.now() };
       };
       this.input.connect(this.worklet);
+      this.sidechainInput.connect(this.worklet, 0, 1);
+      this.applyKey();
       this.worklet.connect(this.output);
     } catch (e) {
       console.warn('[NOVA De-esser] AudioWorklet indisponible, effet contourné :', e);
@@ -147,10 +204,69 @@ export class DeEsserNode {
   /** Retard ajouté (s) : aucun (pas d'anticipation), déclaré au PDC. */
   public get latency(): number { return 0; }
 
+  /** Valeurs fixes des réglages automatisables (bornées). */
+  private apValues(): Record<string, number> {
+    const o: Record<string, number> = {};
+    for (const d of DEESS_AP) {
+      const v = Number((this.params as any)[d.name]);
+      o[d.name] = Math.max(d.min, Math.min(d.max, Number.isFinite(v) ? v : d.def));
+    }
+    return o;
+  }
+
   public updateParams(p: Partial<DeEsserParams>) {
     if (!p) return;
-    this.params = { ...this.params, ...DeEsserNode.clean(p) };
-    this.worklet?.port.postMessage({ params: { ...this.params } });
+    const clean = DeEsserNode.clean(p);
+    this.params = { ...this.params, ...clean };
+    if (clean.keyListen !== undefined) this.applyKey();
+    if (!this.worklet) return;
+    // Réglages automatisables : posés sur leur AudioParam (le worklet le lit à chaque bloc) ;
+    // les autres par message. Un réglage absent (tenu par une voie d'automation) n'est pas touché.
+    const msg: Record<string, any> = {};
+    const now = this.ctx.currentTime;
+    const ap = this.apValues();
+    for (const [k, v] of Object.entries(clean)) {
+      const prm = DEESS_AP.some(d => d.name === k) ? (this.worklet.parameters as any).get(k) as AudioParam | undefined : undefined;
+      if (prm) { try { prm.setValueAtTime(ap[k], now); } catch { prm.value = ap[k]; } }
+      else msg[k] = v;
+    }
+    if (Object.keys(msg).length) this.worklet.port.postMessage({ params: msg });
+  }
+
+  /** AudioParam d'un réglage automatisable (R8) : « threshold », « relThreshold », « frequency » ; sinon null. */
+  public automationParam(key: string): AudioParam | null {
+    if (!this.worklet || !DEESS_AP.some(d => d.name === key)) return null;
+    return (this.worklet.parameters as any).get(key) ?? null;
+  }
+
+  /** Lecture arrêtée : les réglages automatisés reviennent à leur valeur fixe. */
+  public restoreStatic() {
+    if (!this.worklet) return;
+    const now = this.ctx.currentTime;
+    const ap = this.apValues();
+    for (const d of DEESS_AP) {
+      const prm = (this.worklet.parameters as any).get(d.name) as AudioParam | undefined;
+      if (!prm) continue;
+      try { prm.cancelScheduledValues(0); prm.setValueAtTime(ap[d.name], now); } catch { prm.value = ap[d.name]; }
+    }
+  }
+
+  /** Écoute externe branchée (R7) : la détection écoute `sidechainInput`. */
+  public setSidechainActive(on: boolean) {
+    if (on === this.keyActive) return;
+    this.keyActive = on;
+    this.applyKey();
+  }
+  public get sidechainActive() { return this.keyActive; }
+
+  private applyKey() {
+    if (!this.worklet) return;
+    const prm = this.worklet.parameters as any;
+    const now = this.ctx.currentTime;
+    try {
+      prm.get('__keyOn')?.setValueAtTime(this.keyActive ? 1 : 0, now);
+      prm.get('__keyListen')?.setValueAtTime(this.keyActive && Number(this.params.keyListen) >= 0.5 ? 1 : 0, now);
+    } catch { /* contexte fermé */ }
   }
 
   /** Réduction courante de la bande, en dB (valeur négative ou nulle). */
@@ -171,11 +287,17 @@ export class DeEsserNode {
 
   public disconnect() {
     try { this.input.disconnect(); } catch { /* déjà débranché */ }
+    try { this.sidechainInput.disconnect(); } catch { /* idem */ }
     try { this.worklet?.disconnect(); } catch { /* idem */ }
     try { this.output.disconnect(); } catch { /* idem */ }
   }
 
-  public dispose() { this.disconnect(); }
+  /** Effet retiré de la piste : worklet mis à la retraite (ou jamais créé s'il chargeait encore), entrées débranchées. */
+  public dispose() {
+    this.disposed = true;
+    if (this.worklet) { retireWorkletNode(this.worklet); this.worklet = null; }
+    this.disconnect();
+  }
 }
 
 // ── Fenêtre ─────────────────────────────────────────────────────────────────

@@ -25,6 +25,8 @@ import FitToWidth from './FitToWidth';
 import { PluginName } from './PluginName';
 import { getRegisteredPlugin } from '../engine/pluginRegistry';
 import PresetMenu from './PresetMenu';
+import SidechainPanel from './SidechainPanel';
+import { supportsSidechain } from '../engine/sidechain';
 
 interface PluginEditorProps {
   plugin: PluginInstance;
@@ -40,12 +42,14 @@ interface PluginEditorProps {
   onToggleBypass?: (trackId: string, pluginId: string) => void;
   /** Ouvre un autre effet de la piste (flèches précédent / suivant). */
   onOpenPlugin?: (trackId: string, plugin: PluginInstance) => void;
+  /** Toutes les pistes (side-chain : choix de la clé, R7). */
+  allTracks?: Track[];
 }
 
 /** Position de la fenêtre d'effet (gardée d'un effet à l'autre pendant la session). */
 let windowOffset = { x: 0, y: 0 };
 
-const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, onUpdateParams, isMobile, track, onUpdateTrack, onToggleFreeze, onToggleBypass, onOpenPlugin }) => {
+const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, onUpdateParams, isMobile, track, onUpdateTrack, onToggleFreeze, onToggleBypass, onOpenPlugin, allTracks }) => {
   // Rappel STABLE vers le projet : App en recrée un à chaque rendu ; les effets qui
   // remontent leurs réglages dans un useEffect([params, onParamsChange]) bouclaient
   // à l'infini (Saturation : « Maximum update depth exceeded », NOVA planté).
@@ -302,10 +306,17 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
     }
   };
 
+  // Side-chain (R7) : barre « Clé » au-dessus de la fenêtre du Compresseur, des 4 compresseurs analogiques, du Gate, du Gate rythmique et du De-esser.
+  const sidechainBar = (compact?: boolean) => (track && onUpdateTrack && allTracks && supportsSidechain(plugin.type)
+    ? <SidechainPanel plugin={live} track={track} tracks={allTracks} onUpdateTrack={onUpdateTrack} onUpdateParams={stableUpdateParams} onReloaded={() => setUiKey(k => k + 1)} compact={compact} />
+    : null);
+  const hasKeyBar = !!(track && onUpdateTrack && allTracks && supportsSidechain(plugin.type));
+
   if (isMobile) {
     return mobileShell(
-      <div key={uiKey} className="nova-sombre nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden rounded-none">
-        {renderPluginUI()}
+      <div className="nova-sombre nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden rounded-none">
+        {sidechainBar(true)}
+        <div key={uiKey}>{renderPluginUI()}</div>
       </div>
     );
   }
@@ -346,8 +357,10 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       </div>
       
       {/* Container */}
-      <div key={uiKey} className={`nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden ${isMobile ? 'rounded-none scale-[0.85] origin-top' : 'rounded-[40px]'}`}>
-        {renderPluginUI()}
+      {/* Effet à clé (R7) : la fenêtre ne dépasse pas l'écran (la barre du haut reste visible), le contenu défile. */}
+      <div className={`nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden ${isMobile ? 'rounded-none scale-[0.85] origin-top' : 'rounded-[40px]'} ${hasKeyBar ? 'max-h-[calc(100dvh-5.5rem)] overflow-y-auto' : ''}`}>
+        {sidechainBar()}
+        <div key={uiKey}>{renderPluginUI()}</div>
       </div>
     </div>
   );

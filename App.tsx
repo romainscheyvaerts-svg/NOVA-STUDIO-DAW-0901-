@@ -8,6 +8,7 @@ import { audioEngine } from './engine/AudioEngine';
 import { dspMonitor, safeModeStore } from './engine/dspMonitor';
 import { estimatedLoadPct as estimatedDspLoadPct, pickAutoFreeze, SafetyContext as DspSafetyContext } from './utils/dspLoad';
 import TransportBar from './components/TransportBar';
+import { LoudnessPanelHost } from './components/meters/LoudnessPanel';
 import MobileTransport from './components/MobileTransport';
 import AdminTemplateButton from './components/AdminTemplateButton';
 import ArrangementView from './components/ArrangementView';
@@ -22,6 +23,8 @@ import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
 const TrackListPanel = lazy(() => import('./components/TrackListPanel'));
+const GroupsListPanel = lazy(() => import('./components/GroupsListPanel'));
+const TimeOpsDialog = lazy(() => import('./components/TimeOpsDialog'));
 const BusPanel = lazy(() => import('./components/BusPanel'));
 const AuthScreen = lazy(() => import('./components/AuthScreen'));
 const AutomationEditorView = lazy(() => import('./components/AutomationEditorView'));
@@ -68,10 +71,16 @@ import { recFreezeStore } from './utils/recFreezeStore';
 import { ProjectIO } from './services/ProjectIO';
 const PianoRoll = lazy(() => import('./components/PianoRoll'));
 import MidiHost from './components/MidiHost'; // V25 : .mid, groove, capture MIDI
+import MidiInputHost from './components/MidiInputHost'; // R16 : clavier de l'ordinateur, fenêtre MIDI, MIDI Learn
 import { midiManager } from './services/MidiManager';
+import { splitClipAt } from './utils/timeSelection';
+import { midiInput } from './services/MidiInput';
+import { isMidiRecordTrack, applyMidiTake, applyLoopTake, MODE_LABELS } from './utils/midiRecord';
+import { midiLearn, LearnHit } from './utils/midiLearn';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
+import { ClipMove, moveAutomationWithClips } from './utils/automationEdit';
 import { metronomeService } from './services/MetronomeService';
 import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange, tempoSignature } from './utils/tempoMap';
 import { resolveCountIn, planCountIn } from './utils/countIn';
@@ -124,6 +133,11 @@ import {
 import { localCollabOutboxStore } from './utils/collabOutbox';
 import { engineView, shownTrackIds, withPluginState } from './utils/trackStructure';
 import { structureBus, StructurePanel } from './utils/structureBus';
+import { useR12, linkedMixUpdates, selectedTrackIds, runTimeOpOn } from './hooks/useR12';
+import { createGroup, updateGroup, deleteGroup, newGroupId, groupsOpOf, groupsSig, sanitizeGroupsOp, applyGroupsOp } from './utils/editGroups';
+import { sanitizeTimeOp, TimeOp } from './utils/timeOps';
+import { R12Panel, TimeDialogPreset, openR12Panel } from './utils/r12Bus';
+import ArrangeLane, { ARRANGE_LANE_H, useArrangeLaneShown } from './components/ArrangeLane';
 import { StructureTracksContext } from './components/TrackStructure';
 import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf, sanitizeIncomingClips } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
@@ -180,7 +194,7 @@ import { track, trackOnce } from './utils/analytics';
 import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 import { setFeedbackAppState } from './utils/feedbackContext';
 import { setFeedbackUserEmail } from './services/feedback';
-import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone } from './utils/punch';
+import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds } from './utils/punch';
 import { splitLoopPasses, keptLoopPasses, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
 import { compSwipe, compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
@@ -504,6 +518,7 @@ const useUndoRedo = (initialState: DAWState) => {
         newState.markers !== curr.present.markers ||
         newState.chords !== curr.present.chords ||
         newState.trackGroups !== curr.present.trackGroups ||
+        newState.groupSettings !== curr.present.groupSettings ||
         newState.timeSignature !== curr.present.timeSignature ||
         newState.tempoEvents !== curr.present.tempoEvents ||
         newState.isLoopActive !== curr.present.isLoopActive ||
@@ -530,7 +545,7 @@ const useUndoRedo = (initialState: DAWState) => {
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
   // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
   // continuait, et pendant une prise il basculait l'enregistrement.
-  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords'] as const;
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords'] as const;
   const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
     const out: any = { ...base };
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
@@ -1573,11 +1588,14 @@ function Studio() {
             if(idx > -1) {
               const clip = newClips[idx];
               const splitTime = payload.time;
-              if (splitTime > clip.start && splitTime < clip.start + clip.duration) {
+              // Clip MIDI : notes et contrôleurs répartis entre les deux moitiés (utils/timeSelection).
+              const midiParts = Array.isArray(clip.notes) ? splitClipAt(clip as Clip, splitTime, `clip-split-${Date.now()}`) : null;
+              if (midiParts) { newClips[idx] = midiParts[0] as any; newClips.push(midiParts[1] as any); }
+              else if (splitTime > clip.start && splitTime < clip.start + clip.duration) {
                   const firstDuration = splitTime - clip.start;
                   const secondDuration = clip.duration - firstDuration;
                   newClips[idx] = { ...clip, duration: firstDuration };
-                  newClips.push({ ...clip, id: `clip-split-${Date.now()}`, start: splitTime, duration: secondDuration, offset: clip.offset + firstDuration });
+                  newClips.push({ ...clip, id: `clip-split-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`, start: splitTime, duration: secondDuration, offset: clip.offset + firstDuration });
               }
             }
             break;
@@ -1612,9 +1630,11 @@ function Studio() {
                     if (t.id !== updatedTrack.id) t.isTrackArmed = false;
                 });
             }));
+            // Piste MIDI (R16) : pas de micro, le clavier MIDI (ou celui de l'ordinateur) joue dessus.
+            if (isMidiRecordTrack(updatedTrack)) { audioEngine.disarmTrack(); void announceMidiArmRef.current?.(updatedTrack); }
             // Si le micro est refuse ou absent, on le dit et on desarme : sinon
             // la piste paraissait prete et l'enregistrement echouait en silence.
-            audioEngine.armTrack(updatedTrack.id).then(erreur => {
+            else audioEngine.armTrack(updatedTrack.id).then(erreur => {
                 if (!erreur) return;
                 setAiNotification(`🎤 ${erreur}`);
                 setTimeout(() => setAiNotification(null), 5000);
@@ -1665,7 +1685,18 @@ function Studio() {
             draft.tracks[trackIndex] = updatedTrack;
         }
     }));
+    // Groupes de mix (R12) : volume, muet, solo… suivent sur les autres membres.
+    if (previousTrack) groupLinkRef.current?.(previousTrack, updatedTrack);
   }, [setState, setSilently]);
+  const groupLinkRef = useRef<((prev: Track, next: Track) => void) | null>(null);
+  const groupLinkingRef = useRef(false);
+  groupLinkRef.current = (prev, next) => {
+    if (groupLinkingRef.current) return;
+    const ups = linkedMixUpdates(stateRef.current, prev, next);
+    if (!ups.length) return;
+    groupLinkingRef.current = true;
+    try { ups.forEach(u => handleUpdateTrack(u)); } finally { groupLinkingRef.current = false; }
+  };
 
   const handleUpdatePluginParams = useCallback((trackId: string, pluginId: string, params: Record<string, any>) => {
     const automationCaptured = automationRecorder.capturePluginParams(trackId, pluginId, params);
@@ -1730,6 +1761,8 @@ function Studio() {
    *        rangée comme une prise normale (couloir, niveau, respirations).
    */
   const finalizeRecording = useCallback(async (captured?: { clip: Clip; trackId: string }) => {
+    // Prise MIDI armée (R16) : écrite par finalizeMidiRecording, pas de micro.
+    if (!captured && midiInput.isRecording) { finalizeMidiRef.current?.(); return null; }
     const result = captured ?? await audioEngine.stopRecording();
     const rec = captured ? null : punchRecRef.current;
     if (!captured) punchRecRef.current = null;
@@ -2006,6 +2039,8 @@ function Studio() {
       draft.tracks.forEach(t => { t.isTrackArmed = t.id === trackId; });
       draft.selectedTrackId = trackId;
     }));
+    const armedMidi = stateRef.current.tracks.find(t => t.id === trackId);
+    if (armedMidi && isMidiRecordTrack(armedMidi)) { audioEngine.disarmTrack(); await announceMidiArmRef.current?.(armedMidi, true); return true; }
     const erreur = await audioEngine.armTrack(trackId);
     if (erreur) {
       setAiNotification(`🎤 ${erreur}`);
@@ -2324,7 +2359,7 @@ function Studio() {
     // QuickPunch (comme dans Pro Tools) : pendant la lecture, REC entre dans
     // l'enregistrement et en ressort sans arrêter la lecture.
     if (currentState.isRecording && punchRecRef.current?.quick) { await quickPunchOutRef.current?.(false); return; }
-    if (!currentState.isRecording && currentState.isPlaying && currentState.punch?.quickPunch) { await quickPunchIn(); return; }
+    if (!currentState.isRecording && currentState.isPlaying && currentState.punch?.quickPunch && !isMidiRecordTrack(currentState.tracks.find(t => t.isTrackArmed))) { await quickPunchIn(); return; }
 
     if (currentState.isRecording) {
         audioEngine.stopAll();
@@ -2345,6 +2380,19 @@ function Studio() {
 
     // Armement automatique : plus besoin de trouver le bouton R d'abord.
     let armedTrack = currentState.tracks.find(t => t.isTrackArmed);
+    // Prise MIDI (R16) : piste MIDI armée, ou piste MIDI sélectionnée sans piste armée
+    // (comme FL et Live : on sélectionne son synthé et on appuie sur REC).
+    {
+      const sel = currentState.tracks.find(t => t.id === currentState.selectedTrackId);
+      const midiTarget = armedTrack ? (isMidiRecordTrack(armedTrack) ? armedTrack : null) : (isMidiRecordTrack(sel) ? sel! : null);
+      if (midiTarget) {
+        const why = collabRecGuardRef.current(midiTarget.id);
+        if (why) { setAiNotification(`🔒 ${why}`); return; }
+        if (!armedTrack) await armForRecording(midiTarget.id);
+        await startMidiRecordingRef.current?.(midiTarget.id);
+        return;
+      }
+    }
     // Collaboration : jamais sur la piste d'un autre, ni pendant qu'il y enregistre.
     if (armedTrack) { const why = collabRecGuardRef.current(armedTrack.id); if (why) { setAiNotification(`🔒 ${why}`); return; } }
     // Piste « armée » dans le projet mais micro fermé côté moteur (annuler / rétablir, session
@@ -2442,6 +2490,157 @@ function Studio() {
     try { await handleToggleRecordInner(); } finally { recBusyRef.current = false; }
   }, [handleToggleRecordInner]);
   toggleRecordRef.current = handleToggleRecord;
+
+  // ===== Prise MIDI armée (R16) : clavier MIDI / clavier de l'ordinateur → piste MIDI armée
+  const midiRecMetaRef = useRef<{ trackId: string; loop: { start: number; end: number } | null; isPunch: boolean; startAt: number } | null>(null);
+  const announceMidiArmRef = useRef<((t: Track, fromRec?: boolean) => Promise<void>) | null>(null);
+  announceMidiArmRef.current = async (t: Track, fromRec?: boolean) => {
+    midiInput.keepClockFresh();
+    const ok = await midiManager.init();
+    if (fromRec) return;
+    const name = ok ? midiManager.getActiveDeviceName() : null;
+    setAiNotification(name
+      ? `🎹 « ${t.name} » armée : joue sur ${name}, puis REC (R). Mode ${MODE_LABELS[midiInput.prefs.mode].label.toLowerCase()}.`
+      : `🎹 « ${t.name} » armée. Aucun clavier MIDI détecté : joue avec le clavier de l'ordinateur (Ctrl+Maj+K) ou branche un clavier.`);
+  };
+
+  const startMidiRecordingRef = useRef<((trackId: string) => Promise<void>) | null>(null);
+  startMidiRecordingRef.current = async (trackId: string) => {
+    if (isBeatLoading()) { setAiNotification('⏳ Attends la fin du chargement du beat : sans lui, ta prise partirait sur du silence.'); return; }
+    void midiManager.init();
+    // Relevés de l'écart d'horloges dès maintenant (décompte compris) : positions stables dès la 1re note.
+    midiInput.keepClockFresh();
+    const st0 = stateRef.current;
+    const prefs = midiInput.prefs;
+    const bar = barSeconds(st0.bpm, st0.timeSignature);
+    let plan = planRecording({ playhead: playheadStore.get(), punch: st0.punch, bpm: st0.bpm, ts: st0.timeSignature });
+    let loop: { start: number; end: number } | null = null;
+    const loopOn = st0.isLoopActive && st0.loopEnd - st0.loopStart >= 0.5;
+    if (!plan.isPunch && (prefs.mode === 'loop' || loopOn)) {
+      let ls = st0.loopStart, le = st0.loopEnd;
+      if (!loopOn) {
+        // Mode boucle sans boucle posée : 4 mesures à partir de la mesure de la tête de lecture.
+        ls = Math.max(0, Math.floor(playheadStore.get() / bar + 1e-6) * bar);
+        le = ls + 4 * bar;
+        setSilently(produce((d: DAWState) => { d.isLoopActive = true; d.loopStart = ls; d.loopEnd = le; }));
+      }
+      audioEngine.setLoop(true, ls, le);
+      loop = { start: ls, end: le };
+      plan = planRecording({ playhead: ls, punch: st0.punch, bpm: st0.bpm, ts: st0.timeSignature });
+    } else if (plan.isPunch) audioEngine.setLoop(false, st0.loopStart, st0.loopEnd);
+    const startAt = plan.startAt;
+    audioEngine.seekTo(startAt, st0.tracks, false);
+    playheadStore.set(startAt);
+    if (audioEngine.getTakeAudition()) { audioEngine.setTakeAudition(null); setTakeAuditionState(null); }
+    const ci = await runCountIn(startAt);
+    if (!ci.ok) { if (plan.isPunch) audioEngine.setLoop(st0.isLoopActive, st0.loopStart, st0.loopEnd); return; }
+    const playAt = ci.endsAt ?? undefined;
+    const keepFrom = loop ? loop.start : (plan.keepFrom ?? startAt);
+    midiRecMetaRef.current = { trackId, loop, isPunch: plan.isPunch, startAt };
+    // La prise écoute dès maintenant (une note jouée un poil avant le 1er temps est gardée).
+    midiInput.startRecording({ trackId, anchor: (playAt ?? ((audioEngine.ctx?.currentTime ?? 0) + 0.01)) - startAt, recStart: startAt, loop, keepFrom, keepTo: loop ? null : plan.keepTo });
+    recStartRef.current = startAt;
+    punchRecRef.current = plan.isPunch ? { in: plan.keepFrom, out: plan.keepTo, isPunch: true, autoStopAt: plan.autoStopAt } : null;
+    audioEngine.startPlayback(startAt, stateRef.current.tracks, { at: playAt });
+    midiInput.setAnchor(audioEngine.getPlaybackOrigin());
+    if (stateRef.current.metronome.enabled) metronomeService.start(startAt);
+    track('rec_started', { role: 'midi', punch: plan.isPunch, loop: !!loop, mode: prefs.mode });
+    setState(produce(draft => { draft.isRecording = true; draft.isPlaying = true; draft.currentTime = startAt; draft.recStartTime = startAt; }));
+    const tname = stateRef.current.tracks.find(t => t.id === trackId)?.name || 'piste MIDI';
+    const overdub = prefs.mode === 'merge' || (prefs.mode === 'loop' && prefs.loopStyle === 'merge');
+    setAiNotification(loop
+      ? `🔁 Prise MIDI en boucle sur « ${tname} » : ${overdub ? 'chaque tour s’ajoute (overdub)' : 'une prise par tour'}. Stop quand tu as fini.`
+      : `⏺️ Prise MIDI sur « ${tname} » (${MODE_LABELS[prefs.mode === 'loop' ? 'merge' : prefs.mode].label.toLowerCase()}${prefs.quantizeOnInput ? ', quantifiée à l’entrée' : ''}).`);
+  };
+
+  const finalizeMidiRef = useRef<(() => void) | null>(null);
+  finalizeMidiRef.current = () => {
+    const meta = midiRecMetaRef.current;
+    midiRecMetaRef.current = null;
+    punchRecRef.current = null;
+    const r = midiInput.stopRecording();
+    const st = stateRef.current;
+    if (meta?.isPunch) audioEngine.setLoop(st.isLoopActive, st.loopStart, st.loopEnd);
+    const tr = r ? st.tracks.find(t => t.id === r.trackId) : undefined;
+    if (!r || !tr) { setState(produce(draft => { draft.isRecording = false; draft.recStartTime = null; })); return; }
+    const prefs = midiInput.prefs;
+    const bar = barSeconds(st.bpm, st.timeSignature);
+    const quantize = prefs.quantizeOnInput ? { grid: prefs.quantizeGrid * 60 / (st.bpm || 120), strength: prefs.quantizeStrength } : null;
+    const takeNumber = nextTakeNumber(tr);
+    const base = { bar, quantize, stamp: Date.now().toString(36), takeNumber, name: `Prise MIDI ${takeNumber}`, color: tr.color || '#22d3ee' };
+    const notes = r.take.passes.reduce((n, p) => n + p.notes.length, 0);
+    const ccs = r.take.passes.reduce((n, p) => n + Object.values(p.cc).reduce((m, x) => m + x.length, 0), 0);
+    let clips: Clip[] = tr.clips;
+    let msg = '';
+    if (r.take.loop) {
+      const style = prefs.mode === 'loop' ? prefs.loopStyle : prefs.mode === 'merge' ? 'merge' : 'takes';
+      const res = applyLoopTake(tr.clips, r.take, { ...base, style, mergeMode: prefs.mode === 'replace' ? 'replace' : 'merge' });
+      clips = res.clips;
+      msg = res.takes > 1
+        ? `🔁 ${res.takes} tours enregistrés sur « ${tr.name} » : une prise par tour (la dernière complète joue, les autres sont muettes en dessous, comme Loop Record de Pro Tools).`
+        : `🔁 ${notes} note${notes > 1 ? 's' : ''} enregistrée${notes > 1 ? 's' : ''} en boucle sur « ${tr.name} »${r.take.passes.length > 1 ? ` (${r.take.passes.length} tours fusionnés)` : ''}.`;
+    } else {
+      const pass = r.take.passes[0];
+      const mode = prefs.mode === 'replace' ? 'replace' : 'merge';
+      const res = applyMidiTake(tr.clips, pass?.notes || [], pass?.cc || {}, { ...base, mode, range: { start: r.take.from, end: r.take.to } });
+      clips = res.clips;
+      msg = `🎹 ${notes} note${notes > 1 ? 's' : ''}${ccs ? ` et ${ccs} mouvement${ccs > 1 ? 's' : ''} de contrôleurs` : ''} enregistré${notes + ccs > 1 ? 's' : ''} sur « ${tr.name} »${mode === 'replace' && res.removed ? ` (${res.removed} ancienne${res.removed > 1 ? 's' : ''} remplacée${res.removed > 1 ? 's' : ''})` : ''}.`;
+    }
+    if (!notes && !ccs) msg = '🎹 Aucune note reçue pendant la prise. Vérifie que ton clavier est branché (Réglages audio), ou joue avec le clavier de l’ordinateur (Ctrl+Maj+K).';
+    setState(produce(draft => {
+      draft.isRecording = false;
+      draft.recStartTime = null;
+      const t = draft.tracks.find(x => x.id === r.trackId);
+      if (t && clips !== tr.clips) t.clips = clips as any;
+    }));
+    setAiNotification(`${msg}${notes ? ' Ctrl+Z pour annuler.' : ''}`);
+  };
+
+  // Routeur MIDI : piste armée, piste sélectionnée (Thru), accès MIDI déjà accordé au démarrage.
+  useEffect(() => { void midiManager.autoInit(); }, []);
+  useEffect(() => {
+    const armed = state.tracks.find(t => t.isTrackArmed && isMidiRecordTrack(t))?.id || null;
+    midiInput.setContext({ armedTrackId: armed, selectedTrackId: state.selectedTrackId, isMidiTrack: (id: string) => isMidiRecordTrack(stateRef.current.tracks.find(x => x.id === id)) });
+  }, [state.tracks, state.selectedTrackId]);
+
+  // MIDI Learn : un bouton du clavier pilote un réglage. Un geste = une étape d'annulation.
+  const learnPendingRef = useRef(new Map<string, LearnHit>());
+  const learnGestureRef = useRef(new Map<string, number>());
+  const learnRafRef = useRef(0);
+  useEffect(() => {
+    const flush = () => {
+      learnRafRef.current = 0;
+      const hits = Array.from(learnPendingRef.current.values());
+      learnPendingRef.current.clear();
+      const now = performance.now();
+      for (const h of hits) {
+        const tg = h.mapping.target;
+        const t = stateRef.current.tracks.find(x => x.id === tg.trackId);
+        if (!t) continue;
+        const key = h.mapping.id;
+        const inGesture = now - (learnGestureRef.current.get(key) || 0) < 600;
+        learnGestureRef.current.set(key, now);
+        if (tg.kind === 'volume' || tg.kind === 'pan') {
+          const patch = tg.kind === 'volume' ? { volume: h.value } : { pan: h.value };
+          if (!inGesture) { handleUpdateTrack({ ...t, ...patch }); continue; }
+          if (tg.kind === 'volume') audioEngine.setTrackVolume(t.id, h.value, t.isMuted); else audioEngine.setTrackPan(t.id, h.value);
+          atomicTracksRef.current.set(t.id, { ...t, ...patch });
+          setSilently(produce((d: DAWState) => { const x = d.tracks.find(y => y.id === t.id); if (x) Object.assign(x, patch); }));
+        } else if (tg.pluginId && tg.paramId) {
+          const params = { [tg.paramId]: h.value };
+          if (!inGesture) { handleUpdatePluginParams(t.id, tg.pluginId, params); continue; }
+          setSilently(produce((d: DAWState) => { const p = d.tracks.find(y => y.id === t.id)?.plugins.find(q => q.id === tg.pluginId); if (p) p.params = { ...p.params, ...params }; }));
+          audioEngine.getPluginNodeInstance(t.id, tg.pluginId)?.updateParams?.(params);
+        }
+      }
+    };
+    midiInput.setLearnHandler((hits, learned) => {
+      if (learned) setAiNotification(`🎛️ Relié : le bouton CC${learned.cc} pilote « ${learned.target.label} » (gardé dans tes préférences).`);
+      hits.forEach(h => learnPendingRef.current.set(h.mapping.id, h));
+      if (!learnRafRef.current) learnRafRef.current = requestAnimationFrame(flush);
+    });
+    return () => { midiInput.setLearnHandler(null); if (learnRafRef.current) cancelAnimationFrame(learnRafRef.current); };
+  }, [handleUpdateTrack, handleUpdatePluginParams, setSilently, setAiNotification]);
 
   const answerHeadphones = useCallback((hasHeadphones: boolean) => {
     try { localStorage.setItem('nova_headphones', hasHeadphones ? '1' : '0'); } catch { /* stockage indisponible */ }
@@ -2795,6 +2994,22 @@ function Studio() {
         if (clip) clip.start = Math.max(0, it.start + delta);
       });
     }));
+  }, [setState]);
+
+  /** Fin d'un déplacement de clips : l'automation suit les clips (R8, préférence « Automation suit l'édition »). */
+  const handleClipsMoved = useCallback((items: { clipId: string; fromTrackId: string; fromStart: number }[]) => {
+    if (!items.length) return;
+    setState(prev => {
+      const moves: ClipMove[] = [];
+      for (const it of items) {
+        const t = prev.tracks.find(x => x.clips.some(c => c.id === it.clipId));
+        const c = t?.clips.find(x => x.id === it.clipId);
+        if (!t || !c) continue;
+        moves.push({ clipId: it.clipId, fromTrackId: it.fromTrackId, toTrackId: t.id, fromStart: it.fromStart, duration: c.duration, toStart: c.start });
+      }
+      const tracks = moveAutomationWithClips(prev.tracks, moves);
+      return tracks === prev.tracks ? prev : { ...prev, tracks };
+    });
   }, [setState]);
 
   const handleReorderTracks = useCallback((sourceTrackId: string, destTrackId: string) => {
@@ -3242,43 +3457,19 @@ function Studio() {
   const GROUP_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e', '#14b8a6',
                         '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#ec4899'];
 
+  // Groupes Pro Tools (R12, utils/editGroups) : une piste peut être dans plusieurs groupes.
   const handleCreateGroup = useCallback((trackIds: string[]) => {
     if (!trackIds || trackIds.length < 2) return;
-    setState(produce((draft: DAWState) => {
-      const index = draft.trackGroups.length;
-      const id = `grp-${Date.now()}`;
-      draft.trackGroups.push({
-        id,
-        name: `Groupe ${index + 1}`,
-        color: GROUP_COLORS[index % GROUP_COLORS.length],
-        trackIds: [...trackIds],
-        isCollapsed: false,
-        linkedVolume: true,
-        linkedMute: true,
-        linkedSolo: true,
-        linkedPan: false
-      });
-      // Une piste n'appartient qu'a un seul groupe.
-      draft.trackGroups.forEach(g => {
-        if (g.id !== id) g.trackIds = g.trackIds.filter(tid => !trackIds.includes(tid));
-      });
-      draft.trackGroups = draft.trackGroups.filter(g => g.id === id || g.trackIds.length > 0);
-      draft.tracks.forEach(t => { if (trackIds.includes(t.id)) t.groupId = id; });
-    }));
+    const id = newGroupId();
+    setState(prev => createGroup(prev, { id, trackIds, kind: 'both' }));
   }, [setState]);
 
   const handleUpdateGroup = useCallback((group: TrackGroup) => {
-    setState(produce((draft: DAWState) => {
-      const idx = draft.trackGroups.findIndex(g => g.id === group.id);
-      if (idx > -1) draft.trackGroups[idx] = group;
-    }));
+    setState(prev => updateGroup(prev, group.id, group));
   }, [setState]);
 
   const handleDeleteGroup = useCallback((groupId: string) => {
-    setState(produce((draft: DAWState) => {
-      draft.trackGroups = draft.trackGroups.filter(g => g.id !== groupId);
-      draft.tracks.forEach(t => { if (t.groupId === groupId) delete t.groupId; });
-    }));
+    setState(prev => deleteGroup(prev, groupId));
   }, [setState]);
 
   const handleCreateAutomationLane = useCallback(() => {
@@ -4410,6 +4601,19 @@ function Studio() {
     else if (cmd.kind === 'sendView') setSendViewSlot(cmd.slot);
   }), [setState, handleSetPluginState, setAiNotification]);
 
+  // --- R12 · Groupes d'édition et temps (hooks/useR12) : liste des groupes, fenêtre Temps, piste Arrangement.
+  const [r12Panel, setR12Panel] = useState<{ panel: R12Panel; preset?: TimeDialogPreset; newGroup?: boolean } | null>(null);
+  const localTimeOpRef = useRef<((op: TimeOp, next: DAWState) => void) | null>(null);
+  useR12(state, {
+    stateRef, setState, setPanel: setR12Panel,
+    notify: (msg) => { setAiNotification(msg); setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), 5000); },
+    onLocalTimeOp: (op, next) => localTimeOpRef.current?.(op, next),
+  });
+  const arrangeLaneShown = useArrangeLaneShown();
+  const arrangeLaneProp = useMemo(() => (arrangeLaneShown && (state.markers?.length ?? 0) > 0
+    ? { height: ARRANGE_LANE_H, render: (v: { zoomH: number; scrollLeft: number; headerWidth: number; width: number }) => <ArrangeLane {...v} markers={state.markers} tracks={state.tracks} /> }
+    : undefined), [arrangeLaneShown, state.markers, state.tracks]);
+
   const COLLAB_ACTIVE_KEY = 'nova_collab_active';
   const [collabOpen, setCollabOpen] = useState(false);
   const collabOpenRef = useRef(false);
@@ -4868,6 +5072,30 @@ function Studio() {
         if (!o.replay) setAiNotification(`🎼 ${o.author_name} a réglé le tempo : ${op.bpm} BPM, ${op.timeSignature.numerator}/${op.timeSignature.denominator}${op.tempoEvents.length ? ` (${op.tempoEvents.length} changement${op.tempoEvents.length > 1 ? 's' : ''} dans le morceau)` : ''}.`);
         break;
       }
+      case 'groups': {
+        // Groupes (R12) : toute la liste en une opération ; le plus récent du journal gagne.
+        if (!lwwRef.current.accept('groups', o.seq)) break;
+        const op = sanitizeGroupsOp(p);
+        if (!op) break;
+        const sig = groupsSig(applyGroupsOp(stateRef.current, op));
+        knownGroupsSigRef.current = sig;
+        if (sig === groupsSig(stateRef.current)) break;
+        setState(prev => applyGroupsOp(prev, op));
+        if (!o.replay) setAiNotification(`🔗 ${o.author_name} a modifié les groupes (${op.groups.length} groupe${op.groups.length > 1 ? 's' : ''}${op.settings.suspended ? ', suspendus' : ''}).`);
+        break;
+      }
+      case 'timeop': {
+        // Temps inséré / supprimé, section déplacée ou dupliquée (R12) : rejouée ici à l'identique
+        // (mêmes identifiants) ; rien n'est renvoyé en écho (contenu, repères, accords, tempo connus).
+        const op = sanitizeTimeOp(p);
+        if (!op) break;
+        const cur = stateRef.current;
+        const r = runTimeOpOn(cur, op);
+        rememberTimeOp(r.state);
+        setState(prev => (prev === cur ? r.state : runTimeOpOn(prev, op).state));
+        if (!o.replay) setAiNotification(`⏱️ ${o.author_name} : ${r.report.summary}.`);
+        break;
+      }
       case 'listen': {
         // « Écouter ensemble » lancé (ou arrêté) par l'hôte.
         if (!lwwRef.current.accept('listen', o.seq)) break;
@@ -5065,6 +5293,7 @@ function Studio() {
         else if (kind === 'own' && Array.isArray(op.trackIds)) (op.trackIds as string[]).forEach(id => { if (claimSeqRef.current.get(id) === Infinity) claimSeqRef.current.set(id, seq); });
         else if (kind === 'markers') { [...(Array.isArray(op.upsert) ? op.upsert : []), ...((Array.isArray(op.remove) ? op.remove : []).map((id: string) => ({ id })))].forEach((m: any) => lwwRef.current.note(`marker:${m.id}`, seq)); }
         else if (kind === 'listen') lwwRef.current.note('listen', seq);
+        else if (kind === 'groups') lwwRef.current.note('groups', seq);
         else if (kind === 'chords') [...(Array.isArray(op.upsert) ? op.upsert : []).map((c: any) => c?.id), ...(Array.isArray(op.remove) ? op.remove : [])]
           .forEach((id: unknown) => { if (typeof id === 'string') { lwwRef.current.note(`chord:${id}`, seq); pendingChordsRef.current.delete(id); } });
         else if (kind === 'chat' && typeof op.localId === 'string') setCollabMessages(m => m.map(x => (x.id === op.localId ? { ...x, pending: false } : x)));
@@ -5353,6 +5582,32 @@ function Studio() {
     knownTempoSigRef.current = sig;
     c.client.queue('tempo', 'tempo', op as unknown as Record<string, unknown>);
   }, [state.bpm, state.timeSignature, state.tempoEvents, collab]);
+
+  // Groupes (R12) : une seule opération pour toute la liste (et les réglages : suspension, <TOUT>).
+  const knownGroupsSigRef = useRef<string | null>(null);
+  useEffect(() => { knownGroupsSigRef.current = collab ? groupsSig(stateRef.current) : null; }, [collab]);
+  useEffect(() => {
+    const c = collabRef.current;
+    if (!c) return;
+    const sig = groupsSig(state);
+    if (sig === knownGroupsSigRef.current) return;
+    knownGroupsSigRef.current = sig;
+    c.client.queue('groups', 'groups', groupsOpOf(state) as unknown as Record<string, unknown>);
+  }, [state.trackGroups, state.groupSettings, collab]);
+  /** Après une opération sur le temps : ce qu'elle a changé est connu de tous (rien n'est renvoyé). */
+  const rememberTimeOp = (next: DAWState) => {
+    next.tracks.forEach(t => remoteTouchedRef.current.add(t.id));
+    knownMarkersRef.current = new Map((next.markers || []).map(m => [m.id, markerSig(m)]));
+    knownChordsRef.current = new Map((next.chords || []).map(c => [c.id, chordSig(c)]));
+    knownTempoSigRef.current = tempoOpSig(tempoOpOf(next));
+  };
+  // Opération sur le temps faite ici : UNE opération part chez les autres, qui la rejouent.
+  localTimeOpRef.current = (op, next) => {
+    const c = collabRef.current;
+    if (!c) return;
+    rememberTimeOp(next);
+    c.client.queue(`timeop:${op.id}`, 'timeop', op as unknown as Record<string, unknown>);
+  };
 
   // Repères : ceux posés / déplacés / supprimés ici partent chez les autres (avec mon nom).
   useEffect(() => {
@@ -6958,6 +7213,12 @@ function Studio() {
   const onRequestAddPluginMenu = useLatestCallback((tid: string, x: number, y: number) => setAddPluginMenu({ trackId: tid, x, y }));
   const onEditClipStable = useLatestCallback(handleEditClip);
   const onEditMidiStable = useLatestCallback((trackId: string, clipId: string) => setMidiEditorOpen({ trackId, clipId }));
+  // Ouvrir le piano roll sur un clip depuis n'importe où (message, lien, scénario de test).
+  useEffect(() => {
+    const on = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.trackId && d?.clipId) setMidiEditorOpen({ trackId: d.trackId, clipId: d.clipId }); };
+    window.addEventListener('nova:open-piano-roll', on);
+    return () => window.removeEventListener('nova:open-piano-roll', on);
+  }, []);
 
   // --- Séparation de stems (menu du clip ; calcul dans l'appli Windows) ---------------
   const [stemTarget, setStemTarget] = useState<StemTarget | null>(null);
@@ -7125,6 +7386,8 @@ function Studio() {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden [overflow:clip] relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
       {saveState.isSaving && <SaveOverlay progress={saveState.progress} message={saveState.message} />}
+      {/* Fenêtre Loudness du master (R11) : ouverte depuis le transport ou la console. */}
+      <LoudnessPanelHost />
 
       {/* TransportBar - Desktop, Tablet ET Mobile avec menu hamburger */}
       <div className="relative z-50">
@@ -7231,13 +7494,14 @@ function Studio() {
                    onEditClip={onEditClipStable} isRecording={state.isRecording} isPlaying={state.isPlaying} recStartTime={state.recStartTime}
                    onMoveClip={handleMoveClip} onEditMidi={onEditMidiStable} onSeparateStems={onSeparateStemsStable}
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
-                   onMoveClipsBy={handleMoveClipsBy}
+                   onMoveClipsBy={handleMoveClipsBy} onClipsMoved={handleClipsMoved}
                    onAudioDrop={onArrangementAudioDrop}
                    punch={state.punch} onUpdatePunch={handleUpdatePunch} editCommands={editCommands} takeLanes={takeLanesApi}
                    markers={state.markers} onAddMarker={handleAddMarker}
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker} onAddRegion={handleAddRegion}
                    chordLane={chordLane}
                    tempoLane={tempoLaneProp}
+                   arrangeLane={arrangeLaneProp}
                 />
                 </StructureTracksContext.Provider>
                 </PanelBoundary>
@@ -7277,6 +7541,16 @@ function Studio() {
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${structurePanel === 'tracks' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
                   <i className="fas fa-list mr-1.5 text-[10px]" />Pistes{state.tracks.some(t => t.isHidden) ? ` · ${state.tracks.filter(t => t.isHidden).length} masquée${state.tracks.filter(t => t.isHidden).length > 1 ? 's' : ''}` : ''}
                 </button>
+                <button type="button" data-testid="dock-groups" onClick={() => setR12Panel(p => (p?.panel === 'groups' ? null : { panel: 'groups' }))} aria-pressed={r12Panel?.panel === 'groups'}
+                  title="Groupes (Pro Tools « Groups List ») : édition et mix liés, <TOUT>, suspendre (Ctrl+Maj+G), créer (Ctrl+G)"
+                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${r12Panel?.panel === 'groups' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
+                  <i className="fas fa-object-group mr-1.5 text-[10px]" />Groupes{state.trackGroups.length ? ` · ${state.trackGroups.length}` : ''}{state.groupSettings?.suspended ? ' ⏸' : ''}
+                </button>
+                <button type="button" data-testid="dock-time" onClick={() => openR12Panel('time', { preset: (() => { const sel = editSelectionStore.get().time; return sel ? { mode: 'insert' as const, at: sel.start, length: sel.end - sel.start, trackIds: sel.trackIds } : { mode: 'insert' as const, at: playheadStore.get() }; })() })}
+                  title="Insérer / supprimer du temps (Pro Tools : Insert Silence, Insert Time, Cut Time) — Ctrl+Alt+I"
+                  className="h-10 rounded-full border border-nv-line bg-nv-well px-3 text-[11px] font-bold whitespace-nowrap text-nv-muted hover:text-nv-ink">
+                  <i className="fas fa-arrows-alt-h mr-1.5 text-[10px]" />Temps
+                </button>
                 <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen}
                   title="Collaborer à distance : artiste, ingé son, beatmaker"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${collabOpen ? 'border-violet-400 bg-violet-500/25 text-white' : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'}`}>
@@ -7309,12 +7583,31 @@ function Studio() {
           )}
 
           {/* Mode Mobile - Nouveau système de pages */}
-          {isMobile && state.tracks.some(t => t.isHidden) && (activeMobileTab === 'TRACKS' || activeMobileTab === 'MIXER' || activeMobileTab === 'ARRANGEMENT') && (
-            <button type="button" data-testid="mobile-hidden-tracks" onClick={() => setStructurePanel('hidden')}
-              title="Pistes masquées : les révéler (et les activer)"
-              className="absolute right-2 top-2 z-[60] h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
-              <i className="fas fa-eye-slash mr-1.5 text-[10px] text-nv-muted" />Pistes masquées ({state.tracks.filter(t => t.isHidden).length})
-            </button>
+          {isMobile && (activeMobileTab === 'TRACKS' || activeMobileTab === 'MIXER' || activeMobileTab === 'ARRANGEMENT') && (
+            <div className="absolute right-2 top-2 z-[60] flex gap-1.5">
+              {/* Téléphone (R12) : groupes en lecture seule, insertion de temps. */}
+              {state.trackGroups.length > 0 && (
+                <button type="button" data-testid="mobile-groups" onClick={() => setR12Panel({ panel: 'groups' })}
+                  title="Groupes de la session (lecture seule sur téléphone)"
+                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
+                  <i className="fas fa-object-group mr-1.5 text-[10px] text-nv-muted" />Groupes ({state.trackGroups.length})
+                </button>
+              )}
+              {activeMobileTab !== 'MIXER' && (
+                <button type="button" data-testid="mobile-time" onClick={() => openR12Panel('time', { preset: { mode: 'insert', at: playheadStore.get() } })}
+                  title="Insérer ou supprimer du temps à la tête de lecture"
+                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
+                  <i className="fas fa-arrows-alt-h mr-1.5 text-[10px] text-nv-muted" />Temps
+                </button>
+              )}
+              {state.tracks.some(t => t.isHidden) && (
+                <button type="button" data-testid="mobile-hidden-tracks" onClick={() => setStructurePanel('hidden')}
+                  title="Pistes masquées : les révéler (et les activer)"
+                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
+                  <i className="fas fa-eye-slash mr-1.5 text-[10px] text-nv-muted" />Pistes masquées ({state.tracks.filter(t => t.isHidden).length})
+                </button>
+              )}
+            </div>
           )}
           {isMobile && (
             <PanelBoundary key={`mobile-${activeMobileTab}`} name={MOBILE_PAGE_NAMES[activeMobileTab] || 'cette page'}>
@@ -7410,7 +7703,22 @@ function Studio() {
             </Suspense>
             </PanelBoundary>
           )}
+          {r12Panel?.panel === 'groups' && (
+            <PanelBoundary name="la liste des groupes" onClose={() => setR12Panel(null)}>
+              <Suspense fallback={null}>
+                <GroupsListPanel readOnly={isMobile} newGroup={r12Panel.newGroup} selectedTrackIds={selectedTrackIds(state)} onClose={() => setR12Panel(null)}
+                  className={isMobile ? 'fixed inset-x-2 bottom-2 top-16 z-[700]' : 'absolute left-2 top-2 bottom-2 z-[655] w-[360px] max-w-[calc(100%-16px)]'} />
+              </Suspense>
+            </PanelBoundary>
+          )}
         </main>
+        {r12Panel?.panel === 'time' && (
+          <PanelBoundary name="la fenêtre Temps" onClose={() => setR12Panel(null)}>
+            <Suspense fallback={null}>
+              <TimeOpsDialog state={state} preset={r12Panel.preset} compact={isMobile} onClose={() => setR12Panel(null)} />
+            </Suspense>
+          </PanelBoundary>
+        )}
       </div>
       
       {/* Avancement des imports et des calages.
@@ -7538,7 +7846,7 @@ function Studio() {
       />
 
       <RecordingCoach
-        isRecording={state.isRecording}
+        isRecording={state.isRecording && !isMidiRecordTrack(state.tracks.find(t => t.isTrackArmed))}
         trackId={state.tracks.find(t => t.isTrackArmed)?.id || null}
         trackName={state.tracks.find(t => t.isTrackArmed)?.name}
         partLabel={SESSION_LABEL[sessionPart]}
@@ -7854,6 +8162,8 @@ function Studio() {
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}
       
       <MidiHost state={state} getState={getStateForMidi} setState={setState} pianoRoll={midiEditorOpen} />
+      <MidiInputHost tracks={state.tracks} selectedTrackId={state.selectedTrackId} isRecording={state.isRecording}
+        onArm={id => { void armForRecording(id); }} onToggleRecord={() => { void handleToggleRecord(); }} />
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
           <div data-nova-transport="" className="fixed inset-0 z-[250] bg-[#0c0d10] flex flex-col animate-in slide-in-from-bottom-10 duration-200">
              <PanelBoundary name="l'éditeur MIDI" onClose={() => setMidiEditorOpen(null)}>
@@ -7899,7 +8209,7 @@ function Studio() {
            <div className={`relative ${isMobile ? 'w-full h-full p-4 overflow-y-auto' : 'pointer-events-auto'}`} onMouseDown={e => e.stopPropagation()}>
               <PanelBoundary key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} name="la fenêtre d'effet" onClose={() => setActivePlugin(null)}>
               <Suspense fallback={<div className="w-64 h-32 flex items-center justify-center text-slate-400 text-[11px] bg-[#14161a] border border-white/10 rounded-2xl"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}>
-              <PluginEditor key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} onToggleFreeze={handleFreezeTrack} onToggleBypass={handleToggleBypass} onOpenPlugin={(tid, p) => setActivePlugin({ trackId: tid, plugin: p })} />
+              <PluginEditor key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} onToggleFreeze={handleFreezeTrack} onToggleBypass={handleToggleBypass} onOpenPlugin={(tid, p) => setActivePlugin({ trackId: tid, plugin: p })} allTracks={state.tracks} />
               </Suspense>
               </PanelBoundary>
            </div>

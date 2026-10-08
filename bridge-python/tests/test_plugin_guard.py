@@ -34,14 +34,16 @@ class GuardTest(unittest.TestCase):
         return [PY, "-c", code]
 
     def test_essai_plante_bloque_reussit(self):
+        # L'essai tourne en priorité basse : sur une machine chargée (Pro Tools ouvert),
+        # Python seul met déjà 10 à 13 s à démarrer. 60 s = marge, pas un délai attendu.
         crash = self._child("import os; os.abort()")
-        self.assertEqual(plugin_guard.run_trial(self.plugin, None, 20, crash)[0], "crash")
+        self.assertEqual(plugin_guard.run_trial(self.plugin, None, 60, crash)[0], "crash")
         hang = self._child("import time; time.sleep(30)")
         self.assertEqual(plugin_guard.run_trial(self.plugin, None, 1.5, hang)[0], "hang")
         ok = self._child(f"print('{plugin_guard.MARK}' + '{{\"ok\": true, \"params\": 3}}')")
-        self.assertEqual(plugin_guard.run_trial(self.plugin, None, 20, ok), ("ok", "3 réglages"))
+        self.assertEqual(plugin_guard.run_trial(self.plugin, None, 60, ok), ("ok", "3 réglages"))
         err = self._child(f"print('{plugin_guard.MARK}' + '{{\"error\": \"scan failure\"}}')")
-        self.assertEqual(plugin_guard.run_trial(self.plugin, None, 20, err)[0], "error")
+        self.assertEqual(plugin_guard.run_trial(self.plugin, None, 60, err)[0], "error")
 
     def test_plugin_qui_plante_est_isole_et_refuse(self):
         self.assertTrue(plugin_guard.is_risky(self.plugin, None))       # liste de départ (RUBY2)

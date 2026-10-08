@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import TrackMeter from './meters/TrackMeter';
 import { AutotuneBadge } from './AutotuneVstPanel';
 import { useCollabRole, requestVolumeLock, useCollabLive } from '../utils/collabStore';
 import { requestRemoteSend, useRemoteBadge } from '../utils/remoteStore';
@@ -32,6 +33,7 @@ import { useFreezeRefreshBusy } from '../hooks/useFrozenRefresh';
 import { useRecFrozen } from '../utils/recFreezeStore';
 import { useInstrumentStatus } from '../utils/instrumentStore';
 import { openSynthPanel } from '../utils/synthPanelStore';
+import { isMidiRecordTrack } from '../utils/midiRecord';
 import MonitorControl from './MonitorControl';
 import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
@@ -449,6 +451,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined, scrollMarginTop: 44, scrollMarginBottom: 8 }}
     >
       <TrackStructureBadge track={track} />
+      {/* Vrai mètre G / D de la piste + réduction de gain (R11), au bord droit comme dans Pro Tools. */}
+      <div className="absolute right-0.5 top-1.5 bottom-1.5 w-[9px] z-20" data-testid={`header-meter-${track.id}`}>
+        <TrackMeter pointId={track.id} grTrackId={track.id} grText={false} marks={false} label={track.name} className="w-full" />
+      </div>
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center truncate flex-1 pr-2">
           <div 
@@ -647,6 +653,20 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 aria-pressed={!!track.isTrackArmed}
               >
                 <span className="text-[11px] font-bold">R</span>
+              </button>
+          )}
+
+          {/* Armement MIDI (R16) : synthé, 808, batterie, sampler, instrument VST */}
+          {isMidiRecordTrack(track) && (
+              <button
+                data-nova-arm-midi={track.id}
+                onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
+                className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
+                title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : track.isTrackArmed ? "Piste armée : ton clavier MIDI (ou celui de l'ordinateur, Ctrl+Maj+K) joue dessus. REC enregistre ce que tu joues." : "Armer la piste : ton clavier MIDI joue et enregistre dessus (comme le bouton d'armement de Pro Tools, l'armement d'enregistrement de Live, le Record de FL)"}
+                aria-label={`Armer l'enregistrement MIDI : ${track.name}`}
+                aria-pressed={!!track.isTrackArmed}
+              >
+                <i className="fas fa-circle text-[8px]"></i>
               </button>
           )}
         </div>

@@ -53,7 +53,12 @@ export interface AnalogCompInternal {
 
 export interface AnalogCompCore {
   setInternal(cfg: AnalogCompInternal): void;
-  process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number): void;
+  /**
+   * keyL / keyR : clé de side-chain externe (R7) ; présente, elle remplace le
+   * signal du détecteur (même étage d'entrée, en mode « avant » même pour un
+   * appareil à contre-réaction : la clé ne passe pas par la cellule).
+   */
+  process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number, keyL?: Float32Array | null, keyR?: Float32Array | null): void;
   /** Mesures depuis le dernier appel : réduction de gain max et courante (dB, ≥ 0), crêtes entrée / sortie (dBFS). */
   takeMeters(): { grDb: number; grNowDb: number; inPeakDb: number; outPeakDb: number };
   /** Atténuation courante du canal gauche (pour les tests). */
@@ -152,11 +157,14 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
     l0 = +cfg.l0; dl = +cfg.dl > 0 ? +cfg.dl : 1;
   }
 
-  function process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number) {
+  function process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number, keyL?: Float32Array | null, keyR?: Float32Array | null) {
     var right = inR || inL;
+    var kRight = keyL ? (keyR || keyL) : null;
     // entrée mono (deux canaux identiques, cas d'une voix) : un seul canal calculé, recopié
+    // (avec une clé externe, la clé doit elle aussi être identique sur les deux canaux)
     var mono = statesEq;
     if (mono && right !== inL) { for (var j = 0; j < n; j++) if (right[j] !== inL[j]) { mono = false; break; } }
+    if (mono && keyL && kRight !== keyL) { for (var j2 = 0; j2 < n; j2++) if ((kRight as Float32Array)[j2] !== keyL[j2]) { mono = false; break; } }
     var nch = mono ? 1 : 2;
     var drv = P[52] !== 0 ? P[52] : 1;
     var c3 = P[100] > 0.5, sq = P[125] > 0.5, thr2 = P[1] * P[1];
@@ -175,7 +183,12 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
         var xi = inLin ? x0 * pre : shape(x0 * pre, P[14], P[15], P[27], P[53], P[65]);
         if (xfIn) { fluxi[c] += (xi - fluxi[c]) * P[73]; var fi = fluxi[c]; xi = xi + P[72] * fi * (fi < 0 ? -fi : fi); }
         xin[c] = xi;
-        var s = fbOn ? yprev[c] : xi;
+        var s: number;
+        if (keyL) {
+          // Clé externe (side-chain) : le détecteur écoute la clé, le son traité reste l'entrée.
+          var k0 = c === 0 ? keyL[i] : (kRight as Float32Array)[i];
+          s = inLin ? k0 * pre : shape(k0 * pre, P[14], P[15], P[27], P[53], P[65]);
+        } else s = fbOn ? yprev[c] : xi;
         if (hpOn) {
           var h0 = c * 4;
           var o = P[20] * s + P[21] * hp[h0] + P[22] * hp[h0 + 1] - P[23] * hp[h0 + 2] - P[24] * hp[h0 + 3];

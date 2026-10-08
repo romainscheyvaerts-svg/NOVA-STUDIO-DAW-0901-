@@ -33,6 +33,10 @@
  *
  * Écoute : 0 = normal, 1 = la bande seule (ce que le détecteur entend),
  * 2 = ce qui est retiré (y = (1 − g)·b).
+ *
+ * Écoute externe (side-chain, R7) : avec une clé (keyL/keyR), le détecteur
+ * mesure la bande DE LA CLÉ (même filtre, état séparé) ; le son traité reste
+ * l'entrée : y = x + (g − 1)·F(x). Sans clé, rien ne change.
  */
 
 export interface DeesserCoreParams {
@@ -70,7 +74,7 @@ export interface DeesserMeters {
 
 export interface DeesserCore {
   setParams(p: DeesserCoreParams): void;
-  process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number): void;
+  process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number, keyL?: Float32Array | null, keyR?: Float32Array | null): void;
   takeMeters(): DeesserMeters;
   reset(): void;
 }
@@ -80,6 +84,7 @@ export function createDeesserCore(sampleRate: number): DeesserCore {
   // Filtre de bande (biquad, coefficients normalisés)
   var b0 = 0, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
   var z = new Float64Array(8); // par canal : x1, x2, y1, y2
+  var zk = new Float64Array(8); // idem pour la clé externe (side-chain)
   var envB = 0, envW = 0, gr = 0;
   var mGr = 0, lastDet = -120;
   var enabled = true, listen = 0, relative = true;
@@ -129,14 +134,16 @@ export function createDeesserCore(sampleRate: number): DeesserCore {
   }
 
   function reset() {
-    z.fill(0); envB = 0; envW = 0; gr = 0; mGr = 0; lastDet = -120;
+    z.fill(0); zk.fill(0); envB = 0; envW = 0; gr = 0; mGr = 0; lastDet = -120;
   }
 
   setParams({});
 
-  function process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number) {
+  function process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number, keyL?: Float32Array | null, keyR?: Float32Array | null) {
     var right = inR || inL;
     var stereo = !!inR;
+    var kRight = keyL ? (keyR || keyL) : null;
+    var kStereo = !!keyL && !!keyR && keyR !== keyL;
     for (var i = 0; i < n; i++) {
       var xl = inL[i], xr = right[i];
       // bande, canal gauche
@@ -149,8 +156,23 @@ export function createDeesserCore(sampleRate: number): DeesserCore {
       }
       // énergies (stéréo couplée)
       // voix « hors bande » = x − b (tout sauf la bande) : un « s » la domine nettement
-      var rl = xl - bl, rr = xr - br;
-      var pb = 0.5 * (bl * bl + br * br), pw = 0.5 * (rl * rl + rr * rr);
+      var rl: number, rr: number, pb: number, pw: number;
+      if (keyL) {
+        // clé externe : le détecteur écoute la bande de la clé, le son traité reste l'entrée
+        var kl = keyL[i], kr = (kRight as Float32Array)[i];
+        var dl = b0 * kl + b1 * zk[0] + b2 * zk[1] - a1 * zk[2] - a2 * zk[3];
+        zk[1] = zk[0]; zk[0] = kl; zk[3] = zk[2]; zk[2] = dl;
+        var dr = dl;
+        if (kStereo) {
+          dr = b0 * kr + b1 * zk[4] + b2 * zk[5] - a1 * zk[6] - a2 * zk[7];
+          zk[5] = zk[4]; zk[4] = kr; zk[7] = zk[6]; zk[6] = dr;
+        }
+        rl = kl - dl; rr = kr - dr;
+        pb = 0.5 * (dl * dl + dr * dr); pw = 0.5 * (rl * rl + rr * rr);
+      } else {
+        rl = xl - bl; rr = xr - br;
+        pb = 0.5 * (bl * bl + br * br); pw = 0.5 * (rl * rl + rr * rr);
+      }
       envB += (pb - envB) * (pb > envB ? cAttE : cRelE);
       envW += (pw - envW) * (pw > envW ? cAttE : cRelE);
       // niveau détecté et réduction visée (dB)

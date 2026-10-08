@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { PunchSettings } from '../types';
+import { barItem } from '../utils/barFit';
 import { DEFAULT_POST_ROLL_BARS, DEFAULT_PRE_ROLL_BARS, DEFAULT_PUNCH_XFADE_MS, ROLL_CHOICES_BARS, ROLL_CHOICES_SEC, hasPunchZone, rollBars, rollLabel } from '../utils/punch';
 
 /**
@@ -15,11 +16,15 @@ interface Props {
   onTogglePunch: () => void;
   onUpdatePunch?: (patch: Partial<PunchSettings>) => void;
   onToggleQuickPunch?: () => void;
+  /** Dans la barre du haut : repliable (utils/barFit) avec cette priorité. */
+  foldPrio?: number;
 }
 
 const fmtSec = (s: number) => `${s.toFixed(2).replace('.', ',')} s`;
 
-const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePunch, onUpdatePunch, onToggleQuickPunch }) => {
+const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePunch, onUpdatePunch, onToggleQuickPunch, foldPrio }) => {
+  // Repli dans la barre : PRÉ / POST d'abord (réglables aussi par ▾), puis QP, puis tout le punch (menu ☰).
+  const fold = (item: string, prio: number) => (foldPrio === undefined ? {} : barItem(item, prio));
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -49,7 +54,7 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
   const chip = (on: boolean) => `px-1.5 h-6 rounded-md text-[9px] font-black tracking-wider transition-all border ${on ? 'bg-amber-500/15 text-amber-300 border-amber-500/40' : 'text-slate-500 border-white/10 hover:text-white'}`;
 
   return (
-    <div className="hidden md:flex items-center gap-1" data-nova-target="punch">
+    <div {...fold('punch', foldPrio ?? 0)} className="hidden md:flex items-center gap-1" data-nova-target="punch">
       <button onClick={onTogglePunch} aria-pressed={isPunchActive}
         title={`Punch-in / punch-out (comme dans Pro Tools) : REC ne remplace que la zone rouge de la règle (${zone}), avec un crossfade aux bords. La zone vient de ta sélection, sinon de la boucle.`}
         className={`nova-hit-tactile h-8 px-2 rounded-lg flex items-center justify-center text-[9px] font-black tracking-wider transition-all ${isPunchActive ? 'bg-red-500/25 text-red-300 border border-red-500/50' : 'text-slate-500 hover:text-white border border-transparent'}`}>
@@ -59,12 +64,12 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
         <>
           <button onClick={() => onUpdatePunch({ preRollOn: !preOn })} aria-pressed={preOn}
             title={`Pré-roll (comme dans Pro Tools) : la lecture repart ${howLong(preBars, preSec)} avant le point d'entrée pour te caler ; seul ce qui suit est gardé. Clic : activer / couper. Durée (mesures ou secondes) dans le menu ▾.`}
-            className={`hidden xl:flex items-center ${chip(preOn)}`}>PRÉ {label(preBars, preSec, preOn)}</button>
+            {...fold('punch-pre', 5)} className={`${foldPrio === undefined ? 'hidden xl:flex' : 'flex'} items-center whitespace-nowrap ${chip(preOn)}`}>PRÉ {label(preBars, preSec, preOn)}</button>
           <button onClick={() => onUpdatePunch({ postRollOn: !postOn })} aria-pressed={postOn}
             title={`Post-roll (comme dans Pro Tools) : la lecture continue ${howLong(postBars, postSec)} après le point de sortie, puis s'arrête. Clic : activer / couper.`}
-            className={`hidden xl:flex items-center ${chip(postOn)}`}>POST {label(postBars, postSec, postOn)}</button>
+            {...fold('punch-post', 5)} className={`${foldPrio === undefined ? 'hidden xl:flex' : 'flex'} items-center whitespace-nowrap ${chip(postOn)}`}>POST {label(postBars, postSec, postOn)}</button>
           {onToggleQuickPunch && (
-            <button onClick={onToggleQuickPunch} aria-pressed={quick}
+            <button {...fold('quickpunch', 23)} onClick={onToggleQuickPunch} aria-pressed={quick}
               title="QuickPunch (comme dans Pro Tools) : pendant la lecture, REC (ou R) entre dans l'enregistrement sur la piste armée, un 2e appui en sort, sans arrêter la musique. Idéal pour refaire une fin de phrase."
               className={`nova-hit-tactile h-6 px-1.5 rounded-md text-[9px] font-black tracking-wider border transition-all ${quick ? 'bg-red-500/25 text-red-300 border-red-500/50' : 'text-slate-500 border-white/10 hover:text-white'}`}>
               QP

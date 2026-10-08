@@ -87,6 +87,8 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.tools', keys: ['1', '2', '3'], label: 'Outil sélection / ciseaux / gomme', pt: 'F6 / F7 / F8', category: 'Édition' }),
   nova({ id: 'nova.pencil', keys: ['6'], label: 'Crayon : dessiner la ligne de gain d’un clip ou une ligne d’automation (libre, ligne, triangle, carré, aléatoire)', pt: 'F10 (Pencil Tool)', category: 'Édition' }),
   // Géré par components/MidiHost (V25). Ctrl+Alt+C : repli quand le navigateur garde Ctrl+Maj+C (outils de développement).
+  nova({ id: 'nova.computerKeyboard', keys: ['ctrl+shift+k'], label: 'Clavier de l’ordinateur = clavier MIDI sur la piste armée ou sélectionnée, sans ouvrir le piano roll (R reste l’enregistrement, Espace la lecture)', pt: 'Pro Tools : clavier MIDI (Ctrl+Démarrer+K) · Live : M (Computer MIDI Keyboard) · FL : Typing keyboard to piano', category: 'Transport' }),
+  nova({ id: 'nova.muteNotes', keys: ['ctrl+m'], label: 'Piano roll : rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Alt+clic sur une note aussi)', pt: 'Pro Tools : Mute Notes (Ctrl+M) · FL : outil Muet', category: 'Clavier MIDI' }),
   nova({ id: 'nova.captureMidi', keys: ['ctrl+shift+c', 'ctrl+alt+c'], label: 'Capturer ce que tu viens de jouer (clip MIDI créé après coup)', pt: 'Pas dans Pro Tools : Capture MIDI de Live (Ctrl+Maj+C)', category: 'Transport' }),
 
   // --- Ajoutés façon Pro Tools (toujours actifs) ----------------------------------
@@ -138,6 +140,10 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.heal', keys: ['ctrl+h', 'ctrl+alt+h'], label: 'Recoller deux morceaux d’un même fichier (Heal) : sélection, plage ou jonction sous la tête de lecture', pt: 'Ctrl+H (Heal Separation)', category: 'Édition', command: 'heal' }),
   g({ id: 'pt.repeat', keys: ['alt+r'], label: 'Répéter les clips sélectionnés n fois à la suite (fenêtre)', pt: 'Alt+R (Repeat)', category: 'Édition', command: 'repeatClips' }),
   g({ id: 'pt.loopClip', keys: ['ctrl+alt+l'], label: 'Boucler le clip sélectionné (nombre de tours, fondus aux jonctions)', pt: 'Ctrl+Alt+L (Loop Clip)', category: 'Édition', command: 'loopClips' }),
+  // Groupes et temps (R12, hooks/useR12).
+  g({ id: 'pt.groupCreate', keys: ['ctrl+g'], label: 'Créer un groupe avec les pistes sélectionnées (édition et mix)', pt: 'Ctrl+G (Group)', category: 'Édition', command: 'groupCreate' }),
+  g({ id: 'pt.groupsSuspend', keys: ['ctrl+shift+g'], label: 'Suspendre / reprendre tous les groupes', pt: 'Ctrl+Maj+G (Suspend All Groups)', category: 'Édition', command: 'groupsSuspend' }),
+  g({ id: 'pt.insertTime', keys: ['ctrl+alt+i'], label: 'Insérer ou supprimer du temps (repères, accords, tempo, automation et clips suivent)', pt: 'Ctrl+Maj+E (Insert Silence) — pris par Exporter dans NOVA', category: 'Édition', command: 'insertTime' }),
   g({ id: 'pt.focus', keys: ['ctrl+alt+1'], label: 'Commands Keyboard Focus on / off (une touche = une commande)', pt: 'Ctrl+Alt+1 (bouton a–z)', category: 'Keyboard Focus' }),
 
   // --- Commands Keyboard Focus (une touche = une commande) ------------------------

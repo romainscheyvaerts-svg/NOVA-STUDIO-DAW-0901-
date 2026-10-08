@@ -38,6 +38,7 @@ import { DrumRackNode } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
 import { events808 } from '../utils/bass808';
+import { playableNotes, ccValueAt, ccDefault, sortPoints, SUSTAIN } from '../utils/midiCc';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
 import { CaptureRing as _CaptureRing, chooseCapture, captureMinutes, captureWorkletSource, type PlayRun } from '../utils/audioCapture';
 void _CaptureRing;
@@ -67,6 +68,13 @@ import { gainPointsSig } from '../utils/clipGain';
 import { auditionClips } from '../utils/playlists';
 import { ChordEvent, chordSteps } from '../utils/chordDetect';
 import { engineView, VOID_OUTPUT } from '../utils/trackStructure';
+import { legacyAutomatable, paramsWithoutAutomated, hasPluginLane, pluginParamStaticValue } from './automationParams';
+import { isMuteParam, muteGainPoints, muteLaneOf } from '../utils/muteAutomation';
+import { SidechainRouter, KeyPath, KeyRoute, keyRoutes, pdcKeysFor, latencyBefore, isKeyedNode } from './sidechain';
+// R11 : vrais mètres (AudioWorklet partagé) et tête de tranche (trim, Ø, mono, largeur).
+import { meterBank } from './meters/meterBank';
+import { buildStrip, disposeStrip, setStrip, stripParam, stripSignature, StripNodes, TRIM_PARAM, WIDTH_PARAM } from './meters/channelStrip';
+import { GrPart, readGainReduction } from './meters/gainReduction';
 
 interface TrackDSP {
   input: GainNode;          
@@ -99,6 +107,12 @@ interface TrackDSP {
    */
   preFaderTap?: GainNode;
   /**
+   * Sortie de la chaîne d'effets (gain unité, avant le mute automatisé) : la
+   * clé de side-chain « avant fader » y est prise (R7). Le preFaderTap qui suit
+   * porte le mute automatisé (R8).
+   */
+  chainOut?: GainNode;
+  /**
    * Compensation de latence (PDC) : retard de la sortie principale et de chaque
    * envoi pour aligner les chemins plus courts (voir utils/pdc.ts) ; outputs =
    * destinations câblées ; downLatency = latence en aval de la chaîne (s).
@@ -122,6 +136,8 @@ interface TrackDSP {
   // reconstruire — et donc de couper brievement — le graphe quand rien de
   // structurel n'a change.
   graphSignature?: string;
+  /** Tête de tranche (R11) : trim, Ø, mono, largeur ; absente si la piste est neutre. */
+  strip?: StripNodes | null;
 }
 
 /** Journal d'une prise en cours (utils/recoveryStore.TakeJournal). */
@@ -348,7 +364,16 @@ export class AudioEngine {
     this.masterAnalyzerR.smoothingTimeConstant = 0.5;
 
     this.masterOutput.connect(this.masterLimiter);
-    this.masterLimiter.connect(this.masterAnalyzer);
+    // R11 : le DynamicsCompressorNode de Chrome ajoute un gain de compensation
+    // automatique (« makeup ») de (1 / gain à 0 dBFS)^0,6 : +0,57 dB ici, sur
+    // TOUT le mix, même très en dessous du seuil. L'écoute était donc 0,57 dB
+    // plus forte que l'export (qui n'a pas ce limiteur) et le LUFS lu en
+    // direct ne collait pas à celui du fichier. On retire ce gain juste après.
+    const safetyTrim = this.ctx.createGain();
+    const fullRangeDb = this.masterLimiter.threshold.value * (1 - 1 / this.masterLimiter.ratio.value);
+    safetyTrim.gain.value = Math.pow(Math.pow(10, fullRangeDb / 20), 0.6);
+    this.masterLimiter.connect(safetyTrim);
+    safetyTrim.connect(this.masterAnalyzer);
     // Sortie « navigateur » coupée pendant le flux ASIO : le mix part alors par
     // la carte, sinon l'artiste l'entendait deux fois (écho / effet de phase).
     this.browserOutput = this.ctx.createGain();
@@ -358,6 +383,8 @@ export class AudioEngine {
     this.masterAnalyzer.connect(this.masterSplitter);
     this.masterSplitter.connect(this.masterAnalyzerL, 0);
     this.masterSplitter.connect(this.masterAnalyzerR, 1);
+    // R11 : mètres du master (crête vraie, LUFS, corrélation) sur la sortie finale.
+    meterBank.init(this.ctx, this.masterAnalyzer);
 
     this.previewGain = this.ctx.createGain();
     this.previewAnalyzer = this.ctx.createAnalyser();
@@ -932,15 +959,20 @@ export class AudioEngine {
       panner: StereoPannerNode;
       output: GainNode;
       sends: Map<string, GainNode>;
-      /** Sortie de la chaîne d'effets, avant le fader (envois pré-fader) ; piste muette / coupée par un solo. */
+      /** Sortie de la chaîne d'effets, avant le fader (clé de side-chain) ; piste muette / coupée par un solo. */
       pre?: AudioNode;
+      /** Mute automatisé (R8), juste après la chaîne : envois pré-fader pris après lui. */
+      muteGain?: GainNode;
       silenced?: boolean;
       /** Effets créés pour le rendu (automation de leurs paramètres). */
       pluginNodes?: Map<string, any>;
+      /** Latence des effets avant chaque effet (side-chain, R7). */
+      pluginOffsets?: Map<string, number>;
       synth?: TrackSynth;
       sampler?: AudioSampler;
       drumRack?: DrumRackNode;
       bass808?: Bass808Node;
+      strip?: StripNodes | null;
     }
     const rendered = new Map<string, RenderTrack>();
     // Certains plugins (AutoTune) s'initialisent de maniere asynchrone : on
@@ -972,6 +1004,9 @@ export class AudioEngine {
       const output = offlineCtx.createGain();
 
       let head: AudioNode = input;
+      // Tête de tranche (R11) : trim, Ø, mono, largeur, comme en lecture.
+      const strip = buildStrip(offlineCtx, track);
+      if (strip) { input.connect(strip.input); head = strip.output; }
       // Piste gelee : meme cablage qu'en lecture (rendu -> effets restants).
       const frozen = isTrackFrozen(track);
       // Bus d'effets gelé : ce qui y entre encore en direct (envoi ajouté ailleurs) passe par ses effets non rendus.
@@ -987,6 +1022,8 @@ export class AudioEngine {
       let postLatency = 0;
       let frozenInput: GainNode | undefined;
       const pluginNodes = new Map<string, any>();
+      /** Latence des effets avant chaque effet (offset d'une clé de side-chain, R7). */
+      const pluginOffsets = new Map<string, number>();
       const addPlugin = (plugin: PluginInstance, isPost: boolean) => {
         // Inactif : absent du rendu (aucune latence). Bypass : contourné, retardé de sa latence (comme en lecture).
         if (plugin.isInactive) return;
@@ -1006,6 +1043,7 @@ export class AudioEngine {
             return;
           }
           pluginNodes.set(plugin.id, entry.node);
+          pluginOffsets.set(plugin.id, offlineLatency);
           if (entry.node?.ready instanceof Promise) pendingPlugins.push(entry.node.ready);
           head.connect(entry.input);
           head = entry.output;
@@ -1024,7 +1062,10 @@ export class AudioEngine {
         head = frozenInput;
       }
       postPlugins.forEach(p => addPlugin(p, true));
-      head.connect(gain);
+      // Sortie de la chaîne (clé de side-chain avant fader) -> mute automatisé (R8) -> fader.
+      const muteGain = offlineCtx.createGain();
+      head.connect(muteGain);
+      muteGain.connect(gain);
       const preNode = head;
       gain.connect(panner);
       panner.connect(output);
@@ -1035,7 +1076,7 @@ export class AudioEngine {
       panner.pan.value = options.preFader ? 0 : track.pan;
 
       const rt: RenderTrack = {
-        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pre: preNode, silenced,
+        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pluginOffsets, pre: preNode, muteGain, silenced, strip,
         frozenInput, frozenClipId: frozen ? track.frozenClip!.id : undefined, postLatency,
       };
 
@@ -1099,7 +1140,7 @@ export class AudioEngine {
         // Envoi muet (Pro Tools) : câblé mais à zéro.
         sendGain.gain.value = (send.preFader && rt.silenced) || send.isMuted ? 0 : send.level;
         const ownPan = typeof send.pan === 'number';
-        (send.preFader && rt.pre ? rt.pre : (ownPan ? rt.gain : rt.panner)).connect(sendGain);
+        (send.preFader && rt.pre ? (rt.muteGain || rt.pre) : (ownPan ? rt.gain : rt.panner)).connect(sendGain);
         const sendDelay = offlineCtx.createDelay(PDC_MAX_SECONDS);
         if (ownPan) {
           const sp = offlineCtx.createStereoPanner();
@@ -1114,11 +1155,34 @@ export class AudioEngine {
       });
     }
 
-    // --- 2-PDC. Compensation de latence (bus, envois) : mêmes règles qu'en lecture.
+    // --- 2-SC. Side-chain (R7) : clé = sortie de la chaîne (ou fader) de la source, filtrée, vers l'effet à clé.
+    const offlineKeys: { route: KeyRoute; path: KeyPath }[] = [];
+    for (const r of keyRoutes(tracks)) {
+      const node = rendered.get(r.targetTrackId)?.pluginNodes?.get(r.pluginId);
+      if (!isKeyedNode(node)) continue;
+      const srcs = r.sources.filter(sid => rendered.has(sid));
+      if (!srcs.length) continue;
+      const path = new KeyPath(offlineCtx);
+      path.setFilters(r.hpf, r.lpf);
+      srcs.forEach(sid => { const rs = rendered.get(sid)!; path.setSource(sid, r.tap === 'post' ? rs.gain : (rs.pre || rs.input)); });
+      path.connectTo(node.sidechainInput);
+      node.setSidechainActive!(true);
+      offlineKeys.push({ route: { ...r, sources: srcs }, path });
+    }
+
+    // --- 2-PDC. Compensation de latence (bus, envois, clés de side-chain) : mêmes règles qu'en lecture.
     {
       const nodes = new Map<string, PdcNode>();
-      rendered.forEach((rt, id) => nodes.set(id, { latency: rt.latency || 0, outputs: rt.outputs || [] }));
+      const routesR = offlineKeys.map(k => k.route);
+      rendered.forEach((rt, id) => nodes.set(id, {
+        latency: rt.latency || 0, outputs: rt.outputs || [],
+        ...(routesR.length ? { keys: pdcKeysFor(routesR, id, (tid, pid) => rendered.get(tid)?.pluginOffsets?.get(pid) || 0) } : {}),
+      }));
       const pdc = computePdc(nodes);
+      offlineKeys.forEach(({ route, path }) => route.sources.forEach(sid => {
+        const d = path.delayOf(sid);
+        if (d) d.delayTime.value = toSamples(pdc.get(sid)?.keyDelays.get(route.pluginId) ?? 0);
+      }));
       rendered.forEach((rt, id) => {
         const r = pdc.get(id);
         rt.down = r?.down || 0;
@@ -1150,7 +1214,12 @@ export class AudioEngine {
 
       playedLanes(track).forEach(lane => {
         if (options.preFader && lane.parameterName !== PRE_VOLUME) return;
-        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends, (rt.frozenInput || rt.input).gain);
+        if (isMuteParam(lane.parameterName)) {
+          // Mute automatisé (R8) : en paliers, calé sur la musique (avance PDC aval de la piste).
+          if (rt.muteGain && lane.points.length) this.programmerVoieHorsLigne(rt.muteGain.gain, muteGainPoints(lane.points), startOffset + toSamples(rt.down || 0), totalDuration);
+          return;
+        }
+        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends, (rt.frozenInput || rt.input).gain, rt.strip);
         if (!cible || !lane.points || lane.points.length === 0) return;
 
         const points = [...lane.points].sort((a, b) => a.time - b.time);
@@ -1234,7 +1303,8 @@ export class AudioEngine {
 
         // PDC : notes avancées de la latence de tout le chemin (comme en lecture).
         const lat = toSamples((rt.latency || 0) + (rt.down || 0));
-        for (const note of (rt.synth instanceof NovaSynthNode ? notesInTimeOrder(clip.notes) : clip.notes)) {
+        const heard = playableNotes(clip);
+        for (const note of (rt.synth instanceof NovaSynthNode ? notesInTimeOrder(heard) : heard)) {
           const noteStart = clip.start + note.start - startOffset - lat;
           const noteEnd = noteStart + note.duration;
           if (noteEnd <= 0 || noteStart >= totalDuration) continue;
@@ -1255,6 +1325,8 @@ export class AudioEngine {
         processedClips++;
         if (onProgress) onProgress(Math.round((processedClips / Math.max(1, totalClips)) * 80));
       }
+      // Contrôleurs MIDI (R16) : pitch bend, modulation, expression… mêmes instants qu'en lecture.
+      if (rt.synth) this.scheduleOfflineControllers(track, rt.synth, startOffset + toSamples((rt.latency || 0) + (rt.down || 0)), totalDuration);
     }
 
     if (pendingPlugins.length > 0) {
@@ -1423,6 +1495,8 @@ export class AudioEngine {
   private midiRunStart: number | null = null;
   /** Dernier retard PDC demandé par nœud (delayTime.value est en retard d'un rendu). */
   private pdcSet = new WeakMap<DelayNode, number>();
+  /** Side-chain (R7) : clés câblées en lecture (engine/sidechain.ts). */
+  private sidechain = new SidechainRouter(() => this.ctx);
 
   public setRecordingFreeze(trackId: string, freeze: { clip: Clip; upTo: number; clipIds: string[] } | null) {
     if (freeze) this.recFreezes.set(trackId, freeze); else this.recFreezes.delete(trackId);
@@ -1517,7 +1591,12 @@ export class AudioEngine {
   private recomputePdc() {
     if (!this.ctx) return;
     const nodes = new Map<string, PdcNode>();
-    this.tracksDSP.forEach((d, id) => nodes.set(id, { latency: this.pdcSuspended ? 0 : (d.pluginLatency || 0), outputs: d.outputs || [] }));
+    // Clés de side-chain (R7) : traitées comme des sorties de la piste source (alignées sur l'effet à clé).
+    const routes = this.sidechain.current();
+    this.tracksDSP.forEach((d, id) => nodes.set(id, {
+      latency: this.pdcSuspended ? 0 : (d.pluginLatency || 0), outputs: d.outputs || [],
+      ...(routes.length ? { keys: pdcKeysFor(routes, id, (tid, pid) => this.keyOffset(tid, pid)) } : {}),
+    }));
     const res = computePdc(nodes);
     const t = this.ctx.currentTime;
     const setDelay = (node: DelayNode | undefined, sec: number) => {
@@ -1538,9 +1617,37 @@ export class AudioEngine {
       setDelay(d.outDelay, r && main !== undefined ? (r.delays.get(main) ?? r.down) : 0);
       d.sendDelays?.forEach((node, sendId) => setDelay(node, r?.delays.get(sendId) ?? 0));
     });
+    this.sidechain.applyDelays(res, setDelay, this.pdcSuspended);
     // Latences changées (effet ajouté, gel de prise…) : l'avance des gates aussi.
     this.resyncTimelineEffects();
   }
+
+  /** Latence (s) des effets placés avant un effet à clé sur sa piste (offset de la clé, PDC). */
+  private keyOffset(trackId: string, pluginId: string): number {
+    if (this.pdcSuspended) return 0;
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp) return 0;
+    return latencyBefore(dsp.chainIds || [], pluginId, id => dsp.pluginChain.get(id)?.instance?.latency);
+  }
+
+  /**
+   * Side-chain (R7) : câble les clés des effets (prise « pre » = sortie de la
+   * chaîne de la source, avant son mute et son fader ; « post » = après le
+   * fader). Idempotent : appelé à chaque mise à jour de piste (un recâblage de
+   * la source coupe ses sorties, il est réparé ici). PDC refaite si la
+   * topologie des clés change.
+   */
+  private syncSidechains(allTracks: Track[]) {
+    const routes = keyRoutes(allTracks);
+    if (!routes.length && !this.sidechain.current().length) return;
+    const changed = this.sidechain.sync(routes,
+      (tid, pid) => this.tracksDSP.get(tid)?.pluginChain.get(pid)?.instance,
+      (tid, tap) => { const d = this.tracksDSP.get(tid); return d ? (tap === 'post' ? d.gain : (d.chainOut || null)) : null; });
+    if (changed) this.recomputePdc();
+  }
+
+  /** Effet à clé : chemin de sa clé en lecture (mesures, QA). */
+  public getSidechainPath(pluginId: string): KeyPath | null { return this.sidechain.pathOf(pluginId); }
 
   /**
    * Effets calés sur la ligne de temps du morceau (gate rythmique) d'une chaîne :
@@ -1914,7 +2021,7 @@ export class AudioEngine {
     });
     this.activeSources.clear();
     this.tracksDSP.forEach(dsp => {
-        if (dsp.synth) dsp.synth.releaseAll();
+        if (dsp.synth) { dsp.synth.releaseAll(); dsp.synth.resetControllers(); }
         if (dsp.bass808) dsp.bass808.stopAll();
         if (dsp.sampler) dsp.sampler.stopAll();
         if (dsp.drumSampler) dsp.drumSampler.stop();
@@ -1976,6 +2083,12 @@ export class AudioEngine {
   }
   
   public getIsPlaying(): boolean { return this.isPlaying; }
+
+  /**
+   * Instant du contexte audio qui correspond au début du morceau pour la
+   * lecture en cours (avant tout retour de boucle) : prise MIDI armée (R16).
+   */
+  public getPlaybackOrigin(): number { return this.playbackStartTime; }
 
   public scrub(tracks: Track[], time: number, velocity: number) { /* ... */ }
   public stopScrubbing() { /* ... */ }
@@ -2161,7 +2274,8 @@ export class AudioEngine {
 
   private scheduleClips(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number, maxLatency: number, latencies: Map<string, number>) {
       tracks.map(t => this.eff(t)).forEach(track => {
-      if (track.isMuted) return; 
+      // Piste muette : rien à jouer, SAUF si elle sert de clé de side-chain avant fader (kick fantôme, R7).
+      if (track.isMuted && !this.sidechain.isPreKeySource(track.id)) return; 
       const isFrozenRender = isTrackFrozen(track);
       if (!isFrozenRender && track.type !== TrackType.AUDIO && track.type !== TrackType.SAMPLER && track.type !== TrackType.BUS && track.type !== TrackType.SEND) return;
 
@@ -2181,7 +2295,7 @@ export class AudioEngine {
 
   private scheduleMidi(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number) {
       tracks.map(t => this.eff(t)).forEach(track => {
-        if (track.isMuted) return;
+        if (track.isMuted && !this.sidechain.isPreKeySource(track.id)) return;
         if (track.type !== TrackType.MIDI && track.type !== TrackType.SAMPLER && track.type !== TrackType.DRUM_RACK) return;
         // Piste gelee : seules les notes ajoutees apres le rendu sont jouees.
         const midiClips = isTrackFrozen(track) ? uncoveredClips(track) : track.clips;
@@ -2204,7 +2318,10 @@ export class AudioEngine {
           return;
         }
 
-        const novaSynth = this.tracksDSP.get(track.id)?.synth instanceof NovaSynthNode;
+        const synth = this.tracksDSP.get(track.id)?.synth;
+        const novaSynth = synth instanceof NovaSynthNode;
+        // Contrôleurs MIDI (R16) : valeur tenue au départ (chasse), puis chaque point de la fenêtre.
+        if (synth) this.scheduleControllers(track.id, midiClips, ws, Math.min(we, loopEnd), contextScheduleTime, firstWindow);
         midiClips.forEach(clip => {
            if (clip.type !== TrackType.MIDI || !clip.notes) return;
            
@@ -2213,7 +2330,8 @@ export class AudioEngine {
            // la fenêtre peut déjà avoir des notes à programmer.
            if (clip.start >= we || clipEnd <= projectWindowStart) return;
 
-           (novaSynth ? notesInTimeOrder(clip.notes) : clip.notes).forEach(note => {
+           const heard = playableNotes(clip);
+           (novaSynth ? notesInTimeOrder(heard) : heard).forEach(note => {
                const noteAbsStart = clip.start + note.start;
                const noteAbsEnd = noteAbsStart + note.duration;
 
@@ -2235,6 +2353,78 @@ export class AudioEngine {
       });
   }
   
+  /** Clés de contrôleurs présentes sur des clips (hors sustain, cuit dans les notes). */
+  private ccKeysOf(clips: Clip[]): string[] {
+    const keys = new Set<string>();
+    for (const c of clips) {
+      if (c.isMuted || !c.cc) continue;
+      for (const [k, pts] of Object.entries(c.cc)) if (k !== SUSTAIN && pts && pts.length) keys.add(k);
+    }
+    return Array.from(keys);
+  }
+
+  /** Valeur d'un contrôleur au temps absolu t (le clip qui couvre t, sinon le dernier fini avant). */
+  private ccValueOnTrack(clips: Clip[], key: string, t: number): number {
+    let best: { start: number; v: number } | null = null;
+    for (const c of clips) {
+      if (c.isMuted || !c.cc?.[key]?.length || c.start > t + 1e-9) continue;
+      const pts = sortPoints(c.cc[key]);
+      const v = ccValueAt(pts, Math.min(t, c.start + c.duration) - c.start, ccDefault(key));
+      if (!best || c.start >= best.start) best = { start: c.start, v };
+    }
+    return best ? best.v : ccDefault(key);
+  }
+
+  /** Lecture : contrôleurs des clips MIDI d'une piste dans la fenêtre [ws, we[ (temps du morceau). */
+  private scheduleControllers(trackId: string, clips: Clip[], ws: number, we: number, contextScheduleTime: number, chase: boolean) {
+    const keys = this.ccKeysOf(clips);
+    if (!keys.length) return;
+    if (chase) for (const k of keys) this.sendTrackController(trackId, k, this.ccValueOnTrack(clips, k, ws), contextScheduleTime);
+    for (const c of clips) {
+      if (c.isMuted || !c.cc || c.type !== TrackType.MIDI) continue;
+      if (c.start >= we || c.start + c.duration <= ws) continue;
+      for (const k of keys) {
+        const pts = c.cc[k];
+        if (!pts?.length) continue;
+        for (const p of pts) {
+          const at = c.start + p.t;
+          if (p.t > c.duration + 1e-9 || at < ws || at >= we) continue;
+          this.sendTrackController(trackId, k, p.v, contextScheduleTime + (at - ws));
+        }
+      }
+    }
+  }
+
+  /** Export : tous les contrôleurs d'une piste (temps 0 du rendu = `from` du morceau). */
+  private scheduleOfflineControllers(track: Track, synth: TrackSynth, from: number, totalDuration: number) {
+    const clips = (isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || [])).filter(c => c.type === TrackType.MIDI);
+    const keys = this.ccKeysOf(clips);
+    if (!keys.length) return;
+    for (const k of keys) synth.setController(k, this.ccValueOnTrack(clips, k, from), 0);
+    for (const c of clips) {
+      if (c.isMuted || !c.cc) continue;
+      for (const k of keys) {
+        for (const p of c.cc[k] || []) {
+          const at = c.start + p.t - from;
+          if (p.t > c.duration + 1e-9 || at < 0 || at >= totalDuration) continue;
+          synth.setController(k, p.v, at);
+        }
+      }
+    }
+  }
+
+  /**
+   * Contrôleur MIDI sur l'instrument d'une piste (R16) : clé « pb », « cc1 »,
+   * « cc11 »… et valeur MIDI brute. Synthé NOVA et ancien synthé (pitch bend,
+   * vibrato, expression, brillance). `time` : instant du contexte (0 = tout de suite).
+   */
+  public sendTrackController(trackId: string, key: string, value: number, time: number = 0) {
+    if (!this.ctx) return;
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp || dsp.bass808) return;
+    try { dsp.synth?.setController(key, value, Math.max(time, this.ctx.currentTime)); } catch { /* instrument sans contrôleurs */ }
+  }
+
   public triggerTrackAttack(trackId: string, pitch: number, velocity: number, time: number = 0) {
       if (!this.ctx) return;
       const dsp = this.tracksDSP.get(trackId);
@@ -2302,9 +2492,12 @@ export class AudioEngine {
     gain: AudioParam,
     pan: AudioParam,
     sends: Map<string, GainNode>,
-    pre?: AudioParam
+    pre?: AudioParam,
+    strip?: StripNodes | null
   ): AudioParam | null {
     if (nomParametre === 'volume') return gain;
+    // Tête de tranche (R11) : trim d'entrée (gain) et largeur stéréo.
+    if (nomParametre === TRIM_PARAM || nomParametre === WIDTH_PARAM) return stripParam(strip, nomParametre);
     // Volume AVANT effets (tête de chaîne) : édité sur une piste gelée, il
     // attaque le compresseur et la reverb au dégel. Piste gelée : après le rendu.
     if (nomParametre === PRE_VOLUME) return pre || null;
@@ -2411,7 +2604,7 @@ export class AudioEngine {
     if (!dsp || !this.ctx) return;
     const track = this.liveTracks?.find(t => t.id === trackId);
     if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
-    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
     if (!cible) return;
     const now = this.ctx.currentTime;
     try { cible.cancelScheduledValues(now); cible.setTargetAtTime(value, now, 0.01); } catch { /* valeur hors limites */ }
@@ -2445,7 +2638,7 @@ export class AudioEngine {
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp) return;
     if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
-    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
     if (!cible) return;
     const now = this.ctx.currentTime;
     const t0 = now + 0.01;
@@ -2736,12 +2929,17 @@ export class AudioEngine {
         playedLanes(track).forEach(lane => {
             if (lane.points.length === 0 || this.autoOverrides.has(`${track.id}|${lane.parameterName}`)) return;
             if (parsePluginParam(lane.parameterName)) { this.schedulePluginAutomation(track.id, lane.parameterName, lane.points, start, when, end); return; }
+            if (isMuteParam(lane.parameterName)) {
+              // Mute automatisé (R8) : programmé d'avance, en paliers, calé sur la PDC de la piste.
+              if (dsp.preFaderTap) this.programPluginWindow(dsp.preFaderTap.gain, muteGainPoints(lane.points), start, end, when, this.pdcSuspended ? 0 : (dsp.downLatency || 0));
+              return;
+            }
 
             lane.points.forEach((point, index) => {
                 if (point.time >= start && point.time < end) {
                     const scheduleTime = when + (point.time - start);
                     
-                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
                     if (ancre) ancre.setValueAtTime(point.value, scheduleTime);
                     
                     const nextPoint = lane.points[index + 1];
@@ -2749,7 +2947,7 @@ export class AudioEngine {
                         // On programme la rampe meme si le point suivant sort de la
                         // fenetre : sinon la valeur restait en palier jusqu'a lui.
                         const nextScheduleTime = when + (nextPoint.time - start);
-                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
                         if (cible) {
                             this.programmerSegment(cible, point, nextPoint, scheduleTime, nextScheduleTime);
                         }
@@ -3037,8 +3235,10 @@ export class AudioEngine {
 
     dsp.sendDelays?.forEach(n => { try { n.disconnect(); } catch (e) {} });
     dsp.sendPanners?.forEach(n => { try { n.disconnect(); } catch (e) {} });
-    [dsp.input, dsp.preFaderTap, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
+    [dsp.input, dsp.chainOut, dsp.preFaderTap, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
       .forEach(n => { try { n?.disconnect(); } catch (e) {} });
+    meterBank.detachTrack(trackId);
+    disposeStrip(dsp.strip);
 
     this.tracksDSP.delete(trackId);
     this.recomputePdc();
@@ -3119,7 +3319,7 @@ export class AudioEngine {
     const preSilenced = track.isMuted || this.soloSilencedIds.has(track.id);
     const sendLevelOf = (send: { id: string; isEnabled: boolean; level: number; preFader?: boolean; isMuted?: boolean }) =>
       (!send.isEnabled || send.isMuted || isFeedCovered(track, send.id, allTracks) || (send.preFader && preSilenced)) ? 0 : send.level;
-    const signature = this.graphSignatureOf(track, coveredOut ? 'covered-out' : '');
+    const signature = this.graphSignatureOf(track, (coveredOut ? 'covered-out' : '') + stripSignature(track));
     if (dsp.graphSignature === signature) {
       const t = this.ctx.currentTime;
       // Pendant la lecture, un paramètre automatisé garde la valeur de sa courbe.
@@ -3130,22 +3330,29 @@ export class AudioEngine {
       if (!this.isPlaying) { try { dsp.gain.gain.cancelScheduledValues(t); dsp.gain.gain.setValueAtTime(target, t); } catch { /* */ } }
       else dsp.gain.gain.setTargetAtTime(target, t, 0.015);
       dsp.panner.pan.setTargetAtTime(this.automatedValue(track, 'pan', track.pan), t, 0.015);
+      if (dsp.strip) setStrip(dsp.strip, track, t, !this.isPlaying, { trim: this.automationOwns(track, TRIM_PARAM), width: this.automationOwns(track, WIDTH_PARAM) });
       this.pluginAutoSent.forEach((_, k) => { if (k.startsWith(`${track.id}|`)) this.pluginAutoSent.delete(k); });
 
       // Seuls les effets cables ont une entree (sur une piste gelee : ceux
       // apres le rendu, qui restent reglables).
+      const lanes = playedLanes(track);
       track.plugins.forEach(p => {
         const entry = dsp.pluginChain.get(p.id);
         if (entry && entry.instance && typeof entry.instance.updateParams === 'function') {
-          entry.instance.updateParams(p.params);
+          // Réglages tenus par une voie pendant la lecture : laissés à l'automation (R8).
+          entry.instance.updateParams(paramsWithoutAutomated(p.params, lanes, p.id, this.isPlaying));
+          // À l'arrêt, sans voie : les réglages automatisables reviennent à leur valeur fixe.
+          if (!this.isPlaying && typeof entry.instance.restoreStatic === 'function' && !hasPluginLane(lanes, p.id)) entry.instance.restoreStatic();
         }
       });
+      this.resetMuteGain(track, dsp);
       (track.sends || []).forEach(send => {
         const sendGain = dsp.sends.get(send.id);
         const forcedOff = !send.isEnabled || !!send.isMuted || isFeedCovered(track, send.id, allTracks) || (!!send.preFader && preSilenced);
         if (sendGain) sendGain.gain.setTargetAtTime(forcedOff ? 0 : this.automatedValue(track, `send::${send.id}`, send.level), t, 0.015);
         if (typeof send.pan === 'number') dsp.sendPanners?.get(send.id)?.pan.setTargetAtTime(send.pan, t, 0.015);
       });
+      this.syncSidechains(allTracks);
       return;
     }
     dsp.graphSignature = signature;
@@ -3169,7 +3376,15 @@ export class AudioEngine {
     // the plugin's internal graph. The plugins manage their own internal connections.
     // We only disconnect the chain between plugins below by rebuilding it.
     
+    // Tête de tranche (R11) : entrée -> trim / Ø / mono / largeur -> effets.
+    disposeStrip(dsp.strip);
+    dsp.strip = buildStrip(this.ctx, track);
     let head: AudioNode = dsp.input;
+    if (dsp.strip) {
+      dsp.input.connect(dsp.strip.input);
+      head = dsp.strip.output;
+      setStrip(dsp.strip, track, now, true, { trim: this.automationOwns(track, TRIM_PARAM), width: this.automationOwns(track, WIDTH_PARAM) });
+    }
     // Sorties d'effets cablees au passage precedent : on ne coupe QUE ces liens
     // (pas le graphe interne des effets). Sans ca, reordonner ou geler une chaine
     // laissait l'ancien lien en place et doublait le signal.
@@ -3230,7 +3445,7 @@ export class AudioEngine {
           }
         }
       } else if (pEntry.instance && pEntry.instance.updateParams) {
-        pEntry.instance.updateParams({ ...plugin.params, lowLatency });
+        pEntry.instance.updateParams({ ...paramsWithoutAutomated(plugin.params, playedLanes(track), plugin.id, this.isPlaying), lowLatency });
       }
       if (pEntry && plugin.isEnabled) {
         link(head, pEntry.input);
@@ -3294,9 +3509,12 @@ export class AudioEngine {
     });
 
     // Point pré-fader (envois PRE) : gain unité entre la chaîne et le fader.
+    // chainOut (sortie de la chaîne, clé de side-chain) -> preFaderTap (mute automatisé) -> fader.
     if (!dsp.preFaderTap) dsp.preFaderTap = this.ctx.createGain();
-    link(head, dsp.preFaderTap);
+    if (!dsp.chainOut) { dsp.chainOut = this.ctx.createGain(); dsp.chainOut.connect(dsp.preFaderTap); }
+    link(head, dsp.chainOut);
     dsp.preFaderTap.connect(dsp.gain);
+    this.resetMuteGain(track, dsp);
     dsp.gain.connect(dsp.panner);
     dsp.panner.connect(dsp.analyzer);
     dsp.analyzer.connect(dsp.output);
@@ -3398,7 +3616,11 @@ export class AudioEngine {
       if (!currentSendIds.has(sendId)) { try { node.disconnect(); } catch (e) {} dsp!.sendPanners!.delete(sendId); }
     });
     dsp.outputs = outputs;
+    this.syncSidechains(allTracks);
     this.recomputePdc();
+    // R11 : point de mesure de la piste (pré-fader : après les effets ; post : après fader et pan).
+    // Pré-fader pris sur chainOut (R7/R8) : le mute automatisé agit comme le mute fixe, après ce point.
+    meterBank.attachTrack(track.id, dsp.chainOut || dsp.preFaderTap!, dsp.analyzer);
   }
 
   private applyAutomation(track: Track, time: number) {
@@ -3407,8 +3629,18 @@ export class AudioEngine {
     this.resetPreVolume(track, dsp);
     if (track.isMuted || this.soloSilencedIds.has(track.id)) return;
 
+    this.resetMuteGain(track, dsp);
     playedLanes(track).forEach(lane => {
         if (lane.points.length === 0 || this.autoOverrides.has(`${track.id}|${lane.parameterName}`)) return;
+        if (isMuteParam(lane.parameterName)) {
+          // Mute automatisé (R8) : calé sur la musique (avance PDC de la piste).
+          const ap = dsp.preFaderTap?.gain;
+          if (!ap) return;
+          const lead = this.pdcSuspended ? 0 : (dsp.downLatency || 0);
+          if (this.isPlaying) this.programPluginStart(ap, muteGainPoints(lane.points), time, this.playbackStartTime + time, lead);
+          else { try { ap.cancelScheduledValues(this.ctx!.currentTime); ap.setValueAtTime(valueAtPoints(muteGainPoints(lane.points), time + lead, 1), this.ctx!.currentTime); } catch { /* */ } }
+          return;
+        }
         if (parsePluginParam(lane.parameterName)) {
           // En lecture, sur un AudioParam : posé à l'instant exact du départ (ou du bouclage).
           const a = this.isPlaying ? this.pluginAutoParam(track.id, lane.parameterName) : null;
@@ -3437,10 +3669,19 @@ export class AudioEngine {
         }
         
         const now = this.ctx.currentTime;
-        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
         if (cible) cible.setValueAtTime(value, now);
     });
 }
+
+  /** Sans voie « Muet » jouée, le gain du mute automatisé revient à 1 (voie effacée, mode Off). */
+  private resetMuteGain(track: Track, dsp: TrackDSP) {
+    const ap = dsp.preFaderTap?.gain;
+    if (!ap || !this.ctx || muteLaneOf(track)) return;
+    if (Math.abs(ap.value - 1) < 1e-9 && !this.pluginAutoParams.has(ap)) return;
+    try { const now = this.ctx.currentTime; ap.cancelScheduledValues(now); ap.setValueAtTime(1, now); } catch { /* */ }
+    this.pluginAutoParams.delete(ap);
+  }
 
   /** Gain « volume avant effets » : tête de chaîne, ou entrée du rendu sur une piste gelée. */
   private preParam(dsp: TrackDSP): AudioParam {
@@ -3500,8 +3741,10 @@ export class AudioEngine {
     const track = this.liveTracks?.find(t => t.id === trackId);
     return (track?.plugins || []).flatMap(pl => {
       const reg = getRegisteredPlugin(pl.type);
-      if (!reg?.automatable?.length) return [];
-      return [{ pluginId: pl.id, pluginName: reg.name, params: reg.automatable.map(a => ({ id: a.id, name: a.label, type: 'float' as const, min: a.min, max: a.max, value: pl.params?.[a.id], unit: a.unit })) }];
+      // Effets historiques (R8) : Compresseur, EQ, Reverb, Délai, De-esser, Saturation, Doubleur, Nova Tune.
+      const list = reg?.automatable?.length ? reg.automatable : legacyAutomatable(pl.type);
+      if (!list.length) return [];
+      return [{ pluginId: pl.id, pluginName: reg?.name || pl.name || pl.type, params: list.map(a => ({ id: a.id, name: a.label, type: 'float' as const, min: a.min, max: a.max, value: pluginParamStaticValue(pl.params, a.id) as any, unit: a.unit })) }];
     });
   }
   public getMasterAnalyzer() { return this.masterAnalyzer; }
@@ -3541,6 +3784,26 @@ export class AudioEngine {
   public getTrackAnalyzer(trackId: string) { const dsp = this.tracksDSP.get(trackId); if (!dsp) return null; if (this.monitoringTrackId === trackId && dsp.inputAnalyzer) return dsp.inputAnalyzer; return dsp.analyzer; }
   public getPluginNodeInstance(trackId: string, pluginId: string) { return this.tracksDSP.get(trackId)?.pluginChain.get(pluginId)?.instance || null; }
   public setRecMode(active: boolean) { this.isRecMode = active; }
+  /**
+   * R11 : réduction de gain des dynamiques de la piste (compresseur, de-esser,
+   * limiteur…), en dB positifs, avec le détail par effet. null : aucune
+   * dynamique mesurable. Sur le master, le limiteur de sécurité compte aussi.
+   */
+  public getTrackGainReduction(trackId: string): { db: number; parts: GrPart[] } | null {
+    const dsp = this.tracksDSP.get(trackId);
+    const parts: GrPart[] = [];
+    dsp?.pluginChain.forEach((entry, pluginId) => {
+      if (dsp.chainIds && !dsp.chainIds.includes(pluginId)) return;
+      const db = readGainReduction(entry.instance);
+      if (db !== null) parts.push({ pluginId, db });
+    });
+    if (trackId === 'master' && this.masterLimiter && this.safetyLimiterOn) {
+      parts.push({ pluginId: 'safety-limiter', db: Math.abs(this.masterLimiter.reduction || 0) });
+    }
+    if (!parts.length) return null;
+    return { db: parts.reduce((s, p) => s + p.db, 0), parts };
+  }
+
   public getRMS(analyser: AnalyserNode | null): number {
     if (!analyser) return 0;
     const data = new Uint8Array(analyser.frequencyBinCount);

@@ -108,7 +108,12 @@ export const sanitizePlugin = (p: PluginInstance): PluginInstance => {
   delete params.isAnalyzing;
   delete params.analysisProgress;
   // Inactif (Pro Tools « Make Inactive ») : gardé tel quel, avec ses réglages.
-  return { id: p.id, name: p.name, type: p.type, isEnabled: !!p.isEnabled, params, latency: 0, ...(p.isInactive ? { isInactive: true } : {}) };
+  return {
+    id: p.id, name: p.name, type: p.type, isEnabled: !!p.isEnabled, params, latency: 0, ...(p.isInactive ? { isInactive: true } : {}),
+    // Side-chain (R7) : la clé voyage avec l'effet (id + nom pour la retrouver dans une autre session).
+    ...(p.sidechainSourceId ? { sidechainSourceId: p.sidechainSourceId, ...(p.sidechainSourceName ? { sidechainSourceName: p.sidechainSourceName } : {}) } : {}),
+    ...(p.sidechainTap ? { sidechainTap: p.sidechainTap } : {}),
+  };
 };
 
 const sanitizeClip = (c: Clip): Clip | null => {

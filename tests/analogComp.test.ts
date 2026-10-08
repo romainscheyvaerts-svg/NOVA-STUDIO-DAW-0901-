@@ -141,7 +141,7 @@ describe('VU et calage « réduction cible »', () => {
       expect(l.reached).toBe(true);
       expect(Math.abs(l.grDb - 2)).toBeLessThanOrEqual(0.25);
     }
-  });
+  }, 60_000); // calcul pur ≈ 4 s seul : > 5 s quand les tests tournent en parallèle sur une machine chargée.
 
   it('son trop faible : le calage le dit au lieu de mentir', async () => {
     const v = voiceLike(3, 0.0003);
@@ -224,5 +224,49 @@ describe('compresseurs analogiques : tour 2 du labo', () => {
     };
     const rel = (g(80, 80) - g(1000, 80)) - (g(80, 0) - g(1000, 0));
     expect(Math.abs(rel - -4.17)).toBeLessThan(0.3);
+  });
+});
+
+describe('compresseurs analogiques NOVA : clé de side-chain (R7)', () => {
+  /** Comme run(), avec une clé externe sur le détecteur. */
+  function runKey(kind: string, L: Float32Array, key: Float32Array) {
+    const core = createAnalogCompCore(SR);
+    core.setInternal(buildAnalogInternal(kind, ANALOG_SPECS[kind].defaults as any, ANALOG_PROFILES[kind], SR));
+    const n = L.length;
+    const oL = new Float32Array(n), oR = new Float32Array(n);
+    let grMax = 0;
+    for (let i = 0; i < n; i += 128) {
+      const m = Math.min(128, n - i);
+      core.process(L.subarray(i, i + m), L.subarray(i, i + m), oL.subarray(i, i + m), oR.subarray(i, i + m), m, key.subarray(i, i + m), key.subarray(i, i + m));
+      grMax = Math.max(grMax, core.takeMeters().grDb);
+    }
+    return { L: oL, grMax };
+  }
+
+  it.each(KINDS)('%s : la clé seule décide de la compression', kind => {
+    const loud = sine(1, -3), quiet = sine(1, -40), silence = new Float32Array(loud.length);
+    const own = run(kind, ANALOG_SPECS[kind].defaults as any, loud);
+    expect(own.grMax, 'sans clé, le son fort se compresse').toBeGreaterThan(1);
+    // Son fort, clé muette : plus aucune réduction.
+    expect(runKey(kind, loud, silence).grMax).toBeLessThan(0.05);
+    // Son faible, clé forte : il est compressé comme le serait le son fort.
+    const keyed = runKey(kind, quiet, loud);
+    expect(keyed.grMax).toBeGreaterThan(1);
+    expect(Math.abs(keyed.grMax - own.grMax)).toBeLessThan(Math.max(1, own.grMax * 0.35));
+  });
+
+  it('sans clé, le traitement est identique au dernier bit près (le labo reste calé)', () => {
+    for (const kind of KINDS) {
+      const x = voiceLike(1);
+      const a = run(kind, ANALOG_SPECS[kind].defaults as any, x);
+      const core = createAnalogCompCore(SR);
+      core.setInternal(buildAnalogInternal(kind, ANALOG_SPECS[kind].defaults as any, ANALOG_PROFILES[kind], SR));
+      const oL = new Float32Array(x.length), oR = new Float32Array(x.length);
+      for (let i = 0; i < x.length; i += 128) {
+        const m = Math.min(128, x.length - i);
+        core.process(x.subarray(i, i + m), x.subarray(i, i + m), oL.subarray(i, i + m), oR.subarray(i, i + m), m, null, null);
+      }
+      expect(oL).toEqual(a.L);
+    }
   });
 });

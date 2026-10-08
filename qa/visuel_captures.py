@@ -143,6 +143,10 @@ def run(b, vp, theme, R):
             S("console")
             b3 = pg.get_by_role("button", name=re.compile("^Pistes$")).locator("visible=true")
             if not b3.count():
+                # Tablette, mode simple : bouton « Pistes » du bandeau du bas (le menu ☰ n'a pas « Vues »,
+                # et l'ouvrir recouvrait ce bouton : clic bloqué 15 s).
+                b3 = pg.get_by_role("button", name=re.compile(r"\bPistes\b")).locator("visible=true")
+            if not b3.count():
                 open_menu(pg)
                 b3 = pg.get_by_role("button", name=re.compile("Pistes")).locator("visible=true")
             b3.first.click(); pg.wait_for_timeout(700)

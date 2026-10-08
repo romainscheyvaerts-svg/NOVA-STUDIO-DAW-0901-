@@ -1,4 +1,5 @@
 
+import { AutomationSet, MappedParam } from '../engine/automationParams';
 import React, { useEffect, useRef, useState } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { setParamSmooth } from './vocalDspUtils';
@@ -39,6 +40,9 @@ interface DoubleVoice {
 
 export class VocalDoublerNode {
   private readonly createdAt: number;
+  /** Réglages automatisables (R8) : largeur, niveau des doublures gauche / droite. */
+  private auto = new AutomationSet();
+  private autoState = '';
   private setP(param: AudioParam, value: number, tau: number) {
     setParamSmooth(param, value, this.ctx, this.createdAt, tau);
   }
@@ -130,8 +134,16 @@ export class VocalDoublerNode {
       v.panner.connect(this.output);
     }
 
+    this.auto.add('width', new MappedParam(this.ctx, [{ param: this.voiceL.panner.pan, map: v => -v }, { param: this.voiceR.panner.pan }], { min: 0, max: 1, value: 0, affine: true }));
+    this.auto.add('gainL', new MappedParam(this.ctx, [{ param: this.voiceL.gain.gain }], { min: 0, max: 1, value: 0, affine: true }));
+    this.auto.add('gainR', new MappedParam(this.ctx, [{ param: this.voiceR.gain.gain }], { min: 0, max: 1, value: 0, affine: true }));
     this.applyParams();
   }
+
+  /** AudioParam d'un réglage automatisable (R8) : « width », « gainL », « gainR » ; sinon null. */
+  public automationParam(key: string): MappedParam | null { return this.auto.get(key); }
+  /** Lecture arrêtée : les réglages automatisés reviennent à leur valeur fixe. */
+  public restoreStatic() { this.auto.restoreStatic(); }
 
   public updateParams(p: Partial<DoublerParams>) {
     this.params = { ...this.params, ...p };
@@ -142,15 +154,17 @@ export class VocalDoublerNode {
     const now = this.ctx.currentTime;
     const safe = (v: number) => Number.isFinite(v) ? v : 0;
     const { detune, width, gainL, gainR, directOn, isEnabled } = this.params;
+    const stKey = `${isEnabled ? 1 : 0}`;
+    const st = { force: stKey !== this.autoState, tau: 0.05, immediate: this.ctx.currentTime <= this.createdAt };
+    this.autoState = stKey;
 
     if (isEnabled) {
       this.setP(this.dryGain.gain, directOn ? 1.0 : 0.0, 0.05);
-      this.setP(this.voiceL.gain.gain, Math.max(0, safe(gainL)), 0.05);
-      this.setP(this.voiceR.gain.gain, Math.max(0, safe(gainR)), 0.05);
+      this.auto.get('gainL')!.setStatic(Math.max(0, safe(gainL)), st);
+      this.auto.get('gainR')!.setStatic(Math.max(0, safe(gainR)), st);
       
       const sWidth = Math.max(0, Math.min(1, safe(width)));
-      this.setP(this.voiceL.panner.pan, -sWidth, 0.1);
-      this.setP(this.voiceR.panner.pan, sWidth, 0.1);
+      this.auto.get('width')!.setStatic(sWidth, { ...st, tau: 0.1 });
       
       // Detune 0..1 => ecart de hauteur crete d'environ 0..15 cents.
       // L'ecart de hauteur d'un retard module vaut 2*pi*f*A : on calcule
@@ -165,8 +179,8 @@ export class VocalDoublerNode {
       }
     } else {
       this.setP(this.dryGain.gain, 1.0, 0.02);
-      this.setP(this.voiceL.gain.gain, 0, 0.02);
-      this.setP(this.voiceR.gain.gain, 0, 0.02);
+      this.auto.get('gainL')!.setStatic(0, { ...st, tau: 0.02 });
+      this.auto.get('gainR')!.setStatic(0, { ...st, tau: 0.02 });
     }
   }
 

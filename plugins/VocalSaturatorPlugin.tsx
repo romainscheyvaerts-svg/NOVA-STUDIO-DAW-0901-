@@ -1,4 +1,5 @@
 
+import { AutomationSet, MappedParam } from '../engine/automationParams';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
@@ -140,6 +141,9 @@ export class VocalSaturatorNode {
   private dryGain: GainNode;
   private makeupGain: GainNode;
   private readonly createdAt: number;
+  /** Réglages automatisables (R8) : mélange, couleur (tilt), gain de sortie. */
+  private auto = new AutomationSet();
+  private autoState = '';
 
   /** Pret quand l'etage ADAA est en place (le rendu hors ligne attend cette promesse). */
   public readonly ready: Promise<void>;
@@ -192,6 +196,9 @@ export class VocalSaturatorNode {
     this.makeupGain = ctx.createGain();
     this.setupChain();
     this.generateCurve();
+    this.auto.add('mix', new MappedParam(ctx, [{ param: this.wetGain.gain }, { param: this.dryGain.gain, map: v => 1 - v }], { min: 0, max: 1, value: 0.5, affine: true }));
+    this.auto.add('tone', new MappedParam(ctx, [{ param: this.tiltHigh.gain, map: v => v * 12 }, { param: this.tiltLow.gain, map: v => -v * 12 }], { min: -1, max: 1, value: 0, affine: true }));
+    this.auto.add('outputGain', new MappedParam(ctx, [{ param: this.makeupGain.gain }], { min: 0, max: 4, value: 1, affine: true }));
     this.applyParams();
     this.ready = this.initWorklet();
   }
@@ -236,6 +243,11 @@ export class VocalSaturatorNode {
       console.warn('[VocalSaturator] ADAA indisponible, courbe simple :', e);
     }
   }
+
+  /** AudioParam d'un réglage automatisable (R8) : « mix », « tone », « outputGain » ; sinon null. */
+  public automationParam(key: string): MappedParam | null { return this.auto.get(key); }
+  /** Lecture arrêtée : les réglages automatisés reviennent à leur valeur fixe. */
+  public restoreStatic() { this.auto.restoreStatic(); }
 
   public updateParams(p: Partial<SaturatorParams>) {
     const oldMode = this.params.mode;
@@ -323,6 +335,9 @@ export class VocalSaturatorNode {
     const { tone, mix, outputGain, isEnabled } = this.params;
     const safe = (v: number) => Number.isFinite(v) ? v : 0;
     const set = (prm: AudioParam, v: number) => setParamSmooth(prm, v, this.ctx, this.createdAt, 0.02);
+    const stKey = `${isEnabled ? 1 : 0}`;
+    const st = { force: stKey !== this.autoState, tau: 0.02, immediate: this.ctx.currentTime <= this.createdAt };
+    this.autoState = stKey;
 
     if (isEnabled) {
       const pre = 1 + (this.safeDrive() / 25);
@@ -330,21 +345,18 @@ export class VocalSaturatorNode {
       set(this.autoGain.gain, this.driveCompensation(pre));
 
       const sTone = Math.max(-1, Math.min(1, safe(tone)));
-      set(this.tiltHigh.gain, sTone * 12);
-      set(this.tiltLow.gain, -sTone * 12);
+      this.auto.get('tone')!.setStatic(sTone, st);
 
       set(this.eqLowNode.gain, safe(this.params.eqLow));
       set(this.eqMidNode.gain, safe(this.params.eqMid));
       set(this.eqHighNode.gain, safe(this.params.eqHigh));
 
       const sMix = Math.max(0, Math.min(1, safe(mix)));
-      set(this.dryGain.gain, 1 - sMix);
-      set(this.wetGain.gain, sMix);
-      set(this.makeupGain.gain, Math.max(0, Number.isFinite(outputGain) ? outputGain : 1));
+      this.auto.get('mix')!.setStatic(sMix, st);
+      this.auto.get('outputGain')!.setStatic(Math.max(0, Number.isFinite(outputGain) ? outputGain : 1), st);
     } else {
-      set(this.dryGain.gain, 1);
-      set(this.wetGain.gain, 0);
-      set(this.makeupGain.gain, 1);
+      this.auto.get('mix')!.setStatic(0, st);
+      this.auto.get('outputGain')!.setStatic(1, st);
     }
   }
 

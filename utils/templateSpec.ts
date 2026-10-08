@@ -72,7 +72,8 @@
  * scripts/template_from_spec.ts fait le contrôle réel : réglage puis relecture
  * sur le pont VST, état du plugin capturé, rapport.
  */
-import { NamedBus, PluginInstance, PluginType, TrackSend, TrackType } from '../types';
+import { NamedBus, PluginInstance, PluginType, Track, TrackSend, TrackType } from '../types';
+import { groupNameKey, groupsFromSpec, SpecGroup, syncGroupFields } from './editGroups';
 import { isExcluded } from './autotuneVst';
 import { classifyPlugin } from './vstKnowledge';
 import { compact, resolveVst, VstCandidate, VstMatch } from './vstMatch';
@@ -185,6 +186,8 @@ export interface SpecTrack {
   parent?: string;
   /** VCA qui pilote la piste (nom). */
   vca?: string;
+  /** VCA : groupe dont les pistes sont les membres (nom du groupe, R12). */
+  group?: string;
 }
 
 export interface TemplateSpec {
@@ -204,6 +207,11 @@ export interface TemplateSpec {
   buses?: (string | { name: string; channels?: 1 | 2 })[];
   /** « Fidèle à la session Pro Tools » : garder les plugins exclus par les règles du studio (SSL, Slate). */
   keepExcludedPlugins?: boolean;
+  /**
+   * Groupes Pro Tools (R12) : { name, kind: edit | mix | both, members: [noms de
+   * pistes], attrs, active, deduced } ; ils deviennent de vrais groupes NOVA.
+   */
+  groups?: SpecGroup[];
   tracks: SpecTrack[];
 }
 
@@ -539,6 +547,9 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
     return { outputTrackId: targetId(t.output, t.name) };
   };
 
+  // Groupes Pro Tools (R12) : membres retrouvés par leur nom ; un VCA « group » prend ses membres par groupe.
+  const specGroups = groupsFromSpec(spec.groups, n => byName.get(compact(n)));
+  for (const g of spec.groups || []) for (const m of g.members || []) if (!byName.get(compact(m))) report.warnings.push(`Groupe « ${g.name} » : piste « ${m} » introuvable.`);
   const tracks: TemplateTrack[] = spec.tracks.map((t, ti) => {
     const id = ids.get(t)!;
     const type = typeOf(t);
@@ -640,6 +651,8 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
     const out = outputOfSpec(t, parentFolder);
     const inputBus = t.input ? busByName.get(compact(t.input)) : undefined;
     const vcaId = t.vca ? vcaIdByName.get(compact(t.vca)) : undefined;
+    const vcaGroupId = t.kind === 'vca' && t.group ? specGroups.find(g => groupNameKey(g.name) === groupNameKey(t.group!))?.id : undefined;
+    if (t.kind === 'vca' && t.group && !vcaGroupId) report.warnings.push(`VCA « ${t.name} » : groupe « ${t.group} » introuvable.`);
     return {
       id, name: t.name, type,
       color: t.color || (t.kind === 'master' ? '#00f2ff' : fk ? (fk === 'routing' ? '#f59e0b' : '#64748b') : t.kind === 'vca' ? '#8b5cf6' : PALETTE[ti % PALETTE.length]),
@@ -656,6 +669,7 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
       ...(parentFolder ? { parentFolderId: ids.get(parentFolder)! } : {}),
       ...(t.kind === 'vca' ? { isVca: true } : {}),
       ...(vcaId ? { vcaId } : {}),
+      ...(vcaGroupId ? { vcaGroupId } : {}),
       ...(inputBus ? { inputBusId: inputBus.id } : {}),
     } as TemplateTrack;
   });
@@ -682,8 +696,8 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
       ...(ts ? { timeSignature: { numerator: Number(ts[1]), denominator: Number(ts[2]) } } : {}),
       ...(key ? { projectKey: key.key, projectScale: key.scale } : {}),
       isDelayCompEnabled: true,
-      tracks,
-      trackGroups: [],
+      tracks: syncGroupFields(tracks as unknown as Track[], specGroups) as unknown as TemplateTrack[],
+      trackGroups: specGroups,
     },
   };
   report.mixRules = checkMixRules(template);

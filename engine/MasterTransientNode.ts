@@ -15,6 +15,7 @@ import { createLimiterCore } from './limiterCore';
 import { MASTER_TRANSIENT_PROFILE } from './masterTransientProfile';
 import { MT_DEFAULTS, MT_SPECS, mtToCore, sanitizeMt } from './masterTransientParams';
 import { loadWorkletModule } from '../plugins/vocalDspUtils';
+import { retireWorkletNode } from './workletGuard';
 
 const AP = MT_SPECS.filter(s => s.auto).map(s => ({ name: s.id, defaultValue: MT_DEFAULTS[s.id] ?? s.min }));
 
@@ -84,6 +85,8 @@ export class MasterTransientNode {
   private meters: MtMeters & { at: number } = { ...EMPTY, at: 0 };
   private failed = false;
   private latSamples: number;
+  /** Effet retiré : un worklet encore en chargement n'est pas créé (sinon il restait vivant). */
+  private disposed = false;
 
   constructor(ctx: BaseAudioContext, params?: Record<string, any>) {
     this.ctx = ctx;
@@ -99,6 +102,7 @@ export class MasterTransientNode {
   private async init() {
     try {
       await loadWorkletModule(this.ctx, 'nova-master-transient-v1', WORKLET_CODE);
+      if (this.disposed) return;
       const parameterData: Record<string, number> = {};
       for (const a of AP) parameterData[a.name] = +this.params[a.name];
       this.worklet = new AudioWorkletNode(this.ctx, 'nova-master-transient-v1', {
@@ -160,5 +164,12 @@ export class MasterTransientNode {
     try { this.input.disconnect(); } catch { /* déjà débranché */ }
     try { this.worklet?.disconnect(); } catch { /* idem */ }
     try { this.output.disconnect(); } catch { /* idem */ }
+  }
+
+  /** Effet retiré de la piste : worklet mis à la retraite (ou jamais créé s'il chargeait encore), entrées débranchées. */
+  public dispose() {
+    this.disposed = true;
+    if (this.worklet) { retireWorkletNode(this.worklet); this.worklet = null; }
+    this.disconnect();
   }
 }

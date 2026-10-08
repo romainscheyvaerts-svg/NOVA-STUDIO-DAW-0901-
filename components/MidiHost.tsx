@@ -10,7 +10,6 @@ import { chordFromEvent } from '../utils/keymap';
 import { makeDrumMachine, drumPadsFor, DrumMachine } from '../utils/drumKits';
 import { loadPadBuffer } from '../utils/padBuffers';
 import { padLoadKey } from '../utils/drumSamples';
-import { midiManager } from '../services/MidiManager';
 import { audioEngine } from '../engine/AudioEngine';
 import GroovePanel from './GroovePanel';
 import { tempoMapStore } from '../utils/tempoMap';
@@ -226,10 +225,8 @@ const MidiHost: React.FC<Props> = ({ state, getState, setState, pianoRoll }) => 
   }, []);
 
   useEffect(() => {
+    // Les notes jouées arrivent par le routeur MIDI (services/MidiInput), qui les garde pour la capture.
     midiCapture.setTransport(() => ({ playing: !!getState().isPlaying, time: audioEngine.getCurrentTime() }));
-    return midiManager.addCaptureListener((on, note, vel) => {
-      if (on) midiCapture.noteOn(note, vel, getState().selectedTrackId || null); else midiCapture.noteOff(note);
-    });
   }, [getState]);
   useEffect(() => { midiCapture.setPlaying(!!state.isPlaying); }, [state.isPlaying]);
 
@@ -237,10 +234,13 @@ const MidiHost: React.FC<Props> = ({ state, getState, setState, pianoRoll }) => 
   useEffect(() => {
     (window as any).__novaMidi = {
       bpm: () => getState().bpm,
+      /** Pistes complètes (lecture seule) : rendu d'export dans les scénarios R16. */
+      rawTracks: () => getState().tracks,
+      state: () => { const st = getState(); return { isRecording: st.isRecording, isPlaying: st.isPlaying, recStartTime: st.recStartTime, isLoopActive: st.isLoopActive, loopStart: st.loopStart, loopEnd: st.loopEnd, selectedTrackId: st.selectedTrackId, armed: st.tracks.filter(t => t.isTrackArmed).map(t => t.id), volumes: Object.fromEntries(st.tracks.map(t => [t.id, t.volume])) }; },
       captured: () => midiCapture.size,
       tracks: () => getState().tracks.map(t => ({
         id: t.id, name: t.name, type: t.type,
-        clips: t.clips.filter(c => Array.isArray(c.notes)).map(c => ({ id: c.id, name: c.name, start: c.start, duration: c.duration, groove: c.groove ? c.groove.template.id : null, notes: (c.notes || []).map(n => ({ p: n.pitch, s: n.start, d: n.duration, v: n.velocity })) })),
+        clips: t.clips.filter(c => Array.isArray(c.notes)).map(c => ({ id: c.id, name: c.name, start: c.start, duration: c.duration, muted: !!c.isMuted, takeNumber: c.takeNumber ?? null, groove: c.groove ? c.groove.template.id : null, cc: c.cc || null, notes: (c.notes || []).map(n => ({ p: n.pitch, s: n.start, d: n.duration, v: n.velocity, ...(n.muted ? { m: 1 } : {}) })) })),
       })),
     };
     return () => { delete (window as any).__novaMidi; };

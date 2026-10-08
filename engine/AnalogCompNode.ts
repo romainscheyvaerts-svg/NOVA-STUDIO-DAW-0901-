@@ -14,12 +14,16 @@
  *   labo : l'original a une légère avance de phase, reproduite par un
  *   passe-tout fractionnaire plus cette latence compensée).
  * - VU de réduction de gain : réduction max et courante, ~30 fois par seconde.
+ * - Side-chain (R7) : même interface que le Compresseur (`sidechainInput`,
+ *   `setSidechainActive`) ; la clé entre sur la 2e entrée du worklet et remplace
+ *   le signal du détecteur ; « écouter la clé » (keyListen) fait entendre la clé.
  */
 import { createAnalogCompCore } from './analogCompCore';
 import { buildAnalogInternal } from './analogCompMaps';
 import { ANALOG_PROFILES } from './analogProfiles';
 import { ANALOG_SPECS, sanitizeAnalog } from './analogCompParams';
 import { loadWorkletModule } from '../plugins/vocalDspUtils';
+import { retireWorkletNode } from './workletGuard';
 
 const AUDIO_PARAMS = (kind: string) => (ANALOG_SPECS[kind]?.specs || []).filter(s => s.auto);
 
@@ -38,7 +42,10 @@ const __apByKind = ${JSON.stringify(Object.fromEntries(Object.keys(ANALOG_SPECS)
 const __allAp = ${JSON.stringify(ALL_AP)};
 class NovaAnalogCompProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
-    return __allAp.map(d => ({ name: d.name, minValue: -1e4, maxValue: 1e4, defaultValue: d.defaultValue, automationRate: 'k-rate' }));
+    return __allAp.map(d => ({ name: d.name, minValue: -1e4, maxValue: 1e4, defaultValue: d.defaultValue, automationRate: 'k-rate' }))
+      // Side-chain (R7) : détection sur l'entrée 2 (clé externe), écoute de la clé.
+      .concat([{ name: '__keyOn', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' },
+        { name: '__keyListen', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' }]);
   }
   constructor(options) {
     super();
@@ -75,7 +82,17 @@ class NovaAnalogCompProcessor extends AudioWorkletProcessor {
     const inp = inputs[0];
     const iL = inp && inp[0] ? inp[0] : this.zero;
     const iR = inp && inp[1] ? inp[1] : iL;
-    this.core.process(iL, iR, out[0], out[1] || null, n);
+    const key = inputs[1];
+    // Clé branchée mais muette (source à l'arrêt : entrée inactive, 0 canal) = silence, pas le son de la piste.
+    const useKey = parameters.__keyOn[0] >= 0.5;
+    const kL = useKey ? (key && key[0] ? key[0] : this.zero) : null;
+    const kR = useKey ? (key && key[1] ? key[1] : kL) : null;
+    this.core.process(iL, iR, out[0], out[1] || null, n, kL, kR);
+    if (useKey && parameters.__keyListen[0] >= 0.5) {
+      // Écoute de la clé : on n'entend que la clé (filtrée par la barre « Clé »).
+      out[0].set(kL.subarray(0, n));
+      if (out[1]) out[1].set(kR.subarray(0, n));
+    }
     if (++this.blocks >= 12) { this.blocks = 0; this.port.postMessage(this.core.takeMeters()); }
     return true;
   }
@@ -88,6 +105,8 @@ export interface AnalogMeters { grDb: number; grNowDb: number; inPeakDb: number;
 export class AnalogCompNode {
   public input: GainNode;
   public output: GainNode;
+  /** Entrée de la clé de side-chain (R7), câblée par le moteur (engine/sidechain.ts). */
+  public readonly sidechainInput: GainNode;
   public readonly ready: Promise<void>;
   public readonly kind: string;
   private ctx: BaseAudioContext;
@@ -97,6 +116,10 @@ export class AnalogCompNode {
   private failed = false;
   /** Latence déclarée (échantillons) : avance de phase mesurée du plugin d'origine (passe-tout + PDC). */
   private latSamples = 0;
+  private keyActive = false;
+  /** Effet retiré : un worklet encore en chargement n'est pas créé (sinon il restait vivant). */
+  private disposed = false;
+  private keyListen = false;
 
   constructor(ctx: BaseAudioContext, kind: string, params?: Record<string, any>) {
     this.ctx = ctx;
@@ -105,6 +128,11 @@ export class AnalogCompNode {
     this.output = ctx.createGain();
     this.input.channelCount = 2;
     this.input.channelCountMode = 'explicit';
+    this.sidechainInput = ctx.createGain();
+    this.sidechainInput.channelCount = 2;
+    this.sidechainInput.channelCountMode = 'explicit';
+    this.sidechainInput.channelInterpretation = 'speakers';
+    this.keyListen = Number(params?.keyListen) >= 0.5;
     this.params = { ...(ANALOG_SPECS[kind]?.defaults || {}), isEnabled: true, ...sanitizeAnalog(kind, params || {}) };
     try {
       const cfg = buildAnalogInternal(kind, this.numericParams(), ANALOG_PROFILES[kind], ctx.sampleRate);
@@ -116,10 +144,11 @@ export class AnalogCompNode {
   private async init() {
     try {
       await loadWorkletModule(this.ctx, 'nova-analog-comp-v1', WORKLET_CODE);
+      if (this.disposed) return;
       const parameterData: Record<string, number> = {};
       for (const s of AUDIO_PARAMS(this.kind)) parameterData[s.id] = +(this.params[s.id] as number);
       this.worklet = new AudioWorkletNode(this.ctx, 'nova-analog-comp-v1', {
-        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+        numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [2],
         channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
         parameterData,
         // Réglages et profil passés à la construction : un message arriverait trop tard à l'export.
@@ -130,6 +159,8 @@ export class AnalogCompNode {
         if (Number.isFinite(d.grDb)) this.meters = { grDb: d.grDb, grNowDb: d.grNowDb, inPeakDb: d.inPeakDb, outPeakDb: d.outPeakDb, at: Date.now() };
       };
       this.input.connect(this.worklet);
+      this.sidechainInput.connect(this.worklet, 0, 1);
+      this.applyKey();
       this.worklet.connect(this.output);
     } catch (e) {
       console.warn(`[NOVA ${this.kind}] AudioWorklet indisponible, effet contourné :`, e);
@@ -150,6 +181,7 @@ export class AnalogCompNode {
 
   public updateParams(p: Record<string, any>) {
     if (!p) return;
+    if (p.keyListen !== undefined) { const l = Number(p.keyListen) >= 0.5; if (l !== this.keyListen) { this.keyListen = l; this.applyKey(); } }
     const clean = sanitizeAnalog(this.kind, p);
     this.params = { ...this.params, ...clean };
     if (!this.worklet) return;
@@ -166,6 +198,24 @@ export class AnalogCompNode {
 
   public getParams() { return { ...this.params }; }
 
+  /** Clé externe branchée (R7) : la détection écoute `sidechainInput`. */
+  public setSidechainActive(on: boolean) {
+    if (on === this.keyActive) return;
+    this.keyActive = on;
+    this.applyKey();
+  }
+  public get sidechainActive() { return this.keyActive; }
+
+  private applyKey() {
+    if (!this.worklet) return;
+    const prm = this.worklet.parameters as any;
+    const now = this.ctx.currentTime;
+    try {
+      prm.get('__keyOn')?.setValueAtTime(this.keyActive ? 1 : 0, now);
+      prm.get('__keyListen')?.setValueAtTime(this.keyActive && this.keyListen ? 1 : 0, now);
+    } catch { /* contexte fermé */ }
+  }
+
   /** AudioParam d'un réglage automatisable (lecture et export y programment la voie d'automation), sinon null. */
   public automationParam(key: string): AudioParam | null {
     if (!this.worklet || !AUDIO_PARAMS(this.kind).some(s => s.id === key)) return null;
@@ -181,8 +231,16 @@ export class AnalogCompNode {
 
   public isFallback() { return this.failed; }
 
+  /** Effet retiré de la piste : worklet mis à la retraite (ou jamais créé s'il chargeait encore), entrées débranchées. */
+  public dispose() {
+    this.disposed = true;
+    if (this.worklet) { retireWorkletNode(this.worklet); this.worklet = null; }
+    this.disconnect();
+  }
+
   public disconnect() {
     try { this.input.disconnect(); } catch { /* déjà débranché */ }
+    try { this.sidechainInput.disconnect(); } catch { /* idem */ }
     try { this.worklet?.disconnect(); } catch { /* idem */ }
     try { this.output.disconnect(); } catch { /* idem */ }
   }

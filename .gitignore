@@ -41,3 +41,5 @@ bridge-python/*.pyc
 .env
 .vercel
 .env*
+__pycache__/
+*.pyc

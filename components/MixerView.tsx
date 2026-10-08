@@ -2,9 +2,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { gainToDbText, panToText } from '../utils/db';
 import { Track, TrackType, PluginInstance, TrackSend, PluginType, TrackGroup } from '../types';
-import { audioEngine } from '../engine/AudioEngine';
 import { SmartKnob } from './SmartKnob';
-import ProMasterMeter from './ProMasterMeter';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { getValidDestinations, getRouteLabel } from './RoutingManager';
 import { PluginName } from './PluginName';
@@ -14,10 +12,13 @@ import { automationRecorder } from '../services/AutomationManager';
 import { useLiveParam } from '../utils/automationLiveStore';
 import { sendColor, sendHelp, sendLabel, trackDisplayName } from '../utils/sendLabels';
 import InsertListPopover from './InsertListPopover';
-import { canvasTheme } from '../utils/canvasTheme';
 import { MIXER_INSERT_ROWS, splitInserts } from '../utils/insertRows';
 import { FloatingMenu, handlePluginModifierClick, InactiveStripVeil, MixerStructureButtons, pluginStateClass, pluginStateHelp, pluginStateMenuItems, SendSlotsPopover, SendViewPicker, SendViewStrip, TrackIOSelectors, useLongPress, VcaStrip } from './TrackStructure';
 import { sendSlots, shownTrackIds } from '../utils/trackStructure';
+import TrackMeter from './meters/TrackMeter';
+import StripHead from './meters/StripHead';
+import { loudnessPanel } from './meters/LoudnessPanel';
+import { MASTER_OUT } from '../engine/meters/meterBank';
 
 // Track Group Colors (inspired by Pro Tools)
 const GROUP_COLORS = [
@@ -26,31 +27,9 @@ const GROUP_COLORS = [
   '#6366f1', '#8b5cf6', '#a855f7', '#ec4899'
 ];
 
-const VUMeter: React.FC<{ analyzer: AnalyserNode | null }> = ({ analyzer }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    if (!analyzer) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    const data = new Uint8Array(analyzer.frequencyBinCount);
-    let frame: number;
-    const draw = () => {
-      analyzer.getByteFrequencyData(data);
-      let sum = 0; for (let i = 0; i < data.length; i++) sum += data[i];
-      // Slightly boost visual level for better feedback
-      const level = Math.min(1, (sum / data.length / 128) * 1.8);
-      const w = canvas.width; const h = canvas.height;
-      ctx.clearRect(0, 0, w, h); ctx.fillStyle = canvasTheme().light ? 'rgba(15, 23, 42, 0.1)' : '#1e2229'; ctx.fillRect(0, 0, w, h);
-      const grad = ctx.createLinearGradient(0, h, 0, 0);
-      grad.addColorStop(0, '#22c55e'); grad.addColorStop(0.7, '#eab308'); grad.addColorStop(0.9, '#ef4444');
-      ctx.fillStyle = grad; ctx.fillRect(0, h - (level * h), w, level * h);
-      frame = requestAnimationFrame(draw);
-    };
-    draw(); return () => cancelAnimationFrame(frame);
-  }, [analyzer]);
-  return <canvas ref={canvasRef} width={6} height={120} className="rounded-full overflow-hidden" />;
-};
+// R11 : l'ancien VUMeter lisait le SPECTRE (getByteFrequencyData) et la droite
+// recopiait la gauche. Les tranches utilisent désormais de vrais mètres
+// AudioWorklet (components/meters/TrackMeter.tsx).
 
 /** Même envoi : même destination ET même emplacement (Pro Tools : deux envois a et d vers RV PLATE). */
 const sameSend = (a: TrackSend, b: TrackSend) => a.id === b.id && (a.slot ?? null) === (b.slot ?? null);
@@ -170,10 +149,6 @@ const ChannelStrip: React.FC<{
   const insertRows = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? MIXER_INSERT_ROWS.touch : MIXER_INSERT_ROWS.mouse;
   const { shown: shownInserts, hidden: hiddenInserts } = splitInserts(track.plugins, insertRows);
   
-  // Use Engine Analyzers: Master uses Left/Right, Tracks use single
-  const analyzer = isMaster ? audioEngine.masterAnalyzerL : audioEngine.getTrackAnalyzer(track.id);
-  // For master right channel
-  const analyzerR = isMaster ? audioEngine.masterAnalyzerR : analyzer; 
 
   const handleFXClick = (e: React.MouseEvent | React.TouchEvent, p: PluginInstance) => {
     e.stopPropagation();
@@ -379,6 +354,9 @@ const ChannelStrip: React.FC<{
             <div className="mb-2 px-1"><AutomationModeSelector track={track} onUpdate={onUpdate} variant="mixer" /></div>
         )}
 
+        {/* Tête de tranche (R11) : Ø, mono, trim d'entrée, largeur (avant les inserts). */}
+        <div className="mb-2"><StripHead track={track} onUpdate={onUpdate} /></div>
+
         <div className="mb-2 flex flex-col items-center">
            <SmartKnob id={`${track.id}-pan`} targetId={track.id} paramId="pan" label="Pan" value={shownPan} min={-1} max={1} size={36} color="#06b6d4" defaultValue={0} format={panToText} onChange={(val) => onUpdate({...track, pan: val})} />
         </div>
@@ -401,17 +379,19 @@ const ChannelStrip: React.FC<{
                  </div>
               </div>
            </div>
-           {isMaster ? (
-              <ProMasterMeter orientation="vertical" />
-           ) : (
-           <div className="flex space-x-1">
-              <VUMeter analyzer={analyzer} />
-              <VUMeter analyzer={analyzerR} />
-           </div>
-           )}
+           {/* Vrais mètres G / D (R11) + réduction de gain des dynamiques de la piste. */}
+           <TrackMeter pointId={isMaster ? MASTER_OUT : track.id} grTrackId={track.id} showReadout
+             label={isMaster ? 'Sortie master' : track.name} className={isMaster ? 'w-[44px]' : 'w-[30px]'} />
         </div>
 
         <div className="mt-2 text-center text-[10px] font-mono tabular-nums text-slate-300">{gainToDbText(shownVolume)}</div>
+        {isMaster && (
+          <button type="button" onClick={() => loudnessPanel.toggle()} data-testid="mixer-loudness"
+            title="Fenêtre Loudness : LUFS intégré / court terme / momentané, LRA, crête vraie, corrélation, goniomètre, spectre"
+            className="nova-hit-tactile mt-2 h-7 rounded border border-cyan-500/30 bg-cyan-500/10 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/20">
+            <i className="fas fa-wave-square mr-1 text-[9px]" />Loudness
+          </button>
+        )}
         <div className="mt-2 flex space-x-2">
            <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title="Couper le son de cette tranche">Muet</button>
            <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title="N'écouter que cette tranche">Solo</button>
@@ -619,36 +599,11 @@ const MixerView: React.FC<{
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busKey]);
   
-  // Handle linked group actions
-  const handleGroupedTrackUpdate = useCallback((previous: Track, updated: Track) => {
-    // La piste modifiee est toujours appliquee...
+  // Groupes de mix : App les applique pour toutes les vues (R12, utils/editGroups.mixLinkUpdates :
+  // volume et pan relatifs, muet, solo, envois, mode d'automation ; groupes actifs ; Maj+Ctrl inverse).
+  const handleGroupedTrackUpdate = useCallback((_previous: Track, updated: Track) => {
     onUpdateTrack(updated);
-
-    const trackGroup = trackGroups.find(g => g.trackIds.includes(previous.id));
-    if (!trackGroup) return;
-
-    // ...puis on repercute sur le groupe uniquement ce qui a REELLEMENT change.
-    const others = trackGroup.trackIds
-      .filter(tid => tid !== previous.id)
-      .map(tid => tracks.find(tr => tr.id === tid))
-      .filter((t): t is Track => !!t);
-    if (others.length === 0) return;
-
-    if (trackGroup.linkedVolume && updated.volume !== previous.volume && previous.volume > 0) {
-      const ratio = updated.volume / previous.volume;
-      others.forEach(t => onUpdateTrack({ ...t, volume: Math.max(0, Math.min(1.5, t.volume * ratio)) }));
-    }
-    if (trackGroup.linkedPan && updated.pan !== previous.pan) {
-      const delta = updated.pan - previous.pan;
-      others.forEach(t => onUpdateTrack({ ...t, pan: Math.max(-1, Math.min(1, t.pan + delta)) }));
-    }
-    if (trackGroup.linkedMute && updated.isMuted !== previous.isMuted) {
-      others.forEach(t => onUpdateTrack({ ...t, isMuted: updated.isMuted }));
-    }
-    if (trackGroup.linkedSolo && updated.isSolo !== previous.isSolo) {
-      others.forEach(t => onUpdateTrack({ ...t, isSolo: updated.isSolo }));
-    }
-  }, [trackGroups, tracks, onUpdateTrack]);
+  }, [onUpdateTrack]);
   
   return (
     <div ref={mixerScrollRef} className="flex-1 flex overflow-x-auto bg-[#08090b] custom-scroll h-full snap-x snap-mandatory">

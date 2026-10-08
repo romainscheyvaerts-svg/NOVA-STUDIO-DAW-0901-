@@ -1,10 +1,11 @@
 import { Bass808Style, BASS808_ROOT, BASS808_RELEASE, DEFAULT_GLIDE_TIME, midiToHz, rateForPitch, Voice808, Event808, Bass808Settings, plan808 } from '../utils/bass808';
 import { Clip, TrackType } from '../types';
+import { playableNotes } from '../utils/midiCc';
 
 /** Notes (temps absolus) de clips MIDI, clips coupés exclus. */
 export function notesOfClips(clips: Clip[]) {
   return clips.filter(c => !c.isMuted && c.type === TrackType.MIDI && c.notes && c.notes.length)
-    .flatMap(c => c.notes!.filter(n => n.start < c.duration).map(n => ({
+    .flatMap(c => playableNotes(c).filter(n => n.start < c.duration).map(n => ({
       pitch: n.pitch, velocity: n.velocity, start: c.start + n.start, duration: Math.min(n.duration, c.duration - n.start),
     })));
 }

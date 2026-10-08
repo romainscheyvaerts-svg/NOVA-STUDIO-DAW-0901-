@@ -5,10 +5,13 @@ import { dspMonitor, DspState, safeModeStore } from '../engine/dspMonitor';
 import { pickAutoFreeze, rankHeavyTracks, SafetyContext } from '../utils/dspLoad';
 import { novaBridge, BridgeState } from '../services/NovaBridge';
 import { audioEngine } from '../engine/AudioEngine';
+import { barItem } from '../utils/barFit';
 
 /**
  * Compteur « CPU » de la barre de transport (comme la fenêtre Performance de
- * Pro Tools) : charge audio en barres vertes / orange / rouges, état du pont VST,
+ * Pro Tools) : charge audio en barres vertes / orange / rouges, état du pont VST
+ * dans la MÊME puce (point vert « VST », ou prise orange en reconnexion : la barre
+ * débordait avec deux puces),
  * et en surcharge confirmée une alerte qui PROPOSE une solution (geler la piste la
  * plus lourde, tampon de lecture plus grand). Le mode sécurité (gel automatique)
  * est réglé ici et appliqué par l'appli (App, gel par handleFreezeTrack).
@@ -90,7 +93,10 @@ const DspMeter: React.FC<Props> = ({ tracks, onFreezeTrack, safety, compact = fa
   const freezable = useMemo(() => (alert || open ? pickAutoFreeze(tracks, safety) : null), [tracks, safety, alert, open]);
   const ui = LEVEL_UI[s.level];
   const pct = s.dsp;
-  const label = `Charge audio : ${pct} % (${ui.label})${s.underrunsPerMin ? `, ${s.underrunsPerMin} craquement${s.underrunsPerMin > 1 ? 's' : ''} par minute` : ''}`;
+  const bridgeLabel = bridge.status === 'connected'
+    ? `Pont VST connecté : ${bridge.pluginCount} plugin${bridge.pluginCount > 1 ? 's' : ''} du PC disponibles`
+    : bridge.status === 'reconnecting' ? `Pont VST : reconnexion… (essai ${bridge.attempt || 1})` : '';
+  const label = `Charge audio : ${pct} % (${ui.label})${s.underrunsPerMin ? `, ${s.underrunsPerMin} craquement${s.underrunsPerMin > 1 ? 's' : ''} par minute` : ''}${bridgeLabel ? `. ${bridgeLabel}` : ''}`;
 
   const rect = btnRef.current?.getBoundingClientRect();
   const panelStyle: React.CSSProperties = rect
@@ -99,20 +105,6 @@ const DspMeter: React.FC<Props> = ({ tracks, onFreezeTrack, safety, compact = fa
 
   return (
     <>
-      {bridge.status === 'connected' && !compact && (
-        <span role="status" data-testid="bridge-status" title={`Pont VST connecté : ${bridge.pluginCount} plugin${bridge.pluginCount > 1 ? 's' : ''} du PC disponibles.`}
-          className="hidden xl:inline-flex h-7 items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 text-[9px] font-black text-emerald-300">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" aria-hidden="true"></span>VST
-        </span>
-      )}
-      {bridge.status === 'reconnecting' && (
-        <button type="button" onClick={() => { void novaBridge.retryNow(); }} data-testid="bridge-status"
-          title="Le pont VST (effets de ton PC) s'est fermé : NOVA se reconnecte toute seule. Clic : réessayer maintenant."
-          className="hidden md:inline-flex h-7 items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/15 px-2 text-[10px] font-bold text-amber-300">
-          <i className="fas fa-plug-circle-exclamation text-[10px]" aria-hidden="true"></i>
-          <span>Pont VST : reconnexion… (essai {bridge.attempt || 1})</span>
-        </button>
-      )}
       <button
         ref={btnRef}
         type="button"
@@ -121,13 +113,23 @@ const DspMeter: React.FC<Props> = ({ tracks, onFreezeTrack, safety, compact = fa
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
         aria-label={label}
-        title={`${label}. Clic : détails, pistes les plus lourdes, mode sécurité.`}
-        className={`nova-hit-tactile flex h-8 items-center gap-1.5 rounded-lg px-2 border transition-colors ${s.level === 'surcharge' ? 'border-red-500/50 bg-red-500/15' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}
+        title={`${label}. Clic : détails, pistes les plus lourdes, mode sécurité${bridge.status === 'reconnecting' ? ', réessayer le pont VST' : ''}.`}
+        className={`nova-hit-tactile flex shrink-0 whitespace-nowrap h-8 items-center gap-1.5 rounded-lg px-2 border transition-colors ${s.level === 'surcharge' ? 'border-red-500/50 bg-red-500/15' : bridge.status === 'reconnecting' ? 'border-amber-500/50 bg-amber-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}
       >
-        {!compact && <span className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>CPU</span>}
+        {!compact && <span {...barItem('libelle-cpu', 7)} className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>CPU</span>}
         <Bars value={pct} color={ui.color} />
         {!compact && <span className="mono nova-chiffres text-[10px] font-bold w-7 text-right" style={{ color: ui.color }}>{pct}%</span>}
         {safe && <i className="fas fa-life-ring text-[9px] text-cyan-300" aria-label="Mode sécurité actif"></i>}
+        {bridge.status === 'connected' && (
+          <span data-testid="bridge-status" data-bridge="connected" className="flex items-center gap-1 border-l border-white/10 pl-1.5 text-[9px] font-black text-emerald-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" aria-hidden="true"></span>{!compact && 'VST'}
+          </span>
+        )}
+        {bridge.status === 'reconnecting' && (
+          <span data-testid="bridge-status" data-bridge="reconnecting" className="flex items-center border-l border-white/10 pl-1.5 text-amber-300">
+            <i className="fas fa-plug-circle-exclamation text-[10px] animate-pulse" aria-hidden="true"></i>
+          </span>
+        )}
       </button>
 
       {open && createPortal(
@@ -145,6 +147,15 @@ const DspMeter: React.FC<Props> = ({ tracks, onFreezeTrack, safety, compact = fa
               <dt className="text-slate-400">Sons en retard</dt><dd className="font-bold">{s.lateEvents}</dd>
             </dl>
             {s.source === 'none' && <p className="text-[11px] text-slate-500 mb-3">Mesure disponible pendant la lecture.</p>}
+            {bridgeLabel && (
+              <div className={`mb-3 flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 ${bridge.status === 'reconnecting' ? 'border-amber-500/40 bg-amber-500/10 text-amber-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
+                <span className="text-[11px] font-bold">{bridgeLabel}{bridge.status === 'reconnecting' ? ' NOVA se reconnecte toute seule.' : ''}</span>
+                {bridge.status === 'reconnecting' && (
+                  <button type="button" onClick={() => { void novaBridge.retryNow(); }} data-testid="bridge-retry"
+                    className="h-8 shrink-0 px-2.5 rounded-md bg-amber-400 text-black text-[11px] font-black">Réessayer</button>
+                )}
+              </div>
+            )}
             {heavy.length > 0 && (
               <div className="mb-3">
                 <p className="text-[11px] font-bold text-slate-400 mb-1.5">Pistes les plus lourdes</p>

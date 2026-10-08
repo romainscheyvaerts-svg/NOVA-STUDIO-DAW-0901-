@@ -4,6 +4,7 @@ import { PluginParameter } from '../types';
 import { makeCurve, loadWorkletModule } from './vocalDspUtils';
 import { retireWorkletNode } from '../engine/workletGuard';
 import { gainDbFr, numFr, termHelp } from '../utils/pluginUi';
+import { AutomationSet, MappedParam } from '../engine/automationParams';
 
 /** Préréglages affichés en français (les clés restent celles des projets). */
 const PRESET_LABELS: Record<string, string> = {
@@ -33,6 +34,10 @@ export interface CompressorParams {
    * est ignoree, le compresseur n'ajoute alors aucun retard. Optionnel.
    */
   lowLatency?: boolean;
+  /** Side-chain (R7) : filtre de la clé (Hz) et écoute de la clé (1 = on entend la clé). */
+  keyHpf?: number;
+  keyLpf?: number;
+  keyListen?: number;
 }
 
 /**
@@ -69,7 +74,10 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
       { name: 'release', defaultValue: 0.25, minValue: 0.005, maxValue: 5, automationRate: 'k-rate' },
       { name: 'scHpFreq', defaultValue: 80, minValue: 10, maxValue: 2000, automationRate: 'k-rate' },
       { name: 'lookahead', defaultValue: 0, minValue: 0, maxValue: 0.01, automationRate: 'k-rate' },
-      { name: 'mode', defaultValue: 0, minValue: 0, maxValue: 3, automationRate: 'k-rate' }
+      { name: 'mode', defaultValue: 0, minValue: 0, maxValue: 3, automationRate: 'k-rate' },
+      // Side-chain (R7) : détection sur l'entrée 2 (clé externe), écoute de la clé.
+      { name: 'keyOn', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+      { name: 'keyListen', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' }
     ];
   }
   constructor() {
@@ -99,6 +107,15 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     const inL = nIn > 0 ? input[0] : null;
     const inR = nIn > 1 ? input[1] : inL;
     const outL = output[0], outR = output.length > 1 ? output[1] : null;
+    // Clé externe (side-chain) : la détection écoute l'entrée 2 ; le son traité reste l'entrée 1.
+    const key = inputs[1];
+    // Clé branchée mais muette (source à l'arrêt : entrée inactive, 0 canal) = silence,
+    // pas le son de la piste : sans kick, la 808 n'est plus creusée.
+    const useKey = p.keyOn[0] >= 0.5;
+    if (useKey && (!this.zk || this.zk.length < n)) this.zk = new Float32Array(n);
+    const kL = useKey ? (key && key[0] ? key[0] : this.zk) : null;
+    const kR = useKey ? (key && key[1] ? key[1] : kL) : null;
+    const listen = useKey && p.keyListen[0] >= 0.5;
     if (p.scHpFreq[0] !== this.lastFc) this.setHighpass(p.scHpFreq[0]);
     const T = p.threshold[0];
     const R = Math.max(1, p.ratio[0]);
@@ -121,13 +138,15 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     let ms = this.ms, y1 = this.y1, yL = this.yL, q = this.charge, w = this.w, grPeak = this.grPeak;
     for (let i = 0; i < n; i++) {
       const xl = inL ? inL[i] : 0, xr = inR ? inR[i] : 0;
+      // Signal de détection : la clé externe (side-chain) ou le son lui-même.
+      const dl = kL ? kL[i] : xl, dr = kR ? kR[i] : xr;
       // Passe-haut de detection (n'affecte pas le son entendu)
-      let hl = b0 * xl + b1 * s[0] + b2 * s[1] - a1 * s[2] - a2 * s[3];
-      let hr = b0 * xr + b1 * s[4] + b2 * s[5] - a1 * s[6] - a2 * s[7];
+      let hl = b0 * dl + b1 * s[0] + b2 * s[1] - a1 * s[2] - a2 * s[3];
+      let hr = b0 * dr + b1 * s[4] + b2 * s[5] - a1 * s[6] - a2 * s[7];
       if (hl < 1e-15 && hl > -1e-15) hl = 0;
       if (hr < 1e-15 && hr > -1e-15) hr = 0;
-      s[1] = s[0]; s[0] = xl; s[3] = s[2]; s[2] = hl;
-      s[5] = s[4]; s[4] = xr; s[7] = s[6]; s[6] = hr;
+      s[1] = s[0]; s[0] = dl; s[3] = s[2]; s[2] = hl;
+      s[5] = s[4]; s[4] = dr; s[7] = s[6]; s[6] = hr;
       let lvl;
       if (rms) {
         ms = aRms * ms + (1 - aRms) * 0.5 * (hl * hl + hr * hr);
@@ -162,8 +181,8 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
         const iN = (w - this.la) & M;
         vl = bL[iN]; vr = bR[iN];
       }
-      outL[i] = vl * g;
-      if (outR) outR[i] = vr * g;
+      if (listen) { outL[i] = dl; if (outR) outR[i] = dr; }
+      else { outL[i] = vl * g; if (outR) outR[i] = vr * g; }
       w = (w + 1) & M;
     }
     this.ms = ms; this.y1 = y1; this.yL = yL; this.charge = q; this.w = w; this.grPeak = grPeak;
@@ -216,6 +235,16 @@ export class CompressorNode {
 
   /** Pret quand le worklet est charge (le rendu hors ligne attend cette promesse). */
   public readonly ready: Promise<void>;
+
+  /**
+   * Entrée de la clé externe (side-chain, R7) : le moteur y branche la piste
+   * ou le bus choisi, filtré et recalé (PDC). Muette tant qu'aucune clé n'est choisie.
+   */
+  public readonly sidechainInput: GainNode;
+  private keyActive = false;
+
+  /** Réglages automatisables (R8) : seuil, ratio, mix, gain de compensation. */
+  private auto = new AutomationSet();
 
   private params: CompressorParams = {
     threshold: -18,
@@ -273,6 +302,15 @@ export class CompressorNode {
     this.wetGain = ctx.createGain();
     this.wetGain.gain.value = 1;
 
+    this.sidechainInput = ctx.createGain();
+    this.sidechainInput.channelCount = 2;
+    this.sidechainInput.channelCountMode = 'explicit';
+    this.sidechainInput.channelInterpretation = 'speakers';
+
+    // Mix et gain de compensation : automatisables (lois affines : sec = 1 − mix).
+    this.auto.add('mix', new MappedParam(ctx, [{ param: this.wetGain.gain }, { param: this.dryGain.gain, map: v => 1 - v }], { min: 0, max: 1, value: 1, affine: true }));
+    this.auto.add('makeupGain', new MappedParam(ctx, [{ param: this.makeupGainNode.gain }], { min: 0, max: 16, value: 1, affine: true }));
+
     this.input.connect(this.inputAnalyzer);
 
     // Dry path (for parallel compression), aligne sur la voie compressee
@@ -302,10 +340,14 @@ export class CompressorNode {
       await loadWorkletModule(this.ctx, 'vocal-compressor', COMP_WORKLET_CODE);
       if (this.disposed) return;
       this.worklet = new AudioWorkletNode(this.ctx, 'vocal-compressor-processor', {
-        numberOfInputs: 1,
+        numberOfInputs: 2,
         numberOfOutputs: 1,
         outputChannelCount: [2]
       });
+      this.sidechainInput.connect(this.worklet, 0, 1);
+      const wp = this.worklet.parameters;
+      this.auto.add('threshold', new MappedParam(this.ctx, [{ param: wp.get('threshold')! }], { min: -60, max: 0, value: -18, affine: true }));
+      this.auto.add('ratio', new MappedParam(this.ctx, [{ param: wp.get('ratio')! }], { min: 1, max: 20, value: 4, affine: true }));
       this.worklet.port.onmessage = (e) => {
         const d = e.data || {};
         if (Number.isFinite(d.peak)) this.reduction = d.peak;
@@ -317,8 +359,10 @@ export class CompressorNode {
       this.compressor = this.ctx.createDynamicsCompressor();
       this.compIn.connect(this.compressor);
       this.compressor.connect(this.saturationNode);
+      this.auto.add('threshold', new MappedParam(this.ctx, [{ param: this.compressor.threshold }], { min: -60, max: 0, value: -18, affine: true }));
+      this.auto.add('ratio', new MappedParam(this.ctx, [{ param: this.compressor.ratio }], { min: 1, max: 20, value: 4, affine: true }));
     }
-    this.applyParams(true);
+    this.applyParams(true, true);
     const t = this.ctx.currentTime;
     this.output.gain.cancelScheduledValues(t);
     this.output.gain.setValueAtTime(0, t);
@@ -415,8 +459,9 @@ export class CompressorNode {
     this.applyParams();
   }
 
-  /** immediate : valeurs posees sans lissage (mise en place du worklet). */
-  private applyParams(immediate = false) {
+  /** immediate : valeurs posees sans lissage (mise en place du worklet) ; force : réglages fixes reposés même inchangés. */
+  private stateKey = '';
+  private applyParams(immediate = false, force = false) {
     const now = this.ctx.currentTime;
     const safe = (val: number, def: number) => Number.isFinite(val) ? val : def;
     const set = (prm: AudioParam | undefined, v: number, tau = 0.01) => {
@@ -428,43 +473,66 @@ export class CompressorNode {
     const threshold = Math.max(-100, Math.min(0, safe(this.params.threshold, -18)));
     const ratio = Math.max(1, Math.min(20, safe(this.params.ratio, 4)));
     const look = this.effectiveLookahead();
+    const listen = this.keyActive && safe(Number(this.params.keyListen), 0) >= 0.5;
+    // Bascule actif / bypass / écoute de la clé : les réglages fixes sont reposés.
+    const key = `${this.params.isEnabled ? 1 : 0}|${listen ? 1 : 0}`;
+    if (key !== this.stateKey) { this.stateKey = key; force = true; }
+    const st = { force, immediate };
 
+    // Seuil et ratio automatisables (R8) : posés seulement s'ils ont changé.
+    this.auto.get('threshold')?.setStatic(this.compressor && !this.params.isEnabled ? 0 : threshold, st);
+    this.auto.get('ratio')?.setStatic(this.compressor && !this.params.isEnabled ? 1 : ratio, st);
     if (this.worklet) {
       const prm = this.worklet.parameters;
-      set(prm.get('threshold'), threshold);
-      set(prm.get('ratio'), ratio);
       set(prm.get('knee'), dyn.knee);
       set(prm.get('attack'), dyn.attack);
       set(prm.get('release'), dyn.release);
       set(prm.get('scHpFreq'), Math.max(10, Math.min(2000, safe(this.params.scHpFreq, 80))));
       prm.get('mode')?.setValueAtTime(MODE_INDEX[this.params.mode] ?? 0, now);
+      prm.get('keyOn')?.setValueAtTime(this.keyActive ? 1 : 0, now);
+      prm.get('keyListen')?.setValueAtTime(listen ? 1 : 0, now);
       // Le worklet fait lui-meme un fondu quand la pre-lecture change.
       prm.get('lookahead')?.setValueAtTime(look, now);
       set(this.dryDelay.delayTime, look, 0.005);
     } else if (this.compressor) {
-      set(this.compressor.threshold, this.params.isEnabled ? threshold : 0);
-      set(this.compressor.ratio, this.params.isEnabled ? ratio : 1);
       set(this.compressor.knee, dyn.knee);
       set(this.compressor.attack, dyn.attack);
       set(this.compressor.release, dyn.release);
       this.dryDelay.delayTime.setTargetAtTime(Math.floor(0.006 * this.ctx.sampleRate) / this.ctx.sampleRate, now, 0.01);
     }
 
-    if (this.params.isEnabled) {
+    const mix = this.auto.get('mix')!, makeup = this.auto.get('makeupGain')!;
+    if (listen) {
+      // Écoute de la clé : on n'entend que la clé (ni sec, ni gain de compensation).
+      set(this.modeTrim.gain, 1);
+      makeup.setStatic(1, { force: true, immediate });
+      mix.setStatic(1, { force: true, immediate });
+    } else if (this.params.isEnabled) {
       set(this.modeTrim.gain, dyn.trim);
-      const makeup = this.params.autoMakeup
+      const mk = this.params.autoMakeup
         ? this.calculateAutoMakeup()
         : safe(this.params.makeupGain, 1.0);
-      set(this.makeupGainNode.gain, Math.max(0, makeup));
-      const wet = Math.max(0, Math.min(1, safe(this.params.mix, 1)));
-      set(this.wetGain.gain, wet);
-      set(this.dryGain.gain, 1 - wet);
+      makeup.setStatic(Math.max(0, mk), st);
+      mix.setStatic(Math.max(0, Math.min(1, safe(this.params.mix, 1))), st);
     } else {
-      set(this.makeupGainNode.gain, 1.0);
-      set(this.wetGain.gain, 0);
-      set(this.dryGain.gain, 1);
+      makeup.setStatic(1, st);
+      mix.setStatic(0, st);
     }
   }
+
+  /** AudioParam d'un réglage automatisable (R8) : seuil, ratio, mix, gain de compensation ; sinon null. */
+  public automationParam(key: string): MappedParam | null { return this.auto.get(key); }
+
+  /** Lecture arrêtée : les réglages automatisés reviennent à leur valeur fixe. */
+  public restoreStatic() { this.auto.restoreStatic(); }
+
+  /** Clé externe branchée (R7) : la détection écoute `sidechainInput`. */
+  public setSidechainActive(on: boolean) {
+    if (on === this.keyActive) return;
+    this.keyActive = on;
+    this.applyParams();
+  }
+  public get sidechainActive() { return this.keyActive; }
 
   /** Reduction de gain la plus forte depuis la derniere lecture (dB, <= 0). */
   public getReduction(): number {
@@ -512,6 +580,8 @@ export class CompressorNode {
   public dispose() {
     this.disposed = true;
     try { this.input.disconnect(); } catch (e) {}
+    // Clé de side-chain (R7) : plus rien n'entre dans le worklet retiré.
+    try { this.sidechainInput.disconnect(); } catch (e) {}
     if (this.worklet) {
       retireWorkletNode(this.worklet);
       this.worklet = null;

@@ -472,9 +472,14 @@ export const isVca = (t: Pick<Track, 'isVca'> | undefined): boolean => !!t?.isVc
 export const gainToDb = (g: number): number => (g > 0 ? 20 * Math.log10(g) : -Infinity);
 export const dbToGain = (db: number): number => Math.pow(10, db / 20);
 
-/** Membres d'un VCA : pistes qui le désignent (vcaId) et pistes de son groupe (Track.groupId = vcaGroupId). */
+/**
+ * Membres d'un VCA : pistes qui le désignent (vcaId) et pistes de son groupe
+ * (Track.groupId ou Track.groupIds = vcaGroupId : une piste peut être dans
+ * plusieurs groupes, R12). Les VCA et dossiers simples du groupe ne comptent pas.
+ */
 export const vcaMembers = (vca: Track, tracks: Track[]): Track[] =>
-  tracks.filter(t => t.id !== vca.id && (t.vcaId === vca.id || (!!vca.vcaGroupId && t.groupId === vca.vcaGroupId)));
+  tracks.filter(t => t.id !== vca.id && (t.vcaId === vca.id
+    || (!!vca.vcaGroupId && !t.isVca && (t.groupId === vca.vcaGroupId || !!t.groupIds?.includes(vca.vcaGroupId)))));
 
 export const makeVcaTrack = (o: { id: string; name: string; color?: string; groupId?: string }): Track => ({
   id: o.id, name: o.name, type: TrackType.BUS, color: o.color || '#8b5cf6',

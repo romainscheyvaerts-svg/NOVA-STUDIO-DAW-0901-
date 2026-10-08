@@ -207,6 +207,7 @@ export function novaToMidi(sources: ExportSource[], opts: { bpm: number; timeSig
     const notes: MidiFileNote[] = [];
     for (const c of clips) {
       for (const n of c.notes || []) {
+        if (n.muted) continue; // note muette (R16) : jamais exportée
         const abs = c.start + n.start - origin;
         if (abs + n.duration <= 0) continue;
         const s = Math.max(0, abs);

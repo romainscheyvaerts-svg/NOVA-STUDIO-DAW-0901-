@@ -442,13 +442,28 @@ def _is_instrument(plugin) -> bool:
 MAX_RENDER_SECONDS = 20 * 60
 
 
-def midi_events(notes: List[Dict[str, Any]], duration: float) -> List[tuple]:
+def midi_events(notes: List[Dict[str, Any]], duration: float, controllers: Any = None) -> List[tuple]:
     """Notes du DAW → messages MIDI (octets, instant en s) triés pour pedalboard.
 
     Note : {pitch 0–127, start s, duration s, velocity, channel? 0–15}.
     velocity : 0–1 (flottant, 1 = fort) ; une valeur > 1 est lue en 0–127.
-    À instant égal, les fins de note passent avant les débuts (note répétée)."""
+    Contrôleurs (R16) : {time s, status (0xB0 CC, 0xE0 pitch bend, 0xD0
+    aftertouch), data1, data2}. À instant égal : contrôleurs d'abord (la
+    pédale ou le bend s'appliquent à la note qui part), puis fins de note,
+    puis débuts (note répétée)."""
     evs = []
+    for c in controllers or []:
+        try:
+            t = float(c.get("time"))
+            st = int(c.get("status")) & 0xF0
+            d1 = int(c.get("data1", 0)) & 0x7F
+            d2 = int(c.get("data2", 0)) & 0x7F
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if st not in (0xB0, 0xE0, 0xD0) or not np.isfinite(t) or t >= duration:
+            continue
+        msg = bytes([st, d1]) if st == 0xD0 else bytes([st, d1, d2])
+        evs.append((max(0.0, t), -1, msg))
     for n in notes or []:
         try:
             pitch = int(n.get("pitch"))

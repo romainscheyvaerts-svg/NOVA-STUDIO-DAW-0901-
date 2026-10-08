@@ -49,11 +49,17 @@ export interface EditPrefs {
   xfadeCurve: CrossfadeCurve;
   /** Crossfade automatique quand un clip déplacé / rogné touche ou chevauche un voisin. */
   autoXfade: boolean;
+  /**
+   * L'automation suit les éditions (Pro Tools « Automation Follows Edit », R8) :
+   * un clip déplacé emporte sa courbe ; copier / couper / coller / effacer /
+   * dupliquer une plage portent aussi l'automation. Activé par défaut.
+   */
+  automationFollowsEdit: boolean;
 }
 
 const PREFS_KEY = 'nova_edit_prefs';
 const readPrefs = (): EditPrefs => {
-  const def: EditPrefs = { nudge: 'GRID', xfadeCurve: 'EQUAL_POWER', autoXfade: true };
+  const def: EditPrefs = { nudge: 'GRID', xfadeCurve: 'EQUAL_POWER', autoXfade: true, automationFollowsEdit: true };
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return def;

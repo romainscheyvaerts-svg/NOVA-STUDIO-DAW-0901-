@@ -21,6 +21,7 @@
 import { PluginInstance, PluginType, Track, TrackSend, TrackType } from '../types';
 import { instantiateTemplate, InstantiateOptions, sanitizePlugin, SessionTemplate, TEMPLATE_FORMAT, TEMPLATE_VERSION, TemplateLoadReport } from './sessionTemplate';
 import { busesOf, findBusByName, outputOf, setTrackOutput } from './trackStructure';
+import { keySourceLabel, resolveKeySource, sidechainLoop } from '../engine/sidechain';
 
 export const PRESET_FORMAT = 'novapreset';
 export const CHAIN_FORMAT = 'novachain';
@@ -346,7 +347,8 @@ export const makeTrackPreset = (track: Track, tracks: Track[], name: string, opt
     ...(opts.description ? { description: opts.description } : {}),
     createdAt: now, updatedAt: now,
     trackType: track.type, color: track.color,
-    plugins: (track.plugins || []).filter(p => !INSTRUMENT_PLUGINS.has(p.type)).map(chainPlugin),
+    // Clé de side-chain (R7) : son nom est gardé pour la retrouver dans une autre session.
+    plugins: (track.plugins || []).filter(p => !INSTRUMENT_PLUGINS.has(p.type)).map(p => (p.sidechainSourceId ? { ...chainPlugin(p), sidechainSourceName: keySourceLabel(tracks, p.sidechainSourceId) } : chainPlugin(p))),
     sends, volume: track.volume, pan: track.pan, output,
     ...(returns.length ? { returns } : {}),
     source: { from: track.name },
@@ -360,6 +362,8 @@ export interface TrackPresetReport {
   missingSends: string[];
   /** Sortie introuvable : repliée sur le master. */
   outputFallback?: string;
+  /** Clés de side-chain introuvables (ou en boucle) : l'effet écoute sa propre piste. */
+  missingKeys?: string[];
   messages: string[];
 }
 
@@ -419,6 +423,17 @@ export const applyTrackPreset = (tracks: Track[], trackId: string, preset: Track
   if (o.inserts) {
     const src = opts.plugins || preset.plugins;
     next.plugins = src.map(p => ({ ...clone(p), id: newPluginId(), latency: 0 }));
+    // Side-chain (R7) : la clé est retrouvée dans cette session (même id, sinon même nom), sinon retirée.
+    next.plugins = next.plugins.map(p => {
+      if (!p.sidechainSourceId) return p;
+      const ref = resolveKeySource(out, p.sidechainSourceId, p.sidechainSourceName, trackId);
+      const probe = ref ? out.map(t => (t.id === trackId ? { ...next, plugins: [{ ...p, sidechainSourceId: ref }] } : t)) : out;
+      if (ref && !sidechainLoop(probe, trackId, ref, p.id)) return { ...p, sidechainSourceId: ref };
+      (report.missingKeys = report.missingKeys || []).push(p.sidechainSourceName || p.sidechainSourceId);
+      const { sidechainSourceId: _r, ...rest } = p;
+      void _r;
+      return rest;
+    });
   }
   if (o.volumePan) { next.volume = preset.volume; next.pan = preset.pan; }
   if (o.sends) {
@@ -456,6 +471,7 @@ export const applyTrackPreset = (tracks: Track[], trackId: string, preset: Track
   }
   if (report.created.length) report.messages.push(`Retour${report.created.length > 1 ? 's' : ''} créé${report.created.length > 1 ? 's' : ''} : ${report.created.join(', ')}.`);
   if (report.missingSends.length) report.messages.push(`Envoi${report.missingSends.length > 1 ? 's' : ''} ignoré${report.missingSends.length > 1 ? 's' : ''} (destination absente) : ${report.missingSends.join(', ')}.`);
+  if (report.missingKeys?.length) report.messages.push(`Clé de side-chain absente de la session : ${report.missingKeys.join(', ')} (l'effet écoute sa propre piste ; rechoisis la clé dans sa fenêtre).`);
   if (report.outputFallback) report.messages.push(`Sortie « ${report.outputFallback} » absente de la session : la piste sort sur le master.`);
   return { tracks: out, report };
 };

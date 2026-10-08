@@ -147,6 +147,9 @@ const PLUGIN_RANGES: [RegExp, number, number][] = [
 export const paramSpec = (name: string, sample?: number): ParamSpec => {
   if (name === 'volume' || name === PRE_VOLUME) return { min: 0, max: 1.5, kind: 'gain' };
   if (name === 'pan') return { min: -1, max: 1, kind: 'pan' };
+  // Tête de tranche (R11)
+  if (name === 'trim') return { min: 0, max: 4, kind: 'gain' };
+  if (name === 'width') return { min: 0, max: 2, kind: 'linear' };
   if (name.startsWith(SEND_PREFIX)) return { min: 0, max: 1.5, kind: 'gain' };
   const p = parsePluginParam(name);
   const v = typeof sample === 'number' && Number.isFinite(sample) ? sample : 0;
@@ -215,6 +218,8 @@ export const laneDisplayName = (name: string, track?: Pick<Track, 'plugins'>): s
   if (name === 'volume') return 'Volume';
   if (name === 'pan') return 'Panoramique';
   if (name === PRE_VOLUME) return 'Volume avant effets';
+  if (name === 'trim') return "Trim d'entrée";
+  if (name === 'width') return 'Largeur stéréo';
   if (name.startsWith(SEND_PREFIX)) return `Envoi ${name.slice(SEND_PREFIX.length).replace(/^send-/, '')}`;
   const p = parsePluginParam(name);
   if (p) {

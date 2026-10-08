@@ -93,7 +93,7 @@ def run(vps):
                     if name_t:
                         head = pg.locator(".nova-grille").get_by_text(name_t, exact=True).first
                         hb = head.bounding_box()
-                        box = pg.evaluate("""() => { const c = document.querySelectorAll('.nova-grille canvas')[1]; const r = c.getBoundingClientRect();
+                        box = pg.evaluate("""() => { const c = (document.querySelector('.nova-grille canvas[data-tracks-top]') || document.querySelectorAll('.nova-grille canvas')[1]); const r = c.getBoundingClientRect();
                           const sc = document.querySelector('.nova-grille .custom-scroll'); return { x: r.left, sl: sc ? sc.scrollLeft : 0 }; }""")
                         def menu_clip():
                             pg.mouse.click(box["x"] + 3 * 40 - box["sl"], hb["y"] + hb["height"] / 2 + 4, button="right"); pg.wait_for_timeout(400)
