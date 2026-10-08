@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
 import { ProjectIO } from '../services/ProjectIO';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
-import { pluginsSignature } from '../utils/freeze';
+import { anchorClipsToRender, freezeDrift, pluginsSignature } from '../utils/freeze';
 import { DAWState, PluginInstance, PluginType, Track } from '../types';
 import { makeBuffer, parseWavHeader } from './helpers/audio';
 import { makeClip, makeState, makeTrack } from './helpers/fixtures';
@@ -279,5 +279,30 @@ describe('couloirs de prises (V4) : sauvegarde et anciens projets', () => {
     const lead = loaded!.tracks.find(t => t.id === 'track-rec-main')!;
     expect(lead.takeMeta).toBeUndefined();
     expect(listLanes(lead).map(l => [l.n, l.name])).toEqual([[1, 'Prise 1'], [2, 'Prise 2']]);
+  });
+});
+
+describe('ProjectIO : rendu gelé périmé après réouverture', () => {
+  it('les identifiants des sons changent à la réouverture : à jour reste à jour, son changé reste changé', async () => {
+    audioBufferRegistry.register(makeBuffer(1, 8820, 44100), 'rec-1');
+    audioBufferRegistry.register(makeBuffer(1, 8820, 44100), 'justesse-9');
+    audioBufferRegistry.register(makeBuffer(2, 44100, 44100), 'fz-buf');
+    const c1 = makeClip({ id: 'c1', bufferId: 'rec-1', start: 1, duration: 0.1 });
+    const c2 = makeClip({ id: 'c2', bufferId: 'rec-1', start: 2, duration: 0.1, offset: 0.1 });
+    const anchors = anchorClipsToRender([c1, c2], 'fz');
+    const lead = makeTrack({
+      id: 'lead', name: 'Voix', isFrozen: true, frozenUpToPluginIndex: -1, frozenPluginSig: pluginsSignature([], -1),
+      frozenClip: makeClip({ id: 'fz', bufferId: 'fz-buf', duration: 1 }),
+      // c2 corrigé en justesse APRÈS le gel : autre son.
+      clips: [{ ...c1, freezeRef: anchors.get('c1') }, { ...c2, bufferId: 'justesse-9', freezeRef: anchors.get('c2') }],
+    });
+    expect(freezeDrift(lead)!.content).toEqual(['c2']);
+    const blob = await ProjectIO.saveProject(makeState([lead]), []);
+    audioBufferRegistry.clear();
+    const t = (await reload(blob)).tracks[0];
+    expect(t.isFrozen && !!t.frozenClip).toBe(true);
+    expect(t.clips[0].bufferId).not.toBe('rec-1'); // renommé au chargement
+    expect(t.clips[0].freezeRef!.buf).toBe(t.clips[0].bufferId);
+    expect(freezeDrift(t)).toEqual({ content: ['c2'], approx: [], live: [] });
   });
 });

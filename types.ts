@@ -433,6 +433,20 @@ export interface FreezeRef {
   srcClipId?: string;
   /** Respirations traitées (Clip.breaths) déjà contenues dans le rendu. */
   breaths?: BreathEdit[];
+  /**
+   * Son joué par le clip au moment du rendu (bufferId). S'il change (justesse,
+   * Melodyne, alignement, retour à l'original…), la tranche ne peut plus
+   * suivre : le rendu est périmé. Dans un fichier projet : « = » (même son que
+   * le clip) ou « ≠ » (les identifiants des sons changent à la réouverture).
+   */
+  buf?: string;
+  /**
+   * Empreinte du reste du son au moment du rendu (sens, calage, notes : utils/freeze
+   * clipContentSig). Absent (avec buf) : rendus d'avant l'empreinte.
+   */
+  content?: string;
+  /** Clip muet au moment du rendu (le rendu ne contient pas son son). */
+  muted?: boolean;
 }
 
 /** Clip tel qu'il était au moment du gel (référence des éditions pré-effet). */

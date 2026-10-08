@@ -27,7 +27,8 @@ const dragHorizontal = (e: React.MouseEvent, startPos: number, apply: (pos: numb
   window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
 };
 import { Track, PluginType, PluginInstance, TrackType, TrackSend } from '../types';
-import { isPluginBaked, isFreezeStale, isTrackFrozen } from '../utils/freeze';
+import { isPluginBaked, isFreezeStale, isTrackFrozen, freezeDrift } from '../utils/freeze';
+import { useFreezeRefreshBusy } from '../hooks/useFrozenRefresh';
 import { useRecFrozen } from '../utils/recFreezeStore';
 import { useInstrumentStatus } from '../utils/instrumentStore';
 import { openSynthPanel } from '../utils/synthPanelStore';
@@ -413,8 +414,23 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const inst = track.vstInstrument;
   const instStatus = useInstrumentStatus(track.id);
   const freezeStale = !inst && isFreezeStale(track);
+  // Rendu gelé périmé : un clip a changé depuis le gel (hooks/useFrozenRefresh le refait dès que possible).
+  const freezeDriftNow = frozen && !inst ? freezeDrift(track) : null;
+  const refreezing = useFreezeRefreshBusy(track.id);
+  const outdatedPill = freezeDriftNow ? (
+    <span data-testid={`freeze-outdated-${track.id}`} role="status"
+      title={refreezing ? 'Nouveau rendu de la piste gelée en cours…'
+        : freezeDriftNow.content.length
+          ? 'Gel à refaire : le son d’un clip a changé, le rendu gelé joue encore l’ancien. Il sera refait tout seul dès que possible (pont VST connecté) ; sinon dégèle la piste pour l’entendre.'
+          : 'Gel à refaire : des clips ont changé depuis le gel (gain, fondus, découpes, nouvelle prise). Tu les entends déjà à peu près ; le rendu exact sera refait dès que possible (pont VST connecté) ou au dégel.'}
+      className={`shrink-0 inline-flex items-center whitespace-nowrap h-4 rounded px-1 text-[9px] font-black leading-4 ${freezeDriftNow.content.length ? 'bg-amber-500/20 text-amber-300' : 'bg-cyan-500/10 text-cyan-300/80'}`}>
+      {refreezing ? <><i className="fas fa-circle-notch fa-spin mr-0.5 text-[7px]" aria-hidden></i>regel…</> : 'gel à refaire'}
+    </span>
+  ) : null;
   // Piste armée : ligne d'entrée complète (⚙) au lieu des effets.
   const [showInputRow, setShowInputRow] = useState(false);
+  // Ligne des effets affichée (l'indicateur « gel à refaire » s'y range, sinon à côté du nom).
+  const insertStripShown = !(track.isTrackArmed && showInputRow) && !(canHaveSends && showSends && !simple) && (insertPlugins.length > 0 || track.isTrackArmed);
 
   return (
     <div 
@@ -488,6 +504,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               </span>
             )}
             {!isRenaming && <TrackStructureInline track={track} />}
+            {!isRenaming && !insertStripShown && outdatedPill}
             {/* Feat à distance : propriétaire (son nom, sa couleur) et pastille REC quand il enregistre (piste verrouillée). */}
             {!isRenaming && recBy && (
               <span data-testid={`collab-rec-${track.id}`} role="status" title={`${recBy} enregistre sur cette piste : elle est verrouillée pour les autres`}
@@ -743,9 +760,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           passait sur deux lignes et débordait sur la piste suivante. */}
       {/* Piste armée : la ligne vumètre / retour prend la place des pastilles (le bouton FX reste). */}
       {/* Les effets restent visibles même en mode simple : on doit toujours voir ce qui traite la voix. */}
-      {!(track.isTrackArmed && showInputRow) && !(canHaveSends && showSends && !simple) && (insertPlugins.length > 0 || track.isTrackArmed) && (
+      {insertStripShown && (
         <TrackInsertStrip
-          leading={track.isTrackArmed ? <MonitorControl mini trackId={track.id} onExpand={() => setShowInputRow(true)} /> : undefined}
+          leading={track.isTrackArmed ? <MonitorControl mini trackId={track.id} onExpand={() => setShowInputRow(true)} /> : outdatedPill || undefined}
           trackId={track.id}
           plugins={insertPlugins}
           isBaked={(p) => isPluginBaked(track, track.plugins.indexOf(p))}

@@ -58,6 +58,9 @@ export const anchorClipsToRender = (clips: Clip[], renderId: string): Map<string
       ...(c.fadeInCurve ? { fadeInCurve: c.fadeInCurve } : {}), ...(c.fadeOutCurve ? { fadeOutCurve: c.fadeOutCurve } : {}),
       // Respirations déjà traitées dans le rendu (utils/breaths).
       ...(c.breaths?.length ? { breaths: c.breaths.map(e => ({ ...e })) } : {}),
+      // Empreinte du son rendu : un autre son (justesse, Melodyne…) périme le rendu.
+      buf: c.bufferId, content: clipContentSig(c),
+      ...(c.isMuted ? { muted: true } : {}),
     });
   }
   return out;
@@ -100,6 +103,12 @@ export const breathsNeedRefreeze = (t: Track): boolean => {
 
 const playbackCache = new WeakMap<Track, { render: Clip[]; live: Clip[] }>();
 
+/** Places des clips audibles au moment du rendu (temps du rendu = temps du morceau), d'après la photo du gel. */
+const renderedRegions = (t: Track): Array<readonly [number, number]> =>
+  t.freezeBase && t.frozenClip && t.freezeBase.renderId === t.frozenClip.id
+    ? t.freezeBase.clips.filter(b => !b.isMuted).map(b => [b.start, b.start + b.duration] as const)
+    : [];
+
 /**
  * Tranches d'un rendu qui suivent les clips ancrés : pour chaque clip, la
  * partie du rendu qui correspond à son audio actuel, à sa position actuelle
@@ -108,12 +117,16 @@ const playbackCache = new WeakMap<Track, { render: Clip[]; live: Clip[] }>();
  */
 export const sliceAnchored = (
   clips: Clip[], render: Clip, isAnchoredClip: (c: Clip) => boolean, tailMax: number, idSuffix = '~fz',
+  rendered: ReadonlyArray<readonly [number, number]> = [],
 ): { render: Clip[]; live: Clip[] } => {
   const anchored: Clip[] = [];
   const live: Clip[] = [];
   clips.forEach(c => (isAnchoredClip(c) ? anchored : live).push(c));
-  // Débuts des régions rendues (temps du rendu) : une queue s'arrête avant la suivante.
-  const regionStarts = anchored.map(c => c.freezeRef!.anchor + c.freezeRef!.from).sort((a, b) => a - b);
+  // Régions rendues (temps du rendu) : une queue s'arrête où commence la suivante. Une
+  // région collée (clips découpés puis regelés) ou qui chevauche (fondu croisé) contient
+  // déjà cette queue : la rejouer doublerait le son.
+  // `rendered` : toutes les régions présentes au rendu (un clip supprimé depuis y a laissé son son).
+  const regions = [...rendered, ...anchored.map(c => [c.freezeRef!.anchor + c.freezeRef!.from, c.freezeRef!.anchor + c.freezeRef!.to] as const)];
   const out: Clip[] = [];
   for (const c of anchored) {
     const ref = c.freezeRef!;
@@ -132,8 +145,8 @@ export const sliceAnchored = (
       const sameOut = Math.abs(userFadeOut - ref.fadeOut) < 1e-3 && (!userFadeOut || (c.fadeOutCurve || 'LINEAR') === (ref.fadeOutCurve || 'LINEAR'));
       if (endsAtRenderEnd && sameOut && userFadeOut < 0.02) {
         const renderEnd = ref.anchor + ref.to;
-        const next = regionStarts.find(s => s > renderEnd + 1e-3);
-        const room = Math.min(tailMax, (next ?? Infinity) - renderEnd, render.duration - renderEnd);
+        const next = regions.reduce((m, [s, e]) => (e > renderEnd + 1e-3 ? Math.min(m, s) : m), Infinity);
+        const room = Math.min(tailMax, next - renderEnd, render.duration - renderEnd);
         if (room > 0) duration += room;
       }
       out.push({
@@ -182,7 +195,7 @@ export const frozenPlayback = (t: Track): { render: Clip[]; live: Clip[] } => {
     const covered = coveredClipIds(t);
     result = { render: [fc], live: covered ? (t.clips || []).filter(c => !covered.has(c.id)) : [] };
   } else {
-    result = sliceAnchored(t.clips || [], fc, c => isAnchored(t, c), FREEZE_SLICE_TAIL);
+    result = sliceAnchored(t.clips || [], fc, c => isAnchored(t, c), FREEZE_SLICE_TAIL, '~fz', renderedRegions(t));
   }
   playbackCache.set(t, result);
   return result;
@@ -350,4 +363,140 @@ export const isFreezeStale = (t: Track): boolean => {
   if (!t.frozenClip) return false;
   if (t.frozenPluginSig) return pluginsSignature(t.plugins || [], freezeIndex(t)) !== t.frozenPluginSig;
   return needsRerender(t);
+};
+
+// --- Rendu gelé périmé -------------------------------------------------------
+//
+// Un seul mécanisme pour toutes les opérations qui changent un clip d'une piste
+// gelée (justesse, Melodyne / VocAlign, alignement, retour à l'original,
+// inversion, consolidation, Strip Silence, découpe, gain, fondus…), sans les
+// énumérer : chaque clip rendu garde l'empreinte de ce que le rendu contient
+// (FreezeRef), comparée en continu à ce que le clip joue maintenant.
+//
+//   content : le son a changé (autre fichier, inversé, calage, clip remplacé,
+//             respiration retirée, clip rendu muet puis réactivé) : la tranche
+//             joue encore l'ANCIEN son, seul un nouveau rendu le corrige.
+//   approx  : gain, fondus, découpe / raccourci, respirations ajoutées : la
+//             tranche suit, mais APRÈS les effets rendus (un compresseur ne
+//             réagit pas au nouveau gain, la queue d'effet est coupée).
+//   live    : clip absent du rendu (nouvelle prise…) : joué en direct à
+//             travers toute la chaîne (sans le pont, sans ses VST).
+//
+// L'hôte (hooks/useFrozenRefresh) regèle quand c'est sûr ; sinon il prévient
+// (content) et la piste affiche « gel à refaire ».
+
+/** Dans un fichier projet, FreezeRef.buf : le son rendu est celui du clip / un autre. */
+export const FREEZE_SAME_SOUND = '=';
+export const FREEZE_OTHER_SOUND = '≠';
+
+/**
+ * Ce que les tranches du rendu ne savent pas suivre, hors fichier joué (FreezeRef.buf) :
+ * sens, calage, notes. Indépendant des identifiants des sons (stables d'une ouverture à l'autre).
+ */
+export const clipContentSig = (c: Clip): string => fnv([
+  c.isReversed ? 1 : 0,
+  c.warp?.enabled ? JSON.stringify(c.warp) : '',
+  c.notes ? JSON.stringify(c.notes) : '',
+].join('|'));
+
+export type FreezeDriftKind = 'content' | 'approx' | 'live';
+
+export interface FreezeDrift {
+  /** Clips dont le son a changé (ou qui en remplacent un rendu). */
+  content: string[];
+  /** Clips suivis approximativement par les tranches. */
+  approx: string[];
+  /** Clips absents du rendu, joués en direct. */
+  live: string[];
+}
+
+/** Pistes qui suivent leur propre circuit de rendu (instrument VST, ingé à distance, aperçu en direct). */
+const ownRenderFlow = (t: Track): boolean => !!t.vstInstrument || !!t.remote || !!t.livePreview;
+
+/** Le clip pourrait-il être ancré dans un rendu (audio non inversé, audible) ? */
+const anchorable = (c: Clip): boolean => !!c.bufferId && !c.isReversed && !c.notes && !c.isFreezeSlice && !c.isMuted;
+
+const sameFade = (len: number, curve: string | undefined, refLen: number, refCurve: string | undefined): boolean =>
+  Math.abs(len - refLen) < 1e-3 && (!len || (curve || 'LINEAR') === (refCurve || 'LINEAR'));
+
+/** Le son du clip est-il celui que le rendu contient ? */
+const contentChanged = (t: Track, c: Clip, ref: FreezeRef): boolean => {
+  if (c.isReversed) return true;
+  if (ref.muted && !c.isMuted) return true;
+  if (!sliceBreaths(c, ref).exact) return true;
+  if (ref.buf !== undefined && ref.buf !== c.bufferId) return true;
+  if (ref.content !== undefined) return ref.content !== clipContentSig(c);
+  // Rendus d'avant l'empreinte : le son photographié au gel, s'il est connu.
+  const base = t.freezeBase && t.freezeBase.renderId === ref.renderId
+    ? (t.freezeBase.clips.find(b => b.id === (ref.srcClipId || c.id)) as { bufferId?: string } | undefined) : undefined;
+  return !!(base?.bufferId && c.bufferId && base.bufferId !== c.bufferId);
+};
+
+/** Le clip est-il joué depuis le rendu tel qu'il y a été rendu (seulement déplacé) ? */
+const approxChanged = (c: Clip, ref: FreezeRef): boolean => {
+  const off = c.offset || 0;
+  if (Math.abs((c.gain ?? 1) - (ref.gain ?? 1)) > 1e-6) return true;
+  // Raccourci, découpé, rallongé : fondus anti-clic et queue d'effet coupée aux bords.
+  if (Math.abs(off - ref.from) > 1e-3 || Math.abs(off + c.duration - ref.to) > 1e-3) return true;
+  if (!sameFade(c.fadeIn || 0, c.fadeInCurve, ref.fadeIn, ref.fadeInCurve)) return true;
+  if (!sameFade(c.fadeOut || 0, c.fadeOutCurve, ref.fadeOut, ref.fadeOutCurve)) return true;
+  return !!sliceBreaths(c, ref).edits;
+};
+
+const driftCache = new WeakMap<Track, FreezeDrift | null>();
+
+/**
+ * Ce qui, sur une piste gelée, ne correspond plus à son rendu (null : rendu à
+ * jour, piste non gelée, ou piste qui suit son propre circuit de rendu).
+ */
+export const freezeDrift = (t: Track): FreezeDrift | null => {
+  if (!isTrackFrozen(t) || ownRenderFlow(t)) return null;
+  if (driftCache.has(t)) return driftCache.get(t)!;
+  const d: FreezeDrift = { content: [], approx: [], live: [] };
+  const clips = t.clips || [];
+  if (!t.frozenPluginSig) {
+    // Ancien modèle (un seul rendu figé) : toute modification d'un clip rendu est inaudible.
+    const covered = coveredClipIds(t);
+    if (needsRerender(t)) d.content.push(...clips.filter(c => !covered || covered.has(c.id)).map(c => c.id));
+    if (covered) d.live.push(...clips.filter(c => !covered.has(c.id) && anchorable(c)).map(c => c.id));
+  } else {
+    const renderId = t.frozenClip!.id;
+    // Places d'origine des clips rendus (audibles) : un nouveau son posé là les remplace.
+    const rendered = (t.freezeBase && t.freezeBase.renderId === renderId ? t.freezeBase.clips : []).filter(b => !b.isMuted);
+    // Clip rendu supprimé (ni lui ni un morceau de lui) : sa place se tait, mais la queue
+    // d'effet du clip d'avant, prise dans le rendu, n'est plus jouée → à refaire.
+    for (const b of rendered) {
+      if (!clips.some(c => c.id === b.id || (c.freezeRef?.renderId === renderId && c.freezeRef.srcClipId === b.id))) d.approx.push(b.id);
+    }
+    for (const c of clips) {
+      if (c.isFreezeSlice || c.notes) continue;
+      const ref = c.freezeRef && c.freezeRef.renderId === renderId ? c.freezeRef : undefined;
+      if (ref) {
+        if (contentChanged(t, c, ref)) d.content.push(c.id);
+        else if (!c.isMuted && approxChanged(c, ref)) d.approx.push(c.id);
+      } else if (anchorable(c)) {
+        // Nouveau son posé là où jouait un clip rendu (consolidation, remplacement) : le son a changé.
+        const replaces = rendered.some(b => c.start < b.start + b.duration - 1e-3 && c.start + c.duration > b.start + 1e-3);
+        (replaces ? d.content : d.live).push(c.id);
+      }
+    }
+  }
+  const out = d.content.length || d.approx.length || d.live.length ? d : null;
+  driftCache.set(t, out);
+  return out;
+};
+
+/** Le rendu gelé est-il à refaire (« gel à refaire ») ? */
+export const freezeOutdated = (t: Track): boolean => !!freezeDrift(t);
+
+/**
+ * Empreinte de l'écart actuel (null : à jour) : change à chaque nouvelle
+ * modification d'un clip concerné, pour ne traiter chaque état qu'une fois.
+ */
+export const freezeDriftKey = (t: Track): string | null => {
+  const d = freezeDrift(t);
+  if (!d) return null;
+  const byId = new Map((t.clips || []).map(c => [c.id, c] as const));
+  const part = (kind: string, ids: string[]) => ids.map(id => { const c = byId.get(id); return `${kind}:${c ? clipSig(c) : id}`; }).join('|');
+  return `${t.frozenClip?.id}#${fnv([part('c', d.content), part('a', d.approx), part('l', d.live)].join('#'))}`;
 };
