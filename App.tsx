@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta } from './types';
 import { themeStore, useTheme } from './utils/themeStore';
+import { openNovaWindow } from './utils/novaWindows';
 import { audioEngine } from './engine/AudioEngine';
 import TransportBar from './components/TransportBar';
 import MobileTransport from './components/MobileTransport';
@@ -2957,6 +2958,9 @@ function Studio() {
   }, [setState, isMobile]);
   // « Bus 1 », « Bus 2 »… (la console le montre et ouvre tout de suite son renommage).
   const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, nextNumberedName(stateRef.current.tracks, 'Bus')); }, [handleCreateTrack]);
+  const freezeTrackRef = useRef(handleFreezeTrack);
+  freezeTrackRef.current = handleFreezeTrack;
+
   const handleToggleBypass = useCallback((trackId: string, pluginId: string) => {
     setState(produce((draft: DAWState) => {
         const track = draft.tracks.find(t => t.id === trackId);
@@ -5561,7 +5565,28 @@ function Studio() {
       },
       editClip: handleEditClip,
       setBpm: handleUpdateBpm,
-      syncAutoTuneScale: (rootKey: number, scale: string) => applyProjectKey(rootKey, scale)
+      syncAutoTuneScale: (rootKey: number, scale: string) => applyProjectKey(rootKey, scale),
+      // Scénarios de bout en bout (endurance, pannes injectées) : mêmes chemins que l'interface.
+      updateTrack: handleUpdateTrack,
+      updatePluginParams: handleUpdatePluginParams,
+      toggleBypass: handleToggleBypass,
+      togglePlay: handleTogglePlay,
+      stop: handleStop,
+      seek: handleSeek,
+      toggleRecord: () => toggleRecordRef.current?.(),
+      freeze: (trackId: string) => freezeTrackRef.current?.(trackId),
+      undo,
+      redo,
+      setView: (v: string) => setState(s => ({ ...s, currentView: v as any })),
+      setTheme: (p: 'dark' | 'light' | 'system') => themeStore.setPref(p),
+      openWindow: openNovaWindow,
+      diag: () => ({
+        engine: audioEngine.getDiagnostics(),
+        buffers: audioBufferRegistry.size,
+        bufferSeconds: Math.round(audioBufferRegistry.ids().reduce((s, id) => s + (audioBufferRegistry.get(id)?.duration || 0) * (audioBufferRegistry.get(id)?.numberOfChannels || 1), 0)),
+        tracks: stateRef.current.tracks.length,
+        clips: stateRef.current.tracks.reduce((s, t) => s + t.clips.length, 0),
+      }),
     };
     // Dépôt d'un fichier ou d'un beat sur l'en-tête d'une piste (TrackHeader) :
     // cet objet n'existait pas, le dépôt ne faisait rien.

@@ -356,6 +356,25 @@ export class AudioEngine {
     return audioBufferRegistry.get(clipId);
   }
 
+  /** Diagnostic (endurance, console) : tailles des structures vivantes du moteur. */
+  public getDiagnostics() {
+    let plugins = 0, sends = 0;
+    this.tracksDSP.forEach(d => { plugins += d.pluginChain.size; sends += d.sends.size; });
+    return {
+      ctxState: this.ctx?.state ?? null,
+      ctxTime: this.ctx?.currentTime ?? 0,
+      tracksDSP: this.tracksDSP.size,
+      plugins,
+      sends,
+      activeSources: this.activeSources.size,
+      scrubbingSources: this.scrubbingSources.size,
+      reversedCache: this.reversedBufferCache.size,
+      activeMidiNotes: this.activeMidiNotes.size,
+      pluginAutoParams: this.pluginAutoParams.size,
+      isPlaying: this.isPlaying,
+    };
+  }
+
   public async setOutputDevice(deviceId: string) {
       if (!this.ctx) return;
       this.currentOutputDeviceId = deviceId;
