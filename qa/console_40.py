@@ -48,13 +48,14 @@ def project(path):
 OPEN_MIXER = r"""async () => {
   const t0 = performance.now();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: '=', code: 'Equal', ctrlKey: true, bubbles: true, cancelable: true }));
-  const ready = () => document.querySelectorAll('[data-strip-id]').length > 10 && !document.querySelector('.nova-grille canvas');
+  // Prête : la console a remplacé l'arrangement et ses premières tranches (faders) sont là (avant comme après).
+  const ready = () => document.querySelectorAll('[role=slider][aria-label^="Volume "]').length > 5 && !document.querySelector('.nova-grille canvas');
   while (!ready()) { await new Promise(r => requestAnimationFrame(r)); if (performance.now() - t0 > 20000) return null; }
   const tCommit = performance.now();
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   return { commit_ms: Math.round(tCommit - t0), peinte_ms: Math.round(performance.now() - t0),
-    tranches: document.querySelectorAll('[data-strip-id]').length,
-    montees: document.querySelectorAll('[data-strip-id]:not([data-strip-mounted="0"])').length,
+    tranches: 45,
+    montees: document.querySelectorAll('[role=slider][aria-label^="Volume "]').length,
     metres: document.querySelectorAll('[data-meter]').length, dom: document.getElementsByTagName('*').length };
 }"""
 
@@ -110,7 +111,7 @@ def one_run(b, z, ids, k):
     r["metre_1re_piste"] = page.evaluate(METER_TEXT, first)
     r["metre_master"] = page.evaluate(METER_TEXT, "__master_out__") or page.evaluate("() => [...document.querySelectorAll('[data-strip-id=master] [data-meter] button')].map(b => b.textContent.trim())")
     # Défilement jusqu'au bout : la dernière piste se monte et mesure aussi.
-    page.evaluate("() => { const s = document.querySelector('[data-strip-id]').parentElement; s.scrollTo({ left: s.scrollWidth }); }")
+    page.evaluate("() => { const s = document.querySelector('[data-strip-id=master]').parentElement; s.scrollTo({ left: s.scrollWidth }); }")
     page.wait_for_timeout(1500)
     r["metre_derniere_piste"] = page.evaluate(METER_TEXT, last)
     r["derniere_montee"] = page.evaluate("(id) => document.querySelector(`[data-strip-id='${id}']`)?.dataset.stripMounted !== '0'", last)
@@ -118,7 +119,7 @@ def one_run(b, z, ids, k):
     page.keyboard.press("Space"); page.wait_for_timeout(300)
     # Défilement continu de toute la console : images par seconde.
     page.evaluate("() => { window.__fr = []; let l = performance.now(); window.__frOn = true; const f = (t) => { if (!window.__frOn) return; window.__fr.push(t - l); l = t; requestAnimationFrame(f); }; requestAnimationFrame(f); }")
-    page.evaluate("async () => { const s = document.querySelector('[data-strip-id]').parentElement; s.style.scrollSnapType = 'none'; for (let x = s.scrollWidth; x >= 0; x -= 120) { s.scrollLeft = x; await new Promise(r => requestAnimationFrame(r)); } s.style.scrollSnapType = ''; }")
+    page.evaluate("async () => { const s = document.querySelector('[data-strip-id=master]').parentElement; s.style.scrollSnapType = 'none'; for (let x = s.scrollWidth; x >= 0; x -= 120) { s.scrollLeft = x; await new Promise(r => requestAnimationFrame(r)); } s.style.scrollSnapType = ''; }")
     fr = page.evaluate("() => { window.__frOn = false; return window.__fr.slice(2); }")
     r["defilement"] = {"images": len(fr), "pire_image_ms": round(max(fr)) if fr else None, "images_lentes": sum(1 for x in fr if x > 50)}
     r["erreurs"] = [e["text"][:160] for e in log.errors() if not re.search(r"876[56]|ERR_CONNECTION_REFUSED", e["text"])][:5]

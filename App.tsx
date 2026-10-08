@@ -209,8 +209,8 @@ import {
 // Boîte à rythmes : chargée à la 1re ouverture (préchargée au repos), absente du démarrage.
 const DrumMachinePanel = lazyWithPreload(() => import('./components/DrumMachinePanel'));
 import ShortcutsHelp from './components/ShortcutsHelp';
-const KeymapEditor = lazy(() => import('./components/KeymapEditor'));
-const WindowLayoutsPanel = lazy(() => import('./components/WindowLayoutsPanel'));
+const KeymapEditor = lazyWithPreload(() => import('./components/KeymapEditor'));
+const WindowLayoutsPanel = lazyWithPreload(() => import('./components/WindowLayoutsPanel'));
 
 /** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
 const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
@@ -668,7 +668,7 @@ export default function App() {
   // dans la même image que le clic (avant : 300 à 450 ms, retenue de React 19 sur React.lazy).
   useEffect(() => preloadWhenIdle([PluginEditor, ExportModal, TempoDialog, MasterAssistantPanel, SaveProjectModal, MixerView, TrackListPanel,
     GroupsListPanel, SessionProPanel, TimeOpsDialog, MetronomeDialog, LoadProjectModal, ImportSessionDialog, PianoRoll, AutomationEditorView,
-    SessionTemplatesModal, AudioSettingsPanel, ...PRO_TOOLS_WINDOWS_PRELOAD, DrumMachinePanel]), []);
+    SessionTemplatesModal, AudioSettingsPanel, ...PRO_TOOLS_WINDOWS_PRELOAD, DrumMachinePanel, KeymapEditor, WindowLayoutsPanel]), []);
   const paidParam = (() => { try { return new URLSearchParams(window.location.search).get('nova_paid'); } catch { return null; } })();
   if (paidParam && /^cs_(test|live)_[A-Za-z0-9]+$/.test(paidParam)) return <PaymentReturn sessionId={paidParam} />;
   return <Studio />;

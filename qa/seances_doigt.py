@@ -228,6 +228,9 @@ def landing(ch):
     page = ch.page
     page.goto(BASE, wait_until="domcontentloaded")
     page.locator("button:visible", has_text=re.compile("Nouveau Projet")).first.wait_for(timeout=90000)
+    # Écran de chargement (fondu de 300 ms) : un toucher trop tôt tombe dessus.
+    page.wait_for_function("() => !document.getElementById('loading-screen')", timeout=10000)
+    page.wait_for_timeout(300)
 
 
 # ─── Tablette · voix ──────────────────────────────────────────────────────────────

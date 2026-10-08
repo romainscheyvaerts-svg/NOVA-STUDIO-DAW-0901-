@@ -1162,6 +1162,18 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               </button>
             )}
 
+            {/* Respirations (components/BreathTools) : version simple, le dosage dans la fenêtre. À côté de la
+                justesse (outils voix ensemble) : avant, après les fondus et le gain, hors de l'écran du téléphone. */}
+            {selectedClip.clip.type !== 'MIDI' && (
+              <button type="button" data-testid="mobile-breaths"
+                onClick={() => requestBreaths({ mode: 'dialog', trackIds: [selectedClip.trackId], reason: 'menu' })}
+                title="Respirations : baissées sur la lead, supprimées sur les backs (comme Breath Control de Waves)"
+                className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 active:bg-violet-500/30 transition-all">
+                <i className="fas fa-wind text-violet-300 text-sm" aria-hidden />
+                <span className="text-[8px] font-bold text-violet-200 mt-0.5">RESPIRATIONS</span>
+              </button>
+            )}
+
             {/* Tonalité (R13) : transposer le clip, tempo inchangé (version simple) */}
             {selectedClip.clip.type !== TrackType.MIDI && !selectedClip.clip.notes && (
               <button
@@ -1219,17 +1231,6 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             {/* Gain */}
             {/* Gain du clip (version simple) : ±1 dB, la ligne de gain dessinée sur ordinateur est gardée. */}
             {onUpdateClip && <MobileClipGain clip={selectedClip.clip} onChange={p => onUpdateClip(selectedClip.trackId, selectedClip.clip.id, p)} />}
-
-            {/* Respirations (components/BreathTools) : version simple, le dosage dans la fenêtre */}
-            {selectedClip.clip.type !== 'MIDI' && (
-              <button type="button" data-testid="mobile-breaths"
-                onClick={() => requestBreaths({ mode: 'dialog', trackIds: [selectedClip.trackId], reason: 'menu' })}
-                title="Respirations : baissées sur la lead, supprimées sur les backs (comme Breath Control de Waves)"
-                className="flex-shrink-0 flex flex-col items-center justify-center w-16 h-12 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 active:bg-violet-500/30 transition-all">
-                <i className="fas fa-wind text-violet-300 text-sm" aria-hidden />
-                <span className="text-[8px] font-bold text-violet-200 mt-0.5">RESPIRATIONS</span>
-              </button>
-            )}
 
             {/* Divider */}
             <div className="flex-shrink-0 w-px h-8 bg-white/10 mx-1"></div>
