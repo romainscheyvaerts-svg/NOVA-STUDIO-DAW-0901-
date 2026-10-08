@@ -37,6 +37,7 @@ import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
 import CommandPalette from './components/CommandPalette';
+import AddEffectMenu from './components/AddEffectMenu';
 import type { PaletteAction } from './utils/commandPalette';
 import { dockItem, useDockFit } from './utils/dockFit';
 import SamplerHost from './components/SamplerHost';
@@ -8504,7 +8505,8 @@ function Studio() {
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} onClose={() => setIsAuthOpen(false)} />}
       </Suspense>
       
-      {addPluginMenu && <ContextMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)} items={AVAILABLE_FX_MENU.map(fx => ({ label: fx.name, icon: fx.icon, onClick: () => handleAddPluginFromContext(addPluginMenu.trackId, fx.id as PluginType, {}, { openUI: true }) }))} />}
+      {addPluginMenu && <AddEffectMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)} effects={AVAILABLE_FX_MENU}
+        onPick={(id) => handleAddPluginFromContext(addPluginMenu.trackId, id as PluginType, {}, { openUI: true })} />}
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}
       
       <MidiHost state={state} getState={getStateForMidi} setState={setState} pianoRoll={midiEditorOpen} />
