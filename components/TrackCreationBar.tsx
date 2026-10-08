@@ -1,4 +1,5 @@
 import React from 'react';
+import { requestSampler } from '../utils/samplerPanelStore';
 import { TrackType, PluginType } from '../types';
 import { findVocalMixStyle } from '../utils/vocalPresets';
 
@@ -61,6 +62,13 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAd
         <button type="button" onClick={onOpen808} title="Basse 808 : joue-la au piano roll, accordée sur la tonalité, avec glissés"
           className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-[#1a1c21] border-fuchsia-400/40 text-fuchsia-200 hover:text-white">
           <span className="text-base leading-none">🔊</span><span className="text-xs font-bold">808</span>
+        </button>
+      )}
+      {beatmaking && (
+        <button type="button" onClick={() => requestSampler({ kind: 'new' })} data-testid="new-sampler-track"
+          title="Nouvelle piste Sampler : ton son (fichier, micro, clip) ou un instrument NOVA (piano, Rhodes, guitare, cordes, cloches, nappe) sur tout le clavier — comme le Sampler de FL, Simpler de Live ou Quick Sampler de Logic"
+          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-[#1a1c21] border-amber-400/40 text-amber-200 hover:text-white">
+          <span className="text-base leading-none">🎛️</span><span className="text-xs font-bold">Sampler</span>
         </button>
       )}
       {beatmaking && onNewMidiTrack && (

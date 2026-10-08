@@ -23,6 +23,8 @@ export function useSamplerPanelTrack(): string | null {
 /** Demandes venues des menus (clip, pad, barre de création) : traitées par components/SamplerHost. */
 export type SamplerRequest =
   | { kind: 'new'; instrument?: string }
+  /** Piste MIDI existante : jouée par le sampler (instrument NOVA, ou sampler vide à remplir). */
+  | { kind: 'assign'; trackId: string; instrument?: string }
   | { kind: 'from-clip'; trackId: string; clipId: string }
   | { kind: 'from-pad'; rowIndex: number }
   | { kind: 'chop-clip'; trackId: string; clipId: string };

@@ -23,18 +23,18 @@ export interface InstrumentPreset {
 }
 
 export const INSTRUMENT_PRESETS: InstrumentPreset[] = [
-  { id: 'piano', name: 'Piano', emoji: '🎹', category: 'Claviers', hint: 'Piano à queue, plusieurs couches de vélocité : joue doucement, il s\'adoucit.',
-    settings: { attack: 0.002, decay: 1, sustain: 1, release: 0.45, velSens: 0.85 } },
-  { id: 'rhodes', name: 'Rhodes', emoji: '🎛️', category: 'Claviers', hint: 'Piano électrique façon Rhodes : R&B, néo-soul, lo-fi.',
-    settings: { attack: 0.002, decay: 1, sustain: 1, release: 0.35, velSens: 0.8 } },
-  { id: 'guitare', name: 'Guitare', emoji: '🎸', category: 'Guitares', hint: 'Guitare acoustique en notes pincées : afro, pop, drill mélodique.',
-    settings: { attack: 0.002, decay: 1, sustain: 1, release: 0.3, velSens: 0.75 } },
+  { id: 'piano', name: 'Piano', emoji: '🎹', category: 'Claviers', hint: 'Piano droit, trois couches de vélocité : joue doucement, il s\'adoucit.',
+    settings: { attack: 0.002, decay: 1, sustain: 1, release: 0.45, velSens: 0.35 } },
+  { id: 'rhodes', name: 'Rhodes', emoji: '🎛️', category: 'Claviers', hint: 'Piano électrique (FM, façon « E. Piano » du DX7) : R&B, néo-soul, lo-fi.',
+    settings: { attack: 0.002, decay: 1, sustain: 1, release: 0.35, velSens: 0.35 } },
+  { id: 'guitare', name: 'Guitare', emoji: '🎸', category: 'Guitares', hint: 'Guitare classique (nylon) en notes pincées : afro, pop, drill mélodique.',
+    settings: { attack: 0.002, decay: 1, sustain: 1, release: 0.3, velSens: 0.35 } },
   { id: 'cordes', name: 'Cordes', emoji: '🎻', category: 'Cordes', hint: 'Cordes tenues (boucle) : nappes de drill, intros cinématiques.',
-    settings: { attack: 0.12, decay: 1, sustain: 1, release: 0.6, velSens: 0.6 } },
-  { id: 'cloches', name: 'Cloches', emoji: '🔔', category: 'Cloches', hint: 'Cloches et glockenspiel : mélodies trap / plugg.',
-    settings: { attack: 0.001, decay: 1, sustain: 1, release: 0.8, velSens: 0.7 } },
+    settings: { attack: 0.03, decay: 1, sustain: 1, release: 0.6, velSens: 0.3 } },
+  { id: 'cloches', name: 'Cloches', emoji: '🔔', category: 'Cloches', hint: 'Glockenspiel (maillets plastique et laiton) : mélodies trap / plugg.',
+    settings: { attack: 0.001, decay: 1, sustain: 1, release: 0.8, velSens: 0.3 } },
   { id: 'pad', name: 'Nappe', emoji: '🌫️', category: 'Nappes', hint: 'Nappe douce qui tient (boucle) : fond d\'accords.',
-    settings: { attack: 0.35, decay: 1, sustain: 1, release: 1.2, velSens: 0.4 } },
+    settings: { attack: 0.01, decay: 1, sustain: 1, release: 1.2, velSens: 0.4 } },
 ];
 
 export const instrumentPreset = (id?: string) => INSTRUMENT_PRESETS.find(p => p.id === id);

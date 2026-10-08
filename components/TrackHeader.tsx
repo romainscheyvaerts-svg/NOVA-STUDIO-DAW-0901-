@@ -33,6 +33,7 @@ import { useFreezeRefreshBusy } from '../hooks/useFrozenRefresh';
 import { useRecFrozen } from '../utils/recFreezeStore';
 import { useInstrumentStatus } from '../utils/instrumentStore';
 import { openSynthPanel } from '../utils/synthPanelStore';
+import { openSamplerPanel } from '../utils/samplerPanelStore';
 import { isMidiRecordTrack } from '../utils/midiRecord';
 import MonitorControl from './MonitorControl';
 import { PluginName } from './PluginName';
@@ -539,9 +540,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 du son est dans l'infobulle et en tête de l'écran du synthé). */}
             {!isRenaming && track.type === TrackType.MIDI && !track.bass808 && !track.vstInstrument && !track.drumMachine && !instrumentPlugin && (
               <button type="button" data-testid={`synth-pill-${track.id}`}
-                onClick={(e) => { e.stopPropagation(); openSynthPanel(track.id); }}
-                title={`Synthé NOVA : ${track.novaSynth?.name || 'synthé simple'} (ouvrir les sons et réglages)`}
-                aria-label={`Ouvrir le synthé de ${track.name}`}
+                onClick={(e) => { e.stopPropagation(); if (track.melodicSampler) openSamplerPanel(track.id); else openSynthPanel(track.id); }}
+                title={track.melodicSampler ? `Sampler : ${track.melodicSampler.sampleName || 'vide'} (ouvrir le son et les réglages)` : `Synthé NOVA : ${track.novaSynth?.name || 'synthé simple'} (ouvrir les sons et réglages)`}
+                aria-label={track.melodicSampler ? `Ouvrir le sampler de ${track.name}` : `Ouvrir le synthé de ${track.name}`}
                 className="nova-hit-tactile shrink-0 w-6 h-6 rounded-md border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
                 <i className="fas fa-sliders-h text-[9px]"></i>
               </button>

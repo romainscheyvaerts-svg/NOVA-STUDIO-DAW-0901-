@@ -107,7 +107,11 @@ export function commitActive(dm: DrumMachine): DrumMachine {
 
 /** Charge un motif dans la grille (le motif quitté est gardé tel quel). */
 export function selectPattern(dm: DrumMachine, id: string): DrumMachine {
-  const d = commitActive(dm);
+  return loadPattern(commitActive(dm), id);
+}
+
+/** Affiche un motif de la banque dans la grille (sans recopier la grille dans la banque). */
+function loadPattern(d: DrumMachine, id: string): DrumMachine {
   const p = d.patterns!.find(x => x.id === id);
   if (!p) return d;
   return {
@@ -515,7 +519,7 @@ export function setRowRate(dm: DrumMachine, rowIndex: number, rate: StepRate): D
     };
   });
   const rows = d.rows.map((r, i) => (i === rowIndex ? { ...r, rate: rate === '16' ? undefined : rate, len: undefined } : r));
-  return selectPattern({ ...d, rows, patterns }, d.activePattern!);
+  return loadPattern({ ...d, rows, patterns }, d.activePattern!);
 }
 
 /** Longueur propre d'une rangée (polymétrie, comme les longueurs de rangée de Bitwig / FL) ; 0 = le motif entier. */
@@ -537,7 +541,7 @@ export function setRowLength(dm: DrumMachine, rowIndex: number, len: number): Dr
       ...(p.pitch?.[row.id] ? { pitch: { ...p.pitch, [row.id]: cut(p.pitch[row.id], 0) } } : {}),
     };
   });
-  return selectPattern({ ...d, rows, patterns }, d.activePattern!);
+  return loadPattern({ ...d, rows, patterns }, d.activePattern!);
 }
 
 /** Valeur d'un pas dans l'éditeur de graphe (vélocité 1-127, pan -1…1, hauteur -12…+12). */

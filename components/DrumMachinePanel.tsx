@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { DRUM_KITS, DrumMachine, DrumRow, setBars, PadMix, DEFAULT_PAD_MIX, PAD_MIX_PRESETS, libraryChoices, libSoundLabel, makeDrumMachine } from '../utils/drumKits';
-import { ensurePatterns, GROOVES, whereAt } from '../utils/drumPatterns';
+import { ensurePatterns, GROOVES, whereAt, rowStepAt, rowStepsPerBar, STEPS_PER_BAR, STEP_RATES } from '../utils/drumPatterns';
+import { KitBar, StepGraph, RowTiming, rowCells } from './DrumStepTools';
+import { requestSampler } from '../utils/samplerPanelStore';
 import { assignSample, MAX_PADS, userSampleId } from '../utils/drumSamples';
 import { reorderSlices, shuffledOrder } from '../utils/chop';
 import { sampleFromFile } from '../utils/padBuffers';
@@ -79,6 +81,8 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
 
   // Tête de lecture : pas du motif affiché (s'il joue à cet endroit) et mesure du morceau.
   const [playBar, setPlayBar] = useState(-1);
+  // R18 : position fine (rangées en 1/32, triolets, longueurs propres).
+  const [playW, setPlayW] = useState<{ pos16: number; runBars: number } | null>(null);
   useEffect(() => {
     if (!p.open || !p.dm) return;
     let raf = 0;
@@ -86,9 +90,11 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
     const tick = () => {
       if (p.isPlaying) {
         const w = whereAt(dmP, p.bpm, audioEngine.getCurrentTime() - p.clipStart);
-        setPlayStep(w && w.patternId === dmP.activePattern ? w.step : -1);
+        const here = !!w && w.patternId === dmP.activePattern;
+        setPlayStep(here ? w!.step : -1);
+        setPlayW(prev => (here ? (prev && Math.floor(prev.pos16 * 6) === Math.floor(w!.pos16 * 6) ? prev : { pos16: w!.pos16, runBars: w!.runBars }) : null));
         setPlayBar(w ? w.bar : -1);
-      } else { setPlayStep(-1); setPlayBar(-1); }
+      } else { setPlayStep(-1); setPlayBar(-1); setPlayW(null); }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -101,6 +107,30 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   const [keysOn, setKeysOn] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: fine)').matches);
   const [layout, setLayout] = useState<Map<string, string> | null>(null);
   const [flash, setFlash] = useState(-1);
+  // R18 · Roulement (FL : Note Repeat, MPC : Note Repeat) : tenir un pad le rejoue en rythme.
+  const [repeat, setRepeat] = useState<0 | 4 | 8 | 16 | 32 | 24>(0);
+  const repeatTimer = useRef<number | null>(null);
+  const stopRepeat = () => { if (repeatTimer.current) { window.clearInterval(repeatTimer.current); repeatTimer.current = null; } };
+  useEffect(() => () => stopRepeat(), []);
+  /** Démarre le roulement d'un pad : 1re frappe tout de suite, puis calé sur la grille au tempo. */
+  const startRepeat = (ri: number) => {
+    stopRepeat();
+    const ctx = audioEngine.ctx;
+    if (!repeat || !ctx) return;
+    const per = (60 / p.bpm) * (4 / repeat);
+    const song0 = audioEngine.getCurrentTime();
+    // En lecture : frappes sur la grille du morceau ; à l'arrêt : à partir de l'appui.
+    let next = p.isPlaying ? ctx.currentTime + (Math.ceil((song0 + 0.001) / per) * per - song0) : ctx.currentTime + per;
+    let n = 0;
+    const tick = () => {
+      while (next < ctx.currentTime + 0.12 && n < 400) {
+        audioEngine.triggerTrackAttack('track-drums', 60 + ri, 0.85, next);
+        next += per; n++;
+      }
+    };
+    tick();
+    repeatTimer.current = window.setInterval(tick, 25);
+  };
   useEffect(() => {
     try { (navigator as any).keyboard?.getLayoutMap?.().then((m: any) => setLayout(new Map(m))).catch(() => {}); } catch { /* navigateur sans l'API */ }
   }, []);
@@ -119,12 +149,17 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
       if (e.repeat) return;
       const ri = visible[k];
       auditionRef.current(ri);
+      repeatStartRef.current(ri);
       setFlash(ri);
       window.setTimeout(() => setFlash(f => (f === ri ? -1 : f)), 140);
     };
+    const onUp = (e: KeyboardEvent) => { if (padIndexForCode(e.code, visible.length) >= 0) stopRepeat(); };
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onUp, true);
+    return () => { window.removeEventListener('keydown', onKey, true); window.removeEventListener('keyup', onUp, true); };
   }, [p.open, keysOn, p.dm]);
+  const repeatStartRef = useRef(startRepeat);
+  repeatStartRef.current = startRepeat;
 
   if (!p.open) return null;
   const dm = p.dm;
@@ -194,6 +229,9 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
   };
 
   const len = dm ? 16 * dm.bars : 16;
+  // Largeur d'un pas 1/16 sur ordinateur (w-8 + gap-1 ; tablette au doigt : w-9 + gap-1).
+  const coarse = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+  const step16Px = coarse ? 40 : 36;
   const pages = len / 8;
   const curPage = Math.min(page, pages - 1);
   const shownSteps = narrow ? Array.from({ length: 8 }, (_, i) => curPage * 8 + i) : Array.from({ length: len }, (_, i) => i);
@@ -251,6 +289,8 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
             ))}
           </div>
 
+          <KitBar dm={dm} onChange={p.onChange} ensureEngine={p.ensureEngine} notify={p.notify} narrow={narrow} />
+
           <input ref={padFileRef} type="file" multiple accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" className="hidden"
             onChange={e => { const fs = Array.from(e.target.files || []); e.target.value = ''; if (fs.length) void importFiles(fs, null); }} />
           {chop && (
@@ -302,6 +342,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                     <div key={r.id} className="flex items-center gap-1 mb-1">
                       {narrow ? (
                         <button type="button" onClick={() => { p.onAudition(ri); setSelPad(ri); if (soundMenu !== null) setSoundMenu(ri); }}
+                          onPointerDown={() => startRepeat(ri)} onPointerUp={stopRepeat} onPointerLeave={stopRepeat} onPointerCancel={stopRepeat}
                           aria-label={`Écouter ${r.name}`} aria-pressed={selPad === ri} title="Écouter et choisir ce pad"
                           className={`shrink-0 w-10 h-10 rounded-lg px-0.5 text-[9px] leading-[10px] font-bold text-center break-words overflow-hidden ${flash === ri ? 'bg-cyan-400 text-black' : selPad === ri ? 'bg-cyan-500/20 text-white ring-1 ring-cyan-400/60' : 'bg-white/5 text-slate-200'}`}>
                           <span className={r.muted ? 'line-through opacity-50' : ''}>{r.name}</span>
@@ -309,10 +350,13 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                         </button>
                       ) : (
                       <div className="sticky left-0 z-10 bg-nv-surface pr-1 flex items-center gap-1 w-[150px] shrink-0">
-                        <button type="button" onClick={() => p.onAudition(ri)}
-                          title={`${r.name} : écouter le son${keyOf(ri) ? ` (touche ${keyOf(ri)})` : ''}. Glisse un fichier audio ici pour mettre TON son sur ce pad.`}
+                        <button type="button" onClick={() => { p.onAudition(ri); setSelPad(ri); }}
+                          onPointerDown={() => startRepeat(ri)} onPointerUp={stopRepeat} onPointerLeave={stopRepeat} onPointerCancel={stopRepeat}
+                          aria-pressed={selPad === ri}
+                          title={`${r.name} : écouter le son et le choisir pour le graphe${keyOf(ri) ? ` (touche ${keyOf(ri)})` : ''}. Glisse un fichier audio ici pour mettre TON son sur ce pad.`}
                           onDragOver={allowDrop} onDrop={e => onDropFiles(e, ri)}
-                          className={`flex-1 min-w-0 h-9 rounded-lg text-left px-2 text-[11px] font-bold truncate ${flash === ri ? 'bg-cyan-400 text-black' : 'bg-white/[0.04] text-white hover:bg-white/[0.08]'}`}>
+                          className={`flex-1 min-w-0 h-9 rounded-lg text-left px-2 text-[11px] font-bold truncate ${flash === ri ? 'bg-cyan-400 text-black' : selPad === ri ? 'bg-cyan-500/15 text-white ring-1 ring-cyan-400/50' : 'bg-white/[0.04] text-white hover:bg-white/[0.08]'}`}>
+                          {r.rate && r.rate !== '16' && <span className="mr-1 text-[9px] text-violet-300">{STEP_RATES.find(x => x.id === r.rate)?.label}</span>}
                           {keyOf(ri) && <span className="mr-1 inline-block min-w-[14px] px-0.5 rounded bg-white/10 text-[9px] text-center text-slate-300">{keyOf(ri)}</span>}
                           {userSampleId(r.sound) && <i className={`fas ${r.slice ? 'fa-cut text-pink-300' : 'fa-user text-amber-300'} mr-1 text-[9px]`} />}
                           <span className={r.muted ? 'line-through opacity-50' : ''}>{r.name}</span>
@@ -323,7 +367,31 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                           className={`nova-hit-tactile w-7 h-9 rounded-lg text-[11px] ${soundMenu === ri ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}><i className="fas fa-sliders-h" /></button>
                       </div>
                       )}
-                      {shownSteps.map(si => {
+                      {(rowStepsPerBar(r) !== STEPS_PER_BAR || (r.len || 0) > 0) ? (() => {
+                        // R18 : rangée en 1/32 / triolets / longueur propre : cases à l'échelle du temps.
+                        const { cells, usable } = rowCells(r, dm.bars, narrow ? curPage : null);
+                        const ps = playW ? rowStepAt(r, playW, dm.bars) : -1;
+                        return (
+                          <div className={`flex gap-0.5 ${narrow ? 'flex-1 min-w-0' : 'shrink-0'}`} style={narrow ? undefined : { width: `${len * step16Px - 4}px` }}>
+                            {cells.map(si => {
+                              const v = r.steps[si] || 0;
+                              const roll = r.ratchet[si] || 1;
+                              const off = si >= usable;
+                              return (
+                                <button key={si} type="button" disabled={off} data-own-longpress=""
+                                  aria-label={`${r.name}, pas ${si + 1}${off ? ' (hors de la longueur de la rangée)' : v ? (roll > 1 ? `, roll ×${roll}` : ', actif') : ''}`}
+                                  onPointerDown={() => startPress(ri, si)} onPointerUp={() => endPress(ri, si)}
+                                  onPointerLeave={() => { if (pressTimer.current) window.clearTimeout(pressTimer.current); }}
+                                  onContextMenu={e => { e.preventDefault(); cycleRoll(ri, si); }}
+                                  className={`relative flex-1 min-w-0 rounded-[4px] ${narrow ? 'h-10' : 'h-9 [@media(pointer:coarse)]:h-10'} ${ps === si ? 'ring-2 ring-white/70' : ''} ${
+                                    off ? 'bg-white/[0.015] opacity-40' : v >= 100 ? 'bg-violet-400' : v > 0 ? 'bg-violet-400/45' : (si * STEPS_PER_BAR / rowStepsPerBar(r)) % 4 === 0 ? 'bg-white/[0.09]' : 'bg-white/[0.04]'}`}>
+                                  {roll > 1 && v > 0 && <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-black">×{roll}</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })() : shownSteps.map(si => {
                         const v = r.steps[si] || 0;
                         const roll = r.ratchet[si] || 1;
                         const beatStart = si % 4 === 0;
@@ -331,6 +399,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                           <button
                             key={si}
                             type="button"
+                            data-own-longpress=""
                             aria-label={`${r.name}, pas ${si + 1}${v ? (roll > 1 ? `, roll ×${roll}` : ', actif') : ''}`}
                             onPointerDown={() => startPress(ri, si)}
                             onPointerUp={() => endPress(ri, si)}
@@ -358,6 +427,22 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               )}
               </div>
 
+              {/* R18 · Éditeur de graphe du pad choisi (vélocité, pan, hauteur par pas). */}
+              {dm.rows[Math.min(selPad, dm.rows.length - 1)] && (() => {
+                const gi = Math.min(selPad, dm.rows.length - 1);
+                const gr = dm.rows[gi];
+                const plain = rowStepsPerBar(gr) === STEPS_PER_BAR && !((gr.len || 0) > 0);
+                const cells = plain ? shownSteps : rowCells(gr, dm.bars, narrow ? curPage : null).cells.filter(i => i < gr.steps.length);
+                return (
+                  <div className={narrow ? '' : 'overflow-x-auto no-scrollbar'}>
+                    <div style={narrow ? undefined : { width: `${154 + len * step16Px}px`, paddingLeft: '154px' }}>
+                      <StepGraph dm={dm} rowIndex={gi} cells={cells} onChange={p.onChange}
+                        playStep={playW ? rowStepAt(gr, playW, dm.bars) : -1} />
+                    </div>
+                  </div>
+                );
+              })()}
+
               {soundMenu !== null && dm.rows[soundMenu] && (
                 <PadEditor
                   kitId={dm.kitId}
@@ -366,9 +451,17 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                   onAudition={() => setTimeout(() => p.onAudition(soundMenu), 120)}
                   onClose={() => setSoundMenu(null)}
                   extra={
+                    <>
+                    <RowTiming dm={dm} rowIndex={soundMenu} onChange={p.onChange} />
                     <PadSampleTools dm={dm} rowIndex={soundMenu} onChange={d => { p.onChange(d); if (!d.rows[soundMenu]) setSoundMenu(null); }}
                       onAudition={() => p.onAudition(soundMenu)} sessionClips={p.sessionClips || []}
                       ensureEngine={p.ensureEngine || (async () => {})} onChop={src => setChop(src)} notify={p.notify} />
+                    <button type="button" onClick={() => { requestSampler({ kind: 'from-pad', rowIndex: soundMenu }); p.onClose(); }} data-testid="pad-to-sampler"
+                      title="Met le son de ce pad dans un sampler sur une nouvelle piste : il se joue sur tout le clavier (808 mélodique, perc accordée) — comme « Send to Sampler » de FL ou Convert to Simpler de Live"
+                      className="nova-hit h-10 px-3 rounded-lg bg-amber-500/15 border border-amber-400/40 text-amber-200 text-[12px] font-bold hover:bg-amber-500/25">
+                      <i className="fas fa-wave-square mr-1.5" />Convertir en sampler
+                    </button>
+                    </>
                   }
                 />
               )}
@@ -396,6 +489,13 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                     <input type="range" min={0} max={1} step={0.05} value={dm.grooveAmount ?? 1} aria-label="Dosage du groove"
                       onChange={e => p.onChange({ ...dm, grooveAmount: parseFloat(e.target.value) })} className="w-20" />
                   )}
+                </label>
+                <label className="flex items-center gap-1.5" title="Roulement (Note Repeat de FL Studio et de la MPC) : tiens un pad (ou sa touche) et il se rejoue en rythme, calé sur le tempo.">
+                  <i className="fas fa-repeat text-violet-300" aria-hidden />Roulement
+                  <select value={repeat} onChange={e => setRepeat(parseInt(e.target.value, 10) as 0 | 4 | 8 | 16 | 32 | 24)} data-testid="note-repeat"
+                    className="h-10 rounded-lg bg-white/5 border border-white/10 px-1.5 text-[12px] text-white">
+                    <option value={0}>Non</option><option value={4}>1/4</option><option value={8}>1/8</option><option value={16}>1/16</option><option value={24}>1/16 T</option><option value={32}>1/32</option>
+                  </select>
                 </label>
                 <button type="button" onClick={() => padFileRef.current?.click()} disabled={dm.rows.length >= MAX_PADS}
                   title="Ajouter un pad avec TON son (fichier audio). Tu peux aussi glisser des fichiers sur la batterie."
