@@ -775,9 +775,18 @@ export interface Marker {
 export interface MetronomeSettings {
   enabled: boolean;
   volume: number;        // 0-1
-  countIn: number;       // bars before recording (0, 1, 2, 4)
+  /** Décompte : 0, 1, 2, 4 (mesures ou temps selon countInUnit). utils/countIn. */
+  countIn: number;
+  /** Unité du décompte. Absente (projet d'avant R2) : mesures, 1 mesure si countIn = 0. */
+  countInUnit?: 'bars' | 'beats';
   accentDownbeat: boolean;
-  sound: 'CLICK' | 'WOODBLOCK' | 'BEEP' | 'CUSTOM';
+  /** Force de l'accent du premier temps (0…1, 0,6 par défaut). */
+  accentLevel?: number;
+  sound: 'CLICK' | 'WOODBLOCK' | 'BEEP' | 'COWBELL' | 'STICK' | 'CUSTOM';
+  /** Quand le clic sonne : pendant l'enregistrement seulement, ou aussi en lecture (défaut). */
+  mode?: 'record' | 'always';
+  /** Sortie : comme la musique (carte son de NOVA, défaut) ou sortie de l'ordinateur. */
+  output?: 'main' | 'system';
 }
 
 // Punch recording settings (inspired by Pro Tools)
@@ -790,6 +799,9 @@ export interface PunchSettings {
   /** Pré-roll / post-roll en mesures (prioritaires sur les secondes ci-dessus). utils/punch.ts */
   preRollBars?: number;
   postRollBars?: number;
+  /** Pré-roll / post-roll en secondes (R2), prioritaires sur les mesures quand ils sont réglés. */
+  preRollSec?: number;
+  postRollSec?: number;
   /** Pré-roll actif. Non réglé : actif en punch seulement (comportement d'origine). */
   preRollOn?: boolean;
   postRollOn?: boolean;
@@ -812,6 +824,8 @@ export interface DAWState {
   schemaVersion?: number;
   bpm: number;
   timeSignature: TimeSignature;  // NEW
+  /** Changements de tempo et de mesure (piste tempo, R2). utils/tempoMap. */
+  tempoEvents?: import('./utils/tempoMap').TempoEvent[];
   projectKey?: number; 
   projectScale?: string; 
   /** Dernier style de mix voix appliqué (utils/vocalPresets). */

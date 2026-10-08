@@ -459,6 +459,20 @@ export class AudioEngine {
     this.loopEnd = end;
   }
 
+  /**
+   * Horloge de lecture (métronome R2, capture audio R3) : instant du contexte où
+   * le morceau commence, bouclage déjà programmé, zone de boucle.
+   */
+  public getClock(): { playing: boolean; startTime: number; wrap: { at: number; prevStart: number } | null; loop: { start: number; end: number } | null } {
+    const w = this.pendingLoopWrap;
+    return {
+      playing: this.isPlaying,
+      startTime: this.playbackStartTime,
+      wrap: w ? { at: w.atContextTime, prevStart: w.previousStartTime } : null,
+      loop: this.isLoopActive && this.loopEnd > this.loopStart ? { start: this.loopStart, end: this.loopEnd } : null,
+    };
+  }
+
   // -------------------------------------------------------------------------
   // « Fredonne → MIDI » au micro (V20, components/AudioToMidiDialog)
   // -------------------------------------------------------------------------
@@ -1560,7 +1574,11 @@ export class AudioEngine {
     }
   }
 
-  public startPlayback(startOffset: number, tracks: Track[]) {
+  /**
+   * @param opts.at instant du contexte où la lecture doit partir (fin du décompte, R2) ;
+   *        par défaut tout de suite.
+   */
+  public startPlayback(startOffset: number, tracks: Track[], opts: { at?: number } = {}) {
     if (!this.ctx) return;
     tracks = engineView(tracks).tracks;
     if (this.isPlaying) this.stopAll();
@@ -1573,7 +1591,7 @@ export class AudioEngine {
     this.pendingLoopWrap = null;
     this.pausedAt = startOffset;
     this.pluginAutoSent.clear();
-    this.nextScheduleTime = this.ctx.currentTime + 0.01;
+    this.nextScheduleTime = Math.max(this.ctx.currentTime + 0.01, opts.at ?? 0);
     // Le point de départ tombe pile au début de la 1re fenêtre : une note posée
     // exactement là (1er kick de la batterie, 1re 808) était sautée.
     this.playbackStartTime = this.nextScheduleTime - startOffset;

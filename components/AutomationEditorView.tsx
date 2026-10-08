@@ -5,6 +5,7 @@ import AutomationLaneComponent from './AutomationLane';
 import { audioEngine } from '../engine/AudioEngine';
 import { playheadStore } from '../utils/playheadStore';
 import { sendLabel } from '../utils/sendLabels';
+import { tempoMapStore, barsInRange } from '../utils/tempoMap';
 
 interface AutomationEditorViewProps {
   tracks: Track[];
@@ -131,26 +132,20 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
       ctx.fillRect(0, 0, width, 40); // Header height
 
       // Grid Lines
-      const beatPx = (60 / bpm) * zoomH;
       const startTime = pixelsToTime(scrollLeft);
       const endTime = pixelsToTime(scrollLeft + width);
-      const startBar = Math.floor(startTime * (bpm / 60) / 4);
-      const endBar = Math.ceil(endTime * (bpm / 60) / 4);
 
       ctx.strokeStyle = GRID_COLOR;
       ctx.fillStyle = TEXT_COLOR;
       ctx.font = 'bold 10px Inter';
       ctx.lineWidth = 1;
 
-      for (let i = startBar; i <= endBar; i++) {
-          const time = i * 4 * (60 / bpm);
-          const x = timeToPixels(time) - scrollLeft;
-          
+      // Mesures d'après la piste tempo (R2) : 3/4, 6/8, changements de tempo.
+      for (const b of barsInRange(tempoMapStore.get(), Math.max(0, startTime), endTime)) {
+          const x = timeToPixels(b.time) - scrollLeft;
           if (x >= 0 && x <= width) {
-              // Bar Line (Vertical Grid)
               ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
-              // Text only in header
-              ctx.fillText((i+1).toString(), x + 4, 24);
+              ctx.fillText((b.bar + 1).toString(), x + 4, 24);
           }
       }
 

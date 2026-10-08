@@ -22,6 +22,8 @@ interface VocalToolsPanelProps {
   humTools?: React.ReactNode;
   countIn: boolean;
   onCountInChange: (on: boolean) => void;
+  /** Longueur réglée du décompte (« 1 mesure », « 2 temps »…), R2. */
+  countInLength?: string;
   monitoring: boolean;
   onMonitoringChange: (on: boolean) => void;
   onAskNova: () => void;
@@ -267,8 +269,8 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
               <Toggle
                 checked={p.countIn}
                 onChange={p.onCountInChange}
-                label="Décompte 4 temps avant d'enregistrer"
-                hint="Le temps de te placer devant le micro."
+                label={`Décompte${p.countInLength ? ` (${p.countInLength})` : ''} avant d'enregistrer`}
+                hint="Le temps de te placer devant le micro. Longueur, son et volume : ▾ à côté du métronome (comme Click/Countoff de Pro Tools)."
               />
               <Toggle
                 checked={p.monitoring}
