@@ -111,6 +111,13 @@ def prepare(page, port=None, desktop=True):
         page.add_init_script(DESKTOP_INIT)
         fake_login(page)
     if port:
+        # Avec le vrai pont, NOVA trouve les autotunes du PC et demande lequel utiliser, une
+        # fois, quand la liste des plugins arrive (plusieurs secondes après l'ouverture : la
+        # fenêtre surgissait après dismiss_popups et recouvrait le menu du clip). Hors sujet
+        # ici : on part d'un utilisateur qui a déjà répondu (autotune de NOVA), sans écraser
+        # un choix déjà enregistré.
+        page.add_init_script("""try { if (!localStorage.getItem('nova.autotuneVst.v1'))
+          localStorage.setItem('nova.autotuneVst.v1', JSON.stringify({ choice: { mode: 'nova', decidedAt: 1 } })); } catch (e) {}""")
         page.add_init_script("""(() => { const W = window.WebSocket;
           window.WebSocket = function (u, p) { u = String(u).replace(':8765', ':%d'); return p ? new W(u, p) : new W(u); };
           window.WebSocket.prototype = W.prototype; ['CONNECTING','OPEN','CLOSING','CLOSED'].forEach(k => window.WebSocket[k] = W[k]); })();""" % port)
@@ -297,7 +304,9 @@ if __name__ == "__main__":
     shutil.rmtree(SORTIES, ignore_errors=True)
     PROJECT = OUT / "projet_stems_test.zip"
     parts, sr = make_project(PROJECT)
-    PORT_REAL, PORT_EMPTY = 8795, 8796
+    # Ports du pont de test (l'appli Nova Studio installée garde 8765) : NOVA_TEST_PORT, NOVA_TEST_PORT_EMPTY.
+    PORT_REAL = int(os.environ.get("NOVA_TEST_PORT", "8795"))
+    PORT_EMPTY = int(os.environ.get("NOVA_TEST_PORT_EMPTY", "8796"))
     report = {}
     report["A_web"] = run_one(scenario_web, "pc", "A_web")
     empty_home = Path(tempfile.mkdtemp(prefix="nova-stems-vide-"))

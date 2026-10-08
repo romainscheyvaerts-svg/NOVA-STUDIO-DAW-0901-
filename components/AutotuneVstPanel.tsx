@@ -76,8 +76,10 @@ export const AutotuneChoiceModal: React.FC<{ candidates: AutotuneCandidate[]; on
   const single = usable.length === 1;
   return (
     <div className="fixed inset-0 z-[700] flex items-end sm:items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="autotune-choice-title" data-testid="autotune-choice">
-      <div className="w-full max-w-md rounded-3xl border border-cyan-500/30 bg-nv-surface p-6 shadow-2xl space-y-4">
-        <div>
+      {/* Hauteur bornée à l'écran : avec beaucoup d'autotunes (8 sur le PC du studio), la liste
+          défile et le titre comme « Plus tard » restent visibles (sinon coupés sur un écran de 900 px). */}
+      <div className="flex w-full max-w-md max-h-full flex-col rounded-3xl border border-cyan-500/30 bg-nv-surface p-6 shadow-2xl space-y-4" data-testid="autotune-choice-panel">
+        <div className="shrink-0">
           <h2 id="autotune-choice-title" className="text-lg font-black text-white">🎤 Utiliser ton autotune à la place de celui de NOVA ?</h2>
           <p className="mt-1 text-[12px] text-slate-300">
             {single
@@ -86,7 +88,7 @@ export const AutotuneChoiceModal: React.FC<{ candidates: AutotuneCandidate[]; on
             Il sera posé tout seul sur ta voix, réglé dans la gamme du beat. Si le pont VST est fermé, NOVA reprend avec son propre autotune, sans rien couper.
           </p>
         </div>
-        <div role="radiogroup" aria-label="Autotune à utiliser" className="space-y-2">
+        <div role="radiogroup" aria-label="Autotune à utiliser" className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1" data-testid="autotune-choice-list">
           {candidates.map(c => {
             const disabled = !!c.unavailable || !c.followsKey;
             return (
@@ -110,8 +112,8 @@ export const AutotuneChoiceModal: React.FC<{ candidates: AutotuneCandidate[]; on
             </span>
           </label>
         </div>
-        <p className="text-[11px] text-slate-500">Tu pourras changer d'avis dans l'onglet VST (« Autotune »).</p>
-        <div className="flex gap-2">
+        <p className="shrink-0 text-[11px] text-slate-500">Tu pourras changer d'avis dans l'onglet VST (« Autotune »).</p>
+        <div className="flex shrink-0 gap-2">
           <button type="button" onClick={onClose} className="h-11 flex-1 rounded-xl bg-white/5 text-[12px] font-bold text-slate-300 hover:bg-white/10">Plus tard</button>
           <button type="button" onClick={confirm} className="h-11 flex-[2] rounded-xl bg-cyan-500 text-[12px] font-black text-black hover:bg-cyan-400">
             {chosen ? `Utiliser ${chosen.name}` : "Garder l'autotune de NOVA"}
