@@ -409,7 +409,11 @@ export class TakeJournal {
   annotate(patch: Partial<Pick<TakeMetaRecord, 'lead'>>) {
     if (this.closed) return;
     Object.assign(this.meta, patch);
+    this.metaDirty = true;
   }
+
+  /** Description à réécrire (avance notée) ; le nombre d'échantillons, lui, se relit dans les morceaux. */
+  private metaDirty = false;
 
   /** Morceau capté (mono). Écrit dès qu'une demi-seconde s'est accumulée. */
   push(chunk: Float32Array) {
@@ -431,9 +435,15 @@ export class TakeJournal {
     this.meta.samples += block.length;
     this.meta.chunks = this.seq;
     const meta = { ...this.meta };
+    // Une seule écriture durable par morceau (avant : morceau + description à chaque fois) : avec
+    // 4 pistes armées, la file d'IndexedDB prenait du retard et un plantage en perdait la fin.
+    // La description n'est réécrite que si elle a changé (avance notée) ; la récupération relit
+    // la longueur dans les morceaux eux-mêmes.
+    const withMeta = this.metaDirty || seq === 0;
+    this.metaDirty = false;
     this.writing = this.writing
       .then(() => this.db.put(TAKE_CHUNKS, [this.meta.takeId, seq], block, { durable: true }))
-      .then(() => this.db.put(TAKES, this.meta.takeId, meta, { durable: true }))
+      .then(() => (withMeta ? this.db.put(TAKES, this.meta.takeId, meta, { durable: true }) : undefined))
       .catch(() => { this.failed = true; });
     return this.writing;
   }

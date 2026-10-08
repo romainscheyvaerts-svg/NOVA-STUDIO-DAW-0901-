@@ -707,7 +707,7 @@ class ASIOAudioStream:
         self.output_latency_ms = 0.0
 
         # Entrée : blocs (n° de la 1re image, heure ADC, données)
-        self.input_buffer: deque = deque(maxlen=200)
+        self.input_buffer: deque = deque(maxlen=600)   # ~3,5 s à 256 : le navigateur peut se figer un instant
         self.output_buffer: deque = deque(maxlen=100)  # (compat stats)
         self.frames_in = 0                              # images reçues depuis le démarrage
         self.dropped_input_blocks = 0

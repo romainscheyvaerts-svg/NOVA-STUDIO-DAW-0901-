@@ -57,7 +57,8 @@ class AsioInputPlayer extends AudioWorkletProcessor {
       // Raccord horodaté : bloc perdu → silence ; recouvrement → début retiré.
       let pad = 0, skip = 0;
       if (typeof m.frameIndex === 'number') {
-        const j = blockJoin(this.next, m.frameIndex, frames, Math.round((m.rate || sampleRate) * 0.5));
+        // Trou jusqu'à 1,5 s (navigateur figé, blocs perdus côté pont) : comblé de silence, calage gardé.
+        const j = blockJoin(this.next, m.frameIndex, frames, Math.round((m.rate || sampleRate) * 1.5));
         pad = j.pad; skip = j.skip;
         if (pad) { this.gaps++; this.gapFrames += pad; }
         if (skip) this.dups++;

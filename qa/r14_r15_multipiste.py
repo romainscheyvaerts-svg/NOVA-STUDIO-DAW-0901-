@@ -525,6 +525,14 @@ def run_crash(p, ctx, page, profile, fake, proj_path, errs):
     t0 = time.time()
     while time.time() - t0 < 40 and not page.evaluate(vers):
         page.wait_for_timeout(1000)
+    # Sauvegarde automatique d'après la capture (toutes les prises, plusieurs Mo) terminée avant la
+    # prise : sinon le journal attend derrière elle dans IndexedDB (voir le rapport, cas de charge).
+    last, stable = None, 0
+    while time.time() - t0 < 60 and stable < 3:
+        cur = page.evaluate("() => JSON.stringify(window.DAW_CONTROL.diag().autosave || null)")
+        stable = stable + 1 if cur == last else 0
+        last = cur
+        page.wait_for_timeout(1000)
     page.evaluate("() => window.DAW_CONTROL.seek(0)"); page.wait_for_timeout(300)
     page.evaluate("() => window.DAW_CONTROL.toggleRecord()")
     for _ in range(100):
