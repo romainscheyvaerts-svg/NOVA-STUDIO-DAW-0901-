@@ -33,6 +33,10 @@ export interface EditCommands {
   setFadeCurve: (trackId: string, clipIds: string[], which: 'in' | 'out' | 'both', curve: CrossfadeCurve) => void;
   /** Modifie plusieurs clips d'une piste en une seule étape d'annulation. */
   patchClips: (trackId: string, patches: Map<string, Partial<Clip>> | Record<string, Partial<Clip>>) => void;
+  /** Retire des clips d'une piste et en pose d'autres (boucle, Heal, Répéter), en une étape d'annulation. */
+  replaceClips: (trackId: string, removeIds: string[], add: Clip[]) => void;
+  /** Message court en bas de l'écran. */
+  notify: (text: string) => void;
   /** Crossfade entre deux clips (jonction ou chevauchement). false si l'audio manque. */
   crossfade: (trackId: string, aId: string, bId: string, length?: number, curve?: CrossfadeCurve) => boolean;
   /** Crossfade automatique des clips modifiés avec leurs voisins (selon la préférence). */
@@ -345,6 +349,21 @@ export function useEditCommands(deps: EditCommandDeps): EditCommands {
       }));
     };
 
+    const replaceClips: EditCommands['replaceClips'] = (trackId, removeIds, add) => {
+      if (!removeIds.length && !add.length) return;
+      const rm = new Set(removeIds);
+      d().setState(produce((draft: DAWState) => {
+        const t = draft.tracks.find(x => x.id === trackId);
+        if (!t) return;
+        // Les clips gardés restent à leur place ; les nouveaux prennent celle du premier retiré.
+        const at = t.clips.findIndex(c => rm.has(c.id));
+        const kept = t.clips.filter(c => !rm.has(c.id));
+        const fresh = add.filter(c => !kept.some(k => k.id === c.id));
+        kept.splice(at >= 0 ? Math.min(at, kept.length) : kept.length, 0, ...(fresh as any));
+        t.clips = kept;
+      }));
+    };
+
     const nudgeStepSeconds = () => {
       const s = st();
       return nudgeSeconds(editPrefsStore.get().nudge, s.bpm, (window as any).gridSize || '1/4');
@@ -366,6 +385,8 @@ export function useEditCommands(deps: EditCommandDeps): EditCommands {
       },
 
       patchClips,
+      replaceClips,
+      notify: (text) => d().notify(text),
 
       crossfade: (trackId, aId, bId, length = DEFAULT_XFADE_SEC, curve) => {
         const t = st().tracks.find(x => x.id === trackId);

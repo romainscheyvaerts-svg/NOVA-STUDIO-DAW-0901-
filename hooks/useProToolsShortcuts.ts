@@ -131,7 +131,7 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
       // Tab garde son rôle de navigation au clavier entre les boutons.
       if (keyToken(e) === 'tab' && !tabBelongsToTimeline(e.target)) return;
       // Touche maintenue : seuls le nudge, le zoom, la hauteur et Tab se répètent.
-      if (e.repeat && !/^(nudge|zoom|trackHeight|tabToTransient)/.test(sc.command || '')) { e.preventDefault(); e.stopPropagation(); return; }
+      if (e.repeat && !/^(nudge|zoom|trackHeight|tabToTransient|clipGainNudge)/.test(sc.command || '')) { e.preventDefault(); e.stopPropagation(); return; }
       e.preventDefault();
       e.stopPropagation();
       recordAction(`raccourci:${sc.id}`);

@@ -47,6 +47,8 @@ import { canvasTheme } from '../utils/canvasTheme';
 import { useTheme } from '../utils/themeStore';
 import { shownTrackIds } from '../utils/trackStructure';
 import { structureMenuItems } from './TrackStructure';
+import { ClipGainToolbar, ClipToolsHost, clipGainMenuItems, useClipGainEdit } from './ClipGainTools';
+import { envelopeGainAt } from '../utils/clipGain';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -219,6 +221,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const setGridSize = (g: string) => editModeStore.set({ gridSize: g });
   const snapEnabled = em.mode === 'GRID';
   const [gridMenu, setGridMenu] = useState<{ x: number, y: number } | null>(null);
+  // Gain de clip en ligne, crayon, Loop Trim (R5, components/ClipGainTools).
+  const clipGainEdit = useClipGainEdit({ zoomH, bpm, gridSize, snap: ev => snapNow(ev), touch: () => touchRef.current, onUpdateTrack });
+  const clipGainActiveRef = clipGainEdit.activeRef;
 
   const [dragAction, setDragAction] = useState<DragAction | null>(null);
   const [activeClip, setActiveClip] = useState<{trackId: string, clip: Clip} | null>(null);
@@ -354,6 +359,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         if (e.key === '1') { setActiveTool('SELECT'); return; }
         if (e.key === '2') { setActiveTool('SPLIT'); return; }
         if (e.key === '3') { setActiveTool('ERASE'); return; }
+        if (e.key === '6') { setActiveTool('DRAW'); return; }
       }
 
       // Nudge (Pro Tools) : ← / → déplacent la sélection d'un pas (réglable), Maj = 10 pas.
@@ -845,7 +851,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
-    const onTouchMove = (ev: TouchEvent) => { if (dragActionRef.current || loopDragRef.current) ev.preventDefault(); };
+    const onTouchMove = (ev: TouchEvent) => { if (dragActionRef.current || loopDragRef.current || clipGainActiveRef.current) ev.preventDefault(); };
     el.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => el.removeEventListener('touchmove', onTouchMove);
   }, []);
@@ -866,6 +872,12 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       }
       currentY += zoomV + extraH(t);
     }
+    return null;
+  };
+  /** Haut (contenu, px) de la ligne de clips d'une piste, ou null si elle n'est pas affichée. */
+  const laneTopOf = (trackId: string): number | null => {
+    let yy = tracksTop;
+    for (const t of visibleTracks) { if (t.id === trackId) return yy; yy += zoomV + extraH(t); }
     return null;
   };
   /** Appui long du doigt sur un clip (tablette) : son menu, comme le clic droit. */
@@ -963,6 +975,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (e.clientY - rect.top < tracksTop) return;
     let currentY = tracksTop;
     for (const t of visibleTracks) {
+        // Crayon sur une ligne d'automation ouverte (sous les clips).
+        if (activeTool === 'DRAW' && y >= currentY + zoomV && y < currentY + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80
+            && clipGainEdit.onAutomationDown(e, t, x, y - currentY - zoomV, y)) return;
         if (y >= currentY && y < currentY + zoomV) {
             const clip = clipAtTime(rowClips(t), time);
             if (clip) {
@@ -1014,6 +1029,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 // d'un glissement (déplacement, rognage, fondu, gain) n'était alors
                 // plus annulable.
                 if (selectedTrackId !== t.id) onSelectTrack(t.id);
+                // Ligne de gain (points, Alt+clic), crayon, Loop Trim : avant les autres zones du clip.
+                if (clipGainEdit.onClipDown(e, { trackId: t.id, clip, x, relY: y - currentY, laneH: zoomV, tool: activeTool, edgePx: Math.min(10, Math.max(4, clip.duration * zoomH * 0.15)) })) { setActiveClip(null); return; }
 
                 // Zones d'accroche : coins superieurs = fondus, bords = rognage,
                 // reste = deplacement. Jusqu'ici seul le deplacement existait sur
@@ -1142,6 +1159,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
     const x = e.clientX - rect.left - headerWidth + scrollContainerRef.current.scrollLeft;
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
     const useSnap = snapNow(e);
+    if (clipGainEdit.onMove(e, x, y, laneTopOf)) return;
     if (dragAction === 'MOVE' || dragAction === 'TRIM_START' || dragAction === 'TRIM_END' || dragAction === 'FADE_IN' || dragAction === 'FADE_OUT') {
         setDragTipPos({ x: e.clientX, y: e.clientY });
         if (hoverHint) setHoverHint(null);
@@ -1226,7 +1244,9 @@ const handleMouseMove = (e: React.MouseEvent) => {
                     const cx0 = c.start * zoomH, cx1 = (c.start + c.duration) * zoomH;
                     const edge = Math.min(10, Math.max(4, (cx1 - cx0) * 0.15));
                     const relY = y - laneY;
-                    if (c.bufferId && (cx1 - cx0) > 16 && x - cx0 >= edge && cx1 - x >= edge
+                    const gh = clipGainEdit.cursorAt(c, x, relY, zoomV, activeTool, edge);
+                    if (gh) { cursor = gh.cursor; if (gh.hint) hint = gh.hint; }
+                    else if (c.bufferId && (cx1 - cx0) > 16 && x - cx0 >= edge && cx1 - x >= edge
                         && Math.abs(relY - (2 + clipGainHandleY(zoomV - 4, c.gain ?? 1))) <= CLIP_GAIN_GRAB_PX) cursor = 'ns-resize';
                     else if (editCommands && relY > zoomV * 0.55 && junctionNear(t.clips, tHover, Math.max(6, edge) / zoomH)) cursor = 'col-resize';
                     else if (relY < zoomV * 0.35 && (x - cx0 < FADE_HANDLE_PX || cx1 - x < FADE_HANDLE_PX)) {
@@ -1406,6 +1426,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
 };
 
 const handleMouseUp = () => {
+    clipGainEdit.onUp();
     setDragTipPos(null);
     if (longPressRef.current) { clearTimeout(longPressRef.current.timer); longPressRef.current = null; }
     // Spot (Pro Tools) : un clic (sans glisser) sur un clip ouvre « Position exacte ».
@@ -1518,6 +1539,12 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
                         }
                     }
 
+                    // Ligne de gain (utils/clipGain) : la forme d'onde suit le gain dessiné.
+                    if (clip.gainPoints?.length) {
+                        const offG = clip.offset || 0;
+                        for (let i = 0; i < n; i++) env[i] = Math.min(1, env[i] * envelopeGainAt(clip.gainPoints, offG + ((px0 + i + 0.5) / largeurPx) * clip.duration));
+                    }
+
                     // ===== STYLE PRO TOOLS: Filled waveform avec outline =====
                     ctx.fillStyle = waveColor + '55';  // Semi-transparent fill
                     ctx.beginPath();
@@ -1612,7 +1639,8 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     }
 
     // Poignée de gain de clip
-    if (clip.bufferId && w > 16 && h > 30) {
+    // (Ligne de gain affichée : c'est elle qu'on tire, components/ClipGainTools.)
+    if (clip.bufferId && w > 16 && h > 30 && !clipGainEdit.view.line) {
         const g = clip.gain ?? 1;
         const hy = Math.round(y + clipGainHandleY(h, g)) + 0.5;
         const modified = Math.abs(g - 1) > 0.001;
@@ -1628,7 +1656,7 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
         const cxm = (vx0 + vx1) / 2;
         ctx.fillStyle = modified ? '#fbbf24' : (isSelected ? cv.ink(1) : cv.ink(0.5));
         ctx.fillRect(Math.round(cxm - 7), Math.round(hy - 2.5), 14, 5);
-        if (modified && w > 50) {
+        if (modified && w > 50 && clipGainEdit.view.info) {
             const label = gainToDbText(g);
             ctx.font = '700 10px Inter';
             const tw = ctx.measureText(label).width;
@@ -1645,6 +1673,9 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
         }
         ctx.restore();
     }
+
+    // Ligne de gain, points, infos de gain, boucles (components/ClipGainTools).
+    clipGainEdit.draw(ctx, clip, x, y, w, h, isSelected);
 
     // Indicateur de mute
     if (clip.isMuted) {
@@ -1967,7 +1998,7 @@ const drawTimeline = useCallback(() => {
     }
 
     // La tete de lecture est dessinee sur le calque superieur (drawPlayhead).
-}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, lanesKey, lanesByTrack, hoveredClipId, uiTheme, tracksTop]);
+}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, lanesKey, lanesByTrack, hoveredClipId, uiTheme, tracksTop, clipGainEdit.view]);
 
 // Calque statique (grille, clips, formes d'onde, reperes) : redessine seulement
 // quand son contenu change, plus a chaque image de la lecture.
@@ -2055,6 +2086,8 @@ useEffect(() => {
               title="Sélecteur (comme dans Pro Tools) (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
+          {/* Crayon, ligne de gain, infos de gain, mode boucle (R5). */}
+          <ClipGainToolbar activeTool={activeTool} setActiveTool={setActiveTool} compact={simple} />
           {/* Modes d'édition Pro Tools (remplacent l'aimant oui / non) : SHUF / SLIP / SPOT / GRID + valeur de grille. */}
           <EditModeSelector compact={simple} />
           {!simple && (
@@ -2302,6 +2335,8 @@ useEffect(() => {
         );
       })()}
       {editCommands && <RangeActionsBar commands={editCommands} />}
+      {clipGainEdit.overlay}
+      <ClipToolsHost />
       {spotTarget && (() => {
         const tr = tracks.find(t => t.id === spotTarget.trackId);
         const c = tr?.clips.find(x => x.id === spotTarget.clipId);
@@ -2391,6 +2426,8 @@ useEffect(() => {
                 })() : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: simple ? 'Supprimer les silences…' : 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', title: 'Supprimer les silences : découpe le clip et retire les blancs entre les phrases, avec seuil et marges réglables (Pro Tools : Strip Silence, Ctrl+U)', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => { const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id]; requestBreaths({ mode: 'dialog', clipIds: ids, reason: 'menu' }); setClipContextMenu(null); }}] : []),
+                // Gain de clip, Heal, boucle, Répéter, rendre le gain (R5).
+                ...clipGainMenuItems(clipContextMenu.trackId, clipContextMenu.clip, () => setClipContextMenu(null)),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
                   { label: 'Séparer en stems…', icon: 'fa-layer-group', title: STEMS_TOOLTIP,
                     onClick: () => { onSeparateStems(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); } }

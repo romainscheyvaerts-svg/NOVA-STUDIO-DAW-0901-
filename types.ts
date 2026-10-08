@@ -319,6 +319,27 @@ export interface Clip {
    */
   breaths?: BreathEdit[];
   /**
+   * Ligne de gain du clip (Pro Tools : Clip Gain Line, utils/clipGain) :
+   * points en dB rangés en secondes de l'audio SOURCE (même repère que
+   * `offset`), donc ils survivent aux découpes et aux rognages. Le gain
+   * s'ajoute (en dB) au gain global `gain`. Lue par le même plan de gain que
+   * les fondus et les respirations (utils/fades) : lecture = export. Une
+   * ancienne version ignore ce champ. Absent : ligne plate (0 dB).
+   */
+  gainPoints?: ClipGainPoint[];
+  /**
+   * « Rendre le gain dans le fichier » (Pro Tools : Render Clip Gain) : le
+   * clip joue un son où la ligne de gain est déjà appliquée ; le son d'origine
+   * et la ligne sont gardés pour revenir en arrière. Non destructif.
+   */
+  gainRender?: ClipGainRenderInfo;
+  /**
+   * Boucle de clip (Pro Tools : Clip Looping, utils/clipLoop) : ce clip est
+   * une itération d'une boucle. Chaque itération est un vrai clip (même son,
+   * même offset) : une ancienne version joue la boucle telle quelle.
+   */
+  loop?: ClipLoopInfo;
+  /**
    * Groove / swing en cours de réglage (V25, utils/groove) : `notes` contient
    * déjà le résultat (une ancienne version joue donc le clip groové) ; la
    * source sert à changer de réglage. Absent : pas de groove.
@@ -411,6 +432,42 @@ export interface BreathEdit {
   fade?: number;
 }
 
+/** Point de la ligne de gain d'un clip (utils/clipGain). */
+export interface ClipGainPoint {
+  /** Instant dans l'audio source (s, même repère que Clip.offset). */
+  t: number;
+  /** Gain en dB (s'ajoute au gain global du clip). */
+  db: number;
+  /** Courbure du segment vers le point suivant (−1 … 1, 0 ou absent = droit). */
+  curve?: number;
+}
+
+/** Ce que garde un clip dont la ligne de gain a été rendue dans le fichier. */
+export interface ClipGainRenderInfo {
+  /** Son d'origine (registre audio). */
+  sourceBufferId?: string;
+  /** Fichier du son d'origine dans un projet sauvegardé. */
+  sourceRef?: string;
+  /** Ligne de gain et gain global rendus (rétablis par « Revenir »). */
+  gainPoints: ClipGainPoint[];
+  gain: number;
+}
+
+/** Itération d'une boucle de clip (utils/clipLoop). */
+export interface ClipLoopInfo {
+  /** Identifiant de la boucle (commun à toutes ses itérations). */
+  id: string;
+  /** Rang de l'itération (0 = le clip d'origine). */
+  index: number;
+  /** Durée d'une itération (s) : la longueur du clip bouclé. */
+  unit: number;
+  /** Fondu aux jonctions (s), 0 = aucun. */
+  xfade?: number;
+  /** Fondus du clip d'origine (le premier garde l'entrée, le dernier la sortie). */
+  srcFadeIn?: number;
+  srcFadeOut?: number;
+}
+
 export interface FreezeRef {
   /** Id du rendu (frozenClip.id) auquel l'ancrage se rapporte. */
   renderId: string;
@@ -433,6 +490,8 @@ export interface FreezeRef {
   srcClipId?: string;
   /** Respirations traitées (Clip.breaths) déjà contenues dans le rendu. */
   breaths?: BreathEdit[];
+  /** Ligne de gain (Clip.gainPoints) déjà contenue dans le rendu. */
+  gainPoints?: ClipGainPoint[];
   /**
    * Son joué par le clip au moment du rendu (bufferId). S'il change (justesse,
    * Melodyne, alignement, retour à l'original…), la tranche ne peut plus

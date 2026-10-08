@@ -12,6 +12,8 @@ import { sendLabel } from '../utils/sendLabels';
 import { openSynthPanel } from '../utils/synthPanelStore';
 import { editModeStore, useEditMode } from '../utils/editModes';
 import { breathGainAt, breathSig } from '../utils/breathEnvelope';
+import { envelopeGainAt, gainPointsSig } from '../utils/clipGain';
+import { MobileClipGain } from './ClipGainTools';
 
 /** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
 const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
@@ -374,7 +376,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     // Respirations traitées (utils/breaths) : la forme d'onde montre le creux.
     const breaths = clip.breaths?.length && !clip.isReversed ? clip.breaths : undefined;
     const off = clip.offset || 0;
-    const cacheKey = `${bufferKeyOf(buffer)}|${off}|${clip.duration}|${Math.round(width)}|${height}|${breathSig(breaths)}`;
+    const cacheKey = `${bufferKeyOf(buffer)}|${off}|${clip.duration}|${Math.round(width)}|${height}|${breathSig(breaths)}|${gainPointsSig(clip.gainPoints)}`;
     let polygon = wavePointsCache.get(cacheKey);
     if (polygon === undefined) {
     const channelData = buffer.getChannelData(0);
@@ -397,7 +399,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         if (sample > max) max = sample;
       }
 
-      const g = breaths ? breathGainAt(breaths, off + ((i + 0.5) / width) * clip.duration) : 1;
+      const tSrc = off + ((i + 0.5) / width) * clip.duration;
+      // Respirations et ligne de gain (dessinée sur ordinateur) : la forme d'onde suit le gain.
+      const g = (breaths ? breathGainAt(breaths, tSrc) : 1) * (clip.gainPoints?.length ? envelopeGainAt(clip.gainPoints, tSrc) : 1);
       const y1 = centerY + max * g * centerY * 0.85;
       const y2 = centerY + min * g * centerY * 0.85;
       points.push(`${i},${y1}`);
@@ -1141,14 +1145,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             </div>
 
             {/* Gain */}
-            <div className="flex-shrink-0 flex flex-col items-center justify-center px-1.5 h-12 rounded-lg bg-white/5">
-              <span className="text-[8px] font-bold text-white/40 mb-0.5">GAIN</span>
-              <div className="flex items-center gap-1">
-                <button onClick={() => handleGainChange(-0.1)} aria-label="Baisser le gain du clip" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">-</button>
-                <span className="text-[9px] font-mono tabular-nums text-green-400 w-12 text-center">{gainToDbText(selectedClip.clip.gain ?? 1)}</span>
-                <button onClick={() => handleGainChange(0.1)} aria-label="Monter le gain du clip" className="nova-hit w-8 h-8 rounded bg-white/10 text-white/80 text-sm hover:bg-white/20">+</button>
-              </div>
-            </div>
+            {/* Gain du clip (version simple) : ±1 dB, la ligne de gain dessinée sur ordinateur est gardée. */}
+            {onUpdateClip && <MobileClipGain clip={selectedClip.clip} onChange={p => onUpdateClip(selectedClip.trackId, selectedClip.clip.id, p)} />}
 
             {/* Respirations (components/BreathTools) : version simple, le dosage dans la fenêtre */}
             {selectedClip.clip.type !== 'MIDI' && (

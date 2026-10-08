@@ -1,5 +1,6 @@
 import { BreathEdit, Clip, FreezeRef, PluginInstance, Track, TrackType } from '../types';
 import { breathSig } from './breathEnvelope';
+import { envelopeDbAt, gainPointsSig, sortGainPoints } from './clipGain';
 
 /**
  * Regles du gel de piste, partagees par le moteur audio, la sauvegarde et l'interface.
@@ -58,6 +59,8 @@ export const anchorClipsToRender = (clips: Clip[], renderId: string): Map<string
       ...(c.fadeInCurve ? { fadeInCurve: c.fadeInCurve } : {}), ...(c.fadeOutCurve ? { fadeOutCurve: c.fadeOutCurve } : {}),
       // Respirations déjà traitées dans le rendu (utils/breaths).
       ...(c.breaths?.length ? { breaths: c.breaths.map(e => ({ ...e })) } : {}),
+      // Ligne de gain déjà rendue (utils/clipGain).
+      ...(c.gainPoints?.length ? { gainPoints: c.gainPoints.map(p => ({ ...p })) } : {}),
       // Empreinte du son rendu : un autre son (justesse, Melodyne…) périme le rendu.
       buf: c.bufferId, content: clipContentSig(c),
       ...(c.isMuted ? { muted: true } : {}),
@@ -67,6 +70,19 @@ export const anchorClipsToRender = (clips: Clip[], renderId: string): Map<string
 };
 
 const breathKey = (e: BreathEdit) => breathSig([e]);
+
+/**
+ * Ligne de gain d'une tranche de rendu (repère du rendu = ancrage + temps
+ * source) : rien si elle n'a pas changé depuis le gel ; sinon l'écart (ligne
+ * actuelle − ligne rendue), évalué aux points des deux lignes.
+ */
+export const sliceGainPoints = (c: Pick<Clip, 'gainPoints'>, ref: FreezeRef): Clip['gainPoints'] => {
+  const cur = sortGainPoints(c.gainPoints), old = sortGainPoints(ref.gainPoints);
+  if (gainPointsSig(cur) === gainPointsSig(old)) return undefined;
+  const ts = Array.from(new Set([...cur, ...old].map(p => p.t))).sort((a, b) => a - b);
+  if (!ts.length) return undefined;
+  return ts.map(t => ({ t: ref.anchor + t, db: envelopeDbAt(cur, t) - envelopeDbAt(old, t) }));
+};
 
 /**
  * Respirations d'une tranche de rendu (repère du rendu) : seulement celles que
@@ -167,6 +183,8 @@ export const sliceAnchored = (
         freezeRef: undefined,
         // Respirations : le rendu contient déjà celles du gel ; on n'ajoute que les nouvelles.
         breaths: sliceBreaths(c, ref).edits,
+        // Ligne de gain : le rendu contient celle du gel ; on n'applique que l'écart.
+        gainPoints: sliceGainPoints(c, ref),
       });
     }
     // Clip rallongé au-delà de ce qui a été rendu : ces parties passent en direct.
@@ -274,6 +292,8 @@ export const trackBufferIds = (t: Track): string[] => {
   (t.clips || []).forEach(c => { if (c.pitchEdit?.sourceBufferId) ids.push(c.pitchEdit.sourceBufferId); });
   // Prise d'origine d'un clip retouché par Melodyne / VocAlign (ARA).
   (t.clips || []).forEach(c => { if (c.araEdit?.sourceBufferId) ids.push(c.araEdit.sourceBufferId); });
+  // Son d'origine d'un clip dont la ligne de gain a été rendue (« Revenir »).
+  (t.clips || []).forEach(c => { if (c.gainRender?.sourceBufferId) ids.push(c.gainRender.sourceBufferId); });
   if (t.frozenClip?.bufferId) ids.push(t.frozenClip.bufferId);
   (t.sendFreezes || []).forEach(sf => { if (sf.clip.bufferId) ids.push(sf.clip.bufferId); });
   (t.freezeBase?.clips || []).forEach(c => { const b = (c as { bufferId?: string }).bufferId; if (b) ids.push(b); });
@@ -321,6 +341,8 @@ const clipSig = (c: Clip): string => [
   ...(c.fadeInCurve || c.fadeOutCurve ? [`${c.fadeInCurve || ''}/${c.fadeOutCurve || ''}`] : []),
   // Respirations traitées (utils/breaths) : idem, seulement si présentes.
   ...(c.breaths?.length ? [fnv(breathSig(c.breaths))] : []),
+  // Ligne de gain (utils/clipGain) : idem, seulement si présente.
+  ...(c.gainPoints?.length ? [fnv(gainPointsSig(c.gainPoints))] : []),
 ].join(':');
 
 const pluginSig = (p: PluginInstance): string => {

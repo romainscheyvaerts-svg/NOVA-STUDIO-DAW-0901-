@@ -188,3 +188,38 @@ export const touchesPlugins = (fields: MixFields): boolean =>
   Object.keys(fields).some(k => k === 'pluginOrder' || k.startsWith(PLUGIN_FIELD));
 
 export const isBaseField = (f: string): boolean => (BASE_FIELDS as readonly string[]).includes(f);
+
+// ------------------------------------------- gain de clip, Heal, boucle (R5) en collaboration
+
+/**
+ * Le contenu d'une piste voyage avec ses clips tels quels (services/Collab
+ * contentOf) : la ligne de gain (gainPoints), le rendu du gain (gainRender),
+ * les itérations de boucle (loop) et les clips recollés (Heal) arrivent donc
+ * chez l'autre sans format à part. À la réception, on vérifie seulement ces
+ * champs (points triés et bornés, boucle cohérente) : une donnée abîmée ne
+ * doit jamais faire taire un clip ni bloquer la lecture.
+ */
+const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+
+export function sanitizeClipGainFields<T extends Record<string, any>>(c: T): T {
+  if (!c || typeof c !== 'object') return c;
+  const out: Record<string, any> = { ...c };
+  if ('gainPoints' in out) {
+    const pts = Array.isArray(out.gainPoints)
+      ? out.gainPoints.filter((p: any) => p && finite(p.t) && finite(p.db))
+        .map((p: any) => ({ t: p.t, db: Math.max(-60, Math.min(24, p.db)), ...(finite(p.curve) && p.curve !== 0 ? { curve: Math.max(-1, Math.min(1, p.curve)) } : {}) }))
+        .sort((a: any, b: any) => a.t - b.t)
+      : [];
+    if (pts.length) out.gainPoints = pts; else delete out.gainPoints;
+  }
+  if ('loop' in out) {
+    const l = out.loop;
+    if (!l || typeof l.id !== 'string' || !finite(l.index) || !finite(l.unit) || l.unit <= 0) delete out.loop;
+  }
+  if ('gainRender' in out && (!out.gainRender || !Array.isArray(out.gainRender.gainPoints) || !finite(out.gainRender.gain))) delete out.gainRender;
+  return out as T;
+}
+
+/** Clips reçus d'un collaborateur : champs R5 vérifiés (les autres passent tels quels). */
+export const sanitizeIncomingClips = <T extends Record<string, any>>(clips: T[]): T[] =>
+  clips.map(c => (c && ('gainPoints' in c || 'loop' in c || 'gainRender' in c) ? sanitizeClipGainFields(c) : c));

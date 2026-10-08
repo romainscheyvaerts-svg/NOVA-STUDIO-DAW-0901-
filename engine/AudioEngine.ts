@@ -47,6 +47,7 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { computePdc, PdcNode, PDC_MAX_SECONDS } from '../utils/pdc';
 import { applyGainEvents, clipGainEvents } from '../utils/fades';
 import { breathSig } from '../utils/breathEnvelope';
+import { gainPointsSig } from '../utils/clipGain';
 import { auditionClips } from '../utils/playlists';
 import { ChordEvent, chordSteps } from '../utils/chordDetect';
 import { engineView, VOID_OUTPUT } from '../utils/trackStructure';
@@ -1675,7 +1676,7 @@ export class AudioEngine {
   private computeClipSigs(tracks: Track[]): Map<string, string> {
     const m = new Map<string, string>();
     tracks.forEach(t => this.livePlayableClips(t).forEach(c => {
-      m.set(c.id, `${t.id}|${c.start}|${c.offset}|${c.duration}|${c.isMuted ? 1 : 0}|${c.bufferId || ''}|${c.gain ?? 1}|${c.fadeIn}|${c.fadeOut}|${c.fadeInCurve || ''}|${c.fadeOutCurve || ''}|${c.isReversed ? 1 : 0}|${breathSig(c.breaths)}`);
+      m.set(c.id, `${t.id}|${c.start}|${c.offset}|${c.duration}|${c.isMuted ? 1 : 0}|${c.bufferId || ''}|${c.gain ?? 1}|${c.fadeIn}|${c.fadeOut}|${c.fadeInCurve || ''}|${c.fadeOutCurve || ''}|${c.isReversed ? 1 : 0}|${breathSig(c.breaths)}|${gainPointsSig(c.gainPoints)}`);
     }));
     return m;
   }

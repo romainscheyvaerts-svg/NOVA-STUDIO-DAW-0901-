@@ -109,6 +109,20 @@ export class ProjectIO {
                 }
                 delete sClip.araEdit.sourceBufferId;
             }
+            // Ligne de gain rendue dans le fichier : le son d'origine voyage aussi (« Revenir »).
+            const grSrcId = clip.gainRender?.sourceBufferId;
+            if (grSrcId && sClip.gainRender) {
+                const srcBuf = audioBufferRegistry.get(grSrcId);
+                if (srcBuf && !isUnlicensedStoreBeat) {
+                    const filename = `${grSrcId}.wav`;
+                    if (!written.has(filename)) {
+                        written.add(filename);
+                        if (audioFolder) audioFolder.file(filename, wavOf(srcBuf));
+                    }
+                    sClip.gainRender.sourceRef = `audio/${filename}`;
+                }
+                delete sClip.gainRender.sourceBufferId;
+            }
         }
 
         // Samples perso des pads de batterie (V16) : un WAV par sample.
@@ -264,6 +278,24 @@ export class ProjectIO {
                         decoded.set(ref, ae.sourceBufferId);
                     } catch (e) {
                         console.warn(`[ProjectIO] Prise d'origine illisible : ${ref}`, e);
+                    }
+                }
+            }
+            // Son d'origine d'un clip dont la ligne de gain a été rendue (utils/clipGain).
+            const gr = clip.gainRender;
+            if (gr?.sourceRef) {
+                const ref = gr.sourceRef;
+                delete gr.sourceRef;
+                const already = decoded.get(ref);
+                const srcFile = zip.file(ref);
+                if (already) gr.sourceBufferId = already;
+                else if (srcFile) {
+                    try {
+                        const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
+                        gr.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-gain-origine`);
+                        decoded.set(ref, gr.sourceBufferId);
+                    } catch (e) {
+                        console.warn(`[ProjectIO] Son d'origine illisible : ${ref}`, e);
                     }
                 }
             }

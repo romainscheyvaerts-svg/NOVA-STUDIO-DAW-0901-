@@ -23,7 +23,9 @@ export type EditCommandId =
   | 'zoomIn' | 'zoomOut' | 'zoomPreset' | 'zoomToSelection'
   | 'trackHeight' | 'trackHeightUp' | 'trackHeightDown'
   // Modes d'édition Pro Tools (hooks/useEditModes) : F1–F4, Tab to Transient, point de synchro.
-  | 'editMode' | 'tabToTransient' | 'syncPoint';
+  | 'editMode' | 'tabToTransient' | 'syncPoint'
+  // Gain de clip, Heal, boucle (R5, components/ClipGainTools) : ligne de gain, nudge du gain, Heal Separation, Répéter, boucler.
+  | 'clipGainLine' | 'clipGainNudge' | 'heal' | 'repeatClips' | 'loopClips';
 
 export type EditCommandHandler = (arg?: any) => boolean | void;
 
