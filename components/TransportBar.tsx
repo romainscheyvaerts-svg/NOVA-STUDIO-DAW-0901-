@@ -432,7 +432,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
              {onOpenMasterNova && <button {...barItem('master', 24)} onClick={onOpenMasterNova} data-nova-open-master="" title="Master Nova : mastering en un clic pour Spotify, Apple Music, YouTube… (comme le Mastering Assistant de Logic)" aria-label="Master Nova" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-amber-400/40 bg-amber-400/10 text-amber-300 hover:bg-amber-400 hover:text-black"><i className="fas fa-crown text-[10px]"></i><span {...barItem('libelle-master', 4)} className="text-[10px] font-bold tracking-wide">Master</span></button>}
 
              {/* EXPORT BUTTON */}
-             <button {...barItem('exporter', 28)} onClick={onExportMix} title="Exporter le mix" aria-label="Exporter le mix" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span {...barItem('libelle-exporter', 4)} className="text-[10px] font-bold tracking-wide">Exporter</span></button>
+             <button {...barItem('exporter', 33)} onClick={onExportMix} title="Exporter le mix" aria-label="Exporter le mix" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-black"><i className="fas fa-compact-disc text-[10px]"></i><span {...barItem('libelle-exporter', 4)} className="text-[10px] font-bold tracking-wide">Exporter</span></button>
              
              {/* ENGINE BUTTON */}
              <button {...barItem('audio', 14)} onClick={onOpenAudioEngine} title="Réglages audio (carte son, latence)" aria-label="Réglages audio" className="h-8 px-3 rounded-lg flex items-center space-x-2 transition-all bg-white/[0.05] text-slate-400 hover:bg-white/10 hover:text-white"><i className="fas fa-microchip text-[10px]"></i><span {...barItem('libelle-audio', 2)} className="text-[10px] font-bold tracking-wide">Audio</span></button>
@@ -558,7 +558,17 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         )}
 
         {/* BPM CONTROL */}
-        <div data-testid="transport-bpm" className="hidden sm:flex shrink-0 flex-col items-end cursor-ns-resize group" onMouseDown={handleBpmMouseDown} title="Tempo : glisser vers le haut ou le bas, double-clic pour saisir">
+        {/* Souris : glisser / double-clic (comme avant). Doigt ou clavier : la fenêtre Tempo (avant : rien
+            au doigt, seule la pastille « 4/4 » de 23 × 10 px menait au tempo sur tablette). */}
+        <div data-testid="transport-bpm" role="button" tabIndex={0} aria-label={`Tempo : ${bpm} BPM. Toucher pour le régler`}
+          className="hidden sm:flex shrink-0 flex-col items-end justify-center min-h-[40px] px-1 rounded-md cursor-ns-resize group"
+          onMouseDown={handleBpmMouseDown}
+          // Au clic (après le mousedown de compatibilité du doigt) : ouverte au pointerup, la fenêtre
+          // se refermait aussitôt sous ce mousedown (son fond ferme au mousedown).
+          onPointerDown={e => { e.currentTarget.dataset.ptr = e.pointerType; }}
+          onClick={e => { const ptr = e.currentTarget.dataset.ptr; if (ptr && ptr !== 'mouse' && !isEditingBpm) onOpenTempo?.(); }}
+          onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); onOpenTempo?.(); } }}
+          title="Tempo : glisser vers le haut ou le bas, double-clic pour saisir (au doigt : toucher)">
 
            <div className="flex items-center space-x-2">
               {isEditingBpm ? (
@@ -601,6 +611,25 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 <kbd className="hidden md:inline rounded border border-white/15 px-1.5 font-mono text-[10px] text-slate-300">Ctrl+K</kbd>
               </button>
             )}
+
+            {/* Fichiers du quotidien en haut (au doigt, avant : tout en bas du menu, hors de l'écran sur
+                tablette et téléphone) : ouvrir, sauvegarder, importer le beat, exporter. */}
+            <div className="grid grid-cols-2 gap-2" data-testid="menu-fichiers">
+              <button onClick={() => { onOpenLoadMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                <i className="w-5 text-center text-amber-400 fas fa-folder-open" aria-hidden="true"></i><span>Ouvrir un projet</span>
+              </button>
+              <button onClick={() => { onOpenSaveMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                <i className="w-5 text-center text-green-400 fas fa-save" aria-hidden="true"></i><span>Sauvegarder</span>
+              </button>
+              {onImportAudio && !simple && (
+                <button onClick={() => { audioImportInputRef.current?.click(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <i className="w-5 text-center text-slate-300 fas fa-file-import" aria-hidden="true"></i><span>Importer un fichier audio</span>
+                </button>
+              )}
+              <button onClick={() => { onExportMix?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                <i className="w-5 text-center text-purple-400 fas fa-compact-disc" aria-hidden="true"></i><span>Exporter</span>
+              </button>
+            </div>
 
             {/* Téléphone : métronome et boucle (masqués dans la barre sous 768 px) */}
             <div className="grid grid-cols-2 gap-2">
@@ -686,20 +715,6 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             <div className="space-y-2">
               <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Fichiers</div>
               <div className="space-y-2">
-                <button onClick={() => { onOpenLoadMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                  <i className="w-5 text-center text-amber-400 fas fa-folder-open"></i>
-                  <span>Ouvrir un projet</span>
-                </button>
-                <button onClick={() => { onOpenSaveMenu?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                  <i className="w-5 text-center text-green-400 fas fa-save"></i>
-                  <span>Sauvegarder</span>
-                </button>
-                {onImportAudio && !simple && (
-                  <button onClick={() => { audioImportInputRef.current?.click(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                    <i className="w-5 text-center text-slate-300 fas fa-file-import"></i>
-                    <span>Importer un fichier audio</span>
-                  </button>
-                )}
                 {user && (
                   <button onClick={() => { onShareProject?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
                     <i className="w-5 text-center text-blue-400 fas fa-share-alt"></i>
@@ -712,10 +727,6 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                     <span>Master Nova</span>
                   </button>
                 )}
-                <button onClick={() => { onExportMix?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                  <i className="w-5 text-center text-purple-400 fas fa-compact-disc"></i>
-                  <span>Exporter</span>
-                </button>
                 <MidiMobileMenuItems onDone={() => setIsMobileMenuOpen(false)} />
                 <SessionMenuItems onDone={() => setIsMobileMenuOpen(false)} phone={typeof window !== 'undefined' && window.innerWidth < 640} />
                 {onOpenTakeHome && (

@@ -234,7 +234,7 @@ const ChannelStrip: React.FC<{
       onDragLeave={() => setIsDragOver(false)}
       onDrop={handleDrop}
       data-inactive={track.isInactive ? '1' : undefined}
-      className={`relative flex-shrink-0 bg-nv-bg border-r border-white/5 flex flex-col h-full transition-all touch-manipulation ${isMaster ? 'w-64 border-l-2 border-cyan-500/20' : track.type === TrackType.BUS ? 'w-48 bg-nv-surface' : 'w-44'} ${isDragOver ? 'bg-cyan-500/20' : ''}`}
+      className={`relative flex-shrink-0 bg-nv-bg border-r border-white/5 flex flex-col h-full [@media(max-height:820px)]:h-auto [@media(max-height:820px)]:min-h-[920px] transition-all touch-manipulation ${isMaster ? 'w-64 border-l-2 border-cyan-500/20' : track.type === TrackType.BUS ? 'w-48 bg-nv-surface' : 'w-44'} ${isDragOver ? 'bg-cyan-500/20' : ''}`}
     >
       
       {!isMaster && <InactiveStripVeil track={track} all={allTracks} />}
@@ -682,7 +682,7 @@ const MixerView: React.FC<{
   }, [onUpdateTrack]);
   
   return (
-    <div ref={mixerScrollRef} className="flex-1 flex overflow-x-auto bg-nv-panel custom-scroll h-full snap-x snap-mandatory">
+    <div ref={mixerScrollRef} className="flex-1 flex overflow-x-auto bg-nv-panel custom-scroll h-full snap-x snap-mandatory [@media(max-height:820px)]:overflow-y-auto [@media(max-height:820px)]:pb-20">
       {/* Track Groups Panel (inspired by Pro Tools) */}
       {trackGroups.length > 0 && (
         <div className="flex border-r border-white/10 bg-black/20">

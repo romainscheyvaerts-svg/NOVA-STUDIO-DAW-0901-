@@ -1249,6 +1249,9 @@ function Studio() {
   const isMobile = viewMode === 'MOBILE';
   // Téléphone : ses pages (chargées à la demande) arrivent dès l'ouverture du studio.
   useEffect(() => { if (isMobile) MOBILE_PAGES.forEach(c => c.preload()); }, [isMobile]);
+  // Console sur tablette / petit écran : le store (320 px) ne laissait que 3 tranches et demie à
+  // 1024 px. On le replie en passant à la console (▤ en haut à gauche le rouvre), comme après un beat.
+  useEffect(() => { if (state.currentView === 'MIXER' && !isMobile && window.innerWidth < 1280) setIsSidebarOpen(false); }, [state.currentView, isMobile]);
   // Téléphone (version simple) : pistes masquées, VCA et dossiers simples non affichés (menu « Pistes masquées »).
   const mobileTracks = useMemo(() => { const shown = shownTrackIds(state.tracks); return state.tracks.filter(t => shown.has(t.id) && !t.isVca && t.folder?.kind !== 'basic'); }, [state.tracks]);
   const isMobileRef = useRef(isMobile); isMobileRef.current = isMobile;
@@ -2207,7 +2210,10 @@ function Studio() {
     // Première prise du lead : style appliqué même si la prise est à refaire,
     // pour que l'artiste entende tout de suite le rendu « produit ».
     let autoStyleNote = '';
-    if (role === 'lead' && !stateRef.current.vocalMixStyle && (s.peakDb > -0.3 || s.rmsDb < -38)) {
+    // Chaîne déjà posée sur la lead (modèle « Session voix · Make Music », preset de piste, effets
+    // choisis) : on la respecte, le style auto ne s'empile pas dessus (avant : 3 effets du modèle + 5).
+    const ownChain = (t.plugins || []).length > 0;
+    if (role === 'lead' && !ownChain && !stateRef.current.vocalMixStyle && (s.peakDb > -0.3 || s.rmsDb < -38)) {
       const sid = suggestVocalMixStyle(stateRef.current.bpm, stateRef.current.beatGenre, stateRef.current.beatTitle);
       breakHistory(); // Ctrl+Z retire le style, pas la prise
       handleApplyMixStyle(sid, true);
@@ -2232,7 +2238,10 @@ function Studio() {
     const st = stateRef.current;
     const next: NovaFeedMessage['choices'] = [replay];
     let text = `✅ ${takeName} : bon niveau, prise propre.${placed}`;
-    if (role === 'lead' && !st.vocalMixStyle) {
+    if (role === 'lead' && !st.vocalMixStyle && ownChain) {
+      text += " Ta chaîne d'effets est déjà en place : réécoute-la. Si elle te va, on passe aux backs ; sinon refais-en une, l'ancienne est gardée (coupée).";
+      next.push(redo, { label: '➡️ Faire les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } });
+    } else if (role === 'lead' && !st.vocalMixStyle) {
       // Première prise : on fait entendre tout de suite une voix « produite ».
       const sid = suggestVocalMixStyle(st.bpm, st.beatGenre, st.beatTitle);
       breakHistory(); // Ctrl+Z retire le style, pas la prise

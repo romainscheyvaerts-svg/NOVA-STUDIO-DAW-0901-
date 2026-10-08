@@ -467,7 +467,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       <TrackStructureBadge track={track} />
       {/* Vrai mètre G / D de la piste + réduction de gain (R11), au bord droit comme dans Pro Tools. */}
       <div className="absolute right-0.5 top-1.5 bottom-1.5 w-[9px] z-20" data-testid={`header-meter-${track.id}`}>
-        <TrackMeter pointId={track.id} grTrackId={track.id} grText={false} marks={false} label={track.name} className="w-full" />
+        <TrackMeter pointId={track.id} grTrackId={track.id} grText={false} marks={false} clipHit={false} label={track.name} className="w-full" />
       </div>
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center truncate flex-1 pr-2">

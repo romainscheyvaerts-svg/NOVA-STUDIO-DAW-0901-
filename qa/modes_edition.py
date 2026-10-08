@@ -364,7 +364,7 @@ def scenario_ecran(page, res, vp):
         cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         page.wait_for_timeout(300)
         res["tab_appui_long_spot"] = page.locator('[data-testid="spot-dialog"]').is_visible()
-        res["tab_appui_long_menu_du_clip_aussi"] = page.get_by_text("Normaliser").locator("visible=true").count() > 0
+        res["tab_appui_long_menu_du_clip_aussi"] = page.get_by_text("Diviser", exact=True).locator("visible=true").count() > 0
         shot(page, "tab_03_appui_long_spot")
         page.keyboard.press("Escape"); page.wait_for_timeout(200)
         # Sélecteur au doigt : SLIP puis GRID
