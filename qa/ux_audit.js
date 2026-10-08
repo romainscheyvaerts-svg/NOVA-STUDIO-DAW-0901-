@@ -21,7 +21,7 @@
     }
   }
   const EN = /(?<![\wÀ-ÿ])(Settings|Loading|Save|Cancel|Delete|Remove|Upload|Download|Browse|Search|Sign in|Sign up|Log ?in|Log ?out|Share|Invite|Join|Guest|Untitled|Error|Failed|Warning|Select|Choose|Empty|Clear|Random|Copy|Paste|Undo|Redo|Record|Steps|Velocity|Edit|Add|New|Open|Close|Apply|Reset|Default|Tracks|Length|Bypass|Threshold|Release|Output|Input|Click|Drag|Drop|Enabled|Disabled|None|Track|Pitch|Shuffle|Grid|Spot|Slip|Send|Sends|Insert|Inserts|Bus|Group|Playlist|Takes?|Comp|Export|Import|Preview|Play|Stop|Pause|Next|Previous|Back|Done|Ok|Yes|No|Free|Upgrade|Subscribe|Welcome|Start|Online|Offline|Connected|Disconnected|Host|Session|Room|Waiting|Sync|Synced|Pending)(?![\wÀ-ÿ])/;
-  const OK_FR = /^(Solo|Mix|Master|Clip|Gain|Pan|Bus|BPM|REC|FX|MIDI|Nova|Pro|Sync|Spot|Slip|Grid|Shuffle|Comp|Insert|Inserts|Playlist|Session)$/i;
+  const OK_FR = /^(Export|Import|Solo|Mix|Master|Clip|Gain|Pan|Bus|BPM|REC|FX|MIDI|Nova|Pro|Sync|Spot|Slip|Grid|Shuffle|Comp|Insert|Inserts|Playlist|Session)$/i;
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const seenEn = new Set(), seenC = new Set();
   const parse = c => { const m = c.match(/rgba?\(([^)]+)\)/); if (!m) return null; const p = m[1].split(/[ ,/]+/).filter(Boolean).map(Number); return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1]; };

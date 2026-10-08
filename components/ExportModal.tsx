@@ -466,7 +466,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     {onOpenShare && (
                       <button type="button" onClick={() => onOpenShare('demo')} disabled={isRendering}
                         className="w-full min-h-11 rounded-xl border border-cyan-400/40 bg-cyan-500/10 px-3 py-2 text-left text-[13px] font-bold text-cyan-100 hover:bg-cyan-500/20">
-                        ⬇️ Démo gratuite du morceau complet <span className="font-normal text-cyan-200/80">(MP3 avec le tag)</span>
+                        ⬇️ Démo gratuite du morceau complet <span className="font-normal text-cyan-200">(MP3 avec le tag)</span>
                       </button>
                     )}
                     <button type="button" onClick={() => openBuyBeat(projectState.tracks)}
@@ -672,7 +672,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                         <div className="bg-white/5 p-3 rounded-lg space-y-2">
                              <div className="flex justify-between text-[9px]">
                                 <span className="text-slate-500">Taille estimée</span>
-                                <span className="text-white font-mono">~{(format === 'MP3' ? getDuration() * (parseInt(mp3Bitrate, 10) || 320) * 1000 / 8 / 1024 / 1024 : getDuration() * sampleRate * (parseInt(bitDepth)/8) * 2 / 1024 / 1024).toFixed(1)} Mo</span>
+                                <span className="text-white font-mono">~{(format === 'MP3' ? getDuration() * (parseInt(mp3Bitrate, 10) || 320) * 1000 / 8 / 1024 / 1024 : getDuration() * sampleRate * (parseInt(bitDepth)/8) * 2 / 1024 / 1024).toFixed(1).replace(".", ",")} Mo</span>
                              </div>
                              <div className="flex justify-between text-[9px]">
                                 <span className="text-slate-500">Durée</span>

@@ -680,7 +680,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     className="w-2 h-2 rounded-full flex-shrink-0"
                     style={{ backgroundColor: track.color }}
                   />
-                  <span title={track.name} className="text-[11px] leading-4 font-semibold text-white/90 truncate flex-1">
+                  <span title={track.name} className="text-[10px] min-[400px]:text-[11px] leading-4 font-semibold tracking-tight text-white/90 truncate flex-1">
                     {track.name}
                   </span>
                   {/* G26 : en mode simple aussi, on voit que la voix a des effets. */}

@@ -121,10 +121,16 @@ def prise(P, secondes=5):
     pg.wait_for_timeout(1500)
     P.ecran("prise_en_cours")
     pg.wait_for_timeout(secondes * 1000)
+    n0 = pg.evaluate("() => (window.__novaEdit?.getState().tracks || []).reduce((n, t) => n + (t.clips || []).length, 0)")
     tap(bouton(pg, "Arrêter l'enregistrement"), P.vp)
     t = time.time()
-    pg.get_by_role("region", name="Et maintenant ?").wait_for(timeout=15000)
-    P.chrono("carte_apres_prise", t)
+    # La prise est posée (clip(s) en plus) ; la carte « Et maintenant ? » ne vient qu'à la 1re prise.
+    for _ in range(40):
+        pg.wait_for_timeout(250)
+        if pg.evaluate("() => (window.__novaEdit?.getState().tracks || []).reduce((n, t) => n + (t.clips || []).length, 0)") > n0:
+            break
+    P.chrono("prise_posee", t)
+    pg.wait_for_timeout(2500)
 
 
 def fermer_carte(pg):
@@ -216,9 +222,8 @@ def inge(b, theme):
 
     def session():
         ouvrir_beat(P)
-        n = pg.locator("[data-track-header]").count()
         P.ecran("session")
-        return {"pistes": n}
+        return {"pistes": pg.evaluate("() => (window.__novaEdit?.getState().tracks || []).map(t => t.name)")}
     P.etape("session de 12 pistes (beat + voix + bus + retours)", session)
 
     def deux_prises():
@@ -230,21 +235,25 @@ def inge(b, theme):
     def console():
         t = time.time(); bouton(pg, "^Console$").click(); pg.wait_for_timeout(1000); P.chrono("console", t)
         P.ecran("console")
-        t = time.time(); pg.locator(".fx-slot button[aria-label^='Ouvrir']").locator("visible=true").first.click(); pg.wait_for_timeout(1000)
-        P.chrono("ouverture_effet", t)
-        P.ecran("effet_insert")
-        pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
-        bus = pg.get_by_text("+ Bus").locator("visible=true")
-        if bus.count():
-            bus.first.click(); pg.wait_for_timeout(800); P.ecran("bus_cree"); pg.keyboard.press("Escape")
-        bouton(pg, "^Pistes$").click(); pg.wait_for_timeout(600)
+        try:
+            t = time.time(); pg.locator(".fx-slot button[aria-label^='Ouvrir']").locator("visible=true").first.click(); pg.wait_for_timeout(1000)
+            P.chrono("ouverture_effet", t)
+            P.ecran("effet_insert")
+            pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
+            pg.evaluate("() => document.querySelectorAll('.custom-scroll').forEach(e => e.scrollLeft = 99999)")
+            bus = pg.get_by_text("+ Bus").locator("visible=true")
+            if bus.count():
+                bus.first.click(); pg.wait_for_timeout(800); P.ecran("bus_cree"); pg.keyboard.press("Escape")
+            return {"bouton_bus": bus.count()}
+        finally:
+            bouton(pg, "^Pistes$").click(); pg.wait_for_timeout(600)
     P.etape("console : inserts, effet ouvert, nouveau bus", console)
 
     def envois():
-        bouton(pg, "^Envois de REC$").click(); pg.wait_for_timeout(500)
-        P.ecran("envois_rec")
-        bouton(pg, "^Envois de REC$").click(); pg.wait_for_timeout(300)
-    P.etape("envois de la piste REC", envois)
+        bouton(pg, "^Envois de LEAD COUPLET$").click(); pg.wait_for_timeout(500)
+        P.ecran("envois")
+        bouton(pg, "^Envois de LEAD COUPLET$").click(); pg.wait_for_timeout(300)
+    P.etape("envois (écho, reverbs) d'une piste voix", envois)
 
     def automation():
         t = time.time(); bouton(pg, "^Auto$").click(); pg.wait_for_timeout(900); P.chrono("automation", t)
@@ -269,7 +278,7 @@ def inge(b, theme):
     P.etape("modes d'édition Shuffle / Slip / Grid / Spot", modes)
 
     def prises():
-        bouton(pg, r"^Prises \(").click(); pg.wait_for_timeout(700)
+        pg.locator("button", has_text=re.compile(r"Prises \(\d")).locator("visible=true").first.click(); pg.wait_for_timeout(700)
         P.ecran("prises_playlists")
         pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
     P.etape("prises (comp, playlists)", prises)
