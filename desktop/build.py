@@ -168,6 +168,27 @@ def ara_host() -> None:
         print(f"    hôte ARA NON construit ({e}) : Melodyne / VocAlign indisponibles dans cette version")
 
 
+NATIVE_HOST_EXE = os.path.join(REPO, "native-host", "build", "NovaVSTHost_artefacts", "Release", "NovaVSTHost.exe")
+
+
+def native_host() -> None:
+    """Hôte VST3 natif (NovaVSTHost.exe, SDK VST3 sous MIT, sans JUCE) : moteur VST par défaut du
+    pont (bridge-python/vst_native.py), construit depuis native-host/ s'il manque. Inclus par défaut
+    avec ses licences ; NOVA_EXCLUDE_NATIVE_VST=1 pour l'exclure (le pont garde alors pedalboard)."""
+    if os.environ.get("NOVA_EXCLUDE_NATIVE_VST") == "1":
+        print("    hôte VST natif : exclu (NOVA_EXCLUDE_NATIVE_VST=1)")
+        return
+    if os.path.isfile(NATIVE_HOST_EXE) and "--rebuild-native" not in sys.argv:
+        print(f"    hôte VST natif : {os.path.relpath(NATIVE_HOST_EXE, REPO)} (déjà construit)")
+        return
+    bat = os.path.join(REPO, "native-host", "build.bat")
+    try:
+        subprocess.check_call(["cmd", "/c", bat], cwd=os.path.dirname(bat), creationflags=0x08000000)
+        print("    hôte VST natif construit")
+    except Exception as e:  # noqa: BLE001 - non bloquant
+        print(f"    hôte VST natif NON construit ({e}) : le pont utilisera pedalboard")
+
+
 def pyinstaller() -> None:
     step(5, "PyInstaller…")
     subprocess.check_call(
@@ -301,6 +322,7 @@ def main() -> None:
     make_icon()
     build_ui(argv)
     ara_host()
+    native_host()
     pyinstaller()
     check_runtime_dlls()
     if signing_command() is None:

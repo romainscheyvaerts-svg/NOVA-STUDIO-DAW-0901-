@@ -48,9 +48,11 @@ logger = logging.getLogger("NovaBridge.Native")
 IS_WINDOWS = platform.system() == "Windows"
 EXE_NAME = "NovaVSTHost.exe"
 
-# Moteur par défaut quand NOVA_VST_ENGINE n'est pas posé. Passe à « native » une fois la
-# parité prouvée sur la liste de référence (voir D:\1 WORK\CONTENU\nova-hote-vst).
-DEFAULT_ENGINE = "pedalboard"
+# Moteur par défaut quand NOVA_VST_ENGINE n'est pas posé : « native » depuis la parité prouvée
+# sur la liste de référence (Pro-Q 4, Pro-C 3, C6, L1, RVox, EchoBoy, LA-2A, Auto-Tune Pro, CL 1B,
+# Vital ; modèle LENNON : voir D:\1 WORK\CONTENU\nova-hote-vst). pedalboard reste le repli
+# (NOVA_VST_ENGINE=pedalboard, ou NovaVSTHost.exe absent).
+DEFAULT_ENGINE = "native"
 
 LOAD_TIMEOUT_S = 16 * 60.0      # un chargement peut attendre une fenêtre de licence (15 min côté pont)
 CALL_TIMEOUT_S = 120.0
@@ -603,6 +605,11 @@ class HostProcess:
             except Exception:
                 pass
         self.kill()
+        for stream in (self.proc.stdin, self.proc.stdout):
+            try:
+                stream.close()
+            except Exception:
+                pass
         for hd in (getattr(self, "req_ev", None), getattr(self, "done_ev", None)):
             if hd:
                 try:
