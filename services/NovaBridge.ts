@@ -219,6 +219,13 @@ class NovaBridgeService {
   }
 
   private setBridgeState(patch: Partial<BridgeState>) {
+    // Rien de neuf (ex. la même liste relue) : on ne prévient personne. Avant, chaque
+    // GET_PLUGIN_LIST renvoyait un nouvel état ; un écouteur qui relit la liste à chaque
+    // changement (catalogue VST de l'artiste en direct) bouclait sans fin
+    // (« Maximum update depth exceeded », pont VST sollicité en continu).
+    const same = (a: unknown, b: unknown) => a === b
+      || (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]));
+    if ((Object.keys(patch) as (keyof BridgeState)[]).every(k => same(this.state[k], patch[k]))) return;
     this.state = { ...this.state, ...patch };
     this.listeners.forEach(cb => { try { cb(this.state); } catch { /* écouteur fautif */ } });
   }

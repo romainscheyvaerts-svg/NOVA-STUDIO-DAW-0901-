@@ -5177,8 +5177,15 @@ function Studio() {
       catalogSigRef.current = sig;
       await collabRef.current?.client.send('vst_catalog', { plugins: list }).catch(() => { catalogSigRef.current = ''; });
     };
-    void publish();
-    const unsub = novaBridge.subscribe(() => { void publish(); });
+    // Republier seulement quand le pont se connecte ou que sa liste change : publish()
+    // relit la liste, ce qui met à jour l'état du pont (et rappelait cet écouteur).
+    let seen = '';
+    const unsub = novaBridge.subscribe(s => {
+      const key = `${s.status}|${s.pluginCount}|${s.instrumentsPending ? s.instrumentsPending.join('/') : ''}`;
+      if (key === seen) return;
+      seen = key;
+      void publish();
+    });
     return () => { stop = true; unsub(); };
   }, [collab]);
 
