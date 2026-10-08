@@ -4,7 +4,7 @@ Pont NOVA ↔ hôte ARA2 natif (NovaARAHost.exe, sources dans nova-ara-host/).
 
 pedalboard ne sait pas faire d'ARA : Melodyne y passe le son sans rien faire et
 VocAlign rend du silence (il attend une capture et un guide). L'hôte natif
-(JUCE + ARA SDK) donne au plugin le clip entier, comme Pro Tools ou Studio One :
+(SDK VST3 + SDK ARA, sans JUCE) donne au plugin le clip entier, comme Pro Tools ou Studio One :
 analyse immédiate (notes visibles sans lecture), fenêtre du plugin, rendu hors
 temps réel, et sauvegarde des retouches (archive ARA) pour rouvrir plus tard.
 
