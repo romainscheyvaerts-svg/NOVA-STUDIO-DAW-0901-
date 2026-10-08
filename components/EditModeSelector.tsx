@@ -99,7 +99,7 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
       </button>
       {menu && createPortal(
         <div ref={menuRef} role="menu" aria-label="Grille" style={{ left: pos.left, top: pos.top }}
-          className="fixed z-[1000] w-64 rounded-xl border border-white/10 bg-[#14161a] p-2 shadow-[0_10px_40px_rgba(0,0,0,0.8)]">
+          className="fixed z-[1000] w-64 rounded-xl border border-white/10 bg-nv-surface p-2 shadow-[0_10px_40px_rgba(0,0,0,0.8)]">
           <div className="px-1 pb-1 text-[10px] font-bold text-slate-500">Valeur de grille</div>
           {([['musique', null], ['temps', 'En temps (min:s, images)']] as const).map(([kind, title]) => (
             <React.Fragment key={kind}>

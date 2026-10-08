@@ -640,7 +640,7 @@ function PaymentReturn({ sessionId }: { sessionId: string }) {
     return () => { live = false; };
   }, [sessionId]);
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0b0d10] p-6 text-center text-white">
+    <div className="min-h-screen flex items-center justify-center bg-nv-bg p-6 text-center text-white">
       <div className="max-w-sm space-y-3">
         <p className="text-4xl">{state === 'ok' ? '✅' : state === 'ko' ? '⏳' : '…'}</p>
         <h1 className="text-xl font-black">{state === 'ok' ? 'Paiement validé' : state === 'ko' ? 'Paiement en cours de validation' : 'Vérification du paiement…'}</h1>
@@ -7688,7 +7688,7 @@ function Studio() {
       <>
       {landingNotice && (
         <div className="fixed top-3 inset-x-0 z-[999] flex justify-center px-4 pointer-events-none">
-          <div role="status" className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-amber-400/40 bg-[#14161a] px-4 py-3 text-[13px] text-amber-100 shadow-2xl">
+          <div role="status" className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-amber-400/40 bg-nv-surface px-4 py-3 text-[13px] text-amber-100 shadow-2xl">
             <span>{landingNotice}</span>
             <button type="button" aria-label="Fermer" onClick={() => setLandingNotice(null)} className="nova-hit w-8 h-8 shrink-0 rounded-lg bg-white/10 text-white">✕</button>
           </div>
@@ -8189,7 +8189,7 @@ function Studio() {
       {externalImportNotice && (
         // Téléphone (G15) : en bas, au-dessus des onglets ; en haut, il cachait le zoom (− / +).
         <div className={`fixed ${isMobile ? 'bottom-[calc(8.5rem+env(safe-area-inset-bottom))]' : 'top-20'} left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
-                        bg-[#14161a]/95 border border-white/10 shadow-2xl backdrop-blur-sm
+                        bg-nv-surface/95 border border-white/10 shadow-2xl backdrop-blur-sm
                         flex items-center gap-2.5 text-[12px] font-medium text-slate-200
                         animate-in fade-in slide-in-from-top-2 duration-200`}>
           {!/^[✅❌]/.test(externalImportNotice) && (
@@ -8334,7 +8334,7 @@ function Studio() {
       {/* Casque : demandé avant la première prise */}
       {headphonePromptOpen && (
         <div className="fixed inset-0 z-[600] flex items-end sm:items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="casque-titre">
-          <div className="w-full max-w-sm rounded-3xl bg-[#14161a] border border-white/10 p-6 text-center shadow-2xl">
+          <div className="w-full max-w-sm rounded-3xl bg-nv-surface border border-white/10 p-6 text-center shadow-2xl">
             <div className="text-5xl mb-3">🎧</div>
             <h2 id="casque-titre" className="text-lg font-black text-white mb-2">Tu as un casque ou des écouteurs{' '}?</h2>
             <p className="text-sm text-slate-300 mb-5">
@@ -8479,7 +8479,7 @@ function Studio() {
       />
       {cloudProgress && !takeHomeOpen && (
         <div className="fixed inset-x-0 top-3 z-[660] flex justify-center px-4 pointer-events-none" role="status">
-          <div className="w-full max-w-sm rounded-2xl border border-cyan-500/30 bg-[#0d1117]/95 p-3 shadow-2xl">
+          <div className="w-full max-w-sm rounded-2xl border border-cyan-500/30 bg-nv-surface/95 p-3 shadow-2xl">
             <div className="flex justify-between text-[11px] font-bold text-cyan-200"><span>☁️ {cloudProgress.msg}</span><span>{cloudProgress.pct}%</span></div>
             <div className="mt-1.5 h-1.5 rounded-full bg-black/50 overflow-hidden"><div className="h-full bg-cyan-500 transition-all" style={{ width: `${cloudProgress.pct}%` }} /></div>
           </div>
@@ -8589,7 +8589,7 @@ function Studio() {
       )}
       {cloudConflict && (
         <div className="fixed inset-0 z-[670] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="conflict-title">
-          <div className="w-full max-w-md rounded-3xl border border-amber-500/30 bg-[#121418] p-6 shadow-2xl space-y-4">
+          <div className="w-full max-w-md rounded-3xl border border-amber-500/30 bg-nv-surface p-6 shadow-2xl space-y-4">
             <h2 id="conflict-title" className="text-lg font-black text-white">⚠️ Session modifiée ailleurs</h2>
             <p className="text-[13px] text-slate-300">
               La session en ligne a été modifiée {cloudConflict.updatedFrom ? `sur ${cloudConflict.updatedFrom} ` : ''}{cloudConflict.updatedAt ? formatAgo(Date.parse(cloudConflict.updatedAt)) : ''}, après ta dernière synchronisation.
@@ -8641,7 +8641,7 @@ function Studio() {
       <MidiInputHost tracks={state.tracks} selectedTrackId={state.selectedTrackId} isRecording={state.isRecording}
         onArm={id => { void armForRecording(id); }} onToggleRecord={() => { void handleToggleRecord(); }} />
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
-          <div data-nova-transport="" className="fixed inset-0 z-[250] bg-[#0c0d10] flex flex-col animate-in slide-in-from-bottom-10 duration-200">
+          <div data-nova-transport="" className="fixed inset-0 z-[250] bg-nv-bg flex flex-col animate-in slide-in-from-bottom-10 duration-200">
              <PanelBoundary name="l'éditeur MIDI" onClose={() => setMidiEditorOpen(null)}>
              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement de l'éditeur…</div>}>
                <PianoRoll track={state.tracks.find(t => t.id === midiEditorOpen.trackId)!} clipId={midiEditorOpen.clipId} bpm={state.bpm} currentTime={state.currentTime} onUpdateTrack={handleUpdateTrack} onClose={() => setMidiEditorOpen(null)}
@@ -8689,10 +8689,10 @@ function Studio() {
       {activePlugin && (
         // Fenêtre d'effet NON modale sur ordinateur (G18) : pas de voile, la console
         // et les pistes restent utilisables derrière ; on la déplace par sa barre.
-        <div className={`fixed inset-0 flex items-center justify-center z-[200] ${isMobile ? 'bg-[#0c0d10]' : 'pointer-events-none'}`}>
+        <div className={`fixed inset-0 flex items-center justify-center z-[200] ${isMobile ? 'bg-nv-bg' : 'pointer-events-none'}`}>
            <div className={`relative ${isMobile ? 'w-full h-full p-4 overflow-y-auto' : 'pointer-events-auto'}`} onMouseDown={e => e.stopPropagation()}>
               <PanelBoundary key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} name="la fenêtre d'effet" onClose={() => setActivePlugin(null)}>
-              <Suspense fallback={<div className="w-64 h-32 flex items-center justify-center text-slate-400 text-[11px] bg-[#14161a] border border-white/10 rounded-2xl"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}>
+              <Suspense fallback={<div className="w-64 h-32 flex items-center justify-center text-slate-400 text-[11px] bg-nv-surface border border-white/10 rounded-2xl"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}>
               <PluginEditor key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} onToggleFreeze={handleFreezeTrack} onToggleBypass={handleToggleBypass} onOpenPlugin={(tid, p) => setActivePlugin({ trackId: tid, plugin: p })} allTracks={state.tracks} />
               </Suspense>
               </PanelBoundary>
@@ -8734,7 +8734,7 @@ function Studio() {
       {/* Modal Récupération de Backup Automatique */}
       {showBackupRecovery && pendingBackup && (
         <div className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#14161a] border border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+          <div className="bg-nv-surface border border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
             <div className="p-6 border-b border-white/5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center">

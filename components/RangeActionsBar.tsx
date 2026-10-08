@@ -31,7 +31,7 @@ const RangeActionsBar: React.FC<{ commands: EditCommands }> = ({ commands }) => 
   ];
   return (
     <div role="toolbar" aria-label="Actions sur la sélection de plage" data-nova-target="range-actions"
-      className="absolute right-3 top-[50px] z-40 max-w-[calc(100%-24px)] overflow-x-auto flex flex-nowrap items-center gap-1 px-1.5 py-0.5 rounded-xl border border-sky-400/30 bg-[#0d1117]/95 shadow-2xl backdrop-blur">
+      className="absolute right-3 top-[50px] z-40 max-w-[calc(100%-24px)] overflow-x-auto flex flex-nowrap items-center gap-1 px-1.5 py-0.5 rounded-xl border border-sky-400/30 bg-nv-surface/95 shadow-2xl backdrop-blur">
       <span className="px-2 text-[10px] font-black text-sky-300 whitespace-nowrap" title="Plage sélectionnée (Sélecteur de Pro Tools)">
         Plage {fmt(selLength(time))} · {time.trackIds.length} piste{time.trackIds.length > 1 ? 's' : ''}
       </span>

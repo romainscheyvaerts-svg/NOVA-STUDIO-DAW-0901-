@@ -90,7 +90,7 @@ const GroovePanel: React.FC<Props> = ({ track, clip, bpm, onUpdateClip, onClose,
   return (
     <div className="fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-black/50" onPointerDown={onClose}>
       <div role="dialog" aria-label="Groove et swing" data-nova-groove=""
-        className="w-full sm:w-[440px] max-h-[88dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/15 bg-[#16181d] p-4 shadow-2xl text-white"
+        className="w-full sm:w-[440px] max-h-[88dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/15 bg-nv-surface p-4 shadow-2xl text-white"
         onPointerDown={e => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-3">
           <div>

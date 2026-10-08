@@ -42,7 +42,7 @@ const PreFxReplayPanel: React.FC<Props> = ({ data, onClose, onRefreeze, onRevert
 
   return (
     <div className="fixed inset-0 z-[680] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="prefx-title" data-testid="prefx-panel">
-      <div className="w-full max-w-lg max-h-[88vh] overflow-y-auto rounded-3xl border border-cyan-500/30 bg-[#121418] p-5 sm:p-6 shadow-2xl space-y-4">
+      <div className="w-full max-w-lg max-h-[88vh] overflow-y-auto rounded-3xl border border-cyan-500/30 bg-nv-surface p-5 sm:p-6 shadow-2xl space-y-4">
         <div className="space-y-1">
           <h2 id="prefx-title" className="text-lg font-black text-white">
             {merge ? '🔀 Les deux versions sont fusionnées' : summary.total > 0 ? '🔥 Éditions rejouées avant tes effets' : '⚠️ Plugins manquants sur ce PC'}

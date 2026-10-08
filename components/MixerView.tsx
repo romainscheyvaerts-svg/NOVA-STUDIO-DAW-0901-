@@ -234,7 +234,7 @@ const ChannelStrip: React.FC<{
       onDragLeave={() => setIsDragOver(false)}
       onDrop={handleDrop}
       data-inactive={track.isInactive ? '1' : undefined}
-      className={`relative flex-shrink-0 bg-[#0c0e12] border-r border-white/5 flex flex-col h-full transition-all touch-manipulation ${isMaster ? 'w-64 border-l-2 border-cyan-500/20' : track.type === TrackType.BUS ? 'w-48 bg-[#14161a]' : 'w-44'} ${isDragOver ? 'bg-cyan-500/20' : ''}`}
+      className={`relative flex-shrink-0 bg-nv-bg border-r border-white/5 flex flex-col h-full transition-all touch-manipulation ${isMaster ? 'w-64 border-l-2 border-cyan-500/20' : track.type === TrackType.BUS ? 'w-48 bg-nv-surface' : 'w-44'} ${isDragOver ? 'bg-cyan-500/20' : ''}`}
     >
       
       {!isMaster && <InactiveStripVeil track={track} all={allTracks} />}
@@ -682,7 +682,7 @@ const MixerView: React.FC<{
   }, [onUpdateTrack]);
   
   return (
-    <div ref={mixerScrollRef} className="flex-1 flex overflow-x-auto bg-[#08090b] custom-scroll h-full snap-x snap-mandatory">
+    <div ref={mixerScrollRef} className="flex-1 flex overflow-x-auto bg-nv-panel custom-scroll h-full snap-x snap-mandatory">
       {/* Track Groups Panel (inspired by Pro Tools) */}
       {trackGroups.length > 0 && (
         <div className="flex border-r border-white/10 bg-black/20">
@@ -756,7 +756,7 @@ const MixerView: React.FC<{
              
              {/* Group Creation Menu */}
              {showGroupMenu && (
-               <div data-testid="group-menu" className="fixed bg-[#1a1c22] border border-white/20 rounded-xl shadow-2xl z-[700] p-3 w-64 flex flex-col"
+               <div data-testid="group-menu" className="fixed bg-nv-raised border border-white/20 rounded-xl shadow-2xl z-[700] p-3 w-64 flex flex-col"
                  style={groupMenuPos(groupBtnRef.current, audioTracks.length)}>
                  <div className="text-[11px] font-bold text-slate-300 mb-1">Créer un groupe</div>
                  <p className="text-[10px] text-slate-500 mb-2">Coche les pistes qui bougent ensemble (volume, muet, solo).</p>

@@ -181,7 +181,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
   };
 
   return (
-    <div className="w-[480px] bg-[#0c0d10] border border-cyan-500/30 rounded-[40px] p-10 shadow-2xl flex flex-col space-y-8 animate-in fade-in zoom-in duration-300 select-none text-white">
+    <div className="w-[480px] bg-nv-bg border border-cyan-500/30 rounded-[40px] p-10 shadow-2xl flex flex-col space-y-8 animate-in fade-in zoom-in duration-300 select-none text-white">
       <div className="flex justify-between items-start">
         <div className="flex items-center space-x-5">
           <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 border border-cyan-500/20 shadow-lg shadow-cyan-500/5">
@@ -215,7 +215,7 @@ export const MasterSyncUI: React.FC<{ node: MasterSyncNode, initialParams: Maste
 
         {/* BOUTON DE DÉTECTION CENTRAL */}
         {(!params.hasResult || params.isAnalyzing) && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0c0d10]/40 backdrop-blur-sm rounded-[32px] animate-in fade-in duration-300">
+          <div className="absolute inset-0 flex items-center justify-center bg-nv-bg/40 backdrop-blur-sm rounded-[32px] animate-in fade-in duration-300">
             {params.isAnalyzing ? (
               <div className="text-center space-y-4">
                 <div className="w-16 h-16 rounded-full border-4 border-cyan-500/20 border-t-cyan-500 animate-spin mx-auto" />

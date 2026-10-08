@@ -594,7 +594,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
     : '';
 
   const grid = (
-    <div className="relative flex min-h-0 flex-1 overflow-hidden rounded-lg border border-white/5 bg-[#0b0d10]">
+    <div className="relative flex min-h-0 flex-1 overflow-hidden rounded-lg border border-white/5 bg-nv-bg">
       <canvas ref={keysRef} className="shrink-0" aria-hidden="true" />
       <div ref={scrollRef} className="relative min-w-0 flex-1 overflow-x-auto overflow-y-hidden" data-testid="pitch-grid">
         {analysis && notes.length > 0 && (
@@ -643,7 +643,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
   // ----- Téléphone : version simple -----
   if (phone) {
     return (
-      <div className="fixed inset-0 z-[700] flex flex-col bg-[#121418] p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]" role="dialog" aria-modal="true" aria-labelledby="pitch-title" data-testid="pitch-editor" data-mode="phone">
+      <div className="fixed inset-0 z-[700] flex flex-col bg-nv-surface p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]" role="dialog" aria-modal="true" aria-labelledby="pitch-title" data-testid="pitch-editor" data-mode="phone">
         <div className="mb-2 flex items-center gap-2">
           <h2 id="pitch-title" className="mr-auto text-[15px] font-black text-white">🎯 Justesse : {clipName}</h2>
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-11 w-11 rounded-lg bg-white/5 text-slate-300">✕</button>
@@ -696,7 +696,7 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
 
   return (
     <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/70 p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="pitch-title" onClick={onClose}>
-      <div className="flex h-full max-h-[920px] w-full max-w-[1400px] flex-col gap-3 rounded-2xl border border-white/10 bg-[#121418] p-3 shadow-2xl sm:p-4"
+      <div className="flex h-full max-h-[920px] w-full max-w-[1400px] flex-col gap-3 rounded-2xl border border-white/10 bg-nv-surface p-3 shadow-2xl sm:p-4"
         onClick={e => e.stopPropagation()} data-testid="pitch-editor" data-mode="full">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <h2 id="pitch-title" className="text-[15px] font-black text-white" title="Comme Flex Pitch dans Logic, Melodyne ou le Pitch Editor de FL Studio">

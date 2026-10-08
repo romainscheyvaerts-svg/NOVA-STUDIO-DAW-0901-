@@ -76,7 +76,7 @@ export const AutotuneChoiceModal: React.FC<{ candidates: AutotuneCandidate[]; on
   const single = usable.length === 1;
   return (
     <div className="fixed inset-0 z-[700] flex items-end sm:items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="autotune-choice-title" data-testid="autotune-choice">
-      <div className="w-full max-w-md rounded-3xl border border-cyan-500/30 bg-[#121418] p-6 shadow-2xl space-y-4">
+      <div className="w-full max-w-md rounded-3xl border border-cyan-500/30 bg-nv-surface p-6 shadow-2xl space-y-4">
         <div>
           <h2 id="autotune-choice-title" className="text-lg font-black text-white">🎤 Utiliser ton autotune à la place de celui de NOVA ?</h2>
           <p className="mt-1 text-[12px] text-slate-300">

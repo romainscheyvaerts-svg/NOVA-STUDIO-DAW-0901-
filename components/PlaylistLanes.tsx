@@ -68,7 +68,7 @@ export const TakeLaneHeaders: React.FC<HeaderProps> = ({ track, lanes, api, onMe
         const used = l.used > 0.05;
         return (
           <div key={l.n} data-take-lane={l.n}
-            className={`flex items-center gap-1 pl-1 pr-1 border-t border-white/5 ${solo ? 'bg-cyan-500/10' : 'bg-[#101216]'}`}
+            className={`flex items-center gap-1 pl-1 pr-1 border-t border-white/5 ${solo ? 'bg-cyan-500/10' : 'bg-nv-surface'}`}
             style={{ height: TAKE_LANE_H }} title={l.title}>
             <span className="w-1 self-stretch rounded-full shrink-0" style={{ background: takeColor(l.n), opacity: used ? 1 : 0.4 }} />
             <button type="button" aria-pressed={solo}

@@ -430,7 +430,7 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
       {/* Curve Type Menu (inspired by Logic Pro/Ableton) */}
       {showCurveMenu && (
         <div 
-          className="fixed z-[200] bg-[#1a1c22] border border-white/20 rounded-lg shadow-2xl p-1 min-w-[140px]"
+          className="fixed z-[200] bg-nv-raised border border-white/20 rounded-lg shadow-2xl p-1 min-w-[140px]"
           style={{ left: showCurveMenu.x, top: showCurveMenu.y }}
           onMouseLeave={() => setShowCurveMenu(null)}
         >

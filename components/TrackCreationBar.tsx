@@ -48,7 +48,7 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAd
         aria-label="Ajouter une piste voix"
         {...(docked ? dockItem(6) : {})}
         title="Ajouter une piste voix sous la piste sélectionnée : elle est armée, ta prochaine prise part dessus"
-        className="shrink-0 h-12 pl-3 pr-4 sm:pl-4 sm:pr-5 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 bg-[#1a1c21] border border-white/20 text-white/80 hover:text-white hover:border-cyan-500/50 whitespace-nowrap"
+        className="shrink-0 h-12 pl-3 pr-4 sm:pl-4 sm:pr-5 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 bg-nv-raised border border-white/20 text-white/80 hover:text-white hover:border-cyan-500/50 whitespace-nowrap"
       >
         <i className="fas fa-plus text-sm"></i>
         <i className="fas fa-microphone text-sm text-cyan-400"></i>
@@ -56,13 +56,13 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAd
       </button>
       {beatmaking && onOpenDrums && (
         <button type="button" onClick={onOpenDrums} aria-label="Batterie" {...(docked ? dockItem(4) : {})} title="Boîte à rythmes : pas, sons, mix de chaque pad"
-          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-[#1a1c21] border-orange-400/40 text-orange-200 hover:text-white">
+          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-nv-raised border-orange-400/40 text-orange-200 hover:text-white">
           <span className="text-base leading-none">🥁</span><span data-dock-label className="text-xs font-bold">Batterie</span>
         </button>
       )}
       {beatmaking && onOpen808 && (
         <button type="button" onClick={onOpen808} aria-label="Basse 808" {...(docked ? dockItem(4) : {})} title="Basse 808 : joue-la au piano roll, accordée sur la tonalité, avec glissés"
-          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-[#1a1c21] border-fuchsia-400/40 text-fuchsia-200 hover:text-white">
+          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-nv-raised border-fuchsia-400/40 text-fuchsia-200 hover:text-white">
           <span className="text-base leading-none">🔊</span><span data-dock-label className="text-xs font-bold">808</span>
         </button>
       )}
@@ -70,13 +70,13 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAd
         <button type="button" onClick={() => requestSampler({ kind: 'new' })} data-testid="new-sampler-track" {...(docked ? dockItem(3) : {})}
           title="Nouvelle piste Sampler : ton son (fichier, micro, clip) ou un instrument NOVA (piano, Rhodes, guitare, cordes, cloches, nappe) sur tout le clavier — comme le Sampler de FL, Simpler de Live ou Quick Sampler de Logic"
           aria-label="Nouvelle piste Sampler"
-          className="shrink-0 h-12 min-w-[48px] px-3 xl:px-4 rounded-full shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-[#1a1c21] border-amber-400/40 text-amber-200 hover:text-white">
+          className="shrink-0 h-12 min-w-[48px] px-3 xl:px-4 rounded-full shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-nv-raised border-amber-400/40 text-amber-200 hover:text-white">
           <span className="text-base leading-none">🎛️</span><span data-dock-label className={docked ? 'text-xs font-bold' : 'hidden xl:inline text-xs font-bold'}>Sampler</span>
         </button>
       )}
       {beatmaking && onNewMidiTrack && (
         <button type="button" onClick={onNewMidiTrack} aria-label="Nouvelle piste MIDI" {...(docked ? dockItem(4) : {})} title="Nouvelle piste MIDI (synthé, basse…) et son piano roll"
-          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-[#1a1c21] border-violet-400/40 text-violet-200 hover:text-white">
+          className="shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border bg-nv-raised border-violet-400/40 text-violet-200 hover:text-white">
           <span className="text-base leading-none">🎹</span><span data-dock-label className="text-xs font-bold"><span className={docked ? '' : 'hidden xl:inline'}>Piste </span>MIDI</span>
         </button>
       )}
@@ -89,7 +89,7 @@ const TrackCreationBar: React.FC<TrackCreationBarProps> = ({ onCreateTrack, onAd
           aria-label="Paroles"
           {...(docked ? dockItem(5) : {})}
           title="Tes paroles en prompteur qui défile pendant la prise"
-          className={`shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border ${lyricsOpen ? 'bg-white text-black border-white' : 'bg-[#1a1c21] border-white/20 text-white/80 hover:text-white'}`}
+          className={`shrink-0 h-12 px-3 sm:px-4 rounded-full shadow-lg flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap border ${lyricsOpen ? 'bg-white text-black border-white' : 'bg-nv-raised border-white/20 text-white/80 hover:text-white'}`}
         >
           <span className="text-base leading-none">📝</span>
           <span data-dock-label className="text-xs font-bold">Paroles</span>

@@ -109,7 +109,7 @@ const AutomationModeSelector: React.FC<Props> = ({ track, onUpdate, variant = 'h
           aria-label={`Automation de ${track.name}`}
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
-          className="fixed z-[650] w-64 rounded-xl border border-white/10 bg-[#14161c] p-1.5 shadow-2xl"
+          className="fixed z-[650] w-64 rounded-xl border border-white/10 bg-nv-surface p-1.5 shadow-2xl"
           style={menuStyle}
         >
           <p className="px-2 pb-1 pt-0.5 text-[10px] font-black uppercase tracking-widest text-slate-500">Automation · {track.name}</p>

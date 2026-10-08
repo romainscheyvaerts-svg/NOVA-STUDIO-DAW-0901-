@@ -215,12 +215,12 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       )}
       {account?.offline && stage === 'open' && <OfflineNote />}
       {showGate && (
-        <div data-testid="desktop-gate" className="fixed inset-0 z-[10000] flex items-center justify-center overflow-auto bg-[#0b0c10] p-4" role="dialog" aria-modal="true" aria-labelledby="gate-title">
+        <div data-testid="desktop-gate" className="fixed inset-0 z-[10000] flex items-center justify-center overflow-auto bg-nv-bg p-4" role="dialog" aria-modal="true" aria-labelledby="gate-title">
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="absolute -top-40 -left-40 h-[520px] w-[520px] rounded-full bg-cyan-500/15 blur-[120px]" />
             <div className="absolute -bottom-40 -right-40 h-[520px] w-[520px] rounded-full bg-violet-600/20 blur-[120px]" />
           </div>
-          <div className="relative grid w-full max-w-4xl overflow-hidden rounded-3xl border border-white/10 bg-[#111318]/90 shadow-2xl backdrop-blur md:grid-cols-[1.05fr_1fr]">
+          <div className="relative grid w-full max-w-4xl overflow-hidden rounded-3xl border border-white/10 bg-nv-surface/90 shadow-2xl backdrop-blur md:grid-cols-[1.05fr_1fr]">
             <aside className="hidden flex-col justify-between bg-gradient-to-br from-cyan-500/10 via-transparent to-violet-600/15 p-10 md:flex">
               <div>
                 <div className="flex items-center gap-3">
@@ -374,7 +374,7 @@ const GoogleButton: React.FC<{ onClick: () => void; disabled?: boolean }> = ({ o
     <div className="relative" aria-hidden="true">
       <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-white/10" /></div>
       <div className="relative flex justify-center text-[11px] uppercase tracking-wider">
-        <span className="bg-[#111318] px-2 text-slate-500">ou</span>
+        <span className="bg-nv-surface px-2 text-slate-500">ou</span>
       </div>
     </div>
   </>

@@ -614,9 +614,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
   return (
     // pb : la barre de navigation du bas (fixed, h-16) recouvrait la barre
     // d'édition du clip sélectionné.
-    <div className="flex flex-col h-full bg-[#0a0b0d] select-none pb-[calc(4rem+env(safe-area-inset-bottom))]">
+    <div className="flex flex-col h-full bg-nv-bg select-none pb-[calc(4rem+env(safe-area-inset-bottom))]">
       {/* === TOP BAR - Mini Transport === */}
-      <div className="flex items-center h-12 px-3 bg-gradient-to-b from-[#1a1c21] to-[#14161a] border-b border-white/10 gap-2">
+      <div className="flex items-center h-12 px-3 bg-gradient-to-b from-nv-raised to-nv-surface border-b border-white/10 gap-2">
         {/* Lecture / stop : déjà dans la barre du haut (il y avait deux transports). */}
         {/* Time Display */}
         <div className="flex-1 flex items-center justify-center">
@@ -652,7 +652,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       </div>
 
       {/* === TOOL BAR === */}
-      <div className="flex items-center h-10 px-2 bg-[#0f1114] border-b border-white/5 gap-2 overflow-x-auto scrollbar-hide">
+      <div className="flex items-center h-10 px-2 bg-nv-bg border-b border-white/5 gap-2 overflow-x-auto scrollbar-hide">
         {/* Mode simple : sélection, couper, effacer (le reste en mode avancé). */}
         {tools.filter(tool => !simple || tool.id === 'SELECT' || tool.id === 'SPLIT' || tool.id === 'ERASE').map(tool => (
           <button
@@ -705,10 +705,10 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       {/* === MAIN AREA === */}
       <div className="flex-1 flex overflow-hidden">
         {/* === TRACK HEADERS (Fixed) === */}
-        <div className="flex-shrink-0 bg-[#0c0d10] border-r border-white/10 z-10" style={{ width: TRACK_HEADER_WIDTH }}>
+        <div className="flex-shrink-0 bg-nv-bg border-r border-white/10 z-10" style={{ width: TRACK_HEADER_WIDTH }}>
           {/* Timeline header spacer */}
           <div 
-            className="flex items-center justify-center border-b border-white/10 bg-[#0f1114]"
+            className="flex items-center justify-center border-b border-white/10 bg-nv-bg"
             style={{ height: TIMELINE_HEIGHT }}
           >
             <span className="text-[9px] font-bold text-white/50 uppercase">Pistes</span>
@@ -898,7 +898,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             {/* === TIMELINE RULER === */}
             <div
               ref={timelineRef}
-              className="sticky top-0 z-20 bg-[#0f1114] border-b border-cyan-500/30 cursor-pointer"
+              className="sticky top-0 z-20 bg-nv-bg border-b border-cyan-500/30 cursor-pointer"
               style={{ height: TIMELINE_HEIGHT }}
               onPointerDown={handleRulerDown}
               onPointerMove={handleRulerMove}
@@ -971,7 +971,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                 <div
                   key={track.id}
                   className={`relative border-b border-white/5 ${
-                    index % 2 === 0 ? 'bg-[#0c0d10]' : 'bg-[#0e1013]'
+                    index % 2 === 0 ? 'bg-nv-bg' : 'bg-nv-bg'
                   } ${selectedTrackId === track.id ? 'bg-white/5' : ''}`}
                   style={{ height: TRACK_HEIGHT }}
                   onClick={() => onSelectTrack(track.id)}
@@ -1065,7 +1065,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
 
       {/* === SELECTED CLIP EDIT BAR - Professional DAW Controls === */}
       {selectedClip && (
-        <div className="bg-gradient-to-r from-[#12141a] to-[#0f1115] border-t border-cyan-500/30">
+        <div className="bg-gradient-to-r from-nv-surface to-nv-surface border-t border-cyan-500/30">
           {/* Row 1: Clip Info */}
           <div className="h-10 px-3 flex items-center justify-between border-b border-white/5">
             <div className="flex items-center gap-2">
@@ -1267,7 +1267,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowSendsPanel(false)}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div 
-            className="relative w-full bg-gradient-to-t from-[#0a0b0d] to-[#14161a] rounded-t-3xl animate-in slide-in-from-bottom duration-300"
+            className="relative w-full bg-gradient-to-t from-nv-bg to-nv-surface rounded-t-3xl animate-in slide-in-from-bottom duration-300"
             onClick={e => e.stopPropagation()}
           >
             {/* Handle */}
@@ -1381,7 +1381,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
       )}
 
       {/* === BOTTOM PADDING FOR NAV === */}
-      <div className="h-16 bg-[#0a0b0d]" />
+      <div className="h-16 bg-nv-bg" />
     </div>
   );
 };

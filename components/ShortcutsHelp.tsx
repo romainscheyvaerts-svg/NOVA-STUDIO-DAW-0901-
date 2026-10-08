@@ -21,7 +21,7 @@ const ShortcutsHelp: React.FC<{ open: boolean; onClose: () => void; onCustomize?
 
   return (
     <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/60 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
-      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col rounded-2xl border border-white/10 bg-[#121418] p-5 shadow-2xl sm:p-6" onClick={e => e.stopPropagation()}>
+      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col rounded-2xl border border-white/10 bg-nv-surface p-5 shadow-2xl sm:p-6" onClick={e => e.stopPropagation()}>
         <div className="mb-3 flex items-center gap-2">
           <h2 id="shortcuts-title" className="mr-auto text-lg font-black text-white">⌨️ Raccourcis clavier
             <span className="ml-2 align-middle text-[11px] font-bold text-slate-400" data-testid="shortcuts-preset">jeu : {presetById(settings.preset).name}{Object.keys(settings.overrides).length ? ` + ${Object.keys(settings.overrides).length} perso` : ''}</span>

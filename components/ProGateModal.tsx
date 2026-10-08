@@ -65,7 +65,7 @@ const ProGateModal: React.FC<Props> = ({ open, reason, onDone }) => {
 
   return (
     <div className="fixed inset-0 z-[700] flex items-end sm:items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="pro-title" onClick={() => !busy && close()}>
-      <div className="w-full max-w-md rounded-3xl border border-violet-500/30 bg-[#121418] p-6 shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-md rounded-3xl border border-violet-500/30 bg-nv-surface p-6 shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-start gap-3">
           <div className="flex-1">
             <h2 id="pro-title" className="text-lg font-black text-white">⭐ Nova Pro · 5 € / mois</h2>

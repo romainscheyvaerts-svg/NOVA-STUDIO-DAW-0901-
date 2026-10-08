@@ -126,7 +126,7 @@ const DrumRack: React.FC<DrumRackProps> = ({ track, onUpdateTrack }) => {
                         key={padId}
                         className={`
                             relative h-20 border border-white/10 rounded-lg flex flex-col items-center justify-center cursor-pointer select-none transition-all
-                            ${activePadId === padId ? 'bg-cyan-500 border-cyan-400 shadow-[0_0_15px_cyan]' : 'bg-[#1a1c22] hover:bg-[#252830]'}
+                            ${activePadId === padId ? 'bg-cyan-500 border-cyan-400 shadow-[0_0_15px_cyan]' : 'bg-nv-raised hover:bg-nv-raised'}
                             ${selectedPadId === padId ? 'ring-2 ring-white' : ''}
                             ${pad.isMuted ? 'opacity-40 grayscale' : ''}
                             ${pad.isSolo ? 'border-yellow-400' : ''}
@@ -153,7 +153,7 @@ const DrumRack: React.FC<DrumRackProps> = ({ track, onUpdateTrack }) => {
     };
 
     return (
-        <div className="w-[800px] h-[600px] bg-[#0c0d10] border border-white/10 rounded-[32px] p-6 shadow-2xl flex flex-col animate-in fade-in zoom-in duration-200">
+        <div className="w-[800px] h-[600px] bg-nv-bg border border-white/10 rounded-[32px] p-6 shadow-2xl flex flex-col animate-in fade-in zoom-in duration-200">
             <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center space-x-3">
                     <div className="w-10 h-10 bg-cyan-500/10 rounded-xl flex items-center justify-center text-cyan-400 border border-cyan-500/20">

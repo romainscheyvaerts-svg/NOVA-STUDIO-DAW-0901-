@@ -911,7 +911,7 @@ export const ProfessionalReverbUI: React.FC<{
   };
 
   return (
-    <div className="w-[680px] bg-[#0c0d10] border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
+    <div className="w-[680px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
       {/* Header */}
       <div className="flex justify-between items-start">
         <div className="flex items-center space-x-4">
@@ -971,7 +971,7 @@ export const ProfessionalReverbUI: React.FC<{
         
         <select 
           onChange={(e) => loadPreset(parseInt(e.target.value))}
-          className="bg-[#14161a] border border-white/10 rounded-xl px-4 py-2 text-[9px] font-black text-white hover:border-indigo-500/50 outline-none cursor-pointer"
+          className="bg-nv-surface border border-white/10 rounded-xl px-4 py-2 text-[9px] font-black text-white hover:border-indigo-500/50 outline-none cursor-pointer"
           defaultValue="-1"
         >
           <option disabled value="-1">Préréglages</option>
@@ -1045,7 +1045,7 @@ const ReverbKnob: React.FC<{
     <div className="flex flex-col items-center space-y-2 select-none touch-none">
       <div 
         {...knob.bind}
-        className="relative w-11 h-11 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-indigo-500/50 transition-all shadow-xl"
+        className="relative w-11 h-11 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-indigo-500/50 transition-all shadow-xl"
       >
         <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
         <div 

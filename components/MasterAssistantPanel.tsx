@@ -130,8 +130,8 @@ const MasterAssistantPanel: React.FC<Props> = ({ tracks, isPlaying, onTogglePlay
 
   return (
     <div className="fixed inset-0 z-[260] bg-black/70 backdrop-blur-sm flex items-stretch sm:items-center justify-center" role="dialog" aria-modal="true" aria-label="Master Nova" data-nova-master="">
-      <div className="w-full sm:max-w-3xl sm:max-h-[92vh] overflow-y-auto bg-[#0f1013] sm:rounded-2xl border border-white/10 shadow-2xl text-white">
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-5 py-3 bg-[#0f1013]/95 backdrop-blur border-b border-white/10">
+      <div className="w-full sm:max-w-3xl sm:max-h-[92vh] overflow-y-auto bg-nv-bg sm:rounded-2xl border border-white/10 shadow-2xl text-white">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-5 py-3 bg-nv-bg/95 backdrop-blur border-b border-white/10">
           <div className="min-w-0">
             <h2 className="text-base font-black tracking-tight"><i className="fas fa-crown text-amber-400 mr-2"></i>Master Nova</h2>
             <p className="text-[11px] text-slate-400 leading-snug">Ton morceau prêt pour les plateformes en un clic, comme le Mastering Assistant de Logic Pro</p>

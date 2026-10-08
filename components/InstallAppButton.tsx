@@ -36,7 +36,7 @@ const InstallAppButton: React.FC<{ className?: string }> = ({ className }) => {
       </button>
       {iosHelp && (
         <div className="fixed inset-0 z-[900] bg-black/70 flex items-end sm:items-center justify-center p-4" onClick={() => setIosHelp(false)} role="dialog" aria-modal="true">
-          <div className="w-full max-w-sm rounded-3xl bg-[#14161a] border border-white/10 p-6 text-center" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-sm rounded-3xl bg-nv-surface border border-white/10 p-6 text-center" onClick={e => e.stopPropagation()}>
             <div className="text-4xl mb-2">📲</div>
             <h2 className="text-lg font-black text-white mb-2">Installer Nova Studio</h2>
             <p className="text-sm text-slate-300">

@@ -141,7 +141,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
             className={`rounded-xl overflow-hidden transition-all ${
               selectedTrackId === track.id
                 ? 'bg-cyan-500/10 ring-2 ring-cyan-500/50'
-                : 'bg-[#14161a]'
+                : 'bg-nv-surface'
             }`}
             onClick={() => onSelectTrack(track.id)}
           >
@@ -393,7 +393,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
                       
                       {/* Menu dropdown import */}
                       {showBeatImportMenu && (
-                        <div className="absolute right-0 top-12 z-50 w-48 bg-[#1a1d24] border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                        <div className="absolute right-0 top-12 z-50 w-48 bg-nv-raised border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

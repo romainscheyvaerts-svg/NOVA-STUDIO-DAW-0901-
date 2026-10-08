@@ -125,7 +125,7 @@ const StripSilenceDialog: React.FC<Props> = ({ open, tracks, targets, onApply, o
 
   return (
     <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/60 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="strip-title">
-      <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#121418] p-5 shadow-2xl" onClick={e => e.stopPropagation()} data-testid="strip-silence">
+      <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-nv-surface p-5 shadow-2xl" onClick={e => e.stopPropagation()} data-testid="strip-silence">
         <div className="mb-3 flex items-center">
           <h2 id="strip-title" className="mr-auto text-[15px] font-black text-white" title="Supprimer les silences : découpe le clip et retire les blancs entre les phrases (Pro Tools : Strip Silence, Ctrl+U)">{simple ? 'Supprimer les silences' : 'Strip Silence : retirer les blancs'}</h2>
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 rounded-lg bg-white/5 text-slate-300">✕</button>

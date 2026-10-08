@@ -120,7 +120,7 @@ export class PanelBoundary extends React.Component<Props, State> {
     if (!overlay) return card;
     return (
       <div className="fixed inset-x-0 bottom-20 z-[900] flex justify-center px-4 pointer-events-none">
-        <div className="pointer-events-auto max-w-lg w-full rounded-xl bg-[#14161a] shadow-2xl">{card}</div>
+        <div className="pointer-events-auto max-w-lg w-full rounded-xl bg-nv-surface shadow-2xl">{card}</div>
       </div>
     );
   }

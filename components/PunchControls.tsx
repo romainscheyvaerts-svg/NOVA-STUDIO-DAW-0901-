@@ -85,7 +85,7 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
       {open && onUpdatePunch && createPortal(
         <>
           <div className="fixed inset-0 z-[400]" onMouseDown={() => setOpen(false)} />
-          <div role="dialog" aria-label="Réglages du punch" className="fixed z-[401] w-[290px] rounded-xl border border-white/10 bg-[#14161a] p-3 shadow-2xl text-[11px] text-slate-300"
+          <div role="dialog" aria-label="Réglages du punch" className="fixed z-[401] w-[290px] rounded-xl border border-white/10 bg-nv-surface p-3 shadow-2xl text-[11px] text-slate-300"
             style={{ left: pos.x, top: pos.y }}>
             <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Punch (Pro Tools)</div>
             <p className="text-[10px] text-slate-500 mb-2">Zone : <span className="text-red-300 font-mono">{zone}</span>. Glisse ses poignées rouges dans la règle, ou clic droit dans la règle.</p>

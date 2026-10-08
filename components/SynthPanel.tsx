@@ -329,7 +329,7 @@ const SynthPanel: React.FC<Props> = ({ track, onChange, onPreview, onNoteOn, onN
   return (
     <div className="fixed inset-0 z-[300] bg-black/70 flex items-stretch sm:items-center justify-center" onPointerDown={e => { if (e.target === e.currentTarget) onClose(); }}
       role="dialog" aria-modal="true" aria-label="Synthé NOVA" data-testid="synth-panel">
-      <div className="w-full sm:w-[min(1180px,96vw)] h-full sm:h-[92vh] bg-[#101218] sm:rounded-2xl border border-white/10 shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full sm:w-[min(1180px,96vw)] h-full sm:h-[92vh] bg-nv-surface sm:rounded-2xl border border-white/10 shadow-2xl flex flex-col overflow-hidden">
         {/* En-tête : nom du son, précédent / suivant, favori, aperçu */}
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-white/10 bg-gradient-to-r from-cyan-500/10 to-fuchsia-500/10">
           <div className="flex items-center gap-2 min-w-0 w-full sm:w-auto sm:flex-1">

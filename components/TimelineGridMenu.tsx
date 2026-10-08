@@ -67,7 +67,7 @@ const TimelineGridMenu: React.FC<TimelineGridMenuProps> = ({
   return (
     <div 
       ref={menuRef}
-      className="fixed z-[1000] w-60 bg-[#14161a] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] overflow-hidden text-[#e2e8f0] animate-in fade-in zoom-in duration-75"
+      className="fixed z-[1000] w-60 bg-nv-surface border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] overflow-hidden text-[#e2e8f0] animate-in fade-in zoom-in duration-75"
       style={{ left: pos.left, top: pos.top }}
       role="menu" aria-label="Grille et pistes"
       onContextMenu={(e) => e.preventDefault()}

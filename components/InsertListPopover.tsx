@@ -40,7 +40,7 @@ const InsertListPopover: React.FC<{
 
   return (
     <div ref={ref} role="menu" aria-label={title} data-testid="insert-list"
-      className="fixed z-[600] rounded-xl border border-white/10 bg-[#14161c] p-1.5 shadow-2xl max-h-[calc(100vh-16px)] overflow-y-auto"
+      className="fixed z-[600] rounded-xl border border-white/10 bg-nv-surface p-1.5 shadow-2xl max-h-[calc(100vh-16px)] overflow-y-auto"
       style={{ left, top, width: W }} onClick={e => e.stopPropagation()}>
       <p className="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">{title}</p>
       {plugins.map((p, i) => (

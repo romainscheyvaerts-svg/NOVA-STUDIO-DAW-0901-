@@ -93,7 +93,7 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
       aria-labelledby="vocal-tools-title"
     >
       <div
-        className="w-full sm:max-w-2xl max-h-[88vh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-[#121418] border border-white/10 shadow-2xl pb-[env(safe-area-inset-bottom)]"
+        className="w-full sm:max-w-2xl max-h-[88vh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-nv-surface border border-white/10 shadow-2xl pb-[env(safe-area-inset-bottom)]"
         onClick={e => e.stopPropagation()}
       >
         {/* En-tête */}

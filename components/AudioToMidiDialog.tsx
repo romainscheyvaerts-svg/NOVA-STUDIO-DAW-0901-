@@ -450,7 +450,7 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
               <select aria-label="Clip à convertir" value={source ? `${source.trackId}/${source.clipId}` : ''}
                 onChange={e => { const [a, b] = e.target.value.split('/'); setSource({ trackId: a, clipId: b }); }}
                 className="col-span-2 h-9 rounded-lg bg-white/5 border border-white/10 text-[12px] px-2">
-                {voiceChoices.map(({ t, c }) => <option key={c.id} value={`${t.id}/${c.id}`} className="bg-[#12141a]">{t.name} · {c.name}</option>)}
+                {voiceChoices.map(({ t, c }) => <option key={c.id} value={`${t.id}/${c.id}`} className="bg-nv-surface">{t.name} · {c.name}</option>)}
               </select>
             )}
           </div>

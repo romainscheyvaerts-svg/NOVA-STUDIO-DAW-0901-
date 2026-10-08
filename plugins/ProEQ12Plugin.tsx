@@ -418,10 +418,10 @@ const EQKnob: React.FC<{
   const rotation = (norm * 270) - 135;
   return (
     <div title={termHelp(label) || undefined} className={`flex flex-col items-center space-y-2 select-none touch-none ${disabled ? 'opacity-20 grayscale' : ''}`}>
-      <div {...knob.bind} className="relative w-12 h-12 rounded-full bg-[#14161a] border border-white/10 flex items-center justify-center cursor-ns-resize shadow-xl hover:border-white/30 transition-all">
+      <div {...knob.bind} className="relative w-12 h-12 rounded-full bg-nv-surface border border-white/10 flex items-center justify-center cursor-ns-resize shadow-xl hover:border-white/30 transition-all">
         <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full transition-transform duration-75" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}`, transform: `rotate(${rotation}deg) translateY(2px)` }} />
-        <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />
+        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
       </div>
       <div className="text-center">
         <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>
@@ -587,7 +587,7 @@ export const ProEQ12UI: React.FC<{ node: ProEQ12Node, initialParams: ProEQ12Para
   const currentBand = params.bands[selectedBandIdx];
   
   return (
-    <div className="w-[850px] bg-[#0c0d10] border border-white/10 rounded-[40px] overflow-hidden shadow-2xl flex flex-col select-none animate-in fade-in zoom-in duration-300">
+    <div className="w-[850px] bg-nv-bg border border-white/10 rounded-[40px] overflow-hidden shadow-2xl flex flex-col select-none animate-in fade-in zoom-in duration-300">
       <div className="p-8 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
         <div className="flex items-center space-x-6">
           <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 border border-cyan-500/20 shadow-lg shadow-cyan-500/5"><i className="fas fa-wave-square text-2xl"></i></div>

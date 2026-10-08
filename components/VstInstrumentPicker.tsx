@@ -104,7 +104,7 @@ const VstInstrumentPicker: React.FC<{
 
       {open && (
         // Fixe : la barre du piano roll défile en largeur et couperait un panneau absolu.
-        <div role="dialog" aria-label="Son de la piste" className="fixed w-80 max-w-[calc(100vw-32px)] max-h-[70vh] overflow-y-auto bg-[#1a1c22] border border-white/20 rounded-xl shadow-2xl z-[300] p-3 space-y-3 text-left"
+        <div role="dialog" aria-label="Son de la piste" className="fixed w-80 max-w-[calc(100vw-32px)] max-h-[70vh] overflow-y-auto bg-nv-raised border border-white/20 rounded-xl shadow-2xl z-[300] p-3 space-y-3 text-left"
           style={(() => { const r = boxRef.current?.getBoundingClientRect(); return r ? { top: r.bottom + 8, left: Math.max(16, Math.min(r.left, window.innerWidth - 336)) } : { top: 64, left: 16 }; })()}>
           <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Son de la piste</div>
 

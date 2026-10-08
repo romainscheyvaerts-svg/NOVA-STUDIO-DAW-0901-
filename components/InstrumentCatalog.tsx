@@ -304,7 +304,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#08090b] relative" data-nova-target="beat-catalog">
+    <div className="h-full flex flex-col bg-nv-panel relative" data-nova-target="beat-catalog">
       
       {showAdminModal && user && (
         <React.Suspense fallback={null}><AdminPanel 
@@ -316,7 +316,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
       )}
 
       {/* Header Compact */}
-      <div className="p-4 border-b border-white/5 bg-[#08090b] sticky top-0 z-20 space-y-3">
+      <div className="p-4 border-b border-white/5 bg-nv-panel sticky top-0 z-20 space-y-3">
         <div className="flex justify-between items-center">
           <div>
              <h2 className="text-xs font-black uppercase tracking-widest text-white">{shelf === 'MELODIES' ? <>Mélodies <span className="text-violet-400">du studio</span></> : <>Beat <span className="text-cyan-500">Store</span></>}</h2>
@@ -451,7 +451,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                 onClick={handleBackdropClick}
             >
                 <div 
-                    className="bg-[#14161a] border border-white/10 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row relative"
+                    className="bg-nv-surface border border-white/10 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row relative"
                     onClick={(e) => e.stopPropagation()}
                 >
                     {/* BOUTON FERMETURE AVEC Z-INDEX ÉLEVÉ */}
@@ -462,7 +462,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                         <i className="fas fa-times"></i>
                     </button>
                     
-                    <div className="w-full md:w-1/3 bg-[#0c0d10] p-6 flex flex-col items-center justify-center text-center">
+                    <div className="w-full md:w-1/3 bg-nv-bg p-6 flex flex-col items-center justify-center text-center">
                         <img src={getCoverImage(selectedBeat)} className="w-32 h-32 rounded-lg shadow-lg mb-4" />
                         <h2 className="text-lg font-black text-white uppercase">{selectedBeat.title}</h2>
                         <p className="text-[10px] text-slate-500 mb-4">{selectedBeat.bpm || '?'} BPM • {tonaliteFr(selectedBeat.key) || 'tonalité inconnue'}</p>
@@ -470,7 +470,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
 
                     <div className="w-full md:w-2/3 p-6 relative">
                         {processingPayment && (
-                            <div className="absolute inset-0 bg-[#14161a]/90 z-20 flex flex-col items-center justify-center space-y-4">
+                            <div className="absolute inset-0 bg-nv-surface/90 z-20 flex flex-col items-center justify-center space-y-4">
                                 <div className="w-8 h-8 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
                                 <p className="text-xs font-black text-cyan-400 uppercase tracking-widest">Redirection...</p>
                             </div>

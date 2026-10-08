@@ -55,7 +55,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       }
 
       return (
-        <div className="min-h-screen bg-[#0c0d10] flex items-center justify-center p-6">
+        <div className="min-h-screen bg-nv-bg flex items-center justify-center p-6">
           <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/[0.03] p-7 text-center">
             <p className="text-lg font-black text-white mb-2">Nova a rencontré un problème</p>
             <p className="text-sm text-slate-400 mb-6">

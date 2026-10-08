@@ -234,7 +234,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
   };
 
   return (
-    <div className="nova-grille fixed inset-0 bg-[#0a0b0d] flex flex-col overflow-hidden">
+    <div className="nova-grille fixed inset-0 bg-nv-bg flex flex-col overflow-hidden">
       {/* Echec d'ecoute : le bouton revenait a son etat initial sans rien dire */}
       {previewError && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[2000] px-4 py-2.5 rounded-xl
@@ -262,7 +262,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
       />
 
       {/* Header avec bouton connexion */}
-      <header className="nova-brandbar shrink-0 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-white/5 bg-[#0c0d10]">
+      <header className="nova-brandbar shrink-0 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-white/5 bg-nv-bg">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center">
             <i className="fas fa-wave-square text-white text-sm"></i>
@@ -309,7 +309,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
       {/* Contenu principal */}
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Sidebar gauche - Actions principales */}
-        <aside className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-white/5 bg-[#0c0d10] flex flex-col">
+        <aside className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-white/5 bg-nv-bg flex flex-col">
           <div className="p-4 space-y-3">
             <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Démarrer</h2>
 
@@ -449,7 +449,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
         {/* Zone centrale - Catalogue d'instrumentaux */}
         <section className="flex-1 flex flex-col overflow-hidden">
-          <div className="p-4 border-b border-white/5 bg-[#0c0d10]/50">
+          <div className="p-4 border-b border-white/5 bg-nv-bg/50">
             <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-white/[0.06] bg-white/[0.03] p-1" role="tablist" aria-label="Bibliothèque">
               <button type="button" role="tab" aria-selected={shelf === 'BEATS'} onClick={() => setShelf('BEATS')}
                 className={`nova-hit-tactile h-9 px-4 rounded-lg text-[12px] font-bold transition-all ${shelf === 'BEATS' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(34,211,238,0.45)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
@@ -499,7 +499,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                     aria-label={isMelody(inst) ? `Faire une instru sur la mélodie « ${inst.title} »` : `Poser ma voix sur « ${inst.title} »`}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSelectInstrumental(inst); } }}
                     onClick={() => handleSelectInstrumental(inst)}
-                    className={`group relative bg-[#14161a] border rounded-xl overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_32px_-12px_rgba(0,0,0,0.8)] ${
+                    className={`group relative bg-nv-surface border rounded-xl overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_32px_-12px_rgba(0,0,0,0.8)] ${
                       playingId === inst.id ? 'border-cyan-500/70 ring-1 ring-cyan-400/40' : 'border-white/[0.06] hover:border-white/15'
                     }`}
                   >
@@ -584,7 +584,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
       {/* Modal Charger Projet */}
       {showLoadModal && (
         <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowLoadModal(false)}>
-          <div className="bg-[#14161a] border border-white/10 rounded-2xl w-full max-w-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-nv-surface border border-white/10 rounded-2xl w-full max-w-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="p-4 border-b border-white/5 flex items-center justify-between">
               <h3 className="text-sm font-black text-white uppercase tracking-widest">Charger un Projet</h3>
               <button aria-label="Fermer" title="Fermer" onClick={() => setShowLoadModal(false)} className="text-slate-500 hover:text-white">

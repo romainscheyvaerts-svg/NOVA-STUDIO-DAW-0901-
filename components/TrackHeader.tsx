@@ -597,7 +597,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 {insertPlugins.length > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] rounded-full bg-cyan-400 text-black text-[8px] leading-[14px] text-center">{insertPlugins.length}</span>}
               </button>
               {fxMenu && (
-                <div className="fixed z-[600] w-56 rounded-xl border border-white/10 bg-[#14161c] p-1.5 shadow-2xl" onClick={e => e.stopPropagation()}
+                <div className="fixed z-[600] w-56 rounded-xl border border-white/10 bg-nv-surface p-1.5 shadow-2xl" onClick={e => e.stopPropagation()}
                   style={(() => { const r = fxBtnRef.current?.getBoundingClientRect(); return r ? { top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - 232)) } : {}; })()}>
                   {insertPlugins.length === 0 && <p className="px-2 py-1.5 text-[11px] text-slate-400">Aucun effet sur cette piste.</p>}
                   {insertPlugins.map(p => {
@@ -772,7 +772,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         // G24 : les envois prennent la place de la ligne volume / effets DANS la piste
         // (avant, le panneau flottait par-dessus la piste suivante et cachait son volume).
         <div data-testid={`sends-panel-${track.id}`}
-          className="relative mt-1 p-1 bg-[#08090b] rounded-lg border border-cyan-500/30 space-y-0.5 animate-in fade-in duration-150 z-10"
+          className="relative mt-1 p-1 bg-nv-panel rounded-lg border border-cyan-500/30 space-y-0.5 animate-in fade-in duration-150 z-10"
         >
             {sendIds.map(id => {
               const t = sessionTracks?.find(x => x.id === id);

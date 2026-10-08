@@ -40,7 +40,7 @@ const FrozenEditsNotice: React.FC<{ tracks: Track[]; bridgeConnected: boolean; p
     return (
       <button type="button" data-testid="frozen-notice" onClick={() => setCollapsed(false)} style={chipPos}
         aria-label={`Piste${plural ? 's' : ''} gelée${plural ? 's' : ''} par l'ingé : tes éditions seront rejouées avant ses effets. Afficher les détails.`}
-        className="fixed z-[95] flex h-8 max-w-[min(340px,calc(100vw-150px))] items-center gap-2 rounded-full border border-cyan-400/40 bg-[#0d1117]/95 px-3 text-[11px] font-bold text-cyan-100 shadow-xl backdrop-blur">
+        className="fixed z-[95] flex h-8 max-w-[min(340px,calc(100vw-150px))] items-center gap-2 rounded-full border border-cyan-400/40 bg-nv-surface/95 px-3 text-[11px] font-bold text-cyan-100 shadow-xl backdrop-blur">
         <i className="fas fa-snowflake text-cyan-300" aria-hidden="true"></i>
         <span className="truncate">Gelée{plural ? 's' : ''} chez l'ingé · {editsText || 'tes éditions passent avant ses effets'}</span>
       </button>
@@ -48,7 +48,7 @@ const FrozenEditsNotice: React.FC<{ tracks: Track[]; bridgeConnected: boolean; p
   }
   return (
     <div ref={cardRef} role="status" data-testid="frozen-notice" style={pos}
-      className="fixed left-1/2 z-[95] w-[min(560px,calc(100vw-24px))] -translate-x-1/2 rounded-2xl border border-cyan-400/30 bg-[#0d1117]/95 px-3 py-2 shadow-xl backdrop-blur">
+      className="fixed left-1/2 z-[95] w-[min(560px,calc(100vw-24px))] -translate-x-1/2 rounded-2xl border border-cyan-400/30 bg-nv-surface/95 px-3 py-2 shadow-xl backdrop-blur">
       <div className="flex items-start gap-2">
         <i className="fas fa-snowflake mt-0.5 text-[13px] text-cyan-300" aria-hidden="true"></i>
         <div className="min-w-0 flex-1">

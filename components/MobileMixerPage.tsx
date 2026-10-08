@@ -140,7 +140,7 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                   ref={(el) => { stripRefs.current[t.id] = el; }}
                   onClick={() => onSelectTrack(t.id)}
                   className={`snap-start shrink-0 w-[96px] rounded-xl border p-2 flex flex-col items-center gap-2 transition-colors ${
-                    isMaster ? 'bg-[#101820] border-cyan-500/40' : 'bg-[#14161a] border-white/10'
+                    isMaster ? 'bg-[#101820] border-cyan-500/40' : 'bg-nv-surface border-white/10'
                   } ${isSelected ? 'ring-2 ring-cyan-400' : ''}`}
                 >
                   <div className="w-full h-1 rounded-full" style={{ backgroundColor: color }} />
@@ -239,7 +239,7 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
         </div>
 
         {/* === Détail de la piste sélectionnée : inserts === */}
-        <div className="bg-[#14161a] rounded-xl p-4 border border-white/10">
+        <div className="bg-nv-surface rounded-xl p-4 border border-white/10">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: current.color || '#22d3ee' }} />
             <h3 className="text-sm font-bold text-white truncate flex-1">

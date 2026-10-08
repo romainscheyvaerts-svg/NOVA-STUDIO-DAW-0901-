@@ -848,7 +848,7 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
   };
 
   return (
-    <div className="w-[480px] bg-[#0c0d10] border border-white/10 rounded-[40px] p-10 shadow-2xl flex flex-col space-y-10 animate-in fade-in zoom-in duration-300 select-none">
+    <div className="w-[480px] bg-nv-bg border border-white/10 rounded-[40px] p-10 shadow-2xl flex flex-col space-y-10 animate-in fade-in zoom-in duration-300 select-none">
       <div className="flex justify-between items-start">
         <div className="flex items-center space-x-5">
           <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 border border-cyan-500/20">
@@ -889,7 +889,7 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
           <select 
             value={params.rootKey} 
             onChange={(e) => updateParam('rootKey', parseInt(e.target.value))}
-            className="w-full bg-[#14161a] border border-white/10 rounded-xl p-3 text-[11px] font-black text-white hover:border-cyan-500/50 outline-none appearance-none cursor-pointer"
+            className="w-full bg-nv-surface border border-white/10 rounded-xl p-3 text-[11px] font-black text-white hover:border-cyan-500/50 outline-none appearance-none cursor-pointer"
           >
             {NOTES.map((n, i) => <option key={n} value={i}>{n}</option>)}
           </select>
@@ -899,7 +899,7 @@ export const AutoTuneUI: React.FC<AutoTuneUIProps> = ({ node, initialParams, onP
           <select 
             value={params.scale} 
             onChange={(e) => updateParam('scale', e.target.value as any)}
-            className="w-full bg-[#14161a] border border-white/10 rounded-xl p-3 text-[11px] font-black text-white hover:border-cyan-500/50 outline-none appearance-none cursor-pointer"
+            className="w-full bg-nv-surface border border-white/10 rounded-xl p-3 text-[11px] font-black text-white hover:border-cyan-500/50 outline-none appearance-none cursor-pointer"
           >
             {SCALES.map(s => <option key={s} value={s}>{SCALE_LABELS[s] || s}</option>)}
           </select>
@@ -936,7 +936,7 @@ const TuneKnob: React.FC<{
 
   return (
     <div className="flex flex-col items-center space-y-3 group cursor-ns-resize touch-none" {...knob.bind}>
-      <div className="relative w-16 h-16 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center shadow-lg group-hover:border-cyan-500/50 transition-colors">
+      <div className="relative w-16 h-16 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center shadow-lg group-hover:border-cyan-500/50 transition-colors">
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div
           className="absolute w-1.5 h-6 bg-current rounded-full origin-bottom bottom-1/2 transition-transform duration-75"

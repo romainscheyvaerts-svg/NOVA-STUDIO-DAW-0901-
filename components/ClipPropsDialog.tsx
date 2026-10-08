@@ -41,7 +41,7 @@ const ClipPropsDialog: React.FC<Props> = ({ open, title, ptHint, name, color, co
 
   return (
     <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/60 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="clipprops-title">
-      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#121418] p-5 shadow-2xl" onClick={e => e.stopPropagation()} data-testid="clip-props">
+      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-nv-surface p-5 shadow-2xl" onClick={e => e.stopPropagation()} data-testid="clip-props">
         <div className="mb-3 flex items-center">
           <h2 id="clipprops-title" className="mr-auto text-[15px] font-black text-white" title={ptHint}>{title}</h2>
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 rounded-lg bg-white/5 text-slate-300">✕</button>

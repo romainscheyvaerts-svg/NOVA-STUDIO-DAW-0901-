@@ -502,7 +502,7 @@ export const VocalDenoiserUI: React.FC<VocalDenoiserUIProps> = ({ node, initialP
   };
 
   return (
-    <div className="w-[520px] bg-[#0c0d10] border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
+    <div className="w-[520px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div className="flex items-center space-x-4">
@@ -518,7 +518,7 @@ export const VocalDenoiserUI: React.FC<VocalDenoiserUIProps> = ({ node, initialP
           <select
             onChange={(e) => loadPreset(parseInt(e.target.value))}
             aria-label="Préréglages de l'anti-bruit"
-            className="bg-[#14161a] border border-white/10 rounded-xl px-3 py-2 text-[11px] font-bold text-white cursor-pointer hover:border-teal-500/50 transition-all"
+            className="bg-nv-surface border border-white/10 rounded-xl px-3 py-2 text-[11px] font-bold text-white cursor-pointer hover:border-teal-500/50 transition-all"
           >
             <option value="-1">Préréglages…</option>
             {DENOISER_PRESETS.map((p, i) => (
@@ -599,7 +599,7 @@ const ProKnob: React.FC<{
     <div className="flex flex-col items-center space-y-2" title={termHelp(label) || undefined}>
       <div
         {...knob.bind}
-        className="w-14 h-14 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-teal-500/50 transition-all shadow-xl relative"
+        className="w-14 h-14 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-teal-500/50 transition-all shadow-xl relative"
       >
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div
@@ -610,7 +610,7 @@ const ProKnob: React.FC<{
             transform: `rotate(${rotation}deg) translateY(2px)`
           }}
         />
-        <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />
+        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
       </div>
       <div className="text-center">
         <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>

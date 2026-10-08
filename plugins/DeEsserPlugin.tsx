@@ -413,7 +413,7 @@ export const VocalDeEsserUI: React.FC<VocalDeEsserUIProps> = ({ node, initialPar
   const pct = (x: number) => `${Math.min(100, (x / 20) * 100)}%`;
 
   return (
-    <div data-nova-plugin="DEESSER" className="w-[min(540px,calc(100vw-16px))] bg-[#0c0d10] border border-white/10 rounded-[28px] p-5 sm:p-7 shadow-2xl flex flex-col gap-5 select-none text-white">
+    <div data-nova-plugin="DEESSER" className="w-[min(540px,calc(100vw-16px))] bg-nv-bg border border-white/10 rounded-[28px] p-5 sm:p-7 shadow-2xl flex flex-col gap-5 select-none text-white">
       <div className="flex justify-between items-start gap-3">
         <div className="flex items-center gap-4 min-w-0">
           <div className="w-12 h-12 shrink-0 rounded-2xl bg-red-500/10 flex items-center justify-center text-red-300 border border-red-500/25">
@@ -489,7 +489,7 @@ const DeEsserKnob: React.FC<{ label: string; value: number; onChange: (v: number
   return (
     <div className={`flex flex-col items-center gap-2 ${disabled ? 'opacity-40' : ''}`} title={[help, termHelp(label)].filter(Boolean).join(' · ') || undefined}>
       <div {...knob.bind} role="slider" aria-label={label} aria-valuetext={display} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value}
-        className="w-12 h-12 rounded-full bg-[#14161a] border-2 border-white/15 flex items-center justify-center cursor-ns-resize hover:border-red-400/60 transition-all shadow-xl relative">
+        className="w-12 h-12 rounded-full bg-nv-surface border-2 border-white/15 flex items-center justify-center cursor-ns-resize hover:border-red-400/60 transition-all shadow-xl relative">
         <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
         <div className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full bg-red-400" style={{ transform: `rotate(${rotation}deg) translateY(2px)` }} />
       </div>

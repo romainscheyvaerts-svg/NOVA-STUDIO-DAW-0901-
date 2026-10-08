@@ -58,7 +58,7 @@ export const NovaLimiterUI: React.FC<Props> = ({ node, initialParams, onParamsCh
   const latencyMs = node ? node.latency * 1000 : 0;
   const outPk = Math.max(-30, m.outPeakDb);
   return (
-    <div data-nova-plugin="LIMITER" className="w-[min(560px,calc(100vw-16px))] bg-gradient-to-b from-[#1b1710] to-[#0e0d0b] p-6 text-white">
+    <div data-nova-plugin="LIMITER" className="w-[min(560px,calc(100vw-16px))] bg-gradient-to-b from-[#1b1710] to-nv-bg p-6 text-white">
       <div className="flex items-center justify-between mb-5">
         <div>
           <h2 className="text-lg font-black tracking-tight">Nova Limiter <span className="text-amber-400">· maximiseur</span></h2>

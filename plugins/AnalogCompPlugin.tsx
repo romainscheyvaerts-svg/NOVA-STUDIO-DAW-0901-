@@ -125,9 +125,9 @@ export const GrVuMeter: React.FC<{ node: any; target: number; color: string }> =
 
 const THEME: Record<string, { gradient: string; accent: string; range: string; btn: string; bar: string }> = {
   OPTO_VINTAGE: { gradient: 'bg-gradient-to-b from-[#10192b] to-[#0b0f17]', accent: 'text-sky-300', range: 'accent-sky-400', btn: 'bg-sky-400', bar: 'bg-sky-400' },
-  FET76: { gradient: 'bg-gradient-to-b from-[#1a1a1d] to-[#0c0c0e]', accent: 'text-zinc-200', range: 'accent-zinc-300', btn: 'bg-zinc-200', bar: 'bg-amber-300' },
-  LEVELER2A: { gradient: 'bg-gradient-to-b from-[#1d1c19] to-[#0f0e0c]', accent: 'text-amber-200', range: 'accent-amber-300', btn: 'bg-amber-300', bar: 'bg-amber-300' },
-  VOXSTRIP: { gradient: 'bg-gradient-to-b from-[#1b1420] to-[#0e0b10]', accent: 'text-fuchsia-300', range: 'accent-fuchsia-400', btn: 'bg-fuchsia-400', bar: 'bg-fuchsia-400' },
+  FET76: { gradient: 'bg-gradient-to-b from-nv-surface to-nv-bg', accent: 'text-zinc-200', range: 'accent-zinc-300', btn: 'bg-zinc-200', bar: 'bg-amber-300' },
+  LEVELER2A: { gradient: 'bg-gradient-to-b from-nv-surface to-nv-bg', accent: 'text-amber-200', range: 'accent-amber-300', btn: 'bg-amber-300', bar: 'bg-amber-300' },
+  VOXSTRIP: { gradient: 'bg-gradient-to-b from-[#1b1420] to-nv-bg', accent: 'text-fuchsia-300', range: 'accent-fuchsia-400', btn: 'bg-fuchsia-400', bar: 'bg-fuchsia-400' },
 };
 
 const SUBTITLE: Record<string, string> = {

@@ -48,9 +48,9 @@ const CueMixPanel: React.FC<Props> = ({ tracks, mixes, onChange, onClose, isMobi
 
   const body = (
     <div data-testid="cue-panel" role="dialog" aria-modal="true" aria-labelledby="cue-title"
-      className={`${isMobile ? 'w-full h-full rounded-none' : 'w-[min(720px,calc(100vw-24px))] max-h-[88vh] rounded-3xl'} bg-[#0c0d10] border border-white/10 shadow-2xl flex flex-col overflow-hidden`}
+      className={`${isMobile ? 'w-full h-full rounded-none' : 'w-[min(720px,calc(100vw-24px))] max-h-[88vh] rounded-3xl'} bg-nv-bg border border-white/10 shadow-2xl flex flex-col overflow-hidden`}
       onClick={e => e.stopPropagation()}>
-      <div className="flex items-center gap-3 px-5 py-4 border-b border-white/5 bg-[#14161a] shrink-0">
+      <div className="flex items-center gap-3 px-5 py-4 border-b border-white/5 bg-nv-surface shrink-0">
         <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-300 flex items-center justify-center border border-cyan-500/20"><i className="fas fa-headphones" /></div>
         <div className="min-w-0 flex-1">
           <h2 id="cue-title" className="text-sm font-black text-white uppercase tracking-[0.15em]">Mixes casque</h2>
