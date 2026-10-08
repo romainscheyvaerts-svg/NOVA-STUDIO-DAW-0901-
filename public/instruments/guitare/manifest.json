@@ -9,7 +9,7 @@
     {
       "file": "E2_pp.ogg",
       "root": 40,
-      "tune": 42,
+      "tune": 40.4,
       "lo": 36,
       "hi": 41,
       "velLo": 1,
@@ -19,7 +19,7 @@
     {
       "file": "E2_mf.ogg",
       "root": 40,
-      "tune": 40,
+      "tune": 38.6,
       "lo": 36,
       "hi": 41,
       "velLo": 51,
@@ -29,7 +29,7 @@
     {
       "file": "E2_ff.ogg",
       "root": 40,
-      "tune": 37,
+      "tune": 33.4,
       "lo": 36,
       "hi": 41,
       "velLo": 96,
@@ -49,7 +49,7 @@
     {
       "file": "G2_ff.ogg",
       "root": 43,
-      "tune": 35,
+      "tune": 33.0,
       "lo": 42,
       "hi": 45,
       "velLo": 96,
@@ -59,7 +59,7 @@
     {
       "file": "B2_pp.ogg",
       "root": 47,
-      "tune": 18,
+      "tune": 9.4,
       "lo": 46,
       "hi": 48,
       "velLo": 1,
@@ -69,7 +69,7 @@
     {
       "file": "B2_mf.ogg",
       "root": 47,
-      "tune": 21,
+      "tune": 18.9,
       "lo": 46,
       "hi": 48,
       "velLo": 51,
@@ -79,7 +79,7 @@
     {
       "file": "B2_ff.ogg",
       "root": 47,
-      "tune": 18,
+      "tune": 15.0,
       "lo": 46,
       "hi": 48,
       "velLo": 96,
@@ -109,7 +109,7 @@
     {
       "file": "F3_pp.ogg",
       "root": 53,
-      "tune": 20,
+      "tune": 21.1,
       "lo": 52,
       "hi": 55,
       "velLo": 1,
@@ -149,7 +149,7 @@
     {
       "file": "A3_mf.ogg",
       "root": 57,
-      "tune": 11,
+      "tune": 15.8,
       "lo": 56,
       "hi": 58,
       "velLo": 51,
@@ -159,7 +159,7 @@
     {
       "file": "A3_ff.ogg",
       "root": 57,
-      "tune": 8,
+      "tune": 17.6,
       "lo": 56,
       "hi": 58,
       "velLo": 96,
@@ -169,7 +169,7 @@
     {
       "file": "C4_mf.ogg",
       "root": 60,
-      "tune": 14,
+      "tune": 14.6,
       "lo": 59,
       "hi": 62,
       "velLo": 1,
@@ -179,7 +179,7 @@
     {
       "file": "C4_ff.ogg",
       "root": 60,
-      "tune": 13,
+      "tune": 12.3,
       "lo": 59,
       "hi": 62,
       "velLo": 96,
@@ -189,7 +189,7 @@
     {
       "file": "E4_mf.ogg",
       "root": 64,
-      "tune": 21,
+      "tune": 23.6,
       "lo": 63,
       "hi": 65,
       "velLo": 1,
@@ -209,7 +209,7 @@
     {
       "file": "G4_mf.ogg",
       "root": 67,
-      "tune": 18,
+      "tune": 21.4,
       "lo": 66,
       "hi": 69,
       "velLo": 1,
@@ -229,7 +229,7 @@
     {
       "file": "B4_mf.ogg",
       "root": 71,
-      "tune": 17,
+      "tune": 18.4,
       "lo": 70,
       "hi": 72,
       "velLo": 1,
@@ -249,7 +249,7 @@
     {
       "file": "D5_mf.ogg",
       "root": 74,
-      "tune": 17,
+      "tune": 22.4,
       "lo": 73,
       "hi": 76,
       "velLo": 1,
@@ -269,7 +269,7 @@
     {
       "file": "Fs5_mf.ogg",
       "root": 78,
-      "tune": 21,
+      "tune": 21.7,
       "lo": 77,
       "hi": 79,
       "velLo": 1,
@@ -279,7 +279,7 @@
     {
       "file": "Fs5_ff.ogg",
       "root": 78,
-      "tune": 24,
+      "tune": 23.3,
       "lo": 77,
       "hi": 79,
       "velLo": 96,

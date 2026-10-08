@@ -171,6 +171,32 @@ const SamplerHost: React.FC<Props> = ({ tracks, bpm, isMobile, setState, getStat
     return () => window.removeEventListener(SAMPLER_EVENT, on);
   }, [handle]);
 
+  // Diagnostic (console, scénarios de bout en bout), comme window.__novaMidi / __novaEdit.
+  useEffect(() => {
+    (window as any).__novaSampler = {
+      createTrack: createSamplerTrack,
+      registerSound: registerSamplerSound,
+      request: (r: SamplerRequest) => handle(r),
+      update: (trackId: string, patch: Partial<MelodicSamplerSettings>) => setState(produce((d: DAWState) => {
+        const t = d.tracks.find(x => x.id === trackId);
+        if (t?.melodicSampler) t.melodicSampler = normalizeSampler({ ...t.melodicSampler, ...patch });
+      }) as (s: DAWState) => DAWState),
+      /** Clip audio d'un son du registre sur une nouvelle piste audio (scénario de découpe). */
+      addAudioClip: (bufferId: string, start: number, name: string) => {
+        const b = audioBufferRegistry.get(bufferId);
+        if (!b) return null;
+        const trackId = `track-qa-${Date.now().toString(36)}`;
+        setState(produce((d: DAWState) => {
+          const clip: Clip = { id: `clip-${trackId}`, start, duration: b.duration, offset: 0, fadeIn: 0, fadeOut: 0, name, color: '#22d3ee', type: TrackType.AUDIO, bufferId, isMuted: false, gain: 1 };
+          d.tracks.push({ id: trackId, name: name.toUpperCase(), type: TrackType.AUDIO, color: '#22d3ee', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
+            volume: 1, pan: 0, outputTrackId: 'master', sends: [], plugins: [], automationLanes: [], totalLatency: 0, clips: [clip] } as Track);
+        }) as (s: DAWState) => DAWState);
+        return { trackId, clipId: `clip-${trackId}` };
+      },
+    };
+    return () => { delete (window as any).__novaSampler; };
+  }, [createSamplerTrack, handle, setState]);
+
   const track = openId ? tracks.find(t => t.id === openId && t.melodicSampler) : undefined;
   // Piste supprimée ou devenue synthé : l'écran se ferme.
   useEffect(() => { if (openId && !track) closeSamplerPanel(); }, [openId, track]);

@@ -93,8 +93,10 @@ const Keys: React.FC<{ from: number; count: number; root: number; onOn: (p: numb
       <div className="absolute inset-0 flex">
         {whites.map(p => (
           <button key={p} type="button" aria-label={`Note ${noteName(p)}`} {...handlers(p)}
-            className={`relative flex-1 border border-black/50 rounded-b-md ${down.has(p) ? 'bg-cyan-300' : 'bg-slate-100'}`}>
-            {(p % 12 === 0 || p === root) && <span className={`absolute bottom-1 inset-x-0 text-[9px] font-bold ${p === root ? 'text-cyan-600' : 'text-slate-500'}`}>{p === root ? '◆' : noteName(p)}</span>}
+            // Couleurs fixes : un clavier reste blanc et noir dans les deux thèmes.
+            style={{ background: down.has(p) ? '#67e8f9' : '#f1f5f9', borderColor: 'rgba(0,0,0,0.5)' }}
+            className="relative flex-1 border rounded-b-md">
+            {(p % 12 === 0 || p === root) && <span className="absolute bottom-1 inset-x-0 text-[9px] font-bold" style={{ color: p === root ? '#0891b2' : '#64748b' }}>{p === root ? '◆' : noteName(p)}</span>}
           </button>
         ))}
       </div>
@@ -102,8 +104,8 @@ const Keys: React.FC<{ from: number; count: number; root: number; onOn: (p: numb
         const idx = whites.filter(w => w < p).length;
         return (
           <button key={p} type="button" aria-label={`Note ${noteName(p)}`} {...handlers(p)}
-            style={{ left: `calc(${(idx / whites.length) * 100}% - ${(0.6 / whites.length) * 50}%)`, width: `${(0.6 / whites.length) * 100}%` }}
-            className={`absolute top-0 h-[60%] rounded-b-md z-10 border border-black ${down.has(p) ? 'bg-cyan-500' : 'bg-slate-900'}`} />
+            style={{ left: `calc(${(idx / whites.length) * 100}% - ${(0.6 / whites.length) * 50}%)`, width: `${(0.6 / whites.length) * 100}%`, background: down.has(p) ? '#06b6d4' : '#0f172a', borderColor: '#000' }}
+            className="absolute top-0 h-[60%] rounded-b-md z-10 border" />
         );
       })}
     </div>
