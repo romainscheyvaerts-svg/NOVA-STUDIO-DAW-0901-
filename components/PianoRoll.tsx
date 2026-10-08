@@ -12,6 +12,21 @@ import { midiBus } from '../utils/midiBus';
 import { midiCapture } from '../utils/midiCapture';
 import ChordRollOverlay from './ChordRollOverlay';
 import { ComputerKeyboard, NoteRecorder, isComputerKeyboardCode, defaultKeyLabel, octaveBase, KEY_TO_SEMITONE, DEFAULT_KEYBOARD_STATE, KeyboardState } from '../utils/computerKeyboard';
+import { useTheme } from '../utils/themeStore';
+
+/** Au doigt (tablette, téléphone), les boutons de la barre passent à 40 px ; à la souris, rien ne change. */
+const TAP = '[@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:min-w-10';
+const TAP_SQ = '[@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10';
+
+/**
+ * Clavier du piano roll : de vraies touches blanches et noires dans les deux
+ * thèmes (couleurs fixes, hors des jetons qui inversent blanc et noir en clair).
+ * Noms : contraste ≥ 4,5:1 sur la touche, même grisée (hors gamme).
+ */
+const KEY_COLORS = {
+  white: '#f8fafc', whiteOut: '#c9cfd8', black: '#0b0c0f', blackOut: '#2b3039', held: '#22d3ee',
+  nameOnWhite: '#164e63', rootOnWhite: '#92400e', nameOnBlack: '#67e8f9', rootOnBlack: '#fcd34d',
+};
 
 /** Préférences d'affichage du piano roll, gardées sur cet appareil. */
 const PREFS_KEY = 'nova.pianoroll.prefs';
@@ -74,6 +89,7 @@ const VELOCITY_HEIGHT = 150;
 type DragMode = 'MOVE' | 'RESIZE_R' | 'VELOCITY' | 'SELECT' | 'DRAW' | null;
 
 const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack, onClose, toolbarExtra, isPlaying, onTogglePlay, projectKey, projectScale, onSetProjectKey, allTracks }) => {
+  const light = useTheme().theme === 'light';
   const clipIndex = track.clips.findIndex(c => c.id === clipId);
   const clip = track.clips[clipIndex];
   
@@ -126,6 +142,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
   const [quantizeValue, setQuantizeValue] = useState<QuantizeValue>('1/16');
   const [quantizeStrength, setQuantizeStrength] = useState<QuantizeStrength>(100);
   const [showQuantizeMenu, setShowQuantizeMenu] = useState(false);
+  // Position du menu de quantification : affiché hors de la barre (qui défile en largeur et le coupait).
+  const [quantPos, setQuantPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [tool, setTool] = useState<EditorTool>('DRAW');
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
   
@@ -743,17 +761,22 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
         const out = highlight && !inKey(pitch);
         const isRoot = hasKey && ((pitch - keyRoot!) % 12 + 12) % 12 === 0;
         const showName = foldOn || isC || isRoot;
+        const isHeld = held.has(pitch);
+        const K = KEY_COLORS;
+        const bg = isHeld ? K.held : isBlack ? (out ? K.blackOut : K.black) : (out ? K.whiteOut : K.white);
+        const ink = isHeld ? '#000' : isBlack ? (isRoot ? K.rootOnBlack : K.nameOnBlack) : (isRoot ? K.rootOnWhite : K.nameOnWhite);
         return (
             <div 
                 key={pitch} 
                 data-pitch={pitch}
-                className={`flex items-center justify-end pr-1 text-[9px] font-mono border-b border-black/20 box-border cursor-pointer ${held.has(pitch) ? 'bg-cyan-400 text-black' : isBlack ? 'bg-black text-slate-500' : 'bg-white text-slate-500'}`}
-                style={{ height: currentRowHeight, opacity: out && !held.has(pitch) ? 0.45 : 1 }}
+                data-hors-gamme-touche={hasKey && highlight ? (out ? '1' : '0') : undefined}
+                className="flex items-center justify-end pr-1 text-[9px] font-mono box-border cursor-pointer"
+                style={{ height: currentRowHeight, backgroundColor: bg, color: ink, borderBottom: '1px solid rgba(0,0,0,0.22)' }}
                 title={`${noteNameFr(pitch)}${hasKey ? (out ? ' · hors gamme' : ' · dans la gamme') : ''} (clic : écouter)`}
                 onPointerDown={() => audioEngine.previewMidiNote(track.id, pitch, 0.4)}
             >
-                {isRoot && !held.has(pitch) && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mr-auto ml-1" aria-hidden />}
-                {showName && <span className={`font-bold mr-0.5 ${isRoot ? 'text-amber-600' : 'text-cyan-700'}`}>{noteNameFr(pitch)}</span>}
+                {isRoot && !isHeld && <span className="w-1.5 h-1.5 rounded-full mr-auto ml-1" style={{ backgroundColor: '#f59e0b' }} aria-hidden />}
+                {showName && <span className="font-bold mr-0.5">{noteNameFr(pitch)}</span>}
             </div>
         );
       });
@@ -766,12 +789,15 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
          const out = highlight && !inKey(pitch);
          const isRoot = hasKey && ((pitch - keyRoot!) % 12 + 12) % 12 === 0;
          // Gamme surlignée : lignes de la gamme claires, hors gamme hachurées (Scale Highlighting de FL).
+         // En clair : hachures grises légères (avant, des bandes noires barraient la grille).
          const bg = highlight
-           ? (out ? 'repeating-linear-gradient(135deg, #0b0c0f 0 4px, #101217 4px 8px)' : isRoot ? 'rgba(251,191,36,0.10)' : 'rgba(34,211,238,0.06)')
+           ? (out ? (light ? 'repeating-linear-gradient(135deg, #dde2ea 0 4px, #e9edf3 4px 8px)' : 'repeating-linear-gradient(135deg, #0b0c0f 0 4px, #101217 4px 8px)')
+             : isRoot ? (light ? 'rgba(217,119,6,0.14)' : 'rgba(251,191,36,0.10)') : (light ? 'rgba(8,145,178,0.07)' : 'rgba(34,211,238,0.06)'))
            : undefined;
          return (
              <div 
                  key={`bg-${pitch}`} 
+                 data-hors-gamme-ligne={highlight ? (out ? '1' : '0') : undefined}
                  className={`absolute left-0 right-0 border-b border-white/[0.03] ${!highlight ? (isBlack ? 'bg-[#0f1115]' : (isAlt ? 'bg-[#1a1c22]' : '')) : ''}`}
                  style={{ top: i * currentRowHeight, height: currentRowHeight, background: bg }}
              />
@@ -802,7 +828,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                     <i className={`fas ${isDrumMode ? 'fa-drum' : 'fa-keyboard'}`}></i>
                 </div>
                 <div>
-                    <h3 className="text-[10px] font-black text-white uppercase tracking-widest">{isDrumMode ? 'Drum Sequencer' : 'Piano Roll'}</h3>
+                    <h3 className="text-[10px] font-black text-white uppercase tracking-widest">{isDrumMode ? 'Séquenceur de batterie' : 'Piano roll'}</h3>
                     <p className="text-[9px] text-slate-500 font-mono">{clip.name}</p>
                 </div>
              </div>
@@ -821,9 +847,9 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
              
              {/* Tools */}
              <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
-                <button onClick={() => setTool('DRAW')} className={`w-8 h-8 rounded flex items-center justify-center ${tool === 'DRAW' ? 'bg-cyan-500 text-black' : 'text-slate-500 hover:text-white'}`} title="Crayon : dessiner des notes" aria-label="Crayon"><i className="fas fa-pencil-alt text-xs"></i></button>
-                <button onClick={() => setTool('SELECT')} className={`w-8 h-8 rounded flex items-center justify-center ${tool === 'SELECT' ? 'bg-cyan-500 text-black' : 'text-slate-500 hover:text-white'}`} title="Flèche : sélectionner et déplacer" aria-label="Sélection"><i className="fas fa-mouse-pointer text-xs"></i></button>
-                <button onClick={() => setTool('ERASE')} className={`w-8 h-8 rounded flex items-center justify-center ${tool === 'ERASE' ? 'bg-red-500 text-black' : 'text-slate-500 hover:text-white'}`} title="Gomme : effacer des notes" aria-label="Gomme"><i className="fas fa-eraser text-xs"></i></button>
+                <button onClick={() => setTool('DRAW')} className={`w-8 h-8 ${TAP_SQ} rounded flex items-center justify-center ${tool === 'DRAW' ? 'bg-cyan-500 text-black' : 'text-slate-500 hover:text-white'}`} title="Crayon : dessiner des notes" aria-label="Crayon"><i className="fas fa-pencil-alt text-xs"></i></button>
+                <button onClick={() => setTool('SELECT')} className={`w-8 h-8 ${TAP_SQ} rounded flex items-center justify-center ${tool === 'SELECT' ? 'bg-cyan-500 text-black' : 'text-slate-500 hover:text-white'}`} title="Flèche : sélectionner et déplacer" aria-label="Sélection"><i className="fas fa-mouse-pointer text-xs"></i></button>
+                <button onClick={() => setTool('ERASE')} className={`w-8 h-8 ${TAP_SQ} rounded flex items-center justify-center ${tool === 'ERASE' ? 'bg-red-500 text-black' : 'text-slate-500 hover:text-white'}`} title="Gomme : effacer des notes" aria-label="Gomme"><i className="fas fa-eraser text-xs"></i></button>
              </div>
              
              <div className="h-8 w-px bg-white/10"></div>
@@ -833,7 +859,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                <div className="flex items-center gap-1.5 shrink-0">
                  <button type="button" data-nova-roll="gamme" onClick={e => openMenu('scale', e)} aria-expanded={menu?.kind === 'scale'}
                    title="Gamme du morceau : grise les notes hors gamme, aimant, seulement la gamme (comme Scale Highlighting dans FL Studio et Scale Mode dans Live)"
-                   className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${hasKey ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+                   className={`h-8 ${TAP} px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${hasKey ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
                    <i className="fas fa-music text-[9px]"></i>
                    <span>{hasKey ? keyLabelFr(keyRoot, keyScale) : 'Gamme'}</span>
                    {snapOn && <i className="fas fa-magnet text-[8px]" title="Aimant de gamme actif"></i>}
@@ -841,24 +867,24 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                  </button>
                  <button type="button" data-nova-roll="accords" aria-label="Outil accords" onClick={e => openMenu('chord', e)} aria-pressed={!!chordKind}
                    title="Outil accords : un clic pose tout l'accord, dans la gamme (comme Chord Stamp dans FL Studio)"
-                   className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${chordKind ? 'bg-fuchsia-500 border-fuchsia-400 text-black' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+                   className={`h-8 ${TAP} px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${chordKind ? 'bg-fuchsia-500 border-fuchsia-400 text-black' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
                    <i className="fas fa-layer-group text-[9px]"></i>
                    <span className={chordKind ? '' : 'hidden min-[1800px]:inline'}>{chordKind ? CHORD_CHOICES.find(c => c.id === chordKind)?.label : 'Accords'}</span>
                  </button>
                  <button type="button" data-nova-roll="fantomes" aria-label="Notes fantômes" onClick={() => setPrefs({ ghosts: !prefs.ghosts })} aria-pressed={prefs.ghosts}
                    title={`Notes fantômes : les notes des autres pistes MIDI en filigrane, pour écrire la 808 en voyant la mélodie (comme Ghost Notes dans FL Studio)${ghostTrackCount ? ` · ${ghostTrackCount} piste${ghostTrackCount > 1 ? 's' : ''}` : ''}`}
-                   className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${prefs.ghosts ? 'bg-slate-200/10 border-slate-300/40 text-slate-200' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
+                   className={`h-8 ${TAP} px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${prefs.ghosts ? 'bg-slate-200/10 border-slate-300/40 text-slate-200' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
                    <i className="fas fa-ghost text-[9px]"></i><span className="hidden min-[1800px]:inline">Fantômes</span>
                  </button>
                  <button type="button" data-nova-roll="clavier" aria-label="Jouer avec le clavier de l'ordinateur" onClick={() => { setKbOn(v => !v); if (kbOn) setRecArmed(false); }} aria-pressed={kbOn}
                    title={kbOn ? "Clavier de l'ordinateur ACTIF : les lettres jouent des notes. Clic pour le couper et retrouver les raccourcis." : "Jouer avec le clavier de l'ordinateur (comme Computer MIDI Keyboard dans Live et Typing Keyboard dans FL Studio)"}
-                   className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${kbOn ? 'bg-cyan-400 border-cyan-300 text-black' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+                   className={`h-8 ${TAP} px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${kbOn ? 'bg-cyan-400 border-cyan-300 text-black' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
                    <i className="fas fa-keyboard text-[9px]"></i><span className="hidden min-[1800px]:inline">{kbOn ? 'Clavier actif' : 'Clavier'}</span>
                  </button>
                  {kbOn && (
                    <button type="button" data-nova-roll="rec-midi" aria-label="Enregistrer ce que tu joues" onClick={() => { const on = !recArmed; setRecArmed(on); if (on && !isPlaying) onTogglePlay?.(); }} aria-pressed={recArmed}
                      title={recArmed ? 'Prise MIDI armée : ce que tu joues pendant la lecture s’écrit dans le clip (à l’arrêt). Clic pour désarmer.' : 'Enregistrer ce que tu joues au clavier dans le clip (lance la lecture)'}
-                     className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-black ${recArmed ? 'bg-red-600 border-red-400 text-white animate-pulse' : 'bg-white/5 border-white/10 text-red-400 hover:text-white'}`}>
+                     className={`h-8 ${TAP} px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-black ${recArmed ? 'bg-red-600 border-red-400 text-white animate-pulse' : 'bg-white/5 border-white/10 text-red-400 hover:text-white'}`}>
                      <span className={`w-2 h-2 rounded-full ${recArmed ? 'bg-white' : 'bg-red-500'}`}></span><span className="hidden min-[1500px]:inline">{recArmed ? 'Prise…' : 'Enregistrer'}</span>
                    </button>
                  )}
@@ -870,61 +896,26 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
              {/* Quantize Controls (inspired by Ableton) */}
              <div className="flex items-center space-x-2 relative">
                 <button
-                  onClick={() => setShowQuantizeMenu(!showQuantizeMenu)}
-                  className="h-8 px-3 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-400 hover:bg-purple-500/20 flex items-center space-x-2 text-[10px] font-bold"
+                  onClick={e => {
+                    if (showQuantizeMenu) { setShowQuantizeMenu(false); return; }
+                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    setQuantPos({ x: Math.max(8, Math.min(r.left, window.innerWidth - 232)), y: r.bottom + 6 });
+                    setShowQuantizeMenu(true);
+                  }}
+                  aria-haspopup="dialog" aria-expanded={showQuantizeMenu} title="Grille de quantification et force"
+                  className={`h-8 ${TAP} px-3 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-400 hover:bg-purple-500/20 flex items-center space-x-2 text-[10px] font-bold`}
                 >
                   <i className="fas fa-th text-[9px]"></i>
                   <span>{quantizeValue}</span>
                   <i className="fas fa-chevron-down text-[8px]"></i>
                 </button>
                 
-                {/* Quantize Dropdown */}
-                {showQuantizeMenu && (
-                  <div className="absolute top-full left-0 mt-2 bg-[#1a1c22] border border-white/20 rounded-xl shadow-2xl z-[200] p-3 w-56">
-                    <div className="text-[9px] font-black uppercase text-slate-400 mb-2">Grille de quantification</div>
-                    <div className="grid grid-cols-3 gap-1 mb-3">
-                      {QUANTIZE_VALUES.map(q => (
-                        <button
-                          key={q.value}
-                          onClick={() => {
-                            setQuantizeValue(q.value);
-                            setQuantize(q.beats * (60 / bpm));
-                          }}
-                          className={`py-1.5 rounded text-[9px] font-bold ${quantizeValue === q.value ? 'bg-purple-500 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
-                        >
-                          {q.label}
-                        </button>
-                      ))}
-                    </div>
-                    
-                    <div className="text-[9px] font-black uppercase text-slate-400 mb-2">Force</div>
-                    <div className="flex space-x-1 mb-3">
-                      {([25, 50, 75, 100] as QuantizeStrength[]).map(s => (
-                        <button
-                          key={s}
-                          onClick={() => setQuantizeStrength(s)}
-                          className={`flex-1 py-1.5 rounded text-[9px] font-bold ${quantizeStrength === s ? 'bg-purple-500 text-white' : 'bg-white/5 text-slate-400'}`}
-                        >
-                          {s}%
-                        </button>
-                      ))}
-                    </div>
-                    
-                    <button
-                      onClick={() => { applyQuantize(); setShowQuantizeMenu(false); }}
-                      disabled={selectedNoteIds.size === 0}
-                      className={`w-full py-2 rounded text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'bg-purple-500 text-white' : 'bg-white/5 text-slate-600'}`}
-                    >
-                      Quantifier la sélection (Q)
-                    </button>
-                  </div>
-                )}
-                
                 {/* Quick Quantize Button */}
                 <button
                   onClick={applyQuantize}
                   disabled={selectedNoteIds.size === 0}
-                  className={`h-8 px-3 rounded-lg flex items-center space-x-1 text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30' : 'bg-white/5 text-slate-600'}`}
+                  aria-label="Quantifier la sélection"
+                  className={`h-8 ${TAP} px-3 rounded-lg flex items-center space-x-1 text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30' : 'bg-white/5 text-slate-600'}`}
                   title="Quantifier la sélection sur la grille (Q)"
                 >
                   <i className="fas fa-magnet text-[9px]"></i>
@@ -939,32 +930,32 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                 <button
                   onClick={() => transpose(1)}
                   disabled={selectedNoteIds.size === 0}
-                  className={`h-8 px-2 rounded text-[10px] ${selectedNoteIds.size > 0 ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-600'}`}
-                  title="Monter d'un demi-ton (↑, Ctrl+↑ : une octave)"
+                  className={`h-8 ${TAP} px-2 rounded text-[10px] ${selectedNoteIds.size > 0 ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-600'}`}
+                  title="Monter d'un demi-ton (↑, Ctrl+↑ : une octave)" aria-label="Monter d'un demi-ton"
                 >
                   <i className="fas fa-arrow-up"></i>
                 </button>
                 <button
                   onClick={() => transpose(-1)}
                   disabled={selectedNoteIds.size === 0}
-                  className={`h-8 px-2 rounded text-[10px] ${selectedNoteIds.size > 0 ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-600'}`}
-                  title="Descendre d'un demi-ton (↓, Ctrl+↓ : une octave)"
+                  className={`h-8 ${TAP} px-2 rounded text-[10px] ${selectedNoteIds.size > 0 ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-600'}`}
+                  title="Descendre d'un demi-ton (↓, Ctrl+↓ : une octave)" aria-label="Descendre d'un demi-ton"
                 >
                   <i className="fas fa-arrow-down"></i>
                 </button>
                 <button
                   onClick={doubleNotes}
                   disabled={selectedNoteIds.size === 0}
-                  className={`h-8 px-3 rounded text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'text-amber-400 hover:bg-amber-500/10' : 'text-slate-600'}`}
-                  title="Dupliquer la sélection à la suite (Ctrl+D)"
+                  className={`h-8 ${TAP} px-3 rounded text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'text-amber-400 hover:bg-amber-500/10' : 'text-slate-600'}`}
+                  title="Dupliquer la sélection à la suite (Ctrl+D)" aria-label="Dupliquer la sélection à la suite"
                 >
                   <i className="fas fa-clone mr-1"></i>2x
                 </button>
                 <button
                   onClick={humanizeNotes}
                   disabled={selectedNoteIds.size === 0}
-                  className={`h-8 px-3 rounded text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'text-green-400 hover:bg-green-500/10' : 'text-slate-600'}`}
-                  title="Humaniser : petites variations de placement et de vélocité (H)"
+                  className={`h-8 ${TAP} px-3 rounded text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'text-green-400 hover:bg-green-500/10' : 'text-slate-600'}`}
+                  title="Humaniser : petites variations de placement et de vélocité (H)" aria-label="Humaniser la sélection"
                 >
                   <i className="fas fa-random mr-1"></i>H
                 </button>
@@ -976,16 +967,16 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                 <button type="button" data-nova-roll="outils" aria-haspopup="dialog" aria-expanded={toolsAnchor !== false}
                   onClick={e => { if (toolsAnchor !== false) { setToolsAnchor(false); return; } const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setToolsAnchor(window.innerWidth < 640 ? null : { x: r.left, y: r.bottom + 6 }); }}
                   title="Outils : strum, arpège, roll de hi-hats, chop, flam, courbe de vélocité, aléatoire, legato… sur la sélection ou tout le clip (comme les MIDI Transformations de Live 12 et les outils du piano roll de FL Studio)"
-                  className={`hidden sm:flex h-8 px-2.5 rounded-lg border items-center gap-1.5 text-[10px] font-bold ${toolsAnchor !== false ? 'bg-cyan-400 border-cyan-300 text-black' : 'bg-white/5 border-white/10 text-slate-300 hover:text-white'}`}>
+                  className={`hidden sm:flex h-8 ${TAP} px-2.5 rounded-lg border items-center gap-1.5 text-[10px] font-bold ${toolsAnchor !== false ? 'bg-cyan-400 border-cyan-300 text-black' : 'bg-white/5 border-white/10 text-slate-300 hover:text-white'}`}>
                   <i className="fas fa-toolbox text-[9px]"></i><span>Outils</span>
                 </button>
                 <button type="button" data-nova-roll="groove" onClick={() => midiBus.emit({ type: 'groove', trackId: track.id, clipId })} aria-pressed={!!clip.groove}
                   title="Swing et groove de ce clip : 50 à 75 %, grooves MPC et trap, groove extrait d’une boucle (Groove Pool de Live, swing de FL Studio)"
-                  className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${clip.groove ? 'bg-amber-400 border-amber-300 text-black' : 'bg-white/5 border-white/10 text-amber-300 hover:text-white'}`}>
+                  className={`h-8 ${TAP} px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${clip.groove ? 'bg-amber-400 border-amber-300 text-black' : 'bg-white/5 border-white/10 text-amber-300 hover:text-white'}`}>
                   <i className="fas fa-drum text-[9px]"></i><span>Swing</span>
                 </button>
                 <button type="button" data-nova-roll="capturer" onClick={() => midiBus.emit({ type: 'capture', trackId: track.id })} title={CAPTURE_HINT}
-                  className={`relative h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${captureCount > 0 ? 'bg-red-500/15 border-red-400/50 text-red-200' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
+                  className={`relative h-8 ${TAP} px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${captureCount > 0 ? 'bg-red-500/15 border-red-400/50 text-red-200' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
                   <i className="fas fa-hand-sparkles text-[9px]"></i><span>Capturer</span>
                   {captureCount > 0 && <span className="ml-0.5 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black leading-4 text-center">{captureCount > 99 ? '99+' : captureCount}</span>}
                 </button>
@@ -1002,6 +993,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                 <i className="fas fa-search-plus text-[10px] text-slate-500"></i>
                 <input
                   type="range"
+                  aria-label="Zoom horizontal"
+                  title="Zoom horizontal"
                   min="50"
                   max="300"
                   value={zoomX}
@@ -1009,7 +1002,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                   className="w-20 accent-cyan-500"
                 />
              </div>
-             <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="hidden md:flex w-8 h-8 rounded-full bg-white/5 text-slate-400 hover:text-white hover:bg-red-500/20 flex items-center justify-center"><i className="fas fa-times"></i></button>
+             <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="hidden md:flex w-8 h-8 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-full bg-white/5 text-slate-400 hover:text-white hover:bg-red-500/20 flex items-center justify-center"><i className="fas fa-times"></i></button>
           </div>
        </div>
 
@@ -1036,6 +1029,51 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
            onPreview={setToolPreview} onApply={applyToolResult} onClose={() => { setToolsAnchor(false); setToolPreview(null); }} />
        )}
 
+       {/* Menu de quantification : en position fixe, sinon la barre (qui défile en largeur) le coupait */}
+       {showQuantizeMenu && (
+         <>
+           <div className="fixed inset-0 z-[290]" onPointerDown={() => setShowQuantizeMenu(false)} />
+                  <div data-nova-roll-menu="quantize" role="dialog" aria-label="Quantification" className="fixed z-[300] bg-[#1a1c22] border border-white/20 rounded-xl shadow-2xl p-3 w-56" style={{ left: quantPos.x, top: quantPos.y }}>
+                    <div className="text-[9px] font-black uppercase text-slate-400 mb-2">Grille de quantification</div>
+                    <div className="grid grid-cols-3 gap-1 mb-3">
+                      {QUANTIZE_VALUES.map(q => (
+                        <button
+                          key={q.value}
+                          onClick={() => {
+                            setQuantizeValue(q.value);
+                            setQuantize(q.beats * (60 / bpm));
+                          }}
+                          className={`py-1.5 [@media(pointer:coarse)]:min-h-10 rounded text-[9px] font-bold ${quantizeValue === q.value ? 'bg-purple-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                        >
+                          {q.label}
+                        </button>
+                      ))}
+                    </div>
+                    
+                    <div className="text-[9px] font-black uppercase text-slate-400 mb-2">Force</div>
+                    <div className="flex space-x-1 mb-3">
+                      {([25, 50, 75, 100] as QuantizeStrength[]).map(s => (
+                        <button
+                          key={s}
+                          onClick={() => setQuantizeStrength(s)}
+                          className={`flex-1 py-1.5 [@media(pointer:coarse)]:min-h-10 rounded text-[9px] font-bold ${quantizeStrength === s ? 'bg-purple-600 text-white' : 'bg-white/5 text-slate-400'}`}
+                        >
+                          {s}%
+                        </button>
+                      ))}
+                    </div>
+                    
+                    <button
+                      onClick={() => { applyQuantize(); setShowQuantizeMenu(false); }}
+                      disabled={selectedNoteIds.size === 0}
+                      className={`w-full py-2 [@media(pointer:coarse)]:min-h-10 rounded text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'bg-purple-600 text-white' : 'bg-white/5 text-slate-600'}`}
+                    >
+                      Quantifier la sélection (Q)
+                    </button>
+                  </div>
+                  </>
+       )}
+
        {menu && (
          <>
            <div className="fixed inset-0 z-[290]" onPointerDown={() => setMenu(null)} />
@@ -1048,12 +1086,12 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                    <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Tonalité du morceau</div>
                    <div className="flex gap-2">
                      <select aria-label="Note de la tonalité" value={typeof keyRoot === 'number' ? keyRoot : ''} onChange={e => setKey(Number(e.target.value), keyScale)}
-                       className="flex-1 h-9 rounded-lg bg-black/40 border border-white/15 px-2 text-white">
+                       className="flex-1 h-9 [@media(pointer:coarse)]:h-10 rounded-lg bg-black/40 border border-white/15 px-2 text-white">
                        {typeof keyRoot !== 'number' && <option value="">Choisir…</option>}
                        {NOTE_NAMES_FR.map((n, i) => <option key={n} value={i}>{n}</option>)}
                      </select>
                      <select aria-label="Gamme" value={keyScale.toUpperCase()} onChange={e => setKey(typeof keyRoot === 'number' ? keyRoot : 0, e.target.value)}
-                       className="flex-1 h-9 rounded-lg bg-black/40 border border-white/15 px-2 text-white">
+                       className="flex-1 h-9 [@media(pointer:coarse)]:h-10 rounded-lg bg-black/40 border border-white/15 px-2 text-white">
                        {SCALE_CHOICES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                      </select>
                    </div>
@@ -1071,7 +1109,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                  ))}
                  <button type="button" disabled={!hasKey} onClick={() => { fitToScale(); setMenu(null); }}
                    title="Ramène sur la gamme les notes sélectionnées (ou toutes les notes du clip) : une seule étape d'annulation"
-                   className="w-full h-9 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-200 font-bold disabled:opacity-40">
+                   className="w-full h-9 [@media(pointer:coarse)]:h-10 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-200 font-bold disabled:opacity-40">
                    <i className="fas fa-compress-arrows-alt mr-1.5"></i>Remettre {selectedNoteIds.size > 0 ? 'la sélection' : 'tout le clip'} dans la gamme
                  </button>
                </div>
@@ -1080,12 +1118,12 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Accord posé en un clic</div>
                  {CHORD_CHOICES.map(c => (
                    <button key={c.id} type="button" onClick={() => { setChordKind(c.id); setTool('DRAW'); setMenu(null); setLastChord(null); }} title={c.hint}
-                     className={`w-full text-left rounded-lg px-2.5 py-1.5 ${chordKind === c.id ? 'bg-fuchsia-500 text-black' : 'hover:bg-white/5'}`}>
+                     className={`w-full text-left rounded-lg px-2.5 py-1.5 [@media(pointer:coarse)]:min-h-10 ${chordKind === c.id ? 'bg-fuchsia-500 text-black' : 'hover:bg-white/5'}`}>
                      <b>{c.label}</b> <span className={chordKind === c.id ? 'text-black/70' : 'text-slate-500'}>· {c.hint}</span>
                    </button>
                  ))}
                  <button type="button" onClick={() => { setChordKind(null); setMenu(null); setLastChord(null); }} disabled={!chordKind}
-                   className="mt-2 w-full h-9 rounded-lg bg-white/5 border border-white/10 font-bold disabled:opacity-40">Notes simples (couper l'outil accords)</button>
+                   className="mt-2 w-full h-9 [@media(pointer:coarse)]:h-10 rounded-lg bg-white/5 border border-white/10 font-bold disabled:opacity-40">Notes simples (couper l'outil accords)</button>
                </div>
              )}
            </div>
