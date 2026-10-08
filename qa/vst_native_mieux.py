@@ -247,7 +247,7 @@ def scan_times(out):
     p = subprocess.run([sys.executable, "-c", code], capture_output=True, creationflags=0x08000000 | 0x4000, timeout=600)
     res["python_probe_total_s"] = round(time.perf_counter() - t, 2)
     try:
-        d = json.loads(p.stdout.decode().strip().splitlines()[-1])
+        d = json.loads([l for l in p.stdout.decode("utf-8", "replace").splitlines() if l.startswith("{")][-1])
         res["python_probe_classes"], res["python_probe_read_s"] = d["n"], round(d["s"], 2)
     except Exception as e:
         res["python_probe_error"] = str(e)

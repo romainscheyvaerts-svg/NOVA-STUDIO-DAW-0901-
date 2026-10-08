@@ -412,6 +412,11 @@ def _header_type(layout: dict):
     return Header
 
 
+# Réglages à l'échantillon près : bloc coupé aux changements (défaut), ou seulement le décalage
+# IParameterChanges (NOVA_VST_SPLIT_AT_CHANGES=0 : moins d'appels, exact pour les plugins qui
+# respectent le décalage, comme FabFilter).
+SPLIT_AT_CHANGES = os.environ.get("NOVA_VST_SPLIT_AT_CHANGES", "1") != "0"
+
 FLAG_TRANSPORT = 1
 FLAG_PLAYING = 2
 FLAG_RESET_FIRST = 4
@@ -1201,6 +1206,16 @@ class NativePlugin:
             pos = 0
             while pos < n:
                 m = min(cap, n - pos)
+                if SPLIT_AT_CHANGES:
+                    # Le bloc est coupé à chaque réglage posé : le plugin le reçoit au début d'un
+                    # appel (décalage 0). Exact même pour les plugins qui ignorent le décalage
+                    # (Waves : appliqué au début de leur bloc, jusqu'à 256 échantillons trop tôt),
+                    # et même découpe que le pont avec pedalboard (R9) : sorties identiques.
+                    j = ci
+                    while j < len(changes) and changes[j][1] <= pos:
+                        j += 1
+                    if j < len(changes) and changes[j][1] < pos + m:
+                        m = changes[j][1] - pos
                 nin = 0
                 if x is not None:
                     nin = x.shape[0]
