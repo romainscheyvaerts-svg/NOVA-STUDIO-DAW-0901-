@@ -102,6 +102,9 @@ class NodeCoreProc:
             raise RuntimeError(r["error"])
         self._latency = int(r.get("latency", 0))
         y = np.frombuffer(base64.b64decode(r["data"]), dtype=np.float32).reshape(2, -1).astype(np.float64)
+        L = self._latency
+        if L > 0:   # compensation de la latence déclarée, comme le PDC de NOVA
+            y = np.concatenate([y[:, L:], np.zeros((2, L))], axis=1)
         return y
 
     def close(self):

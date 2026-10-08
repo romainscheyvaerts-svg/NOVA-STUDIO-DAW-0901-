@@ -1,0 +1,7 @@
+{
+ "limThrDb": 0.833,
+ "limRelK": 0.0362,
+ "limAdaptExp": 0.8007,
+ "limRelRefHz": 1000.0,
+ "limFinRelMs": 4.6838
+}

@@ -311,7 +311,8 @@ const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number =
   if (type === 'FLANGER') params = { rate: 0.5, depth: 0.5, feedback: 0.7, manual: 0.3, mix: 0.5, invertPhase: false, isEnabled: true };
   if (type === 'DOUBLER') params = { detune: 0.4, width: 0.8, gainL: 0.7, gainR: 0.7, directOn: true, isEnabled: true };
   if (type === 'STEREOSPREADER') params = { width: 1.0, haasDelay: 0.015, lowBypass: 0.8, isEnabled: true };
-  if (type === 'DEESSER') params = { threshold: -25, frequency: 6500, q: 1.0, reduction: 0.6, mode: 'BELL', isEnabled: true };
+  // De-esser : 8 kHz et détection relative par défaut (mesures du labo, règle de Romain)
+  if (type === 'DEESSER') params = { threshold: -30, frequency: 8000, q: 1.0, reduction: 0.6, mode: 'BELL', isEnabled: true, detection: 'RELATIVE', relThreshold: -6, listen: 0 };
   if (type === 'DENOISER') params = { threshold: -45, range: -20, attack: 0.005, hold: 0.05, release: 0.15, scFreq: 1000, flip: false, isEnabled: true };
   if (type === 'VOCALSATURATOR') params = { drive: 20, mix: 0.5, tone: 0.0, eqLow: 0, eqMid: 0, eqHigh: 0, mode: 'TAPE', isEnabled: true, outputGain: 1.0 };
   { const reg = getRegisteredPlugin(type); if (reg) { params = reg.defaultParams(); name = paramsOverride?.name || reg.name; } }

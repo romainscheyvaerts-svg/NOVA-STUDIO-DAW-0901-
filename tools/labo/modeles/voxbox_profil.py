@@ -115,7 +115,7 @@ def nova_to_internal(p, fit):
     # coupe-bas de l'entrée : 1er ordre, placé en couleur (premier biquad)
     eqs = []
     if lc:
-        eqs.append(ac.biquad("hp1", float(lc), 0.7071, 0.0, SR))
+        eqs.append(ac.biquad("hp1", float((fit.get("lowcut_fc") or {}).get(str(lc), lc)), 0.7071, 0.0, SR))
     if int(q["eqOn"]):
         for band, kidx, kval in (("lo", "loFreq", "loPeak"), ("mid", "midFreq", "midDip"), ("hi", "hiFreq", "hiPeak")):
             bq = band_biquad(fit[f"{band}_kind"], fit.get(band), q[kidx], float(q[kval]))
@@ -128,12 +128,26 @@ def nova_to_internal(p, fit):
         P[o:o + 5] = bq
     P[ac.P_OUT_A2], P[ac.P_OUT_A3], P[ac.P_OUT_SAT], P[ac.P_OUT_BIAS] = fit["out_a2"], fit["out_a3"], fit["out_sat"], fit["out_bias"]
     P[ac.P_OUT_AB], P[ac.P_OUT_KNEE] = fit["out_ab"], fit["out_knee"]
-    if int(q["transformer"]):
+    # mode 2 (saturation du grave à l'entrée, mesurée) : présente aussi transformateur coupé (mesure de l'original)
+    if int(q["transformer"]) or int(fit.get("xf_mode", 0)) == 2:
         P[ac.P_XF_K] = fit["xf_k"]
+        P[ac.P_XF_MODE] = float(fit.get("xf_mode", 0))
         P[ac.P_XF_A] = 1.0 - np.exp(-2 * np.pi * fit["xf_fc"] / SR)
     P[ac.P_MAKEUP] = 10 ** (float(q["output"]) / 20.0)
     P[ac.P_MIX] = min(1.0, max(0.0, float(q["mix"]) / 100.0))
     P[ac.P_LINK] = 0.0
+    d2 = fit.get("dyn2")
+    if d2:
+        ai = max(0, min(4, int(round(q.get("attack", 2)))))
+        rj = max(0, min(4, int(round(q.get("release", 2)))))
+        sa = d2["att_scale"][ai] if d2.get("att_scale") else 1.0
+        sr = d2["rel_scale"][rj] if d2.get("rel_scale") else 1.0
+        ac.apply_dyn2(P, d2, sa, sr, SR)
+        if d2.get("fb"):
+            P[ac.P_FB] = 1.0
+            tab = ac.ff_to_fb(tab, L0, DL)
+    ac.apply_lti(P, fit.get("lti"), SR, fit.get("lat", 0))
+    ac.apply_ws(P, fit.get("ws"))
     return P, L0, DL, np.ascontiguousarray(tab)
 
 

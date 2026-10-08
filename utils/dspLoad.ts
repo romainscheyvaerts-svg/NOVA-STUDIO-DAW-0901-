@@ -26,6 +26,8 @@ export const FX_COST_MS: Record<string, number> = {
   FLANGER: 6,
   DENOISER: 10,
   LIMITER: 10,
+  // Mastering Transient : deux STFT (512 et 128 points) + limiteur à crête vraie (mesuré ≈ 5,6 % d'un cœur sous Node).
+  MASTERTRANSIENT: 55,
   HARMONIZER: 30,
   VOICESHIFT: 25,
   TIMEFX: 15,

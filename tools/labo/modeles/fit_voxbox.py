@@ -211,7 +211,7 @@ def correct_tables(fit, iters=2):
     Lg = prof.L0 + prof.DL * np.arange(prof.NL)
     for it in range(iters):
         worst = 0
-        for t in range(3, 11):
+        for t in range(0, 11):
             case = C[f"c_th{t}"]
             proc = proc_for(fit)
             proc.configure(case["settings"])

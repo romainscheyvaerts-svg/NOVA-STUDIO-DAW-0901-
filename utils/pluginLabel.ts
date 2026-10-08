@@ -11,7 +11,7 @@ export const NOVA_FX_NAMES: Record<string, string> = {
   STEREOSPREADER: 'Stéréo', COMPRESSOR: 'Compresseur', AUTOTUNE: 'Nova Tune', DEESSER: 'De-esser',
   DENOISER: 'Anti-bruit', PROEQ12: 'Égaliseur', VOCALSATURATOR: 'Saturation', MASTERSYNC: 'Master', LIMITER: 'Limiteur',
   HARMONIZER: 'Harmoniseur', VOICESHIFT: 'Voix grave/aiguë', TIMEFX: 'Tape stop', DJFILTER: 'Filtre DJ', LOFI: 'Lo-fi', GATEFX: 'Gate rythmique', GATE: 'Gate',
-  OPTO_VINTAGE: 'Opto Vintage', FET76: 'FET 76', LEVELER2A: 'Leveler 2A', VOXSTRIP: 'Vox Strip',
+  OPTO_VINTAGE: 'Opto Vintage', FET76: 'FET 76', LEVELER2A: 'Leveler 2A', VOXSTRIP: 'Vox Strip', MASTERTRANSIENT: 'Mastering Transient',
   SAMPLER: 'Sampler', DRUM_SAMPLER: 'Drum sampler', MELODIC_SAMPLER: 'Sampler mélodique', DRUM_RACK_UI: 'Drum Rack',
 };
 
@@ -21,7 +21,7 @@ const ICONS: Record<string, string> = {
   CHORUS: 'fa-wave-square', FLANGER: 'fa-wave-square', DOUBLER: 'fa-clone', STEREOSPREADER: 'fa-arrows-alt-h',
   MASTERSYNC: 'fa-crown', VST3: 'fa-plug', LIMITER: 'fa-compress-arrows-alt',
   HARMONIZER: 'fa-users', VOICESHIFT: 'fa-theater-masks', TIMEFX: 'fa-stopwatch', DJFILTER: 'fa-filter', LOFI: 'fa-phone-alt', GATEFX: 'fa-grip-lines-vertical', GATE: 'fa-door-open',
-  OPTO_VINTAGE: 'fa-lightbulb', FET76: 'fa-bolt', LEVELER2A: 'fa-sliders-h', VOXSTRIP: 'fa-microphone',
+  OPTO_VINTAGE: 'fa-lightbulb', FET76: 'fa-bolt', LEVELER2A: 'fa-sliders-h', VOXSTRIP: 'fa-microphone', MASTERTRANSIENT: 'fa-wave-square',
 };
 
 /** Ce que l'autotune du PC publie (services/AutotuneVst : autotuneLive). */

@@ -22,6 +22,9 @@ import { NovaNoiseGateUI } from '../plugins/NoiseGatePlugin';
 import { AnalogCompNode } from './AnalogCompNode';
 import { analogAutomatable, analogDefaults } from './analogCompParams';
 import { NovaOptoVintageUI, NovaFet76UI, NovaLeveler2AUI, NovaVoxStripUI } from '../plugins/AnalogCompPlugin';
+import { MasterTransientNode } from './MasterTransientNode';
+import { MT_AUTOMATABLE, MT_DEFAULTS } from './masterTransientParams';
+import { NovaMasterTransientUI } from '../plugins/MasterTransientPlugin';
 
 export interface RegisteredPlugin {
   type: PluginType;
@@ -194,6 +197,18 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     ui: NovaVoxStripUI as any,
     automatable: analogAutomatable('VOXSTRIP'),
   },
+  {
+    type: 'MASTERTRANSIENT',
+    name: 'Mastering Transient',
+    category: 'Master',
+    icon: 'fa-wave-square',
+    color: '#fb923c',
+    description: 'Limiteur de mastering multibande (26 bandes auditives) avec emphase des attaques bande par bande et clipper doux, inspiré des maximiseurs modernes. Préréglage « PRE MASTER Romain ».',
+    defaultParams: () => ({ ...MT_DEFAULTS }),
+    create: (ctx, plugin) => new MasterTransientNode(ctx, plugin.params || {}),
+    ui: NovaMasterTransientUI as any,
+    automatable: MT_AUTOMATABLE,
+  },
 ];
 
 export const getRegisteredPlugin = (type: string): RegisteredPlugin | undefined => PLUGIN_REGISTRY.find(p => p.type === type);
@@ -208,4 +223,4 @@ export const registryMenuItems = () => PLUGIN_REGISTRY.map(p => ({ id: p.type, n
 export const usesProjectKey = (type: string) => type === 'AUTOTUNE' || !!getRegisteredPlugin(type)?.usesProjectKey;
 
 /** Vrai pour un limiteur à crête vraie (le limiteur de sécurité du master s'efface alors). */
-export const isTruePeakLimiter = (type: string) => type === 'LIMITER';
+export const isTruePeakLimiter = (type: string) => type === 'LIMITER' || type === 'MASTERTRANSIENT';

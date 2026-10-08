@@ -82,11 +82,10 @@ describe('compresseurs analogiques NOVA : registre et réglages', () => {
 });
 
 describe('Opto Vintage : courbe statique et temps', () => {
-  it('sous le seuil : passe-plat exact (mode Moderne, gain 0 dB)', () => {
+  it('sous le seuil : niveau inchangé (mode Moderne, gain 0 dB) ; seule la phase mesurée de l’original diffère', () => {
     const x = sine(0.5, -40);
     const y = run('OPTO_VINTAGE', { threshold: -10, ratio: 4, attack: 3, release: 3, mode: 2, output: 0, mix: 100 }, x).L;
-    let d = 0; for (let i = 0; i < x.length; i++) d = Math.max(d, Math.abs(x[i] - y[i]));
-    expect(d).toBeLessThan(1e-6);
+    expect(Math.abs(rmsDb(y, 4800) - rmsDb(x, 4800))).toBeLessThan(0.02);
   });
 
   it('au seuil, la réduction vaut ~1 dB (définition de l\'appareil d\'origine) ; elle croît avec le taux', () => {
@@ -184,6 +183,47 @@ describe('identique au portage du labo', () => {
         expect(Math.abs(r - c.rms_db[s]), `${c.kind} segment ${s}`).toBeLessThan(0.01);
       }
     }
+  });
+});
+
+/** Goertzel : amplitude de l'harmonique k (fréquence f0) sur un segment. */
+function harm(x: Float32Array, f0: number, k: number) {
+  const w = 2 * Math.PI * f0 * k / SR, c = 2 * Math.cos(w);
+  let s1 = 0, s2 = 0;
+  for (let i = 0; i < x.length; i++) { const s0 = x[i] + c * s1 - s2; s2 = s1; s1 = s0; }
+  return Math.sqrt(s1 * s1 + s2 * s2 - c * s1 * s2) / (x.length / 2);
+}
+const relDb = (x: Float32Array, f0: number, k: number) => 20 * Math.log10(harm(x, f0, k) / harm(x, f0, 1) + 1e-12);
+
+/** Tour 2 du labo : chiffres de l'original mesurés en boîte noire (D:/1 WORK/CONTENU/nova-labo). */
+describe('compresseurs analogiques : tour 2 du labo', () => {
+  it('latence déclarée au PDC = avance de phase mesurée de l’original (0 ou 1 échantillon)', () => {
+    for (const k of KINDS) {
+      const cfg = buildAnalogInternal(k, ANALOG_SPECS[k].defaults, ANALOG_PROFILES[k], SR);
+      const lat = Math.round(+(ANALOG_PROFILES[k].lat || 0));
+      expect(cfg.P[AC.LAT], k).toBe(lat);
+      expect(lat === 0 || lat === 1, k).toBe(true);
+    }
+  });
+
+  it('Leveler 2A sans compression : H2 / H3 de l’étage à lampes comme l’original (±3 dB)', () => {
+    // original (UADx, gain 50, 1 kHz) : -6 dBFS -> H2 -28,7 dB, H3 -15,3 dB ; -12 dBFS -> H3 -38,7 dB
+    const p = { peakReduction: 0, gain: 50, limit: 0, emphasis: 0, mix: 100 };
+    const y6 = run('LEVELER2A', p, sine(0.5, -6)).L.subarray(SR * 0.3 | 0, SR * 0.5 | 0);
+    const y12 = run('LEVELER2A', p, sine(0.5, -12)).L.subarray(SR * 0.3 | 0, SR * 0.5 | 0);
+    expect(Math.abs(relDb(y6, 1000, 2) - -28.7)).toBeLessThan(3);
+    expect(Math.abs(relDb(y6, 1000, 3) - -15.3)).toBeLessThan(3);
+    expect(Math.abs(relDb(y12, 1000, 3) - -38.7)).toBeLessThan(3);
+  });
+
+  it('Vox Strip : coupe-bas « 80 Hz » à -4,2 dB à 80 Hz comme l’original (1er ordre, coin réel ~108 Hz)', () => {
+    const d = ANALOG_SPECS.VOXSTRIP.defaults;
+    const g = (f: number, lc: number) => {
+      const y = run('VOXSTRIP', { ...d, compOn: 0, lowCut: lc }, sine(1.0, -30, f)).L;
+      return rmsDb(y, SR / 2);
+    };
+    const rel = (g(80, 80) - g(1000, 80)) - (g(80, 0) - g(1000, 0));
+    expect(Math.abs(rel - -4.17)).toBeLessThan(0.3);
   });
 });
 
