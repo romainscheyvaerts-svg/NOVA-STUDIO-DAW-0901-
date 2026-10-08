@@ -12,7 +12,7 @@ export type AnalogKind = 'OPTO_VINTAGE' | 'FET76' | 'LEVELER2A' | 'VOXSTRIP';
 
 export function buildAnalogInternal(kind: string, p: Record<string, number>, prof: any, sampleRate: number): AnalogCompInternal {
   var SR = sampleRate > 0 ? sampleRate : 48000;
-  var P = new Float64Array(387);
+  var P = new Float64Array(410);
   function num(v: any, d: number) { var x = +v; return x === x && isFinite(x) ? x : d; }
   function interp(x: number, xs: number[], ys: number[]) {
     var n = xs.length;
@@ -93,8 +93,28 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
     P[108] = d.max ? 1 : 0;
     P[127] = d.hold_ms > 0 ? coef(d.hold_ms) : 0;
     if (d.thr_db) P[1] *= Math.pow(10, d.thr_db / 20);
+    // tour 3 : petit écart de gain linéaire mesuré (sortie), calé avec la dynamique
+    if (d.trim_db) P[18] *= Math.pow(10, d.trim_db / 20);
+    var dets = d.dets;
+    if (dets && dets.length) {
+      // tour 3 : détecteur à deux voies [montée ms, descente ms, pente u/s, décalage dB, e_att, e_rel]
+      P[387] = 1;
+      P[388] = num(d.pow, 1);
+      for (var dk = 0; dk < 2 && dk < dets.length; dk++) {
+        var dvv = dets[dk], od = 389 + 4 * dk;
+        var kad = Math.pow(sa, dvv.length > 4 ? dvv[4] : 0), krd = Math.pow(sr, dvv.length > 5 ? dvv[5] : 0);
+        P[od] = dvv[0] > 0 ? coef(dvv[0] / kad) : 1;
+        P[od + 1] = dvv[1] > 0 ? coef(dvv[1] / krd) : 0;
+        P[od + 2] = dvv[2] * krd / SR;
+        P[od + 3] = dvv[3];
+        P[400 + dk] = dvv.length > 6 && dvv[6] > 0 ? Math.pow(10, dvv[6] * P[388] / 20) : 0;
+      }
+      var sel = d.sel || [0, 1, 1];
+      for (var sk = 0; sk < 3; sk++) P[397 + sk] = sk < sel.length ? sel[sk] : 0;
+      if (d.rect !== undefined) P[3] = d.rect;
+    }
     var det = d.det;
-    if (det) {
+    if (det && !(dets && dets.length)) {
       P[125] = det[0];
       P[4] = det[1] > 0 ? coef(det[1]) : 0;
       P[29] = det[2] > 0 ? coef(det[2]) : 0;
@@ -113,7 +133,22 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
       setEq(q, biquad(e[0], e[1], e[2], e[3]));
     }
   }
+  /** Tour 3 : loi statique interne = loi mesurée relue en L' = L + w0 + w1·L + w2·L²/100, réduction × (1 + w3). */
+  function warpTable(t: number[], l0: number, dl: number, w: number[]) {
+    var n = t.length, out: number[] = [];
+    var w0 = num(w[0], 0), w1 = num(w[1], 0), w2 = num(w[2], 0), w3 = num(w[3], 0);
+    for (var i = 0; i < n; i++) {
+      var L = l0 + dl * i;
+      var f = (L + w0 + w1 * L + w2 * L * L / 100 - l0) / dl, v: number;
+      if (f <= 0) v = t[0];
+      else if (f >= n - 1) v = t[n - 1];
+      else { var j = Math.floor(f); v = t[j] + (t[j + 1] - t[j]) * (f - j); }
+      out.push(v * (1 + w3));
+    }
+    return out;
+  }
   function finish(t: number[], sa: number, sr: number, d: any) {
+    if (d && d.lwarp) t = warpTable(t, prof.l0, prof.dl, d.lwarp);
     applyDyn2(d, sa, sr);
     applyLti(prof.lti);
     P[128] = Math.round(num(prof.lat, 0) * SR / 48000);

@@ -80,6 +80,39 @@ export interface MasterTransientProfile {
   limFinRelMs?: number;
   /** Loi statique du limiteur multibande (mesurée sur sinus) : réduction (dB) selon le dépassement du plafond (dB). */
   limGrOver?: number[]; limGrDb?: number[];
+  /**
+   * Tour 3 : réduction COMMUNE dans le temps (gain par échantillon, crête vraie, coude doux mesuré)
+   * au lieu de trames de 10 ms : l'original module le gain dans la période d'un grave à vitesse 1 ms.
+   * Les bandes ne portent plus que l'écart à cette réduction commune (gain adaptatif, ± dB).
+   * Relâchement = limTdRelK × (limTdRelA + vitesse) × limTdAsMul^(vitesse adaptative) (ms).
+   */
+  limTd?: number;
+  limKneeOver?: number[]; limKneeGr?: number[];
+  limLaMs?: number; limAttMs?: number; limHoldMs?: number;
+  limTdRelK?: number; limTdRelA?: number; limTdAsMul?: number;
+  /** Anticipation effective et rampe d'attaque selon la vitesse : a × vitesse^e (ms), bornées par limLaMs. */
+  limTdLa1?: number; limTdEla?: number; limTdAtt1?: number; limTdEatt?: number; limTdRelDb?: number;
+  /** Écart (dB) ajouté au niveau propre de chaque bande (crête / amplitude de trame) ; vitesse adaptative : voir limTdAs*. */
+  limOwnDb?: number;
+  /** Gain adaptatif : part de la réduction commune rendue aux bandes = limAdBeta × (adaptatif / 6 dB)^limAdP. */
+  limAdBeta?: number; limAdP?: number; limAdGamma?: number; limAdTauMs?: number; limAdSlowMs?: number;
+  /**
+   * Vitesse adaptative (domaine temps) : relâchement × (centroïde spectral / 1 kHz)^(−limTdAsK × vitesse adaptative)
+   * (plus vif dans l'aigu, plus lent dans le grave) ; anticipation et attaque × (1 + (limTdAsLa − 1) × vitesse adaptative).
+   */
+  limTdAsK?: number; limTdAsLa?: number;
+  /** Suréchantillonnage de la détection crête vraie du limiteur final (4 par défaut). */
+  limTdOs?: number;
+  /**
+   * Tour 3 : clipper mesuré = saturation instantanée y = plafond · v / (1 + |v|^k)^(1/k), v = x · poussée,
+   * AVANT le plafond en crête vraie (comme l'original) ; ln k tabulé selon la poussée (dB) et la forme (%).
+   */
+  clipDrives?: number[]; clipShapes?: number[]; clipLogK?: number[][];
+  /**
+   * Tour 3 : formes MESURÉES des bandes de l'égaliseur (poids linéaires par case de la STFT 512 à 48 kHz,
+   * pré-compensés du lissage de la fenêtre ; [première case, valeurs] par bande). Absent : triangles.
+   */
+  eqShapes?: [number, number[]][];
 }
 
 export interface MasterTransientCore {
@@ -152,6 +185,21 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
     return { lo: lo, w: w };
   }
   var WM = weights(N), bLo = WM.lo, wLo = WM.w;
+  // égaliseur : poids mesurés par case (interpolés en fréquence si la fréquence d'échantillonnage diffère)
+  var eqM: Float64Array[] | null = null, eqBin = new Float64Array(NH), eqFlat = true;
+  if (prof.eqShapes && prof.eqShapes.length === NB) {
+    eqM = [];
+    for (var be = 0; be < NB; be++) {
+      var sh = prof.eqShapes[be], row = new Float64Array(NH);
+      for (var ke = 0; ke < NH; ke++) {
+        var pos = ke * SR / N / 93.75 - sh[0], i0 = Math.floor(pos), t0 = pos - i0;
+        var v0 = i0 >= 0 && i0 < sh[1].length ? sh[1][i0] : 0, v1 = i0 + 1 >= 0 && i0 + 1 < sh[1].length ? sh[1][i0 + 1] : 0;
+        row[ke] = v0 + (v1 - v0) * t0;
+      }
+      eqM.push(row);
+    }
+  }
+  eqBin.fill(1);
   var WD = weights(Nd), bLoD = WD.lo, wLoD = WD.w;
   var win = new Float64Array(N), winD = new Float64Array(Nd);
   for (var w0 = 0; w0 < N; w0++) win[w0] = Math.sqrt(0.5 - 0.5 * Math.cos(2 * Math.PI * w0 / N));
@@ -175,7 +223,13 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
   var Pf = new Float64Array(NB), Ps = new Float64Array(NB), Lt = new Float64Array(NB), Sv = new Float64Array(NB), age = new Float64Array(NB);
   var HISTN = 4 * (LA + 2) * (H / Hd) + 64;
   var Shist = new Float64Array(HISTN * NB), jLast = -1;
-  var gLim = new Float64Array(NB), gCom = 1, curGr = new Float64Array(NB);
+  var gLim = new Float64Array(NB), gCom = 1, curGr = new Float64Array(NB), devB = new Float64Array(NB);
+  var glB = new Float64Array(NB).fill(1), gaB = new Float64Array(NB).fill(1);
+  var tdOn = !!(prof.limTd && makeLimiter);
+  // tour 3 : la crête d'une bande dépasse son amplitude « sinus » estimée sur la trame (facteur de crête)
+  var ownK = Math.pow(10, (prof.limOwnDb || 0) / 20), tdScale = 1;
+  var asK = 0;
+  var cDev = 1 - (prof.limAdTauMs ? Math.exp(-H / (prof.limAdTauMs * 0.001 * SR)) : 0);
   var G = new Float64Array(NB), gBin = new Float64Array(NH);
   var limiter: any = makeLimiter ? makeLimiter(SR) : null;
   var tmp = { l: new Float32Array(128), r: new Float32Array(128) };
@@ -186,7 +240,7 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
   var EPS = 1e-9; // plancher d'énergie (≈ −120 dBFS) : le silence ne déclenche rien
   var d0e = 1, cAf = 1, cRf = 1, cAs = 1, cRs = 1, cGs = 1, cLt = 1, holdHops = 0, qExp = 1, emA = 0, adA = 0;
   var gin = 1, gout = 1, limG = 1, limThr = 1, agDb = 0, cRelB = new Float64Array(NB);
-  var clipKw = 0.5, clipKnee0 = 0.5, clipDrive = 1, ceilLin = 1;
+  var clipKw = 0.5, clipKnee0 = 0.5, clipDrive = 1, ceilLin = 1, clipMeas = false, clipKexp = 4;
   function coefD(ms: number) { return ms <= 0 ? 1 : 1 - Math.exp(-Hd / (ms * 0.001 * SR)); }
   function coefM(ms: number) { return ms <= 0 ? 1 : 1 - Math.exp(-H / (ms * 0.001 * SR)); }
   function interp(x: number, xs: number[], ys: number[]) {
@@ -224,12 +278,18 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
       var bg = p.bandGainDb && p.bandGainDb.length === NB ? +p.bandGainDb[b] : 0;
       bandGainLin[b] = Math.pow(10, clamp(bg === bg ? bg : 0, -6, 6) / 20);
     }
+    eqFlat = true;
+    for (var bq = 0; bq < NB; bq++) if (bandGainLin[bq] !== 1) eqFlat = false;
+    if (eqM) {
+      for (var kq = 0; kq < NH; kq++) { var sq = 0; for (var bq2 = 0; bq2 < NB; bq2++) sq += eqM[bq2][kq] * bandGainLin[bq2]; eqBin[kq] = sq; }
+    }
     gin = Math.pow(10, clamp(+p.inputDb || 0, -24, 24) / 20);
     gout = Math.pow(10, clamp(+p.outputDb || 0, -24, 24) / 20);
     limG = p.limiterOn ? Math.pow(10, clamp(+p.limitGainDb || 0, 0, 12) / 20) : 1;
     ceilLin = Math.pow(10, clamp(+p.ceilingDb, -12, 0) / 20);
     limThr = ceilLin * Math.pow(10, prof.limThrDb / 20);
     agDb = p.limiterOn ? clamp(+p.adaptiveGainDb || 0, 0, 12) : 0;
+    tdScale = 1 - clamp((prof.limAdBeta || 0) * Math.pow(agDb / 6, prof.limAdP || 1), 0, 1);
     var sp = clamp(+p.speedMs, 0, 10);
     var as = clamp(+p.adaptiveSpeed || 0, 0, 100) / 100;
     for (var b2 = 0; b2 < NB; b2++) {
@@ -239,9 +299,33 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
     clipDrive = p.clipperOn ? Math.pow(10, clamp(+p.clipDriveDb || 0, 0, 12) / 20) : 1;
     clipKw = 0.5 * (1 - clamp(+p.clipShape || 0, 0, 100) / 100);
     clipKnee0 = 1 - clipKw;
+    clipMeas = !!(prof.clipLogK && prof.clipDrives && prof.clipShapes) && p.clipperOn && clipDrive > 1.0001;
+    if (clipMeas) {
+      // ln k : interpolation bilinéaire (poussée en dB, forme en %)
+      var dds = prof.clipDrives as number[], shs = prof.clipShapes as number[], lk = prof.clipLogK as number[][];
+      var dv = clamp(+p.clipDriveDb || 0, dds[0], dds[dds.length - 1]), sv = clamp(+p.clipShape || 0, shs[0], shs[shs.length - 1]);
+      var di = 0; while (di < dds.length - 2 && dds[di + 1] < dv) di++;
+      var si = 0; while (si < shs.length - 2 && shs[si + 1] < sv) si++;
+      var td = (dv - dds[di]) / (dds[di + 1] - dds[di]), ts = (sv - shs[si]) / (shs[si + 1] - shs[si]);
+      var l0 = lk[di][si] + (lk[di][si + 1] - lk[di][si]) * ts, l1 = lk[di + 1][si] + (lk[di + 1][si + 1] - lk[di + 1][si]) * ts;
+      clipKexp = Math.exp(l0 + (l1 - l0) * td);
+    }
     // Limiteur large bande final : plafond (simple protection à 0 dBTP quand le limiteur est coupé).
     // Anticipation fixe : la latence ne change jamais (PDC), crête vraie ou non.
-    if (limiter) limiter.setParams({ ceilingDb: p.limiterOn ? clamp(+p.ceilingDb, -12, 0) : 0, inputGainDb: 0, releaseMs: Math.max(1, (prof.limFinRelMs || 30) * (0.2 + sp)), lookaheadMs: 1.5, oversample: p.truePeak ? 4 : 1 });
+    asK = (prof.limTdAsK || 0) * as;
+    var laMul = Math.max(0.05, 1 + ((prof.limTdAsLa || 1) - 1) * as);
+    if (limiter && prof.limTd) {
+      // Tour 3 : réduction commune par échantillon (coude doux mesuré) ; anticipation fixe (PDC)
+      var on = !!p.limiterOn && limG > 1.0001;
+      limiter.setParams({
+        ceilingDb: p.limiterOn ? clamp(+p.ceilingDb, -12, 0) : 0, inputGainDb: 0, lookaheadMs: prof.limLaMs || 1.5,
+        releaseMs: Math.max(0.02, (prof.limTdRelK || 1) * ((prof.limTdRelA || 0) + sp) * Math.pow(prof.limTdAsMul || 1, as)),
+        oversample: p.truePeak ? (prof.limTdOs || 4) : 1, kneeOverDb: on ? prof.limKneeOver : [], kneeGrDb: on ? prof.limKneeGr : [],
+        detLookMs: prof.limTdLa1 ? Math.min(prof.limLaMs || 1.5, prof.limTdLa1 * laMul * Math.pow(Math.max(sp, 0.1), prof.limTdEla || 0)) : 0,
+        attackMs: prof.limTdAtt1 ? prof.limTdAtt1 * laMul * Math.pow(Math.max(sp, 0.1), prof.limTdEatt || 0) : (prof.limAttMs || 0),
+        holdMs: on ? (prof.limHoldMs || 0) : 0, releaseDb: !!prof.limTdRelDb, grScale: tdScale, grSlowMs: prof.limAdSlowMs || 0,
+      });
+    } else if (limiter) limiter.setParams({ ceilingDb: p.limiterOn ? clamp(+p.ceilingDb, -12, 0) : 0, inputGainDb: 0, releaseMs: Math.max(1, (prof.limFinRelMs || 30) * (0.2 + sp)), lookaheadMs: 1.5, oversample: p.truePeak ? 4 : 1 });
   }
 
   function resetState() {
@@ -249,7 +333,7 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
     for (var q = 0; q < QN; q++) { qRe[q].fill(0); qIm[q].fill(0); }
     accL.fill(0); accR.fill(0);
     Pf.fill(EPS); Ps.fill(Math.pow(EPS, qExp)); Lt.fill(EPS); Emain.fill(0); Sv.fill(0); age.fill(0); Shist.fill(0); jLast = -1;
-    gLim.fill(1); gCom = 1; curGr.fill(0);
+    gLim.fill(1); gCom = 1; curGr.fill(0); devB.fill(0); glB.fill(1); gaB.fill(1);
     if (limiter) limiter.reset();
   }
 
@@ -270,7 +354,7 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
     var o = (j % HISTN) * NB;
     var eps = EPS;
     for (var b = 0; b < NB; b++) {
-      var gl = curGr[b] > 0 ? Math.pow(10, -curGr[b] / 20) : 1; // l'emphase suit le limiteur (comme l'original)
+      var gl = glB[b]; // l'emphase suit le limiteur (comme l'original)
       var e = Ed[b] * gl * gl * gin * gin + eps;
       var pf = Pf[b];
       pf = e > pf ? pf + (e - pf) * cAf : pf + (e - pf) * cRf;
@@ -315,6 +399,13 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
       Ptot += pk;
     }
     for (var lb = 0; lb < LOWB; lb++) Emain[lb] = E[lb];
+    if (asK !== 0 && limiter && limiter.setReleaseScale) {
+      // vitesse adaptative : centroïde spectral de la trame la plus récente
+      var ce = 0, cs = 1e-20;
+      for (var bc = 0; bc < NB; bc++) { ce += E[bc] * C[bc]; cs += E[bc]; }
+      var cent = ce / cs;
+      limiter.setReleaseScale(Math.pow((cent > 20 ? cent : 20) / 1000, -asK));
+    }
     // ── limiteur multibande (sur la trame la plus récente : il anticipe de LA trames) ──
     if (p.limiterOn && limG > 1.0001) {
       var ampK = 2 / N; // amplitude (sinus) ≈ 2·√E / N
@@ -323,17 +414,26 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
       gCom = gtc < gCom ? gtc : gCom + (gtc - gCom) * cRelB[8];
       var rc = -20 * Math.log10(gCom);
       for (var b = 0; b < NB; b++) {
-        var a = ampK * Math.sqrt(E[b]) * limG * gin;
+        var a = ampK * Math.sqrt(E[b]) * limG * gin * ownK;
         var gt = kneeGain(a);
         var g = gLim[b];
         g = gt < g ? gt : g + (gt - g) * cRelB[b];
         gLim[b] = g;
         // gain adaptatif : la réduction d'une bande s'écarte d'au plus agDb de la réduction commune
-        var rr = rc + clamp(-20 * Math.log10(g) - rc, -agDb, agDb);
+        var dev = clamp((tdOn ? (prof.limAdGamma !== undefined ? prof.limAdGamma : 1) : 1) * (-20 * Math.log10(g) - rc), -agDb, agDb);
+        var rr = rc + dev;
         curGr[b] = rr > 0 ? rr : 0;
+        // tour 3 : la réduction commune est faite dans le temps (limiteur final) ; la bande ne porte que l'écart,
+        // ou, avec le gain adaptatif (limAdBeta), ce que la part commune réduite ne fait plus
+        var dv = tdOn ? (prof.limAdBeta && !prof.limAdSlowMs ? Math.max(0, -20 * Math.log10(g) - tdScale * rc) : dev) : 0;
+        // écart lissé (l'adaptation des bandes est lente : moyenne sur limAdTauMs)
+        devB[b] = cDev < 1 ? devB[b] + (dv - devB[b]) * cDev : dv;
+        // gains linéaires de la trame, calculés UNE fois (la détection les relit 4 fois par trame)
+        glB[b] = curGr[b] > 0 ? Math.pow(10, -curGr[b] / 20) : 1;
+        gaB[b] = tdOn ? (devB[b] !== 0 ? Math.pow(10, -devB[b] / 20) : 1) : glB[b];
       }
     } else if (curGr[0] !== 0 || curGr[NB - 1] !== 0) {
-      curGr.fill(0); gLim.fill(1); gCom = 1;
+      curGr.fill(0); gLim.fill(1); gCom = 1; devB.fill(0); glB.fill(1); gaB.fill(1);
     }
     if (qFill < QN) return; // file pas encore pleine : rien à synthétiser
     // ── emphase de la trame m = la plus ancienne de la file ──
@@ -347,8 +447,9 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
       var smx = 0;
       for (var jj = j0; jj <= j1; jj++) { var v = Shist[(jj % HISTN) * NB + b4]; if (v > smx) smx = v; }
       var ge = 1 + emA * bandT[b4] / 100 * smx;
-      var gl2 = curGr[b4] > 0 ? Math.pow(10, -curGr[b4] / 20) : 1;
-      G[b4] = ge * gl2 * bandGainLin[b4] * limG * gin;
+      var gl2 = glB[b4];
+      var ga = gaB[b4];
+      G[b4] = ge * ga * (eqM ? 1 : bandGainLin[b4]) * limG * gin;
       if (p.soloBand >= 0 && p.soloBand < NB && p.soloBand !== b4) G[b4] = 0;
       if (ge > mEmph) mEmph = ge;
       if (gl2 < mGr) mGr = gl2;
@@ -356,6 +457,7 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
       if (curGr[b4] > bandGrMax[b4]) bandGrMax[b4] = curGr[b4];
     }
     for (var k2 = 0; k2 < NH; k2++) gBin[k2] = wLo[k2] * G[bLo[k2]] + (1 - wLo[k2]) * G[bLo[k2] + 1];
+    if (eqM && !eqFlat) for (var k4 = 0; k4 < NH; k4++) gBin[k4] *= eqBin[k4];
     var sr = qRe[qHead], si = qIm[qHead];
     for (var k3 = 0; k3 < N; k3++) {
       var gg = gBin[k3 <= N / 2 ? k3 : N - k3];
@@ -373,6 +475,14 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
   }
 
   /** Clipper doux : identité sous le coude, puis tangente hyperbolique jusqu'au plafond (forme 100 % = écrêtage dur). */
+  /** Saturation mesurée (profil clipLogK) : plafond · v / (1 + |v|^k)^(1/k). */
+  function measClip(x: number) {
+    var v = x * clipDrive, av = v < 0 ? -v : v;
+    if (av < 1e-9) return x * clipDrive * ceilLin;
+    var y = av / Math.pow(1 + Math.pow(av, clipKexp), 1 / clipKexp);
+    return (v < 0 ? -y : y) * ceilLin;
+  }
+
   function softClip(x: number) {
     if (!p.clipperOn || clipDrive <= 1.0001) return x;
     var v = x * clipDrive / ceilLin, av = v < 0 ? -v : v;
@@ -402,6 +512,8 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
       if (count % Hd === 0) detectHop();
       if (count % H === 0) hop();
     }
+    // clipper mesuré : avant le plafond en crête vraie (le limiteur final rattrape les crêtes entre échantillons)
+    if (clipMeas) for (var jc = 0; jc < n; jc++) { tl[jc] = measClip(tl[jc]); tr[jc] = measClip(tr[jc]); }
     // limiteur large bande (plafond), clipper, gain de sortie
     if (limiter) {
       if (p.limiterOn || p.protect !== false) limiter.process(tl, tr, tl, tr, n);
@@ -418,7 +530,7 @@ export function createMasterTransientCore(sampleRate: number, profile: MasterTra
       }
     }
     for (var j = 0; j < n; j++) {
-      var yl = softClip(tl[j]) * gout, yr = softClip(tr[j]) * gout;
+      var yl = (clipMeas ? tl[j] : softClip(tl[j])) * gout, yr = (clipMeas ? tr[j] : softClip(tr[j])) * gout;
       outL[j] = yl; if (outR) outR[j] = yr;
       var ay = Math.max(yl < 0 ? -yl : yl, yr < 0 ? -yr : yr);
       if (ay > mOut) mOut = ay;
