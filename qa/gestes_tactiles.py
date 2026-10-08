@@ -275,8 +275,16 @@ def scenario_tab_menus(browser, log):
         # Un toucher simple sur l'effet l'ouvre toujours (le clic du lever n'est avalé qu'après un appui long).
         chip.tap(); page.wait_for_timeout(900)
         editor = page.get_by_text("Rend le volume de la voix", exact=False).locator("visible=true")
+        # Fenêtre d'effet chargée à la demande : sur une machine très chargée, son code peut
+        # mettre plus de 0,9 s à arriver (« Chargement… »). On attend la fenêtre (15 s au plus)
+        # avant de juger, et avant de continuer : ouverte en retard, elle recouvrait les pistes
+        # et faisait échouer le glisser suivant.
+        waited = 0
+        while not editor.count() and waited < 15000:
+            page.wait_for_timeout(250); waited += 250
+        RES["tab_effet_ouvert_apres_ms"] = 900 + waited
         shot(page, "tab_06_effet_tap_ouvre")
-        ok("tab · un toucher simple sur l'effet l'ouvre (fenêtre du Compresseur)", editor.count() >= 1)
+        ok("tab · un toucher simple sur l'effet l'ouvre (fenêtre du Compresseur)", editor.count() >= 1, {"ouverte_apres_ms": 900 + waited})
         page.keyboard.press("Escape"); page.wait_for_timeout(300)
         for _ in range(3):
             if not editor.count(): break
