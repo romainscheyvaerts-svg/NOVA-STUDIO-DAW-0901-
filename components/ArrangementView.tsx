@@ -45,6 +45,8 @@ import { takeNumberOf } from '../utils/takes';
 import { dragTipText, FADE_PRESETS, fadeWithPreset } from '../utils/dragLabels';
 import { canvasTheme } from '../utils/canvasTheme';
 import { useTheme } from '../utils/themeStore';
+import { shownTrackIds } from '../utils/trackStructure';
+import { structureMenuItems } from './TrackStructure';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -528,7 +530,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   // Mode simple : ni bus ni lignes d'automation à l'écran (gardés dans le projet).
   const { simple } = useSimpleMode();
   const visibleTracks = useMemo(() => {
-    const list = tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master' && !(simple && t.type === TrackType.BUS));
+    // Structure Pro Tools : pistes masquées et pistes de dossiers repliés hors de l'écran (utils/trackStructure).
+    const shown = shownTrackIds(tracks);
+    const list = tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master' && !(simple && t.type === TrackType.BUS) && shown.has(t.id));
     if (!simple) return list;
     return list.map(t => t.automationLanes.some(l => l.isExpanded)
       ? { ...t, automationLanes: t.automationLanes.map(l => ({ ...l, isExpanded: false })) }
@@ -797,6 +801,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       menuItems.push({ label: "Changer d'instrument", onClick: () => onSwapInstrument(trackId), icon: 'fa-exchange-alt' });
     }
     menuItems.push(...midiTrackMenuItems(target, () => setContextMenu(null)));
+    menuItems.push(...structureMenuItems(target, tracks));
     setContextMenu({ x: e.clientX, y: e.clientY, items: menuItems });
   };
   

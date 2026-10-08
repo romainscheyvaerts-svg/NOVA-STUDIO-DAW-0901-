@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { PluginInstance } from '../types';
 import { PluginName, usePluginTitle } from './PluginName';
+import { FloatingMenu, handlePluginModifierClick, pluginStateClass, pluginStateHelp, pluginStateMenuItems, useLongPress } from './TrackStructure';
 
 /**
  * Effets de la piste, lisibles d'un coup d'œil (comme les inserts de Pro Tools) :
@@ -22,8 +23,11 @@ export interface TrackInsertStripProps {
   idle?: boolean;
 }
 
-const Chip: React.FC<{ p: PluginInstance; baked: boolean } & Omit<TrackInsertStripProps, 'trackId' | 'plugins' | 'isBaked' | 'onShowAll'>> = ({ p, baked, onOpen, onToggle, onRemove, onDragStart }) => {
+const Chip: React.FC<{ p: PluginInstance; baked: boolean; trackId: string } & Omit<TrackInsertStripProps, 'trackId' | 'plugins' | 'isBaked' | 'onShowAll'>> = ({ p, baked, trackId, onOpen, onToggle, onRemove, onDragStart }) => {
   const bakedVst = baked && p.type === 'VST3';
+  // Menu de l'effet (clic droit, appui long au doigt) : actif / bypass / inactif.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const { consumed: lpConsumed, ...lpHandlers } = useLongPress((x, y) => { if (!baked) setMenu({ x, y }); });
   const title = usePluginTitle(p);
   return (
     <div
@@ -35,20 +39,26 @@ const Chip: React.FC<{ p: PluginInstance; baked: boolean } & Omit<TrackInsertStr
       <button
         type="button"
         onClick={(e) => {
-          if ((e.ctrlKey || e.metaKey) && !baked) { onToggle(e, p); return; }
+          if (lpConsumed()) return;
+          // Ctrl+clic : bypass ; Ctrl+Alt+clic : actif / inactif (Pro Tools : Ctrl+Démarrer+clic).
+          if (!baked && handlePluginModifierClick(e, trackId, p, () => onToggle(e, p))) return;
           onOpen(e, p);
         }}
+        onContextMenu={(e) => { if (baked) return; e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY }); }}
+        {...lpHandlers}
         title={bakedVst
           ? "Rendu (VST du PC) : déjà inclus dans l'audio de la piste. Pour le régler, ouvre le projet sur ton PC avec le pont VST."
-          : baked ? 'Inclus dans le rendu gelé de la piste' : `${title} · Ctrl+clic : activer / désactiver`}
+          : baked ? 'Inclus dans le rendu gelé de la piste' : `${title} · ${pluginStateHelp(p)}`}
         aria-label={`Ouvrir ${p.name || p.type}`}
-        className={`max-w-full h-5 rounded-md border px-1.5 text-[10px] font-semibold flex items-center transition-colors ${p.isEnabled
+        data-fx-state={p.isInactive ? 'inactive' : p.isEnabled ? 'active' : 'bypass'}
+        className={`max-w-full h-5 rounded-md border px-1.5 text-[10px] font-semibold flex items-center transition-colors ${pluginStateClass(p)} ${p.isEnabled && !p.isInactive
           ? (p.type === 'VST3' ? 'border-fuchsia-400/25 bg-fuchsia-500/10 text-fuchsia-100 hover:bg-fuchsia-500/20' : 'border-cyan-400/20 bg-black/40 text-cyan-100 hover:bg-white/10')
-          : 'border-white/5 bg-black/20 text-slate-500 line-through'}`}
+          : `border-white/5 bg-black/20 text-slate-500 ${p.isInactive ? '' : 'line-through'}`}`}
       >
         <PluginName plugin={p} showDetail compact />
       </button>
       {!baked && <button type="button" onClick={(e) => onRemove(e, p.id)} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${p.name || p.type}`}><i className="fas fa-times"></i></button>}
+      {menu && <FloatingMenu x={menu.x} y={menu.y} title={p.name || p.type} onClose={() => setMenu(null)} items={pluginStateMenuItems(trackId, p, () => onOpen({ stopPropagation() {}, preventDefault() {} } as unknown as React.MouseEvent, p))} />}
     </div>
   );
 };
@@ -86,7 +96,7 @@ const TrackInsertStrip: React.FC<TrackInsertStripProps> = (props) => {
       {props.leading}
       <div ref={box} className={`flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden no-scrollbar ${props.idle ? 'opacity-50' : ''}`} data-testid={`inserts-${trackId}`}
         title={props.idle ? 'Piste vide : ces effets sont prêts pour ta prochaine prise ici' : undefined}>
-        {plugins.map(p => <Chip key={p.id} p={p} baked={isBaked(p)} {...props} />)}
+        {plugins.map(p => <Chip key={p.id} p={p} baked={isBaked(p)} {...props} trackId={trackId} />)}
       </div>
       {hidden > 0 && (
         <button type="button" onClick={(e) => { e.stopPropagation(); onShowAll(e); }}

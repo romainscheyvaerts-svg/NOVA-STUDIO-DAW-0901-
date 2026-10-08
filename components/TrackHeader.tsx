@@ -34,6 +34,7 @@ import { openSynthPanel } from '../utils/synthPanelStore';
 import MonitorControl from './MonitorControl';
 import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
+import { TrackStructureBadge } from './TrackStructure';
 import AutomationModeSelector from './AutomationModeSelector';
 import { automationRecorder } from '../services/AutomationManager';
 import { useLiveParam } from '../utils/automationLiveStore';
@@ -431,6 +432,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       className={`group border-b border-white/[0.06] px-3 py-2 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${frozen ? 'bg-cyan-500/[0.03]' : ''}${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
       style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined, scrollMarginTop: 44, scrollMarginBottom: 8 }}
     >
+      <TrackStructureBadge track={track} />
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center truncate flex-1 pr-2">
           <div 

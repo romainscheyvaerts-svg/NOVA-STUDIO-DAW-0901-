@@ -47,7 +47,7 @@ const InsertListPopover: React.FC<{
         <div key={p.id} className="flex items-center gap-1 rounded-lg hover:bg-white/5">
           <span className="w-4 shrink-0 text-right text-[10px] tabular-nums text-slate-600">{i + 1}</span>
           <button type="button" role="menuitem" onClick={() => { onClose(); onOpen(p); }}
-            className={`flex-1 min-w-0 truncate px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 text-left text-[12px] font-semibold ${p.isEnabled ? 'text-white' : 'text-slate-500 line-through'}`}>
+            className={`flex-1 min-w-0 truncate px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 text-left text-[12px] font-semibold ${p.isInactive ? 'text-slate-500 italic opacity-60' : p.isEnabled ? 'text-white' : 'text-slate-500 line-through'}`}>
             <PluginName plugin={p} showDetail className="max-w-full" />
           </button>
           <button type="button" onClick={() => onToggle(p)} aria-pressed={p.isEnabled}
