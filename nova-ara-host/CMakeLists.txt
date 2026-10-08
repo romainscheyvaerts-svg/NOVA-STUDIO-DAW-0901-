@@ -1,4 +1,4 @@
-﻿# NovaARAHost : petit hôte ARA2 (Melodyne, VocAlign…) piloté par le pont Python de Nova Studio.
+# NovaARAHost : petit hôte ARA2 (Melodyne, VocAlign…) piloté par le pont Python de Nova Studio.
 # SANS JUCE. Sources externes (dépôts officiels GitHub, jamais de binaires tiers) :
 #   VST3 SDK https://github.com/steinbergmedia/vst3sdk  (v3.8.1_build_84, licence MIT)
 #            sous-modules utilisés : base, pluginterfaces, public.sdk
@@ -65,6 +65,8 @@ add_executable(NovaARAHost WIN32
     Source/Main.cpp
     Source/Vst3Plugin.cpp
     Source/EditorWindow.cpp
+    Source/DockedEditor.cpp
+    Source/AudioPipe.cpp
     Source/WasapiOutput.cpp
     Source/NovaARAHost.rc)
 target_compile_options(NovaARAHost PRIVATE /W3 /utf-8 /permissive-)

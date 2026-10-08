@@ -433,6 +433,7 @@ namespace nova
         ctx.projectTimeMusic = (double) t.timeInSamples / sr * t.bpm / 60.0;
         const double barLen = 4.0 * (double) t.sigNum / (double) std::max (1, t.sigDen);
         ctx.barPositionMusic = std::floor (ctx.projectTimeMusic / barLen) * barLen;
+        if (t.musicPos >= 0.0) { ctx.projectTimeMusic = t.musicPos; ctx.barPositionMusic = t.barPos >= 0.0 ? t.barPos : ctx.barPositionMusic; }
         ctx.state = ProcessContext::kTempoValid | ProcessContext::kTimeSigValid | ProcessContext::kProjectTimeMusicValid
                   | ProcessContext::kBarPositionValid | ProcessContext::kSystemTimeValid | ProcessContext::kContTimeValid
                   | (t.playing ? ProcessContext::kPlaying : 0);

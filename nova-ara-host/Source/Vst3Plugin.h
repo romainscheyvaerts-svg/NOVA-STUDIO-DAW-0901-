@@ -39,6 +39,8 @@ namespace nova
         double bpm = 120.0;
         int sigNum = 4, sigDen = 4;
         bool playing = false;
+        // Piste tempo (insert ARA) : position musicale (noires) et début de mesure ; < 0 : tempo constant.
+        double musicPos = -1.0, barPos = -1.0;
     };
 
     class Vst3Plugin
