@@ -381,12 +381,27 @@ namespace nova
     bool VstInstance::textFor (int index, double v, std::string& out)
     {
         if (! controller || index < 0 || index >= (int) params.size()) return false;
+        if ((size_t) index < textBroken.size() && textBroken[(size_t) index]) return false;
         String128 s {};
         tresult r = kResultFalse;
         const ParamID id = params[(size_t) index].id;
         auto* c = controller.get();
         if (! guard::call ([&] { r = c->getParamStringByValue (id, v, s); }))
-            throw guard::Crash ("Le plugin a planté en affichant un réglage (getParamStringByValue)");
+        {
+            // Lecture fautive dans la fonction d'affichage (RUBY2 : violation d'accès en lecture) :
+            // ce réglage prend le texte de repli ; au-delà de 64 plantages, l'instance est perdue.
+            if (textBroken.size() < params.size()) textBroken.resize (params.size(), false);
+            textBroken[(size_t) index] = true;
+            if (++textCrashes > 64)
+                throw guard::Crash ("Le plugin a planté en affichant ses réglages (getParamStringByValue)");
+            if (emit)
+            {
+                auto o = json::Value::object();
+                o.set ("message", "texte du réglage « " + params[(size_t) index].title + " » indisponible (le plugin plante)");
+                emit ("log", o);
+            }
+            return false;
+        }
         if (r != kResultOk) return false;
         s[127] = 0;
         out = StringConvert::convert (s);

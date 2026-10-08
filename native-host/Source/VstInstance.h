@@ -140,6 +140,7 @@ namespace nova
 
         // Réglages bougés dans la fenêtre du plugin : envoyés au pont si vrai.
         std::atomic<bool> reportEdits { true };
+        int textCrashes = 0;
 
     private:
         class HostContext;
@@ -164,6 +165,8 @@ namespace nova
 
         std::unique_ptr<std::atomic<float>[]> cache;
         std::unordered_map<Steinberg::Vst::ParamID, int> idToIndex;
+        // Réglages dont le texte fait planter le plugin (RUBY2) : texte de repli, plus d'appel.
+        std::vector<bool> textBroken;
         // Contrôleurs MIDI → réglages (IMidiMapping), relus sur le fil principal : 16 canaux × 130.
         std::vector<Steinberg::Vst::ParamID> ccMap;
 
