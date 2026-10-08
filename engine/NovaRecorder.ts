@@ -9,13 +9,15 @@
  * exacte, il ne reste qu'à retirer la latence d'entrée / sortie mesurée.
  */
 
+import { retireWorkletNode } from './workletGuard';
+
 const WORKLET = `
 class NovaRecorder extends AudioWorkletProcessor {
   constructor() {
     super();
     this.on = false;
     this.first = -1;
-    this.chunk = new Float32Array(16384);
+    this.chunk = new Float32Array(8192);
     this.n = 0;
     this.port.onmessage = (e) => {
       if (e.data === 'start') { this.on = true; this.first = -1; this.n = 0; }
@@ -75,12 +77,18 @@ export class NovaRecorderSession {
   private chunks: Float32Array[] = [];
   private donePromise: Promise<number>;
   private resolveDone!: (first: number) => void;
+  /** Chaque morceau capté (≈ 0,37 s), au fil de l'eau : journal de prise (récupération après plantage). */
+  public onChunk: ((chunk: Float32Array) => void) | null = null;
 
   constructor(private ctx: AudioContext, source: AudioNode) {
     this.node = new AudioWorkletNode(ctx, 'nova-recorder', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
     this.donePromise = new Promise(r => { this.resolveDone = r; });
     this.node.port.onmessage = (e) => {
-      if (e.data?.type === 'data') this.chunks.push(e.data.data as Float32Array);
+      if (e.data?.type === 'data') {
+        const c = e.data.data as Float32Array;
+        this.chunks.push(c);
+        try { this.onChunk?.(c); } catch { /* le journal ne doit jamais gêner la prise */ }
+      }
       else if (e.data?.type === 'done') this.resolveDone(Number(e.data.first));
     };
     // Le nœud doit être relié à la sortie pour être cadencé ; il n'y envoie que du silence.
@@ -98,6 +106,8 @@ export class NovaRecorderSession {
     const firstFrame = await Promise.race([this.donePromise, new Promise<number>(r => setTimeout(() => r(-1), 2000))]);
     try { source.disconnect(this.node); } catch { /* déjà déconnecté */ }
     try { this.node.disconnect(); this.sink.disconnect(); } catch { /* */ }
+    // Sinon le processeur de chaque prise restait vivant et calculé (fuite mesurée).
+    retireWorkletNode(this.node);
     const total = this.chunks.reduce((s, c) => s + c.length, 0);
     const samples = new Float32Array(total);
     let o = 0;

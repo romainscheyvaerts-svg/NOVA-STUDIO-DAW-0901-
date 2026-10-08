@@ -16,6 +16,7 @@
  */
 import { createLimiterCore, limiterLatencySamples } from './limiterCore';
 import { loadWorkletModule } from '../plugins/vocalDspUtils';
+import { retireWorkletNode } from './workletGuard';
 
 export interface LimiterParams {
   /** Plafond de sortie (dBTP). */
@@ -110,6 +111,8 @@ export class LimiterNode {
   public readonly ready: Promise<void>;
   private ctx: BaseAudioContext;
   private worklet: AudioWorkletNode | null = null;
+  /** Limiteur retiré : un worklet encore en chargement n'est pas créé (sinon il restait vivant). */
+  private disposed = false;
   private params: LimiterParams = { ...DEFAULT_LIMITER_PARAMS };
   private meters = { grDb: 0, outPeakDb: -120, inPeakDb: -120, at: 0 };
   private failed = false;
@@ -127,6 +130,7 @@ export class LimiterNode {
   private async init() {
     try {
       await loadWorkletModule(this.ctx, 'nova-limiter-v3', WORKLET_CODE);
+      if (this.disposed) return;
       const parameterData: Record<string, number> = {};
       for (const a of LIMITER_AUDIO_PARAMS) parameterData[a.name] = this.params[a.name];
       this.worklet = new AudioWorkletNode(this.ctx, 'nova-limiter-processor-v3', {
@@ -148,6 +152,13 @@ export class LimiterNode {
       this.failed = true;
       this.input.connect(this.output);
     }
+  }
+
+  /** Limiteur retiré : worklet mis à la retraite (ou jamais créé s'il chargeait encore). */
+  public dispose() {
+    this.disposed = true;
+    if (this.worklet) { retireWorkletNode(this.worklet); this.worklet = null; }
+    try { this.input.disconnect(); } catch (e) { /* */ }
   }
 
   /** Retard ajouté (s), compensé par le moteur (PDC). */

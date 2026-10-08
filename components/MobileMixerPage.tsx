@@ -2,6 +2,10 @@ import React, { useEffect, useRef } from 'react';
 import MobileContainer from './MobileContainer';
 import { Track, TrackType } from '../types';
 import { structureBus } from '../utils/structureBus';
+import TrackMeter from './meters/TrackMeter';
+import StripHead from './meters/StripHead';
+import { loudnessPanel } from './meters/LoudnessPanel';
+import { MASTER_OUT } from '../engine/meters/meterBank';
 
 interface MobileMixerPageProps {
   tracks: Track[];
@@ -181,12 +185,16 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                     <div className="h-20" />
                   )}
 
-                  <VerticalFader
-                    value={t.volume}
-                    color={color}
-                    label={`Volume ${isMaster ? 'master' : t.name}`}
-                    onChange={(v) => { onUpdateTrack({ ...t, volume: v }); if (!isSelected) onSelectTrack(t.id); }}
-                  />
+                  <div className="flex items-stretch gap-1.5">
+                    <VerticalFader
+                      value={t.volume}
+                      color={color}
+                      label={`Volume ${isMaster ? 'master' : t.name}`}
+                      onChange={(v) => { onUpdateTrack({ ...t, volume: v }); if (!isSelected) onSelectTrack(t.id); }}
+                    />
+                    {/* Vrai mètre G / D + réduction de gain (R11). */}
+                    <TrackMeter pointId={isMaster ? MASTER_OUT : t.id} grTrackId={t.id} grText={false} marks={false} label={isMaster ? 'Sortie master' : t.name} className="w-[14px] h-48" />
+                  </div>
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...t, volume: 1 }); }}
@@ -240,6 +248,12 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
             <span className="text-xs text-slate-400">
               {current.type === TrackType.BUS ? 'Bus' : current.type}
             </span>
+          </div>
+          {/* Tête de tranche (R11) : Ø, mono, trim, largeur ; fenêtre Loudness. */}
+          <div className="mb-3 flex items-center gap-2">
+            <div className="flex-1"><StripHead track={current} onUpdate={onUpdateTrack} /></div>
+            <button type="button" onClick={() => loudnessPanel.toggle()} aria-label="Ouvrir la fenêtre Loudness"
+              className="h-11 px-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-[11px] font-bold text-cyan-300"><i className="fas fa-wave-square mr-1" />LUFS</button>
           </div>
           <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">
             Inserts ({insertPlugins.length})

@@ -15,5 +15,9 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['tests/setup.ts'],
     restoreMocks: true,
+    // 5 s par défaut : trop court quand la suite tourne en parallèle sur une machine
+    // chargée (Pro Tools ouvert) — les 1ers imports à froid du moteur dépassaient
+    // 5 s sans aucun défaut. Un vrai blocage reste détecté.
+    testTimeout: 30_000,
   },
 });

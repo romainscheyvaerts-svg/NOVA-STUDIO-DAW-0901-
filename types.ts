@@ -100,7 +100,7 @@ export interface PendingUpload {
 
 export type AuthStage = 'LOGIN' | 'REGISTER' | 'VERIFY_EMAIL' | 'FORGOT_PASSWORD';
 
-export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX' | 'GATE' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
+export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX' | 'GATE' | 'OPTO_VINTAGE' | 'FET76' | 'LEVELER2A' | 'VOXSTRIP' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
 
 export interface PluginMetadata {
   id: string;
@@ -293,6 +293,8 @@ export interface Clip {
   isReversed?: boolean; 
   audioRef?: string;
   isUnlicensed?: boolean;
+  /** Son introuvable ou illisible à l'ouverture (projet réparé) : clip gardé à sa place, muet. */
+  isOffline?: boolean;
   warp?: WarpSettings;            // NEW: time stretch (Ableton-style)
   groupId?: string;               // NEW: clip grouping
   /**
@@ -689,6 +691,14 @@ export interface Track {
   isFrozen: boolean;
   volume: number;
   pan: number;
+  /** Tête de tranche (R11), avant les inserts : trim d'entrée en dB (−24 à +24, 0 par défaut). */
+  inputTrimDb?: number;
+  /** Inversion de polarité Ø des deux canaux. */
+  phaseInvert?: boolean;
+  /** Somme mono (prime sur la largeur). */
+  monoSum?: boolean;
+  /** Largeur stéréo : 0 = mono, 1 = inchangée (défaut), 2 = très large. */
+  stereoWidth?: number;
   inputDeviceId?: string; 
   outputTrackId: string;  
   instrumentId?: string | number; 

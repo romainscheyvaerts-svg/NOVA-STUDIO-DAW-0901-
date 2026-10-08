@@ -13,7 +13,8 @@ dans quatre cas de latence :
   3. limiteur AVANT le compresseur sur la 808 (latence en amont du son traité) ;
   4. limiteur APRÈS le compresseur sur la 808 (le kick doit partir plus tôt).
 Puis « Voix qui creuse le beat » (le beat baisse de 1 à 3 dB quand la voix est là), « Pompe »
-(profondeur), Gate « Haché par les charleys », et le de-esser en écoute externe.
+(profondeur), Gate « Haché par les charleys », le de-esser en écoute externe, et un compresseur
+analogique du labo (FET 76) avec la même clé (fet) comparé au même sans clé (fetSeul).
 
 Usage : serveur `npx vite --port 3447 --strictPort`, puis
   set NOVA_URL=http://127.0.0.1:3447/ && python qa/r7_sidechain.py
@@ -81,13 +82,23 @@ const EXTRA = (sr) => {
   const hats = new Float32Array(Math.round(3 * sr)); { let s = 7; for (let k = 0; k < 12; k++) { const i0 = Math.round((0.1 + k * 0.25) * sr); for (let i = 0; i < 0.03 * sr; i++) { s = (s * 1664525 + 1013904223) >>> 0; hats[i0 + i] = 0.6 * (s / 4294967296 * 2 - 1) * Math.exp(-i / sr * 120); } } }
   const padRef = sine(3, 0.4, 1000, sr);
   const gate = { sec: 3, ref: padRef, tracks: [trk('hats', toBuf(hats, sr), [], { isMuted: true }), trk('pad', toBuf(padRef, sr), [pl('gate', 'GATE', preset('gate-cle-hats'), { sidechainSourceId: 'hats' })])] };
-  return { v, pompe, gate };
+  // Compresseur analogique du labo (FET 76, réglages d'usine) avec la même clé : il ne doit
+  // compresser QUE sous le kick (kick fantôme muet) ; sans clé, il écrase le sinus en continu.
+  const fetRef = sine(3.6, 0.7, 2000, sr);
+  const fet = { sec: 3.6, ref: fetRef, tracks: [trk('kick', toBuf(kickSig(3.6, sr), sr), [], { isMuted: true }), trk('basse', toBuf(fetRef, sr), [pl('fet', 'FET76', {}, { sidechainSourceId: 'kick' })])] };
+  const fetSeul = { sec: 3.6, ref: fetRef, tracks: [trk('basse', toBuf(fetRef, sr), [pl('fet', 'FET76', {})])] };
+  return { v, pompe, gate, fet, fetSeul };
 };
 const EXTRAMEAS = (k, y, sr, sc) => {
   const g = gainTrack(y, sc.ref, sr, 0.002);
   const avg = (a, z) => r2(g.filter(([t]) => t >= a && t < z).reduce((s, [, v]) => s + v, 0) / Math.max(1, g.filter(([t]) => t >= a && t < z).length));
   if (k === 'v') return { attendu: 'beat à 0 dB hors de la voix ; baisse de 1 à 3 dB pendant la voix (1,0–2,0 s)', avant_db: avg(0.3, 0.9), pendant_db: avg(1.2, 1.9), apres_db: avg(2.6, 2.95) };
   if (k === 'pompe') { const rows = perKick(g, KICKS); return { attendu: 'grosse pompe : ≥ 10 dB à chaque kick', reduction_par_kick_db: rows.map(r => r.reduction_max_db), debut_ms: rows.map(r => r.ecart_ms) }; }
+  if (k === 'fet' || k === 'fetSeul') {
+    const rows = perKick(g, KICKS);
+    return { attendu: k === 'fet' ? 'clé = kick : réduction sur chaque kick, aucune avant le 1er kick (0,05–0,2 s)' : 'sans clé : le sinus fort est compressé dès le début',
+      avant_premier_kick_db: avg(0.05, 0.2), reduction_par_kick_db: rows.map(r => r.reduction_max_db), debut_ms: rows.map(r => r.ecart_ms) };
+  }
   if (k === 'gate') {
     let open = 0, closed = 0, no = 0, nc = 0;
     for (const [t, v] of g) { const ph = ((t - 0.1) % 0.25 + 0.25) % 0.25; if (t < 0.1) continue; if (ph > 0.005 && ph < 0.025) { open += v; no++; } else if (ph > 0.12 && ph < 0.22) { closed += v; nc++; } }

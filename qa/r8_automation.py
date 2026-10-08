@@ -5,6 +5,10 @@ Scénarios, à l'export (renderProject) ET en lecture réelle (sortie du master 
 AudioWorklet témoin), à 48 kHz :
  A. Compresseur : seuil automatisé 0 → −30 dB à 2,000 s (palier), sinus 997 Hz à −6 dBFS, ratio 20 ;
  B. EQ : fréquence de la bande 5 (cloche +12 dB, Q 4) automatisée 500 → 4000 Hz à 2,000 s, sinus 4 kHz ;
+ B2. EQ : GAIN de la bande 5 (cloche à 4 kHz, 0 dB fixe : bande neutre, retirée de la chaîne par
+    l'égaliseur économe) automatisé 0 → +12 dB à 2,000 s : la voie doit la remettre en chaîne ;
+ A2. Opto Vintage (labo) : gain de sortie automatisé 0 → −12 dB à 2,000 s, sinus faible (pas de
+    compression) : le niveau baisse de 12 dB pile à 2,000 s ;
  C. Reverb : mix automatisé 0 → 100 % à 2,000 s (palier) puis rampe 100 → 0 % de 3 à 5 s ;
  D. Mute : voie « Muet » 0 → 1 à 1,500 s → 0 à 2,500 s, piste routée vers un bus qui porte un
     limiteur (latence en aval : le mute doit rester calé sur la musique, pas avancé ni retardé).
@@ -60,9 +64,15 @@ const SCEN = (sr) => {
   // A. Compresseur : seuil 0 → −30 dB à 2,000 s.
   s.A = { sec: 4, tracks: [audioTrack('voix', toBuf(sine(4, 0.5, 997, sr), sr), [pl('comp', 'COMPRESSOR', { threshold: 0, ratio: 20, knee: 0, attack: 0.0005, release: 0.05, makeupGain: 1, mix: 1, scHpFreq: 20, lookahead: 0, autoMakeup: false, mode: 'CLEAN', isEnabled: true })],
     [laneP('comp', 'threshold', [[0, 0], [2.0, -30]], -60, 0)])] };
+  // A2. Opto Vintage : gain de sortie 0 → −12 dB à 2,000 s (sinus à −40 dBFS, sous le seuil).
+  s.A2 = { sec: 4, tracks: [audioTrack('voix', toBuf(sine(4, 0.01, 997, sr), sr), [pl('opto', 'OPTO_VINTAGE', { threshold: 0, output: 0, mix: 100 })],
+    [laneP('opto', 'output', [[0, 0], [2.0, -12]], -18, 28)])] };
   // B. EQ : bande 5 en cloche +12 dB, Q 4 ; fréquence 500 → 4000 Hz à 2,000 s ; sinus 4 kHz.
   const bands = Array.from({ length: 12 }, (_, i) => ({ id: i, type: i === 4 ? 'peaking' : 'peaking', frequency: [80,150,300,500,500,2000,4000,6000,8000,10000,12000,18000][i], gain: i === 4 ? 12 : 0, q: i === 4 ? 4 : 1, isEnabled: true, isSolo: false }));
   s.B = { sec: 4, tracks: [audioTrack('synth', toBuf(sine(4, 0.1, 4000, sr), sr), [pl('eq', 'PROEQ12', { isEnabled: true, masterGain: 1, bands })], [laneP('eq', 'b5Freq', [[0, 500], [2.0, 4000]], 20, 20000)])] };
+  // B2. EQ : bande 5 neutre (0 dB fixe) dont le GAIN est automatisé 0 → +12 dB à 2,000 s.
+  const bands2 = bands.map((b, i) => i === 4 ? { ...b, frequency: 4000, gain: 0 } : b);
+  s.B2 = { sec: 4, tracks: [audioTrack('synth', toBuf(sine(4, 0.1, 4000, sr), sr), [pl('eq', 'PROEQ12', { isEnabled: true, masterGain: 1, bands: bands2 })], [laneP('eq', 'b5Gain', [[0, 0], [2.0, 12]], -30, 30)])] };
   // C. Reverb : mix 0 → 1 à 2,000 s (palier), puis rampe 1 → 0 de 3 à 5 s.
   s.C = { sec: 5.5, input: noise(5.5, 0.3, sr), tracks: null };
   s.C.tracks = [audioTrack('voix', toBuf(s.C.input, sr), [pl('rev', 'REVERB', { mix: 0, decay: 1.2, preDelay: 0.02, isEnabled: true })], [laneP('rev', 'mix', [[0, 0], [2.0, 1], [3.0, 1, 'LINEAR'], [5.0, 0]], 0, 1)])];
@@ -73,7 +83,9 @@ const SCEN = (sr) => {
 };
 const MEASURE = (k, y, sr, sc) => {
   if (k === 'A') return { attendu: 'avant −6,02 dB ; après ≈ −28,5 dB (ratio 20 au-dessus de −30) ; changement à 2000 ms', avant_db: peakDb(y, sr, 1.0, 1.9), apres_db: peakDb(y, sr, 2.5, 3.5), changement_entendu_ms: onset(y, sr, 2.0, 2.2, 1) };
+  if (k === 'A2') { const av = peakDb(y, sr, 1.0, 1.9), ap = peakDb(y, sr, 2.5, 3.5); return { attendu: 'baisse de 12 dB (±0,3) pile à 2000 ms', avant_db: av, apres_db: ap, baisse_db: r2(ap - av), changement_entendu_ms: onset(y, sr, 2.0, 2.2, 1) }; }
   if (k === 'B') return { attendu: 'avant ≈ −20 dB (4 kHz hors de la cloche) ; après ≈ −8 dB (+12 dB) ; changement à 2000 ms', avant_db: peakDb(y, sr, 1.0, 1.9), apres_db: peakDb(y, sr, 2.5, 3.5), changement_entendu_ms: onset(y, sr, 2.0, 2.2, 1) };
+  if (k === 'B2') return { attendu: 'avant ≈ −20 dB (bande à 0 dB) ; après ≈ −8 dB (+12 dB automatisés) ; changement à 2000 ms', avant_db: peakDb(y, sr, 1.0, 1.9), apres_db: peakDb(y, sr, 2.5, 3.5), changement_entendu_ms: onset(y, sr, 2.0, 2.2, 1) };
   if (k === 'C') {
     // Avant 2 s : la sortie EST l'entrée (sec seul). Rampe 3 → 5 s : part du sec = cos(mix·π/2), mesurée par projection sur l'entrée.
     const proj = (a, z) => { let xy = 0, xx = 0; for (let i = Math.round(a * sr); i < Math.round(z * sr); i++) { xy += y[i] * sc.input[i]; xx += sc.input[i] * sc.input[i]; } return xy / xx; };

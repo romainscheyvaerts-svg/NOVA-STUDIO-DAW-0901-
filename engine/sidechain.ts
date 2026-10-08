@@ -1,8 +1,8 @@
 /**
  * R7 · Side-chain natif (Pro Tools « Key Input », Ableton « Sidechain »).
  *
- * Un effet à clé (Compresseur, Gate, Gate rythmique, De-esser en écoute
- * externe) détecte sur une AUTRE piste ou un bus nommé au lieu du son de sa
+ * Un effet à clé (Compresseur, compresseurs analogiques du labo, Gate, Gate
+ * rythmique, De-esser en écoute externe) détecte sur une AUTRE piste ou un bus nommé au lieu du son de sa
  * piste : la 808 qui s'efface sous le kick, le beat qui se creuse sous la voix.
  *
  *  - Source : `PluginInstance.sidechainSourceId` = id d'une piste, ou
@@ -27,7 +27,7 @@ import type { PdcKey, PdcResult } from '../utils/pdc';
 import { busById, busesOf, engineView } from '../utils/trackStructure';
 
 /** Effets qui acceptent une clé externe. Le limiteur à crête vraie n'en a pas : son plafond doit suivre SON signal. */
-export const SIDECHAIN_TYPES = ['COMPRESSOR', 'GATE', 'GATEFX', 'DEESSER'] as const;
+export const SIDECHAIN_TYPES = ['COMPRESSOR', 'GATE', 'GATEFX', 'DEESSER', 'OPTO_VINTAGE', 'FET76', 'LEVELER2A', 'VOXSTRIP'] as const;
 export const supportsSidechain = (type: string) => (SIDECHAIN_TYPES as readonly string[]).includes(type);
 
 export const BUS_KEY_PREFIX = 'bus:';

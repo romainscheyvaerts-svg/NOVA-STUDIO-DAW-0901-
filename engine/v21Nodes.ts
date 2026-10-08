@@ -13,6 +13,7 @@ import { createDjFilterCore, createLofiCore } from './colorFxCore';
 import { createGateCore } from './gateCore';
 import { createNoiseGateCore } from './noiseGateCore';
 import { loadWorkletModule } from '../plugins/vocalDspUtils';
+import { retireWorkletNode } from './workletGuard';
 import { V21Type, V21_DEFAULTS, V21_SPECS, sanitizeV21 } from './v21Params';
 import { scaleIntervals } from '../utils/scales';
 
@@ -73,8 +74,13 @@ class NovaV21Processor extends AudioWorkletProcessor {
     // Clé externe (side-chain, R7) : entrée 2, branchée par le moteur.
     if (this.core.setKey && parameters.keyOn) {
       const k = inputs[1];
-      const on = parameters.keyOn[0] >= 0.5 && !!k && k.length > 0;
-      this.core.setKey(on ? k[0] : null, on ? (k[1] || k[0]) : null, on, on && parameters.keyListen[0] >= 0.5);
+      const on = parameters.keyOn[0] >= 0.5;
+      // Clé branchée mais muette (source à l'arrêt : entrée inactive, 0 canal) = silence,
+      // pas le son de la piste : un pad gaté par le kick reste fermé pendant un break.
+      const nk = outputs[0] && outputs[0][0] ? outputs[0][0].length : 128;
+      if (!this.zk || this.zk.length < nk) this.zk = new Float32Array(nk);
+      const kL = on ? (k && k[0] ? k[0] : this.zk) : null;
+      this.core.setKey(kL, on ? (k && k[1] ? k[1] : kL) : null, on, on && parameters.keyListen[0] >= 0.5);
     }
     const out = outputs[0];
     if (!out || !out[0]) return true;
@@ -224,6 +230,8 @@ export class V21EffectNode {
   private ctx: BaseAudioContext;
   private spec: WorkletSpec;
   private worklet: AudioWorkletNode | null = null;
+  /** Effet retiré : un worklet encore en chargement n'est pas créé (sinon il restait vivant). */
+  private disposed = false;
   private params: Record<string, any>;
   private meters: any = {};
   private metersAt = 0;
@@ -254,6 +262,7 @@ export class V21EffectNode {
   private async init() {
     try {
       await loadWorkletModule(this.ctx, this.spec.key, this.spec.code);
+      if (this.disposed) return;
       const parameterData: Record<string, number> = {};
       for (const k of this.spec.audioParams) if (Number.isFinite(+this.params[k])) parameterData[k] = +this.params[k];
       if (this.spec.timeline) { const hi = Math.floor(this.origin); parameterData.originHi = hi; parameterData.originLo = this.origin - hi; }
@@ -273,6 +282,15 @@ export class V21EffectNode {
       this.failed = true;
       this.input.connect(this.output);
     }
+  }
+
+  /** Effet retiré de la piste : worklet mis à la retraite (ou jamais créé s'il chargeait encore). */
+  public dispose() {
+    this.disposed = true;
+    if (this.worklet) { retireWorkletNode(this.worklet); this.worklet = null; }
+    try { this.input.disconnect(); } catch (e) { /* */ }
+    // Clé de side-chain (R7) : plus rien n'entre dans le worklet retiré.
+    try { this.sidechainInput?.disconnect(); } catch (e) { /* */ }
   }
 
   /** Retard ajouté (s), compensé par le moteur (PDC). Toujours le même, quels que soient les réglages. */

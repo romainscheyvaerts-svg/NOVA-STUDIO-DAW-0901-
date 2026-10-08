@@ -25,7 +25,7 @@ const master = () => tr('master', 'Master', { type: TrackType.BUS, outputTrackId
 
 describe('R7 · side-chain : sources et boucles de routage', () => {
   it('effets à clé : Compresseur, Gate, Gate rythmique, De-esser (pas le limiteur)', () => {
-    for (const t of ['COMPRESSOR', 'GATE', 'GATEFX', 'DEESSER']) expect(supportsSidechain(t)).toBe(true);
+    for (const t of ['COMPRESSOR', 'GATE', 'GATEFX', 'DEESSER', 'OPTO_VINTAGE', 'FET76', 'LEVELER2A', 'VOXSTRIP']) expect(supportsSidechain(t)).toBe(true);
     expect(supportsSidechain('LIMITER')).toBe(false);
     expect(supportsSidechain('REVERB')).toBe(false);
   });

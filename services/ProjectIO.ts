@@ -8,6 +8,10 @@ import { novaBridge } from './NovaBridge';
 import { isTrackFrozen, FREEZE_SAME_SOUND, FREEZE_OTHER_SOUND } from '../utils/freeze';
 import { getEditAuthor, SESSION_SCHEMA_VERSION, stampJournal } from '../utils/preFxEdits';
 import { padSampleFiles, restorePadSamples } from '../utils/drumSamples';
+import { salvageJson, repairProject } from '../utils/projectRepair';
+
+/** Rapport de réparation posé sur l'état chargé (propriété non énumérable). */
+export const REPAIR_REPORT = '__repairReport';
 
 export class ProjectIO {
   
@@ -218,29 +222,60 @@ export class ProjectIO {
    * Charge un projet depuis un fichier ZIP.
    */
   public static async loadProject(file: File): Promise<DAWState> {
-    const zip = await JSZip.loadAsync(file);
-    
-    // 1. Lecture du JSON
-    const jsonFile = zip.file("project.json");
-    if (!jsonFile) throw new Error("Fichier project.json manquant dans l'archive.");
-    
-    const jsonContent = await jsonFile.async("string");
-    // FIX: Added a try-catch block for robust JSON parsing. This prevents application crashes if the project file is corrupted or invalid by throwing a user-friendly error.
-    let loadedState: any;
+    // Projet abîmé (écriture interrompue, son manquant, identifiants en double…) :
+    // il s'ouvre quand même, réparé (utils/projectRepair), avec un rapport lisible
+    // par ProjectIO.repairReportOf(état). On ne lève que si RIEN n'est récupérable.
+    let zip: JSZip;
     try {
-        loadedState = JSON.parse(jsonContent);
+        zip = await JSZip.loadAsync(file);
     } catch (e) {
-        throw new Error("Fichier projet corrompu");
+        throw new Error("Archive illisible : ce fichier n'est pas un projet NOVA ou il est trop abîmé pour être ouvert.");
     }
-    if (!loadedState.tracks || !Array.isArray(loadedState.tracks)) {
-        throw new Error("Format de projet invalide");
+    const files = Object.keys(zip.files).filter(f => !zip.files[f].dir);
+    const audioFiles = files.filter(f => /\.(wav|mp3|ogg|oga|flac|m4a|aac|webm)$/i.test(f));
+    const preReport: string[] = [];
+
+    // 1. Lecture du JSON (tronqué : lu jusqu'à la dernière valeur complète)
+    const jsonFile = zip.file("project.json");
+    let loadedState: any = null;
+    let truncated = false;
+    if (jsonFile) {
+        const jsonContent = await jsonFile.async("string");
+        const s = salvageJson(jsonContent);
+        loadedState = s.value && typeof s.value === 'object' && !Array.isArray(s.value) ? s.value : null;
+        truncated = s.truncated;
+        if (s.truncated && loadedState) preReport.push("Fichier projet incomplet (écriture interrompue) : tout ce qui était lisible a été repris.");
     }
-    
+    if (!loadedState || !Array.isArray(loadedState.tracks)) {
+        // Rien de lisible dans le JSON, mais des sons dans l'archive : on les remet sur des pistes.
+        if (audioFiles.length) {
+            loadedState = { ...(loadedState || {}), tracks: audioFiles.map((ref, i) => ({
+                id: `recup-${i + 1}`, name: `Son récupéré ${i + 1}`, type: 'AUDIO', outputTrackId: 'master',
+                clips: [{ id: `recup-clip-${i + 1}`, name: ref.split('/').pop()!.replace(/\.[^.]+$/, ''), start: 0, duration: 1, offset: 0, fadeIn: 0, fadeOut: 0, type: 'AUDIO', color: '#64748b', audioRef: ref, __salvaged: true }],
+            })) };
+            preReport.push(`${jsonFile ? 'Fichier projet illisible' : 'Fichier projet absent'} : ${audioFiles.length} son${audioFiles.length > 1 ? 's' : ''} de l'archive remis sur des pistes « Son récupéré » (placement d'origine perdu).`);
+        } else if (!jsonFile) {
+            throw new Error("Fichier project.json manquant dans l'archive : aucun projet ni aucun son à récupérer.");
+        } else if (!loadedState || truncated) {
+            throw new Error("Fichier projet corrompu : rien n'a pu être récupéré (ni pistes ni sons).");
+        } else {
+            throw new Error("Format de projet invalide : aucune piste dans ce fichier.");
+        }
+    }
+
+    const fixed = repairProject(loadedState, { audioRefs: new Set(files) });
+    if (fixed.fatal || !fixed.state) throw new Error(`Fichier projet corrompu : ${fixed.fatal || 'illisible'}`);
+    loadedState = fixed.state;
+    const report = [...preReport, ...fixed.report];
+    let unreadable = 0;
+    const unreadableTracks = new Set<string>();
+
     // Initialisation moteur si nécessaire
     await audioEngine.init();
-    
+
     // 2. Reconstruction des AudioBuffers via Registry (un décodage par fichier)
     const decoded = new Map<string, string>();
+    const failed = new Set<string>();
     for (const track of loadedState.tracks) {
         for (const clip of track.clips) {
             if (clip.audioRef) {
@@ -249,18 +284,32 @@ export class ProjectIO {
                 if (already) {
                     clip.bufferId = already;
                     delete clip.buffer;
-                } else if (audioFile) {
-                    const arrayBuffer = await audioFile.async("arraybuffer");
-                    // Décodage WebAudio
-                    const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
-                    
-                    // Enregistrer dans le registry et stocker l'ID
-                    const bufferId = audioBufferRegistry.register(audioBuffer, clip.id);
-                    clip.bufferId = bufferId;
-                    decoded.set(clip.audioRef, bufferId);
-                    
+                } else if (audioFile && !failed.has(clip.audioRef)) {
+                    try {
+                        const arrayBuffer = await audioFile.async("arraybuffer");
+                        // Décodage WebAudio
+                        const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
+
+                        // Enregistrer dans le registry et stocker l'ID
+                        const bufferId = audioBufferRegistry.register(audioBuffer, clip.id);
+                        clip.bufferId = bufferId;
+                        decoded.set(clip.audioRef, bufferId);
+                        if (clip.__salvaged) clip.duration = audioBuffer.duration;
+                    } catch (e) {
+                        // Son abîmé : le clip reste à sa place, hors ligne ; le reste du projet s'ouvre.
+                        console.warn(`[ProjectIO] Son illisible : ${clip.audioRef}`, e);
+                        failed.add(clip.audioRef);
+                        clip.isOffline = true;
+                        unreadable++;
+                        unreadableTracks.add(track.name);
+                    }
+
                     // NE PAS mettre le buffer directement sur le clip (Immer incompatible)
                     delete clip.buffer;
+                } else if (audioFile) {
+                    clip.isOffline = true;
+                    unreadable++;
+                    unreadableTracks.add(track.name);
                 } else {
                     console.warn(`[ProjectIO] Fichier audio manquant : ${clip.audioRef}`);
                     // Si le fichier manque (ex: non exporté car pas de licence), on laisse buffer undefined
@@ -273,6 +322,7 @@ export class ProjectIO {
                 // Nettoyage de la ref interne
                 delete clip.audioRef;
             }
+            delete clip.__salvaged;
             // Rendu gelé : « même son » retrouve l'identifiant du son rechargé.
             if (clip.freezeRef?.buf === FREEZE_SAME_SOUND) {
                 if (clip.bufferId) clip.freezeRef.buf = clip.bufferId; else delete clip.freezeRef.buf;
@@ -415,7 +465,25 @@ export class ProjectIO {
             }
         }
     }
-    
+    if (unreadable) {
+        const list = [...unreadableTracks];
+        report.push(`${unreadable} clip${unreadable > 1 ? 's' : ''} dont le son est abîmé (illisible) : gardé${unreadable > 1 ? 's' : ''} hors ligne (${list.slice(0, 3).map(x => `« ${x} »`).join(', ')}${list.length > 3 ? '…' : ''}).`);
+    }
+    if (report.length) {
+        console.warn('[ProjectIO] Projet réparé :', report);
+        // Non énumérable : jamais sérialisé ni recopié dans l'historique (JSON, spread, immer).
+        Object.defineProperty(loadedState, REPAIR_REPORT, { value: report, enumerable: false, configurable: true, writable: true });
+    }
     return loadedState as DAWState;
+  }
+
+  /**
+   * Rapport de réparation du dernier chargement (« 3 clips en double renommés »…),
+   * null si le projet était intact. À lire juste après loadProject : l'état
+   * recopié (spread, immer) ne le garde pas.
+   */
+  public static repairReportOf(state: unknown): string[] | null {
+    const r = state && typeof state === 'object' ? (state as any)[REPAIR_REPORT] : null;
+    return Array.isArray(r) && r.length ? r : null;
   }
 }

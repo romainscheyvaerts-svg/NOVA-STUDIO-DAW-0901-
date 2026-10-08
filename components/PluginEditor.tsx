@@ -300,13 +300,13 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       case 'MASTERSYNC': return <MasterSyncUI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />;
       default: {
         const reg = getRegisteredPlugin(plugin.type);
-        if (reg) { const UI = reg.ui; return <UI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} />; }
+        if (reg) { const UI = reg.ui; return <UI node={nodeInstance} initialParams={hostParams} onParamsChange={stableUpdateParams} trackId={trackId} />; }
         return <div className="p-20 text-white">Plugin UI Not Found</div>;
       }
     }
   };
 
-  // Side-chain (R7) : barre « Clé » au-dessus de la fenêtre du Compresseur, du Gate, du Gate rythmique et du De-esser.
+  // Side-chain (R7) : barre « Clé » au-dessus de la fenêtre du Compresseur, des 4 compresseurs analogiques, du Gate, du Gate rythmique et du De-esser.
   const sidechainBar = (compact?: boolean) => (track && onUpdateTrack && allTracks && supportsSidechain(plugin.type)
     ? <SidechainPanel plugin={live} track={track} tracks={allTracks} onUpdateTrack={onUpdateTrack} onUpdateParams={stableUpdateParams} onReloaded={() => setUiKey(k => k + 1)} compact={compact} />
     : null);

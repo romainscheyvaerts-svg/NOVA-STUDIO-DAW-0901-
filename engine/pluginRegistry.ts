@@ -19,6 +19,9 @@ import { NovaTimeFxUI } from '../plugins/TimeFxPlugin';
 import { NovaDjFilterUI, NovaLofiUI } from '../plugins/FilterPlugin';
 import { NovaGateFxUI } from '../plugins/GateFxPlugin';
 import { NovaNoiseGateUI } from '../plugins/NoiseGatePlugin';
+import { AnalogCompNode } from './AnalogCompNode';
+import { analogAutomatable, analogDefaults } from './analogCompParams';
+import { NovaOptoVintageUI, NovaFet76UI, NovaLeveler2AUI, NovaVoxStripUI } from '../plugins/AnalogCompPlugin';
 
 export interface RegisteredPlugin {
   type: PluginType;
@@ -35,7 +38,7 @@ export interface RegisteredPlugin {
   /** Nœud audio : { input, output } + updateParams, latency (s), ready éventuels. `bpm` : tempo du projet. */
   create: (ctx: BaseAudioContext, plugin: PluginInstance, bpm?: number) => { input: AudioNode; output: AudioNode; updateParams?: (p: any) => void; latency?: number; ready?: Promise<unknown> };
   /** Fenêtre d'édition (reçoit le nœud, les réglages et le rappel de modification). */
-  ui: React.ComponentType<{ node: any; initialParams: any; onParamsChange: (p: Record<string, any>) => void }>;
+  ui: React.ComponentType<{ node: any; initialParams: any; onParamsChange: (p: Record<string, any>) => void; trackId?: string }>;
   /** Réglages automatisables (éditeur d'automation). */
   automatable?: { id: string; label: string; min: number; max: number; unit?: string }[];
   /** Vrai : reçoit la tonalité du projet (`rootKey`, `scale`) comme l'Auto-Tune. */
@@ -141,6 +144,55 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     create: (ctx, plugin, bpm) => new V21EffectNode(ctx, 'LOFI', plugin.params || {}, bpm),
     ui: NovaLofiUI as any,
     automatable: v21Automatable('LOFI'),
+  },
+  // --- Compresseurs « analogiques » modélisés au labo (mesures boîte noire) ----
+  {
+    type: 'OPTO_VINTAGE',
+    name: 'Opto Vintage',
+    category: 'Compresseurs vintage',
+    icon: 'fa-lightbulb',
+    color: '#38bdf8',
+    description: 'Compresseur optique à lampes inspiré d’un classique danois des studios : doux et transparent, idéal sur la voix. « Caler sur ma voix » règle le seuil pour 5 dB max au VU.',
+    defaultParams: analogDefaults('OPTO_VINTAGE'),
+    create: (ctx, plugin) => new AnalogCompNode(ctx, 'OPTO_VINTAGE', plugin.params || {}),
+    ui: NovaOptoVintageUI as any,
+    automatable: analogAutomatable('OPTO_VINTAGE'),
+  },
+  {
+    type: 'FET76',
+    name: 'FET 76',
+    category: 'Compresseurs vintage',
+    icon: 'fa-bolt',
+    color: '#e4e4e7',
+    description: 'Compresseur à transistor FET inspiré d’un limiteur américain classique : attaque ultra-rapide, du mordant et de la couleur. « Caler sur ma voix » règle l’entrée pour 5 dB max au VU.',
+    defaultParams: analogDefaults('FET76'),
+    create: (ctx, plugin) => new AnalogCompNode(ctx, 'FET76', plugin.params || {}),
+    ui: NovaFet76UI as any,
+    automatable: analogAutomatable('FET76'),
+  },
+  {
+    type: 'LEVELER2A',
+    name: 'Leveler 2A',
+    category: 'Compresseurs vintage',
+    icon: 'fa-sliders-h',
+    color: '#fcd34d',
+    description: 'Niveleur optique à lampes inspiré d’un classique des années 60 : lent, doux, très musical. Sur un bus, « Caler sur ma voix » vise 2 dB max au VU.',
+    defaultParams: analogDefaults('LEVELER2A'),
+    create: (ctx, plugin) => new AnalogCompNode(ctx, 'LEVELER2A', plugin.params || {}),
+    ui: NovaLeveler2AUI as any,
+    automatable: analogAutomatable('LEVELER2A'),
+  },
+  {
+    type: 'VOXSTRIP',
+    name: 'Vox Strip',
+    category: 'Compresseurs vintage',
+    icon: 'fa-microphone',
+    color: '#e879f9',
+    description: 'Tranche voix à lampes inspirée d’un channel strip américain : préampli, compresseur optique, égaliseur passif et transformateur. « Caler sur ma voix » vise 5 dB max au VU.',
+    defaultParams: analogDefaults('VOXSTRIP'),
+    create: (ctx, plugin) => new AnalogCompNode(ctx, 'VOXSTRIP', plugin.params || {}),
+    ui: NovaVoxStripUI as any,
+    automatable: analogAutomatable('VOXSTRIP'),
   },
 ];
 

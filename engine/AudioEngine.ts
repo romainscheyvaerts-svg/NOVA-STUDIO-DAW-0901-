@@ -56,6 +56,7 @@ function loadFlashbackModule(ctx: AudioContext): Promise<void> {
 }
 import { placeHumTake } from './humTake';
 import { VSTPluginNode } from './VSTPluginNode';
+import { installWorkletGuard, installWorkletRetirement, onWorkletCrash, ownsNode, retireWorkletsOf } from './workletGuard';
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback, isFrozenBus, isFeedCovered, busFrozenSlices } from '../utils/freeze';
 import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
@@ -69,6 +70,10 @@ import { engineView, VOID_OUTPUT } from '../utils/trackStructure';
 import { legacyAutomatable, paramsWithoutAutomated, hasPluginLane, pluginParamStaticValue } from './automationParams';
 import { isMuteParam, muteGainPoints, muteLaneOf } from '../utils/muteAutomation';
 import { SidechainRouter, KeyPath, KeyRoute, keyRoutes, pdcKeysFor, latencyBefore, isKeyedNode } from './sidechain';
+// R11 : vrais mètres (AudioWorklet partagé) et tête de tranche (trim, Ø, mono, largeur).
+import { meterBank } from './meters/meterBank';
+import { buildStrip, disposeStrip, setStrip, stripParam, stripSignature, StripNodes, TRIM_PARAM, WIDTH_PARAM } from './meters/channelStrip';
+import { GrPart, readGainReduction } from './meters/gainReduction';
 
 interface TrackDSP {
   input: GainNode;          
@@ -77,7 +82,8 @@ interface TrackDSP {
   gain: GainNode;           
   analyzer: AnalyserNode;
   inputAnalyzer?: AnalyserNode; 
-  pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any; connectedTo?: AudioNode; bypassDelay?: DelayNode }>;
+  /** crashed : son worklet a planté (processorerror) ; l'effet est contourné et sera recréé s'il est réactivé. */
+  pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any; connectedTo?: AudioNode; bypassDelay?: DelayNode; crashed?: boolean }>;
   /** Pan propre des envois (TrackSend.pan, Pro Tools « FMP » éteint). */
   sendPanners?: Map<string, StereoPannerNode>;
   /** Effets actifs cables (ordre de la chaine) et, sur une piste gelee, ceux apres le rendu. */
@@ -129,6 +135,15 @@ interface TrackDSP {
   // reconstruire — et donc de couper brievement — le graphe quand rien de
   // structurel n'a change.
   graphSignature?: string;
+  /** Tête de tranche (R11) : trim, Ø, mono, largeur ; absente si la piste est neutre. */
+  strip?: StripNodes | null;
+}
+
+/** Journal d'une prise en cours (utils/recoveryStore.TakeJournal). */
+export interface TakeJournalLike {
+  push(chunk: Float32Array): void;
+  finish(): Promise<void>;
+  discard(): Promise<void>;
 }
 
 interface ScheduledSource {
@@ -195,6 +210,12 @@ export class AudioEngine {
   // --- Compensation de latence d'enregistrement ---
   private recSession: NovaRecorderSession | null = null;
   private recSource: AudioNode | null = null;
+  /**
+   * Journal de la prise en cours (utils/recoveryStore) : chaque morceau capté est
+   * écrit sur l'appareil pendant l'enregistrement, pour la retrouver après un plantage.
+   */
+  private takeJournalFactory: ((m: { trackId: string; recordedAt: number; latency: number; sampleRate: number }) => TakeJournalLike | null) | null = null;
+  private recJournal: TakeJournalLike | null = null;
   /** Début de lecture (horloge) pendant la prise : STOP coupe la lecture avant la prise. */
   private recPlayStart: number | null = null;
   private latencySamples: number[] = [];
@@ -246,7 +267,53 @@ export class AudioEngine {
   private asioInputReceived = false;
   private asioOutputProcessor: ScriptProcessorNode | null = null;
 
-  constructor() {}
+  constructor() {
+    // Garde des worklets : un processeur qui plante est retrouvé et contourné (voir handleWorkletCrash).
+    if (typeof window !== 'undefined') {
+      installWorkletGuard();
+      // Worklets retirés (effet enlevé, prise finie, synthé remplacé) : vraiment libérés.
+      installWorkletRetirement();
+      onWorkletCrash((node, processor) => this.handleWorkletCrash(node, processor));
+    }
+  }
+
+  /**
+   * Un worklet a levé une exception (il ne sort plus que du silence).
+   * Effet de piste : contourné TOUT DE SUITE (entrée reliée à sa sortie : le son
+   * sec continue), puis l'appli le passe en bypass et prévient
+   * ('nova:plugin-crash'). Le réactiver recrée l'effet (voir wire()).
+   * Autre module (synthé, enregistreur, entrée ASIO…) : 'nova:audio-module-crash'.
+   */
+  public handleWorkletCrash(node: AudioWorkletNode, processor: string): { kind: 'plugin' | 'module' | 'unknown'; trackId?: string; pluginId?: string } {
+    for (const [trackId, dsp] of this.tracksDSP) {
+      for (const [pluginId, entry] of dsp.pluginChain) {
+        if (entry.crashed || !ownsNode(entry.instance, node)) continue;
+        entry.crashed = true;
+        try { entry.input.disconnect(); } catch (e) { /* déjà déconnecté */ }
+        try { entry.input.connect(entry.output); } catch (e) { /* */ }
+        const track = this.liveTracks?.find(t => t.id === trackId);
+        const plugin = track?.plugins.find(p => p.id === pluginId);
+        const detail = { trackId, pluginId, name: plugin?.name || plugin?.type || processor, trackName: track?.name || trackId, processor };
+        console.error(`[AudioEngine] Effet planté contourné : ${detail.name} (${detail.trackName})`);
+        try { window.dispatchEvent(new CustomEvent('nova:plugin-crash', { detail })); } catch (e) { /* hors navigateur */ }
+        return { kind: 'plugin', trackId, pluginId };
+      }
+    }
+    let module = '';
+    let trackId: string | undefined;
+    for (const [tid, dsp] of this.tracksDSP) {
+      if (dsp.synth && ownsNode(dsp.synth, node)) { module = 'le synthé'; trackId = tid; break; }
+      if (dsp.bass808 && ownsNode(dsp.bass808, node)) { module = 'la 808'; trackId = tid; break; }
+    }
+    if (!module && this.recSession && ownsNode(this.recSession, node)) module = "l'enregistreur";
+    if (!module && this.asioInput && ownsNode(this.asioInput, node)) module = "l'entrée de la carte son";
+    if (!module && this.humTake && ownsNode(this.humTake, node)) module = "l'enregistreur (fredonner)";
+    // Web Audio n'expose pas le graphe : on ne peut pas recâbler un module inconnu, on prévient.
+    const detail = { module: module || `le module audio « ${processor} »`, trackId, processor };
+    console.error(`[AudioEngine] Module audio arrêté : ${detail.module}`);
+    try { window.dispatchEvent(new CustomEvent('nova:audio-module-crash', { detail })); } catch (e) { /* hors navigateur */ }
+    return { kind: module ? 'module' : 'unknown', trackId };
+  }
 
   public async init() {
     if (this.ctx) return;
@@ -296,7 +363,16 @@ export class AudioEngine {
     this.masterAnalyzerR.smoothingTimeConstant = 0.5;
 
     this.masterOutput.connect(this.masterLimiter);
-    this.masterLimiter.connect(this.masterAnalyzer);
+    // R11 : le DynamicsCompressorNode de Chrome ajoute un gain de compensation
+    // automatique (« makeup ») de (1 / gain à 0 dBFS)^0,6 : +0,57 dB ici, sur
+    // TOUT le mix, même très en dessous du seuil. L'écoute était donc 0,57 dB
+    // plus forte que l'export (qui n'a pas ce limiteur) et le LUFS lu en
+    // direct ne collait pas à celui du fichier. On retire ce gain juste après.
+    const safetyTrim = this.ctx.createGain();
+    const fullRangeDb = this.masterLimiter.threshold.value * (1 - 1 / this.masterLimiter.ratio.value);
+    safetyTrim.gain.value = Math.pow(Math.pow(10, fullRangeDb / 20), 0.6);
+    this.masterLimiter.connect(safetyTrim);
+    safetyTrim.connect(this.masterAnalyzer);
     // Sortie « navigateur » coupée pendant le flux ASIO : le mix part alors par
     // la carte, sinon l'artiste l'entendait deux fois (écho / effet de phase).
     this.browserOutput = this.ctx.createGain();
@@ -306,6 +382,8 @@ export class AudioEngine {
     this.masterAnalyzer.connect(this.masterSplitter);
     this.masterSplitter.connect(this.masterAnalyzerL, 0);
     this.masterSplitter.connect(this.masterAnalyzerR, 1);
+    // R11 : mètres du master (crête vraie, LUFS, corrélation) sur la sortie finale.
+    meterBank.init(this.ctx, this.masterAnalyzer);
 
     this.previewGain = this.ctx.createGain();
     this.previewAnalyzer = this.ctx.createAnalyser();
@@ -379,6 +457,45 @@ export class AudioEngine {
 
   public getAudioBuffer(clipId: string): AudioBuffer | undefined {
     return audioBufferRegistry.get(clipId);
+  }
+
+  /** La piste a-t-elle vraiment son micro ouvert (armement effectif côté moteur) ? */
+  public isMonitoring(trackId: string): boolean {
+    return this.monitoringTrackId === trackId && (!!this.activeMonitorStream || !!this.armingPromise);
+  }
+
+  /** Pistes qui ont une chaîne audio dans le moteur. */
+  public trackIds(): string[] {
+    return [...this.tracksDSP.keys()];
+  }
+
+  /** Caches du moteur dont le son d'origine a été libéré (clips inversés). */
+  public pruneCaches() {
+    this.reversedBufferCache.forEach((_, key) => { if (!audioBufferRegistry.has(key)) this.reversedBufferCache.delete(key); });
+  }
+
+  /** Journal des prises (récupération après plantage) : branché par l'appli. */
+  public setTakeJournalFactory(f: ((m: { trackId: string; recordedAt: number; latency: number; sampleRate: number }) => TakeJournalLike | null) | null) {
+    this.takeJournalFactory = f;
+  }
+
+  /** Diagnostic (endurance, console) : tailles des structures vivantes du moteur. */
+  public getDiagnostics() {
+    let plugins = 0, sends = 0;
+    this.tracksDSP.forEach(d => { plugins += d.pluginChain.size; sends += d.sends.size; });
+    return {
+      ctxState: this.ctx?.state ?? null,
+      ctxTime: this.ctx?.currentTime ?? 0,
+      tracksDSP: this.tracksDSP.size,
+      plugins,
+      sends,
+      activeSources: this.activeSources.size,
+      scrubbingSources: this.scrubbingSources.size,
+      reversedCache: this.reversedBufferCache.size,
+      activeMidiNotes: this.activeMidiNotes.size,
+      pluginAutoParams: this.pluginAutoParams.size,
+      isPlaying: this.isPlaying,
+    };
   }
 
   public async setOutputDevice(deviceId: string) {
@@ -854,6 +971,7 @@ export class AudioEngine {
       sampler?: AudioSampler;
       drumRack?: DrumRackNode;
       bass808?: Bass808Node;
+      strip?: StripNodes | null;
     }
     const rendered = new Map<string, RenderTrack>();
     // Certains plugins (AutoTune) s'initialisent de maniere asynchrone : on
@@ -885,6 +1003,9 @@ export class AudioEngine {
       const output = offlineCtx.createGain();
 
       let head: AudioNode = input;
+      // Tête de tranche (R11) : trim, Ø, mono, largeur, comme en lecture.
+      const strip = buildStrip(offlineCtx, track);
+      if (strip) { input.connect(strip.input); head = strip.output; }
       // Piste gelee : meme cablage qu'en lecture (rendu -> effets restants).
       const frozen = isTrackFrozen(track);
       // Bus d'effets gelé : ce qui y entre encore en direct (envoi ajouté ailleurs) passe par ses effets non rendus.
@@ -954,7 +1075,7 @@ export class AudioEngine {
       panner.pan.value = options.preFader ? 0 : track.pan;
 
       const rt: RenderTrack = {
-        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pluginOffsets, pre: preNode, muteGain, silenced,
+        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pluginOffsets, pre: preNode, muteGain, silenced, strip,
         frozenInput, frozenClipId: frozen ? track.frozenClip!.id : undefined, postLatency,
       };
 
@@ -1097,7 +1218,7 @@ export class AudioEngine {
           if (rt.muteGain && lane.points.length) this.programmerVoieHorsLigne(rt.muteGain.gain, muteGainPoints(lane.points), startOffset + toSamples(rt.down || 0), totalDuration);
           return;
         }
-        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends, (rt.frozenInput || rt.input).gain);
+        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends, (rt.frozenInput || rt.input).gain, rt.strip);
         if (!cible || !lane.points || lane.points.length === 0) return;
 
         const points = [...lane.points].sort((a, b) => a.time - b.time);
@@ -1578,8 +1699,12 @@ export class AudioEngine {
   }
 
   public async startRecording(currentTime: number, trackId: string): Promise<boolean> {
+    // Piste armée à l'instant (bouton R puis REC tout de suite, ou machine chargée) : le
+    // micro s'ouvre encore. Avant, la prise échouait (« No monitor stream ») : mesuré
+    // dans le soak, 1 prise sur 3 ne démarrait pas sous charge.
+    if (this.armingPromise) { try { await this.armingPromise; } catch { /* erreur d'armement déjà signalée */ } }
     console.log("[AudioEngine] startRecording called - stream:", !!this.activeMonitorStream, "recording:", this.recordingTrackId);
-    
+
     if (!this.activeMonitorStream) {
       console.error("[AudioEngine] REC FAILED - No monitor stream! Arm track first.");
       return false;
@@ -1597,6 +1722,11 @@ export class AudioEngine {
         if (src) {
           this.recSource = src;
           this.recSession = new NovaRecorderSession(this.ctx, src);
+          try {
+            const j = this.takeJournalFactory?.({ trackId, recordedAt: currentTime, latency: this.measureRecordLatency().total + this.recOffsetMs / 1000, sampleRate: this.ctx.sampleRate }) || null;
+            this.recJournal = j;
+            if (j) this.recSession.onChunk = c => j.push(c);
+          } catch { this.recJournal = null; }
           this.recPlayStart = this.isPlaying ? this.playbackStartTime : null;
           this.recStartTime = currentTime;
           this.recordingTrackId = trackId;
@@ -1724,7 +1854,11 @@ export class AudioEngine {
     this.recStartTime = 0;
 
     const { samples, firstFrame } = await session.stop(src);
-    if (!samples.length) return null;
+    const journal = this.recJournal;
+    this.recJournal = null;
+    if (!samples.length) { void journal?.discard(); return null; }
+    // Prise terminée normalement : le journal est clos (effacé une fois la prise dans une version).
+    void journal?.finish();
     const sr = ctx.sampleRate;
 
     // Position de chaque échantillon sur la timeline : (frame / sr) − début de lecture.
@@ -1985,6 +2119,15 @@ export class AudioEngine {
   }
 
   private lastOverloadAt = 0;
+  /** Retards du planificateur (fenêtres programmées après leur début) depuis le lancement. */
+  private schedulerLateTicks = 0;
+  public getSchedulerLateTicks(): number { return this.schedulerLateTicks; }
+  public isTransportRunning(): boolean { return this.isPlaying || !!this.recordingTrackId; }
+  /** Mode de latence du planificateur (réglages audio, mode sécurité). */
+  public getLatencyMode(): 'low' | 'balanced' | 'high' {
+    return this.SCHEDULE_AHEAD_SEC >= 0.2 ? 'high' : this.SCHEDULE_AHEAD_SEC >= 0.1 ? 'balanced' : 'low';
+  }
+
   private scheduler(tracks: Track[]) {
     if (!this.ctx) return;
     // Surcharge : le planificateur a pris du retard sur l'horloge audio (onglet
@@ -1996,6 +2139,9 @@ export class AudioEngine {
         try { window.dispatchEvent(new CustomEvent('nova:overload')); } catch { /* */ }
       }
     }
+    // Fenêtre dont le début est déjà passé : les sons qui y tombent partent en retard
+    // (compteur lu par engine/dspMonitor, indicateur CPU de la barre de transport).
+    if (this.nextScheduleTime < this.ctx.currentTime - 0.003) this.schedulerLateTicks++;
     let guard = 0;
     while (this.nextScheduleTime < this.ctx.currentTime + this.SCHEDULE_AHEAD_SEC && guard++ < 64) {
       const projectTimeStart = this.nextScheduleTime - this.playbackStartTime;
@@ -2260,9 +2406,12 @@ export class AudioEngine {
     gain: AudioParam,
     pan: AudioParam,
     sends: Map<string, GainNode>,
-    pre?: AudioParam
+    pre?: AudioParam,
+    strip?: StripNodes | null
   ): AudioParam | null {
     if (nomParametre === 'volume') return gain;
+    // Tête de tranche (R11) : trim d'entrée (gain) et largeur stéréo.
+    if (nomParametre === TRIM_PARAM || nomParametre === WIDTH_PARAM) return stripParam(strip, nomParametre);
     // Volume AVANT effets (tête de chaîne) : édité sur une piste gelée, il
     // attaque le compresseur et la reverb au dégel. Piste gelée : après le rendu.
     if (nomParametre === PRE_VOLUME) return pre || null;
@@ -2369,7 +2518,7 @@ export class AudioEngine {
     if (!dsp || !this.ctx) return;
     const track = this.liveTracks?.find(t => t.id === trackId);
     if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
-    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
     if (!cible) return;
     const now = this.ctx.currentTime;
     try { cible.cancelScheduledValues(now); cible.setTargetAtTime(value, now, 0.01); } catch { /* valeur hors limites */ }
@@ -2403,7 +2552,7 @@ export class AudioEngine {
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp) return;
     if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
-    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
     if (!cible) return;
     const now = this.ctx.currentTime;
     const t0 = now + 0.01;
@@ -2704,7 +2853,7 @@ export class AudioEngine {
                 if (point.time >= start && point.time < end) {
                     const scheduleTime = when + (point.time - start);
                     
-                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
                     if (ancre) ancre.setValueAtTime(point.value, scheduleTime);
                     
                     const nextPoint = lane.points[index + 1];
@@ -2712,7 +2861,7 @@ export class AudioEngine {
                         // On programme la rampe meme si le point suivant sort de la
                         // fenetre : sinon la valeur restait en palier jusqu'a lui.
                         const nextScheduleTime = when + (nextPoint.time - start);
-                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
                         if (cible) {
                             this.programmerSegment(cible, point, nextPoint, scheduleTime, nextScheduleTime);
                         }
@@ -2815,6 +2964,9 @@ export class AudioEngine {
                 if (current && current.source === source) this.activeSources.delete(sourceKey);
                 try { source.disconnect(); gainNode.disconnect(); } catch (e) {}
             };
+        } else {
+            // Rien à jouer (fin du clip dépassée) : les nœuds créés ne restent pas branchés.
+            try { source.disconnect(); gainNode.disconnect(); } catch (e) {}
         }
         
     } catch (error) {
@@ -2984,9 +3136,13 @@ export class AudioEngine {
     dsp.pluginChain.forEach(entry => {
       try { entry.input.disconnect(); entry.output.disconnect(); } catch (e) {}
       try { entry.bypassDelay?.disconnect(); } catch (e) {}
+      // Avant dispose() : certains effets oublient leur worklet en se libérant.
+      retireWorkletsOf(entry.instance);
       try { entry.instance?.dispose?.(); } catch (e) {}
     });
     dsp.pluginChain.clear();
+    retireWorkletsOf(dsp.synth);
+    retireWorkletsOf(dsp.bass808);
 
     dsp.sends.forEach(g => { try { g.disconnect(); } catch (e) {} });
     dsp.sends.clear();
@@ -2995,6 +3151,8 @@ export class AudioEngine {
     dsp.sendPanners?.forEach(n => { try { n.disconnect(); } catch (e) {} });
     [dsp.input, dsp.chainOut, dsp.preFaderTap, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
       .forEach(n => { try { n?.disconnect(); } catch (e) {} });
+    meterBank.detachTrack(trackId);
+    disposeStrip(dsp.strip);
 
     this.tracksDSP.delete(trackId);
     this.recomputePdc();
@@ -3046,7 +3204,7 @@ export class AudioEngine {
         if (wantNova !== (dsp.synth instanceof NovaSynthNode)) {
           const old = dsp.synth;
           try { old.releaseAll(); } catch (e) {}
-          setTimeout(() => { try { old.output.disconnect(); if (old instanceof NovaSynthNode) old.destroy(); } catch (e) {} }, 60);
+          setTimeout(() => { retireWorkletsOf(old); try { old.output.disconnect(); if (old instanceof NovaSynthNode) old.destroy(); } catch (e) {} }, 60);
           dsp.synth = makeTrackSynth(this.ctx, track);
           dsp.synth.output.connect(dsp.input);
           if (this.isPlaying && dsp.synth instanceof NovaSynthNode) dsp.synth.syncTimeline(this.playbackStartTime, this.ctx.currentTime);
@@ -3075,7 +3233,7 @@ export class AudioEngine {
     const preSilenced = track.isMuted || this.soloSilencedIds.has(track.id);
     const sendLevelOf = (send: { id: string; isEnabled: boolean; level: number; preFader?: boolean; isMuted?: boolean }) =>
       (!send.isEnabled || send.isMuted || isFeedCovered(track, send.id, allTracks) || (send.preFader && preSilenced)) ? 0 : send.level;
-    const signature = this.graphSignatureOf(track, coveredOut ? 'covered-out' : '');
+    const signature = this.graphSignatureOf(track, (coveredOut ? 'covered-out' : '') + stripSignature(track));
     if (dsp.graphSignature === signature) {
       const t = this.ctx.currentTime;
       // Pendant la lecture, un paramètre automatisé garde la valeur de sa courbe.
@@ -3086,6 +3244,7 @@ export class AudioEngine {
       if (!this.isPlaying) { try { dsp.gain.gain.cancelScheduledValues(t); dsp.gain.gain.setValueAtTime(target, t); } catch { /* */ } }
       else dsp.gain.gain.setTargetAtTime(target, t, 0.015);
       dsp.panner.pan.setTargetAtTime(this.automatedValue(track, 'pan', track.pan), t, 0.015);
+      if (dsp.strip) setStrip(dsp.strip, track, t, !this.isPlaying, { trim: this.automationOwns(track, TRIM_PARAM), width: this.automationOwns(track, WIDTH_PARAM) });
       this.pluginAutoSent.forEach((_, k) => { if (k.startsWith(`${track.id}|`)) this.pluginAutoSent.delete(k); });
 
       // Seuls les effets cables ont une entree (sur une piste gelee : ceux
@@ -3131,7 +3290,15 @@ export class AudioEngine {
     // the plugin's internal graph. The plugins manage their own internal connections.
     // We only disconnect the chain between plugins below by rebuilding it.
     
+    // Tête de tranche (R11) : entrée -> trim / Ø / mono / largeur -> effets.
+    disposeStrip(dsp.strip);
+    dsp.strip = buildStrip(this.ctx, track);
     let head: AudioNode = dsp.input;
+    if (dsp.strip) {
+      dsp.input.connect(dsp.strip.input);
+      head = dsp.strip.output;
+      setStrip(dsp.strip, track, now, true, { trim: this.automationOwns(track, TRIM_PARAM), width: this.automationOwns(track, WIDTH_PARAM) });
+    }
     // Sorties d'effets cablees au passage precedent : on ne coupe QUE ces liens
     // (pas le graphe interne des effets). Sans ca, reordonner ou geler une chaine
     // laissait l'ancien lien en place et doublait le signal.
@@ -3165,6 +3332,15 @@ export class AudioEngine {
       if (plugin.isInactive) return;
       currentPluginIds.add(plugin.id);
       let pEntry = dsp!.pluginChain.get(plugin.id);
+      // Effet dont le worklet a planté puis réactivé : instance neuve.
+      if (pEntry?.crashed && plugin.isEnabled) {
+        try { pEntry.input.disconnect(); } catch (e) {}
+        try { pEntry.output.disconnect(); } catch (e) {}
+        try { pEntry.bypassDelay?.disconnect(); } catch (e) {}
+        try { pEntry.instance?.dispose?.(); } catch (e) {}
+        dsp!.pluginChain.delete(plugin.id);
+        pEntry = undefined;
+      }
       if (!pEntry) {
         const instance = this.createPluginNode(plugin, this.currentBpm);
         if (instance) {
@@ -3231,6 +3407,9 @@ export class AudioEngine {
 
     dsp.pluginChain.forEach((val, id) => {
       if (!currentPluginIds.has(id)) {
+        // Worklets de l'effet retiré : sinon ils restaient vivants ET calculés (fuite mesurée).
+        // Avant dispose() : certains effets oublient leur worklet en se libérant.
+        retireWorkletsOf(val.instance);
         try {
           val.input.disconnect();
           val.output.disconnect();
@@ -3353,6 +3532,9 @@ export class AudioEngine {
     dsp.outputs = outputs;
     this.syncSidechains(allTracks);
     this.recomputePdc();
+    // R11 : point de mesure de la piste (pré-fader : après les effets ; post : après fader et pan).
+    // Pré-fader pris sur chainOut (R7/R8) : le mute automatisé agit comme le mute fixe, après ce point.
+    meterBank.attachTrack(track.id, dsp.chainOut || dsp.preFaderTap!, dsp.analyzer);
   }
 
   private applyAutomation(track: Track, time: number) {
@@ -3401,7 +3583,7 @@ export class AudioEngine {
         }
         
         const now = this.ctx.currentTime;
-        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
         if (cible) cible.setValueAtTime(value, now);
     });
 }
@@ -3430,6 +3612,42 @@ export class AudioEngine {
       if (!p || (has && p === active)) return;
       try { p.cancelScheduledValues(now); p.setValueAtTime(1, now); } catch (e) {}
     });
+  }
+
+  /**
+   * Audio source d'une piste (ses clips audio non muets, bout à bout dans
+   * l'ordre de la ligne de temps, gain de clip compris, sans les silences
+   * entre clips), plafonné à `maxSeconds`. Sert au calage « Caler sur ma
+   * voix » des compresseurs : on règle sur ce que la piste va vraiment chanter.
+   */
+  public getTrackSourceAudio(trackId: string, maxSeconds = 90): { channels: Float32Array[]; sampleRate: number } | null {
+    const tracks = this.liveTracks || [];
+    const track = tracks.find(t => t.id === trackId);
+    if (!track) return null;
+    const clips = [...(track.clips || [])].filter(c => !c.isMuted && c.type !== TrackType.MIDI).sort((a, b) => a.start - b.start);
+    const parts: { buf: AudioBuffer; from: number; len: number; gain: number }[] = [];
+    let sr = 0, total = 0;
+    for (const c of clips) {
+      const buf = c.buffer || (c.bufferId ? audioBufferRegistry.get(c.bufferId) : undefined) || audioBufferRegistry.get(c.id);
+      if (!buf) continue;
+      if (!sr) sr = buf.sampleRate;
+      if (buf.sampleRate !== sr) continue;
+      const from = Math.max(0, Math.floor((c.offset || 0) * sr));
+      const len = Math.max(0, Math.min(buf.length - from, Math.floor((c.duration || 0) * sr)));
+      const room = Math.floor(maxSeconds * sr) - total;
+      if (len <= 0 || room <= 0) continue;
+      parts.push({ buf, from, len: Math.min(len, room), gain: c.gain ?? 1 });
+      total += Math.min(len, room);
+    }
+    if (!total) return null;
+    const L = new Float32Array(total), R = new Float32Array(total);
+    let at = 0;
+    for (const p of parts) {
+      const a = p.buf.getChannelData(0), b = p.buf.numberOfChannels > 1 ? p.buf.getChannelData(1) : a;
+      for (let i = 0; i < p.len; i++) { L[at + i] = a[p.from + i] * p.gain; R[at + i] = b[p.from + i] * p.gain; }
+      at += p.len;
+    }
+    return { channels: [L, R], sampleRate: sr };
   }
 
   /** Réglages automatisables des effets du registre (V21 : harmoniseur, tape stop…) de la piste. */
@@ -3480,6 +3698,26 @@ export class AudioEngine {
   public getTrackAnalyzer(trackId: string) { const dsp = this.tracksDSP.get(trackId); if (!dsp) return null; if (this.monitoringTrackId === trackId && dsp.inputAnalyzer) return dsp.inputAnalyzer; return dsp.analyzer; }
   public getPluginNodeInstance(trackId: string, pluginId: string) { return this.tracksDSP.get(trackId)?.pluginChain.get(pluginId)?.instance || null; }
   public setRecMode(active: boolean) { this.isRecMode = active; }
+  /**
+   * R11 : réduction de gain des dynamiques de la piste (compresseur, de-esser,
+   * limiteur…), en dB positifs, avec le détail par effet. null : aucune
+   * dynamique mesurable. Sur le master, le limiteur de sécurité compte aussi.
+   */
+  public getTrackGainReduction(trackId: string): { db: number; parts: GrPart[] } | null {
+    const dsp = this.tracksDSP.get(trackId);
+    const parts: GrPart[] = [];
+    dsp?.pluginChain.forEach((entry, pluginId) => {
+      if (dsp.chainIds && !dsp.chainIds.includes(pluginId)) return;
+      const db = readGainReduction(entry.instance);
+      if (db !== null) parts.push({ pluginId, db });
+    });
+    if (trackId === 'master' && this.masterLimiter && this.safetyLimiterOn) {
+      parts.push({ pluginId: 'safety-limiter', db: Math.abs(this.masterLimiter.reduction || 0) });
+    }
+    if (!parts.length) return null;
+    return { db: parts.reduce((s, p) => s + p.db, 0), parts };
+  }
+
   public getRMS(analyser: AnalyserNode | null): number {
     if (!analyser) return 0;
     const data = new Uint8Array(analyser.frequencyBinCount);

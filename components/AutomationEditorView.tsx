@@ -57,7 +57,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
       // Check if already exists
       if (track.automationLanes.some(l => l.parameterName === paramId)) return;
 
-      const initialVal = paramId === 'volume' ? track.volume : paramId === 'preVolume' ? 1 : paramId === 'pan' ? track.pan : paramId === 'mute' ? (track.isMuted ? 1 : 0) : (typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : min + (max - min) / 2);
+      const initialVal = paramId === 'volume' ? track.volume : paramId === 'preVolume' ? 1 : paramId === 'pan' ? track.pan : paramId === 'mute' ? (track.isMuted ? 1 : 0) : paramId === 'trim' ? Math.pow(10, (track.inputTrimDb || 0) / 20) : paramId === 'width' ? (track.stereoWidth ?? 1) : (typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : min + (max - min) / 2);
 
       const newLane: AutomationLane = {
           id: `auto-${Date.now()}`,
@@ -81,7 +81,10 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
           { id: 'preVolume', name: 'Volume avant effets', min: 0, max: 1.5 },
           { id: 'pan', name: 'Panoramique', min: -1, max: 1 },
           // Mute automatisé (R8, Pro Tools « mute ») : 0 = son, 1 = muet, en paliers.
-          { id: 'mute', name: 'Muet', min: 0, max: 1 }
+          { id: 'mute', name: 'Muet', min: 0, max: 1 },
+          // Tête de tranche (R11) : trim d'entrée (gain, jusqu'à +12 dB) et largeur stéréo (0 = mono, 2 = très large).
+          { id: 'trim', name: "Trim d'entrée", min: 0, max: 4 },
+          { id: 'width', name: 'Largeur stéréo', min: 0, max: 2 }
       ];
       
       // Sends

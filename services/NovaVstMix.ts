@@ -27,6 +27,8 @@ import { liveVstNodes, novaVstEvents } from '../engine/VSTPluginNode';
 import { isVoiceTrack } from '../utils/vocalRoles';
 import { toVstParams } from '../utils/autotuneVst';
 import { enforceRemoteMixRule, installedForRemote, RemoteMixRule } from '../utils/remoteInge';
+import { calibrateNova, novaTargetFor, vstCalibrationSpec } from '../utils/grCalibration';
+import { ANALOG_SPECS } from '../engine/analogCompParams';
 
 export interface NovaVstCtx {
   getState: () => DAWState;
@@ -69,6 +71,59 @@ const findVst = (t: Track, ref: string): PluginInstance | undefined => {
     || t.plugins.find(p => p.type === 'VST3' && classifyPlugin(p.params?.name || p.name, p.params?.vendor || '').category === q)
     || t.plugins.find(p => p.type === 'VST3' && CATEGORY_LABEL_FR[classifyPlugin(p.params?.name || p.name).category]?.toLowerCase().includes(q));
 };
+
+/**
+ * Calage « réduction cible » des compresseurs de la voix et de son bus après
+ * un Mix auto (règle maison : 5 dB max au VU sur la voix et le FET de bus,
+ * 2 dB sur l'optique de bus). Effets NOVA : calés sur place ; VST : par le
+ * pont (rendu hors ligne + dichotomie). Le son de référence est la voix
+ * elle-même (clips de la piste) ; sur le bus, c'est une approximation.
+ */
+export async function calibrateMixCompressors(ctx: NovaVstCtx, voiceId: string, busId: string | null, opts: { waitMs?: number } = {}): Promise<string[]> {
+  const { audioEngine } = await import('../engine/AudioEngine');
+  const src = audioEngine.getTrackSourceAudio(voiceId, 60);
+  if (!src) return [];
+  const lines: string[] = [];
+  const deadline = Date.now() + (opts.waitMs ?? 45000);
+  for (const tid of [voiceId, busId]) {
+    if (!tid) continue;
+    const onBus = tid !== voiceId;
+    const t = ctx.getState().tracks.find(x => x.id === tid);
+    if (!t) continue;
+    for (const pl of t.plugins.filter(p => p.isEnabled)) {
+      try {
+        if (ANALOG_SPECS[pl.type]) {
+          const spec = ANALOG_SPECS[pl.type];
+          const target = novaTargetFor(pl.type, onBus);
+          const r = await calibrateNova(pl.type, { ...spec.defaults, ...(pl.params || {}) }, src.channels, src.sampleRate, target);
+          ctx.mutate(d => { const q = d.tracks.find(x => x.id === tid)?.plugins.find(x => x.id === pl.id); if (q) q.params = { ...q.params, [spec.driveParam]: r.value }; });
+          lines.push(`${r.reached ? '✅' : '⚠️'} ${spec.name} (${t.name}) : ${r.grDb.toFixed(1).replace('.', ',')} dB max au VU (cible ${target} dB)${r.reached ? '' : ` — ${r.why}`}`);
+        } else if (pl.type === 'VST3' && /comp/.test(String(pl.params?.novaSlot || ''))) {
+          const node = liveVstNodes.get(pl.id);
+          let slot = node?.getSlotId() || null;
+          while (!slot && Date.now() < deadline) { await new Promise(res => setTimeout(res, 500)); slot = liveVstNodes.get(pl.id)?.getSlotId() || null; }
+          if (!slot || !novaBridge.getBridgeState().calibrateGr) continue;
+          const names = toVstParams(await novaBridge.getParams(slot)).map(x => x.name);
+          const spec = vstCalibrationSpec(pl.params?.name || pl.name, names, onBus);
+          if (!spec) continue;
+          const r = await novaBridge.calibrateGr({ slotId: slot, param: spec.param, lo: spec.lo, hi: spec.hi, sense: spec.sense, targetDb: spec.targetDb, sampleRate: src.sampleRate, channels: src.channels });
+          // Enregistré dans le projet (Annuler, réouverture) : même chemin que VST_SET_PARAM.
+          ctx.mutate(d => {
+            const q = d.tracks.find(x => x.id === tid)?.plugins.find(x => x.id === pl.id);
+            if (!q) return;
+            const prev = (q.params?.novaSettings || []) as any[];
+            q.params = { ...q.params, novaSettings: [...prev.filter(x => x.name !== spec.param), { name: spec.param, real: r.value }] };
+          });
+          lines.push(`${r.reached ? '✅' : '⚠️'} ${pl.name} (${t.name}) : ${spec.label} ${r.text ?? r.value} → ${r.grDb.toFixed(1).replace('.', ',')} dB max au VU (cible ${spec.targetDb} dB)${r.reached ? '' : ` — ${r.why}`}`);
+        }
+      } catch (e: any) {
+        lines.push(`⚠️ ${pl.name} : calage impossible (${e?.message || e})`);
+      }
+    }
+  }
+  if (lines.length) ctx.post(`🎯 Compresseurs calés sur ta voix (règle maison : 5 dB max au VU, 2 dB sur l’optique de bus) :\n${lines.join('\n')}`);
+  return lines;
+}
 
 /** Relectures envoyées par les plugins après réglage : résumées dans le chat. */
 const watchReadback = (ctx: NovaVstCtx, ids: string[]) => {
@@ -163,6 +218,9 @@ export async function handleNovaVstAction(a: AIAction, ctx: NovaVstCtx): Promise
         const after = ctx.getState();
         const ids = after.tracks.flatMap(t => t.plugins.filter(x => x.type === 'VST3' && x.params?.novaSlot && x.isEnabled).map(x => x.id));
         watchReadback(ctx, ids.filter(id => !!liveVstNodes.get(id) || true));
+        // Puis calage « réduction cible » des compresseurs (voix et bus).
+        const busId = after.tracks.find(t => t.id === (voice.outputTrackId || 'bus-vox') && t.id !== 'master')?.id || null;
+        calibrateMixCompressors(ctx, voice.id, busId).catch(() => { /* le mix reste appliqué */ });
       }, 0);
       return;
     }
