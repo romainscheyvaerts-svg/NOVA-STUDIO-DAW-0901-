@@ -66,12 +66,12 @@ const Slider: React.FC<{ kind: string; spec: AnalogParamSpec; value: number; onC
 );
 
 const Choice: React.FC<{ spec: AnalogParamSpec; value: number; onChange: (v: number) => void; active: string }> = ({ spec, value, onChange, active }) => (
-  <div title={spec.hint} data-nova-param={spec.id}>
+  <div title={spec.hint} data-nova-param={spec.id} className={spec.choices!.length > 3 ? 'sm:col-span-2' : ''}>
     <div className="text-[11px] font-bold text-slate-200 mb-1">{spec.label}</div>
     <div className={`grid gap-1`} style={{ gridTemplateColumns: `repeat(${spec.choices!.length}, minmax(0, 1fr))` }} role="radiogroup" aria-label={spec.label}>
       {spec.choices!.map(c => (
         <button key={c.v} type="button" role="radio" aria-checked={value === c.v} onClick={() => onChange(c.v)} title={c.hint || spec.hint}
-          className={`h-9 rounded-lg text-[11px] font-black border ${value === c.v ? `${active} text-black border-transparent` : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'}`}>
+          className={`min-h-9 px-1 rounded-lg text-[11px] leading-tight font-black border ${value === c.v ? `${active} text-black border-transparent` : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'}`}>
           {c.label}
         </button>
       ))}
@@ -134,7 +134,7 @@ const SUBTITLE: Record<string, string> = {
   OPTO_VINTAGE: "Compresseur optique à lampes, inspiré d'un classique danois des studios : doux, transparent, idéal sur la voix (règle maison : 2:1, 5 dB max au VU).",
   FET76: "Compresseur à transistor FET, inspiré d'un limiteur américain classique : attaque ultra-rapide, du mordant (règle maison : 5 dB max au VU sur les bus).",
   LEVELER2A: "Niveleur optique à lampes, inspiré d'un classique des années 60 : lent, très musical (règle maison : 2 dB max au VU sur les bus).",
-  VOXSTRIP: "Tranche voix à lampes inspirée d'un channel strip américain : compresseur optique, égaliseur passif et de-esser (règle maison : 5 dB max au VU).",
+  VOXSTRIP: "Tranche voix à lampes inspirée d'un channel strip américain : préampli, compresseur optique, égaliseur passif et transformateur (règle maison : 5 dB max au VU).",
 };
 
 export const NovaAnalogCompUI: React.FC<Props & { kind: string }> = ({ kind, node, initialParams, onParamsChange, trackId }) => {
