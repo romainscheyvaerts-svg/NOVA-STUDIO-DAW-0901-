@@ -132,7 +132,7 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
 
   return (
     <div className="fixed inset-0 z-[1200] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm sm:p-4" role="dialog" aria-modal="true" aria-labelledby="tpl-title" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full sm:max-w-2xl max-h-[92dvh] flex flex-col rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#121418] text-white shadow-2xl" data-testid="templates-modal">
+      <div className="w-full sm:max-w-2xl max-h-[92dvh] flex flex-col rounded-t-2xl sm:rounded-2xl border border-white/10 bg-nv-surface text-white shadow-2xl" data-testid="templates-modal">
         <header className="flex items-start gap-3 px-4 sm:px-5 pt-4 pb-3 border-b border-white/5">
           <div className="w-10 h-10 shrink-0 rounded-xl bg-cyan-500/15 flex items-center justify-center"><i className="fas fa-layer-group text-cyan-300" aria-hidden="true"></i></div>
           <div className="min-w-0 flex-1">
@@ -207,6 +207,9 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
                     const info = templateInfo(t);
                     const badge = templateBadge(t);
                     const open = openId === t.id;
+                    // Rien à choisir (aucun VST, aucun effet inactif) et pas de projet à remplacer :
+                    // « Utiliser ce modèle » crée le projet tout de suite (1 geste au lieu de 2).
+                    const needsOptions = info.vst > 0 || info.inactive > 0 || !!inStudio;
                     return (
                       <li key={t.id} className={`rounded-xl border ${open ? 'border-cyan-400/50 bg-cyan-500/[0.06]' : 'border-white/10 bg-white/[0.02]'} p-3`} data-testid="tpl-item" data-template-id={t.id}>
                         <div className="flex items-start gap-3">
@@ -235,15 +238,15 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
 
                         {open ? (
                           <div className="mt-3 space-y-2 border-t border-white/5 pt-3">
-                            <fieldset className="space-y-1">
+                            {info.vst > 0 && <fieldset className="space-y-1">
                               <legend className="text-[11px] font-bold text-slate-300 mb-1">Si un plugin VST manque sur ce PC</legend>
                               <label className="flex items-center gap-3 min-h-[36px] text-[13px]"><input type="radio" name={`miss-${t.id}`} checked={missingMode === 'replace'} onChange={() => setMissingMode('replace')} className="w-5 h-5 accent-cyan-400" />Le remplacer par l'effet NOVA équivalent</label>
                               <label className="flex items-center gap-3 min-h-[36px] text-[13px]"><input type="radio" name={`miss-${t.id}`} checked={missingMode === 'disable'} onChange={() => setMissingMode('disable')} className="w-5 h-5 accent-cyan-400" />Le laisser dans la chaîne, inactif</label>
-                            </fieldset>
-                            <label className="flex items-start gap-3 min-h-[36px] text-[13px]">
+                            </fieldset>}
+                            {info.inactive > 0 && <label className="flex items-start gap-3 min-h-[36px] text-[13px]">
                               <input type="checkbox" checked={enableAll} onChange={e => setEnableAll(e.target.checked)} className="mt-0.5 w-5 h-5 accent-cyan-400" data-testid="tpl-enable-all" />
                               <span>Activer tous les effets inactifs{info.inactive ? ` (${plural(info.inactive, 'effet inactif ou en bypass', 'effets inactifs ou en bypass')} dans le modèle)` : ''}<span className="block text-[11px] text-slate-500">Pour les effets coupés dans la session d'origine (Pro Tools) mais qui servent au mix : on garde la trace de ce qui était inactif.</span></span>
-                            </label>
+                            </label>}
                             {inStudio && <p className="text-[11px] text-amber-200">Ton projet en cours sera remplacé : sauvegarde-le avant si tu veux le garder.</p>}
                             <div className="flex flex-wrap gap-2">
                               <button type="button" disabled={busy} onClick={() => void create(t)} className={primary} data-testid="tpl-create">{busy ? 'Création…' : 'Créer le projet'}</button>
@@ -252,7 +255,7 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
                           </div>
                         ) : (
                           <div className="mt-2 flex flex-wrap gap-2">
-                            <button type="button" onClick={() => { setOpenId(t.id); setConfirmDelete(null); }} className={primary} data-testid="tpl-use">Utiliser ce modèle</button>
+                            <button type="button" disabled={busy} onClick={() => { if (!needsOptions) { void create(t); return; } setOpenId(t.id); setConfirmDelete(null); }} className={primary} data-testid="tpl-use" title={needsOptions ? undefined : 'Crée le projet tout de suite'}>{busy && !needsOptions ? 'Création…' : 'Utiliser ce modèle'}</button>
                             {!t.bundled && <button type="button" onClick={() => setRenaming({ id: t.id, name: t.name })} className={ghost}>Renommer</button>}
                             <button type="button" disabled={busy} onClick={() => void act(async () => { const c = await duplicateTemplate(t.id, email ?? null); await refresh(email ?? null); setStatus({ kind: 'ok', text: `Copie créée : « ${c.name} ».` }); })} className={ghost}>Dupliquer</button>
                             <button type="button" onClick={() => { const { blob, filename } = exportTemplateFile(t); void saveBlob(blob, filename); setStatus({ kind: 'info', text: `📤 ${filename} exporté.${t.privateTo ? ` Il reste ${privateLabel(t.privateTo)} une fois importé ailleurs.` : ''}` }); }} className={ghost}>Exporter</button>

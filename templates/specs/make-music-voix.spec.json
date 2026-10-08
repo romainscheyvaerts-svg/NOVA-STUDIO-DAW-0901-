@@ -1,0 +1,273 @@
+{
+  "format": "nova-template-spec",
+  "version": 1,
+  "name": "Session voix · Make Music",
+  "description": "La séance voix du studio Make Music, prête à enregistrer : voix lead, double et backs (coupe-bas 80 Hz sur la lead ; 200 Hz + coupe-haut 15 kHz sur double et backs ; compresseur opto 2:1 ; de-esser 8 kHz) → bus voix (2e étage 2:1) ; retours Reverb courte, Reverb longue et Écho 1/4 ; master avec Master Nova. Seulement des effets NOVA : marche partout, sur le site comme dans Nova Studio.",
+  "source": "Règles de mix du studio Make Music (08/10/2026)",
+  "timeSignature": "4/4",
+  "tracks": [
+    {
+      "name": "Beat",
+      "id": "instrumental",
+      "kind": "audio",
+      "color": "#eab308",
+      "volumeDb": -3,
+      "output": "Master"
+    },
+    {
+      "name": "Voix lead",
+      "id": "voix-lead",
+      "kind": "audio",
+      "color": "#3b82f6",
+      "volumeDb": 0,
+      "pan": "C",
+      "output": "Bus voix",
+      "inserts": [
+        {
+          "vendor": "NOVA",
+          "plugin": "PROEQ12",
+          "params": {
+            "name": "EQ · coupe-bas 80 Hz",
+            "isEnabled": true,
+            "masterGain": 1,
+            "bands": [
+              { "id": 0, "type": "highpass", "frequency": 80, "gain": 0, "q": 0.707, "isEnabled": true, "isSolo": false },
+              { "id": 1, "type": "peaking", "frequency": 150, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 2, "type": "peaking", "frequency": 300, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 3, "type": "peaking", "frequency": 500, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 4, "type": "peaking", "frequency": 1000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 5, "type": "peaking", "frequency": 2000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 6, "type": "peaking", "frequency": 4000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 7, "type": "peaking", "frequency": 6000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 8, "type": "peaking", "frequency": 8000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 9, "type": "peaking", "frequency": 10000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 10, "type": "peaking", "frequency": 12000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 11, "type": "lowpass", "frequency": 18000, "gain": 0, "q": 0.707, "isEnabled": false, "isSolo": false }
+            ]
+          },
+          "note": "Règle du studio : coupe-bas 80 Hz sur la lead."
+        },
+        {
+          "vendor": "NOVA",
+          "plugin": "OPTO_VINTAGE",
+          "params": { "name": "Opto Vintage · 2:1", "threshold": -30, "ratio": 2, "attack": 3, "release": 3, "mode": 1, "output": 0, "mix": 100, "scLowCut": 80, "vintage": 0 },
+          "note": "1er étage de compression : 2:1 ; « Caler sur ma voix » règle le seuil pour 5 dB max au VU."
+        },
+        {
+          "vendor": "NOVA",
+          "plugin": "DEESSER",
+          "params": { "name": "De-esser · 8 kHz", "threshold": -30, "frequency": 8000, "q": 1, "reduction": 0.6, "mode": "BELL", "detection": "RELATIVE", "relThreshold": -6, "listen": 0 },
+          "note": "Les sifflantes sont souvent vers 8 kHz."
+        }
+      ],
+      "sends": [
+        { "to": "Écho 1/4", "levelDb": -18, "slot": 0 },
+        { "to": "Reverb courte", "levelDb": -14, "slot": 1 },
+        { "to": "Reverb longue", "levelDb": -22, "slot": 2 }
+      ]
+    },
+    {
+      "name": "Voix double",
+      "id": "voix-double",
+      "kind": "audio",
+      "color": "#60a5fa",
+      "volumeDb": -6,
+      "pan": "C",
+      "output": "Bus voix",
+      "inserts": [
+        {
+          "vendor": "NOVA",
+          "plugin": "PROEQ12",
+          "params": {
+            "name": "EQ · 200 Hz – 15 kHz",
+            "isEnabled": true,
+            "masterGain": 1,
+            "bands": [
+              { "id": 0, "type": "highpass", "frequency": 200, "gain": 0, "q": 0.707, "isEnabled": true, "isSolo": false },
+              { "id": 1, "type": "peaking", "frequency": 300, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 2, "type": "peaking", "frequency": 500, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 3, "type": "peaking", "frequency": 800, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 4, "type": "peaking", "frequency": 1000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 5, "type": "peaking", "frequency": 2000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 6, "type": "peaking", "frequency": 4000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 7, "type": "peaking", "frequency": 6000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 8, "type": "peaking", "frequency": 8000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 9, "type": "peaking", "frequency": 10000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 10, "type": "peaking", "frequency": 12000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 11, "type": "lowpass", "frequency": 15000, "gain": 0, "q": 0.707, "isEnabled": true, "isSolo": false }
+            ]
+          },
+          "note": "Règle du studio : coupe-bas 200 Hz et coupe-haut 15 kHz sur les doubles et les backs."
+        },
+        {
+          "vendor": "NOVA",
+          "plugin": "OPTO_VINTAGE",
+          "params": { "name": "Opto Vintage · 2:1", "threshold": -30, "ratio": 2, "attack": 3, "release": 3, "mode": 1, "output": 0, "mix": 100, "scLowCut": 80, "vintage": 0 }
+        },
+        {
+          "vendor": "NOVA",
+          "plugin": "DEESSER",
+          "params": { "name": "De-esser · 8 kHz", "threshold": -30, "frequency": 8000, "q": 1, "reduction": 0.6, "mode": "BELL", "detection": "RELATIVE", "relThreshold": -6, "listen": 0 }
+        }
+      ],
+      "sends": [
+        { "to": "Écho 1/4", "level": 0, "slot": 0 },
+        { "to": "Reverb courte", "levelDb": -18, "slot": 1 },
+        { "to": "Reverb longue", "level": 0, "slot": 2 }
+      ]
+    },
+    {
+      "name": "Backs",
+      "id": "backs",
+      "kind": "audio",
+      "color": "#a855f7",
+      "volumeDb": -8,
+      "pan": "C",
+      "output": "Bus voix",
+      "inserts": [
+        {
+          "vendor": "NOVA",
+          "plugin": "PROEQ12",
+          "params": {
+            "name": "EQ · 200 Hz – 15 kHz",
+            "isEnabled": true,
+            "masterGain": 1,
+            "bands": [
+              { "id": 0, "type": "highpass", "frequency": 200, "gain": 0, "q": 0.707, "isEnabled": true, "isSolo": false },
+              { "id": 1, "type": "peaking", "frequency": 300, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 2, "type": "peaking", "frequency": 500, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 3, "type": "peaking", "frequency": 800, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 4, "type": "peaking", "frequency": 1000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 5, "type": "peaking", "frequency": 2000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 6, "type": "peaking", "frequency": 4000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 7, "type": "peaking", "frequency": 6000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 8, "type": "peaking", "frequency": 8000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 9, "type": "peaking", "frequency": 10000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 10, "type": "peaking", "frequency": 12000, "gain": 0, "q": 1, "isEnabled": true, "isSolo": false },
+              { "id": 11, "type": "lowpass", "frequency": 15000, "gain": 0, "q": 0.707, "isEnabled": true, "isSolo": false }
+            ]
+          },
+          "note": "Règle du studio : coupe-bas 200 Hz et coupe-haut 15 kHz sur les backs."
+        },
+        {
+          "vendor": "NOVA",
+          "plugin": "OPTO_VINTAGE",
+          "params": { "name": "Opto Vintage · 2:1", "threshold": -30, "ratio": 2, "attack": 3, "release": 3, "mode": 1, "output": 0, "mix": 100, "scLowCut": 80, "vintage": 0 }
+        },
+        {
+          "vendor": "NOVA",
+          "plugin": "DEESSER",
+          "params": { "name": "De-esser · 8 kHz", "threshold": -30, "frequency": 8000, "q": 1, "reduction": 0.6, "mode": "BELL", "detection": "RELATIVE", "relThreshold": -6, "listen": 0 }
+        }
+      ],
+      "sends": [
+        { "to": "Écho 1/4", "level": 0, "slot": 0 },
+        { "to": "Reverb courte", "levelDb": -16, "slot": 1 },
+        { "to": "Reverb longue", "levelDb": -20, "slot": 2 }
+      ]
+    },
+    {
+      "name": "Bus voix",
+      "id": "bus-vox",
+      "kind": "bus",
+      "color": "#fbbf24",
+      "volumeDb": 0,
+      "output": "Master",
+      "inserts": [
+        {
+          "vendor": "NOVA",
+          "plugin": "FET76",
+          "params": { "name": "FET 76 · 2:1", "input": -28, "output": -15, "attack": 5, "release": 6, "ratio": 2, "slo": 0, "mix": 100 },
+          "note": "2e étage de compression voix : 2:1, autre type (FET) ; 5 dB max au VU sur le bus."
+        }
+      ]
+    },
+    {
+      "name": "Reverb courte",
+      "id": "send-verb-short",
+      "kind": "aux",
+      "color": "#10b981",
+      "volumeDb": -3,
+      "output": "Master",
+      "inserts": [
+        {
+          "vendor": "NOVA",
+          "plugin": "REVERB",
+          "params": { "name": "Reverb courte (plate)", "decay": 1.2, "preDelay": 0.02, "damping": 0.4, "mix": 1, "size": 0.4, "mode": "PLATE" }
+        }
+      ]
+    },
+    {
+      "name": "Reverb longue",
+      "id": "send-verb-long",
+      "kind": "aux",
+      "color": "#a855f7",
+      "volumeDb": -4.4,
+      "output": "Master",
+      "inserts": [
+        {
+          "vendor": "NOVA",
+          "plugin": "REVERB",
+          "params": { "name": "Reverb longue (hall)", "decay": 3.5, "preDelay": 0.05, "damping": 0.4, "mix": 1, "size": 0.9, "mode": "HALL" }
+        }
+      ]
+    },
+    {
+      "name": "Écho 1/4",
+      "id": "send-delay",
+      "kind": "aux",
+      "color": "#00f2ff",
+      "volumeDb": -2,
+      "output": "Master",
+      "inserts": [
+        {
+          "vendor": "NOVA",
+          "plugin": "DELAY",
+          "params": { "name": "Écho 1/4", "division": "1/4", "feedback": 0.3, "feedbackLP": 5000, "feedbackHP": 150, "mix": 1, "pingPong": false },
+          "note": "Calé sur le tempo du projet (une noire)."
+        }
+      ]
+    },
+    {
+      "name": "Master",
+      "kind": "master",
+      "inserts": [
+        {
+          "vendor": "NOVA",
+          "plugin": "PROEQ12",
+          "params": {
+            "name": "Master Nova · EQ",
+            "masterNova": true,
+            "isEnabled": true,
+            "masterGain": 1,
+            "bands": [
+              { "id": 0, "type": "highpass", "frequency": 22, "gain": 0, "q": 0.7, "isEnabled": true, "isSolo": false },
+              { "id": 1, "type": "lowshelf", "frequency": 55, "gain": 0, "q": 0.7, "isEnabled": true, "isSolo": false },
+              { "id": 2, "type": "peaking", "frequency": 110, "gain": 0, "q": 0.8, "isEnabled": true, "isSolo": false },
+              { "id": 3, "type": "peaking", "frequency": 400, "gain": 0, "q": 0.7, "isEnabled": true, "isSolo": false },
+              { "id": 4, "type": "peaking", "frequency": 1600, "gain": 0, "q": 0.7, "isEnabled": true, "isSolo": false },
+              { "id": 5, "type": "peaking", "frequency": 5000, "gain": 0, "q": 0.8, "isEnabled": true, "isSolo": false },
+              { "id": 6, "type": "highshelf", "frequency": 10000, "gain": 0, "q": 0.7, "isEnabled": true, "isSolo": false },
+              { "id": 7, "type": "peaking", "frequency": 6000, "gain": 0, "q": 1, "isEnabled": false, "isSolo": false },
+              { "id": 8, "type": "peaking", "frequency": 8000, "gain": 0, "q": 1, "isEnabled": false, "isSolo": false },
+              { "id": 9, "type": "peaking", "frequency": 10000, "gain": 0, "q": 1, "isEnabled": false, "isSolo": false },
+              { "id": 10, "type": "peaking", "frequency": 12000, "gain": 0, "q": 1, "isEnabled": false, "isSolo": false },
+              { "id": 11, "type": "lowpass", "frequency": 18000, "gain": 0, "q": 1, "isEnabled": false, "isSolo": false }
+            ]
+          },
+          "note": "Chaîne Master Nova de départ (neutre) : lance Master Nova sur ton mix pour la caler sur Spotify, Apple…"
+        },
+        {
+          "vendor": "NOVA",
+          "plugin": "COMPRESSOR",
+          "params": { "name": "Master Nova · Compression", "masterNova": true, "threshold": -15, "ratio": 1.5, "knee": 8, "attack": 0.03, "release": 0.2, "makeupGain": 1, "mix": 1, "scHpFreq": 90, "lookahead": 0, "autoMakeup": false, "mode": "CLEAN" }
+        },
+        {
+          "vendor": "NOVA",
+          "plugin": "LIMITER",
+          "params": { "name": "Master Nova · Limiteur", "masterNova": true, "ceiling": -1, "inputGain": 0, "release": 100, "lookahead": 3, "oversample": 4 }
+        }
+      ]
+    }
+  ]
+}

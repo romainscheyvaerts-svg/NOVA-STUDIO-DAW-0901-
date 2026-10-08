@@ -2986,6 +2986,14 @@ function Studio() {
 
       // 6. Créer une nouvelle piste audio et ajouter le clip
       setState(produce((draft: DAWState) => {
+        // 1er son importé dans un projet neuf ou un modèle : la piste « Beat » vide le reçoit
+        // (avant, une piste de plus apparaissait et « Beat » restait vide, avec ses réglages).
+        const beat = draft.tracks.find(t => t.id === 'instrumental' && t.type === TrackType.AUDIO && !(t.clips || []).length);
+        if (beat) {
+          beat.clips.push(newClip);
+          draft.selectedTrackId = beat.id;
+          return;
+        }
         const trackId = `track-${Date.now()}`;
         const newTrack: Track = {
           id: trackId,

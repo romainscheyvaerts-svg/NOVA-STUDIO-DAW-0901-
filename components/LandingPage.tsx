@@ -380,7 +380,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 </div>
                 <div className="text-left">
                   <p className="text-sm font-bold text-white">Depuis un modèle</p>
-                  <p className="text-[11px] text-slate-400">Pistes, bus, envois et effets déjà réglés</p>
+                  <p className="text-[11px] text-slate-400">Session voix Make Music : lead, double, backs, retours et master déjà réglés</p>
                 </div>
               </button>
             )}

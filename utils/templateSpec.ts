@@ -360,7 +360,9 @@ export const parseKey = (k?: string): { key: number; scale: string } | null => {
   return { key: idx, scale };
 };
 
-const BUILTIN_TYPES: PluginType[] = ['REVERB', 'DELAY', 'CHORUS', 'FLANGER', 'DOUBLER', 'STEREOSPREADER', 'COMPRESSOR', 'AUTOTUNE', 'DEESSER', 'DENOISER', 'PROEQ12', 'VOCALSATURATOR', 'LIMITER'];
+const BUILTIN_TYPES: PluginType[] = ['REVERB', 'DELAY', 'CHORUS', 'FLANGER', 'DOUBLER', 'STEREOSPREADER', 'COMPRESSOR', 'AUTOTUNE', 'DEESSER', 'DENOISER', 'PROEQ12', 'VOCALSATURATOR', 'LIMITER',
+  // Compresseurs « analogiques » et effets récents de NOVA (modèle livré « Session voix · Make Music »).
+  'OPTO_VINTAGE', 'FET76', 'LEVELER2A', 'VOXSTRIP', 'GATE', 'GATEFX', 'HARMONIZER', 'LOFI', 'DJFILTER', 'TIMEFX', 'MASTERTRANSIENT'];
 
 const builtinTypeOf = (ins: SpecInsert): PluginType | null => {
   const isNova = /^nova$/i.test((ins.vendor || '').trim());
