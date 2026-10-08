@@ -557,7 +557,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             {!isRenaming && !recBy && !editors.length && watchers.length > 0 && (
               <span aria-hidden data-testid={`collab-sel-${track.id}`} title={`${watchers.map(w => w.name).join(', ')} regarde cette piste`}
                 className="shrink-0 flex items-center gap-0.5">
-                {watchers.slice(0, 3).map(w => <span key={w.name} className="w-2 h-2 rounded-full ring-1 ring-black/50" style={{ backgroundColor: w.color }} />)}
+                {watchers.slice(0, 3).map((w, i) => <span key={`${w.name}-${i}`} className="w-2 h-2 rounded-full ring-1 ring-black/50" style={{ backgroundColor: w.color }} />)}
               </span>
             )}
             {/* Synthé NOVA (V24) : pastille de l'instrument de la piste MIDI, ouvre son écran

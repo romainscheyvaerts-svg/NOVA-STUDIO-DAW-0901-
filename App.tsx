@@ -5982,8 +5982,8 @@ function Studio() {
     if (c) collabOnlineRef.current.forEach(m => {
       if (participantOf(m.member_key) === c.key) return;
       const mark = { name: m.display_name, color: m.color || '#94a3b8' };
-      if (m.edit) (edits[m.edit] ||= []).push(mark);
-      if (m.sel) (sels[m.sel] ||= []).push(mark);
+      if (m.edit && !(edits[m.edit] ||= []).some(x => x.name === mark.name)) edits[m.edit].push(mark);
+      if (m.sel && !(sels[m.sel] ||= []).some(x => x.name === mark.name)) sels[m.sel].push(mark);
     });
     collabLiveStore.set({ meKey: c?.key || null, recs, edits, sels });
   };
@@ -6492,6 +6492,7 @@ function Studio() {
     } catch (e: any) {
       const msg = String(e?.message || '');
       if (/inconnue/i.test(msg)) throw new Error('Les codes ne marchent pas encore : demande plutôt le lien d’invitation.');
+      if (/Abonnement/i.test(msg)) { setCollabGate('subscribe'); throw new Error('Pour rejoindre une collaboration, il faut l’abonnement collaboration (5 €/mois) : abonne-toi ci-dessous, puis entre à nouveau le code.'); }
       throw new Error(/introuvable|expir/i.test(msg) ? 'Code inconnu ou expiré (24 h) : demande un nouveau code à la personne qui t’invite.' : `Code impossible à vérifier : ${msg || 'connexion'}. Réessaie.`);
     }
     const link = parseLink(r?.link || '');
@@ -8081,6 +8082,8 @@ function Studio() {
   const [nextStep, setNextStep] = useState<'take' | 'export' | null>(null);
   const nextStepSeenRef = useRef(new Set<string>());
   showNextStepRef.current = (trigger) => {
+    // En collaboration, pas de carte « Faire mixer par un pro / studio » : l'ingé (ou l'autre artiste) est déjà là.
+    if (collabRef.current || remoteRef.current?.active) return;
     if (nextStepSeenRef.current.has(trigger)) return;
     nextStepSeenRef.current.add(trigger);
     setNextStep(trigger);

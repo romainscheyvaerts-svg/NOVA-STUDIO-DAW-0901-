@@ -1,4 +1,5 @@
 import type { DAWState, Track, Clip } from '../types';
+import { groupsOpOf } from './editGroups';
 
 /**
  * Empreinte de ce que la collaboration PARTAGE : deux participants qui ont
@@ -104,8 +105,9 @@ export function songParts(s: Partial<DAWState>): Record<string, unknown> {
     tempo: { bpm: s.bpm, ts: s.timeSignature, events: s.tempoEvents || [] },
     markers: (s.markers || []).map(m => ({ id: m.id, name: m.name, t: m.time, type: (m as any).type ?? null, end: (m as any).endTime ?? null, color: m.color, n: (m as any).number ?? null })),
     chords: (s.chords || []).map(c => { const { by: _b, ...r } = c as any; return r; }),
-    groups: { groups: s.trackGroups || [], settings: s.groupSettings ?? null },
-    notes: s.projectNotes ?? null,
+    // Ce qui voyage des groupes (forme vérifiée) et des notes (le texte : l'heure de modification est locale).
+    groups: groupsOpOf({ trackGroups: s.trackGroups || [], groupSettings: s.groupSettings }),
+    notes: (() => { const { updatedAt: _a, updatedBy: _b, ...n } = (s.projectNotes || {}) as Record<string, unknown>; return n; })(),
     arrangements: s.arrangements || [],
     key: { key: s.projectKey ?? null, scale: s.projectScale ?? null },
     order: (s.tracks || []).map(t => t.id),

@@ -287,7 +287,8 @@ export function sanitizeClipGainFields<T extends Record<string, any>>(c: T): T {
     if (!ok) delete out.elastic;
     else {
       const markers = Array.isArray(e.markers) ? e.markers.filter((m: any) => m && typeof m.id === 'string' && finite(m.src) && finite(m.dst)).sort((a: any, b: any) => a.src - b.src) : [];
-      out.elastic = { ...e, markers: markers.length ? markers : undefined };
+      // Liste vide gardée vide (sinon l'empreinte du clip diffère d'un côté à l'autre).
+      out.elastic = { ...e, markers: markers.length || Array.isArray(e.markers) ? markers : undefined };
     }
   }
   return out as T;
