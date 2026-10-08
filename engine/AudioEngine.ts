@@ -65,6 +65,8 @@ import { computePdc, PdcNode, PDC_MAX_SECONDS } from '../utils/pdc';
 import { applyGainEvents, clipGainEvents } from '../utils/fades';
 import { breathSig } from '../utils/breathEnvelope';
 import { gainPointsSig } from '../utils/clipGain';
+import { Scrubber, type ScrubStats } from './Scrubber';
+import { playheadStore } from '../utils/playheadStore';
 import { auditionClips } from '../utils/playlists';
 import { ChordEvent, chordSteps } from '../utils/chordDetect';
 import { engineView, VOID_OUTPUT } from '../utils/trackStructure';
@@ -2090,8 +2092,57 @@ export class AudioEngine {
    */
   public getPlaybackOrigin(): number { return this.playbackStartTime; }
 
-  public scrub(tracks: Track[], time: number, velocity: number) { /* ... */ }
-  public stopScrubbing() { /* ... */ }
+  // --- Scrub / shuttle audibles (R17, engine/Scrubber) ----------------------------
+  private scrubber: Scrubber | null = null;
+  private scrubberOf(): Scrubber | null {
+    if (!this.ctx) return null;
+    if (!this.scrubber) {
+      this.scrubber = new Scrubber({
+        ctx: this.ctx,
+        input: (id) => this.tracksDSP.get(id)?.input || null,
+        silenced: (id) => this.soloSilencedIds.has(id),
+        reversed: (key, buf) => this.reversedOf(key, buf),
+      });
+      this.scrubber.onMove = (t) => { this.pausedAt = t; playheadStore.set(t); };
+    }
+    return this.scrubber;
+  }
+
+  /** Buffer inversé mis en cache (lecture à l'envers : clip inversé, scrub en arrière). */
+  private reversedOf(key: string, buffer: AudioBuffer): AudioBuffer {
+    let reversed = this.reversedBufferCache.get(key);
+    if (!reversed || reversed.length !== buffer.length) {
+      reversed = this.ctx!.createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+      for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+        const original = buffer.getChannelData(ch);
+        const out = reversed.getChannelData(ch);
+        for (let i = 0, n = original.length; i < n; i++) out[i] = original[n - 1 - i];
+      }
+      this.reversedBufferCache.set(key, reversed);
+    }
+    return reversed;
+  }
+
+  /**
+   * Scrub (Pro Tools : Scrubber, Ctrl+glisser) : la position audible suit `time`.
+   * Grains courts fenêtrés, vitesse = vitesse du geste : voir engine/Scrubber.
+   * La lecture doit être arrêtée (comme dans Pro Tools, scrubber arrête le transport).
+   */
+  public scrub(tracks: Track[], time: number, _velocity?: number) {
+    if (this.isPlaying) return;
+    this.scrubberOf()?.scrubTo(engineView(tracks).tracks, time);
+  }
+
+  /** Shuttle : défilement à vitesse constante (× temps réel, négatif = en arrière). */
+  public shuttle(tracks: Track[], speed: number, from?: number) {
+    if (this.isPlaying) return;
+    this.scrubberOf()?.shuttle(engineView(tracks).tracks, speed, from ?? this.pausedAt);
+  }
+
+  public stopScrubbing() { this.scrubber?.stop(); }
+  public isScrubbing(): boolean { return !!this.scrubber?.active; }
+  public getScrubPosition(): number { return this.scrubber?.position ?? this.pausedAt; }
+  public getScrubStats(): ScrubStats | null { return this.scrubber ? { ...this.scrubber.stats } : null; }
 
   private computeClipSigs(tracks: Track[]): Map<string, string> {
     const m = new Map<string, string>();

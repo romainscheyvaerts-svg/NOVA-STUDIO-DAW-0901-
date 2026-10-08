@@ -1,24 +1,39 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { KEYMAP, SHORTCUT_CATEGORIES, searchShortcuts, shortcutKeysLabel } from '../utils/keymap';
+import { SHORTCUT_CATEGORIES, searchShortcuts, shortcutKeysLabel } from '../utils/keymap';
 import { setKeyboardFocus, useKeyboardFocus } from '../utils/keyboardFocus';
+import { presetById, useKeymap, useKeymapSettings } from '../utils/keymapStore';
 
 /**
- * Aide-mémoire des raccourcis (touche « ? ») : TOUS les raccourcis de la table
- * utils/keymap, avec leur équivalent Pro Tools et une recherche.
+ * Aide-mémoire des raccourcis (touche « ? ») : TOUS les raccourcis ACTIFS
+ * (préréglage choisi + remappages, utils/keymapStore), avec leur équivalent
+ * Pro Tools et une recherche.
  */
-const ShortcutsHelp: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
+const ShortcutsHelp: React.FC<{ open: boolean; onClose: () => void; onCustomize?: () => void; onLayouts?: () => void }> = ({ open, onClose, onCustomize, onLayouts }) => {
   const [query, setQuery] = useState('');
   const focus = useKeyboardFocus();
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 30); else setQuery(''); }, [open]);
-  const found = useMemo(() => searchShortcuts(query, KEYMAP), [query]);
+  const keymap = useKeymap();
+  const settings = useKeymapSettings();
+  // Les commandes sans touche ne sont pas listées dans l'aide (l'éditeur les montre toutes).
+  const found = useMemo(() => searchShortcuts(query, keymap).filter(s => s.keys.length > 0), [query, keymap]);
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/60 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
       <div className="flex max-h-[88vh] w-full max-w-3xl flex-col rounded-2xl border border-white/10 bg-[#121418] p-5 shadow-2xl sm:p-6" onClick={e => e.stopPropagation()}>
         <div className="mb-3 flex items-center gap-2">
-          <h2 id="shortcuts-title" className="mr-auto text-lg font-black text-white">⌨️ Raccourcis clavier</h2>
+          <h2 id="shortcuts-title" className="mr-auto text-lg font-black text-white">⌨️ Raccourcis clavier
+            <span className="ml-2 align-middle text-[11px] font-bold text-slate-400" data-testid="shortcuts-preset">jeu : {presetById(settings.preset).name}{Object.keys(settings.overrides).length ? ` + ${Object.keys(settings.overrides).length} perso` : ''}</span>
+          </h2>
+          {onLayouts && (
+            <button type="button" onClick={onLayouts} data-testid="shortcuts-layouts" title="Dispositions de fenêtres (Enregistrement, Édition, Mix…)"
+              className="h-9 rounded-lg border border-white/10 bg-white/5 px-3 text-[12px] font-bold text-slate-200 hover:bg-white/10">🪟 Dispositions</button>
+          )}
+          {onCustomize && (
+            <button type="button" onClick={onCustomize} data-testid="shortcuts-customize" title="Changer les touches, choisir un jeu Pro Tools, FL Studio ou Ableton Live"
+              className="h-9 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 text-[12px] font-bold text-cyan-200 hover:bg-cyan-500/20">Personnaliser</button>
+          )}
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 rounded-lg bg-white/5 text-slate-300">✕</button>
         </div>
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">

@@ -4,7 +4,7 @@ import { Track, TrackType } from '../types';
 import { midiManager, ALL_INPUTS } from '../services/MidiManager';
 import { midiInput } from '../services/MidiInput';
 import { computerKeyboardStore, isComputerKeyboardCode } from '../utils/computerKeyboard';
-import { chordFromEvent } from '../utils/keymap';
+import { isShortcut, shortcutHint } from '../utils/keymap';
 import { MODE_LABELS, MidiRecMode, isMidiRecordTrack } from '../utils/midiRecord';
 import { midiLearn, LearnTarget, LearnKind } from '../utils/midiLearn';
 import { getRegisteredPlugin } from '../engine/pluginRegistry';
@@ -71,12 +71,12 @@ const MidiInputHost: React.FC<Props> = ({ tracks, selectedTrackId, isRecording, 
   // --- Clavier de l'ordinateur -------------------------------------------------
   useEffect(() => {
     const onToggleKey = (e: KeyboardEvent) => {
-      if (chordFromEvent(e) !== 'ctrl+shift+k' || typing(e.target)) return;
+      if (!isShortcut(e, 'nova.computerKeyboard') || typing(e.target)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       computerKeyboardStore.toggle();
       window.dispatchEvent(new CustomEvent('nova:notify', { detail: computerKeyboardStore.on
-        ? "⌨️ Clavier de l'ordinateur ACTIF : Q S D F G H J K L M = Do Ré Mi… (AZERTY), W / X octave, C / V vélocité. R enregistre, Espace lit. Ctrl+Maj+K pour le couper."
+        ? `⌨️ Clavier de l'ordinateur ACTIF : Q S D F G H J K L M = Do Ré Mi… (AZERTY), W / X octave, C / V vélocité. R enregistre, Espace lit. ${shortcutHint('nova.computerKeyboard') || 'Ctrl+Maj+K'} pour le couper.`
         : "⌨️ Clavier de l'ordinateur coupé : les lettres retrouvent leurs raccourcis." }));
     };
     window.addEventListener('keydown', onToggleKey, true);

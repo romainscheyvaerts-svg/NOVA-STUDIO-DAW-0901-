@@ -540,6 +540,8 @@ export const FeedbackHost: React.FC = () => {
     };
     const onKey = (e: KeyboardEvent) => {
       if (!isFeedbackShortcut(e)) return;
+      // Éditeur de raccourcis en train de capturer une touche : ce n'est pas un signalement.
+      if ((e.target as HTMLElement | null)?.closest?.('[data-keymap-capture]')) return;
       e.preventDefault(); e.stopPropagation();
       setOpen(o => { if (!o) { setInitial({}); recordAction('raccourci:nova.feedback'); } return !o; });
     };
