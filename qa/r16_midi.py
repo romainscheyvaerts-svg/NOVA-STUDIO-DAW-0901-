@@ -247,7 +247,9 @@ def run_pc(b, theme="dark"):
       const all = window.__novaMidi.rawTracks();
       const tr = all.find(t => t.id === tid);
       const SR = 48000;
-      const one = (clips) => [{ ...tr, outputTrackId: undefined, volume: 1, pan: 0, isMuted: false, isSolo: false, sends: [], plugins: [], clips }];
+      const P = await window.__novaAppModule('/utils/novaSynthPresets.ts');
+      let synthOver = {};
+      const one = (clips) => [{ ...tr, ...synthOver, outputTrackId: undefined, volume: 1, pan: 0, isMuted: false, isSolo: false, sends: [], plugins: [], clips }];
       const render = async (clips) => audioEngine.renderProject(one(clips), 2.2, at - 0.2, SR);
       const strip = (c) => ({ ...c, cc: undefined });
       const withCc = await render(tr.clips);
@@ -270,13 +272,21 @@ def run_pc(b, theme="dark"):
         const d = (y0 - y2) / (2 * (y0 - 2 * y1 + y2) || 1);
         return Math.round(SR / (bestLag + d) * 10) / 10;
       };
-      return {
+      const out = {
         tenue_avec_pedale_dB: db(rms(withCc, 0.5, 1.0)), tenue_sans_pedale_dB: db(rms(noCc, 0.5, 1.0)),
         hauteur_avant_bend_Hz: pitch(withCc, 0.3, 0.55), hauteur_bend_Hz: pitch(withCc, 0.75, 1.15), hauteur_apres_retour_Hz: pitch(withCc, 1.25, 1.45),
       };
+      // Même prise sur le synthé NOVA (V24), son « Son vierge ».
+      synthOver = { novaSynth: P.presetSettings('init') };
+      const n1 = await render(tr.clips), n0 = await render(tr.clips.map(strip));
+      out.nova = { tenue_avec_pedale_dB: db(rms(n1, 0.5, 1.0)), tenue_sans_pedale_dB: db(rms(n0, 0.5, 1.0)),
+        hauteur_avant_bend_Hz: pitch(n1, 0.3, 0.55), hauteur_bend_Hz: pitch(n1, 0.75, 1.15), hauteur_apres_retour_Hz: pitch(n1, 1.25, 1.45) };
+      return out;
     }""", {"tid": tid, "at": rec2 + base})
     RES["mesures"]["export_sustain_pitch_bend"] = measure
     ok("sustain entendu à l'export (note tenue par la pédale)", measure["tenue_avec_pedale_dB"] > measure["tenue_sans_pedale_dB"] + 30 and measure["tenue_avec_pedale_dB"] > -45, measure)
+    nv = measure.get("nova") or {}
+    ok("synthé NOVA (V24) : sustain et pitch bend à l'export", nv.get("tenue_avec_pedale_dB", -200) > nv.get("tenue_sans_pedale_dB", 0) + 30 and abs(nv.get("hauteur_avant_bend_Hz", 0) - 440) < 3 and abs(nv.get("hauteur_bend_Hz", 0) - 493.88) < 4 and abs(nv.get("hauteur_apres_retour_Hz", 0) - 440) < 3, nv)
     ok("pitch bend entendu à l'export (440 → 493,9 Hz → 440)", abs(measure["hauteur_avant_bend_Hz"] - 440) < 3 and abs(measure["hauteur_bend_Hz"] - 493.88) < 4 and abs(measure["hauteur_apres_retour_Hz"] - 440) < 3, measure)
 
     # 3. Boucle de 4 tours : une prise par tour.
@@ -399,7 +409,14 @@ def run_pc(b, theme="dark"):
     # 6. Clavier de l'ordinateur sur la piste sélectionnée, sans piano roll.
     pg.evaluate("""async () => { const { audioEngine } = await window.__novaAppModule('/engine/AudioEngine.ts');
       window.__qaAttacks = []; const o = audioEngine.triggerTrackAttack.bind(audioEngine);
-      audioEngine.triggerTrackAttack = (id, p, v, t) => { window.__qaAttacks.push({ id, p }); return o(id, p, v, t); }; }""")
+      audioEngine.triggerTrackAttack = (id, p, v, t) => { window.__qaAttacks.push({ id, p, t: t || 0, at: performance.now() }); return o(id, p, v, t); }; }""")
+    thru = pg.evaluate("""async () => { const { audioEngine: e } = await window.__novaAppModule('/engine/AudioEngine.ts');
+      const t0 = performance.now(); window.__qaMidi.send([0x90, 67, 100], t0); const a = window.__qaAttacks[window.__qaAttacks.length - 1];
+      window.__qaMidi.send([0x80, 67, 0], performance.now());
+      return { appel_apres_ms: a ? Math.round((a.at - t0) * 1000) / 1000 : null, programme_a: a ? (a.t === 0 ? 'tout de suite' : a.t) : null, piste: a && a.id,
+        latence_sortie_ms: Math.round(((e.ctx.baseLatency || 0) + (e.ctx.outputLatency || 0)) * 1000) }; }""")
+    RES["mesures"]["thru"] = thru
+    ok("Thru : la piste armée joue la note du clavier MIDI tout de suite", thru["piste"] == tid and thru["programme_a"] == "tout de suite" and thru["appel_apres_ms"] is not None and thru["appel_apres_ms"] < 5, thru)
     pg.mouse.click(5, 300)
     pg.keyboard.press("Control+Shift+K"); pg.wait_for_timeout(300)
     pg.keyboard.down("KeyA" if False else "a"); pg.wait_for_timeout(120); pg.keyboard.up("a")
