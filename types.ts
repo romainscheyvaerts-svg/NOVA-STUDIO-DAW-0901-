@@ -952,6 +952,12 @@ export interface Track {
   ioBuses?: NamedBus[];
   /** Piste rendue (Commit, bounce, bus imprimé) : d'où elle vient, pour « Restaurer la piste d'origine ». */
   commit?: TrackCommitInfo;
+  /**
+   * R21 · Commentaire de la piste (Pro Tools : Comments, vue Commentaires de la
+   * console et de la fenêtre d'édition) : micro utilisé, consigne de mix… Affiché
+   * dans la console et l'en-tête ; voyage en collaboration (utils/sessionNotes).
+   */
+  comment?: string;
 }
 
 /** R14 · Entrée physique d'une piste (0 = entrée 1 de la carte / du micro). */
@@ -1165,6 +1171,25 @@ export interface DAWState {
    * projets) ; une ancienne version l'ignore sans rien casser.
    */
   chords?: import('./utils/chordDetect').ChordEvent[];
+  // ─── R21 · Session pro ─────────────────────────────────────────────────────
+  /**
+   * Notes du projet (Pro Tools : Project Notes) : consignes de mix, références,
+   * notes libres. Les paroles restent dans `lyrics` (prompteur). Voyagent en
+   * collaboration (utils/sessionNotes). Une ancienne version les ignore.
+   */
+  projectNotes?: import('./utils/sessionNotes').ProjectNotes;
+  /**
+   * Arrangements du morceau (« clean » / « explicite », « radio edit »…) : ordre
+   * des sections de la piste Arrangement et clips coupés. utils/arrangements.
+   */
+  arrangements?: import('./utils/arrangements').SongArrangement[];
+  /**
+   * Clips de la session qui ne sont plus sur la timeline (Pro Tools : Clips
+   * List) : gardés dans la liste des clips, à reposer d'un glisser. utils/clipsList.
+   */
+  clipBin?: import('./utils/clipsList').BinClip[];
+  /** Numéro de version nommée (Enregistrer comme nouvelle version : v2, v3…). utils/projectVersions. */
+  sessionVersion?: number;
 }
 
 export interface ContextMenuItem {

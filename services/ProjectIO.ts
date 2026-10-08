@@ -235,6 +235,25 @@ export class ProjectIO {
         }
     }
     
+    // R21 · Clips retirés de la timeline gardés dans la liste des clips : leur son voyage aussi.
+    if (Array.isArray(state.clipBin) && state.clipBin.length) {
+        const kept: any[] = [];
+        state.clipBin.forEach((c, i) => {
+            const sc = serializableState.clipBin[i];
+            const buf = c.bufferId ? audioBufferRegistry.get(c.bufferId) : undefined;
+            if (c.bufferId && !buf) return; // son déjà libéré : rien à garder
+            if (buf) {
+                const filename = `${c.bufferId}.wav`;
+                if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavOf(buf)); }
+                sc.audioRef = `audio/${filename}`;
+                delete sc.bufferId;
+            }
+            delete sc.buffer;
+            kept.push(sc);
+        });
+        if (kept.length) serializableState.clipBin = kept; else delete serializableState.clipBin;
+    }
+
     // 3. Ajout du fichier JSON d'état
     zip.file("project.json", JSON.stringify(serializableState, null, 2));
     
@@ -245,7 +264,10 @@ export class ProjectIO {
   /**
    * Charge un projet depuis un fichier ZIP.
    */
-  public static async loadProject(file: File): Promise<DAWState> {
+  public static async loadProject(file: File | Blob, opts: { bufferPrefix?: string } = {}): Promise<DAWState> {
+    // R21 · Import depuis une session : les sons du projet importé sont enregistrés sous
+    // un préfixe, ils n'écrasent jamais ceux du projet ouvert (mêmes identifiants de clips).
+    const reg = (b: AudioBuffer, key?: string) => audioBufferRegistry.register(b, opts.bufferPrefix && key ? `${opts.bufferPrefix}${key}` : key);
     // Projet abîmé (écriture interrompue, son manquant, identifiants en double…) :
     // il s'ouvre quand même, réparé (utils/projectRepair), avec un rapport lisible
     // par ProjectIO.repairReportOf(état). On ne lève que si RIEN n'est récupérable.
@@ -315,7 +337,7 @@ export class ProjectIO {
                         const audioBuffer = await audioEngine.ctx!.decodeAudioData(arrayBuffer);
 
                         // Enregistrer dans le registry et stocker l'ID
-                        const bufferId = audioBufferRegistry.register(audioBuffer, clip.id);
+                        const bufferId = reg(audioBuffer, clip.id);
                         clip.bufferId = bufferId;
                         decoded.set(clip.audioRef, bufferId);
                         if (clip.__salvaged) clip.duration = audioBuffer.duration;
@@ -362,7 +384,7 @@ export class ProjectIO {
                 else if (srcFile) {
                     try {
                         const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
-                        ae.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-ara-origine`);
+                        ae.sourceBufferId = reg(srcBuf, `${clip.id}-ara-origine`);
                         decoded.set(ref, ae.sourceBufferId);
                     } catch (e) {
                         console.warn(`[ProjectIO] Prise d'origine illisible : ${ref}`, e);
@@ -380,7 +402,7 @@ export class ProjectIO {
                 else if (srcFile) {
                     try {
                         const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
-                        gr.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-gain-origine`);
+                        gr.sourceBufferId = reg(srcBuf, `${clip.id}-gain-origine`);
                         decoded.set(ref, gr.sourceBufferId);
                     } catch (e) {
                         console.warn(`[ProjectIO] Son d'origine illisible : ${ref}`, e);
@@ -398,7 +420,7 @@ export class ProjectIO {
                 else if (srcFile) {
                     try {
                         const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
-                        el.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-elastic-origine`);
+                        el.sourceBufferId = reg(srcBuf, `${clip.id}-elastic-origine`);
                         decoded.set(ref, el.sourceBufferId);
                     } catch (e) {
                         console.warn(`[ProjectIO] Son d'origine illisible : ${ref}`, e);
@@ -416,7 +438,7 @@ export class ProjectIO {
                 else if (srcFile) {
                     try {
                         const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
-                        suite.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-audiosuite-origine`);
+                        suite.sourceBufferId = reg(srcBuf, `${clip.id}-audiosuite-origine`);
                         decoded.set(ref, suite.sourceBufferId);
                     } catch (e) {
                         console.warn(`[ProjectIO] Prise d'origine illisible : ${ref}`, e);
@@ -434,7 +456,7 @@ export class ProjectIO {
                 else if (srcFile) {
                     try {
                         const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
-                        pe.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-justesse-origine`);
+                        pe.sourceBufferId = reg(srcBuf, `${clip.id}-justesse-origine`);
                         decoded.set(ref, pe.sourceBufferId);
                     } catch (e) {
                         console.warn(`[ProjectIO] Prise d'origine illisible : ${ref}`, e);
@@ -457,7 +479,7 @@ export class ProjectIO {
         // Samples perso des pads de batterie (V16).
         await restorePadSamples(track,
             async ref => { const f = zip.file(ref); return f ? await audioEngine.ctx!.decodeAudioData(await f.async("arraybuffer")) : null; },
-            (b, k) => audioBufferRegistry.register(b, k));
+            (b, k) => audioBufferRegistry.register(b, k)); // clé = celle du pad (pas de préfixe)
 
         // Rendu gelé : décodé à la fréquence de l'appareil (rééchantillonné si
         // le téléphone tourne en 48 kHz et le PC en 44,1 kHz).
@@ -467,7 +489,7 @@ export class ProjectIO {
             if (audioFile) {
                 try {
                     const audioBuffer = await audioEngine.ctx!.decodeAudioData(await audioFile.async("arraybuffer"));
-                    track.frozenClip.bufferId = audioBufferRegistry.register(audioBuffer, track.frozenClip.id);
+                    track.frozenClip.bufferId = reg(audioBuffer, track.frozenClip.id);
                     delete track.frozenClip.buffer;
                 } catch (e) {
                     console.warn(`[ProjectIO] Rendu gelé illisible pour ${track.name}`, e);
@@ -489,7 +511,7 @@ export class ProjectIO {
                 if (!audioFile) continue;
                 try {
                     const audioBuffer = await audioEngine.ctx!.decodeAudioData(await audioFile.async("arraybuffer"));
-                    sf.clip.bufferId = audioBufferRegistry.register(audioBuffer, sf.clip.id);
+                    sf.clip.bufferId = reg(audioBuffer, sf.clip.id);
                     delete sf.clip.audioRef;
                     delete sf.clip.buffer;
                     kept.push(sf);
@@ -511,12 +533,35 @@ export class ProjectIO {
             if (!audioFile) continue;
             try {
                 const audioBuffer = await audioEngine.ctx!.decodeAudioData(await audioFile.async("arraybuffer"));
-                bc.bufferId = audioBufferRegistry.register(audioBuffer, `${bc.id}-base`);
+                bc.bufferId = reg(audioBuffer, `${bc.id}-base`);
                 decoded.set(ref, bc.bufferId);
             } catch (e) {
                 console.warn(`[ProjectIO] Son d'origine illisible (${track.name})`, e);
             }
         }
+    }
+    // R21 · Sons des clips de la liste (hors timeline).
+    if (Array.isArray(loadedState.clipBin)) {
+        const kept: any[] = [];
+        for (const c of loadedState.clipBin) {
+            if (!c || typeof c !== 'object' || typeof c.id !== 'string') continue;
+            const ref = c.audioRef;
+            delete c.audioRef;
+            if (ref) {
+                const already = decoded.get(ref);
+                const f = zip.file(ref);
+                if (already) c.bufferId = already;
+                else if (f) {
+                    try {
+                        const b = await audioEngine.ctx!.decodeAudioData(await f.async("arraybuffer"));
+                        c.bufferId = reg(b, c.id);
+                        decoded.set(ref, c.bufferId);
+                    } catch { c.isOffline = true; }
+                } else c.isOffline = true;
+            }
+            kept.push(c);
+        }
+        loadedState.clipBin = kept;
     }
     if (unreadable) {
         const list = [...unreadableTracks];
