@@ -268,7 +268,8 @@ describe('fiche (Pro Tools relevé) → modèle NOVA', () => {
     expect(template.session.tracks[3].type).toBe(TrackType.SEND);
     expect(template.session.tracks[2].type).toBe(TrackType.BUS);
     const master = template.session.tracks[6];
-    expect(master.plugins.map(p => [p.params.templateSpec.plugin, p.isEnabled])).toEqual([['Pro-Q 4', true], ['Pro-L 2', false]]);
+    // « désactivé » dans Pro Tools = INACTIF (retiré du graphe), pas bypass (utils/trackStructure).
+    expect(master.plugins.map(p => [p.params.templateSpec.plugin, p.isInactive ? 'inactive' : p.isEnabled ? 'active' : 'bypass'])).toEqual([['Pro-Q 4', 'active'], ['Pro-L 2', 'inactive']]);
     expect(template.privateTo).toBe('romain');
     expect(template.session).toMatchObject({ bpm: 140, projectKey: 6, projectScale: 'MINOR' });
     expect(report.mixRules).toEqual([]);

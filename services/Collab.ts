@@ -7,7 +7,7 @@ import { audioEngine } from '../engine/AudioEngine';
 import { Clip, CollabRole, Track } from '../types';
 import { CollabOutbox, CollabOutboxOptions, CollabOutboxStore } from '../utils/collabOutbox';
 import { CollabStatus, initialCollabStatus } from '../utils/collabStatus';
-import { mergeQueuedOps } from '../utils/collabMerge';
+import { mergeQueuedOps, structureOf } from '../utils/collabMerge';
 import { isVocalTrack as isVocalTrackPure, ownsContent as ownsContentPure } from '../utils/collabPeers';
 
 /**
@@ -538,6 +538,8 @@ export const contentBufferIds = (t: Track): string[] => Array.from(new Set([
 export const mixOf = (t: Track) => ({
   volume: t.volumeLock ? undefined : t.volume, pan: t.pan, isMuted: t.isMuted,
   sends: t.sends, plugins: t.plugins, outputTrackId: t.outputTrackId,
+  // Structure Pro Tools (masquée, inactive, dossier, VCA, bus) : ignorée par les anciennes versions.
+  structure: structureOf(t),
 });
 
 export const sigOf = (v: unknown): string => {

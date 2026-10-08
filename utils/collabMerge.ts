@@ -23,13 +23,39 @@ import type { PluginInstance, Track, TrackSend } from '../types';
 export type MixFields = Record<string, unknown>;
 
 export const PLUGIN_FIELD = 'plugin:';
-const BASE_FIELDS = ['volume', 'pan', 'isMuted', 'outputTrackId', 'sends', 'pluginOrder'] as const;
+const BASE_FIELDS = ['volume', 'pan', 'isMuted', 'outputTrackId', 'sends', 'pluginOrder', 'structure'] as const;
+
+/**
+ * Structure façon Pro Tools (utils/trackStructure) : masquée, inactive, dossier,
+ * VCA, bus nommés. Un seul champ « structure » (dernière écriture gagne) :
+ * une piste inactive ou masquée chez l'un l'est chez l'autre. Ignoré par les
+ * anciennes versions. (Les effets inactifs voyagent avec chaque effet.)
+ */
+export const STRUCTURE_KEYS = ['isHidden', 'isInactive', 'folder', 'parentFolderId', 'isVca', 'vcaId', 'vcaGroupId', 'inputBusId', 'outputBusId', 'ioBuses'] as const;
+export type StructureFields = Partial<Pick<Track, typeof STRUCTURE_KEYS[number]>>;
+
+export function structureOf(t: Track): StructureFields {
+  const out: Record<string, unknown> = {};
+  for (const k of STRUCTURE_KEYS) if (t[k] !== undefined && t[k] !== false) out[k] = t[k];
+  return out as StructureFields;
+}
+
+/** Applique une structure reçue (les clés absentes sont retirées). */
+export function applyStructure(t: Track, st: StructureFields) {
+  const rec = t as unknown as Record<string, unknown>;
+  for (const k of STRUCTURE_KEYS) {
+    const v = (st as Record<string, unknown>)[k];
+    if (v === undefined || v === null || v === false) delete rec[k];
+    else rec[k] = typeof v === 'object' ? JSON.parse(JSON.stringify(v)) : v;
+  }
+}
 
 /** Réglages de mix d'une piste, champ par champ (volume absent s'il est verrouillé par l'artiste). */
 export function mixFieldsOf(t: Track): MixFields {
   const out: MixFields = {
     pan: t.pan, isMuted: t.isMuted, outputTrackId: t.outputTrackId,
     sends: t.sends || [], pluginOrder: (t.plugins || []).map(p => p.id),
+    structure: structureOf(t),
   };
   if (!t.volumeLock) out.volume = t.volume;
   for (const p of t.plugins || []) out[PLUGIN_FIELD + p.id] = p;
@@ -63,6 +89,7 @@ export function legacyMixToFields(m: Record<string, any> | undefined | null): Mi
   if (typeof m.isMuted === 'boolean') out.isMuted = m.isMuted;
   if (typeof m.outputTrackId === 'string') out.outputTrackId = m.outputTrackId;
   if (Array.isArray(m.sends)) out.sends = m.sends;
+  if (m.structure && typeof m.structure === 'object') out.structure = m.structure;
   if (Array.isArray(m.plugins)) {
     out.pluginOrder = m.plugins.map((p: PluginInstance) => p.id);
     for (const p of m.plugins as PluginInstance[]) if (p && typeof p.id === 'string') out[PLUGIN_FIELD + p.id] = p;
@@ -128,6 +155,7 @@ export function applyMixFields(t: Track, fields: MixFields, accept: (field: stri
   if (typeof fields.isMuted === 'boolean' && take('isMuted')) t.isMuted = fields.isMuted;
   if (typeof fields.outputTrackId === 'string' && take('outputTrackId')) t.outputTrackId = fields.outputTrackId;
   if (Array.isArray(fields.sends) && take('sends')) t.sends = (fields.sends as TrackSend[]).map(s => ({ ...s }));
+  if (fields.structure && typeof fields.structure === 'object' && take('structure')) applyStructure(t, fields.structure as StructureFields);
   // Effets : chacun à part ; l'ordre (et les ajouts / retraits) par « pluginOrder ».
   const incoming = new Map<string, PluginInstance>();
   for (const [k, v] of Object.entries(fields)) {

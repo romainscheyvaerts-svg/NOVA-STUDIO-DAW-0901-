@@ -6,7 +6,11 @@
  *  - bus et envois (niveau, actif, pré / post-fader), sorties (routage) ;
  *  - chaînes d'effets avec leurs réglages : effets NOVA (params) et VST3 du PC
  *    (chemin, nom, éditeur, état binaire `stateB64` et / ou réglages en valeurs
- *    texte `novaSettings` relus par le pont), effets actifs ou inactifs ;
+ *    texte `novaSettings` relus par le pont), effets actifs, en bypass ou
+ *    inactifs (PluginInstance.isInactive) ;
+ *  - structure Pro Tools (utils/trackStructure) : pistes masquées / inactives,
+ *    dossiers (routage / simples), VCA, 10 envois a-j avec pan et mute, bus
+ *    nommés (rangés sur la piste master : ioBuses), entrées / sorties de bus ;
  *  - master et sa chaîne ; tempo, mesure et tonalité si on le veut ;
  *  - instruments (synthé NOVA, 808, VST3) sans leur rendu audio.
  * « Garder les clips » (désactivé par défaut) garde aussi les clips MIDI, les
@@ -68,7 +72,14 @@ export interface TemplateInfo {
   sends: number;
   plugins: number;
   vst: number;
+  /** Effets inactifs ou en bypass. */
   inactive: number;
+  /** Pistes masquées / inactives, dossiers, VCA, bus nommés. */
+  hiddenTracks?: number;
+  inactiveTracks?: number;
+  folders?: number;
+  vcas?: number;
+  namedBuses?: number;
 }
 
 // ─── Outils ────────────────────────────────────────────────────────────────────
@@ -96,7 +107,8 @@ export const sanitizePlugin = (p: PluginInstance): PluginInstance => {
   // Analyse en cours (MasterSync) : sans objet dans un modèle.
   delete params.isAnalyzing;
   delete params.analysisProgress;
-  return { id: p.id, name: p.name, type: p.type, isEnabled: !!p.isEnabled, params, latency: 0 };
+  // Inactif (Pro Tools « Make Inactive ») : gardé tel quel, avec ses réglages.
+  return { id: p.id, name: p.name, type: p.type, isEnabled: !!p.isEnabled, params, latency: 0, ...(p.isInactive ? { isInactive: true } : {}) };
 };
 
 const sanitizeClip = (c: Clip): Clip | null => {
@@ -246,11 +258,16 @@ export const templateInfo = (tpl: SessionTemplate): TemplateInfo => {
   const plugins = ts.flatMap(t => t.plugins || []);
   return {
     tracks: ts.filter(t => t.type !== TrackType.BUS && t.type !== TrackType.SEND).length,
-    buses: ts.filter(t => t.type === TrackType.BUS && t.id !== 'master').length,
+    buses: ts.filter(t => t.type === TrackType.BUS && t.id !== 'master' && !t.folder && !t.isVca).length,
     sends: ts.filter(t => t.type === TrackType.SEND).length,
     plugins: plugins.length,
     vst: plugins.filter(p => p.type === 'VST3').length,
-    inactive: plugins.filter(p => !p.isEnabled).length,
+    inactive: plugins.filter(p => !p.isEnabled || p.isInactive).length,
+    hiddenTracks: ts.filter(t => t.isHidden).length,
+    inactiveTracks: ts.filter(t => t.isInactive).length,
+    folders: ts.filter(t => t.folder).length,
+    vcas: ts.filter(t => t.isVca).length,
+    namedBuses: ts.find(t => t.id === 'master')?.ioBuses?.length || 0,
   };
 };
 
@@ -388,7 +405,12 @@ export const instantiateTemplate = (tpl: SessionTemplate, opts: InstantiateOptio
     const plugins: PluginInstance[] = [];
     for (const p0 of t.plugins || []) {
       let p: PluginInstance = { ...p0, params: { ...(p0.params || {}) } };
-      if (opts.enableAll && !p.isEnabled) { p.isEnabled = true; report.enabled++; }
+      // « Activer tous les effets » : inactifs (info gardée : templateWasInactive) et en bypass.
+      if (opts.enableAll && (!p.isEnabled || p.isInactive)) {
+        if (p.isInactive) { delete p.isInactive; p.params.templateWasInactive = true; }
+        p.isEnabled = true;
+        report.enabled++;
+      }
       if (p.type === 'VST3') {
         const label = vstLabel(p);
         if (list === null || list === undefined) {
@@ -410,6 +432,7 @@ export const instantiateTemplate = (tpl: SessionTemplate, opts: InstantiateOptio
               const by = BUILTIN_LABEL_FR[type] || type;
               const repl = make(type, { ...approxBuiltinParams(type, p.params.novaSettings || []), name: `${type} (remplace ${label})` });
               repl.isEnabled = p.isEnabled;
+              if (p.isInactive) repl.isInactive = true;
               repl.params = { ...repl.params, isEnabled: p.isEnabled, templateReplaced: { name: label, vendor: p.params.vendor || '', localPath: path, pluginName: wantSub } };
               p = repl;
               report.replaced.push({ track: t.name, plugin: label, by });

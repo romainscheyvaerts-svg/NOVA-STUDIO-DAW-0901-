@@ -99,6 +99,7 @@ import {
   normalizeInviteCode, ownerFromContent, ownerRoleOf, participantOf, peerViews, pickPeerColor, recordBlock, PeerInfo, PeerRec, TransportMsg, MAX_PARTICIPANTS,
 } from './utils/collabPeers';
 import { localCollabOutboxStore } from './utils/collabOutbox';
+import { engineView } from './utils/trackStructure';
 import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
 import RemoteIngePanel from './components/RemoteIngePanel';
@@ -845,16 +846,20 @@ function Studio() {
     if (!audioEngine.ctx) return;
     // Routage, solo et envois agissent sur les autres pistes (bus, pistes
     // rendues muettes par un solo) : dans ce cas on met tout a jour, comme avant.
-    const routing = state.tracks.map(t =>
+    // Structure Pro Tools (utils/trackStructure) : le moteur ne reçoit que les pistes
+    // jouées (actives), avec Muet / Solo de dossier, VCA et bus nommés résolus.
+    const played = engineView(state.tracks);
+    const routing = played.tracks.map(t =>
       `${t.id}>${t.outputTrackId || ''}|${t.isSolo ? 1 : 0}|${t.isFrozen ? 1 : 0}|${(t.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}:${sd.level}`).join(',')}`
-    ).join(';');
+    ).join(';') + `#${[...played.excluded].join(',')}`;
     const previous = engineTracksRef.current;
     const full = !previous || routing !== engineRoutingRef.current;
-    state.tracks.forEach(t => {
+    played.excluded.forEach(id => audioEngine.disposeTrack(id));
+    played.tracks.forEach(t => {
       if (!full && atomic.get(t.id) === t) return; // volume / pan déjà réglés directement
-      if (full || previous!.get(t.id) !== t) audioEngine.updateTrack(t, state.tracks);
+      if (full || previous!.get(t.id) !== t) audioEngine.updateTrack(t, played.tracks);
     });
-    engineTracksRef.current = new Map(state.tracks.map(t => [t.id, t]));
+    engineTracksRef.current = new Map(played.tracks.map(t => [t.id, t]));
     engineRoutingRef.current = routing;
   }, [state.tracks]); 
   useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
