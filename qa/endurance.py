@@ -77,7 +77,7 @@ def base_track(tid, name, ttype, out, color, **kw):
     return t
 
 
-def make_project(path: Path):
+def make_project(path: Path, n_audio=24, n_midi=16):
     tracks, files = [], {}
     tracks.append(base_track("master", "MASTER BUS", "BUS", "", "#00f2ff", volume=0.8,
                              plugins=[plugin("m-eq", "PROEQ12"), plugin("m-comp", "COMPRESSOR")]))
@@ -88,7 +88,7 @@ def make_project(path: Path):
                                  plugins=[plugin(f"bus{b}-comp", "COMPRESSOR"), plugin(f"bus{b}-eq", "PROEQ12")]))
     for i in range(8):
         files[f"audio/son{i}.wav"] = tone(110 * (1 + i * 0.25), 12.0, i % 3)
-    for i in range(24):
+    for i in range(n_audio):
         tid = f"a{i:02d}"
         clips = []
         for k in range(3):
@@ -102,7 +102,7 @@ def make_project(path: Path):
                                  sends=[{"id": "send-verb", "level": 0.15, "isEnabled": True}, {"id": "send-delay", "level": 0.08, "isEnabled": True}],
                                  automationLanes=[lane(tid, "volume", [(0, 0.6), (8, 0.4), (16, 0.7), (31, 0.6)], "#3b82f6"),
                                                   lane(tid, "pan", [(0, -0.3), (16, 0.3), (31, -0.3)], "#3b82f6")]))
-    for i in range(16):
+    for i in range(n_midi):
         tid = f"m{i:02d}"
         notes = []
         for n in range(48):
@@ -115,7 +115,7 @@ def make_project(path: Path):
                                  automationLanes=[lane(tid, "volume", [(0, 0.35), (16, 0.25), (31, 0.35)], "#a855f7")]))
     tracks.append(base_track("rec", "REC", "AUDIO", "bus-0", "#ff0000", plugins=[plugin("rec-comp", "COMPRESSOR")]))
     state = {
-        "id": "proj-endurance", "name": "Endurance 40 pistes", "bpm": 120, "timeSignature": {"numerator": 4, "denominator": 4},
+        "id": "proj-endurance", "name": f"Endurance {n_audio + n_midi} pistes", "bpm": 120, "timeSignature": {"numerator": 4, "denominator": 4},
         "isPlaying": False, "isRecording": False, "currentTime": 0, "isLoopActive": True, "loopStart": 0, "loopEnd": LOOP_END,
         "tracks": tracks, "trackGroups": [], "markers": [{"id": "mk1", "time": 8, "label": "Couplet"}, {"id": "mk2", "time": 16, "label": "Refrain"}],
         "selectedTrackId": "rec", "currentView": "ARRANGEMENT", "projectPhase": "RECORDING", "isLowLatencyMode": False,
@@ -354,7 +354,7 @@ CTX_HOOK = r"""
 """
 
 
-def open_project(page, f):
+def open_project(page, f, min_tracks=40):
     page.goto(BASE, wait_until="domcontentloaded")
     page.get_by_text("Charger Projet").first.wait_for(timeout=40000)
     page.get_by_text("Charger Projet").first.click(); page.wait_for_timeout(700)
@@ -364,7 +364,7 @@ def open_project(page, f):
     for _ in range(60):
         page.wait_for_timeout(1000)
         n = page.evaluate("() => window.DAW_CONTROL && window.DAW_CONTROL.diag ? window.DAW_CONTROL.diag().tracks : 0")
-        if n >= 40:
+        if n >= min_tracks:
             break
     for name in ("C'est parti", "Plus tard"):
         b = page.get_by_role("button", name=name, exact=True).locator("visible=true").first
@@ -374,11 +374,11 @@ def open_project(page, f):
             pass
 
 
-def run(minutes, label, seed, every=(5, 15)):
+def run(minutes, label, seed, every=(5, 15), edits=True, pistes=40):
     OUT.mkdir(parents=True, exist_ok=True)
-    proj = OUT / "endurance_session_40_pistes.novaproj.zip"
+    proj = OUT / f"endurance_session_{pistes}_pistes.novaproj.zip"
     if not proj.exists():
-        make_project(proj)
+        make_project(proj, n_audio=round(pistes * 0.6), n_midi=pistes - round(pistes * 0.6))
     res = {"label": label, "url": BASE, "seed": seed, "minutes": minutes, "rows": [], "edits": [], "ok": True, "notes": []}
     out_path = OUT / f"endurance_{label}.json"
     rng = random.Random(seed)
@@ -397,7 +397,7 @@ def run(minutes, label, seed, every=(5, 15)):
         cdp.send("HeapProfiler.enable")
         soak = Soak(page, cdp, rng, log, res)
         try:
-            open_project(page, proj)
+            open_project(page, proj, min_tracks=pistes)
             shot(page, f"endurance_{label}_00_session")
             page.evaluate("() => window.DAW_CONTROL.seek(0)")
             soak.t_start = time.time()
@@ -412,7 +412,7 @@ def run(minutes, label, seed, every=(5, 15)):
                 el = time.time() - soak.t_start
                 if el >= end:
                     break
-                if el >= next_edit:
+                if edits and el >= next_edit:
                     soak.edit()
                     next_edit = (time.time() - soak.t_start) + rng.uniform(*every)
                 el = time.time() - soak.t_start
@@ -449,5 +449,7 @@ if __name__ == "__main__":
     ap.add_argument("--minutes", type=float, default=60)
     ap.add_argument("--label", default="essai")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--sans-editions", action="store_true", help="lecture seule (mesure de la charge DSP)")
+    ap.add_argument("--pistes", type=int, default=40, help="nombre de pistes audio + MIDI (60 %% audio)")
     a = ap.parse_args()
-    run(a.minutes, a.label, a.seed)
+    run(a.minutes, a.label, a.seed, edits=not a.sans_editions, pistes=a.pistes)
