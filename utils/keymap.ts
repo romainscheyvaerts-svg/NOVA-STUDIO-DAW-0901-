@@ -138,6 +138,10 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.heal', keys: ['ctrl+h', 'ctrl+alt+h'], label: 'Recoller deux morceaux d’un même fichier (Heal) : sélection, plage ou jonction sous la tête de lecture', pt: 'Ctrl+H (Heal Separation)', category: 'Édition', command: 'heal' }),
   g({ id: 'pt.repeat', keys: ['alt+r'], label: 'Répéter les clips sélectionnés n fois à la suite (fenêtre)', pt: 'Alt+R (Repeat)', category: 'Édition', command: 'repeatClips' }),
   g({ id: 'pt.loopClip', keys: ['ctrl+alt+l'], label: 'Boucler le clip sélectionné (nombre de tours, fondus aux jonctions)', pt: 'Ctrl+Alt+L (Loop Clip)', category: 'Édition', command: 'loopClips' }),
+  // Groupes et temps (R12, hooks/useR12).
+  g({ id: 'pt.groupCreate', keys: ['ctrl+g'], label: 'Créer un groupe avec les pistes sélectionnées (édition et mix)', pt: 'Ctrl+G (Group)', category: 'Édition', command: 'groupCreate' }),
+  g({ id: 'pt.groupsSuspend', keys: ['ctrl+shift+g'], label: 'Suspendre / reprendre tous les groupes', pt: 'Ctrl+Maj+G (Suspend All Groups)', category: 'Édition', command: 'groupsSuspend' }),
+  g({ id: 'pt.insertTime', keys: ['ctrl+alt+i'], label: 'Insérer ou supprimer du temps (repères, accords, tempo, automation et clips suivent)', pt: 'Ctrl+Maj+E (Insert Silence) — pris par Exporter dans NOVA', category: 'Édition', command: 'insertTime' }),
   g({ id: 'pt.focus', keys: ['ctrl+alt+1'], label: 'Commands Keyboard Focus on / off (une touche = une commande)', pt: 'Ctrl+Alt+1 (bouton a–z)', category: 'Keyboard Focus' }),
 
   // --- Commands Keyboard Focus (une touche = une commande) ------------------------

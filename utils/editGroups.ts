@@ -410,3 +410,32 @@ export const invertFromEvent = (e?: { shiftKey?: boolean; ctrlKey?: boolean; met
 /** Message court : combien de pistes un geste a touchées par les groupes. */
 export const groupGestureNote = (n: number, inverted: boolean): string =>
   inverted ? 'Maj+Ctrl : groupes inversés pour ce geste' : n > 1 ? `Groupe d’édition : ${n} pistes` : '';
+
+// ─── Gestes sur les clips jumeaux (rognage, fondus, gain) ──────────────────────
+
+/** Début rogné du même décalage (le son ne glisse pas : l'offset suit). */
+export function mateTrimStart(c: Clip, delta: number): Partial<Clip> {
+  const maxStart = c.start + c.duration - 0.05;
+  const minStart = c.start - (c.offset || 0);
+  const start = Math.min(maxStart, Math.max(0, Math.max(minStart, c.start + delta)));
+  const d = start - c.start;
+  return { start, offset: Math.max(0, (c.offset || 0) + d), duration: Math.max(0.05, c.duration - d), fadeIn: Math.min(c.fadeIn || 0, Math.max(0, c.duration - d)) };
+}
+/** Fin rognée du même décalage. */
+export function mateTrimEnd(c: Clip, delta: number): Partial<Clip> {
+  const duration = Math.max(0.05, c.duration + delta);
+  return { duration, fadeOut: Math.min(c.fadeOut || 0, duration) };
+}
+/** Même fondu (borné à la durée du clip). */
+export const mateFade = (c: Clip, which: 'in' | 'out', len: number): Partial<Clip> =>
+  (which === 'in' ? { fadeIn: Math.max(0, Math.min(c.duration, len)) } : { fadeOut: Math.max(0, Math.min(c.duration, len)) });
+/** Gain du clip relatif (chaque clip garde son écart). */
+export const mateGain = (c: Clip, ratio: number): Partial<Clip> => ({ gain: Math.max(0, Math.min(4, (c.gain ?? 1) * ratio)) });
+
+/** Clip jumeau photographié au début du geste (avec les clips de sa piste, pour le Shuffle). */
+export interface MateSnap { trackId: string; clip: Clip; trackClips: Clip[] }
+export function snapMates(trackId: string, clip: Clip, ctx: GroupCtx, invert: boolean): MateSnap[] {
+  return groupClipMates(trackId, clip, ctx, invert).map(m => ({
+    trackId: m.trackId, clip: { ...m.clip }, trackClips: (ctx.tracks.find(t => t.id === m.trackId)?.clips || []).map(c => ({ ...c })),
+  }));
+}

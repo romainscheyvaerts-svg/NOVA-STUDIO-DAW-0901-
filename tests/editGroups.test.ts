@@ -141,3 +141,22 @@ describe('Modèle LENNON : groupes Pro Tools', () => {
     expect(g[0]).toMatchObject({ id: 'grp-pre-all-vox', name: 'PRE ALL VOX', trackIds: ['t1', 't2', 't3'], kind: 'both', deduced: true });
   });
 });
+
+describe('Modèle LENNON livré : les VCA reprennent leurs membres par groupe', () => {
+  it('4 groupes Pro Tools, VCA liés, membres pilotés par leur VCA', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const { parseTemplate } = await import('../utils/sessionTemplate');
+    const t = parseTemplate(fs.readFileSync(path.join(__dirname, '..', 'templates/romain-lennon-depart.novatemplate'), 'utf-8'));
+    const groups = t.session.trackGroups;
+    expect(groups.map(g => g.name)).toEqual(['PRE ALL VOX', 'FX ALL', 'BASS DRUM', 'INSTRUMENT']);
+    const tracks = t.session.tracks as any[];
+    const vca = (n: string) => tracks.find(x => x.isVca && x.name.trim() === n);
+    expect(vca('PRE ALL VOX').vcaGroupId).toBe(groups[0].id);
+    expect(vca('FX').vcaGroupId).toBe(groups[1].id);
+    expect(vca('DRUMS AND BASS').vcaGroupId).toBe(groups[2].id);
+    const members = vcaMembers(vca('PRE ALL VOX'), tracks).map(x => x.name.trim());
+    expect(members).toEqual(expect.arrayContaining(['LEAD A BUS', 'BACK A BUS', 'ALL RFF']));
+    expect(vcaMembers(vca('INSTRUMENT'), tracks).map(x => x.name.trim()).sort()).toEqual(['INSTRU', 'KEYS BUS']);
+  });
+});

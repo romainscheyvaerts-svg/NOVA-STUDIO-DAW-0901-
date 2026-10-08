@@ -23,6 +23,8 @@ import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
 const TrackListPanel = lazy(() => import('./components/TrackListPanel'));
+const GroupsListPanel = lazy(() => import('./components/GroupsListPanel'));
+const TimeOpsDialog = lazy(() => import('./components/TimeOpsDialog'));
 const BusPanel = lazy(() => import('./components/BusPanel'));
 const AuthScreen = lazy(() => import('./components/AuthScreen'));
 const AutomationEditorView = lazy(() => import('./components/AutomationEditorView'));
@@ -125,6 +127,11 @@ import {
 import { localCollabOutboxStore } from './utils/collabOutbox';
 import { engineView, shownTrackIds, withPluginState } from './utils/trackStructure';
 import { structureBus, StructurePanel } from './utils/structureBus';
+import { useR12, linkedMixUpdates, selectedTrackIds, runTimeOpOn } from './hooks/useR12';
+import { createGroup, updateGroup, deleteGroup, newGroupId, groupsOpOf, groupsSig, sanitizeGroupsOp, applyGroupsOp } from './utils/editGroups';
+import { sanitizeTimeOp, TimeOp } from './utils/timeOps';
+import { R12Panel, TimeDialogPreset, openR12Panel } from './utils/r12Bus';
+import ArrangeLane, { ARRANGE_LANE_H, useArrangeLaneShown } from './components/ArrangeLane';
 import { StructureTracksContext } from './components/TrackStructure';
 import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf, sanitizeIncomingClips } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
@@ -504,6 +511,7 @@ const useUndoRedo = (initialState: DAWState) => {
         newState.markers !== curr.present.markers ||
         newState.chords !== curr.present.chords ||
         newState.trackGroups !== curr.present.trackGroups ||
+        newState.groupSettings !== curr.present.groupSettings ||
         newState.timeSignature !== curr.present.timeSignature ||
         newState.tempoEvents !== curr.present.tempoEvents ||
         newState.isLoopActive !== curr.present.isLoopActive ||
@@ -530,7 +538,7 @@ const useUndoRedo = (initialState: DAWState) => {
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
   // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
   // continuait, et pendant une prise il basculait l'enregistrement.
-  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords'] as const;
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords'] as const;
   const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
     const out: any = { ...base };
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
@@ -1665,7 +1673,18 @@ function Studio() {
             draft.tracks[trackIndex] = updatedTrack;
         }
     }));
+    // Groupes de mix (R12) : volume, muet, solo… suivent sur les autres membres.
+    if (previousTrack) groupLinkRef.current?.(previousTrack, updatedTrack);
   }, [setState, setSilently]);
+  const groupLinkRef = useRef<((prev: Track, next: Track) => void) | null>(null);
+  const groupLinkingRef = useRef(false);
+  groupLinkRef.current = (prev, next) => {
+    if (groupLinkingRef.current) return;
+    const ups = linkedMixUpdates(stateRef.current, prev, next);
+    if (!ups.length) return;
+    groupLinkingRef.current = true;
+    try { ups.forEach(u => handleUpdateTrack(u)); } finally { groupLinkingRef.current = false; }
+  };
 
   const handleUpdatePluginParams = useCallback((trackId: string, pluginId: string, params: Record<string, any>) => {
     const automationCaptured = automationRecorder.capturePluginParams(trackId, pluginId, params);
@@ -3242,43 +3261,19 @@ function Studio() {
   const GROUP_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e', '#14b8a6',
                         '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#ec4899'];
 
+  // Groupes Pro Tools (R12, utils/editGroups) : une piste peut être dans plusieurs groupes.
   const handleCreateGroup = useCallback((trackIds: string[]) => {
     if (!trackIds || trackIds.length < 2) return;
-    setState(produce((draft: DAWState) => {
-      const index = draft.trackGroups.length;
-      const id = `grp-${Date.now()}`;
-      draft.trackGroups.push({
-        id,
-        name: `Groupe ${index + 1}`,
-        color: GROUP_COLORS[index % GROUP_COLORS.length],
-        trackIds: [...trackIds],
-        isCollapsed: false,
-        linkedVolume: true,
-        linkedMute: true,
-        linkedSolo: true,
-        linkedPan: false
-      });
-      // Une piste n'appartient qu'a un seul groupe.
-      draft.trackGroups.forEach(g => {
-        if (g.id !== id) g.trackIds = g.trackIds.filter(tid => !trackIds.includes(tid));
-      });
-      draft.trackGroups = draft.trackGroups.filter(g => g.id === id || g.trackIds.length > 0);
-      draft.tracks.forEach(t => { if (trackIds.includes(t.id)) t.groupId = id; });
-    }));
+    const id = newGroupId();
+    setState(prev => createGroup(prev, { id, trackIds, kind: 'both' }));
   }, [setState]);
 
   const handleUpdateGroup = useCallback((group: TrackGroup) => {
-    setState(produce((draft: DAWState) => {
-      const idx = draft.trackGroups.findIndex(g => g.id === group.id);
-      if (idx > -1) draft.trackGroups[idx] = group;
-    }));
+    setState(prev => updateGroup(prev, group.id, group));
   }, [setState]);
 
   const handleDeleteGroup = useCallback((groupId: string) => {
-    setState(produce((draft: DAWState) => {
-      draft.trackGroups = draft.trackGroups.filter(g => g.id !== groupId);
-      draft.tracks.forEach(t => { if (t.groupId === groupId) delete t.groupId; });
-    }));
+    setState(prev => deleteGroup(prev, groupId));
   }, [setState]);
 
   const handleCreateAutomationLane = useCallback(() => {
@@ -4410,6 +4405,19 @@ function Studio() {
     else if (cmd.kind === 'sendView') setSendViewSlot(cmd.slot);
   }), [setState, handleSetPluginState, setAiNotification]);
 
+  // --- R12 · Groupes d'édition et temps (hooks/useR12) : liste des groupes, fenêtre Temps, piste Arrangement.
+  const [r12Panel, setR12Panel] = useState<{ panel: R12Panel; preset?: TimeDialogPreset; newGroup?: boolean } | null>(null);
+  const localTimeOpRef = useRef<((op: TimeOp, next: DAWState) => void) | null>(null);
+  useR12(state, {
+    stateRef, setState, setPanel: setR12Panel,
+    notify: (msg) => { setAiNotification(msg); setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), 5000); },
+    onLocalTimeOp: (op, next) => localTimeOpRef.current?.(op, next),
+  });
+  const arrangeLaneShown = useArrangeLaneShown();
+  const arrangeLaneProp = useMemo(() => (arrangeLaneShown && (state.markers?.length ?? 0) > 0
+    ? { height: ARRANGE_LANE_H, render: (v: { zoomH: number; scrollLeft: number; headerWidth: number; width: number }) => <ArrangeLane {...v} markers={state.markers} tracks={state.tracks} /> }
+    : undefined), [arrangeLaneShown, state.markers, state.tracks]);
+
   const COLLAB_ACTIVE_KEY = 'nova_collab_active';
   const [collabOpen, setCollabOpen] = useState(false);
   const collabOpenRef = useRef(false);
@@ -4868,6 +4876,30 @@ function Studio() {
         if (!o.replay) setAiNotification(`🎼 ${o.author_name} a réglé le tempo : ${op.bpm} BPM, ${op.timeSignature.numerator}/${op.timeSignature.denominator}${op.tempoEvents.length ? ` (${op.tempoEvents.length} changement${op.tempoEvents.length > 1 ? 's' : ''} dans le morceau)` : ''}.`);
         break;
       }
+      case 'groups': {
+        // Groupes (R12) : toute la liste en une opération ; le plus récent du journal gagne.
+        if (!lwwRef.current.accept('groups', o.seq)) break;
+        const op = sanitizeGroupsOp(p);
+        if (!op) break;
+        const sig = groupsSig(applyGroupsOp(stateRef.current, op));
+        knownGroupsSigRef.current = sig;
+        if (sig === groupsSig(stateRef.current)) break;
+        setState(prev => applyGroupsOp(prev, op));
+        if (!o.replay) setAiNotification(`🔗 ${o.author_name} a modifié les groupes (${op.groups.length} groupe${op.groups.length > 1 ? 's' : ''}${op.settings.suspended ? ', suspendus' : ''}).`);
+        break;
+      }
+      case 'timeop': {
+        // Temps inséré / supprimé, section déplacée ou dupliquée (R12) : rejouée ici à l'identique
+        // (mêmes identifiants) ; rien n'est renvoyé en écho (contenu, repères, accords, tempo connus).
+        const op = sanitizeTimeOp(p);
+        if (!op) break;
+        const cur = stateRef.current;
+        const r = runTimeOpOn(cur, op);
+        rememberTimeOp(r.state);
+        setState(prev => (prev === cur ? r.state : runTimeOpOn(prev, op).state));
+        if (!o.replay) setAiNotification(`⏱️ ${o.author_name} : ${r.report.summary}.`);
+        break;
+      }
       case 'listen': {
         // « Écouter ensemble » lancé (ou arrêté) par l'hôte.
         if (!lwwRef.current.accept('listen', o.seq)) break;
@@ -5065,6 +5097,7 @@ function Studio() {
         else if (kind === 'own' && Array.isArray(op.trackIds)) (op.trackIds as string[]).forEach(id => { if (claimSeqRef.current.get(id) === Infinity) claimSeqRef.current.set(id, seq); });
         else if (kind === 'markers') { [...(Array.isArray(op.upsert) ? op.upsert : []), ...((Array.isArray(op.remove) ? op.remove : []).map((id: string) => ({ id })))].forEach((m: any) => lwwRef.current.note(`marker:${m.id}`, seq)); }
         else if (kind === 'listen') lwwRef.current.note('listen', seq);
+        else if (kind === 'groups') lwwRef.current.note('groups', seq);
         else if (kind === 'chords') [...(Array.isArray(op.upsert) ? op.upsert : []).map((c: any) => c?.id), ...(Array.isArray(op.remove) ? op.remove : [])]
           .forEach((id: unknown) => { if (typeof id === 'string') { lwwRef.current.note(`chord:${id}`, seq); pendingChordsRef.current.delete(id); } });
         else if (kind === 'chat' && typeof op.localId === 'string') setCollabMessages(m => m.map(x => (x.id === op.localId ? { ...x, pending: false } : x)));
@@ -5353,6 +5386,32 @@ function Studio() {
     knownTempoSigRef.current = sig;
     c.client.queue('tempo', 'tempo', op as unknown as Record<string, unknown>);
   }, [state.bpm, state.timeSignature, state.tempoEvents, collab]);
+
+  // Groupes (R12) : une seule opération pour toute la liste (et les réglages : suspension, <TOUT>).
+  const knownGroupsSigRef = useRef<string | null>(null);
+  useEffect(() => { knownGroupsSigRef.current = collab ? groupsSig(stateRef.current) : null; }, [collab]);
+  useEffect(() => {
+    const c = collabRef.current;
+    if (!c) return;
+    const sig = groupsSig(state);
+    if (sig === knownGroupsSigRef.current) return;
+    knownGroupsSigRef.current = sig;
+    c.client.queue('groups', 'groups', groupsOpOf(state) as unknown as Record<string, unknown>);
+  }, [state.trackGroups, state.groupSettings, collab]);
+  /** Après une opération sur le temps : ce qu'elle a changé est connu de tous (rien n'est renvoyé). */
+  const rememberTimeOp = (next: DAWState) => {
+    next.tracks.forEach(t => remoteTouchedRef.current.add(t.id));
+    knownMarkersRef.current = new Map((next.markers || []).map(m => [m.id, markerSig(m)]));
+    knownChordsRef.current = new Map((next.chords || []).map(c => [c.id, chordSig(c)]));
+    knownTempoSigRef.current = tempoOpSig(tempoOpOf(next));
+  };
+  // Opération sur le temps faite ici : UNE opération part chez les autres, qui la rejouent.
+  localTimeOpRef.current = (op, next) => {
+    const c = collabRef.current;
+    if (!c) return;
+    rememberTimeOp(next);
+    c.client.queue(`timeop:${op.id}`, 'timeop', op as unknown as Record<string, unknown>);
+  };
 
   // Repères : ceux posés / déplacés / supprimés ici partent chez les autres (avec mon nom).
   useEffect(() => {
@@ -7240,6 +7299,7 @@ function Studio() {
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker} onAddRegion={handleAddRegion}
                    chordLane={chordLane}
                    tempoLane={tempoLaneProp}
+                   arrangeLane={arrangeLaneProp}
                 />
                 </StructureTracksContext.Provider>
                 </PanelBoundary>
@@ -7279,6 +7339,16 @@ function Studio() {
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${structurePanel === 'tracks' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
                   <i className="fas fa-list mr-1.5 text-[10px]" />Pistes{state.tracks.some(t => t.isHidden) ? ` · ${state.tracks.filter(t => t.isHidden).length} masquée${state.tracks.filter(t => t.isHidden).length > 1 ? 's' : ''}` : ''}
                 </button>
+                <button type="button" data-testid="dock-groups" onClick={() => setR12Panel(p => (p?.panel === 'groups' ? null : { panel: 'groups' }))} aria-pressed={r12Panel?.panel === 'groups'}
+                  title="Groupes (Pro Tools « Groups List ») : édition et mix liés, <TOUT>, suspendre (Ctrl+Maj+G), créer (Ctrl+G)"
+                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${r12Panel?.panel === 'groups' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
+                  <i className="fas fa-object-group mr-1.5 text-[10px]" />Groupes{state.trackGroups.length ? ` · ${state.trackGroups.length}` : ''}{state.groupSettings?.suspended ? ' ⏸' : ''}
+                </button>
+                <button type="button" data-testid="dock-time" onClick={() => openR12Panel('time', { preset: (() => { const sel = editSelectionStore.get().time; return sel ? { mode: 'insert' as const, at: sel.start, length: sel.end - sel.start, trackIds: sel.trackIds } : { mode: 'insert' as const, at: playheadStore.get() }; })() })}
+                  title="Insérer / supprimer du temps (Pro Tools : Insert Silence, Insert Time, Cut Time) — Ctrl+Alt+I"
+                  className="h-10 rounded-full border border-nv-line bg-nv-well px-3 text-[11px] font-bold whitespace-nowrap text-nv-muted hover:text-nv-ink">
+                  <i className="fas fa-arrows-alt-h mr-1.5 text-[10px]" />Temps
+                </button>
                 <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen}
                   title="Collaborer à distance : artiste, ingé son, beatmaker"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${collabOpen ? 'border-violet-400 bg-violet-500/25 text-white' : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'}`}>
@@ -7311,12 +7381,31 @@ function Studio() {
           )}
 
           {/* Mode Mobile - Nouveau système de pages */}
-          {isMobile && state.tracks.some(t => t.isHidden) && (activeMobileTab === 'TRACKS' || activeMobileTab === 'MIXER' || activeMobileTab === 'ARRANGEMENT') && (
-            <button type="button" data-testid="mobile-hidden-tracks" onClick={() => setStructurePanel('hidden')}
-              title="Pistes masquées : les révéler (et les activer)"
-              className="absolute right-2 top-2 z-[60] h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
-              <i className="fas fa-eye-slash mr-1.5 text-[10px] text-nv-muted" />Pistes masquées ({state.tracks.filter(t => t.isHidden).length})
-            </button>
+          {isMobile && (activeMobileTab === 'TRACKS' || activeMobileTab === 'MIXER' || activeMobileTab === 'ARRANGEMENT') && (
+            <div className="absolute right-2 top-2 z-[60] flex gap-1.5">
+              {/* Téléphone (R12) : groupes en lecture seule, insertion de temps. */}
+              {state.trackGroups.length > 0 && (
+                <button type="button" data-testid="mobile-groups" onClick={() => setR12Panel({ panel: 'groups' })}
+                  title="Groupes de la session (lecture seule sur téléphone)"
+                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
+                  <i className="fas fa-object-group mr-1.5 text-[10px] text-nv-muted" />Groupes ({state.trackGroups.length})
+                </button>
+              )}
+              {activeMobileTab !== 'MIXER' && (
+                <button type="button" data-testid="mobile-time" onClick={() => openR12Panel('time', { preset: { mode: 'insert', at: playheadStore.get() } })}
+                  title="Insérer ou supprimer du temps à la tête de lecture"
+                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
+                  <i className="fas fa-arrows-alt-h mr-1.5 text-[10px] text-nv-muted" />Temps
+                </button>
+              )}
+              {state.tracks.some(t => t.isHidden) && (
+                <button type="button" data-testid="mobile-hidden-tracks" onClick={() => setStructurePanel('hidden')}
+                  title="Pistes masquées : les révéler (et les activer)"
+                  className="h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
+                  <i className="fas fa-eye-slash mr-1.5 text-[10px] text-nv-muted" />Pistes masquées ({state.tracks.filter(t => t.isHidden).length})
+                </button>
+              )}
+            </div>
           )}
           {isMobile && (
             <PanelBoundary key={`mobile-${activeMobileTab}`} name={MOBILE_PAGE_NAMES[activeMobileTab] || 'cette page'}>
@@ -7412,7 +7501,22 @@ function Studio() {
             </Suspense>
             </PanelBoundary>
           )}
+          {r12Panel?.panel === 'groups' && (
+            <PanelBoundary name="la liste des groupes" onClose={() => setR12Panel(null)}>
+              <Suspense fallback={null}>
+                <GroupsListPanel readOnly={isMobile} newGroup={r12Panel.newGroup} selectedTrackIds={selectedTrackIds(state)} onClose={() => setR12Panel(null)}
+                  className={isMobile ? 'fixed inset-x-2 bottom-2 top-16 z-[700]' : 'absolute left-2 top-2 bottom-2 z-[655] w-[360px] max-w-[calc(100%-16px)]'} />
+              </Suspense>
+            </PanelBoundary>
+          )}
         </main>
+        {r12Panel?.panel === 'time' && (
+          <PanelBoundary name="la fenêtre Temps" onClose={() => setR12Panel(null)}>
+            <Suspense fallback={null}>
+              <TimeOpsDialog state={state} preset={r12Panel.preset} compact={isMobile} onClose={() => setR12Panel(null)} />
+            </Suspense>
+          </PanelBoundary>
+        )}
       </div>
       
       {/* Avancement des imports et des calages.

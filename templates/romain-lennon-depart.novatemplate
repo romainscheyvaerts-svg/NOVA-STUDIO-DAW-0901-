@@ -1215,7 +1215,8 @@
         ],
         "isInactive": true,
         "parentFolderId": "bus-beat",
-        "inputBusId": "bus:drum"
+        "inputBusId": "bus:drum",
+        "groupId": "grp-bass-drum"
       },
       {
         "id": "send-paral-drum",
@@ -1358,7 +1359,8 @@
         ],
         "isInactive": true,
         "parentFolderId": "bus-beat",
-        "inputBusId": "bus:par-drum"
+        "inputBusId": "bus:par-drum",
+        "groupId": "grp-bass-drum"
       },
       {
         "id": "-808",
@@ -1968,7 +1970,8 @@
         ],
         "isInactive": true,
         "parentFolderId": "bus-beat",
-        "inputBusId": "bus:-808-bus"
+        "inputBusId": "bus:-808-bus",
+        "groupId": "grp-bass-drum"
       },
       {
         "id": "bus-bass-drum-bus",
@@ -2514,7 +2517,8 @@
         ],
         "isInactive": true,
         "parentFolderId": "bus-beat",
-        "inputBusId": "bus:key"
+        "inputBusId": "bus:key",
+        "groupId": "grp-instrument"
       },
       {
         "id": "talkback",
@@ -2648,7 +2652,8 @@
               "stateB64": "VkMyIWMHAAA8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCI/PiA8VlNUM1BsdWdpblN0YXRlPjxJQ29tcG9uZW50PjEzNDAuVk1HY1dBLi4uZi4uLi5QLi4uLi4uTHpYdHNELi5ULklGSXpQbkEuLi5IdlNMNERVLlAuQUEuLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLkR2SE8rZldhckFoY2tJMmJvOGxhOEhSTHQuaUhmVGxhaThGWW80MVk4SFJVVFlUSzNIeE85LkJPT2dtWXVJR1lld1Rac2tGY2tJMldQSVdZeVVGY2YuRWEwY1ZadFlVWXhNV1p1NFZPaFBpS3ZQaUt3clVNei5DTGNJQkhQSVdZeVVGY1ZVbGJ5azFhdDBpSHhIQkhOVVdhQ2dWY3RzMWI4SFJMaDNDT1BJMmFtSVdYc0FTTGZIVFh0c1ZPaC5pSGZMRFpnNGxha3cxYjhIaExoLnhUZzBGYnJVbFRnUVdZOEhCSHpmQ0x2LmlIOXZpUGc0MVpBTVVZelFXWnRjMWJmLmtia01XWXo0VFhzVVZPaFBUWWxFVmNyUUdIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZkhCSEk0RmJ6MGlIZnJCTHQuQ0x2LkNMdi5pSGZERGNpc1ZPaHJCTHQuU014LkNMdi5DTGguaFRyTVdZOEhCSGYueEoyM3hMei5DTTRIQkhDSW1jazBpSGZyQkx0LkNMdi5DTHYuaUhmYkVTMXdWT2guQkhxLmlLdi5DTHYuQ0xoLnhTMFFHYjhIQkhxLmlLdi5DTHYuQ0x2SEJIQVVHY3UwaUhxLmlLdi5DTHYuQ0x2LmlIZkxVWGxVVk9ockJMdC5DTHYuQ0x2LkNMaC5SU2tRbWI4SHhKdjNCTHYuQ0x2LkNMdkhCSEFNVGF2MGlIcS5pS3YuQ0x2LkNMdi5pSGYuVVlnc1ZPaHJCTHQuQ0x2LkNMdi5DTGguQlFvUUdaOEhoU080VFFmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmSEJIRFFVZHYwaUhUQUVRRkFCSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5oSGZQVFpEQVdPaERDTHZUQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhoLmhUREUxWDhIeEp2M0JMdi5DTHYuQ0x2SEJIVGdsYnkwaUhmckJMdC5DTHYuQ0x2LmlIdTNDT0JFbGFxSXpUa1FHY280MVl5QUJUeFUxYmtRbVNnMFZZOEhCUWtZVlgwd0ZjZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5oSGZqamF2UVdPaC54SnYzQkx2LkNMdi5DTGguUlB6TTFaOEh4SnYzQkwwRFNOdlRTTHlIQkhSdzFiazBpSGYuQkhxYmlLeVBDTHYuaUhmTGpiMVVWT2gueEp2M0JMdi5DTHYuQ0xoLnhVTFlHYThIQkhmckJMdC5DTHYuQ0x2SEJIT1VHY3YwaUhmckJMdC5DTHYuQ0x2LmlIZkRUY3o4Vk9ockJMdC5DTHYuQ0x2LkNMaC54VGdZVlk4SHhKdjNCTHYuQ0x2LkNMdkhCSE1VRmN4MGlIcS5pS3YuQ0x2LkNMdi5pSGZEelBzQVdPaHJCTHQuQ0x2LkNMdi5DTGguQlRrRTFaOEh4SnYzQkx2LkNMdi5DTHZIQkhEa0ZjbjBpSHhQU0tCa0RVZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLmhIZlBEVTRBV09oUEVURFlESGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGguQlFvUURiOEhSTHYuU0lmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmLkJIZi5CSGYuQkhmSEJIUlFUWGkwaUhxLmlLdi5DTHYuQ0x2LmlIZlBFWnhNV09oLnhKdjNCTHYuQ0x2LkNMaDdoTzc3QlR4ODFZeEVWYXZEaU83N3hTM1kxYXhRMVdMa1Zhb1FXWXg4RVR4VTFia1FtTy4uLi4uLi4uLi4uLi4uLi4uLi4uLi5mUlVNVFFQSVdaMUVGY2tRVFh6RUY8L0lDb21wb25lbnQ+PC9WU1QzUGx1Z2luU3RhdGU+AA=="
             }
           }
-        ]
+        ],
+        "groupId": "grp-instrument"
       },
       {
         "id": "bus-vox",
@@ -4392,7 +4397,8 @@
           }
         ],
         "parentFolderId": "bus-couplet",
-        "inputBusId": "bus:lead-a"
+        "inputBusId": "bus:lead-a",
+        "groupId": "grp-pre-all-vox"
       },
       {
         "id": "bus-insert-fx",
@@ -4849,7 +4855,8 @@
             }
           }
         ],
-        "parentFolderId": "bus-insert-fx"
+        "parentFolderId": "bus-insert-fx",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "-1-2",
@@ -5290,7 +5297,8 @@
             }
           }
         ],
-        "parentFolderId": "bus-insert-fx"
+        "parentFolderId": "bus-insert-fx",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "fx-reverb",
@@ -7638,7 +7646,8 @@
         "isHidden": true,
         "isInactive": true,
         "parentFolderId": "bus-couplet",
-        "inputBusId": "bus:lead-b"
+        "inputBusId": "bus:lead-b",
+        "groupId": "grp-pre-all-vox"
       },
       {
         "id": "bus-back",
@@ -9020,7 +9029,8 @@
           }
         ],
         "parentFolderId": "bus-back",
-        "inputBusId": "bus:back-a"
+        "inputBusId": "bus:back-a",
+        "groupId": "grp-pre-all-vox"
       },
       {
         "id": "back-b",
@@ -10391,7 +10401,8 @@
         "isHidden": true,
         "isInactive": true,
         "parentFolderId": "bus-back",
-        "inputBusId": "bus:back-b"
+        "inputBusId": "bus:back-b",
+        "groupId": "grp-pre-all-vox"
       },
       {
         "id": "bus-ref",
@@ -13162,7 +13173,8 @@
           }
         ],
         "parentFolderId": "bus-back-reff",
-        "inputBusId": "bus:reff-back"
+        "inputBusId": "bus:reff-back",
+        "groupId": "grp-pre-all-vox"
       },
       {
         "id": "bus-all-rff",
@@ -13224,7 +13236,8 @@
           }
         ],
         "parentFolderId": "bus-back-reff",
-        "inputBusId": "bus:all-reff"
+        "inputBusId": "bus:all-reff",
+        "groupId": "grp-pre-all-vox"
       },
       {
         "id": "bus-vox-fx",
@@ -13347,7 +13360,8 @@
           "kind": "routing",
           "isOpen": true
         },
-        "inputBusId": "bus:amb-all"
+        "inputBusId": "bus:amb-all",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "filter",
@@ -16210,7 +16224,8 @@
           }
         ],
         "parentFolderId": "bus-send-fx",
-        "inputBusId": "bus:rv"
+        "inputBusId": "bus:rv",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "send-rv-plate",
@@ -16589,7 +16604,8 @@
           }
         ],
         "parentFolderId": "bus-send-fx",
-        "inputBusId": "bus:rv-plate-1"
+        "inputBusId": "bus:rv-plate-1",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "send-rv-amb",
@@ -16941,7 +16957,8 @@
           }
         ],
         "parentFolderId": "bus-send-fx",
-        "inputBusId": "bus:rv-amb"
+        "inputBusId": "bus:rv-amb",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "send-slap-verb",
@@ -17042,7 +17059,8 @@
           }
         ],
         "parentFolderId": "bus-send-fx",
-        "inputBusId": "bus:slap-verb"
+        "inputBusId": "bus:slap-verb",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "send-dl-1-2",
@@ -17252,7 +17270,8 @@
           }
         ],
         "parentFolderId": "bus-send-fx",
-        "inputBusId": "bus:dl-1-2"
+        "inputBusId": "bus:dl-1-2",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "send-dl-1-4",
@@ -17553,7 +17572,8 @@
           }
         ],
         "parentFolderId": "bus-send-fx",
-        "inputBusId": "bus:dl-1-4"
+        "inputBusId": "bus:dl-1-4",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "send-dl-1-8",
@@ -17758,7 +17778,8 @@
           }
         ],
         "parentFolderId": "bus-send-fx",
-        "inputBusId": "bus:dl-1-8"
+        "inputBusId": "bus:dl-1-8",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "send-doubler",
@@ -17886,7 +17907,8 @@
           }
         ],
         "parentFolderId": "bus-send-fx",
-        "inputBusId": "bus:doubler"
+        "inputBusId": "bus:doubler",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "send-flanger",
@@ -17971,7 +17993,8 @@
           }
         ],
         "parentFolderId": "bus-send-fx",
-        "inputBusId": "bus:flanger"
+        "inputBusId": "bus:flanger",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "send-chorus",
@@ -18208,7 +18231,8 @@
           }
         ],
         "parentFolderId": "bus-send-fx",
-        "inputBusId": "bus:chorus"
+        "inputBusId": "bus:chorus",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "send-par-compr",
@@ -18281,7 +18305,8 @@
         ],
         "isInactive": true,
         "parentFolderId": "bus-send-fx",
-        "inputBusId": "bus:par-compr"
+        "inputBusId": "bus:par-compr",
+        "groupId": "grp-fx-all"
       },
       {
         "id": "bus-vca",
@@ -18315,7 +18340,8 @@
         "sends": [],
         "plugins": [],
         "parentFolderId": "bus-vca",
-        "isVca": true
+        "isVca": true,
+        "vcaGroupId": "grp-pre-all-vox"
       },
       {
         "id": "bus-fx",
@@ -18330,7 +18356,8 @@
         "sends": [],
         "plugins": [],
         "parentFolderId": "bus-vca",
-        "isVca": true
+        "isVca": true,
+        "vcaGroupId": "grp-fx-all"
       },
       {
         "id": "bus-drums-and-bass",
@@ -18345,7 +18372,8 @@
         "sends": [],
         "plugins": [],
         "parentFolderId": "bus-vca",
-        "isVca": true
+        "isVca": true,
+        "vcaGroupId": "grp-bass-drum"
       },
       {
         "id": "bus-instrument",
@@ -18360,7 +18388,8 @@
         "sends": [],
         "plugins": [],
         "parentFolderId": "bus-vca",
-        "isVca": true
+        "isVca": true,
+        "vcaGroupId": "grp-instrument"
       },
       {
         "id": "bus-beat-all",
@@ -18885,6 +18914,100 @@
         ]
       }
     ],
-    "trackGroups": []
+    "trackGroups": [
+      {
+        "id": "grp-pre-all-vox",
+        "name": "PRE ALL VOX",
+        "color": "#ef4444",
+        "trackIds": [
+          "bus-lead-a-bus",
+          "bus-ld-b-bus",
+          "bus-back-a-bus",
+          "bus-back-b-bus",
+          "bus-back-reff-bus",
+          "bus-all-rff"
+        ],
+        "isCollapsed": false,
+        "kind": "mix",
+        "isActive": true,
+        "linkedVolume": true,
+        "linkedMute": true,
+        "linkedSolo": true,
+        "linkedPan": false,
+        "linkedSends": false,
+        "linkedAutomation": false,
+        "deduced": true
+      },
+      {
+        "id": "grp-fx-all",
+        "name": "FX ALL",
+        "color": "#f97316",
+        "trackIds": [
+          "-1-4",
+          "-1-2",
+          "bus-all-amb",
+          "send-rv",
+          "send-rv-plate",
+          "send-rv-amb",
+          "send-slap-verb",
+          "send-dl-1-2",
+          "send-dl-1-4",
+          "send-dl-1-8",
+          "send-doubler",
+          "send-flanger",
+          "send-chorus",
+          "send-par-compr"
+        ],
+        "isCollapsed": false,
+        "kind": "mix",
+        "isActive": true,
+        "linkedVolume": true,
+        "linkedMute": true,
+        "linkedSolo": true,
+        "linkedPan": false,
+        "linkedSends": false,
+        "linkedAutomation": false,
+        "deduced": true
+      },
+      {
+        "id": "grp-bass-drum",
+        "name": "BASS DRUM",
+        "color": "#f59e0b",
+        "trackIds": [
+          "bus-drums-bus",
+          "send-paral-drum",
+          "bus--808-bus"
+        ],
+        "isCollapsed": false,
+        "kind": "mix",
+        "isActive": true,
+        "linkedVolume": true,
+        "linkedMute": true,
+        "linkedSolo": true,
+        "linkedPan": false,
+        "linkedSends": false,
+        "linkedAutomation": false,
+        "deduced": true
+      },
+      {
+        "id": "grp-instrument",
+        "name": "INSTRUMENT",
+        "color": "#84cc16",
+        "trackIds": [
+          "instru",
+          "bus-keys-bus"
+        ],
+        "isCollapsed": false,
+        "kind": "mix",
+        "isActive": true,
+        "linkedVolume": true,
+        "linkedMute": true,
+        "linkedSolo": true,
+        "linkedPan": false,
+        "linkedSends": false,
+        "linkedAutomation": false,
+        "deduced": true
+      }
+    ]
   }
 }

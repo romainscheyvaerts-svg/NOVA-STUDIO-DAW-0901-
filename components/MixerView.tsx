@@ -599,36 +599,11 @@ const MixerView: React.FC<{
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busKey]);
   
-  // Handle linked group actions
-  const handleGroupedTrackUpdate = useCallback((previous: Track, updated: Track) => {
-    // La piste modifiee est toujours appliquee...
+  // Groupes de mix : App les applique pour toutes les vues (R12, utils/editGroups.mixLinkUpdates :
+  // volume et pan relatifs, muet, solo, envois, mode d'automation ; groupes actifs ; Maj+Ctrl inverse).
+  const handleGroupedTrackUpdate = useCallback((_previous: Track, updated: Track) => {
     onUpdateTrack(updated);
-
-    const trackGroup = trackGroups.find(g => g.trackIds.includes(previous.id));
-    if (!trackGroup) return;
-
-    // ...puis on repercute sur le groupe uniquement ce qui a REELLEMENT change.
-    const others = trackGroup.trackIds
-      .filter(tid => tid !== previous.id)
-      .map(tid => tracks.find(tr => tr.id === tid))
-      .filter((t): t is Track => !!t);
-    if (others.length === 0) return;
-
-    if (trackGroup.linkedVolume && updated.volume !== previous.volume && previous.volume > 0) {
-      const ratio = updated.volume / previous.volume;
-      others.forEach(t => onUpdateTrack({ ...t, volume: Math.max(0, Math.min(1.5, t.volume * ratio)) }));
-    }
-    if (trackGroup.linkedPan && updated.pan !== previous.pan) {
-      const delta = updated.pan - previous.pan;
-      others.forEach(t => onUpdateTrack({ ...t, pan: Math.max(-1, Math.min(1, t.pan + delta)) }));
-    }
-    if (trackGroup.linkedMute && updated.isMuted !== previous.isMuted) {
-      others.forEach(t => onUpdateTrack({ ...t, isMuted: updated.isMuted }));
-    }
-    if (trackGroup.linkedSolo && updated.isSolo !== previous.isSolo) {
-      others.forEach(t => onUpdateTrack({ ...t, isSolo: updated.isSolo }));
-    }
-  }, [trackGroups, tracks, onUpdateTrack]);
+  }, [onUpdateTrack]);
   
   return (
     <div ref={mixerScrollRef} className="flex-1 flex overflow-x-auto bg-[#08090b] custom-scroll h-full snap-x snap-mandatory">
