@@ -70,6 +70,7 @@ import { ProjectIO } from './services/ProjectIO';
 const PianoRoll = lazy(() => import('./components/PianoRoll'));
 import MidiHost from './components/MidiHost'; // V25 : .mid, groove, capture MIDI
 import { midiManager } from './services/MidiManager';
+import { splitClipAt } from './utils/timeSelection';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
@@ -1573,7 +1574,10 @@ function Studio() {
             if(idx > -1) {
               const clip = newClips[idx];
               const splitTime = payload.time;
-              if (splitTime > clip.start && splitTime < clip.start + clip.duration) {
+              // Clip MIDI : notes et contrôleurs répartis entre les deux moitiés (utils/timeSelection).
+              const midiParts = Array.isArray(clip.notes) ? splitClipAt(clip as Clip, splitTime, `clip-split-${Date.now()}`) : null;
+              if (midiParts) { newClips[idx] = midiParts[0] as any; newClips.push(midiParts[1] as any); }
+              else if (splitTime > clip.start && splitTime < clip.start + clip.duration) {
                   const firstDuration = splitTime - clip.start;
                   const secondDuration = clip.duration - firstDuration;
                   newClips[idx] = { ...clip, duration: firstDuration };

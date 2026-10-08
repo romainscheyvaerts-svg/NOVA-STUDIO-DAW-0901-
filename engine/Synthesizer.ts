@@ -1,3 +1,4 @@
+import { SynthControllers } from './midiControllers';
 
 
 /**
@@ -9,7 +10,9 @@ export class Synthesizer {
   public output: GainNode;
   
   // FIX: The `activeVoices` map now includes the `filter` node to ensure it can be properly disconnected upon note release, preventing memory leaks.
-  private activeVoices: Map<number, { osc: OscillatorNode, env: GainNode, filter: BiquadFilterNode }> = new Map();
+  private activeVoices: Map<number, { osc: OscillatorNode, env: GainNode, filter: BiquadFilterNode, detach?: () => void }> = new Map();
+  /** Contrôleurs MIDI (R16) : pitch bend, modulation, expression. */
+  private ctrl: SynthControllers;
   
   private params = {
     attack: 0.01,
@@ -24,7 +27,11 @@ export class Synthesizer {
     this.ctx = ctx;
     this.output = ctx.createGain();
     this.output.gain.value = 0.5; // Main volume
+    this.ctrl = new SynthControllers(ctx, this.output.gain, 0.5);
   }
+
+  public setController(key: string, value: number, time = 0) { this.ctrl.set(key, value, time); }
+  public resetControllers(time = 0) { this.ctrl.reset(time); }
 
   public triggerAttack(pitch: number, velocity: number = 0.8, time: number = 0) {
     // Stop existing voice if any (monophonic per key)
@@ -57,7 +64,9 @@ export class Synthesizer {
 
     osc.start(t);
 
-    this.activeVoices.set(pitch, { osc, env, filter });
+    const detach = this.ctrl.attachVoice([osc.detune], [filter.detune]);
+    osc.onended = () => detach();
+    this.activeVoices.set(pitch, { osc, env, filter, detach });
   }
 
   /**
