@@ -5059,6 +5059,10 @@ function Studio() {
   const createInviteCode = useCallback(async () => {
     const cs = cloudRef.current;
     if (!cs) return;
+    // Serveur sans codes (« Action inconnue ») : on ne redemande pas avant 12 h. Chaque
+    // essai ajoutait une erreur 400 dans la console à chaque ouverture du panneau.
+    const NO_CODES = 'nova_invite_codes_absents';
+    try { if (Date.now() - Number(localStorage.getItem(NO_CODES) || 0) < 12 * 3600e3) { setInviteCode('unavailable'); return; } } catch { /* */ }
     setInviteCode('loading');
     try {
       const r = await callCloud<{ code: string; expires_at?: string }>('invite_code', { id: cs.id, secret: cs.secret });
@@ -5066,7 +5070,8 @@ function Studio() {
       setInviteCode(code ? { code, expiresAt: r.expires_at } : 'unavailable');
     } catch (e: any) {
       // Fonction pas encore mise à jour (« Action inconnue ») : le lien suffit.
-      console.warn('[Collab] code', e);
+      if (/inconnue/i.test(String(e?.message || ''))) { try { localStorage.setItem(NO_CODES, String(Date.now())); } catch { /* */ } }
+      else console.warn('[Collab] code', e);
       setInviteCode('unavailable');
     }
   }, []);

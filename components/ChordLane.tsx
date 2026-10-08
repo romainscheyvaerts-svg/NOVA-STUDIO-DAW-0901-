@@ -217,7 +217,7 @@ const ChordLane: React.FC<LaneProps> = ({ chords, zoomH, scrollLeft, headerWidth
             <div key={c.id} data-chord-event={chordSymbol(c.root, c.quality)} data-start={c.start.toFixed(3)}
               title={`${chordNameFr(c.root, c.quality)}${c.auto ? ' (détecté)' : ''}${c.by ? ` · posé par ${c.by}` : ''}`}
               className={`absolute top-[3px] bottom-[3px] rounded-md flex items-center px-1.5 overflow-hidden select-none ${isActive ? 'ring-2 ring-white/80' : ''}`}
-              style={{ left, width: w, backgroundColor: `color-mix(in srgb, ${col} ${isActive ? 45 : 26}%, transparent)`, border: `1px solid ${col}`, borderStyle: c.auto ? 'dashed' : 'solid' }}>
+              style={{ left, width: w, backgroundColor: `color-mix(in srgb, ${col} ${isActive ? 45 : 26}%, transparent)`, borderWidth: 1, borderColor: col, borderStyle: c.auto ? 'dashed' : 'solid' }}>
               <span className="text-[11px] font-black text-white truncate drop-shadow">{chordSymbol(c.root, c.quality)}</span>
               <span className="absolute right-0 top-0 bottom-0 w-2.5 cursor-ew-resize hover:bg-white/30 [@media(pointer:coarse)]:w-4"
                 onPointerDown={e => onEdgeDown(e, c)} onClick={e => e.stopPropagation()} aria-hidden />
