@@ -414,3 +414,24 @@ export function elasticBlock(c: Clip): string | null {
   if (c.isOffline) return 'Son introuvable : relie d’abord le fichier.';
   return null;
 }
+
+/**
+ * Rendu dans un worker (repli : sur place). Les canaux sont transférés au
+ * worker : l'appelant ne doit plus s'en servir.
+ */
+export async function renderElasticAsync(job: ElasticJob): Promise<ElasticResult> {
+  if (typeof Worker === 'undefined') return renderElastic(job);
+  let worker: Worker | null = null;
+  try {
+    worker = new Worker(new URL('./clipTranspose.worker.ts', import.meta.url), { type: 'module' });
+  } catch {
+    return renderElastic(job);
+  }
+  try {
+    return await new Promise<ElasticResult>((resolve, reject) => {
+      worker!.onmessage = (e: MessageEvent<ElasticResult & { error?: string }>) => (e.data.error ? reject(new Error(e.data.error)) : resolve(e.data));
+      worker!.onerror = ev => reject(new Error(ev.message || 'Calcul impossible'));
+      worker!.postMessage(job, job.channels.map(c => c.buffer as ArrayBuffer));
+    });
+  } finally { worker.terminate(); }
+}

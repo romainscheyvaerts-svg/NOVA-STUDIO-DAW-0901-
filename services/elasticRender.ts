@@ -8,27 +8,10 @@
 import type { Clip, DAWState, ElasticInfo } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import {
-  editingElastic, elasticPatch, elasticRevertPatch, ElasticJob, ElasticResult, isNeutralElastic, renderElastic, renderPlan, semitoneText, stretchOf,
+  editingElastic, elasticPatch, elasticRevertPatch, isNeutralElastic, renderElasticAsync, renderPlan, semitoneText, stretchOf,
 } from '../utils/clipTranspose';
 
 const has = (id: string) => !!audioBufferRegistry.get(id);
-
-async function runJob(job: ElasticJob): Promise<ElasticResult> {
-  if (typeof Worker === 'undefined') return renderElastic(job);
-  try {
-    const worker = new Worker(new URL('../utils/clipTranspose.worker.ts', import.meta.url), { type: 'module' });
-    try {
-      return await new Promise<ElasticResult>((resolve, reject) => {
-        worker.onmessage = (e: MessageEvent<ElasticResult & { error?: string }>) => (e.data.error ? reject(new Error(e.data.error)) : resolve(e.data));
-        worker.onerror = ev => reject(new Error(ev.message || 'worker'));
-        worker.postMessage(job, job.channels.map(c => c.buffer as ArrayBuffer));
-      });
-    } finally { worker.terminate(); }
-  } catch (e) {
-    if (e instanceof Error && e.message !== 'worker') throw e;
-    return renderElastic(job);
-  }
-}
 
 export interface ElasticRequest { trackId: string; clipId: string; info: ElasticInfo }
 
@@ -53,7 +36,7 @@ export async function renderElasticClip(clip: Clip, info: ElasticInfo): Promise<
   const n = plan.segments[plan.segments.length - 1].s1;
   const channels: Float32Array[] = [];
   for (let c = 0; c < src.numberOfChannels; c++) channels.push(src.getChannelData(c).slice(a0, a0 + n));
-  const res = await runJob({ channels, sr, segments: plan.segments, semitones: info.semitones, formants: info.formants, algo: info.algo });
+  const res = await renderElasticAsync({ channels, sr, segments: plan.segments, semitones: info.semitones, formants: info.formants, algo: info.algo });
   const out = new AudioBuffer({ length: Math.max(1, res.channels[0].length), numberOfChannels: res.channels.length, sampleRate: sr });
   res.channels.forEach((c, i) => out.copyToChannel(c as Float32Array<ArrayBuffer>, i));
   const id = `elastic-${clip.id}-${Date.now().toString(36)}`;

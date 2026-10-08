@@ -55,6 +55,12 @@ export interface EditPrefs {
    * dupliquer une plage portent aussi l'automation. Activé par défaut.
    */
   automationFollowsEdit: boolean;
+  /**
+   * Trim TCE (Pro Tools : outil Trim en mode TCE, R13) : tirer le bord d'un clip
+   * audio l'étire au lieu de le rogner (hauteur inchangée). Alt + bord fait de
+   * même sans ce mode (Logic : Option + bord).
+   */
+  trimTce?: boolean;
 }
 
 const PREFS_KEY = 'nova_edit_prefs';

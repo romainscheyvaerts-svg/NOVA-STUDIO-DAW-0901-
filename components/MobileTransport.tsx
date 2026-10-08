@@ -1,4 +1,5 @@
 import React from 'react';
+import PracticeSpeed from './PracticeSpeed';
 
 interface MobileTransportProps {
   isPlaying: boolean;
@@ -108,6 +109,9 @@ const MobileTransport: React.FC<MobileTransportProps> = ({
         >
           <i className="fas fa-sync-alt text-xs"></i>
         </button>
+
+        {/* Lecture ralentie (R13) : un appui = préréglage suivant (100 → 85 → 75 → 60 → 50 %). */}
+        <PracticeSpeed compact />
 
         {/* Settings */}
         {onOpenSettings && (

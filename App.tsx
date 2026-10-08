@@ -207,6 +207,7 @@ import { getRegisteredPlugin, registryMenuItems, usesProjectKey } from './engine
 import { pluginDisplayName } from './utils/pluginLabel';
 import { BreathHost, BreathMixOption, BreathPanelTools, breathsAfterMixStyle } from './components/BreathTools';
 import { requestBreaths } from './utils/breathBus';
+import { practiceSpeedStore } from './utils/practiceSpeed';
 
 /** Pages du téléphone : nom affiché si l'une plante (le reste du studio continue). */
 const MOBILE_PAGE_NAMES: Record<string, string> = {
@@ -1025,6 +1026,12 @@ function Studio() {
   useEffect(() => { audioEngine.setDelayCompensation(state.isDelayCompEnabled); }, [state.isDelayCompEnabled]);
   // Les modifications faites pendant la lecture s'entendent immédiatement.
   useEffect(() => { audioEngine.setLiveTracks(state.tracks); }, [state.tracks]);
+  // Lecture ralentie (R13) : réglage d'écoute, suivi par le moteur (l'export reste à 100 %).
+  useEffect(() => {
+    const apply = () => audioEngine.setPracticeRate(practiceSpeedStore.get());
+    apply();
+    return practiceSpeedStore.subscribe(apply);
+  }, []);
 
   // Metronome : reglages, tempo et signature suivent l'etat du projet.
   useEffect(() => { metronomeService.setSettings(state.metronome); }, [state.metronome]);
@@ -3678,6 +3685,14 @@ function Studio() {
         e.preventDefault();
         if (e.repeat) return;
         spaceDown = true;
+        // Maj+Espace (Pro Tools : Half-Speed Playback) : bascule la lecture ralentie 50 % / 100 % (R13).
+        if (e.shiftKey) {
+          const slow = practiceSpeedStore.get() < 0.999;
+          practiceSpeedStore.set(slow ? 1 : 0.5);
+          window.dispatchEvent(new CustomEvent('nova:notify', { detail: slow ? 'Vitesse normale (100 %).' : 'Lecture ralentie à 50 %, hauteur gardée (Maj+Espace pour revenir à 100 %).' }));
+          if (!stateRef.current.isPlaying) handleTogglePlay();
+          return;
+        }
         handleTogglePlay();
         return;
       }
