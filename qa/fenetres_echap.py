@@ -18,6 +18,7 @@ PHASE = os.environ.get("QA_PHASE", "apres")
 os.environ.setdefault("QA_OUT", rf"D:\1 WORK\CONTENU\nova-pro\{PHASE}\fenetres")
 sys.path.insert(0, str(Path(__file__).parent))
 from qalib import launch, new_page, OUT, Log  # noqa: E402
+from nova_pro_lib import track_point  # noqa: E402
 from desktop_gate import install_mocks, SUPERADMIN  # noqa: E402
 _r1 = (Path(__file__).parent / "r1_export.py").read_text(encoding="utf-8").split("\nwith sync_playwright() as p:")[0]
 exec(compile(_r1, "r1_export.py", "exec"))  # make_project, open_with_project…
@@ -119,7 +120,13 @@ def click(sel):
 
 
 def select_first_clip(p):
-    p.locator("[data-clip-id]").locator("visible=true").nth(1).click(timeout=4000)
+    x, y = track_point(p, "voix", 3.0)
+    p.mouse.click(x, y)
+
+
+def clip_menu(p):
+    x, y = track_point(p, "voix", 3.0)
+    p.mouse.click(x, y, button="right")
 
 
 CASES = [
@@ -148,7 +155,7 @@ CASES = [
     ("Session (notes, clips, versions)", click("[data-testid=dock-session]"), None),
     ("Effets de la piste (FX)", click("button:has-text('FX')"), None),
     ("Prises (comp)", click("button:has-text('Prises')"), None),
-    ("Menu du clip (clic droit)", lambda p: p.locator("[data-clip-id]").locator("visible=true").nth(1).click(button="right"), None),
+    ("Menu du clip (clic droit)", clip_menu, None),
     ("Supprimer les silences (Ctrl+U)", key("Control+u"), select_first_clip),
     ("Respirations (Ctrl+Alt+R)", key("Control+Alt+r"), select_first_clip),
     ("Répéter (Alt+R)", key("Alt+r"), select_first_clip),

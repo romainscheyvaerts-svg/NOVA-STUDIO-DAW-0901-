@@ -252,7 +252,8 @@ const AVAILABLE_FX_MENU = [
     { id: 'PROEQ12', name: 'Pro-EQ 12', icon: 'fa-wave-square' },
     { id: 'AUTOTUNE', name: 'Auto-Tune Pro', icon: 'fa-microphone-alt' },
     { id: 'DENOISER', name: 'Denoiser', icon: 'fa-broom' },
-    { id: 'COMPRESSOR', name: 'Leveler', icon: 'fa-compress-alt' },
+    // Même nom que la fenêtre de l'effet (« Compresseur ») : avant, le menu disait « Leveler ».
+    { id: 'COMPRESSOR', name: 'Compresseur', icon: 'fa-compress-alt' },
     { id: 'REVERB', name: 'Spatial Verb', icon: 'fa-mountain-sun' },
     { id: 'DELAY', name: 'Sync Delay', icon: 'fa-history' },
     { id: 'CHORUS', name: 'Vocal Chorus', icon: 'fa-layer-group' },

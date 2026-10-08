@@ -3,9 +3,9 @@ import { normText } from '../utils/commandPalette';
 
 /**
  * Menu « Ajouter un effet » d'une piste : rangé comme une chaîne de mix (nettoyage, égaliseur,
- * dynamique, saturation, espace…), chaque effet avec ce qu'il EST (« Leveler · compresseur »),
+ * dynamique, saturation, espace…), chaque effet avec ce qu'il EST (« FET 76 · compresseur FET »),
  * et une case de recherche qui a le focus : on tape « comp », « eq », « reverb », « 1176 »,
- * Entrée. Avant : 28 noms de produits en vrac (« Leveler », « S-Killer »…) sans catégorie,
+ * Entrée. Avant : 28 noms de produits en vrac (« Leveler » pour le compresseur, « S-Killer »…),
  * le compresseur était introuvable pour qui cherchait « compresseur ».
  */
 export interface EffectEntry { id: string; name: string; icon?: string }
@@ -16,7 +16,7 @@ const KIND: Record<string, { cat: string; kind: string; also?: string }> = {
   DEESSER: { cat: 'Nettoyage', kind: 'de-esser', also: 'sifflantes s ess' },
   GATE: { cat: 'Nettoyage', kind: 'gate / expandeur', also: 'porte noise gate side-chain' },
   PROEQ12: { cat: 'Égaliseur', kind: 'égaliseur 12 bandes', also: 'eq egaliseur filtre coupe-bas low cut' },
-  COMPRESSOR: { cat: 'Dynamique', kind: 'compresseur', also: 'comp compression side-chain dyn3' },
+  COMPRESSOR: { cat: 'Dynamique', kind: 'propre, VCA, opto, FET', also: 'comp compression side-chain dyn3 leveler' },
   OPTO_VINTAGE: { cat: 'Dynamique', kind: 'compresseur optique', also: 'comp opto cl1b' },
   FET76: { cat: 'Dynamique', kind: 'compresseur FET (type 1176)', also: 'comp 1176 fet' },
   LEVELER2A: { cat: 'Dynamique', kind: 'niveleur optique (type LA-2A)', also: 'comp la2a la-2a opto' },
