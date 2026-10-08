@@ -14,6 +14,9 @@ import PunchControls from './PunchControls';
 import { PunchSettings } from '../types';
 import { openFeedback } from '../services/feedback';
 import { MidiFileMenu, MidiMobileMenuItems } from './MidiFileMenu';
+import DspMeter from './DspMeter';
+import type { Track } from '../types';
+import type { SafetyContext } from '../utils/dspLoad';
 
 interface TransportProps {
   /** Ouvre « Master Nova » (mastering en un clic, V15). */
@@ -80,6 +83,11 @@ interface TransportProps {
 
   // Import Audio (nouveau système)
   onImportAudio?: (file: File) => void;
+
+  /** Compteur CPU / DSP (engine/dspMonitor) : pistes de la session, gel, garde-fous du mode sécurité. */
+  dspTracks?: Track[];
+  onDspFreezeTrack?: (trackId: string) => void;
+  dspSafety?: SafetyContext;
 }
 
 /** Voyant de surcharge : s'allume 4 s quand le moteur prend du retard. */
@@ -183,6 +191,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar, isMobileLayout = false,
   onImportAudio,
+  dspTracks, onDspFreezeTrack, dspSafety,
   children
 }) => {
   const tsNum = timeSignature?.numerator || 4;
@@ -377,7 +386,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           <button onClick={onStop} title="Stop (Échap)" aria-label="Stop" className="nova-hit w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
           <button onClick={onTogglePlay} title="Lecture / pause (raccourci : barre d'espace)" aria-label={isPlaying ? 'Pause' : 'Lecture'} aria-pressed={isPlaying} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-150 ${isPlaying ? 'text-black nova-halo' : 'bg-white text-black hover:scale-105 shadow-md shadow-black/30'}`} style={isPlaying ? { backgroundColor: 'var(--accent-neon)' } : undefined}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-base`}></i></button>
           <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" aria-pressed={isLoopActive} className={`nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
-          <OverloadBadge />
+          {dspTracks ? <DspMeter tracks={dspTracks} onFreezeTrack={onDspFreezeTrack} safety={dspSafety || { isRecording, bridgeConnected: false }} compact={isMobileLayout} /> : <OverloadBadge />}
           {onTogglePunch && !simple && (
             <PunchControls punch={punch} bpm={bpm} isPunchActive={isPunchActive} onTogglePunch={onTogglePunch}
               onUpdatePunch={onUpdatePunch} onToggleQuickPunch={onToggleQuickPunch} />
