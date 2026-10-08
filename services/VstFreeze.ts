@@ -8,6 +8,7 @@ import {
   needsRerender, pluginsSignature, SEND_RENDER_TAIL,
 } from '../utils/freeze';
 import { makeFreezeBase, PRE_VOLUME } from '../utils/preFxEdits';
+import { vstAutomationFor, vstAutomationSig } from '../utils/vstAutomation';
 
 /**
  * Rendu des effets VST3 (via le pont du PC) dans l'audio de la piste, pour que
@@ -30,6 +31,8 @@ export interface FreezeResult {
   pluginSig: string;
   /** Place de chaque clip rendu dans le rendu, telle qu'au moment du rendu. */
   anchors: Map<string, NonNullable<Clip['freezeRef']>>;
+  /** (R9) Empreinte de l'automation des VST rendus. */
+  vstAutoSig?: string;
 }
 
 /**
@@ -42,6 +45,7 @@ export function applyFreezeResult(t: Track, r: FreezeResult, by?: string): void 
   t.frozenClipIds = r.clipIds;
   t.frozenSourceSig = r.sig;
   t.frozenPluginSig = r.pluginSig;
+  t.frozenVstAutoSig = r.vstAutoSig || '';
   t.clips = (t.clips || []).map(c => {
     const ref = r.anchors.get(c.id);
     if (!ref) return c;
@@ -84,11 +88,21 @@ const isolated = (track: Track, plugins: PluginInstance[], clips?: Clip[], withP
 const channelsOf = (b: AudioBuffer): Float32Array[] =>
   Array.from({ length: Math.min(2, b.numberOfChannels) }, (_, c) => b.getChannelData(c));
 
+/** Options du rendu d'une chaîne : position du son dans le morceau, clés de side-chain (R10). */
+export interface ChainRenderOptions {
+  /** Temps du morceau (s) du premier échantillon (automation des VST : R9). */
+  startTime?: number;
+  /** Clé de side-chain par effet VST (id → 2 canaux, alignés sur le son). */
+  keys?: Map<string, Float32Array[]>;
+}
+
 /**
  * Passe un son (stéréo) dans une chaîne d'effets : VST3 par le pont, effets
  * natifs hors ligne. La durée ne change pas (la queue doit déjà être dans le son).
+ * Les voies d'automation des VST (R9) de `host` sont rejouées par le pont, à
+ * l'échantillon près, comme en lecture.
  */
-export async function renderThroughChain(input: AudioBuffer, plugins: PluginInstance[], host: Track, onStep?: (msg: string) => void): Promise<AudioBuffer> {
+export async function renderThroughChain(input: AudioBuffer, plugins: PluginInstance[], host: Track, onStep?: (msg: string) => void, opts: ChainRenderOptions = {}): Promise<AudioBuffer> {
   await audioEngine.init();
   const ctx = audioEngine.ctx!;
   const sr = input.sampleRate;
@@ -103,10 +117,16 @@ export async function renderThroughChain(input: AudioBuffer, plugins: PluginInst
       const p = seg.plugin;
       onStep?.(`Rendu ${p.params?.name || p.name}…`);
       const live = liveVstNodes.get(p.id);
+      const automation = vstAutomationFor(host, p.id, opts.startTime || 0, sr, buffer.length);
+      if (automation.length && !novaBridge.getBridgeState().automation) {
+        throw new Error("Mets à jour le pont VST (Nova Studio pour Windows) pour rendre l'automation des VST.");
+      }
       const out = await novaBridge.render({
         slotId: live?.getSlotId() || null,
         path: p.params?.localPath, pluginName: p.params?.pluginName || null, stateB64: p.params?.stateB64 || null,
         sampleRate: sr, channels: channelsOf(buffer), tailSeconds: 0,
+        ...(automation.length ? { automation } : {}),
+        ...(opts.keys?.get(p.id) ? { key: opts.keys.get(p.id)! } : {}),
       });
       const next = ctx.createBuffer(2, buffer.length, sr);
       for (let c = 0; c < 2; c++) next.copyToChannel(out[Math.min(c, out.length - 1)].subarray(0, buffer.length), c);
@@ -167,6 +187,7 @@ export async function renderTrackFreeze(track: Track, upTo: number, onStep?: (ms
   return {
     clip, upTo, clipIds: clips.map(c => c.id), sig: freezeSignature(clips, track.plugins || [], upTo),
     pluginSig: pluginsSignature(track.plugins || [], upTo), anchors: anchorClipsToRender(clips, clipId),
+    vstAutoSig: vstAutomationSig(track, upTo),
   };
 }
 
@@ -191,7 +212,7 @@ export async function renderTrackPreview(
   const firstNative = segments[0]?.kind === 'native' ? (segments[0] as { kind: 'native'; plugins: PluginInstance[] }).plugins : [];
   const dry = await audioEngine.renderProject([isolated(track, firstNative)], duration, Math.max(0, win.from), sr, undefined, { preFader: true });
   const rest = segments[0]?.kind === 'native' ? plugins.slice(plugins.indexOf(firstNative[firstNative.length - 1]) + 1) : plugins;
-  const buffer = await renderThroughChain(dry, rest, track, onStep);
+  const buffer = await renderThroughChain(dry, rest, track, onStep, { startTime: Math.max(0, win.from) });
   const id = `preview-${track.id}-${Date.now()}`;
   audioBufferRegistry.register(buffer, id);
   return {
@@ -363,6 +384,7 @@ export function applyBusFreezeResult(tracks: Track[], r: BusFreezeResult, by?: s
   bus.frozenUpToPluginIndex = r.upTo;
   bus.frozenClipIds = [];
   bus.frozenPluginSig = r.pluginSig;
+  bus.frozenVstAutoSig = vstAutomationSig(bus, r.upTo);
   delete bus.frozenSourceSig;
   for (const s of tracks) {
     const p = r.perSource.get(s.id);

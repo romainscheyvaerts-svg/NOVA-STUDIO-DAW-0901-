@@ -14,7 +14,7 @@ hiddenimports = collect_submodules('websockets')
 # pedalboard embarque un module natif (JUCE) et ses données : on prend tout.
 tmp_ret = collect_all('pedalboard')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-hiddenimports += ['pedalboard_native', 'vst_host', 'vst_probe', 'license_watch', 'stems_service', 'stems_install']
+hiddenimports += ['pedalboard_native', 'vst_host', 'vst_probe', 'license_watch', 'stems_service', 'stems_install', 'vst_automation']
 datas += [('stems_worker.py', '.')]  # séparation de stems : moteur lancé dans le module optionnel
 
 

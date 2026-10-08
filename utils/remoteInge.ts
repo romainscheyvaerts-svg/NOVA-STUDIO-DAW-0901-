@@ -4,6 +4,7 @@ import {
 import { classifyPlugin } from './vstKnowledge';
 import { participantOf } from './collabPeers';
 import { freezeIndex, isFrozenBus, isTrackFrozen, isVst, pluginsSignature } from './freeze';
+import { vstAutomationSig } from './vstAutomation';
 import { makeFreezeBase, PRE_VOLUME } from './preFxEdits';
 import type { KnownPlugin, MixPlan } from './mixPlanner';
 
@@ -456,6 +457,7 @@ const upsertArtistBus = (tracks: Track[], b: RemoteBusWire): Track => {
     bus.frozenUpToPluginIndex = b.frozen.upTo;
     bus.frozenClipIds = [];
     bus.frozenPluginSig = pluginsSignature(bus.plugins, b.frozen.upTo);
+    bus.frozenVstAutoSig = vstAutomationSig(bus, b.frozen.upTo);
     delete bus.frozenSourceSig;
   } else {
     bus.isFrozen = false;
@@ -515,6 +517,7 @@ export function applyReturnOnArtist(tracks: Track[], p: RemoteReturnPayload, by?
     t.frozenUpToPluginIndex = p.frozen.upTo;
     t.frozenClipIds = p.frozen.clipIds ? [...p.frozen.clipIds] : undefined;
     t.frozenPluginSig = pluginsSignature(t.plugins, p.frozen.upTo);
+    t.frozenVstAutoSig = vstAutomationSig(t, p.frozen.upTo);
   } else {
     t.isFrozen = false;
     delete t.frozenClip; delete t.frozenUpToPluginIndex; delete t.frozenClipIds; delete t.frozenPluginSig;
