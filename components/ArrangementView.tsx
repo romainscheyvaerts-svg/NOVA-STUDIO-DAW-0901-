@@ -27,6 +27,7 @@ import { openNovaWindow } from '../utils/novaWindows';
 import WaveformRenderer from './WaveformRenderer';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore } from '../utils/playheadStore';
+import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures';
 import { visibleEnvelope } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
 import { useSimpleMode } from '../utils/simpleMode';
@@ -910,9 +911,24 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     for (const t of visibleTracks) { if (t.id === trackId) return yy; yy += zoomV + extraH(t); }
     return null;
   };
-  /** Appui long du doigt sur un clip (tablette) : son menu, comme le clic droit. */
+  /** Appui long du doigt (tablette) : le menu du clip, comme le clic droit ; ailleurs, le clic droit de l'endroit. */
   const longPressRef = useRef<{ timer: number; x: number; y: number } | null>(null);
   const cancelLongPress = () => { if (longPressRef.current) { window.clearTimeout(longPressRef.current.timer); longPressRef.current = null; } };
+  /** Doigts posés sur la zone des pistes, et celui qui mène le geste (le premier). Un 2e doigt
+   *  = défilement / zoom à deux doigts : jamais un appui long, jamais un nouveau geste. */
+  const touchPointersRef = useRef<Set<number>>(new Set());
+  const gestureFingerRef = useRef<number | null>(null);
+  /** Geste interrompu par un 2e doigt : sa fin n'est pas un « clic » (Spot n'ouvre rien). */
+  const gestureAbortedRef = useRef(false);
+  const endTouch = (pointerId: number) => {
+    touchPointersRef.current.delete(pointerId);
+    cancelLongPress();
+    // Le lever d'un 2e doigt ne termine pas le geste du premier.
+    if (gestureFingerRef.current !== pointerId) return;
+    gestureFingerRef.current = null;
+    touchRef.current = false;
+    handleMouseUp();
+  };
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
@@ -1504,7 +1520,7 @@ const handleMouseUp = () => {
     setDragTipPos(null);
     if (longPressRef.current) { clearTimeout(longPressRef.current.timer); longPressRef.current = null; }
     // Spot (Pro Tools) : un clic (sans glisser) sur un clip ouvre « Position exacte ».
-    if (dragAction === 'MOVE' && activeClip && !movedRef.current && editModeStore.get().mode === 'SPOT') {
+    if (dragAction === 'MOVE' && activeClip && !movedRef.current && !gestureAbortedRef.current && editModeStore.get().mode === 'SPOT') {
         setSpotTarget({ trackId: activeClip.trackId, clipId: activeClip.clip.id });
     }
     shuffleInitRef.current = null;
@@ -2299,17 +2315,53 @@ useEffect(() => {
             if (e.pointerType === 'mouse') return;
             // Pas d'événements souris « de compatibilité » en double après le doigt.
             e.preventDefault();
+            const fingers = touchPointersRef.current;
+            // Premier doigt posé (isPrimary) : aucun autre doigt n'est sur l'écran
+            // (un lever perdu ne laisse pas un doigt fantôme).
+            if (e.isPrimary) fingers.clear();
+            fingers.add(e.pointerId);
+            // Deuxième doigt : défilement ou zoom à deux doigts, pas un nouveau geste
+            // (ni un appui long sous ce doigt, ni la fin de celui du premier doigt).
+            if (fingers.size > 1) {
+              cancelLongPress();
+              // Le geste du premier doigt s'arrête là (sans valoir un clic) : le clip ne suit
+              // plus ce doigt et le navigateur peut faire défiler / zoomer à deux doigts.
+              if (gestureFingerRef.current !== null) {
+                gestureFingerRef.current = null;
+                gestureAbortedRef.current = true;
+                touchRef.current = false;
+                try { handleMouseUp(); } finally { gestureAbortedRef.current = false; }
+              }
+              return;
+            }
+            gestureFingerRef.current = e.pointerId;
             touchRef.current = true;
+            // « Le clip a bougé » vaut pour CE geste (un déplacement précédent ne bloque pas l'appui long).
+            movedRef.current = false;
             handleMouseDown(e);
-            // Appui long sur un clip (doigt immobile 0,55 s) : en mode Spot, « Position exacte » ;
-            // sinon le menu du clip (qui propose aussi le Spot).
+            // Appui long (doigt immobile 0,55 s). Seul arbitre ici (data-own-longpress) :
+            // sur un clip, en mode Spot « Position exacte », sinon le menu du clip ;
+            // ailleurs (règle, piste vide), le clic droit de l'endroit. Les en-têtes de
+            // pistes gardent l'appui long du gestionnaire global.
+            const sc = scrollContainerRef.current;
+            if (!sc || e.clientX - sc.getBoundingClientRect().left < headerWidth) { cancelLongPress(); return; }
             const cx = e.clientX, cy = e.clientY;
             cancelLongPress();
             longPressRef.current = { x: cx, y: cy, timer: window.setTimeout(() => {
               longPressRef.current = null;
+              // Crayon de gain / d'automation en cours, ou clip déjà déplacé : le geste continue.
+              if (clipGainActiveRef.current || movedRef.current || touchPointersRef.current.size !== 1) return;
               const hit = clipAtPoint(cx, cy);
-              if (!hit) return;
               touchRef.current = false; handleMouseUp();
+              // Le clic envoyé au lever du doigt ne doit pas activer le menu ouvert dessous
+              // (il « Normalisait » le clip et refermait le menu).
+              swallowReleaseClick(cx, cy);
+              if (!hit) {
+                // Clic droit de l'endroit (marqueur / punch sur la règle, menu de la grille,
+                // pattern MIDI sur une piste d'instrument), comme le gestionnaire global le faisait.
+                scrollContainerRef.current?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 2, buttons: 2 }));
+                return;
+              }
               if (editModeStore.get().mode === 'SPOT') {
                 suppressCtxUntilRef.current = Date.now() + 1500;
                 setSpotTarget({ trackId: hit.trackId, clipId: hit.clip.id });
@@ -2320,16 +2372,18 @@ useEffect(() => {
           }}
           onPointerMove={(e) => {
             if (e.pointerType === 'mouse') return;
+            if (e.pointerId !== gestureFingerRef.current) return;
             const lp = longPressRef.current;
             if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancelLongPress();
             handleMouseMove(e);
           }}
-          onPointerUp={(e) => { if (e.pointerType !== 'mouse') { cancelLongPress(); touchRef.current = false; handleMouseUp(); } }}
-          onPointerCancel={(e) => { if (e.pointerType !== 'mouse') { cancelLongPress(); touchRef.current = false; handleMouseUp(); } }}
+          onPointerUp={(e) => { if (e.pointerType !== 'mouse') endTouch(e.pointerId); }}
+          onPointerCancel={(e) => { if (e.pointerType !== 'mouse') endTouch(e.pointerId); }}
           onScroll={(e) => { setScrollLeft(e.currentTarget.scrollLeft); setScrollTop(e.currentTarget.scrollTop); }}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onContextMenu={(e) => e.preventDefault()}
+          {...{ [OWN_LONG_PRESS_ATTR]: '' }}
       >
         {/* Container for all content with proper dimensions */}
         <div style={{ width: totalContentWidth + headerWidth, minHeight: totalArrangementHeight, position: 'relative' }}>
@@ -2337,6 +2391,7 @@ useEffect(() => {
           {/* SIDEBAR - sticky left only (scrolls vertically with content) */}
           <div 
               ref={sidebarContainerRef}
+              {...{ [OWN_LONG_PRESS_ATTR]: 'off' }}
               className="z-40 flex flex-col"
               style={{ 
                   position: 'sticky', 
