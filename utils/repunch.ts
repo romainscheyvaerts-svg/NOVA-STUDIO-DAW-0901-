@@ -137,12 +137,17 @@ export function findRedoSpots(x: Float32Array, sr: number, t0: number, o: FindOp
   const spots: RedoSpot[] = [];
   rows.forEach((r, i) => {
     const reasons: RedoReason[] = [];
-    const bad = (k: 'pitch' | 'timing' | 'level' | 'noise') => r.score[k] < th[k] || (several && r.score[k] < med[k] - RELATIVE_GAP);
+    // Sous le seuil ET un peu sous le reste de la prise, ou nettement sous le reste de la prise :
+    // le style de l'artiste (flow en avance, voix voilée) ne met pas toute la prise en rouge.
+    const bad = (k: 'pitch' | 'timing' | 'level' | 'noise') =>
+      (r.score[k] < th[k] && (!several || r.score[k] < med[k] - 5)) || (several && r.score[k] < med[k] - RELATIVE_GAP);
     if (bad('pitch')) reasons.push('justesse');
     if (bad('timing')) reasons.push('calage');
     if (r.clipped > 0.0005) reasons.push('saturation');
     else if (bad('level')) reasons.push('niveau');
-    if (bad('noise')) reasons.push('bruit');
+    // Bruit : mesuré sur les petits silences de la phrase, peu fiable seul ; seulement s'il détonne
+    // du reste de la prise (le bruit de toute la prise est signalé à part : takeNoise).
+    if (several && r.score.noise < th.noise && r.score.noise < med.noise - RELATIVE_GAP) reasons.push('bruit');
     if (!reasons.length) return;
     spots.push({
       id: `redo-${o.trackId}-${Math.round(r.p.start * 1000)}-${i}`,
@@ -165,4 +170,12 @@ export function compareScores(before: TakeScore | null, after: TakeScore | null)
   if (d >= 4) return { better: 'new', text: `La nouvelle prise est meilleure (${before.total} → ${after.total}${gains.length ? ` : ${gains.join(', ')}` : ''}).` };
   if (d <= -4) return { better: 'old', text: `L’ancienne était meilleure (${before.total} → ${after.total}${losses.length ? ` : ${losses.join(', ')} en baisse` : ''}). Écoute les deux avant de choisir.` };
   return { better: 'same', text: `Les deux se valent (${before.total} → ${after.total}) : choisis à l’oreille.` };
+}
+
+/**
+ * Bruit de fond de TOUTE la prise (silences entre les phrases compris) : 0-100.
+ * Sous 40 : la pièce, le souffle ou un appareil s'entendent sur toute la prise.
+ */
+export function takeNoise(x: Float32Array, sr: number, bpm: number): number {
+  return scoreTake(x, sr, { bpm }).noise;
 }

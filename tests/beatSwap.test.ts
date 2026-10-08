@@ -92,7 +92,7 @@ describe('le projet après le changement de beat (une seule opération)', () => 
   };
   const plan = planSwap({ bpm: 94, key: G_MIN, downbeat: 0.35 }, { bpm: 100, key: A_MIN, downbeat: 0.12 });
 
-  it('voix, MIDI, repères, accords, boucle, punch, tempo et tonalité suivent', () => {
+  it('voix, MIDI, repères, accords, boucle, tempo et tonalité suivent', () => {
     const s0 = base();
     expect(hasVoicesToKeep(s0.tracks)).toBe(true);
     expect(audioClipsToRender(s0.tracks).map(r => r.clip.id)).toEqual(['v1', 'pickup']);
@@ -125,7 +125,7 @@ describe('le projet après le changement de beat (une seule opération)', () => 
     expect(s.chords![0]).toMatchObject({ root: 9 });
     expect(s.chords![0].end).toBeCloseTo(0.12 + 4 * 60 / 100, 6);
     expect(s.loopEnd).toBeCloseTo(0.12 + 16 * 60 / 100, 6);
-    expect(s.punch.punchIn).toBeCloseTo(0.12 + 60 / 100, 6);
+    expect(s.punch).toBe(s0.punch);
     expect(s.bpm).toBe(100);
     expect(s.projectKey).toBe(9);
     expect(s.beatTitle).toBe('Beat B');

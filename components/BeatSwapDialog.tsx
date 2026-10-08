@@ -11,9 +11,24 @@ import type { R23Api } from '../hooks/useR23';
  * Téléphone : version simple (le plan, les alertes, un bouton).
  */
 const r1 = (v: number) => (Math.round(v * 10) / 10).toString().replace('.', ',');
-const from = (f?: string) => (f === 'catalogue' ? 'annoncé par le store' : f === 'projet' ? 'du projet' : f === 'écoute' ? 'détecté à l’écoute' : '');
+const from = (f?: string) => (f === 'catalogue' ? 'annoncé par le store' : f === 'projet' ? 'du projet' : f === 'écoute' ? 'détecté à l’écoute' : f === 'main' ? 'réglé par toi' : '');
 
-const BeatCard: React.FC<{ label: string; info: BeatInfo | null; accent?: boolean; testid: string }> = ({ label, info, accent, testid }) => (
+const BpmFix: React.FC<{ bpm: number; onSet: (b: number) => void }> = ({ bpm, onSet }) => {
+  const [v, setV] = useState(String(Math.round(bpm * 10) / 10));
+  React.useEffect(() => setV(String(Math.round(bpm * 10) / 10)), [bpm]);
+  const btn = 'nova-hit-tactile h-7 rounded-md bg-nv-panel px-2 text-[10px] font-bold text-nv-ink border border-nv-line';
+  return (
+    <div className="mt-1 flex items-center gap-1" title="Tempo mal deviné (moitié ou double) ? Corrige-le : la grille et le premier temps sont recalculés.">
+      <button type="button" className={btn} data-testid="beatswap-bpm-half" onClick={() => onSet(bpm / 2)} aria-label="Moitié du tempo">/2</button>
+      <button type="button" className={btn} data-testid="beatswap-bpm-double" onClick={() => onSet(bpm * 2)} aria-label="Double du tempo">×2</button>
+      <input type="number" min={40} max={240} step={0.1} value={v} onChange={e => setV(e.target.value)} aria-label="Tempo du nouveau beat (BPM)"
+        onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') onSet(Number(v.replace(',', '.'))); }} onBlur={() => { const n = Number(v.replace(',', '.')); if (Math.abs(n - bpm) > 0.01) onSet(n); }}
+        data-testid="beatswap-bpm-input" className="h-7 w-16 rounded-md border border-nv-line bg-nv-bg px-1.5 text-[11px] font-bold text-nv-ink tabular-nums" />
+    </div>
+  );
+};
+
+const BeatCard: React.FC<{ label: string; info: BeatInfo | null; accent?: boolean; testid: string; onSetBpm?: (b: number) => void }> = ({ label, info, accent, testid, onSetBpm }) => (
   <div data-testid={testid} className={`flex-1 min-w-0 rounded-xl border px-3 py-2 ${accent ? 'border-nv-accent/60 bg-nv-accent/10' : 'border-nv-line bg-nv-well'}`}>
     <p className="text-[10px] font-bold uppercase tracking-wide text-nv-muted">{label}</p>
     {info ? (
@@ -22,6 +37,7 @@ const BeatCard: React.FC<{ label: string; info: BeatInfo | null; accent?: boolea
         <p className="text-[12px] text-nv-ink"><b className="tabular-nums">{r1(info.bpm)} BPM</b> <span className="text-[10px] text-nv-muted" title="D'où vient le tempo">{from(info.bpmFrom)}</span></p>
         <p className="text-[12px] text-nv-ink"><b>{keyName(info.key)}</b> <span className="text-[10px] text-nv-muted">{from(info.keyFrom)}</span></p>
         <p className="text-[10px] text-nv-muted" title="Premier temps fort du beat (le « 1 » de la première mesure) : c'est lui qui aligne tes voix.">1er temps à <span className="tabular-nums">{info.downbeat.toFixed(3).replace('.', ',')} s</span></p>
+        {onSetBpm && <BpmFix bpm={info.bpm} onSet={onSetBpm} />}
       </>
     ) : <p className="text-[11px] text-nv-muted">…</p>}
   </div>
@@ -82,7 +98,7 @@ export const BeatSwapDialog: React.FC<{ api: R23Api; compact?: boolean; onChoose
             <div className="flex gap-2">
               <BeatCard label="Ancien beat" info={s.oldInfo} testid="beatswap-old" />
               <div className="self-center text-nv-muted"><i className="fas fa-arrow-right" /></div>
-              <BeatCard label="Nouveau beat" info={s.newInfo} accent testid="beatswap-new" />
+              <BeatCard label="Nouveau beat" info={s.newInfo} accent testid="beatswap-new" onSetBpm={!compact || fine ? (b => { void api.setNewBpm(b); }) : undefined} />
             </div>
             <p data-testid="beatswap-plan" className="rounded-xl bg-nv-well px-3 py-2 text-[12px] leading-snug text-nv-ink">
               <b>Tes voix ({s.voices} clip{s.voices > 1 ? 's' : ''}) :</b> {planSummary(p)}. Le premier temps de l’ancien beat tombe sur celui du nouveau ; repères et accords suivent.

@@ -4,7 +4,7 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import {
   applySwap, BeatInfo, BeatSwapOp, doneText, followsBeat, hasVoicesToKeep, isBeatTrack, KeyInfo, planSummary, planSwap, SwapOptions, SwapPlan,
 } from '../utils/beatSwap';
-import { compareScores, findRedoSpots, RedoSpot } from '../utils/repunch';
+import { compareScores, findRedoSpots, RedoSpot, takeNoise } from '../utils/repunch';
 import { redoPunchZone } from '../utils/punch';
 import { scoreTake, TakeScore } from '../utils/takeScore';
 import { takeNumberOf } from '../utils/takes';
@@ -170,6 +170,17 @@ export function useR23(state: DAWState, d: R23Deps) {
     });
   }, []);
 
+  /** Tempo du nouveau beat réglé à la main (×2, ÷2, saisi) : grille et premier temps recalculés. */
+  const setNewBpm = useCallback(async (bpm: number) => {
+    const s = swapRef.current;
+    const fetched = fetchedRef.current;
+    if (!s?.newInfo || !s.oldInfo || !fetched || !(bpm >= 40 && bpm <= 240)) return;
+    const st0 = dRef.current.stateRef.current;
+    const newInfo = await analyzeNewBeat(fetched.buffer, st0.tracks.find(isBeatTrack)?.clips[0]?.start ?? 0, { bpm, key: s.newInfo.key, title: fetched.title, id: fetched.audioRef, manual: true });
+    newInfo.keyFrom = s.newInfo.keyFrom;
+    setSwap(x => (x && x.oldInfo ? { ...x, newInfo, plan: planSwap(x.oldInfo, newInfo, x.opts) } : x));
+  }, []);
+
   const closeSwap = useCallback(() => { cancelRef.current = true; setSwap(null); fetchedRef.current = null; }, []);
   /** « Choisir dans le store » : la fenêtre se replie en bandeau, le prochain beat choisi arrive ici. */
   const waitStore = useCallback(() => {
@@ -286,9 +297,10 @@ export function useR23(state: DAWState, d: R23Deps) {
     await new Promise(r => setTimeout(r, 0));
     const spots = findRedoSpots(a.x, a.sr, from, { trackId: t.id, bpm: st.bpm, key: keyOf(st), gridOrigin: g0 });
     redoSpotsStore.set([...redoSpotsStore.get().filter(s => s.trackId !== t.id), ...spots]);
-    dd.notify(spots.length
+    const noisy = takeNoise(a.x, a.sr, st.bpm) < 40 ? ' · Bruit de fond sur toute la prise (souffle, pièce) : vérifie le micro avant de refaire.' : '';
+    dd.notify((spots.length
       ? `🎯 ${spots.length} passage${spots.length > 1 ? 's' : ''} à refaire sur « ${t.name} » (en rouge sur la timeline) — le pire : ${spots[0].label.toLowerCase()} à ${spots[0].start.toFixed(1).replace('.', ',')} s. Clique « Refaire » pour poser le punch.`
-      : `✅ « ${t.name} » : rien ne détonne (justesse, calage, niveau, saturation, bruit). Belle prise !`);
+      : `✅ « ${t.name} » : rien ne détonne (justesse, calage, niveau, saturation, bruit). Belle prise !`) + noisy);
   }, [gridOrigin]);
 
   const pendingRef = useRef<{ trackIds: string[]; zone: { start: number; end: number }; before: Map<string, { score: TakeScore | null; clips: Clip[]; takeMeta?: TakeMeta[] }>; spotId: string } | null>(null);
@@ -429,7 +441,7 @@ export function useR23(state: DAWState, d: R23Deps) {
   }, [state.tracks]);
 
   return {
-    swap, openSwap, chooseSource: analyze, setOptions, closeSwap, confirmSwap, waitStore,
+    swap, openSwap, chooseSource: analyze, setOptions, setNewBpm, closeSwap, confirmSwap, waitStore,
     result, showSwap, revertSwap, keepSwap,
     compare, showCompare, keepNew, keepOld, closeCompare: () => setCompare(null),
     findSpots,

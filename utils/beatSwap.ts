@@ -80,7 +80,7 @@ export interface BeatInfo {
   key: KeyInfo | null;
   downbeat: number;
   /** D'où viennent les infos (affichées : « annoncé par le catalogue », « détecté à l'écoute »). */
-  bpmFrom?: 'catalogue' | 'projet' | 'écoute';
+  bpmFrom?: 'catalogue' | 'projet' | 'écoute' | 'main';
   keyFrom?: 'catalogue' | 'projet' | 'écoute';
   /** Confiance de la détection du premier temps (0-1). */
   downbeatConfidence?: number;
@@ -321,6 +321,8 @@ export interface BeatGrid {
   /** Phase de la grille des temps (s, dans [0, période)). */
   beatPhase: number;
   confidence: number;
+  /** Force des attaques sur la grille / moyenne (sert à départager deux tempos candidats). */
+  score: number;
 }
 
 /** Enveloppes d'attaque (pas de 5 ms) : bande entière et graves (< ~150 Hz : kick, 808). */
@@ -460,7 +462,7 @@ export function analyzeBeatGrid(x: Float32Array, sr: number, approxBpm: number, 
   // Confiance : attaques fortes sur la grille / attaques fortes ailleurs.
   const mean = env.odf.reduce((a, b) => a + b, 0) / frames;
   const confidence = Math.max(0, Math.min(1, (bestS / Math.max(1e-9, mean) - 1) / 8));
-  return { bpm: Math.round(bpm * 1000) / 1000, downbeat: Math.round(downbeat * 1e5) / 1e5, beatPhase: Math.round(phase * 1e5) / 1e5, confidence: Math.round(confidence * 100) / 100 };
+  return { bpm: Math.round(bpm * 1000) / 1000, downbeat: Math.round(downbeat * 1e5) / 1e5, beatPhase: Math.round(phase * 1e5) / 1e5, confidence: Math.round(confidence * 100) / 100, score: Math.round((bestS / Math.max(1e-9, mean)) * 1000) / 1000 };
 }
 
 // ─── Collaboration : le changement de beat voyage en UNE opération ─────────────

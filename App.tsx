@@ -167,7 +167,7 @@ import type { TakeResult } from './engine/AudioEngine';
 import { useR21 } from './hooks/useR21';
 import { useR23 } from './hooks/useR23';
 import { BeatSwapDialog, BeatSwapResultCard } from './components/BeatSwapDialog';
-import { RepunchCompareCard, R23VoiceTools } from './components/RepunchUI';
+import { RedoSpotsSheet, RepunchCompareCard, R23VoiceTools } from './components/RepunchUI';
 import { applyBeatSwapOp, BeatSwapOp, hasVoicesToKeep } from './utils/beatSwap';
 import { currentBeatClip } from './services/beatSwapRun';
 import { openSessionPanel, useSessionPanel } from './utils/r21Bus';
@@ -8105,6 +8105,7 @@ function Studio() {
       {r23.swap && <BeatSwapDialog api={r23} compact={isMobile} onChooseFile={(f) => { void r23.chooseSource({ kind: 'file', url: URL.createObjectURL(f), name: f.name, file: f }); }} />}
       <BeatSwapResultCard api={r23} compact={isMobile} />
       <RepunchCompareCard api={r23} compact={isMobile} />
+      {isMobile && !r23.compare && <RedoSpotsSheet />}
       <AutoCompCard proposal={autoCompProposal}
         onKeep={() => { autoCompBeforeRef.current = null; setAutoCompProposal(null); setAiNotification("✓ Comp de l'IA gardé — tu peux encore le retoucher en balayant dans les couloirs."); }}
         onRevert={handleAutoCompRevert}

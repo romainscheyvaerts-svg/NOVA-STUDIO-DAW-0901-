@@ -44,7 +44,7 @@ export const RedoSpotsOverlay: React.FC<{
             )}
             {isSel && (
               <div role="dialog" aria-label="Passage à refaire" data-testid="redo-spot-pop" onClick={e => e.stopPropagation()}
-                style={{ position: 'absolute', left: 0, bottom: bandH + 4, minWidth: 240, zIndex: 5 }}
+                style={{ position: 'absolute', left: Math.max(-x, Math.min(0, width - x - 260)), ...(top < 150 ? { top: bandH + 4 } : { bottom: bandH + 4 }), minWidth: 240, zIndex: 5 }}
                 className="rounded-xl border border-nv-line bg-nv-panel p-2.5 shadow-2xl flex flex-col gap-1.5">
                 <p className="text-[12px] font-bold text-nv-ink">À refaire : {s.label}</p>
                 <p className="text-[10px] text-nv-muted tabular-nums">{fmt(s.start)} → {fmt(s.end)} · justesse {s.score.pitch} · calage {s.score.timing} · niveau {s.score.level} · bruit {s.score.noise}</p>
@@ -109,3 +109,31 @@ export const R23VoiceTools: React.FC<{ onAfter?: () => void; hasVoice: boolean }
     </button>
   </div>
 );
+
+/**
+ * Téléphone (version simple) : la timeline du téléphone est réduite, les
+ * passages à refaire sont listés dans une feuille en bas de l'écran.
+ */
+export const RedoSpotsSheet: React.FC = () => {
+  const spots = useRedoSpots();
+  if (!spots.length) return null;
+  return (
+    <div role="dialog" aria-label="Passages à refaire" data-testid="redo-spots-sheet"
+      className="fixed inset-x-2 bottom-[calc(8.5rem+env(safe-area-inset-bottom))] z-[540] max-h-[45vh] overflow-y-auto rounded-2xl border border-red-400/50 bg-nv-panel p-3 shadow-2xl flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <p className="flex-1 text-[13px] font-bold text-nv-ink"><i className="fas fa-redo mr-1.5 text-red-300" />{spots.length} passage{spots.length > 1 ? 's' : ''} à refaire</p>
+        <button type="button" onClick={() => r23Bus.emit({ kind: 'clearSpots' })} aria-label="Fermer" className="nova-hit-tactile w-9 h-9 rounded-lg text-nv-muted"><i className="fas fa-times" /></button>
+      </div>
+      {spots.map(s => (
+        <div key={s.id} data-testid="redo-spot-row" className="rounded-xl bg-nv-well px-2.5 py-2 flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-[12px] font-bold text-nv-ink truncate">{s.label}</p>
+            <p className="text-[10px] text-nv-muted tabular-nums">{fmt(s.start)} → {fmt(s.end)} · note {s.score.total}/100</p>
+          </div>
+          <button type="button" onClick={() => r23Bus.emit({ kind: 'listenSpot', spotId: s.id })} aria-label="Écouter ce passage" className="nova-hit-tactile w-10 h-10 rounded-lg bg-nv-panel text-nv-ink"><i className="fas fa-play" /></button>
+          <button type="button" data-testid="redo-spot-row-go" onClick={() => r23Bus.emit({ kind: 'redo', spotId: s.id })} className="nova-hit-tactile h-10 px-3 rounded-lg bg-red-500 text-[12px] font-bold text-white">Refaire</button>
+        </div>
+      ))}
+    </div>
+  );
+};

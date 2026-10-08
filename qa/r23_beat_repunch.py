@@ -9,7 +9,7 @@
      hauteur transposée de +2 demi-tons (le plus court) à ±5 cents.
      Repères et accords suivis ; Avant / Après ; « Revenir à l'ancien beat » (une seule
      annulation) ; Ctrl+Y puis UN Ctrl+Z.
-  B. Prise de voix (vraie voix sur le vrai beat de « Silence blanc », 140 BPM) dont une
+  B. Prise de voix (vraie voix sur le vrai beat de « Silence blanc », 92,3 BPM) dont une
      phrase est volontairement fausse (+45 cents) et en retard (90 ms) : « Repérer les
      passages à refaire » → repère sur cette phrase ; « Refaire ce passage » → zone de punch
      posée sur les temps, pré-roll, piste armée, prise lancée (micro simulé) ; la prise est
@@ -38,6 +38,7 @@ RES = {"name": "r23_beat_repunch", "ok": True, "etapes": {}}
 A_BPM, A_ROOT, A_DB = 94, 55, 0.35      # Sol mineur
 B_BPM, B_ROOT, B_DB = 100, 57, 0.12     # La mineur
 VOICE_AT = A_DB + 4 * 60 / A_BPM         # la voix entre à la mesure 2 du beat A
+SB_BPM = 92.3                            # « Silence blanc » (librosa : 92,3 BPM)
 INIT = """try { localStorage.setItem('nova_headphones', '1'); localStorage.setItem('nova_welcome_seen', '1'); localStorage.setItem('nova_simple_mode', '0');
   localStorage.setItem('nova_count_in', '0'); localStorage.setItem('nova_auto_clean', '0'); } catch (e) {}"""
 
@@ -180,7 +181,7 @@ def projects():
     ], {"audio/voix.wav": (OUT / "voix_reelle.wav").read_bytes(), "audio/beatA.wav": (OUT / "beat_A_94_sol_mineur.wav").read_bytes()})
     tk, _ = read_wav(OUT / "prise_fausse_et_decalee.wav")
     pb = OUT / "projet_prise_a_refaire.zip"
-    make_zip(pb, "R23 prise a refaire", {"bpm": 140, "projectKey": None, "markers": []}, [
+    make_zip(pb, "R23 prise a refaire", {"bpm": SB_BPM, "projectKey": None, "markers": []}, [
         {**TBASE, "id": "instrumental", "name": "BEAT", "type": "AUDIO", "color": "#eab308", "clips": [clip("beat-sb", "Silence blanc (instru)", "audio/instru.wav", 0, tk.shape[1] / SR)]},
         {**TBASE, "id": "voix", "name": "Voix lead", "type": "AUDIO", "color": "#22d3ee",
          "clips": [clip("prise-1", "Prise 1", "audio/prise.wav", 0, tk.shape[1] / SR, takeNumber=1)]},
@@ -411,7 +412,6 @@ def part_b_redo(page):
     after = st(page, "s => s.tracks.find(t => t.id === 'voix').clips.map(c => ({ id: c.id, start: c.start, duration: c.duration, muted: !!c.isMuted, take: c.takeNumber, fadeIn: c.fadeIn, fadeOut: c.fadeOut }))")
     out["clips_apres"] = after
     new = [c for c in after if c["take"] == 2]
-    beat = 60 / 140
     out["zone_sur_les_temps"] = None
     pin, pout = p["punchIn"], p["punchOut"]
     if new:
@@ -500,8 +500,24 @@ def captures(browser, log, pa, pb):
             page.wait_for_timeout(700)
             sp = page.locator("[data-testid=redo-spot]").locator("visible=true")
             if sp.count():
-                sp.first.click(); page.wait_for_timeout(500)
+                # Clic sur le début du bandeau (pas sur « Refaire ») : la bulle des raisons.
+                sp.first.click(position={"x": 8, "y": 10}); page.wait_for_timeout(500)
+            out[f"{vp}_{theme}_liste_telephone"] = page.locator("[data-testid=redo-spot-row]").count()
             shot(page, f"C_{vp}_{theme}_5_reperes_a_refaire")
+            if vp == "tel" and page.locator("[data-testid=redo-spot-row-go]").count():
+                page.locator("[data-testid=redo-spot-row-go]").first.click()
+                try:
+                    page.wait_for_function("() => window.__novaEdit.getState().isRecording", timeout=30000)
+                    page.wait_for_timeout(1200)
+                    shot(page, f"C_{vp}_{theme}_6_refaire_en_cours")
+                    page.wait_for_function("() => !window.__novaEdit.getState().isRecording", timeout=120000)
+                    page.wait_for_selector("[data-testid=repunch-compare]", timeout=20000)
+                    page.wait_for_timeout(500)
+                    shot(page, f"C_{vp}_{theme}_7_avant_apres")
+                    out[f"{vp}_{theme}_refaire_ok"] = True
+                except Exception as e:  # noqa
+                    out[f"{vp}_{theme}_refaire_ok"] = f"échec : {str(e)[:120]}"
+                    RES["ok"] = False
             ctx.close()
     return out
 

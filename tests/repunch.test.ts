@@ -11,15 +11,15 @@ const BEAT = 60 / BPM;
  * Prise de 4 phrases (une par 2 mesures) en La mineur, notes sur les croches.
  * La phrase `bad` est chantée 45 cents trop haut et 90 ms en retard.
  */
-function take(bad: number | null, opts: { origin?: number; clipPhrase?: number } = {}) {
+function take(bad: number | null, opts: { origin?: number; clipPhrase?: number; late?: number; detune?: number } = {}) {
   const o = opts.origin ?? 0;
   const scale = [57, 59, 60, 62, 64, 65, 67, 69];
   const notes: SynthNote[] = [];
   for (let ph = 0; ph < 4; ph++) {
     const t0 = o + ph * 8 * BEAT;
     for (let k = 0; k < 6; k++) {
-      const late = ph === bad ? 0.09 : 0;
-      const detune = ph === bad ? 0.45 : 0;
+      const late = ph === bad ? (opts.late ?? 0.09) : 0;
+      const detune = ph === bad ? (opts.detune ?? 0.45) : 0;
       notes.push({ midi: scale[(k * 3 + ph) % scale.length] + detune, at: t0 + k * BEAT / 2 * 2 + late, len: BEAT * 0.8 });
     }
   }
@@ -52,11 +52,13 @@ describe('repères « à refaire »', () => {
   });
 
   it('la grille part du premier temps du beat', () => {
-    // Beat dont le 1er temps est à 0,23 s : la prise est calée dessus.
-    const x = take(null, { origin: 0.23 });
-    expect(findRedoSpots(x, SR, 0, { trackId: 'v', bpm: BPM, gridOrigin: 0.23 }).filter(s => s.reasons.includes('calage'))).toEqual([]);
-    const off = findRedoSpots(x, SR, 0, { trackId: 'v', bpm: BPM, gridOrigin: 0, thresholds: { timing: 90 } });
-    expect(off.some(s => s.reasons.includes('calage'))).toBe(true);
+    // Beat dont le 1er temps est à 0,23 s : la prise est calée dessus ; une phrase 70 ms en retard.
+    const x = take(1, { origin: 0.23, late: 0.07, detune: 0 });
+    const spots = findRedoSpots(x, SR, 0, { trackId: 'v', bpm: BPM, gridOrigin: 0.23 });
+    expect(spots.map(s => s.reasons)).toEqual([['calage']]);
+    expect(spots[0].start).toBeGreaterThan(0.23 + 8 * BEAT - 0.1);
+    // Toute la prise décalée de la même façon (le style de l'artiste) : rien en rouge.
+    expect(findRedoSpots(take(null, { origin: 0.23 }), SR, 0, { trackId: 'v', bpm: BPM, gridOrigin: 0 }).filter(s => s.reasons.includes('calage'))).toEqual([]);
   });
 
   it('saturation repérée', () => {

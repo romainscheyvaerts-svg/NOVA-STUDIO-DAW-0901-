@@ -71,19 +71,19 @@ export async function analyzeCurrentBeat(state: DAWState): Promise<BeatInfo | nu
  * Le nouveau beat, posé à `start` (s) : tempo et tonalité du catalogue s'ils
  * sont connus (vérifiés à l'écoute), sinon détectés.
  */
-export async function analyzeNewBeat(buf: AudioBuffer, start: number, meta: { bpm?: number; key?: KeyInfo | null; title?: string; id?: string }): Promise<BeatInfo> {
+export async function analyzeNewBeat(buf: AudioBuffer, start: number, meta: { bpm?: number; key?: KeyInfo | null; title?: string; id?: string; manual?: boolean }): Promise<BeatInfo> {
   let approx = meta.bpm && meta.bpm > 0 ? meta.bpm : 0;
   if (!approx) {
     await tick();
     approx = estimateTempo(monoOf(buf, 30), buf.sampleRate)?.bpm || 120;
   }
   const g = await gridOf(meta.id, buf, approx);
-  let bpm = approx, bpmFrom: BeatInfo['bpmFrom'] = meta.bpm ? 'catalogue' : 'écoute';
+  let bpm = approx, bpmFrom: BeatInfo['bpmFrom'] = meta.manual ? 'main' : meta.bpm ? 'catalogue' : 'écoute';
   if (g) {
     if (!meta.bpm) bpm = g.bpm;
-    else if (Math.abs(g.bpm / meta.bpm - 1) > 0.005 && g.confidence > 0.3) { bpm = g.bpm; bpmFrom = 'écoute'; }
+    else if (Math.abs(g.bpm / meta.bpm - 1) > 0.005 && g.confidence > 0.3) { bpm = g.bpm; if (!meta.manual) bpmFrom = 'écoute'; }
   }
-  let key = meta.key ?? null, keyFrom: BeatInfo['keyFrom'] = key ? 'catalogue' : undefined;
+  let key = meta.key ?? null, keyFrom: BeatInfo['keyFrom'] = key ? (meta.manual ? undefined : 'catalogue') : undefined;
   if (!key) {
     const d = await detectKey(buf).catch(() => null);
     if (d) { key = { root: d.rootKey, scale: d.scale }; keyFrom = 'écoute'; }
