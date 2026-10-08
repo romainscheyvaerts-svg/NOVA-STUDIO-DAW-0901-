@@ -10,8 +10,9 @@
  *   le profil mesuré de l'appareil (analogProfiles.ts) voyagent dans le
  *   worklet : la traduction est refaite dans le thread audio dès qu'un
  *   réglage bouge.
- * - Latence : aucune (traitement échantillon par échantillon, sans
- *   anticipation). Elle est déclarée (0) au PDC comme pour tout effet.
+ * - Latence : 0 ou 1 échantillon déclaré au PDC selon l'appareil (tour 2 du
+ *   labo : l'original a une légère avance de phase, reproduite par un
+ *   passe-tout fractionnaire plus cette latence compensée).
  * - VU de réduction de gain : réduction max et courante, ~30 fois par seconde.
  */
 import { createAnalogCompCore } from './analogCompCore';
@@ -94,6 +95,8 @@ export class AnalogCompNode {
   private params: Record<string, number | boolean>;
   private meters: AnalogMeters & { at: number } = { grDb: 0, grNowDb: 0, inPeakDb: -120, outPeakDb: -120, at: 0 };
   private failed = false;
+  /** Latence déclarée (échantillons) : avance de phase mesurée du plugin d'origine (passe-tout + PDC). */
+  private latSamples = 0;
 
   constructor(ctx: BaseAudioContext, kind: string, params?: Record<string, any>) {
     this.ctx = ctx;
@@ -103,6 +106,10 @@ export class AnalogCompNode {
     this.input.channelCount = 2;
     this.input.channelCountMode = 'explicit';
     this.params = { ...(ANALOG_SPECS[kind]?.defaults || {}), isEnabled: true, ...sanitizeAnalog(kind, params || {}) };
+    try {
+      const cfg = buildAnalogInternal(kind, this.numericParams(), ANALOG_PROFILES[kind], ctx.sampleRate);
+      this.latSamples = Math.max(0, Math.round(+cfg.P[128] || 0));
+    } catch { this.latSamples = 0; }
     this.ready = this.init();
   }
 
@@ -137,8 +144,9 @@ export class AnalogCompNode {
     return o;
   }
 
-  /** Retard ajouté (s), compensé par le moteur (PDC) : aucun (pas d'anticipation). */
-  public get latency(): number { return 0; }
+  /** Retard déclaré (s), compensé par le moteur (PDC) : 0 ou 1 échantillon selon l'appareil (avance de phase
+   *  mesurée du plugin d'origine, reproduite par un passe-tout fractionnaire + cette latence). */
+  public get latency(): number { return this.failed ? 0 : this.latSamples / this.ctx.sampleRate; }
 
   public updateParams(p: Record<string, any>) {
     if (!p) return;

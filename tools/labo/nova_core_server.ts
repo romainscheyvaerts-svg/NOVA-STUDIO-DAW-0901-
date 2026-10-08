@@ -21,7 +21,9 @@ rl.on('line', (line) => {
     const inL = all.slice(0, n), inR = all.slice(n, 2 * n);
     const outL = new Float32Array(n), outR = new Float32Array(n);
     const core = createAnalogCompCore(sr);
-    core.setInternal(buildAnalogInternal(req.kind, req.params || {}, ANALOG_PROFILES[req.kind], sr));
+    const cfg = buildAnalogInternal(req.kind, req.params || {}, ANALOG_PROFILES[req.kind], sr);
+    core.setInternal(cfg);
+    const latency = Math.round(cfg.P[128] || 0);
     // blocs de 128 échantillons comme l'AudioWorklet
     let grDb = 0;
     for (let i = 0; i < n; i += 128) {
@@ -31,7 +33,7 @@ rl.on('line', (line) => {
     }
     const out = new Float32Array(2 * n);
     out.set(outL, 0); out.set(outR, n);
-    process.stdout.write(JSON.stringify({ data: Buffer.from(out.buffer).toString('base64'), latency: 0, grDb }) + '\n');
+    process.stdout.write(JSON.stringify({ data: Buffer.from(out.buffer).toString('base64'), latency, grDb }) + '\n');
   } catch (e: any) {
     process.stdout.write(JSON.stringify({ error: String(e && e.stack || e) }) + '\n');
   }

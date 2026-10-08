@@ -138,6 +138,16 @@ def nova_to_internal(p, fit):
     hp = ac.hpf_coefs(scf[0], SR, scf[1]) if scf else (ac.hpf_coefs(sc, SR, 0.7071) if sc else [0.0] * 5)
     P[ac.P_HP_B0:ac.P_HP_A2 + 1] = hp
     P[ac.P_LINK] = 0.0
+    d2 = (fit.get("dyn2") or {}).get({0: "fix", 1: "fm", 2: "man"}[mode])
+    if d2:
+        sa = ac.interp_log(d2["att_knob"], d2["att_scale"], att) if d2.get("att_scale") else 1.0
+        sr = ac.interp_log(d2["rel_knob"], d2["rel_scale"], rel) if d2.get("rel_scale") else 1.0
+        ac.apply_dyn2(P, d2, sa, sr, SR)
+        if d2.get("fb"):
+            P[ac.P_FB] = 1.0
+            tab = ac.ff_to_fb(tab, L0, DL)
+    ac.apply_lti(P, fit.get("lti"), SR, fit.get("lat", 0))
+    ac.apply_ws(P, fit.get("ws"))
     return P, L0, DL, np.ascontiguousarray(tab)
 
 
@@ -165,3 +175,8 @@ def builder(fit=None, to_nova=None):
         p = to_nova(settings) if to_nova else settings
         return nova_to_internal(p, f)
     return build
+
+
+def save_fit(fit):
+    with open(FIT_FILE, "w", encoding="utf-8") as f:
+        json.dump(fit, f, indent=1)
