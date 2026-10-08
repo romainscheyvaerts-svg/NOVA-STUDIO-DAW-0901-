@@ -77,7 +77,7 @@ const Row: React.FC<{
             className="nova-hit-tactile h-9 rounded-full border border-nv-line px-3 text-[11px] font-bold text-nv-ink">Afficher</button>
           {t.isInactive && (
             <button type="button" onClick={() => applyTracks(ts => showAndActivate(ts, t.id), `« ${t.name} » est prête`)}
-              className="nova-hit-tactile h-9 rounded-full bg-nv-accent px-3 text-[11px] font-bold text-nv-accent-ink">Afficher et activer</button>
+              className="nova-hit-tactile h-9 rounded-full bg-cyan-500 px-3 text-[11px] font-bold text-black">Afficher et activer</button>
           )}
         </>
       ) : (
@@ -133,7 +133,7 @@ const TrackListPanel: React.FC<{ tracks: Track[]; mode?: 'full' | 'hidden'; onCl
         <div className="flex flex-wrap items-center gap-1 px-3 pt-2">
           {FILTERS.map(f => (
             <button key={f.id} type="button" onClick={() => setFilter(f.id)} aria-pressed={filter === f.id} data-testid={`tracklist-filter-${f.id}`}
-              className={`nova-hit-tactile h-7 rounded-full px-2.5 text-[11px] font-bold ${filter === f.id ? 'bg-nv-accent text-nv-accent-ink' : 'bg-nv-well text-nv-muted hover:text-nv-ink'}`}>{f.label}</button>
+              className={`nova-hit-tactile h-7 rounded-full px-2.5 text-[11px] font-bold ${filter === f.id ? 'bg-cyan-500 text-black' : 'bg-nv-well text-nv-muted hover:text-nv-ink'}`}>{f.label}</button>
           ))}
         </div>
       )}

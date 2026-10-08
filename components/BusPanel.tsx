@@ -47,7 +47,7 @@ const BusPanel: React.FC<{ tracks: Track[]; onClose: () => void; className?: str
         <input value={name} onChange={e => setName(e.target.value)} placeholder="Nom du bus (LEAD A, VOX ALL, RV…)" aria-label="Nom du nouveau bus" data-testid="bus-new-name"
           className="min-w-0 flex-1 h-9 rounded-lg border border-nv-line bg-nv-well px-2 text-[12px] text-nv-ink outline-none focus:border-nv-accent" />
         <button type="submit" disabled={!name.trim() || !hasMaster} data-testid="bus-create"
-          className="nova-hit-tactile h-9 rounded-lg bg-nv-accent px-3 text-[12px] font-bold text-nv-accent-ink disabled:opacity-40">Créer</button>
+          className="nova-hit-tactile h-9 rounded-lg bg-cyan-500 px-3 text-[12px] font-bold text-black disabled:opacity-40">Créer</button>
       </form>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 flex flex-col gap-2">
         {usage.length === 0 && <p className="py-6 text-center text-[12px] text-nv-muted">Aucun bus nommé pour l’instant. Crée « LEAD A » puis choisis-le en sortie des pistes lead.</p>}

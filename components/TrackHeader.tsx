@@ -34,7 +34,7 @@ import { openSynthPanel } from '../utils/synthPanelStore';
 import MonitorControl from './MonitorControl';
 import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
-import { TrackStructureBadge } from './TrackStructure';
+import { TrackStructureBadge, TrackStructureInline } from './TrackStructure';
 import AutomationModeSelector from './AutomationModeSelector';
 import { automationRecorder } from '../services/AutomationManager';
 import { useLiveParam } from '../utils/automationLiveStore';
@@ -487,6 +487,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 {freezeStale && <i className="fas fa-exclamation-triangle text-[8px] ml-1 text-amber-400" title="Les prises ont changé depuis le rendu : il sera refait à la prochaine sauvegarde sur PC (pont VST)."></i>}
               </span>
             )}
+            {!isRenaming && <TrackStructureInline track={track} />}
             {/* Feat à distance : propriétaire (son nom, sa couleur) et pastille REC quand il enregistre (piste verrouillée). */}
             {!isRenaming && recBy && (
               <span data-testid={`collab-rec-${track.id}`} role="status" title={`${recBy} enregistre sur cette piste : elle est verrouillée pour les autres`}

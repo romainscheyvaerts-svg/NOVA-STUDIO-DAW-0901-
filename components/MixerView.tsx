@@ -16,7 +16,7 @@ import InsertListPopover from './InsertListPopover';
 import { canvasTheme } from '../utils/canvasTheme';
 import { MIXER_INSERT_ROWS, splitInserts } from '../utils/insertRows';
 import { FloatingMenu, handlePluginModifierClick, InactiveStripVeil, MixerStructureButtons, pluginStateClass, pluginStateHelp, pluginStateMenuItems, SendSlotsPopover, SendViewPicker, SendViewStrip, TrackIOSelectors, useLongPress, VcaStrip } from './TrackStructure';
-import { sendSlots } from '../utils/trackStructure';
+import { sendSlots, shownTrackIds } from '../utils/trackStructure';
 
 // Track Group Colors (inspired by Pro Tools)
 const GROUP_COLORS = [
@@ -576,10 +576,12 @@ const MixerView: React.FC<{
   trackGroups = [], onCreateGroup, onUpdateGroup, onDeleteGroup, sendViewSlot = null
 }) => {
   // Pistes masquées : hors de la console (comme Pro Tools) ; dossiers simples sans tranche ; VCA à part.
-  const audioTracks = tracks.filter(t => !t.isHidden && (t.type === TrackType.AUDIO || t.type === TrackType.SAMPLER || t.type === TrackType.MIDI));
-  const busTracks = tracks.filter(t => t.type === TrackType.BUS && t.id !== 'master' && !t.isHidden && !t.isVca && t.folder?.kind !== 'basic');
-  const sendTracks = tracks.filter(t => t.type === TrackType.SEND && !t.isHidden);
-  const vcaTracks = tracks.filter(t => t.isVca && !t.isHidden);
+  // (masquée elle-même, ou dans un dossier masqué / replié).
+  const shown = shownTrackIds(tracks);
+  const audioTracks = tracks.filter(t => shown.has(t.id) && (t.type === TrackType.AUDIO || t.type === TrackType.SAMPLER || t.type === TrackType.MIDI));
+  const busTracks = tracks.filter(t => t.type === TrackType.BUS && t.id !== 'master' && shown.has(t.id) && !t.isVca && t.folder?.kind !== 'basic');
+  const sendTracks = tracks.filter(t => t.type === TrackType.SEND && shown.has(t.id));
+  const vcaTracks = tracks.filter(t => t.isVca && shown.has(t.id));
   const masterTrack = tracks.find(t => t.id === 'master');
 
   // Get selected tracks for grouping
@@ -692,7 +694,7 @@ const MixerView: React.FC<{
       })}
       
       {/* ADD BUS / CREATE GROUP Section */}
-      <div className="flex flex-col items-center justify-center px-2 border-r border-white/5 min-w-[60px] space-y-3">
+      <div className="flex flex-col items-center justify-center px-2 border-r border-white/5 min-w-[88px] space-y-2 overflow-y-auto">
          <button onClick={() => { busWanted.current = true; onAddBus?.(); }} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group" title="Ajouter un bus (piste de regroupement : plusieurs pistes y passent pour être traitées ensemble)" aria-label="Ajouter un bus">
             <i className="fas fa-plus group-hover:scale-125 transition-transform"></i>
          </button>

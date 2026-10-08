@@ -10,6 +10,7 @@ import { applyTracks, structureBus } from '../utils/structureBus';
 import { gainToDbText, panToText } from '../utils/db';
 import { getValidDestinations } from './RoutingManager';
 import { trackDisplayName } from '../utils/sendLabels';
+import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
 /**
  * Morceaux d'interface de la structure façon Pro Tools (voir utils/trackStructure) :
@@ -196,32 +197,11 @@ export const TrackStructureBadge: React.FC<{ track: Track }> = ({ track }) => {
   const anc = useMemo(() => ancestorsOf(track, byId), [track, byId]);
   const inactive = track.isInactive || anc.some(a => a.isInactive);
   const inheritedFrom = !track.isInactive ? anc.find(a => a.isInactive) : undefined;
-  const members = track.isVca && all ? vcaMembers(track, all).length : 0;
-  const kids = track.folder && all ? all.filter(t => t.parentFolderId === track.id).length : 0;
   return (
     <>
       {anc.length > 0 && (
         <div aria-hidden className="pointer-events-none absolute left-0 top-0 bottom-0 flex" data-testid={`folder-indent-${track.id}`}>
           {anc.slice().reverse().map(a => <span key={a.id} className="w-[3px] h-full opacity-70 mr-[2px]" style={{ backgroundColor: a.color }} />)}
-        </div>
-      )}
-      {(track.folder || track.isVca) && (
-        <div className="absolute right-1.5 top-1 z-10 flex items-center gap-1">
-          {track.folder && (
-            <button type="button" data-testid={`folder-toggle-${track.id}`}
-              onClick={(e) => { e.stopPropagation(); applyTracks(ts => setFolderOpen(ts, track.id, track.folder!.isOpen === false)); }}
-              title={`${track.folder.kind === 'routing' ? 'Dossier de routage (Pro Tools « Routing Folder ») : un bus, ses pistes y sont routées' : 'Dossier simple (Pro Tools « Basic Folder ») : range les pistes'} · ${track.folder.isOpen === false ? 'déplier' : 'replier'}`}
-              aria-expanded={track.folder.isOpen !== false}
-              className={`nova-hit-tactile h-5 rounded-md border px-1.5 text-[9px] font-black flex items-center gap-1 ${track.folder.kind === 'routing' ? 'border-amber-400/50 bg-amber-500/15 text-amber-300' : 'border-nv-line bg-nv-well text-nv-muted'}`}>
-              <i className={`fas ${track.folder.isOpen === false ? 'fa-folder' : 'fa-folder-open'} text-[9px]`} />
-              {track.folder.kind === 'routing' ? 'Routage' : 'Dossier'} · {kids}
-              <i className={`fas ${track.folder.isOpen === false ? 'fa-chevron-right' : 'fa-chevron-down'} text-[7px]`} />
-            </button>
-          )}
-          {track.isVca && (
-            <span title="VCA Master (Pro Tools) : son fader pilote le volume des pistes membres, sans passer le son"
-              className="h-5 rounded-md border border-violet-400/50 bg-violet-500/15 px-1.5 text-[9px] font-black text-violet-300 flex items-center">VCA · {members}</span>
-          )}
         </div>
       )}
       {inactive && (
@@ -237,6 +217,33 @@ export const TrackStructureBadge: React.FC<{ track: Track }> = ({ track }) => {
         </div>
       )}
     </>
+  );
+};
+
+/** Pastille dossier / VCA à côté du nom de la piste (clic : replier / déplier le dossier). */
+export const TrackStructureInline: React.FC<{ track: Track }> = ({ track }) => {
+  const all = useStructureTracks();
+  if (!track.folder && !track.isVca) return null;
+  const members = track.isVca && all ? vcaMembers(track, all).length : 0;
+  const kids = track.folder && all ? all.filter(t => t.parentFolderId === track.id).length : 0;
+  return (
+    <span className="shrink-0 flex items-center gap-1">
+          {track.folder && (
+            <button type="button" data-testid={`folder-toggle-${track.id}`}
+              onClick={(e) => { e.stopPropagation(); applyTracks(ts => setFolderOpen(ts, track.id, track.folder!.isOpen === false)); }}
+              title={`${track.folder.kind === 'routing' ? 'Dossier de routage (Pro Tools « Routing Folder ») : un bus, ses pistes y sont routées' : 'Dossier simple (Pro Tools « Basic Folder ») : range les pistes'} · ${track.folder.isOpen === false ? 'déplier' : 'replier'}`}
+              aria-expanded={track.folder.isOpen !== false}
+              className={`nova-hit-tactile h-5 rounded-md border px-1.5 text-[9px] font-black flex items-center gap-1 ${track.folder.kind === 'routing' ? 'border-amber-400/50 bg-amber-500/15 text-amber-300' : 'border-nv-line bg-nv-well text-nv-muted'}`}>
+              <i className={`fas ${track.folder.isOpen === false ? 'fa-folder' : 'fa-folder-open'} text-[9px]`} />
+              {kids}
+              <i className={`fas ${track.folder.isOpen === false ? 'fa-chevron-right' : 'fa-chevron-down'} text-[7px]`} />
+            </button>
+          )}
+          {track.isVca && (
+            <span title="VCA Master (Pro Tools) : son fader pilote le volume des pistes membres, sans passer le son"
+              className="h-5 rounded-md border border-violet-400/50 bg-violet-500/15 px-1.5 text-[9px] font-black text-violet-300 flex items-center">VCA · {members}</span>
+          )}
+    </span>
   );
 };
 
@@ -402,13 +409,40 @@ export const SendSlotsPopover: React.FC<{ track: Track; all: Track[]; anchor: DO
 export const SendViewStrip: React.FC<{ track: Track; all: Track[]; slot: number }> = ({ track, all, slot }) => {
   const send = sendSlots(track.sends)[slot];
   const letter = SEND_SLOT_LETTERS[slot].toUpperCase();
+  const dests = sendDestinations(track, all);
+  const set = (patch: Partial<TrackSend>) => send && updateSends(track.id, ss => ss.map(s => (s.id === send.id ? { ...s, ...patch, slot } : s)));
   return (
     <div className="h-full flex flex-col gap-1" data-testid={`send-view-${track.id}`}>
-      <div className="flex items-center justify-between">
-        <span className="text-[9px] font-black uppercase text-cyan-300">Envoi {letter}</span>
-        {send && <span className="text-[9px] tabular-nums text-slate-400">{gainToDbText(send.level)}</span>}
+      <div className="flex items-center gap-1">
+        <span className="shrink-0 text-[9px] font-black uppercase text-cyan-300">Envoi {letter}</span>
+        <select aria-label={`Envoi ${letter} de ${track.name}`} value={send?.id || ''}
+          onChange={(e) => { const id = e.target.value; updateSends(track.id, ss => setSendSlot(ss, slot, id ? { id, level: send?.level ?? gOf(-10), isEnabled: true, ...(send?.preFader ? { preFader: true } : {}) } : null)); }}
+          className="min-w-0 flex-1 h-6 [@media(pointer:coarse)]:h-8 rounded border border-white/10 bg-black/50 px-1 text-[10px] text-white">
+          <option value="">— libre —</option>
+          {dests.map(d => <option key={d.id} value={d.id}>{trackDisplayName(d, all)}</option>)}
+        </select>
       </div>
-      <SendRow track={track} all={all} slot={slot} send={send} big />
+      {send ? (
+        <>
+          <div className="flex items-center gap-1">
+            <input type="range" min={-60} max={6} step={0.5} value={Math.round(dbOf(send.level) * 2) / 2} aria-label={`Niveau de l'envoi ${letter}`}
+              onChange={(e) => set({ level: Math.min(1.5, gOf(Number(e.target.value))) })} onDoubleClick={() => set({ level: 1 })}
+              title="Niveau de l'envoi · double-clic : 0 dB" className="min-w-0 flex-1 accent-cyan-400" />
+            <span className="w-11 shrink-0 text-right text-[9px] tabular-nums text-slate-300">{gainToDbText(send.level)}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <input type="range" min={-1} max={1} step={0.01} value={send.pan ?? 0} aria-label={`Pan de l'envoi ${letter}`}
+              onChange={(e) => set({ pan: Number(e.target.value) })}
+              onDoubleClick={() => updateSends(track.id, ss => ss.map(s => { if (s.id !== send.id) return s; const o = { ...s }; delete o.pan; return o; }))}
+              title="Pan de l'envoi (double-clic : suivre le pan de la piste)" className={`min-w-0 flex-1 accent-amber-400 ${send.pan === undefined ? 'opacity-50' : ''}`} />
+            <span className="w-8 shrink-0 text-[9px] text-slate-400">{send.pan === undefined ? 'piste' : panToText(send.pan)}</span>
+            <button type="button" onClick={() => set({ isMuted: !send.isMuted })} aria-pressed={!!send.isMuted} aria-label={`Couper l'envoi ${letter}`} title="Mute de l'envoi (Pro Tools)"
+              className={`nova-hit-tactile h-6 w-6 shrink-0 rounded text-[9px] font-black ${send.isMuted ? 'bg-amber-500 text-black' : 'bg-white/10 text-slate-400'}`}>M</button>
+            <button type="button" onClick={() => set({ preFader: !send.preFader })} aria-pressed={!!send.preFader} aria-label={`Envoi ${letter} pré-fader`} title="PRE : avant le fader"
+              className={`nova-hit-tactile h-6 px-1 shrink-0 rounded text-[8px] font-black ${send.preFader ? 'bg-amber-400 text-black' : 'bg-white/10 text-slate-400'}`}>PRE</button>
+          </div>
+        </>
+      ) : <p className="text-[9px] text-slate-500">Emplacement libre : choisis un retour.</p>}
     </div>
   );
 };
@@ -435,6 +469,11 @@ export const VcaStrip: React.FC<{ vca: Track; all: Track[] }> = ({ vca, all }) =
   const db = vca.volume > 0.0001 ? 20 * Math.log10(vca.volume) : -60;
   const set = (patch: Partial<Track>) => applyTracks(mapTrack(vca.id, t => ({ ...t, ...patch })));
   const candidates = all.filter(t => t.id !== vca.id && t.id !== 'master' && !t.folder && !(t.isVca && t.id === vca.id));
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const pos = Math.sqrt(Math.max(0, vca.volume) / 1.5);
+  const fader = useKnobInteraction(pos, (p) => set({ volume: p * p * 1.5 }), {
+    min: 0, max: 1, defaultValue: Math.sqrt(1 / 1.5), wheelStep: 0.005, sensitivity: Math.max(120, trackRef.current?.clientHeight || 300),
+  });
   return (
     <div data-strip-id={vca.id} data-testid={`vca-strip-${vca.id}`}
       className={`relative w-36 shrink-0 h-full border-r border-white/5 bg-violet-500/[0.06] p-3 flex flex-col gap-2 ${vca.isInactive ? 'opacity-50 grayscale' : ''}`}>
@@ -443,13 +482,18 @@ export const VcaStrip: React.FC<{ vca: Track; all: Track[] }> = ({ vca, all }) =
         className="rounded border border-violet-400/40 bg-violet-500/10 px-2 py-1 text-[10px] font-bold text-violet-200 text-left" data-testid={`vca-members-${vca.id}`}>
         {members.length} membre{members.length > 1 ? 's' : ''} ▾
       </button>
-      <div className="flex-1 flex flex-col items-center justify-center min-h-[120px]">
-        <input type="range" min={-60} max={12} step={0.1} value={Math.round(db * 10) / 10}
+      <div className="flex-1 flex justify-center min-h-[120px]">
+        {/* Même fader que les tranches (glisser, Maj = fin, molette, double-clic = 0 dB) ; le curseur natif reste pour le clavier. */}
+        <div {...fader.bind} ref={(el) => { trackRef.current = el; fader.wheelRef(el); }} role="presentation"
+          title="Fader du VCA : glisser (Maj = fin), molette, double-clic = 0 dB · pilote les membres en dB relatifs"
+          className="relative h-full w-7 rounded-full border border-white/5 bg-black/40 cursor-pointer touch-none">
+          <div className="absolute left-1/2 -translate-x-1/2 w-9 h-14 rounded border border-violet-300/60 bg-violet-500 shadow-2xl flex items-center justify-center"
+            style={{ bottom: `calc(${pos * 100}% - 28px)` }}><div className="w-full h-0.5 bg-black/70" /></div>
+        </div>
+        <input type="range" min={-60} max={3.5} step={0.1} value={Math.max(-60, Math.round(db * 10) / 10)}
           aria-label={`Fader du VCA ${vca.name}`} data-testid={`vca-fader-${vca.id}`}
           onChange={(e) => set({ volume: Number(e.target.value) <= -59.9 ? 0 : Math.pow(10, Number(e.target.value) / 20) })}
-          onDoubleClick={() => set({ volume: 1 })}
-          title="Double-clic : 0 dB"
-          className="accent-violet-400 [writing-mode:vertical-lr] [direction:rtl] h-full min-h-[120px] w-8" />
+          className="sr-only" />
       </div>
       <div className="text-center text-[11px] font-mono tabular-nums text-violet-200">{db <= -59.9 ? '-∞' : `${db > 0 ? '+' : ''}${db.toFixed(1)} dB`}</div>
       <div className="flex gap-1.5">
