@@ -686,6 +686,17 @@ export interface Track {
    */
   takeMeta?: TakeMeta[];
 
+  /**
+   * Piste guide (R3) : la voix témoin (démo du topliner, yaourt, ancienne prise)
+   * s'entend pendant la prise mais n'est jamais exportée, ni mixée, ni masterisée
+   * (Pro Tools : piste « Guide » inactive au Bounce ; Logic : piste mise hors du
+   * Bounce). `guideLevel` : son niveau à part (×, 0,7 par défaut), `guideMuted` :
+   * coupée d'un geste (bouton GUIDE de la barre, touche G).
+   */
+  isGuide?: boolean;
+  guideLevel?: number;
+  guideMuted?: boolean;
+
   // ─── Structure façon Pro Tools (utils/trackStructure.ts) ───────────────────
   /** Piste masquée (liste des pistes de Pro Tools) : elle joue quand même si elle est active. */
   isHidden?: boolean;

@@ -370,14 +370,21 @@ export class ReverbNode {
     const attackN = Math.floor(attack * sr);
     const earlyN = Math.floor(0.08 * sr);
 
+    // Bruit REPRODUCTIBLE (graine tirée des réglages) : la même réverbe à la lecture,
+    // à l'export et dans chaque stem. Avec Math.random(), chaque instance avait sa
+    // propre queue : la somme des stems ne redonnait pas le mix (R1).
+    const seedOf = (str: string) => { let h = 0x811c9dc5; for (let k = 0; k < str.length; k++) { h ^= str.charCodeAt(k); h = Math.imul(h, 0x01000193) >>> 0; } return h || 1; };
+    const seed0 = seedOf(`${sr}|${decay}|${size}|${damping}|${diffusion}|${p.mode}`);
     for (let ch = 0; ch < 2; ch++) {
       const data = ir.getChannelData(ch);
       let lp1 = 0, lp2 = 0, eL = 1, eH = 1;
+      let st = (seed0 ^ (ch ? 0x9e3779b9 : 0)) >>> 0 || 1;
+      const rnd = () => { st ^= st << 13; st >>>= 0; st ^= st >>> 17; st ^= st << 5; st >>>= 0; return st / 4294967296; };
       for (let i = 0; i < length; i++) {
-        let n = Math.random() + Math.random() - 1;
+        let n = rnd() + rnd() - 1;
         // Debut de queue plus « granuleux » quand la diffusion est faible
         if (i < earlyN && diffusion < 1) {
-          const sparse = Math.random() < 0.1 ? 1.8 : diffusion;
+          const sparse = rnd() < 0.1 ? 1.8 : diffusion;
           const w = i / earlyN;
           n *= sparse + (1 - sparse) * w;
         }

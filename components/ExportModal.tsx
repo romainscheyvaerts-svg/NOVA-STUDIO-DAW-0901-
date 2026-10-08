@@ -1,21 +1,39 @@
 
-import { integratedLufs, normalizeToLufs, truePeakDb, capTruePeak, MP3_TRUE_PEAK_CEILING } from '../utils/loudness';
 import { openCheckout, waitPaid, isExportVoicesUnlocked, markExportVoicesUnlocked, spendExportCredit, billingStatus } from '../services/Billing';
 import React, { useState, useEffect } from 'react';
 import { DAWState, Track } from '../types';
-import { audioEngine } from '../engine/AudioEngine';
-import { AudioEncoder, BitDepth, AudioFormat } from '../services/AudioEncoder';
-import JSZip from 'jszip';
-import { saveBlob } from '../utils/saveBlob';
 import { openBuyBeat, openProMix } from '../utils/studioLinks';
 import { prepareTracksForOffline } from '../services/VstFreeze';
 import { track } from '../utils/analytics';
 import { consumeSelectionExport, editSelectionStore } from '../utils/editSelection';
 import { simpleModeStore } from '../utils/simpleMode';
 import { MidiExportRow } from './MidiFileMenu';
+import { runExport, outputBits, outputRate, type ExportSettings, type ExportFormat, type ExportSource } from '../services/ExportPipeline';
+import { exportQueue } from '../services/ExportQueue';
+import { reportLine } from './ExportQueueToast';
+import { keyToId3, type ChannelLayout } from '../utils/audioFormats';
+import { keyForFile } from '../utils/exportNaming';
+import { nomTonaliteCourt } from '../utils/musicKey';
+import { PLATFORM_TARGETS } from '../utils/masterAssistant';
+import type { StemGrouping, ReturnsMode } from '../utils/stemPlan';
+import type { TailMode, RangeMode } from '../utils/exportTail';
 
 // Compte admin du studio (tout gratuit pour tester) : lu une fois par session.
 let adminCache: boolean | null = null;
+
+/** Réglages d'export retenus d'une fois sur l'autre (format, stems, queue, artiste…). */
+const PREFS_KEY = 'nova_export_prefs';
+interface ExportPrefs {
+  format?: ExportFormat; bits?: '16' | '24' | '32'; mp3?: string; sr?: number; layout?: ChannelLayout; dither?: boolean;
+  normalize?: string; tailMode?: TailMode; tailSec?: number; grouping?: StemGrouping; returns?: ReturnsMode; masterFx?: boolean; artist?: string;
+}
+const readPrefs = (): ExportPrefs => { try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {}; } catch { return {}; } };
+const writePrefs = (p: ExportPrefs) => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* stockage indisponible */ } };
+
+/** ISRC : 2 lettres pays, 3 caractères, 7 chiffres (tirets tolérés). */
+export const normalizeIsrc = (s: string): string => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+export const isValidIsrc = (s: string): boolean => /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(normalizeIsrc(s));
+
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -125,22 +143,43 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
       setLoudnessReport(`⚠️ Paiement impossible : ${e?.message || 'erreur'}`);
     }
   };
-  const handleExportRef = React.useRef<(() => Promise<void>) | null>(null);
+  const handleExportRef = React.useRef<((queueOnly?: boolean) => Promise<void>) | null>(null);
   // SELECTION : la plage choisie au Sélecteur / Smart Tool (comme l'export d'une sélection dans Pro Tools).
-  const [rangeMode, setRangeMode] = useState<'FULL' | 'LOOP' | 'SELECTION'>('FULL');
+  const [rangeMode, setRangeMode] = useState<RangeMode>('FULL');
   const selRange = editSelectionStore.get().time;
+  const markers = React.useMemo(() => [...(projectState.markers || [])].sort((a, b) => a.time - b.time), [projectState.markers]);
+  const [markerA, setMarkerA] = useState<string>('');
+  const [markerB, setMarkerB] = useState<string>('');
 
+  const prefs0 = React.useMemo(readPrefs, []);
   // FORMAT & QUALITÉ
-  const [format, setFormat] = useState<AudioFormat>('WAV');
-  const [sampleRate, setSampleRate] = useState<number>(44100);
-  const [bitDepth, setBitDepth] = useState<BitDepth>('24');
-  const [mp3Bitrate, setMp3Bitrate] = useState<string>('320');
+  const [format, setFormat] = useState<ExportFormat>(prefs0.format || 'WAV');
+  const [sampleRate, setSampleRate] = useState<number>(prefs0.sr || 44100);
+  const [bitDepth, setBitDepth] = useState<'16' | '24' | '32'>(prefs0.bits || '24');
+  const [mp3Bitrate, setMp3Bitrate] = useState<string>(prefs0.mp3 || '320');
+  const [layout, setLayout] = useState<ChannelLayout>(prefs0.layout || 'stereo');
+  // Queue (réverbe) : auto, réglée, coupée, bouclée.
+  const [tailMode, setTailMode] = useState<TailMode>(prefs0.tailMode || 'auto');
+  const [tailSec, setTailSec] = useState<number>(prefs0.tailSec ?? 4);
+  // Stems
+  const [grouping, setGrouping] = useState<StemGrouping>(prefs0.grouping || 'tracks');
+  const [returns, setReturns] = useState<ReturnsMode>(prefs0.returns || 'in-stems');
+  const [masterFx, setMasterFx] = useState<boolean>(prefs0.masterFx ?? false);
 
   // TRAITEMENT
-  // Normalisation : aucune, crête (-0,1 dB) ou loudness (LUFS) comme les plateformes
-  const [normalize, setNormalize] = useState<'off' | 'peak' | 'lufs14' | 'lufs16'>('off');
+  // Volume final : tel quel, crête −1 dBTP, ou une cible du Master Nova (Spotify −14 LUFS…).
+  const [normalize, setNormalize] = useState<string>(prefs0.normalize || 'off');
   const [loudnessReport, setLoudnessReport] = useState<string | null>(null);
-  const [dither, setDither] = useState(true); // On by default for lower bit depths
+  const [dither, setDither] = useState(prefs0.dither ?? true);
+
+  // MÉTADONNÉES
+  const keyLabel = nomTonaliteCourt(projectState.projectKey, projectState.projectScale);
+  const [metaTitle, setMetaTitle] = useState(projectState.name || '');
+  const [metaArtist, setMetaArtist] = useState(prefs0.artist || '');
+  const [metaBpm, setMetaBpm] = useState<string>(String(Math.round((projectState.bpm || 120) * 100) / 100));
+  const [metaKey, setMetaKey] = useState(keyLabel);
+  const [metaIsrc, setMetaIsrc] = useState('');
+  const [cover, setCover] = useState<{ mime: string; data: Uint8Array; url: string } | null>(null);
 
   // UI STATE
   // Par défaut, deux choix simples (extrait réseaux / morceau complet) ; le
@@ -154,216 +193,170 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   useEffect(() => {
     if (isOpen) {
         setFilename(projectState.name || 'Master');
+        setMetaTitle(projectState.name || '');
         setProgress(0);
         setStatusText('');
         setIsRendering(false);
         // Mode avancé (ingé) : on arrive directement sur Mix / Stems / Voix seules (audit G19).
-        if (!simpleModeStore.get().simple) setAdvanced(true);
+        // Téléphone : toujours la version simple d'abord (« Réglages avancés » reste à un toucher).
+        const phone = typeof window !== 'undefined' && window.innerWidth < 640;
+        if (!simpleModeStore.get().simple && !phone) setAdvanced(true);
         if (consumeSelectionExport() && editSelectionStore.get().time) { setRangeMode('SELECTION'); setAdvanced(true); }
         else if (rangeMode === 'SELECTION' && !editSelectionStore.get().time) setRangeMode('FULL');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, projectState.name]);
 
+  // Repères par défaut : le premier et le suivant.
+  useEffect(() => {
+    if (!markers.length) return;
+    if (!markers.some(m => m.id === markerA)) setMarkerA(markers[0].id);
+    if (!markers.some(m => m.id === markerB) && markerB !== '__end') setMarkerB(markers[1]?.id || '__end');
+  }, [markers, markerA, markerB]);
+
+  // Pochette : aperçu libéré à la fermeture.
+  useEffect(() => () => { if (cover) URL.revokeObjectURL(cover.url); }, [cover]);
+
   if (!isOpen) return null;
 
   // --- HELPERS ---
 
+  /** Fin du morceau : dernière fin de clip (les pistes guides ne comptent pas). */
+  const songEnd = () => Math.max(0, ...projectState.tracks.filter(t => !t.isGuide).flatMap(t => t.clips.map(c => c.start + c.duration)));
+
+  /** Plage musicale [début, fin] (sans la queue). */
+  const getRange = (): { start: number; end: number } => {
+    if (rangeMode === 'LOOP') return { start: projectState.loopStart, end: Math.max(projectState.loopStart + 0.05, projectState.loopEnd) };
+    if (rangeMode === 'SELECTION' && selRange) return { start: selRange.start, end: Math.max(selRange.start + 0.05, selRange.end) };
+    if (rangeMode === 'MARKERS' && markers.length) {
+      const a = markers.find(m => m.id === markerA) || markers[0];
+      const b = markerB === '__end' ? null : markers.find(m => m.id === markerB);
+      const end = b ? b.time : Math.max(songEnd(), a.time + 0.05);
+      return { start: Math.min(a.time, end), end: Math.max(a.time, end) };
+    }
+    return { start: 0, end: Math.max(0.05, songEnd()) };
+  };
   const getDuration = () => {
-      if (rangeMode === 'LOOP') {
-          return Math.max(1, projectState.loopEnd - projectState.loopStart);
-      }
-      if (rangeMode === 'SELECTION' && selRange) return Math.max(0.05, selRange.end - selRange.start);
-      // Full Project + Tail
-      const maxTime = Math.max(...projectState.tracks.flatMap(t => t.clips.map(c => c.start + c.duration)), 0);
-      return maxTime + 2; // +2s tail reverb
+    const r = getRange();
+    const tail = tailMode === 'manual' ? tailSec : tailMode === 'auto' ? 2 : 0;
+    return Math.max(0.05, r.end - r.start + tail);
   };
 
-  const getStartOffset = () => {
-      if (rangeMode === 'SELECTION' && selRange) return selRange.start;
-      return rangeMode === 'LOOP' ? projectState.loopStart : 0;
+  const effBits = outputBits({ format, bits: Number(bitDepth) as 16 | 24 | 32 });
+  const effRate = outputRate({ format, sampleRate });
+  const bpmNum = Number(String(metaBpm).replace(',', '.'));
+  const isrcOk = !metaIsrc || isValidIsrc(metaIsrc);
+
+  const buildSettings = (src: ExportSource): ExportSettings => {
+    const r = getRange();
+    const bpm = Number.isFinite(bpmNum) && bpmNum > 0 ? bpmNum : projectState.bpm;
+    return {
+      source: src, vocalsDry,
+      stems: { grouping, returns, withMasterFx: masterFx },
+      start: r.start, end: r.end,
+      tail: { mode: tailMode, seconds: tailSec },
+      format, bits: Number(bitDepth) as 16 | 24 | 32, mp3Kbps: parseInt(mp3Bitrate, 10) || 320, sampleRate, layout, dither, normalize,
+      meta: {
+        title: metaTitle || projectState.name, artist: metaArtist || undefined, bpm,
+        key: metaKey || undefined,
+        keyId3: metaKey && metaKey === keyLabel ? keyToId3(projectState.projectKey, projectState.projectScale) : undefined,
+        isrc: metaIsrc && isValidIsrc(metaIsrc) ? normalizeIsrc(metaIsrc) : undefined,
+        timeSignature: projectState.timeSignature,
+        cover: cover ? { mime: cover.mime, data: cover.data } : undefined,
+      },
+      naming: { title: metaTitle || projectState.name || 'Morceau', bpm, key: metaKey === keyLabel ? keyForFile(projectState.projectKey, projectState.projectScale) : '' },
+      baseName: (filename || 'Master').replace(/[\\/:*?"<>|]+/g, '_'),
+    };
   };
 
-  const processAudioBuffer = (buffer: AudioBuffer, isStem = false): AudioBuffer => {
-      // 1. Normalisation
-      if (isStem) {
-          // pas de normalisation par piste
-      } else if (normalize === 'peak') {
-          setStatusText('Réglage du volume…');
-          AudioEncoder.normalizeBuffer(buffer, -0.1);
-          setLoudnessReport(`Mesuré : ${integratedLufs(buffer).toFixed(1)} LUFS · crête vraie ${truePeakDb(buffer).toFixed(1)} dBTP`);
-      } else if (normalize === 'lufs14' || normalize === 'lufs16') {
-          const target = normalize === 'lufs14' ? -14 : -16;
-          setStatusText(`Réglage du volume (${target} LUFS)…`);
-          const r = normalizeToLufs(buffer, target, -1);
-          setLoudnessReport(`Loudness : ${Number.isFinite(r.before) ? r.before.toFixed(1) : '—'} → ${Number.isFinite(r.after) ? r.after.toFixed(1) : '—'} LUFS · crête vraie ${r.truePeak.toFixed(1)} dBTP${r.limitedByPeak ? ' (cible non atteinte : crêtes trop hautes, passe un limiteur sur le master)' : ''}`);
-      } else {
-          setLoudnessReport(`Mesuré : ${integratedLufs(buffer).toFixed(1)} LUFS · crête vraie ${truePeakDb(buffer).toFixed(1)} dBTP`);
-      }
-      
-      // MP3 : crête vraie plafonnée vers -1 dBTP. Sinon un mix déjà fort (crête
-      // à 0 dB) sature à la conversion MP3.
-      if (format === 'MP3') {
-          const cut = capTruePeak(buffer, MP3_TRUE_PEAK_CEILING);
-          if (cut < 0 && !isStem) setLoudnessReport(r => `${r ? r + ' · ' : ''}volume baissé de ${(-cut).toFixed(1)} dB pour que le MP3 ne sature pas`);
-      }
-
-      // 2. Dithering (Uniquement si réduction de bits)
-      if (dither && format === 'WAV' && bitDepth !== '32') {
-          setStatusText('Dithering…');
-          AudioEncoder.applyDither(buffer, parseInt(bitDepth));
-      }
-
-      return buffer;
+  const jobLabel = (s: ExportSettings) => {
+    const what = s.source === 'MASTER' ? 'Mix' : s.source === 'STEMS' ? 'Stems' : 'Mes pistes';
+    const fmt = s.format === 'MP3' ? `MP3 ${s.mp3Kbps}` : `${s.format} ${outputBits(s) === 32 ? '32f' : outputBits(s)}`;
+    return `${what} · ${fmt} · ${outputRate(s) / 1000} kHz — ${s.meta.title || 'Morceau'}`;
   };
 
-  // --- CORE RENDER LOGIC ---
+  // --- EXPORT (par la file : un ou plusieurs exports à la suite) ---
 
-  const renderTrackList = async (tracksToRender: Track[], label: string, opts: { duration?: number; onProgress?: (p: number) => void; isStem?: boolean } = {}): Promise<Blob> => {
-      setStatusText(`Mixage : ${label}…`);
-      
-      const duration = opts.duration ?? getDuration();
-      const startOffset = getStartOffset();
-
-      // Rendu Offline via AudioEngine
-      const renderedBuffer = await audioEngine.renderProject(
-          tracksToRender,
-          duration,
-          startOffset,
-          // Le MP3 ne sait pas encoder au-delà de 48 kHz
-          format === 'MP3' ? Math.min(48000, sampleRate) : sampleRate,
-          (p) => {
-              if (source === 'MASTER') setProgress(p); // Only update main progress bar here if master
-              opts.onProgress?.(p);
-          }
-      );
-
-      // Post-Processing (DSP). Stems : jamais de normalisation par piste (elle
-      // casserait l'équilibre entre les pistes) ; le dither reste.
-      const processedBuffer = processAudioBuffer(renderedBuffer, !!opts.isStem);
-
-      // Encodage
-      if (format === 'MP3') {
-        const kbps = parseInt(mp3Bitrate, 10) || 320;
-        setStatusText(`Encodage MP3 (${kbps} kbps)...`);
-        return await AudioEncoder.encodeMP3Plafonne(processedBuffer, kbps);
-      }
-      setStatusText(`Création du fichier ${format}…`);
-      return AudioEncoder.encodeWAV(processedBuffer, bitDepth);
-  };
-
-  const handleExport = async () => {
+  const handleExport = async (queueOnly = false) => {
     if (needsVoicesPayment) { void payVoices(); return; }
     if (bloque) {
-      setStatusText("Achetez l'instrumental pour exporter votre morceau (les voix seules restent exportables).");
+      setStatusText("Achète l'instrumental pour exporter ton morceau (les voix seules restent exportables).");
       return;
     }
+    if (!isrcOk) { setStatusText('ISRC invalide : 12 caractères, par exemple FR-Z03-26-00001. Laisse vide si tu n\'en as pas.'); return; }
+    writePrefs({ format, bits: bitDepth, mp3: mp3Bitrate, sr: sampleRate, layout, dither, normalize, tailMode, tailSec, grouping, returns, masterFx, artist: metaArtist });
+    const settings = buildSettings(source);
+    const snapshot = projectState.tracks;
+    const projMarkers = markers.map(m => ({ name: m.name, time: m.time }));
+    const kind = source === 'VOCALS' ? 'vocals' : source === 'STEMS' ? 'stems' : 'full';
+    const id = exportQueue.enqueue(jobLabel(settings), async (onP) => {
+      // Effets VST3 du PC : rendus par le pont (ou rendu déjà fait à la sauvegarde).
+      const prep = await prepareTracksForOffline(snapshot, msg => onP(0, msg));
+      try {
+        if (prep.missingVst.length) onP(1, `Effets VST non inclus (pont VST non connecté) : ${prep.missingVst.join(', ')}`);
+        return await runExport(prep.tracks, settings, projMarkers, onP);
+      } finally { prep.cleanup(); }
+    });
+    track('export_queued', { source: kind, format: settings.format, queued: queueOnly });
+    if (queueOnly) {
+      setStatusText('➕ Ajouté à la file : tu peux continuer, une notification te prévient à la fin.');
+      setTimeout(onClose, 900);
+      return;
+    }
+    // Export direct : la fenêtre suit l'avancement, puis se ferme.
     setIsRendering(true);
     setProgress(0);
-
-    // Effets VST3 du PC : rendus par le pont (ou rendu déjà fait à la
-    // sauvegarde). Un OfflineAudioContext ne peut pas attendre le pont.
-    const prep = await prepareTracksForOffline(projectState.tracks, msg => setStatusText(msg));
-    const exportTracks = prep.tracks;
-    try {
-        if (prep.missingVst.length > 0) {
-            setStatusText(`Effets VST non inclus (pont VST non connecté) : ${prep.missingVst.join(', ')}`);
-        }
-        if (source === 'MASTER') {
-            // --- EXPORT MASTER SIMPLE ---
-            const blob = await renderTrackList(exportTracks, "ton morceau");
-            downloadBlob(blob, format === 'MP3'
-              ? `${filename}_${mp3Bitrate}kbps.mp3`
-              : `${filename}_${sampleRate}Hz_${bitDepth}bit.${format.toLowerCase()}`);
-        } 
-        else if (source === 'VOCALS') {
-            // --- VOIX SEULES, PISTE PAR PISTE (ZIP) ---
-            const estBeat = (t: typeof exportTracks[number]) => t.id === 'instrumental' || (t.instrumentId !== undefined && t.instrumentId !== null && t.instrumentId !== '');
-            // Le beat n'existe plus dans ce rendu.
-            const sansBeat = exportTracks.filter(t => !estBeat(t));
-            // Les pistes de l'artiste : ses voix, sa batterie et sa 808 (sons Make Music,
-            // utilisables librement). La mélodie / le beat du catalogue n'y sont pas.
-            const voix = sansBeat.filter(t => (t.type === 'AUDIO' || t.type === 'DRUM_RACK' || !!t.bass808) && !t.isMuted && t.clips.some(c => !c.isMuted));
-            if (voix.length === 0) throw new Error('Aucune de tes pistes (voix, batterie) à exporter.');
-            // Durée : jusqu'à la fin de la dernière voix + 4 s de queue (reverb),
-            // pas la longueur du beat. Tous les fichiers démarrent au même point.
-            const finVoix = Math.max(...voix.flatMap(t => t.clips.map(c => c.start + c.duration)));
-            const dureeVoix = rangeMode !== 'FULL' ? getDuration() : Math.max(1, finVoix + 4);
-            const zip = new JSZip();
-            for (let i = 0; i < voix.length; i++) {
-                const track = voix[i];
-                setStatusText(`Voix ${i + 1}/${voix.length} : ${track.name}`);
-                setProgress((i / voix.length) * 100);
-                const rendu = vocalsDry
-                  // Prise brute : clips seuls, sans effets, départs ni bus.
-                  ? [{ ...track, isSolo: false, isFrozen: false, frozenClip: undefined, plugins: [], sends: [], outputTrackId: 'master', automationLanes: [] }, ...sansBeat.filter(t => t.id === 'master')]
-                  // Avec effets : la piste en solo à travers son bus et ses envois (reverb…).
-                  : sansBeat.map(t => t.id === track.id ? { ...t, isMuted: false, isSolo: true } : { ...t, isSolo: false });
-                const blob = await renderTrackList(rendu, track.name, {
-                  duration: dureeVoix, isStem: true,
-                  onProgress: p => setProgress(((i + p / 100) / voix.length) * 100),
-                });
-                const ext = format === 'MP3' ? 'mp3' : format.toLowerCase();
-                zip.file(`${String(i + 1).padStart(2, '0')} ${track.name.replace(/[^a-z0-9 _-]/gi, '_')}${vocalsDry ? ' (brut)' : ''}.${ext}`, blob);
-            }
-            setStatusText("Création du fichier .zip…");
-            const zipBlob = await zip.generateAsync({ type: "blob" });
-            downloadBlob(zipBlob, `${filename}_Mes_pistes${vocalsDry ? '_brutes' : ''}.zip`);
-        }
-        else {
-            // --- EXPORT STEMS (ZIP) ---
-            const zip = new JSZip();
-            const tracksToExport = exportTracks.filter(t => 
-                !t.isMuted && t.id !== 'master' && (t.clips.length > 0 || t.type === 'BUS' || t.type === 'SEND')
-            );
-            
-            const totalSteps = tracksToExport.length;
-            
-            for (let i = 0; i < totalSteps; i++) {
-                const track = tracksToExport[i];
-                const trackName = track.name.replace(/[^a-z0-9]/gi, '_');
-                
-                // Update UI
-                setStatusText(`Piste ${i + 1}/${totalSteps} : ${track.name}`);
-                setProgress((i / totalSteps) * 100);
-
-                // On soloe la piste : renderProject garde aussi tout ce qui
-                // l'alimente (pistes -> bus -> master) et ses departs.
-                const isolatedTracks = exportTracks.map(t => {
-                   if (t.id === track.id) return { ...t, isMuted: false, isSolo: true };
-                   return { ...t, isSolo: false };
-                });
-
-                // Render Logic handles Solo implicitly
-                const blob = await renderTrackList(isolatedTracks, track.name, { isStem: true });
-                zip.file(`${trackName}.wav`, blob);
-            }
-
-            setStatusText("Création du fichier .zip…");
-            const zipBlob = await zip.generateAsync({ type: "blob" });
-            downloadBlob(zipBlob, `${filename}_Stems.zip`);
-        }
-
-        setStatusText('✅ Export terminé !');
-        const kind = source === 'VOCALS' ? 'vocals' : source === 'STEMS' ? 'stems' : 'full';
-        track('export_done', { source: kind, paid: paidExport, admin });
-        onExported?.({ source: kind, paid: paidExport });
-        setTimeout(() => {
-            onClose();
-            setIsRendering(false);
-        }, 1500);
-
-    } catch (e: any) {
-        console.error(e);
-        setStatusText(`❌ Export impossible : ${e.message}`);
-        setIsRendering(false);
-    } finally {
-        prep.cleanup();
+    const off = exportQueue.subscribe(jobs => {
+      const j = jobs.find(x => x.id === id);
+      if (!j) return;
+      setProgress(j.progress);
+      if (j.status === 'running' || j.status === 'waiting') setStatusText(j.text);
+    });
+    const done = await exportQueue.wait(id);
+    off();
+    if (done.status === 'done') {
+      setLoudnessReport(reportLine(done));
+      setStatusText(done.saved ? '✅ Export terminé !' : '✅ Export prêt : touche « Télécharger » dans la notification.');
+      track('export_done', { source: kind, paid: paidExport, admin, format: settings.format });
+      onExported?.({ source: kind, paid: paidExport });
+      setTimeout(() => { onClose(); setIsRendering(false); }, 1500);
+    } else {
+      setStatusText(`❌ Export impossible : ${done.error || 'erreur'}`);
+      setIsRendering(false);
     }
   };
 
-  const downloadBlob = (blob: Blob, name: string) => saveBlob(blob, name);
   handleExportRef.current = handleExport;
+
+  const onCoverFile = async (f: File | undefined) => {
+    if (!f) return;
+    if (!/^image\/(jpeg|png)$/.test(f.type)) { setStatusText('Pochette : JPEG ou PNG seulement.'); return; }
+    if (f.size > 5 * 1024 * 1024) { setStatusText('Pochette trop lourde (5 Mo au plus).'); return; }
+    const data = new Uint8Array(await f.arrayBuffer());
+    if (cover) URL.revokeObjectURL(cover.url);
+    setCover({ mime: f.type, data, url: URL.createObjectURL(f) });
+  };
+
+  // Taille estimée (Mo)
+  const estimateMb = () => {
+    const d = getDuration();
+    const ch = layout === 'mono-sum' ? 1 : 2;
+    if (format === 'MP3') return d * (parseInt(mp3Bitrate, 10) || 320) * 1000 / 8 / 1024 / 1024;
+    const raw = d * effRate * (effBits / 8) * ch / 1024 / 1024;
+    return format === 'FLAC' ? raw * 0.6 : raw;
+  };
+
+
+  // Styles communs (jetons de thème nv-* : clair et sombre)
+  const sec = 'text-[10px] font-black text-nv-accent uppercase tracking-widest block border-b border-nv-line/15 pb-1';
+  const lab = 'text-[11px] font-bold text-nv-muted';
+  const sel = 'w-full min-h-10 bg-nv-well/40 border border-nv-line/15 rounded-lg px-3 text-[12px] text-nv-ink font-bold focus:border-nv-accent outline-none';
+  const fmtS = (t: number) => `${(Math.round(t * 10) / 10).toFixed(1).replace('.', ',')} s`;
+  const stemsSumToMixHint = returns === 'none'
+    ? 'Stems secs : la réverbe et le delay ne sont dans aucun fichier.'
+    : masterFx
+      ? 'Avec le master : chaque stem est limité à part, leur somme sera plus forte que ton mix.'
+      : 'Posés à 0 dans une autre session, ces stems redonnent exactement ton mix.';
 
   // Vue simple : « Mon morceau complet » = le mix entier, avec les réglages
   // en cours (WAV qualité studio par défaut), par le même export.
@@ -404,7 +397,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
   return (
     <div className="fixed inset-0 z-[1200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className={`w-full ${advanced ? 'max-w-2xl' : 'max-w-lg'} max-h-[90dvh] overflow-y-auto bg-[#14161a] border border-white/10 rounded-3xl shadow-2xl flex flex-col`} onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="export-title">
+      <div className={`w-full ${advanced ? 'max-w-3xl' : 'max-w-lg'} max-h-[90dvh] overflow-y-auto bg-[#14161a] border border-white/10 rounded-3xl shadow-2xl flex flex-col`} onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="export-title">
         
         {/* Header */}
         <div className="p-6 border-b border-white/5 bg-gradient-to-r from-cyan-900/20 to-transparent flex justify-between items-center">
@@ -495,7 +488,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-black text-white">Mon morceau complet</span>
                       <span className="block text-[12px] text-slate-300 mt-0.5">
-                        {format === 'MP3' ? 'Fichier MP3' : 'Fichier WAV qualité studio'}, sans tag, prêt pour Spotify ou YouTube.
+                        {format === 'MP3' ? 'Fichier MP3' : format === 'WAV' ? 'Fichier WAV qualité studio' : `Fichier ${format}`}, sans tag, prêt pour Spotify ou YouTube.
                         {completPaye && (freeLeft !== null && freeLeft > 0 ? ` Gratuit avec Nova Pro (${freeLeft} restants).` : ' 2 €.')}
                       </span>
                     </span>
@@ -520,169 +513,239 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
             )}
 
             {advanced && (
-            <div className="flex flex-col gap-6 md:flex-row md:gap-8">
-                {/* COLUMN 1: CONFIG */}
-                <div className="flex-1 space-y-6">
-                    
-                    {/* SECTION: SOURCE */}
+            <div className="flex flex-col gap-6 md:flex-row md:gap-8" data-export-vue="avancee">
+                {/* COLONNE 1 : RÉGLAGES */}
+                <div className="flex-1 min-w-0 space-y-6">
+
+                    {/* 1. QUOI ET QUELLE DURÉE */}
                     <div className="space-y-3">
-                        <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">1. Quoi et quelle durée</span>
-                        
+                        <span className={sec}>1. Quoi et quelle durée</span>
+                        <div className="space-y-1">
+                            <span className={lab}>Quoi</span>
+                            {/* Choix visibles d'un coup d'œil (avant : caché dans une liste) : Mix / Stems / Voix seules. */}
+                            <div role="radiogroup" aria-label="Quoi exporter" className="grid grid-cols-3 gap-1 rounded-lg border border-nv-line/15 bg-nv-well/40 p-1">
+                              {([['MASTER', 'Mix', 'Le morceau mixé (Pro Tools : Bounce Mix ; Logic : Bounce ; Ableton : Export Audio ; FL : Export)'], ['STEMS', 'Stems', 'Les pistes séparées, alignées au début, même longueur (Pro Tools : Track Bounce ; Ableton : Export individual tracks ; FL : Split mixer tracks)'], ['VOCALS', 'Voix seules', 'Tes pistes sans le beat : voix, batterie (.zip)']] as const).map(([v, l, h]) => (
+                                <button key={v} type="button" role="radio" aria-checked={source === v} title={h} disabled={isRendering}
+                                  data-testid={`export-source-${v}`}
+                                  onClick={() => { sourceTouched.current = true; setSource(v); }}
+                                  className={`min-h-9 rounded-md text-[12px] font-bold transition-colors ${source === v ? 'bg-cyan-500 text-black' : 'text-nv-muted hover:bg-nv-raised'}`}>
+                                  {l}
+                                </button>
+                              ))}
+                            </div>
+                            <p className="text-[11px] text-nv-muted">{source === 'MASTER' ? 'Le morceau mixé, en un fichier.' : source === 'STEMS' ? 'Les pistes séparées (.zip), toutes à 0 et de la même longueur, nommées Titre_BPM_Ton_Piste.' : 'Tes pistes sans le beat (.zip).'}</p>
+                            {source === 'VOCALS' && (
+                              <label className="mt-1.5 flex items-center gap-2 text-[12px] text-nv-ink">
+                                <input type="checkbox" checked={vocalsDry} onChange={e => setVocalsDry(e.target.checked)} disabled={isRendering} />
+                                Prises brutes (sans effets ni reverb)
+                              </label>
+                            )}
+                        </div>
+
+                        {source === 'STEMS' && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-nv-line/15 bg-nv-well/30 p-3" data-export-stems="">
+                            <label className="space-y-1 block">
+                              <span className={lab}>Découpage</span>
+                              <select value={grouping} onChange={e => setGrouping(e.target.value as StemGrouping)} disabled={isRendering} className={sel}
+                                title="Par piste (Pro Tools : Track Bounce), par bus (Logic : Bounce des Track Stacks ; FL : Split mixer tracks), par dossier (Pro Tools : Routing Folders) ou instru / voix (ce que demande l'ingé)">
+                                <option value="tracks">Une piste = un fichier</option>
+                                <option value="buses">Par bus (bus voix, bus batterie…)</option>
+                                <option value="folders">Par dossier</option>
+                                <option value="instru-voix">Instru et voix séparés (pour l'ingé)</option>
+                              </select>
+                            </label>
+                            <label className="space-y-1 block">
+                              <span className={lab}>Réverbes et delays (retours)</span>
+                              <select value={returns} onChange={e => setReturns(e.target.value as ReturnsMode)} disabled={isRendering} className={sel}
+                                title="Dans chaque stem : chaque fichier garde sa réverbe. En fichiers séparés : stems secs + un fichier par retour, comme les « FX returns » qu'on livre à un mixeur. Sans : stems secs.">
+                                <option value="in-stems">Dans chaque stem</option>
+                                <option value="separate">En fichiers séparés</option>
+                                <option value="none">Sans (stems secs)</option>
+                              </select>
+                            </label>
+                            <label className="sm:col-span-2 flex items-center gap-2 text-[12px] text-nv-ink" title="Avec : chaque stem passe par les effets du master (limiteur, Master Nova). Sans : le master est contourné, la somme des stems redonne exactement le mix — ce qu'attend un ingé de mix (Pro Tools : stems « pre-master »).">
+                              <input type="checkbox" checked={masterFx} onChange={e => setMasterFx(e.target.checked)} disabled={isRendering} />
+                              Avec les effets du master (limiteur, Master Nova)
+                            </label>
+                            <p className="sm:col-span-2 text-[11px] text-nv-muted">
+                              {stemsSumToMixHint}
+                            </p>
+                          </div>
+                        )}
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                             <div className="space-y-1 sm:col-span-2">
-                                <span className="text-[9px] font-bold text-slate-400">Quoi</span>
-                                {/* Choix visibles d'un coup d'œil (avant : caché dans une liste) : Mix / Stems / Voix seules. */}
-                                <div role="radiogroup" aria-label="Quoi exporter" className="grid grid-cols-3 gap-1 rounded-lg border border-white/10 bg-black/40 p-1">
-                                  {([['MASTER', 'Mix', 'Le morceau mixé, en stéréo'], ['STEMS', 'Stems', 'Toutes les pistes séparées, alignées au début (.zip)'], ['VOCALS', 'Voix seules', 'Tes pistes sans le beat : voix, batterie (.zip)']] as const).map(([v, l, h]) => (
-                                    <button key={v} type="button" role="radio" aria-checked={source === v} title={h} disabled={isRendering}
-                                      data-testid={`export-source-${v}`}
-                                      onClick={() => { sourceTouched.current = true; setSource(v); }}
-                                      className={`h-8 rounded-md text-[11px] font-bold transition-colors ${source === v ? 'bg-cyan-500 text-black' : 'text-slate-300 hover:bg-white/10'}`}>
-                                      {l}
-                                    </button>
-                                  ))}
-                                </div>
-                                <p className="text-[10px] text-slate-500">{source === 'MASTER' ? 'Le morceau mixé, en stéréo.' : source === 'STEMS' ? 'Toutes les pistes séparées, alignées au début (.zip).' : 'Tes pistes sans le beat (.zip).'}</p>
-                                {source === 'VOCALS' && (
-                                  <label className="mt-1.5 flex items-center gap-2 text-[10px] text-slate-300">
-                                    <input type="checkbox" checked={vocalsDry} onChange={e => setVocalsDry(e.target.checked)} disabled={isRendering} />
-                                    Prises brutes (sans effets ni reverb)
-                                  </label>
-                                )}
-                             </div>
-                             <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400">Durée</label>
-                                <select 
-                                    value={rangeMode} 
-                                    onChange={e => setRangeMode(e.target.value as any)}
-                                    disabled={isRendering}
-                                    className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
-                                >
-                                    <option value="FULL">Tout le morceau</option>
-                                    <option value="LOOP">Zone de boucle ({projectState.loopStart.toFixed(1)}s - {projectState.loopEnd.toFixed(1)}s)</option>
-                                    {selRange && <option value="SELECTION">Ta sélection ({selRange.start.toFixed(2)}s - {selRange.end.toFixed(2)}s)</option>}
+                          <label className="space-y-1 block">
+                            <span className={lab}>Durée</span>
+                            <select value={rangeMode} onChange={e => setRangeMode(e.target.value as RangeMode)} disabled={isRendering} className={sel}
+                              title="Tout, la boucle, ta sélection ou d'un repère à l'autre (Pro Tools : Bounce de la sélection ; Logic : entre les localisateurs)">
+                              <option value="FULL">Tout le morceau</option>
+                              <option value="LOOP">Zone de boucle ({fmtS(projectState.loopStart)} → {fmtS(projectState.loopEnd)})</option>
+                              {selRange && <option value="SELECTION">Ta sélection ({fmtS(selRange.start)} → {fmtS(selRange.end)})</option>}
+                              {markers.length > 0 && <option value="MARKERS">D'un repère à l'autre</option>}
+                            </select>
+                          </label>
+                          <label className="space-y-1 block">
+                            <span className={lab}>Queue (réverbe après la fin)</span>
+                            <div className="flex gap-2">
+                              <select value={tailMode} onChange={e => setTailMode(e.target.value as TailMode)} disabled={isRendering} className={sel}
+                                title="Auto : NOVA attend que la réverbe retombe (−80 dBFS, 10 s au plus). Réglée : durée fixe. Coupée : rien après la fin (FL : Cut remainder). Bouclée : la queue revient au début, pour une boucle sans trou (FL : Wrap remainder).">
+                                <option value="auto">Auto (fin de la réverbe)</option>
+                                <option value="manual">Réglée</option>
+                                <option value="cut">Coupée net</option>
+                                <option value="wrap">Bouclée (boucle sans trou)</option>
+                              </select>
+                              {tailMode === 'manual' && (
+                                <input type="number" min={0} max={60} step={0.5} value={tailSec} onChange={e => setTailSec(Math.max(0, Math.min(60, Number(e.target.value) || 0)))}
+                                  aria-label="Durée de la queue en secondes" className={`${sel} w-20`} disabled={isRendering} />
+                              )}
+                            </div>
+                          </label>
+                          {rangeMode === 'MARKERS' && markers.length > 0 && (
+                            <div className="sm:col-span-2 grid grid-cols-2 gap-3">
+                              <label className="space-y-1 block">
+                                <span className={lab}>De</span>
+                                <select value={markerA} onChange={e => setMarkerA(e.target.value)} className={sel} disabled={isRendering} aria-label="Repère de début">
+                                  {markers.map(m => <option key={m.id} value={m.id}>{m.name} ({fmtS(m.time)})</option>)}
                                 </select>
-                             </div>
+                              </label>
+                              <label className="space-y-1 block">
+                                <span className={lab}>À</span>
+                                <select value={markerB} onChange={e => setMarkerB(e.target.value)} className={sel} disabled={isRendering} aria-label="Repère de fin">
+                                  {markers.map(m => <option key={m.id} value={m.id}>{m.name} ({fmtS(m.time)})</option>)}
+                                  <option value="__end">Fin du morceau</option>
+                                </select>
+                              </label>
+                            </div>
+                          )}
                         </div>
                     </div>
 
-                    {/* SECTION: FORMAT */}
+                    {/* 2. FORMAT ET QUALITÉ */}
                     <div className="space-y-3">
-                        <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">2. Format et qualité</span>
-                        
+                        <span className={sec}>2. Format et qualité</span>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400">Type de fichier</label>
-                                <select 
-                                    value={format} 
-                                    onChange={e => { setFormat(e.target.value as any); if(e.target.value === 'MP3') setBitDepth('16'); }}
-                                    disabled={isRendering}
-                                    className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
-                                >
+                            <label className="space-y-1 block">
+                                <span className={lab}>Type de fichier</span>
+                                <select value={format} onChange={e => setFormat(e.target.value as ExportFormat)} disabled={isRendering} className={sel}
+                                  title="WAV : le standard des studios (Pro Tools, Ableton, FL). AIFF : le standard Mac (Logic). FLAC : sans perte et 40 % plus léger. MP3 : pour partager.">
                                     <option value="WAV">WAV (qualité studio)</option>
+                                    <option value="AIFF">AIFF (Mac, Logic)</option>
+                                    <option value="FLAC">FLAC (sans perte, plus léger)</option>
                                     <option value="MP3">MP3 (pour partager)</option>
                                 </select>
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400">Fréquence d'échantillonnage</label>
-                                <select 
-                                    value={sampleRate} 
-                                    onChange={e => setSampleRate(Number(e.target.value))}
-                                    disabled={isRendering}
-                                    className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
-                                >
-                                    <option value="44100">44100 Hz (CD)</option>
-                                    <option value="48000">48000 Hz (vidéo)</option>
-                                    <option value="88200" disabled={format === 'MP3'}>88200 Hz (Hi-Res)</option>
-                                    <option value="96000" disabled={format === 'MP3'}>96000 Hz (studio)</option>
+                            </label>
+                            <label className="space-y-1 block">
+                                <span className={lab}>Fréquence d'échantillonnage</span>
+                                <select value={sampleRate} onChange={e => setSampleRate(Number(e.target.value))} disabled={isRendering} className={sel}
+                                  title="Conversion de qualité studio (filtre anti-repliement), comme le SRC de Pro Tools ou de Logic à l'export">
+                                    <option value="44100">44,1 kHz (CD, streaming)</option>
+                                    <option value="48000">48 kHz (vidéo)</option>
+                                    <option value="88200" disabled={format === 'MP3'}>88,2 kHz (Hi-Res)</option>
+                                    <option value="96000" disabled={format === 'MP3'}>96 kHz (studio)</option>
                                 </select>
-                            </div>
-
-                            {format === 'WAV' ? (
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-bold text-slate-400">Résolution</label>
-                                    <select 
-                                        value={bitDepth} 
-                                        onChange={e => setBitDepth(e.target.value as any)}
-                                        disabled={isRendering}
-                                        className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
-                                    >
+                            </label>
+                            {format !== 'MP3' ? (
+                                <label className="space-y-1 block">
+                                    <span className={lab}>Résolution</span>
+                                    <select value={bitDepth} onChange={e => setBitDepth(e.target.value as '16' | '24' | '32')} disabled={isRendering} className={sel}>
                                         <option value="16">16 bits (CD)</option>
                                         <option value="24">24 bits (pro)</option>
-                                        <option value="32">32 bits flottant (max)</option>
+                                        <option value="32" disabled={format === 'FLAC'}>32 bits flottant (max){format === 'FLAC' ? ' : pas en FLAC' : ''}</option>
                                     </select>
-                                </div>
+                                </label>
                             ) : (
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-bold text-slate-400">Qualité MP3</label>
-                                    <select 
-                                        value={mp3Bitrate} 
-                                        onChange={e => setMp3Bitrate(e.target.value)}
-                                        disabled={isRendering}
-                                        className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[10px] text-white font-bold focus:border-cyan-500 outline-none"
-                                    >
+                                <label className="space-y-1 block">
+                                    <span className={lab}>Qualité MP3</span>
+                                    <select value={mp3Bitrate} onChange={e => setMp3Bitrate(e.target.value)} disabled={isRendering} className={sel}>
                                         <option value="320">320 kbps (max)</option>
                                         <option value="192">192 kbps (bonne)</option>
                                         <option value="128">128 kbps (léger)</option>
                                     </select>
-                                </div>
+                                </label>
                             )}
-                        </div>
-                    </div>
-
-                    {/* SECTION: DSP OPTIONS */}
-                    <div className="space-y-3">
-                        <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest block border-b border-white/5 pb-1">3. Volume final</span>
-                        <div className="flex flex-wrap gap-x-6 gap-y-2">
-                            <label className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-[10px] font-bold text-slate-300">
-                                <span>Volume</span>
-                                <select value={normalize} onChange={e => setNormalize(e.target.value as typeof normalize)} disabled={isRendering}
-                                    className="h-8 min-w-0 max-w-full bg-black/40 border border-white/10 rounded-lg px-2 text-[10px] text-white font-bold focus:border-cyan-500 outline-none">
-                                    <option value="off">Tel quel (MP3 : plafonné vers -1 dB)</option>
-                                    <option value="peak">Au plus fort sans saturer</option>
-                                    <option value="lufs14">-14 LUFS (Spotify, YouTube)</option>
-                                    <option value="lufs16">-16 LUFS (Apple Music)</option>
+                            <label className="space-y-1 block">
+                                <span className={lab}>Canaux</span>
+                                <select value={layout} onChange={e => setLayout(e.target.value as ChannelLayout)} disabled={isRendering} className={sel}
+                                  title="Stéréo. Mono (somme) : gauche + droite en un canal (radio, contrôle de compatibilité). Double mono : un fichier gauche et un droit (Pro Tools : Multiple Mono).">
+                                    <option value="stereo">Stéréo</option>
+                                    <option value="mono-sum">Mono (somme G + D)</option>
+                                    <option value="dual-mono">Double mono (G et D séparés)</option>
                                 </select>
                             </label>
+                        </div>
+                        {format !== 'MP3' && effBits < 32 && (
+                          <label className="flex items-center gap-2 text-[12px] text-nv-ink" title="Dither TPDF : un bruit infime qui évite la distorsion de quantification en passant à 16 bits (Pro Tools : POW-r ; Logic : Dither ; Ableton : Triangular)">
+                            <input type="checkbox" checked={dither} onChange={e => setDither(e.target.checked)} disabled={isRendering} />
+                            Dither (adoucit le passage en {effBits} bits{effBits === 16 ? ', conseillé' : ''})
+                          </label>
+                        )}
+                        {format === 'MP3' && sampleRate > 48000 && <p className="text-[11px] text-nv-muted">Le MP3 s'arrête à 48 kHz : ton fichier sortira en 48 kHz.</p>}
+                    </div>
 
-                            <label className="flex items-center space-x-2 cursor-pointer group">
-                                <div className={`w-4 h-4 border rounded flex items-center justify-center transition-all ${dither ? 'bg-cyan-500 border-cyan-500 text-black' : 'border-white/20 bg-black/40'}`}>
-                                    {dither && <i className="fas fa-check text-[8px]"></i>}
-                                </div>
-                                <input type="checkbox" checked={dither} onChange={e => setDither(e.target.checked)} className="hidden" disabled={isRendering || bitDepth === '32'} />
-                                <span className={`text-[10px] font-bold ${dither ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'} ${bitDepth === '32' ? 'opacity-50' : ''}`}>Dithering (adoucit le passage en 16/24 bits)</span>
+                    {/* 3. VOLUME FINAL */}
+                    <div className="space-y-3">
+                        <span className={sec}>3. Volume final</span>
+                        {source === 'MASTER' ? (
+                          <label className="space-y-1 block">
+                            <span className={lab}>Volume</span>
+                            <select value={normalize} onChange={e => setNormalize(e.target.value)} disabled={isRendering} className={sel}
+                              title="Les mêmes cibles que le Master Nova. NOVA monte ou baisse le volume sans jamais dépasser la crête vraie de la plateforme (pas de limiteur caché) et te donne le résultat mesuré.">
+                              <option value="off">Tel quel{format === 'MP3' ? ' (MP3 : plafonné vers −1 dB)' : ''}</option>
+                              <option value="peak">Au plus fort sans saturer (crête −1 dBTP)</option>
+                              {PLATFORM_TARGETS.map(t => <option key={t.id} value={t.id}>{t.label} ({String(t.lufs).replace('-', '−')} LUFS, crête {String(t.ceiling).replace('-', '−').replace('.', ',')} dBTP)</option>)}
+                            </select>
+                          </label>
+                        ) : (
+                          <p className="text-[11px] text-nv-muted">Les stems gardent leur volume du mix (jamais normalisés) : posés à 0 dans une autre session, ils redonnent ton mix.</p>
+                        )}
+                        <p className="text-[11px] text-nv-muted">À la fin, NOVA mesure le fichier : LUFS intégrés, crête vraie (dBTP) et LRA.</p>
+                    </div>
+
+                    {/* 4. INFOS DU FICHIER */}
+                    <div className="space-y-3">
+                        <span className={sec}>4. Infos du fichier</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <label className="space-y-1 block"><span className={lab}>Titre</span>
+                            <input value={metaTitle} onChange={e => setMetaTitle(e.target.value)} disabled={isRendering} className={sel} placeholder="Titre du morceau" /></label>
+                          <label className="space-y-1 block"><span className={lab}>Artiste</span>
+                            <input value={metaArtist} onChange={e => setMetaArtist(e.target.value)} disabled={isRendering} className={sel} placeholder="Ton nom d'artiste" /></label>
+                          <label className="space-y-1 block"><span className={lab}>BPM</span>
+                            <input value={metaBpm} onChange={e => setMetaBpm(e.target.value)} inputMode="decimal" disabled={isRendering} className={sel} /></label>
+                          <label className="space-y-1 block"><span className={lab}>Tonalité</span>
+                            <input value={metaKey} onChange={e => setMetaKey(e.target.value)} disabled={isRendering} className={sel} placeholder="ex. Do mineur" /></label>
+                          <label className="space-y-1 block sm:col-span-2"><span className={lab}>ISRC (facultatif)</span>
+                            <input value={metaIsrc} onChange={e => setMetaIsrc(e.target.value)} disabled={isRendering} className={`${sel} ${isrcOk ? '' : 'border-red-500'}`} placeholder="FR-Z03-26-00001 : donné par ton distributeur" aria-invalid={!isrcOk} />
+                            {!isrcOk && <span className="text-[11px] text-red-400">12 caractères : 2 lettres de pays, 3 lettres ou chiffres, l'année et 5 chiffres.</span>}
+                          </label>
+                          <div className="sm:col-span-2 flex items-center gap-3">
+                            {cover ? <img src={cover.url} alt="Pochette choisie" className="w-12 h-12 rounded-lg object-cover border border-nv-line/15" /> : <span className="w-12 h-12 rounded-lg border border-dashed border-nv-line/15 flex items-center justify-center text-nv-muted" aria-hidden="true"><i className="fas fa-image"></i></span>}
+                            <label className="nova-hit min-h-9 px-3 rounded-lg border border-nv-line/15 text-[12px] font-bold text-nv-ink cursor-pointer flex items-center" title="Image dans le MP3 (ID3) et le FLAC : elle s'affiche dans le téléphone, l'ordinateur et les lecteurs">
+                              <input type="file" accept="image/jpeg,image/png" className="sr-only" onChange={e => { void onCoverFile(e.target.files?.[0]); e.target.value = ''; }} disabled={isRendering} />
+                              {cover ? 'Changer la pochette' : 'Ajouter une pochette'}
                             </label>
+                            {cover && <button type="button" onClick={() => setCover(null)} className="text-[12px] text-nv-muted hover:text-nv-ink">Retirer</button>}
+                          </div>
+                          <p className="sm:col-span-2 text-[11px] text-nv-muted">
+                            {format === 'MP3' ? 'Dans le MP3 : titre, artiste, BPM, tonalité, ISRC et pochette (ID3).'
+                              : format === 'FLAC' ? 'Dans le FLAC : titre, artiste, BPM, tonalité, ISRC et pochette.'
+                              : `Dans le ${format} : titre, artiste, BPM et mesure, tonalité, ISRC, repères et loudness (BWF), lus par Pro Tools, Logic, Ableton et FL.`}
+                          </p>
                         </div>
                     </div>
                 </div>
 
-                {/* COLUMN 2: SUMMARY & ACTION */}
-                <div className="w-full md:w-60 flex flex-col border-t md:border-t-0 md:border-l border-white/5 pt-6 md:pt-0 md:pl-8 justify-between">
+                {/* COLONNE 2 : RÉSUMÉ ET ACTION */}
+                <div className="w-full md:w-64 flex flex-col border-t md:border-t-0 md:border-l border-nv-line/15 pt-6 md:pt-0 md:pl-8 justify-between gap-4">
                     <div className="space-y-4">
-                        <div className="space-y-1">
-                             <label className="text-[9px] font-bold text-slate-500">Nom du fichier</label>
-                             <input 
-                                type="text" 
-                                value={filename} 
-                                onChange={e => setFilename(e.target.value)} 
-                                disabled={isRendering}
-                                className="w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-[10px] text-white focus:border-cyan-500 outline-none"
-                             />
-                        </div>
-                        <div className="bg-white/5 p-3 rounded-lg space-y-2">
-                             <div className="flex justify-between text-[9px]">
-                                <span className="text-slate-500">Taille estimée</span>
-                                <span className="text-white font-mono">~{(format === 'MP3' ? getDuration() * (parseInt(mp3Bitrate, 10) || 320) * 1000 / 8 / 1024 / 1024 : getDuration() * sampleRate * (parseInt(bitDepth)/8) * 2 / 1024 / 1024).toFixed(1).replace(".", ",")} Mo</span>
-                             </div>
-                             <div className="flex justify-between text-[9px]">
-                                <span className="text-slate-500">Durée</span>
-                                <span className="text-white font-mono">{Math.floor(getDuration() / 60)} min {String(Math.round(getDuration() % 60)).padStart(2, '0')} s</span>
-                             </div>
-                             <div className="flex justify-between text-[9px]">
-                                <span className="text-slate-500">Canaux</span>
-                                <span className="text-white font-mono">Stéréo</span>
-                             </div>
+                        <label className="space-y-1 block">
+                             <span className={lab}>Nom du fichier</span>
+                             <input type="text" value={filename} onChange={e => setFilename(e.target.value)} disabled={isRendering} className={sel} />
+                        </label>
+                        <div className="bg-nv-well/40 p-3 rounded-lg space-y-2 text-[11px]">
+                             <div className="flex justify-between gap-2"><span className="text-nv-muted">Taille estimée</span><span className="font-mono">~{estimateMb().toFixed(1).replace('.', ',')} Mo{source !== 'MASTER' ? ' / piste' : ''}</span></div>
+                             <div className="flex justify-between gap-2"><span className="text-nv-muted">Durée</span><span className="font-mono">{Math.floor(getDuration() / 60)} min {String(Math.round(getDuration() % 60)).padStart(2, '0')} s{tailMode === 'auto' ? ' env.' : ''}</span></div>
+                             <div className="flex justify-between gap-2"><span className="text-nv-muted">Fichier</span><span className="font-mono text-right">{format === 'MP3' ? `MP3 ${mp3Bitrate}` : `${format} ${effBits === 32 ? '32f' : effBits}`} · {effRate / 1000} kHz</span></div>
+                             <div className="flex justify-between gap-2"><span className="text-nv-muted">Canaux</span><span className="font-mono">{layout === 'stereo' ? 'Stéréo' : layout === 'mono-sum' ? 'Mono' : '2 × mono'}</span></div>
                         </div>
                     </div>
 
@@ -695,42 +758,30 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                               <i className="fas fa-lock"></i>
                               Export verrouillé
                             </div>
-                            <p className="mt-1.5 text-[10px] leading-relaxed text-amber-100/80">
+                            <p className="mt-1.5 text-[11px] leading-relaxed text-amber-100/80">
                               {beatsNonAchetes.length > 1
                                 ? `${beatsNonAchetes.length} instrumentaux du catalogue ne sont pas achetés.`
                                 : `L'instrumental « ${beatsNonAchetes[0]?.clips[0]?.name || beatsNonAchetes[0]?.name} » n'est pas acheté.`}
                               {' '}Le studio permet de l'essayer librement ; l'achat débloque l'export du morceau.
                             </p>
-                            <button
-                              type="button"
-                              onClick={() => { sourceTouched.current = true; setSource('VOCALS'); }}
-                              className={`mt-2 w-full min-h-10 py-2 leading-tight rounded-lg text-[11px] font-bold ${source === 'VOCALS' ? 'bg-emerald-500/25 text-emerald-100 border border-emerald-400/50' : 'border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/10'}`}
-                            >
+                            <button type="button" onClick={() => { sourceTouched.current = true; setSource('VOCALS'); }}
+                              className={`mt-2 w-full min-h-10 py-2 leading-tight rounded-lg text-[11px] font-bold ${source === 'VOCALS' ? 'bg-emerald-500/25 text-emerald-100 border border-emerald-400/50' : 'border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/10'}`}>
                               🎤 {source === 'VOCALS' ? 'Mes pistes seules sélectionnées : export possible' : 'Exporter mes pistes seules (voix, batterie), sans le beat ni la mélodie'}
                             </button>
                             {/* Le moment où l'artiste veut son fichier : on lui donne les deux suites possibles. */}
                             <div className="mt-3 flex flex-col gap-2">
-                              <button
-                                type="button"
-                                onClick={() => openBuyBeat(projectState.tracks)}
-                                className="w-full min-h-10 py-2 leading-tight rounded-lg bg-amber-400 text-black text-[11px] font-black uppercase tracking-wide hover:bg-amber-300"
-                              >
+                              <button type="button" onClick={() => openBuyBeat(projectState.tracks)}
+                                className="w-full min-h-10 py-2 leading-tight rounded-lg bg-amber-400 text-black text-[11px] font-black uppercase tracking-wide hover:bg-amber-300">
                                 🛒 Acheter cette instru
                               </button>
-                              <button
-                                type="button"
-                                onClick={openProMix}
-                                className="w-full min-h-10 py-2 leading-tight rounded-lg bg-white/10 text-white text-[11px] font-bold hover:bg-white/20"
-                              >
+                              <button type="button" onClick={openProMix}
+                                className="w-full min-h-10 py-2 leading-tight rounded-lg bg-white/10 text-white text-[11px] font-bold hover:bg-white/20">
                                 🎚️ Faire mixer par un pro
                               </button>
                             </div>
                             {onOpenShare && (
-                              <button
-                                type="button"
-                                onClick={() => onOpenShare()}
-                                className="mt-2 w-full min-h-10 py-2 leading-tight rounded-lg border border-cyan-400/40 text-cyan-200 text-[11px] font-bold hover:bg-cyan-500/10"
-                              >
+                              <button type="button" onClick={() => onOpenShare()}
+                                className="mt-2 w-full min-h-10 py-2 leading-tight rounded-lg border border-cyan-400/40 text-cyan-200 text-[11px] font-bold hover:bg-cyan-500/10">
                                 📲 Démo gratuite (MP3 tagué) ou extrait 30 s à partager
                               </button>
                             )}
@@ -738,26 +789,35 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                         )}
 
                         {admin && (
-                          <p className="text-[10px] text-center font-bold text-emerald-300" role="status">
+                          <p className="text-[11px] text-center font-bold text-emerald-400" role="status">
                             <i className="fas fa-user-shield mr-1"></i>Admin : export gratuit
                           </p>
                         )}
 
-                        <button 
-                            onClick={bloque ? () => openBuyBeat(projectState.tracks) : handleExport}
+                        <button
+                            onClick={bloque ? () => openBuyBeat(projectState.tracks) : () => void handleExport(false)}
                             disabled={isRendering || payWait || (adminPending && (bloque || needsVoicesPayment))}
-                            title={bloque ? "Achetez l'instrumental pour exporter (ou choisissez « Voix seules »)" : undefined}
-                            className="w-full min-h-12 py-3 whitespace-normal text-center leading-tight bg-cyan-500 hover:bg-cyan-400 text-black rounded-xl text-[10px] font-black uppercase tracking-[0.12em] shadow-lg shadow-cyan-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                            data-testid="export-go"
+                            title={bloque ? "Achète l'instrumental pour exporter (ou choisis « Voix seules »)" : undefined}
+                            className="w-full min-h-12 py-3 whitespace-normal text-center leading-tight bg-cyan-500 hover:bg-cyan-400 text-black rounded-xl text-[11px] font-black uppercase tracking-[0.12em] shadow-lg shadow-cyan-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
                         >
                             {bloque ? <i className="fas fa-lock"></i>
                               : isRendering ? <i className="fas fa-circle-notch fa-spin"></i>
                               : <i className="fas fa-download"></i>}
                             <span>{adminPending && (bloque || needsVoicesPayment) ? 'VÉRIFICATION…' : bloque ? "ACHETER L'INSTRU POUR EXPORTER" : payWait ? 'EN ATTENTE DU PAIEMENT…' : needsVoicesPayment ? (freeLeft !== null && freeLeft > 0 ? `EXPORTER (GRATUIT NOVA PRO · ${freeLeft} RESTANTS)` : 'PAYER 2 € ET EXPORTER') : source === 'VOCALS' ? 'EXPORTER MES PISTES' : 'EXPORTER'}</span>
                         </button>
+                        {!bloque && !needsVoicesPayment && (
+                          <button type="button" onClick={() => void handleExport(true)} disabled={isRendering || payWait} data-testid="export-queue"
+                            title="Lance cet export en arrière-plan et garde la fenêtre libre : ajoute ensuite un MP3, les stems… (Pro Tools : Bounce en arrière-plan ; Logic : file de bounce). Une notification te prévient à la fin."
+                            className="w-full min-h-10 rounded-xl border border-nv-line/15 text-[12px] font-bold text-nv-ink hover:bg-nv-raised disabled:opacity-50">
+                            <i className="fas fa-layer-group mr-1.5" aria-hidden="true"></i>Ajouter à la file d'exports
+                          </button>
+                        )}
                     </div>
                 </div>
             </div>
             )}
+
 
             {/* Notes MIDI en .mid (V25) */}
             <MidiExportRow tracks={projectState.tracks} />

@@ -25,6 +25,7 @@ const SaveProjectModal = lazy(() => import('./components/SaveProjectModal'));
 const LoadProjectModal = lazy(() => import('./components/LoadProjectModal'));
 const SessionTemplatesModal = lazy(() => import('./components/SessionTemplatesModal'));
 const ExportModal = lazy(() => import('./components/ExportModal'));
+const ExportQueueToast = lazy(() => import('./components/ExportQueueToast'));
 const MasterAssistantPanel = lazy(() => import('./components/MasterAssistantPanel'));
 
 const AudioSettingsPanel = lazy(() => import('./components/AudioSettingsPanel'));
@@ -7106,6 +7107,8 @@ function Studio() {
       )}
       {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
         onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} />}
+      {/* File d'exports (R1) : progression et « Ouvrir le dossier » / « Télécharger » à la fin. */}
+      <Suspense fallback={null}><ExportQueueToast /></Suspense>
       <DrumMachinePanel
         open={drumsOpen}
         onClose={() => setDrumsOpen(false)}

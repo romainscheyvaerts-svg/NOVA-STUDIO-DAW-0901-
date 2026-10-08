@@ -63,6 +63,9 @@ def launch(p):
             "--use-fake-device-for-media-stream",
             f"--use-file-for-fake-audio-capture={FAKE_WAV}",
             "--autoplay-policy=no-user-gesture-required",
+            # Serveur joint par l'adresse du réseau local (127.0.0.1 déjà pris par un autre
+            # serveur) : contexte sûr quand même (micro, AudioWorklet), comme sur 127.0.0.1.
+            *([f"--unsafely-treat-insecure-origin-as-secure={BASE.rstrip('/')}"] if not re.match(r"https?://(127\.0\.0\.1|localhost)", BASE) else []),
         ],
     )
 
