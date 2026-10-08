@@ -1,14 +1,18 @@
 @echo off
-rem Construit NovaARAHost.exe (hote ARA2 de Nova Studio) avec MSVC + CMake + Ninja.
-rem Sources JUCE et ARA SDK attendues dans %NOVA_LIBS% (defaut : D:\1 WORK\CODE\_libs\ara-host-sources).
+rem Construit NovaARAHost.exe (hote ARA2 de Nova Studio, SANS JUCE) avec MSVC + CMake + Ninja.
+rem Sources attendues dans %NOVA_LIBS% (defaut : D:\1 WORK\CODE\_libs\ara-host-sources) :
+rem   vst3sdk  (Steinberg, MIT)      git clone --depth 1 --branch v3.8.1_build_84 https://github.com/steinbergmedia/vst3sdk.git
+rem                                  puis : git -C vst3sdk submodule update --init --depth 1 -- base cmake pluginterfaces public.sdk
+rem   ARA_SDK  (Celemony, Apache 2)  git clone --depth 1 --recurse-submodules https://github.com/Celemony/ARA_SDK.git
 rem Resultat : nova-ara-host\build\NovaARAHost_artefacts\Release\NovaARAHost.exe
 setlocal
 cd /d "%~dp0"
 set VSLANG=1033
 if "%NOVA_LIBS%"=="" set "NOVA_LIBS=D:/1 WORK/CODE/_libs/ara-host-sources"
-if not exist "%NOVA_LIBS%\JUCE\CMakeLists.txt" (
-  echo Sources JUCE introuvables dans %NOVA_LIBS%\JUCE
-  echo   git clone --depth 1 https://github.com/juce-framework/JUCE.git "%NOVA_LIBS%\JUCE"
+if not exist "%NOVA_LIBS%\vst3sdk\pluginterfaces\base\funknown.h" (
+  echo VST3 SDK introuvable dans %NOVA_LIBS%\vst3sdk
+  echo   git clone --depth 1 --branch v3.8.1_build_84 https://github.com/steinbergmedia/vst3sdk.git "%NOVA_LIBS%\vst3sdk"
+  echo   git -C "%NOVA_LIBS%\vst3sdk" submodule update --init --depth 1 -- base cmake pluginterfaces public.sdk
   exit /b 2
 )
 if not exist "%NOVA_LIBS%\ARA_SDK\ARA_API\ARAInterface.h" (
