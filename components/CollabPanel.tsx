@@ -456,7 +456,9 @@ const CollabPanel: React.FC<Props> = (p) => {
                 {p.audio.remoteMixFrom
                   ? `Tu entends le mix de ${p.audio.remoteMixFrom} tel qu’il l’entend (environ 0,2 s de décalage) ; ton propre son est coupé pendant l’écoute.`
                   : p.audio.canMixOut ? 'Ton mix part tel que tu l’entends (Opus stéréo haut débit) : l’artiste l’écoute même sans tes VST, sur téléphone ou tablette.'
-                    : 'Le talkback passe par ton micro (annulation d’écho) ; il est coupé chez l’artiste pendant une prise.'}
+                    : p.role === 'artist'
+                      ? 'Le talkback passe par ton micro (annulation d’écho). Pendant ta prise, celui des autres est coupé chez toi.'
+                      : 'Le talkback passe par ton micro (annulation d’écho) ; il est coupé chez l’artiste pendant une prise.'}
               </p>
             </div>
           )}
