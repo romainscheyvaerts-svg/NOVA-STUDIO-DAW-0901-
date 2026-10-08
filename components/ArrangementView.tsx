@@ -1299,7 +1299,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
         const shInit = shuffleInitRef.current;
         if (editModeStore.get().mode === 'SHUFFLE' && shInit) {
             const from = shInit.group.findIndex(g => g.id === shInit.trackId);
-            let row = -1, yy = 40;
+            let row = -1, yy = tracksTop; // sous la règle ET le couloir d'accords (avant : 40 fixe, le clip sautait sur la piste du dessous)
             for (let i = 0; i < visibleTracks.length; i++) {
                 const hh = zoomV + extraH(visibleTracks[i]);
                 if (y >= yy && y < yy + hh) { row = i; break; }

@@ -405,6 +405,9 @@ def main(names):
                 except Exception: pass
             res["secs"] = round(time.time() - t, 1)
             res["erreurs_page"] = [e["text"][:300] for e in log.errors()][:20]
+            # Bilan : une vérification « …_ok » en échec fait échouer le scénario (avant, « ok » restait vrai).
+            res["echecs"] = [k for k, v in res.items() if k.endswith("_ok") and v is False]
+            res["ok"] = res["ok"] and not res["echecs"]
             save_log(log, {"result": res})
             (OUT / f"mesures_{n}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
             summary[n] = res
