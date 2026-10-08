@@ -190,7 +190,7 @@ def run():
             page.mouse.click(x, y); page.wait_for_timeout(200)
             # place la tête de lecture dans le clip sélectionné (clic sur la règle)
             # (la règle est en haut du calque, au-dessus du couloir d'accords s'il est affiché)
-            ruler_y = page.evaluate("() => document.querySelectorAll('.nova-grille canvas')[1].getBoundingClientRect().top + 20")
+            ruler_y = page.evaluate("() => (document.querySelector('.nova-grille canvas[data-tracks-top]') || document.querySelectorAll('.nova-grille canvas')[1]).getBoundingClientRect().top + 20")
             page.mouse.click(x, ruler_y); page.wait_for_timeout(300)
             page.mouse.click(x, y); page.wait_for_timeout(200)
             press(page, "Control+e", 400)

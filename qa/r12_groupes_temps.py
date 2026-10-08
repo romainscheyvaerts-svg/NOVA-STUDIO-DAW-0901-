@@ -299,6 +299,23 @@ def scenario_pc(page, res_, theme="dark"):
        {"selection": ids, "debuts": after})
     page.keyboard.press("Control+z"); page.wait_for_timeout(600)
 
+    # 5 bis. Rognage et fondu groupés : la fin de la LEAD (14 s) tirée d'une seconde vers la gauche,
+    # puis un fondu d'entrée tiré dans le coin haut de la LEAD (7 s) : DOUBLE et BACKS suivent.
+    close_overlays(page)
+    ends0 = {tid: max(c["end"] for c in clips(page, tid)) for tid in ("lead", "dbl", "backs")}
+    drag(page, x_of(b, 14.0) - 3, lane_top(b, 1) + 60, x_of(b, 13.0) - 3, lane_top(b, 1) + 60)
+    ends1 = {tid: max(c["end"] for c in clips(page, tid)) for tid in ("lead", "dbl", "backs")}
+    dtrim = {tid: round(ends1[tid] - ends0[tid], 9) for tid in ends0}
+    ok("rognage groupé : la fin des 3 clips recule du même pas", len(set(dtrim.values())) == 1 and abs(dtrim["lead"] + 1.0) < 1e-6, {"avant": ends0, "apres": ends1})
+    shot(page, "pc_06b_rognage_groupe")
+    page.keyboard.press("Control+z"); page.wait_for_timeout(600)
+    drag(page, x_of(b, 7.0) + 4, lane_top(b, 1) + 10, x_of(b, 7.5) + 4, lane_top(b, 1) + 10)
+    fades = {tid: [c for c in clips(page, tid) if abs(c["start"] - 7.0) < 1e-6][0]["fadeIn"] for tid in ("lead", "dbl", "backs")}
+    ok("fondu d'entrée groupé : même longueur sur les 3 clips", len(set(fades.values())) == 1 and 0.3 < fades["lead"] < 0.7, fades)
+    res["mesures"]["rognage_fondu"] = {"rognage_s": dtrim, "fondus_s": fades}
+    shot(page, "pc_06c_fondu_groupe")
+    page.keyboard.press("Control+z"); page.wait_for_timeout(600)
+
     # 6. Plage (moitié haute) sur la LEAD : elle couvre le groupe ; Ctrl+X la coupe partout.
     close_overlays(page)
     drag(page, x_of(b, 3.0), lane_top(b, 1) + 25, x_of(b, 4.0), lane_top(b, 1) + 25)

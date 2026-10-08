@@ -149,10 +149,12 @@ export function placeLanePiece(points: AutomationPoint[], piece: AutomationPoint
   const before = pts.filter(p => p.time < at - EPS);
   const after = pts.filter(p => p.time > end + EPS);
   const out: AutomationPoint[] = [...before];
-  if (at > EPS && pts.length) out.push({ id: pid(gen, 'pl'), time: at - ANCHOR, value: valueAtPoints(pts, at - ANCHOR, fb), curveType: 'LINEAR' });
+  // Jonctions verticales (deux points au même instant) : la courbe d'avant reste exacte
+  // jusqu'à `at`, le morceau est exact dès `at` (le moteur saute d'une valeur à l'autre).
+  if (at > EPS && pts.length) out.push({ id: pid(gen, 'pl'), time: at, value: valueAtPoints(pts, at - 1e-9, fb), curveType: 'LINEAR' });
   piece.forEach(p => { if (p.time < len - EPS) out.push({ ...p, id: pid(gen, 'pp'), time: at + p.time }); });
   const last = piece[piece.length - 1];
-  out.push({ id: pid(gen, 'pe'), time: end - ANCHOR, value: last.time >= len - EPS ? valueAtPoints(piece, len - ANCHOR, last.value) : last.value, curveType: 'LINEAR' });
+  out.push({ id: pid(gen, 'pe'), time: end, value: last.value, curveType: 'LINEAR' });
   if (pts.length) out.push({ id: pid(gen, 'pr'), time: end, value: valueAtPoints(pts, end, fb), curveType: curveAt(pts, end) });
   return dedupe([...out, ...after]);
 }

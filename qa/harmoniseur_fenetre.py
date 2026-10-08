@@ -54,7 +54,7 @@ def main():
         prepare(page)
         open_project_file(page, proj, res, "01_projet_accords_sous_la_regle")
         page.wait_for_function("() => !!window.__novaEdit", timeout=20000)
-        res["couloir"] = page.evaluate("""() => { const l = document.querySelector('[data-testid=chord-lane]'); const c = document.querySelectorAll('.nova-grille canvas')[1];
+        res["couloir"] = page.evaluate("""() => { const l = document.querySelector('[data-testid=chord-lane]'); const c = (document.querySelector('.nova-grille canvas[data-tracks-top]') || document.querySelectorAll('.nova-grille canvas')[1]);
           if (!l || !c) return null; const a = l.getBoundingClientRect(), r = c.getBoundingClientRect();
           return { haut_couloir: Math.round(a.top - r.top), hauteur: Math.round(a.height), haut_pistes: +c.dataset.tracksTop, accords: [...document.querySelectorAll('[data-chord-event]')].map(e => e.dataset.chordEvent) }; }""")
         if not open_add_menu(page, "pc"):
