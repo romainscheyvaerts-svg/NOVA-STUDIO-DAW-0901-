@@ -95,6 +95,27 @@ const channelRank = (wanted: Channels, got: Channels): number => {
 
 const namesOf = (c: VstCandidate) => [c.pluginName, c.name, c.scanName].filter((x): x is string => !!x);
 
+/**
+ * Noms Pro Tools (AAX) → nom du fichier VST3 quand ils n'ont rien en commun
+ * (relevé de la session LENNON, 08/10/2026) : UADx s'installe en « uaudio_… »,
+ * Blue Cat en « BC … VST3 », McDSP MC404 dans le paquet MC2000.
+ */
+export const PT_VST3_ALIASES: Record<string, string> = {
+  uadx1176aecompressor: 'uaudio_ua_1176ae',
+  uadxla2asilvercompressor: 'uaudio_teletronix_la-2a_silver',
+  uadxpulteceqp1aeq: 'uaudio_pultec_eqp-1a',
+  uadxpulteceqp1a: 'uaudio_pultec_eqp-1a',
+  uadxlexicon224digitalreverb: 'uaudio_lexicon_224',
+  uadxfairchild670compressor: 'uaudio_fairchild_670',
+  uadxempiricallabsdistressor: 'uaudio_distressor',
+  uadxmanleymassivepassivemst: 'uaudio_manley_massive_passive_m',
+  uadxmanleyvoxbox: 'uaudio_manley_voxbox',
+  uadxcapitolchambers: 'uaudio_capitol_chambers',
+  uadxstudiodchorus: 'uaudio_studio_d_chorus',
+  bluecatspatchwork: 'BC PatchWork VST3',
+  mc404multiband: 'MC2000_MC404',
+};
+
 export interface ResolveOptions {
   exclusions?: ExclusionList;
   /** Autoriser une autre version du même plugin (dernier recours, signalé). */
@@ -115,6 +136,11 @@ export const resolveVst = (
   const wantBase = compact(baseName(name));
   const wantFamily = family(baseName(name));
   const pool = list.filter(c => c.isInstrument !== true && !isExcluded({ name: c.name, vendor: c.vendor || '', path: c.path }, ex));
+  const alias = PT_VST3_ALIASES[compact(baseName(name))] || PT_VST3_ALIASES[wantFull];
+  if (alias) {
+    const hit = pool.find(c => namesOf(c).some(x => compact(x) === compact(alias)) || compact((c.path.split(/[\\/]/).pop() || '').replace(/\.vst3$/i, '')) === compact(alias));
+    if (hit) return { plugin: hit, kind: 'variant', note: `version VST3 : ${hit.name}${hit.unavailable ? ', licence ou démo à vérifier' : ''}` };
+  }
   type Scored = { c: VstCandidate; kind: MatchKind; score: number; note?: string };
   const scored: Scored[] = [];
   for (const c of pool) {

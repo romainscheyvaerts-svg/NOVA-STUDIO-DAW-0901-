@@ -14,6 +14,12 @@
  *   --port <n>                     port du pont (défaut : NOVA_BRIDGE_PORT ou 8765)
  *   --no-bridge                    sans le pont : résolution par la base de connaissance seulement
  *   --no-state                     ne pas capturer l'état binaire des plugins
+ *   --skip <a,b>                   plugins à ne pas charger (connus pour faire planter le pont)
+ *   --timeout <s>                  délai max de chargement d'un plugin (défaut 180 s)
+ *
+ * Si le pont s'arrête pendant un chargement (plugin qui plante), le plugin est
+ * noté « fait planter le pont », le script attend que le pont redémarre (un
+ * superviseur doit le relancer) et passe au suivant.
  *
  * Pièges connus : Pro-C 3 n'accepte que ses textes exacts (« 2.00:1 ») ; le pont
  * prend alors la valeur la plus proche de la liste. Un plugin qui demande une
@@ -33,26 +39,34 @@ import { compact, VstCandidate } from '../utils/vstMatch';
 const argv = process.argv.slice(2).filter(a => a !== '--');
 const flag = (n: string) => argv.includes(n);
 const opt = (n: string) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : undefined; };
-const specPath = argv.find((a, i) => !a.startsWith('--') && !['--out', '--report', '--id', '--port'].includes(argv[i - 1]));
+const specPath = argv.find((a, i) => !a.startsWith('--') && !['--out', '--report', '--id', '--port', '--skip', '--timeout'].includes(argv[i - 1]));
 if (!specPath) {
   console.error('Usage : npx vite-node scripts/template_from_spec.ts -- <fiche.json> [--out f] [--report f] [--activate-all] [--port n] [--no-bridge]');
   process.exit(2);
 }
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(opt('--port') || process.env.NOVA_BRIDGE_PORT || 8765);
+const SKIP = (opt('--skip') || '').split(',').map(x => compact(x)).filter(Boolean);
+const LOAD_TIMEOUT = Number(opt('--timeout') || 180) * 1000;
 
 // ─── Petit client du pont (WebSocket JSON, réponses par req_id) ────────────────
 
 class Bridge {
   private ws!: WebSocket;
+  url = '';
+  get open() { return !!this.ws && this.ws.readyState === 1; }
   private next = 1;
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   async connect(url: string, timeoutMs = 5000) {
+    this.url = url;
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(url);
       const t = setTimeout(() => { try { ws.close(); } catch { /* */ } reject(new Error(`Pont VST injoignable (${url})`)); }, timeoutMs);
       ws.onopen = () => { clearTimeout(t); resolve(); };
       ws.onerror = () => { clearTimeout(t); reject(new Error(`Pont VST injoignable (${url})`)); };
+      ws.onclose = () => {
+        for (const [id, p] of this.pending) { clearTimeout(p.timer); p.reject(Object.assign(new Error('Le pont s’est arrêté'), { bridgeDown: true })); this.pending.delete(id); }
+      };
       ws.onmessage = ev => {
         if (typeof ev.data !== 'string') return;
         let msg: any;
@@ -79,6 +93,14 @@ class Bridge {
     });
   }
   close() { try { this.ws.close(); } catch { /* */ } }
+  /** Attend que le pont réponde de nouveau (relancé par un superviseur). */
+  async reconnect(maxMs = 180000): Promise<boolean> {
+    const t0 = Date.now();
+    while (Date.now() - t0 < maxMs) {
+      try { await this.connect(this.url, 4000); await this.request({ action: 'HELLO' }, 5000); return true; } catch { await new Promise(r => setTimeout(r, 3000)); }
+    }
+    return false;
+  }
 }
 
 // ─── Comparaison réglage demandé / relu ───────────────────────────────────────
@@ -155,13 +177,19 @@ const main = async () => {
     lines.push(line);
     if (ins.excluded) { line.loaded = 'exclu (règle du studio)'; continue; }
     if (!ins.match) { line.loaded = 'absent de ce PC'; line.params = ins.params.map(p => ({ asked: p.asked, value: p.value, key: p.key, verdict: 'introuvable' as Verdict })); continue; }
+    if (SKIP.includes(compact(ins.plugin)) || SKIP.includes(compact(ins.match.plugin.name))) {
+      line.loaded = `trouvé (${ins.match.kind}), non chargé : fait planter le pont (--skip)`;
+      line.params = ins.params.map(p => ({ asked: p.asked, value: p.value, key: p.key, verdict: 'non contrôlé' as Verdict }));
+      continue;
+    }
+    if (bridge && !bridge.open && !(await bridge.reconnect())) bridge = null;
     if (!bridge) { line.loaded = `trouvé (${ins.match.kind}), non contrôlé : pont absent`; line.params = ins.params.map(p => ({ asked: p.asked, value: p.value, key: p.key, verdict: 'non contrôlé' as Verdict })); continue; }
     const slotId = `tplcheck-${process.pid}-${++slot}`;
     try {
       const res = await bridge.request({
         action: 'LOAD_PLUGIN', slot_id: slotId, path: ins.match.plugin.path, plugin_name: ins.match.plugin.pluginName || null,
         sample_rate: 48000, state: pl.params.stateB64 || null, quiet: true,
-      }, 180000);
+      }, LOAD_TIMEOUT);
       line.loaded = `chargé : ${res.name || ins.match.plugin.name}${ins.match.note ? ` (${ins.match.note})` : ''}`;
       const live: KnownParam[] = ((await bridge.request({ action: 'GET_PARAMS', slot_id: slotId }, 120000)).parameters || []);
       const items: { asked: string; value: string; key: string | null; setting?: { name: string; text?: string; real?: number } }[] = ins.params.map(p => {
@@ -184,10 +212,12 @@ const main = async () => {
         if (st?.state) { pl.params.stateB64 = st.state; line.state = true; }
       }
     } catch (e: any) {
-      line.loaded = e?.licenseRequired ? 'licence ou démo : chargement refusé (fenêtre fermée par le pont)' : `chargement impossible : ${e?.message || e}`;
+      line.loaded = e?.licenseRequired ? 'licence ou démo : chargement refusé (fenêtre fermée par le pont)'
+        : e?.bridgeDown ? 'fait planter le pont (le pont s’est arrêté pendant le chargement)' : `chargement impossible : ${e?.message || e}`;
       line.params = ins.params.map(p => ({ asked: p.asked, value: p.value, key: p.key, verdict: 'introuvable' as Verdict }));
     } finally {
-      await bridge.request({ action: 'UNLOAD_PLUGIN', slot_id: slotId }, 30000).catch(() => null);
+      if (bridge.open) await bridge.request({ action: 'UNLOAD_PLUGIN', slot_id: slotId }, 30000).catch(() => null);
+      else if (!(await bridge.reconnect())) bridge = null;
     }
   }
   bridge?.close();

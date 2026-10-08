@@ -302,6 +302,80 @@ describe('fiche (Pro Tools relevé) → modèle NOVA', () => {
     expect(report.mixRules.join('\n')).toMatch(/un seul étage/);
   });
 
+  it('relevé LENNON : slot, réduction visée, état d’origine gardés même avec « activer tous les effets »', () => {
+    const spec: TemplateSpec = {
+      format: 'nova-template-spec', version: 1, name: 'structure',
+      tracks: [
+        {
+          name: 'LEAD A', kind: 'audio', channels: 'mono', output: 'LEAD A BUS',
+          inserts: [
+            { vendor: 'Softube', plugin: 'Tube-Tech CL 1B mk II', slot: 'b', state: 'active', targetGainReductionDb: 5 },
+            { vendor: 'Antares', plugin: 'Auto-Tune Pro', slot: 'f', state: 'bypass' },
+            { vendor: 'Kazrog', plugin: 'True Iron', slot: 'g', state: 'inactive', readings: { Strength: '5.00' } },
+          ],
+        },
+        { name: 'LEAD A BUS', kind: 'bus', hidden: true, inactive: true },
+        { name: 'Master', kind: 'master' },
+      ],
+    };
+    const { template } = buildTemplateFromSpec(spec, { plugins: [] });
+    const lead = template.session.tracks[0];
+    expect(lead.plugins.map(p => p.params.templateSpec.state)).toEqual(['active', 'bypass', 'inactive']);
+    expect(lead.plugins.map(p => p.params.templateSpec.slot)).toEqual(['b', 'f', 'g']);
+    expect(lead.plugins[0].params.templateSpec.targetGainReductionDb).toBe(5);
+    expect(lead.plugins[2].params.templateSpec.wasInactiveInProTools).toBe(true);
+    expect(lead.plugins[1].params.templateSpec.wasInactiveInProTools).toBeUndefined();
+    expect(lead.plugins[2].isInactive).toBe(true);
+    const all = buildTemplateFromSpec(spec, { plugins: [], activateAll: true }).template.session.tracks[0];
+    expect(all.plugins[2].isInactive).toBeFalsy();
+    expect(all.plugins[2].params.templateSpec.wasInactiveInProTools).toBe(true);
+  });
+
+  it('« fidèle à la session Pro Tools » : SSL / Slate gardés et résolus, avec avertissement', () => {
+    const list: VstCandidate[] = [{ name: 'SSL Native Vocalstrip 2', vendor: 'Solid State Logic', path: 'C:\\VST3\\SSL Native Vocalstrip 2.vst3' }];
+    const spec: TemplateSpec = {
+      format: 'nova-template-spec', version: 1, name: 'fidele',
+      tracks: [{ name: 'Bus', kind: 'bus', inserts: [{ vendor: 'Solid State Logic', plugin: 'SSL Native Vocalstrip 2', state: 'inactive' }] }, { name: 'Master', kind: 'master' }],
+    };
+    const strict = buildTemplateFromSpec(spec, { plugins: list });
+    expect(strict.report.inserts[0].excluded).toBe(true);
+    expect(strict.template.session.tracks[0].plugins[0].params.localPath).toBe('');
+    const fidele = buildTemplateFromSpec({ ...spec, keepExcludedPlugins: true }, { plugins: list, activateAll: true });
+    expect(fidele.report.inserts[0].excluded).toBe(false);
+    expect(fidele.report.inserts[0].match?.plugin.path).toMatch(/Vocalstrip 2\.vst3$/);
+    const p = fidele.template.session.tracks[0].plugins[0];
+    expect(p.isEnabled).toBe(true);
+    expect(p.params.templateSpec.outsideStudioRules).toBe(true);
+    expect(fidele.report.warnings.join('\n')).toMatch(/GARDÉ : modèle fidèle/);
+    // Les règles du studio le signalent toujours : c'est à Romain de trancher.
+    expect(fidele.report.mixRules.join('\n')).toMatch(/exclu/);
+    expect(buildTemplateFromSpec(spec, { plugins: list, keepExcluded: true }).report.inserts[0].excluded).toBe(false);
+  });
+
+  it('noms Pro Tools sans rapport avec le fichier VST3 (UADx « uaudio_… », PatchWork, MC404) : retrouvés par alias', () => {
+    const list: VstCandidate[] = [
+      { name: 'uaudio_ua_1176ae', path: 'C:\\VST3\\uaudio_ua_1176ae.vst3' },
+      { name: 'uaudio_ua_1176ln_rev_e', path: 'C:\\VST3\\uaudio_ua_1176ln_rev_e.vst3' },
+      { name: 'uaudio_teletronix_la-2a_silver', path: 'C:\\VST3\\uaudio_teletronix_la-2a_silver.vst3' },
+      { name: 'BC PatchWork VST3', vendor: 'Blue Cat Audio', path: 'C:\\VST3\\Blue Cat Audio\\BC PatchWork VST3.vst3' },
+      { name: 'MC2000_MC404', path: 'C:\\VST3\\MC2000_MC404.vst3' },
+    ];
+    expect(resolveVst('UADx 1176AE Compressor', 'Universal Audio (UADx)', list)?.plugin.name).toBe('uaudio_ua_1176ae');
+    expect(resolveVst('UADx LA-2A Silver Compressor', 'Universal Audio (UADx)', list)?.plugin.name).toBe('uaudio_teletronix_la-2a_silver');
+    expect(resolveVst("Blue Cat's PatchWork", 'Blue Cat Audio', list)?.plugin.name).toBe('BC PatchWork VST3');
+    expect(resolveVst('MC404 Multi-Band', 'McDSP', list)?.plugin.name).toBe('MC2000_MC404');
+    expect(resolveVst('UADx Pultec EQP-1A EQ', 'Universal Audio (UADx)', [...list, { name: 'uaudio_pultec_eqp-1a', path: 'C:\\VST3\\uaudio_pultec_eqp-1a.vst3' }])?.plugin.name).toBe('uaudio_pultec_eqp-1a');
+  });
+
+  it('plugins hébergés (PatchWork) gardés dans le modèle', () => {
+    const spec: TemplateSpec = {
+      format: 'nova-template-spec', version: 1, name: 'pw',
+      tracks: [{ name: 'PRE MASTER', kind: 'bus', inserts: [{ vendor: 'Blue Cat Audio', plugin: "Blue Cat's PatchWork", state: 'inactive', hosted: [{ plugin: 'Elevate', vendor: 'Newfangled Audio', section: 'parallel', chain: 1, slot: 1, params: { 'Limiter Gain': '8.0 dB' } }] }] }, { name: 'Master', kind: 'master' }],
+    };
+    const { template } = buildTemplateFromSpec(spec, { plugins: [] });
+    expect(template.session.tracks[0].plugins[0].params.templateSpec.hosted[0]).toMatchObject({ plugin: 'Elevate', section: 'parallel' });
+  });
+
   it('réglages : clé réelle par nom affiché, unités converties', () => {
     const params = [{ name: 'retune_speed_ms', displayName: 'Retune Speed' }, { name: 'high_pass_frequency', display_name: 'High-Pass Frequency', text: '7000.0 Hz' }];
     expect(matchParamName('retune speed', params)).toBe('retune_speed_ms');
@@ -309,6 +383,29 @@ describe('fiche (Pro Tools relevé) → modèle NOVA', () => {
     expect(settingForParam(params[1], 'high_pass_frequency', '6 kHz')).toEqual({ name: 'high_pass_frequency', real: 6000 });
     expect(settingForParam({ name: 'feedback', text: '0.00', range: [0, 1.25, 0.01] }, 'feedback', '35 %')).toEqual({ name: 'feedback', real: 0.35 });
     expect(settingForParam({ name: 'style', values: ['Clean', 'Vocal'] }, 'style', 'Vocal')).toEqual({ name: 'style', text: 'Vocal' });
+  });
+
+  it('modèle livré LENNON (session de départ Pro Tools) : privé, structure gardée, tous les effets actifs, état d’origine noté', () => {
+    const t: SessionTemplate = parseTemplate(fs.readFileSync(path.join(ROOT, 'templates/romain-lennon-depart.novatemplate'), 'utf-8'));
+    expect(t.privateTo).toBe('romain');
+    const tr = t.session.tracks as any[];
+    const byName = (n: string) => tr.find(x => x.name.trim() === n);
+    expect(tr.length).toBeGreaterThanOrEqual(78);
+    expect(byName('LD B').isHidden).toBe(true);
+    expect(byName('LD B').isInactive).toBe(true);
+    expect(byName('SEND FX').folder?.kind).toBe('routing');
+    expect(byName('VOX').folder?.kind).toBe('basic');
+    expect(tr.filter(x => x.isVca).map(x => x.name.trim())).toEqual(expect.arrayContaining(['PRE ALL VOX', 'BEAT ALL']));
+    const lead = byName('LEAD A');
+    expect(lead.sends).toHaveLength(10);
+    const plugins = tr.flatMap(x => x.plugins);
+    expect(plugins.length).toBeGreaterThanOrEqual(320);
+    expect(plugins.some((p: any) => p.isInactive)).toBe(false);
+    expect(plugins.filter((p: any) => p.params?.templateSpec?.wasInactiveInProTools).length).toBeGreaterThan(150);
+    const tt = lead.plugins.find((p: any) => p.params?.templateSpec?.plugin === 'Tube-Tech CL 1B mk II');
+    expect(tt.params.templateSpec.targetGainReductionDb).toBe(5);
+    const ssl = plugins.find((p: any) => p.params?.templateSpec?.plugin === 'SSL Native Vocalstrip 2');
+    expect(ssl.params.templateSpec).toMatchObject({ outsideStudioRules: true, licenseExpired: true });
   });
 
   it('le modèle livré (relu sur le pont) respecte les règles de mix et est privé', () => {

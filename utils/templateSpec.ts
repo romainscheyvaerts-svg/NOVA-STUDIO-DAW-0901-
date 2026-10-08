@@ -57,6 +57,14 @@
  *    (BuildOptions.activateAll, --activate-all) : les effets inactifs dans Pro
  *    Tools deviennent actifs, l'information est gardée (params.templateSpec.state,
  *    params.templateWasInactive) ; les effets en bypass restent en bypass.
+ *  - en plus (relevé LENNON) : inserts "slot" (a…j), "wasInactiveInProTools",
+ *    "targetGainReductionDb" (réduction visée : NOVA cale le seuil sur le vrai
+ *    signal), "hosted" (plugins contenus dans un hôte comme Blue Cat's
+ *    PatchWork), "licenseExpired" (licence absente : insert gardé sans
+ *    réglages), "readings" (valeurs lues, non envoyées) ; piste "channels",
+ *    "note" ; fiche "keepExcludedPlugins" (« fidèle à la session Pro Tools » :
+ *    les plugins exclus par les règles du studio — SSL, Slate — sont gardés et
+ *    chargés, avec un avertissement, au lieu d'être écartés).
  *
  * buildTemplateFromSpec() résout chaque plugin dans la liste VST du PC (nom +
  * éditeur, variantes tolérées : utils/vstMatch) et chaque réglage dans les
@@ -77,6 +85,22 @@ export type SpecParamValue = string | number | boolean;
 
 export type SpecInsertState = 'active' | 'bypass' | 'inactive';
 
+/** Plugin hébergé dans un autre (Blue Cat's PatchWork : chaînes PRE / parallèles / POST). */
+export interface SpecHostedPlugin {
+  plugin: string;
+  vendor?: string;
+  section: 'pre' | 'parallel' | 'post';
+  /** Chaîne parallèle (1–8), ou rang dans PRE / POST. */
+  chain?: number;
+  slot?: number;
+  /** Faux : slot coupé dans l'hôte. */
+  active?: boolean;
+  /** « Plug-In Missing! » dans l'hôte. */
+  missing?: boolean;
+  params?: Record<string, SpecParamValue>;
+  note?: string;
+}
+
 export interface SpecInsert {
   plugin: string;
   vendor?: string;
@@ -86,6 +110,18 @@ export interface SpecInsert {
   active?: boolean;
   /** Ancien format (synonyme de active). */
   enabled?: boolean;
+  /** Lettre de l'insert dans Pro Tools (a…j). */
+  slot?: string;
+  /** L'insert était inactif dans Pro Tools (noté même si le modèle l'active). */
+  wasInactiveInProTools?: boolean;
+  /** Réduction de gain visée en dB (compresseurs) : NOVA calera le seuil sur le vrai signal. */
+  targetGainReductionDb?: number;
+  /** Plugins contenus (hôte de type PatchWork). */
+  hosted?: SpecHostedPlugin[];
+  /** Licence absente ou expirée sur le PC d'origine (ex. SSL Native) : réglages non lisibles, insert gardé sans réglages. */
+  licenseExpired?: boolean;
+  /** Valeurs lues sur la fenêtre d'origine (potards sans afficheur : « ≈ ») : pour mémoire, non envoyées au plugin. */
+  readings?: Record<string, string>;
   /** Réglages : nom affiché → valeur texte affichée par le plugin. */
   params?: Record<string, SpecParamValue>;
   /** État complet du plugin (base64), si on l'a. */
@@ -130,6 +166,10 @@ export interface SpecTrack {
   output?: string;
   /** Entrée : bus nommé écouté (aux / bus). */
   input?: string;
+  /** Mono / stéréo dans la session d'origine. */
+  channels?: 'mono' | 'stereo';
+  /** Remarque libre. */
+  note?: string;
   inserts?: SpecInsert[];
   sends?: SpecSend[];
   /** Piste masquée (liste des pistes). */
@@ -161,8 +201,11 @@ export interface TemplateSpec {
   key?: string;
   /** Bus internes nommés (I/O Setup) : noms, ou { name, channels }. */
   buses?: (string | { name: string; channels?: 1 | 2 })[];
+  /** « Fidèle à la session Pro Tools » : garder les plugins exclus par les règles du studio (SSL, Slate). */
+  keepExcludedPlugins?: boolean;
   tracks: SpecTrack[];
 }
+
 
 /** Paramètre connu d'un plugin (base de connaissance ou relecture du pont). */
 export interface KnownParam {
@@ -410,9 +453,14 @@ export interface BuildOptions {
   knowledge?: KnowledgeEntry[];
   /** « Activer tous les effets » : les effets désactivés dans Pro Tools sont activés. */
   activateAll?: boolean;
+  /** Garder les plugins exclus (SSL, Slate…) ; prioritaire sur `spec.keepExcludedPlugins`. */
+  keepExcluded?: boolean;
   id?: string;
   now?: number;
 }
+
+/** Aucune exclusion (modèle fidèle à la session d'origine). */
+const NO_EXCLUSIONS = { exclusions: { vendors: [] as string[], plugins: [] as string[], allow: [] as string[] } };
 
 const knownParamsFor = (m: VstMatch | null, kb: KnowledgeEntry[] | undefined, name: string): KnownParam[] => {
   if (!kb?.length) return [];
@@ -428,6 +476,7 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
   if (!Array.isArray(spec0.tracks) || !spec0.tracks.length) throw new Error('La fiche ne contient aucune piste.');
   const spec: TemplateSpec = { ...spec0, tracks: normalizeSpecTracks(spec0) };
   const report: SpecBuildReport = { inserts: [], warnings: [], mixRules: [] };
+  const keepExcluded = opts.keepExcluded ?? !!spec.keepExcludedPlugins;
   const list: VstCandidate[] = opts.plugins || (opts.knowledge || []).map(e => ({ name: e.name, scanName: e.scanName, vendor: e.vendor, path: e.path, pluginName: e.pluginName ?? null, unavailable: !!e.status && e.status !== 'ok' }));
 
   // Retours (aux) : ceux qui reçoivent des envois ; bus : ceux où des pistes sortent.
@@ -517,9 +566,11 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
         report.inserts.push({ track: t.name, plugin: ins.plugin, vendor: 'NOVA', active, builtin: true, match: null, excluded: false, params: [], index: i, pluginId });
         return;
       }
-      const excluded = isExcluded({ name: ins.plugin, vendor: ins.vendor || '', path: '' });
-      const match = excluded ? null : resolveVst(ins.plugin, ins.vendor, list);
+      const ruleExcluded = isExcluded({ name: ins.plugin, vendor: ins.vendor || '', path: '' });
+      const excluded = ruleExcluded && !keepExcluded;
+      const match = excluded ? null : resolveVst(ins.plugin, ins.vendor, list, keepExcluded ? NO_EXCLUSIONS : undefined);
       if (excluded) report.warnings.push(`${t.name} : ${ins.plugin} est exclu (règle du studio : Slate sauf MetaTune / VerbSuite Classics, SSL).`);
+      else if (ruleExcluded) report.warnings.push(`${t.name} : ${ins.plugin} est hors règles du studio (SSL / Slate) mais GARDÉ : modèle fidèle à la session Pro Tools.`);
       else if (!match) report.warnings.push(`${t.name} : ${ins.plugin}${ins.vendor ? ` (${ins.vendor})` : ''} absent de ce PC.`);
       else if (match.kind !== 'exact') report.warnings.push(`${t.name} : ${ins.plugin} → ${match.plugin.name}${match.note ? ` (${match.note})` : ''}.`);
       const known = knownParamsFor(match, opts.knowledge, ins.plugin);
@@ -541,7 +592,16 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
           novaQuiet: true,
           novaSettings: params.filter(x => x.key).map(x => (x.how === 'known' ? settingForParam(known.find(k => k.name === x.key), x.key!, x.value) : { name: x.key!, text: x.value })),
           ...(ins.stateB64 ? { stateB64: ins.stateB64 } : {}),
-          templateSpec: { plugin: ins.plugin, vendor: ins.vendor || '', active: srcState === 'active', state: srcState, ...(ins.note ? { note: ins.note } : {}) },
+          templateSpec: {
+            plugin: ins.plugin, vendor: ins.vendor || '', active: srcState === 'active', state: srcState,
+            ...(ins.slot ? { slot: ins.slot } : {}),
+            ...(ins.wasInactiveInProTools || srcState === 'inactive' ? { wasInactiveInProTools: true } : {}),
+            ...(ins.targetGainReductionDb !== undefined ? { targetGainReductionDb: ins.targetGainReductionDb } : {}),
+            ...(ins.hosted?.length ? { hosted: ins.hosted } : {}),
+            ...(ruleExcluded ? { outsideStudioRules: true } : {}),
+            ...(ins.licenseExpired ? { licenseExpired: true } : {}),
+            ...(ins.note ? { note: ins.note } : {}),
+          },
           ...(srcState === 'inactive' ? { templateWasInactive: true } : {}),
           ...(match ? {} : { templateMissing: true }),
         },
