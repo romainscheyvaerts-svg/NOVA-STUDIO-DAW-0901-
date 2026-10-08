@@ -7,6 +7,7 @@ import {
   setTracksInactive, showAndActivate, vcaMembers,
 } from '../utils/trackStructure';
 import { applyTracks, structureBus } from '../utils/structureBus';
+import { useEditGroups } from '../utils/editGroups';
 import { gainToDbText, panToText } from '../utils/db';
 import { getValidDestinations } from './RoutingManager';
 import { trackDisplayName } from '../utils/sendLabels';
@@ -489,6 +490,9 @@ export const SendViewPicker: React.FC<{ slot: number | null }> = ({ slot }) => (
 /** Tranche VCA : fader (dB relatifs appliqués aux membres), Muet, Solo, membres. */
 export const VcaStrip: React.FC<{ vca: Track; all: Track[] }> = ({ vca, all }) => {
   const members = vcaMembers(vca, all);
+  // R12 : un VCA prend ses membres par groupe (Pro Tools : VCA assigné à un groupe de mix).
+  const { groups } = useEditGroups();
+  const vcaGroup = groups.find(g => g.id === vca.vcaGroupId);
   const [pick, setPick] = useState<DOMRect | null>(null);
   const db = vca.volume > 0.0001 ? 20 * Math.log10(vca.volume) : -60;
   const set = (patch: Partial<Track>) => applyTracks(mapTrack(vca.id, t => ({ ...t, ...patch })));
@@ -504,7 +508,7 @@ export const VcaStrip: React.FC<{ vca: Track; all: Track[] }> = ({ vca, all }) =
       <div className="text-[9px] font-black uppercase tracking-wide text-violet-300" title="VCA Master (Pro Tools) : pilote le volume des membres, sans passer le son">VCA</div>
       <button type="button" onClick={(e) => setPick((e.currentTarget as HTMLElement).getBoundingClientRect())}
         className="rounded border border-violet-400/40 bg-violet-500/10 px-2 py-1 text-[10px] font-bold text-violet-200 text-left" data-testid={`vca-members-${vca.id}`}>
-        {members.length} membre{members.length > 1 ? 's' : ''} ▾
+        {members.length} membre{members.length > 1 ? 's' : ''}{vcaGroup ? ` · groupe ${vcaGroup.name}` : ''} ▾
       </button>
       <div className="flex-1 flex justify-center min-h-[120px]">
         {/* Même fader que les tranches (glisser, Maj = fin, molette, double-clic = 0 dB) ; le curseur natif reste pour le clavier. */}
@@ -527,10 +531,18 @@ export const VcaStrip: React.FC<{ vca: Track; all: Track[] }> = ({ vca, all }) =
       <div className="h-10 rounded-lg bg-violet-500/10 flex items-center px-2 text-[9px] font-black uppercase text-violet-200 truncate">{vca.name}</div>
       {pick && (
         <FloatingMenu x={pick.left} y={pick.bottom + 4} title={`Membres du VCA « ${vca.name} »`} onClose={() => setPick(null)}
-          items={candidates.map(t => {
-            const on = t.vcaId === vca.id;
-            return { label: `${on ? '✓ ' : ''}${t.name}`, onClick: () => applyTracks(mapTrack(t.id, x => { const o = { ...x }; if (on) delete o.vcaId; else o.vcaId = vca.id; return o; })) };
-          })} />
+          items={[
+            ...groups.map(g => {
+              const on = vca.vcaGroupId === g.id;
+              return { label: `${on ? '✓ ' : ''}Groupe « ${g.name} » (${g.trackIds.length})`, title: 'Les pistes du groupe suivent ce VCA (Pro Tools : VCA du groupe)',
+                onClick: () => applyTracks(mapTrack(vca.id, x => { const o = { ...x }; if (on) delete o.vcaGroupId; else o.vcaGroupId = g.id; return o; }), on ? 'VCA détaché du groupe' : `VCA lié au groupe « ${g.name} »`) };
+            }),
+            ...(groups.length ? ['separator' as const] : []),
+            ...candidates.map(t => {
+              const on = t.vcaId === vca.id;
+              return { label: `${on ? '✓ ' : ''}${t.name}`, onClick: () => applyTracks(mapTrack(t.id, x => { const o = { ...x }; if (on) delete o.vcaId; else o.vcaId = vca.id; return o; })) };
+            }),
+          ]} />
       )}
     </div>
   );

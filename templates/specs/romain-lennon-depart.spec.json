@@ -44,6 +44,65 @@
   "VOX / FX",
   "VOX ALL"
  ],
+ "groups": [
+  {
+   "name": "PRE ALL VOX",
+   "kind": "mix",
+   "members": [
+    "LEAD A BUS ",
+    "LD B BUS",
+    "BACK A BUS",
+    "BACK B BUS",
+    "BACK REFF BUS",
+    "ALL RFF"
+   ],
+   "deduced": true,
+   "note": "Bus qui sortent dans ALL VOX (« pré » ALL VOX). Membres déduits des bus (fenêtre des groupes de Pro Tools non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
+  },
+  {
+   "name": "FX ALL",
+   "kind": "mix",
+   "members": [
+    "1/4",
+    "1/2",
+    "ALL AMB",
+    "RV",
+    "RV PLATE",
+    "RV AMB",
+    "SLAP VERB",
+    "DL 1/2",
+    "DL 1/4",
+    "DL 1/8",
+    "DOUBLER",
+    "FLANGER",
+    "CHORUS",
+    "PAR COMPR"
+   ],
+   "deduced": true,
+   "note": "Pistes qui sortent dans le bus FX ALL (dossier SEND FX). Membres déduits des bus (fenêtre des groupes de Pro Tools non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
+  },
+  {
+   "name": "BASS DRUM",
+   "kind": "mix",
+   "members": [
+    "DRUMS BUS",
+    "PARAL DRUM",
+    "808 BUS"
+   ],
+   "deduced": true,
+   "note": "Pistes qui sortent dans le bus BASS DRUM. Membres déduits des bus (fenêtre des groupes de Pro Tools non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
+  },
+  {
+   "name": "INSTRUMENT",
+   "kind": "mix",
+   "members": [
+    "INSTRU",
+    "KEYS BUS"
+   ],
+   "deduced": true,
+   "note": "Instru et claviers. Membres déduits des bus (fenêtre des groupes de Pro Tools non relevée, voir RELEVE_COMPLET.md § 4) : à vérifier dans NOVA, Groupes."
+  }
+ ],
  "tracks": [
   {
    "name": "BEAT",
@@ -12685,6 +12744,7 @@
   {
    "name": "PRE ALL VOX",
    "kind": "vca",
+   "group": "PRE ALL VOX",
    "color": "#14005f",
    "volumeDb": 0.0,
    "folder": {
@@ -12696,6 +12756,7 @@
   {
    "name": "FX",
    "kind": "vca",
+   "group": "FX ALL",
    "color": "#14005f",
    "volumeDb": 0.0,
    "folder": {
@@ -12707,6 +12768,7 @@
   {
    "name": "DRUMS AND BASS",
    "kind": "vca",
+   "group": "BASS DRUM",
    "color": "#14005f",
    "volumeDb": 0.0,
    "folder": {
@@ -12718,6 +12780,7 @@
   {
    "name": "INSTRUMENT",
    "kind": "vca",
+   "group": "INSTRUMENT",
    "color": "#14005f",
    "volumeDb": 0.0,
    "folder": {

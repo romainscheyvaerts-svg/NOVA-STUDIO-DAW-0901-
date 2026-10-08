@@ -365,7 +365,7 @@ def scenario_b3(page, res, vp):
         bb = btn.bounding_box(); res["bouton_box"] = bb
         shot(page, f"b3_{vp}_02_bouton_prises_et_pastille_clip")
         # Pastille « Prises (3) ▾ » sur le clip : clip de 2 s à 10 s, zoom 40 px/s → pastille à 298 px du début du calque.
-        cv = page.evaluate("() => { const c = document.querySelectorAll('.nova-grille canvas')[1].getBoundingClientRect(); const sc = document.querySelector('.nova-grille .custom-scroll'); return { x: c.left, y: c.top, sl: sc ? sc.scrollLeft : 0 }; }")
+        cv = page.evaluate("() => { const c = (document.querySelector('.nova-grille canvas[data-tracks-top]') || document.querySelectorAll('.nova-grille canvas')[1]).getBoundingClientRect(); const sc = document.querySelector('.nova-grille .custom-scroll'); return { x: c.left, y: c.top, sl: sc ? sc.scrollLeft : 0 }; }")
         page.mouse.click(cv["x"] + 298 + 40 - cv["sl"], 164); page.wait_for_timeout(400)
         res["menu_pastille"] = [t.strip() for t in page.locator("button").all_inner_texts() if t.strip().startswith(("Écouter", "Garder", "Afficher", "Replier"))][:8]
         shot(page, f"b3_{vp}_02b_menu_pastille_clip")

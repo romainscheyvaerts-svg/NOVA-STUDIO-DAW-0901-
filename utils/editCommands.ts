@@ -25,7 +25,9 @@ export type EditCommandId =
   // Modes d'édition Pro Tools (hooks/useEditModes) : F1–F4, Tab to Transient, point de synchro.
   | 'editMode' | 'tabToTransient' | 'syncPoint'
   // Gain de clip, Heal, boucle (R5, components/ClipGainTools) : ligne de gain, nudge du gain, Heal Separation, Répéter, boucler.
-  | 'clipGainLine' | 'clipGainNudge' | 'heal' | 'repeatClips' | 'loopClips';
+  | 'clipGainLine' | 'clipGainNudge' | 'heal' | 'repeatClips' | 'loopClips'
+  // Groupes et temps (R12, hooks/useR12) : créer un groupe, suspendre les groupes, insérer / supprimer du temps.
+  | 'groupCreate' | 'groupsSuspend' | 'insertTime';
 
 export type EditCommandHandler = (arg?: any) => boolean | void;
 

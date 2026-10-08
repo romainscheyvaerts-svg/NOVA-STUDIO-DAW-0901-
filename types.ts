@@ -269,6 +269,20 @@ export interface TrackGroup {
   linkedMute: boolean;
   linkedSolo: boolean;
   linkedPan: boolean;
+  // ─── R12 · Groupes Pro Tools complets (utils/editGroups) ─────────────────────
+  /**
+   * Édition, Mix ou les deux (Pro Tools : Edit / Mix / Edit and Mix). Absent :
+   * « mix » (les groupes d'avant R12 ne liaient que la console).
+   */
+  kind?: 'edit' | 'mix' | 'both';
+  /** Groupe actif (surligné dans la liste des groupes). Absent : actif. */
+  isActive?: boolean;
+  /** Envois liés (niveau relatif, muet). */
+  linkedSends?: boolean;
+  /** Mode d'automation lié (Read, Touch, Latch…). */
+  linkedAutomation?: boolean;
+  /** Membres déduits (modèle relevé sans la fenêtre des groupes) : à vérifier. */
+  deduced?: boolean;
 }
 
 export interface Clip {
@@ -798,6 +812,12 @@ export interface Track {
   vstInstrument?: VstInstrument;
   groupId?: string;            // NEW: Track group reference
   /**
+   * R12 : tous les groupes de la piste quand elle en a plusieurs (Pro Tools :
+   * une piste peut être dans plusieurs groupes). Dérivé de TrackGroup.trackIds
+   * (utils/editGroups.syncGroupFields) ; `groupId` reste le premier.
+   */
+  groupIds?: string[];
+  /**
    * Mode d'automation façon Pro Tools (voir utils/automationWrite). Absent :
    * Read (l'automation est rejouée), comme avant l'ajout des modes.
    */
@@ -995,6 +1015,11 @@ export interface DAWState {
   loopEnd: number;
   tracks: Track[];
   trackGroups: TrackGroup[];      // NEW
+  /**
+   * R12 : réglages globaux des groupes (Pro Tools : « Suspendre tous les
+   * groupes », groupe <TOUT>). Absent : rien de suspendu, <TOUT> inactif.
+   */
+  groupSettings?: import('./utils/editGroups').GroupSettings;
   markers: Marker[];              // NEW
   selectedTrackId: string | null;
   currentView: ViewType;
