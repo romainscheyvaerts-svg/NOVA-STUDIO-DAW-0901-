@@ -59,6 +59,21 @@ export function encodeOutputMessage(channels: Float32Array[], dests: number[]): 
   return buf;
 }
 
+/** Message de sortie v2 depuis des échantillons déjà entrelacés (images × canaux). */
+export function encodeOutputInterleaved(interleaved: Float32Array, channels: number, dests: number[]): ArrayBuffer {
+  const nch = Math.max(1, channels);
+  const frames = Math.floor(interleaved.length / nch);
+  const head = 12 + 4 * nch;
+  const buf = new ArrayBuffer(head + frames * nch * 4);
+  const v = new DataView(buf);
+  v.setUint32(0, OUTPUT_MAGIC_V2, true);
+  v.setUint32(4, frames, true);
+  v.setUint32(8, nch, true);
+  for (let c = 0; c < nch; c++) v.setInt32(12 + 4 * c, dests[c] ?? -1, true);
+  new Float32Array(buf, head, frames * nch).set(interleaved.subarray(0, frames * nch));
+  return buf;
+}
+
 /**
  * Raccord d'un bloc horodaté avec le précédent : images à insérer en silence (bloc
  * perdu), à retirer au début (recouvrement), ou rien.

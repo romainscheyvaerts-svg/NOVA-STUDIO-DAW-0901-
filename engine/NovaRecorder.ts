@@ -41,10 +41,10 @@ class NovaRecorder extends AudioWorkletProcessor {
     if (this.n > 0) {
       if (this.k > 0) {
         const outs = this.chunks.map(c => c.slice(0, this.n));
-        this.port.postMessage({ type: 'multi', data: outs }, outs.map(o => o.buffer));
+        this.port.postMessage({ type: 'multi', data: outs, first: this.first }, outs.map(o => o.buffer));
       } else {
         const out = this.chunk.slice(0, this.n);
-        this.port.postMessage({ type: 'data', data: out }, [out.buffer]);
+        this.port.postMessage({ type: 'data', data: out, first: this.first }, [out.buffer]);
       }
       this.n = 0;
     }
@@ -107,6 +107,8 @@ export class NovaRecorderSession {
   private multi: Float32Array[][] = [];
   /** Canaux gardés séparés (0 = mono). */
   public readonly channels: number;
+  /** N° (horloge du contexte) du 1er échantillon capté, connu dès le 1er morceau (-1 avant). */
+  public firstFrame = -1;
 
   constructor(private ctx: AudioContext, source: AudioNode, opts: { channels?: number } = {}) {
     this.channels = Math.max(0, Math.min(32, Math.floor(opts.channels || 0)));
@@ -117,6 +119,7 @@ export class NovaRecorderSession {
     });
     this.donePromise = new Promise(r => { this.resolveDone = r; });
     this.node.port.onmessage = (e) => {
+      if (this.firstFrame < 0 && typeof e.data?.first === 'number' && e.data.first >= 0) this.firstFrame = e.data.first;
       if (e.data?.type === 'data') {
         const c = e.data.data as Float32Array;
         this.chunks.push(c);

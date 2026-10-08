@@ -794,7 +794,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       {/* Les effets restent visibles même en mode simple : on doit toujours voir ce qui traite la voix. */}
       {insertStripShown && (
         <TrackInsertStrip
-          leading={track.isTrackArmed ? <MonitorControl mini trackId={track.id} onExpand={() => setShowInputRow(true)} /> : outdatedPill || undefined}
+          leading={track.isTrackArmed ? <span className="flex shrink-0 items-center gap-1"><span className="max-w-[46px]"><InputSelect track={track} compact /></span><MonitorControl mini trackId={track.id} onExpand={() => setShowInputRow(true)} /></span> : outdatedPill || undefined}
           trackId={track.id}
           plugins={insertPlugins}
           isBaked={(p) => isPluginBaked(track, track.plugins.indexOf(p))}

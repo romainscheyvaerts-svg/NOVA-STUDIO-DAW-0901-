@@ -75,6 +75,11 @@ export interface TakeMetaRecord {
   group?: string;
   /** R14 · Canaux (2 = entrée stéréo, échantillons entrelacés G/D). Absent : mono. */
   channels?: number;
+  /**
+   * Avance du son sur le départ de la lecture (s, décompte / pré-roll), notée pendant la
+   * prise : retirée à la récupération (la prise revient à sa place exacte).
+   */
+  lead?: number;
 }
 
 export interface RecoveredTake { meta: TakeMetaRecord; samples: Float32Array; seconds: number }
@@ -348,7 +353,7 @@ export class RecoveryStore {
     const samples = new Float32Array(total);
     let o = 0;
     for (const c of chunks) { samples.set(c, o); o += c.length; }
-    return { meta: { ...meta, samples: total, chunks: chunks.length }, samples, seconds: total / (meta.sampleRate || 44100) };
+    return { meta: { ...meta, samples: total, chunks: chunks.length }, samples, seconds: total / (meta.sampleRate || 44100) / Math.max(1, meta.channels || 1) };
   }
 
   /**
@@ -399,6 +404,12 @@ export class TakeJournal {
   }
 
   get takeId() { return this.meta.takeId; }
+
+  /** Complète la description de la prise (écrite avec le prochain morceau). */
+  annotate(patch: Partial<Pick<TakeMetaRecord, 'lead'>>) {
+    if (this.closed) return;
+    Object.assign(this.meta, patch);
+  }
 
   /** Morceau capté (mono). Écrit dès qu'une demi-seconde s'est accumulée. */
   push(chunk: Float32Array) {

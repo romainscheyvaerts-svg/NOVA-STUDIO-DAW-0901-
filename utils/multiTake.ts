@@ -124,7 +124,8 @@ export function placeTake(track: Pick<Track, 'clips' | 'takeMeta'>, clip: Clip, 
   let newClipIds: string[];
   if (loopTakes.length) {
     clips = [...clips, ...loopTakes.map(l => toStore(l.clip, bufferId, gain))];
-    for (const l of loopTakes) meta = patchMeta(meta, l.clip.takeNumber!, { recordedAt: Math.round(l.wall), loopPass: l.pass, ...grp });
+    // Un groupe par tour : le tour 2 de la batterie va avec le tour 2 des overheads.
+    for (const l of loopTakes) meta = patchMeta(meta, l.clip.takeNumber!, { recordedAt: Math.round(l.wall), loopPass: l.pass, ...(o.group ? { group: `${o.group}-t${l.pass}` } : {}) });
     newClipIds = loopTakes.map(l => l.clip.id);
   } else if (o.cleaned?.length) {
     const parts = o.cleaned.map(c => toStore({ ...c, takeNumber, name: named.name }, bufferId, gain));

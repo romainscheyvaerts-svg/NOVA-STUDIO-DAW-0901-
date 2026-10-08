@@ -4126,6 +4126,10 @@ function Studio() {
     setAiNotification("↩ Ton comp d'avant est revenu.");
   }, [setState, breakHistory]);
 
+  /** Accès des scénarios (window.DAW_CONTROL) aux gestes récents, sans figer leur version. */
+  const qaHooksRef = useRef<{ compTake: (t: string, n: number, a: number, b: number | null) => void; setPunch: (p: any) => void; setCueMixes: (m: CueMix[]) => void }>(
+    { compTake: () => {}, setPunch: () => {}, setCueMixes: () => {} });
+  qaHooksRef.current.compTake = handleCompSwipe;
   const takeLanesApi = useMemo<TakeLanesApi>(() => ({
     open: takeLanesOpen, audition: takeAudition,
     onToggle: handleToggleTakeLanes, onAudition: handleAuditionTake, onComp: handleCompSwipe, onKeep: handleKeepTake,
@@ -4145,6 +4149,8 @@ function Studio() {
   // Punch-in / punch-out (utils/punch) : points indépendants de la boucle, posés
   // dans la règle ou depuis la sélection ; pré/post-roll réglables ; QuickPunch.
   const punchRecRef = useRef<{ in: number | null; out: number | null; isPunch: boolean; autoStopAt: number | null; quick?: boolean; stopping?: boolean; loop?: { start: number; end: number }; wall?: number } | null>(null);
+  qaHooksRef.current.setPunch = (patch: any) => handleUpdatePunchRef.current?.(patch);
+  const handleUpdatePunchRef = useRef<((p: any) => void) | null>(null);
   /** Réglages du punch : pas une édition du projet (pas d'étape d'annulation, comme Pro Tools). */
   const handleUpdatePunch = useCallback((patch: Partial<DAWState['punch']>) => {
     const p = { ...stateRef.current.punch, ...patch };
@@ -4152,6 +4158,7 @@ function Studio() {
     if (p.postRollBars !== undefined) p.postRoll = p.postRollBars * (240 / (stateRef.current.bpm || 120));
     setVisualState({ punch: p });
   }, [setVisualState]);
+  handleUpdatePunchRef.current = handleUpdatePunch;
   const handleTogglePunch = useCallback(() => {
     const st = stateRef.current;
     if (st.punch?.enabled) {
@@ -4481,6 +4488,7 @@ function Studio() {
   const handleCueMixesChange = useCallback((mixes: CueMix[]) => {
     setSilently(prev => ({ ...prev, cueMixes: mixes }));
   }, [setSilently]);
+  qaHooksRef.current.setCueMixes = handleCueMixesChange;
   // Journal de prise : le moteur écrit chaque morceau capté pendant l'enregistrement.
   useEffect(() => {
     audioEngine.setTakeJournalFactory(m => {
@@ -6312,6 +6320,12 @@ function Studio() {
       seek: handleSeek,
       toggleRecord: () => toggleRecordRef.current?.(),
       freeze: (trackId: string) => freezeTrackRef.current?.(trackId),
+      // R14 / R15 : mêmes chemins que l'interface (couloirs, punch, boucle, mixes casque, capture).
+      compTake: (trackId: string, n: number, a: number, b: number | null) => qaHooksRef.current.compTake(trackId, n, a, b),
+      setPunch: (patch: any) => qaHooksRef.current.setPunch(patch),
+      setLoop: (on: boolean, start: number, end: number) => setState(s => ({ ...s, isLoopActive: on, loopStart: start, loopEnd: end })),
+      setCueMixes: (mixes: CueMix[]) => qaHooksRef.current.setCueMixes(mixes),
+      captureLastTake: () => captureRef.current?.(),
       undo,
       redo,
       setView: (v: string) => setState(s => ({ ...s, currentView: v as any })),

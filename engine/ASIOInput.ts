@@ -14,6 +14,12 @@
  * Tous les canaux d'un bloc sont rééchantillonnés ensemble : ils restent alignés à
  * l'échantillon. Les blocs v2 portent leur n° d'échantillon : un bloc perdu est
  * remplacé par autant de silence (les prises ne glissent pas), un doublon est retiré.
+ *
+ * Calage verrouillé : si les blocs arrivent en retard (navigateur occupé), le lecteur
+ * joue du silence ET le note (« retard ») ; à l'arrivée des blocs en retard, il saute
+ * exactement autant d'échantillons. La correspondance entrée de la carte → horloge du
+ * DAW reste la même : une prise ne glisse pas sur la grille après un à-coup (avant, chaque
+ * à-coup la décalait de la durée du trou, mesuré : +10,6 ms sous charge).
  */
 import { blockJoin } from '../utils/asioProtocol';
 
@@ -32,7 +38,10 @@ class AsioInputPlayer extends AudioWorkletProcessor {
     this.fill = 0;
     this.started = false;
     this.prebuffer = Math.round(sampleRate * 0.03);   // 30 ms de marge contre la gigue réseau
-    this.maxFill = Math.round(sampleRate * 0.15);     // au-delà : on rattrape (latence bornée)
+    this.maxFill = Math.round(sampleRate * 0.25);     // au-delà : on rattrape (latence bornée)
+    this.lag = 0;                           // silence joué faute de données (à rattraper)
+    this.maxLag = sampleRate;               // au-delà d'1 s sans données : on repart de zéro
+    this.caught = 0; this.underruns = 0;
     this.channel = -1;                      // sortie 0 : -1 = mix des entrées 1+2
     this.srcPos = 0;                        // position fractionnaire dans le flux source
     this.last = new Float32Array(this.n);
@@ -79,11 +88,15 @@ class AsioInputPlayer extends AudioWorkletProcessor {
       }
       this.srcPos = pos - n;
       for (let c = 0; c < this.n; c++) this.last[c] = src(c, n);
-      // Trop d'avance (onglet en arrière-plan, rafale réseau) : on saute pour garder une latence faible.
+      // Trop d'avance (onglet en arrière-plan, rafale réseau) : on saute pour garder une latence
+      // faible. Ce qui est sauté rembourse d'abord le retard (le calage ne bouge pas) ; seul le
+      // reste décale (dérive d'horloge entre la carte et le navigateur).
       if (this.fill > this.maxFill) {
         const drop = this.fill - this.prebuffer;
         this.r = (this.r + drop) % this.size;
         this.fill -= drop;
+        const repaid = Math.min(this.lag, drop);
+        this.lag -= repaid; this.caught += repaid;
       }
     };
   }
@@ -92,10 +105,16 @@ class AsioInputPlayer extends AudioWorkletProcessor {
     const len = legacy[0].length;
     // Remplissage du tampon (≈ latence ajoutée) envoyé ~5 fois par seconde
     this.tick = (this.tick || 0) + 1;
-    if (this.tick % 70 === 0) this.port.postMessage({ type: 'fill', fill: this.fill, gaps: this.gaps, gapFrames: this.gapFrames, dups: this.dups });
+    if (this.tick % 70 === 0) this.port.postMessage({ type: 'fill', fill: this.fill, gaps: this.gaps, gapFrames: this.gapFrames, dups: this.dups, caught: this.caught, underruns: this.underruns, lag: this.lag });
     if (!this.started) {
-      if (this.fill >= this.prebuffer) this.started = true;
+      if (this.fill >= this.prebuffer) { this.started = true; this.lag = 0; }
       else { for (const c of legacy) c.fill(0); if (multi) for (const c of multi) c.fill(0); return true; }
+    }
+    // Blocs arrivés en retard : on saute ce qui aurait dû être joué pendant le silence.
+    if (this.lag > 0 && this.fill > len) {
+      const k = Math.min(this.lag, this.fill - len);
+      this.r = (this.r + k) % this.size;
+      this.fill -= k; this.lag -= k; this.caught += k;
     }
     const sel = this.channel;
     for (let i = 0; i < len; i++) {
@@ -107,7 +126,9 @@ class AsioInputPlayer extends AudioWorkletProcessor {
         if (multi) for (let c = 0; c < multi.length; c++) multi[c][i] = c < this.n ? this.bufs[c][r] : 0;
         this.r = (r + 1) % this.size; this.fill--;
       } else {
-        this.started = false;              // tampon vide : on se remet en pré-remplissage
+        // Tampon vide : silence, compté comme retard (rattrapé à l'arrivée des données).
+        this.lag++; this.underruns++;
+        if (this.lag > this.maxLag) { this.started = false; this.lag = 0; }
         if (multi) for (let c = 0; c < multi.length; c++) multi[c][i] = 0;
       }
       for (const c of legacy) c[i] = v;
@@ -136,6 +157,9 @@ export class ASIOInput {
   public gaps = 0;
   public gapFrames = 0;
   public dups = 0;
+  /** Échantillons joués en silence faute de données, puis rattrapés (calage gardé). */
+  public underruns = 0;
+  public caught = 0;
 
   /** Nœud du lecteur : sortie 0 = voix mono (historique), sortie 1 = toutes les entrées. */
   public getNode(): AudioNode | null { return this.node; }
@@ -167,6 +191,7 @@ export class ASIOInput {
         if (d?.type !== 'fill') return;
         this.fillSec = d.fill / this.ctx.sampleRate;
         this.gaps = d.gaps || 0; this.gapFrames = d.gapFrames || 0; this.dups = d.dups || 0;
+        this.underruns = d.underruns || 0; this.caught = d.caught || 0;
       };
       this.dest = this.ctx.createMediaStreamDestination();
       this.dest.channelCount = 2;

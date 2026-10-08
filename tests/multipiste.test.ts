@@ -7,7 +7,9 @@ import {
 import { compTakeGroup, deleteTakeGroup, keepTakeGroup, takeGroupLinked, takeGroupMates, takeGroupTracksAt } from '../utils/takeGroups';
 import { placeTake, trimToPlan } from '../utils/multiTake';
 import { mixLinkUpdates, makeGroup } from '../utils/editGroups';
-import { decodeInputMessage, encodeOutputMessage, blockJoin, INPUT_MAGIC_V2 } from '../utils/asioProtocol';
+import { decodeInputMessage, encodeOutputMessage, encodeOutputInterleaved, blockJoin, INPUT_MAGIC_V2 } from '../utils/asioProtocol';
+import { recoveredTakeClip } from '../utils/recoverySnapshot';
+import { memoryBackend, RecoveryStore } from '../utils/recoveryStore';
 import { Clip, TakeMeta, Track, TrackType } from '../types';
 import { makeClip, makeTrack } from './helpers/fixtures';
 
@@ -216,7 +218,7 @@ describe('R14 · ranger une prise par piste', () => {
     expect(p.loopCount).toBe(3);
     expect(p.activeTake).toBe(3);
     expect(p.clips.filter(c => !c.isMuted).map(c => c.takeNumber)).toEqual([3]);
-    expect(p.takeMeta!.every(m => m.group === 'tg-2')).toBe(true);
+    expect(p.takeMeta!.map(m => m.group)).toEqual(['tg-2-t1', 'tg-2-t2', 'tg-2-t3']);
   });
 });
 
@@ -255,5 +257,40 @@ describe('R15 · protocole du pont', () => {
     expect(blockJoin(512, 384, 256, 22050)).toEqual({ pad: 0, skip: 128, reset: false });
     expect(blockJoin(512, 0, 256, 22050).reset).toBe(true);
     expect(blockJoin(512, 100000, 256, 22050).reset).toBe(true);
+  });
+});
+
+describe('R14 · récupération d’une prise multipiste', () => {
+  const meta = (over: any) => ({ takeId: 't', projectId: 'p', trackId: 'mic3', trackName: 'Micro 3', sampleRate: 44100, recordedAt: 0, latency: 0.0605, startedAt: Date.now(), endedAt: null, samples: 0, chunks: 0, ...over });
+
+  it('replacée comme une prise : avance (décompte) retirée, ce qui tombe avant 0 s rogné (pas décalé)', () => {
+    const c = recoveredTakeClip({ meta: meta({ lead: 2.0, recordedAt: 0 }), samples: new Float32Array(0), seconds: 10 }, 'b');
+    expect(c.start).toBe(0);
+    expect(c.offset).toBeCloseTo(2.0605, 6);
+    expect(c.duration).toBeCloseTo(10 - 2.0605, 6);
+    const d = recoveredTakeClip({ meta: meta({ recordedAt: 12.5, latency: 0.02 }), samples: new Float32Array(0), seconds: 3 }, 'b');
+    expect([d.start, d.offset, d.duration]).toEqual([12.48, 0, 3]);
+  });
+
+  it('entrée stéréo : journal entrelacé, durée en secondes juste ; groupe et avance gardés', async () => {
+    const store = new RecoveryStore(memoryBackend());
+    const j = store.beginTake({ takeId: 's1', projectId: 'p', trackId: 'oh', trackName: 'OH', sampleRate: 100, recordedAt: 1, latency: 0, group: 'tg-1', channels: 2 }, 100);
+    j.push(new Float32Array(200));
+    j.annotate({ lead: 0.5 });
+    j.push(new Float32Array(200));
+    await j.finish();
+    const t = await store.readTake('s1');
+    expect(t!.seconds).toBeCloseTo(2, 6);
+    expect(t!.meta.group).toBe('tg-1');
+    expect(t!.meta.channels).toBe(2);
+    expect(t!.meta.lead).toBe(0.5);
+  });
+});
+
+describe('R15 · envoi entrelacé vers la carte', () => {
+  it('même message qu’à partir des canaux séparés', () => {
+    const a = encodeOutputMessage([new Float32Array([1, 2]), new Float32Array([3, 4])], [2, 3]);
+    const b = encodeOutputInterleaved(new Float32Array([1, 3, 2, 4]), 2, [2, 3]);
+    expect(new Uint8Array(b)).toEqual(new Uint8Array(a));
   });
 });

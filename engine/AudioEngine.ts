@@ -41,6 +41,7 @@ import { events808 } from '../utils/bass808';
 import { playableNotes, ccValueAt, ccDefault, sortPoints, SUSTAIN } from '../utils/midiCc';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
 import { InputRouter, InputTap } from './InputRouter';
+import { createAsioOutputTap, AsioOutputTap } from './AsioOutputTap';
 import { CueMixEngine } from './CueMixEngine';
 import { retireWorkletNode } from './workletGuard';
 import { channelOffsets, channelOffsetSec, neededInputChannels, offsetsFromProbe, setChannelOffsets } from '../utils/multiRecord';
@@ -149,6 +150,13 @@ interface TrackDSP {
   strip?: StripNodes | null;
 }
 
+/** Médiane (latences mesurées pendant une prise). */
+function medianOf(v: number[]): number {
+  const a = [...v].sort((x, y) => x - y);
+  const m = a.length >> 1;
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
 /** Prise à journaliser : piste, position, latence ; `group` et `channels` en multipiste (R14). */
 export interface TakeJournalMeta { trackId: string; recordedAt: number; latency: number; sampleRate: number; group?: string; channels?: number }
 
@@ -158,6 +166,8 @@ export interface TakeResult { clip: Clip; trackId: string; group?: string }
 /** Journal d'une prise en cours (utils/recoveryStore.TakeJournal). */
 export interface TakeJournalLike {
   push(chunk: Float32Array): void;
+  /** Avance du son sur le départ de la lecture (s) : la prise récupérée est replacée au bon endroit. */
+  annotate?(patch: { lead?: number }): void;
   finish(): Promise<void>;
   discard(): Promise<void>;
 }
@@ -243,6 +253,7 @@ export class AudioEngine {
   private recInput: ReturnType<InputRouter['recorderInput']> = null;
   private recChannels = new Map<string, number[]>();
   private recGroup: string | undefined;
+  private recLeadDone = false;
   /** Canaux max que le navigateur donne pour le micro (capabilities), 0 = inconnu. */
   private browserMaxChannels = 0;
   /** Volume / pan connus des pistes (retour direct du pont, mixes casque). */
@@ -309,7 +320,10 @@ export class AudioEngine {
   /** Entrée de la carte son via le pont ASIO (remplace le micro du navigateur quand le flux est actif). */
   private asioInput: ASIOInput | null = null;
   private asioInputReceived = false;
-  private asioOutputProcessor: ScriptProcessorNode | null = null;
+  /** Envoi vers la carte : AudioWorklet (ou ScriptProcessor sans AudioWorklet). */
+  private asioOutputProcessor: AudioNode | null = null;
+  private asioOutTap: AsioOutputTap | null = null;
+  private asioOutGen = 0;
 
   constructor() {
     // Garde des worklets : un processeur qui plante est retrouvé et contourné (voir handleWorkletCrash).
@@ -845,7 +859,7 @@ export class AudioEngine {
     const rawStart = firstCtx - (run ? run.startTime : (pick.from - pick.songTime));
     // Même règle qu'une prise : moyenne des latences mesurées pendant le passage, plus le réglage fin.
     const lats = run?.lat?.length ? run.lat : null;
-    const measured = lats ? lats.reduce((s, v) => s + v, 0) / lats.length : (this.lastLatency || this.measureRecordLatency().total);
+    const measured = lats ? medianOf(lats) : (this.lastLatency || this.measureRecordLatency().total);
     const latency = measured + this.recOffsetMs / 1000;
     const offs = channelOffsets();
     const group = reads.length > 1 ? newTakeGroupId() : undefined;
@@ -1976,8 +1990,10 @@ export class AudioEngine {
               if (j) this.recJournals.set(l.trackId, j);
             } catch { /* le journal ne doit jamais empêcher la prise */ }
           }
+          this.recLeadDone = false;
           if (this.recJournals.size) {
             session.onChunks = cs => {
+              this.annotateLead();
               for (const l of input.layout) {
                 const j = this.recJournals.get(l.trackId);
                 if (!j) continue;
@@ -2036,6 +2052,21 @@ export class AudioEngine {
       this.recordingTrackIds = [];
       return false;
     }
+  }
+
+  /**
+   * Journal de prise : dès que le 1er échantillon capté et le départ de la lecture sont
+   * connus, l'avance du son (décompte, pré-roll) est notée. Après un plantage, la prise
+   * récupérée est replacée comme une prise normale (et les pistes restent alignées).
+   */
+  private annotateLead() {
+    if (this.recLeadDone || !this.recSession || !this.ctx) return;
+    const first = this.recSession.firstFrame;
+    const playStart = this.recPlayStart;
+    if (first < 0 || playStart === null) return;
+    this.recLeadDone = true;
+    const lead = Math.max(0, (playStart + this.recStartTime) - first / this.ctx.sampleRate);
+    this.recJournals.forEach(j => { try { j.annotate?.({ lead }); } catch { /* */ } });
   }
 
   /** Fin de la prise : la 1re piste (voir stopRecordingAll pour toutes). */
@@ -2143,9 +2174,9 @@ export class AudioEngine {
       lead = Math.max(0, Math.round((playCtxAtStart - firstFrame / sr) * sr));
       rawStart = (firstFrame + lead) / sr - playStart;
     }
-    const measured = this.latencySamples.length
-      ? this.latencySamples.reduce((s, v) => s + v, 0) / this.latencySamples.length
-      : this.measureRecordLatency().total;
+    // Médiane des mesures (une par seconde) : un à-coup du navigateur pendant la prise (tampon
+    // d'entrée vidé ou gonflé un instant) ne déplace plus toute la prise.
+    const measured = this.latencySamples.length ? medianOf(this.latencySamples) : this.measureRecordLatency().total;
     const latency = measured + this.recOffsetMs / 1000;
     const offs = channelOffsets();
     const stamp = Date.now();
@@ -2211,7 +2242,7 @@ export class AudioEngine {
     this.tracksDSP.forEach(d => { if (d.synth instanceof NovaSynthNode) d.synth.syncTimeline(this.playbackStartTime, this.nextScheduleTime); });
     // Gate rythmique : motif calé sur la grille du morceau (même calcul qu'à l'export).
     this.resyncTimelineEffects();
-    if (this.recSession && this.recPlayStart === null) this.recPlayStart = this.playbackStartTime; 
+    if (this.recSession && this.recPlayStart === null) { this.recPlayStart = this.playbackStartTime; this.annotateLead(); } 
 
     // Valeur correcte au demarrage : sans ca, une piste dont tous les points
     // d'automation sont anterieurs au point de depart gardait la valeur du
@@ -4065,6 +4096,9 @@ export class AudioEngine {
         this.asioConnected = false;
         this.asioStreamActive = false;
         this.restoreBrowserOutput();
+        this.teardownAsioOutput();
+        // Pont perdu (Nova Studio fermé, pont arrêté) : les pistes armées repassent au micro du navigateur.
+        void this.refreshInputSource();
       },
       onDevices: (devices, asioDevices) => {
         this.asioDevices = asioDevices;
@@ -4317,8 +4351,24 @@ export class AudioEngine {
       sp.connect(merger, 1, 2 * k + 1);
       parts.push(sp);
     });
-    const proc = ctx.createScriptProcessor(256, n, 2);
     const dests = layout.dests;
+    this.asioOutParts = [...parts, ...sources.filter((s): s is AudioNode => !!s)];
+    this.asioOutLayoutSig = sig;
+    const gen = ++this.asioOutGen;
+    if (ctx.audioWorklet) {
+      // AudioWorklet : aucun bloc perdu quand l'interface est occupée (voir AsioOutputTap).
+      this.asioOutputProcessor = merger;   // marque « envoi en place » le temps du chargement
+      void createAsioOutputTap(ctx, n, block => {
+        if (this.asioStreamActive && this.asioBridge) this.asioBridge.sendInterleaved(block, n, dests);
+      }).then(tap => {
+        if (gen !== this.asioOutGen) { tap.dispose(); return; }
+        merger.connect(tap.node);
+        this.asioOutTap = tap;
+        this.asioOutputProcessor = tap.node;
+      }).catch(e => console.warn('[AudioEngine] Envoi vers la carte indisponible', e));
+      return;
+    }
+    const proc = ctx.createScriptProcessor(256, n, 2);
     proc.onaudioprocess = (e) => {
       if (this.asioStreamActive && this.asioBridge) {
         const ch: Float32Array[] = [];
@@ -4333,8 +4383,6 @@ export class AudioEngine {
     merger.connect(proc);
     proc.connect(ctx.destination);
     this.asioOutputProcessor = proc;
-    this.asioOutParts = [...parts, ...sources.filter((s): s is AudioNode => !!s)];
-    this.asioOutLayoutSig = sig;
   }
 
   private teardownAsioOutput() {
@@ -4342,6 +4390,8 @@ export class AudioEngine {
     const proc = this.asioOutputProcessor;
     this.asioOutputProcessor = null;
     this.asioOutLayoutSig = '';
+    this.asioOutGen++;
+    if (this.asioOutTap) { this.asioOutTap.dispose(); this.asioOutTap = null; }
     const [merger, ...rest] = this.asioOutParts;
     // Les sources (master, mixes) ne sont débranchées QUE des séparateurs de l'envoi.
     const splitters = rest.filter(n => n instanceof ChannelSplitterNode);
@@ -4350,7 +4400,7 @@ export class AudioEngine {
     splitters.forEach(sp => { try { sp.disconnect(); } catch { /* */ } });
     try { merger?.disconnect(); } catch { /* */ }
     try { proc.disconnect(); } catch { /* */ }
-    proc.onaudioprocess = null;
+    if (proc instanceof ScriptProcessorNode) proc.onaudioprocess = null;
     this.asioOutParts = [];
   }
 

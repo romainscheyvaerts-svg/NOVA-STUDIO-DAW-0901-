@@ -7,7 +7,7 @@
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 
-import { decodeInputMessage, encodeOutputMessage, InputBlock } from '../utils/asioProtocol';
+import { decodeInputMessage, encodeOutputInterleaved, encodeOutputMessage, InputBlock } from '../utils/asioProtocol';
 
 // Types pour la configuration ASIO
 export interface ASIOConfig {
@@ -178,6 +178,9 @@ export class ASIOBridgeClient {
    * Se déconnecter du serveur
    */
   disconnect(): void {
+    // Déconnexion voulue : pas de reconnexion automatique derrière (elle reprenait la main
+    // en silence, sans que le moteur la voie).
+    this.reconnectAttempts = this.maxReconnectAttempts;
     this.stopPing();
     if (this.ws) {
       this.ws.close();
@@ -310,6 +313,17 @@ export class ASIOBridgeClient {
     if (!this.isConnectedToServer() || channelData.length === 0) return;
     if (this.protocol >= 2) { this.ws!.send(encodeOutputMessage(channelData, dests)); return; }
     this.sendAudioFromWorklet(channelData.slice(0, 2));
+  }
+
+  /** R15 : bloc déjà entrelacé (AudioWorklet d'envoi), chaque canal vers sa sortie. */
+  sendInterleaved(interleaved: Float32Array, channels: number, dests: number[]): void {
+    if (!this.isConnectedToServer() || channels <= 0) return;
+    if (this.protocol >= 2) { this.ws!.send(encodeOutputInterleaved(interleaved, channels, dests)); return; }
+    // Ancien pont : seules les sorties 1-2.
+    const frames = Math.floor(interleaved.length / channels);
+    const two = new Float32Array(frames * 2);
+    for (let i = 0; i < frames; i++) { two[2 * i] = interleaved[i * channels]; two[2 * i + 1] = interleaved[i * channels + (channels > 1 ? 1 : 0)]; }
+    this.sendAudio(two, 2);
   }
 
   /**
