@@ -23,7 +23,23 @@ import type { PluginInstance, Track, TrackSend } from '../types';
 export type MixFields = Record<string, unknown>;
 
 export const PLUGIN_FIELD = 'plugin:';
-const BASE_FIELDS = ['volume', 'pan', 'isMuted', 'outputTrackId', 'sends', 'pluginOrder', 'structure'] as const;
+/** Automation (R7/R8/R9) : chaque couloir à part (« auto:<id> »), leur liste et le mode de lecture. */
+export const AUTO_FIELD = 'auto:';
+const BASE_FIELDS = ['volume', 'pan', 'isMuted', 'outputTrackId', 'sends', 'pluginOrder', 'structure', 'strip', 'autoOrder', 'automationMode'] as const;
+
+/**
+ * Tranche de console (trim d'entrée, inversion de phase, somme mono, largeur
+ * stéréo) : un seul champ. Avant : réglée chez l'ingé, jamais envoyée.
+ */
+export const STRIP_KEYS = ['inputTrimDb', 'phaseInvert', 'monoSum', 'stereoWidth'] as const;
+export const stripOf = (t: Track): Record<string, unknown> => {
+  const out: Record<string, unknown> = {};
+  for (const k of STRIP_KEYS) if (t[k] !== undefined && t[k] !== false && !(k === 'inputTrimDb' && t[k] === 0) && !(k === 'stereoWidth' && t[k] === 1)) out[k] = t[k];
+  return out;
+};
+
+/** Couloir d'automation tel qu'il voyage (sans l'état d'affichage, local : déplié ou non). */
+const laneForWire = (l: any) => { const { isExpanded: _e, ...r } = l || {}; return r; };
 
 /**
  * Structure façon Pro Tools (utils/trackStructure) : masquée, inactive, dossier,
@@ -59,6 +75,11 @@ export function mixFieldsOf(t: Track): MixFields {
   };
   if (!t.volumeLock) out.volume = t.volume;
   for (const p of t.plugins || []) out[PLUGIN_FIELD + p.id] = p;
+  // Automation et tranche : avant, l'automation écrite par l'ingé restait chez lui.
+  out.strip = stripOf(t);
+  out.automationMode = t.automationMode ?? null;
+  out.autoOrder = (t.automationLanes || []).map(l => l.id);
+  for (const l of t.automationLanes || []) out[AUTO_FIELD + l.id] = laneForWire(l);
   return out;
 }
 
@@ -156,6 +177,44 @@ export function applyMixFields(t: Track, fields: MixFields, accept: (field: stri
   if (typeof fields.outputTrackId === 'string' && take('outputTrackId')) t.outputTrackId = fields.outputTrackId;
   if (Array.isArray(fields.sends) && take('sends')) t.sends = (fields.sends as TrackSend[]).map(s => ({ ...s }));
   if (fields.structure && typeof fields.structure === 'object' && take('structure')) applyStructure(t, fields.structure as StructureFields);
+  if (fields.strip && typeof fields.strip === 'object' && take('strip')) {
+    const st = fields.strip as Record<string, unknown>;
+    const rec = t as unknown as Record<string, unknown>;
+    for (const k of STRIP_KEYS) {
+      const v = st[k];
+      if (k === 'phaseInvert' || k === 'monoSum') { if (v === true) rec[k] = true; else delete rec[k]; }
+      else if (typeof v === 'number' && Number.isFinite(v)) rec[k] = k === 'inputTrimDb' ? Math.max(-24, Math.min(24, v)) : Math.max(0, Math.min(2, v));
+      else delete rec[k];
+    }
+  }
+  if ('automationMode' in fields && take('automationMode')) {
+    const m = fields.automationMode;
+    if (m === 'off' || m === 'read' || m === 'touch' || m === 'latch' || m === 'write' || m === 'trim') t.automationMode = m; else delete t.automationMode;
+  }
+  // Automation : couloir par couloir ; la liste (ajouts, retraits, ordre) par « autoOrder ».
+  const lanesIn = new Map<string, any>();
+  for (const [k, v] of Object.entries(fields)) if (k.startsWith(AUTO_FIELD) && v && typeof v === 'object') lanesIn.set(k.slice(AUTO_FIELD.length), v);
+  if (lanesIn.size || Array.isArray(fields.autoOrder)) {
+    const cleanLane = (l: any, old?: any) => ({
+      ...l, isExpanded: old ? !!old.isExpanded : true,
+      points: (Array.isArray(l.points) ? l.points : []).filter((p: any) => p && Number.isFinite(p.time) && Number.isFinite(p.value)).sort((a: any, b: any) => a.time - b.time),
+    });
+    const lanes = [...(t.automationLanes || [])];
+    lanesIn.forEach((l, id) => {
+      const i = lanes.findIndex(x => x.id === id);
+      if (i >= 0 && take(AUTO_FIELD + id)) lanes[i] = cleanLane(l, lanes[i]);
+    });
+    if (Array.isArray(fields.autoOrder) && take('autoOrder')) {
+      const next: any[] = [];
+      for (const id of (fields.autoOrder as unknown[]).filter((x): x is string => typeof x === 'string')) {
+        const have = lanes.find(x => x.id === id);
+        if (have) { next.push(have); continue; }
+        const l = lanesIn.get(id);
+        if (l) { next.push(cleanLane(l)); if (!applied.includes(AUTO_FIELD + id)) { accept(AUTO_FIELD + id); applied.push(AUTO_FIELD + id); } }
+      }
+      t.automationLanes = next;
+    } else t.automationLanes = lanes;
+  }
   // Effets : chacun à part ; l'ordre (et les ajouts / retraits) par « pluginOrder ».
   const incoming = new Map<string, PluginInstance>();
   for (const [k, v] of Object.entries(fields)) {
@@ -184,6 +243,9 @@ export function applyMixFields(t: Track, fields: MixFields, accept: (field: stri
 }
 
 /** Champs de mix touchés par une opération (pour savoir si les effets ont bougé). */
+export const touchesAutomation = (fields: MixFields): boolean =>
+  Object.keys(fields).some(k => k === 'autoOrder' || k === 'automationMode' || k.startsWith(AUTO_FIELD));
+
 export const touchesPlugins = (fields: MixFields): boolean =>
   Object.keys(fields).some(k => k === 'pluginOrder' || k.startsWith(PLUGIN_FIELD));
 
@@ -225,7 +287,8 @@ export function sanitizeClipGainFields<T extends Record<string, any>>(c: T): T {
     if (!ok) delete out.elastic;
     else {
       const markers = Array.isArray(e.markers) ? e.markers.filter((m: any) => m && typeof m.id === 'string' && finite(m.src) && finite(m.dst)).sort((a: any, b: any) => a.src - b.src) : [];
-      out.elastic = { ...e, markers: markers.length ? markers : undefined };
+      // Liste vide gardée vide (sinon l'empreinte du clip diffère d'un côté à l'autre).
+      out.elastic = { ...e, markers: markers.length || Array.isArray(e.markers) ? markers : undefined };
     }
   }
   return out as T;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { RemoteInge } from '../hooks/useRemoteInge';
 import { SLOT_LABEL } from '../utils/remoteInge';
 
@@ -38,6 +38,12 @@ const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
   const [copied, setCopied] = useState(false);
   const [copiedArtist, setCopiedArtist] = useState(false);
   const [over, setOver] = useState<string | null>(null);
+  // Panneau ouvert : les notifications d'export passent à gauche (elles recouvraient ses boutons).
+  useEffect(() => {
+    if (!open) return;
+    document.body.classList.add('nova-collab-open');
+    return () => { document.body.classList.remove('nova-collab-open'); };
+  }, [open]);
   if (!open) return null;
   const isArtist = r.role === 'artist';
 

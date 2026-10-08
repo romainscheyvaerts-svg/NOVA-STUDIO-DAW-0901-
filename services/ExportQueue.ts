@@ -142,7 +142,11 @@ class ExportQueueStore {
     const j = this.jobs.find(x => x.id === id);
     if (!j?.result) return;
     await this.save(j.result.download.blob, j.result.download.name);
+    const first = !j.saved;
     this.patch(id, { saved: true });
+    // Téléchargé à la main (tablette, téléphone) : la notification s'efface comme après un
+    // enregistrement automatique (avant : elle restait et cachait le bas de l'écran, dont Collaborer / Chat).
+    if (first && this.autoDismissMs > 0) setTimeout(() => this.remove(id), this.autoDismissMs);
   }
 
   remove(id: string) {

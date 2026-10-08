@@ -27,11 +27,15 @@ export interface CollabStatus {
   lastError: string | null;
   /** Opérations reçues impossibles à appliquer (abandonnées après plusieurs essais). */
   failedOps: number;
+  /** Nos modifications refusées pour de bon par le serveur (retirées de la file). */
+  droppedOps: number;
+  /** Aller-retour avec le serveur (médiane des derniers envois, ms). */
+  rttMs: number | null;
 }
 
 export const initialCollabStatus = (): CollabStatus => ({
   joined: false, realtime: 'connecting', reachable: true, browserOffline: false, catchingUp: false,
-  lastSyncAt: null, pending: 0, upload: null, lastError: null, failedOps: 0,
+  lastSyncAt: null, pending: 0, upload: null, lastError: null, failedOps: 0, droppedOps: 0, rttMs: null,
 });
 
 export type CollabStatusCode = 'connecting' | 'offline' | 'catching_up' | 'sending' | 'polling' | 'waiting_peer' | 'live' | 'error';
@@ -57,6 +61,12 @@ export function collabStatusView(s: CollabStatus, ctx: { othersOnline: number; p
     return {
       code: 'error', short: 'À recharger', tone: 'error', action: 'reload', actionLabel: 'Recharger la session',
       label: `${s.failedOps > 1 ? `${s.failedOps} modifications reçues n'ont` : "Une modification reçue n'a"} pas pu être appliquée${s.failedOps > 1 ? 's' : ''} (audio introuvable ou connexion). Recharge la session pour repartir de la version en ligne.`,
+    };
+  }
+  if (s.droppedOps > 0) {
+    return {
+      code: 'error', short: 'Modif. refusée', tone: 'error', action: 'reload', actionLabel: 'Recharger la session',
+      label: `${s.lastError || 'Une de tes modifications a été refusée par le serveur.'} Les autres modifications continuent de partir ; recharge la session pour repartir d'un état commun.`,
     };
   }
   if (!s.joined && s.realtime === 'connecting' && s.reachable) {

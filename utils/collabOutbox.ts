@@ -38,6 +38,12 @@ export interface CollabOutboxOptions {
   merge?: (kind: string, older: Record<string, any>, newer: Record<string, any>) => Record<string, any>;
   onChange?: () => void;
   store?: CollabOutboxStore;
+  /**
+   * Modification refusée pour de bon par le serveur (opération invalide, trop
+   * grosse) : retirée de la file, sinon elle bloquait TOUT ce qui suivait
+   * (avant : la file s'arrêtait à elle pour toujours, « hors ligne » affiché).
+   */
+  onDrop?: (entry: OutboxEntry, error: string) => void;
   now?: () => number;
   newId?: () => string;
 }
@@ -86,6 +92,9 @@ export class CollabOutbox {
     return q || f || null;
   }
 
+  /** Modification en attente pour cette clé, SANS celle en cours d'envoi. */
+  peekQueued(key: string): Record<string, any> | null { return this.entries.get(key)?.op || null; }
+
   has(key: string): boolean { return this.entries.has(key) || this.inflight?.key === key; }
   /** Nombre de modifications pas encore parties (celle en cours d'envoi comprise). */
   size(): number { return this.entries.size + (this.inflight ? 1 : 0); }
@@ -120,6 +129,11 @@ export class CollabOutbox {
         this.changed();
       } catch (e: any) {
         this.inflight = null;
+        if (e && e.permanent) {
+          this.changed();
+          try { this.opts.onDrop?.(entry, String(e?.message || 'refusée')); } catch { /* */ }
+          continue;
+        }
         const failed = { ...entry, tries: entry.tries + 1 };
         const newer = this.entries.get(key);
         // Une modification plus récente de la même clé est arrivée pendant l'envoi : elle passe devant.

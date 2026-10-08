@@ -182,6 +182,8 @@ export interface PeerInfo {
   host?: boolean;
   /** Dernier signe de vie (opération reçue), ms. */
   seenAt?: number;
+  /** Appareils connectés de cette personne (même compte sur PC et tablette). */
+  devices?: number;
 }
 
 export interface PeerView extends PeerInfo { state: PeerState; label: string; me: boolean }

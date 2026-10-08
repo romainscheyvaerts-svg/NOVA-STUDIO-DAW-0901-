@@ -463,3 +463,15 @@ describe('contentOf / mixOf / contentBufferIds / sigOf', () => {
     expect(sigOf(undefined)).toBe(sigOf(undefined));
   });
 });
+
+describe('instantané : jusqu’où tout est appliqué (safeSeq)', () => {
+  it('une opération en échec (audio pas encore en ligne) n’est jamais annoncée comme contenue dans l’instantané', async () => {
+    h.server.ops = [op(1001), op(1002), op(1003)];
+    const { c } = client(o => { if (o.seq === 1002) throw new Error('audio pas encore en ligne'); });
+    await c.join(0);
+    await settle(c);
+    await Promise.resolve();
+    expect(c.lastSeq).toBe(1003);
+    expect(c.safeSeq).toBe(1001); // 1002 a échoué : celui qui arrive doit la rejouer
+  });
+});
