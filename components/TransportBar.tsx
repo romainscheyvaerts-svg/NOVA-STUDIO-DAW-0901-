@@ -22,6 +22,7 @@ import { PunchSettings } from '../types';
 import { openFeedback } from '../services/feedback';
 import { MidiFileMenu, MidiMobileMenuItems } from './MidiFileMenu';
 import DspMeter from './DspMeter';
+import PracticeSpeed from './PracticeSpeed';
 import type { Track } from '../types';
 import type { SafetyContext } from '../utils/dspLoad';
 import { fitBar, barItem } from '../utils/barFit';
@@ -453,6 +454,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           <button onClick={onStop} title="Stop (Échap)" aria-label="Stop" className="nova-hit w-8 h-8 text-slate-600 hover:text-white transition-colors hide-on-tablet-text" style={{ color: 'var(--text-secondary)' }}><i className="fas fa-stop text-xs"></i></button>
           <button onClick={onTogglePlay} title="Lecture / pause (raccourci : barre d'espace)" aria-label={isPlaying ? 'Pause' : 'Lecture'} aria-pressed={isPlaying} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-150 ${isPlaying ? 'text-black nova-halo' : 'bg-white text-black hover:scale-105 shadow-md shadow-black/30'}`} style={isPlaying ? { backgroundColor: 'var(--accent-neon)' } : undefined}><i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'} text-base`}></i></button>
           <button onClick={onToggleLoop} title="Boucle (L)" aria-label="Boucle" aria-pressed={isLoopActive} className={`nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isLoopActive ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isLoopActive ? 'rgba(0,242,255,0.2)' : 'transparent', color: isLoopActive ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-sync-alt text-xs"></i></button>
+          {/* Lecture ralentie (R13) : 50 à 100 %, hauteur gardée. */}
+          <PracticeSpeed className="hidden md:block" />
           {dspTracks ? <DspMeter tracks={dspTracks} onFreezeTrack={onDspFreezeTrack} safety={dspSafety || { isRecording, bridgeConnected: false }} compact={isMobileLayout} /> : <OverloadBadge />}
           {onTogglePunch && !simple && (
             <PunchControls foldPrio={27} punch={punch} bpm={bpm} isPunchActive={isPunchActive} onTogglePunch={onTogglePunch}

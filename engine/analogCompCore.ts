@@ -33,7 +33,13 @@ export const AC = {
   HP_B0: 20, HP_B1: 21, HP_B2: 22, HP_A1: 23, HP_A2: 24, LINK: 25, REL_DUCK: 26, IN_SAT: 27, OUT_SAT: 28,
   DET_REL: 29, ATT2: 30, REL2_FOLLOW: 31, EQ: 32, N_EQ: 4, DRIVE: 52, IN_BIAS: 53, OUT_BIAS: 54,
   FAST_ATT: 55, FAST_REL: 56, FAST_DET_REL: 57, FET_A2: 58, FINAL_SAT: 59, FINAL_BIAS: 60,
-  SLOW_FRAC: 61, SLOW_ATT: 62, SLOW_REL: 63, OUT_AB: 64, IN_AB: 65, SC2: 66, OUT_KNEE: 71, XF_K: 72, XF_A: 73, EQ2: 80, NP: 100,
+  SLOW_FRAC: 61, SLOW_ATT: 62, SLOW_REL: 63, OUT_AB: 64, IN_AB: 65, SC2: 66, OUT_KNEE: 71, XF_K: 72, XF_A: 73, XF_MODE: 74, EQ2: 80,
+  /** Tour 2 : cellule multi-composantes en dB (3 x 8 : f, a, alpha, r, beta, l, vitesse max de montée), détecteur RMS, anticipation. */
+  C3: 100, C3_K: 101, DET_SQ: 125, C3_ATT_DB: 126, C3_HOLD: 127,
+  /** Latence DÉCLARÉE au PDC (échantillons) : avec le passe-tout fractionnaire, reproduit l'avance de phase mesurée. */
+  LAT: 128,
+  /** Étage de sortie TABULÉ (caractéristique de transfert mesurée) : v = asinh(u) dans [-WS_MAX, +WS_MAX], N_WS points dès WS. */
+  WS_MAX: 129, WS: 130, N_WS: 257, NP: 387,
 } as const;
 
 export interface AnalogCompInternal {
@@ -63,7 +69,7 @@ export interface AnalogCompCore {
 export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   var SR = sampleRate > 0 ? sampleRate : 48000;
   void SR;
-  var NP = 100, NEQ = 8, PEQ = 32, PEQ2 = 80;
+  var NP = 387, NEQ = 8, PEQ = 32, PEQ2 = 80, NWS = 257;
   var P = new Float64Array(NP);
   var tab = new Float64Array([0, 0]);
   var l0 = -12, dl = 1;
@@ -75,18 +81,31 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   var yprev = new Float64Array(2), above = new Float64Array(2), slowOk = new Float64Array(2);
   var hp = new Float64Array(8); // par canal : x1, x2, y1, y2
   var hp2 = new Float64Array(8);
-  var flux = new Float64Array(2);
+  var flux = new Float64Array(2), fluxi = new Float64Array(2);
   var eqs = new Float64Array(2 * NEQ * 4);
   var lv = new Float64Array(2), xin = new Float64Array(2);
   var envf = new Float64Array(2), Af = new Float64Array(2), lvf = new Float64Array(2), As = new Float64Array(2);
+  var gk = new Float64Array(6), hm = new Float64Array([1, 1]);
+  var eqAct = new Int32Array(8);
   var mGrA = 1, mIn = 0, mOut = 0, curAe = 1;
+  /** Les états des deux canaux sont identiques (après remise à zéro, tant que l'entrée reste mono). */
+  var statesEq = true;
+
+  /** Recopie l'état du canal gauche sur le droit (bloc mono traité une seule fois). */
+  function copyState01() {
+    A[1] = A[0]; A2[1] = A2[0]; env[1] = env[0]; mem[1] = mem[0]; yprev[1] = yprev[0]; above[1] = above[0];
+    slowOk[1] = slowOk[0]; flux[1] = flux[0]; fluxi[1] = fluxi[0]; envf[1] = envf[0]; Af[1] = Af[0]; lvf[1] = lvf[0];
+    As[1] = As[0]; hm[1] = hm[0]; gk[3] = gk[0]; gk[4] = gk[1]; gk[5] = gk[2];
+    for (var k = 0; k < 4; k++) { hp[4 + k] = hp[k]; hp2[4 + k] = hp2[k]; }
+    for (var k2 = 0; k2 < NEQ * 4; k2++) eqs[NEQ * 4 + k2] = eqs[k2];
+  }
 
   function reset() {
     A[0] = A[1] = 1; A2[0] = A2[1] = 1; env[0] = env[1] = 0; mem[0] = mem[1] = 0;
     yprev[0] = yprev[1] = 0; above[0] = above[1] = 0; slowOk[0] = slowOk[1] = 0;
     envf[0] = envf[1] = 0; Af[0] = Af[1] = 1; lvf[0] = lvf[1] = 0; As[0] = As[1] = 1;
-    hp.fill(0); hp2.fill(0); eqs.fill(0); flux[0] = flux[1] = 0;
-    mGrA = 1; mIn = 0; mOut = 0; curAe = 1;
+    hp.fill(0); hp2.fill(0); eqs.fill(0); gk.fill(0); hm[0] = hm[1] = 1; flux[0] = flux[1] = 0; fluxi[0] = fluxi[1] = 0;
+    mGrA = 1; mIn = 0; mOut = 0; curAe = 1; statesEq = true;
   }
   reset();
 
@@ -109,6 +128,18 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
     return y;
   }
 
+  /** Caractéristique de transfert mesurée y = u·h(asinh u) (gain h tabulé, interpolation cubique). */
+  function wsf(u: number) {
+    var m = P[129];
+    var f = (Math.asinh(u) + m) / (2 * m) * (NWS - 1);
+    if (f <= 0) return u * P[130];
+    if (f >= NWS - 1) return u * P[130 + NWS - 1];
+    var i = Math.floor(f), t = f - i;
+    // interpolation cubique (Catmull-Rom) : pente continue -> aucune harmonique parasite des nœuds
+    var p0 = P[130 + (i > 0 ? i - 1 : 0)], p1 = P[130 + i], p2 = P[131 + i], p3 = P[130 + (i + 2 < NWS ? i + 2 : NWS - 1)];
+    return u * (p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0))));
+  }
+
   function table(L: number) {
     var f = (L - l0) / dl;
     var n = tab.length;
@@ -129,34 +160,50 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   function process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number, keyL?: Float32Array | null, keyR?: Float32Array | null) {
     var right = inR || inL;
     var kRight = keyL ? (keyR || keyL) : null;
+    // entrée mono (deux canaux identiques, cas d'une voix) : un seul canal calculé, recopié
+    // (avec une clé externe, la clé doit elle aussi être identique sur les deux canaux)
+    var mono = statesEq;
+    if (mono && right !== inL) { for (var j = 0; j < n; j++) if (right[j] !== inL[j]) { mono = false; break; } }
+    if (mono && keyL && kRight !== keyL) { for (var j2 = 0; j2 < n; j2++) if ((kRight as Float32Array)[j2] !== keyL[j2]) { mono = false; break; } }
+    var nch = mono ? 1 : 2;
     var drv = P[52] !== 0 ? P[52] : 1;
+    var c3 = P[100] > 0.5, sq = P[125] > 0.5, thr2 = P[1] * P[1];
+    var xfIn = P[72] !== 0 && P[74] > 1.5;
+    // invariants du bloc (performance : < 1 % d'un cœur par instance)
+    var pre = P[0], inLin = P[14] === 0 && P[15] === 0 && P[27] === 0 && P[65] === 0;
+    var fbOn = P[2] > 0.5, hpOn = P[20] !== 0, sc2On = P[66] !== 0, half = P[3] > 0.5, thr = P[1];
+    var mix = P[19], dry = 1 - P[19];
+    var nAct = 0;
+    for (var q0 = 0; q0 < NEQ; q0++) { var oq = q0 < 4 ? PEQ + 5 * q0 : PEQ2 + 5 * (q0 - 4); if (P[oq] !== 0) eqAct[nAct++] = q0; }
     for (var i = 0; i < n; i++) {
-      for (var c = 0; c < 2; c++) {
+      for (var c = 0; c < nch; c++) {
         var x0 = c === 0 ? inL[i] : right[i];
         var ax = x0 < 0 ? -x0 : x0;
         if (ax > mIn) mIn = ax;
-        var xi = shape(x0 * P[0], P[14], P[15], P[27], P[53], P[65]);
+        var xi = inLin ? x0 * pre : shape(x0 * pre, P[14], P[15], P[27], P[53], P[65]);
+        if (xfIn) { fluxi[c] += (xi - fluxi[c]) * P[73]; var fi = fluxi[c]; xi = xi + P[72] * fi * (fi < 0 ? -fi : fi); }
         xin[c] = xi;
         var s: number;
         if (keyL) {
           // Clé externe (side-chain) : le détecteur écoute la clé, le son traité reste l'entrée.
           var k0 = c === 0 ? keyL[i] : (kRight as Float32Array)[i];
-          s = shape(k0 * P[0], P[14], P[15], P[27], P[53], P[65]);
-        } else s = P[2] > 0.5 ? yprev[c] : xi;
-        if (P[20] !== 0) {
+          s = inLin ? k0 * pre : shape(k0 * pre, P[14], P[15], P[27], P[53], P[65]);
+        } else s = fbOn ? yprev[c] : xi;
+        if (hpOn) {
           var h0 = c * 4;
           var o = P[20] * s + P[21] * hp[h0] + P[22] * hp[h0 + 1] - P[23] * hp[h0 + 2] - P[24] * hp[h0 + 3];
           hp[h0 + 1] = hp[h0]; hp[h0] = s; hp[h0 + 3] = hp[h0 + 2]; hp[h0 + 2] = o;
           s = o;
         }
-        if (P[66] !== 0) {
+        if (sc2On) {
           var g0 = c * 4;
           var o2 = P[66] * s + P[67] * hp2[g0] + P[68] * hp2[g0 + 1] - P[69] * hp2[g0 + 2] - P[70] * hp2[g0 + 3];
           hp2[g0 + 1] = hp2[g0]; hp2[g0] = s; hp2[g0 + 3] = hp2[g0 + 2]; hp2[g0 + 2] = o2;
           s = o2;
         }
-        var r = P[3] > 0.5 ? (s > 0 ? s : 0) : (s > 0 ? s : -s);
-        r = r / P[1];
+        var r: number;
+        if (sq) r = s * s / thr2;
+        else { r = half ? (s > 0 ? s : 0) : (s > 0 ? s : -s); r = r / thr; }
         var e = env[c];
         if (r > e) e = P[4] <= 0 ? r : e + (r - e) * P[4];
         else e = P[29] <= 0 ? r : e + (r - e) * P[29];
@@ -169,24 +216,56 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
         }
         lv[c] = e;
       }
-      if (P[25] > 0.5) {
+      if (P[25] > 0.5 && !mono) {
         var m = lv[0] > lv[1] ? lv[0] : lv[1]; lv[0] = m; lv[1] = m;
         var mf = lvf[0] > lvf[1] ? lvf[0] : lvf[1]; lvf[0] = mf; lvf[1] = mf;
       }
-      for (var c2 = 0; c2 < 2; c2++) {
+      for (var c2 = 0; c2 < nch; c2++) {
         var rr = lv[c2];
-        var L = 20 * Math.log10(rr > 1e-9 ? rr : 1e-9);
+        var L = sq ? 4.342944819032518 * Math.log(rr > 1e-18 ? rr : 1e-18) : 8.685889638065035 * Math.log(rr > 1e-9 ? rr : 1e-9);
         var Gt = table(L);
+        var ae: number;
+        if (c3) {
+          // cellule multi-composantes (dB) : 3 parts de la cible, montée / descente propres
+          var o3 = c2 * 3;
+          // P[108] : la réduction suit la PLUS FORTE des composantes (cellules en parallèle, mode F/M)
+          var cmax = P[108] > 0.5;
+          var gtot = cmax ? Math.max(gk[o3], gk[o3 + 1], gk[o3 + 2]) : gk[o3] + gk[o3 + 1] + gk[o3 + 2];
+          var T = Gt;
+          if (P[127] > 0) { if (T > gtot) hm[c2] = 0; else hm[c2] += (1 - hm[c2]) * P[127]; }
+          if (P[126] !== 0 && T > gtot) T = T + P[126] * (T - gtot);
+          for (var kk = 0; kk < 3; kk++) {
+            var ob = 101 + 8 * kk, fk = P[ob];
+            if (fk <= 0) continue;
+            var tk = fk * T, gg3 = gk[o3 + kk];
+            if (tk > gg3) {
+              var ca3 = P[ob + 2] !== 0 ? P[ob + 1] * Math.exp(P[ob + 2] * T) : P[ob + 1];
+              if (ca3 > 1) ca3 = 1;
+              var dg3 = (tk - gg3) * ca3;
+              if (P[ob + 6] > 0 && dg3 > P[ob + 6]) dg3 = P[ob + 6];
+              gg3 += dg3;
+            } else {
+              var mb3 = P[ob + 4] !== 0 ? Math.exp(P[ob + 4] * gtot) : 1;
+              var rr3 = P[ob + 3] * mb3;
+              if (rr3 > 1) rr3 = 1;
+              var dd3 = ((gg3 - tk) * rr3 + fk * P[ob + 5] * mb3) * hm[c2];
+              if (dd3 > gg3 - tk) dd3 = gg3 - tk;
+              gg3 -= dd3;
+            }
+            gk[o3 + kk] = gg3;
+          }
+          ae = Math.exp(0.11512925464970229 * (cmax ? Math.max(gk[o3], gk[o3 + 1], gk[o3 + 2]) : gk[o3] + gk[o3 + 1] + gk[o3 + 2]));
+        } else {
         if (P[61] > 0) {
           var Gs = Gt * P[61];
           Gt = Gt - Gs;
-          var Ats = Math.pow(10, Gs / 20);
+          var Ats = Math.exp(0.11512925464970229 * Gs);
           var sv = As[c2];
           if (Ats > sv) sv += (Ats - sv) * P[62];
           else sv -= (sv - Ats) * P[63];
           As[c2] = sv;
         }
-        var At = Math.pow(10, Gt / 20);
+        var At = Math.exp(0.11512925464970229 * Gt);
         var a = A[c2];
         if (Gt > 0.05) above[c2] += 1;
         if (At > a) {
@@ -220,45 +299,52 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
         }
         if (P[55] > 0) {
           var rf = lvf[c2];
-          var Atf = Math.pow(10, table(20 * Math.log10(rf > 1e-9 ? rf : 1e-9)) / 20);
+          var Atf = Math.exp(0.11512925464970229 * table(8.685889638065035 * Math.log(rf > 1e-9 ? rf : 1e-9)));
           var fa = Af[c2];
           if (Atf > fa) fa += (Atf - fa) * P[55];
           else { var df = P[56]; if (df > fa - Atf) df = fa - Atf; fa -= df; }
           Af[c2] = fa;
           if (fa > a) a = fa;
         }
-        var ae = a;
+        ae = a;
         if (P[11] > 0) {
           if (a > mem[c2]) mem[c2] += (a - mem[c2]) * P[12];
           else mem[c2] += (a - mem[c2]) * P[13];
           if (mem[c2] > a) ae = a + P[11] * (mem[c2] - a);
         }
         if (P[61] > 0) ae = ae * As[c2];
+        }
         if (c2 === 0) { curAe = ae; if (ae > mGrA) mGrA = ae; }
         var gg = 1 / ae;
         var xv = xin[c2];
         if (P[58] !== 0) xv = xv + P[58] * (1 - gg) * xv * xv;
         var yc = xv * gg;
         yprev[c2] = yc;
-        var yo = (P[71] > 0 ? shapeK(yc * drv, P[16], P[17], P[28], P[54], P[64], P[71]) : shape(yc * drv, P[16], P[17], P[28], P[54], P[64])) * P[18];
-        if (P[72] !== 0) { flux[c2] += (yo - flux[c2]) * P[73]; yo = yo + P[72] * yo * flux[c2] * flux[c2]; }
+        var yo = (P[129] > 0 ? wsf(yc * drv) : P[71] > 0 ? shapeK(yc * drv, P[16], P[17], P[28], P[54], P[64], P[71]) : shape(yc * drv, P[16], P[17], P[28], P[54], P[64])) * P[18];
+        if (P[72] !== 0 && !xfIn) {
+          flux[c2] += (yo - flux[c2]) * P[73];
+          var fx = flux[c2];
+          // transformateur : mode 1 = k·φ·|φ| (mesuré sur le Vox Strip), mode 0 = k·x·φ²
+          yo = P[74] > 0.5 ? yo + P[72] * fx * (fx < 0 ? -fx : fx) : yo + P[72] * yo * fx * fx;
+        }
         if (P[59] > 0) yo = shape(yo, 0, 0, P[59], P[60], 0);
-        for (var q = 0; q < NEQ; q++) {
+        for (var qa = 0; qa < nAct; qa++) {
+          var q = eqAct[qa];
           var o0 = q < 4 ? PEQ + 5 * q : PEQ2 + 5 * (q - 4);
-          if (P[o0] !== 0) {
-            var e0 = (c2 * NEQ + q) * 4;
-            var oo = P[o0] * yo + P[o0 + 1] * eqs[e0] + P[o0 + 2] * eqs[e0 + 1] - P[o0 + 3] * eqs[e0 + 2] - P[o0 + 4] * eqs[e0 + 3];
-            eqs[e0 + 1] = eqs[e0]; eqs[e0] = yo; eqs[e0 + 3] = eqs[e0 + 2]; eqs[e0 + 2] = oo;
-            yo = oo;
-          }
+          var e0 = (c2 * NEQ + q) * 4;
+          var oo = P[o0] * yo + P[o0 + 1] * eqs[e0] + P[o0 + 2] * eqs[e0 + 1] - P[o0 + 3] * eqs[e0 + 2] - P[o0 + 4] * eqs[e0 + 3];
+          eqs[e0 + 1] = eqs[e0]; eqs[e0] = yo; eqs[e0 + 3] = eqs[e0 + 2]; eqs[e0 + 2] = oo;
+          yo = oo;
         }
         var xd = c2 === 0 ? inL[i] : right[i];
-        var out = P[19] * yo + (1 - P[19]) * xd;
+        var out = mix * yo + dry * xd;
         if (c2 === 0) outL[i] = out; else if (outR) outR[i] = out;
         var ao = out < 0 ? -out : out;
         if (ao > mOut) mOut = ao;
       }
+      if (mono && outR) outR[i] = outL[i];
     }
+    if (mono) copyState01(); else statesEq = false;
   }
 
   return {

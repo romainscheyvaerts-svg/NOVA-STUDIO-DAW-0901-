@@ -113,10 +113,15 @@ const denoise: VocalChainItem = {
   },
 };
 
-/** De-esser en cloche après l'égaliseur ; frequency couvre 5,5-9 kHz (Q 0,8). */
-const deess = (threshold: number, reduction: number, frequency = 7000, q = 0.8): VocalChainItem => ({
+/**
+ * De-esser en cloche après l'égaliseur, 8 kHz par défaut (règle de Romain),
+ * détection relative (la zone des « s » comparée au reste de la voix : ne
+ * dépend pas du niveau d'enregistrement). `threshold` (absolu) reste pour les
+ * filtres hors voix pleine bande (téléphone : détection absolue).
+ */
+const deess = (threshold: number, reduction: number, frequency = 8000, q = 1.0, detection: 'RELATIVE' | 'ABSOLUTE' = 'RELATIVE'): VocalChainItem => ({
   type: 'DEESSER',
-  params: { threshold, frequency, q, reduction, mode: 'BELL' },
+  params: { threshold, frequency, q, reduction, mode: 'BELL', detection, relThreshold: threshold <= -42 ? -7 : -6, listen: 0 },
 });
 
 /** Compresseur rapide « 1176 » : attrape les crêtes (2-4 dB). */
@@ -232,7 +237,7 @@ export const VOCAL_MIX_STYLES: VocalMixStyle[] = [
       denoise,
       eq({ highpass: 500, lowpass: 3500, presence: [1500, 6], air: false }),
       { type: 'COMPRESSOR', params: { threshold: -20, ratio: 6, knee: 6, attack: 0.003, release: 0.1, makeupGain: dbToGain(5.5), autoMakeup: false, mix: 1, scHpFreq: 300, lookahead: 0, mode: 'FET' } },
-      deess(-42, 0.4, 3200, 1.0),
+      deess(-42, 0.4, 3200, 1.0, 'ABSOLUTE'),
       { type: 'VOCALSATURATOR', params: { drive: 40, mix: 0.7, tone: 0.15, eqLow: -6, eqMid: 3, eqHigh: -6, mode: 'TRANSISTOR', outputGain: 1.0 } },
     ],
     sends: { delay: 0.1, verbShort: 0.05, verbLong: 0 },

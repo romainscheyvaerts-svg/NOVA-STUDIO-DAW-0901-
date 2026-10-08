@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { anchorClipsToRender, clipContentSig, freezeDrift, freezeDriftKey, freezeOutdated, freezeSignature, frozenPlayback, pluginsSignature } from '../utils/freeze';
 import { correctedClipPatch, revertClipPatch } from '../utils/pitchEdit';
 import { araClipPatch, araRevertPatch } from '../utils/araEdit';
+import { editingElastic, elasticPatch, renderPlan, withSemitones } from '../utils/clipTranspose';
 import { splitClipAt, replaceWithConsolidated } from '../utils/timeSelection';
 import { makeFreezeBase } from '../utils/preFxEdits';
 import { makeClip, makeTrack } from './helpers/fixtures';
@@ -232,5 +233,19 @@ describe('queues d’effet des tranches : jamais le son d’un voisin rendu', ()
   it('clip seul : sa queue d’effet est gardée', () => {
     const t = freeze(makeTrack({ id: 'x', plugins: [plug('comp')], clips: [makeClip({ id: 'a', bufferId: 'rec', start: 0, duration: 5 })] }));
     expect(frozenPlayback(t).render[0].duration).toBeCloseTo(6, 6);
+  });
+});
+
+describe('R13 · transposer / étirer un clip d’une piste gelée', () => {
+  it('le gel est périmé (le son a changé), comme pour la justesse', () => {
+    const t = lead();
+    expect(freezeDrift(t)).toBeNull();
+    const after = edit(t, 'c', c => {
+      const info = withSemitones(editingElastic(c, has).info, 3);
+      const plan = renderPlan(info, 44100, 44100 * 20);
+      return elasticPatch(c, { newBufferId: 'el-c', info: { ...info, regionStart: plan.regionStart, regionEnd: plan.regionEnd, renderedOffset: plan.renderedOffset }, sourceBufferId: c.bufferId });
+    });
+    expect(after.clips.find(c => c.id === 'c')!.bufferId).toBe('el-c');
+    expect(freezeDrift(after)?.content).toContain('c');
   });
 });

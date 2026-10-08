@@ -6,7 +6,7 @@ import { planMidiImport, partClip, partTrack, exportSources, novaToMidi, TempoMo
 import { midiCapture, buildCapture, placeCapture } from '../utils/midiCapture';
 import { saveBlob } from '../utils/saveBlob';
 import { playheadStore } from '../utils/playheadStore';
-import { chordFromEvent } from '../utils/keymap';
+import { isShortcut } from '../utils/keymap';
 import { makeDrumMachine, drumPadsFor, DrumMachine } from '../utils/drumKits';
 import { loadPadBuffer } from '../utils/padBuffers';
 import { padLoadKey } from '../utils/drumSamples';
@@ -212,8 +212,7 @@ const MidiHost: React.FC<Props> = ({ state, getState, setState, pianoRoll }) => 
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const c = chordFromEvent(e);
-      if (c !== 'ctrl+shift+c' && c !== 'ctrl+alt+c') return;
+      if (!isShortcut(e, 'nova.captureMidi')) return;
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       e.preventDefault();

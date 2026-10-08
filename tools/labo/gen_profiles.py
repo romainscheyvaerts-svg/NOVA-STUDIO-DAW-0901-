@@ -93,9 +93,10 @@ def voxstrip():
         "attMs": f["att_ms"], "relMs": f["rel_ms"],
         "slowFrac": f["slow_frac"], "slowAttMs": f["slow_att_ms"], "slowRelMs": f["slow_rel_ms"],
         "outA2": f["out_a2"], "outA3": f["out_a3"], "outSat": f["out_sat"], "outBias": f["out_bias"],
-        "outAb": f["out_ab"], "outKnee": f["out_knee"], "xfK": f["xf_k"], "xfFc": f["xf_fc"], "eqBase": f["eq_base"],
+        "outAb": f["out_ab"], "outKnee": f["out_knee"], "xfK": f["xf_k"], "xfFc": f["xf_fc"], "xfMode": f.get("xf_mode", 0), "eqBase": f["eq_base"],
         "lo": f["lo"], "mid": f["mid"], "hi": f["hi"], "loKind": f["lo_kind"], "midKind": f["mid_kind"], "hiKind": f["hi_kind"],
         "loF": prof.LO_F, "midF": prof.MID_F, "hiF": prof.HI_F,
+        "lowcutFc": f.get("lowcut_fc") or {},
     }
 
 
@@ -104,9 +105,17 @@ GENERATORS = {"OPTO_VINTAGE": opto_vintage, "FET76": fet76, "LEVELER2A": leveler
 
 def main():
     profiles = {}
+    mods = {"OPTO_VINTAGE": "cl1b_profil", "FET76": "fet76_profil", "LEVELER2A": "la2a_profil", "VOXSTRIP": "voxbox_profil"}
+    import importlib
     for k, g in GENERATORS.items():
         try:
-            profiles[k] = r6(g())
+            prof = g()
+            # tour 2 : cellule multi-composantes (dB) et correction linéaire mesurée (module + phase)
+            fit = importlib.import_module("modeles." + mods[k]).load_fit()
+            for key in ("dyn2", "dyn2_lim", "lti", "lat", "ws"):
+                if fit.get(key):
+                    prof[key] = fit[key]
+            profiles[k] = r6(prof)
         except Exception as e:  # noqa: BLE001
             print("profil ignoré", k, e)
     lines = ["/**",

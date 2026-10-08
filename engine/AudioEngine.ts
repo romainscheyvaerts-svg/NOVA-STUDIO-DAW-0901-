@@ -71,10 +71,13 @@ import { installWorkletGuard, installWorkletRetirement, onWorkletCrash, ownsNode
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback, isFrozenBus, isFeedCovered, busFrozenSlices } from '../utils/freeze';
 import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
+import { renderElasticAsync } from '../utils/clipTranspose';
 import { computePdc, PdcNode, PDC_MAX_SECONDS } from '../utils/pdc';
 import { applyGainEvents, clipGainEvents } from '../utils/fades';
 import { breathSig } from '../utils/breathEnvelope';
 import { gainPointsSig } from '../utils/clipGain';
+import { Scrubber, type ScrubStats } from './Scrubber';
+import { playheadStore } from '../utils/playheadStore';
 import { auditionClips } from '../utils/playlists';
 import { ChordEvent, chordSteps } from '../utils/chordDetect';
 import { engineView, VOID_OUTPUT } from '../utils/trackStructure';
@@ -1091,10 +1094,10 @@ export class AudioEngine {
    * @param options.pluginAutomation avec preFader : l'automation des réglages d'effets
    *        est rejouée quand même (Commit / bounce : le rendu remplace les effets).
    */
-  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean; pluginAutomation?: boolean } = {}): Promise<AudioBuffer> {
+  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean; pluginAutomation?: boolean; keepGuides?: boolean } = {}): Promise<AudioBuffer> {
     // Pistes guides (R3) : entendues pendant la prise, jamais dans un export, un master ni un mix auto.
-    // (Gel d'une piste, rendu avant fader : la piste elle-même est rendue.)
-    if (!options.preFader) tracks = tracks.filter(t => !t.isGuide);
+    // (Gel d'une piste, rendu avant fader : la piste elle-même est rendue. Lecture ralentie, R13 : on les entend, comme en lecture.)
+    if (!options.preFader && !options.keepGuides) tracks = tracks.filter(t => !t.isGuide);
     // Structure Pro Tools : pistes inactives, dossiers simples et VCA hors du rendu ; Muet / Solo / VCA / bus résolus.
     tracks = engineView(tracks).tracks;
     const totalSamples = Math.ceil(totalDuration * targetSampleRate);
@@ -2215,18 +2218,161 @@ export class AudioEngine {
     return out;
   }
 
+  // ─── R13 · Lecture ralentie (Half-Speed de Pro Tools, Varispeed de Logic) ─────────
+  // Le mix est rendu hors ligne par morceaux (même rendu que l'export, pistes guides
+  // comprises), étiré par le vocodeur de phase (hauteur gardée) et joué dans la sortie
+  // du master. La tête de lecture avance à la même vitesse. L'export n'est jamais ralenti.
+  private practiceRate = 1;
+  private practiceGen = 0;
+  /** Pistes du projet avant résolution (engineView n'est pas à appliquer deux fois : niveau des guides). */
+  private practiceRawTracks: Track[] | null = null;
+  private practiceTimer: number | null = null;
+  private practice: {
+    gen: number; rate: number; startOffset: number;
+    /** Morceaux programmés : instant du contexte, temps du projet couvert. */
+    segs: { ctxAt: number; from: number; to: number }[];
+    sources: AudioBufferSourceNode[];
+    nextFrom: number; ctxNext: number | null; rendering: boolean;
+  } | null = null;
+
+  /** Vitesse de la lecture ralentie (0,5 à 1). Changée en cours de lecture : on repart du même endroit. */
+  public setPracticeRate(rate: number) {
+    const r = Math.max(0.5, Math.min(1, Math.round((Number.isFinite(rate) ? rate : 1) * 100) / 100));
+    if (r === this.practiceRate) return;
+    const playing = this.isPlaying && !this.recSession && !this.recordingTrackId;
+    const at = playing ? this.getCurrentTime() : this.pausedAt;
+    this.practiceRate = r;
+    const raw = this.practiceRawTracks || this.liveTracks;
+    if (playing && raw) { this.stopAll(); this.startPlayback(at, raw); }
+  }
+  public getPracticeRate(): number { return this.practiceRate; }
+  /** Lecture ralentie en cours ? (et en attente du 1er morceau ?) */
+  public getPracticeState(): { active: boolean; waiting: boolean; rate: number } {
+    const p = this.practice;
+    return { active: !!p, waiting: !!p && !p.segs.length, rate: this.practiceRate };
+  }
+
+  private startPractice(startOffset: number, tracks: Track[]) {
+    if (!this.ctx) return;
+    this.isPlaying = true;
+    this.pendingLoopWrap = null;
+    this.pausedAt = startOffset;
+    this.liveTracks = tracks;
+    this.clipSigs = this.computeClipSigs(tracks);
+    const gen = ++this.practiceGen;
+    this.practice = { gen, rate: this.practiceRate, startOffset, segs: [], sources: [], nextFrom: startOffset, ctxNext: null, rendering: false };
+    void this.practicePump(gen);
+    this.practiceTimer = window.setInterval(() => { void this.practicePump(gen); }, 200);
+  }
+
+  private stopPractice() {
+    if (this.practiceTimer) { clearInterval(this.practiceTimer); this.practiceTimer = null; }
+    const p = this.practice;
+    if (!p) return;
+    this.practiceGen++;
+    p.sources.forEach(s => { try { s.stop(); s.disconnect(); } catch { /* déjà arrêtée */ } });
+    this.practice = null;
+  }
+
+  /** Temps du projet joué maintenant (la tête attend si un morceau est en retard). */
+  private practiceTime(): number {
+    const p = this.practice!;
+    const now = this.ctx!.currentTime;
+    let seg: { ctxAt: number; from: number; to: number } | null = null;
+    for (const s of p.segs) if (s.ctxAt <= now) seg = s;
+    if (!seg) return p.startOffset;
+    return Math.min(seg.to, seg.from + (now - seg.ctxAt) * p.rate);
+  }
+
+  /** Fin de ce qu'il y a à jouer (dernier clip + 2 s de queue). */
+  private practiceEnd(tracks: Track[]): number {
+    let end = 0;
+    for (const t of tracks) for (const c of t.clips || []) end = Math.max(end, c.start + c.duration);
+    return end + 2;
+  }
+
+  private async practicePump(gen: number) {
+    const p = this.practice;
+    const ctx = this.ctx;
+    if (!p || p.gen !== gen || p.rendering || !ctx) return;
+    const now = ctx.currentTime;
+    if (p.ctxNext !== null && p.ctxNext - now > 5) return; // assez d'avance
+    const tracks = this.practiceRawTracks || this.liveTracks || [];
+    const loop = this.isLoopActive && this.loopEnd > this.loopStart + 0.05;
+    const end = loop ? this.loopEnd : this.practiceEnd(tracks);
+    if (p.nextFrom >= end - 1e-6) {
+      if (!loop) return;
+      p.nextFrom = this.loopStart;
+    }
+    p.rendering = true;
+    const from = p.nextFrom;
+    // 1er morceau court (départ rapide), puis 6 s ; chevauchement de 80 ms pour le fondu entre morceaux.
+    const len = Math.min(p.segs.length ? 6 : 2.5, end - from);
+    const OV = 0.08;
+    const wrapsAfter = loop && from + len >= this.loopEnd - 1e-6;
+    const ov = wrapsAfter ? 0.005 : OV;
+    const pre = Math.min(1, from);
+    const sr = ctx.sampleRate;
+    try {
+      const mix = await this.renderProject(tracks, pre + len + ov, from - pre, sr, undefined, { keepGuides: true });
+      if (!this.practice || this.practice.gen !== gen) return;
+      const a = Math.round(pre * sr), n = Math.min(mix.length - a, Math.round((len + ov) * sr));
+      const chs: Float32Array[] = [];
+      for (let c = 0; c < mix.numberOfChannels; c++) chs.push(mix.getChannelData(c).slice(a, a + n));
+      const outLen = Math.round(n / p.rate);
+      const res = await renderElasticAsync({ channels: chs, sr, segments: [{ s0: 0, s1: n, d0: 0, d1: outLen }], semitones: 0, formants: false, algo: 'poly' });
+      if (!this.practice || this.practice.gen !== gen || !this.ctx) return;
+      const buf = new AudioBuffer({ length: Math.max(1, outLen), numberOfChannels: res.channels.length, sampleRate: sr });
+      res.channels.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+      const t0 = Math.max(p.ctxNext ?? 0, this.ctx.currentTime + 0.04);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      const g = this.ctx.createGain();
+      src.connect(g); g.connect(this.masterOutput || this.ctx.destination);
+      // Fondus à puissance égale aux raccords (départ net au tout début).
+      const joined = p.segs.length > 0 && p.ctxNext !== null && Math.abs(t0 - p.ctxNext) < 1e-3;
+      const dur = outLen / sr;
+      const fadeIn = Math.min(joined ? OV / p.rate : 0.004, dur / 2);
+      const fadeOut = Math.min(ov / p.rate, dur / 2);
+      const curve = (up: boolean) => { const k = new Float32Array(64); for (let i = 0; i < 64; i++) k[i] = up ? Math.sin((i / 63) * Math.PI / 2) : Math.cos((i / 63) * Math.PI / 2); return k; };
+      g.gain.setValueAtTime(0, t0);
+      g.gain.setValueCurveAtTime(curve(true), t0, fadeIn);
+      g.gain.setValueCurveAtTime(curve(false), t0 + dur - fadeOut, fadeOut);
+      src.start(t0);
+      src.onended = () => { const q = this.practice; if (q) q.sources = q.sources.filter(x => x !== src); try { g.disconnect(); } catch { /* */ } };
+      p.sources.push(src);
+      p.segs.push({ ctxAt: t0, from, to: from + len });
+      if (p.segs.length > 64) p.segs.splice(0, p.segs.length - 64);
+      p.ctxNext = t0 + len / p.rate;
+      p.nextFrom = from + len;
+    } catch (e) {
+      console.warn('[AudioEngine] Lecture ralentie : rendu impossible', e);
+      try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: 'Lecture ralentie : rendu impossible, retour à la vitesse normale.' })); } catch { /* */ }
+      if (this.practice?.gen === gen) { this.practiceRate = 1; const at = this.getCurrentTime(); this.stopAll(); this.pausedAt = at; }
+      return;
+    } finally {
+      if (this.practice?.gen === gen) this.practice.rendering = false;
+    }
+    void this.practicePump(gen);
+  }
+
   /**
    * @param opts.at instant du contexte où la lecture doit partir (fin du décompte, R2) ;
    *        par défaut tout de suite.
    */
   public startPlayback(startOffset: number, tracks: Track[], opts: { at?: number } = {}) {
     if (!this.ctx) return;
+    // Pistes du projet telles quelles (la lecture ralentie les passe au rendu, qui les résout lui-même).
+    this.practiceRawTracks = tracks;
     tracks = engineView(tracks).tracks;
     if (this.isPlaying) this.stopAll();
     // L'extrait du catalogue jouait en même temps que le projet : on le coupe
     // (lecteur interne ici, lecteur <audio> du catalogue via l'événement).
     this.stopPreview();
     window.dispatchEvent(new Event('nova:transport-start'));
+
+    // Lecture ralentie (R13) : rendue par morceaux et étirée, hauteur gardée. Jamais pendant une prise.
+    if (this.practiceRate < 0.999 && !this.recSession && !this.recordingTrackId) { this.startPractice(startOffset, tracks); return; }
 
     this.isPlaying = true;
     this.pendingLoopWrap = null;
@@ -2265,6 +2411,7 @@ export class AudioEngine {
     if (this.isPlaying) this.pausedAt = this.getCurrentTime();
     if (this.isPlaying && this.ctx) this.flashbackRunEnd(this.ctx.currentTime, false);
     this.isPlaying = false;
+    this.stopPractice();
     // Fin de passe d'automation (modes Touch / Latch / Write) : à la position d'arrêt.
     if (wasPlaying) { try { window.dispatchEvent(new CustomEvent('nova:transport-stop', { detail: { time: this.pausedAt } })); } catch { /* hors navigateur */ } }
     this.autoOverrides.clear();
@@ -2326,6 +2473,7 @@ export class AudioEngine {
   public getCurrentTime(): number {
     if (!this.ctx) return 0;
     if (!this.isPlaying) return this.pausedAt;
+    if (this.practice) return this.practiceTime();
 
     const now = this.ctx.currentTime;
     let startTime = this.playbackStartTime;
@@ -2347,8 +2495,57 @@ export class AudioEngine {
    */
   public getPlaybackOrigin(): number { return this.playbackStartTime; }
 
-  public scrub(tracks: Track[], time: number, velocity: number) { /* ... */ }
-  public stopScrubbing() { /* ... */ }
+  // --- Scrub / shuttle audibles (R17, engine/Scrubber) ----------------------------
+  private scrubber: Scrubber | null = null;
+  private scrubberOf(): Scrubber | null {
+    if (!this.ctx) return null;
+    if (!this.scrubber) {
+      this.scrubber = new Scrubber({
+        ctx: this.ctx,
+        input: (id) => this.tracksDSP.get(id)?.input || null,
+        silenced: (id) => this.soloSilencedIds.has(id),
+        reversed: (key, buf) => this.reversedOf(key, buf),
+      });
+      this.scrubber.onMove = (t) => { this.pausedAt = t; playheadStore.set(t); };
+    }
+    return this.scrubber;
+  }
+
+  /** Buffer inversé mis en cache (lecture à l'envers : clip inversé, scrub en arrière). */
+  private reversedOf(key: string, buffer: AudioBuffer): AudioBuffer {
+    let reversed = this.reversedBufferCache.get(key);
+    if (!reversed || reversed.length !== buffer.length) {
+      reversed = this.ctx!.createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+      for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+        const original = buffer.getChannelData(ch);
+        const out = reversed.getChannelData(ch);
+        for (let i = 0, n = original.length; i < n; i++) out[i] = original[n - 1 - i];
+      }
+      this.reversedBufferCache.set(key, reversed);
+    }
+    return reversed;
+  }
+
+  /**
+   * Scrub (Pro Tools : Scrubber, Ctrl+glisser) : la position audible suit `time`.
+   * Grains courts fenêtrés, vitesse = vitesse du geste : voir engine/Scrubber.
+   * La lecture doit être arrêtée (comme dans Pro Tools, scrubber arrête le transport).
+   */
+  public scrub(tracks: Track[], time: number, _velocity?: number) {
+    if (this.isPlaying) return;
+    this.scrubberOf()?.scrubTo(engineView(tracks).tracks, time);
+  }
+
+  /** Shuttle : défilement à vitesse constante (× temps réel, négatif = en arrière). */
+  public shuttle(tracks: Track[], speed: number, from?: number) {
+    if (this.isPlaying) return;
+    this.scrubberOf()?.shuttle(engineView(tracks).tracks, speed, from ?? this.pausedAt);
+  }
+
+  public stopScrubbing() { this.scrubber?.stop(); }
+  public isScrubbing(): boolean { return !!this.scrubber?.active; }
+  public getScrubPosition(): number { return this.scrubber?.position ?? this.pausedAt; }
+  public getScrubStats(): ScrubStats | null { return this.scrubber ? { ...this.scrubber.stats } : null; }
 
   private computeClipSigs(tracks: Track[]): Map<string, string> {
     const m = new Map<string, string>();
@@ -2366,6 +2563,7 @@ export class AudioEngine {
    * continuait de sonner jusqu'à l'arrêt.
    */
   public setLiveTracks(tracks: Track[]) {
+    this.practiceRawTracks = tracks;
     tracks = engineView(tracks).tracks;
     if (!this.isPlaying || !this.ctx) { this.liveTracks = tracks; return; }
     const next = this.computeClipSigs(tracks);

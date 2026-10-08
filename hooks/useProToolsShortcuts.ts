@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react';
 import type { DAWState } from '../types';
-import { chordFromEvent, findShortcut, keyToken, ShortcutDef } from '../utils/keymap';
+import { eventChord, findShortcut, keyToken, ShortcutDef } from '../utils/keymap';
+import { keymapStore } from '../utils/keymapStore';
+import { scrubControl } from '../utils/scrubControl';
+import { applyLayout, saveLayout } from '../utils/windowLayouts';
+import { editSelectionStore } from '../utils/editSelection';
+import { chooseEditMode, editModeStore, EDIT_MODES } from '../utils/editModes';
 import { runEditCommand } from '../utils/editCommands';
 import { isKeyboardFocus, toggleKeyboardFocus } from '../utils/keyboardFocus';
 import { tempoMapStore, timeToPosition, barToTime } from '../utils/tempoMap';
@@ -26,6 +31,12 @@ export interface ProToolsShortcutDeps {
   selectTrack: (trackId: string) => void;
   undo: () => void;
   notify: (msg: string) => void;
+  /** R17 : pavé numérique complet, fenêtres. */
+  toggleQuickPunch?: () => void;
+  toggleCountIn?: () => void;
+  toggleMidiMerge?: () => void;
+  openKeymapEditor?: () => void;
+  openLayouts?: () => void;
 }
 
 const isTypingTarget = (el: EventTarget | null) => {
@@ -54,6 +65,10 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
 
   useEffect(() => {
     const recall = new MarkerRecallBuffer();
+    // Shuttle Lock (Pro Tools : Démarrer+1–9 ; ici Ctrl+Alt+pavé 1–9).
+    let lock = false;
+    let lockDir: 1 | -1 = 1;
+    let eventLast: KeyboardEvent | null = null;
 
     const moveTrack = (dir: 1 | -1) => {
       const st = ref.current.stateRef.current;
@@ -90,6 +105,38 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
         case 'pt.trackUp': case 'kf.prevTrack': moveTrack(-1); return;
         case 'pt.trackDown': case 'kf.nextTrack': moveTrack(1); return;
         case 'kf.undo': d.undo(); return;
+        case 'pt.numLoopRec': d.toggleLoop(); d.notify(d.stateRef.current.isLoopActive ? 'Enregistrement en boucle arrêté.' : '🔁 Enregistrement en boucle : chaque tour devient une prise (couloirs de prises).'); return;
+        case 'pt.numQuickPunch': case 'pt.quickPunch': d.toggleQuickPunch?.(); return;
+        case 'pt.numCountoff': d.toggleCountIn?.(); return;
+        case 'pt.numMidiMerge': d.toggleMidiMerge?.(); return;
+        case 'shuttle.fwd': case 'shuttle.back': {
+          const v = scrubControl.shuttleStep(sc.id === 'shuttle.fwd' ? 1 : -1);
+          d.notify(`⏩ Shuttle ${v < 0 ? 'arrière' : 'avant'} ×${Math.abs(v)} — ${sc.id === 'shuttle.fwd' ? 'appuie encore pour accélérer' : 'appuie encore pour accélérer'}, Alt+K pour arrêter.`);
+          return;
+        }
+        case 'shuttle.stop': lock = false; scrubControl.stopShuttle(); return;
+        case 'shuttle.lock': {
+          const n = Number(/num(\d)$/.exec(keyToken(eventLast!))?.[1] || 5);
+          lock = true;
+          const v = scrubControl.shuttleLock(n, lockDir);
+          d.notify(`🔒 Shuttle Lock ×${Math.round(Math.abs(v) * 1000) / 1000} : pavé 1–9 = vitesse, − / + = sens, 0 = pause, Espace ou Échap pour sortir.`);
+          return;
+        }
+        case 'scrub.nudgeL': scrubControl.nudge(-1); return;
+        case 'scrub.nudgeR': scrubControl.nudge(1); return;
+        case 'pt.modeCycle': {
+          const i = EDIT_MODES.indexOf(editModeStore.get().mode);
+          d.notify(chooseEditMode(EDIT_MODES[(i + 1) % EDIT_MODES.length]).message);
+          return;
+        }
+        case 'layout.1': case 'layout.2': case 'layout.3': case 'layout.4': case 'layout.5': {
+          const n = Number(sc.arg);
+          const l = applyLayout(n);
+          d.notify(l ? `🪟 Disposition ${n} : ${l.name}` : `Disposition ${n} vide : ouvre la liste (Ctrl+Alt+J) pour y enregistrer la vue actuelle.`);
+          return;
+        }
+        case 'layout.list': d.openLayouts?.(); return;
+        case 'keymap.editor': d.openKeymapEditor?.(); return;
         case 'pt.focus': {
           toggleKeyboardFocus();
           d.notify(isKeyboardFocus()
@@ -116,6 +163,20 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
       if (recall.active) {
         const tok = keyToken(e);
         if (/^num\d$/.test(tok)) { e.preventDefault(); e.stopPropagation(); recall.digit(tok.slice(3)); return; }
+        // « . » N « * » : rappeler la disposition N ; « . » N « / » : y enregistrer la vue (Pro Tools : Window Configurations).
+        if (tok === 'nummul' || tok === 'numdiv') {
+          e.preventDefault(); e.stopPropagation();
+          const n = recall.close();
+          if (n === null) return;
+          if (tok === 'nummul') {
+            const l = applyLayout(n);
+            ref.current.notify(l ? `🪟 Disposition ${n} : ${l.name}` : `Disposition ${n} vide : enregistre la vue actuelle avec pavé . ${n} / (ou Ctrl+Alt+J).`);
+          } else {
+            const l = saveLayout(n);
+            ref.current.notify(`🪟 Vue enregistrée dans la disposition ${n} (${l.name}). Rappel : pavé . ${n} * ou Ctrl+Maj+${n <= 5 ? n : '…'}.`);
+          }
+          return;
+        }
         if (tok === 'numdec' || tok === 'numenter') {
           e.preventDefault(); e.stopPropagation();
           const n = recall.close();
@@ -128,16 +189,34 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
         recall.cancel();
       }
 
-      const sc = findShortcut(chordFromEvent(e), isKeyboardFocus());
+      // Shuttle Lock en cours (Pro Tools) : chiffres du pavé = vitesse, − / + = sens, 0 = pause, Espace / Échap = sortir.
+      if (lock) {
+        const tok = keyToken(e);
+        const dg = /^num(\d)$/.exec(tok);
+        if (dg || tok === 'numsub' || tok === 'numadd' || tok === 'space' || tok === 'escape') {
+          e.preventDefault(); e.stopPropagation();
+          if (e.repeat) return;
+          if (tok === 'space' || tok === 'escape') { lock = false; scrubControl.stopShuttle(); ref.current.notify('Shuttle Lock terminé.'); return; }
+          if (tok === 'numsub' || tok === 'numadd') { lockDir = tok === 'numsub' ? -1 : 1; scrubControl.shuttleDirection(lockDir); return; }
+          scrubControl.shuttleLock(Number(dg![1]), lockDir);
+          return;
+        }
+      }
+
+      const chord = eventChord(e);
+      const sc = findShortcut(chord, isKeyboardFocus());
       if (!sc) return;
+      // Ctrl+F sans plage : la recherche du navigateur, sauf si l'option « Ctrl+F = fondus » est cochée.
+      if (sc.id === 'pt.fadesRange' && !editSelectionStore.get().time && !keymapStore.get().ctrlFFades) return;
       // Tab to Transient : seulement depuis l'arrangement (ou sans focus) ; ailleurs,
       // Tab garde son rôle de navigation au clavier entre les boutons.
       if (keyToken(e) === 'tab' && !tabBelongsToTimeline(e.target)) return;
       // Touche maintenue : seuls le nudge, le zoom, la hauteur et Tab se répètent.
-      if (e.repeat && !/^(nudge|zoom|trackHeight|tabToTransient|clipGainNudge)/.test(sc.command || '')) { e.preventDefault(); e.stopPropagation(); return; }
+      if (e.repeat && !/^(nudge|zoom|trackHeight|tabToTransient|clipGainNudge)/.test(sc.command || '') && !sc.id.startsWith('scrub.')) { e.preventDefault(); e.stopPropagation(); return; }
       e.preventDefault();
       e.stopPropagation();
       recordAction(`raccourci:${sc.id}`);
+      eventLast = e;
       run(sc);
     };
 

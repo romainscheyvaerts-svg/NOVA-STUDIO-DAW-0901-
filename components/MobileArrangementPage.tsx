@@ -1,12 +1,14 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { isMidiRecordTrack } from '../utils/midiRecord';
 import { openNovaWindow } from '../utils/novaWindows';
+import PracticeSpeed from './PracticeSpeed';
 import { requestBreaths } from '../utils/breathBus';
 import MobileContainer from './MobileContainer';
 import LiveRecordingClip from './LiveRecordingClip';
 import { Track, Clip, TrackType, TrackSend } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore, usePlayheadTime } from '../utils/playheadStore';
+import { scrubControl } from '../utils/scrubControl';
 import { gainToDbText } from '../utils/db';
 import { useSimpleMode } from '../utils/simpleMode';
 import { sendLabel } from '../utils/sendLabels';
@@ -241,14 +243,40 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     return playheadStore.subscribe(apply);
   }, [isPlaying, timeToX]);
 
-  // Handle timeline tap to seek
-  const handleTimelineTap = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+
+  // Règle : un appui place la tête de lecture ; glisser le doigt fait entendre le son
+  // (scrub audible, R17), comme un disque qu'on bouge à la main. Pendant la lecture : saut simple.
+  const rulerScrubRef = useRef(false);
+  const rulerStartRef = useRef<{ x: number; t: number; moved: boolean } | null>(null);
+  const rulerTime = (e: React.PointerEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const x = clientX - rect.left; // rect.left tient déjà compte du défilement
-    const time = xToTime(x);
-    onSeek(Math.max(0, time));
-  }, [xToTime, onSeek]);
+    return Math.max(0, xToTime(e.clientX - rect.left));
+  };
+  const handleRulerDown = useCallback((e: React.PointerEvent) => {
+    const t = rulerTime(e);
+    if (isPlaying) { onSeek(t); return; }
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* pointeur déjà relâché */ }
+    rulerScrubRef.current = true;
+    rulerStartRef.current = { x: e.clientX, t, moved: false };
+    playheadStore.set(t);
+    scrubControl.begin(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, onSeek, xToTime]);
+  const handleRulerMove = useCallback((e: React.PointerEvent) => {
+    if (!rulerScrubRef.current) return;
+    const st = rulerStartRef.current;
+    if (st && !st.moved && Math.abs(e.clientX - st.x) > 3) st.moved = true;
+    scrubControl.move(rulerTime(e));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [xToTime]);
+  const handleRulerUp = useCallback(() => {
+    if (!rulerScrubRef.current) return;
+    rulerScrubRef.current = false;
+    const st = rulerStartRef.current;
+    rulerStartRef.current = null;
+    // Simple appui : la tête de lecture se place tout de suite (comme avant).
+    if (st && !st.moved) scrubControl.endAt(st.t); else scrubControl.end();
+  }, []);
 
   // Handle clip interaction
   const handleClipTouchStart = useCallback((
@@ -601,6 +629,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           <div className="text-[10px] font-bold text-white/50 bg-white/5 px-2 py-1 rounded">
             {bpm} BPM
           </div>
+          {/* Lecture ralentie (R13) : un appui = 85, 75, 60, 50 puis 100 % (hauteur gardée). */}
+          <PracticeSpeed compact />
           <button
             onClick={() => setZoom(z => Math.max(MIN_ZOOM, z - 20))}
             aria-label="Dézoomer"
@@ -807,6 +837,16 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                       <i className="fas fa-sliders-h"></i>
                     </button>
                   )}
+                  {/* Tonalité du beat (R13) : transposer tous ses clips d'un geste, sans changer le tempo */}
+                  {(track.id === 'instrumental' || !!track.instrumentId) && track.clips.some(c => !!c.bufferId && !c.notes) && (
+                    <button type="button" data-testid={`beat-key-${track.id}`}
+                      onClick={(e) => { e.stopPropagation(); openNovaWindow('transpose', { simple: true, targets: track.clips.filter(c => !!c.bufferId && !c.notes).map(c => ({ trackId: track.id, clipId: c.id })) }); }}
+                      aria-label={`Changer la tonalité de ${track.name}`}
+                      title="Changer la tonalité du beat (±12 demi-tons), le tempo ne bouge pas (Pro Tools : Elastic Audio · Live : Transpose · FL : Pitch)"
+                      className="nova-hit w-8 h-8 rounded-md text-[10px] font-bold bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30">
+                      <i className="fas fa-arrows-up-down"></i>
+                    </button>
+                  )}
                   {/* Micro : seulement sur les pistes voix (pas le beat ni les bus) */}
                   {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
                   <button
@@ -859,8 +899,12 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               ref={timelineRef}
               className="sticky top-0 z-20 bg-[#0f1114] border-b border-cyan-500/30 cursor-pointer"
               style={{ height: TIMELINE_HEIGHT }}
-              onTouchStart={handleTimelineTap}
-              onMouseDown={handleTimelineTap}
+              onPointerDown={handleRulerDown}
+              onPointerMove={handleRulerMove}
+              onPointerUp={handleRulerUp}
+              onPointerCancel={handleRulerUp}
+              data-testid="mobile-ruler"
+              title="Touche pour placer la tête de lecture ; glisse le doigt pour entendre le son (scrub)"
             >
               {/* Bar markers */}
               {Array.from({ length: Math.ceil(totalBeats / 4) + 1 }, (_, bar) => {
@@ -1114,6 +1158,22 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               >
                 <i className="fas fa-bullseye text-cyan-300 text-sm mb-0.5"></i>
                 <span className="text-[10px] font-semibold text-white/70">JUSTE</span>
+              </button>
+            )}
+
+            {/* Tonalité (R13) : transposer le clip, tempo inchangé (version simple) */}
+            {selectedClip.clip.type !== TrackType.MIDI && !selectedClip.clip.notes && (
+              <button
+                onClick={() => openNovaWindow('transpose', { simple: true, targets: [{ trackId: selectedClip.trackId, clipId: selectedClip.clip.id }] })}
+                aria-label="Changer la tonalité du clip"
+                title="Plus aigu ou plus grave, sans changer le tempo (Live : Transpose · FL : Pitch)"
+                data-testid="mobile-clip-transpose"
+                className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+                  selectedClip.clip.elastic ? 'bg-cyan-500/25 border border-cyan-500/50' : 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20'
+                }`}
+              >
+                <i className="fas fa-arrows-up-down text-cyan-300 text-sm mb-0.5"></i>
+                <span className="text-[10px] font-semibold text-white/70">TON</span>
               </button>
             )}
 
