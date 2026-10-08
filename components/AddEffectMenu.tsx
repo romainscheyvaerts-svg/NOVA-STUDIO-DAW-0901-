@@ -8,7 +8,7 @@ import { normText } from '../utils/commandPalette';
  * Entrée. Avant : 28 noms de produits en vrac (« Leveler » pour le compresseur, « S-Killer »…),
  * le compresseur était introuvable pour qui cherchait « compresseur ».
  */
-export interface EffectEntry { id: string; name: string; icon?: string }
+export interface EffectEntry { id: string; name: string; icon?: string; /** Rubrique, nature et mots-clés d'un effet hors catalogue (ex. Melodyne / VocAlign en insert ARA). */ cat?: string; kind?: string; also?: string }
 
 /** Rubrique et nature de chaque effet (ordre des rubriques = ordre d'une chaîne de mix). */
 const KIND: Record<string, { cat: string; kind: string; also?: string }> = {
@@ -39,7 +39,7 @@ const KIND: Record<string, { cat: string; kind: string; also?: string }> = {
   MASTERTRANSIENT: { cat: 'Master', kind: 'limiteur multibande', also: 'mastering transient' },
 };
 const CAT_ORDER = ['Nettoyage', 'Égaliseur', 'Dynamique', 'Voix', 'Saturation et couleur', 'Modulation', 'Espace', 'Effets trap', 'Master', 'Autres'];
-const info = (e: EffectEntry) => KIND[e.id] || { cat: 'Autres', kind: '' };
+const info = (e: EffectEntry) => KIND[e.id] || { cat: e.cat && CAT_ORDER.includes(e.cat) ? e.cat : 'Autres', kind: e.kind || '', also: e.also };
 
 export function groupEffects(list: EffectEntry[], query: string): { cat: string; items: EffectEntry[] }[] {
   const words = normText(query).split(/\s+/).filter(Boolean);

@@ -107,6 +107,25 @@ rendu pendant ce temps. Les plugins que pedalboard ne sait pas charger
   effet à clé de référence qui suit ce contrat, pour les tests.
 - Tests : `venv\Scripts\python.exe -m unittest discover -s tests -p "test_vst_*.py"`.
 
+### v12 – Melodyne et VocAlign en insert de piste, comme Pro Tools (`ara_insert.py`)
+
+- `LOAD_PLUGIN ara=melodyne|vocalign` : un insert ARA = un slot (même cycle de vie qu'un VST)
+  servi par `NovaARAHost.exe` (`nova-ara-host/`). État (`GET_STATE`) = archive ARA (retouches)
+  + état VST3, en une chaîne `NARA1.…`.
+- Document de la piste tenu à jour à chaque édition de NOVA (`ARA_INSERT_SOURCE` une fois par son,
+  puis `ARA_INSERT_DOC` : régions = clips, tempo, mesures, accords) ; l'hôte n'applique que le diff.
+- Lecture : trames type 1 avec le drapeau `TIMELINE` (position du morceau) → tube nommé de l'hôte
+  (`AudioPipe`) → rendu de lecture ARA du plugin. Transport arrêté : le plugin l'apprend, silence.
+- `ARA_INSERT_RENDER` (export, gel, Commit), `ARA_INSERT_EDITOR` (éditeur ancré dans la fenêtre de
+  l'appli : `parent` = `window.__novaDesktop.hwnd`, ou flottant), `ARA_INSERT_SELECT`, `ARA_INSERT_PARAM(S)`.
+- VocAlign 6 **Standard** installé ici = variante VST3 « VocAlign 6 Standard VST » : fabrique ARA
+  présente, document accepté, mais sa fenêtre reste en mode « Capture » (pas d'alignement par ARA ;
+  l'ARA de VocAlign passe par sa variante ARA / AAX, dans Pro Tools l'AAX). L'insert VocAlign
+  fait donc une capture transparente (double + guide = la piste choisie dans la barre de l'effet),
+  puis la piste joue le double calé. `NOVA_VOCALIGN_ARA=1` : essayer l'ARA (variante ARA installée).
+- Tests : `venv\Scripts\python.exe -m unittest discover -s tests -p "test_ara_insert*.py"` ;
+  preuves réelles : `qa/ara_insert_pont.py` (+ `vocalign`), `qa/ara_insert_lecture.py`, `qa/ara_dock_appli.py`.
+
 ### 2. ASIO Bridge (`asio_bridge.py`) ⭐ NOUVEAU
 Bridge pour connecter le DAW web à une carte son ASIO.
 

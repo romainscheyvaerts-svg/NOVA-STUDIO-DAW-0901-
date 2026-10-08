@@ -102,6 +102,8 @@ export interface BridgeState {
   stems?: boolean;
   /** (v9) Plugins ARA2 (Melodyne, VocAlign) par l'hôte natif NovaARAHost. */
   ara?: boolean;
+  /** (v12) Melodyne / VocAlign en insert sur une piste, comme Pro Tools (document de la piste, lecture en direct). */
+  araInsert?: boolean;
   /** Reconnexion automatique : numéro de l'essai en attente (0 hors reconnexion). */
   attempt?: number;
   /** Reconnexion automatique : heure (ms, Date.now) du prochain essai. */
@@ -119,6 +121,7 @@ export const BRIDGE_CALIBRATE_VERSION = 10;
 
 /** Première version du pont qui héberge les plugins ARA (Melodyne, VocAlign). */
 export const BRIDGE_ARA_VERSION = 9;
+/** Première version du pont qui pose Melodyne / VocAlign en insert de piste (comme Pro Tools). */ const BRIDGE_ARA_INSERT_VERSION = 12;
 
 export interface AraStatus {
   host: boolean;
@@ -283,6 +286,7 @@ class NovaBridgeService {
   /** Sons rendus par un plugin ARA (trames ARA_RENDERED) en attendant la réponse finale. */
   private araFrames = new Map<number, AraRender[]>();
   private araListeners = new Set<(e: AraEvent) => void>();
+  private araInsertListeners = new Map<string, Set<(e: any) => void>>();
 
   // --- État ---------------------------------------------------------------
 
@@ -402,6 +406,7 @@ class NovaBridgeService {
             paramsText: !!hello.params_text && (Number(hello.version) || 0) >= BRIDGE_PARAMS_TEXT_VERSION,
             stems: !!hello.stems && (Number(hello.version) || 0) >= BRIDGE_STEMS_VERSION,
             ara: !!hello.ara && (Number(hello.version) || 0) >= BRIDGE_ARA_VERSION,
+            araInsert: !!hello.ara_insert && (Number(hello.version) || 0) >= BRIDGE_ARA_INSERT_VERSION,
             calibrateGr: !!hello.calibrate_gr && (Number(hello.version) || 0) >= BRIDGE_CALIBRATE_VERSION,
             automation: !!hello.automation && (Number(hello.version) || 0) >= BRIDGE_AUTOMATION_VERSION,
             sidechain: !!hello.sidechain && (Number(hello.version) || 0) >= BRIDGE_AUTOMATION_VERSION,
@@ -477,6 +482,7 @@ class NovaBridgeService {
       return;
     }
     if (msg && msg.action === 'ARA_EVENT') {
+      if (msg.slot_id) this.araInsertListeners.get(String(msg.slot_id))?.forEach(cb => { try { cb(msg); } catch { /* écouteur fautif */ } });
       this.araListeners.forEach(cb => { try { cb(msg); } catch { /* écouteur fautif */ } });
       return;
     }
@@ -667,11 +673,13 @@ class NovaBridgeService {
    * de licence / démo est fermée par le pont et le chargement échoue
    * (erreur.licenseRequired) au lieu de faire surgir une fenêtre.
    */
-  async loadPlugin(opts: { slotId: string; path: string; pluginName?: string | null; sampleRate: number; stateB64?: string | null; quiet?: boolean }): Promise<LoadResult> {
+  async loadPlugin(opts: { slotId: string; path: string; pluginName?: string | null; sampleRate: number; stateB64?: string | null; quiet?: boolean; ara?: string | null }): Promise<LoadResult> {
     const r = await this.request({
       action: 'LOAD_PLUGIN', slot_id: opts.slotId, path: opts.path, plugin_name: opts.pluginName || null,
       sample_rate: Math.round(opts.sampleRate), state: opts.stateB64 || null, ...(opts.quiet ? { quiet: true } : {}),
-    }, opts.quiet ? 180000 : 60000);
+      // (v12) Insert ARA (Melodyne, VocAlign) : servi par l'hôte natif, comme dans Pro Tools.
+      ...(opts.ara ? { ara: opts.ara } : {}),
+    }, opts.quiet || opts.ara ? 180000 : 60000);
     return {
       name: r.name || '', vendor: r.vendor || '',
       latencySamples: Number(r.latency_samples) || 0,
@@ -993,6 +1001,67 @@ class NovaBridgeService {
   async araClose(sessionId: string): Promise<void> {
     if (!this.isConnected()) return;
     try { await this.request({ action: 'ARA_CLOSE', session_id: sessionId }); } catch { /* déjà fermée */ }
+  }
+
+  // --- Insert ARA sur une piste (pont v12, comme Pro Tools) -----------------------
+
+  /** Évènements d'un insert ARA (transport demandé par le plugin, retouches, fenêtre fermée). */
+  onAraInsertEvent(slotId: string, cb: (e: any) => void): () => void {
+    let set = this.araInsertListeners.get(slotId);
+    if (!set) { set = new Set(); this.araInsertListeners.set(slotId, set); }
+    set.add(cb);
+    return () => { set!.delete(cb); if (set!.size === 0) this.araInsertListeners.delete(slotId); };
+  }
+
+  /** Un fichier son de la piste confié à l'insert (une fois par son). */
+  async araInsertSource(slotId: string, src: { id: string; name: string; sampleRate: number; channels: Float32Array[] }): Promise<void> {
+    const ch = src.channels.slice(0, 2);
+    await this.sendAraFrame({
+      action: 'ARA_INSERT_SOURCE', slot_id: slotId, id: src.id, name: src.name, sample_rate: Math.round(src.sampleRate),
+      nch: ch.length, nframes: ch[0]?.length || 0,
+    }, [{ channels: ch }], 120000 + (ch[0]?.length || 0) / Math.max(1, src.sampleRate) * 1000);
+  }
+
+  /** Document ARA de la piste (sons, clips, tempo, accords) ; applied=false + missing : sons à envoyer d'abord. */
+  async araInsertDoc(slotId: string, doc: Record<string, any>): Promise<{ applied: boolean; missing?: string[]; [k: string]: any }> {
+    const r = await this.request({ action: 'ARA_INSERT_DOC', slot_id: slotId, ...doc }, 180000);
+    return { ...r, applied: r.applied !== false, missing: Array.isArray(r.missing) ? r.missing.map(String) : undefined };
+  }
+
+  async araInsertState(slotId: string, opts: { notes?: boolean; waitAnalysisS?: number } = {}): Promise<any> {
+    return this.request({ action: 'ARA_INSERT_STATE', slot_id: slotId, notes: opts.notes !== false,
+      ...(opts.waitAnalysisS !== undefined ? { wait_analysis_s: opts.waitAnalysisS } : {}) }, 60000 + (opts.waitAnalysisS || 0) * 1000);
+  }
+
+  /** Éditeur du plugin : ancré dans l'appli (dock, bounds), flottant (float) ou masqué (hide). */
+  async araInsertEditor(slotId: string, opts: { mode: 'dock' | 'bounds' | 'float' | 'hide'; parent?: number; x?: number; y?: number; w?: number; h?: number; visible?: boolean; release?: boolean; offscreen?: boolean }): Promise<any> {
+    return this.request({ action: 'ARA_INSERT_EDITOR', slot_id: slotId, ...opts }, 60000);
+  }
+
+  async araInsertSelect(slotId: string, regions: string[]): Promise<void> {
+    await this.request({ action: 'ARA_INSERT_SELECT', slot_id: slotId, regions }, 30000);
+  }
+
+  /** Rendu hors ligne de la piste à travers l'insert ARA (export, gel, bounce) : temps du morceau. */
+  async araInsertRender(slotId: string, start: number, duration: number, sampleRate: number): Promise<Float32Array[]> {
+    const r = await this.request({ action: 'ARA_INSERT_RENDER', slot_id: slotId, start, duration, sample_rate: Math.round(sampleRate) },
+      120000 + duration * 4000);
+    return r.channels as Float32Array[];
+  }
+
+  async araInsertParams(slotId: string): Promise<{ id: number; title: string; value: number; text: string }[]> {
+    const r = await this.request({ action: 'ARA_INSERT_PARAMS', slot_id: slotId }, 30000);
+    return r.params || [];
+  }
+
+  async araInsertParam(slotId: string, p: { title?: string; id?: number; value: number }): Promise<{ text: string; value: number }> {
+    const r = await this.request({ action: 'ARA_INSERT_PARAM', slot_id: slotId, ...p }, 30000);
+    return { text: String(r.text ?? ''), value: Number(r.value) || 0 };
+  }
+
+  /** Capture PNG de la fenêtre du plugin (preuves, assistance). */
+  async araInsertSnapshot(slotId: string, path: string): Promise<any> {
+    return this.request({ action: 'ARA_INSERT_SNAPSHOT', slot_id: slotId, path }, 30000);
   }
 
   // --- Audio temps réel ---------------------------------------------------

@@ -11,6 +11,8 @@
  *   v5 : flags & 1 → réglages horodatés après l'audio :
  *        u16 count | u16 0 | count × (u16 index, u16 décalage, f32 valeur brute)
  *        flags & 2 → nch = 4, canaux 3-4 = clé de side-chain.
+ *   v5 (insert ARA, pont v12) : flags & 4 → f64 position du morceau (échantillons, -1 = arrêt)
+ *        juste après l'audio, AVANT les réglages horodatés.
  *   Retour : toujours nch = 2, flags = 0.
  */
 
@@ -64,13 +66,14 @@ function header(slotId) {
   return h;
 }
 
-function sendBlock(slotId, seq, data, nch, params) {
+function sendBlock(slotId, seq, data, nch, params, tl) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const { bytes, headerLen } = header(slotId);
   const ch = nch === 4 ? 4 : 2;
   const nframes = data.length / ch;
   const pc = params ? Math.floor(params.length / 3) : 0;
-  const extra = pc ? 4 + pc * 8 : 0;
+  const hasTl = typeof tl === 'number';
+  const extra = (pc ? 4 + pc * 8 : 0) + (hasTl ? 8 : 0);
   const buf = new ArrayBuffer(headerLen + data.byteLength + extra);
   const u8 = new Uint8Array(buf);
   u8[0] = 1;
@@ -81,10 +84,11 @@ function sendBlock(slotId, seq, data, nch, params) {
   dv.setUint32(h, seq >>> 0, true);
   dv.setUint16(h + 4, nframes, true);
   dv.setUint8(h + 6, ch);
-  dv.setUint8(h + 7, (pc ? 1 : 0) | (ch === 4 ? 2 : 0));
+  dv.setUint8(h + 7, (pc ? 1 : 0) | (ch === 4 ? 2 : 0) | (hasTl ? 4 : 0));
   new Float32Array(buf, headerLen, data.length).set(data);
+  if (hasTl) dv.setFloat64(headerLen + data.byteLength, tl, true);
   if (pc) {
-    let o = headerLen + data.byteLength;
+    let o = headerLen + data.byteLength + (hasTl ? 8 : 0);
     dv.setUint16(o, pc, true); dv.setUint16(o + 2, 0, true); o += 4;
     for (let i = 0; i < pc; i++) {
       dv.setUint16(o, params[3 * i], true);
@@ -108,7 +112,7 @@ onmessage = (e) => {
     ports.set(slotId, port);
     port.onmessage = (ev) => {
       const b = ev.data;
-      if (b && b.data) sendBlock(slotId, b.seq, b.data, b.nch || 2, b.params || null);
+      if (b && b.data) sendBlock(slotId, b.seq, b.data, b.nch || 2, b.params || null, b.tl);
     };
   } else if (m.type === 'detach') {
     const p = ports.get(m.slotId);

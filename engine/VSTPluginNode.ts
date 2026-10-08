@@ -134,14 +134,14 @@ export class VSTPluginNode {
   /** Latence totale (s) : pré-tampon + plugin. 0 quand le son passe tel quel. */
   public latency = 0;
 
-  private ctx: BaseAudioContext;
-  private plugin: PluginInstance;
-  private worklet: AudioWorkletNode | null = null;
-  private slotId: string | null = null;
-  private status: VstNodeStatus = 'offline';
+  protected ctx: BaseAudioContext;
+  protected plugin: PluginInstance;
+  protected worklet: AudioWorkletNode | null = null;
+  protected slotId: string | null = null;
+  protected status: VstNodeStatus = 'offline';
   private error: string | null = null;
   private loadedName = '';
-  private pluginLatencySamples = 0;
+  protected pluginLatencySamples = 0;
   private monitorBypass = false;
   private knownState: string | null = null;
   private underruns = 0;
@@ -512,6 +512,7 @@ export class VSTPluginNode {
       const res = await novaBridge.loadPlugin({
         slotId, path, pluginName: this.plugin.params?.pluginName || null,
         sampleRate: this.ctx.sampleRate, stateB64: this.knownState, quiet: this.quiet,
+        ...this.loadExtras(),
       });
       this.licenseRequired = false;
       if (this.disposed || seq !== this.loadSeq) { novaBridge.unloadPlugin(slotId); return; }
@@ -542,6 +543,7 @@ export class VSTPluginNode {
       this.input.connect(node);
       node.connect(this.output);
       node.port.postMessage({ type: 'active', on: true });
+      this.onActivated(slotId, node);
       this.setStatus('active');
       node.port.postMessage({ type: 'sidechain', on: this.keyFlowing() });
       this.updateLatency(true);
@@ -566,9 +568,19 @@ export class VSTPluginNode {
     }
   }
 
+  // --- Points d'extension (insert ARA : engine/AraInsertNode.ts) -------------------
+
+  /** Options ajoutées au chargement sur le pont (insert ARA : { ara: 'melodyne' }). */
+  protected loadExtras(): { ara?: string } { return {}; }
+  /** Instance chargée, flux audio branché (avant le passage à « actif »). */
+  protected onActivated(_slotId: string, _node: AudioWorkletNode): void { /* rien pour un VST ordinaire */ }
+  /** Retour au passe-plat (pont fermé, erreur, destruction). */
+  protected onDeactivated(): void { /* rien pour un VST ordinaire */ }
+
   /** Retour au passe-plat (pont fermé, erreur, destruction). */
   private teardown() {
     this.loadSeq++;
+    this.onDeactivated();
     this.slotUnsub?.();
     this.slotUnsub = null;
     if (this.worklet) {
@@ -595,7 +607,7 @@ export class VSTPluginNode {
     if (had !== 0) this.latencyListener?.();
   }
 
-  private updateLatency(notify: boolean) {
+  protected updateLatency(notify: boolean) {
     const sr = this.ctx.sampleRate || 48000;
     const next = (this.status === 'active' && !this.monitorBypass)
       ? (VST_PREBUFFER_FRAMES + this.pluginLatencySamples) / sr

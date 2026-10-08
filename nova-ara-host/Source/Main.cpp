@@ -28,6 +28,16 @@
                   (sans ARA : double sur l'entrée principale, guide sur la sidechain, transport en lecture)
       capture_output out, realtime?, keep? → passe de sortie après capture_align keep=true
       quit
+    Insert ARA sur une piste (comme Pro Tools : document de la piste tenu à jour, lecture en direct)
+      doc         sources:[{id, path, name, persistent_id?}], regions:[{id, source, name, offset, start,
+                  duration}], track:{name}, tempo:[{t, q}], signatures:[{q, num, den}], chords:[…], archive_b64?
+                  → diff appliqué au document ARA (régions créées, déplacées, coupées, rognées, retirées)
+      doc_state   notes?, wait_analysis_s? → régions relues dans le plugin (notes en temps du morceau)
+      stream_open sample_rate, max_block → tube nommé du flux temps réel (voir AudioPipe.h)
+      render_range out, start, duration, sample_rate? → la piste à travers le plugin (export, gel)
+      editor      mode: dock (parent HWND, x, y, w, h, visible) | bounds | float | hide
+      select      regions:[ids] → l'éditeur montre ces clips (vide : toute la piste)
+      params / set_param id|title, value → réglages VST3 du plugin, en direct
     Évènements
       ready, editor_closed, transport_request {kind: start|stop|position, value}, analysis_progress,
       content_changed {scope, clip}, playback {playing, position}, audio_error, log
@@ -35,6 +45,8 @@
 
 #include "Common.h"
 #include "AudioFile.h"
+#include "AudioPipe.h"
+#include "DockedEditor.h"
 #include "EditorWindow.h"
 #include "Vst3Plugin.h"
 #include "WasapiOutput.h"
@@ -124,11 +136,25 @@ namespace nova
     }
 
     //==========================================================================
-    // Modèle : un clip NOVA = une source audio ARA + une modification + une région de lecture.
-    struct HostClip
+    // Objets de l'hôte confiés au plugin (références « host ref » d'ARA).
+    struct HostObject
     {
-        std::string id, name, track, role, persistentId, modificationId;
+        std::string id;
+        HostObject() = default;
+        explicit HostObject (std::string i) : id (std::move (i)) {}
+        virtual ~HostObject() = default;
+    };
+
+    // Objet qui porte du son (source audio ARA).
+    struct AudioHolder : HostObject
+    {
         AudioData audio;
+    };
+
+    // Modèle : un clip NOVA = une source audio ARA + une modification + une région de lecture.
+    struct HostClip : AudioHolder
+    {
+        std::string name, track, role, persistentId, modificationId;
         double start = 0.0;     // position dans le morceau (s)
         ARA::ARAAudioSourceRef source = nullptr;
         ARA::ARAAudioModificationRef modification = nullptr;
@@ -146,18 +172,42 @@ namespace nova
         ARA::ARARegionSequenceRef sequence = nullptr;
     };
 
+    // Insert ARA sur une piste (comme Pro Tools) : un fichier son = une source audio + une
+    // modification (les retouches de Melodyne y sont rangées : couper un clip les garde) ;
+    // un clip = une région de lecture (début dans le fichier, place sur la timeline, durée).
+    struct LiveSource : AudioHolder
+    {
+        std::string name, persistentId, modificationId;
+        ARA::ARAAudioSourceRef source = nullptr;
+        ARA::ARAAudioModificationRef modification = nullptr;
+        bool samplesEnabled = false;
+        double sampleRate() const { return audio.sampleRate; }
+        double duration() const { return audio.sampleRate > 0 ? (double) audio.numFrames() / audio.sampleRate : 0.0; }
+    };
+
+    struct LiveRegion : HostObject
+    {
+        std::string sourceId, name;
+        double offset = 0.0, start = 0.0, duration = 0.0;   // s : début dans le fichier, place, durée
+        LiveSource* src = nullptr;
+        ARA::ARAPlaybackRegionRef region = nullptr;
+    };
+
     template <typename Ref, typename T> static Ref toRef (T* p) { return reinterpret_cast<Ref> (p); }
     template <typename T, typename Ref> static T* fromRef (Ref r) { return reinterpret_cast<T*> (r); }
+    // Toujours passer par la classe de base : le plugin nous rend le même pointeur.
+    template <typename Ref> static Ref objRef (HostObject* p) { return reinterpret_cast<Ref> (p); }
+    template <typename Ref> static Ref audioRef (AudioHolder* p) { return reinterpret_cast<Ref> (p); }
 
     //==========================================================================
     class AudioAccess final : public ARA::Host::AudioAccessControllerInterface
     {
     public:
-        struct Reader { HostClip* clip; bool use64; };
+        struct Reader { AudioHolder* clip; bool use64; };
 
         ARA::ARAAudioReaderHostRef createAudioReaderForSource (ARA::ARAAudioSourceHostRef src, bool use64) noexcept override
         {
-            auto r = std::make_unique<Reader> (Reader { fromRef<HostClip> (src), use64 });
+            auto r = std::make_unique<Reader> (Reader { fromRef<AudioHolder> (src), use64 });
             readersCreated++;
             auto ref = toRef<ARA::ARAAudioReaderHostRef> (r.get());
             std::lock_guard<std::mutex> l (lock);
@@ -234,8 +284,52 @@ namespace nova
         std::atomic<double> bpm { 120.0 };
         int sigNum = 4, sigDen = 4;
 
+        // Piste tempo et piste d'accords de NOVA (insert ARA) : vides = tempo constant, pas d'accords.
+        std::vector<ARA::ARAContentTempoEntry> tempoMap;
+        std::vector<ARA::ARAContentBarSignature> signatures;
+        std::vector<ARA::ARAContentChord> chords;
+        std::vector<std::string> chordNames;
+
+        // Position musicale (noires) à l'instant t (s), selon la piste tempo.
+        double quarterAt (double t) const
+        {
+            if (tempoMap.size() < 2) return t * bpm.load() / 60.0;
+            size_t i = 0;
+            while (i + 2 < tempoMap.size() && t >= tempoMap[i + 1].timePosition) ++i;
+            const auto& a = tempoMap[i];
+            const auto& b = tempoMap[i + 1];
+            const double dt = b.timePosition - a.timePosition;
+            const double slope = dt > 1e-9 ? (b.quarterPosition - a.quarterPosition) / dt : bpm.load() / 60.0;
+            return a.quarterPosition + (t - a.timePosition) * slope;
+        }
+
+        double tempoAt (double t) const
+        {
+            if (tempoMap.size() < 2) return bpm.load();
+            size_t i = 0;
+            while (i + 2 < tempoMap.size() && t >= tempoMap[i + 1].timePosition) ++i;
+            const auto& a = tempoMap[i];
+            const auto& b = tempoMap[i + 1];
+            const double dt = b.timePosition - a.timePosition;
+            return dt > 1e-9 ? 60.0 * (b.quarterPosition - a.quarterPosition) / dt : bpm.load();
+        }
+
+        // Mesure en cours à la position q (noires) : début (noires), numérateur, dénominateur.
+        void barAt (double q, double& barStart, int& num, int& den) const
+        {
+            double s = 0; num = sigNum; den = sigDen;
+            for (const auto& b : signatures)
+            {
+                if (b.position > q + 1e-9) break;
+                s = b.position; num = b.numerator; den = b.denominator;
+            }
+            const double len = 4.0 * (double) num / (double) std::max (1, den);
+            barStart = len > 0 ? s + std::floor ((q - s) / len + 1e-9) * len : s;
+        }
+
         bool isMusicalContextContentAvailable (ARA::ARAMusicalContextHostRef, ARA::ARAContentType t) noexcept override
         {
+            if (t == ARA::kARAContentTypeSheetChords) return ! chords.empty();
             return t == ARA::kARAContentTypeTempoEntries || t == ARA::kARAContentTypeBarSignatures;
         }
         ARA::ARAContentGrade getMusicalContextContentGrade (ARA::ARAMusicalContextHostRef, ARA::ARAContentType) noexcept override { return ARA::kARAContentGradeAdjusted; }
@@ -250,14 +344,25 @@ namespace nova
         ARA::ARAInt32 getContentReaderEventCount (ARA::ARAContentReaderHostRef r) noexcept override
         {
             const auto t = (ARA::ARAContentType) reinterpret_cast<intptr_t> (r);
-            if (t == ARA::kARAContentTypeTempoEntries) return 2;
-            if (t == ARA::kARAContentTypeBarSignatures) return 1;
+            if (t == ARA::kARAContentTypeTempoEntries) return tempoMap.size() >= 2 ? (ARA::ARAInt32) tempoMap.size() : 2;
+            if (t == ARA::kARAContentTypeBarSignatures) return signatures.empty() ? 1 : (ARA::ARAInt32) signatures.size();
+            if (t == ARA::kARAContentTypeSheetChords) return (ARA::ARAInt32) chords.size();
             return 0;
         }
 
         const void* getContentReaderDataForEvent (ARA::ARAContentReaderHostRef r, ARA::ARAInt32 i) noexcept override
         {
             const auto t = (ARA::ARAContentType) reinterpret_cast<intptr_t> (r);
+            if (t == ARA::kARAContentTypeTempoEntries && tempoMap.size() >= 2)
+                return &tempoMap[(size_t) std::clamp<ARA::ARAInt32> (i, 0, (ARA::ARAInt32) tempoMap.size() - 1)];
+            if (t == ARA::kARAContentTypeBarSignatures && ! signatures.empty())
+                return &signatures[(size_t) std::clamp<ARA::ARAInt32> (i, 0, (ARA::ARAInt32) signatures.size() - 1)];
+            if (t == ARA::kARAContentTypeSheetChords)
+            {
+                if (chords.empty()) return nullptr;
+                auto& c = chords[(size_t) std::clamp<ARA::ARAInt32> (i, 0, (ARA::ARAInt32) chords.size() - 1)];
+                return &c;
+            }
             if (t == ARA::kARAContentTypeTempoEntries)
             {
                 // Deux points suffisent pour un tempo constant : 0 s = noire 0, 1 mesure plus loin.
@@ -281,7 +386,7 @@ namespace nova
 
     struct HostCallbacks
     {
-        std::function<void (HostClip*, int, float)> analysisProgress;
+        std::function<void (AudioHolder*, int, float)> analysisProgress;
         std::function<void (const std::string&, const std::string&)> contentChanged;
         std::function<void (const std::string&, double)> transportRequest;
     };
@@ -293,19 +398,19 @@ namespace nova
 
         void notifyAudioSourceAnalysisProgress (ARA::ARAAudioSourceHostRef src, ARA::ARAAnalysisProgressState state, float value) noexcept override
         {
-            if (cb.analysisProgress) cb.analysisProgress (fromRef<HostClip> (src), (int) state, value);
+            if (cb.analysisProgress) cb.analysisProgress (fromRef<AudioHolder> (src), (int) state, value);
         }
         void notifyAudioSourceContentChanged (ARA::ARAAudioSourceHostRef src, const ARA::ARAContentTimeRange*, ARA::ContentUpdateScopes) noexcept override
         {
-            if (cb.contentChanged) cb.contentChanged ("source", fromRef<HostClip> (src)->id);
+            if (cb.contentChanged) cb.contentChanged ("source", fromRef<AudioHolder> (src)->id);
         }
         void notifyAudioModificationContentChanged (ARA::ARAAudioModificationHostRef m, const ARA::ARAContentTimeRange*, ARA::ContentUpdateScopes) noexcept override
         {
-            if (cb.contentChanged) cb.contentChanged ("modification", fromRef<HostClip> (m)->id);
+            if (cb.contentChanged) cb.contentChanged ("modification", fromRef<HostObject> (m)->id);
         }
         void notifyPlaybackRegionContentChanged (ARA::ARAPlaybackRegionHostRef r, const ARA::ARAContentTimeRange*, ARA::ContentUpdateScopes) noexcept override
         {
-            if (cb.contentChanged) cb.contentChanged ("region", fromRef<HostClip> (r)->id);
+            if (cb.contentChanged) cb.contentChanged ("region", fromRef<HostObject> (r)->id);
         }
         void notifyDocumentDataChanged() noexcept override
         {
@@ -412,7 +517,7 @@ namespace nova
     public:
         AraSession()
         {
-            callbacks.analysisProgress = [] (HostClip* c, int state, float value)
+            callbacks.analysisProgress = [] (AudioHolder* c, int state, float value)
             {
                 auto o = Value::object();
                 o.set ("clip", c->id);
@@ -433,6 +538,8 @@ namespace nova
                 o.set ("kind", kind);
                 o.set ("value", value);
                 io::event ("transport_request", o);
+                // Insert sur une piste : c'est NOVA qui joue (le pont relaie la demande à son transport).
+                if (liveMode) return;
                 // L'hôte suit aussi la demande lui-même (lecture du clip dans la fenêtre du plugin).
                 app::post ([this, kind, value]
                 {
@@ -445,9 +552,12 @@ namespace nova
 
         ~AraSession()
         {
+            pipe.stop();
             shutdownAudio();
+            docked.reset();
             editorWindow.reset();
             clearDocument();
+            clearLive();
             if (plugin) plugin->release();
             if (dc)
             {
@@ -598,17 +708,17 @@ namespace nova
                     clip->name.c_str(), clip->persistentId.c_str(), (ARA::ARASampleCount) clip->audio.numFrames(),
                     clip->sampleRate(), (ARA::ARAChannelCount) clip->audio.numChannels(), (ARA::ARABool) false,
                     ARA::kARAChannelArrangementUndefined, nullptr };
-                clip->source = dc->createAudioSource (toRef<ARA::ARAAudioSourceHostRef> (clip.get()), &sp);
+                clip->source = dc->createAudioSource (audioRef<ARA::ARAAudioSourceHostRef> (clip.get()), &sp);
 
                 const ARA::SizedStruct<ARA_STRUCT_MEMBER (ARAAudioModificationProperties, persistentID)> mp {
                     clip->name.c_str(), clip->modificationId.c_str() };
-                clip->modification = dc->createAudioModification (clip->source, toRef<ARA::ARAAudioModificationHostRef> (clip.get()), &mp);
+                clip->modification = dc->createAudioModification (clip->source, objRef<ARA::ARAAudioModificationHostRef> (clip.get()), &mp);
 
                 const ARA::SizedStruct<ARA_STRUCT_MEMBER (ARAPlaybackRegionProperties, color)> rp {
                     (ARA::ARAPlaybackTransformationFlags) ARA::kARAPlaybackTransformationNoChanges,
                     0.0, clip->duration(), clip->start, clip->duration(),
                     musicalContext, track->sequence, clip->name.c_str(), nullptr };
-                clip->region = dc->createPlaybackRegion (clip->modification, toRef<ARA::ARAPlaybackRegionHostRef> (clip.get()), &rp);
+                clip->region = dc->createPlaybackRegion (clip->modification, objRef<ARA::ARAPlaybackRegionHostRef> (clip.get()), &rp);
             }
 
             dc->updateMusicalContextContent (musicalContext, nullptr, ARA::ContentUpdateScopes::timelineIsAffected());
@@ -692,7 +802,7 @@ namespace nova
         Value showEditor (const Value& req)
         {
             if (! plugin) throw std::runtime_error ("Aucun plugin chargé");
-            if (! plugin->hasEditor()) throw std::runtime_error ("Ce plugin n'a pas de fenêtre");
+            if (editorWindow == nullptr && docked == nullptr && ! plugin->hasEditor()) throw std::runtime_error ("Ce plugin n'a pas de fenêtre");
             const bool offscreen = req["offscreen"].asBool (false);
             if (editorWindow == nullptr || editorWindow->offscreen != offscreen)
             {
@@ -729,9 +839,10 @@ namespace nova
 
         Value snapshot (const Value& req)
         {
-            if (editorWindow == nullptr || ! editorWindow->isVisible()) throw std::runtime_error ("Aucune fenêtre ouverte");
+            HWND hwnd = (editorWindow != nullptr && editorWindow->isVisible()) ? editorWindow->handle()
+                      : (docked != nullptr && docked->isVisible() ? docked->handle() : nullptr);
+            if (hwnd == nullptr) throw std::runtime_error ("Aucune fenêtre ouverte");
             const auto path = req["path"].asString();
-            HWND hwnd = editorWindow->handle();
             RECT rc;
             GetWindowRect (hwnd, &rc);
             const int w = rc.right - rc.left, h = rc.bottom - rc.top;
@@ -767,8 +878,9 @@ namespace nova
         // premier plan) : l'état des modificateurs (Ctrl, Maj) est celui du fil de l'interface.
         Value keys (const Value& req)
         {
-            if (editorWindow == nullptr || ! editorWindow->isVisible()) throw std::runtime_error ("Aucune fenêtre ouverte");
-            HWND top = editorWindow->handle();
+            HWND top = (editorWindow != nullptr && editorWindow->isVisible()) ? editorWindow->handle()
+                     : (docked != nullptr && docked->isVisible() ? docked->handle() : nullptr);
+            if (top == nullptr) throw std::runtime_error ("Aucune fenêtre ouverte");
             std::vector<HWND> kids;
             EnumChildWindows (top, [] (HWND h, LPARAM lp) -> BOOL { reinterpret_cast<std::vector<HWND>*> (lp)->push_back (h); return TRUE; }, (LPARAM) &kids);
             auto list = Value::array();
@@ -1003,6 +1115,554 @@ namespace nova
         }
 
         //======================================================================
+        // INSERT ARA SUR UNE PISTE (comme Pro Tools) : document de la piste tenu à jour à chaque
+        // édition de NOVA, lecture en direct (flux AudioPipe calé sur le transport de NOVA),
+        // rendu hors ligne identique, fenêtre du plugin ancrée dans l'appli.
+        //======================================================================
+
+        // doc  sources:[{id, path, name, persistent_id?, modification_id?}] (path : fichiers nouveaux
+        //      seulement), regions:[{id, source, name, offset, start, duration}], track:{name},
+        //      tempo:[{t, q}], signatures:[{q, num, den}], chords:[{q, root, bass, intervals[12], name}],
+        //      bpm?, archive_b64? (retouches à restaurer, une fois)
+        Value doc (const Value& req)
+        {
+            requireLoaded();
+            if (! clips.empty()) throw std::runtime_error ("Session « clip » ouverte : pas d'insert sur cette instance");
+            liveMode = true;
+
+            // 1) Fichiers nouveaux, lus hors verrou (la lecture continue pendant ce temps).
+            std::map<std::string, std::unique_ptr<LiveSource>> fresh;
+            std::set<std::string> listed;
+            const auto& srcList = req["sources"];
+            for (size_t i = 0; srcList.isArray() && i < srcList.size(); ++i)
+            {
+                const auto& s = srcList.at (i);
+                const auto id = s["id"].asString();
+                if (id.empty()) continue;
+                listed.insert (id);
+                if (liveSources.count (id) || fresh.count (id)) continue;
+                auto src = std::make_unique<LiveSource>();
+                src->id = id;
+                src->name = s.has ("name") ? s["name"].asString() : id;
+                src->persistentId = s.has ("persistent_id") ? s["persistent_id"].asString() : ("nova:" + id);
+                src->modificationId = s.has ("modification_id") ? s["modification_id"].asString() : (src->persistentId + "/modif");
+                const auto path = s["path"].asString();
+                if (! readWav (path, src->audio)) throw std::runtime_error ("Audio illisible : " + path);
+                if (src->audio.numChannels() == 0) src->audio.setSize (1, 0);
+                fresh.emplace (id, std::move (src));
+            }
+
+            // 2) Régions voulues (clips de la piste).
+            struct Want { std::string id, sourceId, name; double offset, start, duration; };
+            std::vector<Want> want;
+            const auto& regList = req["regions"];
+            for (size_t i = 0; regList.isArray() && i < regList.size(); ++i)
+            {
+                const auto& r = regList.at (i);
+                Want w { r["id"].asString(), r["source"].asString(), r["name"].asString(),
+                         std::max (0.0, r["offset"].asDouble (0.0)), r["start"].asDouble (0.0), r["duration"].asDouble (0.0) };
+                LiveSource* s = liveSources.count (w.sourceId) ? liveSources[w.sourceId].get()
+                              : (fresh.count (w.sourceId) ? fresh[w.sourceId].get() : nullptr);
+                if (w.id.empty() || s == nullptr) continue;
+                // Région dans le fichier (ARA : jamais au-delà de la modification).
+                const double srcDur = s->duration();
+                w.offset = std::min (w.offset, std::max (0.0, srcDur - 1e-3));
+                w.duration = std::min (w.duration, srcDur - w.offset);
+                if (w.duration <= 1e-4) continue;
+                if (w.name.empty()) w.name = s->name;
+                want.push_back (w);
+            }
+
+            // 3) Tempo, mesures, accords (piste tempo R2, piste d'accords V20).
+            Music music = parseMusic (req);
+            const bool musicChanged = ! sameMusic (music);
+
+            std::set<std::string> wantIds;
+            for (auto& w : want) wantIds.insert (w.id);
+            std::vector<std::string> removed, added, updated;
+            for (auto& [id, r] : liveRegions) if (! wantIds.count (id)) removed.push_back (id);
+            for (auto& w : want)
+            {
+                auto it = liveRegions.find (w.id);
+                if (it == liveRegions.end()) { added.push_back (w.id); continue; }
+                auto& r = *it->second;
+                if (r.sourceId != w.sourceId) { removed.push_back (w.id); added.push_back (w.id); continue; }   // autre son
+                if (std::abs (r.offset - w.offset) > 1e-7 || std::abs (r.start - w.start) > 1e-7
+                    || std::abs (r.duration - w.duration) > 1e-7 || r.name != w.name)
+                    updated.push_back (w.id);
+            }
+            const bool renderersChange = ! removed.empty() || ! added.empty();
+            const auto archiveB64 = req["archive_b64"].asString();
+            std::vector<uint8_t> archiveBytes;
+            if (! archiveB64.empty()) base64::decode (archiveB64, archiveBytes);
+
+            bool restoredNow = false;
+            {
+                std::lock_guard<std::mutex> sl (renderLock);
+                // Ajouter / retirer des régions au rendu : plugin à l'arrêt (règle d'ARA).
+                if (renderersChange && prepared != Prepared::none) { plugin->release(); prepared = Prepared::none; }
+                for (auto& id : removed)
+                {
+                    auto it = liveRegions.find (id);
+                    if (it == liveRegions.end()) continue;
+                    unassignLive (it->second.get());
+                }
+                dc->beginEditing();
+                if (musicChanged)
+                {
+                    applyMusic (std::move (music));
+                    dc->updateMusicalContextContent (musicalContext, nullptr, ARA::ContentUpdateScopes::timelineIsAffected());
+                }
+                const auto trackName = req["track"]["name"].asString();
+                if (liveSequence == nullptr)
+                {
+                    liveTrackName = trackName.empty() ? std::string ("Piste") : trackName;
+                    const ARA::SizedStruct<ARA_STRUCT_MEMBER (ARARegionSequenceProperties, color)> p {
+                        liveTrackName.c_str(), 0, musicalContext, nullptr };
+                    liveSequence = dc->createRegionSequence (objRef<ARA::ARARegionSequenceHostRef> (&liveSeqObj), &p);
+                }
+                else if (! trackName.empty() && trackName != liveTrackName)
+                {
+                    liveTrackName = trackName;
+                    const ARA::SizedStruct<ARA_STRUCT_MEMBER (ARARegionSequenceProperties, color)> p {
+                        liveTrackName.c_str(), 0, musicalContext, nullptr };
+                    dc->updateRegionSequenceProperties (liveSequence, &p);
+                }
+                for (auto& id : removed)
+                {
+                    auto it = liveRegions.find (id);
+                    if (it == liveRegions.end()) continue;
+                    if (it->second->region != nullptr) dc->destroyPlaybackRegion (it->second->region);
+                    liveRegions.erase (it);
+                }
+                for (auto& [id, src] : fresh)
+                {
+                    const ARA::SizedStruct<ARA_STRUCT_MEMBER (ARAAudioSourceProperties, channelArrangement)> sp {
+                        src->name.c_str(), src->persistentId.c_str(), (ARA::ARASampleCount) src->audio.numFrames(),
+                        src->sampleRate(), (ARA::ARAChannelCount) src->audio.numChannels(), (ARA::ARABool) false,
+                        ARA::kARAChannelArrangementUndefined, nullptr };
+                    src->source = dc->createAudioSource (audioRef<ARA::ARAAudioSourceHostRef> (src.get()), &sp);
+                    const ARA::SizedStruct<ARA_STRUCT_MEMBER (ARAAudioModificationProperties, persistentID)> mp {
+                        src->name.c_str(), src->modificationId.c_str() };
+                    src->modification = dc->createAudioModification (src->source, objRef<ARA::ARAAudioModificationHostRef> (src.get()), &mp);
+                    liveSources.emplace (id, std::move (src));
+                }
+                fresh.clear();
+                for (auto& w : want)
+                {
+                    const bool isNew = std::find (added.begin(), added.end(), w.id) != added.end();
+                    const bool isUpd = std::find (updated.begin(), updated.end(), w.id) != updated.end();
+                    if (! isNew && ! isUpd) continue;
+                    LiveRegion* r = nullptr;
+                    if (isNew)
+                    {
+                        auto nr = std::make_unique<LiveRegion>();
+                        nr->id = w.id;
+                        r = nr.get();
+                        liveRegions[w.id] = std::move (nr);
+                    }
+                    else r = liveRegions[w.id].get();
+                    r->sourceId = w.sourceId; r->name = w.name; r->offset = w.offset; r->start = w.start; r->duration = w.duration;
+                    r->src = liveSources[w.sourceId].get();
+                    const ARA::SizedStruct<ARA_STRUCT_MEMBER (ARAPlaybackRegionProperties, color)> rp {
+                        (ARA::ARAPlaybackTransformationFlags) ARA::kARAPlaybackTransformationNoChanges,
+                        r->offset, r->duration, r->start, r->duration, musicalContext, liveSequence, r->name.c_str(), nullptr };
+                    if (isNew) r->region = dc->createPlaybackRegion (r->src->modification, objRef<ARA::ARAPlaybackRegionHostRef> (r), &rp);
+                    else dc->updatePlaybackRegionProperties (r->region, &rp);
+                }
+                if (! archiveBytes.empty())
+                    restoredNow = dc->restoreObjectsFromArchive (toRef<ARA::ARAArchiveReaderHostRef> (&archiveBytes), nullptr);
+                dc->endEditing();
+
+                for (auto& [id, s] : liveSources)
+                    if (! s->samplesEnabled) { dc->enableAudioSourceSamplesAccess (s->source, true); s->samplesEnabled = true; }
+
+                // Fichiers qui ne servent plus (aucun clip, plus dans la liste) : retirés du document.
+                std::vector<std::string> unused;
+                for (auto& [id, s] : liveSources)
+                {
+                    if (listed.count (id)) continue;
+                    bool used = false;
+                    for (auto& [rid, r] : liveRegions) if (r->sourceId == id) { used = true; break; }
+                    if (! used) unused.push_back (id);
+                }
+                if (! unused.empty())
+                {
+                    for (auto& id : unused) { auto& s = liveSources[id]; dc->enableAudioSourceSamplesAccess (s->source, false); s->samplesEnabled = false; }
+                    dc->beginEditing();
+                    for (auto& id : unused)
+                    {
+                        auto& s = liveSources[id];
+                        dc->destroyAudioModification (s->modification);
+                        dc->destroyAudioSource (s->source);
+                    }
+                    dc->endEditing();
+                    for (auto& id : unused) liveSources.erase (id);
+                }
+
+                if (renderersChange || prepared == Prepared::none) assignLive();
+                if (streamWanted && prepared != Prepared::stream) prepareStreamLocked();
+            }
+            if (restoredNow) restored = true;
+            if (canAnalyzeNotes && ! added.empty())
+            {
+                const ARA::ARAContentType types[] { ARA::kARAContentTypeNotes };
+                for (auto& [id, s] : liveSources)
+                    if (dc->isAudioSourceContentAnalysisIncomplete (s->source, ARA::kARAContentTypeNotes))
+                        dc->requestAudioSourceContentAnalysis (s->source, 1, types);
+            }
+            if (docked != nullptr && renderersChange) notifySelectionLive ({});
+            ++docVersion;
+            // Fenêtre demandée avant le premier son : ouverte maintenant (évènement editor_opened).
+            if (pendingEditor != nullptr && ! liveRegions.empty())
+            {
+                auto r = std::move (pendingEditor);
+                try { auto res = editor (*r); io::event ("editor_opened", res); }
+                catch (const std::exception& e) { io::log (std::string ("Fenêtre du plugin : ") + e.what()); }
+            }
+
+            auto out = Value::object();
+            out.set ("version", docVersion);
+            out.set ("sources", (int) liveSources.size());
+            out.set ("regions", (int) liveRegions.size());
+            out.set ("added", (int) added.size());
+            out.set ("removed", (int) removed.size());
+            out.set ("updated", (int) updated.size());
+            out.set ("music_changed", musicChanged);
+            out.set ("restored", restoredNow);
+            out.set ("latency_samples", plugin->latencySamples());
+            return out;
+        }
+
+        // doc_state : le document tel que le plugin le voit (régions relues : notes de chaque
+        // région, en temps du morceau, lues dans le plugin ; tête et queue).
+        // wait_analysis_s : attend la fin de l'analyse (réponse différée).
+        Value docState (const Value& req)
+        {
+            requireLoaded();
+            auto out = Value::object();
+            auto regs = Value::array();
+            const bool withNotes = req["notes"].asBool (true);
+            for (auto& [id, r] : liveRegions)
+            {
+                auto o = Value::object();
+                o.set ("id", r->id);
+                o.set ("source", r->sourceId);
+                o.set ("offset", r->offset);
+                o.set ("start", r->start);
+                o.set ("duration", r->duration);
+                ARA::ARATimeDuration head = 0, tail = 0;
+                dc->getPlaybackRegionHeadAndTailTime (r->region, &head, &tail);
+                o.set ("head", (double) head);
+                o.set ("tail", (double) tail);
+                if (withNotes) o.set ("notes", readRegionNotes (*r));
+                regs.push (o);
+            }
+            auto srcs = Value::array();
+            for (auto& [id, s] : liveSources)
+            {
+                auto o = Value::object();
+                o.set ("id", s->id);
+                o.set ("frames", (double) s->audio.numFrames());
+                o.set ("sample_rate", s->sampleRate());
+                o.set ("analysis_incomplete", canAnalyzeNotes && dc->isAudioSourceContentAnalysisIncomplete (s->source, ARA::kARAContentTypeNotes));
+                srcs.push (o);
+            }
+            out.set ("regions", regs);
+            out.set ("sources", srcs);
+            out.set ("track", liveTrackName);
+            out.set ("version", docVersion);
+            out.set ("tempo_entries", (int) contentAccess->tempoMap.size());
+            out.set ("signatures", (int) contentAccess->signatures.size());
+            out.set ("chords", (int) contentAccess->chords.size());
+            out.set ("audio_readers", audioAccess != nullptr ? audioAccess->readersCreated.load() : 0);
+            out.set ("stream_blocks", (double) pipe.blocks.load());
+            out.set ("stream_rendered", (double) pipe.rendered.load());
+            out.set ("latency_samples", plugin->latencySamples());
+            return out;
+        }
+
+        void docStateWhenAnalyzed (const Value& req, std::function<void (Value, std::string)> reply)
+        {
+            requireLoaded();
+            pendingAnalysis = std::make_unique<PendingAnalysis>();
+            pendingAnalysis->reply = std::move (reply);
+            pendingAnalysis->started = nowMs();
+            pendingAnalysis->timeoutMs = 1000.0 * req["wait_analysis_s"].asDouble (60.0);
+            pendingAnalysis->live = true;
+            pendingAnalysis->request = req;
+        }
+
+        // stream_open sample_rate, max_block → nom du tube ; le pont s'y connecte.
+        Value streamOpen (const Value& req)
+        {
+            requireLoaded();
+            liveMode = true;
+            streamRate = req["sample_rate"].asDouble (sampleRate);
+            streamBlock = std::clamp (req["max_block"].asInt (2048), 64, AudioPipe::kMaxFrames);
+            streamWanted = true;
+            {
+                std::lock_guard<std::mutex> sl (renderLock);
+                if (prepared == Prepared::stream) { plugin->release(); prepared = Prepared::none; }
+                prepareStreamLocked();
+            }
+            if (! pipe.running())
+                pipe.start ("NovaARAHost-" + std::to_string (GetCurrentProcessId()) + "-audio",
+                            [this] (const float* const* in, int nin, float* const* outp, int n, int64_t pos, bool playing)
+                            { return streamProcess (in, nin, outp, n, pos, playing); });
+            auto out = Value::object();
+            out.set ("pipe", "\\\\.\\pipe\\" + pipe.name());
+            out.set ("sample_rate", streamRate);
+            out.set ("max_block", streamBlock);
+            out.set ("latency_samples", plugin->latencySamples());
+            out.set ("output_channels", plugin->totalOutputChannels());
+            return out;
+        }
+
+        // render_range out, start (s), duration (s), sample_rate? → la piste à travers le plugin,
+        // hors temps réel, calée sur le temps du morceau (latence compensée) : export, gel, bounce.
+        Value renderRange (const Value& req)
+        {
+            requireLoaded();
+            const double start = req["start"].asDouble (0.0);
+            const double dur = req["duration"].asDouble (0.0);
+            const double sr = req["sample_rate"].asDouble (streamRate > 0 ? streamRate : sampleRate);
+            const auto outPath = req["out"].asString();
+            if (dur <= 0 || outPath.empty()) throw std::runtime_error ("Plage de rendu invalide");
+            AudioData outBuf;
+            double peak = 0;
+            int latency = 0;
+            {
+                std::lock_guard<std::mutex> sl (renderLock);
+                const bool wasStream = prepared == Prepared::stream;
+                plugin->release();
+                prepared = Prepared::none;
+                assignLive();
+                plugin->prepare (sr, blockSize, true);
+                prepared = Prepared::offline;
+                latency = plugin->latencySamples();
+                const int64_t pos0 = (int64_t) std::llround (start * sr);
+                const int64_t len = (int64_t) std::llround (dur * sr);
+                const int64_t pre = (int64_t) std::llround (0.25 * sr);   // élan : le plugin se cale avant le début
+                const int nch = std::max ({ 2, plugin->totalInputChannels(), plugin->totalOutputChannels() });
+                const int outCh = std::max (1, plugin->totalOutputChannels());
+                outBuf.sampleRate = sr;
+                outBuf.setSize (2, len);
+                std::vector<std::vector<float>> block ((size_t) nch, std::vector<float> ((size_t) blockSize, 0.0f));
+                std::vector<float*> ptrs ((size_t) nch);
+                for (int ch = 0; ch < nch; ++ch) ptrs[(size_t) ch] = block[(size_t) ch].data();
+                const int64_t end = pos0 + len + latency;
+                for (int64_t p = pos0 - pre; p < end; p += blockSize)
+                {
+                    const int n = (int) std::min ((int64_t) blockSize, end - p);
+                    for (auto& b : block) std::fill (b.begin(), b.begin() + n, 0.0f);
+                    plugin->process (ptrs.data(), nch, n, transportAt (p, sr, true));
+                    for (int i = 0; i < n; ++i)
+                    {
+                        const int64_t idx = p + i - latency - pos0;
+                        if (idx < 0 || idx >= len) continue;
+                        for (int ch = 0; ch < 2; ++ch)
+                        {
+                            const float v = block[(size_t) std::min (ch, outCh - 1)][(size_t) i];
+                            outBuf.channels[(size_t) ch][(size_t) idx] = v;
+                            peak = std::max (peak, (double) std::abs (v));
+                        }
+                    }
+                }
+                plugin->release();
+                prepared = Prepared::none;
+                if (wasStream) prepareStreamLocked();
+            }
+            writeWavFloat (outPath, outBuf);
+            auto o = Value::object();
+            o.set ("path", outPath);
+            o.set ("sample_rate", sr);
+            o.set ("samples", (double) outBuf.numFrames());
+            o.set ("latency", latency);
+            o.set ("peak", peak);
+            return o;
+        }
+
+        // editor mode: dock (parent, x, y, w, h, visible) | bounds | float | hide
+        Value editor (const Value& req)
+        {
+            if (! plugin) throw std::runtime_error ("Aucun plugin chargé");
+            const auto mode = req["mode"].asString();
+            auto out = Value::object();
+            // Melodyne plante (violation d'accès) si sa fenêtre s'ouvre sur un document ARA sans aucun
+            // son : la demande attend le premier document (doc), qui l'applique.
+            if (mode != "hide" && dc && liveRegions.empty() && clips.empty() && docked == nullptr && editorWindow == nullptr)
+            {
+                pendingEditor = std::make_unique<Value> (req);
+                out.set ("mode", mode);
+                out.set ("pending", true);
+                return out;
+            }
+            // (Vue déjà ouverte : Melodyne refuse d'en créer une 2e, hasEditor dirait faux.)
+            if (mode != "hide" && docked == nullptr && editorWindow == nullptr && ! plugin->hasEditor())
+                throw std::runtime_error ("Ce plugin n'a pas de fenêtre");
+            if (mode == "hide")
+            {
+                pendingEditor.reset();
+                if (docked) docked->setBounds (0, 0, 1, 1, false);
+                if (editorWindow) editorWindow->hide();
+                if (req["release"].asBool (false)) { docked.reset(); editorWindow.reset(); }
+                out.set ("mode", "hide");
+                return out;
+            }
+            if (mode == "float")
+            {
+                docked.reset();
+                auto r = showEditor (req);
+                if (dc && liveMode) notifySelectionLive (selectedIds);
+                r.set ("mode", "float");
+                return r;
+            }
+            const int x = req["x"].asInt (0), y = req["y"].asInt (0), w = req["w"].asInt (800), h = req["h"].asInt (300);
+            const bool visible = req["visible"].asBool (true);
+            if (mode == "dock")
+            {
+                const auto parent = (HWND) (intptr_t) (int64_t) req["parent"].asDouble (0.0);
+                if (docked == nullptr || docked->parent() != parent)
+                {
+                    docked.reset();
+                    editorWindow.reset();   // une seule vue à la fois
+                    auto view = plugin->createView();
+                    if (view == nullptr) throw std::runtime_error ("Fenêtre du plugin indisponible");
+                    docked = std::make_unique<DockedEditor> (view, parent);
+                }
+                docked->setBounds (x, y, w, h, visible);
+                if (dc && liveMode) notifySelectionLive (selectedIds);
+            }
+            else if (mode == "bounds")
+            {
+                if (docked == nullptr && pendingEditor != nullptr)
+                {
+                    for (const char* k : { "x", "y", "w", "h", "visible" }) if (req.has (k)) pendingEditor->set (k, req[k]);
+                    out.set ("mode", mode);
+                    out.set ("pending", true);
+                    return out;
+                }
+                if (docked == nullptr) throw std::runtime_error ("Aucun panneau ancré");
+                docked->setBounds (x, y, w, h, visible);
+            }
+            else throw std::runtime_error ("Mode de fenêtre inconnu : " + mode);
+            out.set ("mode", mode);
+            out.set ("child", docked->isChild());
+            out.set ("visible", docked->isVisible());
+            out.set ("view_width", docked->viewWidth());
+            out.set ("view_height", docked->viewHeight());
+            out.set ("resizable", docked->resizable());
+            out.set ("hwnd", (double) (intptr_t) docked->handle());
+            return out;
+        }
+
+        // select regions:[ids] (vide : toute la piste) → l'éditeur montre ces clips.
+        Value selectLive (const Value& req)
+        {
+            requireLoaded();
+            std::vector<std::string> ids;
+            const auto& arr = req["regions"];
+            for (size_t i = 0; arr.isArray() && i < arr.size(); ++i) ids.push_back (arr.at (i).asString());
+            selectedIds = ids;
+            const int n = notifySelectionLive (ids);
+            auto out = Value::object();
+            out.set ("selected", n);
+            return out;
+        }
+
+        // params → réglages du plugin (VST3) ; set_param id|title, value (0–1) : réglage en direct.
+        Value params()
+        {
+            if (! plugin || plugin->getController() == nullptr) throw std::runtime_error ("Aucun plugin chargé");
+            auto* ctl = plugin->getController();
+            auto arr = Value::array();
+            const auto n = ctl->getParameterCount();
+            for (Steinberg::int32 i = 0; i < n; ++i)
+            {
+                Steinberg::Vst::ParameterInfo pi {};
+                if (ctl->getParameterInfo (i, pi) != Steinberg::kResultOk) continue;
+                const double v = ctl->getParamNormalized (pi.id);
+                Steinberg::Vst::String128 txt {};
+                ctl->getParamStringByValue (pi.id, v, txt);
+                auto o = Value::object();
+                o.set ("id", (double) pi.id);
+                o.set ("title", narrow (std::wstring (reinterpret_cast<const wchar_t*> (pi.title))));
+                o.set ("units", narrow (std::wstring (reinterpret_cast<const wchar_t*> (pi.units))));
+                o.set ("value", v);
+                o.set ("text", narrow (std::wstring (reinterpret_cast<const wchar_t*> (txt))));
+                o.set ("steps", (int) pi.stepCount);
+                o.set ("flags", (int) pi.flags);
+                arr.push (o);
+            }
+            auto out = Value::object();
+            out.set ("params", arr);
+            return out;
+        }
+
+        // vst_state → état VST3 du plugin (base64) ; set_vst_state state_b64 : réglages hors ARA.
+        Value vstState()
+        {
+            if (! plugin) throw std::runtime_error ("Aucun plugin chargé");
+            const auto bytes = plugin->getState();
+            auto out = Value::object();
+            out.set ("state_b64", base64::encode (bytes.data(), bytes.size()));
+            out.set ("size", (int) bytes.size());
+            return out;
+        }
+
+        Value setVstState (const Value& req)
+        {
+            if (! plugin) throw std::runtime_error ("Aucun plugin chargé");
+            std::vector<uint8_t> m;
+            if (! base64::decode (req["state_b64"].asString(), m) || m.empty()) throw std::runtime_error ("État du plugin illisible");
+            bool ok = false;
+            {
+                std::lock_guard<std::mutex> sl (renderLock);
+                ok = plugin->setState (m);
+            }
+            auto out = Value::object();
+            out.set ("restored", ok);
+            return out;
+        }
+
+        Value setParam (const Value& req)
+        {
+            if (! plugin || plugin->getController() == nullptr) throw std::runtime_error ("Aucun plugin chargé");
+            auto* ctl = plugin->getController();
+            Steinberg::Vst::ParamID id = (Steinberg::Vst::ParamID) req["id"].asDouble (-1.0);
+            if (req.has ("title"))
+            {
+                const auto want = req["title"].asString();
+                bool found = false;
+                for (Steinberg::int32 i = 0; i < ctl->getParameterCount() && ! found; ++i)
+                {
+                    Steinberg::Vst::ParameterInfo pi {};
+                    if (ctl->getParameterInfo (i, pi) == Steinberg::kResultOk
+                        && narrow (std::wstring (reinterpret_cast<const wchar_t*> (pi.title))) == want) { id = pi.id; found = true; }
+                }
+                if (! found) throw std::runtime_error ("Réglage inconnu : " + want);
+            }
+            const double v = std::clamp (req["value"].asDouble (0.0), 0.0, 1.0);
+            plugin->hostEdits[id] = nowMs();
+            ctl->setParamNormalized (id, v);
+            {
+                std::lock_guard<std::mutex> l (plugin->paramLock);
+                plugin->heldParams[id] = v;
+                // Les valeurs déjà renvoyées par le processeur pour ce réglage sont périmées.
+                auto& q = plugin->pendingToController;
+                q.erase (std::remove_if (q.begin(), q.end(), [id] (const auto& e) { return e.first == id; }), q.end());
+            }
+            Steinberg::Vst::String128 txt {};
+            ctl->getParamStringByValue (id, ctl->getParamNormalized (id), txt);
+            auto out = Value::object();
+            out.set ("id", (double) id);
+            out.set ("value", ctl->getParamNormalized (id));
+            out.set ("text", narrow (std::wstring (reinterpret_cast<const wchar_t*> (txt))));
+            return out;
+        }
+
+        //======================================================================
         void timer()
         {
             if (plugin) plugin->flushOutputParameters();
@@ -1011,15 +1671,20 @@ namespace nova
             if (pendingAnalysis == nullptr) return;
             bool incomplete = false;
             if (canAnalyzeNotes)
+            {
                 for (auto& c : clips)
                     if (dc->isAudioSourceContentAnalysisIncomplete (c->source, ARA::kARAContentTypeNotes))
                         incomplete = true;
+                for (auto& [id, s] : liveSources)
+                    if (dc->isAudioSourceContentAnalysisIncomplete (s->source, ARA::kARAContentTypeNotes))
+                        incomplete = true;
+            }
             const auto elapsed = nowMs() - pendingAnalysis->started;
             if (incomplete && elapsed < pendingAnalysis->timeoutMs) return;
             auto p = std::move (pendingAnalysis);
             try
             {
-                auto res = notes();
+                auto res = p->live ? docState (p->request) : notes();
                 res.set ("analysis_seconds", elapsed / 1000.0);
                 res.set ("complete", ! incomplete);
                 p->reply (res, {});
@@ -1028,13 +1693,239 @@ namespace nova
         }
 
     private:
-        enum class Prepared { none, offline, realtime };
+        enum class Prepared { none, offline, realtime, stream };
 
         struct PendingAnalysis
         {
             std::function<void (Value, std::string)> reply;
             double started = 0, timeoutMs = 120000;
+            bool live = false;      // insert : réponse = doc_state
+            Value request;
         };
+
+        //======================================================================
+        // Insert : tempo, mesures, accords reçus de NOVA.
+        struct Music
+        {
+            double bpm = 120.0;
+            std::vector<ARA::ARAContentTempoEntry> tempo;
+            std::vector<ARA::ARAContentBarSignature> sigs;
+            std::vector<ARA::ARAContentChord> chords;
+            std::vector<std::string> names;
+        };
+
+        static Music parseMusic (const Value& req)
+        {
+            Music m;
+            m.bpm = req["bpm"].asDouble (0.0);
+            const auto& t = req["tempo"];
+            for (size_t i = 0; t.isArray() && i < t.size(); ++i)
+            {
+                ARA::ARAContentTempoEntry e {};
+                e.timePosition = t.at (i)["t"].asDouble (0.0);
+                e.quarterPosition = t.at (i)["q"].asDouble (0.0);
+                m.tempo.push_back (e);
+            }
+            const auto& s = req["signatures"];
+            for (size_t i = 0; s.isArray() && i < s.size(); ++i)
+            {
+                ARA::ARAContentBarSignature b {};
+                b.position = s.at (i)["q"].asDouble (0.0);
+                b.numerator = s.at (i)["num"].asInt (4);
+                b.denominator = s.at (i)["den"].asInt (4);
+                m.sigs.push_back (b);
+            }
+            const auto& c = req["chords"];
+            for (size_t i = 0; c.isArray() && i < c.size(); ++i)
+            {
+                const auto& x = c.at (i);
+                ARA::ARAContentChord ch {};
+                ch.position = x["q"].asDouble (0.0);
+                ch.root = (ARA::ARACircleOfFifthsIndex) x["root"].asInt (0);
+                ch.bass = (ARA::ARACircleOfFifthsIndex) (x.has ("bass") ? x["bass"].asInt (0) : x["root"].asInt (0));
+                const auto& iv = x["intervals"];
+                for (size_t k = 0; k < 12; ++k)
+                    ch.intervals[k] = (ARA::ARAChordIntervalUsage) (iv.isArray() && k < iv.size() ? iv.at (k).asInt (0) : 0);
+                m.chords.push_back (ch);
+                m.names.push_back (x["name"].asString());
+            }
+            return m;
+        }
+
+        bool sameMusic (const Music& m) const
+        {
+            const auto& a = *contentAccess;
+            if (m.bpm > 0 && std::abs (m.bpm - a.bpm.load()) > 1e-9) return false;
+            if (m.tempo.size() != a.tempoMap.size() || m.sigs.size() != a.signatures.size() || m.chords.size() != a.chords.size()) return false;
+            for (size_t i = 0; i < m.tempo.size(); ++i)
+                if (std::abs (m.tempo[i].timePosition - a.tempoMap[i].timePosition) > 1e-9
+                    || std::abs (m.tempo[i].quarterPosition - a.tempoMap[i].quarterPosition) > 1e-9) return false;
+            for (size_t i = 0; i < m.sigs.size(); ++i)
+                if (std::abs (m.sigs[i].position - a.signatures[i].position) > 1e-9
+                    || m.sigs[i].numerator != a.signatures[i].numerator || m.sigs[i].denominator != a.signatures[i].denominator) return false;
+            for (size_t i = 0; i < m.chords.size(); ++i)
+                if (std::abs (m.chords[i].position - a.chords[i].position) > 1e-9 || m.chords[i].root != a.chords[i].root
+                    || m.chords[i].bass != a.chords[i].bass || std::memcmp (m.chords[i].intervals, a.chords[i].intervals, 12) != 0) return false;
+            return true;
+        }
+
+        // Sous renderLock, pendant une édition du document.
+        void applyMusic (Music m)
+        {
+            auto& a = *contentAccess;
+            if (m.bpm > 0) { a.bpm = m.bpm; playHead.bpm = m.bpm; }
+            a.tempoMap = std::move (m.tempo);
+            a.signatures = std::move (m.sigs);
+            a.chordNames = std::move (m.names);
+            a.chords = std::move (m.chords);
+            for (size_t i = 0; i < a.chords.size(); ++i)
+                a.chords[i].name = i < a.chordNames.size() && ! a.chordNames[i].empty() ? a.chordNames[i].c_str() : nullptr;
+            if (! a.signatures.empty()) { a.sigNum = a.signatures.front().numerator; a.sigDen = a.signatures.front().denominator; }
+        }
+
+        // Position, tempo et mesure à l'échantillon pos du morceau (piste tempo de NOVA).
+        Transport transportAt (int64_t pos, double sr, bool playing) const
+        {
+            Transport t;
+            t.timeInSamples = pos;
+            t.sampleRate = sr;
+            t.playing = playing;
+            const double sec = (double) pos / sr;
+            const auto& a = *contentAccess;
+            t.bpm = a.tempoAt (sec);
+            t.sigNum = a.sigNum;
+            t.sigDen = a.sigDen;
+            if (a.tempoMap.size() >= 2 || ! a.signatures.empty())
+            {
+                const double q = a.quarterAt (sec);
+                double bs = 0; int num = 4, den = 4;
+                a.barAt (q, bs, num, den);
+                t.musicPos = q; t.barPos = bs; t.sigNum = num; t.sigDen = den;
+            }
+            return t;
+        }
+
+        // Régions de l'insert confiées au rendu (plugin à l'arrêt).
+        void assignLive()
+        {
+            for (auto& [id, r] : liveRegions)
+            {
+                if (playbackRenderer && ! livePlay.count (r.get())) { playbackRenderer->addPlaybackRegion (r->region); livePlay.insert (r.get()); }
+                if (editorRenderer && ! liveEdit.count (r.get())) { editorRenderer->addPlaybackRegion (r->region); liveEdit.insert (r.get()); }
+            }
+        }
+
+        void unassignLive (LiveRegion* r)
+        {
+            if (livePlay.count (r) && playbackRenderer) playbackRenderer->removePlaybackRegion (r->region);
+            if (liveEdit.count (r) && editorRenderer) editorRenderer->removePlaybackRegion (r->region);
+            livePlay.erase (r);
+            liveEdit.erase (r);
+        }
+
+        void clearLive()
+        {
+            if (! dc) { liveRegions.clear(); liveSources.clear(); return; }
+            {
+                std::lock_guard<std::mutex> sl (renderLock);
+                if (plugin) plugin->release();
+                prepared = Prepared::none;
+                for (auto& [id, r] : liveRegions) unassignLive (r.get());
+            }
+            for (auto& [id, s] : liveSources) if (s->samplesEnabled) dc->enableAudioSourceSamplesAccess (s->source, false);
+            dc->beginEditing();
+            for (auto& [id, r] : liveRegions) if (r->region) dc->destroyPlaybackRegion (r->region);
+            for (auto& [id, s] : liveSources)
+            {
+                if (s->modification) dc->destroyAudioModification (s->modification);
+                if (s->source) dc->destroyAudioSource (s->source);
+            }
+            if (liveSequence) dc->destroyRegionSequence (liveSequence);
+            dc->endEditing();
+            liveSequence = nullptr;
+            liveRegions.clear();
+            liveSources.clear();
+        }
+
+        // Sous renderLock.
+        void prepareStreamLocked()
+        {
+            if (prepared == Prepared::stream || ! plugin) return;
+            plugin->release();
+            assignLive();
+            plugin->prepare (streamRate, streamBlock, false);
+            const int nch = std::max ({ 2, plugin->totalInputChannels(), plugin->totalOutputChannels() });
+            streamBuf.assign ((size_t) nch, std::vector<float> ((size_t) streamBlock, 0.0f));
+            streamPtrs.resize ((size_t) nch);
+            for (int ch = 0; ch < nch; ++ch) streamPtrs[(size_t) ch] = streamBuf[(size_t) ch].data();
+            streamOutCh = std::max (1, plugin->totalOutputChannels());
+            prepared = Prepared::stream;
+        }
+
+        // Fil audio du tube : un bloc de la piste, calé sur la position du morceau envoyée par NOVA.
+        bool streamProcess (const float* const* in, int nin, float* const* out, int n, int64_t pos, bool playing)
+        {
+            std::unique_lock<std::mutex> sl (renderLock, std::try_to_lock);
+            if (! sl.owns_lock() || prepared != Prepared::stream || n > streamBlock) return false;
+            for (size_t c = 0; c < streamBuf.size(); ++c)
+            {
+                auto& b = streamBuf[c];
+                if (nin > 0 && (int) c < std::max (2, nin)) std::copy (in[std::min ((int) c, nin - 1)], in[std::min ((int) c, nin - 1)] + n, b.begin());
+                else std::fill (b.begin(), b.begin() + n, 0.0f);
+            }
+            plugin->process (streamPtrs.data(), (int) streamPtrs.size(), n, transportAt (pos, streamRate, playing));
+            for (int ch = 0; ch < 2; ++ch)
+                std::copy (streamBuf[(size_t) std::min (ch, streamOutCh - 1)].begin(), streamBuf[(size_t) std::min (ch, streamOutCh - 1)].begin() + n, out[ch]);
+            return true;
+        }
+
+        // L'éditeur montre ces clips (vide : toute la piste) et la piste.
+        int notifySelectionLive (const std::vector<std::string>& ids)
+        {
+            if (extension == nullptr || extension->editorViewInterface == nullptr || extension->editorViewRef == nullptr) return 0;
+            std::vector<ARA::ARAPlaybackRegionRef> regions;
+            for (auto& [id, r] : liveRegions)
+                if (ids.empty() || std::find (ids.begin(), ids.end(), id) != ids.end()) regions.push_back (r->region);
+            // Document encore vide (fenêtre ouverte avant le premier envoi de NOVA) : rien à montrer.
+            // Melodyne n'aime pas une sélection vide (il s'arrête) ; elle viendra avec le document.
+            if (regions.empty()) return 0;
+            std::vector<ARA::ARARegionSequenceRef> seqs;
+            if (liveSequence) seqs.push_back (liveSequence);
+            ARA::SizedStruct<ARA_STRUCT_MEMBER (ARAViewSelection, timeRange)> sel;
+            sel.playbackRegionRefsCount = regions.size();
+            sel.playbackRegionRefs = regions.data();
+            sel.regionSequenceRefsCount = seqs.size();
+            sel.regionSequenceRefs = seqs.data();
+            sel.timeRange = nullptr;
+            ARA::Host::EditorView view (extension);
+            view.notifySelection (&sel);
+            return (int) regions.size();
+        }
+
+        // Notes d'une région, lues dans le plugin, en temps du morceau.
+        Value readRegionNotes (LiveRegion& r)
+        {
+            auto arr = Value::array();
+            const auto type = ARA::kARAContentTypeNotes;
+            if (! dc->isPlaybackRegionContentAvailable (r.region, type)) return arr;
+            auto reader = dc->createPlaybackRegionContentReader (r.region, type, nullptr);
+            if (reader == nullptr) return arr;
+            const auto n = dc->getContentReaderEventCount (reader);
+            for (ARA::ARAInt32 i = 0; i < n; ++i)
+            {
+                const auto* note = static_cast<const ARA::ARAContentNote*> (dc->getContentReaderDataForEvent (reader, i));
+                if (note == nullptr) continue;
+                auto row = Value::array();
+                row.push ((double) note->frequency);
+                row.push ((int) note->pitchNumber);
+                row.push ((double) note->volume);
+                row.push ((double) note->startPosition);
+                row.push ((double) note->noteDuration);
+                arr.push (row);
+            }
+            dc->destroyContentReader (reader);
+            return arr;
+        }
 
         struct CaptureState
         {
@@ -1418,6 +2309,24 @@ namespace nova
         bool canAnalyzeNotes = false, restored = false;
         double sampleRate = 44100.0, deviceRate = 48000.0;
         int blockSize = 1024, deviceBlock = 512;
+
+        // Insert ARA sur une piste (comme Pro Tools)
+        bool liveMode = false, streamWanted = false;
+        std::map<std::string, std::unique_ptr<LiveSource>> liveSources;
+        std::map<std::string, std::unique_ptr<LiveRegion>> liveRegions;
+        std::set<LiveRegion*> livePlay, liveEdit;
+        HostObject liveSeqObj { std::string ("piste") };
+        ARA::ARARegionSequenceRef liveSequence = nullptr;
+        std::string liveTrackName;
+        std::vector<std::string> selectedIds;
+        int docVersion = 0;
+        double streamRate = 48000.0;
+        int streamBlock = 2048, streamOutCh = 2;
+        std::vector<std::vector<float>> streamBuf;
+        std::vector<float*> streamPtrs;
+        std::unique_ptr<DockedEditor> docked;
+        std::unique_ptr<Value> pendingEditor;   // fenêtre demandée avant le premier son
+        AudioPipe pipe;
     };
 
     //==========================================================================
@@ -1460,7 +2369,21 @@ namespace nova
             else if (cmd == "snapshot") replyOk (id, session->snapshot (req));
             else if (cmd == "capture_output") replyOk (id, session->captureOutput (req));
             else if (cmd == "capture_align") replyOk (id, session->captureAlign (req));
-            else if (cmd == "select") replyOk (id, session->select());
+            else if (cmd == "select") replyOk (id, req.has ("regions") ? session->selectLive (req) : session->select());
+            else if (cmd == "doc") replyOk (id, session->doc (req));
+            else if (cmd == "doc_state")
+            {
+                if (req.has ("wait_analysis_s"))
+                    session->docStateWhenAnalyzed (req, [id] (Value res, std::string err) { if (err.empty()) replyOk (id, res); else replyErr (id, err); });
+                else replyOk (id, session->docState (req));
+            }
+            else if (cmd == "stream_open") replyOk (id, session->streamOpen (req));
+            else if (cmd == "render_range") replyOk (id, session->renderRange (req));
+            else if (cmd == "editor") replyOk (id, session->editor (req));
+            else if (cmd == "params") replyOk (id, session->params());
+            else if (cmd == "vst_state") replyOk (id, session->vstState());
+            else if (cmd == "set_vst_state") replyOk (id, session->setVstState (req));
+            else if (cmd == "set_param") replyOk (id, session->setParam (req));
             else if (cmd == "keys") replyOk (id, session->keys (req));
             else if (cmd == "render") replyOk (id, session->render (req));
             else if (cmd == "archive") replyOk (id, session->archive());

@@ -540,6 +540,71 @@ def run():
             return {"participants_vus_sur_pc": peers}
         step("La tablette de Lina change la couleur de sa piste : le PC et les autres la voient", second_device_edit)
 
+        # ------------------------------------------------------------ 16 bis. Melodyne (ARA) en insert sur la voix, gelée par l'ingé
+        # La piste à insert ARA voyage comme une piste à VST : l'insert (réglages) part avec le mix,
+        # le rendu du gel (le même code que « Geler » : renderTrackFreeze → renderRange de l'insert
+        # ARA → applyFreezeResult) part chez les autres, qui jouent le son retouché tel quel.
+        # Ici sans pont ni Melodyne (navigateurs headless) : le nœud de l'insert est remplacé par un
+        # rendu connu (sinus 330 Hz, crête 0,25, avant les effets suivants) ; le vrai rendu ARA est prouvé par qa/ara_preuve.py insert.
+        def ara_insert():
+            upd(E, """const t = d.tracks.find(x => x.id === 'voix');
+              t.plugins.unshift({ id: 'ara-melodyne-e2e', name: 'Melodyne', type: 'VST3', isEnabled: true, latency: 0,
+                params: { isEnabled: true, name: 'Melodyne', vendor: 'Celemony', uid: '', ara: 'melodyne',
+                          localPath: 'C:\\Program Files\\Common Files\\VST3\\Celemony\\Melodyne.vst3' } });""")
+            propagate("insert ARA (Melodyne) posé par l'ingé", [A, B],
+                      lambda pg: st(pg, "d.tracks.find(x => x.id === 'voix').plugins.some(p => p.id === 'ara-melodyne-e2e' && p.type === 'VST3' && p.params && p.params.ara === 'melodyne')"), timeout=30)
+            made = E.evaluate("""async () => {
+              const m = (p) => window.__novaAppModule(p);
+              const { liveVstNodes } = await m('/engine/VSTPluginNode.ts');
+              const { novaBridge } = await m('/services/NovaBridge.ts');
+              const { renderTrackFreeze, applyFreezeResult } = await m('/services/VstFreeze.ts');
+              const { isAraInsert } = await m('/utils/araInsert.ts');
+              const t = window.__novaTest.getState().tracks.find(x => x.id === 'voix');
+              const ara = t.plugins.find(p => p.id === 'ara-melodyne-e2e');
+              if (!isAraInsert(ara)) return { erreur: 'insert ARA non reconnu' };
+              const calls = [];
+              const prev = liveVstNodes.get(ara.id);
+              liveVstNodes.set(ara.id, { renderRange: async (start, dur, sr) => {
+                calls.push({ start, dur, sr }); const n = Math.round(dur * sr); const x = new Float32Array(n);
+                for (let i = 0; i < n; i++) x[i] = 0.25 * Math.sin(2 * Math.PI * 330 * i / sr);
+                return [x, x.slice()]; } });
+              const conn = novaBridge.isConnected; novaBridge.isConnected = () => true;
+              let r;
+              try { r = await renderTrackFreeze(t, t.plugins.length - 1); }
+              finally { novaBridge.isConnected = conn; if (prev) liveVstNodes.set(ara.id, prev); else liveVstNodes.delete(ara.id); }
+              window.__novaTest.update(d => { const x = d.tracks.find(y => y.id === 'voix'); x.isFrozen = true; delete x.frozenAuto; applyFreezeResult(x, r, 'Max'); });
+              return { clipId: r.clip.id, upTo: r.upTo, appels_renderRange: calls };
+            }""")
+            check("gel de la piste à insert ARA : le rendu vient de l'insert (renderRange appelé)", isinstance(made, dict) and made.get("clipId") and len(made.get("appels_renderRange") or []) == 1)
+            cid = made.get("clipId")
+            rms_js = f"""async () => {{ const r = (await window.__novaAppModule('/utils/audioBufferRegistry.ts')).audioBufferRegistry;
+                const t = window.__novaTest.getState().tracks.find(x => x.id === 'voix');
+                if (!t.isFrozen || !t.frozenClip || t.frozenClip.id !== {json.dumps(cid)}) return null;
+                const b = r.get(t.frozenClip.bufferId); if (!b) return null; const x = b.getChannelData(0); let s = 0; for (let i = 0; i < x.length; i++) s += x[i] * x[i];
+                // Hauteur du rendu (passages par zéro entre 1 et 3 s) : le sinus de l'insert, après les effets suivants de la chaîne.
+                const a0 = Math.round(b.sampleRate), a1 = Math.min(x.length, 3 * a0); let z = 0; for (let i = a0 + 1; i < a1; i++) if ((x[i - 1] < 0) !== (x[i] < 0)) z++;
+                return {{ rms_db: +(10 * Math.log10(s / x.length + 1e-12)).toFixed(2), hz: +(z / 2 / ((a1 - a0) / b.sampleRate)).toFixed(1), dur: +b.duration.toFixed(2), upTo: t.frozenUpToPluginIndex,
+                          insert: t.plugins.some(p => p.id === 'ara-melodyne-e2e' && p.params.ara === 'melodyne') }}; }}"""
+            got = {}
+            t0 = time.time()
+            for nm in ("A", "B", "A2"):
+                pg = pages.get(nm)
+                if pg is None:
+                    continue
+                wait_for(pg, lambda: pg.evaluate(rms_js) is not None, 40, step=100, what=f"rendu de la piste à insert ARA reçu ({nm})")
+                lat(f"gel ARA : rendu reçu (E→{nm})", (time.time() - t0) * 1000)
+                got[nm] = pg.evaluate(rms_js)
+            got["E"] = E.evaluate(rms_js)
+            ok = all(v and v["insert"] and v["upTo"] == got["E"]["upTo"] and abs(v["rms_db"] - got["E"]["rms_db"]) < 0.05 for v in got.values())
+            check("piste à insert ARA reçue gelée chez tous : insert gardé, même rendu (écart RMS < 0,05 dB)", ok)
+            # Rendu = l'insert ARA PUIS les effets suivants de la voix (compresseur de l'ingé, chaîne « Mix auto ») :
+            # le niveau change, la hauteur reste celle du rendu de l'insert (330 Hz).
+            check("rendu de la piste = rendu de l'insert ARA à travers la suite de la chaîne (330 Hz, non muet)", got["E"] and abs(got["E"]["hz"] - 330) < 3 and got["E"]["rms_db"] > -40)
+            shot(A, "A12_voix_melodyne_gelee"); shot(B, "B12_voix_melodyne_gelee")
+            return {"gel": made, "recu": got}
+        if os.environ.get("COLLAB_ARA", "1") != "0":
+            step("Max pose Melodyne (ARA) en insert sur la voix et la gèle : la piste voyage comme une piste à VST (rendu chez tous)", ara_insert)
+
         # ------------------------------------------------------------ 17. export des deux côtés
         def exports():
             for pg in pages.values():

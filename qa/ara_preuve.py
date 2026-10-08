@@ -9,6 +9,14 @@ Usage (serveur NOVA lancé : npx vite --port 3432 --strictPort) :
   B. Melodyne             → clic droit → Ouvrir → fenêtre (capture) → Valider → Retoucher (retouches
                             rechargées) → Revenir à l'original
   C. VocAlign en un clic  → clic droit sur le double → guide = la lead, double coché → Caler
+
+Insert de piste comme Pro Tools (pont v12) : `python qa/ara_preuve.py insert` enchaîne
+  D. qa/ara_insert_pont.py          pont + hôte seuls : document à jour (déplacer, couper, rogner, dupliquer,
+                                    supprimer, régions relues dans le plugin), clic à 2,000 s, export = lecture
+  E. qa/ara_insert_pont.py vocalign VocAlign en insert sur le double, guide = la lead (capture transparente)
+  F. qa/ara_insert_lecture.py       moteur de NOVA : clic du plugin calé sur le clic NOVA à l'échantillon près
+                                    (lecture, saut, boucle), clip déplacé, réglage en direct, export
+  G. qa/ara_dock_appli.py           appli Windows : éditeur de Melodyne ancré en bas de la fenêtre Édition
 """
 import asyncio, io, json, os, re, sys, time, wave, zipfile
 from pathlib import Path
@@ -22,7 +30,7 @@ from qalib import *  # noqa
 from stems_separation import start_bridge, stop_bridge, prepare, dismiss_popups  # noqa
 from gel_pre_effet import open_project_file  # noqa
 
-PORT = 8775
+PORT = int(os.environ.get("NOVA_TEST_PORT", "8775"))
 LEAD = Path(r"D:\1 WORK\CONTENU\nova-ara\melodyne\voix_originale.wav")
 DUB = Path(r"D:\1 WORK\CONTENU\nova-ara\vocalign\double_decale.wav")
 PROJECT = OUT / "projet_ara.zip"
@@ -121,7 +129,7 @@ def scenario_melodyne(page, log, res, vp):
     open_project_file(page, PROJECT, res, "B0_projet")
     page.wait_for_timeout(4000)
     res["menu"] = clip_menu(page, "Voix lead", "B1_menu_clip")
-    page.get_by_role("button", name=re.compile(r"Ouvrir dans Melodyne")).first.click()
+    page.get_by_role("menuitem", name=re.compile(r"Ouvrir dans Melodyne")).first.click()
     page.get_by_test_id("ara-dialog-melodyne").wait_for(timeout=8000)
     shot(page, "B2_dialogue")
     t0 = time.time()
@@ -140,7 +148,7 @@ def scenario_melodyne(page, log, res, vp):
     shot(page, "B4_valide")
     page.wait_for_timeout(1500)
     res["menu_apres"] = clip_menu(page, "Voix lead", "B5_menu_apres")
-    page.get_by_role("button", name=re.compile(r"Retoucher dans Melodyne")).first.click()
+    page.get_by_role("menuitem", name=re.compile(r"Retoucher dans Melodyne")).first.click()
     page.get_by_test_id("ara-open").click()
     page.get_by_test_id("ara-open-info").wait_for(timeout=240000)
     res["reouverture"] = page.get_by_test_id("ara-open-info").inner_text()
@@ -157,7 +165,7 @@ def scenario_vocalign(page, log, res, vp):
     open_project_file(page, PROJECT, res, "C0_projet")
     page.wait_for_timeout(4000)
     clip_menu(page, "Double", "C1_menu_double")
-    page.get_by_role("button", name=re.compile(r"Aligner avec VocAlign")).first.click()
+    page.get_by_role("menuitem", name=re.compile(r"Aligner avec VocAlign")).first.click()
     page.get_by_test_id("ara-dialog-vocalign").wait_for(timeout=8000)
     page.wait_for_timeout(1500)
     res["guide"] = page.get_by_test_id("ara-guide").evaluate("e => e.options[e.selectedIndex].text")
@@ -171,6 +179,32 @@ def scenario_vocalign(page, log, res, vp):
     res["duree_s"] = round(time.time() - t0, 1)
     shot(page, "C4_cale")
 
+
+def insert_scenarios():
+    """D–G : Melodyne / VocAlign en insert de piste (comme Pro Tools), chacun dans son processus."""
+    import subprocess
+    here = Path(__file__).parent
+    py = os.environ.get("NOVA_BRIDGE_PYTHON", r"D:\1 WORK\CODE\NOVA-STUDIO-DAW-0901-\bridge-python\venv\Scripts\python.exe")
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", QA_OUT=os.environ.get("QA_OUT_INSERT", r"D:\1 WORK\CONTENU\nova-ara\insert"))
+    res = {}
+    for key, cmd, out in (("D_pont", [py, str(here / "ara_insert_pont.py")], "ara_insert_pont.json"),
+                          ("E_vocalign", [py, str(here / "ara_insert_pont.py"), "vocalign"], "ara_insert_vocalign.json"),
+                          ("F_lecture", [sys.executable, str(here / "ara_insert_lecture.py")], "ara_insert_lecture.json"),
+                          ("G_appli", [sys.executable, str(here / "ara_dock_appli.py")], "ara_dock_appli.json")):
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
+        try:
+            res[key] = json.loads((Path(env["QA_OUT"]) / out).read_text(encoding="utf-8"))
+        except Exception as e:
+            res[key] = {"erreur": str(e), "sortie": (r.stdout or "")[-2000:] + (r.stderr or "")[-2000:]}
+    return res
+
+
+if __name__ == "__main__" and "insert" in sys.argv[1:]:
+    r = insert_scenarios()
+    p = Path(os.environ.get("QA_OUT_INSERT", r"D:\1 WORK\CONTENU\nova-ara\insert")) / "ara_preuve_insert.json"
+    p.write_text(json.dumps(r, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    print(json.dumps(r, ensure_ascii=False, indent=1, default=str)[:6000])
+    sys.exit(0)
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)

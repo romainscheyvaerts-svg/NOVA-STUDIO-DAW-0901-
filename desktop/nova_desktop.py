@@ -442,7 +442,8 @@ MARKER_JS = """
         platform: 'windows',
         ui: %(ui)s,
         features: Object.freeze(['google-login', 'stems', 'reveal-download']),
-        bridges: Object.freeze({ asio: %(asio)d, vst: %(vst)d })
+        bridges: Object.freeze({ asio: %(asio)d, vst: %(vst)d }),
+        hwnd: %(hwnd)d
       }),
       configurable: false, enumerable: false, writable: false
     });
@@ -750,7 +751,14 @@ def run_window(url: str, url_mode: bool) -> None:
                 core.DownloadStarting += self.on_download_starting
             except Exception:
                 pass
+            # Fenêtre de la page (contrôle WebView2) : l'éditeur d'un insert ARA (Melodyne) s'y ancre
+            # en fenêtre enfant, en bas de la fenêtre Édition (comme Pro Tools).
+            try:
+                page_hwnd = int(self.web.Handle.ToInt64())
+            except Exception:
+                page_hwnd = 0
             core.AddScriptToExecuteOnDocumentCreatedAsync(MARKER_JS % {
+                "hwnd": page_hwnd,
                 "version": json.dumps(APP_VERSION), "asio": ASIO_PORT, "vst": VST_PORT,
                 "ui": json.dumps(ui.active.id if ui.active else "online")})
             try:

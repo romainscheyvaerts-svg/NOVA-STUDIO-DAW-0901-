@@ -15,7 +15,18 @@ export interface NovaDesktopInfo {
   /** Version de l'interface au démarrage (« ui-<empreinte> »), ou « online » (site chargé en ligne). */
   ui?: string;
   bridges?: { asio: number; vst: number };
+  /**
+   * (1.5) Fenêtre de la page (HWND du contrôle WebView2) : l'éditeur d'un insert ARA
+   * (Melodyne) s'y ancre en fenêtre enfant, en bas de la fenêtre Édition (comme Pro Tools).
+   */
+  hwnd?: number;
 }
+
+/** Fenêtre où ancrer l'éditeur d'un plugin (appli Windows seulement), sinon null. */
+export const desktopHwnd = (): number | null => {
+  const h = getNovaDesktop()?.hwnd;
+  return typeof h === 'number' && h > 0 ? h : null;
+};
 
 export const getNovaDesktop = (): NovaDesktopInfo | null => {
   if (typeof window === 'undefined') return null;
