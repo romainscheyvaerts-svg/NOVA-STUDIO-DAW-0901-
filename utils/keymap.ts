@@ -64,6 +64,7 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.mute', keys: ['m'], label: 'Rendre le clip muet / le réactiver', pt: 'Ctrl+M (Clip Mute)', category: 'Édition' }),
   nova({ id: 'nova.split', keys: ['s'], label: 'Couper le clip à la tête de lecture', pt: 'Ctrl+E ou B', category: 'Édition' }),
   nova({ id: 'nova.tools', keys: ['1', '2', '3'], label: 'Outil sélection / ciseaux / gomme', pt: 'F6 / F7 / F8', category: 'Édition' }),
+  nova({ id: 'nova.pencil', keys: ['6'], label: 'Crayon : dessiner la ligne de gain d’un clip ou une ligne d’automation (libre, ligne, triangle, carré, aléatoire)', pt: 'F10 (Pencil Tool)', category: 'Édition' }),
   // Géré par components/MidiHost (V25). Ctrl+Alt+C : repli quand le navigateur garde Ctrl+Maj+C (outils de développement).
   nova({ id: 'nova.captureMidi', keys: ['ctrl+shift+c', 'ctrl+alt+c'], label: 'Capturer ce que tu viens de jouer (clip MIDI créé après coup)', pt: 'Pas dans Pro Tools : Capture MIDI de Live (Ctrl+Maj+C)', category: 'Transport' }),
 
@@ -106,6 +107,16 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.tabClipBack', keys: ['alt+shift+tab', 'ctrl+alt+arrowleft'], label: 'Clip précédent de la piste (le sélectionne)', pt: 'Ctrl+Maj+Tab', category: 'Modes d’édition', command: 'tabToTransient', arg: { dir: -1, clip: true } }),
   g({ id: 'pt.syncPoint', keys: ['ctrl+,'], label: 'Point de synchro du clip à la tête de lecture (ou au début de la plage) : c’est lui qui se cale sur la grille et en Spot', pt: 'Ctrl+, (Identify Sync Point)', category: 'Modes d’édition', command: 'syncPoint' }),
   g({ id: 'pt.syncPointRemove', keys: ['ctrl+alt+,'], label: 'Enlever le point de synchro des clips sélectionnés', pt: 'Alt+clic sur le point (Remove Sync Point)', category: 'Modes d’édition', command: 'syncPoint', arg: { remove: true } }),
+  // --- Gain de clip, Heal, boucle (R5, components/ClipGainTools) --------------------
+  // Ctrl+Maj+− : selon le clavier, le navigateur voit « _ » (QWERTY) ou « 6 » (AZERTY) ; Alt+G marche partout.
+  g({ id: 'pt.clipGainLine', keys: ['alt+g', 'ctrl+shift+-', 'ctrl+_', 'ctrl+shift+6', 'ctrl+shift+numsub'], label: 'Afficher / masquer la ligne de gain des clips (points à tirer, Alt+clic pour enlever)', pt: 'Ctrl+Maj+− (Show Clip Gain Line)', category: 'Zoom et affichage', command: 'clipGainLine' }),
+  g({ id: 'pt.clipGainUp', keys: ['ctrl+shift+arrowup'], label: 'Gain du clip +0,5 dB (sur la plage sélectionnée si elle existe)', pt: 'Ctrl+Maj+↑ (Clip Gain Nudge)', category: 'Édition', command: 'clipGainNudge', arg: { db: 0.5 } }),
+  g({ id: 'pt.clipGainDown', keys: ['ctrl+shift+arrowdown'], label: 'Gain du clip −0,5 dB (sur la plage sélectionnée si elle existe)', pt: 'Ctrl+Maj+↓ (Clip Gain Nudge)', category: 'Édition', command: 'clipGainNudge', arg: { db: -0.5 } }),
+  g({ id: 'pt.clipGainUpFine', keys: ['ctrl+alt+shift+arrowup', 'alt+shift+arrowup'], label: 'Gain du clip +0,1 dB (réglage fin)', pt: 'Pas fin du Clip Gain Nudge', category: 'Édition', command: 'clipGainNudge', arg: { db: 0.1 } }),
+  g({ id: 'pt.clipGainDownFine', keys: ['ctrl+alt+shift+arrowdown', 'alt+shift+arrowdown'], label: 'Gain du clip −0,1 dB (réglage fin)', pt: 'Pas fin du Clip Gain Nudge', category: 'Édition', command: 'clipGainNudge', arg: { db: -0.1 } }),
+  g({ id: 'pt.heal', keys: ['ctrl+h', 'ctrl+alt+h'], label: 'Recoller deux morceaux d’un même fichier (Heal) : sélection, plage ou jonction sous la tête de lecture', pt: 'Ctrl+H (Heal Separation)', category: 'Édition', command: 'heal' }),
+  g({ id: 'pt.repeat', keys: ['alt+r'], label: 'Répéter les clips sélectionnés n fois à la suite (fenêtre)', pt: 'Alt+R (Repeat)', category: 'Édition', command: 'repeatClips' }),
+  g({ id: 'pt.loopClip', keys: ['ctrl+alt+l'], label: 'Boucler le clip sélectionné (nombre de tours, fondus aux jonctions)', pt: 'Ctrl+Alt+L (Loop Clip)', category: 'Édition', command: 'loopClips' }),
   g({ id: 'pt.focus', keys: ['ctrl+alt+1'], label: 'Commands Keyboard Focus on / off (une touche = une commande)', pt: 'Ctrl+Alt+1 (bouton a–z)', category: 'Keyboard Focus' }),
 
   // --- Commands Keyboard Focus (une touche = une commande) ------------------------

@@ -106,7 +106,7 @@ import { localCollabOutboxStore } from './utils/collabOutbox';
 import { engineView, shownTrackIds, withPluginState } from './utils/trackStructure';
 import { structureBus, StructurePanel } from './utils/structureBus';
 import { StructureTracksContext } from './components/TrackStructure';
-import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf } from './utils/collabMerge';
+import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf, sanitizeIncomingClips } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
 import RemoteIngePanel from './components/RemoteIngePanel';
 import LiveVstRemotePanel from './components/LiveVstRemotePanel';
@@ -4380,7 +4380,8 @@ function Studio() {
           if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
           if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
           if (ct.novaSynth !== undefined) { if (ct.novaSynth) t.novaSynth = normalizeSynth(ct.novaSynth); else delete t.novaSynth; }
-          t.clips = Array.isArray(ct.clips) ? ct.clips : t.clips;
+          // Ligne de gain, boucles, Heal (R5) : champs vérifiés à la réception (utils/collabMerge).
+          t.clips = Array.isArray(ct.clips) ? sanitizeIncomingClips(ct.clips) : t.clips;
           // Couloirs de prises (champ ajouté) : absent = envoyé par une ancienne version, on garde les noms locaux.
           t.takeMeta = mergeIncomingTakeMeta(t.takeMeta as TakeMeta[] | undefined, ct.takeMeta);
           // Instrument VST du beatmaker : on reçoit le rendu de ses notes.

@@ -1,5 +1,6 @@
 import { Clip, CrossfadeCurve, TrackType } from '../types';
 import { breathGainAt, breathRampsInClip, clipHasBreaths } from './breathEnvelope';
+import { envelopeGainAt, envelopeRampsInClip, hasGainPoints } from './clipGain';
 import { timeGridStep } from './grid';
 
 /**
@@ -57,13 +58,15 @@ export function fadeOutShape(curve: CrossfadeCurve | undefined, x: number): numb
 
 /** Gain du clip (fondus + gain de clip) à la position t (s, depuis le début du clip). */
 /** Champs d'un clip qui comptent pour son plan de gain (respirations traitées comprises). */
-type GainClip = Pick<Clip, 'duration' | 'fadeIn' | 'fadeOut' | 'fadeInCurve' | 'fadeOutCurve' | 'gain'> & Partial<Pick<Clip, 'offset' | 'breaths' | 'isReversed'>>;
+type GainClip = Pick<Clip, 'duration' | 'fadeIn' | 'fadeOut' | 'fadeInCurve' | 'fadeOutCurve' | 'gain'> & Partial<Pick<Clip, 'offset' | 'breaths' | 'isReversed' | 'gainPoints'>>;
 
 export function clipGainAt(clip: GainClip, t: number): number {
   const { fi, fo } = fadeLengths(clip);
   let g = clip.gain ?? 1;
   // Respirations baissées / supprimées (utils/breaths) : zones de l'audio source.
   if (clip.breaths?.length && !clip.isReversed) g *= breathGainAt(clip.breaths, (clip.offset || 0) + t);
+  // Ligne de gain du clip (utils/clipGain) : points en temps de l'audio source.
+  if (clip.gainPoints?.length) g *= envelopeGainAt(clip.gainPoints, (clip.offset || 0) + t);
   if (fi > 0 && t < fi) g *= fadeInShape(clip.fadeInCurve, t / fi);
   if (fo > 0 && t > clip.duration - fo) g *= fadeOutShape(clip.fadeOutCurve, (t - (clip.duration - fo)) / fo);
   if (t < 0 || t > clip.duration) return 0;
@@ -102,7 +105,7 @@ export function clipGainEvents(
   clip: GainClip,
   from = 0,
 ): GainEvent[] {
-  if (clipHasBreaths(clip)) return breathAwareGainEvents(clip, from);
+  if (clipHasBreaths(clip) || hasGainPoints(clip)) return breathAwareGainEvents(clip, from);
   const d = Math.max(0, clip.duration || 0);
   const g = clip.gain ?? 1;
   const { fi, fo } = fadeLengths(clip);
@@ -130,10 +133,14 @@ export function clipGainEvents(
   return ev;
 }
 
+/** Ligne de gain : un point toutes les ~2 ms jusqu'à 32 s de pente (points exacts à 0,1 dB près). */
+const envelopeCurvePoints = (d: number) => Math.max(8, Math.min(16384, Math.ceil(d * 500) + 1));
+
 /**
- * Plan de gain d'un clip dont des respirations sont traitées : le gain
- * (fondus × gain de clip × respirations) est constant entre les zones où il
- * varie (fondus du clip, fondus d'entrée / sortie de chaque respiration). Une
+ * Plan de gain d'un clip dont des respirations sont traitées ou qui a une
+ * ligne de gain : le gain (fondus × gain de clip × respirations × ligne) est
+ * constant entre les zones où il varie (fondus du clip, fondus d'entrée /
+ * sortie de chaque respiration, pentes de la ligne de gain). Une
  * courbe échantillonnée par zone qui varie, la valeur tenue entre deux : pas
  * d'évènements superposés, et le même rendu en lecture et à l'export.
  */
@@ -144,7 +151,9 @@ function breathAwareGainEvents(clip: GainClip, from: number): GainEvent[] {
   const zones: [number, number][] = [];
   if (fi > 0) zones.push([0, fi]);
   if (fo > 0) zones.push([d - fo, d]);
-  zones.push(...breathRampsInClip(clip.breaths, clip.offset || 0, d));
+  if (!clip.isReversed) zones.push(...breathRampsInClip(clip.breaths, clip.offset || 0, d));
+  const env = hasGainPoints(clip);
+  if (env) zones.push(...envelopeRampsInClip(clip.gainPoints, clip.offset || 0, d));
   zones.sort((a, b) => a[0] - b[0]);
   // Zones qui se touchent ou se chevauchent : une seule courbe.
   const merged: [number, number][] = [];
@@ -161,7 +170,7 @@ function breathAwareGainEvents(clip: GainClip, from: number): GainEvent[] {
     if (first && s > p0 + 1e-6) ev.push({ kind: 'set', t: p0, v: clipGainAt(clip, p0) });
     first = false;
     const dur = b - s;
-    const n = curvePoints(dur);
+    const n = env ? envelopeCurvePoints(dur) : curvePoints(dur);
     const values = new Float32Array(n);
     for (let i = 0; i < n; i++) values[i] = clipGainAt(clip, Math.min(b, s + (dur * i) / (n - 1)));
     // Fin de clip : la dernière valeur tombe pile sur d (gain 0 hors clip) → valeur juste avant.
