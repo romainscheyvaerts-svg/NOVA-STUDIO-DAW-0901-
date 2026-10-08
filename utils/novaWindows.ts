@@ -6,7 +6,9 @@
  */
 export type NovaWindowName = 'memory-locations' | 'strip-silence' | 'clip-props' | 'track-color' | 'shortcuts' | 'pitch-editor' | 'pitch-batch' | 'audio-to-midi' | 'ara-melodyne' | 'ara-vocalign'
   // R4 / R6 : Track Presets, Commit / Consolider avec effets, AudioSuite, impression de bus.
-  | 'track-preset' | 'bounce' | 'audiosuite' | 'print-bus';
+  | 'track-preset' | 'bounce' | 'audiosuite' | 'print-bus'
+  // R13 : transposer / étirer, marqueurs de warp, Trim TCE (bord tiré).
+  | 'transpose' | 'warp' | 'elastic-tce';
 
 export interface NovaWindowDetail {
   name: NovaWindowName;
@@ -21,8 +23,12 @@ export interface NovaWindowDetail {
   bounce?: { mode: 'commit' | 'range'; trackIds?: string[]; start?: number; end?: number };
   /** AudioSuite (R6) : plage de la sélection (sinon les clips visés). */
   range?: { start: number; end: number; trackIds: string[] };
-  /** AudioSuite : « Revenir à l'original » tout de suite (sans fenêtre). */
+  /** AudioSuite / transposition : « Revenir à l'original » tout de suite (sans fenêtre). */
   revert?: boolean;
+  /** Transposition : version simple (téléphone, mode simple : la tonalité seulement). */
+  simple?: boolean;
+  /** Trim TCE (R13) : nouvelle place du clip étiré (début et durée, s). */
+  tce?: { start: number; duration: number };
 }
 
 export const NOVA_WINDOW_EVENT = 'nova:open-window';

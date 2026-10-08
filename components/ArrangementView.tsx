@@ -170,7 +170,7 @@ const fracToClipGain = (f: number): number => {
 /** Ordonnée de la poignée de gain, relative au haut du clip (zone de forme d'onde : y+18 … y+h-4). */
 const clipGainHandleY = (clipH: number, gain: number): number => 18 + Math.max(4, clipH - 22) * (1 - clipGainToFrac(gain));
 
-type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'FADE_IN' | 'FADE_OUT' | 'GAIN' | 'XFADE' | 'RANGE' | null;
+type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'TCE_START' | 'TCE_END' | 'FADE_IN' | 'FADE_OUT' | 'GAIN' | 'XFADE' | 'RANGE' | null;
 type LoopDragMode = 'START' | 'END' | 'BODY' | null;
 
 // Grille : 1/1 à 1/32 et triolets (utils/grid) ; hors grille, à l'échantillon près (Slip).
@@ -287,6 +287,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [dragStartX, setDragStartX] = useState(0);
   const [dragStartY, setDragStartY] = useState(0);
   const [initialClipState, setInitialClipState] = useState<Clip | null>(null);
+  // Trim TCE (R13) : place visée du clip étiré pendant le geste (rendu au relâchement).
+  const [tceGhost, setTceGhost] = useState<{ trackId: string; clipId: string; start: number; duration: number; from: number } | null>(null);
 
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   // Bulle « -3.5 dB » pendant le réglage du gain de clip
@@ -1077,6 +1079,16 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 const inFadeRow = relY < zoomV * 0.35;
                 const edge = Math.min(10, Math.max(4, (clipEndX - clipStartX) * 0.15));
 
+                // Trim TCE (R13, Pro Tools : Trim en mode TCE · Logic : Option + bord) :
+                // le bord tiré étire le clip audio, hauteur inchangée.
+                const onTceEdge = (x - clipStartX < edge || clipEndX - x < edge) && relY >= zoomV * 0.35
+                    && !!clip.bufferId && !clip.notes && clip.type !== TrackType.MIDI && !clip.isReversed;
+                if (onTceEdge && (e.altKey || editPrefsStore.get().trimTce) && editModeStore.get().mode !== 'SHUFFLE') {
+                    setTceGhost({ trackId: t.id, clipId: clip.id, start: clip.start, duration: clip.duration, from: clip.duration });
+                    setDragAction(x - clipStartX < edge ? 'TCE_START' : 'TCE_END');
+                    return;
+                }
+
                 // Alt+glisser : on laisse une copie sur place et on deplace
                 // l'original, comme dans les DAW.
                 if (e.altKey) {
@@ -1196,7 +1208,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
     const y = e.clientY - rect.top + scrollContainerRef.current.scrollTop;
     const useSnap = snapNow(e);
     if (clipGainEdit.onMove(e, x, y, laneTopOf)) return;
-    if (dragAction === 'MOVE' || dragAction === 'TRIM_START' || dragAction === 'TRIM_END' || dragAction === 'FADE_IN' || dragAction === 'FADE_OUT') {
+    if (dragAction === 'MOVE' || dragAction === 'TRIM_START' || dragAction === 'TRIM_END' || dragAction === 'TCE_START' || dragAction === 'TCE_END' || dragAction === 'FADE_IN' || dragAction === 'FADE_OUT') {
         setDragTipPos({ x: e.clientX, y: e.clientY });
         if (hoverHint) setHoverHint(null);
     }
@@ -1289,7 +1301,11 @@ const handleMouseMove = (e: React.MouseEvent) => {
                         cursor = 'nwse-resize';
                         hint = x - cx0 < FADE_HANDLE_PX ? "Glisser vers la droite : fondu d'entrée" : 'Glisser vers la gauche : fondu de sortie';
                     }
-                    else if (x - cx0 < edge || cx1 - x < edge) cursor = 'ew-resize';
+                    else if (x - cx0 < edge || cx1 - x < edge) {
+                        cursor = 'ew-resize';
+                        // Trim TCE (R13) : Alt ou mode TCE → le bord étire le clip.
+                        if (c.bufferId && !c.notes && (e.altKey || editPrefsStore.get().trimTce)) hint = 'Étirer (TCE) : le clip s’allonge ou raccourcit, sa hauteur ne change pas';
+                    }
                     // Smart Tool : moitié haute = Sélecteur (curseur texte), moitié basse = Grabber (main).
                     else if (activeTool === 'RANGE' || (activeTool === 'SMART' && relY < zoomV * 0.5)) cursor = 'text';
                     else if (activeTool === 'SMART') cursor = 'grab';
@@ -1453,6 +1469,20 @@ const handleMouseMove = (e: React.MouseEvent) => {
             fadeOut: Math.min(init.fadeOut || 0, newDuration)
         });
         groupMatesRef.current.forEach(m => onEditClip?.(m.trackId, m.clip.id, 'UPDATE_PROPS', mateTrimEnd(m.clip, newDuration - init.duration)));
+    } else if ((dragAction === 'TCE_START' || dragAction === 'TCE_END') && activeClip && initialClipState && tceGhost) {
+        // Trim TCE : rien ne bouge dans le projet pendant le geste (aperçu dessiné), rendu au relâchement.
+        const init = initialClipState;
+        const set = editModeStore.get();
+        if (dragAction === 'TCE_END') {
+            const rawEnd = trimEdgeTime({ settings: set, invert: invertOf(e), bpm, origEdge: init.start + init.duration, rawEdge: init.start + init.duration + (x - dragStartX) / zoomH });
+            const d = Math.max(init.duration * 0.25, Math.min(init.duration * 4, rawEnd - init.start));
+            setTceGhost({ ...tceGhost, start: init.start, duration: d });
+        } else {
+            const rawStart = trimEdgeTime({ settings: set, invert: invertOf(e), bpm, origEdge: init.start, rawEdge: init.start + (x - dragStartX) / zoomH });
+            const end = init.start + init.duration;
+            const d = Math.max(init.duration * 0.25, Math.min(init.duration * 4, end - Math.max(0, rawStart)));
+            setTceGhost({ ...tceGhost, start: end - d, duration: d });
+        }
     } else if (dragAction === 'FADE_IN' && activeClip && initialClipState) {
         const init = initialClipState;
         const fadeIn = Math.min(init.duration, Math.max(0, (x - init.start * zoomH) / zoomH));
@@ -1507,6 +1537,12 @@ const handleMouseUp = () => {
         setTimeout(() => byTrack.forEach((cids, tid) => editCommands.autoCrossfade(tid, cids)), 0);
     }
     if (gainDragRef.current) { gainDragRef.current = null; setGainTip(null); }
+    // Trim TCE : le rendu part au relâchement (hors ligne, hauteur gardée), une étape d'annulation.
+    if (tceGhost) {
+        const g = tceGhost;
+        setTceGhost(null);
+        if (Math.abs(g.duration - g.from) > 1e-4) openNovaWindow('elastic-tce', { targets: [{ trackId: g.trackId, clipId: g.clipId }], tce: { start: g.start, duration: g.duration } });
+    }
     setDragAction(null);
     setActiveClip(null);
     setLoopDragMode(null);
@@ -1643,6 +1679,36 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
     ctx.lineWidth = isSelected ? 2 : 1;
     ctx.stroke();
     ctx.restore();
+
+    // Transposition / warp (R13) : marqueurs (petits triangles cyan en haut) et pastille du réglage.
+    const el = clip.elastic;
+    if (el && w > 10) {
+        ctx.save();
+        const v0 = (clip.offset || 0) - el.renderedOffset;
+        for (const m of el.markers || []) {
+            const mx = Math.round(x + (m.dst - v0) * zoomH) + 0.5;
+            if (mx < x + 1 || mx > x + w - 1) continue;
+            ctx.strokeStyle = 'rgba(34,211,238,0.55)';
+            ctx.beginPath(); ctx.moveTo(mx, y + 4); ctx.lineTo(mx, y + h - 2); ctx.stroke();
+            ctx.fillStyle = '#22d3ee';
+            ctx.beginPath(); ctx.moveTo(mx - 4, y + 3); ctx.lineTo(mx + 4, y + 3); ctx.lineTo(mx, y + 9); ctx.closePath(); ctx.fill();
+        }
+        const st = Math.round(el.semitones * 100) / 100;
+        const ratio = el.sourceDuration > 0 ? el.duration / el.sourceDuration : 1;
+        const tag = [st ? `${st > 0 ? '+' : '−'}${Math.abs(st)}` : '', Math.abs(ratio - 1) > 1e-4 ? `${Math.round(ratio * 1000) / 10}%` : '', el.markers?.length ? '⇿' : ''].filter(Boolean).join(' ');
+        if (tag && w > 40) {
+            ctx.font = 'bold 9px system-ui, sans-serif';
+            const tw = ctx.measureText(tag).width + 8;
+            const bx = x + w - tw - 3;
+            if (bx > x + 4) {
+                ctx.fillStyle = 'rgba(8,145,178,0.9)';
+                ctx.beginPath(); ctx.roundRect(bx, y + 4, tw, 12, 3); ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(tag, bx + 4, y + 13);
+            }
+        }
+        ctx.restore();
+    }
 
     // Point de synchro (Pro Tools : Sync Point) : trait pointillé + petit triangle en bas.
     const syncRel = syncOffsetOf(clip);
@@ -2140,6 +2206,14 @@ useEffect(() => {
               title="Sélecteur (comme dans Pro Tools) (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
+          {/* Trim TCE (R13) : le bord d'un clip audio l'étire au lieu de le rogner. */}
+          {!simple && (
+            <button type="button" onClick={() => editPrefsStore.set({ trimTce: !editPrefs.trimTce })} aria-pressed={!!editPrefs.trimTce} data-testid="trim-tce" aria-label="Étirer en tirant le bord (Trim TCE)"
+              title="Étirer en tirant le bord (Pro Tools : outil Trim en mode TCE · Logic : Option + bord · Live : Warp) : le clip audio s'allonge ou raccourcit, sa hauteur ne change pas. Sans ce mode : Alt + bord."
+              className={`hidden [@media(pointer:fine)]:flex lg:flex w-9 h-9 shrink-0 rounded-lg items-center justify-center border transition-all ${editPrefs.trimTce ? 'bg-amber-500/15 border-amber-500/50 text-amber-400' : 'border-white/5 bg-black/40 text-slate-500 hover:text-white'}`}>
+              <i className="fas fa-left-right text-[11px]" aria-hidden="true"></i><i className="fas fa-clock text-[8px] -ml-0.5 mt-2" aria-hidden="true"></i>
+            </button>
+          )}
           {/* Crayon, ligne de gain, infos de gain, mode boucle (R5). */}
           <ClipGainToolbar activeTool={activeTool} setActiveTool={setActiveTool} compact={simple} />
           {/* Modes d'édition Pro Tools (remplacent l'aimant oui / non) : SHUF / SLIP / SPOT / GRID + valeur de grille. */}
@@ -2424,6 +2498,24 @@ useEffect(() => {
       {gridMenu && <TimelineGridMenu x={gridMenu.x} y={gridMenu.y} onClose={() => setGridMenu(null)} gridSize={gridSize} onSetGridSize={setGridSize} snapEnabled={snapEnabled} onToggleSnap={() => editModeStore.set({ mode: snapEnabled ? 'SLIP' : 'GRID' })} onAddTrack={() => onAddTrack && onAddTrack(TrackType.AUDIO)} onResetZoom={() => { setZoomH(40); setZoomV(120); }} onPaste={() => onEditClip?.(selectedTrackId || 'track-rec-main', '', 'PASTE', { time: playheadStore.get() })} />}
       {xfadeTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300" style={{ left: xfadeTip.x + 14, top: xfadeTip.y - 28 }}>{xfadeTip.text}</div>}
       {gainTip && <div className="fixed z-[200] px-2 py-1 bg-black/90 border border-amber-400/40 rounded-md shadow-2xl pointer-events-none text-[11px] font-black text-amber-300 font-mono tabular-nums" style={{ left: gainTip.x + 14, top: gainTip.y - 28 }}>Gain {gainTip.text}</div>}
+      {tceGhost && (() => {
+        // Trim TCE (R13) : cadre du clip une fois étiré + bulle « Étirer · 110 % ».
+        const sc = scrollContainerRef.current;
+        const top = laneTopOf(tceGhost.trackId);
+        if (!sc || top === null) return null;
+        const r = sc.getBoundingClientRect();
+        const left = r.left + headerWidth + tceGhost.start * zoomH - sc.scrollLeft;
+        const pct = Math.round((tceGhost.duration / tceGhost.from) * 1000) / 10;
+        return (
+          <>
+            <div data-testid="tce-ghost" className="fixed z-[150] pointer-events-none rounded border-2 border-dashed border-amber-400 bg-amber-400/10"
+              style={{ left, top: r.top + top - sc.scrollTop, width: Math.max(2, tceGhost.duration * zoomH), height: zoomV }} />
+            {dragTipPos && <div role="status" data-testid="drag-tip" className="fixed z-[200] px-3 py-1.5 bg-black/90 border border-amber-400/40 rounded-lg shadow-2xl pointer-events-none text-[11px] font-bold text-amber-200" style={{ left: dragTipPos.x + 15, top: dragTipPos.y + 12 }}>
+              Étirer (TCE) · {String(pct).replace('.', ',')} % · {tceGhost.duration.toFixed(3).replace('.', ',')} s · hauteur gardée
+            </div>}
+          </>
+        );
+      })()}
       {(() => {
         // Bulle de glissement (G8) : « Fondu d'entrée · 0,25 s », « Déplacer · mes. 5.2 ».
         if (!dragTipPos || !activeClip) return null;
@@ -2506,6 +2598,23 @@ useEffect(() => {
                 ...(clipContextMenu.clip.audioSuite ? [{ label: 'Revenir à l’original (AudioSuite)', icon: 'fa-rotate-left',
                   title: `Remet la prise d’origine à la même place (traitements : ${clipContextMenu.clip.audioSuite.steps.map(x => x.name).join(' + ')})`,
                   onClick: () => { openNovaWindow('audiosuite', { revert: true, targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
+                // R13 : transposer / étirer, marqueurs de warp (non destructif).
+                ...(clipContextMenu.clip.type !== TrackType.MIDI && !clipContextMenu.clip.notes ? [
+                  { label: simple ? 'Changer la tonalité…' : 'Transposer / étirer…', icon: 'fa-arrows-up-down',
+                    title: 'Transposer de ±12 demi-tons au cent près, avec ou sans les formants, et changer la durée sans changer la hauteur ; l’original est gardé (Pro Tools : Clip Transpose et Elastic Audio · Logic : Flex Pitch · Live : Transpose / Warp · FL : Pitch et Stretch)',
+                    onClick: () => {
+                      const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id];
+                      const targets = ids.map(clipId => ({ trackId: tracks.find(t => t.clips.some(c => c.id === clipId))?.id || clipContextMenu.trackId, clipId }))
+                        .filter(tg => { const c = tracks.find(t => t.id === tg.trackId)?.clips.find(x => x.id === tg.clipId); return !!c && !c.notes && c.type !== TrackType.MIDI; });
+                      openNovaWindow('transpose', { targets, simple }); setClipContextMenu(null);
+                    } },
+                  ...(!simple ? [{ label: 'Marqueurs de warp…', icon: 'fa-arrows-left-right-to-line',
+                    title: 'Caler les attaques sur la grille en tirant des marqueurs, ou « Quantifier l’audio » d’un coup ; la hauteur ne change pas (Pro Tools : Elastic Audio, vue Warp · Logic : Flex Time · Live : Warp markers · FL : Slice / Stretch)',
+                    onClick: () => { openNovaWindow('warp', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); } }] : []),
+                ] : []),
+                ...(clipContextMenu.clip.elastic ? [{ label: 'Revenir à l’original (transposition / warp)', icon: 'fa-rotate-left',
+                  title: 'Remet le son d’origine, sa tonalité et sa durée d’avant',
+                  onClick: () => { openNovaWindow('transpose', { revert: true, targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); } }] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: simple ? 'Supprimer les silences…' : 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', title: 'Supprimer les silences : découpe le clip et retire les blancs entre les phrases, avec seuil et marges réglables (Pro Tools : Strip Silence, Ctrl+U)', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => { const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id]; requestBreaths({ mode: 'dialog', clipIds: ids, reason: 'menu' }); setClipContextMenu(null); }}] : []),
                 // Gain de clip, Heal, boucle, Répéter, rendre le gain (R5).

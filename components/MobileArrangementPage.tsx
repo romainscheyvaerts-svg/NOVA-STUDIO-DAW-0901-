@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { isMidiRecordTrack } from '../utils/midiRecord';
 import { openNovaWindow } from '../utils/novaWindows';
+import PracticeSpeed from './PracticeSpeed';
 import { requestBreaths } from '../utils/breathBus';
 import MobileContainer from './MobileContainer';
 import LiveRecordingClip from './LiveRecordingClip';
@@ -601,6 +602,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           <div className="text-[10px] font-bold text-white/50 bg-white/5 px-2 py-1 rounded">
             {bpm} BPM
           </div>
+          {/* Lecture ralentie (R13) : un appui = 85, 75, 60, 50 puis 100 % (hauteur gardée). */}
+          <PracticeSpeed compact />
           <button
             onClick={() => setZoom(z => Math.max(MIN_ZOOM, z - 20))}
             aria-label="Dézoomer"
@@ -805,6 +808,16 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                       title={`Synthé NOVA : ${track.novaSynth?.name || 'synthé simple'}`}
                       className="nova-hit w-8 h-8 rounded-md text-[11px] bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30">
                       <i className="fas fa-sliders-h"></i>
+                    </button>
+                  )}
+                  {/* Tonalité du beat (R13) : transposer tous ses clips d'un geste, sans changer le tempo */}
+                  {(track.id === 'instrumental' || !!track.instrumentId) && track.clips.some(c => !!c.bufferId && !c.notes) && (
+                    <button type="button" data-testid={`beat-key-${track.id}`}
+                      onClick={(e) => { e.stopPropagation(); openNovaWindow('transpose', { simple: true, targets: track.clips.filter(c => !!c.bufferId && !c.notes).map(c => ({ trackId: track.id, clipId: c.id })) }); }}
+                      aria-label={`Changer la tonalité de ${track.name}`}
+                      title="Changer la tonalité du beat (±12 demi-tons), le tempo ne bouge pas (Pro Tools : Elastic Audio · Live : Transpose · FL : Pitch)"
+                      className="nova-hit w-8 h-8 rounded-md text-[10px] font-bold bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30">
+                      <i className="fas fa-arrows-up-down"></i>
                     </button>
                   )}
                   {/* Micro : seulement sur les pistes voix (pas le beat ni les bus) */}
@@ -1114,6 +1127,22 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
               >
                 <i className="fas fa-bullseye text-cyan-300 text-sm mb-0.5"></i>
                 <span className="text-[10px] font-semibold text-white/70">JUSTE</span>
+              </button>
+            )}
+
+            {/* Tonalité (R13) : transposer le clip, tempo inchangé (version simple) */}
+            {selectedClip.clip.type !== TrackType.MIDI && !selectedClip.clip.notes && (
+              <button
+                onClick={() => openNovaWindow('transpose', { simple: true, targets: [{ trackId: selectedClip.trackId, clipId: selectedClip.clip.id }] })}
+                aria-label="Changer la tonalité du clip"
+                title="Plus aigu ou plus grave, sans changer le tempo (Live : Transpose · FL : Pitch)"
+                data-testid="mobile-clip-transpose"
+                className={`flex-shrink-0 flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all ${
+                  selectedClip.clip.elastic ? 'bg-cyan-500/25 border border-cyan-500/50' : 'bg-white/5 hover:bg-white/10 active:bg-cyan-500/20'
+                }`}
+              >
+                <i className="fas fa-arrows-up-down text-cyan-300 text-sm mb-0.5"></i>
+                <span className="text-[10px] font-semibold text-white/70">TON</span>
               </button>
             )}
 
