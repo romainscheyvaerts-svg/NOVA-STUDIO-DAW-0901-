@@ -4,11 +4,6 @@ import { themeStore, useTheme } from './utils/themeStore';
 import { openNovaWindow } from './utils/novaWindows';
 import PanelBoundary from './components/PanelBoundary';
 
-/** Pages du téléphone : nom affiché si l'une plante (le reste du studio continue). */
-const MOBILE_PAGE_NAMES: Record<string, string> = {
-  TRACKS: 'la page des pistes', ARRANGEMENT: "la page d'arrangement", MIXER: 'la console de mixage',
-  PLUGINS: 'la page des effets', BROWSER: 'le catalogue', NOVA: 'le chat Nova',
-};
 import { audioEngine } from './engine/AudioEngine';
 import { dspMonitor, safeModeStore } from './engine/dspMonitor';
 import { estimatedLoadPct as estimatedDspLoadPct, pickAutoFreeze, SafetyContext as DspSafetyContext } from './utils/dspLoad';
@@ -185,6 +180,12 @@ import { getRegisteredPlugin, registryMenuItems, usesProjectKey } from './engine
 import { pluginDisplayName } from './utils/pluginLabel';
 import { BreathHost, BreathMixOption, BreathPanelTools, breathsAfterMixStyle } from './components/BreathTools';
 import { requestBreaths } from './utils/breathBus';
+
+/** Pages du téléphone : nom affiché si l'une plante (le reste du studio continue). */
+const MOBILE_PAGE_NAMES: Record<string, string> = {
+  TRACKS: 'la page des pistes', ARRANGEMENT: "la page d'arrangement", MIXER: 'la console de mixage',
+  PLUGINS: 'la page des effets', BROWSER: 'le catalogue', NOVA: 'le chat Nova',
+};
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -4022,7 +4023,8 @@ function Studio() {
   const autosavePending = useRef<VersionReason | null>(null);
   const lastSavedSigRef = useRef<unknown[] | null>(null);
   const purgeTakesAfterSaveRef = useRef(false);
-  const [lastAutosave, setLastAutosave] = useState<{ at: number; ms: number } | null>(null);
+  // Dernière version écrite (diagnostic) : une ref, pas un état (pas de rendu de tout le studio toutes les 15 s).
+  const lastAutosaveRef = useRef<{ at: number; ms: number } | null>(null);
   const autosaveNow = useCallback(async (reason: VersionReason = 'auto', force = false) => {
     if (autosaveBusy.current) { autosavePending.current = reason; return; }
     const st = stateRef.current;
@@ -4044,7 +4046,7 @@ function Studio() {
         },
       });
       lastSavedSigRef.current = sig;
-      if (r) setLastAutosave({ at: r.versionId, ms: r.ms });
+      if (r) lastAutosaveRef.current = { at: r.versionId, ms: r.ms };
       if (purgeTakesAfterSaveRef.current) { purgeTakesAfterSaveRef.current = false; await recoveryStore().purgeTakes(); }
       if (!autosaveNotified.current) {
         autosaveNotified.current = true;
