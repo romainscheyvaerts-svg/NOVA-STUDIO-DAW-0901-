@@ -560,6 +560,12 @@ def onset_env(x, sr, hop=441):
 def part_d(page):
     out = {}
     beat_src, sr = read_wav(OUT / "beat_original.wav")
+    # Beat remis à l'original (l'étape B l'a étiré) : la vitesse se mesure contre le fichier d'origine.
+    cb = clip_of(page, "instrumental")
+    if cb["elastic"]:
+        open_window(page, "transpose", [{"trackId": "instrumental", "clipId": cb["id"]}], revert=True)
+        page.wait_for_timeout(800)
+    out["beat_original_remis"] = clip_of(page, "instrumental")["elastic"] is None
     # Voix coupée : on écoute le beat seul (mesure plus nette).
     page.evaluate("() => { const e = window.__novaEdit; const c = e.getState().tracks.find(t => t.id === 'voix').clips[0]; e.patchClips('voix', { [c.id]: { isMuted: true } }); }")
     page.wait_for_timeout(400)

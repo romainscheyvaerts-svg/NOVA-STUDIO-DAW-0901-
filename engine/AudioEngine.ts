@@ -1965,6 +1965,8 @@ export class AudioEngine {
   // du master. La tête de lecture avance à la même vitesse. L'export n'est jamais ralenti.
   private practiceRate = 1;
   private practiceGen = 0;
+  /** Pistes du projet avant résolution (engineView n'est pas à appliquer deux fois : niveau des guides). */
+  private practiceRawTracks: Track[] | null = null;
   private practiceTimer: number | null = null;
   private practice: {
     gen: number; rate: number; startOffset: number;
@@ -1981,7 +1983,8 @@ export class AudioEngine {
     const playing = this.isPlaying && !this.recSession && !this.recordingTrackId;
     const at = playing ? this.getCurrentTime() : this.pausedAt;
     this.practiceRate = r;
-    if (playing && this.liveTracks) { this.stopAll(); this.startPlayback(at, this.liveTracks); }
+    const raw = this.practiceRawTracks || this.liveTracks;
+    if (playing && raw) { this.stopAll(); this.startPlayback(at, raw); }
   }
   public getPracticeRate(): number { return this.practiceRate; }
   /** Lecture ralentie en cours ? (et en attente du 1er morceau ?) */
@@ -2035,7 +2038,7 @@ export class AudioEngine {
     if (!p || p.gen !== gen || p.rendering || !ctx) return;
     const now = ctx.currentTime;
     if (p.ctxNext !== null && p.ctxNext - now > 5) return; // assez d'avance
-    const tracks = this.liveTracks || [];
+    const tracks = this.practiceRawTracks || this.liveTracks || [];
     const loop = this.isLoopActive && this.loopEnd > this.loopStart + 0.05;
     const end = loop ? this.loopEnd : this.practiceEnd(tracks);
     if (p.nextFrom >= end - 1e-6) {
@@ -2100,6 +2103,8 @@ export class AudioEngine {
    */
   public startPlayback(startOffset: number, tracks: Track[], opts: { at?: number } = {}) {
     if (!this.ctx) return;
+    // Pistes du projet telles quelles (la lecture ralentie les passe au rendu, qui les résout lui-même).
+    this.practiceRawTracks = tracks;
     tracks = engineView(tracks).tracks;
     if (this.isPlaying) this.stopAll();
     // L'extrait du catalogue jouait en même temps que le projet : on le coupe
@@ -2250,6 +2255,7 @@ export class AudioEngine {
    * continuait de sonner jusqu'à l'arrêt.
    */
   public setLiveTracks(tracks: Track[]) {
+    this.practiceRawTracks = tracks;
     tracks = engineView(tracks).tracks;
     if (!this.isPlaying || !this.ctx) { this.liveTracks = tracks; return; }
     const next = this.computeClipSigs(tracks);
