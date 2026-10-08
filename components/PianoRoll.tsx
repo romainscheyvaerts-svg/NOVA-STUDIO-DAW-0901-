@@ -1,4 +1,5 @@
 
+import { matchShortcut } from '../utils/keymap';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Track, Clip, MidiNote, EditorTool, TrackType } from '../types';
 import { NOTES } from '../plugins/AutoTunePlugin';
@@ -20,6 +21,9 @@ import MidiCcLanes from './MidiCcLanes';
 import { MidiCcPoint } from '../utils/midiCc';
 import { StepInput, STEP_VALUES, stepSeconds } from '../utils/stepInput';
 import { useTheme } from '../utils/themeStore';
+
+/** Raccourcis du piano roll (contexte « pianoroll » de utils/keymap, remappables). */
+const PIANO_ROLL_SHORTCUT_IDS = ['pr.close', 'nova.muteNotes', 'pr.delete', 'pr.selectAll', 'pr.double', 'pr.up', 'pr.down', 'pr.octUp', 'pr.octDown', 'pr.quantize', 'pr.humanize'];
 
 /** Au doigt (tablette, téléphone), les boutons de la barre passent à 40 px ; à la souris, rien ne change. */
 const TAP = '[@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:min-w-10';
@@ -767,34 +771,21 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
-      if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
-      // Notes muettes (Pro Tools : Mute Notes, Ctrl+M).
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'm' || e.key === 'M')) { e.preventDefault(); toggleMuteNotes(); return; }
-      
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        deleteNotes(Array.from(selectedNoteIds));
-      }
-      if (e.ctrlKey && e.key === 'a') {
-        e.preventDefault();
-        selectAll();
-      }
-      if (e.ctrlKey && e.key === 'd') {
-        e.preventDefault();
-        doubleNotes();
-      }
-      if (e.key === 'ArrowUp' && !e.shiftKey) {
-        e.preventDefault();
-        transpose(e.ctrlKey ? 12 : 1);
-      }
-      if (e.key === 'ArrowDown' && !e.shiftKey) {
-        e.preventDefault();
-        transpose(e.ctrlKey ? -12 : -1);
-      }
-      if (e.key === 'q') {
-        applyQuantize();
-      }
-      if (e.key === 'h') {
-        humanizeNotes();
+      // Table ACTIVE des raccourcis (utils/keymapStore : préréglage + remappages).
+      const id = matchShortcut(e, PIANO_ROLL_SHORTCUT_IDS);
+      switch (id) {
+        case 'pr.close': e.preventDefault(); onClose(); return;
+        // Notes muettes (Pro Tools : Mute Notes, Ctrl+M).
+        case 'nova.muteNotes': e.preventDefault(); toggleMuteNotes(); return;
+        case 'pr.delete': deleteNotes(Array.from(selectedNoteIds)); return;
+        case 'pr.selectAll': e.preventDefault(); selectAll(); return;
+        case 'pr.double': e.preventDefault(); doubleNotes(); return;
+        case 'pr.up': e.preventDefault(); transpose(1); return;
+        case 'pr.down': e.preventDefault(); transpose(-1); return;
+        case 'pr.octUp': e.preventDefault(); transpose(12); return;
+        case 'pr.octDown': e.preventDefault(); transpose(-12); return;
+        case 'pr.quantize': e.preventDefault(); applyQuantize(); return;
+        case 'pr.humanize': e.preventDefault(); humanizeNotes(); return;
       }
     };
     

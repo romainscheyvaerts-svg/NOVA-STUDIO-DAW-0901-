@@ -89,6 +89,10 @@ import { GUIDE_DEFAULT_LEVEL } from './utils/trackStructure';
 import { CAPTURE_MINUTES_KEY, captureMinutes } from './utils/audioCapture';
 import { sharedTap, roundTapped } from './utils/tapTempo';
 import { isKeyboardFocus } from './utils/keyboardFocus';
+import { isShortcut, matchShortcut, takenByPianoRoll } from './utils/keymap';
+import './utils/keymapStore';
+import { scrubControl } from './utils/scrubControl';
+import { registerLayoutPart } from './utils/windowLayouts';
 import TempoLane, { TEMPO_LANE_H, useTempoLaneShown, tempoLaneStore } from './components/TempoLane';
 const MetronomeDialog = lazy(() => import('./components/MetronomeDialog'));
 const TempoDialog = lazy(() => import('./components/TempoDialog'));
@@ -167,6 +171,12 @@ import {
 } from './services/SessionCloud';
 import DrumMachinePanel from './components/DrumMachinePanel';
 import ShortcutsHelp from './components/ShortcutsHelp';
+import KeymapEditor from './components/KeymapEditor';
+import WindowLayoutsPanel from './components/WindowLayoutsPanel';
+
+/** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
+const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
+  'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
 import ProToolsWindows from './components/ProToolsWindows';
@@ -3675,93 +3685,87 @@ function Studio() {
       const mod = e.ctrlKey || e.metaKey;
       // Fenêtre modale ouverte : R, espace, Entrée… n'agissent plus sur le projet derrière.
       if (!mod && blockingOverlay()) return;
-      // Batterie / piano roll ouverts : seule la barre d'espace (lecture / pause) passe.
-      if (!mod && e.code !== 'Space' && document.querySelector('[data-nova-transport]')) return;
+      // Batterie / piano roll ouverts : seule la lecture / pause passe (et les combinaisons Ctrl).
+      if (!mod && !isShortcut(e, 'nova.play') && document.querySelector('[data-nova-transport]')) return;
+      // Piano roll ouvert : ses propres raccourcis passent avant (Ctrl+A, Ctrl+D…).
+      if (takenByPianoRoll(e)) return;
       // Entrée sur un bouton : on laisse le bouton s'activer (clavier).
       if (e.key === 'Enter' && e.target instanceof HTMLElement && e.target.closest('button, a, [role="button"]')) return;
 
-      // Lecture / pause : la barre d'espace ne doit ni defiler la page ni
-      // re-declencher le bouton qui a le focus.
-      if (e.code === 'Space' && !mod) {
+      // Maj+Espace (Pro Tools : Half-Speed Playback) : bascule la lecture ralentie 50 % / 100 % (R13).
+      if (e.code === 'Space' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         if (e.repeat) return;
         spaceDown = true;
-        // Maj+Espace (Pro Tools : Half-Speed Playback) : bascule la lecture ralentie 50 % / 100 % (R13).
-        if (e.shiftKey) {
-          const slow = practiceSpeedStore.get() < 0.999;
-          practiceSpeedStore.set(slow ? 1 : 0.5);
-          window.dispatchEvent(new CustomEvent('nova:notify', { detail: slow ? 'Vitesse normale (100 %).' : 'Lecture ralentie à 50 %, hauteur gardée (Maj+Espace pour revenir à 100 %).' }));
-          if (!stateRef.current.isPlaying) handleTogglePlay();
+        const slow = practiceSpeedStore.get() < 0.999;
+        practiceSpeedStore.set(slow ? 1 : 0.5);
+        window.dispatchEvent(new CustomEvent('nova:notify', { detail: slow ? 'Vitesse normale (100 %).' : 'Lecture ralentie à 50 %, hauteur gardée (Maj+Espace pour revenir à 100 %).' }));
+        if (!stateRef.current.isPlaying) handleTogglePlay();
+        return;
+      }
+      // Table ACTIVE des raccourcis (utils/keymapStore : préréglage + remappages).
+      let id = matchShortcut(e, APP_SHORTCUT_IDS);
+      // Maj + touche de mesure = un temps (en positions US, Maj compte dans la combinaison).
+      if (!id && e.shiftKey) id = matchShortcut({ key: e.key, code: e.code, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, shiftKey: false }, ['nova.barPrev', 'nova.barNext']);
+      if (!id) return;
+      const now = () => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime);
+      switch (id) {
+        // Lecture / pause : la touche ne doit ni défiler la page ni re-déclencher le bouton qui a le focus.
+        case 'nova.play': e.preventDefault(); if (e.repeat) return; spaceDown = e.code === 'Space'; handleTogglePlay(); return;
+        case 'nova.undo': e.preventDefault(); undo(); return;
+        case 'nova.redo': e.preventDefault(); redo(); return;
+        case 'nova.save': e.preventDefault(); setIsSaveMenuOpen(true); return;
+        // Exporter (Logic : « Exporter… » ; l'ingé n'a plus à passer par le menu).
+        case 'nova.export': e.preventDefault(); void handleExportMix(); return;
+        // Capturer la dernière prise (Logic : Capture as Recording).
+        case 'nova.capture': e.preventDefault(); void captureRef.current(); return;
+        case 'nova.record': e.preventDefault(); handleToggleRecord(); return;
+        // Couper / rallumer la piste guide (R3). En Keyboard Focus, G reste « fondu jusqu'à la fin ».
+        case 'nova.guide':
+          if (isKeyboardFocus() || !stateRef.current.tracks.some(t => t.isGuide)) return;
+          e.preventDefault(); toggleGuidesRef.current(); return;
+        case 'nova.loop': e.preventDefault(); setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive })); return;
+        case 'nova.home': e.preventDefault(); handleSeek(0); return;
+        case 'nova.end': {
+          e.preventDefault();
+          const end = Math.max(0, ...stateRef.current.tracks.flatMap(t => t.clips.map(c => c.start + c.duration)));
+          handleSeek(end);
           return;
         }
-        handleTogglePlay();
-        return;
-      }
-
-      if (mod && (e.key === 'z' || e.key === 'Z')) {
-        e.preventDefault();
-        if (e.shiftKey) redo(); else undo();
-        return;
-      }
-      if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
-      if (mod && (e.key === 's' || e.key === 'S')) { e.preventDefault(); setIsSaveMenuOpen(true); return; }
-      // Exporter : Ctrl+Maj+E (Logic : « Exporter… » ; l'ingé n'a plus à passer par le menu).
-      if (mod && e.shiftKey && (e.key === 'e' || e.key === 'E')) { e.preventDefault(); void handleExportMix(); return; }
-
-      if (mod) return; // on ne capture aucun autre raccourci systeme
-
-      // Maj+R : capturer la dernière prise (Logic : Capture as Recording). R seul : enregistrer.
-      if ((e.key === 'r' || e.key === 'R') && e.shiftKey) { e.preventDefault(); void captureRef.current(); return; }
-      if (e.key === 'r' || e.key === 'R') { e.preventDefault(); handleToggleRecord(); return; }
-      // G : couper / rallumer la piste guide (R3). En Keyboard Focus, G reste « fondu jusqu'à la fin ».
-      if ((e.key === 'g' || e.key === 'G') && !isKeyboardFocus() && stateRef.current.tracks.some(t => t.isGuide)) { e.preventDefault(); toggleGuidesRef.current(); return; }
-      if (e.key === 'l' || e.key === 'L') {
-        e.preventDefault();
-        setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive }));
-        return;
-      }
-      if (e.key === 'Home' || e.key === 'Enter') { e.preventDefault(); handleSeek(0); return; }
-      if (e.key === 'End') {
-        e.preventDefault();
-        const end = Math.max(0, ...stateRef.current.tracks.flatMap(t => t.clips.map(c => c.start + c.duration)));
-        handleSeek(end);
-        return;
-      }
-      // , / . : une mesure en arrière / en avant (Maj : un temps)
-      if (e.key === ',' || e.key === '.' || e.key === ';' || e.key === ':') {
-        e.preventDefault();
-        // Mesure / temps d'après la piste tempo (3/4, 6/8, changements de tempo).
-        const m = tempoMapStore.get();
-        const dir = (e.key === ',' || e.key === ';') ? -1 : 1;
-        const t = audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime;
-        if (e.shiftKey) {
-          const near = beatsInRange(m, Math.max(0, t - 8), t + 8);
-          const target = dir > 0 ? near.find(b => b.time > t + 1e-3) : [...near].reverse().find(b => b.time < t - 1e-3);
-          handleSeek(Math.max(0, target ? target.time : 0));
-        } else {
-          const p = timeToPosition(m, t);
-          const start = barToTime(m, p.bar);
-          handleSeek(Math.max(0, dir > 0 ? barToTime(m, p.bar + 1) : (t - start > 1e-3 ? start : barToTime(m, Math.max(0, p.bar - 1)))));
+        // Une mesure en arrière / en avant (Maj : un temps), d'après la piste tempo (3/4, 6/8, changements de tempo).
+        case 'nova.barPrev': case 'nova.barNext': {
+          e.preventDefault();
+          const m = tempoMapStore.get();
+          const dir = id === 'nova.barPrev' ? -1 : 1;
+          const t = now();
+          if (e.shiftKey) {
+            const near = beatsInRange(m, Math.max(0, t - 8), t + 8);
+            const target = dir > 0 ? near.find(b => b.time > t + 1e-3) : [...near].reverse().find(b => b.time < t - 1e-3);
+            handleSeek(Math.max(0, target ? target.time : 0));
+          } else {
+            const p = timeToPosition(m, t);
+            const start = barToTime(m, p.bar);
+            handleSeek(Math.max(0, dir > 0 ? barToTime(m, p.bar + 1) : (t - start > 1e-3 ? start : barToTime(m, Math.max(0, p.bar - 1)))));
+          }
+          return;
         }
-        return;
+        // Tap tempo (Pro Tools : T dans le champ tempo). En Keyboard Focus, T reste le zoom.
+        case 'nova.tap': if (isKeyboardFocus()) return; e.preventDefault(); if (!e.repeat) handleTap(); return;
+        case 'nova.marker': e.preventDefault(); handleAddMarker(now()); return;
+        case 'nova.help': e.preventDefault(); setShortcutsOpen(v => !v); return;
+        case 'nova.stop': if (!stateRef.current.isPlaying) return; e.preventDefault(); handleStop(); return;
+        case 'nova.metronome': e.preventDefault(); void handleToggleMetronome(); return;
+        case 'view.mixEdit': e.preventDefault(); setState(s => ({ ...s, currentView: s.currentView === 'MIXER' ? 'ARRANGEMENT' : 'MIXER' })); return;
+        case 'view.arrangement': e.preventDefault(); setState(s => ({ ...s, currentView: 'ARRANGEMENT' })); return;
+        case 'view.mixer': e.preventDefault(); setState(s => ({ ...s, currentView: 'MIXER' })); return;
+        case 'view.browser': e.preventDefault(); setIsSidebarOpen(v => !v); return;
       }
-      // T : tap tempo (Pro Tools : T dans le champ tempo). En Keyboard Focus, T reste le zoom.
-      if ((e.key === 't' || e.key === 'T') && !isKeyboardFocus()) { e.preventDefault(); if (!e.repeat) handleTap(); return; }
-      // K : repère à la tête de lecture
-      if (e.key === 'k' || e.key === 'K') {
-        e.preventDefault();
-        const t = audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime;
-        handleAddMarker(t);
-        return;
-      }
-      if (e.key === '?') { e.preventDefault(); setShortcutsOpen(v => !v); return; }
-      if (e.key === 'Escape' && stateRef.current.isPlaying) { e.preventDefault(); handleStop(); return; }
     };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
-  }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, handleAddMarker, undo, redo, setState, handleTap]);
+  }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, handleAddMarker, undo, redo, setState, handleTap, handleToggleMetronome]);
 
   // Raccourcis Pro Tools (utils/keymap) : pavé numérique, Ctrl+E, Keyboard Focus…
   useProToolsShortcuts({
@@ -3776,7 +3780,32 @@ function Studio() {
     selectTrack: (id) => setVisualState({ selectedTrackId: id }),
     undo,
     notify: setAiNotification,
+    toggleQuickPunch: () => handleToggleQuickPunch(),
+    toggleCountIn: () => {
+      let on = true;
+      try { on = localStorage.getItem('nova_count_in') !== '0'; } catch { /* défaut : oui */ }
+      setCountInEnabled(!on);
+      setAiNotification(!on ? '🥁 Décompte avant l’enregistrement activé.' : 'Décompte avant l’enregistrement désactivé.');
+    },
+    toggleMidiMerge: () => {
+      const next = midiInput.prefs.mode === 'merge' ? 'replace' : 'merge';
+      midiInput.setPrefs({ mode: next });
+      setAiNotification(next === 'merge' ? '🎹 Prise MIDI : fusion (les nouvelles notes s’ajoutent).' : '🎹 Prise MIDI : remplacement (la prise remplace les notes).');
+    },
+    openKeymapEditor: () => setKeymapEditorOpen(true),
+    openLayouts: () => setLayoutsOpen(true),
   });
+
+  // Scrub / shuttle (R17) : le moteur, et la position validée au relâchement.
+  useEffect(() => {
+    scrubControl.configure({
+      engine: audioEngine,
+      getTracks: () => stateRef.current.tracks,
+      commit: (t) => handleSeek(t),
+      stopPlayback: () => { if (stateRef.current.isPlaying) void handleTogglePlay(); },
+      getTime: () => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime),
+    });
+  }, [handleSeek, handleTogglePlay]);
 
   const handleRequestAddPlugin = useCallback((trackId: string, x: number, y: number) => {
     setAddPluginMenu({ trackId, x, y });
@@ -4202,6 +4231,8 @@ function Studio() {
 
   // Aide-mémoire des raccourcis (touche « ? »)
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [keymapEditorOpen, setKeymapEditorOpen] = useState(false);
+  const [layoutsOpen, setLayoutsOpen] = useState(false);
 
   // ===== Batterie Make Music (piste PERCUSSIONS) =====
   const [drumsOpen, setDrumsOpen] = useState(false);
@@ -4596,6 +4627,26 @@ function Studio() {
   // --- Structure Pro Tools (utils/trackStructure) : liste des pistes, bus nommés, Send View, états d'effets.
   const [structurePanel, setStructurePanel] = useState<StructurePanel | null>(null);
   const [sendViewSlot, setSendViewSlot] = useState<number | null>(null);
+  // Dispositions de fenêtres (R17, utils/windowLayouts) : vue, navigateur, panneau du bas.
+  const layoutUiRef = useRef({ sidebar: isSidebarOpen, sideTab: activeSideBrowserTab, panel: structurePanel });
+  layoutUiRef.current = { sidebar: isSidebarOpen, sideTab: activeSideBrowserTab, panel: structurePanel };
+  useEffect(() => {
+    const offs = [
+      registerLayoutPart('view', {
+        get: () => stateRef.current.currentView,
+        set: (v) => {
+          if (!['ARRANGEMENT', 'MIXER', 'AUTOMATION'].includes(v)) return;
+          if (v !== 'ARRANGEMENT' && simpleModeStore.get().simple) simpleModeStore.setPref(false);
+          setState(s => ({ ...s, currentView: v }));
+          if (document.body.getAttribute('data-view-mode') === 'MOBILE' && (v === 'MIXER' || v === 'ARRANGEMENT')) setActiveMobileTab(v as MobileTab);
+        },
+      }),
+      registerLayoutPart('sidebar', { get: () => layoutUiRef.current.sidebar, set: (v) => setIsSidebarOpen(!!v) }),
+      registerLayoutPart('sideTab', { get: () => layoutUiRef.current.sideTab, set: (v) => { if (v === 'STORE' || v === 'FX' || v === 'BRIDGE') setActiveSideBrowserTab(v); } }),
+      registerLayoutPart('panel', { get: () => layoutUiRef.current.panel, set: (v) => setStructurePanel(v ?? null) }),
+    ];
+    return () => offs.forEach(f => f());
+  }, [setState]);
   const handleSetPluginState = useCallback(async (trackId: string, pluginId: string, next: 'active' | 'bypass' | 'inactive') => {
     // VST inactif : son état est relu sur le pont AVANT d'être déchargé (rechargé à l'identique ensuite).
     if (next === 'inactive') {
@@ -7999,7 +8050,9 @@ function Studio() {
         notify={setAiNotification}
       />
       </PanelBoundary>
-      <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} onCustomize={isMobile ? undefined : () => { setShortcutsOpen(false); setKeymapEditorOpen(true); }} onLayouts={() => { setShortcutsOpen(false); setLayoutsOpen(true); }} />
+      {keymapEditorOpen && !isMobile && <KeymapEditor onClose={() => setKeymapEditorOpen(false)} />}
+      {layoutsOpen && <WindowLayoutsPanel onClose={() => setLayoutsOpen(false)} notify={setAiNotification} />}
       <PanelBoundary name="les fenêtres d'édition" overlay>
       <ProToolsWindows tracks={state.tracks} markers={state.markers} bpm={state.bpm} setState={setState} onEditClip={handleEditClip}
         onSeek={handleSeek} onAddMarker={handleAddMarker} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
