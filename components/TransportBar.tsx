@@ -561,7 +561,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         {/* Souris : glisser / double-clic (comme avant). Doigt ou clavier : la fenêtre Tempo (avant : rien
             au doigt, seule la pastille « 4/4 » de 23 × 10 px menait au tempo sur tablette). */}
         <div data-testid="transport-bpm" role="button" tabIndex={0} aria-label={`Tempo : ${bpm} BPM. Toucher pour le régler`}
-          className="hidden sm:flex shrink-0 flex-col items-end justify-center min-h-[40px] px-1 rounded-md cursor-ns-resize group"
+          className="hidden sm:flex shrink-0 flex-col items-end justify-center min-h-[40px] rounded-md cursor-ns-resize group"
           onMouseDown={handleBpmMouseDown}
           // Au clic (après le mousedown de compatibilité du doigt) : ouverte au pointerup, la fenêtre
           // se refermait aussitôt sous ce mousedown (son fond ferme au mousedown).
