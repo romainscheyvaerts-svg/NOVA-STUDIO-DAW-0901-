@@ -128,6 +128,14 @@ const FADE_HANDLE_PX = 14;
 // +12 dB tout en haut de la forme d'onde, 0 dB à 20 % sous le haut, -40 dB en bas.
 const CLIP_GAIN_MAX_DB = 12;
 const CLIP_GAIN_MIN_DB = -40;
+/** Hauteur de la barre d'outils de l'arrangement (h-12). */
+const TOOLBAR_H = 48;
+/**
+ * Hauteur de la règle (mesures, marqueurs, boucle, punch), dessinée en haut du
+ * calque. Le couloir d'accords (s'il est affiché) vient juste dessous, comme
+ * la Chord Track de Logic, puis les pistes : `tracksTop` = règle + couloir.
+ */
+export const RULER_H = 40;
 const CLIP_GAIN_ZERO_FRAC = 0.8;
 const CLIP_GAIN_GRAB_PX = 5;
 const clipGainToFrac = (g: number): number => {
@@ -160,8 +168,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy,
   punch, onUpdatePunch, editCommands, takeLanes, chordLane
 }) => {
-  // Piste d'accords (V20) : couloir entre la barre d'outils et la règle.
+  // Piste d'accords (V20) : couloir sous la règle (comme Logic), au-dessus des pistes.
   const chordH = chordLane ? chordLane.height : 0;
+  /** Haut des pistes, dans le contenu défilant comme dans le calque : règle + couloir d'accords. */
+  const tracksTop = RULER_H + chordH;
   // Thème affiché : le canvas se redessine quand on passe en clair / sombre.
   const { theme: uiTheme } = useTheme();
   const editPrefs = useEditPrefs();
@@ -583,7 +593,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   // Raccourcis Pro Tools (utils/keymap → utils/editCommands) : versions de base sur la sélection de clips.
   useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomV, setZoomV, bpm,
     viewportWidth: viewportSize.width - headerWidth, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
-  const totalArrangementHeight = useMemo(() => 40 + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + extraH(t), 0), [visibleTracks, zoomV, lanesKey]);
+  const totalArrangementHeight = useMemo(() => tracksTop + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + extraH(t), 0), [visibleTracks, zoomV, lanesKey, tracksTop]);
 
   // Mode avancé (G13) : FX, M, S, envois et R mangeaient le nom (« LEAD C... ») ;
   // colonne un peu plus large sur grand écran, tant que l'utilisateur ne l'a pas réglée.
@@ -642,7 +652,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       
       
       let targetTrackId: string | null = null;
-      let currentY = 40;
+      let currentY = tracksTop;
       for (const t of visibleTracks) {
           if (y >= currentY && y < currentY + zoomV) {
               targetTrackId = t.id;
@@ -835,10 +845,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const sc = scrollContainerRef.current;
     if (!sc) return null;
     const rect = sc.getBoundingClientRect();
-    if (clientX - rect.left < headerWidth || clientY - rect.top < 40) return null;
+    if (clientX - rect.left < headerWidth || clientY - rect.top < tracksTop) return null;
     const x = clientX - rect.left - headerWidth + sc.scrollLeft;
     const y = clientY - rect.top + sc.scrollTop;
-    let currentY = 40;
+    let currentY = tracksTop;
     for (const t of visibleTracks) {
       if (y >= currentY && y < currentY + zoomV) {
         const clip = clipAtTime(rowClips(t), x / zoomH);
@@ -863,7 +873,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const time = (x / zoomH);
     const useSnap = snapNow(e);
 
-    if (e.clientY - rect.top < 40) {
+    if (e.clientY - rect.top < RULER_H) {
         // --- Marqueurs (drapeaux dessines dans les 14 premiers pixels du ruler)
         const localY = e.clientY - rect.top;
         const hitMarker = localY < 16
@@ -939,7 +949,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         return;
     }
     
-    let currentY = 40;
+    // Sous la règle, le couloir d'accords (au-dessus) reçoit ses propres clics.
+    if (e.clientY - rect.top < tracksTop) return;
+    let currentY = tracksTop;
     for (const t of visibleTracks) {
         if (y >= currentY && y < currentY + zoomV) {
             const clip = clipAtTime(rowClips(t), time);
@@ -1056,7 +1068,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (e.button === 2) {
       e.preventDefault();
       // Zone vide d'une piste instrument : proposer la creation d'un pattern MIDI.
-      let laneY = 40;
+      let laneY = tracksTop;
       let laneTrack: Track | undefined;
       for (const t of visibleTracks) {
         const trackHeight = zoomV + extraH(t);
@@ -1077,7 +1089,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
     // Zone vide d'une piste : Sélecteur, ou moitié haute avec le Smart Tool → plage de temps.
     {
-      let laneY = 40;
+      let laneY = tracksTop;
       for (const t of visibleTracks) {
         const laneH = zoomV + extraH(t);
         if (y >= laneY && y < laneY + zoomV) {
@@ -1169,7 +1181,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
 
             const t0 = x0 / zoomH, t1 = x1 / zoomH;
             const ids = new Set<string>();
-            let laneY = 40;
+            let laneY = tracksTop;
             for (const t of visibleTracks) {
                 const laneHeight = zoomV + extraH(t);
                 // La bande de clips occupe zoomV, les voies d'automation sont ignorees.
@@ -1191,7 +1203,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
         let hint: string | null = null;
         let hovered: string | null = null;
         const tHover = x / zoomH;
-        let laneY = 40;
+        let laneY = tracksTop;
         for (const t of visibleTracks) {
             if (y >= laneY && y < laneY + zoomV) {
                 const c = clipAtTime(rowClips(t), tHover);
@@ -1228,7 +1240,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
         // Plage : du point d'ancrage au pointeur, sur toutes les pistes traversées.
         const rd = rangeDragRef.current;
         let overId = rd.anchorTrack;
-        let laneY = 40;
+        let laneY = tracksTop;
         for (const t of visibleTracks) {
             const laneH = zoomV + extraH(t);
             if (y >= laneY && y < laneY + laneH) { overId = t.id; break; }
@@ -1287,7 +1299,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
 
         // Détecter la piste cible en fonction de la position Y
         let targetTrackId = activeClip.trackId;
-        let currentY = 40;
+        let currentY = tracksTop;
         for (const t of visibleTracks) {
             const trackHeight = zoomV + extraH(t);
             if (y >= currentY && y < currentY + trackHeight) {
@@ -1671,7 +1683,7 @@ const drawTimeline = useCallback(() => {
         if (loopStartX + loopWidth > 0 && loopStartX < w) {
             // Zone de loop avec opacité augmentée
             ctx.fillStyle = cv.accentFill(0.15);
-            ctx.fillRect(loopStartX, 40, loopWidth, h - 40);
+            ctx.fillRect(loopStartX, tracksTop, loopWidth, h - tracksTop);
 
             // Lignes verticales de début et fin de loop plus visibles
             ctx.strokeStyle = cv.accent;
@@ -1679,13 +1691,13 @@ const drawTimeline = useCallback(() => {
 
             // Ligne de début
             ctx.beginPath();
-            ctx.moveTo(loopStartX, 40);
+            ctx.moveTo(loopStartX, tracksTop);
             ctx.lineTo(loopStartX, h);
             ctx.stroke();
 
             // Ligne de fin
             ctx.beginPath();
-            ctx.moveTo(loopEndX, 40);
+            ctx.moveTo(loopEndX, tracksTop);
             ctx.lineTo(loopEndX, h);
             ctx.stroke();
 
@@ -1693,22 +1705,22 @@ const drawTimeline = useCallback(() => {
             ctx.fillStyle = cv.accent;
             // Poignée début (triangle)
             ctx.beginPath();
-            ctx.moveTo(loopStartX - 8, 40);
-            ctx.lineTo(loopStartX + 8, 40);
-            ctx.lineTo(loopStartX, 55);
+            ctx.moveTo(loopStartX - 8, tracksTop);
+            ctx.lineTo(loopStartX + 8, tracksTop);
+            ctx.lineTo(loopStartX, tracksTop + 15);
             ctx.fill();
 
             // Poignée fin (triangle)
             ctx.beginPath();
-            ctx.moveTo(loopEndX - 8, 40);
-            ctx.lineTo(loopEndX + 8, 40);
-            ctx.lineTo(loopEndX, 55);
+            ctx.moveTo(loopEndX - 8, tracksTop);
+            ctx.lineTo(loopEndX + 8, tracksTop);
+            ctx.lineTo(loopEndX, tracksTop + 15);
             ctx.fill();
         }
     }
     
     // Dessiner les clips SANS translate - coordonnées relatives au viewport
-    let currentY = 40; // Position absolue dans le document
+    let currentY = tracksTop; // Position absolue dans le document
     visibleTracks.forEach((track) => {
         const trackH = zoomV;
         const totalAutomationHeight = extraH(track);
@@ -1717,18 +1729,18 @@ const drawTimeline = useCallback(() => {
         const viewportY = currentY - scrollTop;
 
         // Vérifier si la piste est visible dans le viewport
-        if (viewportY + trackH > 40 && viewportY < h) {
+        if (viewportY + trackH > tracksTop && viewportY < h) {
             rowClips(track).forEach(clip => {
                 const cx = timeToPixels(clip.start) - scrollX;
                 const cw = timeToPixels(clip.duration);
                 if (cx + cw > 0 && cx < w) {
                     // Dessiner le clip à sa position relative dans le viewport
-                    const clipY = Math.max(viewportY + 2, 40); // Ne pas dessiner au-dessus du ruler
+                    const clipY = Math.max(viewportY + 2, tracksTop); // Ne pas dessiner sous la règle ni le couloir d'accords
                     const clipH = Math.min(trackH - 4, viewportY + trackH - 2 - clipY);
                     if (clipH > 0) {
                         drawClip(ctx, clip, track.color, cx, clipY, cw, clipH, (selectedClip?.clip.id === clip.id) || (activeClip?.clip.id === clip.id) || selectedClipIds.has(clip.id), zoomH, hoveredClipId === clip.id);
                         const bx = takeBadgeX(track, clip);
-                        if (bx !== null && viewportY + 3 >= 40) {
+                        if (bx !== null && viewportY + 3 >= tracksTop) {
                             const n = lanesByTrack.get(track.id)!.length;
                             const x0 = bx - scrollX, y0 = viewportY + 3;
                             ctx.save();
@@ -1750,12 +1762,12 @@ const drawTimeline = useCallback(() => {
         }
         
         // Crossfades (zone commune de deux clips en fondu croisé) : les deux courbes, en ambre.
-        if (viewportY + trackH > 40 && viewportY < h) {
+        if (viewportY + trackH > tracksTop && viewportY < h) {
             for (const z of crossfadeZones(track.clips)) {
                 const a = track.clips.find(c => c.id === z.a)!, b = track.clips.find(c => c.id === z.b)!;
                 const zx = timeToPixels(z.start) - scrollX, zw = timeToPixels(z.end - z.start);
                 if (zx + zw < 0 || zx > w || zw < 2) continue;
-                const zy = Math.max(viewportY + 2, 40), zh = Math.min(trackH - 4, viewportY + trackH - 2 - zy);
+                const zy = Math.max(viewportY + 2, tracksTop), zh = Math.min(trackH - 4, viewportY + trackH - 2 - zy);
                 if (zh <= 0) continue;
                 ctx.save();
                 ctx.fillStyle = 'rgba(251,191,36,0.10)';
@@ -1776,7 +1788,7 @@ const drawTimeline = useCallback(() => {
         if (totalAutomationHeight > 0) drawExpandedLanes(ctx, track, viewportY + trackH, w, h, zoomH, scrollX);
 
         // Dessiner les séparateurs de pistes (position relative au viewport)
-        if (viewportY + trackH + totalAutomationHeight > 40 && viewportY < h) {
+        if (viewportY + trackH + totalAutomationHeight > tracksTop && viewportY < h) {
             const lineY = viewportY + trackH + totalAutomationHeight;
             ctx.strokeStyle = cv.ink(0.1);
             ctx.lineWidth = 1;
@@ -1790,9 +1802,9 @@ const drawTimeline = useCallback(() => {
     });
 
     ctx.fillStyle = cv.surface;
-    ctx.fillRect(0, 0, w, 40);
+    ctx.fillRect(0, 0, w, RULER_H);
     ctx.strokeStyle = cv.ink(0.1);
-    ctx.beginPath(); ctx.moveTo(0, 40); ctx.lineTo(w, 40); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, RULER_H); ctx.lineTo(w, RULER_H); ctx.stroke();
 
     ctx.fillStyle = cv.textMuted;
     ctx.font = '600 11px Inter';
@@ -1811,12 +1823,12 @@ const drawTimeline = useCallback(() => {
                 // Region marker (like Pro Tools Memory Locations)
                 const endX = timeToPixels(marker.endTime) - scrollX;
                 ctx.fillStyle = marker.color + '22';
-                ctx.fillRect(markerX, 0, endX - markerX, 40);
+                ctx.fillRect(markerX, 0, endX - markerX, RULER_H);
                 ctx.strokeStyle = marker.color;
                 ctx.lineWidth = 2;
                 ctx.beginPath();
-                ctx.moveTo(markerX, 0); ctx.lineTo(markerX, 40);
-                ctx.moveTo(endX, 0); ctx.lineTo(endX, 40);
+                ctx.moveTo(markerX, 0); ctx.lineTo(markerX, RULER_H);
+                ctx.moveTo(endX, 0); ctx.lineTo(endX, RULER_H);
                 ctx.stroke();
             }
             
@@ -1858,17 +1870,17 @@ const drawTimeline = useCallback(() => {
             ctx.fillRect(px0, 31, px1 - px0, 8);
             if (on) {
                 ctx.fillStyle = 'rgba(239, 68, 68, 0.06)';
-                ctx.fillRect(px0, 40, px1 - px0, h - 40);
+                ctx.fillRect(px0, tracksTop, px1 - px0, h - tracksTop);
                 ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
                 ctx.lineWidth = 1;
                 ctx.setLineDash([3, 3]);
-                ctx.beginPath(); ctx.moveTo(px0 + 0.5, 40); ctx.lineTo(px0 + 0.5, h); ctx.moveTo(px1 - 0.5, 40); ctx.lineTo(px1 - 0.5, h); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(px0 + 0.5, tracksTop); ctx.lineTo(px0 + 0.5, h); ctx.moveTo(px1 - 0.5, tracksTop); ctx.lineTo(px1 - 0.5, h); ctx.stroke();
                 ctx.setLineDash([]);
             }
             // Poignées : crochets d'entrée et de sortie.
             ctx.fillStyle = on ? '#ef4444' : 'rgba(239, 68, 68, 0.6)';
-            ctx.beginPath(); ctx.moveTo(px0, 26); ctx.lineTo(px0 + 7, 26); ctx.lineTo(px0, 40); ctx.closePath(); ctx.fill();
-            ctx.beginPath(); ctx.moveTo(px1, 26); ctx.lineTo(px1 - 7, 26); ctx.lineTo(px1, 40); ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(px0, 26); ctx.lineTo(px0 + 7, 26); ctx.lineTo(px0, RULER_H); ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(px1, 26); ctx.lineTo(px1 - 7, 26); ctx.lineTo(px1, RULER_H); ctx.closePath(); ctx.fill();
             if (px1 - px0 > 50) {
                 ctx.fillStyle = '#fff';
                 ctx.font = 'bold 8px Inter';
@@ -1882,12 +1894,12 @@ const drawTimeline = useCallback(() => {
         const sx = timeToPixels(timeSel.start) - scrollX;
         const sw = Math.max(1, timeToPixels(timeSel.end - timeSel.start));
         if (sx + sw > 0 && sx < w) {
-            let ly = 40;
+            let ly = tracksTop;
             visibleTracks.forEach(t => {
                 const laneH = zoomV + extraH(t);
                 if (timeSel.trackIds.includes(t.id)) {
                     const vy = ly - scrollTop;
-                    const top = Math.max(40, vy), bottom = Math.min(h, vy + zoomV);
+                    const top = Math.max(tracksTop, vy), bottom = Math.min(h, vy + zoomV);
                     if (bottom > top) {
                         ctx.fillStyle = 'rgba(186, 230, 253, 0.22)';
                         ctx.fillRect(sx, top, sw, bottom - top);
@@ -1917,7 +1929,7 @@ const drawTimeline = useCallback(() => {
     }
 
     // La tete de lecture est dessinee sur le calque superieur (drawPlayhead).
-}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, lanesKey, lanesByTrack, hoveredClipId, uiTheme]);
+}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, lanesKey, lanesByTrack, hoveredClipId, uiTheme, tracksTop]);
 
 // Calque statique (grille, clips, formes d'onde, reperes) : redessine seulement
 // quand son contenu change, plus a chaque image de la lecture.
@@ -2044,7 +2056,12 @@ useEffect(() => {
              <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
         </div>
       </div>
-      {chordLane && chordLane.render({ zoomH, scrollLeft, headerWidth, width: Math.max(0, viewportSize.width - headerWidth) })}
+      {/* Piste d'accords : sous la règle (comme la Chord Track de Logic), fixe pendant le défilement vertical. */}
+      {chordLane && (
+        <div style={{ position: 'absolute', top: TOOLBAR_H + RULER_H, left: 0, right: 0, zIndex: 41 }}>
+          {chordLane.render({ zoomH, scrollLeft, headerWidth, width: Math.max(0, viewportSize.width - headerWidth) })}
+        </div>
+      )}
       {/* SINGLE SCROLL CONTAINER - sidebar is sticky left, canvas is sticky top */}
       <div 
           ref={scrollContainerRef} 
@@ -2116,8 +2133,8 @@ useEffect(() => {
                   borderRight: '1px solid var(--border-dim)'
               }}
           >
-            {/* Ruler spacer */}
-            <div style={{ height: 40, flexShrink: 0, backgroundColor: 'var(--bg-surface)' }} />
+            {/* Règle + couloir d'accords */}
+            <div style={{ height: tracksTop, flexShrink: 0, backgroundColor: 'var(--bg-surface)' }} />
             {/* Track Headers */}
             {visibleTracks.map((track) => (
               <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>
@@ -2164,7 +2181,7 @@ useEffect(() => {
           {isRecording && recStartTime !== null && (
              visibleTracks.map((track, idx) => {
                if (!track.isTrackArmed) return null;
-               let topY = 40; for (let i = 0; i < idx; i++) topY += zoomV + extraH(visibleTracks[i]);
+               let topY = tracksTop; for (let i = 0; i < idx; i++) topY += zoomV + extraH(visibleTracks[i]);
                return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, left: headerWidth, height: `${zoomV - 4}px`, right: 0, pointerEvents: 'none' }}><LiveRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} /></div>;
              })
           )}
@@ -2172,15 +2189,16 @@ useEffect(() => {
       </div>
       {/* CANVAS - Overlay fixe pour la grille et la timeline */}
       <canvas 
-          ref={canvasRef} 
+          ref={canvasRef}
+          data-tracks-top={tracksTop} 
           style={{ 
               position: 'absolute',
-              top: 48 + chordH, // Hauteur de la toolbar (+ piste d'accords)
+              top: TOOLBAR_H, // sous la barre d'outils : règle, couloir d'accords, pistes
               left: headerWidth,
               right: 0,
               bottom: 0,
               width: `calc(100% - ${headerWidth}px)`,
-              height: `calc(100% - ${48 + chordH}px)`,
+              height: `calc(100% - ${TOOLBAR_H}px)`,
               pointerEvents: 'none',
               zIndex: 20
           }} 
@@ -2190,24 +2208,25 @@ useEffect(() => {
           ref={overlayRef}
           style={{
               position: 'absolute',
-              top: 48 + chordH,
+              top: TOOLBAR_H,
               left: headerWidth,
               right: 0,
               bottom: 0,
               width: `calc(100% - ${headerWidth}px)`,
-              height: `calc(100% - ${48 + chordH}px)`,
+              height: `calc(100% - ${TOOLBAR_H}px)`,
               pointerEvents: 'none',
-              zIndex: 21
+              // Au-dessus du couloir d'accords et des couloirs de prises : la tête de lecture les traverse.
+              zIndex: 42
           }}
       />
       {/* Couloirs de prises (au-dessus des calques dessinés, sous la règle) */}
       {takeLanes && visibleTracks.some(t => openLanesOf(t).length > 0) && (
-        <div style={{ position: 'absolute', top: 48 + chordH + 40, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 22 }}>
+        <div style={{ position: 'absolute', top: TOOLBAR_H + tracksTop, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 22 }}>
           {(() => {
-            let y = 40;
+            let y = tracksTop;
             return visibleTracks.map(t => {
               const lanes = openLanesOf(t);
-              const top = y + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80 - scrollTop - 40;
+              const top = y + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80 - scrollTop - tracksTop;
               y += zoomV + extraH(t);
               if (!lanes.length || top > viewportSize.height || top + lanes.length * TAKE_LANE_H < 0) return null;
               return <TakeLanesOverlay key={t.id} track={t} lanes={lanes} api={takeLanes} top={top} zoomH={zoomH} scrollLeft={scrollLeft}

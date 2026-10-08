@@ -278,14 +278,14 @@ def buffer_of(page, bid):
 
 def canvas_box(page):
     return page.evaluate("""() => { const c = document.querySelectorAll('.nova-grille canvas')[1]; const r = c.getBoundingClientRect();
-      const sc = document.querySelector('.nova-grille .custom-scroll'); return { x: r.left, y: r.top, w: r.width, h: r.height, sl: sc ? sc.scrollLeft : 0, st: sc ? sc.scrollTop : 0 }; }""")
+      const sc = document.querySelector('.nova-grille .custom-scroll'); return { x: r.left, y: r.top, w: r.width, h: r.height, sl: sc ? sc.scrollLeft : 0, st: sc ? sc.scrollTop : 0, tt: +(c.dataset.tracksTop || 40) }; }""")
 
 
 def open_clip_menu(page, t=2.0):
     """Clic droit sur le clip de voix (arrangement : piste 1, 40 px par seconde à 120 BPM)."""
     page.mouse.click(800, 600); page.wait_for_timeout(200)
     box = canvas_box(page)
-    page.mouse.click(box["x"] + t * 40 - box["sl"], box["y"] + 40 + 60 - box["st"], button="right")
+    page.mouse.click(box["x"] + t * 40 - box["sl"], box["y"] + box.get("tt", 40) + 60 - box["st"], button="right")
     page.wait_for_timeout(400)
 
 
@@ -545,7 +545,7 @@ def scenario_tablet(p):
     open_project_file(page, proj, RESULTS, "B0_projet_tablette")
     page.wait_for_function("() => !!window.__novaEdit", timeout=20000)
     box = canvas_box(page)
-    long_press(page, box["x"] + 2.0 * 40 - box["sl"], box["y"] + 40 + 60 - box["st"])
+    long_press(page, box["x"] + 2.0 * 40 - box["sl"], box["y"] + box.get("tt", 40) + 60 - box["st"])
     shot(page, "B1_appui_long_menu_clip")
     tap(page, page.get_by_text("Justesse note par note…", exact=True).first)
     wait_editor(page)

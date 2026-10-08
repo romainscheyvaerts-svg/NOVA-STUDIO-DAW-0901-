@@ -122,7 +122,7 @@ def wait_engine(page, t, timeout=20):
 
 def canvas_box(page):
     return page.evaluate("""() => { const c = document.querySelectorAll('.nova-grille canvas')[1]; const r = c.getBoundingClientRect();
-      const sc = document.querySelector('.nova-grille .custom-scroll'); return { x: r.left, y: r.top, w: r.width, h: r.height, sl: sc ? sc.scrollLeft : 0, st: sc ? sc.scrollTop : 0 }; }""")
+      const sc = document.querySelector('.nova-grille .custom-scroll'); return { x: r.left, y: r.top, w: r.width, h: r.height, sl: sc ? sc.scrollLeft : 0, st: sc ? sc.scrollTop : 0, tt: +(c.dataset.tracksTop || 40) }; }""")
 
 
 def x_of(box, t, zoom=40):
@@ -370,7 +370,7 @@ def v2(page, res):
 
 def lane_y(box, track_index=0, frac=0.8, zoomv=120):
     """Ordonnée (écran) d'une piste : frac = 0 haut du clip, 1 bas."""
-    return box["y"] + 40 + track_index * zoomv + 2 + frac * (zoomv - 4)
+    return box["y"] + box.get("tt", 40) + track_index * zoomv + 2 + frac * (zoomv - 4)
 
 
 def v2ui(page, res):

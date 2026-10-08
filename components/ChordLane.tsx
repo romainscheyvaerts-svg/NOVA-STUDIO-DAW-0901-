@@ -11,7 +11,7 @@ import { useSimpleMode } from '../utils/simpleMode';
 import { keyLabelFr } from '../utils/scales';
 
 /**
- * Piste d'accords (V20) : un couloir collé à la règle de l'arrangement qui
+ * Piste d'accords (V20) : un couloir juste sous la règle de l'arrangement qui
  * montre les accords (Am, F, C, G…), comme la Chord Track de Logic.
  *  - clic dans le vide : poser un accord (ceux de la gamme proposés d'abord) ;
  *  - clic sur un accord : le changer, l'allonger, le raccourcir, le retirer ;
@@ -322,7 +322,7 @@ export const ChordLaneToggleButton: React.FC = () => {
   const shown = useChordLaneShown();
   return (
     <button type="button" onClick={() => chordLaneStore.set(!shown)} aria-pressed={shown} data-testid="chord-lane-toggle"
-      title={`${shown ? 'Masquer' : 'Afficher'} la piste d’accords (Chord Track de Logic) sous la barre d’outils`}
+      title={`${shown ? 'Masquer' : 'Afficher'} la piste d’accords (Chord Track de Logic), sous la règle de l’arrangement`}
       className={`h-8 px-2 rounded-lg border text-[10px] font-bold whitespace-nowrap ${shown ? 'bg-cyan-500/15 border-cyan-400/40 text-cyan-200' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
       <i className="fas fa-guitar mr-1" />Accords
     </button>
@@ -337,7 +337,7 @@ export const ChordLaneMenuToggle: React.FC<{ onDone?: () => void }> = ({ onDone 
       <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Affichage</div>
       <button type="button" role="switch" aria-checked={shown} data-testid="menu-chord-lane"
         onClick={() => { chordLaneStore.set(!shown); onDone?.(); }}
-        title="Couloir des accords sous la barre d’outils de l’arrangement (comme la Chord Track de Logic)"
+        title="Couloir des accords sous la règle de l’arrangement (comme la Chord Track de Logic)"
         className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
         <i className="fas fa-guitar w-5 text-center text-cyan-300" />
         <span className="flex-1 text-left">Piste d’accords</span>
