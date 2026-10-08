@@ -5,7 +5,6 @@ clr_loader==0.3.1
 # Ponts (mêmes versions que bridge-python\venv)
 websockets==17.1
 numpy==2.5.3
-pedalboard==0.9.25
 sounddevice==0.5.6
 comtypes==1.4.17
 # Construction

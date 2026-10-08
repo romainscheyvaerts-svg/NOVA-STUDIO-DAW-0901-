@@ -54,6 +54,7 @@ const MemoryLocations: React.FC<Props> = ({ open, onClose, markers, bpm, onGoTo,
       role="complementary"
       aria-label="Repères (Memory Locations)"
       data-testid="memory-locations"
+      data-nova-window=""
       className="fixed right-3 top-20 z-[640] flex max-h-[70vh] w-[min(420px,calc(100vw-24px))] flex-col rounded-2xl border border-white/10 bg-[#121418]/95 shadow-2xl backdrop-blur"
     >
       <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">

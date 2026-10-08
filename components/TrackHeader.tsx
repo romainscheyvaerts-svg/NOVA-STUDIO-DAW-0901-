@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useContext } from 'react';
 import { openSessionPanel } from '../utils/r21Bus';
 import TrackMeter from './meters/TrackMeter';
 import { AutotuneBadge } from './AutotuneVstPanel';
@@ -41,11 +41,11 @@ import InputSelect from './InputSelect';
 import { noteArmClick } from '../utils/multiRecord';
 import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
-import { TrackStructureBadge, TrackStructureInline } from './TrackStructure';
+import { TrackStructureBadge, TrackStructureInline, StructureTracksContext } from './TrackStructure';
 import AutomationModeSelector from './AutomationModeSelector';
 import { automationRecorder } from '../services/AutomationManager';
 import { useLiveParam } from '../utils/automationLiveStore';
-import { SEND_LABELS } from '../utils/sendLabels';
+import { STANDARD_SENDS, sendLabel, sendColor } from '../utils/sendLabels';
 
 interface TrackHeaderProps {
   track: Track;
@@ -184,10 +184,20 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     }
   };
 
+  // Un envoi qui n'existe pas encore sur la piste est créé au premier geste (avant : la piste
+  // sans envoi ignorait le fader, on ne pouvait pas envoyer la voix vers la reverb ici).
   const handleSendChange = (sendId: string, level: number) => {
-    const newSends = track.sends.map(s => s.id === sendId ? { ...s, level } : s);
+    const has = track.sends.some(s => s.id === sendId);
+    const newSends = has ? track.sends.map(s => s.id === sendId ? { ...s, level } : s) : [...track.sends, { id: sendId, level, isEnabled: true }];
     onUpdate({ ...track, sends: newSends });
   };
+  // Retours de la session (pistes d'envoi), pas seulement les 3 retours livrés par NOVA : un projet
+  // importé ou une reverb ajoutée par l'ingé (« Reverb », « Écho »…) apparaît ici.
+  const sessionTracks = useContext(StructureTracksContext);
+  const sendIds: string[] = (() => {
+    const own = (sessionTracks || []).filter(t => t.type === TrackType.SEND && t.id !== track.id).map(t => t.id);
+    return own.length ? own : [...STANDARD_SENDS];
+  })();
 
   const handleFXClick = (e: React.MouseEvent | React.TouchEvent, p: PluginInstance) => {
     e.stopPropagation();
@@ -764,9 +774,13 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
         <div data-testid={`sends-panel-${track.id}`}
           className="relative mt-1 p-1 bg-[#08090b] rounded-lg border border-cyan-500/30 space-y-0.5 animate-in fade-in duration-150 z-10"
         >
-            <HorizontalSendFader trackId={track.id} label={SEND_LABELS['send-delay'].label} color={SEND_LABELS['send-delay'].color} send={track.sends.find(s => s.id === 'send-delay') || { id: 'send-delay', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-delay', lvl)} />
-            <HorizontalSendFader trackId={track.id} label={SEND_LABELS['send-verb-short'].label} color={SEND_LABELS['send-verb-short'].color} send={track.sends.find(s => s.id === 'send-verb-short') || { id: 'send-verb-short', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-short', lvl)} />
-            <HorizontalSendFader trackId={track.id} label={SEND_LABELS['send-verb-long'].label} color={SEND_LABELS['send-verb-long'].color} send={track.sends.find(s => s.id === 'send-verb-long') || { id: 'send-verb-long', level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange('send-verb-long', lvl)} />
+            {sendIds.map(id => {
+              const t = sessionTracks?.find(x => x.id === id);
+              return (
+                <HorizontalSendFader key={id} trackId={track.id} label={sendLabel(id, sessionTracks)} color={t && !STANDARD_SENDS.includes(id as any) ? t.color : sendColor(id)}
+                  send={track.sends.find(s => s.id === id) || { id, level: 0, isEnabled: true }} onChange={(lvl) => handleSendChange(id, lvl)} />
+              );
+            })}
         </div>
       )}
       

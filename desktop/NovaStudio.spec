@@ -32,12 +32,24 @@ if os.environ.get('NOVA_EXCLUDE_ARA') != '1' and os.path.isfile(_ara):
     datas += [('../nova-ara-host/LICENCES.md', 'ara-host')]
     datas += [(f, 'ara-host/licences') for f in glob.glob('../nova-ara-host/licences/*.txt')]
 
+# Hôte VST3 natif (moteur VST par défaut du pont, SDK VST3 sous MIT, sans JUCE, voir
+# native-host/LICENCES.md) : NovaVSTHost.exe à côté du pont, avec ses licences. Inclus par défaut ;
+# NOVA_EXCLUDE_NATIVE_VST=1 pour l'exclure (le pont n'a alors plus de moteur VST).
+hiddenimports += ['vst_native', 'nova_vst3host', 'vst_automation', 'vst_sidechain']
+_vsthost = '../native-host/build/NovaVSTHost_artefacts/Release/NovaVSTHost.exe'
+if os.environ.get('NOVA_EXCLUDE_NATIVE_VST') != '1' and os.path.isfile(_vsthost):
+    binaries += [(_vsthost, '.')]
+    datas += [('../native-host/LICENCES.md', 'vst-host')]
+    datas += [(f, 'vst-host/licences') for f in glob.glob('../native-host/licences/*.txt')]
+
 # pont ASIO : PortAudio compilé avec ASIO (_sounddevice_data)
 datas += collect_data_files('_sounddevice_data')
-for pkg in ('sounddevice', 'pedalboard'):
+for pkg in ('sounddevice',):
     d, b, h = collect_all(pkg)
     datas += d; binaries += b; hiddenimports += h
-hiddenimports += ['pedalboard_native']
+# pedalboard (GPLv3, embarque JUCE) n'est plus livré : jamais embarqué, même s'il traîne dans la
+# venv de construction (le pont ne l'importe que sur demande, voir vst_native.load_pedalboard).
+PEDALBOARD_EXCLUDES = ['pedalboard', 'pedalboard_native', 'vst_shell']
 
 a = Analysis(
     ['nova_desktop.py'],
@@ -48,7 +60,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib', 'PIL', 'pytest', 'IPython', 'pyaudio', 'pydoc', 'unittest'],
+    excludes=PEDALBOARD_EXCLUDES + ['tkinter', 'matplotlib', 'PIL', 'pytest', 'IPython', 'pyaudio', 'pydoc', 'unittest'],
     noarchive=False,
     optimize=0,
 )

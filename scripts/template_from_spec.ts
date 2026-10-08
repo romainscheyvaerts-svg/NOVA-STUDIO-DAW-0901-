@@ -51,6 +51,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(opt('--port') || process.env.NOVA_BRIDGE_PORT || 8765);
 const SKIP = (opt('--skip') || '').split(',').map(x => compact(x)).filter(Boolean);
 const LOAD_TIMEOUT = Number(opt('--timeout') || 180) * 1000;
+// Machine très chargée : délais de connexion / réponse multipliés (NOVA_BRIDGE_TIMEOUT_FACTOR, défaut 1).
+const SLOW = Math.max(1, Number(process.env.NOVA_BRIDGE_TIMEOUT_FACTOR) || 1);
 
 // ─── Petit client du pont (WebSocket JSON, réponses par req_id) ────────────────
 
@@ -60,7 +62,7 @@ class Bridge {
   get open() { return !!this.ws && this.ws.readyState === 1; }
   private next = 1;
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-  async connect(url: string, timeoutMs = 5000) {
+  async connect(url: string, timeoutMs = 5000 * SLOW) {
     this.url = url;
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(url);
@@ -89,6 +91,7 @@ class Bridge {
     });
   }
   request(msg: Record<string, any>, timeoutMs = 30000): Promise<any> {
+    timeoutMs *= SLOW;
     const req_id = this.next++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(req_id); reject(new Error(`Le pont ne répond pas (${msg.action})`)); }, timeoutMs);
@@ -101,7 +104,7 @@ class Bridge {
   async reconnect(maxMs = 180000): Promise<boolean> {
     const t0 = Date.now();
     while (Date.now() - t0 < maxMs) {
-      try { await this.connect(this.url, 4000); await this.request({ action: 'HELLO' }, 5000); return true; } catch { await new Promise(r => setTimeout(r, 3000)); }
+      try { await this.connect(this.url, 4000 * SLOW); await this.request({ action: 'HELLO' }, 5000); return true; } catch { await new Promise(r => setTimeout(r, 3000)); }
     }
     return false;
   }

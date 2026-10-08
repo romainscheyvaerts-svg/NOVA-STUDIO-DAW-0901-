@@ -122,3 +122,38 @@ describe('Mastering Transient : limiteur', () => {
     expect(s).toEqual({ emphasis: 100, bt3: 200, bg2: -6, limiterOn: 1, ceiling: 0 });
   });
 });
+
+describe('Mastering Transient : tour 3 (mesures de l’original)', () => {
+  /** Gain RMS (dB) d'un sinus tenu, mesuré sur la dernière 1/4 s. */
+  function toneGain(params: Record<string, number>, dbfs: number, f = 1000) {
+    const n = Math.round(0.8 * SR), x = new Float32Array(n), a = Math.pow(10, dbfs / 20);
+    for (let i = 0; i < n; i++) x[i] = a * Math.sin(2 * Math.PI * f * i / SR);
+    const y = run(make(params), x, x).L;
+    let ex = 0, ey = 0;
+    for (let i = n - SR / 4; i < n; i++) { ex += x[i] * x[i]; ey += y[i] * y[i]; }
+    return 10 * Math.log10(ey / ex);
+  }
+  const LIM8 = { ...NEUTRAL, limitGain: 8, speed: 1, adaptiveGain: 0, adaptiveSpeed: 0, ceiling: -0.1, truePeak: 1, limiterOn: 1 };
+
+  it('coude du limiteur (+8 dB, sinus 1 kHz tenu) : gain de l’original à ±0,15 dB, y compris vers −9 dBFS', () => {
+    // original : −20 dBFS → +7,79 ; −10 → +6,69 ; −8 → +6,01 ; −6 → +5,00 ; −2 → +1,75 dB
+    for (const [lv, g] of [[-20, 7.79], [-10, 6.69], [-8, 6.01], [-6, 5.0], [-2, 1.75]]) {
+      expect(Math.abs(toneGain(LIM8, lv) - g), `${lv} dBFS`).toBeLessThan(0.15);
+    }
+  });
+
+  it('égaliseur aux formes mesurées : bande 2 à +6 dB → ≈ +5,9 dB à 100 Hz (triangles : +5,0)', () => {
+    const g = toneGain({ ...NEUTRAL, bg2: 6 }, -30, 100);
+    expect(g).toBeGreaterThan(5.3);
+    expect(g).toBeLessThan(6.2);
+    expect(Math.abs(toneGain({ ...NEUTRAL, bg2: 6 }, -30, 3000))).toBeLessThan(0.05);
+  });
+
+  it('clipper mesuré (poussée 6 dB, forme 0) : saturation douce dès −24 dBFS, plafonnée', () => {
+    const p = { ...NEUTRAL, limiterOn: 1, limitGain: 0, ceiling: -0.1, truePeak: 1, clipperOn: 1, clipDrive: 6, clipShape: 0 };
+    // original : −24 dBFS → +5,88 ; −8 → +5,02 ; 0 → +1,04 dB
+    expect(Math.abs(toneGain(p, -24) - 5.88)).toBeLessThan(0.2);
+    expect(Math.abs(toneGain(p, -8) - 5.02)).toBeLessThan(0.3);
+    expect(Math.abs(toneGain(p, 0) - 1.04)).toBeLessThan(0.4);
+  });
+});

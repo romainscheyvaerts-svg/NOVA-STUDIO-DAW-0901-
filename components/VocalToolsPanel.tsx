@@ -20,6 +20,8 @@ interface VocalToolsPanelProps {
   breathMixOption?: React.ReactNode;
   /** « Fredonne → 808 / piano » (V20, components/AudioToMidiDialog). */
   humTools?: React.ReactNode;
+  /** R23 : « Changer de beat » (garder sa voix) et « Refaire un passage » (components/RepunchUI). */
+  r23Tools?: React.ReactNode;
   countIn: boolean;
   onCountInChange: (on: boolean) => void;
   /** Longueur réglée du décompte (« 1 mesure », « 2 temps »…), R2. */
@@ -115,6 +117,8 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
         </div>
 
         <div className="overflow-y-auto px-5 py-4 space-y-5">
+          {/* R23 : changer de beat, refaire un passage raté (les deux gestes du studio) */}
+          {p.r23Tools}
           {/* Mes prises : en haut (B3 de l'audit), avant tout le reste */}
           {p.takeGroups.some(g => g.lanes.length > 1) && (
             <div data-mes-prises className="rounded-2xl border border-cyan-400/25 bg-cyan-500/[0.04] p-3">

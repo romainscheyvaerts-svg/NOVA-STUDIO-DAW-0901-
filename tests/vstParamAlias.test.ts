@@ -33,6 +33,13 @@ describe('noms des réglages Pro Tools → VST3', () => {
     expect(nameTokens('Rel. Time')).toEqual(['release', 'time']);
   });
 
+  it('RUBY2 (hôte natif) : « High Cut Gain » = Flat → high_cut_gain à 0', () => {
+    const RUBY2 = [{ name: 'high_cut_gain', display_name: 'High Cut Gain', text: '0', range: [0, 0, null] }];
+    const m = matchParam('High Cut Gain', RUBY2, 'RUBY2')!;
+    expect(m).toMatchObject({ key: 'high_cut_gain', how: 'alias' });
+    expect(settingFor(RUBY2[0], m.key, 'Flat', m.convert)).toEqual({ name: 'high_cut_gain', real: 0 });
+  });
+
   it('correspondance approchée : Crossover Low = low_crossover, Threshold 2 = band_2_threshold', () => {
     expect(matchParam('Crossover Low', C6, 'Some EQ')).toMatchObject({ key: 'low_crossover', how: 'approx' });
     expect(matchParam('Band 2 Thresh', C6, 'Some EQ')).toMatchObject({ key: 'band_2_threshold', how: 'approx' });

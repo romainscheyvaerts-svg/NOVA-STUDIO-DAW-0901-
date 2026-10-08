@@ -214,3 +214,26 @@ export function rollLabel(bars: number, on: boolean): string {
   if (bars === 0.5) return '½';
   return String(bars);
 }
+
+// ------------------------------------------------------------- R23 · Refaire ce passage
+
+/**
+ * Zone de punch pour refaire un passage (R23, « Refaire ce passage ») : les
+ * bords sont posés sur les temps qui encadrent le passage (avec 40 ms de marge
+ * pour ne pas couper une attaque ni une fin de mot), le pré-roll est activé
+ * (au moins une mesure, pour que l'artiste reprenne le flow). `gridOrigin` :
+ * premier temps du beat (s).
+ */
+export function redoPunchZone(p: PunchSettings, spot: { start: number; end: number }, bpm: number, ts?: TimeSignature, gridOrigin = 0): PunchSettings {
+  const beat = (60 / (bpm > 0 ? bpm : 120)) * (4 / (ts?.denominator || 4));
+  const margin = 0.04;
+  const snapDown = (t: number) => gridOrigin + Math.floor((t - gridOrigin) / beat + 1e-6) * beat;
+  const snapUp = (t: number) => gridOrigin + Math.ceil((t - gridOrigin) / beat - 1e-6) * beat;
+  let a = snapDown(spot.start - margin);
+  let b = snapUp(spot.end + margin);
+  if (a < 0) a = Math.max(0, spot.start - margin);
+  if (b - a < MIN_PUNCH_SEC) b = a + beat;
+  const out: PunchSettings = { ...p, enabled: true, punchIn: Math.round(a * 1e6) / 1e6, punchOut: Math.round(b * 1e6) / 1e6, preRollOn: true };
+  if (rollSeconds(p, 'pre', bpm, ts) < Math.min(barSeconds(bpm, ts), 2) - 1e-6) { out.preRollBars = 1; delete out.preRollSec; }
+  return out;
+}

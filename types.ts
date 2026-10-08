@@ -456,6 +456,8 @@ export interface ElasticInfo {
   markers?: ElasticMarker[];
   /** Calage au tempo (warp automatique, Ableton) : tempo d'origine du son et tempo visé. */
   tempo?: { sourceBpm: number; bpm: number };
+  /** R23 : attaques ancrées (chaque attaque tombe à l'échantillon près à sa nouvelle place). */
+  attacks?: boolean;
   /** Nom et calage du clip d'origine. */
   sourceName?: string;
   sourceWarp?: WarpSettings;

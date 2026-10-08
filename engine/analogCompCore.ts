@@ -39,7 +39,14 @@ export const AC = {
   /** Latence DÉCLARÉE au PDC (échantillons) : avec le passe-tout fractionnaire, reproduit l'avance de phase mesurée. */
   LAT: 128,
   /** Étage de sortie TABULÉ (caractéristique de transfert mesurée) : v = asinh(u) dans [-WS_MAX, +WS_MAX], N_WS points dès WS. */
-  WS_MAX: 129, WS: 130, N_WS: 257, NP: 387,
+  WS_MAX: 129, WS: 130, N_WS: 257,
+  /**
+   * Tour 3 : DÉTECTEUR À DEUX VOIES avant la loi statique (charge / décharge d'un condensateur).
+   * u = (|s| / seuil)^p ; voie d : montée e += (u - e)·a, descente e -= (e - u)·r + l (bornée à u) ;
+   * niveau L = (20/p)·log10(e) + décalage. Chaque composante prend sa cible dans sa voie (D3_SEL).
+   * D3_DET : 2 x (a, r, l, décalage dB) ; D3_CAP : plafond de la charge (la cellule sature, le condensateur aussi).
+   */
+  D3: 387, D3_POW: 388, D3_DET: 389, D3_SEL: 397, /** plafond de charge de chaque voie (u ; 0 = aucun) */ D3_CAP: 400, NP: 410,
 } as const;
 
 export interface AnalogCompInternal {
@@ -69,7 +76,7 @@ export interface AnalogCompCore {
 export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   var SR = sampleRate > 0 ? sampleRate : 48000;
   void SR;
-  var NP = 387, NEQ = 8, PEQ = 32, PEQ2 = 80, NWS = 257;
+  var NP = 410, NEQ = 8, PEQ = 32, PEQ2 = 80, NWS = 257;
   var P = new Float64Array(NP);
   var tab = new Float64Array([0, 0]);
   var l0 = -12, dl = 1;
@@ -86,6 +93,8 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   var lv = new Float64Array(2), xin = new Float64Array(2);
   var envf = new Float64Array(2), Af = new Float64Array(2), lvf = new Float64Array(2), As = new Float64Array(2);
   var gk = new Float64Array(6), hm = new Float64Array([1, 1]);
+  /** Tour 3 : états des deux voies du détecteur (canal x voie) et réduction cible par voie. */
+  var ed = new Float64Array(4), gd = new Float64Array(2);
   var eqAct = new Int32Array(8);
   var mGrA = 1, mIn = 0, mOut = 0, curAe = 1;
   /** Les états des deux canaux sont identiques (après remise à zéro, tant que l'entrée reste mono). */
@@ -95,7 +104,7 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   function copyState01() {
     A[1] = A[0]; A2[1] = A2[0]; env[1] = env[0]; mem[1] = mem[0]; yprev[1] = yprev[0]; above[1] = above[0];
     slowOk[1] = slowOk[0]; flux[1] = flux[0]; fluxi[1] = fluxi[0]; envf[1] = envf[0]; Af[1] = Af[0]; lvf[1] = lvf[0];
-    As[1] = As[0]; hm[1] = hm[0]; gk[3] = gk[0]; gk[4] = gk[1]; gk[5] = gk[2];
+    As[1] = As[0]; hm[1] = hm[0]; gk[3] = gk[0]; gk[4] = gk[1]; gk[5] = gk[2]; ed[2] = ed[0]; ed[3] = ed[1];
     for (var k = 0; k < 4; k++) { hp[4 + k] = hp[k]; hp2[4 + k] = hp2[k]; }
     for (var k2 = 0; k2 < NEQ * 4; k2++) eqs[NEQ * 4 + k2] = eqs[k2];
   }
@@ -104,7 +113,7 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
     A[0] = A[1] = 1; A2[0] = A2[1] = 1; env[0] = env[1] = 0; mem[0] = mem[1] = 0;
     yprev[0] = yprev[1] = 0; above[0] = above[1] = 0; slowOk[0] = slowOk[1] = 0;
     envf[0] = envf[1] = 0; Af[0] = Af[1] = 1; lvf[0] = lvf[1] = 0; As[0] = As[1] = 1;
-    hp.fill(0); hp2.fill(0); eqs.fill(0); gk.fill(0); hm[0] = hm[1] = 1; flux[0] = flux[1] = 0; fluxi[0] = fluxi[1] = 0;
+    hp.fill(0); hp2.fill(0); eqs.fill(0); gk.fill(0); ed.fill(0); hm[0] = hm[1] = 1; flux[0] = flux[1] = 0; fluxi[0] = fluxi[1] = 0;
     mGrA = 1; mIn = 0; mOut = 0; curAe = 1; statesEq = true;
   }
   reset();
@@ -168,6 +177,7 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
     var nch = mono ? 1 : 2;
     var drv = P[52] !== 0 ? P[52] : 1;
     var c3 = P[100] > 0.5, sq = P[125] > 0.5, thr2 = P[1] * P[1];
+    var d3 = P[387] > 0.5, pw = P[388] > 0 ? P[388] : 1, lk = 8.685889638065035 / pw;
     var xfIn = P[72] !== 0 && P[74] > 1.5;
     // invariants du bloc (performance : < 1 % d'un cœur par instance)
     var pre = P[0], inLin = P[14] === 0 && P[15] === 0 && P[27] === 0 && P[65] === 0;
@@ -202,6 +212,21 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
           s = o2;
         }
         var r: number;
+        if (d3) {
+          // détecteur à deux voies (domaine u = r^p)
+          r = half ? (s > 0 ? s : 0) : (s > 0 ? s : -s);
+          r = r / thr;
+          var u = pw === 1 ? r : pw === 2 ? r * r : (r > 0 ? Math.pow(r, pw) : 0);
+          for (var dv = 0; dv < 2; dv++) {
+            var od = 389 + 4 * dv, ie = c * 2 + dv, ev = ed[ie];
+            if (u > ev) ev += (u - ev) * P[od];
+            else { ev -= (ev - u) * P[od + 1] + P[od + 2]; if (ev < u) ev = u; }
+            if (P[400 + dv] > 0 && ev > P[400 + dv]) ev = P[400 + dv];
+            ed[ie] = ev;
+          }
+          lv[c] = ed[c * 2];
+          continue;
+        }
         if (sq) r = s * s / thr2;
         else { r = half ? (s > 0 ? s : 0) : (s > 0 ? s : -s); r = r / thr; }
         var e = env[c];
@@ -216,14 +241,25 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
         }
         lv[c] = e;
       }
+      if (d3 && P[25] > 0.5 && !mono) {
+        for (var dl2 = 0; dl2 < 2; dl2++) { var md = ed[dl2] > ed[2 + dl2] ? ed[dl2] : ed[2 + dl2]; ed[dl2] = md; ed[2 + dl2] = md; }
+      }
       if (P[25] > 0.5 && !mono) {
         var m = lv[0] > lv[1] ? lv[0] : lv[1]; lv[0] = m; lv[1] = m;
         var mf = lvf[0] > lvf[1] ? lvf[0] : lvf[1]; lvf[0] = mf; lvf[1] = mf;
       }
       for (var c2 = 0; c2 < nch; c2++) {
         var rr = lv[c2];
-        var L = sq ? 4.342944819032518 * Math.log(rr > 1e-18 ? rr : 1e-18) : 8.685889638065035 * Math.log(rr > 1e-9 ? rr : 1e-9);
-        var Gt = table(L);
+        var Gt: number;
+        if (d3) {
+          var e0d = ed[c2 * 2], e1d = ed[c2 * 2 + 1];
+          gd[0] = table(lk * Math.log(e0d > 1e-30 ? e0d : 1e-30) + P[392]);
+          gd[1] = table(lk * Math.log(e1d > 1e-30 ? e1d : 1e-30) + P[396]);
+          Gt = gd[0] > gd[1] ? gd[0] : gd[1];
+        } else {
+          var L = sq ? 4.342944819032518 * Math.log(rr > 1e-18 ? rr : 1e-18) : 8.685889638065035 * Math.log(rr > 1e-9 ? rr : 1e-9);
+          Gt = table(L);
+        }
         var ae: number;
         if (c3) {
           // cellule multi-composantes (dB) : 3 parts de la cible, montée / descente propres
@@ -233,10 +269,15 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
           var gtot = cmax ? Math.max(gk[o3], gk[o3 + 1], gk[o3 + 2]) : gk[o3] + gk[o3 + 1] + gk[o3 + 2];
           var T = Gt;
           if (P[127] > 0) { if (T > gtot) hm[c2] = 0; else hm[c2] += (1 - hm[c2]) * P[127]; }
-          if (P[126] !== 0 && T > gtot) T = T + P[126] * (T - gtot);
+          if (P[126] !== 0 && T > gtot && !d3) T = T + P[126] * (T - gtot);
           for (var kk = 0; kk < 3; kk++) {
             var ob = 101 + 8 * kk, fk = P[ob];
             if (fk <= 0) continue;
+            if (d3) {
+              // tour 3 : cible de la composante = voie choisie du détecteur
+              T = P[397 + kk] > 0.5 ? gd[1] : gd[0];
+              if (P[126] !== 0 && T > gtot) T = T + P[126] * (T - gtot);
+            }
             var tk = fk * T, gg3 = gk[o3 + kk];
             if (tk > gg3) {
               var ca3 = P[ob + 2] !== 0 ? P[ob + 1] * Math.exp(P[ob + 2] * T) : P[ob + 1];

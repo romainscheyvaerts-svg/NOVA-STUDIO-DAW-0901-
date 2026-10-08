@@ -136,7 +136,7 @@ export const FloatingMenu: React.FC<{ x: number; y: number; items: (ContextMenuI
   }, [onClose]);
   return (
     <div ref={ref} role="menu" data-testid="structure-menu" onClick={e => e.stopPropagation()}
-      className="fixed z-[900] min-w-[200px] max-w-[300px] max-h-[calc(100vh-16px)] overflow-y-auto rounded-xl border border-nv-line bg-nv-raised p-1 shadow-2xl"
+      className="fixed z-[900] min-w-[200px] max-w-[300px] max-h-[calc(100vh-16px)] overflow-y-auto rounded-xl border border-nv-line/15 bg-nv-raised p-1 shadow-2xl"
       style={{ left: pos.x, top: pos.y }}>
       {title && <p className="px-2 pt-1 pb-1 text-[10px] font-bold uppercase tracking-wide text-nv-muted truncate">{title}</p>}
       {items.map((it, i) => it === 'separator'

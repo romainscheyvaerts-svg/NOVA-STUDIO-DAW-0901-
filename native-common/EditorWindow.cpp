@@ -1,5 +1,5 @@
 ﻿/*
-    NovaARAHost — fenêtre Win32 de la vue du plugin (sans JUCE).
+    Hôtes natifs de Nova Studio (NovaARAHost, NovaVSTHost) — fenêtre Win32 de la vue du plugin (sans JUCE).
     (c) Make Music.
 */
 #include "EditorWindow.h"
@@ -14,8 +14,8 @@ using namespace Steinberg;
 
 namespace nova
 {
-    static const wchar_t* kTopClass = L"NovaARAHostEditor";
-    static const wchar_t* kContainerClass = L"NovaARAHostView";
+    static const wchar_t* kTopClass = L"NovaPluginEditor";
+    static const wchar_t* kContainerClass = L"NovaPluginView";
 
     class EditorWindow::Frame final : public U::Implements<U::Directly<IPlugFrame>>
     {

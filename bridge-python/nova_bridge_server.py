@@ -305,7 +305,7 @@ class NovaBridgeServer:
         async with serve(self._handle, HOST, PORT, process_request=self._check_origin,
                          max_size=1024 * 1024 * 1024, compression=None,
                          ping_interval=20, ping_timeout=20):
-            logger.info(f"✅ Pont VST prêt sur ws://{HOST}:{PORT}  (pedalboard : {vst_host.HAS_PEDALBOARD})")
+            logger.info(f"✅ Pont VST prêt sur ws://{HOST}:{PORT}  (moteur VST : {vst_host.ENGINE})")
             logger.info("   Laisse cette fenêtre ouverte pendant ta session.")
             await asyncio.Future()
 
@@ -527,17 +527,17 @@ class NovaBridgeServer:
 
     async def _a_hello(self, ws, req):
         self._reply(ws, req, {"success": True, "version": VERSION, "binary_audio": True,
-                              "render": True, "editor": vst_host.HAS_PEDALBOARD,
-                              "pedalboard": vst_host.HAS_PEDALBOARD,
-                              "instruments": vst_host.HAS_PEDALBOARD,
+                              "render": True, "editor": vst_host.HAS_VST,
+                              "pedalboard": vst_host.ENGINE == "pedalboard", "engine": vst_host.ENGINE,
+                              "instruments": vst_host.HAS_VST,
                               "license_events": license_watch.IS_WINDOWS,
-                              "params_text": True, "stems": True, "calibrate_gr": vst_host.HAS_PEDALBOARD,
+                              "params_text": True, "stems": True, "calibrate_gr": vst_host.HAS_VST,
                               # Plugins d'un shell (Waves) chargés par leur nom ; plugins qui
                               # plantent isolés (« unstable » dans la liste et au chargement).
                               "shells": True, "plugin_guard": True,
                               "crash_events": True, "quarantine": True,
                               # (v11) automation des réglages à l'échantillon près, écriture depuis la fenêtre
-                              "automation": vst_host.HAS_PEDALBOARD, "param_watch": vst_host.HAS_PEDALBOARD,
+                              "automation": vst_host.HAS_VST, "param_watch": vst_host.HAS_VST,
                               # (v11, R10) clé de side-chain des VST3 : seulement avec l'hôte natif
                               # (pedalboard désactive les bus d'entrée auxiliaires, voir vst_sidechain)
                               "sidechain": vst_sidechain.host_feeds_sidechain(), "sidechain_protocol": True,
@@ -551,21 +551,17 @@ class NovaBridgeServer:
             self._probed.clear()
             # Choix explicite : les plugins en attente d'activation sont relus.
             await self.loop.run_in_executor(self.misc_pool, vst_probe.forget_unsettled)
-            await self.loop.run_in_executor(self.misc_pool, plugin_guard.retry_unstable)
             if vst_host.CRASH_GUARD is not None:
                 vst_host.CRASH_GUARD.clear()  # on réessaie les plugins qui avaient planté
             await self._scan()
         await self.scan_done.wait()
         effects_only = bool(req.get("effects_only"))
         plugins = []
-        unstable = plugin_guard.unstable_keys()
         for p in self.plugins:
             if effects_only and p["category"] != "Effect":
                 continue
             lic = p.get("license") or self.licenses.status(p["path"], p.get("plugin_name"))
             item = {**p, "license": lic} if lic else p
-            if unstable and plugin_guard.key_of(p["path"], p.get("plugin_name")) in unstable:
-                item = {**item, "unstable": True}
             if vst_host.CRASH_GUARD is not None and vst_host.CRASH_GUARD.is_quarantined(p["path"]):
                 item = {**item, "quarantined": True}
             plugins.append(item)
@@ -658,7 +654,7 @@ class NovaBridgeServer:
     def _load_payload(self, slot: Slot, state, reused=False):
         return {"success": True, "slot_id": slot.slot_id, "name": slot.name, "vendor": slot.vendor,
                 "latency_samples": slot.latency_samples, "buffer_latency_samples": 0,
-                "sample_rate": slot.sample_rate, "state": state, "has_editor": vst_host.HAS_PEDALBOARD,
+                "sample_rate": slot.sample_rate, "state": state, "has_editor": vst_host.HAS_VST,
                 "is_instrument": slot.is_instrument, "reused": reused,
                 # (R10) None : l'hôte ne sait pas alimenter l'entrée clé ; 0 : pas d'entrée clé ; 2 : clé stéréo
                 "sidechain_inputs": slot.sidechain_inputs}
@@ -820,7 +816,7 @@ class NovaBridgeServer:
 
     async def _a_show_editor(self, ws, req):
         slot = self._slot(req)
-        if not vst_host.HAS_PEDALBOARD:
+        if not vst_host.HAS_VST:
             raise RuntimeError("Fenêtres de plugins indisponibles")
         loop = self.loop
 
@@ -1163,11 +1159,6 @@ def main():
     if "--probe-vst3" in sys.argv:
         vst_probe.child_main()  # processus enfant : lecture des plugins (voir vst_probe)
         return
-    if "--trial-load" in sys.argv:
-        plugin_guard.trial_child_main()  # processus jetable : essai d'un plugin à risque (voir plugin_guard)
-        return
-    plugin_guard.MAIN_SCRIPT = MAIN_SCRIPT
-    plugin_guard.startup()  # témoin resté = le pont est mort pendant un chargement
     # Console Windows redirigée (fichier, pipe) : cp1252 refusait les accents/emojis.
     for stream in (sys.stdout, sys.stderr):
         try:

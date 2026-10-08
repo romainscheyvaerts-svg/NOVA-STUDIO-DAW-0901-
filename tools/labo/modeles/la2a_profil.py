@@ -103,6 +103,8 @@ def nova_to_internal(p, fit):
     d2 = fit.get("dyn2_lim") if (int(p.get("limit", 0)) and fit.get("dyn2_lim")) else fit.get("dyn2")
     if d2:
         ac.apply_dyn2(P, d2, 1.0, 1.0, SR)
+        if d2.get("lwarp"):
+            tab = ac.warp_table(tab, L0, DL, d2["lwarp"])
         if d2.get("fb"):
             P[ac.P_FB] = 1.0
             tab = ac.ff_to_fb(tab, L0, DL)

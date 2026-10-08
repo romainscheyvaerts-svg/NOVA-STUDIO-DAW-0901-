@@ -97,7 +97,18 @@ P_WS_MAX = 129     # étage de sortie TABULÉ (mesuré) : v = asinh(u) dans [-ma
 P_WS = 130         # table du GAIN de l'étage y = u * h(v), N_WS points régulièrement espacés en v = asinh(u)
                    # (fin près de zéro, large dans la saturation)
 N_WS = 257
-NP = P_WS + N_WS
+# ── Tour 3 : DÉTECTEUR À DEUX VOIES avant la loi statique (charge / décharge d'un condensateur) ──
+# u = (|s| / seuil)^p ; chaque voie d suit u : montée e += (u - e)·a_d, descente e -= (e - u)·r_d + l_d
+# (bornée à u) ; niveau L_d = (20/p)·log10(e_d) + décalage_d (dB). Chaque composante k de la cellule
+# prend sa cible dans la voie choisie (P_D3_SEL + k) : en F/M, voie rapide fixe + voie manuelle.
+# Une salve courte ne charge qu'à peine la voie lente -> relâchement court ; un son tenu la charge
+# -> relâchement long ; un train de salves l'accumule (comportement de programme mesuré).
+P_D3 = 387          # 1 = détecteur à deux voies actif (avec la cellule multi-composantes)
+P_D3_POW = 388      # exposant p du domaine du détecteur (1 = tension, 2 = puissance, petit = quasi log)
+P_D3_DET = 389      # 2 voies x 4 : coefficient de montée, coefficient de descente, pente de descente (u/éch.), décalage (dB)
+P_D3_SEL = 397      # voie (0 / 1) de chacune des 3 composantes
+P_D3_CAP = 400      # 2 voies : plafond de la charge (u ; 0 = aucun) — la cellule sature, le condensateur aussi
+NP = 410            # (400..409 réservés)
 
 
 @njit(cache=True)
@@ -189,6 +200,10 @@ def process(x, P, l0, dl, tab):
     fluxi = np.zeros(2)
     xf_in = P[P_XF_K] != 0.0 and P[P_XF_MODE] > 1.5
     c3 = P[P_C3] > 0.5
+    d3 = P[P_D3] > 0.5
+    pw = P[P_D3_POW] if P[P_D3_POW] > 0.0 else 1.0
+    ed = np.zeros((2, 2))
+    gd = np.zeros(2)
     sq = P[P_DET_SQ] > 0.5
     thr2 = P[P_THR] * P[P_THR]
     drv = P[P_DRIVE] if P[P_DRIVE] != 0.0 else 1.0
@@ -214,6 +229,32 @@ def process(x, P, l0, dl, tab):
                 hp2[c, 3] = hp2[c, 2]
                 hp2[c, 2] = o
                 s = o
+            if d3:
+                if P[P_RECT] > 0.5:
+                    r = s if s > 0.0 else 0.0
+                else:
+                    r = s if s > 0.0 else -s
+                r = r / P[P_THR]
+                if pw == 1.0:
+                    u = r
+                elif pw == 2.0:
+                    u = r * r
+                else:
+                    u = r ** pw if r > 0.0 else 0.0
+                for d in range(2):
+                    o = P_D3_DET + 4 * d
+                    e = ed[c, d]
+                    if u > e:
+                        e += (u - e) * P[o]
+                    else:
+                        e -= (e - u) * P[o + 1] + P[o + 2]
+                        if e < u:
+                            e = u
+                    if P[P_D3_CAP + d] > 0.0 and e > P[P_D3_CAP + d]:
+                        e = P[P_D3_CAP + d]
+                    ed[c, d] = e
+                lv[c] = ed[c, 0]
+                continue
             if sq:
                 r = s * s / thr2
             else:
@@ -238,6 +279,11 @@ def process(x, P, l0, dl, tab):
                 envf[c] = ef
                 lvf[c] = ef
             lv[c] = e
+        if d3 and P[P_LINK] > 0.5 and nch == 2:
+            for d in range(2):
+                m = ed[0, d] if ed[0, d] > ed[1, d] else ed[1, d]
+                ed[0, d] = m
+                ed[1, d] = m
         if P[P_LINK] > 0.5 and nch == 2:
             m = lv[0] if lv[0] > lv[1] else lv[1]
             lv[0] = m
@@ -247,11 +293,17 @@ def process(x, P, l0, dl, tab):
             lvf[1] = m
         for c in range(nch):
             r = lv[c]
-            if sq:
+            if d3:
+                for d in range(2):
+                    e = ed[c, d]
+                    gd[d] = _table(20.0 / pw * math.log10(e if e > 1e-30 else 1e-30) + P[P_D3_DET + 4 * d + 3], l0, dl, tab)
+                Gt = gd[0] if gd[0] > gd[1] else gd[1]
+            elif sq:
                 L = 10.0 * math.log10(r if r > 1e-18 else 1e-18)
+                Gt = _table(L, l0, dl, tab)
             else:
                 L = 20.0 * math.log10(r if r > 1e-9 else 1e-9)
-            Gt = _table(L, l0, dl, tab)
+                Gt = _table(L, l0, dl, tab)
             if c3:
                 # cellule multi-composantes (dB)
                 cmax = P[P_C3_MAX] > 0.5
@@ -265,13 +317,17 @@ def process(x, P, l0, dl, tab):
                         hm[c] = 0.0
                     else:
                         hm[c] += (1.0 - hm[c]) * P[P_C3_HOLD]
-                if P[P_C3_ATT_DB] != 0.0 and T > gtot:
+                if P[P_C3_ATT_DB] != 0.0 and T > gtot and not d3:
                     T = T + P[P_C3_ATT_DB] * (T - gtot)
                 for k in range(3):
                     o0 = P_C3_K + 8 * k
                     f = P[o0]
                     if f <= 0.0:
                         continue
+                    if d3:
+                        T = gd[1] if P[P_D3_SEL + k] > 0.5 else gd[0]
+                        if P[P_C3_ATT_DB] != 0.0 and T > gtot:
+                            T = T + P[P_C3_ATT_DB] * (T - gtot)
                     tk = f * T
                     g = gk[c, k]
                     if tk > g:
@@ -496,8 +552,30 @@ def apply_dyn2(P, d, sa=1.0, sr=1.0, SR=48000.0):
     P[P_C3_HOLD] = coef_from_ms(d["hold_ms"], SR) if d.get("hold_ms", 0.0) > 0 else 0.0
     if d.get("thr_db"):
         P[P_THR] *= 10 ** (d["thr_db"] / 20.0)
+    if d.get("trim_db"):
+        # tour 3 : petit écart de gain linéaire mesuré (sortie), calé avec la dynamique
+        P[P_MAKEUP] *= 10 ** (d["trim_db"] / 20.0)
+    dets = d.get("dets")
+    if dets:
+        # tour 3 : détecteur à deux voies [montée ms, descente ms, pente u/s, décalage dB, e_att, e_rel]
+        P[P_D3] = 1.0
+        P[P_D3_POW] = float(d.get("pow", 1.0))
+        for k, dv in enumerate(dets[:2]):
+            ka = sa ** (dv[4] if len(dv) > 4 else 0.0)
+            kr = sr ** (dv[5] if len(dv) > 5 else 0.0)
+            o = P_D3_DET + 4 * k
+            P[o] = coef_from_ms(dv[0] / ka, SR) if dv[0] > 0 else 1.0
+            P[o + 1] = coef_from_ms(dv[1] / kr, SR) if dv[1] > 0 else 0.0
+            P[o + 2] = dv[2] * kr / SR
+            P[o + 3] = dv[3]
+            P[P_D3_CAP + k] = 10 ** (dv[6] * P[P_D3_POW] / 20.0) if len(dv) > 6 and dv[6] > 0 else 0.0
+        sel = d.get("sel", [0, 1, 1])
+        for k in range(3):
+            P[P_D3_SEL + k] = float(sel[k]) if k < len(sel) else 0.0
+        if "rect" in d:
+            P[P_RECT] = float(d["rect"])
     det = d.get("det")
-    if det:
+    if det and not dets:
         P[P_DET_SQ] = float(det[0])
         P[P_DET_ATT] = coef_from_ms(det[1], SR) if det[1] > 0 else 0.0
         P[P_DET_REL] = coef_from_ms(det[2], SR) if det[2] > 0 else 0.0
@@ -507,6 +585,27 @@ def apply_dyn2(P, d, sa=1.0, sr=1.0, SR=48000.0):
     P[P_FAST_ATT] = 0.0
     P[P_MEM] = 0.0
     return P
+
+
+def warp_table(tab, l0, dl, w):
+    """Tour 3 : loi statique INTERNE = loi mesurée relue en L' = L + w0 + w1·L + w2·L²/100, réduction × (1 + w3).
+    (Le détecteur à deux voies lisse avant la loi : la loi mesurée, composite, est recalée par le calage.)"""
+    tab = np.asarray(tab, float)
+    n = len(tab)
+    w = list(w) + [0.0] * (4 - len(w))
+    out = np.empty(n)
+    for i in range(n):
+        L = l0 + dl * i
+        f = (L + w[0] + w[1] * L + w[2] * L * L / 100.0 - l0) / dl
+        if f <= 0.0:
+            v = tab[0]
+        elif f >= n - 1:
+            v = tab[n - 1]
+        else:
+            j = int(f)
+            v = tab[j] + (tab[j + 1] - tab[j]) * (f - j)
+        out[i] = v * (1.0 + w[3])
+    return out
 
 
 def apply_ws(P, ws):
