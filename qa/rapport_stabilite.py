@@ -68,7 +68,7 @@ def chart(title, unit, lines, w=560, h=230, marks=None, fname=None):
     parts.append(f'<text x="12" y="{(pad_t + h - pad_b) / 2}" transform="rotate(-90 12 {(pad_t + h - pad_b) / 2})" text-anchor="middle" fill="#555">{esc(unit)}</text>')
     for (mx, mlabel, mcolor) in (marks or []):
         parts.append(f'<line x1="{sx(mx):.1f}" x2="{sx(mx):.1f}" y1="{pad_t}" y2="{h - pad_b}" stroke="{mcolor}" stroke-dasharray="4 3"/>')
-        parts.append(f'<text x="{sx(mx) + 4:.1f}" y="{pad_t + 12}" fill="{mcolor}" font-weight="700">{esc(mlabel)}</text>')
+        parts.append(f'<text x="{sx(mx) + 4:.1f}" y="{h - pad_b - 6}" fill="{mcolor}" font-weight="700">{esc(mlabel)}</text>')
     lx = w - pad_r - 150
     for i, (label, color, pts) in enumerate(lines):
         if pts:
@@ -180,6 +180,7 @@ th{background:#f0f0f2}.grid{display:grid;grid-template-columns:repeat(auto-fit,m
             h.append(row(label, f"{sa.get('editions')} ({sa.get('editions_echouees')})", f"{sp.get('editions')} ({sp.get('editions_echouees')})"))
     h.append("</table>")
     h.append('<div class="grid">' + "".join(f"<div>{c}</div>" for c in charts) + "</div>")
+    h.append("<p class='note'>Lecture des décrochages : sur la session de 40 pistes, le rendu audio (un seul fil dans le navigateur) est saturé avant ET après ; le nombre d'événements de sous-régime monte « après » parce que le contexte rend 2,4 fois plus de son par seconde (horloge audio / temps réel). La mesure propre est la lecture seule (section 3) : à 16 pistes, 50 % du son en sous-régime avant, 1,2 % après. Worklets « après » 61 → 132 : le style de mix appliqué après une prise ajoute 3 effets à worklet sur les 24 pistes audio (état légitime) ; 120 changements d'effet ne laissent plus aucun worklet en trop (section 2).</p>")
     if av and av.get("errors"):
         h.append("<p class='note'>Erreurs « avant » (extrait) : " + esc(" | ".join(e.split("\n")[0][:140] for e in av["errors"][:4])) + "</p>")
 
@@ -201,6 +202,13 @@ th{background:#f0f0f2}.grid{display:grid;grid-template-columns:repeat(auto-fit,m
             for k, v in dsp["lecture"].items():
                 h.append(row(k, v.get("avant"), v.get("apres")))
             h.append("</table>")
+
+    sv = load("sauvegarde_auto.json")
+    if sv:
+        h.append("<h2>Sauvegarde automatique incrémentale (session de 40 pistes, pendant la lecture)</h2><table><tr><th>Version</th><th>Sons écrits</th><th>Durée totale (asynchrone)</th><th>Travail sur le fil de l'interface</th></tr>")
+        for v in sv.get("versions", []):
+            h.append(f"<tr><td>{'première' if v.get('premiere_version') else 'suivante'}</td><td>{v.get('sons_ecrits')}</td><td>{v.get('duree_totale_ms')} ms</td><td>{v.get('travail_synchrone_ms')} ms</td></tr>")
+        h.append(f"</table><p class='note'>{esc(sv.get('note'))}</p>")
 
     if rec:
         h.append("<h2>4. Récupération après plantage (navigateur réellement tué au milieu d'une prise)</h2><table><tr><th>Scénario</th><th>Capté jusqu'à la mise à mort</th><th>Prise récupérée</th><th>Perte</th><th>Projet revenu</th><th>Résultat</th></tr>")
