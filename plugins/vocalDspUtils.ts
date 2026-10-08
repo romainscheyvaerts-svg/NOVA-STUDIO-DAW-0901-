@@ -41,9 +41,13 @@ export class EnvelopeDucker {
   private shaper: WaveShaperNode;
   private depth: GainNode;
   private ctx: BaseAudioContext;
+  private source: AudioNode;
+  private listening = true;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: BaseAudioContext, source: AudioNode, target: AudioParam, sensitivity = 9, smoothingHz = 6) {
     this.ctx = ctx;
+    this.source = source;
     this.follower = createEnvelopeFollower(ctx, smoothingHz);
     this.shaper = ctx.createWaveShaper();
     this.shaper.curve = makeCurve(4097, x => (x <= 0 ? 0 : -(1 - Math.exp(-sensitivity * x))));
@@ -55,12 +59,30 @@ export class EnvelopeDucker {
     this.depth.connect(target);
   }
 
-  public setAmount(amount: number) {
+  /**
+   * @param immediate rien n'a encore sonné (création, avant un rendu hors ligne) :
+   * à 0, le suiveur d'enveloppe est débranché tout de suite (il ne calcule plus
+   * rien ; sa contribution, multipliée par 0, était exactement nulle). En
+   * direct, il l'est une fois le retour à 0 terminé.
+   */
+  public setAmount(amount: number, immediate = false) {
     const a = Number.isFinite(amount) ? Math.max(0, Math.min(1, amount)) : 0;
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+    if (a > 0 && !this.listening) { this.source.connect(this.follower.input); this.listening = true; }
     this.depth.gain.setTargetAtTime(a * 0.9, this.ctx.currentTime, 0.03);
+    if (a > 0 || !this.listening) return;
+    const offline = typeof OfflineAudioContext !== 'undefined' && this.ctx instanceof OfflineAudioContext;
+    if (immediate) this.stopListening();
+    else if (!offline) this.idleTimer = setTimeout(() => { this.idleTimer = null; this.stopListening(); }, 400);
+  }
+
+  private stopListening() {
+    try { this.source.disconnect(this.follower.input); } catch (e) { /* déjà débranché */ }
+    this.listening = false;
   }
 
   public disconnect() {
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     for (const n of [...this.follower.nodes, this.shaper, this.depth]) {
       try { n.disconnect(); } catch (e) {}
     }

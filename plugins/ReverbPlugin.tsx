@@ -62,6 +62,19 @@ function loadCapturedIr(ctx: BaseAudioContext, url: string): Promise<AudioBuffer
 }
 const loadedIrs = new Map<string, AudioBuffer>();
 
+/**
+ * Réponses calculées déjà prêtes (par fréquence et réglages exacts) : l'export,
+ * le gel et chaque nouvelle reverb réutilisent celle déjà entendue, au lieu de
+ * la recalculer (et d'en tirer une autre au hasard). Les 8 dernières suffisent.
+ */
+const builtIrs = new Map<string, AudioBuffer>();
+const BUILT_IR_MAX = 8;
+function rememberIr(key: string, ir: AudioBuffer) {
+  builtIrs.delete(key);
+  builtIrs.set(key, ir);
+  while (builtIrs.size > BUILT_IR_MAX) builtIrs.delete(builtIrs.keys().next().value as string);
+}
+
 export const REVERB_PRESETS: Array<Partial<ReverbParams> & { name: string }> = [
   { 
     name: "Vocal Plate", 
@@ -212,7 +225,17 @@ export class ReverbNode {
   private irKey = '';
   private lastIrTime = 0;
   private irTimer: ReturnType<typeof setTimeout> | null = null;
+  private releaseTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly isOffline: boolean;
+
+  /**
+   * Branches débranchées quand elles ne peuvent rien ajouter au son : la queue
+   * (reverb coupée ou mix à 0), les réflexions primaires (niveau 0) et la
+   * modulation (profondeur 0). Le navigateur ne les calcule alors plus. Une
+   * branche est rebranchée dès qu'elle sert ; débranchée tout de suite si rien
+   * n'a encore sonné (export, gel), sinon après la fin du fondu.
+   */
+  private links!: Record<'wet' | 'er' | 'mod', { on: boolean; timer: ReturnType<typeof setTimeout> | null; connect: () => void; disconnect: () => void }>;
 
   private params: ReverbParams = {
     decay: 2.5,
@@ -276,7 +299,6 @@ export class ReverbNode {
     this.modDepthGain = ctx.createGain();
     this.modDepthGain.gain.value = 0;
     this.modLFO.connect(this.modDepthGain);
-    this.modDepthGain.connect(this.modDelay.delayTime);
     this.modLFO.start();
 
     // EQ filters
@@ -334,6 +356,11 @@ export class ReverbNode {
     this.wetGain = ctx.createGain();
     this.dryGain = ctx.createGain();
 
+    this.links = {
+      wet: { on: false, timer: null, connect: () => this.input.connect(this.preDelayNode), disconnect: () => this.input.disconnect(this.preDelayNode) },
+      er: { on: false, timer: null, connect: () => this.erDelays.forEach(d => this.input.connect(d)), disconnect: () => this.erDelays.forEach(d => this.input.disconnect(d)) },
+      mod: { on: false, timer: null, connect: () => this.modDepthGain.connect(this.modDelay.delayTime), disconnect: () => this.modDepthGain.disconnect(this.modDelay.delayTime) },
+    };
     this.setupChain();
     this.ducker = new EnvelopeDucker(ctx, this.input, this.duckGain.gain);
     this.regenerateImpulse(true);
@@ -445,15 +472,22 @@ export class ReverbNode {
     }
     this.irKey = key;
     this.lastIrTime = now;
-    const ir = this.buildImpulse();
+    const ir = this.impulse();
     // Empreinte capturée : son niveau est calibré dans le fichier, le convolveur
     // ne doit pas le renormaliser (il le ramène sinon à un niveau arbitraire).
     const captured = !!this.params.irUrl && loadedIrs.get(`${this.ctx.sampleRate}|${this.params.irUrl}`) === ir;
     const t = this.ctx.currentTime;
-    const firstLoad = !this.convA.buffer && !this.convB.buffer;
-    if (firstLoad) {
-      this.convA.normalize = !captured;
-      this.convA.buffer = ir;
+    if (this.releaseTimer) { clearTimeout(this.releaseTimer); this.releaseTimer = null; }
+    if (this.silentSoFar || (!this.convA.buffer && !this.convB.buffer)) {
+      // Rien n'a encore sonné (création, début d'export ou de gel) : la réponse
+      // remplace celle du convolveur actif, l'autre est vidé. Avant, l'ancienne
+      // réponse restait chargée dans le convolveur muet, qui calculait quand
+      // même toute sa convolution : le rendu des reverbs coûtait le double.
+      const active = this.activeConv === 'A' ? this.convA : this.convB;
+      const idle = this.activeConv === 'A' ? this.convB : this.convA;
+      active.normalize = !captured;
+      active.buffer = ir;
+      if (idle.buffer) idle.buffer = null;
       return;
     }
     const nextIsA = this.activeConv === 'B';
@@ -473,6 +507,43 @@ export class ReverbNode {
       outgoingGain.gain.setTargetAtTime(0, t, 0.05);
     }
     this.activeConv = nextIsA ? 'A' : 'B';
+    // Fondu fini (0,6 s = 12 constantes de temps, -104 dB) : on vide le convolveur
+    // sortant, qui sinon convoluerait pour rien jusqu'au prochain réglage.
+    const outgoing = nextIsA ? this.convB : this.convA;
+    const until = t + 0.6;
+    outgoingGain.gain.setValueAtTime(0, until);
+    if (!this.isOffline) {
+      this.releaseTimer = setTimeout(() => {
+        this.releaseTimer = null;
+        if (this.ctx.currentTime >= until && (this.activeConv === 'A' ? this.convB : this.convA) === outgoing) outgoing.buffer = null;
+      }, 700);
+    }
+  }
+
+  /** Réponse à charger : empreinte capturée, ou réponse calculée (gardée en cache). */
+  private impulse(): AudioBuffer {
+    const p = this.params;
+    if (p.irUrl && loadedIrs.has(`${this.ctx.sampleRate}|${p.irUrl}`)) return this.buildImpulse();
+    const key = [this.ctx.sampleRate, safeNum(p.decay, 2.5), safeNum(p.size, 0.7), safeNum(p.damping, 0.5), safeNum(p.diffusion, 0.8), p.mode].join('|');
+    const hit = builtIrs.get(key);
+    if (hit) { rememberIr(key, hit); return hit; }
+    const ir = this.buildImpulse();
+    rememberIr(key, ir);
+    return ir;
+  }
+
+  /** Rien n'a encore sonné : création, ou export / gel avant le début du rendu. */
+  private get silentSoFar() { return this.ctx.currentTime <= this.createdAt; }
+
+  private setLink(key: 'wet' | 'er' | 'mod', need: boolean) {
+    const l = this.links[key];
+    if (l.timer) { clearTimeout(l.timer); l.timer = null; }
+    if (need) { if (!l.on) { l.connect(); l.on = true; } return; }
+    if (!l.on) return;
+    const cut = () => { try { l.disconnect(); } catch (e) { /* déjà débranché */ } l.on = false; };
+    if (this.silentSoFar) cut();
+    // En direct : après la fin du fondu (SMOOTH) ; hors ligne pendant le rendu, on garde.
+    else if (!this.isOffline) l.timer = setTimeout(() => { l.timer = null; cut(); }, 600);
   }
 
   private setupChain() {
@@ -485,7 +556,7 @@ export class ReverbNode {
 
     // === WET PATH ===
     // Input -> PreDelay -> Convolvers A/B -> Mod -> EQ -> Width -> Duck -> Wet
-    this.input.connect(this.preDelayNode);
+    this.setLink('wet', true);
     this.preDelayNode.connect(this.convA);
     this.preDelayNode.connect(this.convB);
     this.convA.connect(this.convGainA);
@@ -509,8 +580,9 @@ export class ReverbNode {
 
     // Early reflections : alternees G/D et passees dans le meme EQ que la
     // queue (avant, des echos pleine bande au centre sonnaient « slapback »).
+    this.setLink('er', true);
+    this.setLink('mod', true);
     for (let i = 0; i < this.erDelays.length; i++) {
-      this.input.connect(this.erDelays[i]);
       this.erDelays[i].connect(this.erGains[i]);
       this.erGains[i].connect(this.erPanners[i]);
       this.erPanners[i].connect(this.erMix);
@@ -549,7 +621,12 @@ export class ReverbNode {
     this.setP(this.wRL.gain, b, T);
 
     this.updateERTimings();
-    this.ducker.setAmount(p.isEnabled ? safeNum(p.ducking, 0) : 0);
+    this.ducker.setAmount(p.isEnabled ? safeNum(p.ducking, 0) : 0, this.silentSoFar);
+
+    const wetOn = !!p.isEnabled && clamp(safeNum(p.mix, 0.3), 0, 1) > 0;
+    this.setLink('wet', wetOn);
+    this.setLink('er', wetOn && clamp(safeNum(p.erLevel, 0.3), 0, 1) > 0);
+    this.setLink('mod', wetOn && depth > 0);
 
     if (p.isEnabled) {
       const mix = clamp(safeNum(p.mix, 0.3), 0, 1);
@@ -635,6 +712,8 @@ export class ReverbNode {
   public dispose() {
     try {
       if (this.irTimer) { clearTimeout(this.irTimer); this.irTimer = null; }
+      if (this.releaseTimer) { clearTimeout(this.releaseTimer); this.releaseTimer = null; }
+      for (const l of Object.values(this.links)) if (l.timer) { clearTimeout(l.timer); l.timer = null; }
       try { this.modLFO.stop(); } catch (e) {}
       this.ducker.disconnect();
       const nodes: AudioNode[] = [
