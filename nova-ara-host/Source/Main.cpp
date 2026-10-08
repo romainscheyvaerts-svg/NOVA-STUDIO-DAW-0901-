@@ -1296,8 +1296,32 @@ private:
     {
         if (deviceOpen) return;
         auto err = deviceManager.initialiseWithDefaultDevices (0, 2);
-        if (err.isNotEmpty()) throw std::runtime_error (("Carte son : " + err).toStdString());
-        if (auto* d = deviceManager.getCurrentAudioDevice()) deviceName = d->getName();
+        if (deviceManager.getCurrentAudioDevice() == nullptr)
+        {
+            // Pas de sortie par défaut ouverte : on essaie chaque type (Windows Audio partagé d'abord).
+            for (auto* type : deviceManager.getAvailableDeviceTypes())
+            {
+                type->scanForDevices();
+                deviceManager.setCurrentAudioDeviceType (type->getTypeName(), true);
+                auto setup = deviceManager.getAudioDeviceSetup();
+                auto outs = type->getDeviceNames (false);
+                if (outs.isEmpty()) continue;
+                setup.outputDeviceName = outs[type->getDefaultDeviceIndex (false) >= 0 ? type->getDefaultDeviceIndex (false) : 0];
+                setup.inputDeviceName = {};
+                setup.useDefaultOutputChannels = true;
+                err = deviceManager.setAudioDeviceSetup (setup, true);
+                if (deviceManager.getCurrentAudioDevice() != nullptr) break;
+            }
+        }
+        auto* d = deviceManager.getCurrentAudioDevice();
+        if (d == nullptr)
+        {
+            String diag;
+            for (auto* type : deviceManager.getAvailableDeviceTypes())
+                diag << " [" << type->getTypeName() << " : " << type->getDeviceNames (false).joinIntoString (", ") << "]";
+            throw std::runtime_error (("Aucune sortie audio disponible" + (err.isNotEmpty() ? " : " + err : String()) + diag).toStdString());
+        }
+        deviceName = d->getTypeName() + " / " + d->getName();
         deviceManager.addAudioCallback (this);
         deviceOpen = true;
     }
@@ -1329,7 +1353,16 @@ private:
 
     void startPlayback (double positionSeconds)
     {
-        try { ensureAudio(); } catch (const std::exception& e) { io::log (e.what()); return; }
+        try { ensureAudio(); }
+        catch (const std::exception& e)
+        {
+            io::log (e.what());
+            auto o = io::obj();
+            o->setProperty ("message", String::fromUTF8 ("Aucune sortie audio active sur ce PC (carte son débranchée ou désactivée) : branche-la pour écouter dans le plugin."));
+            o->setProperty ("detail", String::fromUTF8 (e.what()));
+            io::event ("audio_error", o);
+            return;
+        }
         const double keep = (double) playHead.timeInSamples.load() / playHead.sampleRate.load();
         prepareRealtime();
         setPosition (positionSeconds >= 0 ? positionSeconds : keep);

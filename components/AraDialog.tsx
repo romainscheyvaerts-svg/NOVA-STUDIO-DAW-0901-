@@ -138,6 +138,7 @@ const AraDialog: React.FC<Props> = ({ open, plugin, trackId, clipId, tracks, bpm
 
   useEffect(() => novaBridge.onAraEvent(e => {
     if (e.session_id !== sessionRef.current) return;
+    if (e.event === 'audio_error') setError(String(e.message || 'Lecture impossible sur ce PC'));
     if (e.event === 'editor_closed') setInfo(i => i.includes('fenêtre fermée') ? i : `${i} (fenêtre fermée : « Valider » garde tes retouches)`);
   }), []);
 
