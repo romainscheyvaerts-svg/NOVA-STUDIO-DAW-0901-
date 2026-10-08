@@ -14,6 +14,7 @@ import {
   araMissingMessage, araMusicFor, araSelectionFor, circleOfFifths, effectsBeforeAraInsert, isAraInsert, withAraInsertFirst,
 } from '../utils/araInsert';
 import { buildTempoMap } from '../utils/tempoMap';
+import { hasVst, lastVstIndex } from '../utils/freeze';
 
 const clip = (id: string, start: number, offset: number, duration: number, extra: Partial<Clip> = {}): Clip => ({
   id, start, offset, duration, fadeIn: 0, fadeOut: 0, name: `Clip ${id}`, color: '#fff', type: TrackType.AUDIO, bufferId: 'buf-voix', ...extra,
@@ -137,6 +138,12 @@ describe('état de l’insert et collaboration', () => {
     expect(araArchiveOfState('QVJBQVJD')).toBe('QVJBQVJD');
     expect(araArchiveOfState(null)).toBeUndefined();
     expect(araArchiveOfState('NARA1.%%%')).toBeUndefined();
+  });
+
+  it('collaboration : la piste à insert ARA est rendue à la sauvegarde comme une piste à VST', () => {
+    const t = track([clip('c1', 1.5, 0, 9)]);
+    expect(hasVst(t)).toBe(true);
+    expect(lastVstIndex(t)).toBe(0);
   });
 
   it('sans le plugin : le son retouché (rendu) est joué tel quel', () => {
