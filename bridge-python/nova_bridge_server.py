@@ -74,6 +74,10 @@ Protocole (WebSocket ws://127.0.0.1:8765)
                                   stems, seconds, device, outdir | error, code: not_installed|cancelled|error}.
     (v9) Plugins ARA2 (Melodyne, VocAlign) par l'hôte natif NovaARAHost.exe : voir ara_service.py
     (ARA_STATUS, ARA_OPEN, ARA_ALIGN, ARA_COMMIT, ARA_SHOW, ARA_TRANSPORT, ARA_CLOSE, ARA_EVENT).
+    (v12) Melodyne / VocAlign en INSERT sur une piste, comme Pro Tools : voir ara_insert.py
+    (LOAD_PLUGIN ara=…, ARA_INSERT_SOURCE / DOC / STATE / EDITOR / SELECT / RENDER / PARAM(S)) ;
+    trames type 1 : flags & 4 (TIMELINE) → f64 position du morceau (échantillons, -1 = arrêt) juste
+    après l'audio, avant les réglages d'automation.
     (v11) Automation des VST (R9) :
     AUTOMATABLE slot_id         → parameters:[{name, display_name, value, text, label?, num_steps?,
                                   is_boolean?}] : réglages automatisables, lus sans conversion texte
@@ -153,6 +157,7 @@ import numpy as np
 import websockets
 from websockets.asyncio.server import serve, ServerConnection
 
+import ara_insert
 import ara_service
 import license_watch
 import stems_service
@@ -163,7 +168,7 @@ import vst_probe
 import plugin_guard
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events, calibrate_gr_offline
 
-VERSION = 11
+VERSION = 12
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
@@ -217,7 +222,7 @@ def parse_audio_extras(buf: bytes, nframes: int, nch: int, flags: int):
     if not flags & vst_automation.FLAG_PARAMS:
         return None
     L = buf[1]
-    off = _align4(2 + L) + 8 + nframes * nch * 4
+    off = _align4(2 + L) + 8 + nframes * nch * 4 + ara_insert.timeline_extra_bytes(flags)
     return vst_automation.parse_param_section(buf, off) or None
 
 
@@ -536,7 +541,9 @@ class NovaBridgeServer:
                               # (v11, R10) clé de side-chain des VST3 : seulement avec l'hôte natif
                               # (pedalboard désactive les bus d'entrée auxiliaires, voir vst_sidechain)
                               "sidechain": vst_sidechain.host_feeds_sidechain(), "sidechain_protocol": True,
-                              "ara": bool(ara_service.ara_host.find_host_exe())})
+                              "ara": bool(ara_service.ara_host.find_host_exe()),
+                              # (v12) Melodyne / VocAlign en insert sur une piste, comme Pro Tools
+                              "ara_insert": bool(ara_service.ara_host.find_host_exe())})
 
     async def _a_get_plugin_list(self, ws, req):
         if req.get("rescan"):
@@ -871,6 +878,8 @@ class NovaBridgeServer:
         try:
             slot_id, seq, nframes, nch, flags, data = parse_audio_frame(buf)
             changes = parse_audio_extras(buf, nframes, nch, flags)
+            # (v12) Insert ARA : position du morceau portée par la trame (drapeau TIMELINE).
+            timeline = ara_insert.parse_timeline(buf, nframes, nch, flags)
         except Exception:
             return
         q = self.slot_queues.get(slot_id)
@@ -880,7 +889,8 @@ class NovaBridgeServer:
         key = None
         if flags & vst_automation.FLAG_SIDECHAIN and nch >= 4:
             block, key = block[:2], block[2:4]
-        self._enqueue(q, (ws, "bin", seq, block, changes, key), self.slots.get(slot_id))
+        item = (ws, "bin", seq, block, changes, key) if timeline is None else (ws, "bin", seq, block, changes, key, timeline)
+        self._enqueue(q, item, self.slots.get(slot_id))
 
     async def _slot_worker(self, slot: Slot, q: asyncio.Queue):
         """Un consommateur par slot : blocs traités et renvoyés dans l'ordre.
@@ -893,13 +903,16 @@ class NovaBridgeServer:
             if item is None:
                 return
             try:
-                ws, kind, seq, block, changes, key = item
+                ws, kind, seq, block, changes, key = item[:6]
+                timeline = item[6] if len(item) > 6 else None
                 if not slot.loaded.is_set() or (slot.plugin is None and not slot.failed):
                     continue
                 if slot.failed:
                     out = slot.dry_block(block)
                 else:
                     extra = (changes, key) if (changes or key is not None) else ()
+                    if timeline is not None:
+                        extra = (changes, key, timeline)
                     fut = self.loop.run_in_executor(slot.executor, slot.process_block, block, *extra)
                     try:
                         out = await asyncio.wait_for(asyncio.shield(fut), vst_host.HANG_TIMEOUT_S)
@@ -994,6 +1007,12 @@ class NovaBridgeServer:
                 return
             if meta.get("action") == "ARA_ALIGN":
                 await self._ara_align(ws, meta, data)
+                return
+            if meta.get("action") == "ARA_INSERT_SOURCE":
+                await self._ara_insert_source(ws, meta, data)
+                return
+            if meta.get("action") == "ARA_INSERT_RENDER":
+                await self._ara_insert_render_frame(ws, meta, data)
                 return
             if meta.get("action") == "CALIBRATE_GR":
                 await self._calibrate_gr(ws, meta, data)
@@ -1137,6 +1156,7 @@ def _stems_server_methods():
 
 _stems_server_methods()
 ara_service.install(NovaBridgeServer, build_render_frame)
+ara_insert.install(NovaBridgeServer, build_render_frame, parse_render_frame)
 
 
 def main():

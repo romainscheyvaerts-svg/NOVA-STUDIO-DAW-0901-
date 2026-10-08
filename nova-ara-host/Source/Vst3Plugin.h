@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -89,6 +90,10 @@ namespace nova
         // Paramètres renvoyés par le processeur : à appliquer au contrôleur (fil de l'interface).
         void flushOutputParameters();
 
+        // État du plugin (IComponent::getState / setState, puis contrôleur) : réglages hors ARA.
+        std::vector<uint8_t> getState();
+        bool setState (const std::vector<uint8_t>& data);
+
     private:
         struct Bus
         {
@@ -131,5 +136,9 @@ namespace nova
         std::mutex paramLock;
         std::vector<std::pair<Steinberg::Vst::ParamID, double>> pendingToProcessor, pendingToController;
         std::atomic<int> restartFlags { 0 };
+        // Réglages posés par l'hôte (set_param) : instant (ms), fil de l'interface seulement.
+        std::map<Steinberg::Vst::ParamID, double> hostEdits;
+        // Réglages tenus (sous paramLock) : donnés au processeur à chaque bloc.
+        std::map<Steinberg::Vst::ParamID, double> heldParams;
     };
 }

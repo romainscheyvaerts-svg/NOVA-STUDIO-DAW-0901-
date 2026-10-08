@@ -417,6 +417,17 @@ namespace nova
                 }
                 pendingToProcessor.clear();
             }
+            // Réglages tenus par l'hôte (comme une voie d'automation) : redonnés à chaque bloc.
+            if (l.owns_lock())
+                for (auto& [id, v] : heldParams)
+                {
+                    int32 idx = 0;
+                    if (auto* q = inChanges.addParameterData (id, idx))
+                    {
+                        int32 pi = 0;
+                        q->addPoint (0, v, pi);
+                    }
+                }
         }
         inEvents.clear();
         outEvents.clear();
@@ -486,6 +497,34 @@ namespace nova
         }
     }
 
+    std::vector<uint8_t> Vst3Plugin::getState()
+    {
+        std::vector<uint8_t> out;
+        if (! component) return out;
+        IPtr<MemoryStream> s = owned (new MemoryStream());
+        if (component->getState (s.get()) != kResultTrue) return out;
+        const auto* p = reinterpret_cast<const uint8_t*> (s->getData());
+        out.assign (p, p + s->getSize());
+        return out;
+    }
+
+    bool Vst3Plugin::setState (const std::vector<uint8_t>& data)
+    {
+        if (! component || data.empty()) return false;
+        IPtr<MemoryStream> s = owned (new MemoryStream());
+        int32 written = 0;
+        int64 at = 0;
+        s->write (const_cast<uint8_t*> (data.data()), (int32) data.size(), &written);
+        s->seek (0, IBStream::kIBSeekSet, &at);
+        const bool ok = component->setState (s.get()) == kResultTrue;
+        if (controller)
+        {
+            s->seek (0, IBStream::kIBSeekSet, &at);
+            controller->setComponentState (s.get());
+        }
+        return ok;
+    }
+
     void Vst3Plugin::flushOutputParameters()
     {
         std::vector<std::pair<ParamID, double>> todo;
@@ -494,7 +533,13 @@ namespace nova
             todo.swap (pendingToController);
         }
         if (controller)
-            for (auto& [id, v] : todo) controller->setParamNormalized (id, v);
+            for (auto& [id, v] : todo)
+            {
+                // Réglage posé par l'hôte il y a peu : la valeur renvoyée par le processeur est périmée.
+                auto it = hostEdits.find (id);
+                if (it != hostEdits.end() && nowMs() - it->second < 500.0) continue;
+                controller->setParamNormalized (id, v);
+            }
     }
 
     //==========================================================================

@@ -1574,6 +1574,32 @@ namespace nova
             return out;
         }
 
+        // vst_state → état VST3 du plugin (base64) ; set_vst_state state_b64 : réglages hors ARA.
+        Value vstState()
+        {
+            if (! plugin) throw std::runtime_error ("Aucun plugin chargé");
+            const auto bytes = plugin->getState();
+            auto out = Value::object();
+            out.set ("state_b64", base64::encode (bytes.data(), bytes.size()));
+            out.set ("size", (int) bytes.size());
+            return out;
+        }
+
+        Value setVstState (const Value& req)
+        {
+            if (! plugin) throw std::runtime_error ("Aucun plugin chargé");
+            std::vector<uint8_t> m;
+            if (! base64::decode (req["state_b64"].asString(), m) || m.empty()) throw std::runtime_error ("État du plugin illisible");
+            bool ok = false;
+            {
+                std::lock_guard<std::mutex> sl (renderLock);
+                ok = plugin->setState (m);
+            }
+            auto out = Value::object();
+            out.set ("restored", ok);
+            return out;
+        }
+
         Value setParam (const Value& req)
         {
             if (! plugin || plugin->getController() == nullptr) throw std::runtime_error ("Aucun plugin chargé");
@@ -1592,10 +1618,14 @@ namespace nova
                 if (! found) throw std::runtime_error ("Réglage inconnu : " + want);
             }
             const double v = std::clamp (req["value"].asDouble (0.0), 0.0, 1.0);
+            plugin->hostEdits[id] = nowMs();
             ctl->setParamNormalized (id, v);
             {
                 std::lock_guard<std::mutex> l (plugin->paramLock);
-                plugin->pendingToProcessor.emplace_back (id, v);
+                plugin->heldParams[id] = v;
+                // Les valeurs déjà renvoyées par le processeur pour ce réglage sont périmées.
+                auto& q = plugin->pendingToController;
+                q.erase (std::remove_if (q.begin(), q.end(), [id] (const auto& e) { return e.first == id; }), q.end());
             }
             Steinberg::Vst::String128 txt {};
             ctl->getParamStringByValue (id, ctl->getParamNormalized (id), txt);
@@ -2321,6 +2351,8 @@ namespace nova
             else if (cmd == "render_range") replyOk (id, session->renderRange (req));
             else if (cmd == "editor") replyOk (id, session->editor (req));
             else if (cmd == "params") replyOk (id, session->params());
+            else if (cmd == "vst_state") replyOk (id, session->vstState());
+            else if (cmd == "set_vst_state") replyOk (id, session->setVstState (req));
             else if (cmd == "set_param") replyOk (id, session->setParam (req));
             else if (cmd == "keys") replyOk (id, session->keys (req));
             else if (cmd == "render") replyOk (id, session->render (req));
