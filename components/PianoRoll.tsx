@@ -10,6 +10,7 @@ import MidiToolsPanel from './MidiToolsPanel';
 import { useCaptureCount, CAPTURE_HINT } from './MidiFileMenu';
 import { midiBus } from '../utils/midiBus';
 import { midiCapture } from '../utils/midiCapture';
+import ChordRollOverlay from './ChordRollOverlay';
 import { ComputerKeyboard, NoteRecorder, isComputerKeyboardCode, defaultKeyLabel, octaveBase, KEY_TO_SEMITONE, DEFAULT_KEYBOARD_STATE, KeyboardState } from '../utils/computerKeyboard';
 
 /** Préférences d'affichage du piano roll, gardées sur cet appareil. */
@@ -1111,6 +1112,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack
               >
                  <div style={{ width: Math.max((clip.duration + 4) * zoomX, 2000), height: totalRows * currentRowHeight, position: 'relative' }}>
                     {renderGridRows()}
+                    {/* Piste d'accords (V20) : notes de l'accord en cours surlignées */}
+                    <ChordRollOverlay clipStart={clip.start} clipDuration={clip.duration} zoomX={zoomX} rows={rows} rowHeight={currentRowHeight} hidden={isDrumMode} />
 
                     {/* Beat Grid */}
                     {Array.from({ length: Math.ceil((clip.duration + 4) / (quantize || 0.25)) }).map((_, i) => (

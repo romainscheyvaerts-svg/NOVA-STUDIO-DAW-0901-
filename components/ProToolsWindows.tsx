@@ -7,6 +7,7 @@ import MemoryLocations from './MemoryLocations';
 import StripSilenceDialog from './StripSilenceDialog';
 import ClipPropsDialog from './ClipPropsDialog';
 import PitchEditor from './PitchEditor';
+import AudioToMidiDialog, { AudioToMidiRequest } from './AudioToMidiDialog';
 
 interface Props {
   tracks: Track[];
@@ -23,6 +24,8 @@ interface Props {
   /** Tonalité du projet (justesse note par note). */
   projectKey?: number;
   projectScale?: string;
+  /** Temps par mesure (audio → MIDI, V20). */
+  beatsPerBar?: number;
 }
 
 /**
@@ -31,11 +34,12 @@ interface Props {
  * couleur de piste ; plus le témoin Commands Keyboard Focus.
  * App.tsx ne fait que monter ce composant.
  */
-const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEditClip, onSeek, onAddMarker, onUpdateMarker, onDeleteMarker, getPlayhead, onOpenShortcuts, projectKey, projectScale }) => {
+const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEditClip, onSeek, onAddMarker, onUpdateMarker, onDeleteMarker, getPlayhead, onOpenShortcuts, projectKey, projectScale, beatsPerBar }) => {
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [strip, setStrip] = useState<NovaWindowDetail | null>(null);
   const [props, setProps] = useState<NovaWindowDetail | null>(null);
   const [pitch, setPitch] = useState<NovaWindowDetail | null>(null);
+  const [convert, setConvert] = useState<AudioToMidiRequest | null>(null);
   const focus = useKeyboardFocus();
 
   useEffect(() => {
@@ -47,6 +51,8 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       else if (d.name === 'clip-props' || d.name === 'track-color') setProps(d);
       else if (d.name === 'shortcuts') onOpenShortcuts();
       else if (d.name === 'pitch-editor' && d.targets?.length) setPitch(d);
+      // Audio → MIDI (V20) : mélodie, batterie, harmonie.
+      else if (d.name === 'audio-to-midi' && d.convert) setConvert({ ...d.convert, trackId: d.targets?.[0]?.trackId, clipId: d.targets?.[0]?.clipId });
     };
     window.addEventListener(NOVA_WINDOW_EVENT, onOpen);
     return () => window.removeEventListener(NOVA_WINDOW_EVENT, onOpen);
@@ -116,6 +122,8 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       {propsView}
       <PitchEditor open={!!pitch} trackId={pitch?.targets?.[0]?.trackId} clipId={pitch?.targets?.[0]?.clipId} tracks={tracks}
         projectKey={projectKey} projectScale={projectScale} onApply={applyPitch} onClose={() => setPitch(null)} />
+      <AudioToMidiDialog request={convert} tracks={tracks} bpm={bpm} beatsPerBar={beatsPerBar} projectKey={projectKey} projectScale={projectScale}
+        setState={setState} onClose={() => setConvert(null)} />
       {focus && (
         <button type="button" onClick={() => setKeyboardFocus(false)} data-testid="keyboard-focus-badge"
           title="Commands Keyboard Focus actif : une touche = une commande (A, S, D, G, R, T…). Clic ou Ctrl+Alt+1 pour l'arrêter. Ctrl+Espace enregistre."

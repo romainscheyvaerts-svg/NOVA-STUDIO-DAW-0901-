@@ -18,6 +18,8 @@ interface VocalToolsPanelProps {
   /** Respirations (components/BreathTools) : bloc des outils voix et case du Mix auto. */
   breathTools?: React.ReactNode;
   breathMixOption?: React.ReactNode;
+  /** « Fredonne → 808 / piano » (V20, components/AudioToMidiDialog). */
+  humTools?: React.ReactNode;
   countIn: boolean;
   onCountInChange: (on: boolean) => void;
   monitoring: boolean;
@@ -253,6 +255,7 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
             </button>
             {!p.canClean && <p className="text-[11px] text-slate-500 mt-1">Enregistre d'abord une prise.</p>}
             {p.breathTools}
+            {p.humTools && <div className="mt-2">{p.humTools}</div>}
             <div className="mt-2 divide-y divide-white/5">
               <Toggle
                 checked={p.autoClean}

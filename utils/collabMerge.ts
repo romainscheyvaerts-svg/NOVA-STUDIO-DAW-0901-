@@ -88,10 +88,10 @@ export const mergeMarkerOps = (older: Record<string, any>, newer: Record<string,
   return { ...older, ...newer, upsert: [...up.values()], remove: [...rm] };
 };
 
-/** Fusion par défaut de la file d'envoi : le mix champ par champ, les repères repère par repère, le reste remplacé par le plus récent. */
+/** Fusion par défaut de la file d'envoi : le mix champ par champ, les repères (et les accords, V20) un par un, le reste remplacé par le plus récent. */
 export const mergeQueuedOps = (kind: string, older: Record<string, any>, newer: Record<string, any>): Record<string, any> =>
   (kind === 'mix' && older?.fields && newer?.fields ? mergeMixOps(older, newer)
-    : kind === 'markers' ? mergeMarkerOps(older, newer) : newer);
+    : kind === 'markers' || kind === 'chords' ? mergeMarkerOps(older, newer) : newer);
 
 /**
  * Horloge « dernière écriture gagne » : le numéro (seq) du journal le plus

@@ -130,6 +130,9 @@ import ShortcutsHelp from './components/ShortcutsHelp';
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
 import ProToolsWindows from './components/ProToolsWindows';
+import { useChordLaneProp } from './components/ChordLane';
+import { HumQuickButtons } from './components/AudioToMidiDialog';
+import { applyChordOps, chordChanges, chordSig, chordsStore } from './utils/chordTrack';
 import { nextMarkerNumber } from './utils/memoryLocations';
 import { automationRecorder } from './services/AutomationManager';
 import { DrumMachine, makeDrumMachineLib, drumPadsFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
@@ -462,6 +465,7 @@ const useUndoRedo = (initialState: DAWState) => {
         newState.bpm !== curr.present.bpm ||
         newState.name !== curr.present.name ||
         newState.markers !== curr.present.markers ||
+        newState.chords !== curr.present.chords ||
         newState.trackGroups !== curr.present.trackGroups ||
         newState.timeSignature !== curr.present.timeSignature ||
         newState.isLoopActive !== curr.present.isLoopActive ||
@@ -488,7 +492,7 @@ const useUndoRedo = (initialState: DAWState) => {
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
   // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
   // continuait, et pendant une prise il basculait l'enregistrement.
-  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'timeSignature', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle'] as const;
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'timeSignature', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords'] as const;
   const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
     const out: any = { ...base };
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
@@ -3593,6 +3597,10 @@ function Studio() {
     onToggle: handleToggleTakeLanes, onAudition: handleAuditionTake, onComp: handleCompSwipe, onKeep: handleKeepTake,
     onRename: handleRenameTake, onDuplicate: handleDuplicateTake, onDelete: handleDeleteTake, onAutoComp: handleAutoComp,
   }), [takeLanesOpen, takeAudition, handleToggleTakeLanes, handleAuditionTake, handleCompSwipe, handleKeepTake, handleRenameTake, handleDuplicateTake, handleDeleteTake, handleAutoComp]);
+  // Piste d'accords (V20) : couloir de l'arrangement (absent quand il est masqué) ; accords publiés pour le piano roll.
+  const chordLane = useChordLaneProp({ chords: state.chords, tracks: state.tracks, bpm: state.bpm, beatsPerBar: state.timeSignature?.numerator,
+    projectKey: state.projectKey, projectScale: state.projectScale, setState });
+  useEffect(() => { chordsStore.set(state.chords); }, [state.chords]);
 
   // Punch-in / punch-out (utils/punch) : points indépendants de la boucle, posés
   // dans la règle ou depuis la sélection ; pré/post-roll réglables ; QuickPunch.
@@ -3658,6 +3666,13 @@ function Studio() {
   };
 
   /** Applique un motif : pads + clip régénérés (une étape d'historique). */
+  // Batterie → MIDI (V20, components/AudioToMidiDialog) : le motif d'une boucle part dans la boîte à rythmes.
+  useEffect(() => {
+    const on = (e: Event) => { const dm = (e as CustomEvent<{ dm?: DrumMachine }>).detail?.dm; if (dm) applyDrumMachineRef.current?.(dm); };
+    window.addEventListener('nova:apply-drum-machine', on);
+    return () => window.removeEventListener('nova:apply-drum-machine', on);
+  }, []);
+  const applyDrumMachineRef = useRef<((dm: DrumMachine) => void) | null>(null);
   const applyDrumMachine = useCallback((dmIn: DrumMachine) => {
     let dm = dmIn;
     setState(produce((draft: DAWState) => {
@@ -3686,6 +3701,7 @@ function Studio() {
       t.drumPads = drumPadsFor(dm) as any;
     }));
   }, [setState]);
+  applyDrumMachineRef.current = applyDrumMachine;
 
   const handleSetDrumKit = useCallback((kitId?: string) => {
     const st = stateRef.current;
@@ -3983,6 +3999,9 @@ function Studio() {
   /** Revendications de pistes (« own ») : numéro retenu par piste (la première gagne). */
   const claimSeqRef = useRef(new Map<string, number>());
   const knownMarkersRef = useRef(new Map<string, string>());
+  // Piste d'accords (V20) : accords déjà partagés, et les nôtres pas encore enregistrés par le serveur.
+  const knownChordsRef = useRef(new Map<string, string>());
+  const pendingChordsRef = useRef(new Set<string>());
   /** « Écouter ensemble » : hôte qui guide la lecture (null : chacun écoute de son côté). */
   const [listenTogether, setListenTogether] = useState<{ hostKey: string; hostName: string } | null>(null);
   const listenTogetherRef = useRef(listenTogether);
@@ -4370,6 +4389,20 @@ function Studio() {
         if (!o.replay && upsert.length === 1) setAiNotification(`📍 ${by} a posé le repère « ${String(upsert[0].name || 'Repère').slice(0, 60)} ».`);
         break;
       }
+      case 'chords': {
+        // Piste d'accords (V20) : le plus récent du journal gagne, accord par accord ;
+        // nos accords pas encore enregistrés restent (ils partiront après et gagneront partout).
+        const accept = (id: string) => lwwRef.current.accept(`chord:${id}`, o.seq);
+        const upsert = (Array.isArray(p.upsert) ? p.upsert : []).map((x: any) => ({ ...x, by: x?.by || o.author_name }));
+        const cur = stateRef.current.chords || [];
+        const next = applyChordOps(cur, upsert, p.remove, accept, pendingChordsRef.current);
+        if (JSON.stringify(next) === JSON.stringify(cur)) break;
+        next.forEach(c => { if (!pendingChordsRef.current.has(c.id)) knownChordsRef.current.set(c.id, chordSig(c)); });
+        [...knownChordsRef.current.keys()].forEach(id => { if (!next.some(c => c.id === id) && !pendingChordsRef.current.has(id)) knownChordsRef.current.delete(id); });
+        setState(produce((d: DAWState) => { d.chords = next; }));
+        if (!o.replay && upsert.length) setAiNotification(`🎸 ${o.author_name} a ${upsert.length > 1 ? `posé ${upsert.length} accords` : 'changé un accord'} dans la piste d’accords.`);
+        break;
+      }
       case 'listen': {
         // « Écouter ensemble » lancé (ou arrêté) par l'hôte.
         if (!lwwRef.current.accept('listen', o.seq)) break;
@@ -4567,6 +4600,8 @@ function Studio() {
         else if (kind === 'own' && Array.isArray(op.trackIds)) (op.trackIds as string[]).forEach(id => { if (claimSeqRef.current.get(id) === Infinity) claimSeqRef.current.set(id, seq); });
         else if (kind === 'markers') { [...(Array.isArray(op.upsert) ? op.upsert : []), ...((Array.isArray(op.remove) ? op.remove : []).map((id: string) => ({ id })))].forEach((m: any) => lwwRef.current.note(`marker:${m.id}`, seq)); }
         else if (kind === 'listen') lwwRef.current.note('listen', seq);
+        else if (kind === 'chords') [...(Array.isArray(op.upsert) ? op.upsert : []).map((c: any) => c?.id), ...(Array.isArray(op.remove) ? op.remove : [])]
+          .forEach((id: unknown) => { if (typeof id === 'string') { lwwRef.current.note(`chord:${id}`, seq); pendingChordsRef.current.delete(id); } });
         else if (kind === 'chat' && typeof op.localId === 'string') setCollabMessages(m => m.map(x => (x.id === op.localId ? { ...x, pending: false } : x)));
       };
       client.onStatus(s => setCollabStatus(s));
@@ -4579,6 +4614,8 @@ function Studio() {
       // Le projet en cours devient la base : on ne renvoie pas ce que tout le monde a déjà.
       stateRef.current.tracks.forEach(t => rememberTrack(t));
       knownMarkersRef.current = new Map((stateRef.current.markers || []).map(m => [m.id, markerSig(m)]));
+      knownChordsRef.current = new Map((stateRef.current.chords || []).map(c => [c.id, chordSig(c)]));
+      pendingChordsRef.current.clear();
       setCollab({ client, role, name, host, key: myKey, color: myColor });
       collabRef.current = { client, role, name, host, key: myKey, color: myColor };
       collabRoleStore.set(role);
@@ -4671,6 +4708,8 @@ function Studio() {
     opRecsRef.current.clear();
     seenPeersRef.current.clear();
     knownMarkersRef.current.clear();
+    knownChordsRef.current.clear();
+    pendingChordsRef.current.clear();
     setListenTogether(null);
     setInviteCode(null);
     collabLiveStore.set({ meKey: null, recs: {} });
@@ -4824,6 +4863,17 @@ function Studio() {
     if (!s) return;
     collabRef.current?.client.setPresence({ st: s.catchingUp || s.pending > 2 || !!s.upload ? 'late' : 'ok' });
   }, [collabStatus]);
+
+  // Piste d'accords (V20) : les accords posés / changés / retirés ici partent chez les autres.
+  useEffect(() => {
+    const c = collabRef.current;
+    if (!c) return;
+    const { upsert, remove } = chordChanges(knownChordsRef.current, state.chords || []);
+    if (!upsert.length && !remove.length) return;
+    upsert.forEach(x => { knownChordsRef.current.set(x.id, chordSig(x)); pendingChordsRef.current.add(x.id); });
+    remove.forEach(id => { knownChordsRef.current.delete(id); pendingChordsRef.current.add(id); });
+    c.client.queue('chords', 'chords', { upsert: upsert.map(x => ({ ...x, by: x.by || c.name })), remove });
+  }, [state.chords, collab]);
 
   // Repères : ceux posés / déplacés / supprimés ici partent chez les autres (avec mon nom).
   useEffect(() => {
@@ -6613,6 +6663,7 @@ function Studio() {
                    punch={state.punch} onUpdatePunch={handleUpdatePunch} editCommands={editCommands} takeLanes={takeLanesApi}
                    markers={state.markers} onAddMarker={handleAddMarker}
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker} onAddRegion={handleAddRegion}
+                   chordLane={chordLane}
                 />
               )}
 
@@ -6809,6 +6860,7 @@ function Studio() {
         currentStyleId={state.vocalMixStyle}
         onApplyStyle={(id: string) => { if (handleApplyMixStyle(id) !== false) breathsAfterMixStyle(); }}
         breathMixOption={<BreathMixOption />}
+        humTools={<HumQuickButtons onOpen={() => setVocalToolsOpen(false)} />}
         breathTools={<BreathPanelTools canTreat={state.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0)}
           projectAuto={state.breathAuto} onProjectAutoChange={(on) => setState(prev => ({ ...prev, breathAuto: on }))} />}
         canClean={!!getTargetVoiceTrack()?.clips.length}
@@ -6991,7 +7043,7 @@ function Studio() {
       <ProToolsWindows tracks={state.tracks} markers={state.markers} bpm={state.bpm} setState={setState} onEditClip={handleEditClip}
         onSeek={handleSeek} onAddMarker={handleAddMarker} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
         getPlayhead={() => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime)}
-        onOpenShortcuts={() => setShortcutsOpen(true)} projectKey={state.projectKey} projectScale={state.projectScale} />
+        onOpenShortcuts={() => setShortcutsOpen(true)} projectKey={state.projectKey} projectScale={state.projectScale} beatsPerBar={state.timeSignature?.numerator} />
       {/* Respirations : fenêtre, traitement en un clic, mode auto après chaque prise (components/BreathTools). */}
       <BreathHost tracks={state.tracks} setState={setState} undo={undo} breakHistory={breakHistory} projectAuto={state.breathAuto} isMobile={isMobile} />
       <TakeHomeModal

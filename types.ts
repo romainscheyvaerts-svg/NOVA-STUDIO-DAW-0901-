@@ -736,6 +736,12 @@ export interface DAWState {
   punch: PunchSettings;           // NEW
   /** Mode d'édition Pro Tools (Shuffle, Slip, Spot, Grid) et grille : utils/editModes. */
   editMode?: import('./utils/editModes').EditModeSettings;
+  /**
+   * Piste d'accords (V20, Chord Track de Logic) : accords posés à la main ou
+   * détectés sur le beat (utils/chordTrack). Absent : pas d'accords (anciens
+   * projets) ; une ancienne version l'ignore sans rien casser.
+   */
+  chords?: import('./utils/chordDetect').ChordEvent[];
 }
 
 export interface ContextMenuItem {
