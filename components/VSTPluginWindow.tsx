@@ -12,6 +12,8 @@ interface VSTPluginWindowProps {
   track?: Track;
   /** Gèle / dégèle la piste (handleFreezeTrack). */
   onToggleFreeze?: (trackId: string) => void;
+  /** Presets du plugin (R4) : état lu par le pont, rechargé et vérifié. */
+  presetSlot?: React.ReactNode;
 }
 
 /**
@@ -19,7 +21,7 @@ interface VSTPluginWindowProps {
  * fenêtre sur le PC (pont VST) ; ici : état, latence, bouton d'ouverture.
  * Sans pont (téléphone) : l'effet est déjà rendu dans l'audio de la piste.
  */
-const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ plugin, onClose, trackId, track, onToggleFreeze }) => {
+const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ plugin, onClose, trackId, track, onToggleFreeze, presetSlot }) => {
   const bridge = useBridgeState();
   const info = useVstNodeInfo(plugin.id);
   const [opening, setOpening] = useState(false);
@@ -117,6 +119,7 @@ const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ plugin, onClose, trac
           <i className="fas fa-times"></i>
         </button>
       </div>
+      {presetSlot && <div className="flex items-center gap-1 rounded-xl bg-white/[0.03] border border-white/10 p-1">{presetSlot}</div>}
       {body}
     </div>
   );

@@ -11,6 +11,7 @@ import { gainToDbText, panToText } from '../utils/db';
 import { getValidDestinations } from './RoutingManager';
 import { trackDisplayName } from '../utils/sendLabels';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { openNovaWindow } from '../utils/novaWindows';
 
 /**
  * Morceaux d'interface de la structure façon Pro Tools (voir utils/trackStructure) :
@@ -143,6 +144,12 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
   if (!target || target.id === 'master') return [];
   const id = target.id;
   const items: (ContextMenuItem | 'separator')[] = ['separator'];
+  // R4 : Track Presets (Pro Tools 2020+).
+  if (!target.isVca && !target.folder) items.push({
+    label: 'Track Preset…', icon: 'fa-bookmark',
+    title: 'Enregistrer ou rappeler toute la chaîne de la piste : effets, envois, volume, pan, sortie (Pro Tools : Track Presets · Logic : Patches · Ableton : Rack · FL : état de piste)',
+    onClick: () => openNovaWindow('track-preset', { trackId: id }),
+  });
   items.push({
     label: target.isInactive ? 'Rendre la piste active' : 'Rendre la piste inactive',
     icon: target.isInactive ? 'fa-play-circle' : 'fa-ban',

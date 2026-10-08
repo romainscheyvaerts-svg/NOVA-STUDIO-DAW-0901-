@@ -10,6 +10,7 @@ import PitchEditor from './PitchEditor';
 import PitchBatchDialog from './PitchBatchDialog';
 import AudioToMidiDialog, { AudioToMidiRequest } from './AudioToMidiDialog';
 import AraDialog, { AraApply } from './AraDialog';
+import TrackPresetDialog from './TrackPresetDialog';
 
 interface Props {
   tracks: Track[];
@@ -44,6 +45,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
   const [pitchBatch, setPitchBatch] = useState<NovaWindowDetail | null>(null);
   const [convert, setConvert] = useState<AudioToMidiRequest | null>(null);
   const [ara, setAra] = useState<NovaWindowDetail | null>(null);
+  const [trackPreset, setTrackPreset] = useState<NovaWindowDetail | null>(null);
   const focus = useKeyboardFocus();
 
   useEffect(() => {
@@ -59,6 +61,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       // Audio → MIDI (V20) : mélodie, batterie, harmonie.
       else if (d.name === 'audio-to-midi' && d.convert) setConvert({ ...d.convert, trackId: d.targets?.[0]?.trackId, clipId: d.targets?.[0]?.clipId });
       else if ((d.name === 'ara-melodyne' || d.name === 'ara-vocalign') && d.targets?.length) setAra(d);
+      else if (d.name === 'track-preset') setTrackPreset(d);
     };
     window.addEventListener(NOVA_WINDOW_EVENT, onOpen);
     return () => window.removeEventListener(NOVA_WINDOW_EVENT, onOpen);
@@ -162,6 +165,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
         setState={setState} onClose={() => setConvert(null)} />
       <AraDialog open={!!ara} plugin={ara?.name === 'ara-vocalign' ? 'vocalign' : 'melodyne'} trackId={ara?.targets?.[0]?.trackId}
         clipId={ara?.targets?.[0]?.clipId} tracks={tracks} bpm={bpm} onApply={applyAra} onClose={() => setAra(null)} />
+      <TrackPresetDialog open={!!trackPreset} trackId={trackPreset?.trackId} tracks={tracks} setState={setState} onClose={() => setTrackPreset(null)} />
       {focus && (
         <button type="button" onClick={() => setKeyboardFocus(false)} data-testid="keyboard-focus-badge"
           title="Commands Keyboard Focus actif : une touche = une commande (A, S, D, G, R, T…). Clic ou Ctrl+Alt+1 pour l'arrêter. Ctrl+Espace enregistre."

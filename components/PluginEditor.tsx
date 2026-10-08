@@ -24,6 +24,7 @@ import DrumRack from './DrumRack';
 import FitToWidth from './FitToWidth';
 import { PluginName } from './PluginName';
 import { getRegisteredPlugin } from '../engine/pluginRegistry';
+import PresetMenu from './PresetMenu';
 
 interface PluginEditorProps {
   plugin: PluginInstance;
@@ -127,7 +128,18 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   // Un seul interrupteur (G17) : l'ancien marche / arrêt interne de l'effet est
   // masqué ; s'il était coupé, on le rallume dedans et on passe l'effet en
   // bypass dans la barre (même résultat à l'oreille, un seul endroit pour le changer).
-  const hostParams = React.useMemo(() => ((plugin.params as any)?.isEnabled === false ? { ...(plugin.params as any), isEnabled: true } : plugin.params) as any, [plugin.params]);
+  // Presets / Comparer (R4) : après un chargement, l'interface de l'effet repart des
+  // réglages à jour (uiKey) ; entre deux chargements elle garde son propre état.
+  const [uiKey, setUiKey] = useState(0);
+  const liveParamsRef = useRef(live.params);
+  liveParamsRef.current = live.params;
+  const hostParams = React.useMemo(() => {
+    const src = (uiKey === 0 ? plugin.params : liveParamsRef.current) as any;
+    return (src?.isEnabled === false ? { ...src, isEnabled: true } : src) as any;
+  }, [plugin.params, uiKey]);
+  const presetMenu = (simple?: boolean) => (
+    <PresetMenu plugin={live} simple={simple} onApply={p => stableUpdateParams(p)} onReloaded={() => setUiKey(k => k + 1)} />
+  );
   const folded = useRef(false);
   useEffect(() => {
     if (!nodeInstance || folded.current) return;
@@ -161,6 +173,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
                 )}
                 <span className="min-w-0 truncate text-[13px] font-bold text-white"><PluginName plugin={live} showDetail /></span>
                 {!live.isEnabled && <span className="shrink-0 rounded bg-amber-500/20 px-1.5 text-[10px] font-bold text-amber-300">Bypass</span>}
+                {!['SAMPLER', 'DRUM_SAMPLER', 'MELODIC_SAMPLER', 'DRUM_RACK_UI'].includes(plugin.type) && presetMenu(true)}
               </span>
               <button onClick={onClose} aria-label="Fermer" className="w-11 h-11 rounded-full flex items-center justify-center text-white hover:bg-white/10">
                   <i className="fas fa-times"></i>
@@ -172,7 +185,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
 
   // --- SPECIAL CASE: VST3 EXTERNALS ---
   if (plugin.type === 'VST3') {
-      const vstWindow = <VSTPluginWindow plugin={plugin} onClose={onClose} trackId={trackId} track={track} onToggleFreeze={onToggleFreeze} />;
+      const vstWindow = <VSTPluginWindow plugin={plugin} onClose={onClose} trackId={trackId} track={track} onToggleFreeze={onToggleFreeze} presetSlot={isMobile ? undefined : presetMenu()} />;
       if (isMobile) return mobileShell(vstWindow);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">
@@ -291,7 +304,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
 
   if (isMobile) {
     return mobileShell(
-      <div className="nova-sombre nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden rounded-none">
+      <div key={uiKey} className="nova-sombre nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden rounded-none">
         {renderPluginUI()}
       </div>
     );
@@ -317,6 +330,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
             {!live.isEnabled && <span className="shrink-0 rounded bg-amber-500/20 px-1.5 text-[10px] font-bold text-amber-300">Bypass</span>}
          </div>
          <div className="flex shrink-0 items-center gap-1">
+         {presetMenu()}
          {onOpenPlugin && chain.length > 1 && (
            <>
              <button type="button" disabled={!prev} onClick={() => prev && onOpenPlugin(trackId, prev)} aria-label="Effet précédent" title={prev ? `Effet précédent : ${prev.name || prev.type}` : 'Premier effet de la piste'}
@@ -332,7 +346,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
       </div>
       
       {/* Container */}
-      <div className={`nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden ${isMobile ? 'rounded-none scale-[0.85] origin-top' : 'rounded-[40px]'}`}>
+      <div key={uiKey} className={`nova-hosted-plugin shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden ${isMobile ? 'rounded-none scale-[0.85] origin-top' : 'rounded-[40px]'}`}>
         {renderPluginUI()}
       </div>
     </div>

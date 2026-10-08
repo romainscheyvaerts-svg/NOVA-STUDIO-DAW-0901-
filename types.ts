@@ -332,6 +332,50 @@ export interface Clip {
    * Voir utils/araEdit.
    */
   araEdit?: AraEditInfo;
+  /**
+   * Traitement de clip (AudioSuite de Pro Tools, R6) : ce clip joue le son
+   * rendu par un ou plusieurs effets. La prise d'origine est gardée pour
+   * « Revenir à l'original ». Une ancienne version ignore ce champ et joue le
+   * son traité comme un clip normal. Voir utils/clipProcess.
+   */
+  audioSuite?: AudioSuiteInfo;
+}
+
+/** Ce que garde un clip traité par un effet (AudioSuite). */
+export interface AudioSuiteInfo {
+  version: 1;
+  /** Son d'origine (registre audio). Absent ou introuvable : on ne peut que garder le son traité. */
+  sourceBufferId?: string;
+  /** Fichier du son d'origine dans un projet sauvegardé (le temps de la sauvegarde). */
+  sourceRef?: string;
+  /** Instant du son d'origine qui correspond au début du son traité (s). */
+  regionStart: number;
+  /** Effets appliqués, dans l'ordre. */
+  steps: { type: PluginType; name: string; preset?: string; at: number }[];
+  /** Nom et calage du clip d'origine. */
+  sourceName?: string;
+  sourceWarp?: WarpSettings;
+}
+
+/** Piste rendue par Commit, Consolider avec effets ou impression de bus (utils/commit). */
+export interface TrackCommitInfo {
+  kind: 'commit' | 'bounce' | 'bus';
+  /** Piste d'origine : rendue inactive et masquée (commit), clips coupés (bounce), bus coupé (bus). */
+  sourceTrackId: string;
+  at: number;
+  /** Dernier effet inclus dans le rendu (index) ; -1 : aucun. */
+  upTo?: number;
+  /** Queue rendue après la fin (s). */
+  tail?: number;
+  /** Plage rendue (bounce). */
+  range?: { start: number; end: number };
+  /** Clips d'origine coupés par le bounce (rallumés à la restauration). */
+  mutedClipIds?: string[];
+  /** Le bus d'origine a été coupé à l'impression. */
+  mutedSource?: boolean;
+  /** État de la piste d'origine avant le commit (restauré à l'identique). */
+  sourceWasHidden?: boolean;
+  sourceWasInactive?: boolean;
 }
 
 /** Plugin ARA connu de NOVA. */
@@ -707,6 +751,8 @@ export interface Track {
   outputBusId?: string;
   /** Bus nommés de la session (I/O Setup) : rangés sur la piste master seulement. */
   ioBuses?: NamedBus[];
+  /** Piste rendue (Commit, bounce, bus imprimé) : d'où elle vient, pour « Restaurer la piste d'origine ». */
+  commit?: TrackCommitInfo;
 }
 
 /** Infos d'un couloir de prise (Track.takeMeta). */
