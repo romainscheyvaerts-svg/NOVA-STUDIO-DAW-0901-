@@ -678,6 +678,14 @@ export interface Track {
   isFrozen: boolean;
   volume: number;
   pan: number;
+  /** Tête de tranche (R11), avant les inserts : trim d'entrée en dB (−24 à +24, 0 par défaut). */
+  inputTrimDb?: number;
+  /** Inversion de polarité Ø des deux canaux. */
+  phaseInvert?: boolean;
+  /** Somme mono (prime sur la largeur). */
+  monoSum?: boolean;
+  /** Largeur stéréo : 0 = mono, 1 = inchangée (défaut), 2 = très large. */
+  stereoWidth?: number;
   inputDeviceId?: string; 
   outputTrackId: string;  
   instrumentId?: string | number; 
