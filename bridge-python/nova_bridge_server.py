@@ -119,7 +119,9 @@ Protocole (WebSocket ws://127.0.0.1:8765)
       (v11) flags & 1 (PARAMS) : après l'audio, u16 count | u16 0 | count × (u16 index,
         u16 décalage dans le bloc, f32 valeur brute 0–1) : réglages posés à l'échantillon
         près (bloc découpé), index dans la table SET_AUTOMATION_MAP.
-      (v11) flags & 2 (SIDECHAIN) : nch=4, canaux 3-4 = clé de side-chain (voir vst_sidechain).
+      (v11) flags & 2 (SIDECHAIN) : nch=4, canaux 3-4 = clé de side-chain (voir vst_sidechain) :
+        passée à l'entrée clé du plugin quand l'hôte sait l'alimenter (LOAD_PLUGIN
+        sidechain_inputs > 0), sinon ignorée. HELLO sidechain=true : hôte natif présent.
     type 2 — rendu hors temps réel (gel / export)
       u8 type=2 | u8 0 | u16 0 | u32 J | JSON (J octets) | bourrage 4 | float32 entrelacés
       JSON requête : {action:"RENDER", req_id, slot_id | path+plugin_name+state,
@@ -156,6 +158,7 @@ import license_watch
 import stems_service
 import vst_automation
 import vst_host
+import vst_sidechain
 import vst_probe
 import plugin_guard
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events, calibrate_gr_offline
@@ -530,6 +533,9 @@ class NovaBridgeServer:
                               "crash_events": True, "quarantine": True,
                               # (v11) automation des réglages à l'échantillon près, écriture depuis la fenêtre
                               "automation": vst_host.HAS_PEDALBOARD, "param_watch": vst_host.HAS_PEDALBOARD,
+                              # (v11, R10) clé de side-chain des VST3 : seulement avec l'hôte natif
+                              # (pedalboard désactive les bus d'entrée auxiliaires, voir vst_sidechain)
+                              "sidechain": vst_sidechain.host_feeds_sidechain(), "sidechain_protocol": True,
                               "ara": bool(ara_service.ara_host.find_host_exe())})
 
     async def _a_get_plugin_list(self, ws, req):
@@ -646,7 +652,9 @@ class NovaBridgeServer:
         return {"success": True, "slot_id": slot.slot_id, "name": slot.name, "vendor": slot.vendor,
                 "latency_samples": slot.latency_samples, "buffer_latency_samples": 0,
                 "sample_rate": slot.sample_rate, "state": state, "has_editor": vst_host.HAS_PEDALBOARD,
-                "is_instrument": slot.is_instrument, "reused": reused}
+                "is_instrument": slot.is_instrument, "reused": reused,
+                # (R10) None : l'hôte ne sait pas alimenter l'entrée clé ; 0 : pas d'entrée clé ; 2 : clé stéréo
+                "sidechain_inputs": slot.sidechain_inputs}
 
     async def _a_unload_plugin(self, ws, req):
         sid = str(req.get("slot_id", ""))
@@ -751,7 +759,9 @@ class NovaBridgeServer:
             slot.proc_seconds, slot.proc_blocks, slot.auto_applied, slot.auto_skipped = 0.0, 0, 0, 0
         avg = slot.proc_seconds / slot.proc_blocks * 1e6 if slot.proc_blocks else 0.0
         self._reply(ws, req, {"success": True, "applied": slot.auto_applied, "skipped": slot.auto_skipped,
-                              "watching": slot.watching, "blocks": slot.proc_blocks, "avg_block_us": round(avg, 1)})
+                              "watching": slot.watching, "blocks": slot.proc_blocks, "avg_block_us": round(avg, 1),
+                              "key_blocks": slot.key_blocks, "sidechain_inputs": slot.sidechain_inputs,
+                              "last_gr_db": round(float(getattr(slot.plugin, "last_gr_db", 0.0) or 0.0), 2)})
 
     async def _a_watch_params(self, ws, req):
         slot = self._slot(req)

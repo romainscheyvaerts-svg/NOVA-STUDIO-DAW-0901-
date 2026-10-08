@@ -49,6 +49,7 @@ import license_watch
 import plugin_guard
 import vst_automation
 import vst_shell
+import vst_sidechain
 
 try:
     import pedalboard
@@ -176,6 +177,8 @@ def scan_vst3(extra_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _open_plugin(path: str, plugin_name: Optional[str] = None):
+    if vst_sidechain.is_debug_plugin(path):
+        return vst_sidechain.DebugDucker()   # effet à clé de référence (tests, NOVA_BRIDGE_DEBUG=1)
     if not HAS_PEDALBOARD:
         raise RuntimeError("pedalboard n'est pas installé")
     if not os.path.exists(path):
@@ -1129,6 +1132,8 @@ class Slot:
         # plugin : son état (GET_STATE, rendus hors ligne) ne les contient pas encore.
         self._params_dirty = False
         self._last_block_t = 0.0
+        self.sidechain_inputs: Optional[int] = None
+        self.key_blocks = 0
 
     @property
     def latency_samples(self) -> int:
@@ -1143,6 +1148,8 @@ class Slot:
         self.name = getattr(plugin, "name", None) or self.name
         self.vendor = getattr(plugin, "manufacturer_name", "") or ""
         self.is_instrument = _is_instrument(plugin)
+        # (R10) Entrée clé : None = l'hôte (pedalboard) ne sait pas l'alimenter.
+        self.sidechain_inputs = vst_sidechain.sidechain_inputs(plugin)
         with self.lock:
             self.plugin = plugin
             self.reported_latency = _latency_of(plugin)
@@ -1193,12 +1200,20 @@ class Slot:
                 changes = [(i, 0, v) for i, _o, v in self._carry] + list(changes or [])
                 self._carry = []
             t0 = time.perf_counter()
+            # (R10) Clé de side-chain : seulement pour un plugin dont l'hôte alimente l'entrée clé.
+            use_key = key is not None and vst_sidechain.keyed(plugin)
             try:
-                if changes:
+                if changes or use_key:
                     stereo = _to_stereo(block)
-                    parts = vst_automation.process_split(
-                        lambda b: np.asarray(process(plugin, b, self.sample_rate, BLOCK), dtype=np.float32),
-                        self._apply_changes, stereo, changes)
+                    full = np.vstack([stereo, _to_stereo(key)]) if use_key else stereo
+
+                    def run(b):
+                        if use_key:
+                            return np.asarray(plugin.process_keyed(np.ascontiguousarray(b[:2]), np.ascontiguousarray(b[2:4]), []), dtype=np.float32)
+                        return np.asarray(process(plugin, b, self.sample_rate, BLOCK), dtype=np.float32)
+                    if use_key:
+                        self.key_blocks += 1
+                    parts = vst_automation.process_split(run, self._apply_changes, full, changes or [])
                     parts = [_to_stereo(x) for x in parts if x.shape[-1]]
                     out = np.concatenate(parts, axis=1) if parts else np.zeros((2, 0), np.float32)
                 else:
@@ -1580,8 +1595,9 @@ def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], stat
     La sortie de pedalboard est alignée mais retient au début l'équivalent de
     la latence du plugin : on pousse du silence jusqu'à tout récupérer.
     automation (R9) : [{name, frames, values}] rejoués à l'échantillon près
-    (rendu découpé aux instants des changements). key (R10) : clé de side-chain,
-    réservée à l'hôte natif (voir vst_sidechain) ; ignorée ici."""
+    (rendu découpé aux instants des changements). key (R10) : clé de side-chain
+    (2, n), passée à l'entrée clé quand l'hôte sait l'alimenter (vst_sidechain),
+    sinon ignorée."""
     sr = int(sample_rate)
     entry = OFFLINE.acquire(juce, path, plugin_name, state_b64, sr, RENDER_BLOCK, context)
     plugin = entry.plugin
@@ -1596,6 +1612,11 @@ def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], stat
         got = 0
         events = vst_automation.offline_events(automation, total) if automation else []
         handles = _handles_for(plugin, {e[1] for e in events})
+        use_key = key is not None and vst_sidechain.keyed(plugin)
+        if use_key:
+            k = _to_stereo(key)
+            ksrc = np.zeros((2, total), np.float32)
+            ksrc[:, :min(total, k.shape[1])] = k[:, :total]
         for start, end, todo in vst_automation.render_chunks(total, events, chunk):
             for _f, name, value in todo:
                 cp = handles.get(name)
@@ -1604,7 +1625,10 @@ def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], stat
                         cp.raw_value = float(value)
                     except Exception:
                         pass
-            out = np.asarray(process(plugin, src[:, start:end], sr, RENDER_BLOCK), np.float32)
+            if use_key:
+                out = np.asarray(plugin.process_keyed(np.ascontiguousarray(src[:, start:end]), np.ascontiguousarray(ksrc[:, start:end]), []), np.float32)
+            else:
+                out = np.asarray(process(plugin, src[:, start:end], sr, RENDER_BLOCK), np.float32)
             if out.shape[-1]:
                 parts.append(_to_stereo(out))
                 got += out.shape[-1]

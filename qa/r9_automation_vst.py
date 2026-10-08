@@ -246,6 +246,18 @@ const mkB = () => [audioTrack('synth', toBuf(sine(4, 0.1, 4000, sr), sr), [vstPl
   const names = []; for (let b = 1; b <= 10; b++) { names.push(`band_${b}_gain`); names.push(`band_${b}_frequency`); }
   const lanes = names.map((n, i) => laneP('proq4', n, [[0, 0.3, 'LINEAR'], [4, 0.7 - (i % 5) * 0.05, 'LINEAR'], [8, 0.4]]));
   const noise = new Float32Array(8 * sr); let s = 7; for (let i = 0; i < noise.length; i++) { s = (s * 1664525 + 1013904223) >>> 0; noise[i] = 0.05 * (s / 4294967296 * 2 - 1); }
+  // Témoin : même son, même plugin, sans automation (coupures dues à la machine seule).
+  {
+    const t0s = [audioTrack('bus', toBuf(noise, sr), [vstPlugin('proq4', pq)], [])];
+    await loadLive(t0s);
+    const n0 = VN.liveVstNodes.get('proq4');
+    const u00 = n0.getInfo().underruns;
+    await novaBridge.request({ action: 'AUTOMATION_STATS', slot_id: n0.getSlotId(), reset: true });
+    await capture(t0s, 8);
+    const b0 = await novaBridge.request({ action: 'AUTOMATION_STATS', slot_id: n0.getSlotId() });
+    out.D0 = { reglages: 0, us_par_bloc_dans_le_plugin: b0.avg_block_us, coupures: n0.getInfo().underruns - u00 };
+    t0s.forEach(t => E.disposeTrack(t.id));
+  }
   const tracks = [audioTrack('bus', toBuf(noise, sr), [vstPlugin('proq4', pq)], lanes)];
   await loadLive(tracks);
   const node = VN.liveVstNodes.get('proq4');

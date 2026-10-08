@@ -6,7 +6,8 @@ import { interpolateCurve, parsePluginParam, playedLanes, sortedPoints } from '.
  *
  * En lecture, le worklet du pont (vst-bridge-processor-v5) envoie avec chaque
  * bloc de 128 échantillons :
- *   - la valeur au début du bloc si elle a bougé de plus de VST_AUTO_TOL ;
+ *   - la valeur au début du bloc si elle a bougé de plus de VST_AUTO_TOL, au plus
+ *     une fois tous les VST_AUTO_RAMP_BLOCKS blocs (débit des rampes limité) ;
  *   - tout saut de plus de VST_AUTO_JUMP dans le bloc, à son échantillon exact.
  * Le rendu hors ligne envoie au pont la MÊME suite de changements, calculée ici
  * à partir des voies (images depuis le début du son rendu) : l'export rejoue
@@ -17,6 +18,7 @@ import { interpolateCurve, parsePluginParam, playedLanes, sortedPoints } from '.
 export const VST_AUTO_BLOCK = 128;
 export const VST_AUTO_TOL = 1e-4;
 export const VST_AUTO_JUMP = 0.02;
+export const VST_AUTO_RAMP_BLOCKS = 2;
 
 export interface VstAutomationLane { name: string; frames: number[]; values: number[] }
 
@@ -65,18 +67,19 @@ export function laneEvents(points: AutomationPoint[], startTime: number, sampleR
     }
   }
   let last = NaN;
+  let lastAt = -1e9;
   const nBlocks = Math.ceil(frames / VST_AUTO_BLOCK);
   for (let b = 0; b < nBlocks; b++) {
     const f0 = b * VST_AUTO_BLOCK;
     // Valeurs en flottants 32 bits, comme l'AudioParam lu par le worklet : mêmes décisions, au bit près.
     const v0 = Math.fround(clamp01(w.at(startTime + f0 / sampleRate)));
-    if (!(Math.abs(v0 - last) <= VST_AUTO_TOL)) { out.frames.push(f0); out.values.push(v0); last = v0; }
+    if (!(Math.abs(v0 - last) <= VST_AUTO_TOL) && (last !== last || b - lastAt >= VST_AUTO_RAMP_BLOCKS)) { out.frames.push(f0); out.values.push(v0); last = v0; lastAt = b; }
     const inBlock = steps.get(b);
     if (inBlock) {
       for (const f of inBlock.sort((x, y) => x - y)) {
         if (f === f0) continue;
         const v = Math.fround(clamp01(w.at(startTime + f / sampleRate + 1e-9)));
-        if (Math.abs(v - last) > VST_AUTO_JUMP) { out.frames.push(f); out.values.push(v); last = v; }
+        if (Math.abs(v - last) > VST_AUTO_JUMP) { out.frames.push(f); out.values.push(v); last = v; lastAt = b; }
       }
     }
   }

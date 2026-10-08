@@ -20,8 +20,8 @@
  * réglage VST, -1 = libre). Le moteur y programme les voies d'automation
  * d'avance, avec la même avance PDC que les effets NOVA. Chaque bloc envoyé
  * porte les changements qui le concernent, horodatés à l'échantillon près :
- *   - valeur au début du bloc si elle a bougé de plus de TOL (rampes : au plus
- *     une valeur par bloc et par réglage, débit limité) ;
+ *   - valeur au début du bloc si elle a bougé de plus de TOL, au plus une fois
+ *     tous les RAMP_BLOCKS blocs par réglage (rampes : débit limité, ≈ 5 ms) ;
  *   - tout saut de plus de JUMP au sein du bloc, à son échantillon exact
  *     (paliers), au plus MAX_PER_BLOCK par réglage.
  * v5 (R10) — side-chain : 2e entrée = clé ; si la clé est active, le bloc
@@ -33,6 +33,7 @@ const AUTO_SLOTS = 32;
 const TOL = 1e-4;
 const JUMP = 0.02;
 const MAX_PER_BLOCK = 4;
+const RAMP_BLOCKS = 2;
 
 class VSTBridgeProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -60,6 +61,7 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     this.activeSince = 0;     // les premiers blocs (remplissage du pré-tampon) ne sont pas des pertes
     this.armed = new Uint8Array(AUTO_SLOTS);
     this.lastSent = new Float32Array(AUTO_SLOTS).fill(NaN);
+    this.lastSentAt = new Float64Array(AUTO_SLOTS).fill(-1e9);
     this.paramsSent = 0;
     this.paramBlocks = 0;
     this.pbuf = new Float32Array(AUTO_SLOTS * MAX_PER_BLOCK * 3);
@@ -109,9 +111,11 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
       let last = this.lastSent[i];
       const v0 = arr[0];
       let k = 0;
-      if (v0 >= 0 && !(Math.abs(v0 - last) <= TOL)) {
+      // Rampe : au plus une valeur tous les RAMP_BLOCKS blocs (première valeur : tout de suite).
+      if (v0 >= 0 && !(Math.abs(v0 - last) <= TOL) && (last !== last || this.seq - this.lastSentAt[i] >= RAMP_BLOCKS)) {
         this.pbuf[c * 3] = i; this.pbuf[c * 3 + 1] = 0; this.pbuf[c * 3 + 2] = v0; c++; k++;
         last = v0;
+        this.lastSentAt[i] = this.seq;
       }
       if (arr.length > 1) {
         for (let s = 1; s < n && k < MAX_PER_BLOCK; s++) {
@@ -119,6 +123,7 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
           if (v >= 0 && Math.abs(v - last) > JUMP) {
             this.pbuf[c * 3] = i; this.pbuf[c * 3 + 1] = s; this.pbuf[c * 3 + 2] = v; c++; k++;
             last = v;
+            this.lastSentAt[i] = this.seq;
           }
         }
       }

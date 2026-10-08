@@ -47,6 +47,11 @@ export interface VstNodeInfo {
   name: string;
   latencyMs: number;
   underruns: number;
+  /**
+   * (R10) Clé de side-chain : 'ok' (le plugin la reçoit), 'none' (pas d'entrée clé),
+   * 'host' (l'hôte du pont ne sait pas encore alimenter l'entrée clé des VST3), null (pas chargé).
+   */
+  sidechain: 'ok' | 'none' | 'host' | null;
 }
 
 /** D'où vient l'état : fenêtre du plugin fermée par l'artiste, chargement, réglage par Nova. */
@@ -164,6 +169,8 @@ export class VSTPluginNode {
   /** (R10) Entrée de clé (side-chain) : branchée sur la 2e entrée du worklet. */
   public readonly sidechainInput: GainNode;
   private sidechainOn = false;
+  /** Entrée clé annoncée par le pont au chargement (null : hôte sans side-chain). */
+  private keyInputs: number | null = null;
 
   /**
    * opts.quiet : plugin posé par NOVA lui-même (autotune du PC) : chargement
@@ -239,6 +246,7 @@ export class VSTPluginNode {
       pluginId: this.plugin.id, status: this.status, error: this.error, licenseRequired: this.licenseRequired,
       name: this.loadedName || this.plugin.name, underruns: this.underruns,
       latencyMs: Math.round(this.latency * 1000),
+      sidechain: this.status !== 'active' ? null : this.keyInputs === null ? 'host' : this.keyInputs > 0 ? 'ok' : 'none',
     };
   }
 
@@ -364,11 +372,15 @@ export class VSTPluginNode {
 
   // --- Side-chain (R10) -----------------------------------------------------------
 
-  /** Clé branchée par le moteur (SidechainRouter) : les blocs partent avec la clé. */
+  /**
+   * Clé branchée par le moteur (SidechainRouter) : les blocs partent avec la clé (4 canaux),
+   * seulement si le pont alimente l'entrée clé de ce plugin (sinon débit inutile).
+   */
   setSidechainActive(on: boolean) {
     this.sidechainOn = on;
-    this.worklet?.port.postMessage({ type: 'sidechain', on: on && this.status === 'active' });
+    this.worklet?.port.postMessage({ type: 'sidechain', on: this.keyFlowing() });
   }
+  private keyFlowing() { return this.sidechainOn && this.status === 'active' && (this.keyInputs || 0) > 0; }
   isSidechainActive() { return this.sidechainOn; }
 
   dispose() {
@@ -504,6 +516,7 @@ export class VSTPluginNode {
       this.licenseRequired = false;
       if (this.disposed || seq !== this.loadSeq) { novaBridge.unloadPlugin(slotId); return; }
       this.loadedName = res.name;
+      this.keyInputs = typeof res.sidechainInputs === 'number' ? res.sidechainInputs : null;
       this.pluginLatencySamples = res.latencySamples + res.bufferLatencySamples;
       if (res.stateB64) this.adoptState(res.stateB64);
 
@@ -529,8 +542,8 @@ export class VSTPluginNode {
       this.input.connect(node);
       node.connect(this.output);
       node.port.postMessage({ type: 'active', on: true });
-      node.port.postMessage({ type: 'sidechain', on: this.sidechainOn });
       this.setStatus('active');
+      node.port.postMessage({ type: 'sidechain', on: this.keyFlowing() });
       this.updateLatency(true);
       if (this.plugin.params?.novaSettings) void this.applyNovaSettings();
       // (R9) Nouvelle instance : réglages automatisés redéclarés, catalogue relu, écriture reprise.

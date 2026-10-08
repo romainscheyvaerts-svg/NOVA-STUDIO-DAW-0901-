@@ -250,6 +250,8 @@ export interface LoadResult {
   bufferLatencySamples: number;
   stateB64: string | null;
   isInstrument: boolean;
+  /** (v11, R10) Entrée clé du plugin : null = l'hôte du pont ne sait pas l'alimenter ; 0 = aucune ; 2 = stéréo. */
+  sidechainInputs: number | null;
 }
 
 export type SlotEvent =
@@ -676,6 +678,7 @@ class NovaBridgeService {
       bufferLatencySamples: Number(r.buffer_latency_samples) || 0,
       stateB64: r.state || null,
       isInstrument: !!r.is_instrument,
+      sidechainInputs: typeof r.sidechain_inputs === 'number' ? r.sidechain_inputs : null,
     };
   }
 

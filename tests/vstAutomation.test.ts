@@ -71,7 +71,7 @@ describe('R9 · changements envoyés au pont', () => {
     expect(ev.frames).toEqual([0, Math.round(0.5 * SR)]);
   });
 
-  it('rampe : une valeur par bloc au plus, débit borné', () => {
+  it('rampe : une valeur tous les 2 blocs au plus, débit borné', () => {
     const ev = laneEvents(pts([[0, 0], [1, 1]]), 0, SR, 2 * SR);
     expect(ev.frames.every(f => f % VST_AUTO_BLOCK === 0)).toBe(true);
     expect(ev.frames.length).toBeLessThanOrEqual(Math.ceil(SR / VST_AUTO_BLOCK) + 2);
@@ -98,9 +98,9 @@ describe('R9 · changements envoyés au pont', () => {
     const lanes = Array.from({ length: 20 }, (_, i) => pts([[0, 0], [4, 1], [4 + i * 0.1, 0.2, 'HOLD'], [8, 0.9]]));
     const per = lanes.map(l => laneEvents(l, 0, SR, 8 * SR).frames.length);
     const total = per.reduce((a, b) => a + b, 0);
-    // 20 rampes simultanées : au plus 1 valeur par bloc et par réglage (375/s à 48 kHz) + les paliers,
-    // 8 octets chacune : ≈ 36 Ko/s vers le pont au pire (l'audio stéréo du même bloc : 375 Ko/s).
-    expect(total).toBeLessThanOrEqual(20 * (8 * SR / VST_AUTO_BLOCK + 4));
+    // 20 rampes simultanées : au plus 1 valeur tous les 2 blocs et par réglage (188/s à 48 kHz) + les paliers,
+    // 8 octets chacune : ≈ 29 Ko/s vers le pont au pire (l'audio stéréo du même bloc : 375 Ko/s).
+    expect(total).toBeLessThanOrEqual(20 * (8 * SR / VST_AUTO_BLOCK / 2 + 4));
     expect((total * 8) / 8 / 1024).toBeLessThan(64);
   });
 

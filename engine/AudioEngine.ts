@@ -2314,6 +2314,9 @@ export class AudioEngine {
    * planificateur gardait les pistes du moment du « Play » : un clip supprimé
    * continuait de sonner jusqu'à l'arrêt.
    */
+  /** Pistes de la session telles que le moteur les joue (clés de side-chain des rendus VST, R10). */
+  public getLiveTracks(): Track[] { return this.liveTracks || []; }
+
   public setLiveTracks(tracks: Track[]) {
     this.practiceRawTracks = tracks;
     tracks = engineView(tracks).tracks;
