@@ -28,6 +28,13 @@ Hôte VST3 du pont Nova (pedalboard de Spotify).
                   CrashGuard : un marqueur disque est posé pendant chaque
                   chargement natif ; s'il reste au démarrage suivant, le pont
                   est mort en chargeant ce plugin. Deux fois : quarantaine.
+- Moteur        : NOVA_VST_ENGINE=native|pedalboard (vst_native.select_engine).
+                  « native » : NovaVSTHost.exe (SDK VST3 sous MIT, sans JUCE), un
+                  processus par plugin ; _open_plugin() rend un NativePlugin qui
+                  a la même surface que l'objet de pedalboard, le reste de ce
+                  fichier est commun aux deux moteurs. En plus : side-chain réel
+                  (key), réglages à l'échantillon près, un plugin qui plante
+                  n'emporte que son processus (HostCrashed → slot en panne).
 """
 
 import base64
@@ -59,6 +66,12 @@ except ImportError:  # pragma: no cover - le pont reste joignable, sans VST
     HAS_PEDALBOARD = False
 
 logger = logging.getLogger('NovaBridge.VST')
+
+import vst_native  # noqa: E402  (moteur natif, voir plus haut)
+
+ENGINE = vst_native.select_engine(HAS_PEDALBOARD)
+NATIVE = ENGINE == "native"
+HAS_VST = ENGINE != "none"     # un moteur VST est disponible (pedalboard ou natif)
 
 VST3_PATHS = {
     "Windows": [
@@ -175,6 +188,10 @@ def scan_vst3(extra_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _open_plugin(path: str, plugin_name: Optional[str] = None):
+    if NATIVE:
+        # Hôte natif : un processus par plugin, chargé par nom de classe (shells Waves
+        # compris, sans vst_shell), dossier UADx compris.
+        return vst_native.load_plugin(path, plugin_name)
     if not HAS_PEDALBOARD:
         raise RuntimeError("pedalboard n'est pas installé")
     if not os.path.exists(path):
@@ -421,10 +438,16 @@ def prepare_plugin(path: str, plugin_name: Optional[str], state_b64: Optional[st
 _MONO: set = set()
 
 
-def process(plugin, block: np.ndarray, sample_rate: int, buffer_size: int, reset: bool = False) -> np.ndarray:
-    """plugin.process, en mono pour les variantes mono (somme L+R en entrée)."""
+def process(plugin, block: np.ndarray, sample_rate: int, buffer_size: int, reset: bool = False,
+            **native) -> np.ndarray:
+    """plugin.process, en mono pour les variantes mono (somme L+R en entrée).
+    native (moteur natif seulement) : key=(2, n) clé de side-chain, changes=[(clé, décalage,
+    valeur 0–1)] réglages à l'échantillon près. Ignorés avec pedalboard."""
     if id(plugin) in _MONO:
         block = np.ascontiguousarray(block.mean(axis=0, keepdims=True) if block.shape[0] > 1 else block, dtype=np.float32)
+    native = {k: v for k, v in native.items() if v is not None}
+    if native and isinstance(plugin, vst_native.NativePlugin):
+        return plugin.process(block, int(sample_rate), buffer_size=buffer_size, reset=reset, **native)
     return plugin.process(block, int(sample_rate), buffer_size=buffer_size, reset=reset)
 
 
@@ -541,6 +564,8 @@ def instantiate(juce: "JuceThread", path: str, plugin_name: Optional[str], state
     Plugin en quarantaine (il a fait planter le pont) : refusé (PluginQuarantined).
     Un marqueur disque couvre le chargement natif ; il n'est effacé qu'une fois
     le chargement fini (même après un délai dépassé)."""
+    if NATIVE:
+        return _instantiate_native(juce, path, plugin_name, state_b64, sample_rate, block, context)
     # Plugin connu pour planter (ou à risque) : essai dans un processus jetable
     # d'abord ; s'il plante, PluginUnstable et le pont continue (plugin_guard).
     plugin_guard.check(path, plugin_name)
@@ -564,6 +589,38 @@ def instantiate(juce: "JuceThread", path: str, plugin_name: Optional[str], state
                         # Fini plus tard (fenêtre fermée) : l'instance orpheline est libérée.
                         fut.add_done_callback(lambda f: juce.release(f.result()[0]) if not f.exception() else None)
                         raise TimeoutError("Le plugin ne répond pas (fenêtre de licence restée ouverte ?)")
+    finally:
+        if w is not None:
+            w.end()
+
+
+def _instantiate_native(juce: "JuceThread", path: str, plugin_name: Optional[str], state_b64: Optional[str],
+                        sample_rate: int, block: int, context: Optional[dict] = None):
+    """Moteur natif : le plugin vit dans son propre processus, un plantage au chargement
+    n'arrête pas le pont (pas d'essai jetable ni de marqueur disque). Il compte quand même
+    pour la quarantaine : deux plantages, le plugin n'est plus chargé (rescan = on réessaie)."""
+    guard = CRASH_GUARD
+    if guard is not None and guard.is_quarantined(path):
+        raise PluginQuarantined(guard.message(path))
+    w = WATCHER.begin(path, plugin_name, context) if WATCHER is not None else None
+    t0 = time.time()
+    try:
+        fut = juce.call(prepare_plugin, path, plugin_name, state_b64, sample_rate, block)
+        while True:
+            try:
+                return fut.result(timeout=1.0)
+            except FutureTimeout:
+                limit = LICENSE_WAIT_S if (w is not None and w.seen) else LOAD_TIMEOUT_S
+                if time.time() - t0 > limit:
+                    fut.add_done_callback(lambda f: juce.release(f.result()[0]) if not f.exception() else None)
+                    raise TimeoutError("Le plugin ne répond pas (fenêtre de licence restée ouverte ?)")
+            except vst_native.HostCrashed as e:
+                if guard is not None:
+                    guard.record_crash(path)
+                base = os.path.basename(path.rstrip("\\/"))
+                name = plugin_name or (base[:-5] if base.lower().endswith(".vst3") else base)
+                raise plugin_guard.PluginUnstable(
+                    f"{name} a planté en se chargeant ({e}) : il tourne à part, le pont continue") from e
     finally:
         if w is not None:
             w.end()
@@ -672,6 +729,14 @@ class CrashGuard:
                     e["last"] = time.time()
                 self._save()
         return crashed
+
+    def record_crash(self, path: str):
+        """Plantage constaté directement (moteur natif : le processus du plugin, pas le pont)."""
+        with self.lock:
+            e = self.crashes.setdefault(path, {"count": 0})
+            e["count"] = int(e.get("count", 0)) + 1
+            e["last"] = time.time()
+            self._save()
 
     def count(self, path: str) -> int:
         return int((self.crashes.get(path) or {}).get("count", 0))
