@@ -505,7 +505,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                       {/* Overlay au hover */}
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                         {isMelody(inst) ? (
-                          <span className="px-3 py-2 rounded-full bg-violet-500 text-white text-[11px] font-black shadow-lg">🥁 Faire une instru</span>
+                          <span className="px-3 py-2 rounded-full bg-violet-600 text-white text-[11px] font-black shadow-lg">🥁 Faire une instru</span>
                         ) : (
                           <div className="w-14 h-14 rounded-full bg-cyan-500 flex items-center justify-center shadow-lg">
                             <i className="fas fa-arrow-right text-white text-lg"></i>

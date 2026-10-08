@@ -508,25 +508,25 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-xl flex justify-center items-center p-6 animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[9999] bg-black/70 flex justify-center items-center p-6 animate-in fade-in duration-300" role="dialog" aria-modal="true" aria-labelledby="admin-title">
       
-      {/* MAIN CONTAINER (Glass Effect) */}
-      <div className="w-full max-w-7xl h-[90vh] bg-[#14161a] border border-white/10 rounded-3xl flex flex-col overflow-hidden shadow-2xl relative">
+      {/* Épure orbitale : surface du thème, sans verre ni lueur */}
+      <div className="w-full max-w-7xl h-[90vh] bg-nv-surface border border-white/[0.06] rounded-3xl flex flex-col overflow-hidden shadow-2xl relative">
         
         {/* HEADER */}
-        <div className="h-16 border-b border-white/5 flex items-center justify-between px-8 bg-black/20">
+        <div className="h-16 border-b border-white/[0.06] flex items-center justify-between px-6">
             <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-cyan-500 rounded-lg flex items-center justify-center text-black shadow-[0_0_15px_rgba(6,182,212,0.5)]">
+                <div className="w-9 h-9 bg-white/[0.06] rounded-xl flex items-center justify-center text-amber-400">
                     <i className="fas fa-crown text-sm"></i>
                 </div>
                 <div>
-                    <h2 className="text-sm font-black uppercase tracking-[0.2em] text-white">Admin Dashboard</h2>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Store Manager v2.1</p>
+                    <h2 id="admin-title" className="text-[15px] font-black text-white">Gestion du catalogue</h2>
+                    <p className="text-[11px] text-slate-400">Beats du store Make Music · réservé à l'admin</p>
                 </div>
             </div>
             <button aria-label="Fermer" title="Fermer" 
                 onClick={onClose}
-                className="w-8 h-8 rounded-full bg-white/5 hover:bg-red-500 hover:text-white text-slate-500 flex items-center justify-center transition-all"
+                className="nova-hit w-9 h-9 rounded-xl bg-white/[0.06] hover:bg-white/10 hover:text-white text-slate-300 flex items-center justify-center transition-all"
             >
                 <i className="fas fa-times"></i>
             </button>
@@ -536,17 +536,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
         <div className="flex-1 flex overflow-hidden">
             
             {/* LEFT COLUMN: FORM */}
-            <div className="w-1/3 min-w-[400px] border-r border-white/5 flex flex-col bg-[#0c0d10]">
-                <div className={`p-6 border-b border-white/5 flex justify-between items-center ${editingId ? 'bg-amber-500/10' : ''}`}>
-                    <h3 className={`text-xs font-black uppercase tracking-widest ${editingId ? 'text-amber-400' : 'text-cyan-400'}`}>
+            <div className="w-1/3 min-w-[380px] border-r border-white/[0.06] flex flex-col bg-nv-bg">
+                <div className={`px-6 py-4 border-b border-white/[0.06] flex justify-between items-center ${editingId ? 'bg-amber-500/10' : ''}`}>
+                    <h3 className={`text-[13px] font-black ${editingId ? 'text-amber-400' : 'text-white'}`}>
                         <i className={`fas ${editingId ? 'fa-edit' : 'fa-plus-circle'} mr-2`}></i>
-                        {editingId ? 'Modifier le Beat' : 'Ajouter un nouveau Beat'}
+                        {editingId ? 'Modifier le beat' : 'Ajouter un beat'}
                     </h3>
                     
                     {editingId ? (
                         <button 
                             onClick={resetForm}
-                            className="text-[9px] bg-white/5 hover:bg-red-500 hover:text-white px-2 py-1 rounded transition-colors text-slate-400"
+                            className="h-9 px-3 rounded-lg bg-white/[0.06] hover:bg-white/10 text-[12px] font-bold text-slate-300 transition-colors"
                         >
                             <i className="fas fa-times mr-1"></i> Annuler
                         </button>
@@ -554,10 +554,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                         <button 
                             onClick={() => handleRegenerateAll()}
                             disabled={isGeneratingMeta || isGeneratingImg}
-                            className="text-[9px] bg-white/5 hover:bg-cyan-500 hover:text-black px-2 py-1 rounded transition-colors text-slate-400"
-                            title="Tout régénérer (Nom + Cover)"
+                            className="h-9 px-3 rounded-lg bg-white/[0.06] hover:bg-white/10 text-[12px] font-bold text-slate-300 transition-colors disabled:opacity-40"
+                            title="Proposer un nom et une pochette (IA)"
                         >
-                            <i className={`fas fa-random mr-1 ${isGeneratingMeta ? 'fa-spin' : ''}`}></i> Auto-Gen
+                            <i className={`fas fa-wand-magic-sparkles mr-1 text-violet-400 ${isGeneratingMeta ? 'fa-spin' : ''}`}></i> Nom + pochette IA
                         </button>
                     )}
                 </div>
@@ -566,14 +566,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                     
                     {/* --- EDITING INSTRUMENTAL INFO --- */}
                     {editingInstrumental && (
-                        <div className="mb-6 bg-purple-500/10 border border-purple-500/30 rounded-xl p-4">
+                        <div className="mb-6 rounded-2xl bg-cyan-500/[0.07] ring-1 ring-cyan-400/30 p-4">
                             <div className="flex items-center justify-between mb-3">
-                                <span className="text-[10px] font-black uppercase text-purple-400 tracking-widest">
+                                <span className="text-[12px] font-black text-cyan-300">
                                     <i className="fas fa-edit mr-2"></i>Modification de l'instrumental
                                 </span>
                                 <button 
                                     onClick={cancelEditInstrumental}
-                                    className="text-[9px] bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white px-2 py-1 rounded transition-colors"
+                                    className="h-8 px-3 rounded-lg bg-white/[0.06] hover:bg-white/10 text-[12px] font-bold text-slate-300 transition-colors"
                                 >
                                     <i className="fas fa-times mr-1"></i>Annuler
                                 </button>
@@ -598,87 +598,87 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                     
                     {/* Message si aucun instrumental sélectionné */}
                     {!editingInstrumental && !editingId && (
-                        <div className="mb-6 bg-slate-500/5 border border-slate-500/20 rounded-xl p-6 text-center">
-                            <i className="fas fa-mouse-pointer text-3xl text-slate-500/30 mb-3"></i>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
-                                Sélectionnez un instrumental à modifier
+                        <div className="mb-6 rounded-2xl border border-dashed border-white/15 p-5 text-center">
+                            <i className="fas fa-arrow-pointer text-2xl text-slate-400 mb-2"></i>
+                            <p className="text-[13px] text-white font-bold">
+                                Choisis un beat à modifier dans la liste
                             </p>
-                            <p className="text-[9px] text-slate-600 mt-1">
-                                Cliquez sur le bouton <span className="text-amber-400">✏️</span> à côté d'un instrumental
+                            <p className="text-[12px] text-slate-400 mt-1">
+                                Bouton <i className="fas fa-pen text-amber-400" aria-hidden /> sur sa ligne : ses infos, sa pochette et ses prix s'affichent ici.
                             </p>
                         </div>
                     )}
 
                     <form onSubmit={(e) => { e.preventDefault(); editingInstrumental ? handleSaveInstrumental() : handleSubmit(e); }} className="space-y-6">
                         {/* METADATA */}
-                        <div className="space-y-4 bg-white/5 p-4 rounded-xl border border-white/5">
-                            <label className="text-[9px] font-black text-slate-500 uppercase block">1. Informations de base</label>
+                        <div className="space-y-3 rounded-2xl bg-white/[0.03] p-4">
+                            <label className="text-[11px] font-bold text-slate-400 block">1. Informations</label>
                             
                             <div className="relative">
                                 <input 
                                     type="text" 
                                     value={name} 
                                     onChange={(e) => setName(e.target.value)} 
-                                    className="w-full bg-black/40 border border-white/10 rounded-lg pl-3 pr-8 py-2 text-xs text-white focus:border-cyan-500 outline-none" 
-                                    placeholder="Nom du Beat (ex: NIGHT RIDER)" 
+                                    className="w-full bg-nv-bg border border-white/10 rounded-lg text-[13px] text-white focus:border-cyan-500 outline-none pl-3 pr-10 py-2" aria-label="Nom du beat"
+                                    placeholder="Nom du beat (ex. : NIGHT RIDER)" 
                                 />
                                 <button 
                                     type="button"
                                     onClick={() => handleRegenerateName()}
                                     disabled={isGeneratingMeta}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-cyan-400"
-                                    title="Régénérer le nom"
+                                    className="nova-hit absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-cyan-400"
+                                    title="Proposer un autre nom (IA)" aria-label="Proposer un autre nom"
                                 >
                                     <i className={`fas fa-dice ${isGeneratingMeta ? 'fa-spin' : ''}`}></i>
                                 </button>
                             </div>
                             
                             <div className="grid grid-cols-2 gap-3">
-                                <select value={category} onChange={(e) => setCategory(e.target.value as any)} className="bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:border-cyan-500 outline-none">
+                                <select value={category} onChange={(e) => setCategory(e.target.value as any)} aria-label="Style" className="bg-nv-bg border border-white/10 rounded-lg text-[13px] text-white focus:border-cyan-500 outline-none px-3 py-2">
                                     {['Trap', 'Drill', 'Boombap', 'Afro', 'RnB', 'Pop', 'Electro'].map(c => <option key={c} value={c}>{c}</option>)}
                                 </select>
                                 <div className="flex space-x-2">
-                                    <input type="number" value={bpm} onChange={(e) => setBpm(Number(e.target.value))} className="w-1/2 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white text-center" placeholder="BPM" />
-                                    <input type="text" value={musicalKey} onChange={(e) => setMusicalKey(e.target.value)} className="w-1/2 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white text-center" placeholder="Key" />
+                                    <input type="number" value={bpm} onChange={(e) => setBpm(Number(e.target.value))} aria-label="Tempo (BPM)" className="w-1/2 bg-nv-bg border border-white/10 rounded-lg text-[13px] text-white focus:border-cyan-500 outline-none px-3 py-2 text-center" placeholder="BPM" />
+                                    <input type="text" value={musicalKey} onChange={(e) => setMusicalKey(e.target.value)} aria-label="Tonalité" className="w-1/2 bg-nv-bg border border-white/10 rounded-lg text-[13px] text-white focus:border-cyan-500 outline-none px-3 py-2 text-center" placeholder="Tonalité" />
                                 </div>
                             </div>
                         </div>
 
                         {/* FILES */}
-                        <div className="space-y-4 bg-white/5 p-4 rounded-xl border border-white/5">
-                            <label className="text-[9px] font-black text-slate-500 uppercase block">2. Fichiers & Cover {editingId && <span className="text-amber-500">(Optionnel si déjà présent)</span>}</label>
+                        <div className="space-y-3 rounded-2xl bg-white/[0.03] p-4">
+                            <label className="text-[11px] font-bold text-slate-400 block">2. Fichiers et pochette {editingId && <span className="font-normal text-amber-400">(facultatif s'ils existent déjà)</span>}</label>
                             
                             {/* AI Cover Gen */}
                             <div className="flex space-x-3">
-                                <div className="w-20 h-20 bg-black rounded-lg border border-white/10 flex items-center justify-center overflow-hidden shrink-0 relative group">
+                                <div className="w-20 h-20 bg-white/[0.06] rounded-xl flex items-center justify-center overflow-hidden shrink-0 relative group">
                                     {coverPreviewUrl ? (
                                         <img src={coverPreviewUrl} className="w-full h-full object-cover" alt="Preview" />
                                     ) : (
-                                        <i className={`fas ${isGeneratingImg ? 'fa-spinner fa-spin' : 'fa-image'} text-white/20`}></i>
+                                        <i className={`fas ${isGeneratingImg ? 'fa-spinner fa-spin' : 'fa-image'} text-slate-400`}></i>
                                     )}
                                     <button 
                                         type="button" 
                                         onClick={() => handleGenerateCover()} 
                                         className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-cyan-400 transition-opacity"
-                                        title="Régénérer Cover"
+                                        title="Nouvelle pochette (IA)" aria-label="Nouvelle pochette"
                                     >
                                         <i className="fas fa-sync-alt"></i>
                                     </button>
                                 </div>
                                 <div className="flex-1 space-y-2">
                                     <input type="file" ref={coverInputRef} accept="image/*" onChange={(e) => handleFileChange(e, 'cover')} className="hidden" id="cover-upload" />
-                                    <label htmlFor="cover-upload" className="block w-full py-1.5 bg-white/10 hover:bg-white/20 text-center rounded-lg text-[9px] font-bold text-slate-300 cursor-pointer transition-all">
-                                        {coverFile ? "Fichier Sélectionné" : "Changer l'image"}
+                                    <label htmlFor="cover-upload" className="block w-full py-2 bg-white/[0.06] hover:bg-white/10 text-center rounded-lg text-[12px] font-bold text-slate-200 cursor-pointer transition-all truncate px-2">
+                                        {coverFile ? `✓ ${coverFile.name}` : "Choisir une image"}
                                     </label>
                                     
                                     <div className="flex space-x-2">
-                                        <input type="text" value={coverPrompt} onChange={(e) => setCoverPrompt(e.target.value)} placeholder="Prompt IA (ex: Neon city)" className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2 text-[9px] text-white truncate" />
+                                        <input type="text" value={coverPrompt} onChange={(e) => setCoverPrompt(e.target.value)} placeholder="Idée de pochette pour l'IA (ex. : ville néon)" aria-label="Idée de pochette pour l'IA" className="flex-1 min-w-0 bg-nv-bg border border-white/10 rounded-lg text-[13px] text-white focus:border-cyan-500 outline-none px-2 py-2 text-[12px] truncate" />
                                         <button 
                                             type="button" 
                                             onClick={() => handleGenerateCover()} 
                                             disabled={isGeneratingImg} 
-                                            className="px-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs"
-                                            title="Générer avec ce prompt"
+                                            className="px-3 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs disabled:opacity-40"
+                                            title="Créer la pochette avec cette idée" aria-label="Créer la pochette"
                                         >
                                             <i className={`fas ${isGeneratingImg ? 'fa-spinner fa-spin' : 'fa-magic'}`}></i>
                                         </button>
@@ -689,59 +689,67 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                             {/* Audio Inputs */}
                             <div className="space-y-2">
                                 {/* PREVIEW MP3 */}
-                                <div className={`flex items-center space-x-2 p-2 rounded-lg border ${importedPreviewUrl ? 'bg-blue-500/10 border-blue-500/30' : 'bg-black/20 border-white/5'}`}>
-                                    <i className="fas fa-music text-green-400 text-xs"></i>
+                                <div className={`flex items-center space-x-2 p-2 rounded-lg ${importedPreviewUrl ? 'bg-cyan-500/10' : 'bg-white/[0.04]'}`}>
+                                    <i className="fas fa-music text-cyan-400 text-xs"></i>
                                     <div className="flex-1 min-w-0">
                                         {importedPreviewUrl ? (
-                                            <span className="text-[9px] font-mono text-blue-300">🔗 Fichier Drive Lié (MP3)</span>
+                                            <span className="text-[12px] text-cyan-300">🔗 Extrait lié depuis le Drive (MP3)</span>
                                         ) : (
-                                            <input type="file" ref={previewInputRef} accept="audio/*" onChange={(e) => handleFileChange(e, 'preview')} className="text-[9px] text-slate-400 file:bg-white/10 file:text-white file:border-0 file:rounded-md file:px-2 file:py-0.5 file:mr-2 cursor-pointer w-full" />
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input type="file" ref={previewInputRef} accept="audio/*" onChange={(e) => handleFileChange(e, 'preview')} className="sr-only" />
+                                                <span className="shrink-0 h-8 px-3 rounded-lg bg-white/[0.08] hover:bg-white/[0.12] text-[12px] font-bold text-slate-200 leading-8">Choisir l'extrait</span>
+                                                <span className="min-w-0 truncate text-[12px] text-slate-400">{previewFile ? previewFile.name : 'MP3 ou WAV, joué dans le catalogue'}</span>
+                                            </label>
                                         )}
-                                        {editingId && !previewFile && !importedPreviewUrl && <p className="text-[8px] text-slate-500 pl-2 mt-1">Laissez vide pour garder l'actuel.</p>}
+                                        {editingId && !previewFile && !importedPreviewUrl && <p className="text-[11px] text-slate-400 mt-1">Laisse vide pour garder l'extrait actuel.</p>}
                                     </div>
                                     {importedPreviewUrl && <button aria-label="Retirer l'extrait" title="Retirer l'extrait" type="button" onClick={() => setImportedPreviewUrl(null)} className="text-red-500 hover:text-white"><i className="fas fa-times text-[10px]"></i></button>}
                                 </div>
                                 
                                 {/* STEMS ZIP */}
-                                <div className={`flex items-center space-x-2 p-2 rounded-lg border ${importedStemsUrl ? 'bg-green-500/10 border-green-500/30' : 'bg-black/20 border-white/5'}`}>
+                                <div className={`flex items-center space-x-2 p-2 rounded-lg ${importedStemsUrl ? 'bg-emerald-500/10' : 'bg-white/[0.04]'}`}>
                                     <div className="flex flex-col items-center justify-center w-4">
                                         <i className="fas fa-file-archive text-amber-400 text-xs"></i>
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         {importedStemsUrl ? (
-                                            <span className="text-[9px] font-mono text-green-300">🔗 Fichier Drive Lié (STEMS)</span>
+                                            <span className="text-[12px] text-emerald-300">🔗 Pistes séparées liées depuis le Drive</span>
                                         ) : (
-                                            <input type="file" ref={stemsInputRef} accept=".zip,.rar" onChange={(e) => handleFileChange(e, 'stems')} className="text-[9px] text-slate-400 file:bg-white/10 file:text-white file:border-0 file:rounded-md file:px-2 file:py-0.5 file:mr-2 cursor-pointer w-full" />
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input type="file" ref={stemsInputRef} accept=".zip,.rar" onChange={(e) => handleFileChange(e, 'stems')} className="sr-only" />
+                                                <span className="shrink-0 h-8 px-3 rounded-lg bg-white/[0.08] hover:bg-white/[0.12] text-[12px] font-bold text-slate-200 leading-8">Choisir les pistes</span>
+                                                <span className="min-w-0 truncate text-[12px] text-slate-400">{stemsFile ? stemsFile.name : 'Pistes séparées (.zip)'}</span>
+                                            </label>
                                         )}
-                                        {editingId && !stemsFile && !importedStemsUrl && <p className="text-[8px] text-slate-500 pl-2 mt-1">Laissez vide pour garder les stems actuels (s'il y en a).</p>}
+                                        {editingId && !stemsFile && !importedStemsUrl && <p className="text-[11px] text-slate-400 mt-1">Laisse vide pour garder les pistes séparées actuelles (s'il y en a).</p>}
                                     </div>
                                     {importedStemsUrl ? (
                                         <button aria-label="Retirer les pistes séparées" title="Retirer les pistes séparées" type="button" onClick={() => setImportedStemsUrl(null)} className="text-red-500 hover:text-white"><i className="fas fa-times text-[10px]"></i></button>
                                     ) : (
-                                        <span className="text-[8px] text-slate-600 font-bold uppercase tracking-wider ml-auto">Optionnel</span>
+                                        <span className="text-[11px] text-slate-400 ml-auto">facultatif</span>
                                     )}
                                 </div>
                             </div>
                         </div>
 
                         {/* PRICES */}
-                        <div className="space-y-4 bg-white/5 p-4 rounded-xl border border-white/5">
-                            <label className="text-[9px] font-black text-slate-500 uppercase block">3. Tarification ($)</label>
+                        <div className="space-y-3 rounded-2xl bg-white/[0.03] p-4">
+                            <label className="text-[11px] font-bold text-slate-400 block">3. Prix des licences (€)</label>
                             <div className="grid grid-cols-3 gap-2">
-                                <div><label className="text-[8px] text-slate-500 block mb-1">MP3</label><input type="number" step="0.01" value={priceBasic} onChange={(e) => setPriceBasic(Number(e.target.value))} className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-xs text-white" /></div>
-                                <div><label className="text-[8px] text-slate-500 block mb-1">WAV</label><input type="number" step="0.01" value={pricePremium} onChange={(e) => setPricePremium(Number(e.target.value))} className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-xs text-white" /></div>
-                                <div><label className="text-[8px] text-slate-500 block mb-1">STEMS</label><input type="number" step="0.01" value={priceExclusive} onChange={(e) => setPriceExclusive(Number(e.target.value))} className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-xs text-white" /></div>
+                                <div><label className="text-[11px] text-slate-400 block mb-1">MP3</label><input type="number" step="0.01" value={priceBasic} onChange={(e) => setPriceBasic(Number(e.target.value))} className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-xs text-white" /></div>
+                                <div><label className="text-[11px] text-slate-400 block mb-1">WAV</label><input type="number" step="0.01" value={pricePremium} onChange={(e) => setPricePremium(Number(e.target.value))} className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-xs text-white" /></div>
+                                <div><label className="text-[11px] text-slate-400 block mb-1">Pistes séparées</label><input type="number" step="0.01" value={priceExclusive} onChange={(e) => setPriceExclusive(Number(e.target.value))} className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-xs text-white" /></div>
                             </div>
                         </div>
 
                         <div className="pt-2">
-                            <span className="block text-[10px] text-center text-slate-400 mb-2">{status}</span>
+                            <span className="block text-[12px] text-center text-slate-300 mb-2" role="status">{status}</span>
                             <button 
                                 type="submit" 
                                 disabled={loading || (!editingInstrumental && !editingId && !previewFile && !importedPreviewUrl)} 
-                                className={`w-full h-12 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg transition-all disabled:opacity-50 ${editingInstrumental ? 'bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white shadow-purple-500/20' : editingId ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-black shadow-amber-500/20' : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-cyan-500/20'}`}
+                                className={`w-full h-12 rounded-xl text-[13px] font-black transition-all disabled:opacity-40 ${editingId && !editingInstrumental ? 'bg-amber-400 hover:bg-amber-300 text-black' : 'bg-cyan-500 hover:bg-cyan-400 text-black'}`}
                             >
-                                {loading ? <i className="fas fa-spinner fa-spin"></i> : (editingInstrumental ? "💾 Sauvegarder les modifications" : editingId ? "Mettre à jour" : "Sélectionnez un instrumental →")}
+                                {loading ? <i className="fas fa-spinner fa-spin"></i> : (editingInstrumental ? "💾 Sauvegarder les modifications" : editingId ? "Mettre à jour" : "Choisis un beat dans la liste →")}
                             </button>
                         </div>
                     </form>
@@ -749,18 +757,18 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
             </div>
 
             {/* RIGHT COLUMN: INSTRUMENTALS LIST (from Supabase instrumentals table) */}
-            <div className="flex-1 flex flex-col bg-[#14161a]">
-                <div className="p-6 border-b border-white/5 flex justify-between items-center">
-                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-300">
+            <div className="flex-1 min-w-0 flex flex-col bg-nv-surface">
+                <div className="px-6 py-4 border-b border-white/[0.06] flex justify-between items-center">
+                    <h3 className="text-[13px] font-black text-white">
                         <i className="fab fa-google-drive mr-2 text-blue-400"></i>
-                        Catalogue Instrumentals ({instrumentals.length})
+                        Beats du catalogue ({instrumentals.length})
                     </h3>
                     <div className="flex items-center space-x-3">
-                        <span className="text-[9px] text-slate-500 font-mono">Table: instrumentals</span>
+                        <span className="text-[11px] text-slate-400">Base Supabase · table « instrumentals »</span>
                         <button 
                             onClick={fetchInstrumentals}
-                            className="text-cyan-400 hover:text-white transition-colors"
-                            title="Rafraîchir"
+                            className="nova-hit w-9 h-9 rounded-lg bg-white/[0.06] text-cyan-400 hover:text-white transition-colors"
+                            title="Recharger la liste" aria-label="Recharger la liste"
                         >
                             <i className={`fas fa-sync-alt text-xs ${loadingInstrumentals ? 'fa-spin' : ''}`}></i>
                         </button>
@@ -773,14 +781,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                             <div className="w-8 h-8 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
                         </div>
                     ) : instrumentals.length > 0 ? (
-                        <div className="divide-y divide-white/5">
+                        <div className="divide-y divide-white/[0.06]">
                             {instrumentals.map((inst) => (
                                 <div 
                                     key={inst.id} 
-                                    className={`p-4 hover:bg-white/[0.02] transition-colors flex items-center space-x-4 ${inst.is_active ? '' : 'opacity-60'}`}
+                                    className={`px-6 py-3 hover:bg-white/[0.03] transition-colors flex items-center space-x-4 ${inst.is_active ? '' : 'opacity-60'}`}
                                 >
                                     {/* Cover / Icon */}
-                                    <div className="w-12 h-12 bg-gradient-to-br from-purple-600/30 to-blue-600/30 rounded-lg flex items-center justify-center border border-white/10 shrink-0">
+                                    <div className="w-12 h-12 bg-white/[0.06] rounded-lg flex items-center justify-center shrink-0">
                                         {inst.cover_image_url ? (
                                             <img src={inst.cover_image_url} alt="" className="w-full h-full object-cover rounded-lg" />
                                         ) : (
@@ -801,12 +809,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                                     <div className="flex-1 min-w-0">
                                         <div className="text-sm font-bold text-white truncate">{inst.title}</div>
                                         <div className="flex items-center space-x-2 mt-1">
-                                            <span className="text-[10px] bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">{inst.genre || 'Beat'}</span>
-                                            <span className="text-[10px] text-slate-500">{inst.bpm} BPM</span>
-                                            <span className="text-[10px] text-slate-500">{inst.key}</span>
+                                            <span className="text-[11px] bg-white/[0.06] text-slate-300 px-2 py-0.5 rounded">{inst.genre || 'Beat'}</span>
+                                            <span className="text-[11px] text-slate-400">{inst.bpm ? `${inst.bpm} BPM` : 'BPM à renseigner'}</span>
+                                            {inst.key && <span className="text-[11px] text-slate-400">{inst.key}</span>}
                                         </div>
                                         {inst.drive_file_id && (
-                                            <div className="text-[8px] text-slate-600 mt-1 truncate">
+                                            <div className="text-[10px] text-slate-500 mt-1 truncate">
                                                 <i className="fab fa-google-drive mr-1"></i>
                                                 {inst.drive_file_id}
                                             </div>
@@ -815,33 +823,34 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                                     
                                     {/* Prices */}
                                     <div className="text-right shrink-0">
-                                        <div className="text-xs font-mono text-green-400">{inst.price_base}€</div>
-                                        <div className="text-[9px] text-amber-400">{inst.price_exclusive}€ exclu</div>
+                                        <div className="text-[12px] font-mono text-emerald-400">{inst.price_base} €</div>
+                                        <div className="text-[11px] text-amber-400">{inst.price_exclusive} € exclu</div>
                                     </div>
                                     
                                     {/* Stems indicator */}
                                     <div className="shrink-0 w-12 text-center">
                                         {inst.has_stems ? (
-                                            <span className="text-[8px] bg-green-500/20 text-green-400 px-2 py-1 rounded">STEMS</span>
+                                            <span className="text-[10px] bg-emerald-500/15 text-emerald-300 px-2 py-1 rounded" title="Pistes séparées disponibles">Pistes</span>
                                         ) : (
-                                            <span className="text-[8px] text-slate-600">-</span>
+                                            <span className="text-[11px] text-slate-500" title="Pas de pistes séparées">—</span>
                                         )}
                                     </div>
                                     
                                     {/* Active Toggle */}
                                     <button 
                                         onClick={() => toggleInstrumentalActive(inst.id, inst.is_active)}
-                                        className={`w-12 h-6 rounded-full relative transition-colors duration-300 shrink-0 ${inst.is_active ? 'bg-green-500' : 'bg-slate-700'}`}
-                                        title={inst.is_active ? "Actif (visible)" : "Inactif (masqué)"}
+                                        role="switch" aria-checked={!!inst.is_active} aria-label={`Visible dans le store : ${inst.title}`}
+                                        className={`nova-hit w-12 h-6 rounded-full relative transition-colors duration-300 shrink-0 ${inst.is_active ? 'bg-emerald-500' : 'bg-white/15'}`}
+                                        title={inst.is_active ? "Visible dans le store (clic : masquer)" : "Masqué du store (clic : afficher)"}
                                     >
-                                        <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-300 shadow ${inst.is_active ? 'translate-x-6' : 'translate-x-0'}`} />
+                                        <div className={`absolute top-1 left-1 w-4 h-4 bg-white [[data-theme=light]_&]:bg-nv-surface rounded-full transition-transform duration-300 shadow ${inst.is_active ? 'translate-x-6' : 'translate-x-0'}`} />
                                     </button>
                                     
                                     {/* Edit Button */}
                                     <button
                                         onClick={() => handleEditInstrumental(inst)}
-                                        className={`w-8 h-8 rounded-lg transition-all flex items-center justify-center shrink-0 ${editingInstrumental?.id === inst.id ? 'bg-amber-500 text-black' : 'bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-black'}`}
-                                        title="Modifier cet instrumental"
+                                        className={`nova-hit w-9 h-9 rounded-lg transition-all flex items-center justify-center shrink-0 ${editingInstrumental?.id === inst.id ? 'bg-amber-400 text-black' : 'bg-white/[0.06] hover:bg-white/10 text-amber-400'}`}
+                                        title="Modifier ce beat" aria-label={`Modifier ${inst.title}`}
                                     >
                                         <i className="fas fa-pen text-xs"></i>
                                     </button>
@@ -852,8 +861,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                                             href={`https://drive.google.com/file/d/${inst.drive_file_id}/view`}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="w-8 h-8 rounded-lg bg-blue-500/10 hover:bg-blue-500 text-blue-400 hover:text-white transition-all flex items-center justify-center shrink-0"
-                                            title="Ouvrir dans Google Drive"
+                                            className="nova-hit w-9 h-9 rounded-lg bg-white/[0.06] hover:bg-white/10 text-blue-400 transition-all flex items-center justify-center shrink-0"
+                                            title="Ouvrir dans Google Drive" aria-label={`Ouvrir ${inst.title} dans Google Drive`}
                                         >
                                             <i className="fab fa-google-drive text-xs"></i>
                                         </a>
@@ -862,10 +871,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, onSuccess, onClose, exist
                             ))}
                         </div>
                     ) : (
-                        <div className="text-center py-20 opacity-40">
-                            <i className="fab fa-google-drive text-4xl text-blue-500/30 mb-4"></i>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Aucun instrumental dans la table.</p>
-                            <p className="text-[9px] text-slate-600 mt-2">Les instrumentaux sont gérés depuis Supabase.</p>
+                        <div className="text-center py-20 px-6">
+                            <i className="fab fa-google-drive text-4xl text-slate-500 mb-4"></i>
+                            <p className="text-[14px] font-bold text-white">Aucun beat dans le catalogue</p>
+                            <p className="text-[12px] text-slate-400 mt-2">Ajoute ton premier beat avec le formulaire à gauche, ou vérifie ta connexion puis « Recharger la liste ».</p>
                         </div>
                     )}
                 </div>

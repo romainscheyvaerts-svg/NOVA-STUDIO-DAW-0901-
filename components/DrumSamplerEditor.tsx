@@ -190,11 +190,11 @@ const DrumSamplerEditor: React.FC<DrumSamplerEditorProps> = ({ plugin, trackId, 
             <div className="col-span-3 space-y-4 border-r border-white/5 px-4">
                 <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest">AHDSR Envelope</div>
                 <div className="grid grid-cols-5 gap-2">
-                    <DKnob label="Attack" value={params.attack * 2} displayVal={`${Math.round(params.attack * 1000)}ms`} onChange={v => updateParam('attack', v/2)} />
-                    <DKnob label="Hold" value={params.hold * 2} displayVal={`${Math.round(params.hold * 1000)}ms`} onChange={v => updateParam('hold', v/2)} />
-                    <DKnob label="Decay" value={params.decay} displayVal={`${Math.round(params.decay * 1000)}ms`} onChange={v => updateParam('decay', v)} />
-                    <DKnob label="Sustain" value={params.sustain} displayVal={`${Math.round(params.sustain * 100)}%`} onChange={v => updateParam('sustain', v)} />
-                    <DKnob label="Release" value={params.release} displayVal={`${Math.round(params.release * 1000)}ms`} onChange={v => updateParam('release', v)} />
+                    <DKnob label="Attaque" value={params.attack * 2} displayVal={`${Math.round(params.attack * 1000)}ms`} onChange={v => updateParam('attack', v/2)} />
+                    <DKnob label="Tenue" value={params.hold * 2} displayVal={`${Math.round(params.hold * 1000)}ms`} onChange={v => updateParam('hold', v/2)} />
+                    <DKnob label="Déclin" value={params.decay} displayVal={`${Math.round(params.decay * 1000)}ms`} onChange={v => updateParam('decay', v)} />
+                    <DKnob label="Maintien" value={params.sustain} displayVal={`${Math.round(params.sustain * 100)}%`} onChange={v => updateParam('sustain', v)} />
+                    <DKnob label="Relâche" value={params.release} displayVal={`${Math.round(params.release * 1000)}ms`} onChange={v => updateParam('release', v)} />
                 </div>
                 <div className="h-10 bg-black/40 rounded-lg border border-white/5 relative opacity-50">
                     {/* Mini visualizer for ADSR could go here */}

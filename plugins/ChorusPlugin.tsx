@@ -533,10 +533,10 @@ export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusPa
 
       {/* Main Controls */}
       <div className="grid grid-cols-5 gap-4">
-        <ChorusKnob label="Rate" value={(params.rate || 1.2) / 8} factor={8} suffix="Hz" onChange={v => handleParamChange('rate', v * 8)} defaultValue={0.15} />
-        <ChorusKnob label="Depth" value={params.depth || 0.35} factor={100} suffix="%" onChange={v => handleParamChange('depth', v)} defaultValue={0.35} />
+        <ChorusKnob label="Vitesse" value={(params.rate || 1.2) / 8} factor={8} suffix="Hz" onChange={v => handleParamChange('rate', v * 8)} defaultValue={0.15} />
+        <ChorusKnob label="Profondeur" value={params.depth || 0.35} factor={100} suffix="%" onChange={v => handleParamChange('depth', v)} defaultValue={0.35} />
         <ChorusKnob label="Spread" value={params.spread || 0.8} factor={100} suffix="%" onChange={v => handleParamChange('spread', v)} defaultValue={0.8} />
-        <ChorusKnob label="Feedback" value={params.feedback || 0} factor={100} suffix="%" onChange={v => handleParamChange('feedback', v * 0.95)} defaultValue={0} color="#f59e0b" />
+        <ChorusKnob label="Retour" value={params.feedback || 0} factor={100} suffix="%" onChange={v => handleParamChange('feedback', v * 0.95)} defaultValue={0} color="#f59e0b" />
         <ChorusKnob label="Mix" value={params.mix || 0.4} factor={100} suffix="%" onChange={v => handleParamChange('mix', v)} defaultValue={0.4} color="#fff" />
       </div>
 
@@ -587,8 +587,8 @@ export const VocalChorusUI: React.FC<{ node: ChorusNode, initialParams: ChorusPa
       {/* Advanced Controls */}
       {showAdvanced && (
         <div className="grid grid-cols-3 gap-4 pt-4 border-t border-white/5">
-          <ChorusKnob label="Low Cut" value={(params.lowCut || 100) / 500} factor={500} suffix="Hz" onChange={v => handleParamChange('lowCut', Math.max(20, v * 500))} defaultValue={0.2} color="#f43f5e" />
-          <ChorusKnob label="High Cut" value={(params.highCut || 12000) / 20000} factor={20} suffix="kHz" onChange={v => handleParamChange('highCut', Math.max(2000, v * 20000))} defaultValue={0.6} color="#f43f5e" />
+          <ChorusKnob label="Coupe-bas" value={(params.lowCut || 100) / 500} factor={500} suffix="Hz" onChange={v => handleParamChange('lowCut', Math.max(20, v * 500))} defaultValue={0.2} color="#f43f5e" />
+          <ChorusKnob label="Coupe-haut" value={(params.highCut || 12000) / 20000} factor={20} suffix="kHz" onChange={v => handleParamChange('highCut', Math.max(2000, v * 20000))} defaultValue={0.6} color="#f43f5e" />
           <div className="flex flex-col items-center justify-center">
             <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest mb-2">À propos du mode</span>
             <div className="bg-black/40 px-3 py-2 rounded-lg border border-white/5 text-center">

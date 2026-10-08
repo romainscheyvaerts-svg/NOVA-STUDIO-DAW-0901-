@@ -193,7 +193,7 @@ const CollabPanel: React.FC<Props> = (p) => {
         <div className="space-y-2 rounded-2xl border border-violet-500/30 bg-violet-500/10 p-3">
           <p className="text-[12px] font-bold text-white">Abonnement collaboration : 5 € / mois</p>
           <p className="text-[11px] text-slate-300">Pour chaque compte qui collabore (artiste, ingé son, beatmaker). Sans engagement, résiliable quand tu veux.</p>
-          <button type="button" disabled={!!p.busy} onClick={p.onSubscribe} className={`${btn} w-full bg-violet-500 text-white`}>{p.busy || "M'abonner (paiement sécurisé Stripe)"}</button>
+          <button type="button" disabled={!!p.busy} onClick={p.onSubscribe} className={`${btn} w-full bg-violet-600 text-white`}>{p.busy || "M'abonner (paiement sécurisé Stripe)"}</button>
         </div>
       )}
     </>

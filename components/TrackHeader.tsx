@@ -719,7 +719,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                   <div className="flex-1 h-8 relative border-r border-cyan-500/20 hover:bg-white/5 transition-colors">
                       <div className="absolute inset-0 flex flex-col justify-center px-2 pointer-events-none">
                           <span className="text-[9px] font-black uppercase text-cyan-100 truncate">
-                              {instrumentPlugin.type === 'DRUM_RACK_UI' ? 'Drum Rack 30' : (instrumentPlugin.type === 'DRUM_SAMPLER' ? 'Single Drum' : 'Melodic Sampler')}
+                              {instrumentPlugin.type === 'DRUM_RACK_UI' ? 'Batterie 30 pads' : (instrumentPlugin.type === 'DRUM_SAMPLER' ? 'Échantillon de batterie' : 'Échantillonneur mélodique')}
                           </span>
                           <span className="text-[7px] text-slate-500 font-mono">Instrument</span>
                       </div>

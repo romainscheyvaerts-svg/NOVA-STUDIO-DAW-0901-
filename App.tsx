@@ -3172,6 +3172,8 @@ function Studio() {
       }
       if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
       if (mod && (e.key === 's' || e.key === 'S')) { e.preventDefault(); setIsSaveMenuOpen(true); return; }
+      // Exporter : Ctrl+Maj+E (Logic : « Exporter… » ; l'ingé n'a plus à passer par le menu).
+      if (mod && e.shiftKey && (e.key === 'e' || e.key === 'E')) { e.preventDefault(); void handleExportMix(); return; }
 
       if (mod) return; // on ne capture aucun autre raccourci systeme
 

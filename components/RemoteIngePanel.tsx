@@ -146,7 +146,7 @@ const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
             {r.phase === 'recording' ? (
               <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-3 space-y-2">
                 <p className="text-[12px] text-rose-100">🎙️ Enregistrement en direct : reverbs et délais de NOVA seulement. L'artiste les a aussi et les entend en direct, exactement comme toi (leurs réglages sont synchronisés).</p>
-                <button type="button" data-testid="remote-phase-mix" onClick={() => r.setPhase('mixing')} className={`${btn} w-full bg-violet-500 text-white`}>Enregistrement terminé : passer au mix</button>
+                <button type="button" data-testid="remote-phase-mix" onClick={() => r.setPhase('mixing')} className={`${btn} w-full bg-violet-600 text-white`}>Enregistrement terminé : passer au mix</button>
               </div>
             ) : (
               <div className="rounded-2xl border border-violet-500/30 bg-violet-500/10 p-3 space-y-2">

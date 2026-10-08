@@ -119,10 +119,10 @@ const SamplerEditor: React.FC<SamplerEditorProps> = ({ plugin, trackId, onClose 
         {/* ADSR Controls */}
         <div className="bg-white/[0.02] p-4 rounded-[24px] border border-white/5">
             <div className="grid grid-cols-4 gap-4">
-                <Knob label="Attack" value={adsr.attack} min={0} max={2} onChange={v => handleKnobChange('attack', v)} color="#ec4899" />
-                <Knob label="Decay" value={adsr.decay} min={0} max={2} onChange={v => handleKnobChange('decay', v)} color="#ec4899" />
-                <Knob label="Sustain" value={adsr.sustain} min={0} max={1} onChange={v => handleKnobChange('sustain', v)} color="#ec4899" />
-                <Knob label="Release" value={adsr.release} min={0} max={5} onChange={v => handleKnobChange('release', v)} color="#ec4899" />
+                <Knob label="Attaque" value={adsr.attack} min={0} max={2} onChange={v => handleKnobChange('attack', v)} color="#ec4899" />
+                <Knob label="Déclin" value={adsr.decay} min={0} max={2} onChange={v => handleKnobChange('decay', v)} color="#ec4899" />
+                <Knob label="Maintien" value={adsr.sustain} min={0} max={1} onChange={v => handleKnobChange('sustain', v)} color="#ec4899" />
+                <Knob label="Relâche" value={adsr.release} min={0} max={5} onChange={v => handleKnobChange('release', v)} color="#ec4899" />
             </div>
         </div>
     </div>

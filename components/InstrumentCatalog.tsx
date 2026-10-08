@@ -402,7 +402,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                   <button
                     type="button"
                     onClick={() => onMakeBeat(inst)}
-                    className="nova-hit mr-2 h-9 px-3 rounded-lg bg-violet-500 text-white text-[11px] font-black hover:bg-violet-400 active:scale-95 transition-all"
+                    className="nova-hit mr-2 h-9 px-3 rounded-lg bg-violet-600 text-white text-[11px] font-black hover:bg-violet-700 active:scale-95 transition-all"
                     title="Ouvrir un projet pour faire une instru (batterie) sur cette mélodie, et y poser ta voix"
                   >
                     🥁 Faire une instru

@@ -84,7 +84,7 @@ const TrackInsertStrip: React.FC<TrackInsertStripProps> = (props) => {
   return (
     <div className="mt-1 flex items-center gap-1 min-h-0 shrink-0">
       {props.leading}
-      <div ref={box} className={`flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden no-scrollbar ${props.idle ? 'opacity-50' : ''}`} data-testid={`inserts-${trackId}`}
+      <div ref={box} className={`flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden no-scrollbar ${props.idle ? 'opacity-70' : ''}`} data-testid={`inserts-${trackId}`}
         title={props.idle ? 'Piste vide : ces effets sont prêts pour ta prochaine prise ici' : undefined}>
         {plugins.map(p => <Chip key={p.id} p={p} baked={isBaked(p)} {...props} />)}
       </div>

@@ -235,9 +235,9 @@ const MelodicSamplerEditor: React.FC<MelodicSamplerEditorProps> = ({ plugin, tra
             <div className="col-span-2 space-y-4 border-l border-white/5 pl-6">
                 <h3 className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Effects</h3>
                 <div className="grid grid-cols-2 gap-4">
-                    <MKnob label="Drive" value={params.saturation} displayVal={`${Math.round(params.saturation * 100)}%`} onChange={v => updateParam('saturation', v)} color="#ef4444" />
+                    <MKnob label="Saturation" value={params.saturation} displayVal={`${Math.round(params.saturation * 100)}%`} onChange={v => updateParam('saturation', v)} color="#ef4444" />
                     <MKnob label="Crush" value={params.bitCrush} displayVal={`${Math.round(params.bitCrush * 100)}%`} onChange={v => updateParam('bitCrush', v)} color="#ef4444" />
-                    <MKnob label="Width" value={params.width} displayVal={`${Math.round(params.width * 100)}%`} onChange={v => updateParam('width', v)} color="#3b82f6" />
+                    <MKnob label="Largeur" value={params.width} displayVal={`${Math.round(params.width * 100)}%`} onChange={v => updateParam('width', v)} color="#3b82f6" />
                 </div>
             </div>
         </div>
