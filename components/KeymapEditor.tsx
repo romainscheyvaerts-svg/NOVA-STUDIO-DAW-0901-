@@ -234,13 +234,13 @@ const KeymapEditor: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                         {d.keys.map((k, i) => (
                           <span key={k} className="inline-flex items-center overflow-hidden rounded-md border border-nv-line bg-nv-well">
                             <button type="button" onClick={() => { setListenKey(false); setCapture({ id: d.id, replaceIndex: i }); }} title="Changer cette touche"
-                              className="px-2 py-1 font-mono text-[12px] hover:bg-nv-accent/15" data-testid={`keymap-key-${d.id}-${i}`}>{chordLabel(k)}</button>
+                              className="px-2 py-1 [@media(pointer:coarse)]:px-3 [@media(pointer:coarse)]:py-2 font-mono text-[12px] hover:bg-nv-accent/15" data-testid={`keymap-key-${d.id}-${i}`}>{chordLabel(k)}</button>
                             <button type="button" onClick={() => keymapStore.removeKey(d.id, k)} aria-label={`Retirer ${chordLabel(k)}`} title="Retirer cette touche"
-                              className="border-l border-nv-line px-1.5 py-1 text-[11px] text-nv-muted hover:text-red-400">✕</button>
+                              className="border-l border-nv-line px-1.5 py-1 [@media(pointer:coarse)]:px-3 [@media(pointer:coarse)]:py-2 text-[11px] text-nv-muted hover:text-red-400">✕</button>
                           </span>
                         ))}
                         <button type="button" onClick={() => { setListenKey(false); setCapture({ id: d.id }); }} data-testid={`keymap-add-${d.id}`}
-                          className="h-7 rounded-md border border-dashed border-nv-line px-2 text-[12px] text-nv-muted hover:text-nv-ink" title="Ajouter une touche">{d.keys.length ? '+' : '+ Choisir une touche'}</button>
+                          className="h-7 [@media(pointer:coarse)]:h-9 rounded-md border border-dashed border-nv-line px-2 [@media(pointer:coarse)]:px-3 text-[12px] text-nv-muted hover:text-nv-ink" title="Ajouter une touche">{d.keys.length ? '+' : '+ Choisir une touche'}</button>
                         {custom && (
                           <button type="button" onClick={() => keymapStore.resetCommand(d.id)} title="Remettre comme dans le jeu choisi" aria-label={`Remettre « ${d.label} » par défaut`}
                             className="h-7 rounded-md px-2 text-[12px] text-nv-muted hover:text-nv-ink">↺</button>
