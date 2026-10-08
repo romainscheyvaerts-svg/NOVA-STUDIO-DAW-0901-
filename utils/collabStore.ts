@@ -31,14 +31,20 @@ export const requestVolumeLock = (trackId: string) =>
  * qui je suis (pour « à toi ») et qui enregistre sur quelle piste (pastille
  * REC, piste verrouillée chez les autres).
  */
-export interface CollabLive { meKey: string | null; recs: Record<string, string> }
+export interface CollabPeerMark { name: string; color: string }
+/**
+ * edits : qui modifie quelle piste en ce moment (verrou doux : on voit « ✎ Max ») ;
+ * sels : qui a quelle piste sélectionnée (liseré de sa couleur).
+ */
+export interface CollabLive { meKey: string | null; recs: Record<string, string>; edits?: Record<string, CollabPeerMark[]>; sels?: Record<string, CollabPeerMark[]> }
 let live: CollabLive = { meKey: null, recs: {} };
 const liveListeners = new Set<() => void>();
 
 export const collabLiveStore = {
   get: () => live,
   set(next: CollabLive) {
-    if (next.meKey === live.meKey && JSON.stringify(next.recs) === JSON.stringify(live.recs)) return;
+    if (next.meKey === live.meKey && JSON.stringify(next.recs) === JSON.stringify(live.recs)
+      && JSON.stringify(next.edits || {}) === JSON.stringify(live.edits || {}) && JSON.stringify(next.sels || {}) === JSON.stringify(live.sels || {})) return;
     live = next;
     liveListeners.forEach(l => l());
   },

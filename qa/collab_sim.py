@@ -26,14 +26,30 @@ def _id(n, alphabet=string.ascii_lowercase + string.digits):
     return "".join(random.choice(alphabet) for _ in range(n))
 
 
+class HttpErr(Exception):
+    """Erreur avec le code HTTP de la vraie fonction (401, 402, 403, 413…)."""
+
+    def __init__(self, status, msg):
+        super().__init__(msg)
+        self.status = status
+
+
 class FakeNovaCloud:
     """daw-session simulée : sessions (manifeste + version), membres, journal, morceaux audio."""
 
-    def __init__(self, per_device=False, codes=False):
+    def __init__(self, per_device=False, codes=False, strict=False, subscribed=None):
         # per_device / codes : la fonction avec le patch « Feat à distance »
         # (clé de membre par appareil, codes d'invitation) ; sinon la fonction en ligne.
+        # strict : comme la VRAIE fonction (fe14e5f) — compte exigé, abonnement (402),
+        # nom d'opération ^[a-z_]{2,20}$, taille 1,5 Mo (413), codes HTTP réels.
+        # subscribed : comptes abonnés (None : tous).
         self.per_device = per_device
         self.codes = codes
+        self.strict = strict
+        self.subscribed = subscribed
+        self.lose_reply = set()   # navigateurs dont la PROCHAINE réponse à « op » se perd (op enregistrée)
+        self.calls = []           # (tag, action, ms) : latence côté serveur simulé
+        self.last_seen = {}
         self.invites = {}
         self.sessions = {}
         self.members = {}
@@ -60,9 +76,17 @@ class FakeNovaCloud:
                 body = {}
             a = body.get("action")
             self.log.append((tag, a))
+            t0 = time.time()
             try:
                 out = self.act(a, body, request)
+                if a == "op" and tag in self.lose_reply:
+                    self.lose_reply.discard(tag)
+                    self.log.append((tag, "RÉPONSE PERDUE"))
+                    return route.abort("connectionreset")
+                self.calls.append((tag, a, round((time.time() - t0) * 1000, 2)))
                 route.fulfill(status=200, content_type="application/json", headers=self.cors(), body=json.dumps(out))
+            except HttpErr as e:
+                route.fulfill(status=e.status, content_type="application/json", headers=self.cors(), body=json.dumps({"error": str(e)}))
             except Exception as e:  # noqa
                 route.fulfill(status=400, content_type="application/json", headers=self.cors(), body=json.dumps({"error": str(e)}))
         return h
@@ -76,7 +100,20 @@ class FakeNovaCloud:
         except Exception:
             return None
 
+    def _need_user(self, request, msg="Connecte-toi à ton compte Make Music pour collaborer"):
+        uid = self._user(request)
+        if self.strict and not uid:
+            raise HttpErr(401, msg)
+        return uid
+
+    def _need_plan(self, uid):
+        if self.strict and self.subscribed is not None and uid not in self.subscribed:
+            raise HttpErr(402, "Abonnement collaboration requis (5 €/mois)")
+
     def act(self, a, b, request):
+        if a == "resolve_code" and self.strict:
+            uid = self._need_user(request)
+            self._need_plan(uid)
         if a == "resolve_code":
             if not self.codes:
                 raise RuntimeError("Action inconnue")
@@ -95,13 +132,15 @@ class FakeNovaCloud:
         sid = b.get("id")
         s = self.sessions.get(sid)
         if not s or s["secret"] != b.get("secret"):
-            raise RuntimeError("Session introuvable")
+            raise HttpErr(404, "Session introuvable")
         uid = self._user(request)
         dev = re.sub(r"[^a-zA-Z0-9_-]", "", str(b.get("device_id") or ""))[:40]
         if self.per_device:
             key = (f"u:{uid}:{dev}" if dev else f"u:{uid}") if uid else "d:" + dev
         else:
             key = f"u:{uid}" if uid else "d:" + str(b.get("device_id") or "")
+        if a == "invite_code" and self.strict:
+            self._need_user(request, "Connecte-toi à ton compte Make Music pour inviter")
         if a == "invite_code":
             if not self.codes:
                 raise RuntimeError("Action inconnue")
@@ -131,17 +170,34 @@ class FakeNovaCloud:
         if a == "info":
             return {"id": sid, "link": f"{sid}.{s['secret']}", "name": s["name"], "version": s["version"], "updated_at": s["updated_at"], "updated_from": s["updated_from"]}
         if a == "join":
-            self.members[(sid, key)] = {"role": b.get("role"), "name": b.get("name")}
+            if self.strict:
+                if b.get("role") not in ("artist", "engineer", "beatmaker"):
+                    raise HttpErr(400, "Rôle inconnu")
+                self._need_user(request)
+                self._need_plan(uid)
+                if key == "d:":
+                    raise HttpErr(400, "Appareil inconnu")
+            self.last_seen[(sid, key)] = time.time()
+            self.members[(sid, key)] = {"role": b.get("role"), "name": (str(b.get("name") or "") or "Invité")[:40]}
             mem = [{"member_key": k[1], "role": v["role"], "display_name": v["name"]} for k, v in self.members.items() if k[0] == sid]
             last = max([o["seq"] for o in self.ops if o["sid"] == sid] or [0])
             return {"member_key": key, "last_seq": last, "members": mem, "channel": f"nova-collab-{sid}-test"}
         if a == "op":
+            if self.strict:
+                kind = str(b.get("kind") or "")
+                if not re.match(r"^[a-z_]{2,20}$", kind):
+                    raise HttpErr(400, "Opération invalide")
+                if not isinstance(b.get("op"), dict):
+                    raise HttpErr(400, "Opération vide")
+                if len(json.dumps(b.get("op"))) > 1_500_000:
+                    raise HttpErr(413, "Opération trop grosse")
             m = self.members.get((sid, key))
             if not m and self.per_device and uid and (sid, f"u:{uid}") in self.members:
                 key = f"u:{uid}"  # rejoint avant la mise à jour de la fonction
                 m = self.members.get((sid, key))
             if not m:
-                raise RuntimeError("Rejoins d'abord la session")
+                raise HttpErr(403, "Rejoins d'abord la session")
+            self.last_seen[(sid, key)] = time.time()
             self.seq += 1
             o = {"seq": self.seq, "sid": sid, "member_key": key, "role": m["role"], "author_name": m["name"], "kind": b.get("kind"), "op": b.get("op"),
                  "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"), "t": time.time()}
@@ -154,7 +210,13 @@ class FakeNovaCloud:
         if a == "urls":
             return {"urls": {p: f"{STORE}/{p}" for p in b.get("parts", []) if p in self.parts}}
         if a == "members":
-            return {"members": [{"member_key": k[1], "role": v["role"], "display_name": v["name"]} for k, v in self.members.items() if k[0] == sid]}
+            return {"members": [{"member_key": k[1], "role": v["role"], "display_name": v["name"],
+                                 "last_seen": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.last_seen.get(k, time.time())))}
+                                for k, v in self.members.items() if k[0] == sid]}
+        if a == "claim":
+            if self.strict and not self._user(request):
+                raise HttpErr(401, "Connecte-toi à ton compte Make Music")
+            return {"ok": True, "link": f"{sid}.{s['secret']}"}
         raise RuntimeError(f"Action inconnue {a}")
 
     def upload(self, route, request):

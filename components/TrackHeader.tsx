@@ -412,6 +412,8 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
   const collabLive = useCollabLive();
   const recBy = collabRole ? collabLive.recs[track.id] : undefined;
   const ownerName = collabRole && track.collabOwnerKey ? (track.collabOwnerKey === collabLive.meKey ? 'à toi' : track.collabOwnerName || '') : '';
+  const editors = (collabRole && collabLive.edits?.[track.id]) || [];
+  const watchers = (collabRole && collabLive.sels?.[track.id]) || [];
   const remote = useRemoteBadge(track.id);
   // Mode simple : ni effets ni envois dans l'en-tête (Mix auto s'en charge).
   const { simple } = useSimpleMode();
@@ -542,6 +544,20 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 className="shrink-0 max-w-[5.5rem] truncate h-4 rounded px-1 text-[9px] font-black leading-4"
                 style={{ color: track.collabOwnerColor || '#e2e8f0', backgroundColor: `${track.collabOwnerColor || '#94a3b8'}26` }}>
                 {ownerName}
+              </span>
+            )}
+            {/* Collaboration : qui modifie cette piste en ce moment (verrou doux) et qui la regarde. */}
+            {!isRenaming && !recBy && editors.length > 0 && (
+              <span data-testid={`collab-edit-${track.id}`} role="status" title={`${editors.map(e => e.name).join(', ')} modifie cette piste en ce moment : vos changements se fusionnent (le plus récent gagne)`}
+                className="shrink-0 max-w-[5.5rem] truncate h-4 rounded px-1 text-[9px] font-black leading-4 text-black"
+                style={{ backgroundColor: editors[0].color }}>
+                ✎ {editors[0].name}{editors.length > 1 ? ` +${editors.length - 1}` : ''}
+              </span>
+            )}
+            {!isRenaming && !recBy && !editors.length && watchers.length > 0 && (
+              <span aria-hidden data-testid={`collab-sel-${track.id}`} title={`${watchers.map(w => w.name).join(', ')} regarde cette piste`}
+                className="shrink-0 flex items-center gap-0.5">
+                {watchers.slice(0, 3).map(w => <span key={w.name} className="w-2 h-2 rounded-full ring-1 ring-black/50" style={{ backgroundColor: w.color }} />)}
               </span>
             )}
             {/* Synthé NOVA (V24) : pastille de l'instrument de la piste MIDI, ouvre son écran

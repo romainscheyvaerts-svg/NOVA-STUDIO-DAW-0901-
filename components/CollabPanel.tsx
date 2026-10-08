@@ -3,6 +3,7 @@ import { CollabRole, Marker } from '../types';
 import { CollabMember, ROLE_LABEL } from '../services/Collab';
 import type { CollabStatusView } from '../utils/collabStatus';
 import { ARRIVAL_ROLE_HELP, formatInviteCode, formatPosition, MAX_PARTICIPANTS, parseTimeMentions, PeerView, PEER_STATE_TONE, withPosition } from '../utils/collabPeers';
+import { agoShort, type HistoryEntry } from '../utils/collabHistory';
 
 /**
  * Collaboration à distance : inviter (un lien, un code à 6 caractères ; la
@@ -14,6 +15,23 @@ import { ARRIVAL_ROLE_HELP, formatInviteCode, formatPosition, MAX_PARTICIPANTS, 
  * beatmaker ajoute ses pistes.
  */
 export interface CollabMessage { id: string; from: string; role: CollabRole; text: string; at: number; mine?: boolean; /** Pas encore parti (hors ligne) : « envoi… ». */ pending?: boolean }
+
+/** Audio en direct (services/CollabRtc) : talkback, mix de l'ingé diffusé. */
+export interface LiveAudioView {
+  /** Talkback ouvert (je parle). */
+  talkOn: boolean;
+  onTalk: (on: boolean) => void;
+  /** Ingé : peut diffuser son mix ; diffusion en cours. */
+  canMixOut: boolean;
+  mixOutOn: boolean;
+  onToggleMixOut: () => void;
+  /** Mix reçu en direct (nom de la personne qui le diffuse), et si je l'écoute. */
+  remoteMixFrom: string | null;
+  listening: boolean;
+  onToggleListen: () => void;
+  /** Qui me parle en ce moment (talkback reçu). */
+  talking: string[];
+}
 
 export interface ListenView {
   /** Je suis l'hôte (je peux guider la lecture). */
@@ -83,7 +101,19 @@ interface Props {
   onSeek?: (seconds: number) => void;
   /** Position de la tête de lecture (pour « à 0:42 »). */
   position?: () => number;
+  // --- Collaboration « pro » ---
+  /** Historique « qui a changé quoi » (les plus récentes d'abord), avec « Annuler ». */
+  history?: (HistoryEntry & { canUndo: boolean })[];
+  onUndo?: (id: string) => void;
+  /** Aller-retour avec le serveur (ms) et avec chaque personne par le direct (clé → ms). */
+  latency?: { serverMs: number | null; peers: Record<string, number> };
+  /** Vérification des empreintes : chacun a-t-il la même session que moi ? */
+  sync?: Record<string, { ok: boolean; at: number; diff?: string[] }>;
+  audio?: LiveAudioView | null;
 }
+
+/** Couleur d'une latence (aller-retour). */
+const latencyTone = (ms: number) => (ms < 150 ? 'text-emerald-300' : ms < 400 ? 'text-amber-200' : 'text-red-300');
 
 const STATUS_TONE: Record<CollabStatusView['tone'], { dot: string; text: string; box: string }> = {
   ok: { dot: 'bg-emerald-400', text: 'text-emerald-200', box: 'border-emerald-500/20 bg-emerald-500/[0.06]' },
@@ -151,6 +181,7 @@ const CollabPanel: React.FC<Props> = (p) => {
   const [codeBusy, setCodeBusy] = useState(false);
   const [codeErr, setCodeErr] = useState<string | null>(null);
   const [markerName, setMarkerName] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
   // Nouveau message : on descend jusqu'à lui (pas à l'ouverture : les réglages restent en haut).
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [p.messages.length]);
   if (!p.open) return null;
@@ -204,6 +235,10 @@ const CollabPanel: React.FC<Props> = (p) => {
       <div className="flex items-center gap-2 p-4 border-b border-white/5">
         <h2 id="collab-title" className="flex-1 text-[14px] font-black text-white">👥 Collaboration</h2>
         {p.active && p.status && <span data-testid="collab-status-short" className={`inline-flex items-center gap-1.5 text-[10px] font-black ${STATUS_TONE[p.status.tone].text}`}><span className={`w-1.5 h-1.5 rounded-full ${STATUS_TONE[p.status.tone].dot}`} />{p.status.short}</span>}
+        {p.active && p.latency?.serverMs != null && (
+          <span data-testid="collab-latency" title="Aller-retour d'une modification avec le serveur (médiane des derniers envois)"
+            className={`font-mono text-[10px] font-black ${latencyTone(p.latency.serverMs)}`}>{p.latency.serverMs} ms</span>
+        )}
         {p.active && p.role && <span className={`text-[11px] font-black ${ROLE_COLOR[p.role]}`}>{ROLE_LABEL[p.role]}</span>}
         <button type="button" onClick={p.onClose} aria-label="Fermer" className="w-10 h-10 rounded-xl bg-white/5 text-slate-300">✕</button>
       </div>
@@ -323,7 +358,14 @@ const CollabPanel: React.FC<Props> = (p) => {
                     {v.host && <span className="ml-1 rounded bg-white/10 px-1 text-[9px] font-black uppercase text-slate-300">hôte</span>}
                     <span className={`block text-[11px] ${v.state === 'recording' ? 'text-red-300 font-bold' : v.state === 'late' ? 'text-amber-200' : v.state === 'offline' ? 'text-slate-500' : 'text-slate-400'}`}>
                       {v.state === 'recording' ? '● ' : ''}{v.label}
+                      {!v.me && v.online && p.latency?.peers[v.key] != null && <span data-testid="collab-peer-latency" className={`ml-1 font-mono ${latencyTone(p.latency.peers[v.key])}`}>· {p.latency.peers[v.key]} ms</span>}
                     </span>
+                    {!v.me && p.sync?.[v.key] && (
+                      <span data-testid="collab-peer-sync" data-ok={p.sync[v.key].ok ? '1' : '0'} className={`block text-[10px] font-bold ${p.sync[v.key].ok ? 'text-emerald-300' : 'text-red-300'}`}>
+                        {p.sync[v.key].ok ? '✓ même session que toi' : `⚠ écart avec toi${p.sync[v.key].diff?.length ? ` : ${p.sync[v.key].diff!.join(', ')}` : ''}`}
+                        {!p.sync[v.key].ok && p.onReload && <button type="button" onClick={p.onReload} className="ml-1 underline">Resynchroniser</button>}
+                      </span>
+                    )}
                   </span>
                 </li>
               ))}
@@ -376,6 +418,65 @@ const CollabPanel: React.FC<Props> = (p) => {
                   )}
                 </div>
               )}
+            </div>
+          )}
+          {p.audio && (
+            <div className="p-4 space-y-2 border-b border-white/5" data-testid="collab-audio">
+              <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Audio en direct</p>
+              <button type="button" data-testid="collab-talk"
+                onPointerDown={(e) => { e.preventDefault(); p.audio!.onTalk(true); }}
+                onPointerUp={() => p.audio!.onTalk(false)} onPointerLeave={() => { if (p.audio!.talkOn) p.audio!.onTalk(false); }} onPointerCancel={() => p.audio!.onTalk(false)}
+                onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && !p.audio!.talkOn) { e.preventDefault(); p.audio!.onTalk(true); } }}
+                onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') p.audio!.onTalk(false); }}
+                aria-pressed={p.audio.talkOn}
+                className={`${btn} h-12 w-full select-none touch-none ${p.audio.talkOn ? 'bg-red-500 text-white animate-pulse' : 'bg-white/10 text-white hover:bg-white/15'}`}>
+                {p.audio.talkOn ? '🎙️ On t’entend… (relâche pour couper)' : '🎙️ Maintenir pour parler (talkback)'}
+              </button>
+              {p.audio.talking.length > 0 && <p role="status" data-testid="collab-talking" className="text-[12px] font-bold text-sky-200">🔊 {p.audio.talking.join(', ')} te parle{p.audio.talking.length > 1 ? 'nt' : ''}…</p>}
+              {p.audio.canMixOut && (
+                <button type="button" data-testid="collab-mix-out" onClick={p.audio.onToggleMixOut} aria-pressed={p.audio.mixOutOn}
+                  className={`${btn} h-11 w-full ${p.audio.mixOutOn ? 'bg-amber-400 text-black' : 'bg-white/10 text-white'}`}>
+                  📡 Diffuser mon mix en direct : {p.audio.mixOutOn ? 'activé' : 'désactivé'}
+                </button>
+              )}
+              {p.audio.remoteMixFrom && (
+                <button type="button" data-testid="collab-mix-listen" onClick={p.audio.onToggleListen} aria-pressed={p.audio.listening}
+                  className={`${btn} h-11 w-full ${p.audio.listening ? 'bg-sky-400 text-black' : 'bg-white/10 text-white'}`}>
+                  🎧 Écouter le mix de {p.audio.remoteMixFrom} : {p.audio.listening ? 'en cours' : 'non'}
+                </button>
+              )}
+              <p className="text-[11px] text-slate-500">
+                {p.audio.remoteMixFrom
+                  ? `Tu entends le mix de ${p.audio.remoteMixFrom} tel qu’il l’entend (environ 0,2 s de décalage) ; ton propre son est coupé pendant l’écoute.`
+                  : p.audio.canMixOut ? 'Ton mix part tel que tu l’entends (Opus stéréo haut débit) : l’artiste l’écoute même sans tes VST, sur téléphone ou tablette.'
+                    : 'Le talkback passe par ton micro (annulation d’écho) ; il est coupé chez l’artiste pendant une prise.'}
+              </p>
+            </div>
+          )}
+          {p.history && (
+            <div className="p-4 space-y-2 border-b border-white/5" data-testid="collab-history">
+              <button type="button" onClick={() => setHistoryOpen(o => !o)} aria-expanded={historyOpen} data-testid="collab-history-toggle"
+                className="flex w-full min-h-10 items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-400">
+                <span>Qui a changé quoi · {p.history.length}</span><span aria-hidden>{historyOpen ? '▾' : '▸'}</span>
+              </button>
+              {historyOpen && (p.history.length === 0
+                ? <p className="text-[11px] text-slate-500">Rien pour l’instant : les modifications des autres s’afficheront ici, avec « Annuler ».</p>
+                : (
+                  <ul className="space-y-1 max-h-56 overflow-y-auto" aria-label="Historique des modifications">
+                    {p.history.slice(0, 60).map(h => (
+                      <li key={h.id} data-testid="collab-history-entry" className={`flex items-start gap-2 rounded-xl px-2 py-1.5 text-[12px] ${h.undone ? 'opacity-50' : 'bg-white/[0.03]'}`}>
+                        <span className="min-w-0 flex-1 leading-snug text-slate-200">
+                          <span className="font-black" style={{ color: h.color || undefined }}>{h.who}</span> {h.text}
+                          <span className="block text-[10px] text-slate-500">{agoShort(h.at)}{h.undone ? ' · annulé' : ''}</span>
+                        </span>
+                        {h.canUndo && p.onUndo && (
+                          <button type="button" onClick={() => p.onUndo!(h.id)} data-testid="collab-history-undo"
+                            className="h-9 shrink-0 rounded-lg bg-white/10 px-2 text-[11px] font-black text-white hover:bg-white/15">↩ Annuler</button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ))}
             </div>
           )}
           {p.markers && p.onAddMarker && (

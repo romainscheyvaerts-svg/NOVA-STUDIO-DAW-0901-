@@ -42,11 +42,22 @@ export interface CollabMember {
   member_key: string; role: CollabRole; display_name: string; online?: boolean;
   /** Présence en direct (« Feat à distance ») : couleur, piste en cours d'enregistrement, lecture, état de sa connexion, hôte. */
   color?: string; rec?: string | null; playing?: boolean; st?: 'ok' | 'late'; host?: boolean;
+  /** Piste qu'il modifie en ce moment, piste sélectionnée chez lui. */
+  edit?: string | null; sel?: string | null;
+  /** Audio en direct proposé : talkback ouvert, mix diffusé (services/CollabRtc). */
+  talk?: boolean; mixOut?: boolean;
   last_seen?: string;
 }
 
 /** Ce que chacun annonce dans la présence en direct (en plus de son nom et de son rôle). */
-export interface PresenceMeta { color?: string; rec?: string | null; playing?: boolean; st?: 'ok' | 'late'; host?: boolean }
+export interface PresenceMeta {
+  color?: string; rec?: string | null; playing?: boolean; st?: 'ok' | 'late'; host?: boolean;
+  edit?: string | null; sel?: string | null; talk?: boolean; mixOut?: boolean;
+}
+
+/** Messages éphémères (direct seulement, jamais dans le journal). */
+export type EphemeralEvent = 'tp' | 'ping' | 'pong' | 'fp' | 'rtc';
+const EPHEMERAL_EVENTS: EphemeralEvent[] = ['tp', 'ping', 'pong', 'fp', 'rtc'];
 export type AudioRefs = Record<string, { parts: string[]; size: number }>;
 
 export const collabDeviceId = (): string => {
@@ -105,6 +116,8 @@ export interface CollabClientOptions {
 export class CollabClient {
   memberKey = '';
   lastSeq = 0;
+  /** Plus grand numéro du journal vu (reçu en direct, rattrapé, ou envoyé) : « horizon » de synchronisation. */
+  horizon = 0;
   readonly deviceId = collabDeviceId();
   /** Page (chargement) qui a envoyé l'opération : voir collabPageId. */
   readonly pageId = collabPageId;
@@ -112,6 +125,8 @@ export class CollabClient {
   private channel: ReturnType<typeof catalogSupabase.channel> | null = null;
   /** Rattrapage en cours : un second appel attend la fin de celui-ci. */
   private catchUpRun: Promise<void> | null = null;
+  /** Opérations reçues pas encore appliquées (téléchargement en cours…). */
+  pendingApply(): number { return this.pending.size; }
   /** Opérations en file ou en cours d'application (pas de second essai en parallèle). */
   private pending = new Set<number>();
   private closed = false;
@@ -131,6 +146,10 @@ export class CollabClient {
   ) {
     this.outbox = new CollabOutbox((kind, op) => this.send(kind, op), {
       store: opts.outboxStore, merge: opts.merge || mergeQueuedOps, onChange: () => this.setStatus({ pending: this.outbox?.size() ?? 0 }),
+      onDrop: (entry, error) => {
+        this.setStatus({ droppedOps: this.status.droppedOps + 1, lastError: error });
+        this.onDropped?.(entry.kind, entry.op, error);
+      },
     });
     this.status.pending = this.outbox.size();
   }
@@ -142,6 +161,15 @@ export class CollabClient {
   // --- État -------------------------------------------------------------------------------
 
   getStatus(): CollabStatus { return this.status; }
+
+  /** Aller-retour avec le serveur (envoi d'une opération), moyenne glissante. */
+  private rtts: number[] = [];
+  private noteRtt(ms: number) {
+    if (!Number.isFinite(ms) || ms < 0) return;
+    this.rtts = [...this.rtts.slice(-9), ms];
+    const sorted = [...this.rtts].sort((a, b) => a - b);
+    this.setStatus({ rttMs: Math.round(sorted[Math.floor(sorted.length / 2)]) });
+  }
   onStatus(cb: (s: CollabStatus) => void): () => void {
     this.statusListeners.add(cb);
     cb(this.status);
@@ -175,12 +203,13 @@ export class CollabClient {
     this.joinSeq = Number(r.last_seq) || 0;
     this.lastSeq = Math.max(0, fromSeq);
     this.floorSeq = this.lastSeq;
+    this.horizon = Math.max(this.horizon, this.floorSeq);
     this.setStatus({ joined: true, reachable: true });
     const ch = catalogSupabase.channel(r.channel, { config: { broadcast: { self: false }, presence: { key: this.memberKey } } });
     this.channelRef = ch;
     ch.on('broadcast', { event: 'op' }, ({ payload }) => { void this.receive(payload as CollabOp); });
-    // Messages éphémères (lecture de l'hôte pour « Écouter ensemble ») : pas de journal.
-    ch.on('broadcast', { event: 'tp' }, ({ payload }) => { try { this.onEphemeral?.('tp', payload); } catch { /* */ } });
+    // Messages éphémères (lecture de l'hôte, mesure de latence, empreintes, audio en direct) : pas de journal.
+    EPHEMERAL_EVENTS.forEach(ev => ch.on('broadcast', { event: ev }, ({ payload }) => { try { this.onEphemeral?.(ev, payload); } catch { /* */ } }));
     ch.on('presence', { event: 'sync' }, () => {
       const state = ch.presenceState() as Record<string, ({ name: string; role: CollabRole } & PresenceMeta)[]>;
       // Une clé = un membre ; plusieurs appareils du même compte (ancienne fonction) : le plus récent.
@@ -192,6 +221,10 @@ export class CollabClient {
         if (m.playing) extra.playing = true;
         if (m.st) extra.st = m.st;
         if (m.host) extra.host = true;
+        if (m.edit) extra.edit = m.edit;
+        if (m.sel) extra.sel = m.sel;
+        if (m.talk) extra.talk = true;
+        if (m.mixOut) extra.mixOut = true;
         return { member_key: key, role: m.role, display_name: m.name, online: true, ...extra };
       });
       this.onPresence(online as CollabMember[]);
@@ -259,14 +292,14 @@ export class CollabClient {
    * Message éphémère par le direct seulement (pas de journal) : la lecture de
    * l'hôte. Renvoie false si le direct est coupé (l'appelant passe alors par le journal).
    */
-  broadcast(event: 'tp', payload: Record<string, unknown>): boolean {
+  broadcast(event: EphemeralEvent, payload: Record<string, unknown>): boolean {
     const ch = this.channel || this.channelRef;
     if (!ch || !this.subscribed || this.closed) return false;
     try { void Promise.resolve(ch.send({ type: 'broadcast', event, payload })).catch(() => { /* */ }); return true; } catch { return false; }
   }
 
   /** Message éphémère reçu (voir broadcast). */
-  onEphemeral?: (event: string, payload: any) => void;
+  onEphemeral?: (event: EphemeralEvent, payload: any) => void;
 
   /** « Réessayer » : rattrapage et envoi tout de suite (sans attendre les 10 s). */
   async retryNow(): Promise<void> {
@@ -285,19 +318,42 @@ export class CollabClient {
     const body = { ...(op as Record<string, unknown>), _id: (op as any)?._id || newOpId(), _d: this.deviceId, _p: this.pageId };
     remember(this.seenIds, body._id as string); // notre écho n'est jamais rejoué
     let r: { seq: number; role: CollabRole; author_name: string; member_key: string; created_at: string };
+    const t0 = Date.now();
     try {
       r = await call('op', this.body({ kind, op: body }));
     } catch (e: any) {
-      this.setStatus({ reachable: false, lastError: e?.message || 'Erreur réseau' });
+      const status = Number(e?.status) || 0;
+      // Plus membre (serveur mis à jour en pleine session, ménage…) : on rejoint, puis un essai.
+      if (status === 403 && /Rejoins/i.test(String(e?.message || '')) && !(op as any)?._rejoined) {
+        try {
+          await call('join', this.body({ role: this.role, name: this.name }));
+          return await this.send(kind, { ...(op as Record<string, unknown>), _id: body._id, _rejoined: true });
+        } catch { /* l'erreur d'origine est remontée */ }
+      }
+      // Refus définitif (opération invalide ou trop grosse) : la réessayer ne sert à rien.
+      if (status === 400 || status === 413 || status === 422) {
+        const err = new Error(status === 413
+          ? "Une modification trop lourde n'a pas pu partir (plus de 1,5 Mo de réglages ou de notes d'un coup)."
+          : `Une modification a été refusée par le serveur (${e?.message || 'invalide'}).`) as Error & { permanent?: boolean; status?: number };
+        err.permanent = true; err.status = status;
+        this.setStatus({ reachable: true });
+        throw err;
+      }
+      this.setStatus({ reachable: status ? true : false, lastError: e?.message || 'Erreur réseau' });
       throw e;
     }
+    this.noteRtt(Date.now() - t0);
     this.setStatus({ reachable: true });
     const full: CollabOp = { seq: r.seq, kind, op: body, role: r.role, author_name: r.author_name, member_key: r.member_key, created_at: r.created_at };
     remember(this.applied, r.seq); // nos propres opérations ne sont jamais rejouées
+    if (r.seq > this.horizon) this.horizon = r.seq;
     try { void Promise.resolve(this.channel?.send({ type: 'broadcast', event: 'op', payload: full })).catch(() => { /* le rattrapage la livrera */ }); } catch { /* */ }
     this.onSent?.(kind, body, r.seq);
     return r.seq;
   }
+
+  /** Modification refusée pour de bon par le serveur (retirée de la file d'envoi). */
+  onDropped?: (kind: string, op: Record<string, unknown>, error: string) => void;
 
   /** Notre opération est enregistrée (numéro du journal) : pour la règle « dernière écriture gagne ». */
   onSent?: (kind: string, op: Record<string, unknown>, seq: number) => void;
@@ -340,6 +396,7 @@ export class CollabClient {
 
   private apply(o: CollabOp) {
     if (!o || typeof o.seq !== 'number' || !Number.isFinite(o.seq) || typeof o.kind !== 'string') return;
+    if (o.seq > this.horizon) this.horizon = o.seq;
     if (this.applied.has(o.seq) || o.seq <= this.floorSeq) return;
     remember(this.applied, o.seq);
     const id = o.op && typeof o.op === 'object' && typeof o.op._id === 'string' ? o.op._id : null;
@@ -541,6 +598,8 @@ export const contentOf = (t: Track) => ({
   // ignore ce champ et joue le comp. Absent (piste sans prise) : rien
   // d'envoyé, le contenu reste identique à celui d'une ancienne version.
   takeMeta: t.takeMeta && t.takeMeta.length ? t.takeMeta : undefined,
+  // Respirations (rôle de la piste pour le traitement auto) : champ ajouté, ignoré des anciennes versions.
+  ...(t.breathKind ? { breathKind: t.breathKind } : {}),
   // Instrument VST du PC : le rendu des notes voyage avec la piste (sans
   // l'état du plugin, lourd et inutile à qui n'a pas le VST).
   vstInstrument: t.vstInstrument ? { ...t.vstInstrument, stateB64: undefined } : undefined,
@@ -551,7 +610,12 @@ export const contentOf = (t: Track) => ({
 
 /** Audio à envoyer avec le contenu d'une piste (prises, rendu d'instrument VST, samples perso des pads). */
 export const contentBufferIds = (t: Track): string[] => Array.from(new Set([
-  ...(t.clips || []).map(c => c.bufferId),
+  // Jamais le son d'un beat non acheté.
+  ...(t.clips || []).filter(c => !c.isUnlicensed).map(c => c.bufferId),
+  // Son d'origine des clips retouchés (justesse, Melodyne / VocAlign, AudioSuite,
+  // transposition) : l'autre peut revenir à la prise d'origine ou retoucher à
+  // nouveau. Déjà en ligne la plupart du temps (c'était la prise) : rien de plus à envoyer.
+  ...(t.clips || []).filter(c => !c.isUnlicensed).flatMap(c => [c.pitchEdit?.sourceBufferId, c.araEdit?.sourceBufferId, c.audioSuite?.sourceBufferId, c.elastic?.sourceBufferId]),
   t.vstInstrument && t.isFrozen ? t.frozenClip?.bufferId : undefined,
   // Batterie : sans eux, les pads perso (samples glissés, tranches d'une découpe)
   // restaient muets chez l'autre (motifs et réglages arrivaient, pas le son).
