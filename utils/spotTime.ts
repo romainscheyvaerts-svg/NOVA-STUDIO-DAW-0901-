@@ -124,3 +124,35 @@ export function spotStart(c: SpotClip, a: SpotAnchor, time: number): number | nu
 export function originalStartOf(c: SpotClip): number | null {
   return typeof c.originStart === 'number' && Number.isFinite(c.originStart) ? Math.max(0, c.originStart + (c.offset || 0)) : null;
 }
+
+/**
+ * Champ « Nouvelle position » de la fenêtre Spot. Les formats Mesures (1 tick =
+ * 0,52 ms à 120 BPM) et Min:sec (1 ms) sont moins fins que l'échantillon : relire
+ * le texte affiché décalerait le clip de quelques échantillons (constat R1 :
+ * 14 994 devenait 14 999 en passant de Mesures à Échantillons à 44,1 kHz). Tant
+ * que le texte n'a pas été retapé, le champ garde donc l'instant exact qu'il
+ * représente ; un changement de format repart de cet instant, pas du texte arrondi.
+ */
+export interface SpotField { text: string; format: SpotFormat; source: { text: string; time: number } | null }
+
+export function spotField(t: number, format: SpotFormat, c: SpotContext): SpotField {
+  const text = formatSpot(t, format, c);
+  return { text, format, source: { text, time: t } };
+}
+
+/** Texte tapé : l'instant exact ne vaut plus que si le texte redevient identique. */
+export function typeSpotField(f: SpotField, text: string): SpotField {
+  return { ...f, text };
+}
+
+/** Instant représenté par le champ (exact s'il n'a pas été retapé). */
+export function readSpotField(f: SpotField, c: SpotContext): { time: number; format: SpotFormat } | null {
+  if (f.source && f.text === f.source.text) return { time: f.source.time, format: f.format };
+  return parseSpot(f.text, f.format, c);
+}
+
+/** Change de format en gardant l'instant (exact, ou celui du texte tapé ; sinon `fallback`). */
+export function switchSpotFormat(f: SpotField, to: SpotFormat, c: SpotContext, fallback: number): SpotField {
+  const r = readSpotField(f, c);
+  return spotField(r ? r.time : fallback, to, c);
+}

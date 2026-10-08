@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Clip } from '../types';
 import { syncOffsetOf } from '../utils/editModes';
 import {
-  anchorTime, formatSpot, originalStartOf, parseSpot, SPOT_FORMATS, SpotAnchor, SpotFormat, spotStart,
+  anchorTime, formatSpot, originalStartOf, readSpotField, SPOT_FORMATS, SpotAnchor, spotField, SpotFormat, spotStart,
+  switchSpotFormat, typeSpotField,
 } from '../utils/spotTime';
 
 /**
@@ -37,9 +38,10 @@ const SpotDialog: React.FC<Props> = ({ clip, trackName, bpm, sampleRate, onApply
   const ctx = useMemo(() => ({ bpm, sr: sampleRate }), [bpm, sampleRate]);
   const hasSync = syncOffsetOf(clip) !== null;
   const origin = originalStartOf(clip);
-  const [format, setFormat] = useState<SpotFormat>(readFormat);
   const [anchor, setAnchor] = useState<SpotAnchor>(hasSync ? 'SYNC' : 'START');
-  const [text, setText] = useState(() => formatSpot(anchorTime(clip, hasSync ? 'SYNC' : 'START'), readFormat(), ctx));
+  // Le champ garde l'instant exact affiché (pas d'arrondi au tick ni à la ms) tant qu'on ne le retape pas.
+  const [field, setField] = useState(() => spotField(anchorTime(clip, hasSync ? 'SYNC' : 'START'), readFormat(), ctx));
+  const { text, format } = field;
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 30); }, []);
@@ -49,7 +51,7 @@ const SpotDialog: React.FC<Props> = ({ clip, trackName, bpm, sampleRate, onApply
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
-  const parsed = parseSpot(text, format, ctx);
+  const parsed = readSpotField(field, ctx);
   const newStart = parsed ? spotStart(clip, anchor, parsed.time) : null;
   const error = !text.trim() ? 'Tape une position.'
     : !parsed ? `Format attendu : ${SPOT_FORMATS.find(f => f.id === format)!.example}`
@@ -57,11 +59,10 @@ const SpotDialog: React.FC<Props> = ({ clip, trackName, bpm, sampleRate, onApply
 
   const changeFormat = (f: SpotFormat) => {
     // On garde la valeur tapée, convertie dans le nouveau format.
-    const t = parsed ? parsed.time : anchorTime(clip, anchor);
-    setFormat(f); setText(formatSpot(t, f, ctx));
+    setField(switchSpotFormat(field, f, ctx, anchorTime(clip, anchor)));
     try { localStorage.setItem(FORMAT_KEY, f); } catch { /* rien */ }
   };
-  const changeAnchor = (a: SpotAnchor) => { setAnchor(a); setText(formatSpot(anchorTime(clip, a), format, ctx)); };
+  const changeAnchor = (a: SpotAnchor) => { setAnchor(a); setField(spotField(anchorTime(clip, a), format, ctx)); };
   const apply = () => { if (newStart === null || error) return; onApply(newStart); onClose(); };
 
   const fmtAll = (t: number) => SPOT_FORMATS.map(f => formatSpot(t, f.id, ctx)).join(' · ');
@@ -103,7 +104,7 @@ const SpotDialog: React.FC<Props> = ({ clip, trackName, bpm, sampleRate, onApply
 
         <label className="block">
           <span className="text-[11px] font-bold text-slate-300">Nouvelle position ({ANCHORS.find(a => a.id === anchor)!.label.toLowerCase()})</span>
-          <input ref={inputRef} value={text} onChange={e => setText(e.target.value)} aria-label="Nouvelle position" data-testid="spot-input"
+          <input ref={inputRef} value={text} onChange={e => setField(typeSpotField(field, e.target.value))} aria-label="Nouvelle position" data-testid="spot-input"
             inputMode={format === 'SAMPLES' ? 'numeric' : 'text'} spellCheck={false}
             onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); apply(); } }}
             className={`mt-1 w-full rounded-lg border bg-black/40 px-3 py-2 font-mono text-[16px] tabular-nums text-white outline-none ${error && text.trim() ? 'border-red-500/60' : 'border-white/10 focus:border-yellow-500/60'}`} />
@@ -120,7 +121,7 @@ const SpotDialog: React.FC<Props> = ({ clip, trackName, bpm, sampleRate, onApply
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button type="button" disabled={origin === null} data-testid="spot-origin"
-            onClick={() => { if (origin === null) return; setAnchor('START'); setText(formatSpot(origin, format, ctx)); }}
+            onClick={() => { if (origin === null) return; setAnchor('START'); setField(spotField(origin, format, ctx)); }}
             title={origin === null ? 'Position d’origine inconnue : ce clip n’a pas été enregistré dans NOVA (import, ancien projet).' : 'Remet le clip là où il a été enregistré (Pro Tools : Original Time Stamp).'}
             className="mr-auto rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold text-slate-300 hover:text-white disabled:opacity-35">
             <i className="fas fa-clock-rotate-left mr-1.5" aria-hidden />Reprendre la position d’origine
