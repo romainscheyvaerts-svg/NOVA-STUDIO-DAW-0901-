@@ -295,7 +295,7 @@ const main = async () => {
     const A = tally(old.lines); const B = tally(lines);
     const tot = (m: Map<string, Tally>) => [...m.values()].reduce((x, t) => ({ a: x.a + t.a, r: x.r + t.r, i: x.i + t.i, n: x.n + t.n }), { a: 0, r: 0, i: 0, n: 0 });
     const ta = tot(A); const tb = tot(B);
-    md.push('## Avant / après', '', `- Avant : ${ta.a} appliqués, ${ta.r} refusés, ${ta.i} introuvables, ${ta.n} non contrôlés.`, `- Après : ${tb.a} appliqués, ${tb.r} refusés, ${tb.i} introuvables, ${tb.n} non contrôlés.`, '',
+    md.push('## Avant / après', '', `- Avant : ${ta.a} appliqués, ${ta.r} refusés, ${ta.i} introuvables, ${ta.n} non contrôlés.`, `- Après : ${tb.a} appliqués, ${tb.r} refusés, ${tb.i} introuvables, ${tb.n} non exposés en VST3 ou non contrôlés.`, '',
       '| Plugin | Avant (appl. / ref. / introuv.) | Après (appl. / ref. / introuv.) | État après |', '|---|---|---|---|');
     for (const k of [...new Set([...A.keys(), ...B.keys()])].sort((x, y) => x.localeCompare(y))) {
       const a = A.get(k); const b = B.get(k);

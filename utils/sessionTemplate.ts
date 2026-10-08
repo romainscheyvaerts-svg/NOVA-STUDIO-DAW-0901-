@@ -409,7 +409,8 @@ export const instantiateTemplate = (tpl: SessionTemplate, opts: InstantiateOptio
       const repl = p.params.templateReplacement as { from: string; to: string; inactive?: boolean; note?: string } | undefined;
       if (repl?.from && repl.to) {
         report.replaced.push({ track: t.name, plugin: repl.from, by: repl.to });
-        report.messages.push(`${repl.from} manquant sur ${t.name} : remplacé par ${repl.to}${repl.inactive ? ' (laissé inactif)' : ''}${repl.note ? ` — ${repl.note}` : ''}.`);
+        // Court : la raison détaillée reste dans l'effet (params.templateReplacement.note) et le rapport du modèle.
+        report.messages.push(`${repl.from} manquant sur ${t.name} : remplacé par ${repl.to}${repl.inactive ? ' (laissé inactif)' : ''}.`);
       }
       // « Activer tous les effets » : inactifs (info gardée : templateWasInactive) et en bypass.
       // Un remplaçant « laissé inactif » (équivalence lointaine) n'est jamais activé d'office.

@@ -400,7 +400,10 @@ describe('fiche (Pro Tools relevé) → modèle NOVA', () => {
     expect(lead.sends).toHaveLength(10);
     const plugins = tr.flatMap(x => x.plugins);
     expect(plugins.length).toBeGreaterThanOrEqual(320);
-    expect(plugins.some((p: any) => p.isInactive)).toBe(false);
+    // Tout est actif, sauf les remplaçants « laissés inactifs » (Neutron 4 → Ozone 9…).
+    expect(plugins.filter((p: any) => p.isInactive).every((p: any) => p.params?.templateReplacement?.inactive)).toBe(true);
+    expect(plugins.filter((p: any) => p.params?.templateReplacement).map((p: any) => p.params.templateReplacement.from))
+      .toEqual(expect.arrayContaining(['True Iron', 'Oxford SuprEsser DS', 'Neutron 4', 'Gullfoss', 'soothe2', 'PURPLE2AA']));
     expect(plugins.filter((p: any) => p.params?.templateSpec?.wasInactiveInProTools).length).toBeGreaterThan(150);
     const tt = lead.plugins.find((p: any) => p.params?.templateSpec?.plugin === 'Tube-Tech CL 1B mk II');
     expect(tt.params.templateSpec.targetGainReductionDb).toBe(5);
