@@ -6187,6 +6187,14 @@ function Studio() {
   useEffect(() => {
     audioElsRef.current.forEach((el, id) => { el.muted = id.endsWith(':talk') ? !!state.isRecording : !listenRemoteMix; });
   }, [state.isRecording, listenRemoteMix]);
+  // Une prise commence pendant l'écoute du mix de l'ingé : on rend son propre son (retour casque).
+  useEffect(() => {
+    if (!state.isRecording || !listenRemoteMixRef.current) return;
+    setListenRemoteMix(false);
+    audioEngine.setCollabOutputMuted(false);
+    audioElsRef.current.forEach((el, id) => { if (id.endsWith(':mix')) el.muted = true; });
+    setAiNotification("🎧 Prise en cours : l'écoute du mix de l'ingé est coupée, tu entends ton propre retour.");
+  }, [state.isRecording]);
   /** Talkback : maintenir pour parler (le micro reste ouvert, coupé entre deux appuis). */
   const setTalk = useCallback(async (on: boolean) => {
     const c = collabRef.current;

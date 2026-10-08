@@ -90,7 +90,8 @@ export class CollabRtc {
     const want = new Set(keys.filter(k => k && k !== this.o.me));
     for (const k of [...this.peers.keys()]) if (!want.has(k)) this.drop(k, true);
     // Seulement s'il y a quelque chose à envoyer : sinon c'est l'autre qui appelle.
-    if (this.local.size) want.forEach(k => this.ensure(k));
+    // Un nouvel arrivant reçoit tout de suite ce qu'on diffuse (talkback ouvert, mix).
+    if (this.local.size) want.forEach(k => { const isNew = !this.peers.has(k); const p = this.ensure(k); if (isNew) this.local.forEach((_s, kind) => this.attach(p, kind)); });
   }
 
   /** Commence à envoyer un flux (micro du talkback, ou mix master). */
