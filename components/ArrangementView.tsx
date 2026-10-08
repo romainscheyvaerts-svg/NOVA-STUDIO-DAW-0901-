@@ -2424,6 +2424,16 @@ useEffect(() => {
                       onClick: () => { openNovaWindow(clipContextMenu.clip.araEdit!.plugin === 'melodyne' ? 'ara-melodyne' : 'ara-vocalign', target); setClipContextMenu(null); } }] : []),
                   ];
                 })() : []),
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'AudioSuite (traiter avec un effet)…', icon: 'fa-wand-magic-sparkles',
+                  title: 'Appliquer un effet NOVA ou un VST à ce clip, avec poignées ; l’original est gardé (« AudioSuite » de Pro Tools, « Traitement de fichier » de Logic, Edison dans FL)',
+                  onClick: () => {
+                    const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id];
+                    const targets = ids.map(clipId => ({ trackId: tracks.find(t => t.clips.some(c => c.id === clipId))?.id || clipContextMenu.trackId, clipId }));
+                    openNovaWindow('audiosuite', { targets }); setClipContextMenu(null);
+                  }}] : []),
+                ...(clipContextMenu.clip.audioSuite ? [{ label: 'Revenir à l’original (AudioSuite)', icon: 'fa-rotate-left',
+                  title: `Remet la prise d’origine à la même place (traitements : ${clipContextMenu.clip.audioSuite.steps.map(x => x.name).join(' + ')})`,
+                  onClick: () => { openNovaWindow('audiosuite', { revert: true, targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: simple ? 'Supprimer les silences…' : 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', title: 'Supprimer les silences : découpe le clip et retire les blancs entre les phrases, avec seuil et marges réglables (Pro Tools : Strip Silence, Ctrl+U)', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => { const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id]; requestBreaths({ mode: 'dialog', clipIds: ids, reason: 'menu' }); setClipContextMenu(null); }}] : []),
                 // Gain de clip, Heal, boucle, Répéter, rendre le gain (R5).

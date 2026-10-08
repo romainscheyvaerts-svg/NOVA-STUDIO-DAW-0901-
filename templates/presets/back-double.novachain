@@ -1,0 +1,250 @@
+{
+  "format": "novachain",
+  "version": 1,
+  "id": "chain-make-music-back-double",
+  "name": "Back / double",
+  "description": "Backs et doubles : low cut 200 Hz et high cut 15 kHz, pour laisser la place à la lead. Envois prêts (à 0) vers les retours du studio.",
+  "createdAt": 1791417600000,
+  "updatedAt": 1791417600000,
+  "trackType": "AUDIO",
+  "color": "#a855f7",
+  "plugins": [
+    {
+      "id": "back-eq",
+      "name": "EQ · 200 Hz – 15 kHz",
+      "type": "PROEQ12",
+      "isEnabled": true,
+      "latency": 0,
+      "params": {
+        "isEnabled": true,
+        "masterGain": 1.0,
+        "bands": [
+          {
+            "id": 0,
+            "type": "highpass",
+            "frequency": 200,
+            "gain": 0,
+            "q": 0.707,
+            "isEnabled": true,
+            "isSolo": false
+          },
+          {
+            "id": 1,
+            "type": "peaking",
+            "frequency": 150,
+            "gain": 0,
+            "q": 1.0,
+            "isEnabled": true,
+            "isSolo": false
+          },
+          {
+            "id": 2,
+            "type": "peaking",
+            "frequency": 300,
+            "gain": 0,
+            "q": 1.0,
+            "isEnabled": true,
+            "isSolo": false
+          },
+          {
+            "id": 3,
+            "type": "peaking",
+            "frequency": 500,
+            "gain": 0,
+            "q": 1.0,
+            "isEnabled": true,
+            "isSolo": false
+          },
+          {
+            "id": 4,
+            "type": "peaking",
+            "frequency": 1000,
+            "gain": 0,
+            "q": 1.0,
+            "isEnabled": true,
+            "isSolo": false
+          },
+          {
+            "id": 5,
+            "type": "peaking",
+            "frequency": 2000,
+            "gain": 0,
+            "q": 1.0,
+            "isEnabled": true,
+            "isSolo": false
+          },
+          {
+            "id": 6,
+            "type": "peaking",
+            "frequency": 4000,
+            "gain": 0,
+            "q": 1.0,
+            "isEnabled": true,
+            "isSolo": false
+          },
+          {
+            "id": 7,
+            "type": "peaking",
+            "frequency": 6000,
+            "gain": 0,
+            "q": 1.0,
+            "isEnabled": true,
+            "isSolo": false
+          },
+          {
+            "id": 8,
+            "type": "peaking",
+            "frequency": 8000,
+            "gain": 0,
+            "q": 1.0,
+            "isEnabled": true,
+            "isSolo": false
+          },
+          {
+            "id": 9,
+            "type": "peaking",
+            "frequency": 10000,
+            "gain": 0,
+            "q": 1.0,
+            "isEnabled": true,
+            "isSolo": false
+          },
+          {
+            "id": 10,
+            "type": "peaking",
+            "frequency": 12000,
+            "gain": 0,
+            "q": 1.0,
+            "isEnabled": true,
+            "isSolo": false
+          },
+          {
+            "id": 11,
+            "type": "lowpass",
+            "frequency": 15000,
+            "gain": 0,
+            "q": 0.707,
+            "isEnabled": true,
+            "isSolo": false
+          }
+        ]
+      }
+    }
+  ],
+  "sends": [
+    {
+      "to": {
+        "id": "send-delay",
+        "name": "Écho 1/4"
+      },
+      "level": 0,
+      "isEnabled": true,
+      "slot": 0
+    },
+    {
+      "to": {
+        "id": "send-verb-short",
+        "name": "Reverb courte"
+      },
+      "level": 0,
+      "isEnabled": true,
+      "slot": 1
+    },
+    {
+      "to": {
+        "id": "send-verb-long",
+        "name": "Reverb longue"
+      },
+      "level": 0,
+      "isEnabled": true,
+      "slot": 2
+    }
+  ],
+  "volume": 1,
+  "pan": 0,
+  "output": {
+    "kind": "track",
+    "id": "bus-vox",
+    "name": "BUS VOX"
+  },
+  "returns": [
+    {
+      "id": "send-verb-short",
+      "name": "Reverb courte",
+      "type": "SEND",
+      "color": "#10b981",
+      "volume": 0.7,
+      "plugins": [
+        {
+          "id": "rv-short",
+          "name": "Reverb courte (plate)",
+          "type": "REVERB",
+          "isEnabled": true,
+          "latency": 0,
+          "params": {
+            "decay": 1.2,
+            "preDelay": 0.02,
+            "damping": 0.4,
+            "mix": 1,
+            "size": 0.4,
+            "mode": "PLATE",
+            "isEnabled": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "send-delay",
+      "name": "Écho 1/4",
+      "type": "SEND",
+      "color": "#00f2ff",
+      "volume": 0.8,
+      "plugins": [
+        {
+          "id": "dl-quarter",
+          "name": "Écho 1/4",
+          "type": "DELAY",
+          "isEnabled": true,
+          "latency": 0,
+          "params": {
+            "division": "1/4",
+            "feedback": 0.3,
+            "feedbackLP": 5000,
+            "feedbackHP": 150,
+            "mix": 1,
+            "pingPong": false,
+            "isEnabled": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "send-verb-long",
+      "name": "Reverb longue",
+      "type": "SEND",
+      "color": "#a855f7",
+      "volume": 0.6,
+      "plugins": [
+        {
+          "id": "rv-long",
+          "name": "Reverb longue (hall)",
+          "type": "REVERB",
+          "isEnabled": true,
+          "latency": 0,
+          "params": {
+            "decay": 3.5,
+            "preDelay": 0.05,
+            "damping": 0.4,
+            "mix": 1,
+            "size": 0.9,
+            "mode": "HALL",
+            "isEnabled": true
+          }
+        }
+      ]
+    }
+  ],
+  "source": {
+    "from": "Règles de mix Make Music"
+  }
+}

@@ -12,6 +12,8 @@ import { playheadStore } from '../utils/playheadStore';
 import { registerEditCommands } from '../utils/editCommands';
 import { editModeStore } from '../utils/editModes';
 import { closeRange, openGapAt, ShuffleOptions } from '../utils/shuffle';
+import { bounceTracks, canCommit } from '../utils/commit';
+import { DEFAULT_TAIL, renderCommitClip } from '../services/Bounce';
 
 /**
  * Commandes d'édition « façon Pro Tools » appelables de partout (clavier,
@@ -65,8 +67,14 @@ export interface EditCommands {
   duplicateSelection: () => boolean;
   /** Séparer (Ctrl+E) aux bords de la plage, ou à la tête de lecture sur la piste active. */
   separate: () => boolean;
-  /** Consolider (Alt+Maj+3) : un seul clip audio par piste pour la plage. */
-  consolidateSelection: () => Promise<boolean>;
+  /**
+   * Consolider (Alt+Maj+3) : un seul clip audio par piste pour la plage.
+   * withEffects (R6, « Bounce in place ») : la plage est rendue AVEC les effets
+   * de la piste sur une nouvelle piste (même son qu'à la lecture, latence
+   * compensée, queue `tail` en secondes) et les clips d'origine de la plage sont
+   * coupés. Une seule étape d'annulation.
+   */
+  consolidateSelection: (opts?: { withEffects?: boolean; tail?: number }) => Promise<boolean>;
   /** Créer des fondus (Ctrl+F) sur la plage : fondus d'entrée / de sortie ou crossfade. */
   fadesFromSelection: () => boolean;
   /** La plage devient la zone de boucle (et la boucle s'active). */
@@ -264,8 +272,34 @@ function rangeCommands(
       d().notify(s ? `✂️ Clips séparés aux bords de la plage (${what(s)}).` : '✂️ Clip séparé à la tête de lecture.');
       return true;
     },
-    consolidateSelection: async () => {
+    consolidateSelection: async (opts) => {
       const s = need(); if (!s) return false;
+      if (opts?.withEffects) {
+        const tail = Math.max(0, opts.tail ?? DEFAULT_TAIL);
+        const made: { sourceId: string; id: string; clip: Clip; upTo: number }[] = [];
+        const errors: string[] = [];
+        d().notify(`⏳ Rendu de la plage avec les effets (${what(s)})…`);
+        for (const id of s.trackIds) {
+          const t = st().tracks.find(x => x.id === id);
+          if (!t || !canCommit(t)) continue;
+          if (!t.clips.some(c => !c.isMuted && c.start < s.end && c.start + c.duration > s.start)) continue;
+          try {
+            const r = await renderCommitClip(t, { range: { start: s.start, end: s.end }, tail, label: 'bounce', session: st().tracks });
+            made.push({ sourceId: id, id: `track-bounce-${Date.now().toString(36)}-${made.length}`, clip: r.clip, upTo: r.upTo });
+          } catch (e: any) { errors.push(`${t.name} : ${e?.message || e}`); }
+        }
+        if (!made.length) { d().notify(errors.length ? `Consolider avec effets impossible — ${errors.join(' · ')}` : 'Consolider : aucun clip dans la plage.'); return false; }
+        d().setState(prev => {
+          let tracks = prev.tracks;
+          for (const m of made) {
+            if (!tracks.some(x => x.id === m.sourceId)) continue;
+            tracks = bounceTracks(tracks, m.sourceId, { id: m.id, clip: m.clip, upTo: m.upTo, tail, range: { start: s.start, end: s.end } });
+          }
+          return { ...prev, tracks };
+        });
+        d().notify(`🧱 Bounce in place : ${made.length} piste${made.length > 1 ? 's' : ''} rendue${made.length > 1 ? 's' : ''} avec les effets (clips d'origine coupés sur la plage${tail ? `, queue de ${tail} s` : ''}). Ctrl+Z pour revenir.${errors.length ? ` Non rendu : ${errors.join(' · ')}` : ''}`);
+        return true;
+      }
       const len = selLength(s);
       const out: ClipsByTrack = {};
       let made = 0;

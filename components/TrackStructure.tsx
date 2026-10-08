@@ -11,6 +11,8 @@ import { gainToDbText, panToText } from '../utils/db';
 import { getValidDestinations } from './RoutingManager';
 import { trackDisplayName } from '../utils/sendLabels';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
+import { openNovaWindow } from '../utils/novaWindows';
+import { canCommit, canPrintBus, canRestore, commitLabel, restoreCommitted } from '../utils/commit';
 
 /**
  * Morceaux d'interface de la structure façon Pro Tools (voir utils/trackStructure) :
@@ -143,6 +145,28 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
   if (!target || target.id === 'master') return [];
   const id = target.id;
   const items: (ContextMenuItem | 'separator')[] = ['separator'];
+  // R4 : Track Presets (Pro Tools 2020+).
+  if (!target.isVca && !target.folder) items.push({
+    label: 'Track Preset…', icon: 'fa-bookmark',
+    title: 'Enregistrer ou rappeler toute la chaîne de la piste : effets, envois, volume, pan, sortie (Pro Tools : Track Presets · Logic : Patches · Ableton : Rack · FL : état de piste)',
+    onClick: () => openNovaWindow('track-preset', { trackId: id }),
+  });
+  // R6 : Commit, impression de bus, restauration.
+  if (canCommit(target) && (target.clips || []).length) items.push({
+    label: 'Commit (rendre avec les effets)…', icon: 'fa-check-double',
+    title: 'La piste rendue avec ses effets remplace l’originale, gardée inactive et masquée (Pro Tools 2020+ : Commit · Logic : Bounce in Place · Ableton : Freeze and Flatten · FL : Consolidate)',
+    onClick: () => openNovaWindow('bounce', { trackId: id, bounce: { mode: 'commit' } }),
+  });
+  if (canPrintBus(target)) items.push({
+    label: 'Imprimer le bus sur une nouvelle piste…', icon: 'fa-print',
+    title: 'Le son exact du bus, aligné à l’échantillon, sur une piste audio (Pro Tools : enregistrer un bus · Logic : Bounce in Place d’un aux · Ableton : Resample)',
+    onClick: () => openNovaWindow('print-bus', { trackId: id }),
+  });
+  if (canRestore(target, tracks)) items.push({
+    label: 'Restaurer la piste d’origine', icon: 'fa-rotate-left',
+    title: `${commitLabel(target, tracks)} : la piste rendue est retirée, l’originale revient telle qu’elle était (Ctrl+Z pour annuler)`,
+    onClick: () => applyTracks(ts => restoreCommitted(ts, id).tracks, `Piste d’origine restaurée (${commitLabel(target, tracks)})`),
+  });
   items.push({
     label: target.isInactive ? 'Rendre la piste active' : 'Rendre la piste inactive',
     icon: target.isInactive ? 'fa-play-circle' : 'fa-ban',

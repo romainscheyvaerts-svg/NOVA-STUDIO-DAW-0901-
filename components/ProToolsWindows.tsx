@@ -10,6 +10,11 @@ import PitchEditor from './PitchEditor';
 import PitchBatchDialog from './PitchBatchDialog';
 import AudioToMidiDialog, { AudioToMidiRequest } from './AudioToMidiDialog';
 import AraDialog, { AraApply } from './AraDialog';
+import TrackPresetDialog from './TrackPresetDialog';
+import BounceDialog from './BounceDialog';
+import AudioSuiteDialog from './AudioSuiteDialog';
+import { audioSuiteRevertPatch, patchClip } from '../utils/clipProcess';
+import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 
 interface Props {
   tracks: Track[];
@@ -44,6 +49,25 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
   const [pitchBatch, setPitchBatch] = useState<NovaWindowDetail | null>(null);
   const [convert, setConvert] = useState<AudioToMidiRequest | null>(null);
   const [ara, setAra] = useState<NovaWindowDetail | null>(null);
+  const [trackPreset, setTrackPreset] = useState<NovaWindowDetail | null>(null);
+  const [bounce, setBounce] = useState<NovaWindowDetail | null>(null);
+  const [suite, setSuite] = useState<NovaWindowDetail | null>(null);
+  // « Revenir à l'original » (AudioSuite) depuis le menu du clip : une seule étape d'annulation.
+  const revertSuite = useCallback((targets: { trackId: string; clipId: string }[]) => {
+    const ids = new Set(targets.map(t => t.clipId));
+    setState(prev => ({
+      ...prev,
+      tracks: prev.tracks.map(t => (t.clips.some(c => ids.has(c.id) && c.audioSuite) ? {
+        ...t,
+        clips: t.clips.map(c => {
+          if (!ids.has(c.id) || !c.audioSuite) return c;
+          const p = audioSuiteRevertPatch(c, id => !!audioBufferRegistry.get(id));
+          return p ? patchClip(c, p) : c;
+        }),
+      } : t)),
+    }));
+    try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: "↩️ Clip revenu à l'original (AudioSuite). Ctrl+Z pour retrouver le son traité." })); } catch { /* hors navigateur */ }
+  }, [setState]);
   const focus = useKeyboardFocus();
 
   useEffect(() => {
@@ -59,10 +83,13 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       // Audio → MIDI (V20) : mélodie, batterie, harmonie.
       else if (d.name === 'audio-to-midi' && d.convert) setConvert({ ...d.convert, trackId: d.targets?.[0]?.trackId, clipId: d.targets?.[0]?.clipId });
       else if ((d.name === 'ara-melodyne' || d.name === 'ara-vocalign') && d.targets?.length) setAra(d);
+      else if (d.name === 'track-preset') setTrackPreset(d);
+      else if (d.name === 'bounce' || d.name === 'print-bus') setBounce(d);
+      else if (d.name === 'audiosuite') { if (d.revert && d.targets?.length) revertSuite(d.targets); else if (d.targets?.length || d.range) setSuite(d); }
     };
     window.addEventListener(NOVA_WINDOW_EVENT, onOpen);
     return () => window.removeEventListener(NOVA_WINDOW_EVENT, onOpen);
-  }, [onOpenShortcuts]);
+  }, [onOpenShortcuts, revertSuite]);
 
   const applyStrip = useCallback((results: { trackId: string; clipId: string; clips: Clip[] }[]) => {
     if (!results.length) return;
@@ -162,6 +189,10 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
         setState={setState} onClose={() => setConvert(null)} />
       <AraDialog open={!!ara} plugin={ara?.name === 'ara-vocalign' ? 'vocalign' : 'melodyne'} trackId={ara?.targets?.[0]?.trackId}
         clipId={ara?.targets?.[0]?.clipId} tracks={tracks} bpm={bpm} onApply={applyAra} onClose={() => setAra(null)} />
+      <TrackPresetDialog open={!!trackPreset} trackId={trackPreset?.trackId} tracks={tracks} setState={setState} onClose={() => setTrackPreset(null)} />
+      <BounceDialog open={!!bounce} mode={bounce?.name === 'print-bus' ? 'bus' : bounce?.bounce?.mode === 'range' ? 'range' : 'commit'} trackId={bounce?.trackId}
+        range={bounce?.range} tracks={tracks} setState={setState} onClose={() => setBounce(null)} />
+      <AudioSuiteDialog open={!!suite} targets={suite?.targets} range={suite?.range} tracks={tracks} setState={setState} onClose={() => setSuite(null)} />
       {focus && (
         <button type="button" onClick={() => setKeyboardFocus(false)} data-testid="keyboard-focus-badge"
           title="Commands Keyboard Focus actif : une touche = une commande (A, S, D, G, R, T…). Clic ou Ctrl+Alt+1 pour l'arrêter. Ctrl+Espace enregistre."

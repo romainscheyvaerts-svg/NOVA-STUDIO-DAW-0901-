@@ -58,7 +58,8 @@ type Segment = { kind: 'native'; plugins: PluginInstance[] } | { kind: 'vst'; pl
 const splitSegments = (plugins: PluginInstance[]): Segment[] => {
   const out: Segment[] = [];
   for (const p of plugins) {
-    if (!p.isEnabled) continue;
+    // Bypass ou inactif (Pro Tools « Make Inactive ») : hors du rendu.
+    if (!p.isEnabled || p.isInactive) continue;
     if (isVst(p)) out.push({ kind: 'vst', plugin: p });
     else {
       const last = out[out.length - 1];
@@ -205,7 +206,7 @@ export async function renderTrackPreview(
 // --- Bus / envois à effets VST (reverb VST de l'ingé…) ----------------------------
 
 /** Effets VST3 actifs dans les effets [0..upTo] d'une piste. */
-const activeVstUpTo = (t: Track, upTo: number) => (t.plugins || []).slice(0, upTo + 1).some(p => isVst(p) && p.isEnabled);
+const activeVstUpTo = (t: Track, upTo: number) => (t.plugins || []).slice(0, upTo + 1).some(p => isVst(p) && p.isEnabled && !p.isInactive);
 
 /** Bus / envois d'effets qui passent par un VST3 du PC (à geler pour la tablette). */
 export const vstBuses = (tracks: Track[]): Track[] =>

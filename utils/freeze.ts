@@ -294,6 +294,8 @@ export const trackBufferIds = (t: Track): string[] => {
   (t.clips || []).forEach(c => { if (c.araEdit?.sourceBufferId) ids.push(c.araEdit.sourceBufferId); });
   // Son d'origine d'un clip dont la ligne de gain a été rendue (« Revenir »).
   (t.clips || []).forEach(c => { if (c.gainRender?.sourceBufferId) ids.push(c.gainRender.sourceBufferId); });
+  // Prise d'origine d'un clip traité par AudioSuite (R6) : gardée pour « Revenir à l'original ».
+  (t.clips || []).forEach(c => { if (c.audioSuite?.sourceBufferId) ids.push(c.audioSuite.sourceBufferId); });
   if (t.frozenClip?.bufferId) ids.push(t.frozenClip.bufferId);
   (t.sendFreezes || []).forEach(sf => { if (sf.clip.bufferId) ids.push(sf.clip.bufferId); });
   (t.freezeBase?.clips || []).forEach(c => { const b = (c as { bufferId?: string }).bufferId; if (b) ids.push(b); });
