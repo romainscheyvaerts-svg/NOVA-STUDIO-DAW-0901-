@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import { isMidiRecordTrack } from '../utils/midiRecord';
 import { openNovaWindow } from '../utils/novaWindows';
 import { requestBreaths } from '../utils/breathBus';
 import MobileContainer from './MobileContainer';
@@ -822,6 +823,16 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     }`}
                   >
                     R
+                  </button>
+                  )}
+                  {/* Armement MIDI (R16) : jouer et enregistrer au clavier MIDI */}
+                  {isMidiRecordTrack(track) && (
+                  <button type="button" data-nova-arm-midi={track.id}
+                    onClick={(e) => { e.stopPropagation(); if (onUpdateTrack) onUpdateTrack({ ...track, isTrackArmed: !track.isTrackArmed }); }}
+                    aria-label={track.isTrackArmed ? `Désarmer ${track.name}` : `Armer ${track.name} : enregistrer depuis le clavier MIDI`}
+                    aria-pressed={!!track.isTrackArmed}
+                    className={`nova-hit w-8 h-8 rounded-md text-[10px] font-bold transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/10 text-white/40 hover:bg-white/20'}`}>
+                    <i className="fas fa-circle text-[8px]"></i>
                   </button>
                   )}
                 </div>

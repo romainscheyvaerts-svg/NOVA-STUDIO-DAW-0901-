@@ -87,6 +87,8 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.tools', keys: ['1', '2', '3'], label: 'Outil sélection / ciseaux / gomme', pt: 'F6 / F7 / F8', category: 'Édition' }),
   nova({ id: 'nova.pencil', keys: ['6'], label: 'Crayon : dessiner la ligne de gain d’un clip ou une ligne d’automation (libre, ligne, triangle, carré, aléatoire)', pt: 'F10 (Pencil Tool)', category: 'Édition' }),
   // Géré par components/MidiHost (V25). Ctrl+Alt+C : repli quand le navigateur garde Ctrl+Maj+C (outils de développement).
+  nova({ id: 'nova.computerKeyboard', keys: ['ctrl+shift+k'], label: 'Clavier de l’ordinateur = clavier MIDI sur la piste armée ou sélectionnée, sans ouvrir le piano roll (R reste l’enregistrement, Espace la lecture)', pt: 'Pro Tools : clavier MIDI (Ctrl+Démarrer+K) · Live : M (Computer MIDI Keyboard) · FL : Typing keyboard to piano', category: 'Transport' }),
+  nova({ id: 'nova.muteNotes', keys: ['ctrl+m'], label: 'Piano roll : rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Alt+clic sur une note aussi)', pt: 'Pro Tools : Mute Notes (Ctrl+M) · FL : outil Muet', category: 'Clavier MIDI' }),
   nova({ id: 'nova.captureMidi', keys: ['ctrl+shift+c', 'ctrl+alt+c'], label: 'Capturer ce que tu viens de jouer (clip MIDI créé après coup)', pt: 'Pas dans Pro Tools : Capture MIDI de Live (Ctrl+Maj+C)', category: 'Transport' }),
 
   // --- Ajoutés façon Pro Tools (toujours actifs) ----------------------------------

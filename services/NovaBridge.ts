@@ -214,6 +214,14 @@ export interface InstrumentNote {
   velocity: number;
 }
 
+/** Message MIDI de contrôleur (R16) : pitch bend, CC, aftertouch, à `time` s du début du rendu. */
+export interface InstrumentController {
+  time: number;
+  status: number;
+  data1: number;
+  data2: number;
+}
+
 export interface LoadResult {
   name: string;
   vendor: string;
@@ -750,7 +758,7 @@ class NovaBridgeService {
    */
   async renderInstrument(opts: {
     slotId?: string | null; path?: string; pluginName?: string | null; stateB64?: string | null;
-    sampleRate: number; notes: InstrumentNote[]; lengthSeconds: number; tailSeconds?: number;
+    sampleRate: number; notes: InstrumentNote[]; controllers?: InstrumentController[]; lengthSeconds: number; tailSeconds?: number;
   }): Promise<Float32Array[]> {
     if (!this.state.instruments) throw new Error('Mets à jour le pont VST pour utiliser tes instruments.');
     const seconds = opts.lengthSeconds + (opts.tailSeconds || 0);
@@ -758,6 +766,8 @@ class NovaBridgeService {
       action: 'RENDER_INSTRUMENT', slot_id: opts.slotId || null, path: opts.path || null,
       plugin_name: opts.pluginName || null, state: opts.slotId ? null : (opts.stateB64 || null),
       sample_rate: Math.round(opts.sampleRate), notes: opts.notes,
+      // Pont plus ancien : champ ignoré (les notes seules sont rendues).
+      ...(opts.controllers && opts.controllers.length ? { controllers: opts.controllers } : {}),
       length_seconds: opts.lengthSeconds, tail_seconds: opts.tailSeconds || 0,
     }, 60000 + seconds * 4000);
     return r.channels as Float32Array[];

@@ -38,6 +38,7 @@ import { DrumRackNode } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
 import { events808 } from '../utils/bass808';
+import { playableNotes, ccValueAt, ccDefault, sortPoints, SUSTAIN } from '../utils/midiCc';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
 import { CaptureRing as _CaptureRing, chooseCapture, captureMinutes, captureWorkletSource, type PlayRun } from '../utils/audioCapture';
 void _CaptureRing;
@@ -1302,7 +1303,8 @@ export class AudioEngine {
 
         // PDC : notes avancées de la latence de tout le chemin (comme en lecture).
         const lat = toSamples((rt.latency || 0) + (rt.down || 0));
-        for (const note of (rt.synth instanceof NovaSynthNode ? notesInTimeOrder(clip.notes) : clip.notes)) {
+        const heard = playableNotes(clip);
+        for (const note of (rt.synth instanceof NovaSynthNode ? notesInTimeOrder(heard) : heard)) {
           const noteStart = clip.start + note.start - startOffset - lat;
           const noteEnd = noteStart + note.duration;
           if (noteEnd <= 0 || noteStart >= totalDuration) continue;
@@ -1323,6 +1325,8 @@ export class AudioEngine {
         processedClips++;
         if (onProgress) onProgress(Math.round((processedClips / Math.max(1, totalClips)) * 80));
       }
+      // Contrôleurs MIDI (R16) : pitch bend, modulation, expression… mêmes instants qu'en lecture.
+      if (rt.synth) this.scheduleOfflineControllers(track, rt.synth, startOffset + toSamples((rt.latency || 0) + (rt.down || 0)), totalDuration);
     }
 
     if (pendingPlugins.length > 0) {
@@ -2017,7 +2021,7 @@ export class AudioEngine {
     });
     this.activeSources.clear();
     this.tracksDSP.forEach(dsp => {
-        if (dsp.synth) dsp.synth.releaseAll();
+        if (dsp.synth) { dsp.synth.releaseAll(); dsp.synth.resetControllers(); }
         if (dsp.bass808) dsp.bass808.stopAll();
         if (dsp.sampler) dsp.sampler.stopAll();
         if (dsp.drumSampler) dsp.drumSampler.stop();
@@ -2079,6 +2083,12 @@ export class AudioEngine {
   }
   
   public getIsPlaying(): boolean { return this.isPlaying; }
+
+  /**
+   * Instant du contexte audio qui correspond au début du morceau pour la
+   * lecture en cours (avant tout retour de boucle) : prise MIDI armée (R16).
+   */
+  public getPlaybackOrigin(): number { return this.playbackStartTime; }
 
   public scrub(tracks: Track[], time: number, velocity: number) { /* ... */ }
   public stopScrubbing() { /* ... */ }
@@ -2308,7 +2318,10 @@ export class AudioEngine {
           return;
         }
 
-        const novaSynth = this.tracksDSP.get(track.id)?.synth instanceof NovaSynthNode;
+        const synth = this.tracksDSP.get(track.id)?.synth;
+        const novaSynth = synth instanceof NovaSynthNode;
+        // Contrôleurs MIDI (R16) : valeur tenue au départ (chasse), puis chaque point de la fenêtre.
+        if (synth) this.scheduleControllers(track.id, midiClips, ws, Math.min(we, loopEnd), contextScheduleTime, firstWindow);
         midiClips.forEach(clip => {
            if (clip.type !== TrackType.MIDI || !clip.notes) return;
            
@@ -2317,7 +2330,8 @@ export class AudioEngine {
            // la fenêtre peut déjà avoir des notes à programmer.
            if (clip.start >= we || clipEnd <= projectWindowStart) return;
 
-           (novaSynth ? notesInTimeOrder(clip.notes) : clip.notes).forEach(note => {
+           const heard = playableNotes(clip);
+           (novaSynth ? notesInTimeOrder(heard) : heard).forEach(note => {
                const noteAbsStart = clip.start + note.start;
                const noteAbsEnd = noteAbsStart + note.duration;
 
@@ -2339,6 +2353,78 @@ export class AudioEngine {
       });
   }
   
+  /** Clés de contrôleurs présentes sur des clips (hors sustain, cuit dans les notes). */
+  private ccKeysOf(clips: Clip[]): string[] {
+    const keys = new Set<string>();
+    for (const c of clips) {
+      if (c.isMuted || !c.cc) continue;
+      for (const [k, pts] of Object.entries(c.cc)) if (k !== SUSTAIN && pts && pts.length) keys.add(k);
+    }
+    return Array.from(keys);
+  }
+
+  /** Valeur d'un contrôleur au temps absolu t (le clip qui couvre t, sinon le dernier fini avant). */
+  private ccValueOnTrack(clips: Clip[], key: string, t: number): number {
+    let best: { start: number; v: number } | null = null;
+    for (const c of clips) {
+      if (c.isMuted || !c.cc?.[key]?.length || c.start > t + 1e-9) continue;
+      const pts = sortPoints(c.cc[key]);
+      const v = ccValueAt(pts, Math.min(t, c.start + c.duration) - c.start, ccDefault(key));
+      if (!best || c.start >= best.start) best = { start: c.start, v };
+    }
+    return best ? best.v : ccDefault(key);
+  }
+
+  /** Lecture : contrôleurs des clips MIDI d'une piste dans la fenêtre [ws, we[ (temps du morceau). */
+  private scheduleControllers(trackId: string, clips: Clip[], ws: number, we: number, contextScheduleTime: number, chase: boolean) {
+    const keys = this.ccKeysOf(clips);
+    if (!keys.length) return;
+    if (chase) for (const k of keys) this.sendTrackController(trackId, k, this.ccValueOnTrack(clips, k, ws), contextScheduleTime);
+    for (const c of clips) {
+      if (c.isMuted || !c.cc || c.type !== TrackType.MIDI) continue;
+      if (c.start >= we || c.start + c.duration <= ws) continue;
+      for (const k of keys) {
+        const pts = c.cc[k];
+        if (!pts?.length) continue;
+        for (const p of pts) {
+          const at = c.start + p.t;
+          if (p.t > c.duration + 1e-9 || at < ws || at >= we) continue;
+          this.sendTrackController(trackId, k, p.v, contextScheduleTime + (at - ws));
+        }
+      }
+    }
+  }
+
+  /** Export : tous les contrôleurs d'une piste (temps 0 du rendu = `from` du morceau). */
+  private scheduleOfflineControllers(track: Track, synth: TrackSynth, from: number, totalDuration: number) {
+    const clips = (isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || [])).filter(c => c.type === TrackType.MIDI);
+    const keys = this.ccKeysOf(clips);
+    if (!keys.length) return;
+    for (const k of keys) synth.setController(k, this.ccValueOnTrack(clips, k, from), 0);
+    for (const c of clips) {
+      if (c.isMuted || !c.cc) continue;
+      for (const k of keys) {
+        for (const p of c.cc[k] || []) {
+          const at = c.start + p.t - from;
+          if (p.t > c.duration + 1e-9 || at < 0 || at >= totalDuration) continue;
+          synth.setController(k, p.v, at);
+        }
+      }
+    }
+  }
+
+  /**
+   * Contrôleur MIDI sur l'instrument d'une piste (R16) : clé « pb », « cc1 »,
+   * « cc11 »… et valeur MIDI brute. Synthé NOVA et ancien synthé (pitch bend,
+   * vibrato, expression, brillance). `time` : instant du contexte (0 = tout de suite).
+   */
+  public sendTrackController(trackId: string, key: string, value: number, time: number = 0) {
+    if (!this.ctx) return;
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp || dsp.bass808) return;
+    try { dsp.synth?.setController(key, value, Math.max(time, this.ctx.currentTime)); } catch { /* instrument sans contrôleurs */ }
+  }
+
   public triggerTrackAttack(trackId: string, pitch: number, velocity: number, time: number = 0) {
       if (!this.ctx) return;
       const dsp = this.tracksDSP.get(trackId);

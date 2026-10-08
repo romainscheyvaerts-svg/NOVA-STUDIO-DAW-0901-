@@ -5,6 +5,9 @@ import ProMasterMeter from './ProMasterMeter';
 import { LufsChip } from './meters/LoudnessPanel';
 import MasterVisualizer from './MasterVisualizer';
 import { midiManager } from '../services/MidiManager';
+import { openMidiPanel, useComputerKeyboard, useMidiRecPrefs } from './MidiInputHost';
+import { computerKeyboardStore } from '../utils/computerKeyboard';
+import { MODE_LABELS } from '../utils/midiRecord';
 import { playheadStore } from '../utils/playheadStore';
 import { formatMesures, nomTonaliteCourt } from '../utils/musicKey';
 import { formatBarsBeats } from '../utils/tempoMap';
@@ -226,6 +229,10 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   // Mode simple : outils de mixage, routage et import cachés (menu ☰ → Mode avancé).
   const { simple } = useSimpleMode();
 
+  useComputerKeyboard();
+  const kbOn = computerKeyboardStore.on;
+  const midiPrefs = useMidiRecPrefs();
+  useEffect(() => midiManager.onDevicesChange(() => setMidiDeviceName(midiManager.getActiveDeviceName())), []);
   useEffect(() => {
      // Check for MIDI device on mount
      const name = midiManager.getActiveDeviceName();
@@ -390,11 +397,15 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 <span className="text-[9px] font-black uppercase tracking-wider">PDC</span>
              </button>}
 
-             {/* MIDI INDICATOR */}
-             {!simple && <div className={`h-8 px-2 rounded-lg ${midiDeviceName ? 'flex' : 'hidden min-[2300px]:flex'} items-center justify-center space-x-2 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : 'bg-white/5 border-white/10 text-slate-600'}`} title={midiDeviceName ? `MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"} role="status" aria-label={midiDeviceName ? `Clavier MIDI : ${midiDeviceName}` : "Aucun clavier MIDI détecté"}>
-                 <i className="fas fa-plug text-[10px]"></i>
+             {/* MIDI (R16) : clavier branché, clavier de l'ordinateur, mode de prise, MIDI Learn */}
+             <button type="button" data-nova-midi-button="" onClick={openMidiPanel}
+               className={`h-8 px-2 rounded-lg flex items-center justify-center gap-1.5 border transition-all ${midiActive ? 'bg-green-500 text-black border-green-400 shadow-lg shadow-green-500/30' : kbOn ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}
+               title={`MIDI : ${midiDeviceName ? `clavier « ${midiDeviceName} »` : 'aucun clavier MIDI détecté'}${kbOn ? ' · clavier de l’ordinateur actif (Ctrl+Maj+K)' : ''} · prise ${MODE_LABELS[midiPrefs.mode].label.toLowerCase()}. Clic : réglages MIDI, MIDI Learn.`}
+               aria-label={midiDeviceName ? `MIDI : clavier ${midiDeviceName}` : 'Réglages MIDI'}>
+                 <i className={`fas ${kbOn ? 'fa-keyboard' : 'fa-plug'} text-[10px]`}></i>
+                 <span className="text-[9px] font-black uppercase tracking-wider">MIDI</span>
                  {midiDeviceName && <span className="hidden 2xl:inline text-[8px] font-black uppercase max-w-[80px] truncate">{midiDeviceName}</span>}
-             </div>}
+             </button>
           </div>
       </div>
 
@@ -552,6 +563,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 {guide && guide.count > 0 && onToggleGuide && <button type="button" onClick={onToggleGuide} aria-pressed={!guide.muted} data-testid="menu-guide" className={`min-h-12 rounded-xl text-[12px] font-bold border ${guide.muted ? 'border-white/10 text-slate-400' : 'bg-amber-500/15 border-amber-500/40 text-amber-200'}`}><i className="fas fa-headphones mr-1.5" aria-hidden="true"></i>{guide.muted ? 'Rallumer le guide' : 'Couper le guide'}</button>}
               </div>
             )}
+
+            {/* R16 : MIDI au téléphone (clavier USB sur Android, clavier de l'ordinateur sur tablette) */}
+            <button type="button" data-testid="menu-midi" onClick={() => { openMidiPanel(); setIsMobileMenuOpen(false); }}
+              className="w-full min-h-12 rounded-xl bg-white/[0.04] border border-white/10 text-slate-200 text-[12px] font-bold text-left px-3 flex items-center gap-2">
+              <i className="fas fa-keyboard text-cyan-300" aria-hidden="true"></i>
+              <span>MIDI : enregistrer depuis ton clavier{midiDeviceName ? ` (${midiDeviceName})` : ''}</span>
+            </button>
 
             {/* Mode simple / avancé : en haut du menu, facile à retrouver */}
             <SimpleModeToggle onDone={() => setIsMobileMenuOpen(false)} />

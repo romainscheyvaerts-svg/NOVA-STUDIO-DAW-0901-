@@ -1,4 +1,5 @@
 import { Clip, MidiNote, TrackType } from '../types';
+import { splitCc } from './midiCc';
 
 /**
  * Sélection de plage de temps (Sélecteur / Smart Tool de Pro Tools) et
@@ -88,6 +89,12 @@ export function splitClipAt(c: Clip, t: number, newId: string): [Clip, Clip] | n
     a.notes = na;
     b.notes = nb;
     b.offset = c.offset || 0;
+    // Contrôleurs (R16) : la moitié droite repart avec la valeur tenue à la coupe.
+    if (c.cc) {
+      const [ca, cb] = splitCc(c.cc, d1);
+      if (ca) a.cc = ca; else delete a.cc;
+      if (cb) b.cc = cb; else delete b.cc;
+    }
   }
   return [a, b];
 }

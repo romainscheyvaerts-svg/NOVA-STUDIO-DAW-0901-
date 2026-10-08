@@ -19,6 +19,7 @@ import {
   mixNorm, ampEnvAt, glideSource, voicesToCut, voiceToRelease, nextMonoStart,
   MIN_ATTACK, MIN_RELEASE, STEAL_FADE, RELEASE_TAIL,
 } from '../utils/novaSynth';
+import { SynthControllers } from './midiControllers';
 
 /** Crête d'une voix au volume 1 (les sons de la banque sont calibrés autour de -18 dB RMS). */
 const PEAK = 0.715;
@@ -35,6 +36,8 @@ interface Voice extends VoiceSlot {
   envCents: number;
   peak: number;
   legatoLvl: number | null;
+  /** Débranche la voix des contrôleurs MIDI (pitch bend, vibrato, brillance). */
+  detach?: () => void;
 }
 
 const noiseCache = new WeakMap<BaseAudioContext, AudioBuffer>();
@@ -131,11 +134,14 @@ export class NovaSynthNode {
   private readonly delaySend: GainNode;
   private readonly delayFb: GainNode;
   private readonly fxNodes: AudioNode[] = [];
+  /** Contrôleurs MIDI (R16) : pitch bend, modulation, expression, brillance. */
+  private readonly ctrl: SynthControllers;
 
   constructor(ctx: BaseAudioContext, settings?: unknown) {
     this.ctx = ctx;
     this.s = normalizeSynth(settings);
     this.output = ctx.createGain();
+    this.ctrl = new SynthControllers(ctx, this.output.gain, 1);
     this.bus = ctx.createGain();
     this.dry = ctx.createGain();
     this.bus.connect(this.dry);
@@ -421,6 +427,7 @@ export class NovaSynthNode {
     }
 
     const v: Voice = { id: this.nextId++, pitch, start: t, release: Infinity, end: Infinity, vel, s, amp, rel, filters, sources, nodes, envCents, peak, legatoLvl };
+    v.detach = this.ctrl.attachVoice(oscs.map(o => o.detune), filters.map(f => f.detune));
     // Nettoyage quand la voix s'est tue (marche aussi à l'export, sans minuterie).
     if (sources[0]) sources[0].onended = () => this.dispose(v);
     else { this.dispose(v); return; }
@@ -503,6 +510,7 @@ export class NovaSynthNode {
    * appels est différent) : lecture et export divergeaient au hasard (mesuré).
    */
   private dispose(v: Voice) {
+    v.detach?.();
     for (const n of v.nodes) { try { n.disconnect(); } catch { /* */ } }
     v.nodes = [];
   }
@@ -541,6 +549,12 @@ export class NovaSynthNode {
 
   public stopAll() { this.releaseAll(); }
 
+  /** Contrôleur MIDI (R16) : « pb », « cc1 », « cc7 », « cc11 », « cc74 » (valeur MIDI brute). */
+  public setController(key: string, value: number, time = 0) { this.ctrl.set(key, value, time); }
+
+  /** Contrôleurs au repos (arrêt de la lecture). */
+  public resetControllers(time = 0) { this.ctrl.reset(time); }
+
   /** Nombre de voix qui sonnent (mesures, tests). */
   public activeVoiceCount(): number {
     const now = this.ctx.currentTime;
@@ -549,6 +563,7 @@ export class NovaSynthNode {
 
   public destroy() {
     this.releaseAll();
+    this.ctrl.destroy();
     for (const l of this.chorusLfos) { try { l.stop(); } catch { /* */ } }
     for (const n of this.fxNodes) { try { n.disconnect(); } catch { /* */ } }
     try { this.bus.disconnect(); this.dry.disconnect(); this.output.disconnect(); } catch { /* */ }

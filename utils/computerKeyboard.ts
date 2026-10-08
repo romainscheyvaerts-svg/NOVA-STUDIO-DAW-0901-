@@ -150,3 +150,42 @@ export class NoteRecorder {
     ];
   }
 }
+
+// ---------------------------------------------------------------------------
+// Clavier de l'ordinateur pour toute l'appli (R16) : allumé depuis la barre de
+// transport (Ctrl+Maj+K) ou le piano roll, il joue sur la piste armée, sinon
+// sur la piste sélectionnée, sans ouvrir le piano roll (Computer MIDI Keyboard
+// de Live). Un seul automate, partagé : le piano roll n'en a plus à lui.
+// ---------------------------------------------------------------------------
+
+type KbListener = () => void;
+
+class ComputerKeyboardStore {
+  on = false;
+  kb = new ComputerKeyboard();
+  held: number[] = [];
+  /** Piste imposée (piano roll ouvert) : le clavier joue sur elle. */
+  forcedTrackId: string | null = null;
+  private listeners = new Set<KbListener>();
+
+  get state(): KeyboardState { return this.kb.state; }
+
+  /** Allumé depuis le piano roll : il s'éteint avec lui (comme avant R16). */
+  fromRoll = false;
+
+  setOn(on: boolean, fromRoll = false) {
+    this.fromRoll = on && fromRoll;
+    if (this.on === on) return;
+    this.on = on;
+    this.emit();
+  }
+  toggle() { this.setOn(!this.on); }
+
+  setHeld(h: number[]) { this.held = h; this.emit(); }
+  touch() { this.emit(); }
+
+  subscribe(f: KbListener) { this.listeners.add(f); return () => { this.listeners.delete(f); }; }
+  private emit() { this.listeners.forEach(f => { try { f(); } catch { /* */ } }); }
+}
+
+export const computerKeyboardStore = new ComputerKeyboardStore();

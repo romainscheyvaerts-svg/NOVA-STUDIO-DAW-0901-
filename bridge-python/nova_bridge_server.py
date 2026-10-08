@@ -826,7 +826,9 @@ class NovaBridgeServer:
             if length <= 0:
                 length = max([float(n.get("start", 0)) + float(n.get("duration", 0)) for n in notes if isinstance(n, dict)] or [0])
             duration = min(vst_host.MAX_RENDER_SECONDS, max(0.1, length + max(0.0, float(meta.get("tail_seconds") or 0))))
-            events = midi_events([n for n in notes if isinstance(n, dict)], duration)
+            ctrls = meta.get("controllers") or []
+            events = midi_events([n for n in notes if isinstance(n, dict)], duration,
+                                 [c for c in ctrls if isinstance(c, dict)] if isinstance(ctrls, list) else None)
             slot = self.slots.get(str(meta.get("slot_id") or ""))
             t = time.time()
             if slot is not None and slot.plugin is not None and slot.is_instrument and slot.sample_rate == sr:
