@@ -142,3 +142,9 @@ describe('plugins absents remplacés', () => {
     expect(ds.params.threshold).toBe(-18);
   });
 });
+
+describe('unités affichées', () => {
+  it('Trackspacer affiche « 20.00k » : le nombre en Hz est envoyé (le pont lit « k » = ×1000)', () => {
+    expect(settingFor({ name: 'high_cut_hz', text: '20.00k' }, 'high_cut_hz', '20 kHz')).toEqual({ name: 'high_cut_hz', real: 20000 });
+  });
+});

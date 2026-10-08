@@ -479,7 +479,8 @@ const UNIT_RE = /(khz|hz|ms|s|db(?:tp|fs)?|%|cents?|ct)\s*$/i;
 const unitOfParam = (p: ParamLike): string => {
   const u = (p.label || p.units || '').trim().toLowerCase();
   if (u) return u;
-  return ((p.text || '').trim().match(UNIT_RE)?.[1] || '').toLowerCase();
+  const t = (p.text || '').trim();
+  return (t.match(UNIT_RE)?.[1] || '').toLowerCase();
 };
 
 /** Valeur exacte de la liste du plugin correspondant au texte lu (null : aucune sûre). */
@@ -577,7 +578,7 @@ export const settingFor = (p: ParamLike | undefined, key: string, value: string,
   if (convert?.kind === 'scale') n *= convert.factor;
   const from = parsed.unit;
   const to = unitOfParam(p);
-  if (from === 'khz' && to === 'hz') n *= 1000;
+  if (from === 'khz' && to !== 'khz') n *= 1000;                         // Hz : unité de base (afficheur « 20.00k » compris)
   else if (from === 'hz' && to === 'khz') n /= 1000;
   else if (from === 's' && to === 'ms') n *= 1000;
   else if (from === 'ms' && to === 's') n /= 1000;

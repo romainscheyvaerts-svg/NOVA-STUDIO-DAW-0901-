@@ -46,6 +46,9 @@ class GuardTest(unittest.TestCase):
     def test_plugin_qui_plante_est_isole_et_refuse(self):
         self.assertTrue(plugin_guard.is_risky(self.plugin, None))       # liste de départ (RUBY2)
         self.assertFalse(plugin_guard.is_risky(self.other, None))
+        zl = os.path.join(self.tmp.name, "RUBY2ZL.vst3")
+        Path(zl).write_bytes(b"z")
+        self.assertTrue(plugin_guard.is_risky(zl, None))                 # variante zéro latence : même risque
         orig = plugin_guard._child_command
         plugin_guard._child_command = lambda: self._child("import os; os.abort()")
         try:

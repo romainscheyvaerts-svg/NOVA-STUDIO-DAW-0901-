@@ -747,7 +747,13 @@ _OFF_WORDS = re.compile(r"\b(not|off|disabled|inactive|no)\b|^0$", re.I)
 
 def _first_number(x) -> Optional[float]:
     m = _NUM.search(str(x))
-    return float(m.group(0).replace(",", ".")) if m else None
+    if not m:
+        return None
+    n = float(m.group(0).replace(",", "."))
+    # « 20.00k » (Trackspacer), « 1.5 kHz » : milliers.
+    if re.match(r"\s*k(hz)?(?![a-z])", str(x)[m.end():], re.I):
+        n *= 1000.0
+    return n
 
 
 def _valid_strings(p) -> List[str]:

@@ -125,7 +125,9 @@ const verdictOf = (sent: { text?: string; real?: number }, ok: boolean, readText
     if (noUnit(sent.text) === noUnit(readText)) return 'appliqué';
     if (/inf/i.test(sent.text) && /inf/i.test(readText) && /^-/.test(sent.text.trim()) === /^-/.test(readText.trim())) return 'appliqué';
     const a = num(sent.text); const b = num(readText);
-    if (a !== null && b !== null && Math.abs(a - b) <= Math.max(0.02 * Math.abs(a), 0.05)) return 'appliqué';
+    // Le plugin peut afficher en kHz ce qu'on a envoyé en Hz (« 1500.0 » relu « 1.5 kHz »).
+    const near = (x: number, y: number) => Math.abs(x - y) <= Math.max(0.02 * Math.abs(x), 0.05);
+    if (a !== null && b !== null && (near(a, b) || near(a, b * 1000) || near(a, b / 1000))) return 'appliqué';
     // Interrupteurs : « On » demandé, « True » / « Enabled » relu.
     if (/^(on|true|oui|enabled|used)$/i.test(sent.text) && /^(on|true|enabled|used|active)$/i.test(readText.trim())) return 'appliqué';
     if (/^(off|false|non|disabled)$/i.test(sent.text) && /^(off|false|disabled|not bypassed|inactive)$/i.test(readText.trim())) return 'appliqué';

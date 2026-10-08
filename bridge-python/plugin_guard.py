@@ -46,7 +46,8 @@ logger = logging.getLogger('NovaBridge.Guard')
 MARK = "@@NOVA-TRIAL@@"
 TRIAL_TIMEOUT_S = float(os.environ.get("NOVA_GUARD_TIMEOUT") or 90)
 
-# Plugins connus pour faire planter pedalboard (essai isolé dès la 1re fois).
+# Plugins connus pour faire planter pedalboard (essai isolé dès la 1re fois) ;
+# le nom compact du plugin COMMENCE par l'une de ces entrées (RUBY2, RUBY2ZL).
 SEED_RISKY = {"ruby2"}
 
 # Script relancé en enfant (le serveur le renseigne ; exécutable figé : sys.executable).
@@ -228,7 +229,9 @@ def is_risky(path: str, plugin_name: Optional[str]) -> bool:
         return True
     if k in d["risky"]:
         return True
-    return _compact(display_name(path, plugin_name)) in SEED_RISKY
+    # Variantes du même plugin (RUBY2ZL, version « zéro latence » de RUBY2) : même risque.
+    name = _compact(display_name(path, plugin_name))
+    return any(name.startswith(seed) for seed in SEED_RISKY)
 
 
 def check(path: str, plugin_name: Optional[str], timeout: Optional[float] = None):
