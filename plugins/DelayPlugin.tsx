@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { AutomationSet, MappedParam, mixDry, mixWet, mixFromWet } from '../engine/automationParams';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { paramFr, termHelp } from '../utils/pluginUi';
 import { PluginParameter } from '../types';
@@ -82,6 +83,9 @@ export class SyncDelayNode {
   private setP(param: AudioParam, value: number, tau: number) {
     setParamSmooth(param, value, this.ctx, this.createdAt, tau);
   }
+  /** Réglages automatisables (R8) : mix, réinjection, couleur des échos. */
+  private auto = new AutomationSet();
+  private autoState = '';
   private ctx: AudioContext;
   public input: GainNode;
   public output: GainNode;
@@ -245,8 +249,16 @@ export class SyncDelayNode {
 
     this.setupChain();
     this.ducker = new EnvelopeDucker(ctx, this.input, this.duckingGain.gain);
+    this.auto.add('mix', new MappedParam(ctx, [{ param: this.wetGain.gain, map: mixWet }, { param: this.dryGain.gain, map: mixDry }], { min: 0, max: 1, value: 0.3, inverse: mixFromWet }));
+    this.auto.add('feedback', new MappedParam(ctx, [{ param: this.lineL.fb.gain }, { param: this.lineR.fb.gain }], { min: 0, max: 0.985, value: 0.4, affine: true }));
+    this.auto.add('feedbackLP', new MappedParam(ctx, [{ param: this.lineL.lp.frequency }, { param: this.lineR.lp.frequency }], { min: 500, max: 20000, value: 8000, affine: true }));
     this.applyParams();
   }
+
+  /** AudioParam d'un réglage automatisable (R8) : « mix », « feedback », « feedbackLP » ; sinon null. */
+  public automationParam(key: string): MappedParam | null { return this.auto.get(key); }
+  /** Lecture arrêtée : les réglages automatisés reviennent à leur valeur fixe. */
+  public restoreStatic() { this.auto.restoreStatic(); }
 
   private createLine(): DelayLine {
     const ctx = this.ctx;
@@ -390,6 +402,10 @@ export class SyncDelayNode {
     const now = this.ctx.currentTime;
     const safe = (v: number, def: number) => Number.isFinite(v) ? v : def;
     const T = SMOOTH;
+    const stKey = `${this.params.isEnabled ? 1 : 0}|${this.params.freeze ? 1 : 0}`;
+    const force = stKey !== this.autoState;
+    this.autoState = stKey;
+    const st = { force, tau: T, immediate: now <= this.createdAt };
     const bpm = Math.max(20, Math.min(400, safe(this.params.bpm, 120)));
     const beatDuration = 60 / bpm;
     const factor = (d: DelayDivision | undefined) => DIVISION_FACTORS[d as DelayDivision] ?? 1;
@@ -419,8 +435,7 @@ export class SyncDelayNode {
       // Feedback (borne a 0,95 ; freeze a 0,985 : le limiteur de boucle evite
       // toute explosion meme si un filtre resonne un peu)
       const fb = this.params.freeze ? 0.985 : Math.max(0, Math.min(0.95, safe(this.params.feedback, 0.4)));
-      this.setP(this.lineL.fb.gain, fb, T);
-      this.setP(this.lineR.fb.gain, fb, T);
+      this.auto.get('feedback')!.setStatic(fb, st);
 
       // Routage stereo / ping-pong par gains (pas de recablage => pas de clic)
       const pp = this.params.pingPong ? 1 : 0;
@@ -443,10 +458,8 @@ export class SyncDelayNode {
       // Feedback filters
       const hpF = Math.max(20, Math.min(5000, safe(this.params.feedbackHP, 80)));
       const lpF = Math.max(500, Math.min(20000, safe(this.params.feedbackLP, 8000)));
-      for (const line of [this.lineL, this.lineR]) {
-        this.setP(line.hp.frequency, hpF, T);
-        this.setP(line.lp.frequency, lpF, T);
-      }
+      for (const line of [this.lineL, this.lineR]) this.setP(line.hp.frequency, hpF, T);
+      this.auto.get('feedbackLP')!.setStatic(lpF, st);
 
       // Modulation - reduced values to prevent "wou wou" artifacts
       const modEnabled = this.params.mode === 'TAPE' || this.params.mode === 'ANALOG';
@@ -466,12 +479,10 @@ export class SyncDelayNode {
 
       // Mix with equal-power crossfade
       const mix = Math.max(0, Math.min(1, safe(this.params.mix, 0.3)));
-      this.setP(this.dryGain.gain, Math.cos(mix * Math.PI * 0.5), T);
-      this.setP(this.wetGain.gain, Math.sin(mix * Math.PI * 0.5), T);
+      this.auto.get('mix')!.setStatic(mix, st);
 
     } else {
-      this.setP(this.dryGain.gain, 1, T);
-      this.setP(this.wetGain.gain, 0, T);
+      this.auto.get('mix')!.setStatic(0, st);
     }
   }
 

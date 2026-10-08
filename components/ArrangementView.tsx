@@ -96,6 +96,8 @@ interface ArrangementViewProps {
   onCreatePattern?: (trackId: string, time: number) => void;
   /** Decale d'un meme delta un ensemble de clips (deplacement groupe). */
   onMoveClipsBy?: (items: {trackId:string, clipId:string, start:number}[], delta: number) => void;
+  /** Fin d'un déplacement de clips (R8) : l'automation suit les clips (préférence). Positions d'AVANT le geste. */
+  onClipsMoved?: (moves: { clipId: string; fromTrackId: string; fromStart: number }[]) => void;
   onSwapInstrument?: (trackId: string) => void; 
   onEditMidi?: (trackId: string, clipId: string) => void;
   /** « Séparer en stems » (menu du clip audio) : voix, batterie, basse, autres. */
@@ -175,7 +177,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   markers = [], onAddMarker, onUpdateMarker, onDeleteMarker, onAddRegion, isPlaying = false,
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip: onEditClipRaw, isRecording, recStartTime,
-  onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy,
+  onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy, onClipsMoved,
   punch, onUpdatePunch, editCommands, takeLanes, chordLane, tempoLane
 }) => {
   // Piste d'accords (V20) : couloir sous la règle (comme Logic), au-dessus des pistes.
@@ -263,6 +265,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const marqueeOriginRef = useRef<{x:number,y:number} | null>(null);
   // Positions de depart des clips selectionnes, capturees au debut du glissement.
   const multiDragRef = useRef<{trackId:string, clipId:string, start:number}[] | null>(null);
+  /** Piste d'origine du clip saisi (l'automation suit le clip, R8). */
+  const dragOriginTrackRef = useRef<string | null>(null);
   
   const [loopDragMode, setLoopDragMode] = useState<LoopDragMode>(null);
   // Tactile (iPad, téléphone) : vrai pendant un appui au doigt / stylet.
@@ -1032,6 +1036,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
                 setDragStartX(x); setDragStartY(y);
                 setInitialClipState({ ...clip });
+                dragOriginTrackRef.current = t.id;
                 movedRef.current = false;
                 // Shuffle : photo des clips de la piste (Alt+glisser = copie libre, hors Shuffle).
                 shuffleInitRef.current = editModeStore.get().mode === 'SHUFFLE' && !e.altKey ? {
@@ -1459,6 +1464,13 @@ const handleMouseUp = () => {
         setSelectedClipIds(new Set([rd.clickClip.clip.id]));
     }
     rangeDragRef.current = null;
+    // L'automation suit les clips déplacés (R8, Pro Tools « Automation Follows Edit ») : une étape, à la fin du geste.
+    if (dragAction === 'MOVE' && activeClip && initialClipState && movedRef.current && onClipsMoved && editPrefsStore.get().automationFollowsEdit !== false && editModeStore.get().mode !== 'SHUFFLE') {
+        const items = multiDragRef.current && multiDragRef.current.length > 1
+            ? multiDragRef.current.map(it => ({ clipId: it.clipId, fromTrackId: it.trackId, fromStart: it.start }))
+            : [{ clipId: activeClip.clip.id, fromTrackId: dragOriginTrackRef.current || activeClip.trackId, fromStart: initialClipState.start }];
+        setTimeout(() => onClipsMoved(items), 0);
+    }
     // Crossfade automatique quand un clip déplacé / rogné touche ou chevauche un voisin.
     if (editCommands && activeClip && (dragAction === 'MOVE' || dragAction === 'TRIM_START' || dragAction === 'TRIM_END')) {
         const ids = multiDragRef.current && multiDragRef.current.length > 1 ? multiDragRef.current : [{ trackId: activeClip.trackId, clipId: activeClip.clip.id }];
@@ -2116,6 +2128,12 @@ useEffect(() => {
                 title="Fondu enchaîné auto : quand tu poses un clip contre un autre ou par-dessus (≤ 2 s), un fondu enchaîné (crossfade) est créé tout seul."
                 className={`h-8 px-2 rounded-lg border text-[10px] font-bold ${editPrefs.autoXfade ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
                 <i className="fas fa-xmark mr-1"></i>Fondu enchaîné auto
+              </button>
+              <button onClick={() => editPrefsStore.set({ automationFollowsEdit: !editPrefs.automationFollowsEdit })} aria-pressed={editPrefs.automationFollowsEdit !== false}
+                data-nova-target="automation-follows"
+                title="L'automation suit l'édition (« Automation Follows Edit » de Pro Tools) : un clip déplacé emporte sa courbe de volume, de pan, de mute et d'effets ; copier, couper, coller, effacer ou dupliquer une plage portent aussi l'automation. Désactivé : la courbe reste où elle est."
+                className={`h-8 px-2 rounded-lg border text-[10px] font-bold ${editPrefs.automationFollowsEdit !== false ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
+                <i className="fas fa-wave-square mr-1"></i>Automation suit l'édition
               </button>
               <select value={editPrefs.xfadeCurve} onChange={e => editPrefsStore.set({ xfadeCurve: e.target.value as CrossfadeCurve })}
                 aria-label="Courbe des fondus enchaînés"

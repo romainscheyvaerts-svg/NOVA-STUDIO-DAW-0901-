@@ -14,6 +14,7 @@ import { editModeStore } from '../utils/editModes';
 import { closeRange, openGapAt, ShuffleOptions } from '../utils/shuffle';
 import { bounceTracks, canCommit } from '../utils/commit';
 import { DEFAULT_TAIL, renderCommitClip } from '../services/Bounce';
+import { AutomationClipboard, clearAutomationRange, copyAutomationRange, moveAutomationWithClips, pasteAutomationRange } from '../utils/automationEdit';
 
 /**
  * Commandes d'édition « façon Pro Tools » appelables de partout (clavier,
@@ -83,6 +84,13 @@ export interface EditCommands {
   punchSelection: () => boolean;
   /** Ouvre l'export sur la plage. */
   exportSelection: () => boolean;
+  // --- Automation (R8)
+  /** Copie l'automation de la plage (toutes les voies des pistes sélectionnées). */
+  copyAutomation: () => boolean;
+  /** Colle l'automation copiée au début de la sélection (sinon à la tête de lecture). */
+  pasteAutomation: () => boolean;
+  /** Y a-t-il de l'automation copiée ? */
+  hasAutomationClipboard: () => boolean;
 }
 
 export interface EditCommandDeps {
@@ -122,6 +130,10 @@ const fmtMs = (s: number) => (s >= 1 ? `${s.toFixed(2).replace('.', ',')} s` : `
 
 /** Presse-papiers de plage (partagé par toutes les commandes du studio). */
 let rangeClipboard: RangeClipboard | null = null;
+/** Automation copiée (R8) : une entrée par piste de la plage, dans l'ordre (null = piste sans automation). */
+let autoClipboard: (AutomationClipboard | null)[] | null = null;
+/** Automation de la dernière plage copiée / coupée (suit l'édition), collée avec elle. */
+let rangeAutoClipboard: (AutomationClipboard | null)[] | null = null;
 let lastClipboard: 'range' | 'clip' | null = null;
 
 /** Mixe les morceaux d'une plage (clips seuls, sans effets) dans un nouveau son. */
@@ -152,6 +164,7 @@ async function renderPieces(pieces: ConsolidatePiece[], length: number): Promise
 }
 
 type RangeCommandKeys = 'getTimeSelection' | 'selectRange' | 'clearSelection' | 'editableTrackIds' | 'copySelection' | 'cutSelection' | 'pasteRange' | 'hasRangeClipboard'
+  | 'copyAutomation' | 'pasteAutomation' | 'hasAutomationClipboard'
   | 'markClipClipboard' | 'deleteSelection' | 'duplicateSelection' | 'separate' | 'consolidateSelection' | 'fadesFromSelection'
   | 'loopSelection' | 'punchSelection' | 'exportSelection';
 
@@ -170,15 +183,29 @@ function rangeCommands(
     st().tracks.forEach(t => { if (ids.includes(t.id)) out[t.id] = t.clips; });
     return out;
   };
-  /** Applique de nouvelles listes de clips (une étape d'annulation) ; les gelées gardent leurs règles. */
-  const apply = (clips: ClipsByTrack) => {
-    d().setState(produce((draft: DAWState) => {
-      Object.entries(clips).forEach(([id, list]) => {
-        const t = draft.tracks.find(x => x.id === id);
-        if (t) t.clips = list as any;
-      });
-    }));
+  /**
+   * Applique de nouvelles listes de clips (une étape d'annulation) ; les gelées gardent leurs règles.
+   * `auto` : retouche de l'automation dans la même étape (l'automation suit l'édition, R8).
+   */
+  const apply = (clips: ClipsByTrack, auto?: (tracks: DAWState['tracks']) => DAWState['tracks']) => {
+    d().setState(prev => {
+      let tracks = prev.tracks.map(t => (clips[t.id] ? { ...t, clips: clips[t.id] as any } : t));
+      if (auto) tracks = auto(tracks);
+      return { ...prev, tracks };
+    });
   };
+  /** L'automation suit l'édition (préférence) ; pas en Shuffle (la suite bouge, la courbe resterait). */
+  const follows = () => editPrefsStore.get().automationFollowsEdit !== false && !shuffle();
+  const copyAuto = (s: TimeSelection) => s.trackIds.map(id => {
+    const t = st().tracks.find(x => x.id === id);
+    return t ? copyAutomationRange(t, s.start, s.end) : null;
+  });
+  const pasteAutoOn = (clip: (AutomationClipboard | null)[], targets: string[], at: number) => (tracks: DAWState['tracks']) => tracks.map(t => {
+    const k = targets.indexOf(t.id);
+    const c = k >= 0 ? clip[k] : null;
+    return c ? pasteAutomationRange(t, c, at).track : t;
+  });
+  const clearAutoOn = (s: TimeSelection) => (tracks: DAWState['tracks']) => tracks.map(t => (s.trackIds.includes(t.id) ? clearAutomationRange(t, s.start, s.end) : t));
   // Mode Shuffle (Pro Tools) : effacer / couper une plage recolle la suite,
   // coller / dupliquer l'insère et pousse le reste (utils/shuffle).
   const shuffle = () => editModeStore.get().mode === 'SHUFFLE';
@@ -214,6 +241,7 @@ function rangeCommands(
     copySelection: () => {
       const s = need(); if (!s) return false;
       rangeClipboard = copyRange(byTrack(s.trackIds), s, idGenerator('c'));
+      rangeAutoClipboard = follows() ? copyAuto(s) : null;
       lastClipboard = 'range';
       d().notify(`📋 Plage copiée (${what(s)}) : Ctrl+V la colle à la tête de lecture ou au début de ta sélection.`);
       return true;
@@ -222,8 +250,10 @@ function rangeCommands(
       const s = need(); if (!s) return false;
       const r = cutRange(byTrack(s.trackIds), s, idGenerator('x'));
       rangeClipboard = r.clipboard;
+      const fol = follows();
+      rangeAutoClipboard = fol ? copyAuto(s) : null;
       lastClipboard = 'range';
-      apply(closeGap(r.clips, s));
+      apply(closeGap(r.clips, s), fol ? clearAutoOn(s) : undefined);
       d().notify(`✂️ Plage coupée (${what(s)}) — Ctrl+V pour la coller, Ctrl+Z pour revenir.`);
       return true;
     },
@@ -238,25 +268,61 @@ function rangeCommands(
       const at = gap.at;
       const clips = pasteRange(gap.clips, rangeClipboard, at, targets, idGenerator('p'));
       if (!Object.keys(clips).length) return false;
-      apply(clips);
       const used = targets.slice(0, rangeClipboard.lanes.length);
+      apply(clips, rangeAutoClipboard && follows() ? pasteAutoOn(rangeAutoClipboard, used, at) : undefined);
       editSelectionStore.set({ time: makeSelection(at, at + rangeClipboard.length, used) });
       d().notify(`📋 Plage collée à ${at.toFixed(2).replace('.', ',')} s (${fmtMs(rangeClipboard.length)}).`);
       return true;
     },
     hasRangeClipboard: () => lastClipboard === 'range' && !!rangeClipboard,
+
+    copyAutomation: () => {
+      const s = need(); if (!s) return false;
+      const clip = copyAuto(s);
+      const n = clip.reduce((k, c) => k + (c ? c.lanes.length : 0), 0);
+      if (!n) { d().notify('Aucune automation dans cette plage : dessine d\'abord une voie (bouton « A » de la piste ou vue Automation).'); return false; }
+      autoClipboard = clip;
+      d().notify(`📈 Automation copiée (${n} voie${n > 1 ? 's' : ''}, ${what(s)}) : « Coller l'automation » la pose au début de ta sélection ou à la tête de lecture.`);
+      return true;
+    },
+    pasteAutomation: () => {
+      if (!autoClipboard) { d().notify('Rien à coller : copie d\'abord l\'automation d\'une plage.'); return false; }
+      const s = sel();
+      const order = editableTrackIds();
+      const focus = editSelectionStore.get().focusTrackId;
+      const firstSrc = autoClipboard.find(Boolean)?.trackId;
+      const startIdx = Math.max(0, order.indexOf(s?.trackIds[0] || focus || firstSrc || ''));
+      const targets = s ? [...s.trackIds, ...order.slice(order.indexOf(s.trackIds[s.trackIds.length - 1]) + 1)] : order.slice(startIdx);
+      const at = s ? s.start : playheadStore.get();
+      const used = targets.slice(0, autoClipboard.length);
+      let skipped = 0;
+      const clip = autoClipboard;
+      d().setState(prev => ({ ...prev, tracks: prev.tracks.map(t => {
+        const k = used.indexOf(t.id);
+        const c = k >= 0 ? clip[k] : null;
+        if (!c) return t;
+        const r = pasteAutomationRange(t, c, at);
+        skipped += r.skipped.length;
+        return r.track;
+      }) }));
+      const len = Math.max(0, ...clip.map(c => c?.length || 0));
+      editSelectionStore.set({ time: makeSelection(at, at + len, used) });
+      d().notify(`📈 Automation collée à ${at.toFixed(2).replace('.', ',')} s${skipped ? ` (${skipped} réglage${skipped > 1 ? 's' : ''} d'effet ignoré${skipped > 1 ? 's' : ''} : effet absent de la piste)` : ''}. Ctrl+Z pour revenir.`);
+      return true;
+    },
+    hasAutomationClipboard: () => !!autoClipboard,
     markClipClipboard: () => { lastClipboard = 'clip'; },
 
     deleteSelection: () => {
       const s = need(); if (!s) return false;
-      apply(closeGap(deleteRange(byTrack(s.trackIds), s, idGenerator('d')), s));
+      apply(closeGap(deleteRange(byTrack(s.trackIds), s, idGenerator('d')), s), follows() ? clearAutoOn(s) : undefined);
       d().notify(`🗑️ Plage effacée (${what(s)}) — Ctrl+Z pour revenir.`);
       return true;
     },
     duplicateSelection: () => {
       const s = need(); if (!s) return false;
       const r = duplicateRange(withGap(byTrack(s.trackIds), s.end, selLength(s)).clips, s, idGenerator('u'));
-      apply(r.clips);
+      apply(r.clips, follows() ? pasteAutoOn(copyAuto(s), s.trackIds, s.end) : undefined);
       editSelectionStore.set({ time: r.selection });
       d().notify(`⧉ Plage dupliquée juste après (${what(s)}).`);
       return true;
@@ -456,9 +522,13 @@ export function useEditCommands(deps: EditCommandDeps): EditCommands {
           st().tracks.forEach(t => t.clips.forEach(c => { if (ids.has(c.id)) minStart = Math.min(minStart, c.start); }));
           const delta = Math.max(-minStart, step);
           if (Math.abs(delta) < 1e-9) return;
-          d().setState(produce((draft: DAWState) => {
-            draft.tracks.forEach(t => t.clips.forEach(c => { if (ids.has(c.id)) c.start = Math.max(0, c.start + delta); }));
-          }));
+          const fol = editPrefsStore.get().automationFollowsEdit !== false;
+          d().setState(prev => {
+            const moves = fol ? prev.tracks.flatMap(t => t.clips.filter(c => ids.has(c.id)).map(c => ({ clipId: c.id, fromTrackId: t.id, toTrackId: t.id, fromStart: c.start, duration: c.duration, toStart: Math.max(0, c.start + delta) }))) : [];
+            const tracks = prev.tracks.map(t => (t.clips.some(c => ids.has(c.id)) ? { ...t, clips: t.clips.map(c => (ids.has(c.id) ? { ...c, start: Math.max(0, c.start + delta) } : c)) } : t));
+            // L'automation suit les clips (R8, préférence « l'automation suit l'édition »).
+            return { ...prev, tracks: moves.length ? moveAutomationWithClips(tracks, moves) : tracks };
+          });
           if (sel.time) editSelectionStore.set({ time: shiftSelection(sel.time, delta) });
           return;
         }

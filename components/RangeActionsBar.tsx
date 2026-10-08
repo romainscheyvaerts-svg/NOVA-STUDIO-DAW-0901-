@@ -24,6 +24,8 @@ const RangeActionsBar: React.FC<{ commands: EditCommands }> = ({ commands }) => 
     { label: 'Fondus', icon: 'fa-bezier-curve', title: 'Créer des fondus sur la plage : entrée, sortie ou crossfade sur une jonction (Ctrl+F, « Fades » de Pro Tools)', run: commands.fadesFromSelection },
     { label: 'Boucler', icon: 'fa-sync-alt', title: 'Boucler la lecture sur la plage (« Loop Playback » sur la sélection)', run: commands.loopSelection },
     { label: 'Punch', icon: 'fa-bullseye', title: 'La plage devient la zone de punch : REC ne remplacera qu\'elle (Punch-in / punch-out de Pro Tools)', run: commands.punchSelection },
+    { label: 'Copier l’automation', icon: 'fa-wave-square', title: 'Copier l’automation de la plage : volume, pan, muet, envois et réglages d’effets de chaque piste (« Copy Special > Automation » de Pro Tools)', run: commands.copyAutomation },
+    ...(commands.hasAutomationClipboard() ? [{ label: 'Coller l’automation', icon: 'fa-paste', title: 'Coller l’automation copiée au début de la plage, sur les mêmes réglages (« Paste Special > Merge » de Pro Tools) ; un réglage d’effet absent de la piste est ignoré', run: commands.pasteAutomation }] : []),
     { label: 'Exporter', icon: 'fa-compact-disc', title: 'Exporter seulement la plage (« Bounce » de la sélection dans Pro Tools)', run: commands.exportSelection },
     { label: 'Effacer', icon: 'fa-trash', title: 'Effacer le contenu de la plage, en laissant un blanc (Suppr)', run: commands.deleteSelection, danger: true },
   ];

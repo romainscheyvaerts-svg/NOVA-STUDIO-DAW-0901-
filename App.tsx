@@ -67,6 +67,7 @@ import { midiManager } from './services/MidiManager';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
+import { ClipMove, moveAutomationWithClips } from './utils/automationEdit';
 import { metronomeService } from './services/MetronomeService';
 import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange, tempoSignature } from './utils/tempoMap';
 import { resolveCountIn, planCountIn } from './utils/countIn';
@@ -2665,6 +2666,22 @@ function Studio() {
         if (clip) clip.start = Math.max(0, it.start + delta);
       });
     }));
+  }, [setState]);
+
+  /** Fin d'un déplacement de clips : l'automation suit les clips (R8, préférence « Automation suit l'édition »). */
+  const handleClipsMoved = useCallback((items: { clipId: string; fromTrackId: string; fromStart: number }[]) => {
+    if (!items.length) return;
+    setState(prev => {
+      const moves: ClipMove[] = [];
+      for (const it of items) {
+        const t = prev.tracks.find(x => x.clips.some(c => c.id === it.clipId));
+        const c = t?.clips.find(x => x.id === it.clipId);
+        if (!t || !c) continue;
+        moves.push({ clipId: it.clipId, fromTrackId: it.fromTrackId, toTrackId: t.id, fromStart: it.fromStart, duration: c.duration, toStart: c.start });
+      }
+      const tracks = moveAutomationWithClips(prev.tracks, moves);
+      return tracks === prev.tracks ? prev : { ...prev, tracks };
+    });
   }, [setState]);
 
   const handleReorderTracks = useCallback((sourceTrackId: string, destTrackId: string) => {
@@ -6916,7 +6933,7 @@ function Studio() {
                    onEditClip={onEditClipStable} isRecording={state.isRecording} isPlaying={state.isPlaying} recStartTime={state.recStartTime}
                    onMoveClip={handleMoveClip} onEditMidi={onEditMidiStable} onSeparateStems={onSeparateStemsStable}
                    onCreatePattern={handleCreatePatternAndOpen} onSwapInstrument={handleSwapInstrument}
-                   onMoveClipsBy={handleMoveClipsBy}
+                   onMoveClipsBy={handleMoveClipsBy} onClipsMoved={handleClipsMoved}
                    onAudioDrop={onArrangementAudioDrop}
                    punch={state.punch} onUpdatePunch={handleUpdatePunch} editCommands={editCommands} takeLanes={takeLanesApi}
                    markers={state.markers} onAddMarker={handleAddMarker}

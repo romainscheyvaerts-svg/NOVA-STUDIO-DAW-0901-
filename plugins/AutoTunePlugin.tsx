@@ -1,4 +1,5 @@
 
+import { AutomationSet, MappedParam } from '../engine/automationParams';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
@@ -530,6 +531,9 @@ export class AutoTuneNode {
   public output: GainNode;
   private worklet: AudioWorkletNode | null = null;
   private onStatusCallback: ((data: any) => void) | null = null;
+  /** Réglages automatisables (R8) : vitesse, intensité, humanisation. */
+  private auto = new AutomationSet();
+  private autoForce = true;
 
   private params: AutoTuneParams = {
     speed: 0.1,
@@ -599,7 +603,12 @@ export class AutoTuneNode {
       this.input.disconnect();
       this.input.connect(this.worklet);
       this.worklet.connect(this.output);
-      
+      const wp = this.worklet.parameters;
+      this.auto.add('speed', new MappedParam(this.ctx, [{ param: wp.get('retuneSpeed')! }], { min: 0, max: 1, value: this.params.speed, affine: true }));
+      this.auto.add('mix', new MappedParam(this.ctx, [{ param: wp.get('amount')! }], { min: 0, max: 1, value: this.params.mix, affine: true }));
+      this.auto.add('humanize', new MappedParam(this.ctx, [{ param: wp.get('humanize')! }], { min: 0, max: 1, value: this.params.humanize, affine: true }));
+      this.autoForce = true;
+
       this.applyParams(); 
 
     } catch (e) {
@@ -626,9 +635,12 @@ export class AutoTuneNode {
     params.get('bypass')?.setValueAtTime(isEnabled ? 0 : 1, now);
     // Le worklet fait lui-meme le fondu entre les deux moteurs.
     params.get('lowLatency')?.setValueAtTime(this.params.lowLatency ? 1 : 0, now);
-    params.get('retuneSpeed')?.setTargetAtTime(safe(speed, 0.1), now, 0.01);
-    params.get('amount')?.setTargetAtTime(safe(mix, 1), now, 0.01);
-    params.get('humanize')?.setTargetAtTime(safe(humanize, 0), now, 0.01);
+    // Automatisables (R8) : posés seulement s'ils ont changé (une voie d'automation garde la main).
+    const st = { force: this.autoForce, tau: 0.01 };
+    this.autoForce = false;
+    this.auto.get('speed')?.setStatic(safe(speed, 0.1), st);
+    this.auto.get('mix')?.setStatic(safe(mix, 1), st);
+    this.auto.get('humanize')?.setStatic(safe(humanize, 0), st);
     params.get('rootKey')?.setValueAtTime(safe(rootKey, 0), now);
     const scaleIdx = SCALES.indexOf(scale);
     params.get('scaleType')?.setValueAtTime(scaleIdx >= 0 ? scaleIdx : 0, now);
@@ -637,6 +649,11 @@ export class AutoTuneNode {
   public setStatusCallback(cb: (data: any) => void) {
     this.onStatusCallback = cb;
   }
+
+  /** AudioParam d'un réglage automatisable (R8) : « speed », « mix », « humanize » ; sinon null. */
+  public automationParam(key: string): MappedParam | null { return this.auto.get(key); }
+  /** Lecture arrêtée : les réglages automatisés reviennent à leur valeur fixe. */
+  public restoreStatic() { this.auto.restoreStatic(); }
 
   /**
    * Libere le worklet : sans ca, une instance retiree de la chaine continuait

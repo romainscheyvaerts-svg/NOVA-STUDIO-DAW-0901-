@@ -66,6 +66,8 @@ import { gainPointsSig } from '../utils/clipGain';
 import { auditionClips } from '../utils/playlists';
 import { ChordEvent, chordSteps } from '../utils/chordDetect';
 import { engineView, VOID_OUTPUT } from '../utils/trackStructure';
+import { legacyAutomatable, paramsWithoutAutomated, hasPluginLane, pluginParamStaticValue } from './automationParams';
+import { isMuteParam, muteGainPoints, muteLaneOf } from '../utils/muteAutomation';
 
 interface TrackDSP {
   input: GainNode;          
@@ -96,6 +98,12 @@ interface TrackDSP {
    * fader et le pan (gain unité, toujours câblé entre la chaîne et le fader).
    */
   preFaderTap?: GainNode;
+  /**
+   * Sortie de la chaîne d'effets (gain unité, avant le mute automatisé) : la
+   * clé de side-chain « avant fader » y est prise (R7). Le preFaderTap qui suit
+   * porte le mute automatisé (R8).
+   */
+  chainOut?: GainNode;
   /**
    * Compensation de latence (PDC) : retard de la sortie principale et de chaque
    * envoi pour aligner les chemins plus courts (voir utils/pdc.ts) ; outputs =
@@ -832,8 +840,10 @@ export class AudioEngine {
       panner: StereoPannerNode;
       output: GainNode;
       sends: Map<string, GainNode>;
-      /** Sortie de la chaîne d'effets, avant le fader (envois pré-fader) ; piste muette / coupée par un solo. */
+      /** Sortie de la chaîne d'effets, avant le fader (clé de side-chain) ; piste muette / coupée par un solo. */
       pre?: AudioNode;
+      /** Mute automatisé (R8), juste après la chaîne : envois pré-fader pris après lui. */
+      muteGain?: GainNode;
       silenced?: boolean;
       /** Effets créés pour le rendu (automation de leurs paramètres). */
       pluginNodes?: Map<string, any>;
@@ -924,7 +934,10 @@ export class AudioEngine {
         head = frozenInput;
       }
       postPlugins.forEach(p => addPlugin(p, true));
-      head.connect(gain);
+      // Sortie de la chaîne (clé de side-chain avant fader) -> mute automatisé (R8) -> fader.
+      const muteGain = offlineCtx.createGain();
+      head.connect(muteGain);
+      muteGain.connect(gain);
       const preNode = head;
       gain.connect(panner);
       panner.connect(output);
@@ -935,7 +948,7 @@ export class AudioEngine {
       panner.pan.value = options.preFader ? 0 : track.pan;
 
       const rt: RenderTrack = {
-        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pre: preNode, silenced,
+        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pre: preNode, muteGain, silenced,
         frozenInput, frozenClipId: frozen ? track.frozenClip!.id : undefined, postLatency,
       };
 
@@ -999,7 +1012,7 @@ export class AudioEngine {
         // Envoi muet (Pro Tools) : câblé mais à zéro.
         sendGain.gain.value = (send.preFader && rt.silenced) || send.isMuted ? 0 : send.level;
         const ownPan = typeof send.pan === 'number';
-        (send.preFader && rt.pre ? rt.pre : (ownPan ? rt.gain : rt.panner)).connect(sendGain);
+        (send.preFader && rt.pre ? (rt.muteGain || rt.pre) : (ownPan ? rt.gain : rt.panner)).connect(sendGain);
         const sendDelay = offlineCtx.createDelay(PDC_MAX_SECONDS);
         if (ownPan) {
           const sp = offlineCtx.createStereoPanner();
@@ -1050,6 +1063,11 @@ export class AudioEngine {
 
       playedLanes(track).forEach(lane => {
         if (options.preFader && lane.parameterName !== PRE_VOLUME) return;
+        if (isMuteParam(lane.parameterName)) {
+          // Mute automatisé (R8) : en paliers, calé sur la musique (avance PDC aval de la piste).
+          if (rt.muteGain && lane.points.length) this.programmerVoieHorsLigne(rt.muteGain.gain, muteGainPoints(lane.points), startOffset + toSamples(rt.down || 0), totalDuration);
+          return;
+        }
         const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends, (rt.frozenInput || rt.input).gain);
         if (!cible || !lane.points || lane.points.length === 0) return;
 
@@ -2611,6 +2629,11 @@ export class AudioEngine {
         playedLanes(track).forEach(lane => {
             if (lane.points.length === 0 || this.autoOverrides.has(`${track.id}|${lane.parameterName}`)) return;
             if (parsePluginParam(lane.parameterName)) { this.schedulePluginAutomation(track.id, lane.parameterName, lane.points, start, when, end); return; }
+            if (isMuteParam(lane.parameterName)) {
+              // Mute automatisé (R8) : programmé d'avance, en paliers, calé sur la PDC de la piste.
+              if (dsp.preFaderTap) this.programPluginWindow(dsp.preFaderTap.gain, muteGainPoints(lane.points), start, end, when, this.pdcSuspended ? 0 : (dsp.downLatency || 0));
+              return;
+            }
 
             lane.points.forEach((point, index) => {
                 if (point.time >= start && point.time < end) {
@@ -2905,7 +2928,7 @@ export class AudioEngine {
 
     dsp.sendDelays?.forEach(n => { try { n.disconnect(); } catch (e) {} });
     dsp.sendPanners?.forEach(n => { try { n.disconnect(); } catch (e) {} });
-    [dsp.input, dsp.preFaderTap, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
+    [dsp.input, dsp.chainOut, dsp.preFaderTap, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
       .forEach(n => { try { n?.disconnect(); } catch (e) {} });
 
     this.tracksDSP.delete(trackId);
@@ -3002,12 +3025,17 @@ export class AudioEngine {
 
       // Seuls les effets cables ont une entree (sur une piste gelee : ceux
       // apres le rendu, qui restent reglables).
+      const lanes = playedLanes(track);
       track.plugins.forEach(p => {
         const entry = dsp.pluginChain.get(p.id);
         if (entry && entry.instance && typeof entry.instance.updateParams === 'function') {
-          entry.instance.updateParams(p.params);
+          // Réglages tenus par une voie pendant la lecture : laissés à l'automation (R8).
+          entry.instance.updateParams(paramsWithoutAutomated(p.params, lanes, p.id, this.isPlaying));
+          // À l'arrêt, sans voie : les réglages automatisables reviennent à leur valeur fixe.
+          if (!this.isPlaying && typeof entry.instance.restoreStatic === 'function' && !hasPluginLane(lanes, p.id)) entry.instance.restoreStatic();
         }
       });
+      this.resetMuteGain(track, dsp);
       (track.sends || []).forEach(send => {
         const sendGain = dsp.sends.get(send.id);
         const forcedOff = !send.isEnabled || !!send.isMuted || isFeedCovered(track, send.id, allTracks) || (!!send.preFader && preSilenced);
@@ -3089,7 +3117,7 @@ export class AudioEngine {
           }
         }
       } else if (pEntry.instance && pEntry.instance.updateParams) {
-        pEntry.instance.updateParams({ ...plugin.params, lowLatency });
+        pEntry.instance.updateParams({ ...paramsWithoutAutomated(plugin.params, playedLanes(track), plugin.id, this.isPlaying), lowLatency });
       }
       if (pEntry && plugin.isEnabled) {
         link(head, pEntry.input);
@@ -3150,9 +3178,12 @@ export class AudioEngine {
     });
 
     // Point pré-fader (envois PRE) : gain unité entre la chaîne et le fader.
+    // chainOut (sortie de la chaîne, clé de side-chain) -> preFaderTap (mute automatisé) -> fader.
     if (!dsp.preFaderTap) dsp.preFaderTap = this.ctx.createGain();
-    link(head, dsp.preFaderTap);
+    if (!dsp.chainOut) { dsp.chainOut = this.ctx.createGain(); dsp.chainOut.connect(dsp.preFaderTap); }
+    link(head, dsp.chainOut);
     dsp.preFaderTap.connect(dsp.gain);
+    this.resetMuteGain(track, dsp);
     dsp.gain.connect(dsp.panner);
     dsp.panner.connect(dsp.analyzer);
     dsp.analyzer.connect(dsp.output);
@@ -3263,8 +3294,18 @@ export class AudioEngine {
     this.resetPreVolume(track, dsp);
     if (track.isMuted || this.soloSilencedIds.has(track.id)) return;
 
+    this.resetMuteGain(track, dsp);
     playedLanes(track).forEach(lane => {
         if (lane.points.length === 0 || this.autoOverrides.has(`${track.id}|${lane.parameterName}`)) return;
+        if (isMuteParam(lane.parameterName)) {
+          // Mute automatisé (R8) : calé sur la musique (avance PDC de la piste).
+          const ap = dsp.preFaderTap?.gain;
+          if (!ap) return;
+          const lead = this.pdcSuspended ? 0 : (dsp.downLatency || 0);
+          if (this.isPlaying) this.programPluginStart(ap, muteGainPoints(lane.points), time, this.playbackStartTime + time, lead);
+          else { try { ap.cancelScheduledValues(this.ctx!.currentTime); ap.setValueAtTime(valueAtPoints(muteGainPoints(lane.points), time + lead, 1), this.ctx!.currentTime); } catch { /* */ } }
+          return;
+        }
         if (parsePluginParam(lane.parameterName)) {
           // En lecture, sur un AudioParam : posé à l'instant exact du départ (ou du bouclage).
           const a = this.isPlaying ? this.pluginAutoParam(track.id, lane.parameterName) : null;
@@ -3298,6 +3339,15 @@ export class AudioEngine {
     });
 }
 
+  /** Sans voie « Muet » jouée, le gain du mute automatisé revient à 1 (voie effacée, mode Off). */
+  private resetMuteGain(track: Track, dsp: TrackDSP) {
+    const ap = dsp.preFaderTap?.gain;
+    if (!ap || !this.ctx || muteLaneOf(track)) return;
+    if (Math.abs(ap.value - 1) < 1e-9 && !this.pluginAutoParams.has(ap)) return;
+    try { const now = this.ctx.currentTime; ap.cancelScheduledValues(now); ap.setValueAtTime(1, now); } catch { /* */ }
+    this.pluginAutoParams.delete(ap);
+  }
+
   /** Gain « volume avant effets » : tête de chaîne, ou entrée du rendu sur une piste gelée. */
   private preParam(dsp: TrackDSP): AudioParam {
     return (dsp.frozenClipId && dsp.frozenInput ? dsp.frozenInput : dsp.input).gain;
@@ -3320,8 +3370,10 @@ export class AudioEngine {
     const track = this.liveTracks?.find(t => t.id === trackId);
     return (track?.plugins || []).flatMap(pl => {
       const reg = getRegisteredPlugin(pl.type);
-      if (!reg?.automatable?.length) return [];
-      return [{ pluginId: pl.id, pluginName: reg.name, params: reg.automatable.map(a => ({ id: a.id, name: a.label, type: 'float' as const, min: a.min, max: a.max, value: pl.params?.[a.id], unit: a.unit })) }];
+      // Effets historiques (R8) : Compresseur, EQ, Reverb, Délai, De-esser, Saturation, Doubleur, Nova Tune.
+      const list = reg?.automatable?.length ? reg.automatable : legacyAutomatable(pl.type);
+      if (!list.length) return [];
+      return [{ pluginId: pl.id, pluginName: reg?.name || pl.name || pl.type, params: list.map(a => ({ id: a.id, name: a.label, type: 'float' as const, min: a.min, max: a.max, value: pluginParamStaticValue(pl.params, a.id) as any, unit: a.unit })) }];
     });
   }
   public getMasterAnalyzer() { return this.masterAnalyzer; }

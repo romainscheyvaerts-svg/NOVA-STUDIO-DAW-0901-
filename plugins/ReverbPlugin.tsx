@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { AutomationSet, MappedParam, mixDry, mixWet, mixFromWet } from '../engine/automationParams';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { paramFr, termHelp } from '../utils/pluginUi';
 import { PluginParameter } from '../types';
@@ -185,6 +186,11 @@ export class ReverbNode {
   private setP(param: AudioParam, value: number, tau: number) {
     setParamSmooth(param, value, this.ctx, this.createdAt, tau);
   }
+  /** Réglages automatisables (R8) : mix et pré-délai. */
+  private auto = new AutomationSet();
+  /** Mix automatisé : la voie d'effet reste branchée même si le mix fixe vaut 0. */
+  private mixAutomated = false;
+  private autoState = '';
   private ctx: AudioContext;
   public input: GainNode;
   public output: GainNode;
@@ -375,6 +381,8 @@ export class ReverbNode {
       mod: { on: false, timer: null, connect: () => this.modDepthGain.connect(this.modDelay.delayTime), disconnect: () => this.modDepthGain.disconnect(this.modDelay.delayTime) },
     };
     this.setupChain();
+    this.auto.add('mix', new MappedParam(ctx, [{ param: this.wetGain.gain, map: mixWet }, { param: this.dryGain.gain, map: mixDry }], { min: 0, max: 1, value: 0.3, inverse: mixFromWet }));
+    this.auto.add('preDelay', new MappedParam(ctx, [{ param: this.preDelayNode.delayTime }], { min: 0, max: 0.45, value: 0.025, affine: true }));
     this.ducker = new EnvelopeDucker(ctx, this.input, this.duckGain.gain);
     this.regenerateImpulse(true);
     this.applyLiveParams();
@@ -619,7 +627,10 @@ export class ReverbNode {
     const T = SMOOTH;
     const p = this.params;
 
-    this.setP(this.preDelayNode.delayTime, clamp(safeNum(p.preDelay, 0.025), 0, 0.45), T);
+    const stKey = `${p.isEnabled ? 1 : 0}`;
+    const force = stKey !== this.autoState;
+    this.autoState = stKey;
+    this.auto.get('preDelay')?.setStatic(clamp(safeNum(p.preDelay, 0.025), 0, 0.45), { force, tau: T });
     this.setP(this.lowCutFilter.frequency, clamp(safeNum(p.lowCut, 160), 20, 2000), T);
     this.setP(this.highCutFilter.frequency, clamp(safeNum(p.highCut, 10000), 500, 20000), T);
     this.setP(this.bassBoostFilter.gain, clamp(safeNum(p.bassBoost, 0), 0, 1) * 12, T);
@@ -641,22 +652,32 @@ export class ReverbNode {
     this.updateERTimings();
     this.ducker.setAmount(p.isEnabled ? safeNum(p.ducking, 0) : 0, this.silentSoFar);
 
-    const wetOn = !!p.isEnabled && clamp(safeNum(p.mix, 0.3), 0, 1) > 0;
+    const wetOn = !!p.isEnabled && (this.mixAutomated || clamp(safeNum(p.mix, 0.3), 0, 1) > 0);
     this.setLink('wet', wetOn);
     this.setLink('er', wetOn && clamp(safeNum(p.erLevel, 0.3), 0, 1) > 0);
     this.setLink('mod', wetOn && depth > 0);
 
     if (p.isEnabled) {
       const mix = clamp(safeNum(p.mix, 0.3), 0, 1);
-      // Use equal-power crossfade for smoother mix
-      this.setP(this.dryGain.gain, Math.cos(mix * Math.PI * 0.5), T);
-      this.setP(this.wetGain.gain, Math.sin(mix * Math.PI * 0.5), T);
+      // Use equal-power crossfade for smoother mix (automatisable : posé seulement s'il a changé)
+      this.auto.get('mix')?.setStatic(mix, { force, tau: T, immediate: this.ctx.currentTime <= this.createdAt });
       this.setP(this.erMix.gain, clamp(safeNum(p.erLevel, 0.3), 0, 1), T);
     } else {
-      this.setP(this.dryGain.gain, 1, T);
-      this.setP(this.wetGain.gain, 0, T);
+      this.auto.get('mix')?.setStatic(0, { force, tau: T });
     }
   }
+
+  /** AudioParam d'un réglage automatisable (R8) : « mix », « preDelay » ; sinon null. */
+  public automationParam(key: string): MappedParam | null {
+    const mp = this.auto.get(key);
+    if (mp && key === 'mix' && !this.mixAutomated) {
+      this.mixAutomated = true;
+      if (this.params.isEnabled) { this.setLink('wet', true); this.setLink('er', clamp(safeNum(this.params.erLevel, 0.3), 0, 1) > 0); }
+    }
+    return mp;
+  }
+  /** Lecture arrêtée : les réglages automatisés reviennent à leur valeur fixe. */
+  public restoreStatic() { this.auto.restoreStatic(); }
 
   public updateParams(p: Partial<ReverbParams>) {
     this.params = { ...this.params, ...p };
