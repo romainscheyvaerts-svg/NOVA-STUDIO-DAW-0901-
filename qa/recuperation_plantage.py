@@ -122,7 +122,7 @@ def open_project(page, f):
 
 
 STATE_JS = """() => { const s = window.DAW_CONTROL.getState(); return { recording: s.isRecording, tracks: s.tracks.map(t => ({ id: t.id, name: t.name,
-  clips: t.clips.map(c => ({ id: c.id, name: c.name, start: Math.round(c.start * 1000) / 1000, duration: Math.round(c.duration * 1000) / 1000, hasAudio: !!(c.bufferId && window.DAW_CONTROL.diag && true) })) })),
+  clips: t.clips.map(c => ({ id: c.id, name: c.name, start: Math.round(c.start * 1000) / 1000, duration: Math.round(c.duration * 1000) / 1000, offset: Math.round((c.offset || 0) * 1000) / 1000, hasAudio: !!(c.bufferId && window.DAW_CONTROL.diag && true) })) })),
   markers: (s.markers || []).length, buffers: window.DAW_CONTROL.diag().buffers }; }"""
 
 
@@ -199,7 +199,10 @@ def scenario(p, name, kill):
         voix = next((t for t in st["tracks"] if t["id"] == "rec"), None)
         recup = [c for t in st["tracks"] for c in t["clips"] if "récupérée" in (c["name"] or "")]
         res["etat_apres"] = st
-        res["prise_recuperee_s"] = recup[0]["duration"] if recup else 0
+        # Depuis R14 la prise récupérée est replacée comme une prise normale : le décompte capté avant
+        # le point d'enregistrement reste dans le fichier, en début de clip masqué (offset), pas perdu.
+        res["prise_recuperee_s"] = round(recup[0]["duration"] + recup[0].get("offset", 0), 3) if recup else 0
+        res["debut_masque_s"] = recup[0].get("offset", 0) if recup else 0
         ref = res.get("capte_jusqu_a_la_mise_a_mort_s", res["prise_enregistree_s"])
         res["perte_s"] = round(ref - res["prise_recuperee_s"], 2)
         guitare = next((t for t in st["tracks"] if t["id"] == "guitare"), None)
