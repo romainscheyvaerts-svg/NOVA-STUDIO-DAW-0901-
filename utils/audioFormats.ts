@@ -14,7 +14,7 @@
  * et la loudness mesurée, pour l'ingé qui reçoit les fichiers.
  */
 
-export type ChannelLayout = 'stereo' | 'mono-sum' | 'dual-mono';
+export type ChannelLayout = 'stereo' | 'mono' | 'mono-sum' | 'dual-mono';
 
 export interface AudioMarker { name: string; time: number }
 
@@ -80,7 +80,11 @@ export function applyTpdfDither(chs: Float32Array[], bits: number, rng: () => nu
   for (const c of chs) for (let i = 0; i < c.length; i++) c[i] += (rng() - rng()) * lsb;
 }
 
-/** Stéréo → mono-somme ((G + D) / 2) ou double mono (deux fichiers G et D, Pro Tools « Multiple Mono »). */
+/**
+ * Stéréo, mono (canal gauche seul : une source mono enregistrée en stéréo),
+ * mono-somme ((G + D) / 2, Pro Tools « Mono (Summed) ») ou double mono (deux
+ * fichiers G et D, Pro Tools « Multiple Mono »).
+ */
 export function applyLayout(chs: Float32Array[], layout: ChannelLayout): Float32Array[][] {
   const L = chs[0] || new Float32Array(0);
   const R = chs[1] || L;
@@ -90,6 +94,7 @@ export function applyLayout(chs: Float32Array[], layout: ChannelLayout): Float32
     return [[m]];
   }
   if (layout === 'dual-mono') return [[L], [R]];
+  if (layout === 'mono') return [[L]];
   return [chs.length >= 2 ? [L, R] : [L, L]];
 }
 

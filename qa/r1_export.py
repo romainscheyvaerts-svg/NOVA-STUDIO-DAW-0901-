@@ -222,6 +222,7 @@ with sync_playwright() as p:
     files["mp3_320"] = do_export(page, "mp3_320", fmt="MP3", mp3="320", sr=44100, cover=cover, isrc="FRZ032600001")
     files["mp3_192"] = do_export(page, "mp3_192", fmt="MP3", mp3="192", sr=48000)
     files["mono"] = do_export(page, "mono", bits="24", sr=48000, layout="mono-sum")
+    files["mono_g"] = do_export(page, "mono_g", bits="24", sr=48000, layout="mono")
     files["dualmono"] = do_export(page, "dualmono", bits="24", sr=48000, layout="dual-mono")
     files["spotify"] = do_export(page, "spotify", bits="24", sr=44100, normalize="spotify")
     files["refrain"] = do_export(page, "refrain", bits="24", sr=48000, rng="MARKERS", tail="cut")
@@ -298,6 +299,9 @@ ok("WAV : BWF bext (description, loudness), acid 120 BPM, repères, INFO ISRC", 
    {"chunks": ids, "description": bext[:256].rstrip(b"\0").decode("ascii", "replace"), "lufs_bwf": struct.unpack("<h", bext[412:414])[0] / 100 if len(bext) > 414 else None})
 
 i = sfinfo(files["mono"]); ok("mono-somme : 1 canal", i["ch"] == 1, i)
+mg, _ = sf.read(str(files["mono_g"]), dtype="int32", always_2d=True)
+w24, _ = sf.read(str(files["wav24"]), dtype="int32", always_2d=True)
+ok("mono (canal gauche) : 1 canal, identique au gauche du WAV 24 bits stéréo", mg.shape[1] == 1 and mg.shape[0] == w24.shape[0] and np.array_equal(mg[:, 0], w24[:, 0]), {"frames": mg.shape[0]})
 z = zipfile.ZipFile(files["dualmono"]); names = [n for n in z.namelist() if n.endswith(".wav")]
 chs = [sf.info(io.BytesIO(z.read(n))).channels for n in names]
 ok("double mono : 2 fichiers mono .L / .R", len(names) == 2 and chs == [1, 1] and any(".L." in n for n in names) and any(".R." in n for n in names), names)

@@ -340,7 +340,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   // Taille estimée (Mo)
   const estimateMb = () => {
     const d = getDuration();
-    const ch = layout === 'mono-sum' ? 1 : 2;
+    const ch = layout === 'mono-sum' || layout === 'mono' ? 1 : 2;
     if (format === 'MP3') return d * (parseInt(mp3Bitrate, 10) || 320) * 1000 / 8 / 1024 / 1024;
     const raw = d * effRate * (effBits / 8) * ch / 1024 / 1024;
     return format === 'FLAC' ? raw * 0.6 : raw;
@@ -666,8 +666,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             <label className="space-y-1 block">
                                 <span className={lab}>Canaux</span>
                                 <select value={layout} onChange={e => setLayout(e.target.value as ChannelLayout)} disabled={isRendering} className={sel}
-                                  title="Stéréo. Mono (somme) : gauche + droite en un canal (radio, contrôle de compatibilité). Double mono : un fichier gauche et un droit (Pro Tools : Multiple Mono).">
+                                  title="Stéréo. Mono : le canal gauche seul (une voix mono enregistrée en stéréo). Mono (somme) : gauche + droite en un canal (Pro Tools : Mono Summed ; radio, contrôle de compatibilité). Double mono : un fichier gauche et un droit (Pro Tools : Multiple Mono).">
                                     <option value="stereo">Stéréo</option>
+                                    <option value="mono">Mono (canal gauche)</option>
                                     <option value="mono-sum">Mono (somme G + D)</option>
                                     <option value="dual-mono">Double mono (G et D séparés)</option>
                                 </select>
@@ -745,7 +746,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                              <div className="flex justify-between gap-2"><span className="text-nv-muted">Taille estimée</span><span className="font-mono">~{estimateMb().toFixed(1).replace('.', ',')} Mo{source !== 'MASTER' ? ' / piste' : ''}</span></div>
                              <div className="flex justify-between gap-2"><span className="text-nv-muted">Durée</span><span className="font-mono">{Math.floor(getDuration() / 60)} min {String(Math.round(getDuration() % 60)).padStart(2, '0')} s{tailMode === 'auto' ? ' env.' : ''}</span></div>
                              <div className="flex justify-between gap-2"><span className="text-nv-muted">Fichier</span><span className="font-mono text-right">{format === 'MP3' ? `MP3 ${mp3Bitrate}` : `${format} ${effBits === 32 ? '32f' : effBits}`} · {effRate / 1000} kHz</span></div>
-                             <div className="flex justify-between gap-2"><span className="text-nv-muted">Canaux</span><span className="font-mono">{layout === 'stereo' ? 'Stéréo' : layout === 'mono-sum' ? 'Mono' : '2 × mono'}</span></div>
+                             <div className="flex justify-between gap-2"><span className="text-nv-muted">Canaux</span><span className="font-mono">{layout === 'stereo' ? 'Stéréo' : layout === 'dual-mono' ? '2 × mono' : 'Mono'}</span></div>
                         </div>
                     </div>
 

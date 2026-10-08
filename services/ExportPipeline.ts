@@ -267,7 +267,7 @@ export function deliveryNote(s: ExportSettings, files: ExportedFile[], r: Export
   const lines = [
     `${s.meta.title || s.naming.title}${s.meta.artist ? ` — ${s.meta.artist}` : ''}`,
     `Tempo : ${s.naming.bpm ?? '?'} BPM · Tonalité : ${s.meta.key || '?'}${s.meta.isrc ? ` · ISRC : ${s.meta.isrc}` : ''}`,
-    `Format : ${fmt}, ${outputRate(s)} Hz, ${s.layout === 'stereo' ? 'stéréo' : s.layout === 'mono-sum' ? 'mono (somme)' : 'double mono (G / D)'}`,
+    `Format : ${fmt}, ${outputRate(s)} Hz, ${s.layout === 'stereo' ? 'stéréo' : s.layout === 'mono-sum' ? 'mono (somme)' : s.layout === 'mono' ? 'mono (canal gauche)' : 'double mono (G / D)'}`,
     `Plage : ${s.start.toFixed(3)} s → ${s.end.toFixed(3)} s du morceau, queue ${s.tail.mode === 'auto' ? 'automatique' : s.tail.mode === 'manual' ? `${s.tail.seconds} s` : s.tail.mode === 'wrap' ? 'bouclée' : 'coupée'}.`,
     `Tous les fichiers démarrent à 0 et durent ${r.seconds.toFixed(3)} s : glisse-les au début de ta session.`,
     s.source === 'STEMS' && s.stems ? `Stems : ${({ tracks: 'par piste', buses: 'par bus', folders: 'par dossier', 'instru-voix': 'instru et voix séparés' } as Record<string, string>)[s.stems.grouping]}, retours ${s.stems.returns === 'in-stems' ? 'dans chaque stem' : s.stems.returns === 'separate' ? 'en fichiers séparés' : 'absents'}, ${s.stems.withMasterFx ? 'avec' : 'sans'} les effets du master.` : '',

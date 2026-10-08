@@ -57,6 +57,7 @@ describe('quantification', () => {
     const dm = applyLayout([L, R], 'dual-mono');
     expect(dm.length).toBe(2); expect(dm[0][0]).toBe(L); expect(dm[1][0]).toBe(R);
     expect(applyLayout([L, R], 'stereo')[0].length).toBe(2);
+    expect(applyLayout([L, R], 'mono')).toEqual([[L]]);
   });
   it('tonalité en notation ID3', () => {
     expect(keyToId3(0, 'MINOR')).toBe('Cm');
