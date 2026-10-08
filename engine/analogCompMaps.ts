@@ -65,14 +65,8 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
   var tab: number[] = [0, 0];
 
   if (kind === 'OPTO_VINTAGE') {
-    var thr = num(p.threshold, 99);
-    if (thr < 50) {
-      // bouton -> niveau (dBFS) où la réduction atteint 1 dB au taux 4:1
-      var tk: number[] = prof.thrKnob.slice().reverse(), tv: number[] = prof.thr1db.slice().reverse();
-      var onset = interp(thr, tk, tv);
-      if (thr > prof.thrKnob[0]) onset = tv[tv.length - 1] + (thr - prof.thrKnob[0]) * 1.35;
-      P[1] = Math.pow(10, onset / 20);
-    }
+    // Seuil = niveau (dBFS crête, sinus) où la réduction atteint 1 dB au taux 4:1
+    P[1] = Math.pow(10, num(p.threshold, -30) / 20);
     var ratio = Math.min(10, Math.max(2, num(p.ratio, 4)));
     tab = tableFor(ratio, prof.ratioKnob, prof.tables);
     P[2] = 0;
@@ -106,8 +100,7 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
       P[57] = coef(prof.fastDetRelMs);
     }
     P[31] = coef(prof.cellRelFollowMs);
-    var out = num(p.output, 0);
-    P[18] = out > -60 ? Math.pow(10, interp(out, prof.outKnob, prof.outDb) / 20) : 0;
+    P[18] = Math.pow(10, num(p.output, 0) / 20);
     if (num(p.vintage, 0) >= 0.5 && prof.vintageEq) {
       P[18] *= Math.pow(10, prof.vintageGainDb / 20);
       for (var q = 0; q < prof.vintageEq.length && q < 4; q++) {

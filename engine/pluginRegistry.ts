@@ -18,6 +18,9 @@ import { NovaVoiceShifterUI } from '../plugins/VoiceShifterPlugin';
 import { NovaTimeFxUI } from '../plugins/TimeFxPlugin';
 import { NovaDjFilterUI, NovaLofiUI } from '../plugins/FilterPlugin';
 import { NovaGateFxUI } from '../plugins/GateFxPlugin';
+import { AnalogCompNode } from './AnalogCompNode';
+import { analogAutomatable, analogDefaults } from './analogCompParams';
+import { NovaOptoVintageUI } from '../plugins/AnalogCompPlugin';
 
 export interface RegisteredPlugin {
   type: PluginType;
@@ -34,7 +37,7 @@ export interface RegisteredPlugin {
   /** Nœud audio : { input, output } + updateParams, latency (s), ready éventuels. `bpm` : tempo du projet. */
   create: (ctx: BaseAudioContext, plugin: PluginInstance, bpm?: number) => { input: AudioNode; output: AudioNode; updateParams?: (p: any) => void; latency?: number; ready?: Promise<unknown> };
   /** Fenêtre d'édition (reçoit le nœud, les réglages et le rappel de modification). */
-  ui: React.ComponentType<{ node: any; initialParams: any; onParamsChange: (p: Record<string, any>) => void }>;
+  ui: React.ComponentType<{ node: any; initialParams: any; onParamsChange: (p: Record<string, any>) => void; trackId?: string }>;
   /** Réglages automatisables (éditeur d'automation). */
   automatable?: { id: string; label: string; min: number; max: number; unit?: string }[];
   /** Vrai : reçoit la tonalité du projet (`rootKey`, `scale`) comme l'Auto-Tune. */
@@ -128,6 +131,19 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     create: (ctx, plugin, bpm) => new V21EffectNode(ctx, 'LOFI', plugin.params || {}, bpm),
     ui: NovaLofiUI as any,
     automatable: v21Automatable('LOFI'),
+  },
+  // --- Compresseurs « analogiques » modélisés au labo (mesures boîte noire) ----
+  {
+    type: 'OPTO_VINTAGE',
+    name: 'Opto Vintage',
+    category: 'Compresseurs vintage',
+    icon: 'fa-lightbulb',
+    color: '#38bdf8',
+    description: 'Compresseur optique à lampes inspiré d’un classique danois des studios : doux et transparent, idéal sur la voix. « Caler sur ma voix » règle le seuil pour 5 dB max au VU.',
+    defaultParams: analogDefaults('OPTO_VINTAGE'),
+    create: (ctx, plugin) => new AnalogCompNode(ctx, 'OPTO_VINTAGE', plugin.params || {}),
+    ui: NovaOptoVintageUI as any,
+    automatable: analogAutomatable('OPTO_VINTAGE'),
   },
 ];
 

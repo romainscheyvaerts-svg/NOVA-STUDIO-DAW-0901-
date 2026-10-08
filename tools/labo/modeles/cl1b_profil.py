@@ -68,16 +68,9 @@ def nova_to_internal(p, fit):
     """Paramètres NOVA (positions de boutons) -> vecteur P du cœur + table."""
     P = np.zeros(ac.NP)
     P[ac.P_PRE] = 1.0
-    thr = p.get("threshold", 99.0)
-    if thr >= 50:   # « Off »
-        P[ac.P_THR] = 1e6
-    else:
-        knobs = THR_KNOB[::-1]
-        vals = list(fit["thr_1db"])[::-1]
-        onset = float(np.interp(thr, knobs, vals, left=vals[0], right=vals[-1]))
-        if thr > THR_KNOB[0]:
-            onset = vals[-1] + (thr - THR_KNOB[0]) * 1.35
-        P[ac.P_THR] = 10 ** (onset / 20.0)
+    # Seuil NOVA = niveau (dBFS crête, sinus) où la réduction atteint 1 dB au taux 4:1
+    thr = p.get("threshold", -30.0)
+    P[ac.P_THR] = 10 ** (thr / 20.0)
     ratio = min(10.0, max(2.0, p.get("ratio", 4.0)))
     tabs = np.asarray(fit["tables"], float)
     j = np.searchsorted(RATIO_KNOB, ratio)
@@ -133,8 +126,8 @@ def nova_to_internal(p, fit):
         P[ac.P_FAST_REL] = fit.get("fast_rel_slew", 3000.0) / SR
         P[ac.P_FAST_DET_REL] = ac.coef_from_ms(fit.get("fast_det_rel_ms", 2.0))
     P[ac.P_REL2_FOLLOW] = ac.coef_from_ms(fit.get("cell_rel_follow_ms", 0.5))
-    out = p.get("output", 0.0)
-    P[ac.P_MAKEUP] = 10 ** (float(np.interp(out, OUT_KNOB, OUT_DB)) / 20.0) if out > -60 else 0.0
+    out = p.get("output", 0.0)   # gain réel en dB
+    P[ac.P_MAKEUP] = 10 ** (out / 20.0)
     if int(p.get("vintage", 0)) and fit.get("vintage_eq"):
         P[ac.P_MAKEUP] *= 10 ** (fit.get("vintage_gain_db", 0.0) / 20.0)
         for q, (kind, fc, qq, gdb) in enumerate(fit["vintage_eq"][:ac.N_EQ]):
@@ -146,6 +139,23 @@ def nova_to_internal(p, fit):
     P[ac.P_HP_B0:ac.P_HP_A2 + 1] = hp
     P[ac.P_LINK] = 0.0
     return P, L0, DL, np.ascontiguousarray(tab)
+
+
+def knob_to_threshold_db(knob, fit=None):
+    """Bouton « Threshold » du plugin d'origine -> seuil NOVA (dBFS)."""
+    f = fit or load_fit()
+    if str(knob) == "Off":
+        return 40.0
+    k = float(knob)
+    knobs = THR_KNOB[::-1]
+    vals = list(f["thr_1db"])[::-1]
+    if k > THR_KNOB[0]:
+        return vals[-1] + (k - THR_KNOB[0]) * 1.35
+    return float(np.interp(k, knobs, vals))
+
+
+def knob_to_output_db(knob):
+    return float(np.interp(float(knob), OUT_KNOB, OUT_DB))
 
 
 def builder(fit=None, to_nova=None):

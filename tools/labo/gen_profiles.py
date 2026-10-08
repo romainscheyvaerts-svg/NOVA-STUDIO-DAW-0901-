@@ -36,6 +36,12 @@ def opto_vintage():
         "outKnob": prof.OUT_KNOB, "outDb": prof.OUT_DB,
         "vintageGainDb": fit.get("vintage_gain_db", 0.0), "vintageEq": fit.get("vintage_eq"),
         "scFilters": fit.get("sc_filters", {}),
+        "fmKnob": fit.get("fm_knob"), "fmAttMs": fit.get("fm_att_ms"),
+        "fastAttMs": fit.get("fast_att_ms"), "fastRelSlew": fit.get("fast_rel_slew"),
+        "fastDetRelMs": fit.get("fast_det_rel_ms"),
+        # temps mesurés (t63, saut de 15 / 25 dB) : affichage seulement
+        "attT63Ms": [1.0, 1.0, 1.0, 2.1, 6.4, 9.4, 10.9, 13.9, 20.4, 31.9, 48.9, 68.4, 87.4, 135.9, 191.9, 225.9],
+        "relT63Ms": [23, 36, 84, 182, 351, 584, 863, 1353, 2359, 4118, 4806],
     }
 
 

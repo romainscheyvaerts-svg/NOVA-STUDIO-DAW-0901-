@@ -24,15 +24,16 @@ def to_nova(s):
     """Réglages du VST (texte) -> paramètres NOVA (mêmes positions de boutons)."""
     m = dict(BASE)
     m.update(s)
+    from modeles import cl1b_profil as prof
     thr = m["threshold_db"]
     ratio = m["ratio"]
     return {
-        "threshold": 99.0 if str(thr) == "Off" else float(thr),
+        "threshold": prof.knob_to_threshold_db(thr),
         "ratio": float(str(ratio).split(":")[0]),
         "attack": float(m["attack"]),
         "release": float(m["release"]),
         "mode": {"Fix": 0, "F/M": 1, "Man": 2}[m["select_attack_release"]],
-        "output": float(m["output_volume_db"]),
+        "output": prof.knob_to_output_db(m["output_volume_db"]),
         "mix": float(m["parallel_compression"]),
         "scLowCut": {"Off": 0, "80 Hz": 80, "220 Hz": 220}[m["sidechain_low_cut"]],
         "vintage": 1 if m["cl1b_generation"].startswith("Vintage") else 0,
