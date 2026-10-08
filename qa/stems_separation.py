@@ -156,7 +156,7 @@ def open_stems_menu(page, label):
     page.mouse.click(900, y + 60, button="right")
     page.wait_for_timeout(400)
     menu_open_for(page, "Séparer en stems")  # sous-menu « Traitement »
-    item = page.get_by_role("button", name=re.compile("Séparer en stems")).first
+    item = page.get_by_role("menuitem", name=re.compile("Séparer en stems")).first
     title = item.get_attribute("title")
     shot(page, f"{label}_menu")
     item.click()
