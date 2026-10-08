@@ -6,7 +6,10 @@ import { isVoiceTrack } from '../utils/vocalRoles';
 import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint, Marker } from '../types';
 import TrackHeader from './TrackHeader';
 import ContextMenu from './ContextMenu';
+import { midiClipMenuItems, midiTrackMenuItems } from './MidiFileMenu';
+import { midiBus, isMidiFile } from '../utils/midiBus';
 import TimelineGridMenu from './TimelineGridMenu'; 
+import { ChordLaneToggleButton, ChordLaneView } from './ChordLane';
 import LiveRecordingClip from './LiveRecordingClip'; 
 import AutomationLaneComponent from './AutomationLane';
 import { drawExpandedLanes } from '../utils/automationDraw';
@@ -34,6 +37,8 @@ import type { EditCommands } from '../hooks/useEditCommands';
 import { bufferDurationOf } from '../hooks/useEditCommands';
 import { CrossfadeCurve } from '../types';
 import { STEMS_TOOLTIP } from '../services/StemSeparation';
+import { araAvailability } from '../utils/araEdit';
+import { useAraContext } from './AraDialog';
 import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor } from './PlaylistLanes';
 import { listLanes, mainRowClips, clipAtTime, takeCount, TakeLane } from '../utils/playlists';
 import { takeNumberOf } from '../utils/takes';
@@ -97,6 +102,8 @@ interface ArrangementViewProps {
   editCommands?: EditCommands;
   /** Couloirs de prises (Playlists) et comp à la souris. components/PlaylistLanes */
   takeLanes?: TakeLanesApi;
+  /** Piste d'accords (V20, components/ChordLane) : absente quand le couloir est masqué. */
+  chordLane?: { height: number; render: (v: ChordLaneView) => React.ReactNode };
 }
 
 /** Contour d'un fondu (courbe choisie) : zone assombrie au-dessus de la courbe + trait. */
@@ -153,8 +160,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip: onEditClipRaw, isRecording, recStartTime,
   onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy,
-  punch, onUpdatePunch, editCommands, takeLanes
+  punch, onUpdatePunch, editCommands, takeLanes, chordLane
 }) => {
+  // Piste d'accords (V20) : couloir entre la barre d'outils et la règle.
+  const chordH = chordLane ? chordLane.height : 0;
   // Thème affiché : le canvas se redessine quand on passe en clair / sombre.
   const { theme: uiTheme } = useTheme();
   const editPrefs = useEditPrefs();
@@ -252,6 +261,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [hoveredClipId, setHoveredClipId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: (ContextMenuItem | 'separator')[] } | null>(null);
   const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
+  // Melodyne / VocAlign : pont + plugins présents ? (commandes grisées sinon)
+  const araCtx = useAraContext();
   // Reordonnancement des pistes par glisser-deposer (le TrackHeader emettait
   // deja les evenements, mais ArrangementView les ignorait).
   const dragTrackIdRef = useRef<string | null>(null);
@@ -644,6 +655,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           }
           currentY += zoomV + extraH(t);
       }
+
+      // Fichiers .mid (V25) : pistes ou clips créés à l'endroit du dépôt (components/MidiHost).
+      const midiDropped = Array.from(e.dataTransfer.files || []).filter(isMidiFile);
+      midiDropped.forEach(f => midiBus.emit({ type: 'import-file', file: f, trackId: targetTrackId, time: dropTime }));
+      if (midiDropped.length && midiDropped.length === e.dataTransfer.files.length) return;
       
       if (!targetTrackId) {
           targetTrackId = visibleTracks.find(t => t.id === 'instrumental')?.id || 
@@ -669,7 +685,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           const AUDIO_EXT = /\.(wav|wave|mp3|aif|aiff|flac|ogg|oga|opus|m4a|aac|webm|caf)$/i;
           const files = Array.from(e.dataTransfer.files);
           const audio = files.filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
-          const refused = files.length - audio.length;
+          const refused = files.length - audio.length - midiDropped.length;
           // Plusieurs fichiers : un par piste, à partir de celle visée (comme dans les autres DAW).
           const startIdx = Math.max(0, visibleTracks.findIndex(t => t.id === targetTrackId));
           const targets = visibleTracks.slice(startIdx).filter(t => t.type === TrackType.AUDIO);
@@ -781,6 +797,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (onSwapInstrument && target && (target.type === TrackType.MIDI || target.type === TrackType.SAMPLER || target.type === TrackType.DRUM_RACK)) {
       menuItems.push({ label: "Changer d'instrument", onClick: () => onSwapInstrument(trackId), icon: 'fa-exchange-alt' });
     }
+    menuItems.push(...midiTrackMenuItems(target, () => setContextMenu(null)));
     setContextMenu({ x: e.clientX, y: e.clientY, items: menuItems });
   };
   
@@ -2055,10 +2072,12 @@ useEffect(() => {
             </div>
         </div>
         <div className="flex items-center space-x-3 shrink-0">
+             {!simple && <ChordLaneToggleButton />}
              <i className="fas fa-search-plus text-[10px]"></i>
              <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
         </div>
       </div>
+      {chordLane && chordLane.render({ zoomH, scrollLeft, headerWidth, width: Math.max(0, viewportSize.width - headerWidth) })}
       {/* SINGLE SCROLL CONTAINER - sidebar is sticky left, canvas is sticky top */}
       <div 
           ref={scrollContainerRef} 
@@ -2189,12 +2208,12 @@ useEffect(() => {
           ref={canvasRef} 
           style={{ 
               position: 'absolute',
-              top: 48, // Hauteur de la toolbar
+              top: 48 + chordH, // Hauteur de la toolbar (+ piste d'accords)
               left: headerWidth,
               right: 0,
               bottom: 0,
               width: `calc(100% - ${headerWidth}px)`,
-              height: 'calc(100% - 48px)',
+              height: `calc(100% - ${48 + chordH}px)`,
               pointerEvents: 'none',
               zIndex: 20
           }} 
@@ -2204,19 +2223,19 @@ useEffect(() => {
           ref={overlayRef}
           style={{
               position: 'absolute',
-              top: 48,
+              top: 48 + chordH,
               left: headerWidth,
               right: 0,
               bottom: 0,
               width: `calc(100% - ${headerWidth}px)`,
-              height: 'calc(100% - 48px)',
+              height: `calc(100% - ${48 + chordH}px)`,
               pointerEvents: 'none',
               zIndex: 21
           }}
       />
       {/* Couloirs de prises (au-dessus des calques dessinés, sous la règle) */}
       {takeLanes && visibleTracks.some(t => openLanesOf(t).length > 0) && (
-        <div style={{ position: 'absolute', top: 48 + 40, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 22 }}>
+        <div style={{ position: 'absolute', top: 48 + chordH + 40, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 22 }}>
           {(() => {
             let y = 40;
             return visibleTracks.map(t => {
@@ -2322,6 +2341,30 @@ useEffect(() => {
                     return targets.length > 1 ? [{ label: `Justesse : corriger tout (${targets.length} clips)…`, icon: 'fa-wand-magic-sparkles', title: 'Ramène toutes les notes des clips sélectionnés dans la gamme, avec dosage et style. Une seule annulation.',
                       onClick: () => { openNovaWindow('pitch-batch', { targets }); setClipContextMenu(null); } }] : [];
                 })(),
+                // Audio → MIDI (V20) : Convert Melody / Drums / Harmony d'Ableton Live, « Create MIDI » du Flex Pitch de Logic.
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [
+                  { label: 'Mélodie → MIDI (808, piano…)…', icon: 'fa-microphone-lines', title: 'Convertir la mélodie de cette voix en notes MIDI : 808 qui la suit, piano, lead ou nappe (comme Convert Melody to MIDI d’Ableton Live ou « Create MIDI » du Flex Pitch de Logic)',
+                    onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], convert: { mode: 'melody' } }); setClipContextMenu(null); } },
+                  { label: 'Batterie → MIDI…', icon: 'fa-drum', title: 'Convertir cette boucle de batterie en motif : kick, snare / clap, hi-hat dans la boîte à rythmes ou en piste MIDI General MIDI (comme Convert Drums to MIDI d’Ableton Live)',
+                    onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], convert: { mode: 'drums' } }); setClipContextMenu(null); } },
+                  { label: 'Accords → MIDI…', icon: 'fa-guitar', title: 'Trouver les accords de ce sample et les rejouer en MIDI, et remplir la piste d’accords (comme Convert Harmony to MIDI d’Ableton Live ou Chord ID de Logic)',
+                    onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], convert: { mode: 'harmony' } }); setClipContextMenu(null); } },
+                ] : []),
+                // Melodyne / VocAlign (ARA2, hôte natif du pont) : grisés sur le site, avec la raison en infobulle.
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? (() => {
+                  const target = { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] };
+                  const mel = araAvailability('melodyne', araCtx), va = araAvailability('vocalign', araCtx);
+                  return [
+                    { label: clipContextMenu.clip.araEdit?.plugin === 'melodyne' ? 'Retoucher dans Melodyne (ARA)' : 'Ouvrir dans Melodyne (ARA)', icon: 'fa-wand-magic-sparkles', title: mel.tooltip, disabled: !mel.enabled,
+                      onClick: () => { openNovaWindow('ara-melodyne', target); setClipContextMenu(null); } },
+                    { label: 'Aligner avec VocAlign… (ARA)', icon: 'fa-align-left', title: va.tooltip, disabled: !va.enabled,
+                      onClick: () => { openNovaWindow('ara-vocalign', target); setClipContextMenu(null); } },
+                    ...(!va.enabled ? [{ label: 'Caler sur la lead (alignement NOVA)…', icon: 'fa-align-left', title: "Cale doubles, backs et harmonies sur la voix lead, sans plugin",
+                      onClick: () => { openNovaWindow('ara-vocalign', target); setClipContextMenu(null); } }] : []),
+                    ...(clipContextMenu.clip.araEdit ? [{ label: "Revenir à l'original…", icon: 'fa-rotate-left', title: 'Remet la prise d’origine (avant Melodyne / VocAlign)',
+                      onClick: () => { openNovaWindow(clipContextMenu.clip.araEdit!.plugin === 'melodyne' ? 'ara-melodyne' : 'ara-vocalign', target); setClipContextMenu(null); } }] : []),
+                  ];
+                })() : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => { const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id]; requestBreaths({ mode: 'dialog', clipIds: ids, reason: 'menu' }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
@@ -2331,6 +2374,7 @@ useEffect(() => {
                 ...(clipContextMenu.clip.type === TrackType.MIDI && onEditMidi ? [
                   { label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); }}
                 ] : []),
+                ...midiClipMenuItems(clipContextMenu.trackId, clipContextMenu.clip, () => setClipContextMenu(null)),
                 'separator',
                 { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
                 { label: clipContextMenu.clip.isReversed ? 'Remettre à l’endroit' : 'Inverser', icon: 'fa-rotate-left', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { isReversed: !clipContextMenu.clip.isReversed }); setClipContextMenu(null); }},

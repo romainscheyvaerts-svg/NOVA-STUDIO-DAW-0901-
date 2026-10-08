@@ -66,7 +66,40 @@ export interface BridgeState {
   paramsText?: boolean;
   /** (v8) Le pont sait séparer un clip en stems (module optionnel, installé à la demande). */
   stems?: boolean;
+  /** (v9) Plugins ARA2 (Melodyne, VocAlign) par l'hôte natif NovaARAHost. */
+  ara?: boolean;
 }
+
+/** Première version du pont qui héberge les plugins ARA (Melodyne, VocAlign). */
+export const BRIDGE_ARA_VERSION = 9;
+
+export interface AraStatus {
+  host: boolean;
+  plugins: Partial<Record<'melodyne' | 'vocalign', { path: string; name?: string; label?: string }>>;
+}
+
+export interface AraClipIn {
+  id: string; name: string; track?: string; role?: 'edit' | 'dub' | 'guide' | 'context';
+  start?: number; persistentId?: string; channels: Float32Array[];
+}
+
+export interface AraRender { clipId: string; channels: Float32Array[]; sampleRate: number }
+
+export interface AraOpenResult {
+  sessionId: string; pluginName?: string; pluginVersion?: string; restored: boolean; analysisSeconds?: number;
+  notes: Record<string, { count: number; voiced: number; mean_abs_cents?: number; notes?: number[][] }>;
+}
+
+export interface AraEvent { session_id: string; event: string; [k: string]: any }
+
+/** Adresse du pont : 8765, ou une autre pour les essais (localStorage « nova.bridge.url », en local seulement). */
+const bridgeUrl = (): string => {
+  try {
+    const v = typeof localStorage !== 'undefined' ? localStorage.getItem('nova.bridge.url') : null;
+    if (v && /^ws:\/\/127\.0\.0\.1:\d+$/.test(v)) return v;
+  } catch { /* stockage indisponible */ }
+  return 'ws://127.0.0.1:8765';
+};
 
 /** Première version du pont qui sépare les stems (Demucs). */
 export const BRIDGE_STEMS_VERSION = 8;
@@ -154,7 +187,7 @@ type SlotEvent =
 const align4 = (n: number) => (n + 3) & ~3;
 
 class NovaBridgeService {
-  readonly url = 'ws://127.0.0.1:8765';
+  readonly url = bridgeUrl();
   private ws: WebSocket | null = null;
   private state: BridgeState = { status: 'idle', error: null, version: null, pluginCount: 0, instruments: false, instrumentsPending: null };
   private listeners = new Set<(s: BridgeState) => void>();
@@ -170,6 +203,9 @@ class NovaBridgeService {
   private stemFrames = new Map<number, SeparatedStem[]>();
   /** req_id de chaque séparation en cours (délai prolongé à chaque progression). */
   private stemsJobs = new Map<string, number>();
+  /** Sons rendus par un plugin ARA (trames ARA_RENDERED) en attendant la réponse finale. */
+  private araFrames = new Map<number, AraRender[]>();
+  private araListeners = new Set<(e: AraEvent) => void>();
 
   // --- État ---------------------------------------------------------------
 
@@ -222,6 +258,7 @@ class NovaBridgeService {
             instruments: !!hello.instruments && (Number(hello.version) || 0) >= BRIDGE_INSTRUMENTS_VERSION,
             paramsText: !!hello.params_text && (Number(hello.version) || 0) >= BRIDGE_PARAMS_TEXT_VERSION,
             stems: !!hello.stems && (Number(hello.version) || 0) >= BRIDGE_STEMS_VERSION,
+            ara: !!hello.ara && (Number(hello.version) || 0) >= BRIDGE_ARA_VERSION,
           });
           this.ensureWorker();
           done(true);
@@ -279,6 +316,10 @@ class NovaBridgeService {
       this.onStemsEventMsg(msg);
       return;
     }
+    if (msg && msg.action === 'ARA_EVENT') {
+      this.araListeners.forEach(cb => { try { cb(msg); } catch { /* écouteur fautif */ } });
+      return;
+    }
     if (msg && msg.action === 'LICENSE_WINDOW') {
       this.onLicenseWindowMsg(msg);
       return;
@@ -313,10 +354,25 @@ class NovaBridgeService {
       this.stemFrames.set(meta.req_id, list);
       return;
     }
+    // (v9) Un clip rendu par Melodyne / VocAlign : gardé jusqu'à la réponse finale.
+    if (meta.action === 'ARA_RENDERED') {
+      if (!this.pending.has(meta.req_id)) return;
+      const list = this.araFrames.get(meta.req_id) || [];
+      list.push({ clipId: String(meta.clip_id), channels: deinterleave(), sampleRate: Number(meta.sample_rate) || 44100 });
+      this.araFrames.set(meta.req_id, list);
+      return;
+    }
     const p = this.pending.get(meta.req_id);
     if (!p) return;
     this.pending.delete(meta.req_id);
     window.clearTimeout(p.timer);
+    if (meta.action === 'ARA_COMMIT' || meta.action === 'ARA_ALIGN') {
+      const renders = this.araFrames.get(meta.req_id) || [];
+      this.araFrames.delete(meta.req_id);
+      if (!meta.success) p.reject(new Error(meta.error || 'Rendu du plugin impossible'));
+      else p.resolve({ ...meta, renders });
+      return;
+    }
     if (meta.action === 'STEMS_SEPARATE') {
       const stems = this.stemFrames.get(meta.req_id) || [];
       this.stemFrames.delete(meta.req_id);
@@ -627,6 +683,73 @@ class NovaBridgeService {
     }
   }
 
+  // --- Plugins ARA : Melodyne, VocAlign (pont v9) ----------------------------
+
+  onAraEvent(cb: (e: AraEvent) => void): () => void {
+    this.araListeners.add(cb);
+    return () => { this.araListeners.delete(cb); };
+  }
+
+  async araStatus(): Promise<AraStatus> {
+    if (!this.isConnected() || !this.state.ara) return { host: false, plugins: {} };
+    const r = await this.request({ action: 'ARA_STATUS' }, 40000);
+    return { host: !!r.host, plugins: r.plugins || {} };
+  }
+
+  /** Requête binaire (clips audio à la suite) ; la réponse arrive en JSON ou en trames. */
+  private sendAraFrame(meta: Record<string, any>, clips: { channels: Float32Array[] }[], timeoutMs: number): Promise<any> {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error('Pont VST non connecté'));
+    const req_id = this.nextId++;
+    const buf = encodeMultiClipFrame({ ...meta, req_id }, clips.map(c => c.channels));
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        this.pending.delete(req_id);
+        this.araFrames.delete(req_id);
+        reject(new Error('Le plugin ne répond pas'));
+      }, timeoutMs);
+      this.pending.set(req_id, { resolve, reject, timer });
+      ws.send(buf);
+    });
+  }
+
+  /** Ouvre des clips dans Melodyne (fenêtre du plugin sur le PC, notes déjà analysées). */
+  async araOpen(opts: { sessionId: string; plugin: 'melodyne'; sampleRate: number; tempo: number; archive?: string; clips: AraClipIn[]; offscreen?: boolean }): Promise<AraOpenResult> {
+    const seconds = opts.clips.reduce((a, c) => a + (c.channels[0]?.length || 0), 0) / opts.sampleRate;
+    const r = await this.sendAraFrame({
+      action: 'ARA_OPEN', session_id: opts.sessionId, plugin: opts.plugin, sample_rate: Math.round(opts.sampleRate),
+      tempo: opts.tempo, archive_b64: opts.archive || '', offscreen: !!opts.offscreen,
+      clips: opts.clips.map(c => ({ id: c.id, name: c.name, track: c.track || c.name, role: c.role || 'edit', start: c.start || 0,
+        persistent_id: c.persistentId || c.id, nch: Math.min(2, c.channels.length), nframes: c.channels[0]?.length || 0 })),
+    }, opts.clips, 120000 + seconds * 2000);
+    return { sessionId: r.session_id, pluginName: r.plugin_name, pluginVersion: r.plugin_version, restored: !!r.restored,
+      analysisSeconds: r.analysis_seconds, notes: r.notes || {} };
+  }
+
+  /** VocAlign : cale les doubles sur le guide. interactive : fenêtre ouverte, puis araCommit(). */
+  async araAlign(opts: { sessionId: string; sampleRate: number; interactive: boolean; guide: AraClipIn; dubs: AraClipIn[] }): Promise<{ waiting: boolean; renders: AraRender[] }> {
+    const meta = (c: AraClipIn) => ({ id: c.id, name: c.name, nch: Math.min(2, c.channels.length), nframes: c.channels[0]?.length || 0 });
+    const seconds = (opts.guide.channels[0]?.length || 0) / opts.sampleRate;
+    const r = await this.sendAraFrame({
+      action: 'ARA_ALIGN', session_id: opts.sessionId, sample_rate: Math.round(opts.sampleRate), interactive: opts.interactive,
+      guide: meta(opts.guide), dubs: opts.dubs.map(meta),
+    }, [opts.guide, ...opts.dubs], 120000 + seconds * 3000 * Math.max(1, opts.dubs.length));
+    return { waiting: !!r.waiting, renders: r.renders || [] };
+  }
+
+  /** « Valider » : rendu des clips de la session (et archive ARA de Melodyne). */
+  async araCommit(sessionId: string, timeoutMs = 600000): Promise<{ renders: AraRender[]; archive?: string }> {
+    const r = await this.request({ action: 'ARA_COMMIT', session_id: sessionId }, timeoutMs);
+    return { renders: r.renders || [], archive: r.archive_b64 || undefined };
+  }
+
+  async araShow(sessionId: string): Promise<void> { await this.request({ action: 'ARA_SHOW', session_id: sessionId }); }
+
+  async araClose(sessionId: string): Promise<void> {
+    if (!this.isConnected()) return;
+    try { await this.request({ action: 'ARA_CLOSE', session_id: sessionId }); } catch { /* déjà fermée */ }
+  }
+
   // --- Audio temps réel ---------------------------------------------------
 
   private ensureWorker() {
@@ -678,6 +801,26 @@ export function encodeType2Frame(meta: string, channels: Float32Array[]): ArrayB
   for (let c = 0; c < nch; c++) {
     const ch = channels[c];
     for (let i = 0; i < nframes; i++) inter[i * nch + c] = ch[i];
+  }
+  return buf;
+}
+
+/** Trame type 2 avec plusieurs clips : audio de chaque clip entrelacé, à la suite (ARA_OPEN, ARA_ALIGN). */
+export function encodeMultiClipFrame(meta: Record<string, any>, clips: Float32Array[][]): ArrayBuffer {
+  const j = new TextEncoder().encode(JSON.stringify(meta));
+  const off = align4(8 + j.length);
+  const total = clips.reduce((a, ch) => a + (ch[0]?.length || 0) * Math.min(2, ch.length), 0);
+  const buf = new ArrayBuffer(off + total * 4);
+  const u8 = new Uint8Array(buf);
+  u8[0] = 2;
+  new DataView(buf).setUint32(4, j.length, true);
+  u8.set(j, 8);
+  const inter = new Float32Array(buf, off, total);
+  let o = 0;
+  for (const chs of clips) {
+    const ch = chs.slice(0, 2);
+    const n = ch[0]?.length || 0;
+    for (let i = 0; i < n; i++) for (let c = 0; c < ch.length; c++) inter[o++] = ch[c][i];
   }
   return buf;
 }

@@ -142,6 +142,33 @@ export interface MidiNote {
   isSelected?: boolean;
 }
 
+/** Groove (V25, utils/groove) : décalage et vélocité par case de grille, comme le Groove Pool de Live. */
+export interface GrooveTemplate {
+  id: string;
+  name: string;
+  /** Cases par temps : 2 = croches, 4 = doubles-croches. */
+  stepsPerBeat: number;
+  /** Longueur du motif en temps (4 = une mesure en 4/4). */
+  lengthBeats: number;
+  /** Décalage de chaque case, en fraction de case (+ = en retard). */
+  timing: number[];
+  /** Multiplicateur de vélocité de chaque case. */
+  velocity: number[];
+}
+
+/** Groove posé sur un clip MIDI, réglable tant qu'il n'est pas appliqué (Commit Groove). */
+export interface ClipGroove {
+  template: GrooveTemplate;
+  /** Intensité du décalage (0-1, comme Timing dans Live). */
+  amount: number;
+  /** Effet sur la vélocité (0-1). */
+  velocity: number;
+  /** Calage sur la grille avant le groove (0-1, comme Quantize dans Live). */
+  quantize?: number;
+  /** Notes d'origine (sans groove). */
+  source: MidiNote[];
+}
+
 // Crossfade curve types (inspired by Pro Tools)
 export type CrossfadeCurve = 'LINEAR' | 'EQUAL_POWER' | 'S_CURVE' | 'EXPONENTIAL';
 
@@ -247,6 +274,48 @@ export interface Clip {
    * avec le clip (collaboration). Absent : rien de traité.
    */
   breaths?: BreathEdit[];
+  /**
+   * Groove / swing en cours de réglage (V25, utils/groove) : `notes` contient
+   * déjà le résultat (une ancienne version joue donc le clip groové) ; la
+   * source sert à changer de réglage. Absent : pas de groove.
+   */
+  groove?: ClipGroove;
+  /**
+   * Retouche par un plugin ARA (Melodyne, VocAlign) : ce clip joue le son rendu
+   * par le plugin. La prise d'origine et l'état du plugin (archive ARA, les
+   * retouches de Melodyne) sont gardés pour rouvrir, retoucher ou revenir à
+   * l'original. Une ancienne version ignore ce champ et joue le son rendu.
+   * Voir utils/araEdit.
+   */
+  araEdit?: AraEditInfo;
+}
+
+/** Plugin ARA connu de NOVA. */
+export type AraPluginKey = 'melodyne' | 'vocalign';
+
+/** Ce que garde un clip retouché par un plugin ARA. */
+export interface AraEditInfo {
+  version: 1;
+  plugin: AraPluginKey;
+  /** Nom et version du plugin au moment de la retouche (« Melodyne 5.4.2 »). */
+  pluginName?: string;
+  /** Comment le son a été obtenu : ARA (Melodyne), capture (VocAlign), ou alignement NOVA (sans plugin). */
+  mode: 'ara' | 'capture' | 'nova';
+  /** Son d'origine (registre audio). Absent ou introuvable : on ne peut que garder le son rendu. */
+  sourceBufferId?: string;
+  /** Fichier du son d'origine dans un projet sauvegardé (le temps de la sauvegarde). */
+  sourceRef?: string;
+  /** Instant du son d'origine qui correspond au début du son rendu (s). */
+  regionStart: number;
+  /** Identifiant stable du son confié au plugin (relie l'archive au bon son). */
+  persistentId: string;
+  /** État ARA du plugin (base64) : les retouches de Melodyne, pour rouvrir et retoucher. */
+  archive?: string;
+  /** VocAlign : le guide (la lead) sur lequel ce clip a été calé. */
+  guide?: { trackId?: string; clipId?: string; name?: string };
+  sourceWarp?: WarpSettings;
+  sourceName?: string;
+  at?: number;
 }
 
 /** Retouche d'une note (justesse), rangée par instant (secondes dans le son d'origine). */
@@ -434,6 +503,8 @@ export interface DrumPad {
 
 export interface Track {
   id: string;
+  /** Canal MIDI d'un .mid importé (V25) : 10 = batterie General MIDI gardée en notes brutes. */
+  midiChannel?: number;
   name: string;
   type: TrackType;
   color: string;
@@ -703,6 +774,12 @@ export interface DAWState {
   punch: PunchSettings;           // NEW
   /** Mode d'édition Pro Tools (Shuffle, Slip, Spot, Grid) et grille : utils/editModes. */
   editMode?: import('./utils/editModes').EditModeSettings;
+  /**
+   * Piste d'accords (V20, Chord Track de Logic) : accords posés à la main ou
+   * détectés sur le beat (utils/chordTrack). Absent : pas d'accords (anciens
+   * projets) ; une ancienne version l'ignore sans rien casser.
+   */
+  chords?: import('./utils/chordDetect').ChordEvent[];
 }
 
 export interface ContextMenuItem {

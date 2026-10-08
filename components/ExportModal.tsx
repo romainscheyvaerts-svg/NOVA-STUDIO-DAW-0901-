@@ -12,6 +12,7 @@ import { prepareTracksForOffline } from '../services/VstFreeze';
 import { track } from '../utils/analytics';
 import { consumeSelectionExport, editSelectionStore } from '../utils/editSelection';
 import { simpleModeStore } from '../utils/simpleMode';
+import { MidiExportRow } from './MidiFileMenu';
 
 // Compte admin du studio (tout gratuit pour tester) : lu une fois par session.
 let adminCache: boolean | null = null;
@@ -757,6 +758,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
             </div>
             )}
 
+            {/* Notes MIDI en .mid (V25) */}
+            <MidiExportRow tracks={projectState.tracks} />
         </div>
       </div>
     </div>

@@ -4,7 +4,7 @@
  * descendre de nouvelles props dans l'arrangement : un simple événement que
  * components/ProToolsWindows écoute.
  */
-export type NovaWindowName = 'memory-locations' | 'strip-silence' | 'clip-props' | 'track-color' | 'shortcuts' | 'pitch-editor' | 'pitch-batch';
+export type NovaWindowName = 'memory-locations' | 'strip-silence' | 'clip-props' | 'track-color' | 'shortcuts' | 'pitch-editor' | 'pitch-batch' | 'audio-to-midi' | 'ara-melodyne' | 'ara-vocalign';
 
 export interface NovaWindowDetail {
   name: NovaWindowName;
@@ -13,6 +13,8 @@ export interface NovaWindowDetail {
   trackId?: string;
   /** Champ mis en avant à l'ouverture. */
   focus?: 'name' | 'color';
+  /** Audio → MIDI (V20) : mélodie, batterie ou harmonie ; micro ; instrument ; version simple. */
+  convert?: { mode: 'melody' | 'drums' | 'harmony'; mic?: boolean; instrument?: '808' | 'piano' | 'lead' | 'pad'; simple?: boolean };
 }
 
 export const NOVA_WINDOW_EVENT = 'nova:open-window';
