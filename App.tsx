@@ -6655,6 +6655,25 @@ function Studio() {
     return peerViews([...map.values()], collab.key, names);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collab, collabOnline, peersTick]);
+  // Un collaborateur vient de perdre le direct (en retard, ou parti depuis moins de 2 min) : rattrapage
+  // rapproché, ce qu'il envoie au retour du réseau arrive en ~2 s au lieu de ~10 s.
+  const onlineBeforeRef = useRef(new Set<string>());
+  const droppedAtRef = useRef(new Map<string, number>());
+  useEffect(() => {
+    const c = collabRef.current;
+    if (!c) { onlineBeforeRef.current.clear(); droppedAtRef.current.clear(); return; }
+    const now = Date.now();
+    const onlineNow = new Set(collabPeerViews.filter(v => v.online && !v.me).map(v => v.key));
+    onlineBeforeRef.current.forEach(k => { if (!onlineNow.has(k)) droppedAtRef.current.set(k, now); });
+    onlineNow.forEach(k => droppedAtRef.current.delete(k));
+    onlineBeforeRef.current = onlineNow;
+    const away = collabPeerViews.some(v => !v.me && v.state === 'late') || [...droppedAtRef.current.values()].some(t => now - t < 120_000);
+    c.client.setFastPoll(away);
+    if (!away) return;
+    // Fin de la fenêtre de 2 min : on réévalue (sinon le rattrapage rapproché resterait).
+    const id = window.setTimeout(() => setPeersTick(x => x + 1), 121_000);
+    return () => window.clearTimeout(id);
+  }, [collabPeerViews]);
   // « en retard » → « hors ligne » au bout d'une minute sans nouvelles : on recalcule.
   useEffect(() => {
     if (!collab) return;

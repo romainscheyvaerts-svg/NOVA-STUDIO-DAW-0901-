@@ -309,6 +309,16 @@ export class CollabClient {
   /** Message éphémère reçu (voir broadcast). */
   onEphemeral?: (event: EphemeralEvent, payload: any) => void;
 
+  /**
+   * Rattrapage rapproché (toutes les 2 s) pendant qu'un collaborateur n'a plus le direct :
+   * ce qu'il envoie au retour du réseau arrive tout de suite, pas au prochain passage des 10 s.
+   */
+  private fastTimer: ReturnType<typeof setInterval> | null = null;
+  setFastPoll(on: boolean) {
+    if (on && !this.fastTimer && !this.closed) this.fastTimer = setInterval(() => { void this.catchUp(); }, 2000);
+    else if (!on && this.fastTimer) { clearInterval(this.fastTimer); this.fastTimer = null; }
+  }
+
   /** « Réessayer » : rattrapage et envoi tout de suite (sans attendre les 10 s). */
   async retryNow(): Promise<void> {
     this.setStatus({ lastError: null });
@@ -485,6 +495,7 @@ export class CollabClient {
   async leave() {
     this.closed = true;
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    if (this.fastTimer) { clearInterval(this.fastTimer); this.fastTimer = null; }
     this.unlisten.forEach(u => u());
     this.unlisten = [];
     try { if (this.channel || this.channelRef) await catalogSupabase.removeChannel((this.channel || this.channelRef)!); } catch { /* */ }
