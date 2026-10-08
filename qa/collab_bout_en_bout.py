@@ -390,9 +390,15 @@ def run():
                 pg.get_by_role("button", name="Envoyer", exact=True).click()
                 for nm in others:
                     o = pages[nm]
-                    open_panel(o)
-                    wait_for(o, lambda: txt in o.locator("[aria-labelledby='collab-title']").inner_text(), 20, step=40, what="message reçu")
+                    wait_for(o, lambda: collab(o, f"c.messages().some(m => m.text === {json.dumps(txt)})"), 20, step=40, what=f"message reçu ({nm})")
                     lat(f"chat ({who}→{nm})", (time.time() - t0) * 1000)
+                    open_panel(o)
+                    try:
+                        wait_for(o, lambda: txt in o.locator("[aria-labelledby='collab-title']").first.inner_text(), 10, step=200, what="message affiché")
+                        check(f"chat : message de {who} affiché chez {nm}", True)
+                    except AssertionError:
+                        check(f"chat : message de {who} affiché chez {nm}", False)
+                        shot(o, f"CHAT_non_affiche_{who}_{nm}")
                 out[who] = txt
             A.wait_for_timeout(6000)  # mesures de latence (toutes les 5 s) et empreintes (toutes les 8 s)
             out["latence_vue_par_lina"] = collab(A, "c.latency()")

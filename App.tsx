@@ -4811,6 +4811,8 @@ function Studio() {
   collabRef.current = collab;
   const [collabOnline, setCollabOnline] = useState<CollabMember[]>([]);
   const [collabMessages, setCollabMessages] = useState<CollabMessage[]>([]);
+  const collabMessagesRef = useRef(collabMessages);
+  collabMessagesRef.current = collabMessages;
   const [collabBusy, setCollabBusy] = useState<string | null>(null);
   const pendingCollabRoleRef = useRef<CollabRole | null>(null);
   // Signatures connues (envoyées ou reçues) par domaine : rien n'est renvoyé en écho.
@@ -6452,7 +6454,11 @@ function Studio() {
     collabOnline.forEach(m => {
       const k = participantOf(m.member_key);
       const prev = map.get(k);
-      map.set(k, { key: k, name: m.display_name || prev?.name || '?', role: m.role, online: true, color: m.color, rec: m.rec, playing: m.playing, st: m.st, host: m.host, seenAt: prev?.seenAt });
+      // Même compte sur plusieurs appareils (PC + tablette) : une personne, ses appareils comptés ;
+      // ce qu'il fait (enregistre, écoute) vient de n'importe lequel.
+      const devices = (prev?.online ? prev.devices || 1 : 0) + 1;
+      map.set(k, { key: k, name: m.display_name || prev?.name || '?', role: m.role, online: true, color: m.color || prev?.color,
+        rec: m.rec || (prev?.online ? prev.rec : null), playing: m.playing || (prev?.online && prev.playing), st: m.st, host: m.host || (prev?.online && prev.host), seenAt: prev?.seenAt, devices });
     });
     if (!map.has(collab.key)) map.set(collab.key, { key: collab.key, name: collab.name, role: collab.role, online: true, color: collab.color, host: collab.host });
     const me = map.get(collab.key)!;
@@ -6541,6 +6547,7 @@ function Studio() {
       fingerprint: () => sessionPrint(stateRef.current),
       /** Ce qui est partagé d'une piste, en clair (pour dire précisément ce qui diffère). */
       parts: (id: string) => { const t = stateRef.current.tracks.find(x => x.id === id); return t ? JSON.parse(JSON.stringify(trackParts(t))) : null; },
+      messages: () => collabMessagesRef.current.map(m => ({ from: m.from, text: m.text, mine: !!m.mine, pending: !!m.pending })),
       history: () => collabHistoryRef.current.map(h => ({ who: h.who, text: h.text, undo: !!h.undo, undone: !!h.undone })),
       audio: () => ({ rtc: rtcRef.current?.connectionStates() || {}, remote: remoteAudioRef.current, talkOn: talkOnRef.current, mixOut: mixOutOnRef.current }),
       latency: () => ({ server: collabRef.current?.client.getStatus().rttMs ?? null, peers: peerLatencyRef.current, sync: peerSyncRef.current, horizon: collabRef.current?.client.horizon ?? null }),

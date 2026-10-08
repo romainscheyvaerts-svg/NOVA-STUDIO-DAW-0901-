@@ -356,6 +356,7 @@ const CollabPanel: React.FC<Props> = (p) => {
                     {v.me && <span className="text-slate-500"> (toi)</span>}
                     <span className={`${ROLE_COLOR[v.role] || 'text-slate-400'}`}> · {ROLE_LABEL[v.role] || v.role}</span>
                     {v.host && <span className="ml-1 rounded bg-white/10 px-1 text-[9px] font-black uppercase text-slate-300">hôte</span>}
+                    {(v.devices || 0) > 1 && <span className="ml-1 text-[10px] text-slate-400">· {v.devices} appareils</span>}
                     <span className={`block text-[11px] ${v.state === 'recording' ? 'text-red-300 font-bold' : v.state === 'late' ? 'text-amber-200' : v.state === 'offline' ? 'text-slate-500' : 'text-slate-400'}`}>
                       {v.state === 'recording' ? '● ' : ''}{v.label}
                       {!v.me && v.online && p.latency?.peers[v.key] != null && <span data-testid="collab-peer-latency" className={`ml-1 font-mono ${latencyTone(p.latency.peers[v.key])}`}>· {p.latency.peers[v.key]} ms</span>}
