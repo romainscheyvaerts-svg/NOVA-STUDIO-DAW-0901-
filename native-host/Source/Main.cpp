@@ -182,6 +182,16 @@ namespace nova
 
     static std::unique_ptr<Session> session;
 
+    // Sortie garantie : un plugin qui bloque en se terminant (ou une fenêtre d'un autre plugin
+    // qui ne répond plus) ne laisse jamais un processus orphelin.
+    static void armExitWatchdog (DWORD ms = 4000)
+    {
+        static std::atomic<bool> armed { false };
+        if (armed.exchange (true)) return;
+        std::thread ([ms] { Sleep (ms); TerminateProcess (GetCurrentProcess(), 0); }).detach();
+    }
+
+
     //==========================================================================
     static void reply (const Value& id, Value o)
     {
@@ -496,6 +506,7 @@ namespace nova
             }
             else if (cmd == "quit")
             {
+                armExitWatchdog();
                 reply (id, Value::object());
                 PostQuitMessage (0);
             }
@@ -552,7 +563,9 @@ namespace nova
                 for (auto& l : splitLines (one)) app::post ([line = l] { handle (line); });
             }
         }
-        // Le pont s'est arrêté : on quitte aussi.
+        // Le pont s'est arrêté : on quitte aussi (et quoi qu'il arrive dans 4 s, même si le
+        // plugin bloque en se terminant).
+        armExitWatchdog();
         app::post ([] { PostQuitMessage (0); });
     }
 

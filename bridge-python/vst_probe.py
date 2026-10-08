@@ -355,6 +355,17 @@ def _fingerprint(bundle: str) -> Optional[Tuple[float, int]]:
 
 
 def _child_command(main_script: Optional[str]) -> List[str]:
+    # Moteur natif : NovaVSTHost.exe --scan lit les fabriques (même protocole, fenêtres
+    # d'activation cachées et signalées par l'hôte lui-même), sans démarrer Python.
+    try:
+        import vst_host
+        if vst_host.NATIVE:
+            import vst_native
+            cmd = vst_native.scan_command()
+            if cmd:
+                return cmd
+    except Exception:
+        pass
     if getattr(sys, "frozen", False):
         return [sys.executable, "--probe-vst3"]
     return [sys.executable, main_script or os.path.abspath(sys.argv[0]), "--probe-vst3"]

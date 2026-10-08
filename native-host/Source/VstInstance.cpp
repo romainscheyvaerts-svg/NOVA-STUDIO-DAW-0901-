@@ -459,8 +459,16 @@ namespace nova
             std::string t;
             if (slow)
             {
-                // Repli de pedalboard : la valeur est posée, puis son texte relu.
-                setValue (index, v);
+                // Repli de pedalboard : la valeur est posée, puis son texte relu. Un plugin qui
+                // plante en recevant la valeur (RUBY2, réglage « Program ») : relevé arrêté là.
+                bool fine = guard::call ([&] { setValue (index, v); });
+                if (! fine)
+                {
+                    if (textBroken.size() < params.size()) textBroken.resize (params.size(), false);
+                    textBroken[(size_t) index] = true;
+                    if (++textCrashes > 64) throw guard::Crash ("Le plugin a planté en recevant des réglages");
+                    return arr;
+                }
                 if (! textFor (index, (double) cache[(size_t) index].load(), t)) t = fallbackText (v);
             }
             else if (! textFor (index, (double) v, t))
@@ -475,7 +483,7 @@ namespace nova
                 havePrev = true;
             }
         }
-        if (slow) setValue (index, original);
+        if (slow) guard::call ([&] { setValue (index, original); });
         return arr;
     }
 

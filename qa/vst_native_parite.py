@@ -467,7 +467,7 @@ def write_report(out, reps):
     json.dump(reps, open(os.path.join(out, "parite.json"), "w", encoding="utf-8"), indent=1, default=str)
 
 
-def spawn(args, timeout=1800):
+def spawn(args, timeout=3600):
     flags = 0x08000000 | BELOW_NORMAL
     t = time.time()
     try:
@@ -478,12 +478,19 @@ def spawn(args, timeout=1800):
     return round(time.time() - t, 1)
 
 
+REUSE_PB = False
+
+
 def run_all(out, only):
     os.makedirs(out, exist_ok=True)
     reps = []
     for pid in only:
         print(f"== {pid}", flush=True)
-        print("  pedalboard", spawn(["run", "--engine", "pedalboard", "--plugin", pid, "--out", out]), flush=True)
+        prev = load_json(os.path.join(out, f"{pid}.pedalboard.result.json")) or {}
+        if REUSE_PB and prev.get("ok"):
+            print("  pedalboard : résultats déjà là (pedalboard est très lent sur cette machine)", flush=True)
+        else:
+            print("  pedalboard", spawn(["run", "--engine", "pedalboard", "--plugin", pid, "--out", out]), flush=True)
         pb_state = os.path.join(out, f"{pid}.pedalboard.state.b64")
         print("  natif", spawn(["run", "--engine", "native", "--plugin", pid, "--out", out, "--foreign", pb_state]), flush=True)
         nv_state = os.path.join(out, f"{pid}.native.state.b64")
@@ -507,7 +514,10 @@ def main():
     ap.add_argument("--foreign")
     ap.add_argument("--only-foreign", action="store_true")
     ap.add_argument("--only")
+    ap.add_argument("--reuse-pb", action="store_true")
     a = ap.parse_args()
+    global REUSE_PB
+    REUSE_PB = a.reuse_pb
     below_normal()
     if a.cmd == "run":
         run_engine(a.engine, a.plugin, a.out, a.foreign, a.only_foreign)

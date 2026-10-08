@@ -62,6 +62,8 @@ PRIORITY = {"below_normal": 0x00004000, "normal": 0x00000020, "above_normal": 0x
 
 K_CAN_AUTOMATE = 1 << 0
 K_IS_BYPASS = 1 << 16
+K_IS_READ_ONLY = 1 << 1
+K_IS_PROGRAM_CHANGE = 1 << 15
 DEFAULT_NUM_STEPS = 0x7FFFFFFF   # AudioProcessor::getDefaultNumParameterSteps de JUCE
 
 
@@ -337,6 +339,45 @@ else:  # pragma: no cover - hôte natif réservé à Windows
 
 _seq = itertools.count(1)
 
+# Tous les hôtes dans un « job » Windows fermé avec le pont : si le pont meurt (ou est
+# arrêté net), aucun NovaVSTHost.exe ne reste orphelin.
+_job = None
+_job_lock = threading.Lock()
+
+
+def _attach_to_job(proc_handle: int):
+    global _job
+    if not IS_WINDOWS:
+        return
+    try:
+        with _job_lock:
+            if _job is None:
+                k = ctypes.windll.kernel32
+                k.CreateJobObjectW.restype = wintypes.HANDLE
+                job = k.CreateJobObjectW(None, None)
+
+                class _Basic(ctypes.Structure):
+                    _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                                ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                                ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                                ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                                ("SchedulingClass", wintypes.DWORD)]
+
+                class _Io(ctypes.Structure):
+                    _fields_ = [(n, ctypes.c_uint64) for n in ("r", "w", "o", "rt", "wt", "ot")]
+
+                class _Ext(ctypes.Structure):
+                    _fields_ = [("Basic", _Basic), ("Io", _Io), ("ProcessMemoryLimit", ctypes.c_size_t),
+                                ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                                ("PeakJobMemoryUsed", ctypes.c_size_t)]
+                info = _Ext()
+                info.Basic.LimitFlags = 0x2000          # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                k.SetInformationJobObject(wintypes.HANDLE(job), 9, ctypes.byref(info), ctypes.sizeof(info))
+                _job = job
+            ctypes.windll.kernel32.AssignProcessToJobObject(wintypes.HANDLE(_job), wintypes.HANDLE(proc_handle))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"job Windows indisponible : {e}")
+
 
 class _ParamChange(ctypes.Structure):
     _fields_ = [("id", ctypes.c_uint32), ("offset", ctypes.c_int32), ("value", ctypes.c_double)]
@@ -391,6 +432,7 @@ class HostProcess:
         self.proc = subprocess.Popen([exe, "--serve"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.DEVNULL, creationflags=flags)
         self.pid = self.proc.pid
+        _attach_to_job(int(self.proc._handle))
         self._ids = itertools.count(1)
         self._pending: Dict[int, list] = {}
         self._lock = threading.Lock()
@@ -921,7 +963,10 @@ class NativePlugin:
             slow_idx = []
             for i, runs in zip(todo, fast):
                 self._ranges_cache[i] = runs
-                if NativeParameter.looks_wrong(runs):
+                flags = self._cpp_by_host[i].flags if 0 <= i < len(self._cpp_by_host) else 0
+                # Relevé « lent » (valeur posée puis lue) : jamais pour le réglage de programme
+                # (il changerait tous les autres ; RUBY2 plante dessus).
+                if NativeParameter.looks_wrong(runs) and not flags & K_IS_PROGRAM_CHANGE:
                     slow_idx.append(i)
             if slow_idx:
                 res = self._host.request("ranges", timeout=max(CALL_TIMEOUT_S, 0.05 * len(slow_idx)),
