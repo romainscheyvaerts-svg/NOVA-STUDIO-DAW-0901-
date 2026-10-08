@@ -74,6 +74,8 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     this.tlSegs = [];
     this.tlLatency = 0;
     this.tlPlaying = false;
+    this.tlSentPlaying = false;
+    this.tlMuteBefore = -1;
 
     this.port.onmessage = (e) => {
       const m = e.data || {};
@@ -96,7 +98,7 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
       } else if (m.type === 'ara') {
         this.ara = !!m.on;
       } else if (m.type === 'timeline') {
-        // { from, origin } en images du contexte : à partir de rom (sortie), morceau = t − origin.
+        // { from, origin } en images du contexte : à partir de from (sortie), morceau = t − origin.
         const seg = { from: m.from, origin: m.origin };
         if (m.reset || !this.tlPlaying) this.tlSegs = [seg];
         else { this.tlSegs = this.tlSegs.filter(s => s.from < seg.from); this.tlSegs.push(seg); if (this.tlSegs.length > 8) this.tlSegs.shift(); }
@@ -104,6 +106,8 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
         this.tlPlaying = true;
       } else if (m.type === 'tlstop') {
         this.tlPlaying = false;
+        // Arrêt net (comme Pro Tools) : la fin déjà en route dans le pré-tampon n'est pas jouée.
+        this.tlMuteBefore = this.seq;
       } else if (m.type === 'tllatency') {
         this.tlLatency = m.latency || 0;
       }
@@ -204,7 +208,10 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     // finie) : inutile de solliciter le pont. Le bloc est marqué silencieux.
     // Un changement de réglage part quand même (il doit tomber à son heure).
     // Insert ARA : à l'arrêt, rien à jouer (silence sans solliciter le pont) ; en lecture, tout part.
-    const gate = this.ara ? (tl < 0 && pc === 0) : (pc === 0 && this.silentIn > this.delayBlocks + 64 && (this.lastRecvSeq - this.lastLoudSeq) > 64);
+    // Le premier bloc après l'arrêt part quand même (position -1) : le plugin apprend l'arrêt
+    // (sinon Melodyne rejoue un bout de l'ancienne position à la relance).
+    const gate = this.ara ? (tl < 0 && pc === 0 && !this.tlSentPlaying) : (pc === 0 && this.silentIn > this.delayBlocks + 64 && (this.lastRecvSeq - this.lastLoudSeq) > 64);
+    if (this.ara && !gate) this.tlSentPlaying = tl >= 0;
     if (gate) {
       this.ring[this.seq % RING] = { seq: this.seq, data: null };
     } else if (pc > 0) {
@@ -220,7 +227,7 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     const want = this.seq - this.delayBlocks;
     const e = want >= 0 ? this.ring[want % RING] : null;
     const hit = !!(e && e.seq === want);
-    if (hit && e.data) {
+    if (hit && e.data && !(this.ara && want < this.tlMuteBefore)) {
       const d = e.data;
       for (let i = 0; i < n; i++) { oL[i] = d[2 * i]; if (oR !== oL) oR[i] = d[2 * i + 1]; }
     } else {

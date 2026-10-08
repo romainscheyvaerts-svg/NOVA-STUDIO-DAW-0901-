@@ -118,6 +118,9 @@ class AraInsertSlot:
         self._pipe_name: Optional[str] = None
         self._zeros: Dict[int, np.ndarray] = {}
         self.last_pos = -1.0
+        self._was_playing = False
+        self.jumps: List[list] = []
+        self._jump_watch = 0
         # Rien d'automatisable par le pont pour un insert ARA (les retouches sont dans l'archive).
         self.auto_keys: List[str] = []
         self.watching = False
@@ -247,7 +250,20 @@ class AraInsertSlot:
             z = self._zeros.get(n)
             if z is None:
                 z = self._zeros[n] = np.zeros((2, n), np.float32)
+            if self._was_playing and self._pipe is not None:
+                # Transport arrêté : le plugin l'apprend (sinon Melodyne rejoue un bout de
+                # l'ancienne position à la relance).
+                self._was_playing = False
+                try:
+                    with self.lock:
+                        for _ in range(4):
+                            self._pipe.write(struct.pack("<IIIIq", PIPE_MAGIC, n, 2, 0, int(self.last_pos)) + z.astype("<f4").tobytes())
+                            _magic, nn, nc, _fl = struct.unpack("<IIII", _read_exact(self._pipe, 16))
+                            _read_exact(self._pipe, 4 * nn * nc)
+                except Exception:
+                    pass
             return z
+        self._was_playing = True
         x = block if block.shape[0] >= 2 else np.vstack([block, block])
         x = np.ascontiguousarray(x[:2], dtype="<f4")
         pos = int(round(timeline))
@@ -263,9 +279,17 @@ class AraInsertSlot:
         self.blocks += 1
         if flags & 1:
             self.rendered_blocks += 1
+        out = np.array(np.frombuffer(data, "<f4").reshape(nc, nn)[:2], dtype=np.float32, copy=True)
+        if self.last_pos >= 0 and pos != self.last_pos + n:
+            # Sauts de position (relance, boucle) : position d'avant, d'après, pic des 10 blocs suivants.
+            self.jumps.append([int(self.last_pos), pos, 0.0])
+            self.jumps = self.jumps[-50:]
+            self._jump_watch = 10
+        if self._jump_watch > 0 and self.jumps:
+            self._jump_watch -= 1
+            self.jumps[-1][2] = max(self.jumps[-1][2], float(np.max(np.abs(out))))
         self.last_pos = pos
-        out = np.frombuffer(data, "<f4").reshape(nc, nn)
-        return np.array(out[:2], dtype=np.float32, copy=True)
+        return out
 
     def _play_aligned(self, block: np.ndarray, timeline: Optional[float]) -> np.ndarray:
         """VocAlign (capture) : le double calé, à la position du morceau ; tant qu'il n'est pas
@@ -668,7 +692,8 @@ def install(Server, build_render_frame, parse_render_frame):
             timeout += kw["wait_analysis_s"]
         res = await self.loop.run_in_executor(self.misc_pool, lambda: slot.host.call("doc_state", timeout=timeout, **kw))
         self._reply(ws, req, {"success": True, **{k: v for k, v in res.items() if k not in ("id", "ok")},
-                              "pont_blocs": slot.blocks, "pont_blocs_rendus": slot.rendered_blocks})
+                              "pont_blocs": slot.blocks, "pont_blocs_rendus": slot.rendered_blocks,
+                              "sauts": [list(j) for j in slot.jumps[-20:]]})
 
     async def _a_ara_insert_capture(self, ws, req):
         """VocAlign (capture) : état de la capture transparente."""
