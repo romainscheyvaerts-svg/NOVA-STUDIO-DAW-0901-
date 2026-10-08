@@ -24,6 +24,7 @@ const REASONS: Record<VersionReason, string> = {
   manual: 'enregistrée',
   restore: 'avant une restauration',
   recovered: 'après une récupération',
+  named: 'version nommée',
 };
 
 export interface CrashInfo { version: VersionMeta | null; takes: { seconds: number; trackName: string }[]; recording: boolean }
@@ -97,7 +98,7 @@ export const VersionsDialog: React.FC<{
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <h2 id="versions-title" className="text-lg font-black text-white">🕘 Versions de la session</h2>
-            <p className="text-[12px] text-slate-400 mt-1">Gardées sur cet appareil : les 20 dernières, puis une par heure (7 jours). Restaurer ne supprime rien : ta version actuelle reste dans la liste.</p>
+            <p className="text-[12px] text-slate-400 mt-1">Gardées sur cet appareil : les 20 dernières, puis une par heure (7 jours) ; les versions nommées (v2, v3…) pour toujours. Restaurer ne supprime rien : ta version actuelle reste dans la liste.</p>
           </div>
           <button type="button" onClick={onClose} disabled={busy} aria-label="Fermer" className="w-11 h-11 shrink-0 rounded-xl bg-white/5 text-slate-300">✕</button>
         </div>
@@ -107,8 +108,12 @@ export const VersionsDialog: React.FC<{
           {shown.map((v, i) => (
             <div key={v.id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
               <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-bold text-white">{fmtDay(v.savedAt)} à {fmtTime(v.savedAt)}{i === 0 ? <span className="ml-2 text-[10px] font-black uppercase text-emerald-300">la plus récente</span> : null}</p>
+                <p className="text-[13px] font-bold text-white">
+                  {v.versionNumber ? <span className="mr-2 rounded bg-cyan-500/20 px-1.5 text-[11px] font-black text-cyan-200" title="Version nommée (Enregistrer comme nouvelle version) : jamais effacée">v{v.versionNumber}</span> : null}
+                  {fmtDay(v.savedAt)} à {fmtTime(v.savedAt)}{i === 0 ? <span className="ml-2 text-[10px] font-black uppercase text-emerald-300">la plus récente</span> : null}
+                </p>
                 <p className="text-[11px] text-slate-400 truncate">{[REASONS[v.reason] || v.reason, v.name, `${v.tracks} piste${v.tracks > 1 ? 's' : ''}`, v.takes ? `${v.takes} prise${v.takes > 1 ? 's' : ''}` : null].filter(Boolean).join(' · ')}</p>
+                {v.comment ? <p className="text-[12px] italic text-slate-200 truncate" title={v.comment}>« {v.comment} »</p> : null}
               </div>
               <button type="button" disabled={busy} onClick={() => onRestore(v)} className={`${btn} shrink-0 bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25`}>Restaurer</button>
             </div>

@@ -1,0 +1,370 @@
+{
+  "id": "rhodes",
+  "name": "Piano électrique (FM, type DX7)",
+  "version": 1,
+  "license": "CC0 1.0 (FreePats FM Synthesized Piano #1)",
+  "source": "https://freepats.zenvoid.org/ElectricPiano/synthesized-piano.html",
+  "release": 0.4,
+  "zones": [
+    {
+      "file": "Fs1_v60.ogg",
+      "root": 30,
+      "tune": 3,
+      "lo": 24,
+      "hi": 33,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "Fs1_v80.ogg",
+      "root": 30,
+      "tune": 0,
+      "lo": 24,
+      "hi": 33,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "Fs1_v100.ogg",
+      "root": 30,
+      "tune": -1,
+      "lo": 24,
+      "hi": 33,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "C2_v60.ogg",
+      "root": 36,
+      "tune": 1,
+      "lo": 34,
+      "hi": 39,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "C2_v80.ogg",
+      "root": 36,
+      "tune": 0,
+      "lo": 34,
+      "hi": 39,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "C2_v100.ogg",
+      "root": 36,
+      "tune": -1,
+      "lo": 34,
+      "hi": 39,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Fs2_v60.ogg",
+      "root": 42,
+      "tune": 1,
+      "lo": 40,
+      "hi": 45,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "Fs2_v80.ogg",
+      "root": 42,
+      "tune": 0,
+      "lo": 40,
+      "hi": 45,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "Fs2_v100.ogg",
+      "root": 42,
+      "tune": 0,
+      "lo": 40,
+      "hi": 45,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "C3_v60.ogg",
+      "root": 48,
+      "tune": 0,
+      "lo": 46,
+      "hi": 51,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "C3_v80.ogg",
+      "root": 48,
+      "tune": 0,
+      "lo": 46,
+      "hi": 51,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "C3_v100.ogg",
+      "root": 48,
+      "tune": 0,
+      "lo": 46,
+      "hi": 51,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Fs3_v60.ogg",
+      "root": 54,
+      "tune": 1,
+      "lo": 52,
+      "hi": 57,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "Fs3_v80.ogg",
+      "root": 54,
+      "tune": 0,
+      "lo": 52,
+      "hi": 57,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "Fs3_v100.ogg",
+      "root": 54,
+      "tune": 0,
+      "lo": 52,
+      "hi": 57,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "C4_v60.ogg",
+      "root": 60,
+      "tune": 0,
+      "lo": 58,
+      "hi": 63,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "C4_v80.ogg",
+      "root": 60,
+      "tune": 0,
+      "lo": 58,
+      "hi": 63,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "C4_v100.ogg",
+      "root": 60,
+      "tune": 0,
+      "lo": 58,
+      "hi": 63,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Fs4_v60.ogg",
+      "root": 66,
+      "tune": 1,
+      "lo": 64,
+      "hi": 69,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "Fs4_v80.ogg",
+      "root": 66,
+      "tune": 0,
+      "lo": 64,
+      "hi": 69,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "Fs4_v100.ogg",
+      "root": 66,
+      "tune": 0,
+      "lo": 64,
+      "hi": 69,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "C5_v60.ogg",
+      "root": 72,
+      "tune": 0,
+      "lo": 70,
+      "hi": 75,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "C5_v80.ogg",
+      "root": 72,
+      "tune": 0,
+      "lo": 70,
+      "hi": 75,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "C5_v100.ogg",
+      "root": 72,
+      "tune": 0,
+      "lo": 70,
+      "hi": 75,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Fs5_v60.ogg",
+      "root": 78,
+      "tune": 0,
+      "lo": 76,
+      "hi": 81,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "Fs5_v80.ogg",
+      "root": 78,
+      "tune": 0,
+      "lo": 76,
+      "hi": 81,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "Fs5_v100.ogg",
+      "root": 78,
+      "tune": 0,
+      "lo": 76,
+      "hi": 81,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "C6_v60.ogg",
+      "root": 84,
+      "tune": 0,
+      "lo": 82,
+      "hi": 87,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "C6_v80.ogg",
+      "root": 84,
+      "tune": 0,
+      "lo": 82,
+      "hi": 87,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "C6_v100.ogg",
+      "root": 84,
+      "tune": 0,
+      "lo": 82,
+      "hi": 87,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Fs6_v60.ogg",
+      "root": 90,
+      "tune": 0,
+      "lo": 88,
+      "hi": 93,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "Fs6_v80.ogg",
+      "root": 90,
+      "tune": 0,
+      "lo": 88,
+      "hi": 93,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "Fs6_v100.ogg",
+      "root": 90,
+      "tune": 0,
+      "lo": 88,
+      "hi": 93,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "C7_v60.ogg",
+      "root": 96,
+      "tune": -1,
+      "lo": 94,
+      "hi": 103,
+      "velLo": 1,
+      "velHi": 69,
+      "rr": 0
+    },
+    {
+      "file": "C7_v80.ogg",
+      "root": 96,
+      "tune": -1,
+      "lo": 94,
+      "hi": 103,
+      "velLo": 70,
+      "velHi": 109,
+      "rr": 0
+    },
+    {
+      "file": "C7_v100.ogg",
+      "root": 96,
+      "tune": -1,
+      "lo": 94,
+      "hi": 103,
+      "velLo": 110,
+      "velHi": 127,
+      "rr": 0
+    }
+  ]
+}

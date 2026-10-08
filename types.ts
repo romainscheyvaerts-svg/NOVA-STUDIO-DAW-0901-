@@ -200,6 +200,14 @@ export interface MidiNote {
    * clip, affichée en gris, jamais jouée ni exportée.
    */
   muted?: boolean;
+  /**
+   * R18 · Réglages par note venus de la boîte à rythmes (Graph Editor de FL
+   * Studio) : panoramique (-1 … 1, ajouté à celui du pad) et hauteur en
+   * demi-tons (ajoutée à l'accordage). Le sampler mélodique les suit aussi.
+   * Absents : 0 (une ancienne version les ignore).
+   */
+  pan?: number;
+  tune?: number;
 }
 
 /** Groove (V25, utils/groove) : décalage et vélocité par case de grille, comme le Groove Pool de Live. */
@@ -818,6 +826,11 @@ export interface Track {
    */
   frozenPluginSig?: string;
   /**
+   * (R9) Empreinte de l'automation des VST rendus (voies jouées des effets
+   * [0..frozenUpToPluginIndex]) : si elle change, le rendu est périmé.
+   */
+  frozenVstAutoSig?: string;
+  /**
    * Gel automatique (sauvegarde / fermeture sur le PC avec le pont VST) : la
    * piste se dégèle toute seule quand la session rouvre sur un PC qui a les
    * plugins ; un gel manuel (CPU) reste, lui, tel quel.
@@ -873,6 +886,13 @@ export interface Track {
    * Absent : l'ancien synthé simple (les anciens projets sonnent comme avant).
    */
   novaSynth?: import('./utils/novaSynth').NovaSynthSettings;
+  /**
+   * R18 · Piste MIDI jouée par le sampler mélodique (ton son, chromatique,
+   * ADSR, boucle, glide, mono / poly) ou, R20, par un instrument
+   * multi-échantillons (piano, Rhodes, guitare, cordes, cloches, nappe).
+   * Absent : synthé. Une ancienne version l'ignore et joue le synthé.
+   */
+  melodicSampler?: import('./utils/melodicSampler').MelodicSamplerSettings;
   /**
    * Piste MIDI (mode instru) jouée par un instrument VST3 du PC (pont VST).
    * Les notes sont rendues hors temps réel dans frozenClip (isFrozen, aucun
@@ -937,6 +957,12 @@ export interface Track {
   ioBuses?: NamedBus[];
   /** Piste rendue (Commit, bounce, bus imprimé) : d'où elle vient, pour « Restaurer la piste d'origine ». */
   commit?: TrackCommitInfo;
+  /**
+   * R21 · Commentaire de la piste (Pro Tools : Comments, vue Commentaires de la
+   * console et de la fenêtre d'édition) : micro utilisé, consigne de mix… Affiché
+   * dans la console et l'en-tête ; voyage en collaboration (utils/sessionNotes).
+   */
+  comment?: string;
 }
 
 /** R14 · Entrée physique d'une piste (0 = entrée 1 de la carte / du micro). */
@@ -1150,6 +1176,25 @@ export interface DAWState {
    * projets) ; une ancienne version l'ignore sans rien casser.
    */
   chords?: import('./utils/chordDetect').ChordEvent[];
+  // ─── R21 · Session pro ─────────────────────────────────────────────────────
+  /**
+   * Notes du projet (Pro Tools : Project Notes) : consignes de mix, références,
+   * notes libres. Les paroles restent dans `lyrics` (prompteur). Voyagent en
+   * collaboration (utils/sessionNotes). Une ancienne version les ignore.
+   */
+  projectNotes?: import('./utils/sessionNotes').ProjectNotes;
+  /**
+   * Arrangements du morceau (« clean » / « explicite », « radio edit »…) : ordre
+   * des sections de la piste Arrangement et clips coupés. utils/arrangements.
+   */
+  arrangements?: import('./utils/arrangements').SongArrangement[];
+  /**
+   * Clips de la session qui ne sont plus sur la timeline (Pro Tools : Clips
+   * List) : gardés dans la liste des clips, à reposer d'un glisser. utils/clipsList.
+   */
+  clipBin?: import('./utils/clipsList').BinClip[];
+  /** Numéro de version nommée (Enregistrer comme nouvelle version : v2, v3…). utils/projectVersions. */
+  sessionVersion?: number;
 }
 
 export interface ContextMenuItem {

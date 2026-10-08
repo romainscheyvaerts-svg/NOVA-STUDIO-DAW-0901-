@@ -47,7 +47,9 @@ import numpy as np
 
 import license_watch
 import plugin_guard
+import vst_automation
 import vst_shell
+import vst_sidechain
 
 try:
     import pedalboard
@@ -175,6 +177,8 @@ def scan_vst3(extra_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _open_plugin(path: str, plugin_name: Optional[str] = None):
+    if vst_sidechain.is_debug_plugin(path):
+        return vst_sidechain.DebugDucker()   # effet à clé de référence (tests, NOVA_BRIDGE_DEBUG=1)
     if not HAS_PEDALBOARD:
         raise RuntimeError("pedalboard n'est pas installé")
     if not os.path.exists(path):
@@ -806,6 +810,43 @@ _MIDI_CC = re.compile(
     r"omni_mode_(on|off)|mono_mode_on|poly_mode_on)$")
 
 
+_IGNORED_NAMES = re.compile(r"^(MIDI CC |P\d\d\d)")
+
+
+def _python_key(cp) -> Optional[str]:
+    """Clé pedalboard d'un réglage C++ (même règle que plugin.parameters)."""
+    if _IGNORED_NAMES.match(str(cp.name or "")):
+        return None
+    try:
+        from pedalboard._pedalboard import to_python_parameter_name
+        return to_python_parameter_name(cp) or None
+    except Exception:
+        name = str(cp.name or "")
+        return re.sub(r"_+", "_", re.sub(r"[^0-9a-z]", "_", name.lower().strip())).strip("_") or None
+
+
+def automatable_info(key: str, cp) -> Dict[str, Any]:
+    """Réglage proposé dans « + voie » : clé, nom affiché, valeur brute, texte, unité."""
+    raw = float(getattr(cp, "raw_value", 0.0))
+    info: Dict[str, Any] = {"name": key, "display_name": str(getattr(cp, "name", key) or key),
+                            "value": raw if np.isfinite(raw) else 0.0, "text": _text_of(cp)}
+    try:
+        lab = str(cp.label or "")
+        if lab and not lab.startswith(":"):
+            info["label"] = lab
+    except Exception:
+        pass
+    try:
+        info["num_steps"] = int(cp.num_steps)
+    except Exception:
+        pass
+    try:
+        info["is_boolean"] = bool(cp.is_boolean)
+    except Exception:
+        pass
+    return info
+
+
 def is_midi_cc_param(key: str, p) -> bool:
     if not _MIDI_CC.match(key):
         return False
@@ -1073,6 +1114,26 @@ class Slot:
         self._nan_blocks = 0
         self._dry_lock = threading.Lock()
         self._dry_hist: Optional[np.ndarray] = None
+        # Automation (R9) : table index → réglage (SET_AUTOMATION_MAP), poignées
+        # C++ des réglages (lecture / écriture directes, sans conversion texte),
+        # valeurs connues (écriture Touch / Latch : ce qui bouge ailleurs vient
+        # de la fenêtre du plugin), changements d'un bloc jeté à reporter.
+        self.auto_keys: List[str] = []
+        self._cpp: Optional[Dict[str, Any]] = None
+        self.watch = vst_automation.ParamWatch()
+        self.watching = False
+        self._carry: List[tuple] = []
+        self.auto_applied = 0
+        self.auto_skipped = 0
+        # Charge : temps passé dans le plugin (blocs temps réel), pour AUTOMATION_STATS.
+        self.proc_seconds = 0.0
+        self.proc_blocks = 0
+        # Réglages posés par Nova (SET_PARAMS) pas encore passés par le processeur du
+        # plugin : son état (GET_STATE, rendus hors ligne) ne les contient pas encore.
+        self._params_dirty = False
+        self._last_block_t = 0.0
+        self.sidechain_inputs: Optional[int] = None
+        self.key_blocks = 0
 
     @property
     def latency_samples(self) -> int:
@@ -1087,11 +1148,15 @@ class Slot:
         self.name = getattr(plugin, "name", None) or self.name
         self.vendor = getattr(plugin, "manufacturer_name", "") or ""
         self.is_instrument = _is_instrument(plugin)
+        # (R10) Entrée clé : None = l'hôte (pedalboard) ne sait pas l'alimenter.
+        self.sidechain_inputs = vst_sidechain.sidechain_inputs(plugin)
         with self.lock:
             self.plugin = plugin
             self.reported_latency = _latency_of(plugin)
             self._fifo = np.zeros((2, 0), dtype=np.float32)
             self.padded_total = 0
+            self._cpp = None
+            self.watch.forget()
         self.loaded.set()
         return restored
 
@@ -1117,8 +1182,12 @@ class Slot:
         np.clip(out, -OUT_LIMIT, OUT_LIMIT, out=out)
         return out
 
-    def process_block(self, block: np.ndarray) -> np.ndarray:
+    def process_block(self, block: np.ndarray, changes: Optional[List[tuple]] = None,
+                      key: Optional[np.ndarray] = None) -> np.ndarray:
         """block (nch, n) → sortie stéréo (2, n), latence constante.
+        changes (R9) : [(index, décalage, valeur brute)] posés à l'échantillon
+        près (le bloc est découpé aux décalages). key (R10) : clé de side-chain
+        (2, n), pour les plugins hébergés par l'hôte natif (sinon ignorée).
         Plugin en panne (exception, NaN en continu, figé) : signal sec."""
         n = block.shape[1]
         if self.failed:
@@ -1127,11 +1196,35 @@ class Slot:
             plugin = self.plugin
             if plugin is None:
                 return np.zeros((2, n), np.float32)
+            if self._carry:
+                changes = [(i, 0, v) for i, _o, v in self._carry] + list(changes or [])
+                self._carry = []
+            t0 = time.perf_counter()
+            # (R10) Clé de side-chain : seulement pour un plugin dont l'hôte alimente l'entrée clé.
+            use_key = key is not None and vst_sidechain.keyed(plugin)
             try:
-                out = process(plugin, _to_stereo(block), self.sample_rate, BLOCK)
+                if changes or use_key:
+                    stereo = _to_stereo(block)
+                    full = np.vstack([stereo, _to_stereo(key)]) if use_key else stereo
+
+                    def run(b):
+                        if use_key:
+                            return np.asarray(plugin.process_keyed(np.ascontiguousarray(b[:2]), np.ascontiguousarray(b[2:4]), []), dtype=np.float32)
+                        return np.asarray(process(plugin, b, self.sample_rate, BLOCK), dtype=np.float32)
+                    if use_key:
+                        self.key_blocks += 1
+                    parts = vst_automation.process_split(run, self._apply_changes, full, changes or [])
+                    parts = [_to_stereo(x) for x in parts if x.shape[-1]]
+                    out = np.concatenate(parts, axis=1) if parts else np.zeros((2, 0), np.float32)
+                else:
+                    out = process(plugin, _to_stereo(block), self.sample_rate, BLOCK)
             except Exception as e:
                 self.mark_failed("exception", f"{type(e).__name__}: {e}")
                 return self.dry_block(block)
+            self.proc_seconds += time.perf_counter() - t0
+            self.proc_blocks += 1
+            self._params_dirty = False
+            self._last_block_t = time.monotonic()
             out = np.array(_to_stereo(np.asarray(out, dtype=np.float32)), dtype=np.float32, copy=True)
             if sanitize(out):
                 self._nan_blocks += 1
@@ -1149,6 +1242,150 @@ class Slot:
             self.blocks += 1
             return fifo[:, :n]
 
+    # --- Automation (R9) ---------------------------------------------------------
+
+    def _handles_now(self) -> Dict[str, Any]:
+        """(Thread JUCE) Poignées C++ des réglages, par clé pedalboard (« threshold »).
+        Construites sans les enveloppes Python de pedalboard (≈ 1 000 conversions
+        texte par réglage : 2,8 s pour Pro-Q 4). Lire / écrire raw_value sur la
+        poignée ne passe par aucune conversion texte : utilisable depuis le
+        thread du slot pendant le traitement (≈ 1 µs par réglage)."""
+        plugin = self.plugin
+        if plugin is None:
+            return {}
+        out: Dict[str, Any] = {}
+        try:
+            cps = list(plugin._parameters)
+        except Exception:
+            return {}
+        for cp in cps:
+            try:
+                key = _python_key(cp)
+                if not key or is_midi_cc_param(key, cp):
+                    continue
+                out[key] = cp
+            except Exception:
+                continue
+        return out
+
+    def handles(self) -> Dict[str, Any]:
+        if self._cpp is None:
+            h = self._on_message_thread(self._handles_now)
+            with self.lock:
+                self._cpp = h
+        return self._cpp or {}
+
+    def automatable(self) -> List[Dict[str, Any]]:
+        """(R9) Réglages automatisables (« + voie »), lus par les poignées C++ : rapide
+        même sur un plugin à 700 réglages. Les réglages marqués non automatisables
+        par le plugin sont écartés."""
+        def now():
+            h = self._handles_now()
+            out = []
+            with self.lock:
+                self._cpp = h
+                for key, cp in h.items():
+                    try:
+                        if hasattr(cp, "is_automatable") and not bool(cp.is_automatable):
+                            continue
+                        out.append(automatable_info(key, cp))
+                    except Exception:
+                        continue
+                    if len(out) >= MAX_PARAMS:
+                        break
+            return out
+        return self._on_message_thread(now)
+
+    def set_automation_map(self, names: List[str]) -> Dict[str, Any]:
+        """Table index → réglage utilisée par les trames temps réel. Renvoie les
+        réglages inconnus du plugin (ignorés)."""
+        h = self.handles()
+        names = [str(n or "") for n in names][:4096]
+        missing = [n for n in names if n and n not in h]
+        with self.lock:
+            self.auto_keys = names
+            for n in names:
+                cp = h.get(n)
+                if cp is not None:
+                    try:
+                        self.watch.note(n, float(cp.raw_value))
+                    except Exception:
+                        pass
+        return {"count": len(names), "missing": missing}
+
+    def _apply_changes(self, changes: List[tuple]):
+        """(Sous self.lock) Pose des valeurs brutes reçues avec l'audio."""
+        h = self._cpp or {}
+        for idx, _off, value in changes:
+            name = self.auto_keys[idx] if 0 <= idx < len(self.auto_keys) else None
+            cp = h.get(name) if name else None
+            if cp is None:
+                continue
+            if self.watching and self.watch.held(name):
+                self.auto_skipped += 1      # geste en cours dans la fenêtre : il garde la main
+                continue
+            try:
+                cp.raw_value = float(value)
+                self.watch.note(name, float(value))
+                self.auto_applied += 1
+            except Exception:
+                pass
+
+    def carry_changes(self, changes: List[tuple]):
+        """Bloc jeté (file pleine) : ses réglages sont posés au début du bloc suivant."""
+        if changes:
+            with self._dry_lock:
+                self._carry = (self._carry + list(changes))[-256:]
+
+    def poll_changes(self) -> List[Dict[str, Any]]:
+        """Écriture (Touch / Latch) : réglages bougés dans la fenêtre du plugin
+        depuis le dernier relevé (ni par Nova ni par l'automation)."""
+        h = self._cpp
+        if h is None or self.plugin is None:
+            return []
+        with self.lock:
+            cur = {}
+            for name, cp in h.items():
+                try:
+                    cur[name] = float(cp.raw_value)
+                except Exception:
+                    pass
+            moved = self.watch.diff(cur)
+        return [{"name": n, "value": v, "from": old} for n, v, old in moved]
+
+    def set_watching(self, on: bool):
+        if on:
+            self.handles()
+            with self.lock:
+                for name, cp in (self._cpp or {}).items():
+                    try:
+                        self.watch.note(name, float(cp.raw_value))
+                    except Exception:
+                        pass
+        self.watching = bool(on)
+
+    def param_texts(self, names: List[str], steps: int = 100) -> Dict[str, List[str]]:
+        """Valeur affichée par le plugin pour 0, 1/steps, … 1 (voies d'automation en vraies unités)."""
+        steps = max(2, min(400, int(steps or 100)))
+
+        def now():
+            h = self._cpp if self._cpp is not None else self._handles_now()
+            out: Dict[str, List[str]] = {}
+            with self.lock:
+                for name in names[:64]:
+                    cp = h.get(name)
+                    if cp is None:
+                        continue
+                    texts = []
+                    for i in range(steps + 1):
+                        try:
+                            texts.append(str(cp.get_text_for_raw_value(i / steps)))
+                        except Exception:
+                            texts.append("")
+                    out[name] = texts
+            return out
+        return self._on_message_thread(now)
+
     def render_midi(self, events: List[tuple], duration: float) -> np.ndarray:
         """Instrument : rendu des notes avec le son réglé dans cette instance
         (fenêtre du plugin ouverte ou non)."""
@@ -1161,7 +1398,23 @@ class Slot:
 
     def get_state(self) -> Optional[str]:
         with self.lock:
-            return _get_state(self.plugin) if self.plugin is not None else None
+            if self.plugin is None:
+                return None
+            self._flush_params()
+            return _get_state(self.plugin)
+
+    def _flush_params(self):
+        """(Sous self.lock) Un VST3 ne reçoit les réglages posés par l'hôte qu'au
+        traitement suivant : sans audio depuis (lecture arrêtée), son état les
+        ignorait (rendu d'export fait avec les anciens réglages). Un bloc de
+        silence les lui fait passer — seulement quand aucun bloc ne circule."""
+        if not self._params_dirty or self.is_instrument or time.monotonic() - self._last_block_t < 0.25:
+            return
+        try:
+            process(self.plugin, np.zeros((2, BLOCK), np.float32), self.sample_rate, BLOCK)
+        except Exception:
+            pass
+        self._params_dirty = False
 
     def set_state(self, state_b64: str) -> bool:
         with self.lock:
@@ -1210,6 +1463,7 @@ class Slot:
                 p = (getattr(self.plugin, "parameters", {}) or {}).get(name)
                 if p is not None:
                     p.raw_value = float(value)
+                    self._params_dirty = True
         self._on_message_thread(now)
 
     def set_parameters(self, items: List[Dict[str, Any]], probe_latency: Optional[bool] = None) -> Dict[str, Any]:
@@ -1236,6 +1490,7 @@ class Slot:
                     continue
                 try:
                     apply_param(plugin, name, p, it)
+                    self._params_dirty = True
                     results.append({"name": name, "ok": True, "text": _text_of(p), "value": float(p.raw_value)})
                 except Exception as e:
                     results.append({"name": name, "ok": False, "error": str(e)[:200], "text": _text_of(p),
@@ -1315,13 +1570,34 @@ def calibrate_gr_offline(juce: JuceThread, path: str, plugin_name: Optional[str]
             pass
 
 
+def _handles_for(plugin, names) -> Dict[str, Any]:
+    """Poignées C++ des réglages nommés (rendu hors ligne de l'automation)."""
+    want = set(names)
+    out: Dict[str, Any] = {}
+    if not want:
+        return out
+    try:
+        for cp in plugin._parameters:
+            key = _python_key(cp)
+            if key in want:
+                out[key] = cp
+    except Exception:
+        pass
+    return out
+
+
 def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], state_b64: Optional[str],
                    audio: np.ndarray, sample_rate: int, tail_seconds: float,
-                   context: Optional[dict] = None) -> np.ndarray:
+                   context: Optional[dict] = None, automation: Any = None,
+                   key: Optional[np.ndarray] = None) -> np.ndarray:
     """Rendu hors temps réel sur une instance hors ligne réutilisée (l'instance
     temps réel n'est pas perturbée) : buffer complet + queue de silence pour les réverbes.
     La sortie de pedalboard est alignée mais retient au début l'équivalent de
-    la latence du plugin : on pousse du silence jusqu'à tout récupérer."""
+    la latence du plugin : on pousse du silence jusqu'à tout récupérer.
+    automation (R9) : [{name, frames, values}] rejoués à l'échantillon près
+    (rendu découpé aux instants des changements). key (R10) : clé de side-chain
+    (2, n), passée à l'entrée clé quand l'hôte sait l'alimenter (vst_sidechain),
+    sinon ignorée."""
     sr = int(sample_rate)
     entry = OFFLINE.acquire(juce, path, plugin_name, state_b64, sr, RENDER_BLOCK, context)
     plugin = entry.plugin
@@ -1334,8 +1610,25 @@ def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], stat
         total = src.shape[1]
         chunk = 8192
         got = 0
-        for start in range(0, total, chunk):
-            out = np.asarray(process(plugin, src[:, start:start + chunk], sr, RENDER_BLOCK), np.float32)
+        events = vst_automation.offline_events(automation, total) if automation else []
+        handles = _handles_for(plugin, {e[1] for e in events})
+        use_key = key is not None and vst_sidechain.keyed(plugin)
+        if use_key:
+            k = _to_stereo(key)
+            ksrc = np.zeros((2, total), np.float32)
+            ksrc[:, :min(total, k.shape[1])] = k[:, :total]
+        for start, end, todo in vst_automation.render_chunks(total, events, chunk):
+            for _f, name, value in todo:
+                cp = handles.get(name)
+                if cp is not None:
+                    try:
+                        cp.raw_value = float(value)
+                    except Exception:
+                        pass
+            if use_key:
+                out = np.asarray(plugin.process_keyed(np.ascontiguousarray(src[:, start:end]), np.ascontiguousarray(ksrc[:, start:end]), []), np.float32)
+            else:
+                out = np.asarray(process(plugin, src[:, start:end], sr, RENDER_BLOCK), np.float32)
             if out.shape[-1]:
                 parts.append(_to_stereo(out))
                 got += out.shape[-1]

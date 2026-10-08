@@ -151,6 +151,9 @@ with sync_playwright() as p:
         ctx, page = new_page(b, kind)
         errs = []
         page.on("pageerror", lambda e: errs.append(str(e)[:300]))
+        # Fenêtre « en 3 gestes » (première visite) marquée vue : sur une machine chargée, elle
+        # apparaissait pendant l'ouverture du projet et masquait le menu ☰.
+        page.add_init_script("try { localStorage.setItem('nova_welcome_seen', '1'); } catch (e) {}")
         install_mocks(page, "romain", SUPERADMIN, {})
         open_with_project(page, zpath)
         page.mouse.click(5, 300)

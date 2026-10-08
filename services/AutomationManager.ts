@@ -155,12 +155,12 @@ export class AutomationRecorder {
    * Nouvelle valeur d'un fader. Renvoie true si elle est écrite (l'appelant
    * met alors l'état à jour sans créer d'étape d'annulation).
    */
-  change(trackId: string, param: string, value: number): boolean {
+  change(trackId: string, param: string, value: number, before?: number): boolean {
     if (!Number.isFinite(value)) return false;
     const ctx = this.writable(trackId, param);
     if (!ctx) return false;
     let a = this.active.get(automationKey(trackId, param));
-    if (!a) a = this.begin(ctx.track, param, ctx.kind, ctx.now, true, true);
+    if (!a) a = this.begin(ctx.track, param, ctx.kind, ctx.now, true, true, before);
     if (!a.touched) { a.touched = true; a.implicit = !this.pointerDown; }
     a.ctrl = value;
     a.lastChangeWall = this.wall();
@@ -282,20 +282,33 @@ export class AutomationRecorder {
     return all;
   }
 
-  /** Réglage d'un effet natif depuis sa fenêtre (les VST3 passent par le pont : non automatisés). */
-  capturePluginParams(trackId: string, pluginId: string, params: Record<string, any>): boolean {
+  /** La piste écrit-elle de l'automation en ce moment (lecture + Touch / Latch / Write / Trim) ? */
+  canWrite(trackId: string): boolean {
+    if (!this.host?.isPlaying()) return false;
+    const track = this.track(trackId);
+    return !!track && isWriteMode(automationModeOf(track));
+  }
+
+  /**
+   * Réglage d'un effet depuis sa fenêtre : effet natif, ou VST3 (R9 : réglage bougé
+   * dans la fenêtre du plugin, signalé par le pont ; valeur brute 0–1, sans valeur
+   * fixe connue dans le projet).
+   */
+  capturePluginParams(trackId: string, pluginId: string, params: Record<string, any>, before?: Record<string, number>): boolean {
     if (!this.host?.isPlaying()) return false;
     const track = this.track(trackId);
     if (!track || !isWriteMode(automationModeOf(track))) return false;
     const plugin = (track.plugins || []).find(p => p.id === pluginId);
-    if (!plugin || plugin.type === 'VST3') return false;
-    const before = plugin.params || {};
+    if (!plugin) return false;
+    const vst = plugin.type === 'VST3';
+    const stat = plugin.params || {};
     let any = false, all = true;
     for (const [k, v] of Object.entries(params || {})) {
-      if (before[k] === v) continue;
-      if (typeof v !== 'number' || typeof before[k] !== 'number') { all = false; continue; }
+      if (stat[k] === v) continue;
+      if (typeof v !== 'number' || (!vst && typeof stat[k] !== 'number')) { all = false; continue; }
       any = true;
-      all = this.change(trackId, pluginParamName(pluginId, k), v) && all;
+      // VST : la valeur d'avant le geste (relevée par le pont) sert de référence hors du passage.
+      all = this.change(trackId, pluginParamName(pluginId, k), v, before?.[k]) && all;
     }
     return any && all;
   }
@@ -312,15 +325,18 @@ export class AutomationRecorder {
     return { track, kind: mode as WriteKind, now: host.getTime() };
   }
 
-  private begin(track: Track, param: string, kind: WriteKind, now: number, touched: boolean, implicit: boolean): ActiveWrite {
+  private begin(track: Track, param: string, kind: WriteKind, now: number, touched: boolean, implicit: boolean, hint?: number): ActiveWrite {
     const host = this.host!;
     if (!this.undoTaken) { host.beginUndoStep(); this.undoTaken = true; }
     const orig = this.lanePoints(track, param);
-    const stat = staticParamValue(track, param);
+    const stat = staticParamValue(track, param) ?? (typeof hint === 'number' && Number.isFinite(hint) ? hint : null);
     const baseline = stat ?? (param === 'volume' ? 1 : 0);
     const shown = valueAtPoints(orig, now, baseline);
     const lane = findLane(track, param);
-    let spec = paramSpec(param, shown);
+    const pp = parsePluginParam(param);
+    // Réglage VST (R9) : valeur brute du plugin, toujours 0–1.
+    const vst = !!pp && (track.plugins || []).find(x => x.id === pp.pluginId)?.type === 'VST3';
+    let spec = vst ? { min: 0, max: 1, kind: 'linear' as const } : paramSpec(param, shown);
     if (lane && parsePluginParam(param)) spec = widenSpec({ ...spec, min: lane.min, max: lane.max }, [shown]);
     const a: ActiveWrite = {
       key: automationKey(track.id, param), trackId: track.id, param, kind,

@@ -17,12 +17,20 @@ interface SaveProjectModalProps {
   onSaveAsTemplate?: () => void;
   /** Historique des versions gardées sur l'appareil (sauvegarde automatique). */
   onOpenVersions?: () => void;
+  /**
+   * R21 · « Enregistrer comme nouvelle version » (Pro Tools : Save As New Version) :
+   * le projet devient « Titre v2 » et un point marqué (commentaire) entre dans l'historique.
+   */
+  onSaveNewVersion?: (comment: string) => void;
+  /** Nom de la prochaine version (« Mon son v2 »), affiché sur le bouton. */
+  nextVersionLabel?: string;
 }
 
 const SaveProjectModal: React.FC<SaveProjectModalProps> = ({ 
-  isOpen, onClose, currentName, user, onSaveCloud, onSaveLocal, onSaveAsCopy, onOpenAuth, onTakeHome, onSaveAsTemplate, onOpenVersions
+  isOpen, onClose, currentName, user, onSaveCloud, onSaveLocal, onSaveAsCopy, onOpenAuth, onTakeHome, onSaveAsTemplate, onOpenVersions, onSaveNewVersion, nextVersionLabel
 }) => {
   const [name, setName] = useState(currentName);
+  const [versionComment, setVersionComment] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -172,6 +180,20 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
                     <span className="block text-[12px] font-black text-white">📐 Enregistrer comme modèle</span>
                     <span className="block text-[11px] text-slate-400 mt-1">Pistes, bus, envois et effets réglés, sans l'audio : pour démarrer tes prochains projets avec le même routage.</span>
                   </button>
+                )}
+                {onSaveNewVersion && (
+                  <div className="col-span-2 p-4 rounded-xl border border-cyan-500/30 bg-cyan-500/5 space-y-2" data-testid="save-new-version-box">
+                    <span className="block text-[12px] font-black text-white" title="Pro Tools : File › Save As New Version ; Logic : Project Alternatives">🔖 Enregistrer comme nouvelle version</span>
+                    <span className="block text-[11px] text-slate-400">Le projet devient « {nextVersionLabel || 'v2'} ». La version est marquée dans l'historique (jamais effacée) : restaure-la ou compare-la plus tard.</span>
+                    <input value={versionComment} onChange={e => setVersionComment(e.target.value)} maxLength={400} aria-label="Commentaire de la version"
+                      placeholder="Commentaire (ex. : mix validé par l'artiste)" data-testid="save-new-version-comment"
+                      className="w-full h-10 bg-black/40 border border-white/10 rounded-lg px-3 text-[12px] text-white focus:border-cyan-500 focus:outline-none" />
+                    <button type="button" data-testid="save-new-version"
+                      onClick={() => { onSaveNewVersion(versionComment); setVersionComment(''); onClose(); }}
+                      className="w-full h-10 rounded-lg bg-cyan-500 text-black text-[12px] font-black hover:bg-cyan-400 transition-all">
+                      Enregistrer {nextVersionLabel ? `« ${nextVersionLabel} »` : 'la nouvelle version'}
+                    </button>
+                  </div>
                 )}
                 {onOpenVersions && (
                   <button type="button" onClick={onOpenVersions} data-testid="open-versions"

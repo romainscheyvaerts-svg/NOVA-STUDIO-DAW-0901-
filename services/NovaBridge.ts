@@ -5,7 +5,7 @@
  *   Windows) : aucun essai automatique sur un appareil qui n'a jamais vu le pont
  *   (téléphones, PC sans pont). Ensuite, reconnexion automatique (voir v10).
  * - Contrôle (JSON, requêtes numérotées) sur ce thread ; l'audio temps réel passe
- *   par un Worker dédié (public/worklets/vst-bridge-worker-v4.js) relié à chaque
+ *   par un Worker dédié (public/worklets/vst-bridge-worker-v5.js) relié à chaque
  *   AudioWorklet d'effet VST3.
  * - Rendu hors temps réel (RENDER) en trame binaire pour le gel / l'export.
  * - v5 : instruments VST3 (RENDER_INSTRUMENT : notes -> audio, mode instru).
@@ -108,6 +108,10 @@ export interface BridgeState {
   nextRetryAt?: number | null;
   /** (v10) Calage « réduction cible » d'un compresseur VST (rendu hors ligne + dichotomie). */
   calibrateGr?: boolean;
+  /** (v11, R9) Automation des réglages VST à l'échantillon près + écriture depuis la fenêtre du plugin. */
+  automation?: boolean;
+  /** (v11, R10) Clé de side-chain des VST (hôte natif du pont). */
+  sidechain?: boolean;
 }
 
 /** Première version du pont qui sait caler un compresseur sur une réduction cible. */
@@ -202,6 +206,23 @@ export interface SetParamsResult {
   latencyChanged: boolean;
 }
 
+/** Première version du pont qui automatise les réglages des VST (R9) et alimente leur side-chain (R10). */
+export const BRIDGE_AUTOMATION_VERSION = 11;
+
+/** Réglage automatisable d'un VST (« + voie »), valeur brute 0–1. */
+export interface VstAutomatableParam {
+  name: string;
+  displayName: string;
+  value: number;
+  text: string;
+  label?: string;
+  numSteps?: number;
+  isBoolean?: boolean;
+}
+
+/** Voie d'automation envoyée avec un rendu hors ligne : images depuis le début du son, valeurs brutes 0–1. */
+export interface VstAutomationLane { name: string; frames: number[]; values: number[] }
+
 /** Première version du pont qui rend les instruments VST3. */
 export const BRIDGE_INSTRUMENTS_VERSION = 5;
 
@@ -229,12 +250,16 @@ export interface LoadResult {
   bufferLatencySamples: number;
   stateB64: string | null;
   isInstrument: boolean;
+  /** (v11, R10) Entrée clé du plugin : null = l'hôte du pont ne sait pas l'alimenter ; 0 = aucune ; 2 = stéréo. */
+  sidechainInputs: number | null;
 }
 
 export type SlotEvent =
   | { action: 'EDITOR_CLOSED'; slot_id: string; state: string | null }
   | { action: 'LATENCY'; slot_id: string; latency_samples: number }
-  | { action: 'PLUGIN_CRASHED'; slot_id: string; reason: string; error: string | null; name: string };
+  | { action: 'PLUGIN_CRASHED'; slot_id: string; reason: string; error: string | null; name: string }
+  /** (v11) Réglages bougés dans la fenêtre du plugin (écriture Touch / Latch). */
+  | { action: 'PARAM_CHANGED'; slot_id: string; changes: { name: string; value: number; from?: number; text?: string }[] };
 
 const align4 = (n: number) => (n + 3) & ~3;
 
@@ -378,6 +403,8 @@ class NovaBridgeService {
             stems: !!hello.stems && (Number(hello.version) || 0) >= BRIDGE_STEMS_VERSION,
             ara: !!hello.ara && (Number(hello.version) || 0) >= BRIDGE_ARA_VERSION,
             calibrateGr: !!hello.calibrate_gr && (Number(hello.version) || 0) >= BRIDGE_CALIBRATE_VERSION,
+            automation: !!hello.automation && (Number(hello.version) || 0) >= BRIDGE_AUTOMATION_VERSION,
+            sidechain: !!hello.sidechain && (Number(hello.version) || 0) >= BRIDGE_AUTOMATION_VERSION,
           });
           this.ensureWorker();
           done(true);
@@ -457,7 +484,7 @@ class NovaBridgeService {
       this.onLicenseWindowMsg(msg);
       return;
     }
-    if (msg && (msg.action === 'EDITOR_CLOSED' || msg.action === 'LATENCY' || msg.action === 'PLUGIN_CRASHED') && msg.slot_id) {
+    if (msg && (msg.action === 'EDITOR_CLOSED' || msg.action === 'LATENCY' || msg.action === 'PLUGIN_CRASHED' || msg.action === 'PARAM_CHANGED') && msg.slot_id) {
       this.slotListeners.get(String(msg.slot_id))?.forEach(cb => { try { cb(msg); } catch { /* */ } });
     }
     if (msg && msg.action === 'PLUGIN_CRASHED' && msg.slot_id) {
@@ -651,6 +678,7 @@ class NovaBridgeService {
       bufferLatencySamples: Number(r.buffer_latency_samples) || 0,
       stateB64: r.state || null,
       isInstrument: !!r.is_instrument,
+      sidechainInputs: typeof r.sidechain_inputs === 'number' ? r.sidechain_inputs : null,
     };
   }
 
@@ -688,6 +716,42 @@ class NovaBridgeService {
     return { results: r.results || [], latencySamples: Number(r.latency_samples) || 0, latencyChanged: !!r.latency_changed };
   }
 
+  // --- Automation des VST (v11, R9) ---------------------------------------------
+
+  /** Réglages automatisables du plugin chargé (lus sans conversion texte : rapide même pour 700 réglages). */
+  async automatable(slotId: string): Promise<VstAutomatableParam[]> {
+    if (!this.state.automation) return [];
+    const r = await this.request({ action: 'AUTOMATABLE', slot_id: slotId }, 60000);
+    return (Array.isArray(r.parameters) ? r.parameters : []).map((p: any) => ({
+      name: String(p.name), displayName: String(p.display_name || p.name), value: Number(p.value) || 0, text: String(p.text ?? ''),
+      ...(p.label ? { label: String(p.label) } : {}), ...(typeof p.num_steps === 'number' ? { numSteps: p.num_steps } : {}),
+      ...(p.is_boolean ? { isBoolean: true } : {}),
+    }));
+  }
+
+  /** Table index → réglage des blocs temps réel (les valeurs automatisées partent avec l'audio). */
+  async setAutomationMap(slotId: string, names: string[]): Promise<{ missing: string[] }> {
+    const r = await this.request({ action: 'SET_AUTOMATION_MAP', slot_id: slotId, names }, 30000);
+    return { missing: Array.isArray(r.missing) ? r.missing : [] };
+  }
+
+  /** Texte affiché par le plugin pour les valeurs brutes 0, 1/steps, … 1. */
+  async paramTexts(slotId: string, names: string[], steps = 100): Promise<Record<string, string[]>> {
+    const r = await this.request({ action: 'PARAM_TEXTS', slot_id: slotId, names, steps }, 60000);
+    return r.texts || {};
+  }
+
+  /** Écriture : signaler les réglages bougés dans la fenêtre du plugin (PARAM_CHANGED). */
+  async watchParams(slotId: string, on: boolean): Promise<void> {
+    if (!this.state.automation) return;
+    await this.request({ action: 'WATCH_PARAMS', slot_id: slotId, on }, 30000);
+  }
+
+  async automationStats(slotId: string): Promise<{ applied: number; skipped: number; watching: boolean }> {
+    const r = await this.request({ action: 'AUTOMATION_STATS', slot_id: slotId });
+    return { applied: Number(r.applied) || 0, skipped: Number(r.skipped) || 0, watching: !!r.watching };
+  }
+
   showEditor(slotId: string) { return this.request({ action: 'SHOW_EDITOR', slot_id: slotId }); }
   closeEditor(slotId: string) { return this.request({ action: 'CLOSE_EDITOR', slot_id: slotId }).catch(() => undefined); }
 
@@ -700,18 +764,28 @@ class NovaBridgeService {
   async render(opts: {
     slotId?: string | null; path?: string; pluginName?: string | null; stateB64?: string | null;
     sampleRate: number; channels: Float32Array[]; tailSeconds?: number;
+    /** (v11, R9) Automation rejouée à l'échantillon près pendant le rendu. */
+    automation?: VstAutomationLane[];
+    /** (v11, R10) Clé de side-chain (2 canaux, même longueur que le son). */
+    key?: Float32Array[] | null;
   }): Promise<Float32Array[]> {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('Pont VST non connecté');
-    const nch = Math.max(1, Math.min(2, opts.channels.length));
-    const nframes = opts.channels[0]?.length || 0;
+    const main = opts.channels.slice(0, 2);
+    const nframes = main[0]?.length || 0;
+    // Clé : son en 4 canaux (principal G/D puis clé G/D), comme les blocs temps réel.
+    const key = opts.key && opts.key.length ? [opts.key[0], opts.key[1] || opts.key[0]] : null;
+    const chans = key ? [main[0], main[1] || main[0], key[0], key[1]] : main;
+    const nch = Math.max(1, chans.length);
     const req_id = this.nextId++;
     const meta = JSON.stringify({
       action: 'RENDER', req_id, slot_id: opts.slotId || null, path: opts.path || null,
       plugin_name: opts.pluginName || null, state: opts.stateB64 || null,
       sample_rate: Math.round(opts.sampleRate), nch, nframes, tail_seconds: opts.tailSeconds || 0,
+      ...(opts.automation && opts.automation.length ? { automation: opts.automation } : {}),
+      ...(key ? { sidechain: true } : {}),
     });
-    const buf = encodeType2Frame(meta, opts.channels.slice(0, nch));
+    const buf = encodeType2Frame(meta, chans.map(c => (c.length === nframes ? c : padTo(c, nframes))));
     // Le rendu d'un long morceau peut prendre du temps sur un gros plugin.
     const timeoutMs = 60000 + (nframes / Math.max(1, opts.sampleRate)) * 4000;
     const res = await new Promise<any>((resolve, reject) => {
@@ -925,7 +999,7 @@ class NovaBridgeService {
 
   private ensureWorker() {
     if (!this.worker) {
-      this.worker = new Worker(`${import.meta.env.BASE_URL}worklets/vst-bridge-worker-v4.js`);
+      this.worker = new Worker(`${import.meta.env.BASE_URL}worklets/vst-bridge-worker-v5.js`);
     }
     this.worker.postMessage({ type: 'init', url: this.url });
   }
@@ -994,6 +1068,12 @@ export function encodeMultiClipFrame(meta: Record<string, any>, clips: Float32Ar
     for (let i = 0; i < n; i++) for (let c = 0; c < ch.length; c++) inter[o++] = ch[c][i];
   }
   return buf;
+}
+
+function padTo(x: Float32Array, n: number): Float32Array {
+  const out = new Float32Array(n);
+  out.set(x.subarray(0, n));
+  return out;
 }
 
 function buildType2Frame(meta: Record<string, any>, channels: Float32Array[]): ArrayBuffer {

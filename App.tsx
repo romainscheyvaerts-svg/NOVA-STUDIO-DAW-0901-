@@ -22,9 +22,14 @@ import ViewModeSwitcher from './components/ViewModeSwitcher';
 import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
+import SamplerHost from './components/SamplerHost';
+import { openSamplerPanel } from './utils/samplerPanelStore';
+import { requestSampler } from './utils/samplerPanelStore';
 const TrackListPanel = lazy(() => import('./components/TrackListPanel'));
 const GroupsListPanel = lazy(() => import('./components/GroupsListPanel'));
 const TimeOpsDialog = lazy(() => import('./components/TimeOpsDialog'));
+const SessionProPanel = lazy(() => import('./components/SessionProPanel'));
+const ImportSessionDialog = lazy(() => import('./components/ImportSessionDialog'));
 const BusPanel = lazy(() => import('./components/BusPanel'));
 const AuthScreen = lazy(() => import('./components/AuthScreen'));
 const AutomationEditorView = lazy(() => import('./components/AutomationEditorView'));
@@ -57,6 +62,7 @@ import VstInstrumentPicker from './components/VstInstrumentPicker';
 import Bass808Controls from './components/Bass808Controls';
 import { BASS808_TRACK_ID, kit808Style, starter808Notes } from './utils/bass808';
 import { normalizeSynth } from './utils/novaSynth';
+import { normalizeSampler } from './utils/melodicSampler';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
 import { renderTrackFreeze, renderTrackPreview, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
@@ -144,6 +150,10 @@ import { armAlone, takeArmShift, recordTargets, inputsMessage, linkedRecordMates
 import { placeTake, trimToPlan } from './utils/multiTake';
 import { compTakeGroup, keepTakeGroup, deleteTakeGroup, takeGroupLinked } from './utils/takeGroups';
 import type { TakeResult } from './engine/AudioEngine';
+import { useR21 } from './hooks/useR21';
+import { openSessionPanel, useSessionPanel } from './utils/r21Bus';
+import { notesCount } from './utils/sessionNotes';
+import { nextVersionNumber, versionName } from './utils/projectVersions';
 import { sanitizeTimeOp, TimeOp } from './utils/timeOps';
 import { R12Panel, TimeDialogPreset, openR12Panel } from './utils/r12Bus';
 import ArrangeLane, { ARRANGE_LANE_H, useArrangeLaneShown } from './components/ArrangeLane';
@@ -169,7 +179,7 @@ import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
 import { AutotuneVstManager } from './components/AutotuneVstPanel';
 import { handleNovaVstAction, VST_ACTIONS } from './services/NovaVstMix';
-import { novaVstEvents } from './engine/VSTPluginNode';
+import { novaVstEvents, vstParamEvents } from './engine/VSTPluginNode';
 import {
   pushSession, pullSession, parseLink, createCloudSession, cloudProjectId, CloudConflictError, LocalCloudSession,
   getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, sessionUrl, signInAccount, call as callCloud,
@@ -539,7 +549,10 @@ const useUndoRedo = (initialState: DAWState) => {
         newState.tempoEvents !== curr.present.tempoEvents ||
         newState.isLoopActive !== curr.present.isLoopActive ||
         newState.loopStart !== curr.present.loopStart ||
-        newState.loopEnd !== curr.present.loopEnd;
+        newState.loopEnd !== curr.present.loopEnd ||
+        // R21 : arrangements et liste des clips (Ctrl+Z remet les clips retirés de la liste).
+        newState.arrangements !== curr.present.arrangements ||
+        newState.clipBin !== curr.present.clipBin;
 
       if (!modificationReelle) return { ...curr, present: newState };
 
@@ -561,7 +574,7 @@ const useUndoRedo = (initialState: DAWState) => {
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
   // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
   // continuait, et pendant une prise il basculait l'enregistrement.
-  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords'] as const;
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords', 'arrangements', 'clipBin'] as const;
   const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
     const out: any = { ...base };
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
@@ -1442,7 +1455,7 @@ function Studio() {
         .some(c => c.bufferId === bufferId && !excludeClipIds.includes(c.id))
       // Rendus d'envois VST, sons d'origine de la photo du gel (éditions pré-effet).
       || trackBufferIds({ ...t, clips: [], frozenClip: undefined }).includes(bufferId)
-    );
+    ) || (stateRef.current.clipBin || []).some(c => c.bufferId === bufferId); // R21 : clip gardé dans la liste des clips
     if (!stillUsed && !isBufferInHistory(bufferId)) audioBufferRegistry.remove(bufferId);
   }, []);
 
@@ -3161,6 +3174,23 @@ function Studio() {
     if (source === 'load' || source === 'nova') setSilently(update); else setState(update);
   }), [setState, setSilently]);
 
+  // Écriture d'automation des VST (R9) : un réglage bougé dans la fenêtre du plugin
+  // (signalé par le pont) pendant la lecture, piste en Touch / Latch / Write / Trim,
+  // est enregistré dans sa voie, comme un fader. Pas d'écho vers le plugin.
+  useEffect(() => vstParamEvents.on(({ pluginId, changes }) => {
+    const track = stateRef.current.tracks.find(t => (t.plugins || []).some(p => p.id === pluginId && p.type === 'VST3'));
+    if (!track || !automationRecorder.canWrite(track.id)) return;
+    const params: Record<string, number> = {};
+    const before: Record<string, number> = {};
+    changes.forEach(c => { if (Number.isFinite(c.value)) params[c.name] = c.value; if (typeof c.from === 'number') before[c.name] = c.from; });
+    if (!Object.keys(params).length) return;
+    if (!automationRecorder.capturePluginParams(track.id, pluginId, params, before)) return;
+    setSilently(produce((draft: DAWState) => {
+      const pl = draft.tracks.find(t => t.id === track.id)?.plugins.find(p => p.id === pluginId);
+      if (pl) pl.params = { ...pl.params, ...params };
+    }));
+  }), [setSilently]);
+
   /**
    * Session à enregistrer comme modèle : l'état des VST3 chargés est relu sur le
    * pont (réglages faits dans leurs fenêtres), sans rendu audio.
@@ -4411,16 +4441,18 @@ function Studio() {
   const purgeTakesAfterSaveRef = useRef(false);
   // Dernière version écrite (diagnostic) : une ref, pas un état (pas de rendu de tout le studio toutes les 15 s).
   const lastAutosaveRef = useRef<{ at: number; ms: number; syncMs: number; audioWritten: number } | null>(null);
-  const autosaveNow = useCallback(async (reason: VersionReason = 'auto', force = false) => {
-    if (autosaveBusy.current) { autosavePending.current = reason; return; }
-    const st = stateRef.current;
-    if (st.isRecording) return; // la prise est déjà écrite au fil de l'eau
-    const sig = [st.tracks, st.lyrics, st.bpm, st.name, st.markers, st.chords, st.timeSignature];
+  const autosaveNow = useCallback(async (reason: VersionReason = 'auto', force = false, named?: { versionNumber: number; comment?: string; state: DAWState }): Promise<boolean> => {
+    // R21 · Version nommée : attend la sauvegarde en cours, puis s'écrit (jamais sautée).
+    if (named) { for (let i = 0; i < 100 && autosaveBusy.current; i++) await new Promise(r => setTimeout(r, 50)); }
+    if (autosaveBusy.current) { autosavePending.current = reason; return false; }
+    const st = named ? named.state : stateRef.current;
+    if (st.isRecording) return false; // la prise est déjà écrite au fil de l'eau
+    const sig = [st.tracks, st.lyrics, st.bpm, st.name, st.markers, st.chords, st.timeSignature, st.projectNotes, st.arrangements, st.clipBin];
     const last = lastSavedSigRef.current;
-    if (!force && last && sig.every((v, i) => v === last[i])) return;
+    if (!force && !named && last && sig.every((v, i) => v === last[i])) return false;
     // Rien à garder (projet vierge, beat seul) : on n'écrase pas une session précédente.
     const hasContent = st.tracks.some(t => t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0) || !!(st.lyrics || '').trim();
-    if (!hasContent) return;
+    if (!hasContent && !named) return false;
     autosaveBusy.current = true;
     try {
       const t0 = performance.now();
@@ -4428,7 +4460,8 @@ function Studio() {
       // Travail synchrone (fil de l'interface) : la mise en JSON. L'écriture IndexedDB est asynchrone.
       const syncMs = Math.round((performance.now() - t0) * 10) / 10;
       const r = await recoveryStore().saveVersion({
-        projectId: st.id, name: st.name || 'Session', reason, ...snap,
+        projectId: st.id, name: st.name || 'Session', reason: named ? 'named' : reason, ...snap,
+        ...(named ? { versionNumber: named.versionNumber, comment: named.comment || undefined } : {}),
         getAudio: id => {
           const b = audioBufferRegistry.get(id);
           return b ? { sampleRate: b.sampleRate, length: b.length, channels: Array.from({ length: b.numberOfChannels }, (_, i) => b.getChannelData(i)) } : null;
@@ -4439,17 +4472,19 @@ function Studio() {
       if (purgeTakesAfterSaveRef.current) { purgeTakesAfterSaveRef.current = false; await recoveryStore().purgeTakes(); }
       if (!autosaveNotified.current) {
         autosaveNotified.current = true;
-        setAiNotification("💾 Ta session est sauvegardée automatiquement sur cet appareil, prises comprises (même pendant l'enregistrement) : tu la retrouveras en revenant, même après un plantage.");
+        if (!named) setAiNotification("💾 Ta session est sauvegardée automatiquement sur cet appareil, prises comprises (même pendant l'enregistrement) : tu la retrouveras en revenant, même après un plantage.");
       }
+      return !!r;
     } catch (e) {
       console.warn('[Session] Sauvegarde auto impossible', e);
+      return false;
     } finally {
       autosaveBusy.current = false;
       const again = autosavePending.current;
       if (again) { autosavePending.current = null; setTimeout(() => { void autosaveNowRef.current?.(again); }, 300); }
     }
   }, [user]);
-  const autosaveNowRef = useRef<((reason?: VersionReason, force?: boolean) => Promise<void>) | null>(null);
+  const autosaveNowRef = useRef<((reason?: VersionReason, force?: boolean) => Promise<boolean>) | null>(null);
   autosaveNowRef.current = autosaveNow;
   useEffect(() => {
     if (showLanding) return;
@@ -4768,6 +4803,27 @@ function Studio() {
   // Piste d'accords (V20) : accords déjà partagés, et les nôtres pas encore enregistrés par le serveur.
   const knownChordsRef = useRef(new Map<string, string>());
   const pendingChordsRef = useRef(new Set<string>());
+
+  // --- R21 · Session pro (hooks/useR21) : import de session, versions nommées, arrangements, notes, liste des clips.
+  const sessionTab = useSessionPanel();
+  const r21Ref = useRef<ReturnType<typeof useR21> | null>(null);
+  const r21 = useR21(state, {
+    stateRef, setState, setSilently,
+    notify: (msg) => { setAiNotification(msg); setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), 6000); },
+    saveVersion: (named) => autosaveNow('named', true, named),
+    openVersions: () => { setVersionsOpen(true); },
+    restoreVersion: (id, label) => {
+      void (async () => {
+        // La version actuelle est gardée d'abord : restaurer ne perd rien.
+        try { await autosaveNowRef.current?.('restore', true); } catch { /* */ }
+        void recoverSession(id, { takes: false, label });
+      })();
+    },
+    openExport: () => setIsExportMenuOpen(true),
+    collab: () => (collabRef.current ? { queue: (k, kind, op) => collabRef.current?.client.queue(k, kind, op), name: collabRef.current.name } : null),
+    lww: () => lwwRef.current,
+  });
+  r21Ref.current = r21;
   /** « Écouter ensemble » : hôte qui guide la lecture (null : chacun écoute de son côté). */
   const [listenTogether, setListenTogether] = useState<{ hostKey: string; hostName: string } | null>(null);
   const listenTogetherRef = useRef(listenTogether);
@@ -4874,6 +4930,7 @@ function Studio() {
       if (!t) return;
       // Ancien son retiré : le synthé Nova joue en attendant le rendu du nouveau.
       if (t.vstInstrument || t.isFrozen) { old = t.frozenClip?.bufferId; clearInstrumentRender(t); }
+      delete t.melodicSampler;
       t.vstInstrument = instrumentFromPlugin(p);
     }));
     if (old) setTimeout(() => releaseBufferIfUnused(old, []), 0);
@@ -4884,6 +4941,8 @@ function Studio() {
     let old: string | undefined;
     setState(produce((d: DAWState) => {
       const t = d.tracks.find(x => x.id === trackId);
+      // Sampler / instrument NOVA (R18, R20) : la piste revient au synthé.
+      if (t?.melodicSampler) delete t.melodicSampler;
       if (!t?.vstInstrument) return;
       old = t.frozenClip?.bufferId;
       clearInstrumentRender(t);
@@ -5072,6 +5131,8 @@ function Studio() {
           if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
           if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
           if (ct.novaSynth !== undefined) { if (ct.novaSynth) t.novaSynth = normalizeSynth(ct.novaSynth); else delete t.novaSynth; }
+          // Sampler mélodique / instrument (R18, R20) : réglages bornés à la réception.
+          if (ct.melodicSampler !== undefined) { if (ct.melodicSampler) t.melodicSampler = normalizeSampler(ct.melodicSampler); else delete t.melodicSampler; }
           // Ligne de gain, boucles, Heal (R5) : champs vérifiés à la réception (utils/collabMerge).
           t.clips = Array.isArray(ct.clips) ? sanitizeIncomingClips(ct.clips) : t.clips;
           // Couloirs de prises (champ ajouté) : absent = envoyé par une ancienne version, on garde les noms locaux.
@@ -5157,6 +5218,11 @@ function Studio() {
         (Array.isArray(p.remove) ? p.remove : []).forEach((id: string) => { if (!next.some(m => m.id === id)) knownMarkersRef.current.delete(id); });
         setState(produce((d: DAWState) => { d.markers = next; }));
         if (!o.replay && upsert.length === 1) setAiNotification(`📍 ${by} a posé le repère « ${String(upsert[0].name || 'Repère').slice(0, 60)} ».`);
+        break;
+      }
+      case 'notes': {
+        // R21 · Notes de projet et commentaires de piste : le plus récent du journal gagne, champ par champ.
+        r21Ref.current?.onRemoteNotes(o);
         break;
       }
       case 'chords': {
@@ -5411,6 +5477,7 @@ function Studio() {
         else if (kind === 'chords') [...(Array.isArray(op.upsert) ? op.upsert : []).map((c: any) => c?.id), ...(Array.isArray(op.remove) ? op.remove : [])]
           .forEach((id: unknown) => { if (typeof id === 'string') { lwwRef.current.note(`chord:${id}`, seq); pendingChordsRef.current.delete(id); } });
         else if (kind === 'chat' && typeof op.localId === 'string') setCollabMessages(m => m.map(x => (x.id === op.localId ? { ...x, pending: false } : x)));
+        else if (kind === 'notes') r21Ref.current?.onNotesSent(op, seq);
       };
       client.onStatus(s => setCollabStatus(s));
       client.onEphemeral = (ev, payload) => { if (ev === 'tp' && payload && typeof payload === 'object') followTransportRef.current(payload as TransportMsg & { by?: string }); };
@@ -6513,6 +6580,8 @@ function Studio() {
       case 'ADD_TRACK':
       case 'CREATE_TRACK': {
         const type = (String(p.type || 'AUDIO').toUpperCase() as TrackType);
+        // R18 / R20 : piste Sampler (ton son ou un instrument NOVA : piano, rhodes, guitare, cordes, cloches, pad).
+        if (type === TrackType.MELODIC_SAMPLER) { requestSampler({ kind: 'new', instrument: typeof p.instrument === 'string' ? p.instrument : undefined }); break; }
         // Mode instru (beatmaker) : la piste MIDI existe. En mode voix, pas de MIDI
         // pour ne pas embrouiller l'artiste.
         if (stateRef.current.projectMode === 'BEATMAKING' && (type === TrackType.MIDI || type === TrackType.SAMPLER)) { handleNewMidiTrack(); break; }
@@ -7671,6 +7740,11 @@ function Studio() {
                   className="h-10 rounded-full border border-nv-line bg-nv-well px-3 text-[11px] font-bold whitespace-nowrap text-nv-muted hover:text-nv-ink">
                   <i className="fas fa-arrows-alt-h mr-1.5 text-[10px]" />Temps
                 </button>
+                <button type="button" data-testid="dock-session" onClick={() => openSessionPanel(sessionTab ? null : 'notes')} aria-pressed={!!sessionTab}
+                  title="Session : notes et commentaires (Pro Tools : Comments), liste des clips (Clips List), arrangements, versions (Save As New Version), importer depuis une session (Import Session Data, Alt+Maj+I)"
+                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${sessionTab ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
+                  <i className="fas fa-folder-open text-[10px] xl:mr-1.5" aria-hidden="true" /><span className="hidden xl:inline">Session{notesCount(state) ? ` · 📝${notesCount(state)}` : ''}</span><span className="sr-only xl:hidden">Session</span>
+                </button>
                 <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen}
                   title="Collaborer à distance : artiste, ingé son, beatmaker"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${collabOpen ? 'border-violet-400 bg-violet-500/25 text-white' : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'}`}>
@@ -7823,6 +7897,14 @@ function Studio() {
             </Suspense>
             </PanelBoundary>
           )}
+          {sessionTab && (
+            <PanelBoundary name="le panneau Session" onClose={() => openSessionPanel(null)}>
+              <Suspense fallback={null}>
+                <SessionProPanel state={state} tab={sessionTab} phone={isMobile}
+                  className={isMobile ? 'fixed inset-x-2 bottom-2 top-16 z-[700]' : 'absolute left-2 top-2 bottom-2 z-[656] w-[420px] max-w-[calc(100%-16px)]'} />
+              </Suspense>
+            </PanelBoundary>
+          )}
           {r12Panel?.panel === 'groups' && (
             <PanelBoundary name="la liste des groupes" onClose={() => setR12Panel(null)}>
               <Suspense fallback={null}>
@@ -7832,6 +7914,24 @@ function Studio() {
             </PanelBoundary>
           )}
         </main>
+        {r21.importOpen && (
+          <PanelBoundary name="la fenêtre d'import" onClose={() => r21.setImportOpen(false)}>
+            <Suspense fallback={null}>
+              <ImportSessionDialog getState={() => stateRef.current} onClose={() => r21.setImportOpen(false)} userEmail={user?.email || null}
+                makeBuiltin={makeTemplateBuiltin}
+                onStretch={async (reqs, sourceBpm) => {
+                  const { renderAndApply } = await import('./services/elasticRender');
+                  const { editingElastic, withTempo } = await import('./utils/clipTranspose');
+                  const st = stateRef.current;
+                  const list = reqs.map(r => {
+                    const clip = st.tracks.find(t => t.id === r.trackId)?.clips.find(c => c.id === r.clipId);
+                    return clip ? { trackId: r.trackId, clipId: r.clipId, info: withTempo(editingElastic(clip, id => audioBufferRegistry.has(id)).info, sourceBpm, st.bpm) } : null;
+                  }).filter((x): x is NonNullable<typeof x> => !!x);
+                  await renderAndApply(st.tracks, list, setState);
+                }} />
+            </Suspense>
+          </PanelBoundary>
+        )}
         {r12Panel?.panel === 'time' && (
           <PanelBoundary name="la fenêtre Temps" onClose={() => setR12Panel(null)}>
             <Suspense fallback={null}>
@@ -8016,7 +8116,8 @@ function Studio() {
       )}
 
       <Suspense fallback={null}>
-      {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user && user.id !== 'guest' ? user : null} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} onSaveAsTemplate={() => { setIsSaveMenuOpen(false); setTemplatesModal('save'); }} onOpenVersions={() => { setIsSaveMenuOpen(false); setVersionsOpen(true); }} />}
+      {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user && user.id !== 'guest' ? user : null} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} onSaveAsTemplate={() => { setIsSaveMenuOpen(false); setTemplatesModal('save'); }} onOpenVersions={() => { setIsSaveMenuOpen(false); setVersionsOpen(true); }}
+        onSaveNewVersion={comment => void r21.saveNewVersion(comment)} nextVersionLabel={versionName(state.name, nextVersionNumber(state))} />}
       <VersionsDialog open={versionsOpen} busy={recovering} projectId={state.id} onClose={() => setVersionsOpen(false)}
         onRestore={async v => {
           // La version actuelle est gardée d'abord : restaurer ne perd rien.
@@ -8266,7 +8367,7 @@ function Studio() {
         onApply={applyMasterNova} onRemove={removeMasterNova} onSetBypass={bypassMasterNova} onClose={() => setMasterNovaOpen(false)} />}
       <ShareClipModal open={shareOpen} autoRun={shareAuto} onClose={() => { setShareOpen(false); setShareAuto(null); }} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
       {(() => {
-        const st = synthPanelTrackId ? state.tracks.find(t => t.id === synthPanelTrackId && t.type === TrackType.MIDI && !t.bass808) : undefined;
+        const st = synthPanelTrackId ? state.tracks.find(t => t.id === synthPanelTrackId && t.type === TrackType.MIDI && !t.bass808 && !t.melodicSampler) : undefined;
         if (!st) return null;
         return (
           <PanelBoundary name="le synthé" overlay onClose={closeSynthPanel}>
@@ -8284,6 +8385,9 @@ function Studio() {
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}
       
       <MidiHost state={state} getState={getStateForMidi} setState={setState} pianoRoll={midiEditorOpen} />
+      {/* R18 / R20 : sampler mélodique, instruments NOVA, « Convertir en sampler », découpe d'un clip. */}
+      <SamplerHost tracks={state.tracks} bpm={state.bpm} isMobile={isMobile} setState={setState} getState={() => stateRef.current}
+        notify={setAiNotification} ensureEngine={ensureAudioEngine} openPianoRoll={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })} />
       <MidiInputHost tracks={state.tracks} selectedTrackId={state.selectedTrackId} isRecording={state.isRecording}
         onArm={id => { void armForRecording(id); }} onToggleRecord={() => { void handleToggleRecord(); }} />
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
@@ -8300,7 +8404,14 @@ function Studio() {
                    if (!t || t.type !== TrackType.MIDI || !(state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker')) return null;
                    return (
                      <>
-                     {!t.vstInstrument && (
+                     {t.melodicSampler && !t.vstInstrument && (
+                       <button type="button" onClick={() => openSamplerPanel(t.id)} data-testid="open-sampler-panel"
+                         title="Ouvrir le sampler : ton son ou un instrument NOVA, note racine, enveloppe, boucle, glissé (Sampler de FL, Simpler de Live)"
+                         className="nova-hit h-8 px-2.5 rounded-lg text-[11px] font-bold border bg-amber-500/15 border-amber-400/50 text-amber-100 hover:bg-amber-500/25 shrink-0">
+                         <i className="fas fa-wave-square mr-1" />{t.melodicSampler.sampleName || 'Sampler'}
+                       </button>
+                     )}
+                     {!t.vstInstrument && !t.melodicSampler && (
                        <button type="button" onClick={() => openSynthPanel(t.id)} data-testid="open-synth-panel"
                          title="Ouvrir le synthé NOVA : 48 sons (pianos, nappes, plucks, cloches…) et tous les réglages"
                          className="nova-hit h-8 px-2.5 rounded-lg text-[11px] font-bold border bg-cyan-500/15 border-cyan-400/50 text-cyan-100 hover:bg-cyan-500/25 shrink-0">
@@ -8312,6 +8423,7 @@ function Studio() {
                        stale={!!t.vstInstrument && !isInstrumentRenderCurrent(t, state.bpm)}
                        onChoose={(p) => handleChooseInstrument(t.id, p)}
                        onUseSynth={() => handleUseSynth(t.id)}
+                       onChooseSampler={(instrument) => requestSampler({ kind: 'assign', trackId: t.id, instrument })}
                        onRetry={() => vstInstruments.retry(t.id)}
                        onError={(msg) => notifyInstrument(`🎹 ${msg}`)}
                      />

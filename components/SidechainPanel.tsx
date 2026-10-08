@@ -21,6 +21,8 @@ interface Props {
   /** Après un préréglage : la fenêtre de l'effet repart des réglages à jour. */
   onReloaded?: () => void;
   compact?: boolean;
+  /** VST du PC (R10) : la clé est-elle vraiment reçue par le plugin ? */
+  vstKey?: 'ok' | 'none' | 'host' | null;
 }
 
 const hz = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1).replace('.', ',')} kHz` : `${Math.round(v)} Hz`);
@@ -33,7 +35,7 @@ let detailsOpen = false;
 /** Dernier message (préréglage appliqué…) par effet : survit au rechargement de la fenêtre. */
 const notes = new Map<string, string>();
 
-export const SidechainPanel: React.FC<Props> = ({ plugin, track, tracks, onUpdateTrack, onUpdateParams, onReloaded, compact }) => {
+export const SidechainPanel: React.FC<Props> = ({ plugin, track, tracks, onUpdateTrack, onUpdateParams, onReloaded, compact, vstKey }) => {
   const [open, setOpen] = useState(detailsOpen);
   const setOpenPersist = (v: boolean) => { detailsOpen = v; setOpen(v); };
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +50,7 @@ export const SidechainPanel: React.FC<Props> = ({ plugin, track, tracks, onUpdat
   const missing = !!ref && !options.some(o => o.ref === ref);
   const presets = sidechainPresetsFor(plugin.type);
   const isDeesser = plugin.type === 'DEESSER';
+  const isVst = plugin.type === 'VST3';
   const title = isDeesser ? 'Écoute externe' : 'Clé (side-chain)';
 
   const apply = (next: string | null, nextTap?: 'pre' | 'post') => {
@@ -84,6 +87,9 @@ export const SidechainPanel: React.FC<Props> = ({ plugin, track, tracks, onUpdat
     : loop ? { cls: 'text-red-300', text: `${loop.message} La clé est ignorée tant que la boucle existe.`, alert: true }
     : missing ? { cls: 'text-amber-300', text: `La source de la clé n'existe plus dans cette session (${plugin.sidechainSourceName || 'piste supprimée'}) : choisis-en une autre.`, alert: false }
     : note ? { cls: 'text-sky-200', text: note, alert: false }
+    : isVst && ref && vstKey === 'host' ? { cls: 'text-amber-300', text: "Clé routée et calée sur la latence, mais le pont VST actuel ne sait pas encore la passer à l'entrée side-chain des VST3 : le plugin entend du silence en clé. Elle sera reçue avec l'hôte VST natif de Nova Studio (mise à jour à venir).", alert: false }
+    : isVst && ref && vstKey === 'none' ? { cls: 'text-amber-300', text: "Ce plugin n'a pas d'entrée side-chain : la clé est ignorée.", alert: false }
+    : isVst && ref && vstKey === 'ok' ? { cls: 'text-emerald-300', text: "Le plugin reçoit la clé. Dans sa fenêtre, choisis l'entrée side-chain « External » / « Ext. » si besoin.", alert: false }
     : null;
   const summary = ref ? `La détection écoute ${keySourceLabel(tracks, ref)} (${tap === 'pre' ? 'avant fader' : 'après fader'}), recalée sur la latence : identique à la lecture et à l'export.`
     : "Sans clé, l'effet écoute le son de sa propre piste.";
@@ -121,7 +127,7 @@ export const SidechainPanel: React.FC<Props> = ({ plugin, track, tracks, onUpdat
             ))}
           </div>
         )}
-        {ref && (
+        {ref && !isVst && (
           <button type="button" aria-pressed={f.listen} onClick={() => onUpdateParams({ keyListen: f.listen ? 0 : 1 })} data-nova-key-listen
             title="Écouter la clé (Pro Tools : « Key Listen ») : on entend la clé filtrée à la place du son, pour régler le filtre. Pense à le couper ensuite."
             className={`h-8 px-2 rounded-lg border text-[11px] font-bold ${f.listen ? 'bg-amber-400 text-black border-amber-300 animate-pulse' : 'bg-white/5 border-white/15 text-slate-200 hover:bg-white/10'}`}>

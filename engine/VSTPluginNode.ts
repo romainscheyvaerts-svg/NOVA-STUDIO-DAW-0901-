@@ -1,5 +1,7 @@
 import { PluginInstance } from '../types';
-import { novaBridge, BridgeState } from '../services/NovaBridge';
+import { novaBridge, BridgeState, VstAutomatableParam } from '../services/NovaBridge';
+import { vstParamCatalog, vstParamTexts, notifyVstCatalog as notifyCatalog } from '../utils/vstParamCatalog';
+export { vstParamCatalog, vstParamTexts, onVstCatalogChange, vstValueText, vstParamDisplayName } from '../utils/vstParamCatalog';
 
 /**
  * Effet VST3 du PC dans la chaîne Web Audio, via le pont local.
@@ -19,6 +21,16 @@ import { novaBridge, BridgeState } from '../services/NovaBridge';
  *   VST_CRASH_RETRIES fois en 10 min pour ce plugin, puis il reste contourné
  *   (« désactivé : il plante »). Événement fenêtre « nova:vst-crash » pour l'appli.
  *   Plugin en quarantaine (il a fait planter le pont au chargement) : erreur, pas de relance.
+ * - (R9) Automation : `automationParam(clé)` rend un AudioParam du worklet (valeur
+ *   brute 0–1 du réglage VST). Le moteur y programme la voie d'avance, avec la même
+ *   avance PDC que les effets NOVA ; chaque bloc envoyé au pont porte les changements
+ *   horodatés à l'échantillon près. Réglages proposés dans « + voie » : `automatable()`
+ *   (lus par le pont, noms et valeurs texte du plugin). Écriture Touch / Latch :
+ *   `setWatch(true)` → les réglages bougés dans la fenêtre du plugin sont signalés
+ *   (vstParamEvents) et enregistrés dans la voie par l'application.
+ * - (R10) Side-chain : `sidechainInput` (2e entrée du worklet). Clé active : les
+ *   blocs partent en 4 canaux, le pont alimente l'entrée side-chain du plugin
+ *   (hôte natif, voir bridge-python/vst_sidechain.py).
  */
 
 /** Pré-tampon, en échantillons : absorbe les à-coups du pont sans craquement. */
@@ -35,6 +47,11 @@ export interface VstNodeInfo {
   name: string;
   latencyMs: number;
   underruns: number;
+  /**
+   * (R10) Clé de side-chain : 'ok' (le plugin la reçoit), 'none' (pas d'entrée clé),
+   * 'host' (l'hôte du pont ne sait pas encore alimenter l'entrée clé des VST3), null (pas chargé).
+   */
+  sidechain: 'ok' | 'none' | 'host' | null;
 }
 
 /** D'où vient l'état : fenêtre du plugin fermée par l'artiste, chargement, réglage par Nova. */
@@ -65,6 +82,17 @@ export const novaVstEvents = {
   emit(r: NovaSettingsReport) { this.listeners.forEach(cb => { try { cb(r); } catch { /* */ } }); },
 };
 
+/** Nombre d'AudioParam d'automation du worklet (vst-bridge-processor-v5 : p0 … p31). */
+export const VST_AUTO_SLOTS = 32;
+
+/** Réglages bougés dans la fenêtre du plugin (écriture Touch / Latch) : id de l'effet, clé, valeur brute. */
+export interface VstParamChange { pluginId: string; changes: { name: string; value: number; from?: number; text?: string }[] }
+export const vstParamEvents = {
+  listeners: new Set<(e: VstParamChange) => void>(),
+  on(cb: (e: VstParamChange) => void) { this.listeners.add(cb); return () => { this.listeners.delete(cb); }; },
+  emit(e: VstParamChange) { this.listeners.forEach(cb => { try { cb(e); } catch { /* */ } }); },
+};
+
 /** Effets VST3 vivants (un par effet de piste), pour l'interface et la sauvegarde. */
 export const liveVstNodes = new Map<string, VSTPluginNode>();
 const infoListeners = new Set<() => void>();
@@ -72,6 +100,11 @@ export const onVstNodesChange = (cb: () => void) => { infoListeners.add(cb); ret
 const notifyInfo = () => infoListeners.forEach(cb => { try { cb(); } catch { /* */ } });
 
 const workletLoaded = new WeakMap<BaseAudioContext, Promise<void>>();
+
+/** Capacités du pont connecté (v11 : automation, side-chain) ; vide si inconnues. */
+const bridgeCaps = (): Partial<BridgeState> => {
+  try { return (novaBridge as any).getBridgeState?.() || {}; } catch { return {}; }
+};
 
 /** Relances automatiques après un plantage, par plugin, sur une fenêtre de 10 min. */
 export const VST_CRASH_RETRIES = 2;
@@ -125,6 +158,19 @@ export class VSTPluginNode {
   /** Plantage à répétition ou quarantaine : plus de relance automatique (reconnexion comprise). */
   private crashDisabled = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** (R9) Réglage → index de l'AudioParam du worklet ; réglages déclarés au pont pour ce chargement. */
+  private autoIndex = new Map<string, number>();
+  private autoArmed = new Set<string>();
+  private autoMapSeq = 0;
+  private watchWanted = false;
+  private watchOn = false;
+  private textsAsked = new Set<string>();
+  private paramStats = { paramsSent: 0, paramBlocks: 0 };
+  /** (R10) Entrée de clé (side-chain) : branchée sur la 2e entrée du worklet. */
+  public readonly sidechainInput: GainNode;
+  private sidechainOn = false;
+  /** Entrée clé annoncée par le pont au chargement (null : hôte sans side-chain). */
+  private keyInputs: number | null = null;
 
   /**
    * opts.quiet : plugin posé par NOVA lui-même (autotune du PC) : chargement
@@ -137,6 +183,9 @@ export class VSTPluginNode {
     this.knownSettings = JSON.stringify(plugin.params?.novaSettings || null);
     this.input = ctx.createGain();
     this.output = ctx.createGain();
+    this.sidechainInput = ctx.createGain();
+    this.sidechainInput.channelCount = 2;
+    this.sidechainInput.channelCountMode = 'explicit';
     this.knownState = plugin.params?.stateB64 || null;
     // Tant que le flux n'est pas prêt : passe-plat direct.
     this.input.connect(this.output);
@@ -197,6 +246,7 @@ export class VSTPluginNode {
       pluginId: this.plugin.id, status: this.status, error: this.error, licenseRequired: this.licenseRequired,
       name: this.loadedName || this.plugin.name, underruns: this.underruns,
       latencyMs: Math.round(this.latency * 1000),
+      sidechain: this.status !== 'active' ? null : this.keyInputs === null ? 'host' : this.keyInputs > 0 ? 'ok' : 'none',
     };
   }
 
@@ -216,6 +266,123 @@ export class VSTPluginNode {
 
   getSlotId(): string | null { return this.status === 'active' ? this.slotId : null; }
 
+  // --- Automation (R9) -----------------------------------------------------------
+
+  /**
+   * AudioParam d'automation d'un réglage VST (valeur brute 0–1), ou null (plugin
+   * pas chargé, pont sans automation, plus de place : 32 réglages par effet).
+   * Le réglage est déclaré au pont ; ses valeurs partent avec l'audio dès que
+   * le pont l'a enregistré.
+   */
+  automationParam(key: string): AudioParam | null {
+    const w = this.worklet;
+    if (!w || !key || !bridgeCaps().automation) return null;
+    let idx = this.autoIndex.get(key);
+    if (idx === undefined) {
+      if (this.autoIndex.size >= VST_AUTO_SLOTS) return null;
+      const used = new Set(this.autoIndex.values());
+      idx = 0;
+      while (used.has(idx)) idx++;
+      this.autoIndex.set(key, idx);
+      this.requestTexts([key]);
+    }
+    if (!this.autoArmed.has(key) && this.status === 'active') void this.syncAutomationMap();
+    return (w.parameters as any).get(`p${idx}`) || null;
+  }
+
+  /** Réglages déclarés au pont (index → clé) puis armés dans le worklet. */
+  private async syncAutomationMap() {
+    const slotId = this.slotId;
+    const w = this.worklet;
+    if (!slotId || !w || this.status !== 'active') return;
+    const seq = ++this.autoMapSeq;
+    const names: string[] = [];
+    this.autoIndex.forEach((i, k) => { names[i] = k; });
+    for (let i = 0; i < names.length; i++) if (!names[i]) names[i] = '';
+    try {
+      await novaBridge.setAutomationMap(slotId, names);
+    } catch { return; }
+    if (seq !== this.autoMapSeq || this.slotId !== slotId || this.status !== 'active') return;
+    this.autoIndex.forEach((i, k) => {
+      if (this.autoArmed.has(k)) return;
+      this.autoArmed.add(k);
+      w.port.postMessage({ type: 'arm', index: i, on: true });
+    });
+  }
+
+  /**
+   * Valeur posée tout de suite (départ de lecture à l'arrêt, fin d'écriture, plus de
+   * 32 réglages automatisés) : sur l'AudioParam s'il existe, sinon par le pont.
+   */
+  setParamNow(key: string, raw: number) {
+    if (!Number.isFinite(raw)) return;
+    const v = Math.max(0, Math.min(1, raw));
+    const ap = this.autoIndex.has(key) ? this.automationParam(key) : null;
+    if (ap) {
+      try { const now = this.ctx.currentTime; ap.cancelScheduledValues(now); ap.setValueAtTime(v, now); } catch { /* */ }
+      return;
+    }
+    if (this.status === 'active' && this.slotId) novaBridge.setParams(this.slotId, [{ name: key, value: v }]).catch(() => { /* */ });
+  }
+
+  /** Réglages automatisables (« + voie ») : catalogue en cache, relu au chargement. */
+  automatable(): VstAutomatableParam[] { return vstParamCatalog.get(this.plugin.id) || []; }
+
+  private async loadAutomatable() {
+    const slotId = this.slotId;
+    if (!slotId || !bridgeCaps().automation) return;
+    try {
+      const list = await novaBridge.automatable(slotId);
+      if (this.slotId !== slotId) return;
+      vstParamCatalog.set(this.plugin.id, list);
+      notifyCatalog();
+      // Voies existantes : leurs unités (textes du plugin).
+      this.requestTexts([...this.autoIndex.keys()]);
+    } catch { /* plugin occupé : la liste viendra au prochain chargement */ }
+  }
+
+  /** Textes du plugin pour ces réglages (unités affichées dans les voies). */
+  requestTexts(keys: string[]) {
+    const slotId = this.slotId;
+    const want = keys.filter(k => k && !this.textsAsked.has(k) && !vstParamTexts.has(`${this.plugin.id}::${k}`));
+    if (!slotId || !want.length || this.status !== 'active') return;
+    want.forEach(k => this.textsAsked.add(k));
+    novaBridge.paramTexts(slotId, want, 100).then(texts => {
+      Object.entries(texts).forEach(([k, t]) => { if (Array.isArray(t) && t.length) vstParamTexts.set(`${this.plugin.id}::${k}`, t); });
+      notifyCatalog();
+    }).catch(() => { want.forEach(k => this.textsAsked.delete(k)); });
+  }
+
+  /** Écriture Touch / Latch / Write : signaler les réglages bougés dans la fenêtre du plugin. */
+  setWatch(on: boolean) {
+    this.watchWanted = on;
+    void this.applyWatch();
+  }
+
+  private async applyWatch() {
+    const slotId = this.slotId;
+    const want = this.watchWanted && this.status === 'active' && !!slotId;
+    if (want === this.watchOn || !slotId) return;
+    this.watchOn = want;
+    try { await novaBridge.watchParams(slotId, want); } catch { this.watchOn = false; }
+  }
+
+  /** Statistiques d'automation du worklet (valeurs envoyées). */
+  getParamStats() { return { ...this.paramStats }; }
+
+  // --- Side-chain (R10) -----------------------------------------------------------
+
+  /**
+   * Clé branchée par le moteur (SidechainRouter) : les blocs partent avec la clé (4 canaux),
+   * seulement si le pont alimente l'entrée clé de ce plugin (sinon débit inutile).
+   */
+  setSidechainActive(on: boolean) {
+    this.sidechainOn = on;
+    this.worklet?.port.postMessage({ type: 'sidechain', on: this.keyFlowing() });
+  }
+  private keyFlowing() { return this.sidechainOn && this.status === 'active' && (this.keyInputs || 0) > 0; }
+  isSidechainActive() { return this.sidechainOn; }
+
   dispose() {
     this.disposed = true;
     if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
@@ -226,6 +393,7 @@ export class VSTPluginNode {
     notifyInfo();
     try { this.input.disconnect(); } catch { /* */ }
     try { this.output.disconnect(); } catch { /* */ }
+    try { this.sidechainInput.disconnect(); } catch { /* */ }
   }
 
   // --- Interne -----------------------------------------------------------------
@@ -310,20 +478,23 @@ export class VSTPluginNode {
     let p = workletLoaded.get(this.ctx);
     if (!p) {
       // Chemin relatif à la base du build (le DAW n'est pas toujours servi à la racine).
-      p = this.ctx.audioWorklet.addModule(`${import.meta.env.BASE_URL}worklets/vst-bridge-processor-v4.js`);
+      p = this.ctx.audioWorklet.addModule(`${import.meta.env.BASE_URL}worklets/vst-bridge-processor-v5.js`);
       workletLoaded.set(this.ctx, p);
     }
     await p;
-    const node = new AudioWorkletNode(this.ctx, 'vst-bridge-processor-v4', {
-      numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+    const node = new AudioWorkletNode(this.ctx, 'vst-bridge-processor-v5', {
+      // 2e entrée : clé de side-chain (R10).
+      numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [2],
       channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
       processorOptions: { prebufferFrames: VST_PREBUFFER_FRAMES },
     });
     node.port.onmessage = (e) => {
       if (e.data?.type === 'stats') {
+        this.paramStats = { paramsSent: Number(e.data.paramsSent) || 0, paramBlocks: Number(e.data.paramBlocks) || 0 };
         if (e.data.underruns !== this.underruns) { this.underruns = e.data.underruns; notifyInfo(); }
       }
     };
+    this.sidechainInput.connect(node, 0, 1);
     this.worklet = node;
     return node;
   }
@@ -345,6 +516,7 @@ export class VSTPluginNode {
       this.licenseRequired = false;
       if (this.disposed || seq !== this.loadSeq) { novaBridge.unloadPlugin(slotId); return; }
       this.loadedName = res.name;
+      this.keyInputs = typeof res.sidechainInputs === 'number' ? res.sidechainInputs : null;
       this.pluginLatencySamples = res.latencySamples + res.bufferLatencySamples;
       if (res.stateB64) this.adoptState(res.stateB64);
 
@@ -356,6 +528,9 @@ export class VSTPluginNode {
           this.updateLatency(true);
         }
         if (ev.action === 'PLUGIN_CRASHED' && this.slotId === slotId) this.onCrash(String(ev.reason || 'exception'), ev.error ?? null);
+        if (ev.action === 'PARAM_CHANGED' && Array.isArray(ev.changes) && ev.changes.length) {
+          vstParamEvents.emit({ pluginId: this.plugin.id, changes: ev.changes.map(c => ({ name: String(c.name), value: Number(c.value), ...(typeof c.from === 'number' ? { from: c.from } : {}), text: c.text })) });
+        }
       });
 
       const port = novaBridge.attachAudio(slotId);
@@ -368,8 +543,15 @@ export class VSTPluginNode {
       node.connect(this.output);
       node.port.postMessage({ type: 'active', on: true });
       this.setStatus('active');
+      node.port.postMessage({ type: 'sidechain', on: this.keyFlowing() });
       this.updateLatency(true);
       if (this.plugin.params?.novaSettings) void this.applyNovaSettings();
+      // (R9) Nouvelle instance : réglages automatisés redéclarés, catalogue relu, écriture reprise.
+      this.autoArmed.clear();
+      if (this.autoIndex.size) void this.syncAutomationMap();
+      void this.loadAutomatable();
+      this.watchOn = false;
+      void this.applyWatch();
     } catch (e: any) {
       if (this.disposed || seq !== this.loadSeq) return;
       this.teardown();
@@ -391,6 +573,12 @@ export class VSTPluginNode {
     this.slotUnsub = null;
     if (this.worklet) {
       this.worklet.port.postMessage({ type: 'active', on: false });
+      // Réglages à redéclarer au prochain chargement (nouvelle instance sur le pont).
+      this.autoArmed.forEach(k => { const i = this.autoIndex.get(k); if (i !== undefined) this.worklet!.port.postMessage({ type: 'arm', index: i, on: false }); });
+      this.autoArmed.clear();
+      this.autoMapSeq++;
+      this.watchOn = false;
+      this.textsAsked.clear();
       try { this.input.disconnect(this.worklet); } catch { /* */ }
       try { this.worklet.disconnect(); } catch { /* */ }
     }

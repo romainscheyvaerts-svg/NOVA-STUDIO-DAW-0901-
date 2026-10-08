@@ -19,6 +19,31 @@ import TrackMeter from './meters/TrackMeter';
 import StripHead from './meters/StripHead';
 import { loudnessPanel } from './meters/LoudnessPanel';
 import { MASTER_OUT } from '../engine/meters/meterBank';
+import { withTrackComment } from '../utils/sessionNotes';
+
+/**
+ * R21 · Commentaire de la tranche (Pro Tools : vue Commentaires de la console) :
+ * micro, consigne… Un clic pour l'écrire ; il voyage avec le projet et en collaboration.
+ */
+const StripComment: React.FC<{ track: Track; onUpdate: (t: Track) => void }> = ({ track, onUpdate }) => {
+  const [editing, setEditing] = useState(false);
+  const c = track.comment || '';
+  if (editing) {
+    return (
+      <textarea autoFocus defaultValue={c} maxLength={500} aria-label={`Commentaire de ${track.name}`} data-testid={`strip-comment-input-${track.id}`}
+        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.currentTarget.blur(); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditing(false); } }}
+        onBlur={e => { setEditing(false); const n = withTrackComment(track, e.currentTarget.value); if (n !== track) onUpdate(n); }}
+        className="mt-1.5 h-10 w-full resize-none rounded border border-cyan-500/50 bg-black/60 px-1 text-[10px] leading-tight text-white outline-none" />
+    );
+  }
+  return (
+    <button type="button" onClick={() => setEditing(true)} data-testid={`strip-comment-${track.id}`}
+      title={c ? `Commentaire : ${c} (clic pour modifier ; Pro Tools : Comments)` : 'Ajouter un commentaire (micro, consigne…) — Pro Tools : Comments'}
+      className={`mt-1.5 h-10 w-full overflow-hidden rounded px-1 text-left text-[10px] leading-tight ${c ? 'bg-white/[0.04] text-slate-200 italic' : 'text-slate-500 hover:text-slate-300'}`}>
+      <span className="line-clamp-3 break-words">{c || '+ commentaire'}</span>
+    </button>
+  );
+};
 
 // Track Group Colors (inspired by Pro Tools)
 const GROUP_COLORS = [
@@ -412,6 +437,7 @@ const ChannelStrip: React.FC<{
                onDoubleClick={() => { if (!isMaster) setRenaming(true); }}>{trackDisplayName(track, allTracks)}</span>
            )}
         </div>
+        {!isMaster && <StripComment track={track} onUpdate={onUpdate} />}
       </div>
     </div>
   );
