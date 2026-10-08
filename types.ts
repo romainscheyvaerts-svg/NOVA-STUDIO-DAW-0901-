@@ -184,6 +184,11 @@ export interface MidiNote {
    * qu'elle n'a pas changé de pad.
    */
   gm?: number;
+  /**
+   * Note muette (R16, Pro Tools : Mute Notes, FL : outil Muet) : gardée dans le
+   * clip, affichée en gris, jamais jouée ni exportée.
+   */
+  muted?: boolean;
 }
 
 /** Groove (V25, utils/groove) : décalage et vélocité par case de grille, comme le Groove Pool de Live. */
@@ -277,6 +282,12 @@ export interface Clip {
   buffer?: AudioBuffer;
   bufferId?: string; 
   notes?: MidiNote[]; 
+  /**
+   * Contrôleurs MIDI (R16, utils/midiCc) : pitch bend (« pb »), aftertouch
+   * (« at ») et CC (« cc1 », « cc64 »…), points { t (s depuis le début du
+   * clip), v (valeur MIDI brute) }. Absent : aucun contrôleur.
+   */
+  cc?: Record<string, { t: number; v: number }[]>;
   isMuted?: boolean;
   gain?: number;
   isReversed?: boolean; 
