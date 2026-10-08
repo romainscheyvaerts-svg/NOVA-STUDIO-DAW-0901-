@@ -24,7 +24,7 @@ def opto_vintage():
     from modeles import cl1b_profil as prof
     fit = prof.load_fit()
     return {
-        "source": "Mesures labo NOVA du Tube-Tech CL 1B mk II (Softube), 08/10/2026",
+        "source": "Mesures labo NOVA (compresseur optique à tubes de référence), 08/10/2026",
         "l0": prof.L0, "dl": prof.DL,
         "thrKnob": prof.THR_KNOB, "thr1db": fit["thr_1db"],
         "ratioKnob": prof.RATIO_KNOB, "tables": fit["tables"],
@@ -49,7 +49,7 @@ def fet76():
     from modeles import fet76_profil as prof
     f = prof.load_fit()
     return {
-        "source": "Mesures labo NOVA de l'UADx 1176AE, 08/10/2026",
+        "source": "Mesures labo NOVA (compresseur FET de référence), 08/10/2026",
         "l0": prof.L0, "dl": prof.DL, "ratios": prof.RATIOS, "tables": f["tables"],
         "inKnob": f["in_knob"], "inGainDb": f["in_gain_db"], "outKnob": f["out_knob"], "outGainDb": f["out_gain_db"],
         "tRefDb": f["t_ref_db"], "rectHalf": int(f["rect_half"]), "detRelMs": f["det_rel_ms"],
@@ -68,7 +68,7 @@ def leveler2a():
     from modeles import la2a_profil as prof
     f = prof.load_fit()
     return {
-        "source": "Mesures labo NOVA de l'UADx LA-2A Silver, 08/10/2026",
+        "source": "Mesures labo NOVA (nivelleur optique de référence), 08/10/2026",
         "l0": prof.L0, "dl": prof.DL,
         "prKnob": prof.PR_KNOB, "thrPr": f["thr_pr"], "tablesPr": f["tables_pr"],
         "limKnob": prof.LIM_KNOB, "thrLim": f["thr_lim"], "tablesLim": f["tables_lim"],
@@ -86,7 +86,7 @@ def voxstrip():
     from modeles import voxbox_profil as prof
     f = prof.load_fit()
     return {
-        "source": "Mesures labo NOVA de l'UADx Manley VOXBOX, 08/10/2026",
+        "source": "Mesures labo NOVA (tranche voix à lampes de référence), 08/10/2026",
         "l0": prof.L0, "dl": prof.DL, "defaults": prof.DEFAULT_NOVA,
         "inKnob": f["in_knob"], "inGainDb": f["in_gain_db"],
         "thKnob": prof.TH_KNOB, "thrTh": f["thr_th"], "tablesTh": f["tables_th"],

@@ -143,6 +143,8 @@ def nova_to_internal(p, fit):
         sa = ac.interp_log(d2["att_knob"], d2["att_scale"], att) if d2.get("att_scale") else 1.0
         sr = ac.interp_log(d2["rel_knob"], d2["rel_scale"], rel) if d2.get("rel_scale") else 1.0
         ac.apply_dyn2(P, d2, sa, sr, SR)
+        if d2.get("lwarp"):
+            tab = ac.warp_table(tab, L0, DL, d2["lwarp"])
         if d2.get("fb"):
             P[ac.P_FB] = 1.0
             tab = ac.ff_to_fb(tab, L0, DL)
