@@ -4,6 +4,7 @@ import { automationRecorder } from '../services/AutomationManager';
 import {
   AUTOMATION_MODES, AutomationMode, automationModeInfo, automationModeOf, clearTrackAutomation, hasAutomation, laneDisplayName,
 } from '../utils/automationWrite';
+import { useSimpleMode } from '../utils/simpleMode';
 
 /** Vrai pendant qu'un fader de cette piste écrit de l'automation. */
 export const useAutomationWriting = (trackId: string): boolean => {
@@ -25,6 +26,8 @@ interface Props {
  */
 const AutomationModeSelector: React.FC<Props> = ({ track, onUpdate, variant = 'header' }) => {
   const mode = automationModeOf(track);
+  // Mode simple : libellés français (« Lecture ») ; avancé : sigles de la console Pro Tools (READ).
+  const { simple } = useSimpleMode();
   const info = automationModeInfo(mode);
   const writing = useAutomationWriting(track.id);
   const [open, setOpen] = useState(false);
@@ -68,7 +71,7 @@ const AutomationModeSelector: React.FC<Props> = ({ track, onUpdate, variant = 'h
     ? { top: Math.min(rect.bottom + 4, window.innerHeight - 340), left: Math.max(8, Math.min(rect.left, window.innerWidth - 272)) }
     : {};
 
-  const label = variant === 'mixer' ? info.label.toUpperCase() : info.short;
+  const label = simple ? info.fr : variant === 'mixer' ? info.label.toUpperCase() : info.short;
 
   return (
     <>
@@ -79,8 +82,8 @@ const AutomationModeSelector: React.FC<Props> = ({ track, onUpdate, variant = 'h
         data-automation-mode={mode}
         onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
         onMouseDown={(e) => e.stopPropagation()}
-        title={`Automation : ${info.title}`}
-        aria-label={`Mode d'automation de ${track.name} : ${info.label}`}
+        title={`Automation : ${info.fr}. ${info.title}`}
+        aria-label={`Mode d'automation de ${track.name} : ${info.fr} (${info.label})`}
         aria-haspopup="menu"
         aria-expanded={open}
         className={`nova-hit-tactile relative shrink-0 rounded-md border font-black tracking-wide transition-colors ${variant === 'mixer' ? 'w-full h-7 text-[9px]' : 'h-7 px-1.5 min-w-[2.6rem] text-[8px]'}`}
@@ -122,7 +125,7 @@ const AutomationModeSelector: React.FC<Props> = ({ track, onUpdate, variant = 'h
             >
               <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: m.color }} />
               <span className="min-w-0">
-                <span className="block text-[12px] font-bold" style={{ color: m.id === mode ? m.color : '#e2e8f0' }}>{m.label}</span>
+                <span className="block text-[12px] font-bold" style={{ color: m.id === mode ? m.color : '#e2e8f0' }}>{simple ? m.fr : <>{m.label} <span className="font-normal text-slate-400">· {m.fr}</span></>}</span>
                 <span className="block text-[10px] leading-snug text-slate-400">{m.title.replace(/\s*\(Pro Tools : [^)]*\)\.?$/, '.')}</span>
               </span>
             </button>

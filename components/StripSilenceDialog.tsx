@@ -3,6 +3,7 @@ import type { Clip, Track } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { StripSilenceOptions, stripSilenceFromClip } from '../utils/stripSilence';
 import { canvasTheme } from '../utils/canvasTheme';
+import { useSimpleMode } from '../utils/simpleMode';
 
 export interface StripSilenceSettings { thresholdDb: number; minStripMs: number; startPadMs: number; endPadMs: number }
 
@@ -36,6 +37,8 @@ const SETTINGS_KEY = 'nova_strip_silence';
  * marges avant / après, aperçu sur la forme d'onde. Non destructif et annulable.
  */
 const StripSilenceDialog: React.FC<Props> = ({ open, tracks, targets, onApply, onClose }) => {
+  // Mode simple : libellé français seul ; mode avancé : le nom Pro Tools, expliqué en infobulle.
+  const { simple } = useSimpleMode();
   const [s, setS] = useState<StripSilenceSettings>(() => {
     try { return { ...DEFAULT_STRIP_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; } catch { return DEFAULT_STRIP_SETTINGS; }
   });
@@ -124,7 +127,7 @@ const StripSilenceDialog: React.FC<Props> = ({ open, tracks, targets, onApply, o
     <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/60 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="strip-title">
       <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#121418] p-5 shadow-2xl" onClick={e => e.stopPropagation()} data-testid="strip-silence">
         <div className="mb-3 flex items-center">
-          <h2 id="strip-title" className="mr-auto text-[15px] font-black text-white" title="Pro Tools : Strip Silence (Ctrl+U)">Strip Silence : retirer les blancs</h2>
+          <h2 id="strip-title" className="mr-auto text-[15px] font-black text-white" title="Supprimer les silences : découpe le clip et retire les blancs entre les phrases (Pro Tools : Strip Silence, Ctrl+U)">{simple ? 'Supprimer les silences' : 'Strip Silence : retirer les blancs'}</h2>
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 rounded-lg bg-white/5 text-slate-300">✕</button>
         </div>
         <p className="mb-3 text-[12px] text-slate-400">

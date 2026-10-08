@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Clip } from '../types';
 import { syncOffsetOf } from '../utils/editModes';
+import { useSimpleMode } from '../utils/simpleMode';
 import {
   anchorTime, formatSpot, originalStartOf, readSpotField, SPOT_FORMATS, SpotAnchor, spotField, SpotFormat, spotStart,
   switchSpotFormat, typeSpotField,
@@ -36,6 +37,7 @@ const ANCHORS: { id: SpotAnchor; label: string; hint: string }[] = [
 
 const SpotDialog: React.FC<Props> = ({ clip, trackName, bpm, sampleRate, onApply, onClose }) => {
   const ctx = useMemo(() => ({ bpm, sr: sampleRate }), [bpm, sampleRate]);
+  const { simple } = useSimpleMode();
   const hasSync = syncOffsetOf(clip) !== null;
   const origin = originalStartOf(clip);
   const [anchor, setAnchor] = useState<SpotAnchor>(hasSync ? 'SYNC' : 'START');
@@ -71,8 +73,8 @@ const SpotDialog: React.FC<Props> = ({ clip, trackName, bpm, sampleRate, onApply
     <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/60 p-4" onMouseDown={onClose} role="dialog" aria-modal="true" aria-labelledby="spot-title" data-testid="spot-dialog">
       <div className="w-full max-w-md rounded-2xl border border-yellow-500/30 bg-[#121418] p-5 shadow-2xl" onMouseDown={e => e.stopPropagation()}>
         <div className="mb-3 flex items-center">
-          <h2 id="spot-title" className="mr-auto text-[15px] font-black text-white" title="Pro Tools : Spot Dialog (mode Spot, F3)">
-            <span className="mr-2 rounded px-1.5 py-0.5 text-[10px] font-black text-black" style={{ background: '#eab308' }}>SPOT</span>Position exacte
+          <h2 id="spot-title" className="mr-auto text-[15px] font-black text-white" title="Position exacte : place le clip au tick, à la milliseconde ou à l’échantillon près (Pro Tools : Spot Dialog, mode Spot, F3)">
+            {!simple && <span className="mr-2 rounded px-1.5 py-0.5 text-[10px] font-black text-black" style={{ background: '#eab308' }}>SPOT</span>}Position exacte
           </h2>
           <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 rounded-lg bg-white/5 text-slate-300">✕</button>
         </div>

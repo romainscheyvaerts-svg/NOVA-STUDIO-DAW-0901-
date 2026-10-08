@@ -2339,7 +2339,7 @@ useEffect(() => {
                 { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: playheadStore.get() }); setClipContextMenu(null); }},
                 { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE'); setClipContextMenu(null); }},
                 // Modes d'édition Pro Tools : Spot (position exacte) et point de synchro.
-                { label: 'Position exacte (Spot)…', icon: 'fa-crosshairs', shortcut: 'F3 + clic', onClick: () => { setSpotTarget({ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }); setClipContextMenu(null); }},
+                { label: simple ? 'Position exacte…' : 'Position exacte (Spot)…', icon: 'fa-crosshairs', shortcut: 'F3 + clic', title: 'Placer le clip au tick, à la milliseconde ou à l’échantillon près, par son début, sa fin ou son point de synchro (Pro Tools : Spot, F3 puis clic)', onClick: () => { setSpotTarget({ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }); setClipContextMenu(null); }},
                 { label: 'Point de synchro à la tête de lecture', icon: 'fa-location-dot', shortcut: 'Ctrl+,', onClick: () => {
                     const sp = syncPointAt(clipContextMenu.clip, playheadStore.get());
                     if (sp === null) window.dispatchEvent(new CustomEvent('nova:notify', { detail: 'Point de synchro : place d’abord la tête de lecture DANS ce clip, sur l’attaque à caler.' }));
@@ -2384,7 +2384,7 @@ useEffect(() => {
                       onClick: () => { openNovaWindow(clipContextMenu.clip.araEdit!.plugin === 'melodyne' ? 'ara-melodyne' : 'ara-vocalign', target); setClipContextMenu(null); } }] : []),
                   ];
                 })() : []),
-                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: simple ? 'Supprimer les silences…' : 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', title: 'Supprimer les silences : découpe le clip et retire les blancs entre les phrases, avec seuil et marges réglables (Pro Tools : Strip Silence, Ctrl+U)', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => { const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id]; requestBreaths({ mode: 'dialog', clipIds: ids, reason: 'menu' }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
                   { label: 'Séparer en stems…', icon: 'fa-layer-group', title: STEMS_TOOLTIP,

@@ -25,6 +25,8 @@ export interface AutomationModeInfo {
   label: string;
   /** Libellé court du bouton de piste (comme la console Pro Tools). */
   short: string;
+  /** Libellé français (mode simple : pas de sigle Pro Tools). */
+  fr: string;
   /** Couleur Pro Tools : Read vert, Touch/Latch jaune, Write rouge. */
   color: string;
   /** Infobulle : ce que fait le mode, et son équivalent Pro Tools. */
@@ -32,17 +34,17 @@ export interface AutomationModeInfo {
 }
 
 export const AUTOMATION_MODES: AutomationModeInfo[] = [
-  { id: 'off', label: 'Off', short: 'OFF', color: '#64748b',
+  { id: 'off', label: 'Off', short: 'OFF', fr: 'Coupée', color: '#64748b',
     title: "Off : l'automation de la piste n'est ni lue ni écrite (Pro Tools : Off)." },
-  { id: 'read', label: 'Read', short: 'READ', color: '#22c55e',
+  { id: 'read', label: 'Read', short: 'READ', fr: 'Lecture', color: '#22c55e',
     title: "Read : la piste rejoue son automation ; bouger un fader ne l'écrit pas (Pro Tools : Read)." },
-  { id: 'touch', label: 'Touch', short: 'TCH', color: '#eab308',
+  { id: 'touch', label: 'Touch', short: 'TCH', fr: 'Au toucher', color: '#eab308',
     title: "Touch : pendant la lecture, écrit tant que tu tiens le fader ; au relâchement, il revient à la courbe (Pro Tools : Touch)." },
-  { id: 'latch', label: 'Latch', short: 'LTCH', color: '#eab308',
+  { id: 'latch', label: 'Latch', short: 'LTCH', fr: 'Maintien', color: '#eab308',
     title: "Latch : écrit dès que tu touches le fader et garde la dernière valeur jusqu'à l'arrêt (Pro Tools : Latch)." },
-  { id: 'write', label: 'Write', short: 'WRT', color: '#ef4444',
+  { id: 'write', label: 'Write', short: 'WRT', fr: 'Écriture', color: '#ef4444',
     title: "Write : écrase l'automation de tout le passage lu, du départ à l'arrêt ; la piste repasse ensuite en Touch (Pro Tools : Write)." },
-  { id: 'trim', label: 'Trim', short: 'TRIM', color: '#f97316',
+  { id: 'trim', label: 'Trim', short: 'TRIM', fr: 'Ajustement', color: '#f97316',
     title: "Trim : décale la courbe existante (en dB pour le volume) tant que tu tiens le fader (Pro Tools : Trim)." },
 ];
 

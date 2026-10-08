@@ -92,7 +92,7 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.quickFades', keys: ['ctrl+alt+f'], label: 'Fondus rapides (10 ms) sur les clips sélectionnés, contre les clics', pt: 'Ctrl+F (Fades) / Batch Fades', category: 'Édition', command: 'quickFades' }),
   g({ id: 'pt.selectAll', keys: ['ctrl+a'], label: 'Sélectionner tous les clips', pt: 'Ctrl+A', category: 'Édition', command: 'selectAllClips' }),
   g({ id: 'pt.rename', keys: ['ctrl+shift+r'], label: 'Renommer le clip', pt: 'Ctrl+Maj+R (Rename Clip)', category: 'Édition', command: 'renameClip' }),
-  g({ id: 'pt.stripSilence', keys: ['ctrl+u'], label: 'Strip Silence : retirer les blancs (fenêtre)', pt: 'Ctrl+U', category: 'Édition', command: 'stripSilence' }),
+  g({ id: 'pt.stripSilence', keys: ['ctrl+u'], label: 'Supprimer les silences (Strip Silence) : retirer les blancs (fenêtre)', pt: 'Ctrl+U', category: 'Édition', command: 'stripSilence' }),
   g({ id: 'nova.breaths', keys: ['ctrl+alt+r'], label: 'Respirations : baisser la lead, supprimer sur les backs (fenêtre)', pt: 'Pas dans Pro Tools : comme Breath Control de Waves / De-breath de RX', category: 'Édition', command: 'breaths' }),
   g({ id: 'pt.nudgeL', keys: ['arrowleft', 'numsub'], label: 'Nudge : clip(s) sélectionné(s) d’un pas de grille vers la gauche ; sans sélection, la tête de lecture', pt: 'Pavé − (Nudge)', category: 'Édition', command: 'nudgeLeft' }),
   g({ id: 'pt.nudgeR', keys: ['arrowright', 'numadd'], label: 'Nudge : clip(s) sélectionné(s) d’un pas de grille vers la droite ; sans sélection, la tête de lecture', pt: 'Pavé + (Nudge)', category: 'Édition', command: 'nudgeRight' }),
