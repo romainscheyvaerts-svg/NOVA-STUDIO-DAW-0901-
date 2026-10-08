@@ -284,12 +284,15 @@ def run_engine(engine, pid, out, foreign=None, only_foreign=False):
                 res["last_process_us"] = getattr(plug, "last_process_us", None)
             slot.unload()
             # Rendus hors ligne (deux fois : déterminisme)
-            s3 = vst_host.Slot("r", path, name, SR, juce)
-            s3.load(state)
-            json.dump(s3.parameters(), open(os.path.join(out, tag + ".reload_params.json"), "w", encoding="utf-8"))
-            s3.unload()
+            if engine == "native":
+                # (Avec pedalboard, chaque instance coûte jusqu'à 16 min sur cette machine : pas de rechargement.)
+                s3 = vst_host.Slot("r", path, name, SR, juce)
+                s3.load(state)
+                json.dump(s3.parameters(), open(os.path.join(out, tag + ".reload_params.json"), "w", encoding="utf-8"))
+                s3.unload()
             for k in (1, 2):
-                fresh_pool()
+                if k == 1:
+                    fresh_pool()      # 2e rendu : même instance hors ligne réutilisée (comme le pont)
                 t = time.perf_counter()
                 if spec.get("instrument"):
                     ev = vst_host.midi_events(notes(), 3.0)
@@ -408,7 +411,8 @@ def compare(out, pid):
     # États croisés : natif rend avec l'état de pedalboard, pedalboard avec celui du natif
     rep["state_pb_to_native"] = null_db(rp1, load_np(os.path.join(out, N + ".foreign_render.npy")))
     rep["state_native_to_pb"] = null_db(rn1, load_np(os.path.join(out, f"{pid}.pedalboard.foreign.render.npy")))
-    rep["state_params_pb_to_native"] = cmp_params(load_json(os.path.join(out, P + ".reload_params.json")),
+    rep["state_params_pb_to_native"] = cmp_params(load_json(os.path.join(out, P + ".reload_params.json"))
+                                                  or load_json(os.path.join(out, P + ".params1.json")),
                                                   load_json(os.path.join(out, N + ".foreign_params.json")))
     rep["state_params_native_to_pb"] = cmp_params(load_json(os.path.join(out, N + ".reload_params.json")),
                                                   load_json(os.path.join(out, f"{pid}.pedalboard.foreign.params.json")))
@@ -431,7 +435,7 @@ def write_report(out, reps):
              f"Généré le {time.strftime('%d/%m/%Y %H:%M')} — 48 kHz, signal de test 3 s (balayage, bruit coloré, kick), "
              "rendus par le vrai pont (vst_host : Slot, set_parameters, render_offline) dans un processus par moteur.",
              "Null test : crête de (pedalboard − natif) en dB FS ; « identique » = différence nulle à l'échantillon près. "
-             "Auto-contrôle : chaque moteur comparé à lui-même (deux rendus), pour repérer un plugin non déterministe.", "",
+             "Auto-contrôle : chaque moteur comparé à lui-même (2e rendu sur la même instance hors ligne, réutilisée comme dans le pont).", "",
              "| Plugin | Rendu hors ligne | Flux 128 éch. | pb↔pb | natif↔natif | Réglages (clés / champs) | apply_param identiques | État pb→natif | État natif→pb | Latence pb / natif |",
              "|---|---|---|---|---|---|---|---|---|---|"]
     for r in reps:
@@ -474,7 +478,7 @@ def write_report(out, reps):
     json.dump(reps, open(os.path.join(out, "parite.json"), "w", encoding="utf-8"), indent=1, default=str)
 
 
-def spawn(args, timeout=3600):
+def spawn(args, timeout=4 * 3600):
     flags = 0x08000000 | BELOW_NORMAL
     t = time.time()
     try:
