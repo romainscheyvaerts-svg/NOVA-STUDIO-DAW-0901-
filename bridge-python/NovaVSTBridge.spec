@@ -16,6 +16,13 @@ tmp_ret = collect_all('pedalboard')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 hiddenimports += ['pedalboard_native', 'vst_host', 'vst_probe', 'license_watch', 'stems_service', 'stems_install', 'vst_automation', 'vst_sidechain']
 datas += [('stems_worker.py', '.')]  # séparation de stems : moteur lancé dans le module optionnel
+# Hôte VST3 natif (moteur par défaut, MIT, sans JUCE) : voir ../native-host/LICENCES.md
+import glob, os
+hiddenimports += ['vst_native', 'nova_vst3host']
+if os.path.isfile('../native-host/build/NovaVSTHost_artefacts/Release/NovaVSTHost.exe'):
+    binaries += [('../native-host/build/NovaVSTHost_artefacts/Release/NovaVSTHost.exe', '.')]
+    datas += [('../native-host/LICENCES.md', 'vst-host')]
+    datas += [(f, 'vst-host/licences') for f in glob.glob('../native-host/licences/*.txt')]
 
 
 a = Analysis(

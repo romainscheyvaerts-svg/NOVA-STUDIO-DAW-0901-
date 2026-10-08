@@ -28,6 +28,13 @@ Hôte VST3 du pont Nova (pedalboard de Spotify).
                   CrashGuard : un marqueur disque est posé pendant chaque
                   chargement natif ; s'il reste au démarrage suivant, le pont
                   est mort en chargeant ce plugin. Deux fois : quarantaine.
+- Moteur        : NOVA_VST_ENGINE=native|pedalboard (vst_native.select_engine).
+                  « native » : NovaVSTHost.exe (SDK VST3 sous MIT, sans JUCE), un
+                  processus par plugin ; _open_plugin() rend un NativePlugin qui
+                  a la même surface que l'objet de pedalboard, le reste de ce
+                  fichier est commun aux deux moteurs. En plus : side-chain réel
+                  (key), réglages à l'échantillon près, un plugin qui plante
+                  n'emporte que son processus (HostCrashed → slot en panne).
 """
 
 import base64
@@ -61,6 +68,12 @@ except ImportError:  # pragma: no cover - le pont reste joignable, sans VST
     HAS_PEDALBOARD = False
 
 logger = logging.getLogger('NovaBridge.VST')
+
+import vst_native  # noqa: E402  (moteur natif, voir plus haut)
+
+ENGINE = vst_native.select_engine(HAS_PEDALBOARD)
+NATIVE = ENGINE == "native"
+HAS_VST = ENGINE != "none"     # un moteur VST est disponible (pedalboard ou natif)
 
 VST3_PATHS = {
     "Windows": [
@@ -179,6 +192,10 @@ def scan_vst3(extra_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
 def _open_plugin(path: str, plugin_name: Optional[str] = None):
     if vst_sidechain.is_debug_plugin(path):
         return vst_sidechain.DebugDucker()   # effet à clé de référence (tests, NOVA_BRIDGE_DEBUG=1)
+    if NATIVE:
+        # Hôte natif : un processus par plugin, chargé par nom de classe (shells Waves
+        # compris, sans vst_shell), dossier UADx compris.
+        return vst_native.load_plugin(path, plugin_name)
     if not HAS_PEDALBOARD:
         raise RuntimeError("pedalboard n'est pas installé")
     if not os.path.exists(path):
@@ -288,6 +305,7 @@ class JuceThread:
         self.jobs: "queue.Queue" = queue.Queue()
         self._editor_close: Optional[threading.Event] = None
         self.editor_slot: Optional["Slot"] = None
+        self._native_editors: Dict[int, threading.Event] = {}
 
     def call(self, fn, *args) -> Future:
         fut: Future = Future()
@@ -302,17 +320,58 @@ class JuceThread:
         return self.call(fn, *args).result(timeout=timeout)
 
     def open_editor(self, slot: "Slot", on_closed: Callable[[], None]):
+        if isinstance(slot.plugin, vst_native.NativePlugin):
+            # Hôte natif : la fenêtre vit dans le processus du plugin ; ce thread reste libre
+            # (un chargement ne la ferme plus) et plusieurs fenêtres peuvent rester ouvertes.
+            self._open_native_editor(slot, on_closed)
+            return
         if self._editor_close is not None:
             self._editor_close.set()  # un seul éditeur à la fois
         self.jobs.put(("editor", slot, on_closed, None))
 
     def close_editor(self, slot: "Slot"):
+        ev = self._native_editors.get(id(slot))
+        if ev is not None:
+            ev.set()
+            return
         if self.editor_slot is slot and self._editor_close is not None:
             self._editor_close.set()
+
+    def _open_native_editor(self, slot: "Slot", on_closed: Callable[[], None]):
+        if id(slot) in self._native_editors:
+            try:
+                slot.plugin.bring_editor_to_front()      # déjà ouverte : ramenée devant
+            except Exception as e:
+                logger.debug(f"Fenêtre de {slot.name} : {e}")
+            return
+        ev = threading.Event()
+        self._native_editors[id(slot)] = ev
+        plugin = slot.plugin
+
+        def run():
+            try:
+                logger.info(f"🪟 Fenêtre ouverte : {slot.name}")
+                plugin.show_editor(ev)
+            except Exception as e:
+                logger.error(f"Fenêtre de {slot.name} : {e}")
+            finally:
+                if self._native_editors.get(id(slot)) is ev:
+                    self._native_editors.pop(id(slot), None)
+                logger.info(f"🪟 Fenêtre fermée : {slot.name}")
+                try:
+                    on_closed()
+                except Exception as e:
+                    logger.error(f"Fermeture de fenêtre : {e}")
+        threading.Thread(target=run, name=f"editor-{slot.slot_id[:12]}", daemon=True).start()
 
     def release(self, obj):
         """Détruit un plugin sur ce thread (destructeur JUCE)."""
         _MONO.discard(id(obj))
+        if isinstance(obj, vst_native.NativePlugin):
+            # Hôte natif : processus fermé tout de suite (les poignées de réglages gardées par un
+            # Slot, l'automation… ne le retiennent plus en vie).
+            threading.Thread(target=obj.close, name="vsthost-close", daemon=True).start()
+            return
         holder = [obj]
         self.jobs.put(("job", holder.clear, (), None))
 
@@ -425,10 +484,16 @@ def prepare_plugin(path: str, plugin_name: Optional[str], state_b64: Optional[st
 _MONO: set = set()
 
 
-def process(plugin, block: np.ndarray, sample_rate: int, buffer_size: int, reset: bool = False) -> np.ndarray:
-    """plugin.process, en mono pour les variantes mono (somme L+R en entrée)."""
+def process(plugin, block: np.ndarray, sample_rate: int, buffer_size: int, reset: bool = False,
+            **native) -> np.ndarray:
+    """plugin.process, en mono pour les variantes mono (somme L+R en entrée).
+    native (moteur natif seulement) : key=(2, n) clé de side-chain, changes=[(clé, décalage,
+    valeur 0–1)] réglages à l'échantillon près. Ignorés avec pedalboard."""
     if id(plugin) in _MONO:
         block = np.ascontiguousarray(block.mean(axis=0, keepdims=True) if block.shape[0] > 1 else block, dtype=np.float32)
+    native = {k: v for k, v in native.items() if v is not None}
+    if native and isinstance(plugin, vst_native.NativePlugin):
+        return plugin.process(block, int(sample_rate), buffer_size=buffer_size, reset=reset, **native)
     return plugin.process(block, int(sample_rate), buffer_size=buffer_size, reset=reset)
 
 
@@ -545,6 +610,8 @@ def instantiate(juce: "JuceThread", path: str, plugin_name: Optional[str], state
     Plugin en quarantaine (il a fait planter le pont) : refusé (PluginQuarantined).
     Un marqueur disque couvre le chargement natif ; il n'est effacé qu'une fois
     le chargement fini (même après un délai dépassé)."""
+    if NATIVE:
+        return _instantiate_native(juce, path, plugin_name, state_b64, sample_rate, block, context)
     # Plugin connu pour planter (ou à risque) : essai dans un processus jetable
     # d'abord ; s'il plante, PluginUnstable et le pont continue (plugin_guard).
     plugin_guard.check(path, plugin_name)
@@ -568,6 +635,38 @@ def instantiate(juce: "JuceThread", path: str, plugin_name: Optional[str], state
                         # Fini plus tard (fenêtre fermée) : l'instance orpheline est libérée.
                         fut.add_done_callback(lambda f: juce.release(f.result()[0]) if not f.exception() else None)
                         raise TimeoutError("Le plugin ne répond pas (fenêtre de licence restée ouverte ?)")
+    finally:
+        if w is not None:
+            w.end()
+
+
+def _instantiate_native(juce: "JuceThread", path: str, plugin_name: Optional[str], state_b64: Optional[str],
+                        sample_rate: int, block: int, context: Optional[dict] = None):
+    """Moteur natif : le plugin vit dans son propre processus, un plantage au chargement
+    n'arrête pas le pont (pas d'essai jetable ni de marqueur disque). Il compte quand même
+    pour la quarantaine : deux plantages, le plugin n'est plus chargé (rescan = on réessaie)."""
+    guard = CRASH_GUARD
+    if guard is not None and guard.is_quarantined(path):
+        raise PluginQuarantined(guard.message(path))
+    w = WATCHER.begin(path, plugin_name, context) if WATCHER is not None else None
+    t0 = time.time()
+    try:
+        fut = juce.call(prepare_plugin, path, plugin_name, state_b64, sample_rate, block)
+        while True:
+            try:
+                return fut.result(timeout=1.0)
+            except FutureTimeout:
+                limit = LICENSE_WAIT_S if (w is not None and w.seen) else LOAD_TIMEOUT_S
+                if time.time() - t0 > limit:
+                    fut.add_done_callback(lambda f: juce.release(f.result()[0]) if not f.exception() else None)
+                    raise TimeoutError("Le plugin ne répond pas (fenêtre de licence restée ouverte ?)")
+            except vst_native.HostCrashed as e:
+                if guard is not None:
+                    guard.record_crash(path)
+                base = os.path.basename(path.rstrip("\\/"))
+                name = plugin_name or (base[:-5] if base.lower().endswith(".vst3") else base)
+                raise plugin_guard.PluginUnstable(
+                    f"{name} a planté en se chargeant ({e}) : il tourne à part, le pont continue") from e
     finally:
         if w is not None:
             w.end()
@@ -676,6 +775,14 @@ class CrashGuard:
                     e["last"] = time.time()
                 self._save()
         return crashed
+
+    def record_crash(self, path: str):
+        """Plantage constaté directement (moteur natif : le processus du plugin, pas le pont)."""
+        with self.lock:
+            e = self.crashes.setdefault(path, {"count": 0})
+            e["count"] = int(e.get("count", 0)) + 1
+            e["last"] = time.time()
+            self._save()
 
     def count(self, path: str) -> int:
         return int((self.crashes.get(path) or {}).get("count", 0))
@@ -817,12 +924,8 @@ def _python_key(cp) -> Optional[str]:
     """Clé pedalboard d'un réglage C++ (même règle que plugin.parameters)."""
     if _IGNORED_NAMES.match(str(cp.name or "")):
         return None
-    try:
-        from pedalboard._pedalboard import to_python_parameter_name
-        return to_python_parameter_name(cp) or None
-    except Exception:
-        name = str(cp.name or "")
-        return re.sub(r"_+", "_", re.sub(r"[^0-9a-z]", "_", name.lower().strip())).strip("_") or None
+    # Même règle que pedalboard (nom + unité, « # » → « _sharp »…), sans dépendre de lui.
+    return vst_native.python_key(str(cp.name or ""), str(getattr(cp, "label", "") or "")) or None
 
 
 def automatable_info(key: str, cp) -> Dict[str, Any]:
@@ -1202,8 +1305,17 @@ class Slot:
             t0 = time.perf_counter()
             # (R10) Clé de side-chain : seulement pour un plugin dont l'hôte alimente l'entrée clé.
             use_key = key is not None and vst_sidechain.keyed(plugin)
+            native = isinstance(plugin, vst_native.NativePlugin)
             try:
-                if changes or use_key:
+                if native:
+                    # Hôte natif : réglages posés à l'échantillon près par IParameterChanges et clé
+                    # sur le bus side-chain, en un seul appel (aucune découpe du bloc).
+                    if use_key:
+                        self.key_blocks += 1
+                    out = process(plugin, _to_stereo(block), self.sample_rate, BLOCK,
+                                  key=_to_stereo(key) if use_key else None,
+                                  changes=self._native_changes(changes) if changes else None)
+                elif changes or use_key:
                     stereo = _to_stereo(block)
                     full = np.vstack([stereo, _to_stereo(key)]) if use_key else stereo
 
@@ -1331,6 +1443,25 @@ class Slot:
             except Exception:
                 pass
 
+    def _native_changes(self, changes: List[tuple]) -> List[tuple]:
+        """(Sous self.lock) Mêmes règles que _apply_changes (geste en cours dans la fenêtre :
+        il garde la main), mais rendus à l'hôte natif avec leur décalage au lieu d'être posés."""
+        h = self._cpp if self._cpp is not None else self._handles_now()
+        self._cpp = h
+        out = []
+        for idx, off, value in changes:
+            name = self.auto_keys[idx] if 0 <= idx < len(self.auto_keys) else None
+            cp = h.get(name) if name else None
+            if cp is None:
+                continue
+            if self.watching and self.watch.held(name):
+                self.auto_skipped += 1
+                continue
+            out.append((cp, int(off), float(value)))
+            self.watch.note(name, float(value))
+            self.auto_applied += 1
+        return out
+
     def carry_changes(self, changes: List[tuple]):
         """Bloc jeté (file pleine) : ses réglages sont posés au début du bloc suivant."""
         if changes:
@@ -1375,6 +1506,15 @@ class Slot:
                 for name in names[:64]:
                     cp = h.get(name)
                     if cp is None:
+                        continue
+                    if isinstance(cp, vst_native.NativeCppParam):
+                        # Hôte natif : tous les pas en un aller-retour.
+                        try:
+                            got = cp._plugin._texts([(cp.host_index, vst_native.f32(i / steps)) for i in range(steps + 1)])
+                            out[name] = [t if ok else vst_native._fallback_text(vst_native.f32(i / steps))
+                                         for i, (ok, t) in enumerate(got)]
+                        except Exception:
+                            out[name] = [""] * (steps + 1)
                         continue
                     texts = []
                     for i in range(steps + 1):
@@ -1617,7 +1757,18 @@ def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], stat
             k = _to_stereo(key)
             ksrc = np.zeros((2, total), np.float32)
             ksrc[:, :min(total, k.shape[1])] = k[:, :total]
-        for start, end, todo in vst_automation.render_chunks(total, events, chunk):
+        native = isinstance(plugin, vst_native.NativePlugin)
+        if native:
+            # Hôte natif : tout le son en un appel (sous-blocs de RENDER_BLOCK comme pedalboard),
+            # automation par IParameterChanges à l'échantillon près, clé sur le bus side-chain ;
+            # la latence est retenue au début puis vidée par du silence (comme ci-dessous).
+            changes = [(handles[name], f, v) for f, name, v in events if name in handles]
+            out = np.asarray(process(plugin, src, sr, RENDER_BLOCK, key=ksrc if use_key else None,
+                                     changes=changes or None), np.float32)
+            if out.shape[-1]:
+                parts.append(_to_stereo(out))
+                got += out.shape[-1]
+        for start, end, todo in ([] if native else vst_automation.render_chunks(total, events, chunk)):
             for _f, name, value in todo:
                 cp = handles.get(name)
                 if cp is not None:
@@ -1634,7 +1785,8 @@ def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], stat
                 got += out.shape[-1]
         flush = 0
         while got < total and flush < 64:  # au plus ~11 s de latence à vider
-            out = np.asarray(process(plugin, np.zeros((2, chunk), np.float32), sr, RENDER_BLOCK), np.float32)
+            zk = np.zeros((2, chunk), np.float32) if (native and use_key) else None
+            out = np.asarray(process(plugin, np.zeros((2, chunk), np.float32), sr, RENDER_BLOCK, key=zk), np.float32)
             flush += 1
             if out.shape[-1]:
                 parts.append(_to_stereo(out))
