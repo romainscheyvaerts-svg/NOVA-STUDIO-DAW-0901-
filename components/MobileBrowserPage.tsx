@@ -78,7 +78,7 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
             className={`py-4 rounded-xl text-xs font-black uppercase transition-all flex flex-col items-center gap-2 ${
               activeTab === 'STORE'
                 ? 'bg-cyan-500 text-black'
-                : 'bg-[#14161a] text-slate-500'
+                : 'bg-nv-surface text-slate-500'
             }`}
           >
             <i className="fas fa-store text-lg"></i>
@@ -89,7 +89,7 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
             className={`py-4 rounded-xl text-xs font-black uppercase transition-all flex flex-col items-center gap-2 ${
               activeTab === 'FX'
                 ? 'bg-cyan-500 text-black'
-                : 'bg-[#14161a] text-slate-500'
+                : 'bg-nv-surface text-slate-500'
             }`}
           >
             <i className="fas fa-atom text-lg"></i>
@@ -120,7 +120,7 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
                 placeholder="Chercher un effet..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-[#14161a] border border-white/10 rounded-xl pl-11 pr-4 py-3 text-white placeholder-slate-600 focus:border-cyan-500/50 focus:outline-none text-sm"
+                className="w-full bg-nv-surface border border-white/10 rounded-xl pl-11 pr-4 py-3 text-white placeholder-slate-600 focus:border-cyan-500/50 focus:outline-none text-sm"
               />
             </div>
 
@@ -133,7 +133,7 @@ const MobileBrowserPage: React.FC<MobileBrowserPageProps> = ({
                 <button
                   key={plugin.id}
                   onClick={() => handleAddPlugin(plugin.id as PluginType)}
-                  className="w-full bg-[#14161a] rounded-xl p-4 border border-white/10 hover:border-cyan-500/30 hover:bg-white/5 transition-all active:scale-95 flex items-center gap-3"
+                  className="w-full bg-nv-surface rounded-xl p-4 border border-white/10 hover:border-cyan-500/30 hover:bg-white/5 transition-all active:scale-95 flex items-center gap-3"
                 >
                   <div
                     className="w-11 h-11 rounded-xl flex items-center justify-center text-lg border"

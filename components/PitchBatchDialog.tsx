@@ -88,7 +88,7 @@ const PitchBatchDialog: React.FC<Props> = ({ open, targets, tracks, projectKey, 
   const pct = busy ? Math.round((busy.done / Math.max(1, busy.total)) * 100) : 0;
   return (
     <div className="fixed inset-0 z-[720] flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="pitch-batch-title" onClick={busy ? undefined : close}>
-      <div className="w-full max-w-lg rounded-t-2xl border border-white/10 bg-[#121418] p-5 shadow-2xl sm:rounded-2xl" onClick={e => e.stopPropagation()} data-testid="pitch-batch">
+      <div className="w-full max-w-lg rounded-t-2xl border border-white/10 bg-nv-surface p-5 shadow-2xl sm:rounded-2xl" onClick={e => e.stopPropagation()} data-testid="pitch-batch">
         <div className="mb-3 flex items-start gap-3">
           <div className="mr-auto min-w-0">
             <h2 id="pitch-batch-title" className="text-[16px] font-black text-white">🎯 Justesse : corriger tout ({ok.length} clip{ok.length > 1 ? 's' : ''})</h2>

@@ -9,7 +9,7 @@ et un résumé JSON `<code>_<phase>.json`. Navigateur headless : aucune fenêtre
 import json, os, re, sys, time
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-audit-corrections")
-from qalib import launch, new_page, shot, OUT, Log  # noqa: E402
+from qalib import launch, new_page, shot, OUT, Log, menu_open_for  # noqa: E402
 from scenarios import open_studio, visible, body, btn, close_welcome, do_take, wait_text_gone  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -422,6 +422,7 @@ def f4(b, R):
     R["annulable"] = "Couplet 1" not in pg.evaluate(noms)
     # Le menu du clip (fondus) reste accessible au clic droit.
     pg.mouse.click(x0, rec["y"] + 60, button="right"); pg.wait_for_timeout(500)
+    menu_open_for(pg, "Fondus")  # menu du clip regroupé : sous-menu « Gain et fondus »
     R["menu_clic_droit"] = pg.locator("[data-testid=fade-in-10ms]").count() > 0
     S(pg, "f4", "03_clic_droit_menu")
     pg.keyboard.press("Escape")

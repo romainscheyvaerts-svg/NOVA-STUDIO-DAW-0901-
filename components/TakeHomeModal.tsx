@@ -62,7 +62,7 @@ const TakeHomeModal: React.FC<Props> = ({ open, onClose, session, progress, erro
 
   return (
     <div className="fixed inset-0 z-[650] flex items-end sm:items-center justify-center bg-black/70 p-4" onClick={() => !busy && onClose()} role="dialog" aria-modal="true" aria-labelledby="takehome-title">
-      <div className="w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#121418] p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-3xl border border-white/10 bg-nv-surface p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <h2 id="takehome-title" className="text-lg font-black text-white">🏠 Emporter la session</h2>

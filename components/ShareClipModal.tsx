@@ -61,7 +61,7 @@ const ShareClipModal: React.FC<ShareClipModalProps> = ({ open, onClose, state, o
   const btn = 'w-full rounded-2xl border p-4 text-left transition-all active:scale-[0.99] disabled:opacity-40';
   return (
     <div className="fixed inset-0 z-[640] flex items-end sm:items-center justify-center bg-black/70 p-4" onClick={() => !busy && onClose()} role="dialog" aria-modal="true" aria-labelledby="share-title">
-      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#121418] p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-nv-surface p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <h2 id="share-title" className="text-lg font-black text-white">📲 Fais écouter ton son</h2>

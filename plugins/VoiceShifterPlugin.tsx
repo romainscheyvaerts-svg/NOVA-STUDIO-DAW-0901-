@@ -21,7 +21,7 @@ export const NovaVoiceShifterUI: React.FC<{ node: any; initialParams: any; onPar
     : `${p.pitch < 0 ? 'Plus grave' : 'Plus aiguë'} de ${Math.abs(p.pitch).toFixed(1).replace('.', ',').replace(/,0$/, '')} demi-ton${Math.abs(p.pitch) >= 2 ? 's' : ''}${linked ? ', timbre lié (bande accélérée / ralentie)' : ', timbre naturel'}.`;
 
   return (
-    <V21Shell type="VOICESHIFT" title="Voix grave / aiguë" accent="text-violet-400" node={node} gradient="bg-gradient-to-b from-[#15122a] to-[#0b0a12]"
+    <V21Shell type="VOICESHIFT" title="Voix grave / aiguë" accent="text-violet-400" node={node} gradient="bg-gradient-to-b from-[#15122a] to-nv-bg"
       subtitle="Hauteur et formant séparés : voix de démon, chipmunk ou timbre seul (comme le Vocal Transformer de Logic ou Little AlterBoy)">
       <V21Presets presets={VOICESHIFT_PRESETS} current={p} onApply={pr => set(pr.params as any)} color="bg-violet-400" />
       <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-white/[0.04] border border-white/10 px-3 py-2">

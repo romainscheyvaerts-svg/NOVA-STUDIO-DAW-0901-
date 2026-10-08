@@ -1,0 +1,922 @@
+{
+  "format": "novatemplate",
+  "version": 1,
+  "id": "tpl-make-music-voix",
+  "name": "Session voix · Make Music",
+  "description": "La séance voix du studio Make Music, prête à enregistrer : voix lead, double et backs (coupe-bas 80 Hz sur la lead ; 200 Hz + coupe-haut 15 kHz sur double et backs ; compresseur opto 2:1 ; de-esser 8 kHz) → bus voix (2e étage 2:1) ; retours Reverb courte, Reverb longue et Écho 1/4 ; master avec Master Nova. Seulement des effets NOVA : marche partout, sur le site comme dans Nova Studio.",
+  "createdAt": 1791489594657,
+  "updatedAt": 1791489594657,
+  "source": {
+    "kind": "spec",
+    "from": "Règles de mix du studio Make Music (08/10/2026)"
+  },
+  "keepClips": false,
+  "session": {
+    "timeSignature": {
+      "numerator": 4,
+      "denominator": 4
+    },
+    "isDelayCompEnabled": true,
+    "tracks": [
+      {
+        "id": "instrumental",
+        "name": "Beat",
+        "type": "AUDIO",
+        "color": "#eab308",
+        "isMuted": false,
+        "isSolo": false,
+        "volume": 0.7079,
+        "pan": 0,
+        "outputTrackId": "master",
+        "sends": [],
+        "plugins": []
+      },
+      {
+        "id": "voix-lead",
+        "name": "Voix lead",
+        "type": "AUDIO",
+        "color": "#3b82f6",
+        "isMuted": false,
+        "isSolo": false,
+        "volume": 1,
+        "pan": 0,
+        "outputTrackId": "bus-vox",
+        "sends": [
+          {
+            "id": "send-delay",
+            "level": 0.12589254117941673,
+            "isEnabled": true,
+            "slot": 0
+          },
+          {
+            "id": "send-verb-short",
+            "level": 0.19952623149688797,
+            "isEnabled": true,
+            "slot": 1
+          },
+          {
+            "id": "send-verb-long",
+            "level": 0.07943282347242814,
+            "isEnabled": true,
+            "slot": 2
+          }
+        ],
+        "plugins": [
+          {
+            "id": "pl-voix-lead-1",
+            "name": "EQ · coupe-bas 80 Hz",
+            "type": "PROEQ12",
+            "isEnabled": true,
+            "params": {
+              "isEnabled": true,
+              "masterGain": 1,
+              "bands": [
+                {
+                  "id": 0,
+                  "type": "highpass",
+                  "frequency": 80,
+                  "gain": 0,
+                  "q": 0.707,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 1,
+                  "type": "peaking",
+                  "frequency": 150,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 2,
+                  "type": "peaking",
+                  "frequency": 300,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 3,
+                  "type": "peaking",
+                  "frequency": 500,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 4,
+                  "type": "peaking",
+                  "frequency": 1000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 5,
+                  "type": "peaking",
+                  "frequency": 2000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 6,
+                  "type": "peaking",
+                  "frequency": 4000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 7,
+                  "type": "peaking",
+                  "frequency": 6000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 8,
+                  "type": "peaking",
+                  "frequency": 8000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 9,
+                  "type": "peaking",
+                  "frequency": 10000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 10,
+                  "type": "peaking",
+                  "frequency": 12000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 11,
+                  "type": "lowpass",
+                  "frequency": 18000,
+                  "gain": 0,
+                  "q": 0.707,
+                  "isEnabled": false,
+                  "isSolo": false
+                }
+              ],
+              "name": "EQ · coupe-bas 80 Hz"
+            },
+            "latency": 0
+          },
+          {
+            "id": "pl-voix-lead-2",
+            "name": "Opto Vintage · 2:1",
+            "type": "OPTO_VINTAGE",
+            "isEnabled": true,
+            "params": {
+              "isEnabled": true,
+              "name": "Opto Vintage · 2:1",
+              "threshold": -30,
+              "ratio": 2,
+              "attack": 3,
+              "release": 3,
+              "mode": 1,
+              "output": 0,
+              "mix": 100,
+              "scLowCut": 80,
+              "vintage": 0
+            },
+            "latency": 0
+          },
+          {
+            "id": "pl-voix-lead-3",
+            "name": "De-esser · 8 kHz",
+            "type": "DEESSER",
+            "isEnabled": true,
+            "params": {
+              "threshold": -30,
+              "frequency": 8000,
+              "q": 1,
+              "reduction": 0.6,
+              "mode": "BELL",
+              "isEnabled": true,
+              "detection": "RELATIVE",
+              "relThreshold": -6,
+              "listen": 0,
+              "name": "De-esser · 8 kHz"
+            },
+            "latency": 0
+          }
+        ]
+      },
+      {
+        "id": "voix-double",
+        "name": "Voix double",
+        "type": "AUDIO",
+        "color": "#60a5fa",
+        "isMuted": false,
+        "isSolo": false,
+        "volume": 0.5012,
+        "pan": 0,
+        "outputTrackId": "bus-vox",
+        "sends": [
+          {
+            "id": "send-delay",
+            "level": 0,
+            "isEnabled": true,
+            "slot": 0
+          },
+          {
+            "id": "send-verb-short",
+            "level": 0.12589254117941673,
+            "isEnabled": true,
+            "slot": 1
+          },
+          {
+            "id": "send-verb-long",
+            "level": 0,
+            "isEnabled": true,
+            "slot": 2
+          }
+        ],
+        "plugins": [
+          {
+            "id": "pl-voix-double-1",
+            "name": "EQ · 200 Hz – 15 kHz",
+            "type": "PROEQ12",
+            "isEnabled": true,
+            "params": {
+              "isEnabled": true,
+              "masterGain": 1,
+              "bands": [
+                {
+                  "id": 0,
+                  "type": "highpass",
+                  "frequency": 200,
+                  "gain": 0,
+                  "q": 0.707,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 1,
+                  "type": "peaking",
+                  "frequency": 300,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 2,
+                  "type": "peaking",
+                  "frequency": 500,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 3,
+                  "type": "peaking",
+                  "frequency": 800,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 4,
+                  "type": "peaking",
+                  "frequency": 1000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 5,
+                  "type": "peaking",
+                  "frequency": 2000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 6,
+                  "type": "peaking",
+                  "frequency": 4000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 7,
+                  "type": "peaking",
+                  "frequency": 6000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 8,
+                  "type": "peaking",
+                  "frequency": 8000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 9,
+                  "type": "peaking",
+                  "frequency": 10000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 10,
+                  "type": "peaking",
+                  "frequency": 12000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 11,
+                  "type": "lowpass",
+                  "frequency": 15000,
+                  "gain": 0,
+                  "q": 0.707,
+                  "isEnabled": true,
+                  "isSolo": false
+                }
+              ],
+              "name": "EQ · 200 Hz – 15 kHz"
+            },
+            "latency": 0
+          },
+          {
+            "id": "pl-voix-double-2",
+            "name": "Opto Vintage · 2:1",
+            "type": "OPTO_VINTAGE",
+            "isEnabled": true,
+            "params": {
+              "isEnabled": true,
+              "name": "Opto Vintage · 2:1",
+              "threshold": -30,
+              "ratio": 2,
+              "attack": 3,
+              "release": 3,
+              "mode": 1,
+              "output": 0,
+              "mix": 100,
+              "scLowCut": 80,
+              "vintage": 0
+            },
+            "latency": 0
+          },
+          {
+            "id": "pl-voix-double-3",
+            "name": "De-esser · 8 kHz",
+            "type": "DEESSER",
+            "isEnabled": true,
+            "params": {
+              "threshold": -30,
+              "frequency": 8000,
+              "q": 1,
+              "reduction": 0.6,
+              "mode": "BELL",
+              "isEnabled": true,
+              "detection": "RELATIVE",
+              "relThreshold": -6,
+              "listen": 0,
+              "name": "De-esser · 8 kHz"
+            },
+            "latency": 0
+          }
+        ]
+      },
+      {
+        "id": "backs",
+        "name": "Backs",
+        "type": "AUDIO",
+        "color": "#a855f7",
+        "isMuted": false,
+        "isSolo": false,
+        "volume": 0.3981,
+        "pan": 0,
+        "outputTrackId": "bus-vox",
+        "sends": [
+          {
+            "id": "send-delay",
+            "level": 0,
+            "isEnabled": true,
+            "slot": 0
+          },
+          {
+            "id": "send-verb-short",
+            "level": 0.15848931924611134,
+            "isEnabled": true,
+            "slot": 1
+          },
+          {
+            "id": "send-verb-long",
+            "level": 0.1,
+            "isEnabled": true,
+            "slot": 2
+          }
+        ],
+        "plugins": [
+          {
+            "id": "pl-backs-1",
+            "name": "EQ · 200 Hz – 15 kHz",
+            "type": "PROEQ12",
+            "isEnabled": true,
+            "params": {
+              "isEnabled": true,
+              "masterGain": 1,
+              "bands": [
+                {
+                  "id": 0,
+                  "type": "highpass",
+                  "frequency": 200,
+                  "gain": 0,
+                  "q": 0.707,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 1,
+                  "type": "peaking",
+                  "frequency": 300,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 2,
+                  "type": "peaking",
+                  "frequency": 500,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 3,
+                  "type": "peaking",
+                  "frequency": 800,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 4,
+                  "type": "peaking",
+                  "frequency": 1000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 5,
+                  "type": "peaking",
+                  "frequency": 2000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 6,
+                  "type": "peaking",
+                  "frequency": 4000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 7,
+                  "type": "peaking",
+                  "frequency": 6000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 8,
+                  "type": "peaking",
+                  "frequency": 8000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 9,
+                  "type": "peaking",
+                  "frequency": 10000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 10,
+                  "type": "peaking",
+                  "frequency": 12000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 11,
+                  "type": "lowpass",
+                  "frequency": 15000,
+                  "gain": 0,
+                  "q": 0.707,
+                  "isEnabled": true,
+                  "isSolo": false
+                }
+              ],
+              "name": "EQ · 200 Hz – 15 kHz"
+            },
+            "latency": 0
+          },
+          {
+            "id": "pl-backs-2",
+            "name": "Opto Vintage · 2:1",
+            "type": "OPTO_VINTAGE",
+            "isEnabled": true,
+            "params": {
+              "isEnabled": true,
+              "name": "Opto Vintage · 2:1",
+              "threshold": -30,
+              "ratio": 2,
+              "attack": 3,
+              "release": 3,
+              "mode": 1,
+              "output": 0,
+              "mix": 100,
+              "scLowCut": 80,
+              "vintage": 0
+            },
+            "latency": 0
+          },
+          {
+            "id": "pl-backs-3",
+            "name": "De-esser · 8 kHz",
+            "type": "DEESSER",
+            "isEnabled": true,
+            "params": {
+              "threshold": -30,
+              "frequency": 8000,
+              "q": 1,
+              "reduction": 0.6,
+              "mode": "BELL",
+              "isEnabled": true,
+              "detection": "RELATIVE",
+              "relThreshold": -6,
+              "listen": 0,
+              "name": "De-esser · 8 kHz"
+            },
+            "latency": 0
+          }
+        ]
+      },
+      {
+        "id": "bus-vox",
+        "name": "Bus voix",
+        "type": "BUS",
+        "color": "#fbbf24",
+        "isMuted": false,
+        "isSolo": false,
+        "volume": 1,
+        "pan": 0,
+        "outputTrackId": "master",
+        "sends": [],
+        "plugins": [
+          {
+            "id": "pl-bus-vox-1",
+            "name": "FET 76 · 2:1",
+            "type": "FET76",
+            "isEnabled": true,
+            "params": {
+              "isEnabled": true,
+              "name": "FET 76 · 2:1",
+              "input": -28,
+              "output": -15,
+              "attack": 5,
+              "release": 6,
+              "ratio": 2,
+              "slo": 0,
+              "mix": 100
+            },
+            "latency": 0
+          }
+        ]
+      },
+      {
+        "id": "send-verb-short",
+        "name": "Reverb courte",
+        "type": "SEND",
+        "color": "#10b981",
+        "isMuted": false,
+        "isSolo": false,
+        "volume": 0.7079,
+        "pan": 0,
+        "outputTrackId": "master",
+        "sends": [],
+        "plugins": [
+          {
+            "id": "pl-send-verb-short-1",
+            "name": "Reverb courte (plate)",
+            "type": "REVERB",
+            "isEnabled": true,
+            "params": {
+              "decay": 1.2,
+              "preDelay": 0.02,
+              "damping": 0.4,
+              "mix": 1,
+              "size": 0.4,
+              "mode": "PLATE",
+              "isEnabled": true,
+              "name": "Reverb courte (plate)"
+            },
+            "latency": 0
+          }
+        ]
+      },
+      {
+        "id": "send-verb-long",
+        "name": "Reverb longue",
+        "type": "SEND",
+        "color": "#a855f7",
+        "isMuted": false,
+        "isSolo": false,
+        "volume": 0.6026,
+        "pan": 0,
+        "outputTrackId": "master",
+        "sends": [],
+        "plugins": [
+          {
+            "id": "pl-send-verb-long-1",
+            "name": "Reverb longue (hall)",
+            "type": "REVERB",
+            "isEnabled": true,
+            "params": {
+              "decay": 3.5,
+              "preDelay": 0.05,
+              "damping": 0.4,
+              "mix": 1,
+              "size": 0.9,
+              "mode": "HALL",
+              "isEnabled": true,
+              "name": "Reverb longue (hall)"
+            },
+            "latency": 0
+          }
+        ]
+      },
+      {
+        "id": "send-delay",
+        "name": "Écho 1/4",
+        "type": "SEND",
+        "color": "#00f2ff",
+        "isMuted": false,
+        "isSolo": false,
+        "volume": 0.7943,
+        "pan": 0,
+        "outputTrackId": "master",
+        "sends": [],
+        "plugins": [
+          {
+            "id": "pl-send-delay-1",
+            "name": "Écho 1/4",
+            "type": "DELAY",
+            "isEnabled": true,
+            "params": {
+              "division": "1/4",
+              "feedback": 0.3,
+              "feedbackLP": 5000,
+              "feedbackHP": 150,
+              "mix": 1,
+              "pingPong": false,
+              "bpm": 120,
+              "isEnabled": true,
+              "name": "Écho 1/4"
+            },
+            "latency": 0
+          }
+        ]
+      },
+      {
+        "id": "master",
+        "name": "Master",
+        "type": "BUS",
+        "color": "#00f2ff",
+        "isMuted": false,
+        "isSolo": false,
+        "volume": 1,
+        "pan": 0,
+        "outputTrackId": "",
+        "sends": [],
+        "plugins": [
+          {
+            "id": "pl-master-1",
+            "name": "Master Nova · EQ",
+            "type": "PROEQ12",
+            "isEnabled": true,
+            "params": {
+              "isEnabled": true,
+              "masterGain": 1,
+              "bands": [
+                {
+                  "id": 0,
+                  "type": "highpass",
+                  "frequency": 22,
+                  "gain": 0,
+                  "q": 0.7,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 1,
+                  "type": "lowshelf",
+                  "frequency": 55,
+                  "gain": 0,
+                  "q": 0.7,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 2,
+                  "type": "peaking",
+                  "frequency": 110,
+                  "gain": 0,
+                  "q": 0.8,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 3,
+                  "type": "peaking",
+                  "frequency": 400,
+                  "gain": 0,
+                  "q": 0.7,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 4,
+                  "type": "peaking",
+                  "frequency": 1600,
+                  "gain": 0,
+                  "q": 0.7,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 5,
+                  "type": "peaking",
+                  "frequency": 5000,
+                  "gain": 0,
+                  "q": 0.8,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 6,
+                  "type": "highshelf",
+                  "frequency": 10000,
+                  "gain": 0,
+                  "q": 0.7,
+                  "isEnabled": true,
+                  "isSolo": false
+                },
+                {
+                  "id": 7,
+                  "type": "peaking",
+                  "frequency": 6000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": false,
+                  "isSolo": false
+                },
+                {
+                  "id": 8,
+                  "type": "peaking",
+                  "frequency": 8000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": false,
+                  "isSolo": false
+                },
+                {
+                  "id": 9,
+                  "type": "peaking",
+                  "frequency": 10000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": false,
+                  "isSolo": false
+                },
+                {
+                  "id": 10,
+                  "type": "peaking",
+                  "frequency": 12000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": false,
+                  "isSolo": false
+                },
+                {
+                  "id": 11,
+                  "type": "lowpass",
+                  "frequency": 18000,
+                  "gain": 0,
+                  "q": 1,
+                  "isEnabled": false,
+                  "isSolo": false
+                }
+              ],
+              "name": "Master Nova · EQ",
+              "masterNova": true
+            },
+            "latency": 0
+          },
+          {
+            "id": "pl-master-2",
+            "name": "Master Nova · Compression",
+            "type": "COMPRESSOR",
+            "isEnabled": true,
+            "params": {
+              "threshold": -15,
+              "ratio": 1.5,
+              "knee": 8,
+              "attack": 0.03,
+              "release": 0.2,
+              "makeupGain": 1,
+              "isEnabled": true,
+              "name": "Master Nova · Compression",
+              "masterNova": true,
+              "mix": 1,
+              "scHpFreq": 90,
+              "lookahead": 0,
+              "autoMakeup": false,
+              "mode": "CLEAN"
+            },
+            "latency": 0
+          },
+          {
+            "id": "pl-master-3",
+            "name": "Master Nova · Limiteur",
+            "type": "LIMITER",
+            "isEnabled": true,
+            "params": {
+              "ceiling": -1,
+              "inputGain": 0,
+              "release": 100,
+              "lookahead": 3,
+              "oversample": 4,
+              "isEnabled": true,
+              "name": "Master Nova · Limiteur",
+              "masterNova": true
+            },
+            "latency": 0
+          }
+        ]
+      }
+    ],
+    "trackGroups": []
+  }
+}

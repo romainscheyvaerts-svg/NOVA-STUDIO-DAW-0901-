@@ -172,12 +172,13 @@ def visible_text(page, text):
 
 
 def clip_menu_open(page):
-    return visible_text(page, "Normaliser") > 0 and visible_text(page, "Dupliquer") > 0
+    # Menu du clip regroupé (sous-menus) : « Normaliser » est rangé dans « Gain et fondus ».
+    return visible_text(page, "Diviser") > 0 and visible_text(page, "Dupliquer") > 0
 
 
 def any_menu_open(page):
     return page.evaluate("""() => !![...document.querySelectorAll('[role=menu], .fixed')].find(el => el.getClientRects().length
-      && /Normaliser|Ajouter un marqueur|Créer un pattern|Bypass|Coller/.test(el.innerText || ''))""")
+      && /Normaliser|Diviser|Ajouter un marqueur|Créer un pattern|Bypass|Coller/.test(el.innerText || ''))""")
 
 
 def open_menus(page):
@@ -226,7 +227,7 @@ def scenario_tab_menus(browser, log):
         ok(f"tab · {m} : le clic du lever n'a rien activé (aucune entrée du menu, clip intact)", clips(page) == ref and menu_clicks(page) == m0,
            {"avant": ref["voix"], "apres": clips(page)["voix"], "entrees_cliquees": page.evaluate("() => window.__gestes.menuClicks")})
         ok(f"tab · {m} : un seul arbitre (aucun clic droit simulé sur la zone des pistes)", synth_count(page) == s0, page.evaluate("() => window.__gestes.synth"))
-        ok(f"tab · {m} : un seul menu", page.get_by_text("Normaliser", exact=True).locator("visible=true").count() == 1)
+        ok(f"tab · {m} : un seul menu", page.get_by_text("Diviser", exact=True).locator("visible=true").count() == 1)
         close_menus(page)
         ok(f"tab · {m} : menu refermé par un toucher ailleurs", not clip_menu_open(page))
     # Le menu reste utilisable au doigt : « Dupliquer » ajoute bien un clip.

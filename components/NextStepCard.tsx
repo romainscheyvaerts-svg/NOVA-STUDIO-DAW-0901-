@@ -42,7 +42,7 @@ const NextStepCard: React.FC<NextStepCardProps> = ({ open, trigger, actions, bea
         ? 'inset-x-3 bottom-[calc(8.75rem+env(safe-area-inset-bottom))]'
         : 'right-6 bottom-[13.5rem] w-[340px]'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
     >
-      <div className="rounded-2xl border border-cyan-400/30 bg-[#101318]/95 backdrop-blur-xl shadow-2xl p-3">
+      <div className="rounded-2xl border border-cyan-400/30 bg-nv-surface/95 backdrop-blur-xl shadow-2xl p-3">
         <div className="flex items-start gap-2">
           <div className="flex-1 min-w-0">
             <p className="text-[14px] font-black text-white leading-tight">Ça sonne bien ! Et maintenant ?</p>

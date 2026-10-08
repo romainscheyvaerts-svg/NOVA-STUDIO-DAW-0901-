@@ -113,7 +113,7 @@ const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ plugin, onClose, trac
   }
 
   return (
-    <div className="w-[min(92vw,380px)] bg-[#0f1115] border border-white/10 rounded-2xl p-4 space-y-4" data-vst-window={plugin.id}>
+    <div className="w-[min(92vw,380px)] bg-nv-surface border border-white/10 rounded-2xl p-4 space-y-4" data-vst-window={plugin.id}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest">VST3 de ton PC</div>

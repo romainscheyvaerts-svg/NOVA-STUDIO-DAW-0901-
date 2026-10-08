@@ -4,17 +4,23 @@ import type { Clip, DAWState, Marker, Track } from '../types';
 import { NOVA_WINDOW_EVENT, NovaWindowDetail } from '../utils/novaWindows';
 import { setKeyboardFocus, useKeyboardFocus } from '../utils/keyboardFocus';
 import MemoryLocations from './MemoryLocations';
-import StripSilenceDialog from './StripSilenceDialog';
 import ClipPropsDialog from './ClipPropsDialog';
-import PitchEditor from './PitchEditor';
-import PitchBatchDialog from './PitchBatchDialog';
-import AudioToMidiDialog, { AudioToMidiRequest } from './AudioToMidiDialog';
+import type { AudioToMidiRequest } from './AudioToMidiDialog';
 import AraDialog, { AraApply } from './AraDialog';
-import TrackPresetDialog from './TrackPresetDialog';
-import BounceDialog from './BounceDialog';
-import AudioSuiteDialog from './AudioSuiteDialog';
-import TransposeDialog from './TransposeDialog';
-import WarpMarkers from './WarpMarkers';
+import { lazyWithPreload, MountWhenOpened } from '../utils/lazyPreload';
+
+// Fenêtres d'édition chargées à la demande (paquet principal plus léger), préchargées quand
+// le navigateur est libre (App : preloadWhenIdle) : elles s'ouvrent dans la même image que le clic.
+const StripSilenceDialog = lazyWithPreload(() => import('./StripSilenceDialog'));
+const PitchEditor = lazyWithPreload(() => import('./PitchEditor'));
+const PitchBatchDialog = lazyWithPreload(() => import('./PitchBatchDialog'));
+const AudioToMidiDialog = lazyWithPreload(() => import('./AudioToMidiDialog'));
+const TrackPresetDialog = lazyWithPreload(() => import('./TrackPresetDialog'));
+const BounceDialog = lazyWithPreload(() => import('./BounceDialog'));
+const AudioSuiteDialog = lazyWithPreload(() => import('./AudioSuiteDialog'));
+const TransposeDialog = lazyWithPreload(() => import('./TransposeDialog'));
+const WarpMarkers = lazyWithPreload(() => import('./WarpMarkers'));
+export const PRO_TOOLS_WINDOWS_PRELOAD = [PitchEditor, TrackPresetDialog, StripSilenceDialog, AudioSuiteDialog, TransposeDialog, PitchBatchDialog, AudioToMidiDialog, BounceDialog, WarpMarkers];
 import { editingElastic, elasticBlock, elasticRevertPatch, withDuration, withTempo } from '../utils/clipTranspose';
 import { applyClipPatches, doneMessage, renderElasticClip } from '../services/elasticRender';
 import { audioSuiteRevertPatch, patchClip } from '../utils/clipProcess';
@@ -242,22 +248,22 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
     <>
       <MemoryLocations open={memoryOpen} onClose={() => setMemoryOpen(false)} markers={markers} bpm={bpm}
         onGoTo={onSeek} onAdd={() => onAddMarker(getPlayhead())} onUpdate={onUpdateMarker} onDelete={onDeleteMarker} />
-      <StripSilenceDialog open={!!strip} tracks={tracks} targets={strip?.targets || []} onApply={applyStrip} onClose={() => setStrip(null)} />
+      <MountWhenOpened when={!!strip}><StripSilenceDialog open={!!strip} tracks={tracks} targets={strip?.targets || []} onApply={applyStrip} onClose={() => setStrip(null)} /></MountWhenOpened>
       {propsView}
-      <PitchEditor open={!!pitch} trackId={pitch?.targets?.[0]?.trackId} clipId={pitch?.targets?.[0]?.clipId} tracks={tracks}
-        projectKey={projectKey} projectScale={projectScale} onApply={applyPitch} onClose={() => setPitch(null)} />
-      <PitchBatchDialog open={!!pitchBatch} targets={pitchBatch?.targets || []} tracks={tracks}
-        projectKey={projectKey} projectScale={projectScale} onApply={applyPitchMany} onClose={() => setPitchBatch(null)} />
-      <AudioToMidiDialog request={convert} tracks={tracks} bpm={bpm} beatsPerBar={beatsPerBar} projectKey={projectKey} projectScale={projectScale}
-        setState={setState} onClose={() => setConvert(null)} />
+      <MountWhenOpened when={!!pitch}><PitchEditor open={!!pitch} trackId={pitch?.targets?.[0]?.trackId} clipId={pitch?.targets?.[0]?.clipId} tracks={tracks}
+        projectKey={projectKey} projectScale={projectScale} onApply={applyPitch} onClose={() => setPitch(null)} /></MountWhenOpened>
+      <MountWhenOpened when={!!pitchBatch}><PitchBatchDialog open={!!pitchBatch} targets={pitchBatch?.targets || []} tracks={tracks}
+        projectKey={projectKey} projectScale={projectScale} onApply={applyPitchMany} onClose={() => setPitchBatch(null)} /></MountWhenOpened>
+      <MountWhenOpened when={!!convert}><AudioToMidiDialog request={convert} tracks={tracks} bpm={bpm} beatsPerBar={beatsPerBar} projectKey={projectKey} projectScale={projectScale}
+        setState={setState} onClose={() => setConvert(null)} /></MountWhenOpened>
       <AraDialog open={!!ara} plugin={ara?.name === 'ara-vocalign' ? 'vocalign' : 'melodyne'} trackId={ara?.targets?.[0]?.trackId}
         clipId={ara?.targets?.[0]?.clipId} tracks={tracks} bpm={bpm} onApply={applyAra} onClose={() => setAra(null)} />
-      <TrackPresetDialog open={!!trackPreset} trackId={trackPreset?.trackId} tracks={tracks} setState={setState} onClose={() => setTrackPreset(null)} />
-      <BounceDialog open={!!bounce} mode={bounce?.name === 'print-bus' ? 'bus' : bounce?.bounce?.mode === 'range' ? 'range' : 'commit'} trackId={bounce?.trackId}
-        range={bounce?.range} tracks={tracks} setState={setState} onClose={() => setBounce(null)} />
-      <AudioSuiteDialog open={!!suite} targets={suite?.targets} range={suite?.range} tracks={tracks} setState={setState} onClose={() => setSuite(null)} />
-      <TransposeDialog open={!!transpose} targets={transpose?.targets || []} tracks={tracks} bpm={bpm} simple={!!transpose?.simple} setState={setState} onClose={() => setTranspose(null)} />
-      <WarpMarkers open={!!warp} trackId={warp?.targets?.[0]?.trackId} clipId={warp?.targets?.[0]?.clipId} tracks={tracks} bpm={bpm} setState={setState} onClose={() => setWarp(null)} />
+      <MountWhenOpened when={!!trackPreset}><TrackPresetDialog open={!!trackPreset} trackId={trackPreset?.trackId} tracks={tracks} setState={setState} onClose={() => setTrackPreset(null)} /></MountWhenOpened>
+      <MountWhenOpened when={!!bounce}><BounceDialog open={!!bounce} mode={bounce?.name === 'print-bus' ? 'bus' : bounce?.bounce?.mode === 'range' ? 'range' : 'commit'} trackId={bounce?.trackId}
+        range={bounce?.range} tracks={tracks} setState={setState} onClose={() => setBounce(null)} /></MountWhenOpened>
+      <MountWhenOpened when={!!suite}><AudioSuiteDialog open={!!suite} targets={suite?.targets} range={suite?.range} tracks={tracks} setState={setState} onClose={() => setSuite(null)} /></MountWhenOpened>
+      <MountWhenOpened when={!!transpose}><TransposeDialog open={!!transpose} targets={transpose?.targets || []} tracks={tracks} bpm={bpm} simple={!!transpose?.simple} setState={setState} onClose={() => setTranspose(null)} /></MountWhenOpened>
+      <MountWhenOpened when={!!warp}><WarpMarkers open={!!warp} trackId={warp?.targets?.[0]?.trackId} clipId={warp?.targets?.[0]?.clipId} tracks={tracks} bpm={bpm} setState={setState} onClose={() => setWarp(null)} /></MountWhenOpened>
       {focus && (
         <button type="button" onClick={() => setKeyboardFocus(false)} data-testid="keyboard-focus-badge"
           title="Commands Keyboard Focus actif : une touche = une commande (A, S, D, G, R, T…). Clic ou Ctrl+Alt+1 pour l'arrêter. Ctrl+Espace enregistre."

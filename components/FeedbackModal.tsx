@@ -529,29 +529,5 @@ const FeedbackModal: React.FC<{ open: boolean; initial?: OpenFeedbackOptions; on
 };
 
 /** Monté une fois à la racine : écoute openFeedback() et le raccourci clavier. */
-export const FeedbackHost: React.FC = () => {
-  const [open, setOpen] = useState(false);
-  const [initial, setInitial] = useState<OpenFeedbackOptions | undefined>(undefined);
-  useEffect(() => {
-    const onOpen = (e: Event) => {
-      setInitial({ ...((e as CustomEvent).detail || {}) });
-      setOpen(true);
-      recordAction('feedback:ouvrir');
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (!isFeedbackShortcut(e)) return;
-      // Éditeur de raccourcis en train de capturer une touche : ce n'est pas un signalement.
-      if ((e.target as HTMLElement | null)?.closest?.('[data-keymap-capture]')) return;
-      e.preventDefault(); e.stopPropagation();
-      setOpen(o => { if (!o) { setInitial({}); recordAction('raccourci:nova.feedback'); } return !o; });
-    };
-    window.addEventListener(OPEN_FEEDBACK_EVENT, onOpen);
-    window.addEventListener('keydown', onKey, true);
-    return () => { window.removeEventListener(OPEN_FEEDBACK_EVENT, onOpen); window.removeEventListener('keydown', onKey, true); };
-  }, []);
-  const close = useCallback(() => setOpen(false), []);
-  return <FeedbackModal open={open} initial={initial} onClose={close} />;
-};
-
 export { FEEDBACK_SHORTCUT };
 export default FeedbackModal;

@@ -22,7 +22,7 @@ export const NovaDjFilterUI: React.FC<{ node: any; initialParams: any; onParamsC
   const state = Math.abs(f) <= 0.02 ? 'Ouvert : aucun filtre' : f < 0 ? 'Passe-bas : les aigus s\'en vont' : 'Passe-haut : les basses s\'en vont';
   const cut = m?.cutoff > 0 ? hzText(m.cutoff) : '';
   return (
-    <V21Shell type="DJFILTER" title="Filtre DJ" accent="text-sky-400" node={node} gradient="bg-gradient-to-b from-[#0c1622] to-[#090c10]"
+    <V21Shell type="DJFILTER" title="Filtre DJ" accent="text-sky-400" node={node} gradient="bg-gradient-to-b from-[#0c1622] to-nv-bg"
       subtitle="Un seul bouton : passe-bas à gauche, passe-haut à droite (comme le filtre d'une table DJ, l'Auto Filter de Live ou le DJ Filter de Logic)">
       <V21Presets presets={DJFILTER_PRESETS} current={p} onApply={pr => set(pr.params as any)} color="bg-sky-400" />
       <div className="mb-4 rounded-xl bg-white/[0.04] border border-white/10 p-3" title={dj('filter').hint} data-nova-param="filter">

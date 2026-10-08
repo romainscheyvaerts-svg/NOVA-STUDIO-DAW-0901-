@@ -234,7 +234,7 @@ const ChannelStrip: React.FC<{
       onDragLeave={() => setIsDragOver(false)}
       onDrop={handleDrop}
       data-inactive={track.isInactive ? '1' : undefined}
-      className={`relative flex-shrink-0 bg-[#0c0e12] border-r border-white/5 flex flex-col h-full transition-all touch-manipulation ${isMaster ? 'w-64 border-l-2 border-cyan-500/20' : track.type === TrackType.BUS ? 'w-48 bg-[#14161a]' : 'w-44'} ${isDragOver ? 'bg-cyan-500/20' : ''}`}
+      className={`relative flex-shrink-0 bg-nv-bg border-r border-white/5 flex flex-col h-full [@media(max-height:820px)]:h-auto [@media(max-height:820px)]:min-h-[920px] transition-all touch-manipulation ${isMaster ? 'w-64 border-l-2 border-cyan-500/20' : track.type === TrackType.BUS ? 'w-48 bg-nv-surface' : 'w-44'} ${isDragOver ? 'bg-cyan-500/20' : ''}`}
     >
       
       {!isMaster && <InactiveStripVeil track={track} all={allTracks} />}
@@ -562,6 +562,53 @@ const TrackGroupHeader: React.FC<{
   );
 };
 
+/**
+ * Console de beaucoup de pistes : les tranches hors de l'écran ne sont pas montées
+ * (une tranche = fader, mètres G / D, réduction de gain, inserts, envois : ~60 nœuds
+ * et un mètre animé). À la place, une silhouette de même largeur (couleur, nom) garde
+ * la mise en page, le défilement et l'aimantation ; la vraie tranche se monte dès
+ * qu'elle approche de l'écran (marge de ~3 tranches de chaque côté). Les mètres et la
+ * réduction de gain des tranches montées marchent comme avant ; ceux d'une tranche
+ * hors de l'écran ne dessinent rien (personne ne les voit), le moteur mesure toujours.
+ */
+export const MIXER_VIRTUALIZE_FROM = 16;
+const STRIP_WIDTH = (t: Track) => (t.type === TrackType.BUS ? 192 : 176);
+const STRIP_MARGIN_PX = 600;
+
+const VirtualStrip: React.FC<{
+  track: Track;
+  rootRef: React.RefObject<HTMLDivElement | null>;
+  enabled: boolean;
+  eager: boolean;
+  className?: string;
+  stripId?: string;
+  children: React.ReactNode;
+}> = ({ track, rootRef, enabled, eager, className = 'snap-start', stripId, children }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [near, setNear] = useState(eager || !enabled);
+  useEffect(() => {
+    if (!enabled) { setNear(true); return; }
+    const el = ref.current, root = rootRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') { setNear(true); return; }
+    const io = new IntersectionObserver(entries => { for (const e of entries) setNear(e.isIntersecting); },
+      { root, rootMargin: `0px ${STRIP_MARGIN_PX}px 0px ${STRIP_MARGIN_PX}px`, threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [enabled, rootRef]);
+  const w = STRIP_WIDTH(track);
+  return (
+    <div ref={ref} data-strip-id={stripId ?? track.id} data-strip-mounted={near ? '1' : '0'} className={`${className} relative shrink-0`} style={enabled ? { width: w } : undefined}>
+      {near ? children : (
+        <div className="h-full border-r border-white/5 bg-nv-panel flex flex-col items-center justify-end pb-3 gap-2" style={{ width: w }} aria-hidden="true" data-strip-placeholder="">
+          <div className="w-[30px] flex-1 mt-3 rounded bg-black/30" />
+          <div className="w-full h-1" style={{ backgroundColor: track.color || '#64748b' }} />
+          <span className="max-w-full truncate px-2 text-[10px] font-bold text-slate-400">{track.name}</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const MixerView: React.FC<{ 
   tracks: Track[], 
   onUpdateTrack: (t: Track) => void, 
@@ -594,6 +641,9 @@ const MixerView: React.FC<{
   const sendTracks = tracks.filter(t => t.type === TrackType.SEND && shown.has(t.id));
   const vcaTracks = tracks.filter(t => t.isVca && shown.has(t.id));
   const masterTrack = tracks.find(t => t.id === 'master');
+  const virtual = audioTracks.length + busTracks.length + sendTracks.length >= MIXER_VIRTUALIZE_FROM;
+  // Tranches montées tout de suite (sans attendre l'observateur) : ce que l'écran montre.
+  const eagerCount = Math.ceil((typeof window !== 'undefined' ? window.innerWidth : 1600) / 176) + 2;
 
   // Get selected tracks for grouping
   const [selectedForGroup, setSelectedForGroup] = useState<Set<string>>(new Set());
@@ -632,7 +682,7 @@ const MixerView: React.FC<{
   }, [onUpdateTrack]);
   
   return (
-    <div ref={mixerScrollRef} className="flex-1 flex overflow-x-auto bg-[#08090b] custom-scroll h-full snap-x snap-mandatory">
+    <div ref={mixerScrollRef} className="flex-1 flex overflow-x-auto bg-nv-panel custom-scroll h-full snap-x snap-mandatory [@media(max-height:820px)]:overflow-y-auto [@media(max-height:820px)]:pb-20">
       {/* Track Groups Panel (inspired by Pro Tools) */}
       {trackGroups.length > 0 && (
         <div className="flex border-r border-white/10 bg-black/20">
@@ -654,7 +704,7 @@ const MixerView: React.FC<{
         if (trackGroup?.isCollapsed) return null; // Hide if group is collapsed
         
         return (
-          <div key={t.id} className="snap-start relative">
+          <VirtualStrip key={t.id} track={t} rootRef={mixerScrollRef} enabled={virtual} eager={audioTracks.indexOf(t) < eagerCount}>
             {/* Group color indicator */}
             {trackGroup && (
               <div 
@@ -675,7 +725,7 @@ const MixerView: React.FC<{
               onReorderPlugins={onReorderPlugins}
               sendViewSlot={sendViewSlot}
             />
-          </div>
+          </VirtualStrip>
         );
       })}
       
@@ -706,7 +756,7 @@ const MixerView: React.FC<{
              
              {/* Group Creation Menu */}
              {showGroupMenu && (
-               <div data-testid="group-menu" className="fixed bg-[#1a1c22] border border-white/20 rounded-xl shadow-2xl z-[700] p-3 w-64 flex flex-col"
+               <div data-testid="group-menu" className="fixed bg-nv-raised border border-white/20 rounded-xl shadow-2xl z-[700] p-3 w-64 flex flex-col"
                  style={groupMenuPos(groupBtnRef.current, audioTracks.length)}>
                  <div className="text-[11px] font-bold text-slate-300 mb-1">Créer un groupe</div>
                  <p className="text-[10px] text-slate-500 mb-2">Coche les pistes qui bougent ensemble (volume, muet, solo).</p>
@@ -761,9 +811,9 @@ const MixerView: React.FC<{
          )}
       </div>
 
-      {busTracks.map(t => <div key={t.id} data-strip-id={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} autoRename={renameBusId === t.id} onRenameDone={() => setRenameBusId(null)} onUpdate={(updatedTrack) => onUpdateTrack(updatedTrack)} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} sendViewSlot={sendViewSlot} /></div>)}
+      {busTracks.map(t => <VirtualStrip key={t.id} track={t} rootRef={mixerScrollRef} enabled={virtual && renameBusId !== t.id} eager={!virtual}><ChannelStrip track={t} allTracks={tracks} autoRename={renameBusId === t.id} onRenameDone={() => setRenameBusId(null)} onUpdate={(updatedTrack) => onUpdateTrack(updatedTrack)} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} sendViewSlot={sendViewSlot} /></VirtualStrip>)}
       <div className="w-4 bg-black/30 border-r border-white/5" />
-      {sendTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} sendViewSlot={sendViewSlot} /></div>)}
+      {sendTracks.map(t => <VirtualStrip key={t.id} track={t} rootRef={mixerScrollRef} enabled={virtual} eager={!virtual}><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} sendViewSlot={sendViewSlot} /></VirtualStrip>)}
       {vcaTracks.length > 0 && <div className="w-2 bg-black/30 border-r border-white/5" />}
       {vcaTracks.map(v => <div key={v.id} className="snap-start"><VcaStrip vca={v} all={tracks} /></div>)}
       <div className="w-10 shrink-0 bg-black/50 border-r border-white/5" />

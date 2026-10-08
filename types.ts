@@ -1215,6 +1215,8 @@ export interface ContextMenuItem {
   disabled?: boolean;
   /** Infobulle (ex. l'équivalent dans Logic / FL Studio). */
   title?: string;
+  /** Sous-menu (un niveau) : l'entrée l'ouvre au survol, au clic / doigt ou avec →. */
+  submenu?: (ContextMenuItem | 'separator')[];
 }
 
 export type AIChatRole = 'user' | 'assistant' | 'system';

@@ -23,7 +23,7 @@ export const NovaGateFxUI: React.FC<{ node: any; initialParams: any; onParamsCha
   };
 
   return (
-    <V21Shell type="GATEFX" title="Gate rythmique" accent="text-fuchsia-400" node={node} gradient="bg-gradient-to-b from-[#1a0f1d] to-[#0c080e]"
+    <V21Shell type="GATEFX" title="Gate rythmique" accent="text-fuchsia-400" node={node} gradient="bg-gradient-to-b from-[#1a0f1d] to-nv-bg"
       subtitle="Motif de 16 pas calé sur le tempo qui hache le son : stutter, half, triolets, pompe (comme Gross Beat dans FL Studio, le Trance Gate ou ShaperBox)">
       <V21Presets presets={GATEFX_PRESETS} current={p} onApply={pr => set(pr.params as any)} color="bg-fuchsia-400" />
       <div className="mb-1 flex items-baseline justify-between">

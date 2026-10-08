@@ -10,7 +10,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { installGlobalErrorLog } from './utils/errorLog';
 import { installActionLog, installConsoleRing } from './utils/feedbackLog';
 import { startFeedbackQueue } from './services/feedback';
-import { FeedbackHost } from './components/FeedbackModal';
+import { FeedbackHost } from './components/FeedbackHost';
 import { themeStore } from './utils/themeStore';
 
 // Tampon des 30 dernières erreurs et des 20 dernières actions (anonymes), joint

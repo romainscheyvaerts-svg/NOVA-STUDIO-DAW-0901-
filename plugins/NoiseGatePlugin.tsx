@@ -15,7 +15,7 @@ export const NovaNoiseGateUI: React.FC<{ node: any; initialParams: any; onParams
   const open = !!m?.open;
   const keyed = !!m?.keyOn;
   return (
-    <V21Shell type="GATE" title="Gate" accent="text-emerald-400" node={node} gradient="bg-gradient-to-b from-[#0d1a14] to-[#080c0a]"
+    <V21Shell type="GATE" title="Gate" accent="text-emerald-400" node={node} gradient="bg-gradient-to-b from-[#0d1a14] to-nv-panel"
       subtitle="Porte de bruit / expandeur : coupe le son sous le seuil. Avec une clé, il s’ouvre au rythme d’une autre piste (Dyn3 Expander/Gate de Pro Tools, Gate d’Ableton)">
       <div className="mb-3 flex items-center gap-2" aria-live="polite">
         <span className={`inline-block w-3 h-3 rounded-full ${open ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-slate-600'}`} />

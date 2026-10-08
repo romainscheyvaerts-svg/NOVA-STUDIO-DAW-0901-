@@ -462,10 +462,10 @@ const SpreaderKnob: React.FC<{ label: string, value: number, onChange: (v: numbe
   
   return (
     <div className="flex flex-col items-center space-y-2 group touch-none select-none">
-      <div {...knob.bind} className="relative w-12 h-12 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-cyan-500/50 transition-all shadow-xl">
+      <div {...knob.bind} className="relative w-12 h-12 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-cyan-500/50 transition-all shadow-xl">
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full transition-transform duration-75" style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: color, boxShadow: `0 0 8px ${color}` }} />
-        <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />
+        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
       </div>
       <div className="text-center">
         <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>
@@ -594,7 +594,7 @@ export const StereoSpreaderUI: React.FC<{ node: StereoSpreaderNode, initialParam
   };
 
   return (
-    <div className="w-[560px] bg-[#0c0d10] border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
+    <div className="w-[560px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div className="flex items-center space-x-4">

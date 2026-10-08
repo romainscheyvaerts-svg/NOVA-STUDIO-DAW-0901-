@@ -28,9 +28,17 @@ export interface ExportJob {
 type Runner = (onProgress: (pct: number, text: string) => void) => Promise<ExportResult>;
 type Listener = (jobs: ExportJob[]) => void;
 
-/** Le navigateur n'autorise le partage (iPhone, Android) qu'après un geste : pas d'enregistrement automatique sur écran tactile. */
+/**
+ * Le navigateur n'autorise le partage (iPhone, Android) qu'après un geste : sur écran tactile,
+ * enregistrement automatique seulement si le geste « Exporter » est encore frais (activation
+ * transitoire, ~5 s : une démo courte) ; sinon le bouton « Télécharger » (un toucher de plus).
+ */
 const autoSaveAllowed = () => {
-  try { return !(typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches); } catch { return true; }
+  try {
+    const coarse = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
+    if (!coarse) return true;
+    return !!(navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive;
+  } catch { return true; }
 };
 
 /** Appli Windows : elle sait montrer le fichier téléchargé dans l'Explorateur. */

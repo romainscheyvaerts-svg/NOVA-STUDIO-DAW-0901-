@@ -303,7 +303,7 @@ const AraDialog: React.FC<Props> = ({ open, plugin, trackId, clipId, tracks, bpm
 
   return (
     <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="ara-title" data-testid={`ara-dialog-${plugin}`}>
-      <div className="w-full max-w-[560px] rounded-2xl border border-white/10 bg-[#15171d] p-5 shadow-2xl">
+      <div className="w-full max-w-[560px] rounded-2xl border border-white/10 bg-nv-surface p-5 shadow-2xl">
         <div className="mb-3 flex items-center gap-2">
           <h2 id="ara-title" className="mr-auto text-[15px] font-black text-white">
             {plugin === 'melodyne' ? `🎛️ Melodyne : ${clip.name}` : `🎙️ Aligner avec VocAlign`}<Badge />

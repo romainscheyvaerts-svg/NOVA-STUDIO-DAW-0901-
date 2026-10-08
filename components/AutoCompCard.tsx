@@ -23,7 +23,7 @@ const AutoCompCard: React.FC<{ proposal: AutoCompProposal | null; onKeep: () => 
   const ranking = Object.entries(proposal.takeScores).map(([n, s]) => ({ n: Number(n), s })).sort((a, b) => b.s.total - a.s.total);
   return (
     <div data-auto-comp role="dialog" aria-label="Meilleure prise proposée par l'IA"
-      className="fixed z-[560] left-1/2 -translate-x-1/2 bottom-24 w-[min(560px,calc(100vw-24px))] rounded-2xl border border-cyan-400/40 bg-[#101318]/95 backdrop-blur shadow-2xl p-4">
+      className="fixed z-[560] left-1/2 -translate-x-1/2 bottom-24 w-[min(560px,calc(100vw-24px))] rounded-2xl border border-cyan-400/40 bg-nv-surface/95 backdrop-blur shadow-2xl p-4">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-[14px] font-black text-white">✨ Meilleure prise — {proposal.trackName}</p>

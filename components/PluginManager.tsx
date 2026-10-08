@@ -185,8 +185,8 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onClose, onPluginsDiscove
         onChange={handleFileInputChange} 
       />
 
-      <div className="w-full max-w-5xl bg-[#0d1014] border border-cyan-500/40 rounded-[40px] overflow-hidden shadow-[0_0_150px_rgba(6,182,212,0.15)] flex flex-col h-[800px]">
-        <div className="p-10 border-b border-white/5 flex justify-between items-center bg-gradient-to-br from-[#13171d] to-[#0d1014]">
+      <div className="w-full max-w-5xl bg-nv-bg border border-cyan-500/40 rounded-[40px] overflow-hidden shadow-[0_0_150px_rgba(6,182,212,0.15)] flex flex-col h-[800px]">
+        <div className="p-10 border-b border-white/5 flex justify-between items-center bg-gradient-to-br from-nv-surface to-nv-bg">
           <div className="flex items-center space-x-6">
             <div className="w-16 h-16 rounded-[24px] bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-2xl shadow-cyan-500/20">
               <i className="fas fa-microchip text-2xl animate-pulse"></i>
@@ -293,7 +293,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onClose, onPluginsDiscove
           )}
         </div>
 
-        <div className="p-10 bg-[#0a0d11] border-t border-white/5 flex justify-between items-center">
+        <div className="p-10 bg-nv-bg border-t border-white/5 flex justify-between items-center">
            <div className="flex space-x-12">
               <div className="flex flex-col">
                 <span className="text-[10px] text-slate-600 font-black uppercase tracking-widest">Plugins Détectés</span>

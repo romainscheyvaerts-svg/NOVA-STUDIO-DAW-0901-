@@ -35,7 +35,7 @@ const WelcomeSteps: React.FC<WelcomeStepsProps> = ({ open, beatLoaded: loadedNow
   return (
     <div className="fixed inset-0 z-[650] flex items-end sm:items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
       {/* Téléphone en paysage : la carte dépassait, « C'est parti » était hors écran */}
-      <div className="w-full max-w-md max-h-full overflow-y-auto overscroll-contain rounded-3xl border border-white/10 bg-[#121418] p-6 shadow-2xl">
+      <div className="w-full max-w-md max-h-full overflow-y-auto overscroll-contain rounded-3xl border border-white/10 bg-nv-surface p-6 shadow-2xl">
         <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-cyan-300">Nova Studio · Make Music</p>
         <h2 id="welcome-title" className="mt-2 text-2xl font-black text-white">{beatmaking ? 'Ton beat, en 3 gestes' : 'Ta voix sur nos beats, en 3 gestes'}</h2>
         <ol className="mt-5 space-y-3">

@@ -106,7 +106,7 @@ const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurcha
   const { simple } = useSimpleMode();
   const activeTab = simple ? 'STORE' : tabChoisi;
   return (
-    <div className="w-80 h-full flex flex-col bg-[#0c0d10] border-r border-white/5 shadow-2xl">
+    <div className="w-80 h-full flex flex-col bg-nv-bg border-r border-white/5 shadow-2xl">
       {/* Tab Bar — VST : plugins du PC via le pont local (ordinateur seulement :
           ce panneau n'est pas affiché sur téléphone). */}
       {!simple && <div className="grid grid-cols-3 gap-1 p-2 bg-black/40 border-b border-white/5 shrink-0">

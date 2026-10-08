@@ -304,12 +304,12 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
   ];
 
   const containerClass = isMobile 
-    ? "fixed inset-0 z-[50] bg-[#0c0d10] flex flex-col pb-20"
+    ? "fixed inset-0 z-[50] bg-nv-bg flex flex-col pb-20"
     : "fixed bottom-6 right-6 z-[500] flex flex-col items-end";
 
   const windowClass = isMobile
     ? "w-full h-full flex flex-col"
-    : "w-[440px] h-[min(600px,calc(100vh-140px))] bg-[#0c0d10]/90 border border-cyan-500/20 rounded-[40px] shadow-[0_0_100px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden mb-4 animate-in slide-in-from-bottom-4 duration-500 backdrop-blur-3xl";
+    : "w-[440px] h-[min(600px,calc(100vh-140px))] bg-nv-bg/90 border border-cyan-500/20 rounded-[40px] shadow-[0_0_100px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden mb-4 animate-in slide-in-from-bottom-4 duration-500 backdrop-blur-3xl";
 
   if (isMobile && !isOpen) return null;
 
@@ -320,7 +320,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
           onClick={() => { setToast(null); setIsOpen(true); onRequestOpen?.(); }}
           // Au-dessus du bouton Nova (bas droite) : avant, centré en bas, il cachait « Piste voix / Paroles /
           // Mix auto » pendant 6 s, et passait par-dessus les menus et fenêtres (z 900).
-          className="fixed left-1/2 -translate-x-1/2 bottom-36 md:left-auto md:right-6 md:translate-x-0 md:bottom-28 z-[565] w-[min(520px,calc(100vw-24px))] rounded-2xl border border-cyan-500/30 bg-[#0d1117]/95 px-4 py-3 text-left shadow-2xl backdrop-blur pointer-events-auto">
+          className="fixed left-1/2 -translate-x-1/2 bottom-36 md:left-auto md:right-6 md:translate-x-0 md:bottom-28 z-[565] w-[min(520px,calc(100vw-24px))] rounded-2xl border border-cyan-500/30 bg-nv-surface/95 px-4 py-3 text-left shadow-2xl backdrop-blur pointer-events-auto">
           <span className="block text-[12px] text-slate-100 line-clamp-3">{toast.text}</span>
           {toast.hasChoices && <span className="mt-1 block text-[11px] font-bold text-cyan-300">Voir les propositions de Nova →</span>}
         </button>,
@@ -466,7 +466,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
             )}
           </div>
 
-          <div className="p-6 bg-[#08090b] border-t border-white/5">
+          <div className="p-6 bg-nv-panel border-t border-white/5">
             <div className="relative flex items-center">
               <input 
                 type="text"
@@ -490,7 +490,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       {!isMobile && !isOpen && unread.n > 0 && !projectState?.isRecording && (
         <button type="button" data-testid="nova-tip-pill" onClick={() => setIsOpen(true)}
           title={unread.last} aria-label={`Nova : ${tipPillLabel(unread.n)} (ouvrir)`}
-          className="nova-hit-tactile absolute right-24 bottom-5 h-9 px-3.5 whitespace-nowrap rounded-full border border-cyan-400/40 bg-[#0f1115]/95 text-[12px] font-bold text-cyan-200 shadow-lg hover:bg-cyan-500/15 flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
+          className="nova-hit-tactile absolute right-24 bottom-5 h-9 px-3.5 whitespace-nowrap rounded-full border border-cyan-400/40 bg-nv-surface/95 text-[12px] font-bold text-cyan-200 shadow-lg hover:bg-cyan-500/15 flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
           <i className="fas fa-lightbulb text-[11px] text-amber-300" aria-hidden="true"></i>{tipPillLabel(unread.n)}
         </button>
       )}
@@ -501,7 +501,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
           title={isOpen ? 'Fermer Nova' : 'Nova, ton assistante de studio'}
           aria-expanded={isOpen}
           className={`w-20 h-20 rounded-[32px] flex items-center justify-center shadow-[0_0_50px_rgba(0,242,255,0.2)] transition-all duration-500 hover:scale-110 active:scale-90 group relative ${
-            isOpen ? 'bg-white text-black rotate-90' : 'bg-[#0f1115] border border-cyan-500/30 text-cyan-400'
+            isOpen ? 'bg-white text-black rotate-90' : 'bg-nv-surface border border-cyan-500/30 text-cyan-400'
           }`}
         >
           {isOpen ? <i className="fas fa-chevron-down text-xl"></i> : (

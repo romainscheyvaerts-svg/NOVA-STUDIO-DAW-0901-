@@ -11,7 +11,7 @@
 import {
   canAccessTemplate, newTemplateId, parseTemplate, serializeTemplate, SessionTemplate, TEMPLATE_EXT, templateSlug,
 } from '../utils/sessionTemplate';
-import { privateLabel } from '../config/templateAccess';
+import { privateLabel, TEMPLATE_ACCESS_GROUPS } from '../config/templateAccess';
 
 // ─── Stockage ──────────────────────────────────────────────────────────────────
 
@@ -86,37 +86,57 @@ const userTemplates = async (): Promise<SessionTemplate[]> => {
 
 // ─── Modèles livrés avec l'appli ───────────────────────────────────────────────
 
-type BundledLoader = () => Promise<SessionTemplate[]>;
+type BundledLoader = (email?: string | null) => Promise<SessionTemplate[]>;
 
-const defaultBundled: BundledLoader = async () => {
+/**
+ * Groupe privé annoncé par le nom du fichier livré (« romain-lennon-depart.novatemplate » →
+ * « romain ») : un compte hors du groupe ne télécharge même pas le fichier (le modèle
+ * LENNON pèse 3 Mo). Le contenu reste juge (privateTo, filtré ensuite).
+ */
+export const bundledFileGroup = (path: string): string | null => {
+  const base = path.split('/').pop() || '';
+  const g = Object.keys(TEMPLATE_ACCESS_GROUPS).find(k => base.toLowerCase().startsWith(`${k.toLowerCase()}-`));
+  return g || null;
+};
+
+const defaultBundled: BundledLoader = async (email) => {
   const files = import.meta.glob('../templates/*.novatemplate', { query: '?raw', import: 'default' }) as Record<string, () => Promise<string>>;
   const out: SessionTemplate[] = [];
   for (const [path, load] of Object.entries(files)) {
+    const g = bundledFileGroup(path);
+    if (g && !canAccessTemplate({ privateTo: g }, email ?? null)) continue;
     try { out.push({ ...parseTemplate(await load()), bundled: true }); } catch (e) { console.warn('[Modèles] Modèle livré illisible :', path, e); }
   }
   return out;
 };
 
 let bundledLoader: BundledLoader = defaultBundled;
-let bundledCache: Promise<SessionTemplate[]> | null = null;
+const bundledCache = new Map<string, Promise<SessionTemplate[]>>();
 /** Tests : modèles livrés à utiliser. */
-export const setBundledLoader = (l: BundledLoader | null) => { bundledLoader = l || defaultBundled; bundledCache = null; };
-const bundledTemplates = () => { if (!bundledCache) bundledCache = bundledLoader().catch(() => []); return bundledCache; };
+export const setBundledLoader = (l: BundledLoader | null) => { bundledLoader = l || defaultBundled; bundledCache.clear(); };
+const bundledTemplates = (email?: string | null) => {
+  const key = (email || '').trim().toLowerCase();
+  let p = bundledCache.get(key);
+  if (!p) { p = bundledLoader(email).catch(() => []); bundledCache.set(key, p); }
+  return p;
+};
 
 // ─── API ───────────────────────────────────────────────────────────────────────
 
 /** Modèles visibles par ce compte (e-mail ; null = invité) : livrés d'abord, puis les plus récents. */
 export const listTemplates = async (email: string | null): Promise<SessionTemplate[]> => {
-  const [b, u] = await Promise.all([bundledTemplates(), userTemplates()]);
+  const [b, u] = await Promise.all([bundledTemplates(email), userTemplates()]);
   const user = u.filter(t => !b.some(x => x.id === t.id)).sort((x, y) => y.updatedAt - x.updatedAt);
-  return [...b, ...user].filter(t => canAccessTemplate(t, email));
+  // Livrés : le modèle de tous (« Session voix · Make Music ») d'abord, puis les modèles privés.
+  const shipped = [...b].sort((x, y) => (x.privateTo ? 1 : 0) - (y.privateTo ? 1 : 0) || x.name.localeCompare(y.name, 'fr'));
+  return [...shipped, ...user].filter(t => canAccessTemplate(t, email));
 };
 
 const refused = (t: SessionTemplate) => new Error(`Ce modèle est ${privateLabel(t.privateTo || '?')} : connecte-toi avec le bon compte pour l'utiliser.`);
 
 /** Un modèle, s'il est visible par ce compte. */
 export const getTemplate = async (id: string, email: string | null): Promise<SessionTemplate> => {
-  const [b, u] = await Promise.all([bundledTemplates(), userTemplates()]);
+  const [b, u] = await Promise.all([bundledTemplates(email), userTemplates()]);
   const t = b.find(x => x.id === id) || u.find(x => x.id === id);
   if (!t) throw new Error('Ce modèle n’existe plus sur cet appareil.');
   if (!canAccessTemplate(t, email)) throw refused(t);
@@ -167,7 +187,7 @@ export const exportTemplateFile = (t: SessionTemplate): { blob: Blob; filename: 
 export const importTemplateText = async (text: string, email: string | null): Promise<SessionTemplate> => {
   const t = parseTemplate(text);
   if (!canAccessTemplate(t, email)) throw refused(t);
-  const [b, u] = await Promise.all([bundledTemplates(), userTemplates()]);
+  const [b, u] = await Promise.all([bundledTemplates(email), userTemplates()]);
   const clash = b.some(x => x.id === t.id) || u.some(x => x.id === t.id);
   const now = Date.now();
   const saved: SessionTemplate = { ...t, id: clash ? newTemplateId() : t.id, updatedAt: now, source: { kind: 'import', from: t.source?.from || t.name } };

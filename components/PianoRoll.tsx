@@ -820,7 +820,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
               return (
                 <div 
                     key={padId}
-                    className="flex items-center justify-between px-2 text-[10px] font-bold border-b border-black/20 box-border bg-[#1a1c22] text-slate-400 hover:bg-[#252830] hover:text-white cursor-pointer truncate"
+                    className="flex items-center justify-between px-2 text-[10px] font-bold border-b border-black/20 box-border bg-nv-raised text-slate-400 hover:bg-nv-raised hover:text-white cursor-pointer truncate"
                     style={{ height: currentRowHeight }}
                     onPointerDown={() => playPreview(pitch)}
                 >
@@ -875,7 +875,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
              <div 
                  key={`bg-${pitch}`} 
                  data-hors-gamme-ligne={highlight ? (out ? '1' : '0') : undefined}
-                 className={`absolute left-0 right-0 border-b border-white/[0.03] ${!highlight ? (isBlack ? 'bg-[#0f1115]' : (isAlt ? 'bg-[#1a1c22]' : '')) : ''}`}
+                 className={`absolute left-0 right-0 border-b border-white/[0.03] ${!highlight ? (isBlack ? 'bg-nv-surface' : (isAlt ? 'bg-nv-raised' : '')) : ''}`}
                  style={{ top: i * currentRowHeight, height: currentRowHeight, background: bg }}
              />
          );
@@ -895,11 +895,11 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   }, [isDrumMode, foldOn]);
 
   return (
-    <div data-nova-pianoroll="" className="w-full h-full flex flex-col bg-[#14161a] select-none text-white font-inter">
+    <div data-nova-pianoroll="" className="w-full h-full flex flex-col bg-nv-surface select-none text-white font-inter">
        {/* TOOLBAR (Enhanced with Quantize and Actions) */}
        {/* Barre d'outils : la partie centrale défile si elle manque de place, mais le bouton
            Fermer reste toujours visible à droite (avant, il sortait de l'écran dès 1600 px). */}
-       <div className="h-14 border-b border-white/10 flex items-center gap-2 px-4 bg-[#0c0d10] shrink-0">
+       <div className="h-14 border-b border-white/10 flex items-center gap-2 px-4 bg-nv-bg shrink-0">
        <div className="flex-1 min-w-0 h-full flex items-center justify-between gap-4 overflow-x-auto no-scrollbar">
           <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="md:hidden shrink-0 w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center"><i className="fas fa-times"></i></button>
           <div className="flex items-center space-x-4 shrink-0">
@@ -1132,7 +1132,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
 
        {/* Bandeau d'état : clavier de l'ordinateur, accord posé, gamme */}
        {!isDrumMode && (kbOn || lastChord || chordKind) && (
-         <div data-nova-roll="bandeau" className="shrink-0 min-h-8 px-4 py-1 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-white/10 bg-[#101216] text-[11px] text-slate-300">
+         <div data-nova-roll="bandeau" className="shrink-0 min-h-8 px-4 py-1 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-white/10 bg-nv-surface text-[11px] text-slate-300">
            {kbOn && (
              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                <span className="text-cyan-300 font-bold"><i className="fas fa-keyboard mr-1"></i>Joue avec les lettres</span>
@@ -1157,7 +1157,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
        {showQuantizeMenu && (
          <>
            <div className="fixed inset-0 z-[290]" onPointerDown={() => setShowQuantizeMenu(false)} />
-                  <div data-nova-roll-menu="quantize" role="dialog" aria-label="Quantification" className="fixed z-[300] bg-[#1a1c22] border border-white/20 rounded-xl shadow-2xl p-3 w-56" style={{ left: quantPos.x, top: quantPos.y }}>
+                  <div data-nova-roll-menu="quantize" role="dialog" aria-label="Quantification" className="fixed z-[300] bg-nv-raised border border-white/20 rounded-xl shadow-2xl p-3 w-56" style={{ left: quantPos.x, top: quantPos.y }}>
                     <div className="text-[9px] font-black uppercase text-slate-400 mb-2">Grille de quantification</div>
                     <div className="grid grid-cols-3 gap-1 mb-3">
                       {QUANTIZE_VALUES.map(q => (
@@ -1202,7 +1202,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
          <>
            <div className="fixed inset-0 z-[290]" onPointerDown={() => setMenu(null)} />
            <div role="dialog" aria-label={menu.kind === 'scale' ? 'Gamme du morceau' : 'Outil accords'} data-nova-roll-menu={menu.kind}
-             className="fixed z-[300] w-72 max-h-[70vh] overflow-y-auto rounded-xl border border-white/15 bg-[#1a1c22] p-3 shadow-2xl text-[11px] text-slate-200"
+             className="fixed z-[300] w-72 max-h-[70vh] overflow-y-auto rounded-xl border border-white/15 bg-nv-raised p-3 shadow-2xl text-[11px] text-slate-200"
              style={{ left: menu.x, top: menu.y }}>
              {menu.kind === 'scale' ? (
                <div className="space-y-3">
@@ -1258,7 +1258,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
           <div className="flex-1 flex overflow-hidden relative" style={{ minHeight: '70%' }}>
               
               {/* SIDEBAR (Keys or Pads) */}
-              <div ref={keysRef} className={`flex-shrink-0 bg-[#0c0d10] border-r border-white/10 overflow-hidden relative z-20 shadow-xl no-scrollbar ${isDrumMode ? 'w-32' : 'w-16'}`}>
+              <div ref={keysRef} className={`flex-shrink-0 bg-nv-bg border-r border-white/10 overflow-hidden relative z-20 shadow-xl no-scrollbar ${isDrumMode ? 'w-32' : 'w-16'}`}>
                  <div style={{ height: totalRows * currentRowHeight, position: 'relative' }}>
                     {renderKeys()}
                  </div>
@@ -1267,7 +1267,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
               {/* GRID */}
               <div 
                  ref={containerRef}
-                 className="flex-1 overflow-auto bg-[#14161a] relative cursor-crosshair custom-scroll"
+                 className="flex-1 overflow-auto bg-nv-surface relative cursor-crosshair custom-scroll"
                  style={{ touchAction: 'pan-x pan-y' }}
                  onScroll={handleScroll}
                  onPointerDown={handleMouseDown}

@@ -286,7 +286,7 @@ const MidiHost: React.FC<Props> = ({ state, getState, setState, pianoRoll }) => 
       {pending && (
         <div className="fixed inset-0 z-[420] flex items-end sm:items-center justify-center bg-black/50" onPointerDown={() => setPending(null)}>
           <div role="dialog" aria-label="Importer un fichier MIDI" data-nova-midi-import=""
-            className="w-full sm:w-[460px] rounded-t-2xl sm:rounded-2xl border border-white/15 bg-[#16181d] p-4 shadow-2xl text-white space-y-3" onPointerDown={e => e.stopPropagation()}>
+            className="w-full sm:w-[460px] rounded-t-2xl sm:rounded-2xl border border-white/15 bg-nv-surface p-4 shadow-2xl text-white space-y-3" onPointerDown={e => e.stopPropagation()}>
             <div className="relative pr-10">
               {/* Bouton Fermer : Échap ferme aussi cette fenêtre (règle commune du studio). */}
               <button type="button" onClick={() => setPending(null)} aria-label="Fermer" title="Fermer (Échap)"

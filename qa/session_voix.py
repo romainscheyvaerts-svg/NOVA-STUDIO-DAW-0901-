@@ -19,7 +19,10 @@ from pathlib import Path
 
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3491/")
 PHASE = os.environ.get("QA_PHASE", "apres")
-os.environ.setdefault("QA_OUT", rf"D:\1 WORK\CONTENU\nova-pro\{PHASE}\session_voix")
+# QA_MODELE=1 : la séance part du modèle livré « Session voix · Make Music » (Depuis un modèle)
+# au lieu d'un projet vierge ; les pistes voix et leurs chaînes sont déjà là.
+MODELE = os.environ.get("QA_MODELE") == "1"
+os.environ.setdefault("QA_OUT", rf"D:\1 WORK\CONTENU\nova-pro\{PHASE}\session_voix{'_modele' if MODELE else ''}")
 sys.path.insert(0, str(Path(__file__).parent))
 from qalib import launch, new_page, OUT, Log, BASE  # noqa: E402
 from desktop_gate import install_mocks, SUPERADMIN  # noqa: E402
@@ -70,13 +73,26 @@ def tracks(page):
 def run(page, log, ch):
     res = {}
     # 1. Ouvrir le studio --------------------------------------------------------------
-    ch.start("Ouvrir", "Nouveau projet vierge (accueil → studio prêt)", protools="Fichier › Nouvelle session : 1 raccourci (Ctrl+N) + nom + Entrée")
+    ch.start("Ouvrir", "Session voix Make Music depuis un modèle (accueil → studio prêt)" if MODELE else "Nouveau projet vierge (accueil → studio prêt)",
+             protools="Fichier › Nouvelle session › Create from Template : 1 raccourci + choisir le modèle + Entrée" if MODELE else "Fichier › Nouvelle session : 1 raccourci (Ctrl+N) + nom + Entrée")
     t = time.time()
     page.goto(BASE, wait_until="domcontentloaded")
     nouveau = page.locator("button:visible", has_text=re.compile("Nouveau Projet")).first
     nouveau.wait_for(timeout=60000)
     res["accueil_ms"] = round((time.time() - t) * 1000)
-    ch.click(nouveau, "Nouveau Projet")
+    if MODELE:
+        ch.click(page.locator("[data-testid=landing-templates]:visible").first, "Depuis un modèle")
+        use = page.locator("[data-template-id=tpl-make-music-voix] [data-testid=tpl-use]")
+        try:
+            use.first.wait_for(timeout=20000)
+            ch.click(use.first, "Utiliser ce modèle (Session voix · Make Music)")
+            page.wait_for_timeout(300)
+            if page.locator("[data-template-id=tpl-make-music-voix] [data-testid=tpl-create]:visible").count():
+                ch.friction("le modèle demande une 2e confirmation"); ch.click(page.locator("[data-testid=tpl-create]:visible").first, "Créer le projet")
+        except Exception as e:
+            ch.fail(f"modèle « Session voix · Make Music » introuvable ({str(e)[:60]})")
+    else:
+        ch.click(nouveau, "Nouveau Projet")
     page.wait_for_timeout(600)
     close_welcome(page)
     try: wait_text_gone(page, "Chargement", 90)
@@ -132,7 +148,8 @@ def run(page, log, ch):
     ch.start("Préparer", "Créer 2 pistes voix (lead + double), armées", protools="Piste › Nouvelle : Ctrl+Maj+N, « 2 », Entrée, puis renommer (1 raccourci + 2 touches + 2 renommages)")
     n0 = len(tracks(page))
     ids0 = {t["id"] for t in tracks(page)}
-    for i in range(2):
+    deja = MODELE and {"voix-lead", "voix-double"} <= ids0  # pistes déjà posées par le modèle : 0 geste
+    for i in range(0 if deja else 2):
         b = reachable(ch, "button[aria-label='Ajouter une piste voix']", "Piste voix")
         if b: ch.click(b, "Piste voix")
         elif open_by_palette(ch, "piste voix", "pal.voiceTrack"): pass
@@ -142,10 +159,10 @@ def run(page, log, ch):
             ch.fail("« Piste voix » inatteignable (hors de l'écran)")
             page.evaluate("() => document.querySelector(\"button[aria-label='Ajouter une piste voix']\")?.click()")
         page.wait_for_timeout(500)
-    ch.wait_js(f"() => window.__novaEdit.getState().tracks.length >= {n0 + 2}", 6000, "2 pistes en plus")
+    if not deja: ch.wait_js(f"() => window.__novaEdit.getState().tracks.length >= {n0 + 2}", 6000, "2 pistes en plus")
     tr = tracks(page)
     res["pistes_apres_creation"] = [t["name"] for t in tr]
-    new_ids = [t["id"] for t in tr if t["id"] not in ids0]
+    new_ids = ["voix-lead", "voix-double"] if deja else [t["id"] for t in tr if t["id"] not in ids0]
     res["nouvelles"] = [t["name"] for t in tr if t["id"] in new_ids]
     ch.end()
     LEAD = new_ids[0] if new_ids else None
@@ -155,6 +172,10 @@ def run(page, log, ch):
     ch.start("Préparer", "Preset « Voix lead Make Music » sur la lead", protools="Nom de piste › clic droit › Track Preset › choisir (3 clics)")
     lead = next((t for t in tracks(page) if t["id"] == LEAD), None)
     opened = False
+    chaine_deja = bool(MODELE and lead and lead["plugins"])
+    if chaine_deja:
+        res["effets_lead"] = len(lead["plugins"]); res["chaine_lead"] = lead["plugins"]
+        lead = None; opened = True
     if lead:
         page.evaluate("(id) => { const s = window.__novaEdit; }", lead["id"])
         hdr = page.locator(f"[data-track-header='{lead['id']}'], [data-trackid='{lead['id']}']").locator("visible=true")
@@ -170,7 +191,8 @@ def run(page, log, ch):
         page.keyboard.press("Escape")
         if open_by_palette(ch, "preset voix lead", "pal.trackPreset"): opened = True
     dlg = page.locator("[data-testid=track-preset-dialog]")
-    if ch.wait_js("() => !!document.querySelector('[data-testid=track-preset-dialog]')", 4000, "fenêtre Track Presets"):
+    if chaine_deja: pass
+    elif ch.wait_js("() => !!document.querySelector('[data-testid=track-preset-dialog]')", 4000, "fenêtre Track Presets"):
         item = dlg.locator("button, li", has_text=re.compile("Voix lead Make Music")).locator("visible=true")
         if item.count():
             ch.click(item.first, "Voix lead Make Music")
@@ -178,13 +200,13 @@ def run(page, log, ch):
             if ap.count(): ch.click(ap.first, "Appliquer")
         else:
             ch.fail("« Voix lead Make Music » absent de la liste")
-    page.wait_for_timeout(600)
+    page.wait_for_timeout(0 if chaine_deja else 600)
     if lead:
         pl = app_state(page, f"s => (s.tracks.find(t => t.id === '{lead['id']}') || {{}}).plugins?.length || 0")
         if not pl: ch.fail("aucun effet posé sur la lead")
         res["effets_lead"] = pl
     page.keyboard.press("Escape")
-    ch.end()
+    ch.end(note=f"chaîne déjà posée par le modèle : {res.get('chaine_lead')}" if chaine_deja else None)
 
     # 6. Armer les 2 pistes -------------------------------------------------------------------
     ch.start("Enregistrer", "Armer les 2 pistes", protools="Bouton R de chaque piste (2 clics)")

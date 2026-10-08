@@ -380,10 +380,10 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
 
   return (
     <div className="fixed inset-0 z-[700] bg-black/90 backdrop-blur-md flex items-center justify-center animate-in fade-in duration-200">
-        <div className="w-full max-w-[640px] bg-[#0c0d10] border border-white/10 rounded-3xl shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col font-inter max-h-[90vh]">
+        <div className="w-full max-w-[640px] bg-nv-bg border border-white/10 rounded-3xl shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col font-inter max-h-[90vh]">
             
             {/* HEADER */}
-            <div className="h-16 bg-[#14161a] border-b border-white/5 flex items-center justify-between px-8 relative shrink-0">
+            <div className="h-16 bg-nv-surface border-b border-white/5 flex items-center justify-between px-8 relative shrink-0">
                 <div className="flex items-center space-x-4">
                     <div className="w-10 h-10 rounded-xl bg-orange-500/10 text-orange-500 flex items-center justify-center border border-orange-500/20 shadow-lg shadow-orange-500/5">
                         <i className="fas fa-sliders-h"></i>
@@ -412,7 +412,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
             </div>
 
             {/* BODY */}
-            <div className="p-8 space-y-8 bg-[#0c0d10] overflow-y-auto">
+            <div className="p-8 space-y-8 bg-nv-bg overflow-y-auto">
                 <SimpleModeToggle />
                 
                 {/* AUDIO I/O - Hidden when ASIO is active with a device selected */}
@@ -431,7 +431,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                 <select 
                                     value={selectedInput} 
                                     onChange={handleInputChange}
-                                    className="w-full h-11 bg-[#14161a] border border-white/10 rounded-xl px-4 text-[11px] font-medium text-white focus:border-orange-500 outline-none appearance-none transition-all hover:bg-[#1a1d21]"
+                                    className="w-full h-11 bg-nv-surface border border-white/10 rounded-xl px-4 text-[11px] font-medium text-white focus:border-orange-500 outline-none appearance-none transition-all hover:bg-nv-raised"
                                 >
                                     <option value="default">Micro par défaut de l'ordinateur</option>
                                     {inputs.map(dev => (
@@ -449,7 +449,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                 <select 
                                     value={selectedOutput} 
                                     onChange={handleOutputChange}
-                                    className="w-full h-11 bg-[#14161a] border border-white/10 rounded-xl px-4 text-[11px] font-medium text-white focus:border-orange-500 outline-none appearance-none transition-all hover:bg-[#1a1d21]"
+                                    className="w-full h-11 bg-nv-surface border border-white/10 rounded-xl px-4 text-[11px] font-medium text-white focus:border-orange-500 outline-none appearance-none transition-all hover:bg-nv-raised"
                                     disabled={!isSinkSupported}
                                 >
                                     <option value="default">Sortie par défaut de l'ordinateur</option>
@@ -487,7 +487,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                     </div>
 
                     {/* Connection Button */}
-                    <div className="bg-[#14161a] border border-white/5 rounded-xl p-4">
+                    <div className="bg-nv-surface border border-white/5 rounded-xl p-4">
                         <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center space-x-3">
                                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${asioConnected ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-800 text-slate-500'}`}>
@@ -718,7 +718,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                 <select 
                                     value={selectedMidiInput} 
                                     onChange={handleMidiInputChange}
-                                    className="w-full h-11 bg-[#14161a] border border-white/10 rounded-xl px-4 text-[11px] font-medium text-white focus:border-green-500 outline-none appearance-none transition-all hover:bg-[#1a1d21]"
+                                    className="w-full h-11 bg-nv-surface border border-white/10 rounded-xl px-4 text-[11px] font-medium text-white focus:border-green-500 outline-none appearance-none transition-all hover:bg-nv-raised"
                                 >
                                     {midiInputs.length === 0 && <option value="">No MIDI Devices Found</option>}
                                     {midiInputs.map(dev => (
@@ -735,7 +735,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                 <select 
                                     value={midiChannel} 
                                     onChange={handleMidiChannelChange}
-                                    className="w-full h-11 bg-[#14161a] border border-white/10 rounded-xl px-4 text-[11px] font-medium text-white focus:border-green-500 outline-none appearance-none transition-all hover:bg-[#1a1d21]"
+                                    className="w-full h-11 bg-nv-surface border border-white/10 rounded-xl px-4 text-[11px] font-medium text-white focus:border-green-500 outline-none appearance-none transition-all hover:bg-nv-raised"
                                 >
                                     <option value="0">Omni (All Channels)</option>
                                     {Array.from({length: 16}).map((_, i) => (
@@ -763,7 +763,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                     <div className="grid grid-cols-3 gap-3">
                          <button 
                             onClick={() => handleLatencyChange('low')} 
-                            className={`h-24 rounded-xl border flex flex-col items-center justify-center space-y-2 transition-all group ${latencyHint === 'low' ? 'bg-cyan-500/10 border-cyan-500 text-white' : 'bg-[#14161a] border-white/5 text-slate-500 hover:bg-[#1a1d21]'}`}
+                            className={`h-24 rounded-xl border flex flex-col items-center justify-center space-y-2 transition-all group ${latencyHint === 'low' ? 'bg-cyan-500/10 border-cyan-500 text-white' : 'bg-nv-surface border-white/5 text-slate-500 hover:bg-nv-raised'}`}
                          >
                              <i className="fas fa-bolt text-lg mb-1"></i>
                              <span className="text-[9px] font-black uppercase tracking-widest">Latence minimale</span>
@@ -772,7 +772,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                          
                          <button 
                             onClick={() => handleLatencyChange('balanced')} 
-                            className={`h-24 rounded-xl border flex flex-col items-center justify-center space-y-2 transition-all group ${latencyHint === 'balanced' ? 'bg-cyan-500/10 border-cyan-500 text-white' : 'bg-[#14161a] border-white/5 text-slate-500 hover:bg-[#1a1d21]'}`}
+                            className={`h-24 rounded-xl border flex flex-col items-center justify-center space-y-2 transition-all group ${latencyHint === 'balanced' ? 'bg-cyan-500/10 border-cyan-500 text-white' : 'bg-nv-surface border-white/5 text-slate-500 hover:bg-nv-raised'}`}
                          >
                              <i className="fas fa-balance-scale text-lg mb-1"></i>
                              <span className="text-[9px] font-black uppercase tracking-widest">Équilibré</span>
@@ -781,7 +781,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                          
                          <button 
                             onClick={() => handleLatencyChange('high')} 
-                            className={`h-24 rounded-xl border flex flex-col items-center justify-center space-y-2 transition-all group ${latencyHint === 'high' ? 'bg-cyan-500/10 border-cyan-500 text-white' : 'bg-[#14161a] border-white/5 text-slate-500 hover:bg-[#1a1d21]'}`}
+                            className={`h-24 rounded-xl border flex flex-col items-center justify-center space-y-2 transition-all group ${latencyHint === 'high' ? 'bg-cyan-500/10 border-cyan-500 text-white' : 'bg-nv-surface border-white/5 text-slate-500 hover:bg-nv-raised'}`}
                          >
                              <i className="fas fa-shield-alt text-lg mb-1"></i>
                              <span className="text-[9px] font-black uppercase tracking-widest">Sécurité</span>
@@ -813,7 +813,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
             </div>
             
             {/* FOOTER */}
-            <div className="bg-[#14161a] px-8 py-4 border-t border-white/5 flex justify-between items-center shrink-0">
+            <div className="bg-nv-surface px-8 py-4 border-t border-white/5 flex justify-between items-center shrink-0">
                 <div className="flex items-center space-x-2">
                     <div className={`w-2 h-2 rounded-full ${(status.includes('Error') || status.startsWith('⚠️')) ? 'bg-red-500' : 'bg-green-500 animate-pulse'}`}></div>
                     <span className="text-[9px] font-mono text-slate-400 uppercase">{status}</span>

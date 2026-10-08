@@ -165,7 +165,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   // de fermeture finissait hors écran, sans autre moyen de sortir. Plein écran
   // défilable, barre de fermeture fixe, contenu ajusté à la largeur.
   const mobileShell = (content: React.ReactNode) => (
-      <div className="nova-sombre fixed inset-0 z-[300] overflow-y-auto bg-[#0c0d10] pt-14 pb-8">
+      <div className="nova-sombre fixed inset-0 z-[300] overflow-y-auto bg-nv-bg pt-14 pb-8">
           <div className="fixed top-0 left-0 right-0 z-[310] h-12 bg-black/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between pl-4 pr-1">
               <span className="flex min-w-0 items-center gap-2">
                 {onToggleBypass && plugin.type !== 'VST3' && (
@@ -254,7 +254,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   if (error) {
     return (
       <div className="fixed inset-0 flex items-center justify-center z-[300]">
-        <div className="nova-sombre bg-[#0f1115] border border-red-500/30 p-10 rounded-[32px] text-center w-80 shadow-2xl relative">
+        <div className="nova-sombre bg-nv-surface border border-red-500/30 p-10 rounded-[32px] text-center w-80 shadow-2xl relative">
           <button aria-label="Fermer" title="Fermer" onClick={onClose} className="absolute top-4 right-4 text-white"><i className="fas fa-times"></i></button>
           <i className="fas fa-bug text-4xl text-red-500 mb-4"></i>
           <p className="text-red-400 font-bold text-xs mb-4">{error}</p>
@@ -273,7 +273,7 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
   if (!nodeInstance) {
     return (
       <div className="fixed inset-0 flex items-center justify-center z-[300]">
-        <div className="nova-sombre bg-[#0f1115] border border-white/10 p-10 rounded-[32px] text-center w-80 shadow-2xl relative">
+        <div className="nova-sombre bg-nv-surface border border-white/10 p-10 rounded-[32px] text-center w-80 shadow-2xl relative">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
             <div className="w-12 h-12 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin mb-4 mx-auto"></div>
             <p className="text-slate-500 font-black uppercase text-[10px] tracking-widest animate-pulse">Initialisation DSP...</p>

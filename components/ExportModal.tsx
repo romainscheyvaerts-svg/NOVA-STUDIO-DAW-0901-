@@ -439,7 +439,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
   return (
     <div className="fixed inset-0 z-[1200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className={`w-full ${advanced ? 'max-w-3xl' : 'max-w-lg'} max-h-[90dvh] overflow-y-auto bg-[#14161a] border border-white/10 rounded-3xl shadow-2xl flex flex-col`} onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="export-title">
+      <div className={`w-full ${advanced ? 'max-w-3xl' : 'max-w-lg'} max-h-[90dvh] overflow-y-auto bg-nv-surface border border-white/10 rounded-3xl shadow-2xl flex flex-col`} onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="export-title">
         
         {/* Header */}
         <div className="p-6 border-b border-white/5 bg-gradient-to-r from-cyan-900/20 to-transparent flex justify-between items-center">

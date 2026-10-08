@@ -57,7 +57,7 @@ const MobilePluginsPage: React.FC<MobilePluginsPageProps> = ({
               className={`shrink-0 min-h-[40px] px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 filterType === cat.id
                   ? 'bg-cyan-500 text-white'
-                  : 'bg-[#14161a] text-slate-400'
+                  : 'bg-nv-surface text-slate-400'
               }`}
             >
               {cat.name} ({cat.count})
@@ -71,7 +71,7 @@ const MobilePluginsPage: React.FC<MobilePluginsPageProps> = ({
             <div
               key={`${track.id}-${plugin.id}`}
               onClick={() => onOpenPlugin?.(track.id, plugin.id)}
-              className="bg-[#14161a] rounded-xl p-4 border border-white/10 hover:border-cyan-500/30 transition-all active:scale-95"
+              className="bg-nv-surface rounded-xl p-4 border border-white/10 hover:border-cyan-500/30 transition-all active:scale-95"
             >
               <div className="flex items-start gap-3">
                 <div
@@ -146,7 +146,7 @@ const MobilePluginsPage: React.FC<MobilePluginsPageProps> = ({
 
         {/* Stats en bas */}
         {allPlugins.length > 0 && (
-          <div className="bg-[#14161a] rounded-xl p-4 border border-white/10">
+          <div className="bg-nv-surface rounded-xl p-4 border border-white/10">
             <div className="grid grid-cols-3 gap-4 text-center">
               <div>
                 <div className="text-2xl font-bold text-cyan-400">{allPlugins.length}</div>

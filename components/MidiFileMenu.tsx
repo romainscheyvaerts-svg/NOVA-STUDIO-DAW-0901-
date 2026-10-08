@@ -66,7 +66,7 @@ export const MidiFileMenu: React.FC<{ tracks?: Track[] }> = ({ tracks }) => {
       {open && createPortal(
         <>
           <div className="fixed inset-0 z-[590]" onPointerDown={() => setOpen(null)} />
-          <div role="menu" aria-label="MIDI" className="fixed z-[600] w-72 rounded-xl border border-white/15 bg-[#1a1c22] p-1.5 shadow-2xl text-slate-100" style={{ left: open.x, top: open.y }}>
+          <div role="menu" aria-label="MIDI" className="fixed z-[600] w-72 rounded-xl border border-white/15 bg-nv-raised p-1.5 shadow-2xl text-slate-100" style={{ left: open.x, top: open.y }}>
             <button role="menuitem" type="button" className={item} data-testid="midi-import" onClick={() => { setOpen(null); midiBus.emit({ type: 'import-pick' }); }}
               title="Ouvre un fichier .mid (pack MIDI, export d’un autre DAW) : une piste par partie, la batterie sur la boîte à rythmes">
               <i className="fas fa-file-import w-4 text-cyan-300" />Importer un fichier .mid…</button>

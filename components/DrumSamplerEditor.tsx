@@ -83,7 +83,7 @@ const DrumSamplerEditor: React.FC<DrumSamplerEditorProps> = ({ plugin, trackId, 
   };
 
   return (
-    <div className="w-[800px] bg-[#0c0d10] border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none text-white">
+    <div className="w-[800px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none text-white">
         {/* Header */}
         <div className="flex justify-between items-center">
             <div className="flex items-center space-x-4">
@@ -237,7 +237,7 @@ const DKnob: React.FC<{ label: string, value: number, displayVal: string, onChan
 
     return (
         <div className="flex flex-col items-center space-y-1 group cursor-ns-resize" {...knob.bind}>
-             <div className="relative w-10 h-10 rounded-full bg-[#14161a] border border-white/10 flex items-center justify-center shadow-lg group-hover:border-orange-500/50 transition-colors">
+             <div className="relative w-10 h-10 rounded-full bg-nv-surface border border-white/10 flex items-center justify-center shadow-lg group-hover:border-orange-500/50 transition-colors">
                  <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
                  <div 
                     className="absolute w-1 h-3 bg-orange-500 rounded-full origin-bottom bottom-1/2 shadow-[0_0_5px_#f97316]"

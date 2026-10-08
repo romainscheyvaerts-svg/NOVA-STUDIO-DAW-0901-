@@ -149,7 +149,7 @@ const DspMeter: React.FC<Props> = ({ tracks, onFreezeTrack, safety, compact = fa
       {open && createPortal(
         <div className="fixed inset-0 z-[700]" onClick={() => setOpen(false)}>
           <div role="dialog" aria-label="Charge du processeur" data-testid="dsp-panel" onClick={e => e.stopPropagation()}
-            className="fixed w-[320px] rounded-2xl border border-white/10 bg-[#14161b] p-4 shadow-2xl text-[12px] text-slate-200" style={panelStyle}>
+            className="fixed w-[320px] rounded-2xl border border-white/10 bg-nv-surface p-4 shadow-2xl text-[12px] text-slate-200" style={panelStyle}>
             <div className="flex items-center justify-between mb-3">
               <p className="font-black text-white text-[13px]">Charge du processeur</p>
               <button type="button" onClick={() => setOpen(false)} aria-label="Fermer" className="w-8 h-8 rounded-lg hover:bg-white/10 text-slate-400"><i className="fas fa-times"></i></button>

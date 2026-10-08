@@ -194,7 +194,7 @@ const MidiToolsPanel: React.FC<Props> = ({ notes, selectedIds, ctx, onPreview, o
     <>
       <div className="fixed inset-0 z-[290]" onPointerDown={onClose} />
       <div role="dialog" aria-label="Outils MIDI" data-nova-roll-menu="outils"
-        className={`fixed z-[300] rounded-xl border border-white/15 bg-[#1a1c22] p-3 shadow-2xl text-[11px] text-slate-200 overflow-y-auto ${anchor ? 'w-[352px] max-h-[75vh]' : 'inset-x-0 bottom-0 rounded-b-none max-h-[80dvh]'}`}
+        className={`fixed z-[300] rounded-xl border border-white/15 bg-nv-raised p-3 shadow-2xl text-[11px] text-slate-200 overflow-y-auto ${anchor ? 'w-[352px] max-h-[75vh]' : 'inset-x-0 bottom-0 rounded-b-none max-h-[80dvh]'}`}
         style={style} onPointerDown={e => e.stopPropagation()}>
         {!tool ? (
           <>

@@ -8,6 +8,17 @@ import React from 'react';
  * fenêtre s'affiche dans la même image que le clic. Sans effet si React change ses détails
  * internes (on retombe sur le comportement normal de React.lazy).
  */
+/**
+ * Monte ses enfants à la 1re fois que `when` est vrai, puis les garde montés (même
+ * comportement qu'une fenêtre toujours montée qui se cache avec open=false), dans un
+ * Suspense sans repli : sert aux fenêtres chargées à la demande (paquet principal plus léger).
+ */
+export const MountWhenOpened: React.FC<{ when: boolean; children: React.ReactNode }> = ({ when, children }) => {
+  const [seen, setSeen] = React.useState(when);
+  if (when && !seen) setSeen(true);
+  return seen || when ? React.createElement(React.Suspense, { fallback: null }, children) : null;
+};
+
 export type PreloadableLazy<T extends React.ComponentType<any>> = React.LazyExoticComponent<T> & { preload: () => void };
 
 export function lazyWithPreload<T extends React.ComponentType<any>>(factory: () => Promise<{ default: T }>): PreloadableLazy<T> {

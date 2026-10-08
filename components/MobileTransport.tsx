@@ -39,7 +39,7 @@ const MobileTransport: React.FC<MobileTransportProps> = ({
   };
 
   return (
-    <div className="fixed top-0 left-0 right-0 h-16 bg-[#0c0d10] border-b border-white/10 flex items-center justify-between px-6 z-50 safe-area-top safe-area-inset-left safe-area-inset-right">
+    <div className="fixed top-0 left-0 right-0 h-16 bg-nv-bg border-b border-white/10 flex items-center justify-between px-6 z-50 safe-area-top safe-area-inset-left safe-area-inset-right">
       {/* Section gauche - Temps et BPM */}
       <div className="flex items-center gap-3">
         {/* Timer */}

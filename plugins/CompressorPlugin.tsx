@@ -852,7 +852,7 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
   };
 
   return (
-    <div className="w-[580px] bg-[#0c0d10] border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
+    <div className="w-[580px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
       {/* Header */}
       <div className="flex justify-between items-start">
         <div className="flex items-center space-x-4">
@@ -990,7 +990,7 @@ const CompressorKnob: React.FC<{
     <div title={termHelp(label) || undefined} className={`flex flex-col items-center space-y-2 group touch-none ${disabled ? 'opacity-40' : ''}`}>
       <div 
         {...knob.bind}
-        className={`w-11 h-11 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center transition-all shadow-xl relative ${disabled ? 'cursor-not-allowed' : 'cursor-ns-resize hover:border-orange-500/50'}`}
+        className={`w-11 h-11 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center transition-all shadow-xl relative ${disabled ? 'cursor-not-allowed' : 'cursor-ns-resize hover:border-orange-500/50'}`}
       >
         <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
         <div 

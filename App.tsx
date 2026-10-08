@@ -15,7 +15,8 @@ import ArrangementView from './components/ArrangementView';
 const MixerView = lazyWithPreload(() => import('./components/MixerView').then(m => ({ default: React.memo(m.default) })));
 // Charge a la demande : PluginEditor tire les 13 interfaces de plugins,
 // soit plus de 8000 lignes qui ne servent qu'a l'ouverture d'un effet.
-import { lazyWithPreload, preloadWhenIdle } from './utils/lazyPreload';
+import { lazyWithPreload, MountWhenOpened, preloadWhenIdle } from './utils/lazyPreload';
+import { detectHeadphones } from './utils/headphoneDetect';
 const loadPluginEditor = () => import('./components/PluginEditor');
 const PluginEditor = lazyWithPreload(loadPluginEditor);
 const SynthPanel = lazy(() => import('./components/SynthPanel'));
@@ -111,11 +112,14 @@ const MetronomeDialog = lazyWithPreload(() => import('./components/MetronomeDial
 const TempoDialog = lazyWithPreload(() => import('./components/TempoDialog'));
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import { etirerBufferAsync, facteurPourTempo } from './utils/timeStretch';
-import MobileTracksPage from './components/MobileTracksPage';
-import MobileArrangementPage from './components/MobileArrangementPage';
-import MobilePluginsPage from './components/MobilePluginsPage';
-import MobileMixerPage from './components/MobileMixerPage';
-import MobileBrowserPage from './components/MobileBrowserPage';
+// Pages du téléphone : chargées à la demande (un PC ne les affiche jamais) ; sur téléphone,
+// préchargées dès l'ouverture du studio (Studio : useEffect sur isMobile).
+const MobileTracksPage = lazyWithPreload(() => import('./components/MobileTracksPage'));
+const MobileArrangementPage = lazyWithPreload(() => import('./components/MobileArrangementPage'));
+const MobilePluginsPage = lazyWithPreload(() => import('./components/MobilePluginsPage'));
+const MobileMixerPage = lazyWithPreload(() => import('./components/MobileMixerPage'));
+const MobileBrowserPage = lazyWithPreload(() => import('./components/MobileBrowserPage'));
+const MOBILE_PAGES = [MobileArrangementPage, MobileTracksPage, MobileMixerPage, MobilePluginsPage, MobileBrowserPage];
 import MobileBottomNav from './components/MobileBottomNav';
 import LandingPage from './components/LandingPage';
 import { saveBlob } from './utils/saveBlob';
@@ -202,19 +206,20 @@ import {
   pushSession, pullSession, parseLink, createCloudSession, cloudProjectId, CloudConflictError, LocalCloudSession,
   getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, sessionUrl, signInAccount, call as callCloud,
 } from './services/SessionCloud';
-import DrumMachinePanel from './components/DrumMachinePanel';
+// Boîte à rythmes : chargée à la 1re ouverture (préchargée au repos), absente du démarrage.
+const DrumMachinePanel = lazyWithPreload(() => import('./components/DrumMachinePanel'));
 import ShortcutsHelp from './components/ShortcutsHelp';
-import KeymapEditor from './components/KeymapEditor';
-import WindowLayoutsPanel from './components/WindowLayoutsPanel';
+const KeymapEditor = lazyWithPreload(() => import('./components/KeymapEditor'));
+const WindowLayoutsPanel = lazyWithPreload(() => import('./components/WindowLayoutsPanel'));
 
 /** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
 const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
   'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
-import ProToolsWindows from './components/ProToolsWindows';
+import ProToolsWindows, { PRO_TOOLS_WINDOWS_PRELOAD } from './components/ProToolsWindows';
 import { useChordLaneProp } from './components/ChordLane';
-import { HumQuickButtons } from './components/AudioToMidiDialog';
+const HumQuickButtons = lazy(() => import('./components/AudioToMidiDialog').then(m => ({ default: m.HumQuickButtons })));
 import { applyChordOps, chordChanges, chordSig, chordsStore } from './utils/chordTrack';
 import { nextMarkerNumber } from './utils/memoryLocations';
 import { automationRecorder } from './services/AutomationManager';
@@ -647,7 +652,7 @@ function PaymentReturn({ sessionId }: { sessionId: string }) {
     return () => { live = false; };
   }, [sessionId]);
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0b0d10] p-6 text-center text-white">
+    <div className="min-h-screen flex items-center justify-center bg-nv-bg p-6 text-center text-white">
       <div className="max-w-sm space-y-3">
         <p className="text-4xl">{state === 'ok' ? '✅' : state === 'ko' ? '⏳' : '…'}</p>
         <h1 className="text-xl font-black">{state === 'ok' ? 'Paiement validé' : state === 'ko' ? 'Paiement en cours de validation' : 'Vérification du paiement…'}</h1>
@@ -663,7 +668,7 @@ export default function App() {
   // dans la même image que le clic (avant : 300 à 450 ms, retenue de React 19 sur React.lazy).
   useEffect(() => preloadWhenIdle([PluginEditor, ExportModal, TempoDialog, MasterAssistantPanel, SaveProjectModal, MixerView, TrackListPanel,
     GroupsListPanel, SessionProPanel, TimeOpsDialog, MetronomeDialog, LoadProjectModal, ImportSessionDialog, PianoRoll, AutomationEditorView,
-    SessionTemplatesModal, AudioSettingsPanel]), []);
+    SessionTemplatesModal, AudioSettingsPanel, ...PRO_TOOLS_WINDOWS_PRELOAD, DrumMachinePanel, KeymapEditor, WindowLayoutsPanel]), []);
   const paidParam = (() => { try { return new URLSearchParams(window.location.search).get('nova_paid'); } catch { return null; } })();
   if (paidParam && /^cs_(test|live)_[A-Za-z0-9]+$/.test(paidParam)) return <PaymentReturn sessionId={paidParam} />;
   return <Studio />;
@@ -1253,6 +1258,11 @@ function Studio() {
   }, []);
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
+  // Téléphone : ses pages (chargées à la demande) arrivent dès l'ouverture du studio.
+  useEffect(() => { if (isMobile) MOBILE_PAGES.forEach(c => c.preload()); }, [isMobile]);
+  // Console sur tablette / petit écran : le store (320 px) ne laissait que 3 tranches et demie à
+  // 1024 px. On le replie en passant à la console (▤ en haut à gauche le rouvre), comme après un beat.
+  useEffect(() => { if (state.currentView === 'MIXER' && !isMobile && window.innerWidth < 1280) setIsSidebarOpen(false); }, [state.currentView, isMobile]);
   // Téléphone (version simple) : pistes masquées, VCA et dossiers simples non affichés (menu « Pistes masquées »).
   const mobileTracks = useMemo(() => { const shown = shownTrackIds(state.tracks); return state.tracks.filter(t => shown.has(t.id) && !t.isVca && t.folder?.kind !== 'basic'); }, [state.tracks]);
   const isMobileRef = useRef(isMobile); isMobileRef.current = isMobile;
@@ -2211,7 +2221,10 @@ function Studio() {
     // Première prise du lead : style appliqué même si la prise est à refaire,
     // pour que l'artiste entende tout de suite le rendu « produit ».
     let autoStyleNote = '';
-    if (role === 'lead' && !stateRef.current.vocalMixStyle && (s.peakDb > -0.3 || s.rmsDb < -38)) {
+    // Chaîne déjà posée sur la lead (modèle « Session voix · Make Music », preset de piste, effets
+    // choisis) : on la respecte, le style auto ne s'empile pas dessus (avant : 3 effets du modèle + 5).
+    const ownChain = (t.plugins || []).length > 0;
+    if (role === 'lead' && !ownChain && !stateRef.current.vocalMixStyle && (s.peakDb > -0.3 || s.rmsDb < -38)) {
       const sid = suggestVocalMixStyle(stateRef.current.bpm, stateRef.current.beatGenre, stateRef.current.beatTitle);
       breakHistory(); // Ctrl+Z retire le style, pas la prise
       handleApplyMixStyle(sid, true);
@@ -2236,7 +2249,10 @@ function Studio() {
     const st = stateRef.current;
     const next: NovaFeedMessage['choices'] = [replay];
     let text = `✅ ${takeName} : bon niveau, prise propre.${placed}`;
-    if (role === 'lead' && !st.vocalMixStyle) {
+    if (role === 'lead' && !st.vocalMixStyle && ownChain) {
+      text += " Ta chaîne d'effets est déjà en place : réécoute-la. Si elle te va, on passe aux backs ; sinon refais-en une, l'ancienne est gardée (coupée).";
+      next.push(redo, { label: '➡️ Faire les backs', action: { action: 'PREPARE_PART', payload: { part: 'back' } } });
+    } else if (role === 'lead' && !st.vocalMixStyle) {
       // Première prise : on fait entendre tout de suite une voix « produite ».
       const sid = suggestVocalMixStyle(st.bpm, st.beatGenre, st.beatTitle);
       breakHistory(); // Ctrl+Z retire le style, pas la prise
@@ -2465,7 +2481,19 @@ function Studio() {
     // Première prise : question casque (la prise repart après la réponse).
     let headphonesAsked = false;
     try { headphonesAsked = localStorage.getItem('nova_headphones') !== null; } catch { headphonesAsked = true; }
-    if (!headphonesAsked) { setHeadphonePromptOpen(true); return; }
+    if (!headphonesAsked) {
+      // Détection d'abord (utils/headphoneDetect) : nom de la sortie audio, ou carte son du pont
+      // ASIO (studio : retour au casque). Trouvé : réponse gardée, la prise part sans question.
+      const found = audioEngine.isUsingASIOInput() ? { guess: 'casque' as const, label: 'carte son du studio' } : await detectHeadphones();
+      if (!found) { setHeadphonePromptOpen(true); return; }
+      const casque = found.guess === 'casque';
+      try { localStorage.setItem('nova_headphones', casque ? '1' : '0'); localStorage.setItem('nova_headphones_auto', found.label); } catch { /* stockage indisponible */ }
+      audioEngine.setInputMonitoring(casque);
+      setInputMonitoringState(casque);
+      setAiNotification(casque
+        ? `🎧 Casque détecté (${found.label}) : tu entends ta voix pendant la prise. Sur haut-parleurs, coupe « Retour casque » sur ta piste.`
+        : `🔈 Haut-parleurs détectés (${found.label}) : ton retour micro reste coupé (pas de larsen). Avec un casque, allume « Retour casque » sur ta piste.`);
+    }
 
     // Décompte (désactivable).
     let countIn = true;
@@ -3066,6 +3094,14 @@ function Studio() {
 
       // 6. Créer une nouvelle piste audio et ajouter le clip
       setState(produce((draft: DAWState) => {
+        // 1er son importé dans un projet neuf ou un modèle : la piste « Beat » vide le reçoit
+        // (avant, une piste de plus apparaissait et « Beat » restait vide, avec ses réglages).
+        const beat = draft.tracks.find(t => t.id === 'instrumental' && t.type === TrackType.AUDIO && !(t.clips || []).length);
+        if (beat) {
+          beat.clips.push(newClip);
+          draft.selectedTrackId = beat.id;
+          return;
+        }
         const trackId = `track-${Date.now()}`;
         const newTrack: Track = {
           id: trackId,
@@ -8549,7 +8585,7 @@ function Studio() {
       <>
       {landingNotice && (
         <div className="fixed top-3 inset-x-0 z-[999] flex justify-center px-4 pointer-events-none">
-          <div role="status" className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-amber-400/40 bg-[#14161a] px-4 py-3 text-[13px] text-amber-100 shadow-2xl">
+          <div role="status" className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-amber-400/40 bg-nv-surface px-4 py-3 text-[13px] text-amber-100 shadow-2xl">
             <span>{landingNotice}</span>
             <button type="button" aria-label="Fermer" onClick={() => setLandingNotice(null)} className="nova-hit w-8 h-8 shrink-0 rounded-lg bg-white/10 text-white">✕</button>
           </div>
@@ -8910,6 +8946,7 @@ function Studio() {
           )}
           {isMobile && (
             <PanelBoundary key={`mobile-${activeMobileTab}`} name={MOBILE_PAGE_NAMES[activeMobileTab] || 'cette page'}>
+              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[12px] text-slate-400" role="status">Chargement…</div>}>
               {activeMobileTab === 'TRACKS' && (
                 <MobileTracksPage
                   tracks={mobileTracks}
@@ -8989,6 +9026,7 @@ function Studio() {
                   selectedTrackId={state.selectedTrackId}
                 />
               )}
+              </Suspense>
             </PanelBoundary>
           )}
           {structurePanel && (
@@ -9054,7 +9092,7 @@ function Studio() {
       {externalImportNotice && (
         // Téléphone (G15) : en bas, au-dessus des onglets ; en haut, il cachait le zoom (− / +).
         <div className={`fixed ${isMobile ? 'bottom-[calc(8.5rem+env(safe-area-inset-bottom))]' : 'top-20'} left-1/2 -translate-x-1/2 z-[540] px-4 py-2.5 rounded-xl
-                        bg-[#14161a]/95 border border-white/10 shadow-2xl backdrop-blur-sm
+                        bg-nv-surface/95 border border-white/10 shadow-2xl backdrop-blur-sm
                         flex items-center gap-2.5 text-[12px] font-medium text-slate-200
                         animate-in fade-in slide-in-from-top-2 duration-200`}>
           {!/^[✅❌]/.test(externalImportNotice) && (
@@ -9098,7 +9136,7 @@ function Studio() {
         currentStyleId={state.vocalMixStyle}
         onApplyStyle={(id: string) => { handleApplyMixStyle(id); }}
         breathMixOption={<BreathMixOption />}
-        humTools={<HumQuickButtons onOpen={() => setVocalToolsOpen(false)} />}
+        humTools={<Suspense fallback={null}><HumQuickButtons onOpen={() => setVocalToolsOpen(false)} /></Suspense>}
         r23Tools={<R23VoiceTools hasVoice={state.tracks.some(t => isVoiceTrack(t) && t.clips.some(c => !c.isMuted))} onAfter={() => setVocalToolsOpen(false)} />}
         breathTools={<BreathPanelTools canTreat={state.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0)}
           projectAuto={state.breathAuto} onProjectAutoChange={(on) => setState(prev => ({ ...prev, breathAuto: on }))} />}
@@ -9199,7 +9237,7 @@ function Studio() {
       {/* Casque : demandé avant la première prise */}
       {headphonePromptOpen && (
         <div className="fixed inset-0 z-[600] flex items-end sm:items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="casque-titre">
-          <div className="w-full max-w-sm rounded-3xl bg-[#14161a] border border-white/10 p-6 text-center shadow-2xl">
+          <div className="w-full max-w-sm rounded-3xl bg-nv-surface border border-white/10 p-6 text-center shadow-2xl">
             <div className="text-5xl mb-3">🎧</div>
             <h2 id="casque-titre" className="text-lg font-black text-white mb-2">Tu as un casque ou des écouteurs{' '}?</h2>
             <p className="text-sm text-slate-300 mb-5">
@@ -9211,7 +9249,7 @@ function Studio() {
               <MicLevelMeter trackId={state.tracks.find(t => t.isTrackArmed)?.id || null} />
             </div>
             <div className="flex flex-col gap-2">
-              <button type="button" onClick={() => answerHeadphones(true)} className="h-12 rounded-xl bg-cyan-500 text-black font-black">
+              <button type="button" autoFocus onClick={() => answerHeadphones(true)} className="h-12 rounded-xl bg-cyan-500 text-black font-black">
                 Oui, j'ai un casque
               </button>
               <button type="button" onClick={() => answerHeadphones(false)} className="h-12 rounded-xl bg-white/10 text-white font-bold">
@@ -9281,6 +9319,7 @@ function Studio() {
       {/* File d'exports (R1) : progression et « Ouvrir le dossier » / « Télécharger » à la fin. */}
       <Suspense fallback={null}><ExportQueueToast /></Suspense>
       <PanelBoundary name="la boîte à rythmes" overlay onClose={() => setDrumsOpen(false)}>
+      <MountWhenOpened when={drumsOpen}>
       <DrumMachinePanel
         open={drumsOpen}
         onClose={() => setDrumsOpen(false)}
@@ -9315,11 +9354,12 @@ function Studio() {
         ensureEngine={ensureAudioEngine}
         notify={setAiNotification}
       />
+      </MountWhenOpened>
       </PanelBoundary>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} actions={paletteOpen ? buildPaletteActions() : []} />
       <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} onCustomize={isMobile ? undefined : () => { setShortcutsOpen(false); setKeymapEditorOpen(true); }} onLayouts={() => { setShortcutsOpen(false); setLayoutsOpen(true); }} />
-      {keymapEditorOpen && !isMobile && <KeymapEditor onClose={() => setKeymapEditorOpen(false)} />}
-      {layoutsOpen && <WindowLayoutsPanel onClose={() => setLayoutsOpen(false)} notify={setAiNotification} />}
+      {keymapEditorOpen && !isMobile && <Suspense fallback={null}><KeymapEditor onClose={() => setKeymapEditorOpen(false)} /></Suspense>}
+      {layoutsOpen && <Suspense fallback={null}><WindowLayoutsPanel onClose={() => setLayoutsOpen(false)} notify={setAiNotification} /></Suspense>}
       <PanelBoundary name="les fenêtres d'édition" overlay>
       <ProToolsWindows tracks={state.tracks} markers={state.markers} bpm={state.bpm} setState={setState} onEditClip={handleEditClip}
         onSeek={handleSeek} onAddMarker={handleAddMarker} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
@@ -9342,7 +9382,7 @@ function Studio() {
       />
       {cloudProgress && !takeHomeOpen && (
         <div className="fixed inset-x-0 top-3 z-[660] flex justify-center px-4 pointer-events-none" role="status">
-          <div className="w-full max-w-sm rounded-2xl border border-cyan-500/30 bg-[#0d1117]/95 p-3 shadow-2xl">
+          <div className="w-full max-w-sm rounded-2xl border border-cyan-500/30 bg-nv-surface/95 p-3 shadow-2xl">
             <div className="flex justify-between text-[11px] font-bold text-cyan-200"><span>☁️ {cloudProgress.msg}</span><span>{cloudProgress.pct}%</span></div>
             <div className="mt-1.5 h-1.5 rounded-full bg-black/50 overflow-hidden"><div className="h-full bg-cyan-500 transition-all" style={{ width: `${cloudProgress.pct}%` }} /></div>
           </div>
@@ -9466,7 +9506,7 @@ function Studio() {
       )}
       {cloudConflict && (
         <div className="fixed inset-0 z-[670] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="conflict-title">
-          <div className="w-full max-w-md rounded-3xl border border-amber-500/30 bg-[#121418] p-6 shadow-2xl space-y-4">
+          <div className="w-full max-w-md rounded-3xl border border-amber-500/30 bg-nv-surface p-6 shadow-2xl space-y-4">
             <h2 id="conflict-title" className="text-lg font-black text-white">⚠️ Session modifiée ailleurs</h2>
             <p className="text-[13px] text-slate-300">
               La session en ligne a été modifiée {cloudConflict.updatedFrom ? `sur ${cloudConflict.updatedFrom} ` : ''}{cloudConflict.updatedAt ? formatAgo(Date.parse(cloudConflict.updatedAt)) : ''}, après ta dernière synchronisation.
@@ -9522,7 +9562,7 @@ function Studio() {
       <MidiInputHost tracks={state.tracks} selectedTrackId={state.selectedTrackId} isRecording={state.isRecording}
         onArm={id => { void armForRecording(id); }} onToggleRecord={() => { void handleToggleRecord(); }} />
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
-          <div data-nova-transport="" className="fixed inset-0 z-[250] bg-[#0c0d10] flex flex-col animate-in slide-in-from-bottom-10 duration-200">
+          <div data-nova-transport="" className="fixed inset-0 z-[250] bg-nv-bg flex flex-col animate-in slide-in-from-bottom-10 duration-200">
              <PanelBoundary name="l'éditeur MIDI" onClose={() => setMidiEditorOpen(null)}>
              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement de l'éditeur…</div>}>
                <PianoRoll track={state.tracks.find(t => t.id === midiEditorOpen.trackId)!} clipId={midiEditorOpen.clipId} bpm={state.bpm} currentTime={state.currentTime} onUpdateTrack={handleUpdateTrack} onClose={() => setMidiEditorOpen(null)}
@@ -9570,10 +9610,10 @@ function Studio() {
       {activePlugin && (
         // Fenêtre d'effet NON modale sur ordinateur (G18) : pas de voile, la console
         // et les pistes restent utilisables derrière ; on la déplace par sa barre.
-        <div className={`fixed inset-0 flex items-center justify-center z-[200] ${isMobile ? 'bg-[#0c0d10]' : 'pointer-events-none'}`}>
+        <div className={`fixed inset-0 flex items-center justify-center z-[200] ${isMobile ? 'bg-nv-bg' : 'pointer-events-none'}`}>
            <div className={`relative ${isMobile ? 'w-full h-full p-4 overflow-y-auto' : 'pointer-events-auto'}`} onMouseDown={e => e.stopPropagation()}>
               <PanelBoundary key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} name="la fenêtre d'effet" onClose={() => setActivePlugin(null)}>
-              <Suspense fallback={<div className="w-64 h-32 flex items-center justify-center text-slate-400 text-[11px] bg-[#14161a] border border-white/10 rounded-2xl"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}>
+              <Suspense fallback={<div className="w-64 h-32 flex items-center justify-center text-slate-400 text-[11px] bg-nv-surface border border-white/10 rounded-2xl"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}>
               <PluginEditor key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} onToggleFreeze={handleFreezeTrack} onToggleBypass={handleToggleBypass} onOpenPlugin={(tid, p) => setActivePlugin({ trackId: tid, plugin: p })} allTracks={state.tracks} />
               </Suspense>
               </PanelBoundary>
@@ -9615,7 +9655,7 @@ function Studio() {
       {/* Modal Récupération de Backup Automatique */}
       {showBackupRecovery && pendingBackup && (
         <div className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#14161a] border border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+          <div className="bg-nv-surface border border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
             <div className="p-6 border-b border-white/5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center">

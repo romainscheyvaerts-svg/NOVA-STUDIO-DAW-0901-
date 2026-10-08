@@ -71,7 +71,7 @@ const SamplerEditor: React.FC<SamplerEditorProps> = ({ plugin, trackId, onClose 
   };
 
   return (
-    <div className="w-[500px] bg-[#0c0d10] border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none text-white">
+    <div className="w-[500px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none text-white">
         {/* Header */}
         <div className="flex justify-between items-center">
             <div className="flex items-center space-x-4">
@@ -137,7 +137,7 @@ const Knob: React.FC<{ label: string, value: number, min: number, max: number, o
 
     return (
         <div className="flex flex-col items-center space-y-2 group cursor-ns-resize" {...knob.bind}>
-             <div className="relative w-12 h-12 rounded-full bg-[#14161a] border border-white/10 shadow-lg flex items-center justify-center">
+             <div className="relative w-12 h-12 rounded-full bg-nv-surface border border-white/10 shadow-lg flex items-center justify-center">
                  <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40" />
                  <div 
                     className="absolute w-1 h-4 bg-current rounded-full origin-bottom bottom-1/2"

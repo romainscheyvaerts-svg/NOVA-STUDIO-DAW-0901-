@@ -64,7 +64,7 @@ export const SmartKnob: React.FC<SmartKnobProps> = ({
         aria-valuemax={max}
         aria-valuenow={Number(visualValue.toFixed(3))}
         aria-valuetext={format ? format(visualValue) : `${visualValue.toFixed(1)}${suffix}`}
-        className="nova-hit-tactile relative rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-white/30 transition-colors shadow-lg touch-none"
+        className="nova-hit-tactile relative rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-white/30 transition-colors shadow-lg touch-none"
         style={{ width: size, height: size }}
       >
         {/* Fond interne */}

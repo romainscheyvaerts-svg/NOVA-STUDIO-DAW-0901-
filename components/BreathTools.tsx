@@ -201,9 +201,10 @@ export const BreathHost: React.FC<HostProps> = ({ tracks, setState, undo, breakH
         <BreathDialog request={dialog} tracks={tracks} targetIds={targetTracks(dialog)} isMobile={!!isMobile && window.innerWidth < 700 || window.innerWidth < 600}
           onApply={applyDialog} onClose={() => setDialog(null)} />
       )}
+      {/* Téléphone : en haut, sous le transport (en bas, il couvrait « Mix auto » et « Piste voix »), et sous les fenêtres (il ne cache plus leur bouton Fermer). */}
       {toast && (
         <div role="status" aria-live="polite" data-testid="breath-toast"
-          className="fixed bottom-24 left-1/2 z-[720] flex w-[92vw] sm:w-auto sm:max-w-[640px] -translate-x-1/2 items-center gap-3 rounded-2xl border border-violet-400/40 bg-[#17131f]/95 px-4 py-3 text-[12.5px] text-violet-50 shadow-2xl">
+          className="fixed top-28 sm:top-auto sm:bottom-24 left-1/2 z-[400] sm:z-[720] flex w-[92vw] sm:w-auto sm:max-w-[640px] -translate-x-1/2 items-center gap-3 rounded-2xl border border-violet-400/40 bg-[#17131f]/95 px-4 py-3 text-[12.5px] text-violet-50 shadow-2xl">
           {toast.busy && <i className="fas fa-circle-notch fa-spin text-violet-300" aria-hidden />}
           <span className="min-w-0 leading-snug">{toast.text}</span>
           {toast.action && (
@@ -346,7 +347,7 @@ const BreathDialog: React.FC<DialogProps> = ({ request, tracks, targetIds, isMob
   );
 
   const footer = (
-    <div className="sticky -bottom-5 -mx-5 mt-4 flex flex-wrap justify-end gap-2 border-t border-white/5 bg-[#121418] px-5 py-3">
+    <div className="sticky -bottom-5 -mx-5 mt-4 flex flex-wrap justify-end gap-2 border-t border-white/5 bg-nv-surface px-5 py-3">
       <button type="button" onClick={() => setBreathPrefs({ settings: DEFAULT_BREATH_SETTINGS })} className="mr-auto h-11 rounded-lg px-3 text-[12px] font-bold text-slate-400 hover:text-white">Réglages par défaut</button>
       <button type="button" onClick={onClose} className="h-11 rounded-lg bg-white/5 px-4 text-[12px] font-bold text-slate-300">Annuler</button>
       <button type="button" disabled={!!progress || !plans.length} data-testid="breath-apply" onClick={() => onApply(plans, kinds)}
@@ -360,7 +361,7 @@ const BreathDialog: React.FC<DialogProps> = ({ request, tracks, targetIds, isMob
   if (isMobile) {
     return (
       <div className="fixed inset-0 z-[700] flex items-end justify-center bg-black/60" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="breath-title">
-        <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-white/10 bg-[#121418] p-4" onClick={e => e.stopPropagation()} data-testid="breath-dialog">
+        <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-white/10 bg-nv-surface p-4" onClick={e => e.stopPropagation()} data-testid="breath-dialog">
           {header}
           <div className="space-y-2">
             {targets.map(t => {
@@ -396,7 +397,7 @@ const BreathDialog: React.FC<DialogProps> = ({ request, tracks, targetIds, isMob
 
   return (
     <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/60 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="breath-title">
-      <div className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-[#121418] p-5 shadow-2xl" onClick={e => e.stopPropagation()} data-testid="breath-dialog">
+      <div className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-nv-surface p-5 shadow-2xl" onClick={e => e.stopPropagation()} data-testid="breath-dialog">
         {header}
         {/* Pistes : type deviné, modifiable */}
         <div className="mb-3 space-y-1.5">

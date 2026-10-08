@@ -136,7 +136,7 @@ const StemSeparationDialog: React.FC<Props> = ({ target, projectName, getClipBuf
   if (!target) {
     if (!current) return null;
     return (
-      <div className="fixed bottom-4 right-4 z-[650] w-72 rounded-2xl border border-cyan-500/30 bg-[#121418]/95 p-3 shadow-2xl space-y-2" data-testid="stems-pill" title={STEMS_TOOLTIP}>
+      <div className="fixed bottom-4 right-4 z-[650] w-72 rounded-2xl border border-cyan-500/30 bg-nv-surface/95 p-3 shadow-2xl space-y-2" data-testid="stems-pill" title={STEMS_TOOLTIP}>
         <div className="flex items-center justify-between gap-2">
           <span className="text-[12px] font-black text-white truncate">Stems · {current.target.clipName}</span>
           {current.phase !== 'running' && <button type="button" aria-label="Fermer" onClick={() => setJob(null)} className="text-slate-400 hover:text-white text-[14px]">×</button>}
@@ -279,7 +279,7 @@ const StemSeparationDialog: React.FC<Props> = ({ target, projectName, getClipBuf
   return (
     <div className="fixed inset-0 z-[700] flex items-end sm:items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="stems-title" data-testid="stems-dialog"
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-md rounded-3xl border border-cyan-500/30 bg-[#121418] p-6 shadow-2xl space-y-4">
+      <div className="w-full max-w-md rounded-3xl border border-cyan-500/30 bg-nv-surface p-6 shadow-2xl space-y-4">
         <div>
           <h2 id="stems-title" className="text-lg font-black text-white" title={STEMS_TOOLTIP}>Séparer en stems</h2>
           <p className="mt-1 text-[12px] text-slate-300 truncate">« {target.clipName} »</p>

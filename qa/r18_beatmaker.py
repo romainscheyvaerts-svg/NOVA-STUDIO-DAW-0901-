@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3459/")
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-r18")
-from qalib import launch, new_page, shot, overflow_report, BASE, OUT  # noqa: E402
+from qalib import launch, new_page, shot, overflow_report, BASE, OUT, menu_open_for  # noqa: E402
 from scenarios import close_welcome, wait_text_gone  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -276,6 +276,7 @@ def step_chop(pg):
     if clip_el.count():
         clip_el.first.click(button="right")
         pg.wait_for_timeout(500)
+        menu_open_for(pg, "Découper (chop)…", exact=True)  # sous-menu « Traitement »
         item = pg.get_by_text("Découper (chop)…", exact=True)
         if item.count():
             item.first.click(); used_menu = True

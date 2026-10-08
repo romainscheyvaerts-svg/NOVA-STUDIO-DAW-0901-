@@ -62,7 +62,7 @@ const RemoteIngePanel: React.FC<Props> = ({ open, onClose, remote: r }) => {
   });
 
   return (
-    <div data-testid="remote-panel" className="fixed right-3 bottom-20 md:bottom-4 z-[640] w-[min(400px,calc(100vw-24px))] max-h-[min(680px,calc(100vh-110px))] flex flex-col rounded-3xl border border-white/10 bg-[#121418]/[0.97] shadow-2xl backdrop-blur" role="dialog" aria-labelledby="remote-title">
+    <div data-testid="remote-panel" className="fixed right-3 bottom-20 md:bottom-4 z-[640] w-[min(400px,calc(100vw-24px))] max-h-[min(680px,calc(100vh-110px))] flex flex-col rounded-3xl border border-white/10 bg-nv-surface/[0.97] shadow-2xl backdrop-blur" role="dialog" aria-labelledby="remote-title">
       <div className="flex items-center gap-2 p-4 border-b border-white/5">
         <h2 id="remote-title" className="flex-1 text-[14px] font-black text-white">🎧 Ingé à distance</h2>
         <span data-testid="remote-phase" className={`rounded-full px-2.5 py-1 text-[10px] font-black ${r.phase === 'mixing' ? 'bg-violet-500/20 text-violet-200' : 'bg-rose-500/20 text-rose-200'}`}>

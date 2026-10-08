@@ -632,7 +632,7 @@ export const SyncDelayUI: React.FC<{ node: SyncDelayNode, initialParams: DelayPa
   }, [params]);
 
   return (
-    <div className="w-[620px] bg-[#0c0d10] border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
+    <div className="w-[620px] bg-nv-bg border border-white/10 rounded-[40px] p-8 shadow-2xl flex flex-col space-y-6 animate-in fade-in zoom-in duration-300 select-none">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div className="flex items-center space-x-4">
@@ -734,7 +734,7 @@ export const SyncDelayUI: React.FC<{ node: SyncDelayNode, initialParams: DelayPa
             <select 
               value={params.divisionR || params.division}
               onChange={(e) => handleParamChange('divisionR', e.target.value as DelayDivision)}
-              className="bg-[#14161a] border border-white/10 rounded-lg px-2 py-1 text-[9px] font-black text-white w-full cursor-pointer hover:border-cyan-500/50 transition-all"
+              className="bg-nv-surface border border-white/10 rounded-lg px-2 py-1 text-[9px] font-black text-white w-full cursor-pointer hover:border-cyan-500/50 transition-all"
             >
               {(['1/4', '1/4D', '1/8', '1/8D', '1/16'] as DelayDivision[]).map(d => (
                 <option key={d} value={d}>{d}</option>
@@ -784,7 +784,7 @@ const DelayKnob: React.FC<{
     <div className="flex flex-col items-center space-y-3 select-none touch-none">
       <div 
         {...knob.bind}
-        className="relative w-14 h-14 rounded-full bg-[#14161a] border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-cyan-500/50 transition-all shadow-xl"
+        className="relative w-14 h-14 rounded-full bg-nv-surface border-2 border-white/10 flex items-center justify-center cursor-ns-resize hover:border-cyan-500/50 transition-all shadow-xl"
       >
         <div className="absolute inset-1.5 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div 
@@ -795,7 +795,7 @@ const DelayKnob: React.FC<{
             transform: `rotate(${(norm * 270) - 135}deg) translateY(2px)` 
           }}
         />
-        <div className="absolute inset-4 rounded-full bg-[#1c1f26] border border-white/5" />
+        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
       </div>
       <div className="text-center">
         <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap" title={termHelp(paramFr(label)) || undefined}>{paramFr(label)}</span>

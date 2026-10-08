@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-finitions-3")
-from qalib import launch, new_page, Log, BASE, OUT  # noqa: E402
+from qalib import launch, new_page, Log, BASE, OUT, menu_open_for  # noqa: E402
 from scenarios import close_welcome, wait_text_gone  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -103,6 +103,7 @@ def run(vps):
                         pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
                         for cle, rx, shot in (("fenetre_silences", r"(Strip Silence|Supprimer les silences)", "3_silences"), ("fenetre_spot", r"^Position exacte", "3b_spot")):
                             menu_clip()
+                            menu_open_for(pg, re.compile(rx))  # sous-menu « Édition »
                             item = pg.get_by_text(re.compile(rx)).first
                             if item.count() and item.is_visible():
                                 item.click(); pg.wait_for_timeout(600)

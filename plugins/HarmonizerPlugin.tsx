@@ -30,7 +30,7 @@ export const NovaHarmonizerUI: React.FC<{ node: any; initialParams: any; onParam
   const harmonyOf = (deg: number) => (sung > 0 ? noteNameFr(sung + math.shiftFor(sung, p.rootKey, scale, deg, chordNow)) : '—');
 
   return (
-    <V21Shell type="HARMONIZER" title="Harmoniseur" accent="text-fuchsia-400" node={node} gradient="bg-gradient-to-b from-[#1a1020] to-[#0d0b10]"
+    <V21Shell type="HARMONIZER" title="Harmoniseur" accent="text-fuchsia-400" node={node} gradient="bg-gradient-to-b from-[#1a1020] to-nv-bg"
       subtitle="Ajoute 1 à 4 voix d'harmonie dans la gamme, timbre naturel (comme les harmonies du Vocal Transformer de Logic ou le Pitcher de FL Studio)">
       <V21Presets presets={HARMONIZER_PRESETS} current={p} onApply={pr => set(pr.params as any)} color="bg-fuchsia-400" />
 

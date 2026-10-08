@@ -237,7 +237,7 @@ const CollabPanel: React.FC<Props> = (p) => {
   );
 
   return (
-    <div className="fixed right-3 bottom-20 md:bottom-4 z-[640] w-[min(400px,calc(100vw-24px))] max-h-[min(700px,calc(100vh-110px))] flex flex-col rounded-3xl border border-white/10 bg-[#121418]/[0.97] shadow-2xl backdrop-blur" role="dialog" aria-labelledby="collab-title">
+    <div className="fixed right-3 bottom-20 md:bottom-4 z-[640] w-[min(400px,calc(100vw-24px))] max-h-[min(700px,calc(100vh-110px))] flex flex-col rounded-3xl border border-white/10 bg-nv-surface/[0.97] shadow-2xl backdrop-blur" role="dialog" aria-labelledby="collab-title">
       <div className="flex items-center gap-2 p-4 border-b border-white/5">
         <h2 id="collab-title" className="flex-1 text-[14px] font-black text-white">👥 Collaboration</h2>
         {p.active && p.status && <span data-testid="collab-status-short" className={`inline-flex items-center gap-1.5 text-[10px] font-black ${STATUS_TONE[p.status.tone].text}`}><span className={`w-1.5 h-1.5 rounded-full ${STATUS_TONE[p.status.tone].dot}`} />{p.status.short}</span>}

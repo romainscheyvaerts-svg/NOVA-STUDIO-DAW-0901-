@@ -213,14 +213,14 @@ const DoublerKnob: React.FC<{
     <div className="flex flex-col items-center space-y-2 select-none group touch-none" title={termHelp(label) || undefined}>
       <div 
         {...knob.bind}
-        className="w-14 h-14 rounded-full bg-[#121418] border-2 border-white/5 flex items-center justify-center cursor-pointer hover:border-violet-500/50 transition-all shadow-xl relative"
+        className="w-14 h-14 rounded-full bg-nv-surface border-2 border-white/5 flex items-center justify-center cursor-pointer hover:border-violet-500/50 transition-all shadow-xl relative"
       >
         <div className="absolute inset-1 rounded-full border border-white/5 bg-black/40 shadow-inner" />
         <div 
           className="absolute top-1/2 left-1/2 w-1 h-5 -ml-0.5 -mt-5 origin-bottom rounded-full transition-transform duration-75"
           style={{ transform: `rotate(${rotation}deg) translateY(2px)`, backgroundColor: '#a855f7', boxShadow: '0 0 10px #a855f7' }}
         />
-        <div className="absolute inset-4 rounded-full bg-[#1a1c22] border border-white/5" />
+        <div className="absolute inset-4 rounded-full bg-nv-raised border border-white/5" />
       </div>
       <div className="text-center">
         <span className="block text-[9px] font-bold text-slate-400 mb-1 whitespace-nowrap">{label}</span>
@@ -297,7 +297,7 @@ export const VocalDoublerUI: React.FC<{ node: VocalDoublerNode, initialParams: D
   };
 
   return (
-    <div className="w-[500px] bg-[#0c0d10] border border-white/10 rounded-[40px] p-10 shadow-2xl flex flex-col space-y-8 animate-in fade-in zoom-in duration-300 select-none">
+    <div className="w-[500px] bg-nv-bg border border-white/10 rounded-[40px] p-10 shadow-2xl flex flex-col space-y-8 animate-in fade-in zoom-in duration-300 select-none">
       <div className="flex justify-between items-center">
         <div className="flex items-center space-x-5">
           <div className="w-14 h-14 rounded-2xl bg-violet-500/10 flex items-center justify-center text-violet-400 border border-violet-500/20 shadow-lg shadow-violet-500/5">
