@@ -2206,6 +2206,14 @@ useEffect(() => {
               title="Sélecteur (comme dans Pro Tools) (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
           </div>
+          {/* Trim TCE (R13) : le bord d'un clip audio l'étire au lieu de le rogner. */}
+          {!simple && (
+            <button type="button" onClick={() => editPrefsStore.set({ trimTce: !editPrefs.trimTce })} aria-pressed={!!editPrefs.trimTce} data-testid="trim-tce" aria-label="Étirer en tirant le bord (Trim TCE)"
+              title="Étirer en tirant le bord (Pro Tools : outil Trim en mode TCE · Logic : Option + bord · Live : Warp) : le clip audio s'allonge ou raccourcit, sa hauteur ne change pas. Sans ce mode : Alt + bord."
+              className={`hidden [@media(pointer:fine)]:flex lg:flex w-9 h-9 shrink-0 rounded-lg items-center justify-center border transition-all ${editPrefs.trimTce ? 'bg-amber-500/15 border-amber-500/50 text-amber-400' : 'border-white/5 bg-black/40 text-slate-500 hover:text-white'}`}>
+              <i className="fas fa-left-right text-[11px]" aria-hidden="true"></i><i className="fas fa-clock text-[8px] -ml-0.5 mt-2" aria-hidden="true"></i>
+            </button>
+          )}
           {/* Crayon, ligne de gain, infos de gain, mode boucle (R5). */}
           <ClipGainToolbar activeTool={activeTool} setActiveTool={setActiveTool} compact={simple} />
           {/* Modes d'édition Pro Tools (remplacent l'aimant oui / non) : SHUF / SLIP / SPOT / GRID + valeur de grille. */}
@@ -2228,11 +2236,6 @@ useEffect(() => {
                 title="L'automation suit l'édition (« Automation Follows Edit » de Pro Tools) : un clip déplacé emporte sa courbe de volume, de pan, de mute et d'effets ; copier, couper, coller, effacer ou dupliquer une plage portent aussi l'automation. Désactivé : la courbe reste où elle est."
                 className={`h-8 px-2 rounded-lg border text-[10px] font-bold ${editPrefs.automationFollowsEdit !== false ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
                 <i className="fas fa-wave-square mr-1"></i>Automation suit l'édition
-              </button>
-              <button onClick={() => editPrefsStore.set({ trimTce: !editPrefs.trimTce })} aria-pressed={!!editPrefs.trimTce} data-testid="trim-tce"
-                title="Trim TCE (Pro Tools : outil Trim en mode TCE · Logic : Option + bord · Live : Warp) : tirer le bord d'un clip audio l'étire au lieu de le rogner, sa hauteur ne change pas. Sans ce mode : Alt + bord."
-                className={`h-8 px-2 rounded-lg border text-[10px] font-bold ${editPrefs.trimTce ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}>
-                <i className="fas fa-arrows-left-right mr-1"></i>Étirer (TCE)
               </button>
               <select value={editPrefs.xfadeCurve} onChange={e => editPrefsStore.set({ xfadeCurve: e.target.value as CrossfadeCurve })}
                 aria-label="Courbe des fondus enchaînés"

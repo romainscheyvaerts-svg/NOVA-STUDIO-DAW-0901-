@@ -15,7 +15,7 @@ import BounceDialog from './BounceDialog';
 import AudioSuiteDialog from './AudioSuiteDialog';
 import TransposeDialog from './TransposeDialog';
 import WarpMarkers from './WarpMarkers';
-import { editingElastic, elasticBlock, elasticRevertPatch, withDuration } from '../utils/clipTranspose';
+import { editingElastic, elasticBlock, elasticRevertPatch, withDuration, withTempo } from '../utils/clipTranspose';
 import { applyClipPatches, doneMessage, renderElasticClip } from '../services/elasticRender';
 import { audioSuiteRevertPatch, patchClip } from '../utils/clipProcess';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
@@ -107,6 +107,26 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
     }));
     try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: "↩️ Clip revenu à l'original (AudioSuite). Ctrl+Z pour retrouver le son traité." })); } catch { /* hors navigateur */ }
   }, [setState]);
+  // Calage au tempo (R13, warp d'Ableton) : un clip calé suit le tempo du projet (rendu refait
+  // depuis l'original, une fois le geste fini).
+  useEffect(() => {
+    const has = (id: string) => !!audioBufferRegistry.get(id);
+    const timer = window.setTimeout(async () => {
+      const todo = tracksRef.current.flatMap(t => t.clips.filter(c => c.elastic?.tempo && Math.abs(c.elastic.tempo.bpm - bpm) > 0.01).map(c => ({ trackId: t.id, clip: c })));
+      if (!todo.length) return;
+      const patches: { trackId: string; clipId: string; patch: Partial<Clip> }[] = [];
+      for (const { trackId, clip } of todo) {
+        try {
+          const ed = editingElastic(clip, has);
+          if (!ed.fromOriginal) continue;
+          const { patch } = await renderElasticClip(clip, withTempo(ed.info, clip.elastic!.tempo!.sourceBpm, bpm));
+          patches.push({ trackId, clipId: clip.id, patch });
+        } catch (e) { console.warn('[R13] calage au tempo', e); }
+      }
+      if (patches.length) { applyClipPatches(setState, patches); say(`⏱️ ${patches.length > 1 ? `${patches.length} samples recalés` : 'Sample recalé'} sur ${Math.round(bpm * 100) / 100} BPM (hauteur gardée).`); }
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [bpm, setState]); // eslint-disable-line react-hooks/exhaustive-deps
   const focus = useKeyboardFocus();
 
   useEffect(() => {

@@ -14,7 +14,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { Clip, DAWState, ElasticInfo, Track } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import {
-  detectMaterial, editingElastic, elasticBlock, elasticLabel, elasticRevertPatch, isNeutralElastic, MAX_STRETCH, MIN_STRETCH, monoMix,
+  detectMaterial, editingElastic, estimateTempo, elasticBlock, elasticLabel, elasticRevertPatch, isNeutralElastic, MAX_STRETCH, MIN_STRETCH, monoMix,
   semitoneText, stretchOf, withDuration, withSemitones,
 } from '../utils/clipTranspose';
 import { applyClipPatches, doneMessage, notifyElastic, renderAndApply } from '../services/elasticRender';
@@ -58,6 +58,7 @@ const TransposeDialog: React.FC<Props> = ({ open, targets, tracks, bpm, setState
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [detected, setDetected] = useState<'voice' | 'poly' | null>(null);
+  const [estimated, setEstimated] = useState(false);
 
   useEffect(() => {
     if (!open || !start) return;
@@ -69,16 +70,25 @@ const TransposeDialog: React.FC<Props> = ({ open, targets, tracks, bpm, setState
     setAlgo(start.algo || 'auto');
     setRatio(null);
     setSampleBpm(start.tempo?.sourceBpm ? String(start.tempo.sourceBpm) : first?.warp?.originalBpm ? String(Math.round(first.warp.originalBpm * 100) / 100) : '');
-    setError(null); setBusy(null); setDetected(null);
-    // Ce que l'auto choisira (6 s au plus, après l'affichage de la fenêtre).
+    setError(null); setBusy(null); setDetected(null); setEstimated(false);
+    // Ce que l'auto choisira (même analyse que le rendu : le milieu de la partie montrée, 20 s au plus).
     const id = window.setTimeout(() => {
       const buf = first ? audioBufferRegistry.get(editingElastic(first, has).bufferId || first.bufferId || '') : null;
       if (!buf) return;
-      const sr = buf.sampleRate, a = Math.round((start.sourceOffset || 0) * sr), n = Math.min(buf.length - a, Math.round(6 * sr));
+      const sr = buf.sampleRate, a = Math.round((start.sourceOffset || 0) * sr), n = Math.min(buf.length - a, Math.round(Math.min(30, start.sourceDuration) * sr));
       if (n < sr * 0.3) return;
       const chs: Float32Array[] = [];
       for (let c = 0; c < buf.numberOfChannels; c++) chs.push(buf.getChannelData(c).subarray(a, a + n));
-      try { setDetected(detectMaterial(monoMix(chs), sr).kind); } catch { /* */ }
+      try {
+        const m = monoMix(chs);
+        const kind = detectMaterial(m, sr).kind;
+        setDetected(kind);
+        // Tempo du sample inconnu : estimé (warp automatique d'Ableton), à corriger si besoin.
+        if (kind === 'poly' && !start.tempo?.sourceBpm && !first?.warp?.originalBpm) {
+          const t = estimateTempo(m, sr);
+          if (t) { setSampleBpm(String(t.bpm)); setEstimated(true); }
+        }
+      } catch { /* */ }
     }, 120);
     return () => window.clearTimeout(id);
   }, [open, start]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -196,8 +206,8 @@ const TransposeDialog: React.FC<Props> = ({ open, targets, tracks, bpm, setState
                 <span className="text-nv-muted">%</span>
               </label>
               <div className="flex items-center gap-2 text-[12px]">
-                <span className="w-16 text-nv-muted" title="Tempo d'origine du sample">Sample</span>
-                <input type="number" min={30} max={300} step={0.01} value={sampleBpm} placeholder="BPM" onChange={e => setSampleBpm(e.target.value)} aria-label="Tempo du sample (BPM)" data-testid="transpose-sample-bpm"
+                <span className="w-16 text-nv-muted" title="Tempo d'origine du sample (souvent dans le nom du fichier) ; estimé à l'écoute s'il n'est pas connu">Sample{estimated ? <span className="block text-[9px]" data-testid="transpose-bpm-estimated">estimé</span> : null}</span>
+                <input type="number" min={30} max={300} step={0.01} value={sampleBpm} placeholder="BPM" onChange={e => { setSampleBpm(e.target.value); setEstimated(false); }} aria-label="Tempo du sample (BPM)" data-testid="transpose-sample-bpm"
                   className="w-20 rounded-lg border border-nv-line bg-nv-panel px-2 py-1 text-right text-[12px] tabular-nums" />
                 <button type="button" onClick={fitTempo} className={`${btn} flex-1`} data-testid="transpose-fit-tempo"
                   title="Cale le sample sur le tempo du projet, sans changer sa hauteur (Live : Warp · Pro Tools : Elastic Audio et Conform · Logic : Smart Tempo)">

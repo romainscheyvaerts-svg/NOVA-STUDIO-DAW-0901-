@@ -19,7 +19,7 @@ import {
   editingElastic, elasticBlock, elasticLabel, elasticRevertPatch, isNeutralElastic, mapTime, placeMarker, quantizeOnsets, removeMarker, unmapTime,
 } from '../utils/clipTranspose';
 import { transientsOf } from '../utils/transients';
-import { gridLabel, gridStepSeconds } from '../utils/grid';
+import { GRID_OPTIONS, gridStepSeconds, gridSubdivisionsPerBar } from '../utils/grid';
 import { useEditMode } from '../utils/editModes';
 import { canvasTheme } from '../utils/canvasTheme';
 import { useTheme } from '../utils/themeStore';
@@ -52,6 +52,10 @@ const WarpMarkers: React.FC<Props> = ({ open, trackId, clipId, tracks, bpm, setS
   const boxRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: string; src: number; free: boolean; timer?: number; moved: boolean } | null>(null);
   const em = useEditMode();
+  // Grille du calage : celle du projet si elle est fine (1/16 ou plus), sinon 1/16 — à la noire,
+  // les charleys en croches seraient tirés sur les temps (Pro Tools : valeur du Quantize).
+  const [qGrid, setQGrid] = useState<string>('1/16');
+  useEffect(() => { if (open) setQGrid(gridSubdivisionsPerBar(em.gridSize) >= 16 && /^1\//.test(em.gridSize) ? em.gridSize : '1/16'); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const { theme } = useTheme();
 
   useEffect(() => { if (open && base) { setInfo(base.info); setError(null); setBusy(null); setSel(null); } }, [open, base]);
@@ -64,9 +68,9 @@ const WarpMarkers: React.FC<Props> = ({ open, trackId, clipId, tracks, bpm, setS
     return transientsOf(buffer).filter(s => s > a + 0.005 && s < b - 0.005);
   }, [buffer, info?.sourceOffset, info?.sourceDuration]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const step = gridStepSeconds(em.gridSize, bpm);
+  const step = gridStepSeconds(qGrid, bpm);
   const clipStart = clip?.start || 0;
-  const onGrid = (d: number) => Math.abs(((clipStart + d) / step) - Math.round((clipStart + d) / step)) * step < 0.0015;
+  const onGrid = (d: number) => Math.abs(((clipStart + d) / step) - Math.round((clipStart + d) / step)) * step < 0.003;
 
   // Largeur suivie (fenêtre, rotation de la tablette).
   useEffect(() => {
@@ -76,7 +80,7 @@ const WarpMarkers: React.FC<Props> = ({ open, trackId, clipId, tracks, bpm, setS
     const ro = new ResizeObserver(() => setWidth(Math.max(240, Math.floor(el.clientWidth))));
     ro.observe(el);
     return () => ro.disconnect();
-  }, [open]);
+  }, [open, !!info]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const draw = useCallback(() => {
     const cv = canvasRef.current;
@@ -257,7 +261,6 @@ const WarpMarkers: React.FC<Props> = ({ open, trackId, clipId, tracks, bpm, setS
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-nv-muted" data-testid="warp-status">
           <span><span className="inline-block h-2 w-2 rounded-full bg-green-500 mr-1" />attaques sur la grille : {onsets.length - offGrid}</span>
           <span><span className="inline-block h-2 w-2 rounded-full bg-orange-500 mr-1" />à côté : {offGrid}</span>
-          <span>grille : {gridLabel(em.gridSize)}</span>
           <span>marqueurs : {info.markers?.length || 0}</span>
         </div>
 
@@ -266,6 +269,12 @@ const WarpMarkers: React.FC<Props> = ({ open, trackId, clipId, tracks, bpm, setS
             title="Cale toutes les attaques sur la grille du projet, sans changer la hauteur (Pro Tools : Elastic Audio Quantize · Logic : Flex Time + Quantize · Live : Quantize des warp markers)">
             <i className="fas fa-magnet mr-1.5" />Quantifier l'audio
           </button>
+          <label className="flex items-center gap-1 text-[12px]" title="Grille du calage (Pro Tools : valeur du Quantize · Logic : Q) : 1/16 pour les charleys, 1/8 pour un flow, triolets pour les flows en triolets">
+            Grille
+            <select value={qGrid} onChange={e => setQGrid(e.target.value)} aria-label="Grille du calage" data-testid="warp-grid" className="rounded-lg border border-nv-line bg-nv-well px-2 py-1 text-[12px] text-nv-ink">
+              {GRID_OPTIONS.filter(o => o.kind !== 'temps').map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </label>
           <label className="flex items-center gap-1 text-[12px]" title="Force du calage : 100 % = pile sur la grille ; 50 % = à mi-chemin (garde du groove)">
             Force
             <select value={strength} onChange={e => setStrength(Number(e.target.value))} aria-label="Force du calage" className="rounded-lg border border-nv-line bg-nv-well px-2 py-1 text-[12px] text-nv-ink">

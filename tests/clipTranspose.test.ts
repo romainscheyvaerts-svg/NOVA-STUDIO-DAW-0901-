@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { pvStretch, resampleStep } from '../engine/phaseVocoder';
 import {
-  anchorsOf, detectMaterial, editingElastic, elasticBlock, elasticLabel, elasticPatch, elasticRevertPatch, isNeutralElastic, mapTime,
+  anchorsOf, detectMaterial, estimateTempo, editingElastic, elasticBlock, elasticLabel, elasticPatch, elasticRevertPatch, isNeutralElastic, mapTime,
   placeMarker, quantizeOnsets, rebaseVisible, removeMarker, renderElastic, renderPlan, semitoneText, unmapTime, withDuration, withSemitones, withTempo,
 } from '../utils/clipTranspose';
 import { analyzePitch } from '../utils/pitchAnalysis';
@@ -154,6 +154,14 @@ describe('transposer un clip (rendu)', () => {
     const r = renderElastic({ channels: [x], sr: SR, segments: seg(x.length, m), semitones: 0, formants: false, algo: 'poly' });
     expect(r.channels[0].length).toBe(m);
     expect(Math.abs(cents(peakHz(r.channels[0], 440), 440))).toBeLessThan(2);
+  });
+
+  it('tempo d’un sample estimé (warp automatique) : boucle à 120 BPM', () => {
+    const t = estimateTempo(synthBeat(8, 120).x, SR);
+    expect(t).not.toBeNull();
+    expect(Math.abs(t!.bpm - 120)).toBeLessThan(1);
+    const t2 = estimateTempo(synthBeat(8, 92).x, SR);
+    expect(Math.abs(t2!.bpm - 92)).toBeLessThan(1);
   });
 
   it('choix automatique : voix seule → PSOLA, beat → polyphonique', () => {

@@ -32,7 +32,7 @@ const PracticeSpeed: React.FC<{ compact?: boolean; className?: string }> = ({ co
   if (compact) {
     return (
       <button type="button" data-testid="practice-speed" aria-label={`Vitesse de lecture : ${practiceLabel(speed)}`} title={TITLE}
-        onClick={() => practiceSpeedStore.set(nextPreset(speed))} className={`${chip} min-h-[44px] ${className}`}>
+        onClick={() => practiceSpeedStore.set(nextPreset(speed))} className={`${chip} h-9 min-h-[36px] [@media(pointer:coarse)]:min-h-[40px] ${className}`}>
         <i className="fas fa-gauge-simple-high mr-1" aria-hidden="true" />{practiceLabel(speed)}
       </button>
     );

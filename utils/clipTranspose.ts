@@ -242,13 +242,28 @@ export function monoMix(chs: Float32Array[]): Float32Array {
   return m;
 }
 
+/** Part de l'énergie sous ~120 Hz (kick, 808, basse) : quasi nulle pour une voix enregistrée. */
+function lowEnergyShare(x: Float32Array, sr: number): number {
+  // Passe-bas d'ordre 4 (deux biquads de Butterworth en cascade) à 120 Hz.
+  const w0 = (2 * Math.PI * 120) / sr, cw = Math.cos(w0), al = Math.sin(w0) / (2 * Math.SQRT1_2);
+  const b0 = (1 - cw) / 2 / (1 + al), b1 = (1 - cw) / (1 + al), a1 = (-2 * cw) / (1 + al), a2 = (1 - al) / (1 + al);
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0, u1 = 0, u2 = 0, z1 = 0, z2 = 0, lo = 0, all = 0;
+  for (let i = 0; i < x.length; i++) {
+    const v = x[i];
+    const y = b0 * v + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = v; y2 = y1; y1 = y;
+    const z = b0 * y + b1 * u1 + b0 * u2 - a1 * z1 - a2 * z2; u2 = u1; u1 = y; z2 = z1; z1 = z;
+    lo += z * z; all += v * v;
+  }
+  return all > 0 ? lo / all : 0;
+}
+
 /**
- * Voix seule ou son polyphonique ? Une voix : la plupart de ses passages
- * forts ont UNE hauteur nette (YIN strict), avec peu d'attaques sèches. Un
- * beat : des attaques régulières (kick, caisse claire, charleston) et un
- * mélange sans hauteur unique.
+ * Voix seule ou son polyphonique ? Une voix enregistrée : la plupart de ses
+ * passages forts ont UNE hauteur nette (YIN strict), presque rien sous 120 Hz,
+ * peu d'attaques sèches. Un beat : du grave (kick, 808, basse), des attaques
+ * régulières, un mélange sans hauteur unique.
  */
-export function detectMaterial(x: Float32Array, sr: number): { kind: 'voice' | 'poly'; voiced: number; onsetsPerSec: number } {
+export function detectMaterial(x: Float32Array, sr: number): { kind: 'voice' | 'poly'; voiced: number; onsetsPerSec: number; low: number } {
   // 20 s au plus (le milieu) : assez pour décider, rapide.
   const maxN = Math.round(20 * sr);
   const from = x.length > maxN ? Math.floor((x.length - maxN) / 2) : 0;
@@ -267,8 +282,9 @@ export function detectMaterial(x: Float32Array, sr: number): { kind: 'voice' | '
   const onsets = detectTransients(y, sr, { jumpDb: 12 });
   const activeSec = Math.max(0.5, (n * tr.hop) / sr);
   const onsetsPerSec = onsets.length / activeSec;
-  const kind = voiced >= 0.55 && onsetsPerSec < 3 ? 'voice' : 'poly';
-  return { kind, voiced: Math.round(voiced * 1000) / 1000, onsetsPerSec: Math.round(onsetsPerSec * 100) / 100 };
+  const low = lowEnergyShare(y, sr);
+  const kind = voiced >= 0.5 && onsetsPerSec < 3 && low < 0.08 ? 'voice' : 'poly';
+  return { kind, voiced: Math.round(voiced * 1000) / 1000, onsetsPerSec: Math.round(onsetsPerSec * 100) / 100, low: Math.round(low * 1000) / 1000 };
 }
 
 /** Étire chaque morceau à sa longueur × `pitch` (la transposition suit par rééchantillonnage). */
@@ -434,4 +450,45 @@ export async function renderElasticAsync(job: ElasticJob): Promise<ElasticResult
       worker!.postMessage(job, job.channels.map(c => c.buffer as ArrayBuffer));
     });
   } finally { worker.terminate(); }
+}
+
+/**
+ * Tempo d'un sample (warp automatique, Ableton) : autocorrélation de la courbe
+ * d'attaques (montées d'énergie par tranches de 10 ms), entre 70 et 180 BPM.
+ * Renvoie null si rien de régulier (voix a cappella, nappe).
+ */
+export function estimateTempo(x: Float32Array, sr: number): { bpm: number; confidence: number } | null {
+  const hop = Math.max(1, Math.round(sr * 0.01));
+  const maxN = Math.min(x.length, Math.round(sr * 30));
+  const frames = Math.floor(maxN / hop);
+  if (frames < 300) return null;
+  const e = new Float64Array(frames);
+  for (let f = 0; f < frames; f++) {
+    let s = 0;
+    for (let i = f * hop, end = i + hop; i < end; i++) s += x[i] * x[i];
+    e[f] = Math.log(1e-6 + Math.sqrt(s / hop));
+  }
+  const d = new Float64Array(frames);
+  for (let f = 1; f < frames; f++) d[f] = Math.max(0, e[f] - e[f - 1]);
+  let mean = 0;
+  for (let f = 0; f < frames; f++) mean += d[f] / frames;
+  for (let f = 0; f < frames; f++) d[f] -= mean;
+  const ac = (lag: number) => { let s = 0; for (let f = 0; f + lag < frames; f++) s += d[f] * d[f + lag]; return s / (frames - lag); };
+  const r0 = ac(0);
+  if (!(r0 > 0)) return null;
+  // Lags de 70 à 180 BPM ; un tempo est soutenu par ses multiples (mesure, demi-mesure).
+  const lagOf = (bpm: number) => (60 / bpm) / 0.01;
+  let best = 0, bestScore = -Infinity;
+  for (let lag = Math.floor(lagOf(180)); lag <= Math.ceil(lagOf(70)); lag++) {
+    const sc = ac(lag) + 0.5 * ac(2 * lag) + 0.25 * ac(4 * lag);
+    if (sc > bestScore) { bestScore = sc; best = lag; }
+  }
+  if (!best) return null;
+  // Affinage parabolique du pic.
+  const a = ac(best - 1), b = ac(best), c = ac(best + 1);
+  const den = a - 2 * b + c;
+  const lag = best + (den !== 0 ? 0.5 * (a - c) / den : 0);
+  const bpm = Math.round((60 / (lag * 0.01)) * 100) / 100;
+  const confidence = Math.max(0, Math.min(1, b / r0));
+  return confidence > 0.05 ? { bpm, confidence: Math.round(confidence * 100) / 100 } : null;
 }

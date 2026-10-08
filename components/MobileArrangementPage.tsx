@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { isMidiRecordTrack } from '../utils/midiRecord';
 import { openNovaWindow } from '../utils/novaWindows';
+import PracticeSpeed from './PracticeSpeed';
 import { requestBreaths } from '../utils/breathBus';
 import MobileContainer from './MobileContainer';
 import LiveRecordingClip from './LiveRecordingClip';
@@ -601,6 +602,8 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           <div className="text-[10px] font-bold text-white/50 bg-white/5 px-2 py-1 rounded">
             {bpm} BPM
           </div>
+          {/* Lecture ralentie (R13) : un appui = 85, 75, 60, 50 puis 100 % (hauteur gardée). */}
+          <PracticeSpeed compact />
           <button
             onClick={() => setZoom(z => Math.max(MIN_ZOOM, z - 20))}
             aria-label="Dézoomer"
