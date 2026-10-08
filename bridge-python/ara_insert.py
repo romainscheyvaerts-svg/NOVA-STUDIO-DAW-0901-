@@ -25,7 +25,7 @@ Actions
   ARA_INSERT_DOC {slot_id, sources:[{id, name, persistent_id?}], regions:[{id, source, name,
                  offset, start, duration}], track:{name}, tempo:[{t, q}], signatures:[{q, num, den}],
                  chords:[{q, root, bass, intervals, name}], bpm}
-                 → {success, version, added, removed, updated} ou {success:false, missing:[ids]}
+                 → {success, applied:true, version, added, removed, updated} ou {success, applied:false, missing:[ids]}
                  (sons pas encore reçus : les envoyer par ARA_INSERT_SOURCE puis renvoyer DOC)
   ARA_INSERT_STATE {slot_id, notes?, wait_analysis_s?} → régions relues dans le plugin
   ARA_INSERT_EDITOR {slot_id, mode: dock|bounds|float|hide, parent, x, y, w, h, visible}
@@ -302,7 +302,7 @@ class AraInsertSlot:
         srcs = req.get("sources") or []
         missing = [str(s.get("id")) for s in srcs if str(s.get("id")) not in self.sources]
         if missing:
-            return {"success": False, "missing": missing}
+            return {"success": True, "applied": False, "missing": missing}
         out_sources = []
         for s in srcs:
             sid = str(s.get("id"))
@@ -324,7 +324,7 @@ class AraInsertSlot:
             self.pending_archive = None
         self.doc_version = int(res.get("version") or self.doc_version + 1)
         self.plugin_latency = int(res.get("latency_samples") or self.plugin_latency)
-        return {"success": True, **{k: v for k, v in res.items() if k not in ("id", "ok")}}
+        return {"success": True, "applied": True, **{k: v for k, v in res.items() if k not in ("id", "ok")}}
 
 
 STATE_PREFIX = "NARA1."

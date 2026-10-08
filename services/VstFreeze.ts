@@ -1,6 +1,7 @@
 import { Clip, PluginInstance, SendFreeze, Track, TrackType } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { liveVstNodes } from '../engine/VSTPluginNode';
+import { isAraInsert } from '../utils/araInsert';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { novaBridge } from './NovaBridge';
 import {
@@ -86,6 +87,9 @@ const isolated = (track: Track, plugins: PluginInstance[], clips?: Clip[], withP
   plugins, ...(clips ? { clips, type: TrackType.AUDIO } : {}),
 });
 
+/** Canal à la longueur voulue (rendu ARA un peu plus court ou plus long). */
+const padChannel = (x: Float32Array, n: number): Float32Array => { if (x.length === n) return x; const o = new Float32Array(n); o.set(x.subarray(0, n)); return o; };
+
 const channelsOf = (b: AudioBuffer): Float32Array[] =>
   Array.from({ length: Math.min(2, b.numberOfChannels) }, (_, c) => b.getChannelData(c));
 
@@ -168,6 +172,18 @@ export async function renderThroughChain(input: AudioBuffer, plugins: PluginInst
     if (seg.kind === 'vst') {
       const p = seg.plugin;
       onStep?.(`Rendu ${p.params?.name || p.name}…`);
+      // Melodyne / VocAlign en insert (ARA) : le plugin rend les clips de la piste eux-mêmes, sur
+      // la même plage du morceau (identique à la lecture) ; le son qui arrive ne compte pas.
+      if (isAraInsert(p)) {
+        // Le nœud de l'insert (engine/AraInsertNode) est aussi dans liveVstNodes.
+        const node = liveVstNodes.get(p.id) as unknown as { renderRange?: (s: number, d: number, sr: number) => Promise<Float32Array[]> } | undefined;
+        if (!node?.renderRange) throw new Error(`${p.params?.name || p.name} (ARA) n'est pas chargé : ouvre le projet dans Nova Studio sur le PC qui l'a.`);
+        const out = await node.renderRange(opts.startTime || 0, buffer.length / sr, sr);
+        const next = ctx.createBuffer(2, buffer.length, sr);
+        for (let c = 0; c < 2; c++) next.copyToChannel(padChannel(out[Math.min(c, out.length - 1)], buffer.length), c);
+        buffer = next;
+        continue;
+      }
       const live = liveVstNodes.get(p.id);
       const automation = vstAutomationFor(host, p.id, opts.startTime || 0, sr, buffer.length);
       if (automation.length && !novaBridge.getBridgeState().automation) {

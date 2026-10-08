@@ -113,7 +113,7 @@ class Document(unittest.TestCase):
 
     def test_son_manquant(self):
         r = self.slot.sync_doc({"sources": [{"id": "b1"}], "regions": [{"id": "c1", "source": "b1", "start": 0, "duration": 1}]})
-        self.assertEqual(r, {"success": False, "missing": ["b1"]})
+        self.assertEqual(r, {"success": True, "applied": False, "missing": ["b1"]})
         self.assertEqual(self.slot.host.calls, [])
 
     def test_son_envoye_une_fois_et_archive_restauree(self):

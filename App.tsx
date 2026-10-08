@@ -247,6 +247,10 @@ import { pluginDisplayName } from './utils/pluginLabel';
 import { BreathHost, BreathMixOption, BreathPanelTools, breathsAfterMixStyle } from './components/BreathTools';
 import { requestBreaths } from './utils/breathBus';
 import { practiceSpeedStore } from './utils/practiceSpeed';
+// Melodyne / VocAlign en insert de piste (ARA, comme Pro Tools) : panneau du bas, document de la piste.
+import AraEditorDock, { AraCommitChange, openAraDock } from './components/AraEditorDock';
+import { araInsertMetadata, araInsertOf, isAraInsert, withAraInsertFirst } from './utils/araInsert';
+import { araMenuPlugins, useAraInserts } from './hooks/useAraInserts';
 
 /** Pages du téléphone : nom affiché si l'une plante (le reste du studio continue). */
 const MOBILE_PAGE_NAMES: Record<string, string> = {
@@ -2914,6 +2918,25 @@ function Studio() {
       return;
     }
 
+    // Melodyne / VocAlign en insert (ARA, comme Pro Tools) : un seul par piste, tout en haut de la chaîne.
+    if (isAraInsert(newPlugin)) {
+      const existing = araInsertOf(stateRef.current.tracks.find(t => t.id === tid));
+      if (existing) {
+        setAiNotification(`ℹ️ Cette piste a déjà ${existing.params?.name || 'un plugin ARA'} en insert : son éditeur s'ouvre en bas.`);
+        openAraDock(tid, existing.id);
+        return;
+      }
+      setState(produce((draft: DAWState) => {
+        const track = draft.tracks.find(t => t.id === tid);
+        if (track) track.plugins = withAraInsertFirst(track.plugins, newPlugin);
+      }));
+      setAiNotification(`🎛️ ${metadata?.name || 'Plugin ARA'} en insert : tous les clips de la piste lui sont confiés (ARA), comme dans Pro Tools. Ses retouches s'entendent en lecture.`);
+      setTimeout(() => setAiNotification(null), 5000);
+      await ensureAudioEngine();
+      setTimeout(() => openAraDock(tid, newPlugin.id), 50);
+      return;
+    }
+
     setState(produce((draft: DAWState) => {
         const track = draft.tracks.find(t => t.id === tid);
         if (track) {
@@ -2934,6 +2957,56 @@ function Studio() {
         }, 50);
     }
   }, [setState]);
+
+  // Melodyne / VocAlign en insert (ARA, comme Pro Tools) : document de la piste tenu à jour.
+  useAraInserts(state.tracks, state.chords);
+
+  // « Valider (Commit) » du panneau ARA : clips rendus + insert retiré, une seule annulation.
+  const handleAraCommit = useCallback((trackId: string, pluginId: string, changes: AraCommitChange[], message: string) => {
+    setState(prev => produce(prev, (draft: DAWState) => {
+      for (const ch of changes) {
+        const c = draft.tracks.find(x => x.id === ch.trackId)?.clips.find(x => x.id === ch.clipId);
+        if (!c) continue;
+        for (const [k, v] of Object.entries(ch.patch)) {
+          if (v === undefined) delete (c as any)[k]; else (c as any)[k] = v;
+        }
+      }
+      const t = draft.tracks.find(x => x.id === trackId);
+      if (t) t.plugins = t.plugins.filter(p => p.id !== pluginId);
+    }));
+    setAiNotification(message);
+    setTimeout(() => setAiNotice(n => (n?.text === message ? null : n)), 8000);
+  }, [setState]);
+
+  // VocAlign : piste guide (la lead) choisie dans la barre de l'effet.
+  const handleAraGuide = useCallback((trackId: string, pluginId: string, guideTrackId: string | null) => {
+    setState(produce((draft: DAWState) => {
+      const p = draft.tracks.find(t => t.id === trackId)?.plugins.find(x => x.id === pluginId);
+      if (p) p.params = { ...p.params, guideTrackId: guideTrackId || undefined };
+    }));
+  }, [setState]);
+
+  // Ouvrir un insert ARA (piste, console, ajout) = le panneau du bas, pas une fenêtre d'effet.
+  useEffect(() => {
+    if (activePlugin && isAraInsert(activePlugin.plugin)) {
+      openAraDock(activePlugin.trackId, activePlugin.plugin.id);
+      setActivePlugin(null);
+    }
+  }, [activePlugin]);
+
+  // Le plugin demande le transport (bouton lecture de Melodyne, clic sur sa règle) : NOVA joue.
+  const araTransportRef = useRef({ seek: handleSeek, toggle: handleTogglePlay });
+  araTransportRef.current = { seek: handleSeek, toggle: handleTogglePlay };
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      const playing = stateRef.current.isPlaying;
+      if (d.kind === 'position' && Number.isFinite(d.value)) araTransportRef.current.seek(Number(d.value));
+      else if ((d.kind === 'start' && !playing) || (d.kind === 'stop' && playing)) void araTransportRef.current.toggle();
+    };
+    window.addEventListener('nova:ara-transport', on);
+    return () => window.removeEventListener('nova:ara-transport', on);
+  }, []);
 
   // ANCIEN SYSTÈME D'IMPORT SUPPRIMÉ - Remplacé par handleNewAudioImport
 
@@ -7710,6 +7783,12 @@ function Studio() {
                 </StructureTracksContext.Provider>
                 </PanelBoundary>
               )}
+              {/* Panneau ARA (Melodyne / VocAlign en insert) : en bas de la fenêtre Édition, comme Pro Tools. */}
+              {shownView === 'ARRANGEMENT' && (
+                <PanelBoundary name="l'éditeur ARA">
+                  <AraEditorDock tracks={state.tracks} selectedTrackId={state.selectedTrackId} onCommit={handleAraCommit} onSetGuide={handleAraGuide} />
+                </PanelBoundary>
+              )}
 
               {shownView === 'MIXER' && (
                  <PanelBoundary name="la console de mixage" onClose={() => setState(s => ({ ...s, currentView: 'ARRANGEMENT' }))}><Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><MixerView
@@ -8396,7 +8475,7 @@ function Studio() {
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} onClose={() => setIsAuthOpen(false)} />}
       </Suspense>
       
-      {addPluginMenu && <ContextMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)} items={AVAILABLE_FX_MENU.map(fx => ({ label: fx.name, icon: fx.icon, onClick: () => handleAddPluginFromContext(addPluginMenu.trackId, fx.id as PluginType, {}, { openUI: true }) }))} />}
+      {addPluginMenu && <ContextMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)} items={[...AVAILABLE_FX_MENU.map(fx => ({ label: fx.name, icon: fx.icon, onClick: () => handleAddPluginFromContext(addPluginMenu.trackId, fx.id as PluginType, {}, { openUI: true }) })), ...araMenuPlugins().map(p => ({ label: `${p.name} (ARA, insert de piste)`, icon: 'fa-wand-magic-sparkles', onClick: () => handleAddPluginFromContext(addPluginMenu.trackId, 'VST3', araInsertMetadata(p), { openUI: true }) }))]} />}
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}
       
       <MidiHost state={state} getState={getStateForMidi} setState={setState} pianoRoll={midiEditorOpen} />

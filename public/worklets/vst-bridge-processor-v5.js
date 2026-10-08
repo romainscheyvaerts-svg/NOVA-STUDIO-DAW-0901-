@@ -26,6 +26,10 @@
  *     (paliers), au plus MAX_PER_BLOCK par réglage.
  * v5 (R10) — side-chain : 2e entrée = clé ; si la clé est active, le bloc
  * part en 4 canaux (principal G/D puis clé G/D).
+ * v5 (insert ARA, pont v12) — position du morceau : en mode « ara », chaque bloc part avec
+ * la position du morceau de son ENTRÉE (échantillons ; -1 = transport arrêté) : la sortie à
+ * l'instant t du contexte = morceau t − origine ; le bloc envoyé à f ressort à f + latence.
+ * Le plugin (Melodyne) joue les clips de la piste à cette position, comme dans Pro Tools.
  */
 
 const RING = 512; // blocs gardés (≈ 1,4 s à 48 kHz)
@@ -65,6 +69,11 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     this.paramsSent = 0;
     this.paramBlocks = 0;
     this.pbuf = new Float32Array(AUTO_SLOTS * MAX_PER_BLOCK * 3);
+    // Insert ARA : origines du morceau (images du contexte) par segment de sortie, latence (images).
+    this.ara = false;
+    this.tlSegs = [];
+    this.tlLatency = 0;
+    this.tlPlaying = false;
 
     this.port.onmessage = (e) => {
       const m = e.data || {};
@@ -84,6 +93,19 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
         this.lastSent.fill(NaN);
       } else if (m.type === 'sidechain') {
         this.sidechain = !!m.on;
+      } else if (m.type === 'ara') {
+        this.ara = !!m.on;
+      } else if (m.type === 'timeline') {
+        // { from, origin } en images du contexte : à partir de rom (sortie), morceau = t − origin.
+        const seg = { from: m.from, origin: m.origin };
+        if (m.reset || !this.tlPlaying) this.tlSegs = [seg];
+        else { this.tlSegs = this.tlSegs.filter(s => s.from < seg.from); this.tlSegs.push(seg); if (this.tlSegs.length > 8) this.tlSegs.shift(); }
+        if (typeof m.latency === 'number') this.tlLatency = m.latency;
+        this.tlPlaying = true;
+      } else if (m.type === 'tlstop') {
+        this.tlPlaying = false;
+      } else if (m.type === 'tllatency') {
+        this.tlLatency = m.latency || 0;
       }
     };
   }
@@ -170,19 +192,28 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     }
     const pc = this.collectParams(parameters, n);
     this.silentIn = loud ? 0 : this.silentIn + 1;
+    // Insert ARA : position du morceau de ce bloc (sortie à currentFrame + latence).
+    let tl = -1;
+    if (this.ara && this.tlPlaying && this.tlSegs.length) {
+      const g = currentFrame + this.tlLatency;
+      let seg = this.tlSegs[0];
+      for (let k = 1; k < this.tlSegs.length; k++) if (this.tlSegs[k].from <= g) seg = this.tlSegs[k];
+      tl = g - seg.origin;
+    }
     // Silence prolongé en entrée ET sortie déjà silencieuse (queue de réverbe
     // finie) : inutile de solliciter le pont. Le bloc est marqué silencieux.
     // Un changement de réglage part quand même (il doit tomber à son heure).
-    const gate = pc === 0 && this.silentIn > this.delayBlocks + 64 && (this.lastRecvSeq - this.lastLoudSeq) > 64;
+    // Insert ARA : à l'arrêt, rien à jouer (silence sans solliciter le pont) ; en lecture, tout part.
+    const gate = this.ara ? (tl < 0 && pc === 0) : (pc === 0 && this.silentIn > this.delayBlocks + 64 && (this.lastRecvSeq - this.lastLoudSeq) > 64);
     if (gate) {
       this.ring[this.seq % RING] = { seq: this.seq, data: null };
     } else if (pc > 0) {
       const params = this.pbuf.slice(0, pc * 3);
       this.paramsSent += pc;
       this.paramBlocks++;
-      this.bridge.postMessage({ seq: this.seq, data, nch, params }, [data.buffer, params.buffer]);
+      this.bridge.postMessage(this.ara ? { seq: this.seq, data, nch, params, tl } : { seq: this.seq, data, nch, params }, [data.buffer, params.buffer]);
     } else {
-      this.bridge.postMessage({ seq: this.seq, data, nch }, [data.buffer]);
+      this.bridge.postMessage(this.ara ? { seq: this.seq, data, nch, tl } : { seq: this.seq, data, nch }, [data.buffer]);
     }
 
     // 2) Sortie : le bloc traité d'il y a delayBlocks

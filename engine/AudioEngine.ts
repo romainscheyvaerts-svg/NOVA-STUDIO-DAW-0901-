@@ -68,6 +68,8 @@ function loadFlashbackModule(ctx: AudioContext): Promise<void> {
 }
 import { placeHumTake } from './humTake';
 import { VSTPluginNode, vstParamCatalog } from './VSTPluginNode';
+import { AraInsertNode } from './AraInsertNode';
+import { isAraInsert } from '../utils/araInsert';
 import { installWorkletGuard, installWorkletRetirement, onWorkletCrash, ownsNode, retireWorkletsOf } from './workletGuard';
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback, isFrozenBus, isFeedCovered, busFrozenSlices } from '../utils/freeze';
 import { PRE_VOLUME } from '../utils/preFxEdits';
@@ -3610,7 +3612,8 @@ export class AudioEngine {
       case 'VOCALSATURATOR': node = new VocalSaturatorNode(ctx); break;
       case 'MASTERSYNC': node = new MasterSyncNode(ctx); break;
       // Effet VST3 du PC via le pont local (passe-plat sans pont ou hors ligne).
-      case 'VST3': node = new VSTPluginNode(ctx, plugin); break;
+      // Melodyne / VocAlign en insert (ARA, comme Pro Tools) : le plugin joue les clips de la piste.
+      case 'VST3': node = isAraInsert(plugin) ? new AraInsertNode(ctx, plugin) : new VSTPluginNode(ctx, plugin); break;
       default: {
         // Effets déclarés dans le registre (engine/pluginRegistry.ts), ex. le limiteur NOVA.
         const reg = getRegisteredPlugin(plugin.type);

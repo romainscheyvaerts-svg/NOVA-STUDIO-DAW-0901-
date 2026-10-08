@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ARA_BADGE_TOOLTIP, araPluginKey } from '../utils/araEdit';
+import { araInsertMetadata } from '../utils/araInsert';
 import { PluginType } from '../types';
 import { novaBridge, BridgePlugin } from '../services/NovaBridge';
 import { useBridgeState } from '../hooks/useNovaBridge';
@@ -92,14 +93,16 @@ const VstBrowserTab: React.FC<{
   };
 
   const add = (p: BridgePlugin) => {
-    // Melodyne / VocAlign (ARA) : en insert ils ne font rien (Melodyne laisse passer le son,
-    // VocAlign rend du silence). Ils s'ouvrent sur un clip, comme dans Pro Tools.
-    const ara = araPluginKey(p.path || p.name);
+    // Melodyne / VocAlign (ARA) : insert de piste comme dans Pro Tools (pont v12) : tous les clips
+    // de la piste sont confiés au plugin, son éditeur s'ancre en bas de la fenêtre Édition.
+    const ara = araInsertMetadata(p);
     if (ara) {
-      const msg = ara === 'melodyne'
-        ? '🎛️ Melodyne s’utilise sur un clip : clic droit sur ta voix → « Ouvrir dans Melodyne (ARA) ».'
-        : '🎙️ VocAlign s’utilise sur les clips : clic droit sur un double → « Aligner avec VocAlign… ».';
-      try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: msg })); } catch { /* hors navigateur */ }
+      if (!bridge.araInsert) {
+        const msg = 'Mets à jour Nova Studio pour Windows pour poser Melodyne / VocAlign en insert (ARA). En attendant : clic droit sur un clip → « Ouvrir dans Melodyne (ARA) ».';
+        try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: msg })); } catch { /* hors navigateur */ }
+        return;
+      }
+      onAddPlugin(selectedTrackId || 'track-rec-main', 'VST3', ara, { openUI: true });
       return;
     }
     onAddPlugin(selectedTrackId || 'track-rec-main', 'VST3', vstMetadata(p), { openUI: true });
@@ -158,7 +161,7 @@ const VstBrowserTab: React.FC<{
             <div className="text-xs font-bold text-white truncate">{p.name}{araPluginKey(p.path || p.name) && (
               <span title={ARA_BADGE_TOOLTIP} data-testid="ara-badge" className="ml-1.5 rounded border border-fuchsia-400/50 bg-fuchsia-500/15 px-1 py-px align-middle text-[9px] font-black tracking-wider text-fuchsia-200">ARA</span>
             )}</div>
-            <div className="text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}{p.category === 'Instrument' ? ' · instrument' : ''}{araPluginKey(p.path || p.name) ? ' · sur un clip (clic droit)' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}{p.channels ? ` · ${p.channels === 'mono' ? 'mono' : p.channels === 'stereo' ? 'stéréo' : 'mono → stéréo'}` : ''}{p.unstable ? ' · instable sur le pont (fait planter le pont : isolé, non chargé)' : ''}</div>
+            <div className="text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}{p.category === 'Instrument' ? ' · instrument' : ''}{araPluginKey(p.path || p.name) ? ' · insert de piste ARA (comme Pro Tools)' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}{p.channels ? ` · ${p.channels === 'mono' ? 'mono' : p.channels === 'stereo' ? 'stéréo' : 'mono → stéréo'}` : ''}{p.unstable ? ' · instable sur le pont (fait planter le pont : isolé, non chargé)' : ''}</div>
           </div>
         </div>
       ))}

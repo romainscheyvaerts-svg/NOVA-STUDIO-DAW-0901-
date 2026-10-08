@@ -17,6 +17,7 @@ import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { openNovaWindow } from '../utils/novaWindows';
 import { canCommit, canPrintBus, canRestore, commitLabel, restoreCommitted } from '../utils/commit';
 import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures';
+import { isAraInsert } from '../utils/araInsert';
 
 /**
  * Morceaux d'interface de la structure façon Pro Tools (voir utils/trackStructure) :
@@ -87,7 +88,8 @@ export const pluginStateHelp = (p: PluginInstance): string => {
     ? 'Inactif : retiré du son, ne consomme rien, aucune latence (ses réglages sont gardés).'
     : s === 'bypass' ? 'Bypass : le son passe sans traitement ; l’effet reste chargé et sa latence reste compensée.'
       : 'Actif.';
-  return `${base} Ctrl+clic : bypass · Ctrl+Alt+clic : actif / inactif (Pro Tools : Ctrl+Démarrer+clic) · clic droit ou appui long : menu`;
+  const ara = isAraInsert(p) ? ' Insert ARA (comme Pro Tools) : le plugin lit les clips de la piste et son éditeur s’ouvre en bas de la fenêtre Édition. Sur un poste sans le plugin (collaboration), la piste joue son rendu, fait à la sauvegarde.' : '';
+  return `${base}${ara} Ctrl+clic : bypass · Ctrl+Alt+clic : actif / inactif (Pro Tools : Ctrl+Démarrer+clic) · clic droit ou appui long : menu`;
 };
 
 /** Ctrl+clic / Ctrl+Alt+clic sur un effet. Renvoie vrai si le clic est traité. */
