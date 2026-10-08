@@ -193,6 +193,6 @@ describe('Collaboration : le rendu part comme un clip audio normal', () => {
     expect(contentBufferIds(cm)).toEqual(['r9']);
     expect(contentOf(cm).clips[0]).toMatchObject({ bufferId: 'r9', type: TrackType.AUDIO });
     const t = makeTrack({ clips: [patchClip(makeClip({ id: 'v', bufferId: 'orig' }), audioSuitePatch(makeClip({ id: 'v', bufferId: 'orig' }), { newBufferId: 'p1', from: 0, step: { type: 'REVERB', name: 'R', at: 0 } }))] });
-    expect(contentBufferIds(t)).toEqual(['p1']);
+    expect(contentBufferIds(t)).toEqual(['p1', 'orig']); // + le son d'origine (retour à l'original chez l'autre)
   });
 });

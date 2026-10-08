@@ -131,7 +131,8 @@ describe('sauvegarde et collaboration', () => {
     const clip = makeClip({ id: 'c1', name: 'Prise 1 (Melodyne)', bufferId: 'mel-1', start: 4, offset: 0.25, duration: 2,
       araEdit: { version: 1, plugin: 'melodyne', mode: 'ara', sourceBufferId: 'rec-1', regionStart: 1.75, persistentId: 'p', archive: 'QQ==' } });
     const t = makeTrack({ id: 'v', name: 'Voix', clips: [clip] });
-    expect(contentBufferIds(t)).toEqual(['mel-1']);
+    // La prise d'origine voyage aussi (collaboration pro : retour à l'original possible chez l'autre).
+    expect(contentBufferIds(t)).toEqual(['mel-1', 'rec-1']);
     expect((contentOf(t) as any).clips[0].araEdit.archive).toBe('QQ==');
     const remoteHas = (id: string) => id === 'mel-1';
     // Chez l'autre sans Melodyne : message clair, pas de retouche.
