@@ -282,7 +282,7 @@ export const defaultBuiltinParams = (type: PluginType, bpm = 120): Record<string
     case 'AUTOTUNE': return { speed: 0.1, humanize: 0.2, mix: 1.0, rootKey: 0, scale: 'CHROMATIC', isEnabled: true };
     case 'CHORUS': return { rate: 1.2, depth: 0.35, spread: 0.5, mix: 0.4, isEnabled: true };
     case 'STEREOSPREADER': return { width: 1.0, haasDelay: 0.015, lowBypass: 0.8, isEnabled: true };
-    case 'DEESSER': return { threshold: -25, frequency: 6500, q: 1.0, reduction: 0.6, mode: 'BELL', isEnabled: true };
+    case 'DEESSER': return { threshold: -30, frequency: 8000, q: 1.0, reduction: 0.6, mode: 'BELL', isEnabled: true, detection: 'RELATIVE', relThreshold: -6, listen: 0 };
     case 'DENOISER': return { threshold: -45, range: -20, attack: 0.005, hold: 0.05, release: 0.15, scFreq: 1000, flip: false, isEnabled: true };
     case 'VOCALSATURATOR': return { drive: 20, mix: 0.5, tone: 0, eqLow: 0, eqMid: 0, eqHigh: 0, mode: 'TAPE', isEnabled: true, outputGain: 1 };
     case 'LIMITER': return { ceiling: -1, inputGain: 0, release: 100, lookahead: 3, oversample: 4, isEnabled: true };

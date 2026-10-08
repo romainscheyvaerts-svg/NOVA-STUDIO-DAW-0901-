@@ -25,7 +25,7 @@ const builtinPlugin = (b: PlannedBuiltin, existing?: PluginInstance): PluginInst
     threshold: b.params.threshold ?? -18, ratio: 2, knee: b.params.knee ?? 6, attack: b.params.attack ?? 0.005,
     release: b.params.release ?? 0.1, makeupGain: existing?.params?.makeupGain ?? 1.4, autoMakeup: false, mix: 1, mode: b.params.mode || 'FET',
   });
-  if (b.type === 'DEESSER') Object.assign(params, { threshold: b.params.threshold ?? -40, frequency: b.params.frequency ?? 6500, q: 0.8, reduction: b.params.reduction ?? 0.5, mode: 'BELL' });
+  if (b.type === 'DEESSER') Object.assign(params, { threshold: b.params.threshold ?? -40, frequency: b.params.frequency ?? 8000, q: 1.0, reduction: b.params.reduction ?? 0.5, mode: 'BELL', detection: b.params.detection ?? 'RELATIVE', relThreshold: b.params.relThreshold ?? -6, listen: 0 });
   if (b.type === 'VOCALSATURATOR') Object.assign(params, { drive: b.params.drive ?? 20, mix: b.params.mix ?? 0.35, tone: 0, eqLow: 0, eqMid: 0, eqHigh: 0, mode: b.params.mode || 'TAPE', outputGain: 1 });
   return {
     id: existing?.id || newId(b.slot), name: existing?.name || b.type, type: b.type as any, isEnabled: true,
