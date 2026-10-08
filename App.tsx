@@ -5916,13 +5916,6 @@ function Studio() {
           }
         }
         else if (kind === 'track_del') lwwRef.current.note(`track:${tid}`, seq);
-        // Opérations reçues pendant que la nôtre (même réglage) partait : rejouées maintenant, la plus
-        // récente du journal l'emporte (les plus anciennes que la nôtre seront écartées par l'horloge).
-        if (['order', 'song', 'markers', 'chords', 'tempo', 'groups'].includes(kind)) {
-          const waiting = deferredOpsRef.current.get(kind) || [];
-          deferredOpsRef.current.delete(kind);
-          if (waiting.length) setTimeout(() => { [...waiting].sort((a, b) => a.seq - b.seq).forEach(w => { void applyCollabOp(w); }); }, 0);
-        }
         else if (kind === 'order') lwwRef.current.note('order', seq);
         else if (kind === 'song' && op.fields && typeof op.fields === 'object') Object.keys(op.fields).forEach(f => lwwRef.current.note(`song:${f}`, seq));
         else if (kind === 'own' && Array.isArray(op.trackIds)) (op.trackIds as string[]).forEach(id => { if (claimSeqRef.current.get(id) === Infinity) claimSeqRef.current.set(id, seq); });
@@ -5933,6 +5926,14 @@ function Studio() {
           .forEach((id: unknown) => { if (typeof id === 'string') { lwwRef.current.note(`chord:${id}`, seq); pendingChordsRef.current.delete(id); } });
         else if (kind === 'chat' && typeof op.localId === 'string') setCollabMessages(m => m.map(x => (x.id === op.localId ? { ...x, pending: false } : x)));
         else if (kind === 'notes') r21Ref.current?.onNotesSent(op, seq);
+        else if (kind === 'tempo') lwwRef.current.note('tempo', seq);
+        // Opérations reçues pendant que la nôtre (même réglage) partait : rejouées maintenant, la plus
+        // récente du journal l'emporte (les plus anciennes que la nôtre seront écartées par l'horloge).
+        if (['order', 'song', 'markers', 'chords', 'tempo', 'groups'].includes(kind)) {
+          const waiting = deferredOpsRef.current.get(kind) || [];
+          deferredOpsRef.current.delete(kind);
+          if (waiting.length) setTimeout(() => { [...waiting].sort((a, b) => a.seq - b.seq).forEach(w => { void applyCollabOp(w); }); }, 0);
+        }
       };
       client.onStatus(s => setCollabStatus(s));
       // Messages éphémères : lecture de l'hôte, latence, empreintes, audio en direct (voir onEphemeralRef).
