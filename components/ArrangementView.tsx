@@ -688,7 +688,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     e.preventDefault();
     e.stopPropagation();
     if (e.dataTransfer.types.includes('audio-url') || 
-        e.dataTransfer.types.includes('Files')) {
+        e.dataTransfer.types.includes('Files') ||
+        e.dataTransfer.types.includes('application/x-nova-clip')) {
         e.dataTransfer.dropEffect = 'copy';
     }
   };
@@ -719,6 +720,13 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
               break;
           }
           currentY += zoomV + extraH(t);
+      }
+
+      // R21 · Clip glissé depuis la liste des clips (Pro Tools : Clips List) : posé sur la piste visée.
+      const novaClip = e.dataTransfer.getData('application/x-nova-clip');
+      if (novaClip) {
+          try { window.dispatchEvent(new CustomEvent('nova:clip-drop', { detail: { ...JSON.parse(novaClip), trackId: targetTrackId, time: dropTime } })); } catch { /* glisser abîmé */ }
+          return;
       }
 
       // Fichiers .mid (V25) : pistes ou clips créés à l'endroit du dépôt (components/MidiHost).

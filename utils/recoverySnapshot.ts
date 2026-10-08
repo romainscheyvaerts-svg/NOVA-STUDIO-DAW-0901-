@@ -44,6 +44,8 @@ export function snapshotOf(state: DAWState, owned: (string | number)[] = []): Sn
     if (isUnlicensedBeat(t, owned)) { needsCatalogBeat = needsCatalogBeat || t.clips.length > 0; continue; }
     for (const id of trackAudioIds(t)) audioIds.add(id);
   }
+  // R21 · Clips de la liste des clips (hors timeline) : leur son est gardé aussi.
+  for (const c of state.clipBin || []) if (c.bufferId) audioIds.add(c.bufferId);
   // Ce qui est en cours (lecture, prise, armement) ne fait pas partie de la version.
   const clean = { ...state, isPlaying: false, isRecording: false, recStartTime: null };
   const beat = state.tracks.find(t => t.id === 'instrumental')?.clips[0];

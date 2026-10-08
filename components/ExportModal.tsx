@@ -17,6 +17,8 @@ import { nomTonaliteCourt } from '../utils/musicKey';
 import { PLATFORM_TARGETS } from '../utils/masterAssistant';
 import type { StemGrouping, ReturnsMode } from '../utils/stemPlan';
 import type { TailMode, RangeMode } from '../utils/exportTail';
+import { renderArrangement } from '../utils/arrangements';
+import { takeExportArrangement } from '../utils/r21Bus';
 
 // Compte admin du studio (tout gratuit pour tester) : lu une fois par session.
 let adminCache: boolean | null = null;
@@ -50,7 +52,14 @@ interface ExportModalProps {
   onExported?: (info: { source: 'vocals' | 'full' | 'stems'; paid: boolean }) => void;
 }
 
-const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState, ownedInstrumentIds = [], onOpenShare, projectKey, onExported }) => {
+const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState: timelineState, ownedInstrumentIds = [], onOpenShare, projectKey, onExported }) => {
+  // R21 · Arrangement exporté (« Clean », « Radio edit »…) : le projet joué est
+  // celui de l'arrangement (sections dans son ordre, passages coupés). Vide : la timeline.
+  const [arrangementId, setArrangementId] = useState<string>(() => takeExportArrangement() || '');
+  const arrangements = timelineState.arrangements || [];
+  const arrangement = arrangements.find(a => a.id === arrangementId) || null;
+  const arranged = React.useMemo(() => (arrangement ? renderArrangement(timelineState, arrangement) : null), [timelineState, arrangement]);
+  const projectState = arranged ? arranged.state : timelineState;
   // Admin (patron, admins du studio) : export complet gratuit, sans licence ni
   // paiement (le serveur le confirme aussi). null : vérification en cours.
   const [isAdmin, setIsAdmin] = useState<boolean | null>(adminCache);
@@ -192,7 +201,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
   useEffect(() => {
     if (isOpen) {
-        setFilename(projectState.name || 'Master');
+        const arr = arrangements.find(a => a.id === arrangementId);
+        setFilename(arr ? `${projectState.name || 'Master'} (${arr.name})` : (projectState.name || 'Master'));
         setMetaTitle(projectState.name || '');
         setProgress(0);
         setStatusText('');
@@ -221,8 +231,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
   // --- HELPERS ---
 
-  /** Fin du morceau : dernière fin de clip (les pistes guides ne comptent pas). */
-  const songEnd = () => Math.max(0, ...projectState.tracks.filter(t => !t.isGuide).flatMap(t => t.clips.map(c => c.start + c.duration)));
+  /** Fin du morceau : dernière fin de clip (les pistes guides ne comptent pas) ; un arrangement dure la somme de ses sections. */
+  const songEnd = () => (arranged ? arranged.report.length : Math.max(0, ...projectState.tracks.filter(t => !t.isGuide).flatMap(t => t.clips.map(c => c.start + c.duration))));
 
   /** Plage musicale [début, fin] (sans la queue). */
   const getRange = (): { start: number; end: number } => {
@@ -352,6 +362,30 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   const lab = 'text-[11px] font-bold text-nv-muted';
   const sel = 'w-full min-h-10 bg-nv-well/40 border border-nv-line/15 rounded-lg px-3 text-[12px] text-nv-ink font-bold focus:border-nv-accent outline-none';
   const fmtS = (t: number) => `${(Math.round(t * 10) / 10).toFixed(1).replace('.', ',')} s`;
+  // R21 : choix de l'arrangement exporté (seulement s'il y en a).
+  const arrangementPicker = arrangements.length > 0 ? (
+    <label className="space-y-1 block" data-testid="export-arrangement">
+      <span className={lab}>Arrangement</span>
+      <select value={arrangementId} disabled={isRendering} className={sel} aria-label="Arrangement exporté"
+        title="Exporter un arrangement précis (clean, explicite, radio edit…) : sections dans son ordre, passages coupés. Logic : Arrangement Alternatives ; Pro Tools : une session par version."
+        onChange={e => {
+          const id = e.target.value;
+          setArrangementId(id);
+          const arr = arrangements.find(a => a.id === id);
+          setFilename(arr ? `${timelineState.name || 'Master'} (${arr.name})` : (timelineState.name || 'Master'));
+        }}>
+        <option value="">Timeline telle quelle</option>
+        {arrangements.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </select>
+      {arranged && (
+        <span className="block text-[11px] text-nv-muted" data-testid="export-arrangement-info">
+          {arranged.report.sections.map(x => x.name).join(' → ') || 'aucune section'} · {fmtS(arranged.report.length)}
+          {arranged.report.muted ? ` · ${arranged.report.muted} coupe${arranged.report.muted > 1 ? 's' : ''}` : ''}
+          {arranged.report.notes.length ? ` · ${arranged.report.notes.join(' ; ')}` : ''}
+        </span>
+      )}
+    </label>
+  ) : null;
   const stemsSumToMixHint = returns === 'none'
     ? 'Stems secs : la réverbe et le delay ne sont dans aucun fichier.'
     : masterFx
@@ -419,6 +453,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
 
             {!advanced && (
               <div className="space-y-3" data-export-vue="simple">
+                {arrangementPicker}
                 {admin && (
                   <p className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-[12px] text-center font-bold text-emerald-300" role="status">
                     <i className="fas fa-user-shield mr-1"></i>Admin : export gratuit
@@ -573,6 +608,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                           </div>
                         )}
 
+                        {arrangementPicker}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <label className="space-y-1 block">
                             <span className={lab}>Durée</span>

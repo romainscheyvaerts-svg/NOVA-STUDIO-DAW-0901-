@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, PropsWithChildren } from 'react';
+import SessionMenuItems from './SessionMenuItems';
 import { createPortal } from 'react-dom';
 import { ViewType, Theme, User } from '../types';
 import ProMasterMeter from './ProMasterMeter';
@@ -698,6 +699,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <span>Exporter</span>
                 </button>
                 <MidiMobileMenuItems onDone={() => setIsMobileMenuOpen(false)} />
+                <SessionMenuItems onDone={() => setIsMobileMenuOpen(false)} phone={typeof window !== 'undefined' && window.innerWidth < 640} />
                 {onOpenTakeHome && (
                   <button onClick={() => { onOpenTakeHome(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
                     <i className="w-5 text-center text-cyan-300 fas fa-cloud-arrow-up"></i>

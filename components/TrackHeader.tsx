@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { openSessionPanel } from '../utils/r21Bus';
 import TrackMeter from './meters/TrackMeter';
 import { AutotuneBadge } from './AutotuneVstPanel';
 import { useCollabRole, requestVolumeLock, useCollabLive } from '../utils/collabStore';
@@ -498,6 +499,12 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 className={`min-w-[3.5rem] text-[12px] font-bold tracking-wide truncate cursor-text ${isSelected ? 'text-white' : 'text-slate-400'}`}
               >
                 {track.name}
+                {track.comment && (
+                  <button type="button" data-testid={`header-comment-${track.id}`} aria-label={`Commentaire : ${track.comment}`}
+                    title={`💬 ${track.comment} — Pro Tools : Comments (clic : notes de la session)`}
+                    onClick={e => { e.stopPropagation(); openSessionPanel('notes'); }}
+                    className="ml-1 align-middle text-[9px] text-amber-300 hover:text-amber-200"><i className="fas fa-comment-alt" /></button>
+                )}
                 {frozen && !inst && <i className="fas fa-snowflake text-[8px] ml-1 text-cyan-400" role="img"
                   aria-label={track.frozenAuto ? "Piste gelée par l'ingé" : 'Piste gelée'}
                   title={track.frozenAuto ? "Piste gelée par l'ingé (ses effets VST) : tes coupes, fondus et volumes seront rejoués AVANT ses effets quand il rouvrira la session." : 'Piste gelée : lue depuis son rendu'}></i>}
