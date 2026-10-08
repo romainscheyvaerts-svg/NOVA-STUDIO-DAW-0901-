@@ -286,6 +286,11 @@ export interface TrackGroup {
   linkedSends?: boolean;
   /** Mode d'automation lié (Read, Touch, Latch…). */
   linkedAutomation?: boolean;
+  /**
+   * R14 · Armement lié (Pro Tools : Record Enable) : armer (ou désarmer) une piste du
+   * groupe arme tout le groupe. Vaut pour les groupes d'édition comme de mix.
+   */
+  linkedRecord?: boolean;
   /** Membres déduits (modèle relevé sans la fenêtre des groupes) : à vérifier. */
   deduced?: boolean;
 }
@@ -713,6 +718,12 @@ export interface Track {
   isMuted: boolean;
   isSolo: boolean;
   isTrackArmed: boolean;
+  /**
+   * R14 · Entrée physique enregistrée par la piste (Pro Tools : sélecteur d'entrée) :
+   * `ch` = 1re entrée (0 = entrée 1), `stereo` = paire ch / ch+1. Absent : entrée
+   * choisie dans les Réglages audio (micro par défaut, ou entrée de la carte).
+   */
+  recordInput?: RecordInput | null;
   isFrozen: boolean;
   volume: number;
   pan: number;
@@ -880,6 +891,37 @@ export interface Track {
   commit?: TrackCommitInfo;
 }
 
+/** R14 · Entrée physique d'une piste (0 = entrée 1 de la carte / du micro). */
+export interface RecordInput {
+  ch: number;
+  stereo?: boolean;
+}
+
+/** R15 · Niveau d'une piste dans un mix casque. */
+export interface CueLevel {
+  /** Gain linéaire (1 = 0 dB, 0 à 2). */
+  level: number;
+  /** Panoramique -1 (gauche) à 1 (droite). */
+  pan: number;
+  muted?: boolean;
+}
+
+/** R15 · Mix casque (cue mix) d'un musicien. */
+export interface CueMix {
+  id: string;
+  name: string;
+  /** Paire de sorties de la carte : 0 = sorties 1-2, 1 = sorties 3-4… */
+  pair: number;
+  /** Niveaux par piste ; une piste absente prend son volume et son pan du mix principal. */
+  levels: Record<string, CueLevel>;
+  /** Niveau du clic dans ce mix (0 = pas de clic). */
+  click: number;
+  /** Volume général du mix (1 = 0 dB). */
+  master?: number;
+  /** Mix coupé. */
+  muted?: boolean;
+}
+
 /** Infos d'un couloir de prise (Track.takeMeta). */
 export interface TakeMeta {
   /** Numéro de la prise (Clip.takeNumber). */
@@ -890,6 +932,11 @@ export interface TakeMeta {
   recordedAt?: number;
   /** Loop Record : numéro du tour de boucle (1, 2, 3…). */
   loopPass?: number;
+  /**
+   * R14 · Groupe de prises (take group) : les prises d'un MÊME passage enregistré sur
+   * plusieurs pistes partagent cet identifiant ; elles se coupent et se compent ensemble.
+   */
+  group?: string;
   /** « Meilleure prise » : note de l'IA locale (0-100) et détail. */
   score?: { total: number; pitch: number; timing: number; level: number; noise: number };
 }
@@ -995,6 +1042,11 @@ export interface DAWState {
    * Absent : on suit la préférence de l'appareil (désactivé par défaut).
    */
   breathAuto?: boolean;
+  /**
+   * R15 · Mixes casque (cue mixes) : un mix séparé par musicien, envoyé sur une paire
+   * de sorties de la carte (envois pré-fader de Pro Tools).
+   */
+  cueMixes?: CueMix[];
   /**
    * Type de projet : VOCAL = poser sa voix sur une instru (par défaut) ;
    * BEATMAKING = faire une instru (batterie) sur une mélodie du studio, avec

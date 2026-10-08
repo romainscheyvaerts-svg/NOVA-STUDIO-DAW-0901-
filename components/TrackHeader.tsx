@@ -35,6 +35,8 @@ import { useInstrumentStatus } from '../utils/instrumentStore';
 import { openSynthPanel } from '../utils/synthPanelStore';
 import { isMidiRecordTrack } from '../utils/midiRecord';
 import MonitorControl from './MonitorControl';
+import InputSelect from './InputSelect';
+import { noteArmClick } from '../utils/multiRecord';
 import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
 import { TrackStructureBadge, TrackStructureInline } from './TrackStructure';
@@ -646,9 +648,9 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
           {/* Bouton micro : sur toutes les pistes voix (pas le beat, pas les bus) */}
           {track.type === TrackType.AUDIO && track.id !== 'instrumental' && !track.instrumentId && (
               <button
-                onClick={(e) => { e.stopPropagation(); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
+                onClick={(e) => { e.stopPropagation(); noteArmClick(e); onUpdate({...track, isTrackArmed: !track.isTrackArmed}) }}
                 className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all ${track.isTrackArmed ? 'bg-red-600 text-white animate-pulse' : 'bg-white/[0.06] text-slate-400 hover:text-white'} ${!track.isTrackArmed && (recBy || (ownerName && ownerName !== 'à toi')) ? 'opacity-40' : ''}`}
-                title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : ownerName && ownerName !== 'à toi' ? `Piste de ${ownerName} : enregistre sur ta propre piste` : track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer" : "Enregistrer sur cette piste (sinon REC choisit la piste sélectionnée)"}
+                title={recBy ? `${recBy} enregistre sur cette piste : verrouillée` : ownerName && ownerName !== 'à toi' ? `Piste de ${ownerName} : enregistre sur ta propre piste` : track.isTrackArmed ? "Micro actif sur cette piste — appuie sur le bouton rouge REC en haut pour enregistrer (toutes les pistes armées enregistrent ensemble)" : "Armer : cette piste enregistre aussi (plusieurs pistes armées = plusieurs micros). Maj+clic : armer celle-ci seule"}
                 aria-label={`Armer l'enregistrement : ${track.name}`}
                 aria-pressed={!!track.isTrackArmed}
               >
@@ -678,6 +680,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       {/* Piste armée : réglages d'entrée complets sur demande (⚙), sinon ses effets restent visibles. */}
       {track.isTrackArmed && showInputRow && (
         <div className="mt-1 relative z-10 flex items-center gap-1">
+          <div className="shrink-0 max-w-[72px]"><InputSelect track={track} compact /></div>
           <div className="min-w-0 flex-1"><MonitorControl compact trackId={track.id} /></div>
           <button type="button" onClick={(e) => { e.stopPropagation(); setShowInputRow(false); }}
             title="Revenir aux effets de la piste" aria-label="Revenir aux effets de la piste"

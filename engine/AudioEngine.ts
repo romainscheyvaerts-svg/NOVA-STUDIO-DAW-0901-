@@ -40,6 +40,15 @@ import { Bass808Node, planOfClips } from './Bass808Node';
 import { events808 } from '../utils/bass808';
 import { playableNotes, ccValueAt, ccDefault, sortPoints, SUSTAIN } from '../utils/midiCc';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
+import { InputRouter, InputTap } from './InputRouter';
+import { CueMixEngine } from './CueMixEngine';
+import { retireWorkletNode } from './workletGuard';
+import { channelOffsets, channelOffsetSec, neededInputChannels, offsetsFromProbe, setChannelOffsets } from '../utils/multiRecord';
+import { directMonitorRoutes, outputLayout } from '../utils/cueMix';
+import { newTakeGroupId } from '../utils/takeGroups';
+import type { CueMix, RecordInput } from '../types';
+import { metronomeService } from '../services/MetronomeService';
+import type { ASIOStreamInfo, ASIOLatencyResult } from '../services/ASIOBridge';
 import { CaptureRing as _CaptureRing, chooseCapture, captureMinutes, captureWorkletSource, type PlayRun } from '../utils/audioCapture';
 void _CaptureRing;
 
@@ -140,6 +149,12 @@ interface TrackDSP {
   strip?: StripNodes | null;
 }
 
+/** Prise à journaliser : piste, position, latence ; `group` et `channels` en multipiste (R14). */
+export interface TakeJournalMeta { trackId: string; recordedAt: number; latency: number; sampleRate: number; group?: string; channels?: number }
+
+/** Résultat d'une prise : un clip par piste armée ; `group` = groupe de prises (passage multipiste). */
+export interface TakeResult { clip: Clip; trackId: string; group?: string }
+
 /** Journal d'une prise en cours (utils/recoveryStore.TakeJournal). */
 export interface TakeJournalLike {
   push(chunk: Float32Array): void;
@@ -215,8 +230,36 @@ export class AudioEngine {
    * Journal de la prise en cours (utils/recoveryStore) : chaque morceau capté est
    * écrit sur l'appareil pendant l'enregistrement, pour la retrouver après un plantage.
    */
-  private takeJournalFactory: ((m: { trackId: string; recordedAt: number; latency: number; sampleRate: number }) => TakeJournalLike | null) | null = null;
-  private recJournal: TakeJournalLike | null = null;
+  private takeJournalFactory: ((m: TakeJournalMeta) => TakeJournalLike | null) | null = null;
+  /** R14 : un journal par piste de la prise. */
+  private recJournals = new Map<string, TakeJournalLike>();
+  /** R14 : entrées des pistes armées (plusieurs à la fois), source partagée. */
+  private inputRouter: InputRouter | null = null;
+  /** Entrée demandée par piste armée (Track.recordInput). */
+  private armedSpecs = new Map<string, RecordInput | null>();
+  private armErrors = new Map<string, string>();
+  /** Pistes de la prise en cours, entrée de l'enregistreur commun et groupe de prises. */
+  private recordingTrackIds: string[] = [];
+  private recInput: ReturnType<InputRouter['recorderInput']> = null;
+  private recChannels = new Map<string, number[]>();
+  private recGroup: string | undefined;
+  /** Canaux max que le navigateur donne pour le micro (capabilities), 0 = inconnu. */
+  private browserMaxChannels = 0;
+  /** Volume / pan connus des pistes (retour direct du pont, mixes casque). */
+  private trackMix = new Map<string, { id: string; volume: number; pan: number }>();
+  // --- R15 · Mixes casque et sorties de la carte ---
+  private cueEngine: CueMixEngine | null = null;
+  private cueMixes: CueMix[] = [];
+  private cueListen: string | null = null;
+  /** Sortie principale : master (mainSel) + mix casque écouté ; part vers le navigateur et la carte. */
+  private mainSel: GainNode | null = null;
+  private mainOut: GainNode | null = null;
+  private asioInputChannels = 2;
+  private asioOutputChannels = 2;
+  private asioBlockSize = 256;
+  private asioOutLayoutSig = '';
+  private asioOutParts: AudioNode[] = [];
+  private configWaiters: ((m: any) => void)[] = [];
   /** Début de lecture (horloge) pendant la prise : STOP coupe la lecture avant la prise. */
   private recPlayStart: number | null = null;
   private latencySamples: number[] = [];
@@ -377,7 +420,14 @@ export class AudioEngine {
     // Sortie « navigateur » coupée pendant le flux ASIO : le mix part alors par
     // la carte, sinon l'artiste l'entendait deux fois (écho / effet de phase).
     this.browserOutput = this.ctx.createGain();
-    this.masterAnalyzer.connect(this.browserOutput);
+    // R15 : sortie principale = le master, ou un mix casque écouté à sa place.
+    this.mainSel = this.ctx.createGain();
+    this.mainOut = this.ctx.createGain();
+    this.masterAnalyzer.connect(this.mainSel);
+    this.mainSel.connect(this.mainOut);
+    this.cueEngine = new CueMixEngine(this.ctx);
+    this.cueEngine.listenOut.connect(this.mainOut);
+    this.mainOut.connect(this.browserOutput);
     this.browserOutput.connect(this.ctx.destination);
     
     this.masterAnalyzer.connect(this.masterSplitter);
@@ -460,9 +510,30 @@ export class AudioEngine {
     return audioBufferRegistry.get(clipId);
   }
 
-  /** La piste a-t-elle vraiment son micro ouvert (armement effectif côté moteur) ? */
+  /** La piste a-t-elle vraiment son entrée ouverte (armement effectif côté moteur) ? */
   public isMonitoring(trackId: string): boolean {
-    return this.monitoringTrackId === trackId && (!!this.activeMonitorStream || !!this.armingPromise);
+    return !!this.inputRouter?.has(trackId) || !!this.armingPromise;
+  }
+
+  /** R14 : pistes armées côté moteur (entrée ouverte), dans l'ordre d'armement. */
+  public armedIds(): string[] { return this.inputRouter?.ids() || []; }
+
+  /** R14 : pistes de la prise en cours. */
+  public getRecordingTrackIds(): string[] { return [...this.recordingTrackIds]; }
+
+  /**
+   * R14 : entrées des pistes armées (vumètres, messages) et nombre d'entrées que la
+   * source donne (carte via le pont, ou micro du navigateur).
+   */
+  public getInputInfo(): { mode: 'asio' | 'navigateur'; available: number; armed: { trackId: string; channels: number[]; missing: boolean; width: 1 | 2 }[] } {
+    const src = this.inputRouter?.getSource();
+    const asio = this.asioStreamActive && this.asioConnected;
+    const available = asio ? this.asioInputChannels : Math.max(src?.kind === 'navigateur' ? src.channels : 0, this.browserMaxChannels || 0, 2);
+    return {
+      mode: asio ? 'asio' : 'navigateur',
+      available,
+      armed: (this.inputRouter?.all() || []).map(t => ({ trackId: t.trackId, channels: [...t.channels], missing: t.missing, width: t.width })),
+    };
   }
 
   /** Pistes qui ont une chaîne audio dans le moteur. */
@@ -476,7 +547,7 @@ export class AudioEngine {
   }
 
   /** Journal des prises (récupération après plantage) : branché par l'appli. */
-  public setTakeJournalFactory(f: ((m: { trackId: string; recordedAt: number; latency: number; sampleRate: number }) => TakeJournalLike | null) | null) {
+  public setTakeJournalFactory(f: ((m: TakeJournalMeta) => TakeJournalLike | null) | null) {
     this.takeJournalFactory = f;
   }
 
@@ -570,7 +641,7 @@ export class AudioEngine {
       this.lastLatency = this.lastLatency ? this.lastLatency * 0.6 + m.total * 0.4 : m.total;
       if (this.recordingTrackId) this.latencySamples.push(m.total);
       // Capture après coup : la latence de chaque passage de lecture, comme pour une prise.
-      if (this.flashback && this.isPlaying) { const r = this.flashbackRuns[this.flashbackRuns.length - 1]; if (r && r.to === null) (r.lat = r.lat || []).push(m.total); }
+      if (this.flashbacks.size && this.isPlaying) { const r = this.flashbackRuns[this.flashbackRuns.length - 1]; if (r && r.to === null) (r.lat = r.lat || []).push(m.total); }
       try { window.dispatchEvent(new CustomEvent('nova:latency', { detail: { ms: Math.round(this.lastLatency * 1000), mode: m.mode, offsetMs: this.recOffsetMs } })); } catch { /* */ }
     };
     tick();
@@ -589,13 +660,37 @@ export class AudioEngine {
     try { localStorage.setItem('nova_rec_offset_ms', String(this.recOffsetMs)); } catch { /* */ }
   }
 
-  /** Retour direct dans le pont ASIO quand la voix arrive par la carte son. */
+  /** Retour direct dans le pont ASIO : la voix de la carte repart vers le casque sans passer par le DAW. */
+  private directMonitorActive(): boolean {
+    return !!this.asioBridge && this.asioConnected && this.isUsingASIOInput() && this.asioStreamActive && !!this.inputRouter?.size;
+  }
+
+  /** Retour casque côté DAW de chaque piste armée (coupé quand le pont fait le retour direct). */
+  private monitorGainFor(): number {
+    if (this.directMonitorActive()) return 0;
+    return this.inputMonitoring ? this.monitorLevel : 0;
+  }
+
+  private applyMonitorGains() {
+    if (this.ctx) this.inputRouter?.setMonitorGain(this.monitorGainFor(), this.ctx.currentTime);
+  }
+
+  /**
+   * Retour direct dans le pont ASIO quand la voix arrive par la carte son. R15 : une
+   * matrice (pistes armées → sorties 1-2 et → la paire de chaque mix casque).
+   */
   private syncDirectMonitor() {
+    this.applyMonitorGains();
     if (!this.asioBridge || !this.asioConnected) return;
-    const direct = this.isUsingASIOInput() && this.asioStreamActive && !!this.monitoringTrackId;
-    this.asioBridge.setMonitor(direct && this.inputMonitoring, this.monitorLevel, this.asioInput ? this.getASIOInputChannel() : -1);
-    // Le retour logiciel est coupé : sinon la voix serait entendue deux fois (avec du retard)
-    if (direct && this.monitorGain && this.ctx) this.monitorGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.01);
+    const direct = this.directMonitorActive();
+    if (this.asioBridge.protocol >= 2) {
+      const armed = (this.inputRouter?.all() || []).map(t => ({ track: this.trackMix.get(t.trackId) || { id: t.trackId, volume: 1, pan: 0 }, channels: t.channels }));
+      const routes = direct ? directMonitorRoutes({ armed, mixes: this.cueMixes, monitoring: this.inputMonitoring, monitorLevel: this.monitorLevel, outputChannels: this.asioOutputChannels, listenId: this.cueListen }) : [];
+      this.asioBridge.setMonitorRoutes(routes.length > 0, routes);
+      try { window.dispatchEvent(new CustomEvent('nova:direct-monitor', { detail: { routes } })); } catch { /* */ }
+    } else {
+      this.asioBridge.setMonitor(direct && this.inputMonitoring, this.monitorLevel, this.asioInput ? this.getASIOInputChannel() : -1);
+    }
   }
 
   public setLoop(active: boolean, start: number, end: number) {
@@ -607,47 +702,72 @@ export class AudioEngine {
   // -------------------------------------------------------------------------
   // Capture audio après coup (R3, utils/audioCapture) : Flashback Capture de Logic
   // -------------------------------------------------------------------------
-  private flashback: { node: AudioWorkletNode; src: AudioNode; sink: GainNode; seconds: number } | null = null;
+  // R14 : un anneau par piste armée (deux pour une entrée stéréo), tous sur l'horloge du
+  // contexte : la capture de plusieurs pistes ressort alignée à l'échantillon.
+  private flashbacks = new Map<string, { nodes: AudioWorkletNode[]; sinks: GainNode[]; extra: AudioNode[]; src: AudioNode; seconds: number }>();
   private flashbackRuns: PlayRun[] = [];
   private flashbackReq = 0;
 
-  /** Anneau du micro branché sur l'entrée armée (micro ou ASIO) ; il n'écrit que pendant la lecture. */
-  private async attachFlashback() {
-    if (!this.ctx?.audioWorklet) return;
-    const src: AudioNode | null = (this.isUsingASIOInput() && this.asioInput?.getNode()) || this.monitorSource;
-    if (!src) return;
-    if (this.flashback?.src === src) return;
-    this.detachFlashback();
-    try {
-      await loadFlashbackModule(this.ctx);
-      const seconds = captureMinutes() * 60;
-      const node = new AudioWorkletNode(this.ctx, 'nova-flashback', {
-        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
-        processorOptions: { capacity: Math.round(seconds * this.ctx.sampleRate) },
-      });
-      const sink = this.ctx.createGain();
-      sink.gain.value = 0;
-      src.connect(node); node.connect(sink); sink.connect(this.ctx.destination);
-      this.flashback = { node, src, sink, seconds };
-      this.flashbackRuns = [];
-      if (this.isPlaying) this.flashbackRunStart(this.ctx.currentTime, this.playbackStartTime);
-    } catch (e) {
-      console.warn('[AudioEngine] Capture après coup indisponible', e);
+  /** Anneaux branchés sur les entrées armées (micro ou ASIO) ; ils n'écrivent que pendant la lecture. */
+  private async attachFlashback(trackId?: string) {
+    const ctx = this.ctx;
+    if (!ctx?.audioWorklet) return;
+    for (const id of trackId ? [trackId] : this.armedIds()) {
+      const tap = this.inputRouter?.tap(id);
+      if (!tap) continue;
+      if (this.flashbacks.get(id)?.src === tap.out) continue;
+      this.detachFlashback(id);
+      try {
+        await loadFlashbackModule(ctx);
+        if (this.inputRouter?.tap(id) !== tap || this.flashbacks.has(id)) continue;   // désarmée / déjà branchée entre-temps
+        const seconds = captureMinutes() * 60;
+        const capacity = Math.round(seconds * ctx.sampleRate);
+        const nodes: AudioWorkletNode[] = [], sinks: GainNode[] = [], extra: AudioNode[] = [];
+        const mk = () => {
+          const node = new AudioWorkletNode(ctx, 'nova-flashback', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1], processorOptions: { capacity } });
+          const sink = ctx.createGain();
+          sink.gain.value = 0;
+          node.connect(sink); sink.connect(ctx.destination);
+          nodes.push(node); sinks.push(sink);
+          return node;
+        };
+        if (tap.width === 2) {
+          const sp = ctx.createChannelSplitter(2);
+          tap.out.connect(sp); extra.push(sp);
+          sp.connect(mk(), 0); sp.connect(mk(), 1);
+        } else tap.out.connect(mk());
+        this.flashbacks.set(id, { nodes, sinks, extra, src: tap.out, seconds });
+        if (this.isPlaying) {
+          const open = this.flashbackRuns.length && this.flashbackRuns[this.flashbackRuns.length - 1].to === null;
+          if (open) nodes.forEach(n => n.port.postMessage({ type: 'on' }));
+          else this.flashbackRunStart(ctx.currentTime, this.playbackStartTime);
+        }
+      } catch (e) {
+        console.warn('[AudioEngine] Capture après coup indisponible', e);
+      }
     }
   }
 
-  private detachFlashback() {
-    const f = this.flashback;
-    if (!f) return;
-    try { f.src.disconnect(f.node); } catch { /* déjà débranché */ }
-    try { f.node.disconnect(); f.sink.disconnect(); } catch { /* */ }
-    this.flashback = null;
-    this.flashbackRuns = [];
+  private detachFlashback(trackId?: string) {
+    for (const id of trackId ? [trackId] : [...this.flashbacks.keys()]) {
+      const f = this.flashbacks.get(id);
+      if (!f) continue;
+      this.flashbacks.delete(id);
+      [...f.extra, ...f.nodes].forEach(n => { try { f.src.disconnect(n); } catch { /* déjà débranché */ } });
+      f.extra.forEach(n => { try { n.disconnect(); } catch { /* */ } });
+      f.nodes.forEach(n => { try { n.disconnect(); } catch { /* */ } retireWorkletNode(n); });
+      f.sinks.forEach(n => { try { n.disconnect(); } catch { /* */ } });
+    }
+    if (!this.flashbacks.size) this.flashbackRuns = [];
+  }
+
+  private flashbackPost(msg: Record<string, unknown>) {
+    this.flashbacks.forEach(f => f.nodes.forEach(n => n.port.postMessage(msg)));
   }
 
   private flashbackRunStart(from: number, startTime: number) {
-    if (!this.flashback) return;
-    this.flashback.node.port.postMessage({ type: 'on' });
+    if (!this.flashbacks.size) return;
+    this.flashbackPost({ type: 'on' });
     const m = this.measureRecordLatency();
     this.flashbackRuns.push({ from, to: null, startTime, lat: [m.total] });
     if (this.flashbackRuns.length > 200) this.flashbackRuns.splice(0, this.flashbackRuns.length - 200);
@@ -655,76 +775,114 @@ export class AudioEngine {
 
   /** Fin d'un passage ; au bouclage l'écriture continue (le tour suivant commence aussitôt). */
   private flashbackRunEnd(at: number, continues: boolean) {
-    if (!this.flashback) return;
+    if (!this.flashbacks.size) return;
     const last = this.flashbackRuns[this.flashbackRuns.length - 1];
     if (last && last.to === null) last.to = at;
-    if (!continues) this.flashback.node.port.postMessage({ type: 'off' });
+    if (!continues) this.flashbackPost({ type: 'off' });
   }
 
   /** Capture prête (piste armée et au moins un passage de lecture). */
   public hasFlashback(): boolean {
     const now = this.ctx?.currentTime ?? 0;
-    return !!this.flashback && this.flashbackRuns.some(r => (r.to ?? now) - r.from >= 0.5);
+    return this.flashbacks.size > 0 && this.flashbackRuns.some(r => (r.to ?? now) - r.from >= 0.5);
   }
 
-  /** Nouvelle durée de capture (réglage) : l'anneau est recréé à la bonne taille. */
-  public resizeFlashback() { if (this.flashback) { this.detachFlashback(); void this.attachFlashback(); } }
+  /** Nouvelle durée de capture (réglage) : les anneaux sont recréés à la bonne taille. */
+  public resizeFlashback() { if (this.flashbacks.size) { this.detachFlashback(); void this.attachFlashback(); } }
 
   /** Durée gardée en mémoire (s), 0 sans piste armée. */
-  public flashbackSeconds(): number { return this.flashback?.seconds ?? 0; }
+  public flashbackSeconds(): number { return this.flashbacks.values().next().value?.seconds ?? 0; }
 
   /**
    * « Capturer la dernière prise » : ce que le micro a reçu pendant le dernier passage
    * de lecture (sans REC), posé au bon endroit, latence compensée comme une prise.
+   * R14 : sur la 1re piste armée (voir captureLastTakes pour toutes).
    */
   public async captureLastTake(): Promise<{ clip: Clip; trackId: string } | { error: string }> {
-    const ctx = this.ctx, f = this.flashback, trackId = this.monitoringTrackId;
-    if (!ctx || !f || !trackId) return { error: "Arme d'abord une piste (bouton R) : NOVA écoute le micro pendant la lecture." };
+    const r = await this.captureLastTakes();
+    if ('error' in r) return r;
+    return r.takes[0];
+  }
+
+  /**
+   * R14 · Capture après coup de TOUTES les pistes armées : le même passage, la même
+   * plage d'échantillons pour chacune (prises alignées), groupées si elles sont plusieurs.
+   */
+  public async captureLastTakes(): Promise<{ takes: TakeResult[]; group?: string } | { error: string }> {
+    const ctx = this.ctx;
+    const ids = this.armedIds().filter(id => this.flashbacks.has(id));
+    if (!ctx || !ids.length) return { error: "Arme d'abord une piste (bouton R) : NOVA écoute le micro pendant la lecture." };
     if (this.recordingTrackId) return { error: "Une prise est en cours : arrête-la d'abord." };
     const sr = ctx.sampleRate;
-    const info = await this.flashbackAsk({ type: 'info' });
-    const oldestCtx = info && typeof info.oldest === 'number' ? info.oldest / sr : null;
-    const pick = chooseCapture(this.flashbackRuns, ctx.currentTime, oldestCtx);
+    // Plus ancien instant gardé par TOUS les anneaux (le plus récent des plus anciens).
+    let oldest: number | null = null;
+    for (const id of ids) for (const n of this.flashbacks.get(id)!.nodes) {
+      const info = await this.flashbackAsk(n, { type: 'info' });
+      if (!info || typeof info.oldest !== 'number') { oldest = null; break; }
+      oldest = Math.max(oldest ?? -Infinity, info.oldest / sr);
+    }
+    const pick = chooseCapture(this.flashbackRuns, ctx.currentTime, oldest);
     if (!pick) return { error: 'Rien à capturer : lance la lecture avec une piste armée et chante, puis capture.' };
-    const got = await this.flashbackAsk({ type: 'read', from: Math.round(pick.from * sr), to: Math.round(pick.to * sr) });
-    const samples: Float32Array | null = got?.samples || null;
-    if (!samples || samples.length < sr * 0.3) return { error: 'Rien à capturer : la lecture était trop courte.' };
+    const from = Math.round(pick.from * sr), to = Math.round(pick.to * sr);
+    const reads: { id: string; chans: Float32Array[]; firsts: number[] }[] = [];
+    for (const id of ids) {
+      const chans: Float32Array[] = [], firsts: number[] = [];
+      for (const n of this.flashbacks.get(id)!.nodes) {
+        const got = await this.flashbackAsk(n, { type: 'read', from, to });
+        if (!got?.samples) break;
+        chans.push(got.samples); firsts.push(got.firstFrame);
+      }
+      if (chans.length === this.flashbacks.get(id)!.nodes.length) reads.push({ id, chans, firsts });
+    }
+    if (!reads.length) return { error: 'Rien à capturer : la lecture était trop courte.' };
+    // Plage commune à tous les anneaux : même 1er échantillon, même fin.
+    const first = Math.max(...reads.flatMap(r => r.firsts));
+    const end = Math.min(...reads.flatMap(r => r.chans.map((c, i) => r.firsts[i] + c.length)));
+    if (end - first < sr * 0.3) return { error: 'Rien à capturer : la lecture était trop courte.' };
     // Même placement qu'une prise : position dans le morceau, moins la latence mesurée + le réglage fin.
-    const firstCtx = got.firstFrame / sr;
+    const firstCtx = first / sr;
     const run = this.flashbackRuns.filter(r => r.from <= firstCtx + 1e-6).pop();
     const rawStart = firstCtx - (run ? run.startTime : (pick.from - pick.songTime));
     // Même règle qu'une prise : moyenne des latences mesurées pendant le passage, plus le réglage fin.
     const lats = run?.lat?.length ? run.lat : null;
     const measured = lats ? lats.reduce((s, v) => s + v, 0) / lats.length : (this.lastLatency || this.measureRecordLatency().total);
     const latency = measured + this.recOffsetMs / 1000;
-    let start = rawStart - latency;
-    let body = samples;
-    if (start < 0) { body = samples.subarray(Math.min(samples.length, Math.round(-start * sr))); start = 0; }
-    if (body.length < sr * 0.2) return { error: 'Rien à capturer.' };
-    const buffer = ctx.createBuffer(1, body.length, sr);
-    buffer.copyToChannel(body, 0);
-    const blob = encodeWav24(body, sr);
-    try { window.dispatchEvent(new CustomEvent('nova:take-aligned', { detail: { ms: Math.round(latency * 1000), sec: latency, raw: rawStart, capture: true } })); } catch { /* */ }
-    return {
-      trackId,
-      clip: {
-        id: `cap-${Date.now()}`, name: 'Capture', start, duration: buffer.duration, offset: 0, fadeIn: 0.01, fadeOut: 0.01,
-        type: TrackType.AUDIO, color: '#f59e0b', audioRef: URL.createObjectURL(blob), buffer,
-      },
-    };
+    const offs = channelOffsets();
+    const group = reads.length > 1 ? newTakeGroupId() : undefined;
+    const stamp = Date.now();
+    const takes: TakeResult[] = [];
+    reads.forEach((r, k) => {
+      const lat = latency + channelOffsetSec(this.inputRouter?.tap(r.id)?.channels || [], offs);
+      let start = rawStart - lat;
+      let cut = 0;
+      if (start < 0) { cut = Math.round(-start * sr); start = 0; }
+      const bodies = r.chans.map((c, i) => c.subarray(first - r.firsts[i] + cut, end - r.firsts[i]));
+      if (!bodies[0] || bodies[0].length < sr * 0.2) return;
+      const buffer = ctx.createBuffer(bodies.length, bodies[0].length, sr);
+      bodies.forEach((b, i) => buffer.copyToChannel(b, i));
+      const blob = encodeWav24(bodies.length > 1 ? bodies : bodies[0], sr);
+      try { window.dispatchEvent(new CustomEvent('nova:take-aligned', { detail: { ms: Math.round(lat * 1000), sec: lat, raw: rawStart, capture: true, trackId: r.id } })); } catch { /* */ }
+      takes.push({
+        trackId: r.id, ...(group ? { group } : {}),
+        clip: {
+          id: k ? `cap-${stamp}-t${k}` : `cap-${stamp}`, name: 'Capture', start, duration: buffer.duration, offset: 0, fadeIn: 0.01, fadeOut: 0.01,
+          type: TrackType.AUDIO, color: '#f59e0b', audioRef: URL.createObjectURL(blob), buffer,
+        },
+      });
+    });
+    if (!takes.length) return { error: 'Rien à capturer.' };
+    return { takes, ...(group && takes.length > 1 ? { group } : {}) };
   }
 
-  private flashbackAsk(msg: Record<string, unknown>): Promise<any> {
-    const f = this.flashback;
-    if (!f) return Promise.resolve(null);
+  private flashbackAsk(node: AudioWorkletNode, msg: Record<string, unknown>): Promise<any> {
     const id = ++this.flashbackReq;
     return new Promise(resolve => {
       const onMsg = (e: MessageEvent) => { if (e.data?.id === id) done(e.data); };
       const timer = setTimeout(() => done(null), 3000);
-      function done(v: any) { f!.node.port.removeEventListener('message', onMsg as any); clearTimeout(timer); resolve(v); }
-      f.node.port.addEventListener('message', onMsg as any);
-      f.node.port.start();
-      f.node.port.postMessage({ ...msg, id });
+      function done(v: any) { node.port.removeEventListener('message', onMsg as any); clearTimeout(timer); resolve(v); }
+      node.port.addEventListener('message', onMsg as any);
+      node.port.start();
+      node.port.postMessage({ ...msg, id });
     });
   }
 
@@ -1366,103 +1524,172 @@ export class AudioEngine {
    * message en console. L'interface affichait la piste armee, puis
    * l'enregistrement echouait sans rien dire.
    */
-  public async armTrack(trackId: string): Promise<string | null> {
+  public async armTrack(trackId: string, opts: { spec?: RecordInput | null; alone?: boolean } = {}): Promise<string | null> {
     if (!this.ctx) await this.init();
     if (this.ctx!.state !== 'running' && this.ctx!.state !== 'closed') await this.ctx!.resume();
-    if (this.armingPromise) await this.armingPromise;
-    this.armingPromise = this._armTrackInternal(trackId);
-    await this.armingPromise;
-    this.armingPromise = null;
-    const erreur = this.derniereErreurArmement;
-    this.derniereErreurArmement = null;
+    if (opts.spec !== undefined) this.armedSpecs.set(trackId, opts.spec);
+    else if (!this.armedSpecs.has(trackId)) this.armedSpecs.set(trackId, null);
+    // Armements à la suite (plusieurs pistes d'un coup) : un à la fois, dans l'ordre.
+    const prev = this.armingPromise || Promise.resolve();
+    const p: Promise<void> = prev.catch(() => {}).then(() => this._armTrackInternal(trackId, !!opts.alone));
+    this.armingPromise = p;
+    try { await p; } finally { if (this.armingPromise === p) this.armingPromise = null; }
+    const erreur = this.armErrors.get(trackId) ?? null;
+    this.armErrors.delete(trackId);
     return erreur;
   }
 
-  private derniereErreurArmement: string | null = null;
-
-  private async _armTrackInternal(trackId: string) {
-    this.disarmTrack();
-    this.monitoringTrackId = trackId;
-    
+  private async _armTrackInternal(trackId: string, alone: boolean) {
+    // Maj+clic (ou armement exclusif) : la piste seule.
+    if (alone) for (const id of this.armedIds()) if (id !== trackId) this.disarmTrack(id);
     let dsp = this.tracksDSP.get(trackId);
-    
     let attempts = 0;
-    const maxAttempts = 10;
-    while (!dsp && attempts < maxAttempts) {
-        await new Promise(r => setTimeout(r, 15)); // 15ms entre checks
-        dsp = this.tracksDSP.get(trackId);
-        attempts++;
+    while (!dsp && attempts < 10) {
+      await new Promise(r => setTimeout(r, 15)); // 15ms entre checks
+      dsp = this.tracksDSP.get(trackId);
+      attempts++;
     }
-    
     if (!dsp) {
       console.error("[AudioEngine] ARM FAILED - No DSP for track:", trackId);
-      this.monitoringTrackId = null;
-      this.derniereErreurArmement = "Piste indisponible pour l'enregistrement.";
+      this.armErrors.set(trackId, "Piste indisponible pour l'enregistrement.");
       return;
     }
-
     try {
-      // Le peripherique choisi dans les reglages audio n'etait jamais transmis :
-      // l'enregistrement utilisait toujours l'entree par defaut du systeme.
-      const audioConstraints: MediaTrackConstraints = {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      };
-      if (this.currentInputDeviceId && this.currentInputDeviceId !== 'default') {
-        audioConstraints.deviceId = { exact: this.currentInputDeviceId };
-      }
-
-      try {
-        this.activeMonitorStream = await this.openInputStream(audioConstraints);
-      } catch (deviceError) {
-        // Peripherique debranche ou refuse : on retombe sur l'entree par defaut
-        // plutot que d'echouer completement l'armement.
-        console.warn("[AudioEngine] Entree demandee indisponible, repli sur le peripherique par defaut", deviceError);
-        this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-        });
-      }
-      this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
-      this.wireMonitor(dsp);
-      void this.attachFlashback();
+      await this.ensureInputSource(trackId);
+      const spec = this.armedSpecs.get(trackId) ?? null;
+      const tap = this.inputRouter!.arm(trackId, spec, dsp.input, dsp.inputAnalyzer, this.monitorGainFor());
+      this.monitoringTrackId = trackId;
+      void this.attachFlashback(trackId);
       this.setTrackLowLatency(trackId, true);
       this.syncDirectMonitor();
-      this.startLatencyWatch();
-      console.log("[AudioEngine] Track armed OK:", trackId);
+      if (!this.latencyTimer) this.startLatencyWatch();
+      this.reportMissingInput(tap);
+      console.log("[AudioEngine] Track armed OK:", trackId, tap.channels);
     } catch (e: any) {
       console.error("[AudioEngine] ARM ERROR:", e);
-      this.monitoringTrackId = null;
-      this.activeMonitorStream = null;
+      this.inputRouter?.disarm(trackId);
+      this.armedSpecs.delete(trackId);
+      if (!this.inputRouter?.size) this.closeInputSource();
       // On traduit les cas courants plutot que de renvoyer un nom technique.
       const nom = e?.name || '';
       if (nom === 'NotAllowedError' || nom === 'SecurityError') {
-        this.derniereErreurArmement = "Micro refusé. Autorisez-le dans votre navigateur puis réessayez.";
+        this.armErrors.set(trackId, "Micro refusé. Autorisez-le dans votre navigateur puis réessayez.");
       } else if (nom === 'NotFoundError' || nom === 'OverconstrainedError') {
-        this.derniereErreurArmement = "Aucun micro détecté. Branchez-en un puis réessayez.";
+        this.armErrors.set(trackId, "Aucun micro détecté. Branchez-en un puis réessayez.");
       } else if (nom === 'NotReadableError') {
-        this.derniereErreurArmement = "Micro déjà utilisé par une autre application.";
+        this.armErrors.set(trackId, "Micro déjà utilisé par une autre application.");
       } else {
-        this.derniereErreurArmement = `Micro inaccessible : ${e?.message || 'erreur inconnue'}`;
+        this.armErrors.set(trackId, `Micro inaccessible : ${e?.message || 'erreur inconnue'}`);
       }
     }
   }
 
-  /** Micro → indicateur de niveau (toujours) et → piste via le gain de retour. */
-  private wireMonitor(dsp: { input: AudioNode; inputAnalyzer?: AnalyserNode }) {
-    if (!this.monitorSource || !this.ctx) return;
-    if (dsp.inputAnalyzer) this.monitorSource.connect(dsp.inputAnalyzer);
-    if (this.monitorGain) { try { this.monitorGain.disconnect(); } catch { /* déjà déconnecté */ } }
-    this.monitorGain = this.ctx.createGain();
-    this.monitorGain.gain.value = this.inputMonitoring ? this.monitorLevel : 0;
-    this.monitorSource.connect(this.monitorGain);
-    this.monitorGain.connect(dsp.input);
+  /** Entrée demandée absente de la source : l'appli l'explique (utils/multiRecord.inputsMessage). */
+  private reportMissingInput(tap: InputTap) {
+    if (!tap.missing) return;
+    const info = this.getInputInfo();
+    try { window.dispatchEvent(new CustomEvent('nova:input-missing', { detail: { trackId: tap.trackId, channels: tap.channels, available: info.available, mode: info.mode } })); } catch { /* */ }
+  }
+
+  /**
+   * Source d'entrée partagée par les pistes armées : toutes les entrées de la carte
+   * (pont ASIO), sinon le micro du navigateur, ouvert avec autant de canaux que les
+   * pistes en demandent (multicanal quand le navigateur le permet).
+   */
+  private async ensureInputSource(forTrack?: string): Promise<void> {
+    if (!this.ctx) return;
+    const router = this.inputRouter || (this.inputRouter = new InputRouter(this.ctx));
+    if (this.asioStreamActive && this.asioConnected) {
+      const asio = this.ensureASIOInput();
+      if (!asio) return;
+      const node = await asio.whenReady();
+      const cur = router.getSource();
+      if (cur?.node !== node || cur.autoChannel !== this.getASIOInputChannel()) {
+        if (this.recordingTrackId && cur) return;      // jamais pendant une prise
+        const oldStream = this.activeMonitorStream, oldSrc = this.monitorSource;
+        this.activeMonitorStream = await asio.getStream();
+        this.monitorSource = null;
+        router.setSource({ node, output: 1, channels: asio.channels, kind: 'asio', autoChannel: this.getASIOInputChannel() });
+        try { oldSrc?.disconnect(); } catch { /* */ }
+        if (oldStream && oldStream !== this.activeMonitorStream) this.stopInputStream(oldStream);
+        console.log('[AudioEngine] Entrée ASIO utilisée pour les pistes armées :', asio.channels, 'entrées');
+      }
+      return;
+    }
+    const specs = [...this.armedSpecs.entries()].filter(([id]) => id === forTrack || router.has(id)).map(([, s]) => s);
+    const need = neededInputChannels(specs);
+    const cur = router.getSource();
+    if (cur?.kind === 'navigateur' && this.activeMonitorStream && this.activeMonitorStream.getAudioTracks().some(t => t.readyState === 'live')) {
+      // Assez de canaux, ou le navigateur n'en donnera pas plus : on garde le flux ouvert.
+      if (cur.channels >= need || (this.browserMaxChannels > 0 && this.browserMaxChannels <= cur.channels)) return;
+      if (this.recordingTrackId) return;
+    }
+    // Le peripherique choisi dans les reglages audio n'etait jamais transmis :
+    // l'enregistrement utilisait toujours l'entree par defaut du systeme.
+    const base: MediaTrackConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    const constraints: MediaTrackConstraints = { ...base, ...(need > 2 ? { channelCount: { ideal: need } } : {}) };
+    if (this.currentInputDeviceId && this.currentInputDeviceId !== 'default') constraints.deviceId = { exact: this.currentInputDeviceId };
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    } catch (deviceError) {
+      // Peripherique debranche ou refuse : on retombe sur l'entree par defaut
+      // plutot que d'echouer completement l'armement.
+      console.warn("[AudioEngine] Entree demandee indisponible, repli sur le peripherique par defaut", deviceError);
+      stream = await navigator.mediaDevices.getUserMedia({ audio: base });
+    }
+    const track = stream.getAudioTracks()[0];
+    let channels = 0;
+    try { channels = Number((track?.getSettings() as any)?.channelCount) || 0; } catch { /* */ }
+    try { const max = Number((track as any)?.getCapabilities?.()?.channelCount?.max); if (max > 0) this.browserMaxChannels = max; } catch { /* */ }
+    const src = this.ctx.createMediaStreamSource(stream);
+    if (!channels) channels = src.channelCount || 2;
+    if (!this.browserMaxChannels) this.browserMaxChannels = channels;
+    const oldStream = this.activeMonitorStream, oldSrc = this.monitorSource;
+    this.activeMonitorStream = stream;
+    this.monitorSource = src;
+    router.setSource({ node: src, output: 0, channels: Math.max(1, channels), kind: 'navigateur', autoChannel: -1 });
+    try { oldSrc?.disconnect(); } catch { /* */ }
+    if (oldStream && oldStream !== stream) this.stopInputStream(oldStream);
+  }
+
+  /** Plus aucune piste armée : le micro est fermé (le flux de la carte, partagé, reste). */
+  private closeInputSource() {
+    this.inputRouter?.setSource(null);
+    if (this.monitorSource) { try { this.monitorSource.disconnect(); } catch { /* */ } this.monitorSource = null; }
+    if (this.activeMonitorStream) { this.stopInputStream(this.activeMonitorStream); this.activeMonitorStream = null; }
+  }
+
+  /** La source a changé (flux de la carte démarré / arrêté) : les pistes armées suivent. */
+  private async refreshInputSource() {
+    if (!this.inputRouter?.size || this.recordingTrackId) return;
+    try {
+      await this.ensureInputSource();
+      this.inputRouter.all().forEach(t => this.reportMissingInput(t));
+      this.syncDirectMonitor();
+    } catch (e) { console.warn('[AudioEngine] Entrée non rouverte', e); }
+  }
+
+  /**
+   * R14 · Entrée physique d'une piste (Track.recordInput). Piste armée : recâblée tout
+   * de suite (pas pendant une prise : la piste garde son entrée jusqu'à l'arrêt).
+   */
+  public async setTrackInput(trackId: string, spec: RecordInput | null): Promise<void> {
+    const before = this.armedSpecs.get(trackId);
+    this.armedSpecs.set(trackId, spec);
+    if (!this.inputRouter?.has(trackId) || this.recordingTrackIds.includes(trackId)) return;
+    if (JSON.stringify(before ?? null) === JSON.stringify(spec ?? null)) return;
+    await this.ensureInputSource(trackId);
+    const old = this.inputRouter.tap(trackId);
+    const tap = this.inputRouter.setSpec(trackId, spec);
+    if (tap && tap !== old) { this.detachFlashback(trackId); void this.attachFlashback(trackId); }
+    this.syncDirectMonitor();
+    if (tap) this.reportMissingInput(tap);
   }
 
   /** Active / coupe le retour du micro dans le casque. */
   public setInputMonitoring(on: boolean) {
     this.inputMonitoring = on;
-    if (this.monitorGain && this.ctx) this.monitorGain.gain.setTargetAtTime(on ? this.monitorLevel : 0, this.ctx.currentTime, 0.01);
     this.syncDirectMonitor();
     try { window.dispatchEvent(new CustomEvent('nova:monitoring', { detail: on })); } catch { /* */ }
   }
@@ -1471,7 +1698,6 @@ export class AudioEngine {
   public setMonitorLevel(level: number) {
     this.monitorLevel = Math.min(2, Math.max(0, level));
     try { localStorage.setItem('nova_monitor_level', String(this.monitorLevel)); } catch { /* */ }
-    if (this.monitorGain && this.ctx && this.inputMonitoring) this.monitorGain.gain.setTargetAtTime(this.monitorLevel, this.ctx.currentTime, 0.01);
     this.syncDirectMonitor();
     try { window.dispatchEvent(new CustomEvent('nova:monitor-level', { detail: this.monitorLevel })); } catch { /* */ }
   }
@@ -1682,98 +1908,148 @@ export class AudioEngine {
     } else this.syncTimelineEffects(this.playbackStartTime);
   }
 
-  public disarmTrack() {
-    this.detachFlashback();
-    if (this.monitoringTrackId) this.setTrackLowLatency(this.monitoringTrackId, false);
-    this.stopLatencyWatch();
-    if (this.asioBridge && this.asioConnected) this.asioBridge.setMonitor(false, this.monitorLevel, -1);
-    if (this.monitorGain) {
-      try { this.monitorGain.disconnect(); } catch { /* déjà déconnecté */ }
-      this.monitorGain = null;
+  /** Désarme une piste (sans argument : toutes). La dernière désarmée ferme le micro. */
+  public disarmTrack(trackId?: string) {
+    const ids = trackId ? [trackId] : this.armedIds();
+    for (const id of ids) {
+      this.detachFlashback(id);
+      this.inputRouter?.disarm(id);
+      this.armedSpecs.delete(id);
+      this.setTrackLowLatency(id, false);
     }
-    if (this.monitorSource) {
-      this.monitorSource.disconnect();
-      this.monitorSource = null;
+    if (!trackId) this.armedSpecs.clear();
+    if (!this.inputRouter?.size) {
+      this.stopLatencyWatch();
+      if (this.asioBridge && this.asioConnected) {
+        if (this.asioBridge.protocol >= 2) this.asioBridge.setMonitorRoutes(false, []);
+        else this.asioBridge.setMonitor(false, this.monitorLevel, -1);
+      }
+      this.closeInputSource();
+      this.monitoringTrackId = null;
+    } else {
+      if (!this.monitoringTrackId || !this.inputRouter.has(this.monitoringTrackId)) this.monitoringTrackId = this.armedIds().pop() || null;
+      this.syncDirectMonitor();
     }
-    if (this.activeMonitorStream) {
-      this.stopInputStream(this.activeMonitorStream);
-      this.activeMonitorStream = null;
-    }
-    this.monitoringTrackId = null;
   }
 
-  public async startRecording(currentTime: number, trackId: string): Promise<boolean> {
+  /**
+   * Démarre une prise sur une ou plusieurs pistes armées (R14 : plusieurs à la fois).
+   * Un seul enregistreur capte toutes les entrées : même premier échantillon pour
+   * toutes les pistes, donc des prises alignées à l'échantillon près.
+   */
+  public async startRecording(currentTime: number, trackIds: string | string[]): Promise<boolean> {
     // Piste armée à l'instant (bouton R puis REC tout de suite, ou machine chargée) : le
     // micro s'ouvre encore. Avant, la prise échouait (« No monitor stream ») : mesuré
     // dans le soak, 1 prise sur 3 ne démarrait pas sous charge.
     if (this.armingPromise) { try { await this.armingPromise; } catch { /* erreur d'armement déjà signalée */ } }
-    console.log("[AudioEngine] startRecording called - stream:", !!this.activeMonitorStream, "recording:", this.recordingTrackId);
-
-    if (!this.activeMonitorStream) {
-      console.error("[AudioEngine] REC FAILED - No monitor stream! Arm track first.");
-      return false;
-    }
+    const wanted = Array.isArray(trackIds) ? trackIds : [trackIds];
+    console.log("[AudioEngine] startRecording called - pistes:", wanted, "armées:", this.armedIds(), "recording:", this.recordingTrackId);
     if (this.recordingTrackId) {
       console.error("[AudioEngine] REC FAILED - Already recording on:", this.recordingTrackId);
       return false;
     }
-    
+    const ids = wanted.filter(id => this.inputRouter?.has(id));
+    if (!ids.length) {
+      console.error("[AudioEngine] REC FAILED - No armed input! Arm track first.");
+      return false;
+    }
+
     // Enregistreur interne (AudioWorklet) : position exacte + son sans compression.
     try {
       if (this.ctx && this.ctx.audioWorklet) {
         await ensureRecorderModule(this.ctx);
-        const src: AudioNode | null = (this.isUsingASIOInput() && this.asioInput?.getNode()) || this.monitorSource;
-        if (src) {
-          this.recSource = src;
-          this.recSession = new NovaRecorderSession(this.ctx, src);
-          try {
-            const j = this.takeJournalFactory?.({ trackId, recordedAt: currentTime, latency: this.measureRecordLatency().total + this.recOffsetMs / 1000, sampleRate: this.ctx.sampleRate }) || null;
-            this.recJournal = j;
-            if (j) this.recSession.onChunk = c => j.push(c);
-          } catch { this.recJournal = null; }
+        const input = this.inputRouter!.recorderInput(ids);
+        if (input) {
+          const session = new NovaRecorderSession(this.ctx, input.node, { channels: input.channels });
+          const group = input.layout.length > 1 ? newTakeGroupId() : undefined;
+          const common = this.measureRecordLatency().total + this.recOffsetMs / 1000;
+          const offs = channelOffsets();
+          this.recChannels = new Map(input.layout.map(l => [l.trackId, [...(this.inputRouter!.tap(l.trackId)?.channels || [])]]));
+          this.recJournals = new Map();
+          for (const l of input.layout) {
+            try {
+              const j = this.takeJournalFactory?.({
+                trackId: l.trackId, recordedAt: currentTime, sampleRate: this.ctx.sampleRate,
+                latency: common + channelOffsetSec(this.recChannels.get(l.trackId) || [], offs),
+                ...(group ? { group } : {}), ...(l.width === 2 ? { channels: 2 } : {}),
+              }) || null;
+              if (j) this.recJournals.set(l.trackId, j);
+            } catch { /* le journal ne doit jamais empêcher la prise */ }
+          }
+          if (this.recJournals.size) {
+            session.onChunks = cs => {
+              for (const l of input.layout) {
+                const j = this.recJournals.get(l.trackId);
+                if (!j) continue;
+                if (l.width === 1) j.push(cs[l.first]);
+                else {
+                  // Stéréo : échantillons entrelacés G/D dans le journal.
+                  const a = cs[l.first], b = cs[l.first + 1], x = new Float32Array(a.length * 2);
+                  for (let i = 0; i < a.length; i++) { x[2 * i] = a[i]; x[2 * i + 1] = b ? b[i] : 0; }
+                  j.push(x);
+                }
+              }
+            };
+          }
+          this.recSession = session;
+          this.recSource = input.node;
+          this.recInput = input;
+          this.recGroup = group;
           this.recPlayStart = this.isPlaying ? this.playbackStartTime : null;
           this.recStartTime = currentTime;
-          this.recordingTrackId = trackId;
+          this.recordingTrackIds = input.layout.map(l => l.trackId);
+          this.recordingTrackId = this.recordingTrackIds[0];
           this.latencySamples = [];
           if (!this.latencyTimer) this.startLatencyWatch();
-          console.log("[AudioEngine] Recording started (enregistreur calé) on track:", trackId);
+          console.log("[AudioEngine] Recording started (enregistreur calé) on tracks:", this.recordingTrackIds, `${input.channels} canaux`);
           return true;
         }
       }
     } catch (e) {
       console.warn("[AudioEngine] Enregistreur calé indisponible, repli sur MediaRecorder", e);
+      this.recInput?.dispose();
+      this.recInput = null;
       this.recSession = null;
       this.recSource = null;
+      this.recJournals = new Map();
     }
 
+    // Repli sans AudioWorklet : MediaRecorder sur le flux du micro, 1re piste seulement.
+    if (!this.activeMonitorStream) return false;
     try {
       this.mediaRecorder = new MediaRecorder(this.activeMonitorStream);
       this.audioChunks = [];
       this.recStartTime = currentTime;
-      this.recordingTrackId = trackId;
+      this.recordingTrackId = ids[0];
+      this.recordingTrackIds = [ids[0]];
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.audioChunks.push(event.data);
         }
       };
       this.mediaRecorder.start();
-      console.log("[AudioEngine] Recording started OK on track:", trackId);
+      console.log("[AudioEngine] Recording started OK on track:", ids[0]);
       return true;
     } catch (e) {
       console.error("[AudioEngine] REC ERROR:", e);
       this.recordingTrackId = null;
+      this.recordingTrackIds = [];
       return false;
     }
   }
 
+  /** Fin de la prise : la 1re piste (voir stopRecordingAll pour toutes). */
   public async stopRecording(): Promise<{ clip: Clip, trackId: string } | null> {
+    const all = await this.stopRecordingAll();
+    return all[0] || null;
+  }
+
+  /** R14 · Fin de la prise : un clip par piste enregistrée (même groupe si plusieurs). */
+  public async stopRecordingAll(): Promise<TakeResult[]> {
     if (this.recSession && this.recordingTrackId && this.ctx) return this.stopCalibratedRecording();
     if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive' || !this.recordingTrackId) {
-      return null;
+      return [];
     }
-    
-    const trackIdToRearm = this.monitoringTrackId; // Sauvegarder pour ré-armement
-    
     return new Promise((resolve) => {
       this.mediaRecorder!.onstop = async () => {
         const trackId = this.recordingTrackId!;
@@ -1787,18 +2063,12 @@ export class AudioEngine {
         // Reset recording state FIRST
         this.audioChunks = [];
         this.recordingTrackId = null;
+        this.recordingTrackIds = [];
         this.recStartTime = 0;
         this.mediaRecorder = null;
-        
-        if (blob.size === 0) {
-          // Ré-armer la piste pour permettre un nouvel enregistrement
-          if (trackIdToRearm) {
-            await this.rearmTrackForNextRecording(trackIdToRearm);
-          }
-          resolve(null);
-          return;
-        }
-        
+
+        if (blob.size === 0) { resolve([]); return; }
+
         try {
           const arrayBuffer = await blob.arrayBuffer();
           const audioBuffer = await this.ctx!.decodeAudioData(arrayBuffer);
@@ -1816,53 +2086,53 @@ export class AudioEngine {
             type: TrackType.AUDIO,
             color: '#ff0000',
             audioRef: URL.createObjectURL(blob),
-            buffer: audioBuffer, 
+            buffer: audioBuffer,
           };
           console.log("[AudioEngine] Recording stopped. New clip created:", clipData);
-          
-          // Ré-armer la piste pour permettre un nouvel enregistrement
-          if (trackIdToRearm) {
-            await this.rearmTrackForNextRecording(trackIdToRearm);
-          }
-          
-          resolve({ clip: clipData, trackId });
+          resolve([{ clip: clipData, trackId }]);
         } catch (e) {
           console.error("Error processing recorded audio:", e);
-          // Ré-armer même en cas d'erreur
-          if (trackIdToRearm) {
-            await this.rearmTrackForNextRecording(trackIdToRearm);
-          }
-          resolve(null);
+          resolve([]);
         }
       };
-      this.mediaRecorder.stop();
+      this.mediaRecorder!.stop();
     });
   }
 
   /**
-   * Fin d'une prise de l'enregistreur calé : la prise est replacée exactement
+   * Fin d'une prise de l'enregistreur calé : chaque prise est replacée exactement
    * où elle aurait dû être (position de lecture au début de la prise, moins la
-   * latence moyenne mesurée pendant la prise, plus le réglage fin manuel).
+   * latence moyenne mesurée pendant la prise, plus le réglage fin manuel, plus le
+   * retard propre de son entrée). Toutes les pistes partagent le même premier
+   * échantillon : seules leurs entrées les décalent (compensation par canal).
    */
-  private async stopCalibratedRecording(): Promise<{ clip: Clip, trackId: string } | null> {
+  private async stopCalibratedRecording(): Promise<TakeResult[]> {
     const ctx = this.ctx!;
-    const trackId = this.recordingTrackId!;
     const session = this.recSession!;
     const src = this.recSource!;
+    const input = this.recInput;
+    const group = this.recGroup;
+    const recChannels = this.recChannels;
     const recordedAt = this.recStartTime;
     const playStart = this.recPlayStart ?? (this.isPlaying ? this.playbackStartTime : null);
     this.recPlayStart = null;
     this.recSession = null;
     this.recSource = null;
+    this.recInput = null;
+    this.recGroup = undefined;
+    this.recChannels = new Map();
     this.recordingTrackId = null;
+    this.recordingTrackIds = [];
     this.recStartTime = 0;
 
-    const { samples, firstFrame } = await session.stop(src);
-    const journal = this.recJournal;
-    this.recJournal = null;
-    if (!samples.length) { void journal?.discard(); return null; }
-    // Prise terminée normalement : le journal est clos (effacé une fois la prise dans une version).
-    void journal?.finish();
+    const { channels, firstFrame } = await session.stop(src);
+    try { input?.dispose(); } catch { /* */ }
+    const journals = this.recJournals;
+    this.recJournals = new Map();
+    const len = channels?.[0]?.length || 0;
+    if (!channels || !len || !input) { journals.forEach(j => void j.discard()); return []; }
+    // Prise terminée normalement : les journaux sont clos (effacés une fois la prise dans une version).
+    journals.forEach(j => void j.finish());
     const sr = ctx.sampleRate;
 
     // Position de chaque échantillon sur la timeline : (frame / sr) − début de lecture.
@@ -1877,85 +2147,41 @@ export class AudioEngine {
       ? this.latencySamples.reduce((s, v) => s + v, 0) / this.latencySamples.length
       : this.measureRecordLatency().total;
     const latency = measured + this.recOffsetMs / 1000;
-    let start = rawStart - latency;
-    let skip = 0;
-    if (start < 0) { skip = Math.round(-start * sr); start = 0; }
-
-    const body = samples.subarray(Math.min(samples.length, lead + skip));
-    if (body.length < sr * 0.05) return null;
-    const buffer = ctx.createBuffer(1, body.length, sr);
-    buffer.copyToChannel(body, 0);
-    const blob = encodeWav24(body, sr);
-    console.log(`[AudioEngine] Prise replacée : latence ${Math.round(latency * 1000)} ms (mesurée ${Math.round(measured * 1000)} ms, réglage ${this.recOffsetMs} ms)`);
-    try { window.dispatchEvent(new CustomEvent('nova:take-aligned', { detail: { ms: Math.round(latency * 1000), sec: latency, raw: rawStart } })); } catch { /* */ }
-
-    return {
-      trackId,
-      clip: {
-        id: `rec-${Date.now()}`,
-        name: `Vocal Take ${new Date().toLocaleTimeString()}`,
-        start,
-        duration: buffer.duration,
-        offset: 0,
-        fadeIn: 0.01,
-        fadeOut: 0.01,
-        type: TrackType.AUDIO,
-        color: '#ff0000',
-        audioRef: URL.createObjectURL(blob),
-        buffer,
-      },
-    };
-  }
-
-  /**
-   * Ré-arme la piste avec un nouveau MediaStream pour permettre plusieurs enregistrements consécutifs.
-   * Le MediaRecorder ne peut pas être réutilisé après stop(), donc on doit recréer le stream.
-   */
-  private async rearmTrackForNextRecording(trackId: string): Promise<void> {
-    console.log("[AudioEngine] Re-arming track for next recording:", trackId);
-    
-    // Fermer l'ancien stream proprement
-    if (this.monitorSource) {
-      try { this.monitorSource.disconnect(); } catch (e) {}
-      this.monitorSource = null;
-    }
-    if (this.activeMonitorStream) {
-      this.stopInputStream(this.activeMonitorStream);
-      this.activeMonitorStream = null;
-    }
-    
-    // Recréer un nouveau stream
-    const dsp = this.tracksDSP.get(trackId);
-    if (!dsp) {
-      console.warn("[AudioEngine] Cannot rearm - DSP not found for track:", trackId);
-      this.monitoringTrackId = null;
-      return;
-    }
-    
-    try {
-      // Même entrée que l'armement initial : sans deviceId, la 2e prise passait
-      // sur le micro par défaut au lieu de l'interface choisie.
-      const constraints: MediaTrackConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
-      if (this.currentInputDeviceId && this.currentInputDeviceId !== 'default') {
-        constraints.deviceId = { exact: this.currentInputDeviceId };
-      }
-      try {
-        this.activeMonitorStream = await this.openInputStream(constraints);
-      } catch {
-        this.activeMonitorStream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-        });
-      }
-      this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
-      this.wireMonitor(dsp);
-      this.monitoringTrackId = trackId;
-      void this.attachFlashback();
-      console.log("[AudioEngine] Track re-armed OK:", trackId);
-    } catch (e) {
-      console.error("[AudioEngine] Re-arm ERROR:", e);
-      this.monitoringTrackId = null;
-      this.activeMonitorStream = null;
-    }
+    const offs = channelOffsets();
+    const stamp = Date.now();
+    const out: TakeResult[] = [];
+    input.layout.forEach((l, k) => {
+      const lat = latency + channelOffsetSec(recChannels.get(l.trackId) || [], offs);
+      let start = rawStart - lat;
+      let skip = 0;
+      if (start < 0) { skip = Math.round(-start * sr); start = 0; }
+      const from = Math.min(len, lead + skip);
+      const bodies = (l.width === 1 ? [channels[l.first]] : [channels[l.first], channels[l.first + 1]]).map(c => c.subarray(from));
+      if (bodies[0].length < sr * 0.05) return;
+      const buffer = ctx.createBuffer(l.width, bodies[0].length, sr);
+      bodies.forEach((b, i) => buffer.copyToChannel(b, i));
+      const blob = encodeWav24(l.width === 1 ? bodies[0] : bodies, sr);
+      console.log(`[AudioEngine] Prise replacée (${l.trackId}) : latence ${Math.round(lat * 1000)} ms (mesurée ${Math.round(measured * 1000)} ms, réglage ${this.recOffsetMs} ms)`);
+      try { window.dispatchEvent(new CustomEvent('nova:take-aligned', { detail: { ms: Math.round(lat * 1000), sec: lat, raw: rawStart, trackId: l.trackId } })); } catch { /* */ }
+      out.push({
+        trackId: l.trackId,
+        ...(group ? { group } : {}),
+        clip: {
+          id: k ? `rec-${stamp}-t${k}` : `rec-${stamp}`,
+          name: `Vocal Take ${new Date().toLocaleTimeString()}`,
+          start,
+          duration: buffer.duration,
+          offset: 0,
+          fadeIn: 0.01,
+          fadeOut: 0.01,
+          type: TrackType.AUDIO,
+          color: '#ff0000',
+          audioRef: URL.createObjectURL(blob),
+          buffer,
+        },
+      });
+    });
+    return out;
   }
 
   /**
@@ -3621,6 +3847,9 @@ export class AudioEngine {
     // R11 : point de mesure de la piste (pré-fader : après les effets ; post : après fader et pan).
     // Pré-fader pris sur chainOut (R7/R8) : le mute automatisé agit comme le mute fixe, après ce point.
     meterBank.attachTrack(track.id, dsp.chainOut || dsp.preFaderTap!, dsp.analyzer);
+    // R15 : les mixes casque reprennent la prise pré-fader (le recâblage l'a débranchée).
+    this.trackMix.set(track.id, { id: track.id, volume: track.volume, pan: track.pan });
+    if (this.cueMixes.length) this.cueEngine?.reconnectTrack(track.id, dsp.preFaderTap || null);
   }
 
   private applyAutomation(track: Track, time: number) {
@@ -3781,7 +4010,7 @@ export class AudioEngine {
   /** Où envoyer les sons de service (décompte) : le master, pour qu'ils sortent aussi en ASIO. */
   public getMonitorBus(): AudioNode | null { return this.masterOutput || this.ctx?.destination || null; }
 
-  public getTrackAnalyzer(trackId: string) { const dsp = this.tracksDSP.get(trackId); if (!dsp) return null; if (this.monitoringTrackId === trackId && dsp.inputAnalyzer) return dsp.inputAnalyzer; return dsp.analyzer; }
+  public getTrackAnalyzer(trackId: string) { const dsp = this.tracksDSP.get(trackId); if (!dsp) return null; if (this.inputRouter?.has(trackId) && dsp.inputAnalyzer) return dsp.inputAnalyzer; return dsp.analyzer; }
   public getPluginNodeInstance(trackId: string, pluginId: string) { return this.tracksDSP.get(trackId)?.pluginChain.get(pluginId)?.instance || null; }
   public setRecMode(active: boolean) { this.isRecMode = active; }
   /**
@@ -3845,36 +4074,40 @@ export class AudioEngine {
         if (success && config) this.applyASIOConfig(config);
       },
       onConfig: (config) => this.applyASIOConfig(config),
-      onStreamStarted: (success, latency_ms) => {
+      onStreamStarted: (success, latency_ms, _error, info) => {
         if (success) {
           this.asioStreamActive = true;
           // latency_ms est en millisecondes ; this.latency est en SECONDES,
           // comme ctx.baseLatency. Sans conversion les deux se melangeaient.
           this.latency = (latency_ms || 0) / 1000;
-          console.log(`[AudioEngine] Stream ASIO démarré - Latence: ${latency_ms}ms`);
-          // Piste déjà armée sur le micro du navigateur : elle bascule sur la carte.
-          if (this.monitoringTrackId && !this.isUsingASIOInput() && !this.recordingTrackId) {
-            void this.armTrack(this.monitoringTrackId);
-          }
+          this.applyStreamInfo(info);
+          console.log(`[AudioEngine] Stream ASIO démarré - Latence: ${latency_ms}ms, tampon ${this.asioBlockSize}, ${this.asioInputChannels} entrées / ${this.asioOutputChannels} sorties`);
+          // Pistes déjà armées sur le micro du navigateur : elles basculent sur la carte.
+          void this.refreshInputSource();
+          if (this.asioOutputProcessor) this.rebuildAsioOutput();
         }
       },
       onStreamStopped: () => {
         this.asioStreamActive = false;
         this.restoreBrowserOutput();
         console.log('[AudioEngine] Stream ASIO arrêté');
-        // Piste armée sur la carte : retour au micro du navigateur pour ne pas rester muet.
-        if (this.monitoringTrackId && this.isUsingASIOInput() && !this.recordingTrackId) {
-          void this.armTrack(this.monitoringTrackId);
-        }
+        // Pistes armées sur la carte : retour au micro du navigateur pour ne pas rester muettes.
+        void this.refreshInputSource();
       },
-      onAudioInput: (audioData, channels) => {
-        this.handleASIOInput(audioData, channels);
+      onAudioInput: (audioData, channels, block) => {
+        this.handleASIOInput(audioData, channels, block?.frameIndex, block?.sampleRate);
       },
       onStats: (stats) => {
         this.latency = (stats.latency_ms || 0) / 1000;
         this.asioQueueSec = (stats.queue_ms || 0) / 1000;
         if (stats.sample_rate && this.asioInput) this.asioInput.sourceRate = stats.sample_rate;
-      }
+        if (stats.block_size) this.asioBlockSize = stats.block_size;
+      },
+      onConfigResult: (m) => {
+        const w = this.configWaiters;
+        this.configWaiters = [];
+        w.forEach(f => f(m));
+      },
     });
 
     return await this.asioBridge.connect();
@@ -3935,32 +4168,8 @@ export class AudioEngine {
       return;
     }
     
-    // Créer un ScriptProcessor pour envoyer l'audio vers ASIO
-    if (this.ctx && !this.asioOutputProcessor) {
-      this.asioOutputProcessor = this.ctx.createScriptProcessor(256, 2, 2);
-      this.asioOutputProcessor.onaudioprocess = (e) => {
-        if (this.asioStreamActive && this.asioBridge) {
-          const channelData = [
-            e.inputBuffer.getChannelData(0),
-            e.inputBuffer.getChannelData(1)
-          ];
-          this.asioBridge.sendAudioFromWorklet(channelData);
-        }
-        // Sortie du processeur silencieuse : le mix part par la carte. (Le copier
-        // ici le faisait aussi sortir par le navigateur, en double.)
-        for (let ch = 0; ch < e.outputBuffer.numberOfChannels; ch++) {
-          e.outputBuffer.getChannelData(ch).fill(0);
-        }
-      };
-
-      // Mix après le limiteur (ce que l'on entend) → carte. Le processeur doit
-      // être relié à la destination pour tourner, mais il n'y envoie que du silence.
-      const tap = this.masterAnalyzer || this.masterOutput;
-      if (tap) {
-        tap.connect(this.asioOutputProcessor);
-        this.asioOutputProcessor.connect(this.ctx.destination);
-      }
-    }
+    // Envoi vers la carte : master sur 1-2, chaque mix casque sur sa paire (R15).
+    if (this.ctx && !this.asioOutputProcessor) this.rebuildAsioOutput();
     if (this.browserOutput && this.ctx) this.browserOutput.gain.setTargetAtTime(0, this.ctx.currentTime, 0.01);
 
     this.asioBridge.startStream();
@@ -3979,14 +4188,7 @@ export class AudioEngine {
       this.asioBridge.stopStream();
     }
     
-    if (this.asioOutputProcessor) {
-      const tap = this.masterAnalyzer || this.masterOutput;
-      try { tap?.disconnect(this.asioOutputProcessor); } catch (e) {}
-      try {
-        this.asioOutputProcessor.disconnect();
-      } catch (e) {}
-      this.asioOutputProcessor = null;
-    }
+    this.teardownAsioOutput();
     this.restoreBrowserOutput();
 
     this.asioStreamActive = false;
@@ -3995,31 +4197,197 @@ export class AudioEngine {
   /**
    * Gérer l'audio entrant du bridge ASIO (entrée micro/instrument)
    */
-  private handleASIOInput(audioData: Float32Array, channels: number): void {
+  private handleASIOInput(audioData: Float32Array, channels: number, frameIndex?: number, rate?: number): void {
     // Le son de la carte arrive en continu ; il n'est entendu / enregistré que
     // si une piste est armée (le flux sert alors de « micro »).
     this.asioInputReceived = true;
-    this.asioInput?.push(audioData, channels);
+    // Plus d'entrées que prévu (1er bloc avant l'info du flux) : le lecteur est refait.
+    if (channels > 0 && channels !== this.asioInputChannels && !this.recordingTrackId) {
+      this.asioInputChannels = Math.min(32, channels);
+      if (this.asioInput && this.asioInput.channels !== this.asioInputChannels) { this.resetASIOInput(); void this.refreshInputSource(); }
+    }
+    this.asioInput?.push(audioData, channels, frameIndex, rate);
+  }
+
+  /** Lecteur des entrées de la carte (autant de canaux que le flux en porte). */
+  private ensureASIOInput(): ASIOInput | null {
+    if (!this.ctx) return null;
+    if (this.asioInput && this.asioInput.channels !== this.asioInputChannels && !this.recordingTrackId) this.resetASIOInput();
+    if (this.asioInput) return this.asioInput;
+    this.asioInput = new ASIOInput(this.ctx, this.asioConfig?.sample_rate || 44100, this.asioInputChannels);
+    this.asioInput.setChannel(this.getASIOInputChannel());
+    return this.asioInput;
+  }
+
+  private resetASIOInput() {
+    const old = this.asioInput;
+    if (!old) return;
+    this.asioInput = null;
+    if (this.inputRouter?.getSource()?.kind === 'asio') this.inputRouter.setSource(null);
+    old.dispose();
+  }
+
+  /** Infos du flux (R15) : canaux réellement ouverts, tampon, latences du pilote. */
+  private applyStreamInfo(info?: ASIOStreamInfo) {
+    if (!info) return;
+    if (info.input_channels) this.asioInputChannels = Math.max(1, Math.min(32, info.input_channels));
+    if (info.output_channels) this.asioOutputChannels = Math.max(1, Math.min(32, info.output_channels));
+    if (info.block_size) this.asioBlockSize = info.block_size;
+    if (info.sample_rate && this.asioInput) this.asioInput.sourceRate = info.sample_rate;
+    try { window.dispatchEvent(new CustomEvent('nova:asio-stream', { detail: { ...info, blockSize: this.asioBlockSize, inputs: this.asioInputChannels, outputs: this.asioOutputChannels } })); } catch { /* */ }
+  }
+
+  /** Infos de la carte pour l'interface (tampon réel, entrées, sorties). */
+  public getASIOStreamInfo() {
+    return { active: this.asioStreamActive, connected: this.asioConnected, blockSize: this.asioBlockSize, inputs: this.asioInputChannels, outputs: this.asioOutputChannels, protocol: this.asioBridge?.protocol ?? 1, latencyMs: Math.round(this.latency * 10000) / 10 };
   }
 
   /**
-   * Source d'entrée pour armer une piste : la carte son via le pont ASIO quand
-   * son flux tourne, sinon le micro du navigateur (getUserMedia).
+   * R15 · Taille du tampon de la carte : le pont RECRÉE le flux avec ce tampon (avant,
+   * la valeur était notée mais le flux gardait l'ancien). Résolu quand le pont a
+   * répondu, avec le tampon réellement obtenu.
    */
-  private async openInputStream(constraints: MediaTrackConstraints): Promise<MediaStream> {
-    if (this.asioStreamActive && this.asioConnected && this.ctx) {
-      this.ensureASIOInput();
-      console.log('[AudioEngine] Entrée ASIO utilisée pour la piste armée');
-      return this.asioInput!.getStream();
-    }
-    return navigator.mediaDevices.getUserMedia({ audio: constraints });
+  public setASIOBufferSize(blockSize: number): Promise<{ ok: boolean; blockSize: number; restarted: boolean; error?: string }> {
+    if (!this.asioBridge || !this.asioConnected) return Promise.resolve({ ok: false, blockSize: this.asioBlockSize, restarted: false, error: 'Pont ASIO non connecté' });
+    if (this.recordingTrackId) return Promise.resolve({ ok: false, blockSize: this.asioBlockSize, restarted: false, error: 'Une prise est en cours : change le tampon après.' });
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { this.configWaiters = this.configWaiters.filter(f => f !== done); resolve({ ok: false, blockSize: this.asioBlockSize, restarted: false, error: 'Pas de réponse du pont' }); }, 8000);
+      const done = (m: any) => {
+        clearTimeout(timer);
+        const bs = Number(m?.config?.block_size) || this.asioBlockSize;
+        if (m?.stream_restarted) this.asioBlockSize = bs;
+        resolve({ ok: !!m?.success, blockSize: bs, restarted: !!m?.stream_restarted, error: m?.error || undefined });
+      };
+      this.configWaiters.push(done);
+      this.asioBridge!.setConfig({ block_size: blockSize });
+    });
   }
 
-  private ensureASIOInput() {
-    if (this.asioInput || !this.ctx) return;
-    this.asioInput = new ASIOInput(this.ctx, this.asioConfig?.sample_rate || 44100);
-    this.asioInput.setChannel(this.getASIOInputChannel());
+  /**
+   * « Tampon plus grand » : avec la carte (pont ASIO), le VRAI tampon double (flux
+   * recréé) ; sans pont, la marge de programmation du navigateur passe au maximum.
+   */
+  public async biggerBuffer(): Promise<{ kind: 'asio'; ok: boolean; blockSize: number; error?: string } | { kind: 'planificateur' }> {
+    if (this.asioStreamActive && this.asioConnected) {
+      const next = Math.min(2048, Math.max(64, this.asioBlockSize * 2));
+      const r = await this.setASIOBufferSize(next);
+      return { kind: 'asio', ok: r.ok && r.restarted, blockSize: r.blockSize, error: r.error };
+    }
+    this.setLatencyMode('high');
+    return { kind: 'planificateur' };
   }
+
+  public getLatencyModeIsMax(): boolean {
+    if (this.asioStreamActive && this.asioConnected) return this.asioBlockSize >= 2048;
+    return this.getLatencyMode() === 'high';
+  }
+
+  /**
+   * R15 · Latence aller-retour de chaque entrée, mesurée par le pont (impulsion sur
+   * les sorties 1-2, retrouvée sur les entrées). Le retard propre de chaque entrée
+   * est gardé (utils/multiRecord.channelOffsets) et ajouté au calage des prises.
+   */
+  public async measureInputLatencies(outChannels: number[] = [0, 1]): Promise<ASIOLatencyResult & { offsetsMs?: Record<number, number> }> {
+    if (!this.asioBridge || !this.asioConnected || !this.asioStreamActive) return { success: false, error: 'Lance le flux de la carte (Nova Studio) pour mesurer.' };
+    const r = await this.asioBridge.measureLatency(outChannels);
+    if (!r.success || !r.delays) return r;
+    const reported = ((r.input_latency_ms || 0) + (r.output_latency_ms || 0)) / 1000;
+    const offsetsMs = offsetsFromProbe(r.delays, r.sample_rate || this.asioConfig?.sample_rate || 44100, reported);
+    if (Object.keys(offsetsMs).length) setChannelOffsets({ ...channelOffsets(), ...offsetsMs });
+    return { ...r, offsetsMs };
+  }
+
+  /** Envoi vers la carte : merger (master + mixes casque) → processeur → pont. */
+  private rebuildAsioOutput() {
+    if (!this.ctx || !this.mainOut) return;
+    const layout = outputLayout(this.cueMixes, { bridge: true, outputChannels: this.asioOutputChannels });
+    const sig = JSON.stringify(layout);
+    if (this.asioOutputProcessor && sig === this.asioOutLayoutSig) return;
+    this.teardownAsioOutput();
+    const ctx = this.ctx;
+    const n = layout.dests.length;
+    const merger = ctx.createChannelMerger(n);
+    const sources: (AudioNode | null)[] = [this.mainOut, ...layout.mixIds.map(id => this.cueEngine?.outputOf(id) || null)];
+    const parts: AudioNode[] = [merger];
+    sources.forEach((s, k) => {
+      if (!s) return;
+      const sp = ctx.createChannelSplitter(2);
+      s.connect(sp);
+      sp.connect(merger, 0, 2 * k);
+      sp.connect(merger, 1, 2 * k + 1);
+      parts.push(sp);
+    });
+    const proc = ctx.createScriptProcessor(256, n, 2);
+    const dests = layout.dests;
+    proc.onaudioprocess = (e) => {
+      if (this.asioStreamActive && this.asioBridge) {
+        const ch: Float32Array[] = [];
+        for (let c = 0; c < n; c++) ch.push(e.inputBuffer.getChannelData(c));
+        this.asioBridge.sendChannels(ch, dests);
+      }
+      // Sortie du processeur silencieuse : le mix part par la carte. (Le copier
+      // ici le faisait aussi sortir par le navigateur, en double.)
+      for (let c = 0; c < e.outputBuffer.numberOfChannels; c++) e.outputBuffer.getChannelData(c).fill(0);
+    };
+    // Le processeur doit être relié à la destination pour tourner (il n'y envoie que du silence).
+    merger.connect(proc);
+    proc.connect(ctx.destination);
+    this.asioOutputProcessor = proc;
+    this.asioOutParts = [...parts, ...sources.filter((s): s is AudioNode => !!s)];
+    this.asioOutLayoutSig = sig;
+  }
+
+  private teardownAsioOutput() {
+    if (!this.asioOutputProcessor) return;
+    const proc = this.asioOutputProcessor;
+    this.asioOutputProcessor = null;
+    this.asioOutLayoutSig = '';
+    const [merger, ...rest] = this.asioOutParts;
+    // Les sources (master, mixes) ne sont débranchées QUE des séparateurs de l'envoi.
+    const splitters = rest.filter(n => n instanceof ChannelSplitterNode);
+    const sources = rest.filter(n => !(n instanceof ChannelSplitterNode));
+    for (const s of sources) for (const sp of splitters) { try { s.disconnect(sp); } catch { /* */ } }
+    splitters.forEach(sp => { try { sp.disconnect(); } catch { /* */ } });
+    try { merger?.disconnect(); } catch { /* */ }
+    try { proc.disconnect(); } catch { /* */ }
+    proc.onaudioprocess = null;
+    this.asioOutParts = [];
+  }
+
+  // ─── R15 · Mixes casque ────────────────────────────────────────────────────
+
+  /** Mixes casque du projet (et pistes, pour les niveaux par défaut et les prises pré-fader). */
+  public setCueMixes(mixes: CueMix[], tracks: Track[]) {
+    this.cueMixes = mixes || [];
+    tracks.forEach(t => this.trackMix.set(t.id, { id: t.id, volume: t.volume, pan: t.pan }));
+    if (!this.ctx || !this.cueEngine) return;
+    if (this.cueMixes.length) metronomeService.addTap(this.cueEngine.clickIn);
+    const sources = tracks.filter(t => this.isSourceTrackType(t) && t.id !== 'master');
+    this.cueEngine.sync(this.cueMixes, sources, id => this.tracksDSP.get(id)?.preFaderTap || null);
+    if (this.cueListen && !this.cueMixes.some(m => m.id === this.cueListen)) this.setCueListen(null);
+    if (this.asioOutputProcessor) this.rebuildAsioOutput();
+    this.syncDirectMonitor();
+  }
+
+  /** Écouter un mix casque sur la sortie principale (null = le master). */
+  public setCueListen(mixId: string | null) {
+    this.cueListen = mixId && this.cueMixes.some(m => m.id === mixId) ? mixId : null;
+    this.cueEngine?.setListen(this.cueListen);
+    if (this.mainSel && this.ctx) this.mainSel.gain.setTargetAtTime(this.cueListen ? 0 : 1, this.ctx.currentTime, 0.01);
+    this.syncDirectMonitor();
+    try { window.dispatchEvent(new CustomEvent('nova:cue-listen', { detail: this.cueListen })); } catch { /* */ }
+  }
+
+  public getCueListen() { return this.cueListen; }
+
+  /** Pour l'interface des mixes casque : pont, sorties de la carte. */
+  public getCueOutputInfo(): { bridge: boolean; outputChannels: number } {
+    const bridge = this.asioConnected && this.asioStreamActive && (this.asioBridge?.protocol ?? 1) >= 2;
+    return { bridge, outputChannels: bridge ? this.asioOutputChannels : 2 };
+  }
+
+  /** Sortie d'un mix casque (mesures, tests). */
+  public getCueOutput(mixId: string): AudioNode | null { return this.cueEngine?.outputOf(mixId) || null; }
 
   /** Stoppe un flux d'entrée, sauf celui de l'ASIO (partagé et réutilisé à chaque prise). */
   private stopInputStream(stream: MediaStream) {
@@ -4032,6 +4400,8 @@ export class AudioEngine {
     try { localStorage.setItem('nova_asio_input_channel', String(channel)); } catch { /* stockage indisponible */ }
     this.ensureASIOInput();
     this.asioInput?.setChannel(channel);
+    // Pistes en entrée « auto » : elles suivent le nouveau réglage.
+    void this.refreshInputSource();
   }
 
   public getASIOInputChannel(): number {
@@ -4090,6 +4460,8 @@ export class AudioEngine {
   private vcaScale: Map<string, number> = new Map();
 
   public setTrackVolume(trackId: string, volume: number, isMuted: boolean) {
+    const tm = this.trackMix.get(trackId);
+    if (tm) tm.volume = volume;
     volume *= this.vcaScale.get(trackId) ?? 1;
     const dsp = this.tracksDSP.get(trackId);
     const live = this.liveTracks?.find(t => t.id === trackId);
@@ -4102,6 +4474,8 @@ export class AudioEngine {
   }
 
   public setTrackPan(trackId: string, pan: number) {
+    const tm = this.trackMix.get(trackId);
+    if (tm && tm.pan !== pan) { tm.pan = pan; if (this.inputRouter?.has(trackId)) this.syncDirectMonitor(); }
     const live = this.liveTracks?.find(t => t.id === trackId);
     if (live && this.automationOwns(live, 'pan')) return;
     const dsp = this.tracksDSP.get(trackId);

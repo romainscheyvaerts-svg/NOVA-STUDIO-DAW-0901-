@@ -39,15 +39,29 @@ const useBridge = (): BridgeState => {
   return s;
 };
 
-/** Tampon de lecture plus grand (planificateur), mémorisé comme dans les réglages audio. */
+/**
+ * « Tampon plus grand » : avec la carte (Nova Studio, pont ASIO), le VRAI tampon de la
+ * carte double — le pont recrée le flux proprement (R15) ; sans pont, la marge de
+ * programmation du navigateur passe au maximum (mémorisée comme dans les réglages).
+ */
 export function useBiggerBuffer() {
-  const [mode, setMode] = useState(() => audioEngine.getLatencyMode());
+  const [isMax, setIsMax] = useState(() => audioEngine.getLatencyModeIsMax());
+  useEffect(() => {
+    const on = () => setIsMax(audioEngine.getLatencyModeIsMax());
+    window.addEventListener('nova:asio-stream', on);
+    return () => window.removeEventListener('nova:asio-stream', on);
+  }, []);
   const apply = () => {
-    audioEngine.setLatencyMode('high');
-    try { localStorage.setItem('nova_audio_latency', 'high'); } catch { /* stockage indisponible */ }
-    setMode('high');
+    void audioEngine.biggerBuffer().then(r => {
+      if (r.kind === 'planificateur') { try { localStorage.setItem('nova_audio_latency', 'high'); } catch { /* stockage indisponible */ } }
+      const msg = r.kind === 'asio'
+        ? (r.ok ? `Tampon de la carte : ${r.blockSize} échantillons (flux recréé).` : `Tampon non changé : ${r.error || 'le pont n’a pas répondu'}.`)
+        : 'Marge de programmation du navigateur au maximum.';
+      try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: msg })); } catch { /* */ }
+      setIsMax(audioEngine.getLatencyModeIsMax());
+    });
   };
-  return { isMax: mode === 'high', apply };
+  return { isMax, apply };
 }
 
 interface Props {

@@ -56,6 +56,15 @@ const GroupEditor: React.FC<{ g: TrackGroup; tracks: Track[]; onDone: () => void
           </div>
         </div>
       )}
+      <div className="flex items-center gap-2">
+        <span className="w-14 shrink-0 text-[10px] font-bold text-nv-muted">REC</span>
+        <button type="button" aria-pressed={!!g.linkedRecord} data-testid="group-attr-record"
+          title="Armement lié (Pro Tools : Record Enable) : armer une piste du groupe arme tout le groupe"
+          onClick={() => set({ linkedRecord: !g.linkedRecord })}
+          className={`nova-hit-tactile h-7 rounded-full px-2.5 text-[11px] font-bold ${g.linkedRecord ? 'text-black' : 'bg-nv-bg text-nv-muted'}`}
+          style={g.linkedRecord ? { backgroundColor: g.color } : undefined}>Armement lié</button>
+        <span className="text-[10px] text-nv-muted leading-snug">armer une piste arme le groupe</span>
+      </div>
       {kind !== 'mix' && (
         <p className="text-[10px] text-nv-muted leading-snug">
           Édition liée : sélection, coupe, rognage, fondus, nudge, déplacement, Shuffle, gain de clip et Consolider se font sur toutes les pistes du groupe.

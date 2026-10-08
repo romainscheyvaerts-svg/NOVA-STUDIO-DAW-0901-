@@ -7,6 +7,93 @@ import DesktopAppDownload from './DesktopAppDownload';
 import { isNovaDesktop } from '../utils/desktopApp';
 import { useSimpleMode } from '../utils/simpleMode';
 import SimpleModeToggle from './SimpleModeToggle';
+import { armExclusivePref, channelOffsets, setArmExclusivePref, setChannelOffsets } from '../utils/multiRecord';
+
+/**
+ * R14 / R15 · Enregistrement multipiste : armement (plusieurs pistes ou une seule),
+ * entrées disponibles, retard propre de chaque entrée (mesuré par le pont ou réglé à
+ * la main), accès aux mixes casque.
+ */
+const MultitrackSettings: React.FC = () => {
+  const [exclusive, setExclusive] = useState(() => armExclusivePref());
+  const [info, setInfo] = useState(() => audioEngine.getInputInfo());
+  const [stream, setStream] = useState(() => audioEngine.getASIOStreamInfo());
+  const [offsets, setOffsets] = useState<Record<number, number>>(() => channelOffsets());
+  const [measuring, setMeasuring] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    const refresh = () => { setInfo(audioEngine.getInputInfo()); setStream(audioEngine.getASIOStreamInfo()); };
+    const evs = ['nova:asio-stream', 'nova:latency', 'nova:input-missing'];
+    evs.forEach(e => window.addEventListener(e, refresh));
+    const id = window.setInterval(refresh, 2000);
+    return () => { evs.forEach(e => window.removeEventListener(e, refresh)); window.clearInterval(id); };
+  }, []);
+  const asio = info.mode === 'asio';
+  const measure = async () => {
+    setMeasuring(true); setMsg(null);
+    const r = await audioEngine.measureInputLatencies([0, 1]);
+    setMeasuring(false);
+    if (!r.success || !r.offsetsMs) { setMsg(r.error || "Mesure impossible : branche un câble de la sortie 1 (ou 2) vers les entrées à mesurer, puis réessaie."); return; }
+    const found = Object.keys(r.offsetsMs).length;
+    setOffsets(channelOffsets());
+    setMsg(found ? `Mesuré sur ${found} entrée${found > 1 ? 's' : ''} : chaque prise est recalée avec le retard de son entrée.` : "Aucune entrée n'a reçu l'impulsion : vérifie le câble de boucle (sortie 1 → entrée).");
+  };
+  const setOne = (ch: number, ms: number) => {
+    const next = { ...offsets, [ch]: Math.max(-50, Math.min(50, Math.round(ms * 100) / 100)) };
+    if (!ms) delete next[ch];
+    setOffsets(next); setChannelOffsets(next);
+  };
+  const shown = Array.from({ length: Math.min(16, Math.max(2, info.available)) }, (_, c) => c);
+  return (
+    <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.04] p-4 space-y-3" data-testid="multitrack-settings">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-black text-cyan-300 uppercase tracking-widest">Enregistrement multipiste</span>
+        <span className="text-[11px] font-mono text-white">{info.available} entrée{info.available > 1 ? 's' : ''} · {asio ? `carte (tampon ${stream.blockSize})` : 'navigateur'}</span>
+      </div>
+      <label className="flex items-start gap-2.5 cursor-pointer">
+        <input type="checkbox" role="switch" checked={exclusive} data-testid="arm-exclusive"
+          onChange={e => { setExclusive(e.target.checked); setArmExclusivePref(e.target.checked); }} className="mt-0.5 w-4 h-4 accent-cyan-400" />
+        <span>
+          <span className="block text-[12px] font-bold text-white">Armement exclusif</span>
+          <span className="block text-[11px] text-slate-400">{exclusive
+            ? 'Armer une piste désarme les autres (Maj+clic : l’armer en plus).'
+            : 'Comme Pro Tools : plusieurs pistes armées enregistrent ensemble, chacune son entrée (sélecteur « In » de la piste). Maj+clic : armer une piste seule.'}</span>
+        </span>
+      </label>
+      {!asio && info.available <= 2 && (
+        <p className="text-[11px] text-amber-200/90 leading-snug"><i className="fas fa-info-circle mr-1" />Le navigateur ne donne que {info.available} entrées de ta carte son : 2 micros (entrées 1 et 2) au plus. Pour 4 micros ou plus, ouvre Nova Studio : le pont ASIO donne toutes les entrées.</p>
+      )}
+      <div>
+        <div className="flex items-center justify-between gap-2 mb-1.5">
+          <span className="text-[11px] text-slate-300">Retard propre de chaque entrée (ms)</span>
+          <div className="flex gap-1.5">
+            {asio && (
+              <button type="button" onClick={measure} disabled={measuring} data-testid="measure-input-latency"
+                title="Une impulsion sort sur les sorties 1-2 ; le pont la retrouve sur chaque entrée (câble de boucle)"
+                className="h-7 px-2.5 rounded-lg bg-cyan-400 text-black text-[11px] font-black disabled:opacity-50">{measuring ? 'Mesure…' : 'Mesurer'}</button>
+            )}
+            <button type="button" onClick={() => { setOffsets({}); setChannelOffsets({}); setMsg(null); }}
+              className="h-7 px-2.5 rounded-lg bg-white/5 text-[11px] font-bold text-slate-300">Remettre à 0</button>
+          </div>
+        </div>
+        <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+          {shown.map(c => (
+            <label key={c} className="flex flex-col items-center gap-0.5">
+              <span className="text-[9px] text-slate-500">In {c + 1}</span>
+              <input type="number" step={0.01} value={offsets[c] ?? 0} aria-label={`Retard propre de l'entrée ${c + 1} (ms)`}
+                onChange={e => setOne(c, parseFloat(e.target.value) || 0)}
+                className="w-full h-7 rounded-md border border-white/10 bg-black/40 px-1 text-center text-[11px] font-mono text-white" />
+            </label>
+          ))}
+        </div>
+        {msg && <p className="mt-1.5 text-[11px] text-slate-300" role="status">{msg}</p>}
+        <p className="mt-1.5 text-[10px] text-slate-500">Ajouté au calage commun : une entrée ADAT ou un préampli externe qui arrive plus tard est recalé à l'échantillon près.</p>
+      </div>
+      <button type="button" data-testid="open-cue-mixes" onClick={() => window.dispatchEvent(new Event('nova:open-cue-mixes'))}
+        className="w-full h-10 rounded-xl border border-white/15 text-[12px] font-bold text-white hover:bg-white/5"><i className="fas fa-headphones mr-1.5" />Mixes casque (un mix par musicien)…</button>
+    </div>
+  );
+};
 
 /** Latence mesurée en direct + réglage fin du recalage des prises. */
 const LatencyCompensation: React.FC = () => {
@@ -254,7 +341,14 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
       // Calculate approximate latency
       const latency = (blockSize / asioSampleRate) * 1000 * 2; // Round trip
       setAsioLatency(latency);
-      audioEngine.configureASIO({ block_size: blockSize });
+      // R15 : le pont recrée VRAIMENT le flux avec ce tampon (avant, seule la valeur changeait).
+      if (audioEngine.isASIOStreamActive()) {
+          setStatus(`Tampon ${blockSize} : le flux de la carte est recréé…`);
+          void audioEngine.setASIOBufferSize(blockSize).then(r => {
+              if (r.ok && r.restarted) { setAsioBlockSize(r.blockSize); setStatus(`Tampon appliqué : ${r.blockSize} échantillons (flux recréé)`); }
+              else setStatus(`Tampon non appliqué : ${r.error || 'le pont n’a pas répondu'}`);
+          });
+      } else audioEngine.configureASIO({ block_size: blockSize });
   };
 
   const handleAsioSampleRateChange = (sampleRate: number) => {
@@ -477,6 +571,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                                                 <option value="256">256 samples (~6ms)</option>
                                                 <option value="512">512 samples (~12ms)</option>
                                                 <option value="1024">1024 samples (~23ms)</option>
+                                                <option value="2048">2048 samples (~46ms)</option>
                                             </select>
                                             <i className="fas fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-[8px] text-slate-600"></i>
                                         </div>
@@ -697,6 +792,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
                 </>}
 
                 <LatencyCompensation />
+                {!simple && <MultitrackSettings />}
 
                 {/* TEST TONE */}
                 {!simple && <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 flex items-center justify-between">

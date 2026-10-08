@@ -71,6 +71,10 @@ export interface TakeMetaRecord {
   endedAt: number | null;
   samples: number;
   chunks: number;
+  /** R14 · Groupe de prises (passage multipiste) : les pistes récupérées vont ensemble. */
+  group?: string;
+  /** R14 · Canaux (2 = entrée stéréo, échantillons entrelacés G/D). Absent : mono. */
+  channels?: number;
 }
 
 export interface RecoveredTake { meta: TakeMetaRecord; samples: Float32Array; seconds: number }

@@ -7,6 +7,8 @@
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 
+import { decodeInputMessage, encodeOutputMessage, InputBlock } from '../utils/asioProtocol';
+
 // Types pour la configuration ASIO
 export interface ASIOConfig {
   device_name: string | null;
@@ -43,6 +45,34 @@ export interface ASIOStats {
   elapsed_seconds: number;
   input_buffer_size: number;
   output_buffer_size: number;
+  /** R15 : canaux réellement ouverts et latences du pilote, séparées. */
+  input_channels?: number;
+  output_channels?: number;
+  input_latency_ms?: number;
+  output_latency_ms?: number;
+  frames_in?: number;
+}
+
+/** R15 : flux démarré (ou recréé après un changement de tampon). */
+export interface ASIOStreamInfo {
+  latency_ms?: number;
+  input_latency_ms?: number;
+  output_latency_ms?: number;
+  block_size?: number;
+  sample_rate?: number;
+  input_channels?: number;
+  output_channels?: number;
+}
+
+/** R15 : latence aller-retour mesurée par entrée (échantillons, null = pas de retour). */
+export interface ASIOLatencyResult {
+  success: boolean;
+  delays?: (number | null)[];
+  sample_rate?: number;
+  block_size?: number;
+  input_latency_ms?: number;
+  output_latency_ms?: number;
+  error?: string;
 }
 
 // Types pour les messages WebSocket
@@ -52,10 +82,12 @@ interface ASIOMessageHandlers {
   onDevices?: (devices: AudioDevice[], asioDevices: AudioDevice[]) => void;
   onConfigSet?: (success: boolean, config?: ASIOConfig, error?: string) => void;
   onConfig?: (config: ASIOConfig) => void;
-  onStreamStarted?: (success: boolean, latency_ms?: number, error?: string) => void;
+  onStreamStarted?: (success: boolean, latency_ms?: number, error?: string, info?: ASIOStreamInfo) => void;
   onStreamStopped?: (success: boolean) => void;
   onStats?: (stats: ASIOStats) => void;
-  onAudioInput?: (audioData: Float32Array, channels: number) => void;
+  /** Bloc d'entrée (v2 : avec son n° d'échantillon dans `block`). */
+  onAudioInput?: (audioData: Float32Array, channels: number, block?: InputBlock) => void;
+  onConfigResult?: (message: any) => void;
   onError?: (error: string) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
@@ -79,8 +111,13 @@ export class ASIOBridgeClient {
   private reconnectDelay = 1000;
   private isConnected = false;
   private pingInterval: NodeJS.Timeout | null = null;
+  /** Protocole binaire négocié avec le pont : 2 = blocs horodatés et sorties multiples (R15). */
+  public protocol = 1;
+  private latencyWaiters: ((r: ASIOLatencyResult) => void)[] = [];
 
   constructor(host: string = '127.0.0.1', port: number = 8766) {
+    // Port de test (pont simulé) : jamais celui du pont du studio par accident.
+    try { const p = parseInt(localStorage.getItem('nova_asio_port') || '', 10); if (p > 0 && p < 65536) port = p; } catch { /* défaut */ }
     this.url = `ws://${host}:${port}`;
   }
 
@@ -104,6 +141,9 @@ export class ASIOBridgeClient {
           console.log('[ASIO Bridge] Connected to', this.url);
           this.isConnected = true;
           this.reconnectAttempts = 0;
+          this.protocol = 1;
+          // R15 : on annonce le protocole v2 (un ancien pont l'ignore et garde le v1).
+          try { this.ws!.send(JSON.stringify({ action: 'HELLO', protocol: 2 })); } catch { /* */ }
           this.startPing();
           this.handlers.onConnect?.();
           resolve(true);
@@ -177,8 +217,23 @@ export class ASIOBridgeClient {
           this.handlers.onDevices?.(message.devices, message.asio_devices);
           break;
 
+        case 'HELLO_OK':
+          this.protocol = message.protocol >= 2 ? 2 : 1;
+          break;
+
         case 'CONFIG_SET':
           this.handlers.onConfigSet?.(message.success, message.config, message.error);
+          this.handlers.onConfigResult?.(message);
+          break;
+
+        case 'LATENCY_MEASURED': {
+          const w = this.latencyWaiters;
+          this.latencyWaiters = [];
+          w.forEach(f => f(message));
+          break;
+        }
+
+        case 'MONITOR_SET':
           break;
 
         case 'CONFIG':
@@ -186,7 +241,7 @@ export class ASIOBridgeClient {
           break;
 
         case 'STREAM_STARTED':
-          this.handlers.onStreamStarted?.(message.success, message.latency_ms, message.error);
+          this.handlers.onStreamStarted?.(message.success, message.latency_ms, message.error, message);
           break;
 
         case 'STREAM_STOPPED':
@@ -210,14 +265,8 @@ export class ASIOBridgeClient {
    */
   private handleBinaryAudio(data: ArrayBuffer): void {
     try {
-      const view = new DataView(data);
-      const numSamples = view.getUint32(0, true);
-      const numChannels = view.getUint32(4, true);
-
-      // Extraire les données audio
-      const audioData = new Float32Array(data, 8);
-
-      this.handlers.onAudioInput?.(audioData, numChannels);
+      const block = decodeInputMessage(data);
+      this.handlers.onAudioInput?.(block.data, block.channels, block);
     } catch (error) {
       console.error('[ASIO Bridge] Error processing binary audio:', error);
     }
@@ -251,6 +300,16 @@ export class ASIOBridgeClient {
     audioView.set(audioData);
 
     this.ws!.send(buffer);
+  }
+
+  /**
+   * R15 : plusieurs canaux, chacun vers sa sortie de la carte (master 1-2, mixes
+   * casque 3-4, 5-6…). Ancien pont : seuls les 2 premiers canaux partent (1-2).
+   */
+  sendChannels(channelData: Float32Array[], dests: number[]): void {
+    if (!this.isConnectedToServer() || channelData.length === 0) return;
+    if (this.protocol >= 2) { this.ws!.send(encodeOutputMessage(channelData, dests)); return; }
+    this.sendAudioFromWorklet(channelData.slice(0, 2));
   }
 
   /**
@@ -309,6 +368,25 @@ export class ASIOBridgeClient {
   /** Retour direct de la voix dans le pont (latence = buffer ASIO seulement). */
   setMonitor(enabled: boolean, gain: number, channel: number): void {
     this.send({ action: 'SET_MONITOR', enabled, gain, channel });
+  }
+
+  /** R15 : retour direct en matrice (voix des pistes armées → master et mixes casque). */
+  setMonitorRoutes(enabled: boolean, routes: { in: number; out: number; gain: number }[]): void {
+    this.send({ action: 'SET_MONITOR', enabled, routes });
+  }
+
+  /**
+   * R15 : latence aller-retour de chaque entrée, mesurée par le pont (impulsion sur
+   * `outChannels`, retrouvée sur les entrées : câble de boucle).
+   */
+  measureLatency(outChannels: number[] = [0, 1], seconds = 0.6): Promise<ASIOLatencyResult> {
+    if (!this.isConnectedToServer()) return Promise.resolve({ success: false, error: 'Pont non connecté' });
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { this.latencyWaiters = this.latencyWaiters.filter(f => f !== done); resolve({ success: false, error: 'Pas de réponse du pont' }); }, 9000);
+      const done = (r: ASIOLatencyResult) => { clearTimeout(timer); resolve(r); };
+      this.latencyWaiters.push(done);
+      this.send({ action: 'MEASURE_LATENCY', out_channels: outChannels, seconds });
+    });
   }
 
   /**

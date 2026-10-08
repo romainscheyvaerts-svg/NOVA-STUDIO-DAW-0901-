@@ -7,6 +7,8 @@ import {
   setTracksInactive, showAndActivate, vcaMembers,
 } from '../utils/trackStructure';
 import { applyTracks, structureBus } from '../utils/structureBus';
+import InputSelect from './InputSelect';
+import { isAudioRecordTrack } from '../utils/multiRecord';
 import { useEditGroups } from '../utils/editGroups';
 import { gainToDbText, panToText } from '../utils/db';
 import { getValidDestinations } from './RoutingManager';
@@ -295,6 +297,12 @@ export const TrackIOSelectors: React.FC<{ track: Track; allTracks: Track[] }> = 
   const inBus = track.inputBusId ? buses.find(b => b.id === track.inputBusId) : undefined;
   return (
     <>
+      {/* R14 · Entrée physique de la piste (micro / entrée de la carte), comme le sélecteur d'entrée de Pro Tools. */}
+      {isAudioRecordTrack(track) && (
+        <div className="relative" data-testid={`physical-input-${track.id}`}>
+          <InputSelect track={track} />
+        </div>
+      )}
       {canListen && !track.isVca && track.id !== 'master' && (
         <div className="relative" data-testid={`input-select-${track.id}`}>
           <div className="h-6 bg-black/60 rounded flex items-center px-2 border border-white/5 cursor-pointer hover:border-white/20">
