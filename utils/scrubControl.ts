@@ -41,6 +41,8 @@ const prepare = (): Deps | null => {
   if (!deps) return null;
   if (releaseTimer) { clearTimeout(releaseTimer); releaseTimer = null; }
   if (deps.engine.getIsPlaying()) deps.stopPlayback();
+  // Un scrub resté actif sans geste en cours (relâché hors de la fenêtre…) : on l'arrête.
+  if (!dragging && shuttleSpeed === 0) deps.engine.stopScrubbing();
   return deps;
 };
 
@@ -74,6 +76,16 @@ export const scrubControl = {
       d.commit(t);
       emit();
     }, 160);
+  },
+
+  /** Simple appui (sans glisser) : la position est validée tout de suite. */
+  endAt(time: number) {
+    if (!deps) return;
+    dragging = false;
+    if (releaseTimer) { clearTimeout(releaseTimer); releaseTimer = null; }
+    deps.engine.stopScrubbing();
+    deps.commit(Math.max(0, time));
+    emit();
   },
 
   /** Shuttle au clavier : chaque appui dans le même sens accélère (×1, ×2, ×4, ×8). */

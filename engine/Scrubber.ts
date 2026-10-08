@@ -10,7 +10,10 @@ import { audioBufferRegistry } from '../utils/audioBufferRegistry';
  * de 2 × HOP secondes est joué depuis la position de scrub, fenêtré par une
  * demi-sinusoïde au carré (Hann). Deux grains Hann décalés de la moitié de leur
  * longueur s'additionnent à 1 : le niveau reste constant, et chaque grain
- * commence et finit à zéro (aucune discontinuité). La vitesse de lecture du
+ * commence et finit à zéro (aucune discontinuité). La fenêtre est CALCULÉE DANS
+ * le grain (windowedGrain) et non par une automation de gain : un grain qui part
+ * en retard sur une machine chargée reste propre (une enveloppe programmée,
+ * elle, démarrerait au milieu de sa courbe : clic mesuré à 1,2 × la crête). La vitesse de lecture du
  * grain suit la vitesse de la souris ou du doigt (de 1/16 à ×4), en arrière avec
  * le fichier inversé.
  *
@@ -24,7 +27,9 @@ export const SCRUB_MIN_RATE = 1 / 16;
 export const SCRUB_MAX_RATE = 4;
 /** Lissage de la position (s) : la tête rattrape la souris en ~ 3 × LAG. */
 const FOLLOW_LAG = 0.05;
-const LOOKAHEAD = 0.05;
+const LOOKAHEAD = 0.07;
+/** Marge minimale avant le départ d'un grain : un grain programmé « dans le passé » démarrerait au milieu de sa fenêtre (clic). */
+const SAFETY = 0.02;
 
 /** Fenêtre de Hann sur n points (commence et finit à 0). */
 export function hannCurve(n = 128): Float32Array {
@@ -83,7 +88,6 @@ export class Scrubber {
   private shuttleSpeed: number | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private nextGrainAt = 0;
-  private curve = hannCurve();
   private live = new Set<AudioBufferSourceNode>();
   stats: ScrubStats = { grains: 0, ticks: 0, peakRate: 0, active: false, pos: 0 };
   /** Appelé à chaque déplacement de la position (tête de lecture affichée). */
@@ -97,16 +101,20 @@ export class Scrubber {
   /** Scrub : la position suit `time` (secondes du morceau). */
   scrubTo(tracks: Track[], time: number) {
     this.tracks = tracks;
-    if (!this.active) { this.pos = time; this.vel = 0; this.start(); }
+    // Cible et mode AVANT le premier grain (sinon il visait l'ancienne cible : saut de position).
     this.shuttleSpeed = null;
     this.target = Math.max(0, time);
+    if (!this.active) { this.pos = this.target; this.vel = 0; this.start(); }
   }
 
   /** Shuttle : défile à `speed` × le temps réel (négatif = en arrière). 0 = immobile, le son se tait. */
   shuttle(tracks: Track[], speed: number, from?: number) {
     this.tracks = tracks;
-    if (!this.active) { this.pos = Math.max(0, from ?? this.pos); this.start(); }
+    const wasShuttle = this.shuttleSpeed !== null;
     this.shuttleSpeed = speed;
+    if (!this.active) { this.pos = Math.max(0, from ?? this.pos); this.target = this.pos; this.start(); }
+    // Passage du scrub (souris) au shuttle : on repart de la position demandée.
+    else if (!wasShuttle && from !== undefined) this.pos = Math.max(0, from);
   }
 
   get shuttling() { return this.shuttleSpeed; }
@@ -132,7 +140,9 @@ export class Scrubber {
     const ctx = this.host.ctx;
     this.stats.ticks++;
     // Programme les grains jusqu'à LOOKAHEAD en avance, au pas fixe de l'horloge audio.
-    if (this.nextGrainAt < ctx.currentTime) this.nextGrainAt = ctx.currentTime + 0.005;
+    // Minuteur en retard (machine chargée) : on repart un peu plus loin plutôt que
+    // de programmer des grains déjà commencés.
+    if (this.nextGrainAt < ctx.currentTime + SAFETY) this.nextGrainAt = ctx.currentTime + SAFETY + 0.005;
     while (this.nextGrainAt < ctx.currentTime + LOOKAHEAD) {
       if (this.shuttleSpeed !== null) {
         this.vel = this.shuttleSpeed;
@@ -161,22 +171,39 @@ export class Scrubber {
       if (!input || !raw) continue;
       const buf = p.reverse ? this.host.reversed(clip!.bufferId || clip!.id, raw) : raw;
       try {
+        const grain = windowedGrain(ctx, buf, p.offset, SCRUB_GRAIN * p.rate, p.gain);
+        if (!grain) continue;
         const src = ctx.createBufferSource();
-        src.buffer = buf;
+        src.buffer = grain;
         src.playbackRate.value = p.rate;
-        const env = ctx.createGain();
-        env.gain.value = 0;
-        const peak = Float32Array.from(this.curve, v => v * p.gain);
-        env.gain.setValueCurveAtTime(peak, when, SCRUB_GRAIN);
-        src.connect(env);
-        env.connect(input);
-        src.start(when, Math.min(p.offset, buf.duration - 1e-3), SCRUB_GRAIN * p.rate + 0.002);
-        src.stop(when + SCRUB_GRAIN + 0.005);
+        src.connect(input);
+        // La fenêtre est DANS le grain : même démarré en retard (machine chargée),
+        // il commence et finit à zéro. Jamais de clic.
+        src.start(Math.max(when, ctx.currentTime));
         this.live.add(src);
-        src.onended = () => { this.live.delete(src); try { src.disconnect(); env.disconnect(); } catch { /* déjà débranché */ } };
+        src.onended = () => { this.live.delete(src); try { src.disconnect(); } catch { /* déjà débranché */ } };
         this.stats.grains++;
         this.stats.peakRate = Math.max(this.stats.peakRate, p.rate);
       } catch { /* contexte fermé : on ignore ce grain */ }
     }
   }
+}
+
+/**
+ * Copie `seconds` de `buf` à partir de `offset`, multipliée par une fenêtre de
+ * Hann (et le gain du clip) : un grain autonome qui commence et finit à 0.
+ */
+export function windowedGrain(ctx: BaseAudioContext, buf: AudioBuffer, offset: number, seconds: number, gain = 1): AudioBuffer | null {
+  const sr = buf.sampleRate;
+  const i0 = Math.max(0, Math.floor(offset * sr));
+  const n = Math.min(Math.ceil(seconds * sr), buf.length - i0);
+  if (n < 16) return null;
+  const out = ctx.createBuffer(buf.numberOfChannels, n, sr);
+  const k = Math.PI / (n - 1);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const src = buf.getChannelData(ch);
+    const dst = out.getChannelData(ch);
+    for (let i = 0; i < n; i++) { const w = Math.sin(k * i); dst[i] = src[i0 + i] * w * w * gain; }
+  }
+  return out;
 }

@@ -7,6 +7,7 @@ import { shortcutHint } from '../utils/keymap';
  * Rappeler, enregistrer la vue actuelle, renommer, remettre la disposition livrée.
  */
 const VIEW_LABEL: Record<string, string> = { ARRANGEMENT: 'arrangement', MIXER: 'console', AUTOMATION: 'automation' };
+const TOOL_LABEL: Record<string, string> = { SMART: 'Smart Tool', RANGE: 'sélecteur', SELECT: 'main', SPLIT: 'ciseaux', ERASE: 'gomme', DRAW: 'crayon', ZOOM: 'zoom', SCRUB: 'scrubber' };
 
 const describe = (l: WindowLayout): string => {
   const p = l.parts || {};
@@ -15,7 +16,7 @@ const describe = (l: WindowLayout): string => {
   if (p.sidebar !== undefined) bits.push(p.sidebar ? `navigateur ouvert${p.sideTab === 'FX' ? ' (effets)' : ''}` : 'navigateur fermé');
   if (p.panel) bits.push(p.panel === 'tracks' ? 'liste des pistes' : String(p.panel));
   if (p.zoom?.h) bits.push(`zoom ${Math.round(p.zoom.h)} px/s, pistes ${Math.round(p.zoom.v || 120)} px`);
-  if (p.tool) bits.push(`outil ${String(p.tool).toLowerCase()}`);
+  if (p.tool) bits.push(`outil ${TOOL_LABEL[p.tool] || String(p.tool).toLowerCase()}`);
   return bits.join(' · ');
 };
 
@@ -59,7 +60,7 @@ const WindowLayoutsPanel: React.FC<{ onClose: () => void; notify: (m: string) =>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <button type="button" disabled={!layout} data-testid={`layout-recall-${slot}`}
                   onClick={() => { const l = applyLayout(slot); if (l) notify(`🪟 Disposition ${slot} : ${l.name}`); onClose(); }}
-                  className="h-9 rounded-lg bg-nv-accent px-3 text-[12px] font-black text-nv-accent-ink disabled:opacity-40">Rappeler</button>
+                  className="h-9 rounded-lg bg-cyan-500 px-3 text-[12px] font-black text-black disabled:opacity-40">Rappeler</button>
                 <button type="button" data-testid={`layout-save-${slot}`}
                   onClick={() => { if (layout && !window.confirm(`Remplacer « ${layout.name} » par la vue actuelle ?`)) return; const l = saveLayout(slot); notify(`🪟 Vue enregistrée dans « ${l.name} » (${slot}).`); }}
                   className="h-9 rounded-lg border border-nv-line bg-nv-well px-3 text-[12px] font-bold">Enregistrer la vue actuelle</button>

@@ -137,7 +137,7 @@ const KeymapEditor: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           </div>
           <div className="flex flex-col gap-2 lg:items-end">
             <button type="button" onClick={applyPreset} disabled={presetChoice === settings.preset && !customCount} data-testid="keymap-apply-preset"
-              className="h-9 rounded-lg bg-nv-accent px-4 text-[13px] font-black text-nv-accent-ink disabled:opacity-40">
+              className="h-9 rounded-lg bg-cyan-500 px-4 text-[13px] font-black text-black disabled:opacity-40">
               {presetChoice === settings.preset ? (customCount ? 'Revenir à ce jeu' : 'Jeu actif') : `Appliquer « ${presetById(presetChoice).name} »`}
             </button>
             <label className="flex items-center gap-2 text-[12px] text-nv-muted" title="Pro Tools sous Windows lit les touches par leur place sur un clavier US : en AZERTY, Annuler (Ctrl+Z) est sur la touche W.">
@@ -184,7 +184,7 @@ const KeymapEditor: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-[13px]" data-testid="keymap-conflict">
                 <p><b>{chordLabel(pending.chord)}</b> sert déjà à {pending.others.map(o => `« ${o.label} »`).join(', ')} ({CONTEXT_LABEL[pending.others[0].context]}).</p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => resolve('steal')} data-testid="keymap-resolve-steal" className="h-9 rounded-lg bg-nv-accent px-3 text-[12px] font-black text-nv-accent-ink">
+                  <button type="button" onClick={() => resolve('steal')} data-testid="keymap-resolve-steal" className="h-9 rounded-lg bg-cyan-500 px-3 text-[12px] font-black text-black">
                     Prendre la touche (la retirer à {pending.others.length > 1 ? 'ces commandes' : 'cette commande'})
                   </button>
                   {(() => {
