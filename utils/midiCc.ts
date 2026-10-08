@@ -72,6 +72,15 @@ export const ccLabel = (key: string): string => {
   return CC_NAMES[n] ? `${CC_NAMES[n]} (CC${n})` : `CC${n}`;
 };
 
+/** Libellé court (liste des couloirs, colonne étroite du piano roll). */
+export const ccShortLabel = (key: string): string => {
+  if (key === PB) return 'Pitch bend';
+  if (key === AT) return 'Aftertouch';
+  const n = ccNumber(key);
+  if (n === null) return key;
+  return CC_NAMES[n] ? CC_NAMES[n] : `CC${n}`;
+};
+
 /** Couloirs proposés d'office dans le piano roll (les autres : « CC… »). */
 export const COMMON_LANES = [PB, MODWHEEL, SUSTAIN, EXPRESSION, VOLUME, BRIGHTNESS, PAN, AT];
 

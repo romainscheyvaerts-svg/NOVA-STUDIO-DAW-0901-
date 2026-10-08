@@ -13,7 +13,12 @@ import { midiCapture } from '../utils/midiCapture';
 import ChordRollOverlay from './ChordRollOverlay';
 import { useTempoMap } from './TempoLane';
 import { tempoAt } from '../utils/tempoMap';
-import { ComputerKeyboard, NoteRecorder, isComputerKeyboardCode, defaultKeyLabel, octaveBase, KEY_TO_SEMITONE, DEFAULT_KEYBOARD_STATE, KeyboardState } from '../utils/computerKeyboard';
+import { NoteRecorder, defaultKeyLabel, KEY_TO_SEMITONE, computerKeyboardStore } from '../utils/computerKeyboard';
+import { useComputerKeyboard } from './MidiInputHost';
+import { midiInput } from '../services/MidiInput';
+import MidiCcLanes from './MidiCcLanes';
+import { MidiCcPoint } from '../utils/midiCc';
+import { StepInput, STEP_VALUES, stepSeconds } from '../utils/stepInput';
 import { useTheme } from '../utils/themeStore';
 
 /** Au doigt (tablette, téléphone), les boutons de la barre passent à 40 px ; à la souris, rien ne change. */
@@ -286,6 +291,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
         if (clickedNote) deleteNotes([clickedNote.id]);
         return;
     }
+    // Alt+clic sur une note : muette / réactivée (FL : outil Muet).
+    if (clickedNote && e.altKey) { toggleMuteNotes([clickedNote.id]); return; }
 
     // DRAW or TRIGGER (Drum)
     if (tool === 'DRAW' && !clickedNote) {
@@ -438,6 +445,29 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
       setSelectedNoteIds(new Set());
   };
 
+  /** Notes muettes (Pro Tools : Mute Notes) : gardées, grisées, jamais jouées ni exportées. */
+  const toggleMuteNotes = (ids: string[] = Array.from(selectedNoteIds)) => {
+      const set = new Set(ids);
+      const target = (clip.notes || []).filter(n => set.has(n.id));
+      if (!target.length) { setLastChord('Sélectionne des notes, puis Ctrl+M (ou Alt+clic sur une note) pour les rendre muettes.'); return; }
+      const mute = target.some(n => !n.muted);
+      updateNotes((clip.notes || []).map(n => {
+        if (!set.has(n.id)) return n;
+        if (mute) return { ...n, muted: true };
+        const { muted, ...rest } = n; void muted;
+        return rest;
+      }));
+      const k = target.length, pl = k > 1 ? 's' : '';
+      setLastChord(mute ? `${k} note${pl} muette${pl} : gardée${pl}, grisée${pl}, jamais jouée${pl} (Ctrl+Z pour annuler)` : `${k} note${pl} réactivée${pl} (Ctrl+Z pour annuler)`);
+  };
+  /** Couloirs (R16) : contrôleurs du clip, une étape d'annulation par geste. */
+  const updateClipCc = (key: string, points: MidiCcPoint[], label: string) => {
+      const next = { ...(clip.cc || {}) };
+      if (points.length) next[key] = points; else delete next[key];
+      onUpdateTrack({ ...track, clips: track.clips.map(c => (c.id === clipId ? { ...c, cc: Object.keys(next).length ? next : undefined } : c)) });
+      setLastChord(`${label} (Ctrl+Z pour annuler)`);
+  };
+
   // NOTE: Preview sound disabled to avoid unwanted audio feedback
   // Users can enable this in preferences if needed
   const playPreview = (pitch: number) => {
@@ -570,17 +600,31 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   }, [selectedNoteIds, clip.notes]);
   
   // --- CLAVIER DE L'ORDINATEUR (Computer MIDI Keyboard de Live, Typing Keyboard de FL) ---
-  const [kbOn, setKbOn] = useState(false);
-  const [kbState, setKbState] = useState<KeyboardState>(DEFAULT_KEYBOARD_STATE);
+  // Partagé avec toute l'appli (R16, components/MidiInputHost) : le piano roll impose seulement sa piste.
+  useComputerKeyboard();
+  const kbOn = computerKeyboardStore.on;
+  const kbState = computerKeyboardStore.state;
+  const setKbOn = (v: boolean | ((x: boolean) => boolean)) => computerKeyboardStore.setOn(typeof v === 'function' ? v(computerKeyboardStore.on) : v);
+  /** Notes tenues sur cette piste (clavier de l'ordinateur ou clavier MIDI). */
   const [heldPitches, setHeldPitches] = useState<number[]>([]);
+  const heldRef = useRef(new Set<number>());
   const [recArmed, setRecArmed] = useState(false);
   const [recPreview, setRecPreview] = useState<{ pitch: number; start: number; duration: number; velocity: number }[]>([]);
   const [keyLabels, setKeyLabels] = useState<Record<string, string>>({});
-  const kbRef = useRef<ComputerKeyboard | null>(null);
   const recRef = useRef<NoteRecorder | null>(null);
   // Dernières valeurs pour les écouteurs clavier (sans les ré-enregistrer à chaque rendu).
   const liveRef = useRef({ track, clip, isPlaying: !!isPlaying });
   liveRef.current = { track, clip, isPlaying: !!isPlaying };
+
+  // Le clavier de l'ordinateur et le clavier MIDI jouent sur la piste ouverte ici.
+  useEffect(() => {
+    computerKeyboardStore.forcedTrackId = track.id;
+    midiInput.setContext({ focusTrackId: track.id });
+    return () => {
+      if (computerKeyboardStore.forcedTrackId === track.id) computerKeyboardStore.forcedTrackId = null;
+      if (midiInput.getContext().focusTrackId === track.id) midiInput.setContext({ focusTrackId: null });
+    };
+  }, [track.id]);
 
   // Lettres du clavier RÉEL (AZERTY : Q S D F… au lieu de A S D F…) quand le navigateur les donne.
   useEffect(() => {
@@ -630,52 +674,71 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
     return () => window.clearInterval(id);
   }, [recArmed, isPlaying]);
 
+  // --- SAISIE PAS À PAS (Pro Tools : MIDI Step Input, FL : Step recording) ---
+  const [stepOn, setStepOn] = useState(false);
+  const [stepValueId, setStepValueId] = useState('1/16');
+  const [stepPos, setStepPos] = useState(0);
+  const [chordHold, setChordHold] = useState(false);
+  const [stepFixedVel, setStepFixedVel] = useState(false);
+  const stepRef = useRef<StepInput | null>(null);
+  const stepQueue = useRef<{ add?: MidiNote[]; remove?: string[] }[]>([]);
+  const stepRaf = useRef(0);
+  const stepValue = STEP_VALUES.find(v => v.id === stepValueId) || STEP_VALUES[4];
   useEffect(() => {
-    if (!kbOn) return;
-    const kb = kbRef.current || (kbRef.current = new ComputerKeyboard(kbState));
-    const typing = (el: EventTarget | null) => {
-      const n = el as HTMLElement | null;
-      if (!n || !n.tagName) return false;
-      const tag = n.tagName.toLowerCase();
-      if (tag === 'input') return !['range', 'button', 'checkbox'].includes((n as HTMLInputElement).type);
-      return tag === 'textarea' || tag === 'select' || n.isContentEditable;
-    };
-    const release = (pitch: number) => {
-      audioEngine.triggerTrackRelease(liveRef.current.track.id, pitch);
-      midiCapture.noteOff(pitch);
-      if (recRef.current && liveRef.current.isPlaying) recRef.current.noteOff(pitch, clipTimeNow());
-    };
-    const onDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || typing(e.target) || !isComputerKeyboardCode(e.code)) return;
-      // Touche du clavier musical : elle ne déclenche aucun autre raccourci.
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      const a = kb.keyDown(e.code, e.repeat);
-      if (a.type === 'state') setKbState(a.state);
-      if (a.type === 'noteOn') {
-        void audioEngine.resume();
-        audioEngine.triggerTrackAttack(liveRef.current.track.id, a.pitch, a.velocity / 127);
-        midiCapture.noteOn(a.pitch, a.velocity, liveRef.current.track.id); // Capture MIDI (V25)
-        if (recRef.current && liveRef.current.isPlaying) recRef.current.noteOn(a.pitch, clipTimeNow(), a.velocity);
-        setHeldPitches(kb.heldPitches());
-      }
-    };
-    const onUp = (e: KeyboardEvent) => {
-      if (!isComputerKeyboardCode(e.code)) return;
-      const a = kb.keyUp(e.code);
-      if (a.type === 'noteOff') { e.stopImmediatePropagation(); release(a.pitch); setHeldPitches(kb.heldPitches()); }
-    };
-    const onBlur = () => { kb.releaseAll().forEach(release); setHeldPitches([]); };
-    window.addEventListener('keydown', onDown, true);
-    window.addEventListener('keyup', onUp, true);
-    window.addEventListener('blur', onBlur);
-    return () => {
-      window.removeEventListener('keydown', onDown, true);
-      window.removeEventListener('keyup', onUp, true);
-      window.removeEventListener('blur', onBlur);
-      onBlur();
-    };
-  }, [kbOn]);
+    if (!stepOn) { stepRef.current = null; return; }
+    const rel = Math.max(0, audioEngine.getCurrentTime() - clip.start);
+    const st = new StepInput({ step: stepSeconds(stepValue, bpm), pos: rel <= clip.duration ? rel : 0, prefix: `st-${Date.now().toString(36)}` });
+    st.chordHold = chordHold;
+    st.fixedVelocity = stepFixedVel ? 100 : null;
+    stepRef.current = st;
+    setStepPos(st.pos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepOn]);
+  useEffect(() => { if (stepRef.current) stepRef.current.step = stepSeconds(stepValue, bpm); }, [stepValue, bpm]);
+  useEffect(() => { if (stepRef.current) stepRef.current.chordHold = chordHold; }, [chordHold]);
+  useEffect(() => { if (stepRef.current) stepRef.current.fixedVelocity = stepFixedVel ? 100 : null; }, [stepFixedVel]);
+  /** Les pas arrivent vite (accords) : on les écrit ensemble, une étape d'annulation par image. */
+  const flushSteps = () => {
+    stepRaf.current = 0;
+    const q = stepQueue.current;
+    stepQueue.current = [];
+    if (!q.length) return;
+    const { track: t, clip: c } = liveRef.current;
+    let notes = [...(c.notes || [])];
+    for (const e of q) {
+      if (e.remove?.length) { const rm = new Set(e.remove); notes = notes.filter(n => !rm.has(n.id)); }
+      if (e.add?.length) notes.push(...e.add);
+    }
+    const end = notes.reduce((m, n) => Math.max(m, n.start + n.duration), 0);
+    const bar = (60 / bpm) * 4;
+    const dur = end > c.duration ? Math.ceil(end / bar - 1e-6) * bar : c.duration;
+    onUpdateTrack({ ...t, clips: t.clips.map(x => (x.id === c.id ? { ...x, notes, duration: dur } : x)) });
+  };
+  const applyStep = (e: { add?: MidiNote[]; remove?: string[]; pos: number }) => {
+    setStepPos(e.pos);
+    if (!e.add?.length && !e.remove?.length) return;
+    stepQueue.current.push(e);
+    if (!stepRaf.current) stepRaf.current = requestAnimationFrame(flushSteps);
+  };
+  const applyStepRef = useRef(applyStep);
+  applyStepRef.current = applyStep;
+
+  // Notes jouées (clavier de l'ordinateur, clavier MIDI, touches à l'écran) sur cette piste :
+  // touches allumées, prise du piano roll, saisie pas à pas.
+  useEffect(() => midiInput.subscribe(e => {
+    if (e.trackId !== liveRef.current.track.id || e.pitch === undefined) return;
+    if (e.type === 'on') {
+      heldRef.current.add(e.pitch);
+      if (recRef.current && liveRef.current.isPlaying) recRef.current.noteOn(e.pitch, clipTimeNow(), e.velocity || 100);
+      if (stepRef.current) applyStepRef.current(stepRef.current.noteOn(e.pitch, e.velocity || 100));
+    } else if (e.type === 'off') {
+      heldRef.current.delete(e.pitch);
+      if (recRef.current && liveRef.current.isPlaying) recRef.current.noteOff(e.pitch, clipTimeNow());
+      if (stepRef.current) applyStepRef.current(stepRef.current.noteOff(e.pitch));
+    }
+    setHeldPitches(Array.from(heldRef.current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
 
   // --- NOTES FANTÔMES (Ghost notes de FL) : les autres pistes MIDI en filigrane ---
   const ghostNotes = useMemo(() => {
@@ -703,6 +766,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
       if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+      // Notes muettes (Pro Tools : Mute Notes, Ctrl+M).
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'm' || e.key === 'M')) { e.preventDefault(); toggleMuteNotes(); return; }
       
       if (e.key === 'Delete' || e.key === 'Backspace') {
         deleteNotes(Array.from(selectedNoteIds));
@@ -733,7 +798,21 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNoteIds, applyQuantize, selectAll, doubleNotes, transpose, humanizeNotes, onClose]);
+  }, [selectedNoteIds, applyQuantize, selectAll, doubleNotes, transpose, humanizeNotes, onClose, clip.notes]);
+
+  // Saisie pas à pas : Tab = silence, Retour arrière = effacer le dernier pas (avant les autres raccourcis).
+  useEffect(() => {
+    if (!stepOn) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); if (stepRef.current) applyStepRef.current(stepRef.current.rest()); }
+      else if (e.key === 'Backspace') { e.preventDefault(); e.stopImmediatePropagation(); if (stepRef.current) applyStepRef.current(stepRef.current.back()); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [stepOn]);
 
   // --- DRUM ROW RENDERING ---
   const renderKeys = () => {
@@ -778,7 +857,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
                 className="flex items-center justify-end pr-1 text-[9px] font-mono box-border cursor-pointer"
                 style={{ height: currentRowHeight, backgroundColor: bg, color: ink, borderBottom: '1px solid rgba(0,0,0,0.22)' }}
                 title={`${noteNameFr(pitch)}${hasKey ? (out ? ' · hors gamme' : ' · dans la gamme') : ''} (clic : écouter)`}
-                onPointerDown={() => audioEngine.previewMidiNote(track.id, pitch, 0.4)}
+                onPointerDown={() => { if (stepOn) { midiInput.noteOn(pitch, 100, { source: 'screen', trackId: track.id }); midiInput.noteOff(pitch, { source: 'screen', trackId: track.id }); } else audioEngine.previewMidiNote(track.id, pitch, 0.4); }}
             >
                 {isRoot && !isHeld && <span className="w-1.5 h-1.5 rounded-full mr-auto ml-1" style={{ backgroundColor: '#f59e0b' }} aria-hidden />}
                 {showName && <span className="font-bold mr-0.5">{noteNameFr(pitch)}</span>}
@@ -964,6 +1043,23 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
                 >
                   <i className="fas fa-random mr-1"></i>H
                 </button>
+                <button
+                  type="button" data-nova-roll="muet"
+                  onClick={() => toggleMuteNotes()}
+                  disabled={selectedNoteIds.size === 0}
+                  className={`h-8 ${TAP} px-3 rounded text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'text-slate-300 hover:bg-white/10' : 'text-slate-600'}`}
+                  title="Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Ctrl+M, ou Alt+clic sur une note ; Pro Tools : Mute Notes, FL : outil Muet)" aria-label="Rendre muettes les notes sélectionnées"
+                >
+                  <i className="fas fa-volume-mute mr-1"></i>Muet
+                </button>
+                <button
+                  type="button" data-nova-roll="pas-a-pas"
+                  onClick={() => setStepOn(v => !v)} aria-pressed={stepOn}
+                  className={`h-8 ${TAP} px-3 rounded-lg border text-[10px] font-bold ${stepOn ? 'bg-emerald-400 border-emerald-300 text-black' : 'bg-white/5 border-white/10 text-emerald-300 hover:text-white'}`}
+                  title="Saisie pas à pas : chaque note jouée (clavier MIDI, clavier de l'ordinateur ou touches à l'écran) avance d'une valeur choisie, sans lecture (Pro Tools : MIDI Step Input, FL : Step recording)" aria-label="Saisie pas à pas"
+                >
+                  <i className="fas fa-shoe-prints mr-1"></i>Pas à pas
+                </button>
              </div>
 
              {/* Outils MIDI, groove, capture (V25) */}
@@ -1010,6 +1106,32 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
              <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="hidden md:flex w-8 h-8 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-full bg-white/5 text-slate-400 hover:text-white hover:bg-red-500/20 flex items-center justify-center"><i className="fas fa-times"></i></button>
           </div>
        </div>
+
+       {/* Saisie pas à pas (R16) */}
+       {stepOn && (
+         <div data-nova-roll="pas-a-pas-barre" className="shrink-0 px-4 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-emerald-400/30 bg-emerald-500/[0.06] text-[11px] text-slate-200">
+           <span className="text-emerald-300 font-bold"><i className="fas fa-shoe-prints mr-1"></i>Pas à pas</span>
+           <span className="flex flex-wrap gap-1" role="radiogroup" aria-label="Valeur d'un pas">
+             {STEP_VALUES.map(v => (
+               <button key={v.id} type="button" role="radio" aria-checked={stepValueId === v.id} onClick={() => setStepValueId(v.id)} title={v.hint} data-nova-step-value={v.id}
+                 className={`h-7 [@media(pointer:coarse)]:h-10 px-2 rounded-md text-[10px] font-bold ${stepValueId === v.id ? 'bg-emerald-400 text-black' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>{v.label}</button>
+             ))}
+           </span>
+           <button type="button" data-nova-step="rest" onClick={() => stepRef.current && applyStep(stepRef.current.rest())} title="Silence : avance d'un pas sans note (Tab)"
+             className="h-7 [@media(pointer:coarse)]:h-10 px-2 rounded-md bg-white/5 hover:bg-white/10 font-bold">Silence <span className="text-slate-500">Tab</span></button>
+           <button type="button" data-nova-step="back" onClick={() => stepRef.current && applyStep(stepRef.current.back())} title="Efface le dernier pas et recule (Retour arrière)"
+             className="h-7 [@media(pointer:coarse)]:h-10 px-2 rounded-md bg-white/5 hover:bg-white/10 font-bold"><i className="fas fa-backspace mr-1"></i>Retour</button>
+           <label className="flex items-center gap-1.5 min-h-7" title="Accord tenu : les notes s'empilent au même endroit, même jouées l'une après l'autre ; « Suivant » avance">
+             <input type="checkbox" className="w-4 h-4 accent-emerald-400" checked={chordHold} onChange={e => setChordHold(e.target.checked)} />Accord tenu
+           </label>
+           {chordHold && <button type="button" data-nova-step="next" onClick={() => stepRef.current && applyStep(stepRef.current.next())} className="h-7 [@media(pointer:coarse)]:h-10 px-2 rounded-md bg-emerald-500/20 border border-emerald-400/40 font-bold">Suivant →</button>}
+           <label className="flex items-center gap-1.5 min-h-7" title="Vélocité fixe à 100, ou celle que tu joues">
+             <input type="checkbox" className="w-4 h-4 accent-emerald-400" checked={stepFixedVel} onChange={e => setStepFixedVel(e.target.checked)} />Vélocité fixe (100)
+           </label>
+           <button type="button" onClick={() => { stepRef.current?.moveTo(0); setStepPos(0); }} className="h-7 px-2 rounded-md bg-white/5 hover:bg-white/10" title="Curseur au début du clip">↺ Début</button>
+           <span className="text-slate-400" role="status">Mesure {Math.floor(stepPos / ((60 / bpm) * 4)) + 1}, temps {(Math.floor(stepPos / (60 / bpm)) % 4) + 1} · joue une note ou un accord</span>
+         </div>
+       )}
 
        {/* Bandeau d'état : clavier de l'ordinateur, accord posé, gamme */}
        {!isDrumMode && (kbOn || lastChord || chordKind) && (
@@ -1183,15 +1305,16 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
                                 key={note.id}
                                 data-nova-note={note.pitch}
                                 data-hors-gamme={outOfKey ? '1' : undefined}
-                                title={`${noteNameFr(note.pitch)}${outOfKey ? ' · hors gamme' : ''}`}
-                                className={`absolute rounded-[2px] border flex items-center overflow-hidden ${outOfKey && !isSelected ? 'border-red-400/70' : 'border-black/30'}`}
+                                data-muette={note.muted ? '1' : undefined}
+                                title={`${noteNameFr(note.pitch)}${outOfKey ? ' · hors gamme' : ''}${note.muted ? ' · muette (Ctrl+M ou Alt+clic pour la réactiver)' : ''}`}
+                                className={`absolute rounded-[2px] border flex items-center overflow-hidden ${note.muted ? 'border-dashed border-slate-400/80' : outOfKey && !isSelected ? 'border-red-400/70' : 'border-black/30'}`}
                                 style={{
                                     left: note.start * zoomX,
                                     top: getYFromPitch(note.pitch) + 1,
                                     width: Math.max(5, note.duration * zoomX - 1),
                                     height: currentRowHeight - 2,
-                                    backgroundColor: isSelected ? '#fff' : (isDrumMode ? '#f97316' : outOfKey ? '#64748b' : track.color),
-                                    opacity: toolPreview ? 0.2 : isSelected ? 1 : outOfKey ? 0.55 : 0.8,
+                                    backgroundColor: isSelected ? '#fff' : note.muted ? '#475569' : (isDrumMode ? '#f97316' : outOfKey ? '#64748b' : track.color),
+                                    opacity: toolPreview ? 0.2 : note.muted ? (isSelected ? 0.7 : 0.4) : isSelected ? 1 : outOfKey ? 0.55 : 0.8,
                                     // Glisser une note au doigt la déplace (pas de défilement)
                                     touchAction: 'none'
                                 }}
@@ -1215,6 +1338,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
 
                     {/* Playhead */}
                     <PianoRollPlayhead clipStart={clip.start} zoomX={zoomX} />
+                    {/* Curseur de la saisie pas à pas */}
+                    {stepOn && <div data-nova-step-cursor={stepPos.toFixed(4)} className="absolute top-0 bottom-0 w-0.5 bg-emerald-400 z-40 pointer-events-none shadow-[0_0_8px_rgba(52,211,153,0.8)]" style={{ left: stepPos * zoomX }} />}
                     
                     {selectionBox && (
                          <div className="absolute border border-cyan-500 bg-cyan-500/20 pointer-events-none" style={{ left: Math.min(selectionBox.startX, selectionBox.endX), top: Math.min(selectionBox.startY, selectionBox.endY), width: Math.abs(selectionBox.endX - selectionBox.startX), height: Math.abs(selectionBox.endY - selectionBox.startY) }} />
@@ -1223,18 +1348,10 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
               </div>
           </div>
           
-          {/* Velocity Panel (Simple version) */}
-          <div className="h-[30%] border-t border-white/10 bg-[#0f1115] flex relative z-30">
-               {/* Just spacer for sidebar alignment */}
-               <div className={`flex-shrink-0 border-r border-white/10 bg-[#0c0d10] ${isDrumMode ? 'w-32' : 'w-16'}`}></div>
-               <div ref={velocityRef} className="flex-1 overflow-hidden relative">
-                    <div style={{ width: Math.max((clip.duration + 4) * zoomX, 2000), height: '100%', position: 'relative' }}>
-                        {(clip.notes || []).map(note => (
-                            <div key={`vel-${note.id}`} className="absolute bottom-0 w-1.5 bg-slate-500 hover:bg-white" style={{ left: note.start * zoomX, height: `${note.velocity * 100}%` }} />
-                        ))}
-                    </div>
-               </div>
-          </div>
+          {/* Couloirs : vélocité, pitch bend, CC (R16) */}
+          <MidiCcLanes notes={clip.notes || []} cc={clip.cc} duration={clip.duration} zoomX={zoomX} width={Math.max((clip.duration + 4) * zoomX, 2000)}
+            sideWidth={isDrumMode ? 'w-32' : 'w-16'} selectedIds={selectedNoteIds} color={track.color || '#22d3ee'} innerRef={velocityRef}
+            onNotes={(next, label) => { updateNotes(next); setLastChord(`${label} (Ctrl+Z pour annuler)`); }} onCc={updateClipCc} />
        </div>
     </div>
   );

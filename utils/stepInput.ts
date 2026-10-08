@@ -16,14 +16,14 @@ import type { MidiNote } from '../types';
 export interface StepValue { id: string; label: string; beats: number; hint: string }
 
 export const STEP_VALUES: StepValue[] = [
-  { id: '1/1', label: '𝅝 Ronde', beats: 4, hint: '4 temps' },
-  { id: '1/2', label: '𝅗𝅥 Blanche', beats: 2, hint: '2 temps' },
-  { id: '1/4', label: '♩ Noire', beats: 1, hint: '1 temps' },
-  { id: '1/8', label: '♪ Croche', beats: 0.5, hint: '1/2 temps' },
-  { id: '1/16', label: '𝅘𝅥𝅯 Double', beats: 0.25, hint: '1/4 de temps (charley trap)' },
+  { id: '1/1', label: 'Ronde', beats: 4, hint: '4 temps' },
+  { id: '1/2', label: 'Blanche', beats: 2, hint: '2 temps' },
+  { id: '1/4', label: 'Noire', beats: 1, hint: '1 temps' },
+  { id: '1/8', label: 'Croche', beats: 0.5, hint: '1/2 temps' },
+  { id: '1/16', label: 'Double', beats: 0.25, hint: '1/4 de temps (charley trap)' },
   { id: '1/32', label: '1/32', beats: 0.125, hint: '1/8 de temps (rolls)' },
-  { id: '1/8T', label: '♪ triolet', beats: 1 / 3, hint: 'croche de triolet' },
-  { id: '1/16T', label: '𝅘𝅥𝅯 triolet', beats: 1 / 6, hint: 'double de triolet' },
+  { id: '1/8T', label: 'Triolet 1/8', beats: 1 / 3, hint: 'croche de triolet' },
+  { id: '1/16T', label: 'Triolet 1/16', beats: 1 / 6, hint: 'double-croche de triolet' },
 ];
 
 export interface StepEdit {

@@ -10,6 +10,8 @@ import { midiClipMenuItems, midiTrackMenuItems } from './MidiFileMenu';
 import { midiBus, isMidiFile } from '../utils/midiBus';
 import TimelineGridMenu from './TimelineGridMenu'; 
 import { ChordLaneToggleButton, ChordLaneView } from './ChordLane';
+import LiveMidiRecordingClip from './LiveMidiRecordingClip';
+import { isMidiRecordTrack } from '../utils/midiRecord';
 import LiveRecordingClip from './LiveRecordingClip'; 
 import AutomationLaneComponent from './AutomationLane';
 import { drawExpandedLanes } from '../utils/automationDraw';
@@ -2272,7 +2274,9 @@ useEffect(() => {
              visibleTracks.map((track, idx) => {
                if (!track.isTrackArmed) return null;
                let topY = tracksTop; for (let i = 0; i < idx; i++) topY += zoomV + extraH(visibleTracks[i]);
-               return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, left: headerWidth, height: `${zoomV - 4}px`, right: 0, pointerEvents: 'none' }}><LiveRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} /></div>;
+               return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, left: headerWidth, height: `${zoomV - 4}px`, right: 0, pointerEvents: 'none', ...(isMidiRecordTrack(track) ? { zIndex: 25 } : {}) }}>{isMidiRecordTrack(track)
+                 ? <LiveMidiRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} />
+                 : <LiveRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} />}</div>;
              })
           )}
         </div>

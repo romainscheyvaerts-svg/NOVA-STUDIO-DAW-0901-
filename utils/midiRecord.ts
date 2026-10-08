@@ -25,6 +25,10 @@
 import { Clip, MidiNote, TrackType } from '../types';
 import { MidiCcMap, MidiCcPoint, ccDefault, ccValueAt, replacePoints, shiftCc, sortPoints, thinPoints } from './midiCc';
 
+/** Pistes qui enregistrent du MIDI (synthé, 808, sampler, batterie, instrument VST). */
+export const isMidiRecordTrack = (t: { type: TrackType } | null | undefined): boolean =>
+  !!t && (t.type === TrackType.MIDI || t.type === TrackType.SAMPLER || t.type === TrackType.DRUM_RACK || t.type === TrackType.MELODIC_SAMPLER);
+
 // ---------------------------------------------------------------------------
 // Préférences
 // ---------------------------------------------------------------------------
@@ -100,14 +104,49 @@ export interface OutputStamp { contextTime: number; performanceTime: number }
  */
 export function midiTimestampToContextTime(ts: number | undefined, o: {
   stamp?: OutputStamp | null; ctxNow: number; perfNow: number; outputLatency?: number; offsetMs?: number;
+  /** Écart d'horloges stabilisé (ClockOffset), prioritaire sur `stamp`. */
+  clockOffset?: number | null;
 }): number {
   const t = typeof ts === 'number' && Number.isFinite(ts) && ts > 0 ? ts : o.perfNow;
   const off = (o.offsetMs || 0) / 1000;
+  if (typeof o.clockOffset === 'number' && Number.isFinite(o.clockOffset)) return o.clockOffset + t / 1000 - off;
   const s = o.stamp;
   if (s && Number.isFinite(s.contextTime) && Number.isFinite(s.performanceTime) && s.performanceTime > 0) {
     return s.contextTime + (t - s.performanceTime) / 1000 - off;
   }
   return o.ctxNow - (o.perfNow - t) / 1000 - (o.outputLatency || 0) - off;
+}
+
+/**
+ * Écart entre l'horloge du son et celle de performance.now() (s), estimé sur
+ * les dernières secondes. Un seul `getOutputTimestamp()` tremble de ±1,4 ms
+ * (mesuré dans Chrome : le temps du son avance par blocs) ; la MÉDIANE de
+ * quelques dizaines de relevés est stable à quelques centièmes de ms, et suit
+ * la lente dérive des deux horloges.
+ */
+export class ClockOffset {
+  private samples: { at: number; off: number }[] = [];
+  constructor(private windowMs = 3000, private max = 96) {}
+
+  /** `off` = contextTime − performanceTime / 1000 ; `atMs` = performance.now(). */
+  push(off: number, atMs: number) {
+    if (!Number.isFinite(off)) return;
+    this.samples.push({ at: atMs, off });
+    const cut = atMs - this.windowMs;
+    while (this.samples.length > this.max || (this.samples.length > 8 && this.samples[0].at < cut)) this.samples.shift();
+  }
+
+  get count() { return this.samples.length; }
+
+  /** Médiane des relevés (null sans relevé). */
+  value(): number | null {
+    if (!this.samples.length) return null;
+    const v = this.samples.map(x => x.off).sort((a, b) => a - b);
+    const m = v.length >> 1;
+    return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+  }
+
+  clear() { this.samples = []; }
 }
 
 /** Une note jouée un peu avant le début de la zone (ou du tour suivant) est ramenée dessus. */

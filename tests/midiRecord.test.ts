@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   midiTimestampToContextTime, foldLoop, MidiTakeRecorder, applyMidiTake, applyLoopTake, eraseMidiZone,
-  quantizeRecNotes, normalizeMidiRecPrefs, PICKUP,
+  quantizeRecNotes, normalizeMidiRecPrefs, PICKUP, ClockOffset,
 } from '../utils/midiRecord';
 import { Clip, TrackType } from '../types';
 
@@ -225,3 +225,21 @@ describe('préférences', () => {
 });
 
 void BPM; void beat;
+
+describe('écart d’horloges stabilisé (ClockOffset)', () => {
+  it('la médiane gomme le tremblement de getOutputTimestamp (±1,4 ms)', () => {
+    const c = new ClockOffset();
+    const truth = 12.3456;
+    // Tremblement en dents de scie de ±1,4 ms, comme les blocs du son.
+    for (let i = 0; i < 60; i++) c.push(truth + (((i * 37) % 29) / 28 - 0.5) * 0.0028, i * 40);
+    expect(Math.abs(c.value()! - truth)).toBeLessThan(0.0002);
+    const t = midiTimestampToContextTime(5000, { ctxNow: 0, perfNow: 0, clockOffset: c.value() });
+    expect(Math.abs(t - (truth + 5))).toBeLessThan(0.0002);
+  });
+  it('oublie les vieux relevés (dérive lente des horloges)', () => {
+    const c = new ClockOffset(1000);
+    for (let i = 0; i < 30; i++) c.push(1, i * 40);
+    for (let i = 0; i < 40; i++) c.push(1.002, 5000 + i * 40);
+    expect(c.value()).toBeCloseTo(1.002, 9);
+  });
+});

@@ -69,8 +69,12 @@ import { recFreezeStore } from './utils/recFreezeStore';
 import { ProjectIO } from './services/ProjectIO';
 const PianoRoll = lazy(() => import('./components/PianoRoll'));
 import MidiHost from './components/MidiHost'; // V25 : .mid, groove, capture MIDI
+import MidiInputHost from './components/MidiInputHost'; // R16 : clavier de l'ordinateur, fenêtre MIDI, MIDI Learn
 import { midiManager } from './services/MidiManager';
 import { splitClipAt } from './utils/timeSelection';
+import { midiInput } from './services/MidiInput';
+import { isMidiRecordTrack, applyMidiTake, applyLoopTake, MODE_LABELS } from './utils/midiRecord';
+import { midiLearn, LearnHit } from './utils/midiLearn';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
@@ -182,7 +186,7 @@ import { track, trackOnce } from './utils/analytics';
 import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 import { setFeedbackAppState } from './utils/feedbackContext';
 import { setFeedbackUserEmail } from './services/feedback';
-import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone } from './utils/punch';
+import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds } from './utils/punch';
 import { splitLoopPasses, keptLoopPasses, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
 import { compSwipe, compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
@@ -1616,9 +1620,11 @@ function Studio() {
                     if (t.id !== updatedTrack.id) t.isTrackArmed = false;
                 });
             }));
+            // Piste MIDI (R16) : pas de micro, le clavier MIDI (ou celui de l'ordinateur) joue dessus.
+            if (isMidiRecordTrack(updatedTrack)) { audioEngine.disarmTrack(); void announceMidiArmRef.current?.(updatedTrack); }
             // Si le micro est refuse ou absent, on le dit et on desarme : sinon
             // la piste paraissait prete et l'enregistrement echouait en silence.
-            audioEngine.armTrack(updatedTrack.id).then(erreur => {
+            else audioEngine.armTrack(updatedTrack.id).then(erreur => {
                 if (!erreur) return;
                 setAiNotification(`🎤 ${erreur}`);
                 setTimeout(() => setAiNotification(null), 5000);
@@ -1734,6 +1740,8 @@ function Studio() {
    *        rangée comme une prise normale (couloir, niveau, respirations).
    */
   const finalizeRecording = useCallback(async (captured?: { clip: Clip; trackId: string }) => {
+    // Prise MIDI armée (R16) : écrite par finalizeMidiRecording, pas de micro.
+    if (!captured && midiInput.isRecording) { finalizeMidiRef.current?.(); return null; }
     const result = captured ?? await audioEngine.stopRecording();
     const rec = captured ? null : punchRecRef.current;
     if (!captured) punchRecRef.current = null;
@@ -2010,6 +2018,8 @@ function Studio() {
       draft.tracks.forEach(t => { t.isTrackArmed = t.id === trackId; });
       draft.selectedTrackId = trackId;
     }));
+    const armedMidi = stateRef.current.tracks.find(t => t.id === trackId);
+    if (armedMidi && isMidiRecordTrack(armedMidi)) { audioEngine.disarmTrack(); await announceMidiArmRef.current?.(armedMidi, true); return true; }
     const erreur = await audioEngine.armTrack(trackId);
     if (erreur) {
       setAiNotification(`🎤 ${erreur}`);
@@ -2328,7 +2338,7 @@ function Studio() {
     // QuickPunch (comme dans Pro Tools) : pendant la lecture, REC entre dans
     // l'enregistrement et en ressort sans arrêter la lecture.
     if (currentState.isRecording && punchRecRef.current?.quick) { await quickPunchOutRef.current?.(false); return; }
-    if (!currentState.isRecording && currentState.isPlaying && currentState.punch?.quickPunch) { await quickPunchIn(); return; }
+    if (!currentState.isRecording && currentState.isPlaying && currentState.punch?.quickPunch && !isMidiRecordTrack(currentState.tracks.find(t => t.isTrackArmed))) { await quickPunchIn(); return; }
 
     if (currentState.isRecording) {
         audioEngine.stopAll();
@@ -2349,6 +2359,19 @@ function Studio() {
 
     // Armement automatique : plus besoin de trouver le bouton R d'abord.
     let armedTrack = currentState.tracks.find(t => t.isTrackArmed);
+    // Prise MIDI (R16) : piste MIDI armée, ou piste MIDI sélectionnée sans piste armée
+    // (comme FL et Live : on sélectionne son synthé et on appuie sur REC).
+    {
+      const sel = currentState.tracks.find(t => t.id === currentState.selectedTrackId);
+      const midiTarget = armedTrack ? (isMidiRecordTrack(armedTrack) ? armedTrack : null) : (isMidiRecordTrack(sel) ? sel! : null);
+      if (midiTarget) {
+        const why = collabRecGuardRef.current(midiTarget.id);
+        if (why) { setAiNotification(`🔒 ${why}`); return; }
+        if (!armedTrack) await armForRecording(midiTarget.id);
+        await startMidiRecordingRef.current?.(midiTarget.id);
+        return;
+      }
+    }
     // Collaboration : jamais sur la piste d'un autre, ni pendant qu'il y enregistre.
     if (armedTrack) { const why = collabRecGuardRef.current(armedTrack.id); if (why) { setAiNotification(`🔒 ${why}`); return; } }
     // Piste « armée » dans le projet mais micro fermé côté moteur (annuler / rétablir, session
@@ -2446,6 +2469,157 @@ function Studio() {
     try { await handleToggleRecordInner(); } finally { recBusyRef.current = false; }
   }, [handleToggleRecordInner]);
   toggleRecordRef.current = handleToggleRecord;
+
+  // ===== Prise MIDI armée (R16) : clavier MIDI / clavier de l'ordinateur → piste MIDI armée
+  const midiRecMetaRef = useRef<{ trackId: string; loop: { start: number; end: number } | null; isPunch: boolean; startAt: number } | null>(null);
+  const announceMidiArmRef = useRef<((t: Track, fromRec?: boolean) => Promise<void>) | null>(null);
+  announceMidiArmRef.current = async (t: Track, fromRec?: boolean) => {
+    midiInput.keepClockFresh();
+    const ok = await midiManager.init();
+    if (fromRec) return;
+    const name = ok ? midiManager.getActiveDeviceName() : null;
+    setAiNotification(name
+      ? `🎹 « ${t.name} » armée : joue sur ${name}, puis REC (R). Mode ${MODE_LABELS[midiInput.prefs.mode].label.toLowerCase()}.`
+      : `🎹 « ${t.name} » armée. Aucun clavier MIDI détecté : joue avec le clavier de l'ordinateur (Ctrl+Maj+K) ou branche un clavier.`);
+  };
+
+  const startMidiRecordingRef = useRef<((trackId: string) => Promise<void>) | null>(null);
+  startMidiRecordingRef.current = async (trackId: string) => {
+    if (isBeatLoading()) { setAiNotification('⏳ Attends la fin du chargement du beat : sans lui, ta prise partirait sur du silence.'); return; }
+    void midiManager.init();
+    // Relevés de l'écart d'horloges dès maintenant (décompte compris) : positions stables dès la 1re note.
+    midiInput.keepClockFresh();
+    const st0 = stateRef.current;
+    const prefs = midiInput.prefs;
+    const bar = barSeconds(st0.bpm, st0.timeSignature);
+    let plan = planRecording({ playhead: playheadStore.get(), punch: st0.punch, bpm: st0.bpm, ts: st0.timeSignature });
+    let loop: { start: number; end: number } | null = null;
+    const loopOn = st0.isLoopActive && st0.loopEnd - st0.loopStart >= 0.5;
+    if (!plan.isPunch && (prefs.mode === 'loop' || loopOn)) {
+      let ls = st0.loopStart, le = st0.loopEnd;
+      if (!loopOn) {
+        // Mode boucle sans boucle posée : 4 mesures à partir de la mesure de la tête de lecture.
+        ls = Math.max(0, Math.floor(playheadStore.get() / bar + 1e-6) * bar);
+        le = ls + 4 * bar;
+        setSilently(produce((d: DAWState) => { d.isLoopActive = true; d.loopStart = ls; d.loopEnd = le; }));
+      }
+      audioEngine.setLoop(true, ls, le);
+      loop = { start: ls, end: le };
+      plan = planRecording({ playhead: ls, punch: st0.punch, bpm: st0.bpm, ts: st0.timeSignature });
+    } else if (plan.isPunch) audioEngine.setLoop(false, st0.loopStart, st0.loopEnd);
+    const startAt = plan.startAt;
+    audioEngine.seekTo(startAt, st0.tracks, false);
+    playheadStore.set(startAt);
+    if (audioEngine.getTakeAudition()) { audioEngine.setTakeAudition(null); setTakeAuditionState(null); }
+    const ci = await runCountIn(startAt);
+    if (!ci.ok) { if (plan.isPunch) audioEngine.setLoop(st0.isLoopActive, st0.loopStart, st0.loopEnd); return; }
+    const playAt = ci.endsAt ?? undefined;
+    const keepFrom = loop ? loop.start : (plan.keepFrom ?? startAt);
+    midiRecMetaRef.current = { trackId, loop, isPunch: plan.isPunch, startAt };
+    // La prise écoute dès maintenant (une note jouée un poil avant le 1er temps est gardée).
+    midiInput.startRecording({ trackId, anchor: (playAt ?? ((audioEngine.ctx?.currentTime ?? 0) + 0.01)) - startAt, recStart: startAt, loop, keepFrom, keepTo: loop ? null : plan.keepTo });
+    recStartRef.current = startAt;
+    punchRecRef.current = plan.isPunch ? { in: plan.keepFrom, out: plan.keepTo, isPunch: true, autoStopAt: plan.autoStopAt } : null;
+    audioEngine.startPlayback(startAt, stateRef.current.tracks, { at: playAt });
+    midiInput.setAnchor(audioEngine.getPlaybackOrigin());
+    if (stateRef.current.metronome.enabled) metronomeService.start(startAt);
+    track('rec_started', { role: 'midi', punch: plan.isPunch, loop: !!loop, mode: prefs.mode });
+    setState(produce(draft => { draft.isRecording = true; draft.isPlaying = true; draft.currentTime = startAt; draft.recStartTime = startAt; }));
+    const tname = stateRef.current.tracks.find(t => t.id === trackId)?.name || 'piste MIDI';
+    const overdub = prefs.mode === 'merge' || (prefs.mode === 'loop' && prefs.loopStyle === 'merge');
+    setAiNotification(loop
+      ? `🔁 Prise MIDI en boucle sur « ${tname} » : ${overdub ? 'chaque tour s’ajoute (overdub)' : 'une prise par tour'}. Stop quand tu as fini.`
+      : `⏺️ Prise MIDI sur « ${tname} » (${MODE_LABELS[prefs.mode === 'loop' ? 'merge' : prefs.mode].label.toLowerCase()}${prefs.quantizeOnInput ? ', quantifiée à l’entrée' : ''}).`);
+  };
+
+  const finalizeMidiRef = useRef<(() => void) | null>(null);
+  finalizeMidiRef.current = () => {
+    const meta = midiRecMetaRef.current;
+    midiRecMetaRef.current = null;
+    punchRecRef.current = null;
+    const r = midiInput.stopRecording();
+    const st = stateRef.current;
+    if (meta?.isPunch) audioEngine.setLoop(st.isLoopActive, st.loopStart, st.loopEnd);
+    const tr = r ? st.tracks.find(t => t.id === r.trackId) : undefined;
+    if (!r || !tr) { setState(produce(draft => { draft.isRecording = false; draft.recStartTime = null; })); return; }
+    const prefs = midiInput.prefs;
+    const bar = barSeconds(st.bpm, st.timeSignature);
+    const quantize = prefs.quantizeOnInput ? { grid: prefs.quantizeGrid * 60 / (st.bpm || 120), strength: prefs.quantizeStrength } : null;
+    const takeNumber = nextTakeNumber(tr);
+    const base = { bar, quantize, stamp: Date.now().toString(36), takeNumber, name: `Prise MIDI ${takeNumber}`, color: tr.color || '#22d3ee' };
+    const notes = r.take.passes.reduce((n, p) => n + p.notes.length, 0);
+    const ccs = r.take.passes.reduce((n, p) => n + Object.values(p.cc).reduce((m, x) => m + x.length, 0), 0);
+    let clips: Clip[] = tr.clips;
+    let msg = '';
+    if (r.take.loop) {
+      const style = prefs.mode === 'loop' ? prefs.loopStyle : prefs.mode === 'merge' ? 'merge' : 'takes';
+      const res = applyLoopTake(tr.clips, r.take, { ...base, style, mergeMode: prefs.mode === 'replace' ? 'replace' : 'merge' });
+      clips = res.clips;
+      msg = res.takes > 1
+        ? `🔁 ${res.takes} tours enregistrés sur « ${tr.name} » : une prise par tour (la dernière complète joue, les autres sont muettes en dessous, comme Loop Record de Pro Tools).`
+        : `🔁 ${notes} note${notes > 1 ? 's' : ''} enregistrée${notes > 1 ? 's' : ''} en boucle sur « ${tr.name} »${r.take.passes.length > 1 ? ` (${r.take.passes.length} tours fusionnés)` : ''}.`;
+    } else {
+      const pass = r.take.passes[0];
+      const mode = prefs.mode === 'replace' ? 'replace' : 'merge';
+      const res = applyMidiTake(tr.clips, pass?.notes || [], pass?.cc || {}, { ...base, mode, range: { start: r.take.from, end: r.take.to } });
+      clips = res.clips;
+      msg = `🎹 ${notes} note${notes > 1 ? 's' : ''}${ccs ? ` et ${ccs} mouvement${ccs > 1 ? 's' : ''} de contrôleurs` : ''} enregistré${notes + ccs > 1 ? 's' : ''} sur « ${tr.name} »${mode === 'replace' && res.removed ? ` (${res.removed} ancienne${res.removed > 1 ? 's' : ''} remplacée${res.removed > 1 ? 's' : ''})` : ''}.`;
+    }
+    if (!notes && !ccs) msg = '🎹 Aucune note reçue pendant la prise. Vérifie que ton clavier est branché (Réglages audio), ou joue avec le clavier de l’ordinateur (Ctrl+Maj+K).';
+    setState(produce(draft => {
+      draft.isRecording = false;
+      draft.recStartTime = null;
+      const t = draft.tracks.find(x => x.id === r.trackId);
+      if (t && clips !== tr.clips) t.clips = clips as any;
+    }));
+    setAiNotification(`${msg}${notes ? ' Ctrl+Z pour annuler.' : ''}`);
+  };
+
+  // Routeur MIDI : piste armée, piste sélectionnée (Thru), accès MIDI déjà accordé au démarrage.
+  useEffect(() => { void midiManager.autoInit(); }, []);
+  useEffect(() => {
+    const armed = state.tracks.find(t => t.isTrackArmed && isMidiRecordTrack(t))?.id || null;
+    midiInput.setContext({ armedTrackId: armed, selectedTrackId: state.selectedTrackId, isMidiTrack: (id: string) => isMidiRecordTrack(stateRef.current.tracks.find(x => x.id === id)) });
+  }, [state.tracks, state.selectedTrackId]);
+
+  // MIDI Learn : un bouton du clavier pilote un réglage. Un geste = une étape d'annulation.
+  const learnPendingRef = useRef(new Map<string, LearnHit>());
+  const learnGestureRef = useRef(new Map<string, number>());
+  const learnRafRef = useRef(0);
+  useEffect(() => {
+    const flush = () => {
+      learnRafRef.current = 0;
+      const hits = Array.from(learnPendingRef.current.values());
+      learnPendingRef.current.clear();
+      const now = performance.now();
+      for (const h of hits) {
+        const tg = h.mapping.target;
+        const t = stateRef.current.tracks.find(x => x.id === tg.trackId);
+        if (!t) continue;
+        const key = h.mapping.id;
+        const inGesture = now - (learnGestureRef.current.get(key) || 0) < 600;
+        learnGestureRef.current.set(key, now);
+        if (tg.kind === 'volume' || tg.kind === 'pan') {
+          const patch = tg.kind === 'volume' ? { volume: h.value } : { pan: h.value };
+          if (!inGesture) { handleUpdateTrack({ ...t, ...patch }); continue; }
+          if (tg.kind === 'volume') audioEngine.setTrackVolume(t.id, h.value, t.isMuted); else audioEngine.setTrackPan(t.id, h.value);
+          atomicTracksRef.current.set(t.id, { ...t, ...patch });
+          setSilently(produce((d: DAWState) => { const x = d.tracks.find(y => y.id === t.id); if (x) Object.assign(x, patch); }));
+        } else if (tg.pluginId && tg.paramId) {
+          const params = { [tg.paramId]: h.value };
+          if (!inGesture) { handleUpdatePluginParams(t.id, tg.pluginId, params); continue; }
+          setSilently(produce((d: DAWState) => { const p = d.tracks.find(y => y.id === t.id)?.plugins.find(q => q.id === tg.pluginId); if (p) p.params = { ...p.params, ...params }; }));
+          audioEngine.getPluginNodeInstance(t.id, tg.pluginId)?.updateParams?.(params);
+        }
+      }
+    };
+    midiInput.setLearnHandler((hits, learned) => {
+      if (learned) setAiNotification(`🎛️ Relié : le bouton CC${learned.cc} pilote « ${learned.target.label} » (gardé dans tes préférences).`);
+      hits.forEach(h => learnPendingRef.current.set(h.mapping.id, h));
+      if (!learnRafRef.current) learnRafRef.current = requestAnimationFrame(flush);
+    });
+    return () => { midiInput.setLearnHandler(null); if (learnRafRef.current) cancelAnimationFrame(learnRafRef.current); };
+  }, [handleUpdateTrack, handleUpdatePluginParams, setSilently, setAiNotification]);
 
   const answerHeadphones = useCallback((hasHeadphones: boolean) => {
     try { localStorage.setItem('nova_headphones', hasHeadphones ? '1' : '0'); } catch { /* stockage indisponible */ }
@@ -6962,6 +7136,12 @@ function Studio() {
   const onRequestAddPluginMenu = useLatestCallback((tid: string, x: number, y: number) => setAddPluginMenu({ trackId: tid, x, y }));
   const onEditClipStable = useLatestCallback(handleEditClip);
   const onEditMidiStable = useLatestCallback((trackId: string, clipId: string) => setMidiEditorOpen({ trackId, clipId }));
+  // Ouvrir le piano roll sur un clip depuis n'importe où (message, lien, scénario de test).
+  useEffect(() => {
+    const on = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.trackId && d?.clipId) setMidiEditorOpen({ trackId: d.trackId, clipId: d.clipId }); };
+    window.addEventListener('nova:open-piano-roll', on);
+    return () => window.removeEventListener('nova:open-piano-roll', on);
+  }, []);
 
   // --- Séparation de stems (menu du clip ; calcul dans l'appli Windows) ---------------
   const [stemTarget, setStemTarget] = useState<StemTarget | null>(null);
@@ -7544,7 +7724,7 @@ function Studio() {
       />
 
       <RecordingCoach
-        isRecording={state.isRecording}
+        isRecording={state.isRecording && !isMidiRecordTrack(state.tracks.find(t => t.isTrackArmed))}
         trackId={state.tracks.find(t => t.isTrackArmed)?.id || null}
         trackName={state.tracks.find(t => t.isTrackArmed)?.name}
         partLabel={SESSION_LABEL[sessionPart]}
@@ -7860,6 +8040,8 @@ function Studio() {
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}
       
       <MidiHost state={state} getState={getStateForMidi} setState={setState} pianoRoll={midiEditorOpen} />
+      <MidiInputHost tracks={state.tracks} selectedTrackId={state.selectedTrackId} isRecording={state.isRecording}
+        onArm={id => { void armForRecording(id); }} onToggleRecord={() => { void handleToggleRecord(); }} />
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
           <div data-nova-transport="" className="fixed inset-0 z-[250] bg-[#0c0d10] flex flex-col animate-in slide-in-from-bottom-10 duration-200">
              <PanelBoundary name="l'éditeur MIDI" onClose={() => setMidiEditorOpen(null)}>

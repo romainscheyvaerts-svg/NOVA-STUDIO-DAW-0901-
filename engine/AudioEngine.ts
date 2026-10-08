@@ -2002,6 +2002,12 @@ export class AudioEngine {
   
   public getIsPlaying(): boolean { return this.isPlaying; }
 
+  /**
+   * Instant du contexte audio qui correspond au début du morceau pour la
+   * lecture en cours (avant tout retour de boucle) : prise MIDI armée (R16).
+   */
+  public getPlaybackOrigin(): number { return this.playbackStartTime; }
+
   public scrub(tracks: Track[], time: number, velocity: number) { /* ... */ }
   public stopScrubbing() { /* ... */ }
 
