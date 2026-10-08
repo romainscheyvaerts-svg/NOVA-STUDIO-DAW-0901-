@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta } from './types';
 import { themeStore, useTheme } from './utils/themeStore';
+import { openNovaWindow } from './utils/novaWindows';
+import PanelBoundary from './components/PanelBoundary';
+
 import { audioEngine } from './engine/AudioEngine';
+import { dspMonitor, safeModeStore } from './engine/dspMonitor';
+import { estimatedLoadPct as estimatedDspLoadPct, pickAutoFreeze, SafetyContext as DspSafetyContext } from './utils/dspLoad';
 import TransportBar from './components/TransportBar';
 import MobileTransport from './components/MobileTransport';
 import AdminTemplateButton from './components/AdminTemplateButton';
@@ -107,6 +112,7 @@ import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
 import ShareClipModal from './components/ShareClipModal';
 import TakeHomeModal from './components/TakeHomeModal';
+import { CrashRecoveryDialog, VersionsDialog } from './components/RecoveryDialogs';
 import ProGateModal from './components/ProGateModal';
 import CollabPanel, { CollabMessage } from './components/CollabPanel';
 import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
@@ -160,7 +166,11 @@ import { commitActive, drumRhythmSig, drumSongClips, drumSongEnd } from './utils
 import { padLoadKey } from './utils/drumSamples';
 import { loadPadBuffer } from './utils/padBuffers';
 import { loadDrumSound } from './utils/drumSounds';
-import { saveSession, loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
+import { loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
+import { recoveryStore, markSessionOpen, markSessionClosed, previousSessionCrashed, VersionMeta, VersionReason, RecoveredTake } from './utils/recoveryStore';
+import { snapshotOf, stateFromVersion, addRecoveredTakes, trackAudioIds } from './utils/recoverySnapshot';
+import { BufferSweeper } from './utils/bufferSweeper';
+import { repairProject } from './utils/projectRepair';
 import type { SessionTemplate, TemplateLoadReport } from './utils/sessionTemplate';
 import VocalToolsPanel from './components/VocalToolsPanel';
 import NextStepCard, { NextStepAction } from './components/NextStepCard';
@@ -183,6 +193,12 @@ import { getRegisteredPlugin, registryMenuItems, usesProjectKey } from './engine
 import { pluginDisplayName } from './utils/pluginLabel';
 import { BreathHost, BreathMixOption, BreathPanelTools, breathsAfterMixStyle } from './components/BreathTools';
 import { requestBreaths } from './utils/breathBus';
+
+/** Pages du téléphone : nom affiché si l'une plante (le reste du studio continue). */
+const MOBILE_PAGE_NAMES: Record<string, string> = {
+  TRACKS: 'la page des pistes', ARRANGEMENT: "la page d'arrangement", MIXER: 'la console de mixage',
+  PLUGINS: 'la page des effets', BROWSER: 'le catalogue', NOVA: 'le chat Nova',
+};
 
 const AVAILABLE_FX_MENU = [
     { id: 'MASTERSYNC', name: 'Master Sync', icon: 'fa-sync-alt' },
@@ -530,11 +546,18 @@ const useUndoRedo = (initialState: DAWState) => {
     const h = historyRef.current;
     return [...h.past, ...h.future].some(s => s.tracks.some(t => trackBufferIds(t).includes(bufferId)));
   }, []);
+  /** Tous les sons cités par l'historique (annuler / rétablir), pour la libération des sons inutiles. */
+  const historyBufferIds = useCallback((): Set<string> => {
+    const h = historyRef.current;
+    const out = new Set<string>();
+    for (const s of [...h.past, ...h.future]) for (const t of s.tracks) for (const id of trackAudioIds(t)) out.add(id);
+    return out;
+  }, []);
   // Prochaine modification = nouvelle étape d'annulation, même dans l'anti-rebond.
   const breakHistory = useCallback(() => setHistory(curr => ({ ...curr, lastChangeAt: 0 })), []);
   // Étape d'annulation posée MAINTENANT (une passe d'automation = une seule étape).
   const checkpoint = useCallback(() => setHistory(curr => ({ past: [...curr.past, cleanStateForHistory(curr.present)].slice(-MAX_HISTORY), present: curr.present, future: [], lastChangeAt: Date.now() })), []);
-  return { state: history.present, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, breakHistory, checkpoint, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
+  return { state: history.present, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, historyBufferIds, breakHistory, checkpoint, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
 };
 
 /** Onglet ouvert au retour de Stripe (?nova_paid=…) : confirme et invite à revenir au studio. */
@@ -629,13 +652,101 @@ function Studio() {
 
   // Dernière session sauvegardée sur l'appareil (« Reprendre ma session »)
   const [savedSessionMeta, setSavedSessionMeta] = useState<SavedSessionMeta | null>(null);
-  useEffect(() => { getSessionMeta().then(setSavedSessionMeta).catch(() => {}); }, []);
+  // Versions gardées sur l'appareil (utils/recoveryStore) ; l'ancienne sauvegarde .zip
+  // (utils/sessionStore) reste lisible pour les sessions d'avant.
+  const latestVersionRef = useRef<VersionMeta | null>(null);
+  // Séance précédente coupée (plantage, appli fermée de force, coupure de courant).
+  const [crashRecovery, setCrashRecovery] = useState<null | { version: VersionMeta | null; takes: { seconds: number; trackName: string }[]; recording: boolean }>(null);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [recovering, setRecovering] = useState(false);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const crashed = previousSessionCrashed();
+      let latest: VersionMeta | null = null;
+      try { latest = await recoveryStore().latest(); } catch { /* stockage indisponible */ }
+      if (!live) return;
+      latestVersionRef.current = latest;
+      if (latest) setSavedSessionMeta({ savedAt: latest.savedAt, beatTitle: latest.beatTitle, takes: latest.takes, hasLyrics: latest.hasLyrics });
+      else getSessionMeta().then(m => { if (live) setSavedSessionMeta(m); }).catch(() => {});
+      if (!crashed) return;
+      let takes: RecoveredTake[] = [];
+      try { takes = await recoveryStore().takesToRecover(); } catch { /* */ }
+      if (!live) return;
+      if (latest || takes.length) setCrashRecovery({ version: latest, takes: takes.map(t => ({ seconds: t.seconds, trackName: t.meta.trackName })), recording: !!crashed.recording });
+      else markSessionClosed();
+    })();
+    return () => { live = false; };
+  }, []);
   // Après une reprise : le beat du catalogue n'est pas dans la sauvegarde (licence),
   // on le recharge depuis le catalogue.
   const restoreBeatAfterResumeRef = useRef(false);
   const restoreCatalogBeatRef = useRef<(done: string) => Promise<void>>(async () => {});
 
+  /**
+   * Rouvre une version gardée sur l'appareil (et, après un plantage, les prises qui
+   * n'y étaient pas encore : la prise en cours revient jusqu'à la dernière seconde écrite).
+   */
+  const recoverSession = async (versionId: number | null, opts: { takes: boolean; label: string }) => {
+    setRecovering(true);
+    try {
+      await audioEngine.init();
+      const ctx = audioEngine.ctx!;
+      const store = recoveryStore();
+      const report: string[] = [];
+      let project: DAWState | null = null;
+      if (versionId !== null) {
+        const v = await store.loadVersion(versionId);
+        if (v) {
+          const r = stateFromVersion(v.record, v.audio,
+            a => { const b = ctx.createBuffer(a.channels.length, a.length, a.sampleRate); a.channels.forEach((c, i) => b.copyToChannel(c, i)); return b; },
+            (b, id) => { audioBufferRegistry.register(b, id); });
+          project = r.state;
+          report.push(...r.report);
+        }
+      }
+      if (!project) project = { ...stateRef.current, isPlaying: false, isRecording: false };
+      if (opts.takes) {
+        const takes = await store.takesToRecover();
+        const items = takes.map(t => {
+          const id = `recup-${t.meta.takeId}`;
+          const b = ctx.createBuffer(1, t.samples.length, t.meta.sampleRate || ctx.sampleRate);
+          b.copyToChannel(t.samples, 0);
+          audioBufferRegistry.register(b, id);
+          return { take: t, bufferId: id };
+        });
+        const r = addRecoveredTakes(project, items);
+        project = r.state;
+        report.push(...r.report);
+        // Les prises récupérées entrent dans la prochaine version : leur journal sera alors effacé.
+        if (items.length) purgeTakesAfterSaveRef.current = true;
+      }
+      // Garde-fou : ids en double, liens cassés… réparés comme pour un fichier abîmé.
+      const rep = repairProject(project, { knownBufferIds: id => audioBufferRegistry.has(id) });
+      if (rep.state) project = rep.state as DAWState;
+      if (rep.repaired) report.push(...rep.report);
+      markSessionClosed();
+      setCrashRecovery(null);
+      setVersionsOpen(false);
+      handleEnterWithProject(project!);
+      const msg = `🛟 ${opts.label}${report.length ? ` — ${report.join(' ; ')}` : ''}.`;
+      setTimeout(() => setAiNotification(msg), 1500);
+      // Nouvelle version tout de suite (avec les prises récupérées).
+      setTimeout(() => { void autosaveNowRef.current?.('recovered', true); }, 4000);
+    } catch (e) {
+      console.error('[Récupération]', e);
+      setAiNotification("La session gardée sur cet appareil n'a pas pu être rouverte. Tes versions sont toujours là (menu « Versions de la session »).");
+    } finally {
+      setRecovering(false);
+    }
+  };
+
   const handleResumeSession = async () => {
+    const latest = latestVersionRef.current;
+    if (latest) {
+      await recoverSession(latest.id, { takes: true, label: `Session reprise (version de ${new Date(latest.savedAt).toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' })})` });
+      return;
+    }
     const saved = await loadSession();
     if (!saved) { setSavedSessionMeta(null); return; }
     try {
@@ -763,8 +874,14 @@ function Studio() {
     const loadPendingData = async () => {
       // Charger un projet complet
       if (pendingProject) {
+        // Fichier abîmé ouvert quand même (services/ProjectIO + utils/projectRepair) : on dit ce qui a été réparé.
+        const repaired = ProjectIO.repairReportOf(pendingProject);
         handleLoadProject(pendingProject);
         setPendingProject(null);
+        if (repaired?.length) {
+          setAiNotification(`🩹 Projet réparé à l'ouverture : ${repaired.join(' ; ')}.`);
+          setTimeout(() => setAiNotice(n => (n?.text?.startsWith('🩹') ? null : n)), 15000);
+        }
         const notice = pendingTemplateNoticeRef.current;
         if (notice) {
           pendingTemplateNoticeRef.current = null;
@@ -827,7 +944,7 @@ function Studio() {
     punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 }
   };
 
-  const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, breakHistory, checkpoint, canUndo, canRedo } = useUndoRedo(initialState);
+  const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, historyBufferIds, breakHistory, checkpoint, canUndo, canRedo } = useUndoRedo(initialState);
   
   // Thème mémorisé sur l'appareil (sombre / clair / auto) : utils/themeStore.
   const { theme } = useTheme();
@@ -875,6 +992,12 @@ function Studio() {
     const previous = engineTracksRef.current;
     const full = !previous || routing !== engineRoutingRef.current;
     played.excluded.forEach(id => audioEngine.disposeTrack(id));
+    // Pistes qui n'existent plus (autre projet ouvert, session reprise) : leur chaîne audio
+    // est libérée. Avant, les pistes du projet précédent restaient dans le moteur (fuite).
+    if (full) {
+      const keep = new Set(played.tracks.map(t => t.id));
+      audioEngine.trackIds().forEach(id => { if (!keep.has(id) && !played.excluded.has(id)) audioEngine.disposeTrack(id); });
+    }
     played.tracks.forEach(t => {
       if (!full && atomic.get(t.id) === t) return; // volume / pan déjà réglés directement
       if (full || previous!.get(t.id) !== t) audioEngine.updateTrack(t, played.tracks);
@@ -1090,7 +1213,7 @@ function Studio() {
   const handleLogout = async () => {
     // Au studio (pont VST) : pistes VST gelées + session sauvegardée avant de se déconnecter.
     if (novaBridge.isConnected() && !showLanding) {
-      try { await bakeVstBeforeSave(); await autosaveNow(); } catch (e) { console.warn('[Déconnexion] gel', e); }
+      try { await bakeVstBeforeSave(); await autosaveNow('manual', true); } catch (e) { console.warn('[Déconnexion] gel', e); }
     }
     await supabaseManager.signOut(); setUser(null);
     // Appli Windows : « Déconnexion » ferme aussi le compte Make Music → la porte de connexion revient.
@@ -2223,6 +2346,12 @@ function Studio() {
     let armedTrack = currentState.tracks.find(t => t.isTrackArmed);
     // Collaboration : jamais sur la piste d'un autre, ni pendant qu'il y enregistre.
     if (armedTrack) { const why = collabRecGuardRef.current(armedTrack.id); if (why) { setAiNotification(`🔒 ${why}`); return; } }
+    // Piste « armée » dans le projet mais micro fermé côté moteur (annuler / rétablir, session
+    // reprise, collaboration) : on réarme. Avant, la prise échouait (« No monitor stream ») —
+    // mesuré dans le soak : 8 prises sur 10 ratées après des annulations.
+    if (armedTrack && !audioEngine.isMonitoring(armedTrack.id)) {
+      if (!(await armForRecording(armedTrack.id))) return;
+    }
     if (!armedTrack) {
       const ctRaw = collabRecTargetRef.current?.(currentState.selectedTrackId) ?? null;
       if (ctRaw && 'error' in ctRaw) { setAiNotification(`🔒 ${ctRaw.error}`); return; }
@@ -3019,6 +3148,43 @@ function Studio() {
   }, [setState, isMobile]);
   // « Bus 1 », « Bus 2 »… (la console le montre et ouvre tout de suite son renommage).
   const handleAddBus = useCallback(() => { handleCreateTrack(TrackType.BUS, nextNumberedName(stateRef.current.tracks, 'Bus')); }, [handleCreateTrack]);
+  const freezeTrackRef = useRef(handleFreezeTrack);
+  freezeTrackRef.current = handleFreezeTrack;
+
+  // --- Surcharge processeur (compteur CPU de la barre de transport, mode sécurité) ---------
+  // engine/dspMonitor mesure les sous-régimes du contexte audio et les retards du
+  // planificateur ; en surcharge CONFIRMÉE, le mode sécurité gèle la piste la plus
+  // lourde qu'on peut geler sans risque (utils/dspLoad.safeToAutoFreeze), une par
+  // épisode, au plus 4 par séance, jamais pendant une prise.
+  const dspSafetyOf = useCallback((): DspSafetyContext => ({
+    isRecording: !!stateRef.current.isRecording,
+    bridgeConnected: novaBridge.isConnected(),
+    busyTrackIds: Object.keys(collabLiveStore.get().recs || {}),
+  }), []);
+  const autoFreezeCountRef = useRef(0);
+  useEffect(() => {
+    dspMonitor.attach({
+      getContext: () => audioEngine.ctx,
+      isActive: () => audioEngine.isTransportRunning(),
+      getLateTicks: () => audioEngine.getSchedulerLateTicks(),
+      getEstimatedLoad: () => estimatedDspLoadPct(stateRef.current.tracks),
+    });
+    const off = dspMonitor.onEpisode(e => {
+      if (e.type !== 'overload' || !safeModeStore.get()) return;
+      if (autoFreezeCountRef.current >= 4) return;
+      const ctx = dspSafetyOf();
+      if (ctx.isRecording) return;
+      const pick = pickAutoFreeze(stateRef.current.tracks, ctx);
+      if (!pick) return;
+      autoFreezeCountRef.current++;
+      void Promise.resolve(freezeTrackRef.current(pick.id)).then(() => {
+        setAiNotification(`🛟 Mode sécurité : « ${pick.name} » gelée pour soulager le processeur (dégèle-la quand tu veux).`);
+        try { window.dispatchEvent(new CustomEvent('nova:safe-freeze', { detail: { trackId: pick.id, name: pick.name } })); } catch { /* */ }
+      });
+    });
+    return () => { off(); dspMonitor.detach(); };
+  }, [dspSafetyOf, setAiNotification]);
+
   const handleToggleBypass = useCallback((trackId: string, pluginId: string) => {
     setState(produce((draft: DAWState) => {
         const track = draft.tracks.find(t => t.id === trackId);
@@ -3979,51 +4145,126 @@ function Studio() {
     setWelcomeOpen(false);
     try { localStorage.setItem('nova_welcome_seen', '1'); } catch { /* */ }
   };
-  const autosaveTimer = useRef<number | null>(null);
+  // --- Sauvegarde automatique incrémentale (utils/recoveryStore) -----------------------
+  // Avant : 4 s après chaque modification (jamais pendant la lecture ni la prise), tout
+  // le projet était réencodé en .zip (un WAV par son) : l'interface gelait sur une grosse
+  // session et seules deux sauvegardes existaient. Maintenant : toutes les 15 s si le
+  // projet a changé (lecture comprise), juste après chaque prise et quand l'onglet passe
+  // en arrière-plan ; seuls les sons nouveaux sont écrits (une fois, sans encodage) ;
+  // 20 dernières versions + une par heure. La prise en cours, elle, est écrite au fil de
+  // l'eau par le journal de prise (moteur audio).
   const autosaveNotified = useRef(false);
   const autosaveBusy = useRef(false);
-  const autosavePending = useRef(false);
-  const autosaveNow = useCallback(async () => {
-    if (autosaveBusy.current) { autosavePending.current = true; return; }
+  const autosavePending = useRef<VersionReason | null>(null);
+  const lastSavedSigRef = useRef<unknown[] | null>(null);
+  const purgeTakesAfterSaveRef = useRef(false);
+  // Dernière version écrite (diagnostic) : une ref, pas un état (pas de rendu de tout le studio toutes les 15 s).
+  const lastAutosaveRef = useRef<{ at: number; ms: number; syncMs: number; audioWritten: number } | null>(null);
+  const autosaveNow = useCallback(async (reason: VersionReason = 'auto', force = false) => {
+    if (autosaveBusy.current) { autosavePending.current = reason; return; }
     const st = stateRef.current;
-    if (st.isRecording) return;
+    if (st.isRecording) return; // la prise est déjà écrite au fil de l'eau
+    const sig = [st.tracks, st.lyrics, st.bpm, st.name, st.markers, st.chords, st.timeSignature];
+    const last = lastSavedSigRef.current;
+    if (!force && last && sig.every((v, i) => v === last[i])) return;
+    // Rien à garder (projet vierge, beat seul) : on n'écrase pas une session précédente.
+    const hasContent = st.tracks.some(t => t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0) || !!(st.lyrics || '').trim();
+    if (!hasContent) return;
     autosaveBusy.current = true;
-    const voiceTakes = countVoiceTakes(st.tracks); // prises, pas fragments (F10)
-    const hasAudio = st.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0);
-    if (!hasAudio && !(st.lyrics || '').trim()) { autosaveBusy.current = false; return; } // rien à garder : on n'écrase pas une session précédente
     try {
-      const blob = await ProjectIO.saveProject(st, user?.owned_instruments || []);
-      const beatClip = st.tracks.find(t => t.id === 'instrumental')?.clips[0];
-      await saveSession(blob, {
-        savedAt: Date.now(),
-        beatTitle: beatClip?.name?.replace(/^🚫\s*/, '').replace(/\s*\(Licence requise\)$/, '') || null,
-        takes: voiceTakes,
-        hasLyrics: !!(st.lyrics || '').trim(),
+      const t0 = performance.now();
+      const snap = snapshotOf(st, user?.owned_instruments || []);
+      // Travail synchrone (fil de l'interface) : la mise en JSON. L'écriture IndexedDB est asynchrone.
+      const syncMs = Math.round((performance.now() - t0) * 10) / 10;
+      const r = await recoveryStore().saveVersion({
+        projectId: st.id, name: st.name || 'Session', reason, ...snap,
+        getAudio: id => {
+          const b = audioBufferRegistry.get(id);
+          return b ? { sampleRate: b.sampleRate, length: b.length, channels: Array.from({ length: b.numberOfChannels }, (_, i) => b.getChannelData(i)) } : null;
+        },
       });
+      lastSavedSigRef.current = sig;
+      if (r) lastAutosaveRef.current = { at: r.versionId, ms: r.ms, syncMs, audioWritten: r.audioWritten };
+      if (purgeTakesAfterSaveRef.current) { purgeTakesAfterSaveRef.current = false; await recoveryStore().purgeTakes(); }
       if (!autosaveNotified.current) {
         autosaveNotified.current = true;
-        setAiNotification("💾 Ta session est sauvegardée automatiquement sur cet appareil : tu la retrouveras en revenant (« Reprendre ma session »).");
+        setAiNotification("💾 Ta session est sauvegardée automatiquement sur cet appareil, prises comprises (même pendant l'enregistrement) : tu la retrouveras en revenant, même après un plantage.");
       }
     } catch (e) {
       console.warn('[Session] Sauvegarde auto impossible', e);
     } finally {
       autosaveBusy.current = false;
-      if (autosavePending.current) { autosavePending.current = false; setTimeout(() => { void autosaveNowRef.current?.(); }, 500); }
+      const again = autosavePending.current;
+      if (again) { autosavePending.current = null; setTimeout(() => { void autosaveNowRef.current?.(again); }, 300); }
     }
   }, [user]);
-  const autosaveNowRef = useRef<(() => Promise<void>) | null>(null);
+  const autosaveNowRef = useRef<((reason?: VersionReason, force?: boolean) => Promise<void>) | null>(null);
   autosaveNowRef.current = autosaveNow;
   useEffect(() => {
-    if (showLanding || state.isPlaying || state.isRecording) return;
-    if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
-    autosaveTimer.current = window.setTimeout(() => { void autosaveNow(); }, 4000);
-    return () => { if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current); };
-  }, [state.tracks, state.lyrics, state.isPlaying, state.isRecording, showLanding, autosaveNow]);
+    if (showLanding) return;
+    const id = window.setInterval(() => { void autosaveNowRef.current?.('auto'); }, 15000);
+    return () => window.clearInterval(id);
+  }, [showLanding]);
+  // Juste après une prise : version tout de suite (la prise y entre, son journal est effacé).
+  const wasRecordingRef = useRef(false);
   useEffect(() => {
-    const onHide = () => { if (document.visibilityState === 'hidden' && !showLanding) void autosaveNow(); };
+    if (wasRecordingRef.current && !state.isRecording && !showLanding) {
+      const t = window.setTimeout(() => { void autosaveNowRef.current?.('take', true); }, 300);
+      wasRecordingRef.current = false;
+      return () => window.clearTimeout(t);
+    }
+    wasRecordingRef.current = state.isRecording;
+  }, [state.isRecording, showLanding]);
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden' && !showLanding) void autosaveNow('close'); };
     document.addEventListener('visibilitychange', onHide);
     return () => document.removeEventListener('visibilitychange', onHide);
   }, [autosaveNow, showLanding]);
+  // Séance ouverte : drapeau posé (localStorage, écriture synchrone). Fermeture normale
+  // (onglet fermé, rechargé, quitté) : drapeau retiré. Resté posé au démarrage suivant =
+  // plantage, fermeture forcée ou coupure de courant → « Récupérer la session ».
+  useEffect(() => {
+    if (showLanding) return;
+    markSessionOpen(state.id, state.isRecording);
+  }, [showLanding, state.id, state.isRecording]);
+  useEffect(() => {
+    const onClose = () => markSessionClosed();
+    window.addEventListener('pagehide', onClose);
+    return () => window.removeEventListener('pagehide', onClose);
+  }, []);
+  // Sons qui ne servent plus (ni au projet ni à l'historique d'annulation) : libérés
+  // après un délai de grâce (utils/bufferSweeper). Avant, un rendu de gel remplacé ou
+  // une prise annulée restait en mémoire dès que son étape sortait de l'historique.
+  const sweeperRef = useRef<BufferSweeper | null>(null);
+  useEffect(() => {
+    if (showLanding) return;
+    if (!sweeperRef.current) sweeperRef.current = new BufferSweeper();
+    const id = window.setInterval(() => {
+      const st = stateRef.current;
+      if (st.isRecording) return;
+      const used = historyBufferIds();
+      for (const t of st.tracks) for (const b of trackAudioIds(t)) used.add(b);
+      const free = sweeperRef.current!.sweep(audioBufferRegistry.ids(), used, Date.now());
+      if (free.length) {
+        audioBufferRegistry.removeMany(free);
+        audioEngine.pruneCaches();
+      }
+    }, 30000);
+    return () => window.clearInterval(id);
+  }, [showLanding, historyBufferIds]);
+  // Journal de prise : le moteur écrit chaque morceau capté pendant l'enregistrement.
+  useEffect(() => {
+    audioEngine.setTakeJournalFactory(m => {
+      const st = stateRef.current;
+      const t = st.tracks.find(x => x.id === m.trackId);
+      return recoveryStore().beginTake({
+        takeId: `take-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        projectId: st.id, trackId: m.trackId, trackName: t?.name || 'Prise',
+        sampleRate: m.sampleRate, recordedAt: m.recordedAt, latency: m.latency,
+      });
+    });
+    return () => audioEngine.setTakeJournalFactory(null);
+  }, []);
 
   // --- Session à emporter (en ligne) -------------------------------------------------
   // Le client enregistre au studio, continue chez lui (iPad, ordinateur), revient :
@@ -5385,7 +5626,7 @@ function Studio() {
     notify: (msg, ms = 5000) => { setAiNotification(msg); setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), ms); },
     gate: remoteGate,
     saveSession: async () => {
-      await autosaveNow();
+      await autosaveNow('manual', true);
       if (cloudRef.current && stateRef.current.id === cloudProjectId(cloudRef.current.id)) await syncCloudRef.current({});
     },
     releaseBuffer: (id) => releaseBufferIfUnused(id, []),
@@ -5465,6 +5706,38 @@ function Studio() {
     return () => window.removeEventListener('nova:volume-lock', onLock);
   }, [setState]);
 
+  // Isolation des pannes audio : un effet dont le worklet a planté est déjà contourné
+  // par le moteur (le son sec continue) ; ici il passe en bypass dans le projet (sans
+  // étape d'annulation) et l'artiste est prévenu. Un VST planté (pont) se relance seul.
+  useEffect(() => {
+    const onPluginCrash = (e: Event) => {
+      const d = (e as CustomEvent<{ trackId: string; pluginId: string; name: string; trackName: string }>).detail;
+      if (!d) return;
+      setSilently(produce((draft: DAWState) => {
+        const p = draft.tracks.find(t => t.id === d.trackId)?.plugins.find(x => x.id === d.pluginId);
+        if (p) p.isEnabled = false;
+      }));
+      setAiNotification(`⚠️ L'effet « ${d.name} » de « ${d.trackName} » a planté : il est contourné (bypass), le son continue. Réactive-le pour le relancer.`);
+    };
+    const onVstCrash = (e: Event) => {
+      const d = (e as CustomEvent<{ message?: string; name?: string }>).detail;
+      if (d?.message) setAiNotification(`⚠️ ${d.message}`);
+      else if (d?.name) setAiNotification(`⚠️ Le VST « ${d.name} » a planté : le son passe sans lui.`);
+    };
+    const onModuleCrash = (e: Event) => {
+      const d = (e as CustomEvent<{ module: string }>).detail;
+      if (d?.module) setAiNotification(`⚠️ ${d.module.charAt(0).toUpperCase()}${d.module.slice(1)} s'est arrêté : le reste continue de jouer.`);
+    };
+    window.addEventListener('nova:plugin-crash', onPluginCrash);
+    window.addEventListener('nova:vst-crash', onVstCrash);
+    window.addEventListener('nova:audio-module-crash', onModuleCrash);
+    return () => {
+      window.removeEventListener('nova:plugin-crash', onPluginCrash);
+      window.removeEventListener('nova:vst-crash', onVstCrash);
+      window.removeEventListener('nova:audio-module-crash', onModuleCrash);
+    };
+  }, [setSilently]);
+
   // Le site (page /daw) transmet la connexion du compte Make Music au studio intégré.
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
@@ -5536,7 +5809,8 @@ function Studio() {
   useEffect(() => {
     (window as any).__novaBeforeClose = async () => {
       try { if (novaBridge.isConnected()) await bakeVstBeforeSave(); } catch (e) { console.warn('[Fermeture] gel', e); }
-      try { await autosaveNow(); } catch { /* */ }
+      try { await autosaveNow('close', true); } catch { /* */ }
+      markSessionClosed();
       if (cloudRef.current && stateRef.current.id === cloudProjectId(cloudRef.current.id)) {
         // Une synchro déjà en cours : on attend qu'elle finisse, puis on renvoie.
         for (let i = 0; i < 120 && cloudBusyRef.current; i++) await new Promise(r => setTimeout(r, 500));
@@ -5733,7 +6007,30 @@ function Studio() {
       },
       editClip: handleEditClip,
       setBpm: handleUpdateBpm,
-      syncAutoTuneScale: (rootKey: number, scale: string) => applyProjectKey(rootKey, scale)
+      syncAutoTuneScale: (rootKey: number, scale: string) => applyProjectKey(rootKey, scale),
+      // Scénarios de bout en bout (endurance, pannes injectées) : mêmes chemins que l'interface.
+      updateTrack: handleUpdateTrack,
+      updatePluginParams: handleUpdatePluginParams,
+      toggleBypass: handleToggleBypass,
+      togglePlay: handleTogglePlay,
+      stop: handleStop,
+      seek: handleSeek,
+      toggleRecord: () => toggleRecordRef.current?.(),
+      freeze: (trackId: string) => freezeTrackRef.current?.(trackId),
+      undo,
+      redo,
+      setView: (v: string) => setState(s => ({ ...s, currentView: v as any })),
+      setTheme: (p: 'dark' | 'light' | 'system') => themeStore.setPref(p),
+      openWindow: openNovaWindow,
+      diag: () => ({
+        engine: audioEngine.getDiagnostics(),
+        buffers: audioBufferRegistry.size,
+        bufferSeconds: Math.round(audioBufferRegistry.ids().reduce((s, id) => s + (audioBufferRegistry.get(id)?.duration || 0) * (audioBufferRegistry.get(id)?.numberOfChannels || 1), 0)),
+        tracks: stateRef.current.tracks.length,
+        clips: stateRef.current.tracks.reduce((s, t) => s + t.clips.length, 0),
+        // Dernière sauvegarde automatique : heure et durée (ms) — elle ne doit jamais geler l'interface.
+        autosave: lastAutosaveRef.current,
+      }),
     };
     // Dépôt d'un fichier ou d'un beat sur l'en-tête d'une piste (TrackHeader) :
     // cet objet n'existait pas, le dépôt ne faisait rien.
@@ -6797,6 +7094,7 @@ function Studio() {
         onEnterWithProject={handleEnterWithProject}
         savedSession={savedSessionMeta}
         onResumeSession={handleResumeSession}
+        onOpenVersions={savedSessionMeta ? () => setVersionsOpen(true) : undefined}
         onLogin={(u) => setUser(u)}
         onLogout={handleLogout}
         onOpenTemplates={() => setTemplatesModal('browse')}
@@ -6811,6 +7109,14 @@ function Studio() {
           />
         </Suspense>
       )}
+      {crashRecovery && !versionsOpen && (
+        <CrashRecoveryDialog info={crashRecovery} busy={recovering}
+          onRecover={() => void recoverSession(crashRecovery.version?.id ?? null, { takes: true, label: crashRecovery.version ? `Session récupérée (version de ${new Date(crashRecovery.version.savedAt).toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' })})` : 'Prise récupérée' })}
+          onLater={() => { markSessionClosed(); setCrashRecovery(null); }}
+          onOpenVersions={() => setVersionsOpen(true)} />
+      )}
+      <VersionsDialog open={versionsOpen} busy={recovering} onClose={() => setVersionsOpen(false)}
+        onRestore={v => void recoverSession(v.id, { takes: !!crashRecovery, label: `Version du ${new Date(v.savedAt).toLocaleString('fr-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} restaurée` })} />
       </>
     );
   }
@@ -6821,7 +7127,11 @@ function Studio() {
 
       {/* TransportBar - Desktop, Tablet ET Mobile avec menu hamburger */}
       <div className="relative z-50">
+        <PanelBoundary name="la barre de transport" compact>
         <TransportBar
+          dspTracks={state.tracks}
+          onDspFreezeTrack={(id) => { void freezeTrackRef.current(id); }}
+          dspSafety={{ isRecording: !!state.isRecording, bridgeConnected: novaBridge.isConnected(), busyTrackIds: Object.keys(collabLiveStore.get().recs || {}) }}
           onOpenCollab={() => setCollabOpen(true)}
           collabLabel={remote.active ? 'Ingé à distance' : collab ? `Collaboration · ${collabOnline.length || 1} en ligne` : 'Collaborer à distance'}
           onOpenTakeHome={() => setTakeHomeOpen(true)}
@@ -6855,6 +7165,7 @@ function Studio() {
         >
           <div className="ml-4 border-l border-white/5 pl-4"><ViewModeSwitcher currentMode={viewMode} onChange={handleViewModeChange} /></div>
         </TransportBar>
+        </PanelBoundary>
       </div>
       
       {/* Admin Template Button - Visible uniquement pour l'admin */}
@@ -6889,12 +7200,14 @@ function Studio() {
       <div className="flex-1 flex overflow-hidden relative">
         {isSidebarOpen && !isMobile && (
             <aside className="shrink-0 z-10">
+              <PanelBoundary name="le navigateur latéral" onClose={toggleSidebar}>
                 <SideBrowser2
                     user={user} activeTab={activeSideBrowserTab} onTabChange={setActiveSideBrowserTab}
                     onAddPlugin={handleAddPluginFromContext}
                     onPurchase={handleBuyLicense} selectedTrackId={state.selectedTrackId}
                     onLoadBeat={handleLoadCatalogBeat} onMakeBeat={(m: any) => { void startMelodyProjectRef.current?.(m); }}
                 />
+              </PanelBoundary>
             </aside>
         )}
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
@@ -6902,6 +7215,7 @@ function Studio() {
           {!isMobile && (
             <>
               {shownView === 'ARRANGEMENT' && (
+                <PanelBoundary name="l'arrangement">
                 <StructureTracksContext.Provider value={state.tracks}>
                 <ArrangementView
                    tracks={state.tracks} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
@@ -6925,10 +7239,11 @@ function Studio() {
                    tempoLane={tempoLaneProp}
                 />
                 </StructureTracksContext.Provider>
+                </PanelBoundary>
               )}
 
               {shownView === 'MIXER' && (
-                 <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><MixerView
+                 <PanelBoundary name="la console de mixage" onClose={() => setState(s => ({ ...s, currentView: 'ARRANGEMENT' }))}><Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><MixerView
                     tracks={state.tracks} onUpdateTrack={handleUpdateTrack}
                     onOpenPlugin={onOpenPluginUI}
                     onDropPluginOnTrack={onDropPluginOpenUI}
@@ -6938,14 +7253,14 @@ function Studio() {
                     trackGroups={state.trackGroups} onCreateGroup={handleCreateGroup}
                     onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup}
                     sendViewSlot={sendViewSlot}
-                 /></Suspense>
+                 /></Suspense></PanelBoundary>
               )}
 
               {shownView === 'AUTOMATION' && (
-                 <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><AutomationEditorView
+                 <PanelBoundary name="l'éditeur d'automation" onClose={() => setState(s => ({ ...s, currentView: 'ARRANGEMENT' }))}><Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}><AutomationEditorView
                    tracks={state.tracks} currentTime={state.currentTime} bpm={state.bpm} zoomH={40}
                    onUpdateTrack={handleUpdateTrack} onSeek={handleSeek}
-                 /></Suspense>
+                 /></Suspense></PanelBoundary>
               )}
             </>
           )}
@@ -7001,7 +7316,7 @@ function Studio() {
             </button>
           )}
           {isMobile && (
-            <>
+            <PanelBoundary key={`mobile-${activeMobileTab}`} name={MOBILE_PAGE_NAMES[activeMobileTab] || 'cette page'}>
               {activeMobileTab === 'TRACKS' && (
                 <MobileTracksPage
                   tracks={mobileTracks}
@@ -7081,9 +7396,10 @@ function Studio() {
                   selectedTrackId={state.selectedTrackId}
                 />
               )}
-            </>
+            </PanelBoundary>
           )}
           {structurePanel && (
+            <PanelBoundary name={structurePanel === 'buses' ? 'la liste des bus' : 'la liste des pistes'} onClose={() => setStructurePanel(null)}>
             <Suspense fallback={null}>
               {structurePanel === 'buses'
                 ? <BusPanel tracks={state.tracks} onClose={() => setStructurePanel(null)}
@@ -7091,6 +7407,7 @@ function Studio() {
                 : <TrackListPanel tracks={state.tracks} mode={isMobile || structurePanel === 'hidden' ? 'hidden' : 'full'} onClose={() => setStructurePanel(null)}
                     className={isMobile ? 'fixed inset-x-2 bottom-2 top-16 z-[700]' : 'absolute left-2 top-2 bottom-2 z-[650] w-[340px] max-w-[calc(100%-16px)]'} />}
             </Suspense>
+            </PanelBoundary>
           )}
         </main>
       </div>
@@ -7270,7 +7587,13 @@ function Studio() {
       )}
 
       <Suspense fallback={null}>
-      {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user && user.id !== 'guest' ? user : null} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} onSaveAsTemplate={() => { setIsSaveMenuOpen(false); setTemplatesModal('save'); }} />}
+      {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user && user.id !== 'guest' ? user : null} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} onSaveAsTemplate={() => { setIsSaveMenuOpen(false); setTemplatesModal('save'); }} onOpenVersions={() => { setIsSaveMenuOpen(false); setVersionsOpen(true); }} />}
+      <VersionsDialog open={versionsOpen} busy={recovering} projectId={state.id} onClose={() => setVersionsOpen(false)}
+        onRestore={async v => {
+          // La version actuelle est gardée d'abord : restaurer ne perd rien.
+          try { await autosaveNowRef.current?.('restore', true); } catch { /* */ }
+          void recoverSession(v.id, { takes: false, label: `Version du ${new Date(v.savedAt).toLocaleString('fr-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} restaurée (ta version d'avant reste dans l'historique)` });
+        }} />
       {isLoadMenuOpen && <LoadProjectModal isOpen={isLoadMenuOpen} onClose={() => setIsLoadMenuOpen(false)} user={user} onLoadCloud={handleLoadCloud} onLoadLocal={handleLoadLocalFile} onOpenAuth={() => setIsAuthOpen(true)} onOpenTemplates={() => { setIsLoadMenuOpen(false); setTemplatesModal('browse'); }} />}
       {templatesModal && (
         <Suspense fallback={null}>
@@ -7289,8 +7612,8 @@ function Studio() {
           />
         </Suspense>
       )}
-      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
-        onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} />}
+      {isExportMenuOpen && <PanelBoundary name="la fenêtre d'export" overlay onClose={() => setIsExportMenuOpen(false)}><ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
+        onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} /></PanelBoundary>}
       {/* R2 : métronome et décompte ; tempo, mesure et piste tempo. */}
       {metronomeDialogOpen && (
         <Suspense fallback={null}>
@@ -7316,6 +7639,7 @@ function Studio() {
       )}
       {/* File d'exports (R1) : progression et « Ouvrir le dossier » / « Télécharger » à la fin. */}
       <Suspense fallback={null}><ExportQueueToast /></Suspense>
+      <PanelBoundary name="la boîte à rythmes" overlay onClose={() => setDrumsOpen(false)}>
       <DrumMachinePanel
         open={drumsOpen}
         onClose={() => setDrumsOpen(false)}
@@ -7350,11 +7674,14 @@ function Studio() {
         ensureEngine={ensureAudioEngine}
         notify={setAiNotification}
       />
+      </PanelBoundary>
       <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <PanelBoundary name="les fenêtres d'édition" overlay>
       <ProToolsWindows tracks={state.tracks} markers={state.markers} bpm={state.bpm} setState={setState} onEditClip={handleEditClip}
         onSeek={handleSeek} onAddMarker={handleAddMarker} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
         getPlayhead={() => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime)}
         onOpenShortcuts={() => setShortcutsOpen(true)} projectKey={state.projectKey} projectScale={state.projectScale} beatsPerBar={state.timeSignature?.numerator} />
+      </PanelBoundary>
       {/* Respirations : fenêtre, traitement en un clic, mode auto après chaque prise (components/BreathTools). */}
       <BreathHost tracks={state.tracks} setState={setState} undo={undo} breakHistory={breakHistory} projectAuto={state.breathAuto} isMobile={isMobile}
         onFrozenTreated={refreezeAfterEdit} onUnfreeze={(id) => { void handleFreezeTrack(id); }} />
@@ -7386,6 +7713,7 @@ function Studio() {
         onDone={(ok) => { const g = proGate; setProGate(null); if (ok) { track('pro_subscribed', { from: 'gate' }); proOkRef.current = { at: Date.now(), ok: true }; setAiNotification('⭐ Nova Pro actif : tu peux importer tes instrus et collaborer.'); } g?.resolve(ok); }}
       />
       <RemoteIngePanel open={collabOpen && (remote.active || !!(remote.connecting && !collab))} onClose={() => setCollabOpen(false)} remote={remote} />
+      <PanelBoundary name="le panneau de collaboration" overlay onClose={() => setCollabOpen(false)}>
       <CollabPanel
         open={collabOpen && !remote.active && !(remote.connecting && !collab)}
         onClose={() => { setCollabOpen(false); if (!collab) { collabPayCancelRef.current = true; setCollabBusy(null); } }}
@@ -7435,6 +7763,7 @@ function Studio() {
         remoteLinkFromUrl={remoteLinkFromUrl}
         savedRemote={state.remoteInge ? { role: state.remoteInge.role } : null}
         liveVst={collab?.role === 'engineer' ? (
+          <PanelBoundary name="les VST de l'artiste" compact>
           <LiveVstRemotePanel
             tracks={state.tracks}
             catalog={artistVstCatalog}
@@ -7456,6 +7785,7 @@ function Studio() {
               setAiNotification(`🎛️ ${entry.name} (VST de l'artiste) ajouté sur ta piste : il se charge sur son PC. Règle-le ici (« Lire ses réglages »).`);
             }}
           />
+          </PanelBoundary>
         ) : null}
         onSubscribe={() => { void subscribeCollab(); }}
         onLeave={() => { void leaveCollab(); }}
@@ -7468,6 +7798,7 @@ function Studio() {
           c.client.queue(`chat:${localId}`, 'chat', { text, localId });
         }}
       />
+      </PanelBoundary>
       {/* « Collaborer » (ordinateur / tablette) : dans le bandeau du bas ; flottant,
           il recouvrait le bas du catalogue Beat Store. */}
       {!showLanding && <FrozenEditsNotice tracks={state.tracks} bridgeConnected={preFx.bridgeConnected} projectId={state.id} compact={isMobile} />}
@@ -7507,10 +7838,12 @@ function Studio() {
         const st = synthPanelTrackId ? state.tracks.find(t => t.id === synthPanelTrackId && t.type === TrackType.MIDI && !t.bass808) : undefined;
         if (!st) return null;
         return (
+          <PanelBoundary name="le synthé" overlay onClose={closeSynthPanel}>
           <SynthPanel track={st} onClose={closeSynthPanel}
             onChange={s => handleSynthChange(st.id, s)}
             onPreview={(s, pitches) => { void handleSynthPreview(st.id, s, pitches); }}
             onNoteOn={p => handleSynthNoteOn(st.id, p)} onNoteOff={p => handleSynthNoteOff(st.id, p)} />
+          </PanelBoundary>
         );
       })()}
       {isAuthOpen && <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} onClose={() => setIsAuthOpen(false)} />}
@@ -7522,6 +7855,7 @@ function Studio() {
       <MidiHost state={state} getState={getStateForMidi} setState={setState} pianoRoll={midiEditorOpen} />
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
           <div data-nova-transport="" className="fixed inset-0 z-[250] bg-[#0c0d10] flex flex-col animate-in slide-in-from-bottom-10 duration-200">
+             <PanelBoundary name="l'éditeur MIDI" onClose={() => setMidiEditorOpen(null)}>
              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement de l'éditeur…</div>}>
                <PianoRoll track={state.tracks.find(t => t.id === midiEditorOpen.trackId)!} clipId={midiEditorOpen.clipId} bpm={state.bpm} currentTime={state.currentTime} onUpdateTrack={handleUpdateTrack} onClose={() => setMidiEditorOpen(null)}
                  isPlaying={state.isPlaying} onTogglePlay={handleTogglePlay}
@@ -7553,6 +7887,7 @@ function Studio() {
                  })()}
                />
              </Suspense>
+             </PanelBoundary>
           </div>
       )}
       
@@ -7561,9 +7896,11 @@ function Studio() {
         // et les pistes restent utilisables derrière ; on la déplace par sa barre.
         <div className={`fixed inset-0 flex items-center justify-center z-[200] ${isMobile ? 'bg-[#0c0d10]' : 'pointer-events-none'}`}>
            <div className={`relative ${isMobile ? 'w-full h-full p-4 overflow-y-auto' : 'pointer-events-auto'}`} onMouseDown={e => e.stopPropagation()}>
+              <PanelBoundary key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} name="la fenêtre d'effet" onClose={() => setActivePlugin(null)}>
               <Suspense fallback={<div className="w-64 h-32 flex items-center justify-center text-slate-400 text-[11px] bg-[#14161a] border border-white/10 rounded-2xl"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement…</div>}>
               <PluginEditor key={`${activePlugin.trackId}:${activePlugin.plugin.id}`} plugin={activePlugin.plugin} trackId={activePlugin.trackId} onClose={() => setActivePlugin(null)} onUpdateParams={(p) => handleUpdatePluginParams(activePlugin.trackId, activePlugin.plugin.id, p)} isMobile={isMobile} track={state.tracks.find(t => t.id === activePlugin.trackId)} onUpdateTrack={handleUpdateTrack} onToggleFreeze={handleFreezeTrack} onToggleBypass={handleToggleBypass} onOpenPlugin={(tid, p) => setActivePlugin({ trackId: tid, plugin: p })} />
               </Suspense>
+              </PanelBoundary>
            </div>
         </div>
       )}
@@ -7575,6 +7912,7 @@ function Studio() {
       </Suspense>
       
       <div className={isMobile && activeMobileTab !== 'NOVA' ? 'hidden' : ''}>
+        <PanelBoundary name="le chat Nova" overlay>
         <ChatAssistant
             onSendMessage={envoyerAuChatbot}
             onExecuteAction={executeAIAction}
@@ -7590,6 +7928,7 @@ function Studio() {
             onOpenChange={setNovaOpen}
             onClose={() => setActiveMobileTab('ARRANGEMENT')}
         />
+        </PanelBoundary>
       </div>
       
       <StemSeparationDialog target={stemTarget} projectName={state.name || 'Projet'} getClipBuffer={getStemClipBuffer}

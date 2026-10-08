@@ -282,6 +282,8 @@ export interface Clip {
   isReversed?: boolean; 
   audioRef?: string;
   isUnlicensed?: boolean;
+  /** Son introuvable ou illisible à l'ouverture (projet réparé) : clip gardé à sa place, muet. */
+  isOffline?: boolean;
   warp?: WarpSettings;            // NEW: time stretch (Ableton-style)
   groupId?: string;               // NEW: clip grouping
   /**

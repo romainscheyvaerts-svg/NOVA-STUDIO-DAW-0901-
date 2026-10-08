@@ -1,8 +1,9 @@
 /**
  * Nova Bridge v4 — client du pont VST3 local (NovaVSTBridge.exe, ws://127.0.0.1:8765).
  *
- * - Connexion UNIQUEMENT à la demande de l'utilisateur (« Connecter le pont VST ») :
- *   aucun essai automatique en boucle (téléphones, PC sans pont).
+ * - Première connexion UNIQUEMENT à la demande (« Connecter le pont VST », ou l'appli
+ *   Windows) : aucun essai automatique sur un appareil qui n'a jamais vu le pont
+ *   (téléphones, PC sans pont). Ensuite, reconnexion automatique (voir v10).
  * - Contrôle (JSON, requêtes numérotées) sur ce thread ; l'audio temps réel passe
  *   par un Worker dédié (public/worklets/vst-bridge-worker-v4.js) relié à chaque
  *   AudioWorklet d'effet VST3.
@@ -15,8 +16,19 @@
  * - v8 : séparation de stems (module optionnel Demucs installé à la demande sur le
  *   PC) : STEMS_STATUS / STEMS_INSTALL / STEMS_CANCEL / STEMS_SEPARATE.
  *
+ * - v10 : pannes isolées. Un plugin qui plante, se fige ou sort des NaN passe en
+ *   « panne » sur le pont (son sec, piste alignée) : événement PLUGIN_CRASHED
+ *   (écouteurs du slot + onPluginCrash). Plugin qui a fait planter le pont au
+ *   chargement deux fois : LOAD_PLUGIN refusé (erreur.quarantined).
+ * - Reconnexion automatique : une fois connecté (ou dans l'appli Windows), une
+ *   fermeture inattendue du pont (plantage, relance par le superviseur) relance
+ *   des essais (1 s, 2 s, 4 s… 10 s au plus) jusqu'à disconnect(). État visible :
+ *   status « reconnecting », attempt, nextRetryAt ; retryNow() pour ne pas attendre.
+ *
  * Protocole complet : bridge-python/nova_bridge_server.py.
  */
+
+import { isNovaDesktop } from '../utils/desktopApp';
 
 export interface BridgePlugin {
   id: string;
@@ -40,7 +52,21 @@ export interface BridgePlugin {
   channels?: 'mono' | 'stereo' | 'mono/stereo' | null;
   /** Plugin qui a fait planter le pont (isolé : il n'est plus chargé). */
   unstable?: boolean;
+  /** (pont v10) A fait planter le pont au chargement (2 fois) : plus chargé jusqu'au prochain rescan. */
+  quarantined?: boolean;
 }
+
+/** (pont v10) Un plugin chargé est tombé en panne : le pont fait passer le son sans lui. */
+export interface PluginCrashEvent {
+  slotId: string;
+  /** exception (erreur interne), hang (ne répond plus), nan (son invalide en continu). */
+  reason: 'exception' | 'hang' | 'nan' | string;
+  error: string | null;
+  name: string;
+}
+
+/** Attente avant le n-ième essai de reconnexion (1 s, 2 s, 4 s, 8 s, puis 10 s). */
+export const reconnectDelayMs = (attempt: number): number => Math.min(10000, 1000 * Math.pow(2, Math.max(0, attempt - 1)));
 
 /**
  * (pont v6) Un plugin vient d'ouvrir une fenêtre d'activation / de licence au
@@ -59,7 +85,7 @@ export interface LicenseWindowEvent {
 /** Délai laissé à un chargement / rendu retenu par une fenêtre de licence. */
 const LICENSE_WAIT_MS = 15 * 60 * 1000;
 
-export type BridgeStatus = 'idle' | 'connecting' | 'connected' | 'unavailable';
+export type BridgeStatus = 'idle' | 'connecting' | 'connected' | 'unavailable' | 'reconnecting';
 
 export interface BridgeState {
   status: BridgeStatus;
@@ -76,6 +102,10 @@ export interface BridgeState {
   stems?: boolean;
   /** (v9) Plugins ARA2 (Melodyne, VocAlign) par l'hôte natif NovaARAHost. */
   ara?: boolean;
+  /** Reconnexion automatique : numéro de l'essai en attente (0 hors reconnexion). */
+  attempt?: number;
+  /** Reconnexion automatique : heure (ms, Date.now) du prochain essai. */
+  nextRetryAt?: number | null;
 }
 
 /** Première version du pont qui héberge les plugins ARA (Melodyne, VocAlign). */
@@ -188,9 +218,10 @@ export interface LoadResult {
   isInstrument: boolean;
 }
 
-type SlotEvent =
+export type SlotEvent =
   | { action: 'EDITOR_CLOSED'; slot_id: string; state: string | null }
-  | { action: 'LATENCY'; slot_id: string; latency_samples: number };
+  | { action: 'LATENCY'; slot_id: string; latency_samples: number }
+  | { action: 'PLUGIN_CRASHED'; slot_id: string; reason: string; error: string | null; name: string };
 
 const align4 = (n: number) => (n + 3) & ~3;
 
@@ -240,18 +271,77 @@ class NovaBridgeService {
 
   // --- Connexion ----------------------------------------------------------
 
+  // --- Reconnexion automatique -------------------------------------------
+  /** Déjà connecté au moins une fois : une fermeture inattendue relance des essais. */
+  private everConnected = false;
+  /** disconnect() appelé : plus aucun essai automatique. */
+  private manualClose = false;
+  private reconnectTimer: number | null = null;
+  private reconnectAttempt = 0;
+  private crashListeners = new Set<(e: PluginCrashEvent) => void>();
+
+  /** Un plugin chargé est tombé en panne sur le pont (pont v10). */
+  onPluginCrash(cb: (e: PluginCrashEvent) => void): () => void {
+    this.crashListeners.add(cb);
+    return () => { this.crashListeners.delete(cb); };
+  }
+
+  private clearReconnectTimer() {
+    if (this.reconnectTimer !== null) { window.clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+  }
+
+  private wantsAutoReconnect(): boolean {
+    if (this.manualClose) return false;
+    try { return this.everConnected || isNovaDesktop(); } catch { return this.everConnected; }
+  }
+
+  private scheduleReconnect(error: string | null) {
+    this.clearReconnectTimer();
+    this.reconnectAttempt++;
+    const delay = reconnectDelayMs(this.reconnectAttempt);
+    this.setBridgeState({ status: 'reconnecting', error, attempt: this.reconnectAttempt, nextRetryAt: Date.now() + delay, instrumentsPending: null });
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.tryConnect(true);
+    }, delay);
+  }
+
+  /** Reconnexion en attente : on essaie tout de suite. */
+  retryNow(): Promise<boolean> {
+    if (this.isConnected()) return Promise.resolve(true);
+    this.clearReconnectTimer();
+    return this.tryConnect(this.state.status === 'reconnecting');
+  }
+
   /** Un seul essai (3 s). Renvoie true si le pont répond. */
   connect(): Promise<boolean> {
+    this.manualClose = false;
     if (this.isConnected()) return Promise.resolve(true);
     if (this.connectPromise) return this.connectPromise;
-    this.setBridgeState({ status: 'connecting', error: null });
+    this.clearReconnectTimer();
+    return this.tryConnect(false);
+  }
+
+  private tryConnect(auto: boolean): Promise<boolean> {
+    if (this.isConnected()) return Promise.resolve(true);
+    if (this.connectPromise) return this.connectPromise;
+    if (!auto) this.setBridgeState({ status: 'connecting', error: null });
     this.connectPromise = new Promise<boolean>((resolve) => {
       let settled = false;
       const done = (ok: boolean, error?: string) => {
         if (settled) return;
         settled = true;
         this.connectPromise = null;
-        if (!ok) this.setBridgeState({ status: 'unavailable', error: error || null });
+        if (ok) {
+          this.everConnected = true;
+          this.reconnectAttempt = 0;
+          this.clearReconnectTimer();
+        } else if (this.wantsAutoReconnect()) {
+          // Pont relancé par le superviseur (appli Windows) ou de retour plus tard : on réessaie.
+          this.scheduleReconnect(auto ? (this.state.error || error || null) : (error || null));
+        } else {
+          this.setBridgeState({ status: 'unavailable', error: error || null, attempt: 0, nextRetryAt: null });
+        }
         resolve(ok);
       };
       let ws: WebSocket;
@@ -269,7 +359,7 @@ class NovaBridgeService {
         try {
           const hello = await this.request({ action: 'HELLO' }, 3000);
           this.setBridgeState({
-            status: 'connected', error: null, version: hello.version ?? null,
+            status: 'connected', error: null, version: hello.version ?? null, attempt: 0, nextRetryAt: null,
             instruments: !!hello.instruments && (Number(hello.version) || 0) >= BRIDGE_INSTRUMENTS_VERSION,
             paramsText: !!hello.params_text && (Number(hello.version) || 0) >= BRIDGE_PARAMS_TEXT_VERSION,
             stems: !!hello.stems && (Number(hello.version) || 0) >= BRIDGE_STEMS_VERSION,
@@ -295,7 +385,13 @@ class NovaBridgeService {
         this.stemsJobs.clear();
         if (wasConnected) {
           this.worker?.postMessage({ type: 'close' });
-          this.setBridgeState({ status: 'idle', error: 'Le pont VST a été fermé.', instrumentsPending: null });
+          if (this.wantsAutoReconnect()) {
+            // Fermeture inattendue (pont planté, relancé) : essais automatiques.
+            this.reconnectAttempt = 0;
+            this.scheduleReconnect('Le pont VST s\'est fermé : reconnexion automatique…');
+          } else {
+            this.setBridgeState({ status: 'idle', error: 'Le pont VST a été fermé.', instrumentsPending: null, attempt: 0, nextRetryAt: null });
+          }
         }
         done(false, 'Pont VST introuvable');
       };
@@ -303,7 +399,12 @@ class NovaBridgeService {
     return this.connectPromise;
   }
 
+  /** Fermeture voulue : plus de reconnexion automatique (jusqu'au prochain connect()). */
   disconnect() {
+    this.manualClose = true;
+    this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
+    if (this.state.status === 'reconnecting') this.setBridgeState({ status: 'idle', error: null, attempt: 0, nextRetryAt: null });
     this.worker?.postMessage({ type: 'close' });
     if (this.ws) { try { this.ws.close(); } catch { /* */ } }
   }
@@ -320,11 +421,12 @@ class NovaBridgeService {
       this.pending.delete(msg.req_id);
       window.clearTimeout(p.timer);
       if (msg.success === false) {
-        const err: Error & { licenseRequired?: boolean; unstable?: boolean } = new Error(msg.error || 'Erreur du pont VST');
+        const err: Error & { licenseRequired?: boolean; unstable?: boolean; quarantined?: boolean } = new Error(msg.error || 'Erreur du pont VST');
         // (v7) Chargement discret refusé par une fenêtre de licence / démo.
         if (msg.license_required) err.licenseRequired = true;
         // Plugin qui plante le pont (isolé par le pont, qui continue) : à ne pas recharger.
         if (msg.unstable) err.unstable = true;
+        if (msg.quarantined) err.quarantined = true;
         p.reject(err);
       } else p.resolve(msg);
       return;
@@ -341,8 +443,12 @@ class NovaBridgeService {
       this.onLicenseWindowMsg(msg);
       return;
     }
-    if (msg && (msg.action === 'EDITOR_CLOSED' || msg.action === 'LATENCY') && msg.slot_id) {
+    if (msg && (msg.action === 'EDITOR_CLOSED' || msg.action === 'LATENCY' || msg.action === 'PLUGIN_CRASHED') && msg.slot_id) {
       this.slotListeners.get(String(msg.slot_id))?.forEach(cb => { try { cb(msg); } catch { /* */ } });
+    }
+    if (msg && msg.action === 'PLUGIN_CRASHED' && msg.slot_id) {
+      const e: PluginCrashEvent = { slotId: String(msg.slot_id), reason: String(msg.reason || 'exception'), error: msg.error ?? null, name: String(msg.name || 'Le plugin') };
+      this.crashListeners.forEach(cb => { try { cb(e); } catch { /* écouteur fautif */ } });
     }
   }
 
@@ -437,6 +543,7 @@ class NovaBridgeService {
       scanStatus: p.scan_status ?? null,
       ...(p.shell ? { shell: String(p.shell), family: p.family ?? null, channels: p.channels ?? null } : {}),
       ...(p.unstable ? { unstable: true } : {}),
+      ...(p.quarantined ? { quarantined: true } : {}),
     }));
     const prog = Array.isArray(r.probe_progress) ? r.probe_progress : null;
     this.setBridgeState({

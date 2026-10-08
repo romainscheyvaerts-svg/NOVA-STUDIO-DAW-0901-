@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NOVA BRIDGE VST3 — v7
+NOVA BRIDGE VST3 — v10
 
 Pont local entre Nova Studio (navigateur) et les plugins VST3 installés sur le PC
 (effets, et depuis la v5 instruments : notes rendues en audio hors temps réel).
@@ -14,7 +14,8 @@ Sécurité
 Protocole (WebSocket ws://127.0.0.1:8765)
   Messages JSON (contrôle) — chaque réponse renvoie le « req_id » reçu :
     HELLO / PING                → capacités, version (5 : instruments, 6 : fenêtres de licence,
-                                  7 : paramètres par valeur texte, params_text=true)
+                                  7 : paramètres par valeur texte, params_text=true,
+                                  10 : pannes isolées, crash_events=true, quarantine=true)
     GET_PLUGIN_LIST [rescan]    → plugins installés ; chacun porte is_instrument
                                   (true / false / null = pas encore lu), plus
                                   instruments_pending + probe_progress [lus, total]
@@ -22,12 +23,17 @@ Protocole (WebSocket ws://127.0.0.1:8765)
                                   (v6) scan_status (ok, error, activation, hang, crash)
                                   et license (activation / nag) quand c'est connu.
                                   rescan=true relit aussi les plugins en attente d'activation
+                                  et (v10) lève la quarantaine des plugins qui avaient planté ;
+                                  chaque plugin en quarantaine porte quarantined=true
     LOAD_PLUGIN  slot_id path [plugin_name] sample_rate [state] [quiet]
                                 → name, vendor, latency_samples, buffer_latency_samples, state, is_instrument
                                   (v7) quiet=true : chargement posé par NOVA lui-même (autotune,
                                   mix auto). Une fenêtre de licence / démo est cachée et fermée
                                   au lieu d'être ramenée devant, et le chargement échoue avec
                                   license_required=true : le DAW passe au plugin suivant.
+                                  (v10) Plugin qui a fait planter le pont 2 fois en se chargeant :
+                                  success=false, quarantined=true, error en clair. Un slot en panne
+                                  (voir PLUGIN_CRASHED) est rechargé à neuf, pas réutilisé.
     UNLOAD_PLUGIN slot_id
     GET_STATE / SET_STATE slot_id [state]   (état binaire du plugin en base64)
                                 GET_STATE renvoie aussi « hash » (SHA-1 de l'état) ;
@@ -69,11 +75,22 @@ Protocole (WebSocket ws://127.0.0.1:8765)
     (v9) Plugins ARA2 (Melodyne, VocAlign) par l'hôte natif NovaARAHost.exe : voir ara_service.py
     (ARA_STATUS, ARA_OPEN, ARA_ALIGN, ARA_COMMIT, ARA_SHOW, ARA_TRANSPORT, ARA_CLOSE, ARA_EVENT).
   Événements : EDITOR_CLOSED (avec l'état), LATENCY (latence mesurée qui change),
+    (v10) PLUGIN_CRASHED {slot_id, reason: exception|nan|hang, error, name} : le plugin
+      a levé une exception, sort des NaN en continu ou s'est figé (> 2 s sur un bloc).
+      Le slot passe alors le signal SEC (retardé de sa latence) : la piste continue
+      sans l'effet ; le DAW peut recharger le plugin (LOAD_PLUGIN, même slot_id).
+      Envoyé une fois, à la connexion propriétaire du slot.
     (v6) LICENSE_WINDOW {type:"license_window", plugin, path, plugin_name, title,
       status: activation|nag, source: load|render, slot_id?} : un plugin vient
       d'ouvrir une fenêtre (activation de licence, enregistrement…), ramenée au
       premier plan ; le chargement / rendu attend qu'elle soit fermée (15 min max).
       Envoyé à la connexion concernée, sinon à toutes.
+
+  Isolation (v10) : la sortie de chaque plugin est nettoyée (NaN / infini → 0,
+    ±4 max) ; un traitement figé ne bloque ni la boucle réseau ni les autres slots
+    (un exécuteur par slot, déchargement dans un thread à part). Un plantage NATIF
+    pendant le chargement est reconnu au démarrage suivant (marqueurs disque,
+    vst_host.CrashGuard) ; le superviseur de l'appli relance le pont.
 
   Instances : un slot par effet / instrument chargé ; les rendus hors slot
   réutilisent une instance hors ligne par plugin (vst_host.OfflinePool).
@@ -122,7 +139,7 @@ import vst_probe
 import plugin_guard
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events
 
-VERSION = 9
+VERSION = 10
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
@@ -233,6 +250,12 @@ class NovaBridgeServer:
     async def run(self):
         self.loop = asyncio.get_running_loop()
         self.scan_done = asyncio.Event()
+        if vst_host.CRASH_GUARD is None:
+            vst_host.CRASH_GUARD = vst_host.CrashGuard()
+        for path in vst_host.CRASH_GUARD.recover():
+            n = vst_host.CRASH_GUARD.count(path)
+            state = "mis en quarantaine" if vst_host.CRASH_GUARD.is_quarantined(path) else "surveillé"
+            logger.warning(f"💥 Le pont s'était arrêté en chargeant {os.path.basename(path)} ({n} fois) : {state}")
         vst_host.WATCHER = license_watch.LicenseWatcher(
             on_window=lambda w, info: self.loop.call_soon_threadsafe(self._license_window, w, info),
             ignore_title=self._is_editor_title,
@@ -474,6 +497,7 @@ class NovaBridgeServer:
                               # Plugins d'un shell (Waves) chargés par leur nom ; plugins qui
                               # plantent isolés (« unstable » dans la liste et au chargement).
                               "shells": True, "plugin_guard": True,
+                              "crash_events": True, "quarantine": True,
                               "ara": bool(ara_service.ara_host.find_host_exe())})
 
     async def _a_get_plugin_list(self, ws, req):
@@ -483,6 +507,8 @@ class NovaBridgeServer:
             # Choix explicite : les plugins en attente d'activation sont relus.
             await self.loop.run_in_executor(self.misc_pool, vst_probe.forget_unsettled)
             await self.loop.run_in_executor(self.misc_pool, plugin_guard.retry_unstable)
+            if vst_host.CRASH_GUARD is not None:
+                vst_host.CRASH_GUARD.clear()  # on réessaie les plugins qui avaient planté
             await self._scan()
         await self.scan_done.wait()
         effects_only = bool(req.get("effects_only"))
@@ -495,6 +521,8 @@ class NovaBridgeServer:
             item = {**p, "license": lic} if lic else p
             if unstable and plugin_guard.key_of(p["path"], p.get("plugin_name")) in unstable:
                 item = {**item, "unstable": True}
+            if vst_host.CRASH_GUARD is not None and vst_host.CRASH_GUARD.is_quarantined(p["path"]):
+                item = {**item, "quarantined": True}
             plugins.append(item)
         pending = self.probe_task is not None and not self.probe_task.done()
         self._reply(ws, req, {"success": True, "plugins": plugins, "instruments_pending": pending,
@@ -505,6 +533,16 @@ class NovaBridgeServer:
         path = req.get("path") or ""
         sr = int(req.get("sample_rate") or req.get("sampleRate") or 48000)
         existing = self.slots.get(slot_id)
+        if existing is not None and existing.failed:
+            # Slot en panne : rechargé à neuf (nouvelle instance, nouvel exécuteur).
+            self._drop_slot(slot_id)
+            existing = None
+        guard = vst_host.CRASH_GUARD
+        if path and guard is not None and guard.is_quarantined(path):
+            msg = guard.message(path)
+            logger.warning(f"🚫 {msg}")
+            self._reply(ws, req, {"success": False, "error": msg, "quarantined": True})
+            return
         if existing is not None and existing.path == path and existing.sample_rate == sr:
             # Rechargement de page / reconnexion : on garde l'instance (et les
             # réglages faits depuis dans la fenêtre du plugin).
@@ -533,13 +571,13 @@ class NovaBridgeServer:
             await self._in_slot(slot, slot.load, req.get("state"), ctx)
             if ctx.get("license_seen"):
                 raise LicenseRequired(f"{slot.name} demande une licence ou une activation : il n'est pas utilisé")
-        except plugin_guard.PluginUnstable as e:
-            # Plugin qui plante (essai isolé raté) : refusé, le pont continue.
+        except (plugin_guard.PluginUnstable, vst_host.PluginQuarantined) as e:
+            # Plugin qui plante : essai isolé raté (plugin_guard) ou quarantaine (pont v10). Refusé, le pont continue.
             slot.error = str(e)
             slot.loaded.set()
             if self.slots.get(slot_id) is slot:
                 self._drop_slot(slot_id)
-            self._reply(ws, req, {"success": False, "error": str(e), "unstable": True})
+            self._reply(ws, req, {"success": False, "error": str(e), "unstable": isinstance(e, plugin_guard.PluginUnstable), "quarantined": isinstance(e, vst_host.PluginQuarantined)})
             return
         except LicenseRequired as e:
             slot.error = str(e)
@@ -722,27 +760,55 @@ class NovaBridgeServer:
         self._enqueue(q, (ws, "bin", seq, block))
 
     async def _slot_worker(self, slot: Slot, q: asyncio.Queue):
-        """Un consommateur par slot : blocs traités et renvoyés dans l'ordre."""
+        """Un consommateur par slot : blocs traités et renvoyés dans l'ordre.
+        Ne s'arrête jamais sur une erreur. Plugin figé (bloc > HANG_TIMEOUT_S) :
+        le slot passe en panne « hang », les blocs suivants repartent secs sans
+        toucher à l'exécuteur bloqué ; les autres slots ne sont pas concernés."""
         reported = None
         while True:
             item = await q.get()
             if item is None:
                 return
-            ws, kind, seq, block = item
-            if not slot.loaded.is_set() or slot.plugin is None:
-                continue
-            out = await self._in_slot(slot, slot.process_block, block)
-            if kind == "bin":
-                await self._send(ws, build_audio_frame(slot.slot_id, seq, out))
-            else:
-                await self._send(ws, {"action": "AUDIO_PROCESSED", "slot_id": slot.slot_id,
-                                      "channels": out.tolist()})
-            # Latence réellement observée (zéros ajoutés en tête du flux)
-            if slot.blocks % 64 == 0 and slot.padded_total != reported and slot.owner is not None:
-                reported = slot.padded_total
-                if slot.padded_total:
-                    await self._send(slot.owner, {"action": "LATENCY", "slot_id": slot.slot_id,
-                                                  "latency_samples": slot.latency_samples})
+            try:
+                ws, kind, seq, block = item
+                if not slot.loaded.is_set() or (slot.plugin is None and not slot.failed):
+                    continue
+                if slot.failed:
+                    out = slot.dry_block(block)
+                else:
+                    fut = self.loop.run_in_executor(slot.executor, slot.process_block, block)
+                    try:
+                        out = await asyncio.wait_for(asyncio.shield(fut), vst_host.HANG_TIMEOUT_S)
+                    except asyncio.TimeoutError:
+                        slot.mark_failed("hang", f"le plugin ne répond plus (bloc > {vst_host.HANG_TIMEOUT_S:g} s)")
+                        out = slot.dry_block(block)
+                if slot.failed and not slot.crash_reported:
+                    self._report_crash(slot)
+                if kind == "bin":
+                    await self._send(ws, build_audio_frame(slot.slot_id, seq, out))
+                else:
+                    await self._send(ws, {"action": "AUDIO_PROCESSED", "slot_id": slot.slot_id,
+                                          "channels": out.tolist()})
+                # Latence réellement observée (zéros ajoutés en tête du flux)
+                if not slot.failed and slot.blocks % 64 == 0 and slot.padded_total != reported and slot.owner is not None:
+                    reported = slot.padded_total
+                    if slot.padded_total:
+                        await self._send(slot.owner, {"action": "LATENCY", "slot_id": slot.slot_id,
+                                                      "latency_samples": slot.latency_samples})
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                # Jamais de worker mort : un slot sans consommateur rendait du silence à vie.
+                logger.error(f"[{slot.name}] bloc perdu : {e}")
+
+    def _report_crash(self, slot: Slot):
+        """PLUGIN_CRASHED, une fois, à la connexion propriétaire du slot."""
+        slot.crash_reported = True
+        msg = {"action": "PLUGIN_CRASHED", "slot_id": slot.slot_id, "reason": slot.failed,
+               "error": slot.fail_error, "name": slot.name}
+        target = slot.owner
+        if target is not None:
+            asyncio.ensure_future(self._send(target, msg))
 
     # --- rendu hors temps réel -------------------------------------------------
 

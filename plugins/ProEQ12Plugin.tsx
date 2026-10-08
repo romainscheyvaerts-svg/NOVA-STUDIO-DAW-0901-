@@ -62,13 +62,31 @@ interface EqBandVoice {
   dry: GainNode;
   slot: 0 | 1;
   type: ProEQFilterType;
+  /** Bande câblée dans la chaîne en série (une bande neutre en est retirée : aucun calcul). */
+  inChain: boolean;
+  /** Entrées câblées : filtre A, filtre B, voie directe. */
+  conn: [boolean, boolean, boolean];
 }
 
 const GAIN_TYPES: ProEQFilterType[] = ['peaking', 'lowshelf', 'highshelf'];
 const EQ_FADE = 0.012;
+/** Fin des fondus (≈ 8 constantes de temps) : on fige alors les réglages et on retire ce qui ne sert plus. */
+const SETTLE_MS = 160;
 
+/**
+ * Charge processeur (mesurée le 08/10/2026, 20 égaliseurs rendus hors ligne) :
+ * 70 ms de calcul par seconde de son et par égaliseur, soit 40 pistes = 2,8 s
+ * par seconde : le rendu en direct ne pouvait pas suivre (craquements sans fin).
+ * Causes : 24 filtres toujours calculés (deux par bande, même à 0 dB) et des
+ * réglages lissés par setTargetAtTime jamais terminés, qui forcent le calcul des
+ * coefficients échantillon par échantillon.
+ * Maintenant : une bande neutre (cloche / étagère à 0 dB, bande coupée) est
+ * retirée de la chaîne ; une bande active n'a qu'un filtre câblé ; une fois les
+ * fondus finis, les réglages sont figés (valeurs fixes, calcul par bloc).
+ * Le son est identique : une bande neutre est strictement transparente.
+ */
 export class ProEQ12Node {
-  private ctx: AudioContext;
+  private ctx: BaseAudioContext;
   public input: GainNode;
   public output: GainNode;
   public preAnalyzer: AnalyserNode;
@@ -76,8 +94,12 @@ export class ProEQ12Node {
   private voices: EqBandVoice[] = [];
   private params: ProEQ12Params;
   private readonly createdAt: number;
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
+  private disposed = false;
+  /** Valeurs visées par bande (pour figer les réglages à la fin des fondus). */
+  private targets: { freq: number; q: number; gain: number; wet: number; dry: number; neutral: boolean }[] = [];
 
-  constructor(ctx: AudioContext, initialParams?: ProEQ12Params) {
+  constructor(ctx: BaseAudioContext, initialParams?: ProEQ12Params) {
     this.ctx = ctx;
     this.createdAt = ctx.currentTime;
 
@@ -110,18 +132,11 @@ export class ProEQ12Node {
     this.postAnalyzer.fftSize = 4096;
     this.postAnalyzer.smoothingTimeConstant = 0.85;
 
-    // Cablage fixe : entree -> analyse -> 12 bandes en serie -> analyse -> sortie
+    // Cablage : entree -> analyse -> bandes actives en serie -> analyse -> sortie
     this.input.connect(this.preAnalyzer);
-    let last: AudioNode = this.preAnalyzer;
-    for (let i = 0; i < 12; i++) {
-      const band = this.params.bands[i];
-      const v = this.createVoice(band.type);
-      last.connect(v.input);
-      last = v.out;
-      this.voices.push(v);
-    }
-    last.connect(this.postAnalyzer);
+    for (let i = 0; i < 12; i++) this.voices.push(this.createVoice(this.params.bands[i].type));
     this.postAnalyzer.connect(this.output);
+    this.relink();
     this.applyAll(true);
   }
 
@@ -141,13 +156,34 @@ export class ProEQ12Node {
     for (let k = 0; k < 2; k++) {
       filters[k].type = type;
       gains[k].gain.value = k === 0 ? 1 : 0;
-      input.connect(filters[k]);
+      // Sorties toujours câblées ; les ENTRÉES (input -> filtre / direct) le sont à la demande.
       filters[k].connect(gains[k]);
       gains[k].connect(out);
     }
-    input.connect(dry);
     dry.connect(out);
-    return { input, out, filters, gains, dry, slot: 0, type };
+    return { input, out, filters, gains, dry, slot: 0, type, inChain: false, conn: [false, false, false] };
+  }
+
+  /** Câble / décâble une entrée de la bande (0, 1 = filtres, 2 = voie directe). */
+  private wireInput(v: EqBandVoice, k: 0 | 1 | 2, on: boolean) {
+    if (v.conn[k] === on) return;
+    const dest = k === 2 ? v.dry : v.filters[k];
+    if (on) v.input.connect(dest);
+    else { try { v.input.disconnect(dest); } catch (e) { /* déjà décâblée */ } }
+    v.conn[k] = on;
+  }
+
+  /** Chaîne en série des seules bandes actives. */
+  private relink() {
+    try { this.preAnalyzer.disconnect(); } catch (e) { /* */ }
+    let last: AudioNode = this.preAnalyzer;
+    for (const v of this.voices) {
+      try { v.out.disconnect(); } catch (e) { /* */ }
+      if (!v.inChain) continue;
+      last.connect(v.input);
+      last = v.out;
+    }
+    last.connect(this.postAnalyzer);
   }
 
   private bandActive(i: number): boolean {
@@ -159,15 +195,17 @@ export class ProEQ12Node {
 
   /** immediate : valeurs posees sans lissage (creation, premier reglage). */
   private applyAll(immediate = false) {
+    if (this.disposed) return;
     const now = this.ctx.currentTime;
     const smooth = !immediate && now > this.createdAt;
-    const set = (prm: AudioParam, v: number, tau: number) => {
+    const set = (prm: AudioParam, v: number, tau: number, soft = smooth) => {
       if (!Number.isFinite(v)) return;
-      if (smooth) prm.setTargetAtTime(v, now, tau);
+      if (soft) prm.setTargetAtTime(v, now, tau);
       else { prm.cancelScheduledValues(now); prm.setValueAtTime(v, now); }
     };
     const nyq = this.ctx.sampleRate / 2;
     const safe = (v: number, def: number) => Number.isFinite(v) ? v : def;
+    let relink = false;
 
     this.params.bands.forEach((band, i) => {
       const v = this.voices[i];
@@ -178,6 +216,33 @@ export class ProEQ12Node {
       const gain = Math.max(-40, Math.min(40, safe(band.gain, 0)));
       const active = this.bandActive(i);
       const gainType = GAIN_TYPES.includes(type);
+      const fGain = gainType && !active ? 0 : gain;
+      const wet = gainType ? 1 : (active ? 1 : 0);
+      // Bande strictement transparente : cloche / étagère à 0 dB (ou coupée), filtre coupé.
+      const neutral = gainType ? Math.abs(fGain) < 1e-6 : !active;
+      this.targets[i] = { freq, q, gain: fGain, wet, dry: 1 - wet, neutral };
+
+      if (!v.inChain) {
+        const f = v.filters[v.slot];
+        f.type = type; v.type = type;
+        if (neutral) {
+          // Hors chaîne : réglages posés directement (aucun calcul, aucun fondu).
+          set(f.frequency, freq, 0, false); set(f.Q, q, 0, false); set(f.gain, fGain, 0, false);
+          set(v.gains[v.slot].gain, wet, 0, false); set(v.gains[v.slot === 0 ? 1 : 0].gain, 0, 0, false);
+          set(v.dry.gain, 1 - wet, 0, false);
+          return;
+        }
+        // Entrée dans la chaîne à l'état TRANSPARENT (gain 0 dB ou voie directe), puis fondu vers le réglage.
+        set(f.frequency, freq, 0, false); set(f.Q, q, 0, false);
+        set(f.gain, gainType && smooth ? 0 : fGain, 0, false);
+        set(v.gains[v.slot].gain, gainType || !smooth ? wet : 0, 0, false);
+        set(v.gains[v.slot === 0 ? 1 : 0].gain, 0, 0, false);
+        set(v.dry.gain, gainType || !smooth ? 1 - wet : 1, 0, false);
+        this.wireInput(v, v.slot, true);
+        if (!gainType && smooth) this.wireInput(v, 2, true);
+        v.inChain = true;
+        relink = true;
+      }
 
       if (type !== v.type) {
         // Changement de type : le filtre libre est prepare (inaudible), puis fondu.
@@ -186,7 +251,8 @@ export class ProEQ12Node {
         f.type = type;
         f.frequency.cancelScheduledValues(now); f.frequency.setValueAtTime(freq, now);
         f.Q.cancelScheduledValues(now); f.Q.setValueAtTime(q, now);
-        f.gain.cancelScheduledValues(now); f.gain.setValueAtTime(gainType && !active ? 0 : gain, now);
+        f.gain.cancelScheduledValues(now); f.gain.setValueAtTime(fGain, now);
+        this.wireInput(v, next, true);
         set(v.gains[v.slot].gain, 0, EQ_FADE);
         v.slot = next;
         v.type = type;
@@ -195,15 +261,53 @@ export class ProEQ12Node {
         set(f.frequency, freq, 0.03);
         set(f.Q, q, 0.03);
         // Cloche / etagere coupee = gain 0 dB : filtre neutre, sans fondu.
-        set(f.gain, gainType && !active ? 0 : gain, 0.03);
+        set(f.gain, fGain, 0.03);
       }
-      const wet = gainType ? 1 : (active ? 1 : 0);
+      if (1 - wet > 0) this.wireInput(v, 2, true);
       set(v.gains[v.slot].gain, wet, EQ_FADE);
       set(v.dry.gain, 1 - wet, EQ_FADE);
     });
 
     const mg = safe(this.params.masterGain, 1.0);
     set(this.output.gain, Math.max(0, mg), 0.01);
+    if (relink) this.relink();
+    if (!smooth) this.settle();
+    else this.scheduleSettle();
+  }
+
+  private scheduleSettle() {
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.settleTimer = setTimeout(() => { this.settleTimer = null; this.settle(); }, SETTLE_MS);
+  }
+
+  /**
+   * Fondus terminés : réglages figés (plus de calcul échantillon par échantillon),
+   * filtre / voie directe inutiles décâblés, bandes neutres retirées de la chaîne.
+   */
+  private settle() {
+    if (this.disposed) return;
+    const now = this.ctx.currentTime;
+    const fix = (prm: AudioParam, v: number) => { prm.cancelScheduledValues(now); prm.setValueAtTime(v, now); };
+    let relink = false;
+    this.voices.forEach((v, i) => {
+      const t = this.targets[i];
+      if (!t) return;
+      const other = (v.slot === 0 ? 1 : 0) as 0 | 1;
+      const f = v.filters[v.slot];
+      fix(f.frequency, t.freq); fix(f.Q, t.q); fix(f.gain, t.gain);
+      fix(v.gains[v.slot].gain, t.wet); fix(v.gains[other].gain, 0); fix(v.dry.gain, t.dry);
+      if (t.neutral) {
+        if (v.inChain) { v.inChain = false; relink = true; }
+        this.wireInput(v, 0, false); this.wireInput(v, 1, false); this.wireInput(v, 2, false);
+        return;
+      }
+      this.wireInput(v, other, false);
+      this.wireInput(v, v.slot, t.wet > 0);
+      this.wireInput(v, 2, t.dry > 0);
+    });
+    const mg = Number.isFinite(this.params.masterGain) ? Math.max(0, this.params.masterGain) : 1;
+    fix(this.output.gain, mg);
+    if (relink) this.relink();
   }
 
   public updateParams(p: Partial<ProEQ12Params>) {
@@ -211,6 +315,11 @@ export class ProEQ12Node {
     if (p.bands) next.bands = this.normalizeBands(p.bands, this.params.bands);
     this.params = next;
     this.applyAll();
+  }
+
+  /** Bandes réellement calculées (diagnostic, tests). */
+  public activeBandCount(): number {
+    return this.voices.filter(v => v.inChain).length;
   }
 
   public getFrequencyResponse(freqs: Float32Array): Float32Array {
@@ -227,7 +336,11 @@ export class ProEQ12Node {
   }
 
   public dispose() {
+    this.disposed = true;
+    if (this.settleTimer) { clearTimeout(this.settleTimer); this.settleTimer = null; }
     try { this.input.disconnect(); } catch (e) {}
+    try { this.preAnalyzer.disconnect(); } catch (e) {}
+    try { this.postAnalyzer.disconnect(); } catch (e) {}
     for (const v of this.voices) {
       for (const n of [v.input, v.out, v.dry, ...v.filters, ...v.gains]) {
         try { n.disconnect(); } catch (e) {}

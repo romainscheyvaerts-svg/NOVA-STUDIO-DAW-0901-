@@ -12,6 +12,7 @@ import { createTimeFxCore } from './timeFxCore';
 import { createDjFilterCore, createLofiCore } from './colorFxCore';
 import { createGateCore } from './gateCore';
 import { loadWorkletModule } from '../plugins/vocalDspUtils';
+import { retireWorkletNode } from './workletGuard';
 import { V21Type, V21_DEFAULTS, V21_SPECS, sanitizeV21 } from './v21Params';
 import { scaleIntervals } from '../utils/scales';
 
@@ -202,6 +203,8 @@ export class V21EffectNode {
   private ctx: BaseAudioContext;
   private spec: WorkletSpec;
   private worklet: AudioWorkletNode | null = null;
+  /** Effet retiré : un worklet encore en chargement n'est pas créé (sinon il restait vivant). */
+  private disposed = false;
   private params: Record<string, any>;
   private meters: any = {};
   private metersAt = 0;
@@ -224,6 +227,7 @@ export class V21EffectNode {
   private async init() {
     try {
       await loadWorkletModule(this.ctx, this.spec.key, this.spec.code);
+      if (this.disposed) return;
       const parameterData: Record<string, number> = {};
       for (const k of this.spec.audioParams) if (Number.isFinite(+this.params[k])) parameterData[k] = +this.params[k];
       if (this.spec.timeline) { const hi = Math.floor(this.origin); parameterData.originHi = hi; parameterData.originLo = this.origin - hi; }
@@ -241,6 +245,13 @@ export class V21EffectNode {
       this.failed = true;
       this.input.connect(this.output);
     }
+  }
+
+  /** Effet retiré de la piste : worklet mis à la retraite (ou jamais créé s'il chargeait encore). */
+  public dispose() {
+    this.disposed = true;
+    if (this.worklet) { retireWorkletNode(this.worklet); this.worklet = null; }
+    try { this.input.disconnect(); } catch (e) { /* */ }
   }
 
   /** Retard ajouté (s), compensé par le moteur (PDC). Toujours le même, quels que soient les réglages. */

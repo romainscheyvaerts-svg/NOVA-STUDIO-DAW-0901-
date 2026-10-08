@@ -56,6 +56,7 @@ function loadFlashbackModule(ctx: AudioContext): Promise<void> {
 }
 import { placeHumTake } from './humTake';
 import { VSTPluginNode } from './VSTPluginNode';
+import { installWorkletGuard, installWorkletRetirement, onWorkletCrash, ownsNode, retireWorkletsOf } from './workletGuard';
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback, isFrozenBus, isFeedCovered, busFrozenSlices } from '../utils/freeze';
 import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
@@ -74,7 +75,8 @@ interface TrackDSP {
   gain: GainNode;           
   analyzer: AnalyserNode;
   inputAnalyzer?: AnalyserNode; 
-  pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any; connectedTo?: AudioNode; bypassDelay?: DelayNode }>;
+  /** crashed : son worklet a planté (processorerror) ; l'effet est contourné et sera recréé s'il est réactivé. */
+  pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any; connectedTo?: AudioNode; bypassDelay?: DelayNode; crashed?: boolean }>;
   /** Pan propre des envois (TrackSend.pan, Pro Tools « FMP » éteint). */
   sendPanners?: Map<string, StereoPannerNode>;
   /** Effets actifs cables (ordre de la chaine) et, sur une piste gelee, ceux apres le rendu. */
@@ -120,6 +122,13 @@ interface TrackDSP {
   // reconstruire — et donc de couper brievement — le graphe quand rien de
   // structurel n'a change.
   graphSignature?: string;
+}
+
+/** Journal d'une prise en cours (utils/recoveryStore.TakeJournal). */
+export interface TakeJournalLike {
+  push(chunk: Float32Array): void;
+  finish(): Promise<void>;
+  discard(): Promise<void>;
 }
 
 interface ScheduledSource {
@@ -186,6 +195,12 @@ export class AudioEngine {
   // --- Compensation de latence d'enregistrement ---
   private recSession: NovaRecorderSession | null = null;
   private recSource: AudioNode | null = null;
+  /**
+   * Journal de la prise en cours (utils/recoveryStore) : chaque morceau capté est
+   * écrit sur l'appareil pendant l'enregistrement, pour la retrouver après un plantage.
+   */
+  private takeJournalFactory: ((m: { trackId: string; recordedAt: number; latency: number; sampleRate: number }) => TakeJournalLike | null) | null = null;
+  private recJournal: TakeJournalLike | null = null;
   /** Début de lecture (horloge) pendant la prise : STOP coupe la lecture avant la prise. */
   private recPlayStart: number | null = null;
   private latencySamples: number[] = [];
@@ -237,7 +252,53 @@ export class AudioEngine {
   private asioInputReceived = false;
   private asioOutputProcessor: ScriptProcessorNode | null = null;
 
-  constructor() {}
+  constructor() {
+    // Garde des worklets : un processeur qui plante est retrouvé et contourné (voir handleWorkletCrash).
+    if (typeof window !== 'undefined') {
+      installWorkletGuard();
+      // Worklets retirés (effet enlevé, prise finie, synthé remplacé) : vraiment libérés.
+      installWorkletRetirement();
+      onWorkletCrash((node, processor) => this.handleWorkletCrash(node, processor));
+    }
+  }
+
+  /**
+   * Un worklet a levé une exception (il ne sort plus que du silence).
+   * Effet de piste : contourné TOUT DE SUITE (entrée reliée à sa sortie : le son
+   * sec continue), puis l'appli le passe en bypass et prévient
+   * ('nova:plugin-crash'). Le réactiver recrée l'effet (voir wire()).
+   * Autre module (synthé, enregistreur, entrée ASIO…) : 'nova:audio-module-crash'.
+   */
+  public handleWorkletCrash(node: AudioWorkletNode, processor: string): { kind: 'plugin' | 'module' | 'unknown'; trackId?: string; pluginId?: string } {
+    for (const [trackId, dsp] of this.tracksDSP) {
+      for (const [pluginId, entry] of dsp.pluginChain) {
+        if (entry.crashed || !ownsNode(entry.instance, node)) continue;
+        entry.crashed = true;
+        try { entry.input.disconnect(); } catch (e) { /* déjà déconnecté */ }
+        try { entry.input.connect(entry.output); } catch (e) { /* */ }
+        const track = this.liveTracks?.find(t => t.id === trackId);
+        const plugin = track?.plugins.find(p => p.id === pluginId);
+        const detail = { trackId, pluginId, name: plugin?.name || plugin?.type || processor, trackName: track?.name || trackId, processor };
+        console.error(`[AudioEngine] Effet planté contourné : ${detail.name} (${detail.trackName})`);
+        try { window.dispatchEvent(new CustomEvent('nova:plugin-crash', { detail })); } catch (e) { /* hors navigateur */ }
+        return { kind: 'plugin', trackId, pluginId };
+      }
+    }
+    let module = '';
+    let trackId: string | undefined;
+    for (const [tid, dsp] of this.tracksDSP) {
+      if (dsp.synth && ownsNode(dsp.synth, node)) { module = 'le synthé'; trackId = tid; break; }
+      if (dsp.bass808 && ownsNode(dsp.bass808, node)) { module = 'la 808'; trackId = tid; break; }
+    }
+    if (!module && this.recSession && ownsNode(this.recSession, node)) module = "l'enregistreur";
+    if (!module && this.asioInput && ownsNode(this.asioInput, node)) module = "l'entrée de la carte son";
+    if (!module && this.humTake && ownsNode(this.humTake, node)) module = "l'enregistreur (fredonner)";
+    // Web Audio n'expose pas le graphe : on ne peut pas recâbler un module inconnu, on prévient.
+    const detail = { module: module || `le module audio « ${processor} »`, trackId, processor };
+    console.error(`[AudioEngine] Module audio arrêté : ${detail.module}`);
+    try { window.dispatchEvent(new CustomEvent('nova:audio-module-crash', { detail })); } catch (e) { /* hors navigateur */ }
+    return { kind: module ? 'module' : 'unknown', trackId };
+  }
 
   public async init() {
     if (this.ctx) return;
@@ -370,6 +431,45 @@ export class AudioEngine {
 
   public getAudioBuffer(clipId: string): AudioBuffer | undefined {
     return audioBufferRegistry.get(clipId);
+  }
+
+  /** La piste a-t-elle vraiment son micro ouvert (armement effectif côté moteur) ? */
+  public isMonitoring(trackId: string): boolean {
+    return this.monitoringTrackId === trackId && (!!this.activeMonitorStream || !!this.armingPromise);
+  }
+
+  /** Pistes qui ont une chaîne audio dans le moteur. */
+  public trackIds(): string[] {
+    return [...this.tracksDSP.keys()];
+  }
+
+  /** Caches du moteur dont le son d'origine a été libéré (clips inversés). */
+  public pruneCaches() {
+    this.reversedBufferCache.forEach((_, key) => { if (!audioBufferRegistry.has(key)) this.reversedBufferCache.delete(key); });
+  }
+
+  /** Journal des prises (récupération après plantage) : branché par l'appli. */
+  public setTakeJournalFactory(f: ((m: { trackId: string; recordedAt: number; latency: number; sampleRate: number }) => TakeJournalLike | null) | null) {
+    this.takeJournalFactory = f;
+  }
+
+  /** Diagnostic (endurance, console) : tailles des structures vivantes du moteur. */
+  public getDiagnostics() {
+    let plugins = 0, sends = 0;
+    this.tracksDSP.forEach(d => { plugins += d.pluginChain.size; sends += d.sends.size; });
+    return {
+      ctxState: this.ctx?.state ?? null,
+      ctxTime: this.ctx?.currentTime ?? 0,
+      tracksDSP: this.tracksDSP.size,
+      plugins,
+      sends,
+      activeSources: this.activeSources.size,
+      scrubbingSources: this.scrubbingSources.size,
+      reversedCache: this.reversedBufferCache.size,
+      activeMidiNotes: this.activeMidiNotes.size,
+      pluginAutoParams: this.pluginAutoParams.size,
+      isPlaying: this.isPlaying,
+    };
   }
 
   public async setOutputDevice(deviceId: string) {
@@ -1496,8 +1596,12 @@ export class AudioEngine {
   }
 
   public async startRecording(currentTime: number, trackId: string): Promise<boolean> {
+    // Piste armée à l'instant (bouton R puis REC tout de suite, ou machine chargée) : le
+    // micro s'ouvre encore. Avant, la prise échouait (« No monitor stream ») : mesuré
+    // dans le soak, 1 prise sur 3 ne démarrait pas sous charge.
+    if (this.armingPromise) { try { await this.armingPromise; } catch { /* erreur d'armement déjà signalée */ } }
     console.log("[AudioEngine] startRecording called - stream:", !!this.activeMonitorStream, "recording:", this.recordingTrackId);
-    
+
     if (!this.activeMonitorStream) {
       console.error("[AudioEngine] REC FAILED - No monitor stream! Arm track first.");
       return false;
@@ -1515,6 +1619,11 @@ export class AudioEngine {
         if (src) {
           this.recSource = src;
           this.recSession = new NovaRecorderSession(this.ctx, src);
+          try {
+            const j = this.takeJournalFactory?.({ trackId, recordedAt: currentTime, latency: this.measureRecordLatency().total + this.recOffsetMs / 1000, sampleRate: this.ctx.sampleRate }) || null;
+            this.recJournal = j;
+            if (j) this.recSession.onChunk = c => j.push(c);
+          } catch { this.recJournal = null; }
           this.recPlayStart = this.isPlaying ? this.playbackStartTime : null;
           this.recStartTime = currentTime;
           this.recordingTrackId = trackId;
@@ -1642,7 +1751,11 @@ export class AudioEngine {
     this.recStartTime = 0;
 
     const { samples, firstFrame } = await session.stop(src);
-    if (!samples.length) return null;
+    const journal = this.recJournal;
+    this.recJournal = null;
+    if (!samples.length) { void journal?.discard(); return null; }
+    // Prise terminée normalement : le journal est clos (effacé une fois la prise dans une version).
+    void journal?.finish();
     const sr = ctx.sampleRate;
 
     // Position de chaque échantillon sur la timeline : (frame / sr) − début de lecture.
@@ -1903,6 +2016,15 @@ export class AudioEngine {
   }
 
   private lastOverloadAt = 0;
+  /** Retards du planificateur (fenêtres programmées après leur début) depuis le lancement. */
+  private schedulerLateTicks = 0;
+  public getSchedulerLateTicks(): number { return this.schedulerLateTicks; }
+  public isTransportRunning(): boolean { return this.isPlaying || !!this.recordingTrackId; }
+  /** Mode de latence du planificateur (réglages audio, mode sécurité). */
+  public getLatencyMode(): 'low' | 'balanced' | 'high' {
+    return this.SCHEDULE_AHEAD_SEC >= 0.2 ? 'high' : this.SCHEDULE_AHEAD_SEC >= 0.1 ? 'balanced' : 'low';
+  }
+
   private scheduler(tracks: Track[]) {
     if (!this.ctx) return;
     // Surcharge : le planificateur a pris du retard sur l'horloge audio (onglet
@@ -1914,6 +2036,9 @@ export class AudioEngine {
         try { window.dispatchEvent(new CustomEvent('nova:overload')); } catch { /* */ }
       }
     }
+    // Fenêtre dont le début est déjà passé : les sons qui y tombent partent en retard
+    // (compteur lu par engine/dspMonitor, indicateur CPU de la barre de transport).
+    if (this.nextScheduleTime < this.ctx.currentTime - 0.003) this.schedulerLateTicks++;
     let guard = 0;
     while (this.nextScheduleTime < this.ctx.currentTime + this.SCHEDULE_AHEAD_SEC && guard++ < 64) {
       const projectTimeStart = this.nextScheduleTime - this.playbackStartTime;
@@ -2727,6 +2852,9 @@ export class AudioEngine {
                 if (current && current.source === source) this.activeSources.delete(sourceKey);
                 try { source.disconnect(); gainNode.disconnect(); } catch (e) {}
             };
+        } else {
+            // Rien à jouer (fin du clip dépassée) : les nœuds créés ne restent pas branchés.
+            try { source.disconnect(); gainNode.disconnect(); } catch (e) {}
         }
         
     } catch (error) {
@@ -2896,9 +3024,13 @@ export class AudioEngine {
     dsp.pluginChain.forEach(entry => {
       try { entry.input.disconnect(); entry.output.disconnect(); } catch (e) {}
       try { entry.bypassDelay?.disconnect(); } catch (e) {}
+      // Avant dispose() : certains effets oublient leur worklet en se libérant.
+      retireWorkletsOf(entry.instance);
       try { entry.instance?.dispose?.(); } catch (e) {}
     });
     dsp.pluginChain.clear();
+    retireWorkletsOf(dsp.synth);
+    retireWorkletsOf(dsp.bass808);
 
     dsp.sends.forEach(g => { try { g.disconnect(); } catch (e) {} });
     dsp.sends.clear();
@@ -2958,7 +3090,7 @@ export class AudioEngine {
         if (wantNova !== (dsp.synth instanceof NovaSynthNode)) {
           const old = dsp.synth;
           try { old.releaseAll(); } catch (e) {}
-          setTimeout(() => { try { old.output.disconnect(); if (old instanceof NovaSynthNode) old.destroy(); } catch (e) {} }, 60);
+          setTimeout(() => { retireWorkletsOf(old); try { old.output.disconnect(); if (old instanceof NovaSynthNode) old.destroy(); } catch (e) {} }, 60);
           dsp.synth = makeTrackSynth(this.ctx, track);
           dsp.synth.output.connect(dsp.input);
           if (this.isPlaying && dsp.synth instanceof NovaSynthNode) dsp.synth.syncTimeline(this.playbackStartTime, this.ctx.currentTime);
@@ -3071,6 +3203,15 @@ export class AudioEngine {
       if (plugin.isInactive) return;
       currentPluginIds.add(plugin.id);
       let pEntry = dsp!.pluginChain.get(plugin.id);
+      // Effet dont le worklet a planté puis réactivé : instance neuve.
+      if (pEntry?.crashed && plugin.isEnabled) {
+        try { pEntry.input.disconnect(); } catch (e) {}
+        try { pEntry.output.disconnect(); } catch (e) {}
+        try { pEntry.bypassDelay?.disconnect(); } catch (e) {}
+        try { pEntry.instance?.dispose?.(); } catch (e) {}
+        dsp!.pluginChain.delete(plugin.id);
+        pEntry = undefined;
+      }
       if (!pEntry) {
         const instance = this.createPluginNode(plugin, this.currentBpm);
         if (instance) {
@@ -3137,6 +3278,9 @@ export class AudioEngine {
 
     dsp.pluginChain.forEach((val, id) => {
       if (!currentPluginIds.has(id)) {
+        // Worklets de l'effet retiré : sinon ils restaient vivants ET calculés (fuite mesurée).
+        // Avant dispose() : certains effets oublient leur worklet en se libérant.
+        retireWorkletsOf(val.instance);
         try {
           val.input.disconnect();
           val.output.disconnect();
