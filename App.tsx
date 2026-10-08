@@ -160,7 +160,8 @@ import { loadPadBuffer } from './utils/padBuffers';
 import { loadDrumSound } from './utils/drumSounds';
 import { loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import { recoveryStore, markSessionOpen, markSessionClosed, previousSessionCrashed, VersionMeta, VersionReason, RecoveredTake } from './utils/recoveryStore';
-import { snapshotOf, stateFromVersion, addRecoveredTakes } from './utils/recoverySnapshot';
+import { snapshotOf, stateFromVersion, addRecoveredTakes, trackAudioIds } from './utils/recoverySnapshot';
+import { BufferSweeper } from './utils/bufferSweeper';
 import { repairProject } from './utils/projectRepair';
 import type { SessionTemplate, TemplateLoadReport } from './utils/sessionTemplate';
 import VocalToolsPanel from './components/VocalToolsPanel';
@@ -530,11 +531,18 @@ const useUndoRedo = (initialState: DAWState) => {
     const h = historyRef.current;
     return [...h.past, ...h.future].some(s => s.tracks.some(t => trackBufferIds(t).includes(bufferId)));
   }, []);
+  /** Tous les sons cités par l'historique (annuler / rétablir), pour la libération des sons inutiles. */
+  const historyBufferIds = useCallback((): Set<string> => {
+    const h = historyRef.current;
+    const out = new Set<string>();
+    for (const s of [...h.past, ...h.future]) for (const t of s.tracks) for (const id of trackAudioIds(t)) out.add(id);
+    return out;
+  }, []);
   // Prochaine modification = nouvelle étape d'annulation, même dans l'anti-rebond.
   const breakHistory = useCallback(() => setHistory(curr => ({ ...curr, lastChangeAt: 0 })), []);
   // Étape d'annulation posée MAINTENANT (une passe d'automation = une seule étape).
   const checkpoint = useCallback(() => setHistory(curr => ({ past: [...curr.past, cleanStateForHistory(curr.present)].slice(-MAX_HISTORY), present: curr.present, future: [], lastChangeAt: Date.now() })), []);
-  return { state: history.present, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, breakHistory, checkpoint, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
+  return { state: history.present, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, historyBufferIds, breakHistory, checkpoint, canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
 };
 
 /** Onglet ouvert au retour de Stripe (?nova_paid=…) : confirme et invite à revenir au studio. */
@@ -921,7 +929,7 @@ function Studio() {
     punch: { enabled: false, punchIn: 0, punchOut: 0, preRoll: 0, postRoll: 0 }
   };
 
-  const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, breakHistory, checkpoint, canUndo, canRedo } = useUndoRedo(initialState);
+  const { state, setState, setVisualState, setSilently, undo, redo, isBufferInHistory, historyBufferIds, breakHistory, checkpoint, canUndo, canRedo } = useUndoRedo(initialState);
   
   // Thème mémorisé sur l'appareil (sombre / clair / auto) : utils/themeStore.
   const { theme } = useTheme();
@@ -4078,6 +4086,26 @@ function Studio() {
     window.addEventListener('pagehide', onClose);
     return () => window.removeEventListener('pagehide', onClose);
   }, []);
+  // Sons qui ne servent plus (ni au projet ni à l'historique d'annulation) : libérés
+  // après un délai de grâce (utils/bufferSweeper). Avant, un rendu de gel remplacé ou
+  // une prise annulée restait en mémoire dès que son étape sortait de l'historique.
+  const sweeperRef = useRef<BufferSweeper | null>(null);
+  useEffect(() => {
+    if (showLanding) return;
+    if (!sweeperRef.current) sweeperRef.current = new BufferSweeper();
+    const id = window.setInterval(() => {
+      const st = stateRef.current;
+      if (st.isRecording) return;
+      const used = historyBufferIds();
+      for (const t of st.tracks) for (const b of trackAudioIds(t)) used.add(b);
+      const free = sweeperRef.current!.sweep(audioBufferRegistry.ids(), used, Date.now());
+      if (free.length) {
+        audioBufferRegistry.removeMany(free);
+        audioEngine.pruneCaches();
+      }
+    }, 30000);
+    return () => window.clearInterval(id);
+  }, [showLanding, historyBufferIds]);
   // Journal de prise : le moteur écrit chaque morceau capté pendant l'enregistrement.
   useEffect(() => {
     audioEngine.setTakeJournalFactory(m => {

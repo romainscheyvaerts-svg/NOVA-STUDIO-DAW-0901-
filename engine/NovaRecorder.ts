@@ -9,6 +9,8 @@
  * exacte, il ne reste qu'à retirer la latence d'entrée / sortie mesurée.
  */
 
+import { retireWorkletNode } from './workletGuard';
+
 const WORKLET = `
 class NovaRecorder extends AudioWorkletProcessor {
   constructor() {
@@ -104,6 +106,8 @@ export class NovaRecorderSession {
     const firstFrame = await Promise.race([this.donePromise, new Promise<number>(r => setTimeout(() => r(-1), 2000))]);
     try { source.disconnect(this.node); } catch { /* déjà déconnecté */ }
     try { this.node.disconnect(); this.sink.disconnect(); } catch { /* */ }
+    // Sinon le processeur de chaque prise restait vivant et calculé (fuite mesurée).
+    retireWorkletNode(this.node);
     const total = this.chunks.reduce((s, c) => s + c.length, 0);
     const samples = new Float32Array(total);
     let o = 0;

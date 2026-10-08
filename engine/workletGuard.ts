@@ -110,3 +110,98 @@ export function ownsNode(root: unknown, target: unknown, maxDepth = 3): boolean 
   };
   return visit(root, 0);
 }
+
+// --------------------------------------------------------------------------------------------
+// Retraite des worklets (fuite mesurée le 08/10/2026)
+//
+// Un processeur dont process() renvoie toujours true reste VIVANT et calculé à chaque bloc,
+// même déconnecté et oublié (règle Web Audio : un processeur « actif » garde son nœud).
+// Chaque effet à worklet retiré d'une piste (compresseur, saturation, lo-fi, filtre DJ,
+// gate, harmoniseur, autotune…), chaque prise (enregistreur) et chaque synthé remplacé
+// restaient donc en mémoire ET consommaient du processeur : 120 changements d'effet =
+// 170 worklets fantômes. Correctif générique : un prélude chargé avant chaque module de
+// worklet enveloppe registerProcessor ; un message { __novaRetire: true } sur le port d'un
+// nœud fait renvoyer false à son process() : le navigateur peut alors le libérer.
+// --------------------------------------------------------------------------------------------
+
+const PRELUDE = `
+(() => {
+  if (globalThis.__novaRetirePrelude) return;
+  globalThis.__novaRetirePrelude = true;
+  const reg = globalThis.registerProcessor;
+  globalThis.registerProcessor = function (name, Cls) {
+    class Retirable extends Cls {
+      constructor(...args) {
+        super(...args);
+        this.__novaAlive = true;
+        try {
+          this.port.addEventListener('message', (e) => { if (e && e.data && e.data.__novaRetire) this.__novaAlive = false; });
+          this.port.start();
+        } catch (e) {}
+      }
+      process(inputs, outputs, params) {
+        if (!this.__novaAlive) return false;
+        return super.process(inputs, outputs, params);
+      }
+    }
+    return reg.call(globalThis, name, Retirable);
+  };
+})();
+`;
+
+const preludeLoaded = new WeakMap<object, Promise<void>>();
+let retirementInstalled = false;
+
+/** Charge le prélude avant tout module de worklet (une fois par contexte audio). */
+export function installWorkletRetirement(): boolean {
+  if (retirementInstalled) return true;
+  const g = globalThis as any;
+  const AW = g.AudioWorklet as { prototype: { addModule: (url: string | URL, opts?: any) => Promise<void> } } | undefined;
+  if (!AW || typeof AW.prototype?.addModule !== 'function' || typeof Blob === 'undefined' || typeof URL?.createObjectURL !== 'function') return false;
+  const orig = AW.prototype.addModule;
+  AW.prototype.addModule = function (this: object, url: string | URL, opts?: any) {
+    let p = preludeLoaded.get(this);
+    if (!p) {
+      const blobUrl = URL.createObjectURL(new Blob([PRELUDE], { type: 'application/javascript' }));
+      p = orig.call(this, blobUrl).catch(() => { /* sans prélude : le module se charge quand même */ }).finally(() => URL.revokeObjectURL(blobUrl));
+      preludeLoaded.set(this, p);
+    }
+    return p.then(() => orig.call(this, url, opts));
+  };
+  retirementInstalled = true;
+  return true;
+}
+
+const retired = new WeakSet<object>();
+
+/** Met un nœud de worklet à la retraite (déconnecté, process() renverra false). */
+export function retireWorkletNode(node: AudioWorkletNode): void {
+  if (!node || retired.has(node)) return;
+  retired.add(node);
+  try { node.port.postMessage({ __novaRetire: true }); } catch { /* port fermé */ }
+  try { node.disconnect(); } catch { /* déjà déconnecté */ }
+  // Un port qui a un écouteur reste vivant (et garde l'effet en mémoire par sa fermeture) :
+  // on le ferme une fois le message parti.
+  try { node.port.onmessage = null; } catch { /* */ }
+  setTimeout(() => { try { node.port.close(); } catch { /* */ } }, 250);
+}
+
+/** Tous les nœuds de worklet d'un objet (effet, synthé, enregistreur), mis à la retraite. */
+export function retireWorkletsOf(root: unknown, maxDepth = 3): number {
+  if (!root || typeof AudioWorkletNode === 'undefined') return 0;
+  let n = 0;
+  const seen = new Set<unknown>();
+  const visit = (v: any, depth: number) => {
+    if (!v || typeof v !== 'object' || depth > maxDepth || seen.has(v)) return;
+    seen.add(v);
+    if (v instanceof AudioWorkletNode) { retireWorkletNode(v); n++; return; }
+    if ((typeof AudioNode !== 'undefined' && v instanceof AudioNode) || (typeof BaseAudioContext !== 'undefined' && v instanceof BaseAudioContext)
+      || (typeof AudioParam !== 'undefined' && v instanceof AudioParam) || (typeof AudioBuffer !== 'undefined' && v instanceof AudioBuffer)) return;
+    if (ArrayBuffer.isView(v)) return;
+    if (v instanceof Map) { for (const x of v.values()) visit(x, depth + 1); return; }
+    if (v instanceof Set || Array.isArray(v)) { for (const x of v as any) visit(x, depth + 1); return; }
+    for (const k of Object.keys(v)) { let x: any; try { x = v[k]; } catch { continue; } visit(x, depth + 1); }
+  };
+  visit(root, 0);
+  return n;
+}

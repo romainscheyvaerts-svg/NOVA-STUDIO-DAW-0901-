@@ -41,7 +41,7 @@ import { events808 } from '../utils/bass808';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
 import { placeHumTake } from './humTake';
 import { VSTPluginNode } from './VSTPluginNode';
-import { installWorkletGuard, onWorkletCrash, ownsNode } from './workletGuard';
+import { installWorkletGuard, installWorkletRetirement, onWorkletCrash, ownsNode, retireWorkletsOf } from './workletGuard';
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback, isFrozenBus, isFeedCovered, busFrozenSlices } from '../utils/freeze';
 import { PRE_VOLUME } from '../utils/preFxEdits';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
@@ -240,6 +240,8 @@ export class AudioEngine {
     // Garde des worklets : un processeur qui plante est retrouvé et contourné (voir handleWorkletCrash).
     if (typeof window !== 'undefined') {
       installWorkletGuard();
+      // Worklets retirés (effet enlevé, prise finie, synthé remplacé) : vraiment libérés.
+      installWorkletRetirement();
       onWorkletCrash((node, processor) => this.handleWorkletCrash(node, processor));
     }
   }
@@ -413,6 +415,11 @@ export class AudioEngine {
 
   public getAudioBuffer(clipId: string): AudioBuffer | undefined {
     return audioBufferRegistry.get(clipId);
+  }
+
+  /** Caches du moteur dont le son d'origine a été libéré (clips inversés). */
+  public pruneCaches() {
+    this.reversedBufferCache.forEach((_, key) => { if (!audioBufferRegistry.has(key)) this.reversedBufferCache.delete(key); });
   }
 
   /** Journal des prises (récupération après plantage) : branché par l'appli. */
@@ -1402,8 +1409,12 @@ export class AudioEngine {
   }
 
   public async startRecording(currentTime: number, trackId: string): Promise<boolean> {
+    // Piste armée à l'instant (bouton R puis REC tout de suite, ou machine chargée) : le
+    // micro s'ouvre encore. Avant, la prise échouait (« No monitor stream ») : mesuré
+    // dans le soak, 1 prise sur 3 ne démarrait pas sous charge.
+    if (this.armingPromise) { try { await this.armingPromise; } catch { /* erreur d'armement déjà signalée */ } }
     console.log("[AudioEngine] startRecording called - stream:", !!this.activeMonitorStream, "recording:", this.recordingTrackId);
-    
+
     if (!this.activeMonitorStream) {
       console.error("[AudioEngine] REC FAILED - No monitor stream! Arm track first.");
       return false;
@@ -2633,6 +2644,9 @@ export class AudioEngine {
                 if (current && current.source === source) this.activeSources.delete(sourceKey);
                 try { source.disconnect(); gainNode.disconnect(); } catch (e) {}
             };
+        } else {
+            // Rien à jouer (fin du clip dépassée) : les nœuds créés ne restent pas branchés.
+            try { source.disconnect(); gainNode.disconnect(); } catch (e) {}
         }
         
     } catch (error) {
@@ -2802,9 +2816,13 @@ export class AudioEngine {
     dsp.pluginChain.forEach(entry => {
       try { entry.input.disconnect(); entry.output.disconnect(); } catch (e) {}
       try { entry.bypassDelay?.disconnect(); } catch (e) {}
+      // Avant dispose() : certains effets oublient leur worklet en se libérant.
+      retireWorkletsOf(entry.instance);
       try { entry.instance?.dispose?.(); } catch (e) {}
     });
     dsp.pluginChain.clear();
+    retireWorkletsOf(dsp.synth);
+    retireWorkletsOf(dsp.bass808);
 
     dsp.sends.forEach(g => { try { g.disconnect(); } catch (e) {} });
     dsp.sends.clear();
@@ -2864,7 +2882,7 @@ export class AudioEngine {
         if (wantNova !== (dsp.synth instanceof NovaSynthNode)) {
           const old = dsp.synth;
           try { old.releaseAll(); } catch (e) {}
-          setTimeout(() => { try { old.output.disconnect(); if (old instanceof NovaSynthNode) old.destroy(); } catch (e) {} }, 60);
+          setTimeout(() => { retireWorkletsOf(old); try { old.output.disconnect(); if (old instanceof NovaSynthNode) old.destroy(); } catch (e) {} }, 60);
           dsp.synth = makeTrackSynth(this.ctx, track);
           dsp.synth.output.connect(dsp.input);
           if (this.isPlaying && dsp.synth instanceof NovaSynthNode) dsp.synth.syncTimeline(this.playbackStartTime, this.ctx.currentTime);
@@ -3048,6 +3066,9 @@ export class AudioEngine {
 
     dsp.pluginChain.forEach((val, id) => {
       if (!currentPluginIds.has(id)) {
+        // Worklets de l'effet retiré : sinon ils restaient vivants ET calculés (fuite mesurée).
+        // Avant dispose() : certains effets oublient leur worklet en se libérant.
+        retireWorkletsOf(val.instance);
         try {
           val.input.disconnect();
           val.output.disconnect();
