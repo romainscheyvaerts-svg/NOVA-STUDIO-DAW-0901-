@@ -367,6 +367,11 @@ class JuceThread:
     def release(self, obj):
         """Détruit un plugin sur ce thread (destructeur JUCE)."""
         _MONO.discard(id(obj))
+        if isinstance(obj, vst_native.NativePlugin):
+            # Hôte natif : processus fermé tout de suite (les poignées de réglages gardées par un
+            # Slot, l'automation… ne le retiennent plus en vie).
+            threading.Thread(target=obj.close, name="vsthost-close", daemon=True).start()
+            return
         holder = [obj]
         self.jobs.put(("job", holder.clear, (), None))
 

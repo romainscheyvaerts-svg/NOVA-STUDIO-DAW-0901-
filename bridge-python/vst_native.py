@@ -632,8 +632,10 @@ class NativeCppParam:
         self.step_count = int(info.get("steps") or 0)
         self.default_raw_value = f32(float(info.get("default") or 0.0))
         self.num_steps = DEFAULT_NUM_STEPS if self.step_count == 0 else self.step_count + 1
-        # Règle de JUCE (FabFilter annonce 2 147 483 646 pas pour ses réglages continus : « discret »).
-        self.is_discrete = self.num_steps != DEFAULT_NUM_STEPS
+        # pedalboard 0.9.25 répond « discret » pour presque tous les réglages VST3, continus compris
+        # (Pro-C 3, Pro-Q 4, C6, Vital), mais pas toujours d'un chargement à l'autre (valeur non fiable
+        # dans sa version de JUCE) : on garde sa réponse dominante.
+        self.is_discrete = True
         self.is_boolean = False          # jamais « booléen » pour un VST3 (comme pedalboard)
         self.is_automatable = bool(self.flags & K_CAN_AUTOMATE)
         self.is_meta_parameter = False
@@ -868,6 +870,7 @@ class NativePlugin:
         _s(self, "buses", info.get("buses") or {})
         _s(self, "offline", (os.environ.get("NOVA_VST_REALTIME_MODE") != "1") if offline is None else bool(offline))
         _s(self, "on_edit", None)
+        _s(self, "out_values", {})        # indice (hôte) → dernière valeur renvoyée par le processeur
         _s(self, "_latency", int(info.get("latency") or 0))
         _s(self, "_spec", None)           # (fréquence, bloc, canaux, side-chain) préparés
         _s(self, "_reload_persists", None)  # garde du son après arrêt / redémarrage ? (test fait une fois)
@@ -881,6 +884,33 @@ class NativePlugin:
         _s(self, "_closed", False)
         self._host.listeners.append(self._on_event)
         self._load_params()
+        self._detect_reload_type()
+
+    def _warm_up(self):
+        """Instrument : mise en route comme pedalboard (une note jouée jusqu'au son, puis coupée)."""
+        try:
+            self._host.request("warm_up", timeout=60.0, seconds=10.0)
+        except HostError as e:
+            logger.debug(f"mise en route : {e}")
+
+    def _detect_reload_type(self):
+        """Comme pedalboard au chargement : un effet passe le test « garde-t-il du son après un
+        arrêt / redémarrage ? » (44,1 kHz, avant toute préparation réelle) ; s'il en garde, il est
+        recréé à neuf tout de suite, puis à chaque remise à zéro. Un instrument est toujours recréé."""
+        if self.main_input_channels == 0:
+            object.__setattr__(self, "_reload_persists", True)
+            self._warm_up()
+            return
+        try:
+            persists = bool(self._host.request("detect_reload").get("persists"))
+        except HostError:
+            persists = False
+        object.__setattr__(self, "_reload_persists", persists)
+        if persists:
+            res = self._host.request("reinstantiate", timeout=LOAD_TIMEOUT_S)
+            object.__setattr__(self, "buses", res.get("buses") or self.buses)
+            self._host.request("release")
+            self._refresh_values()
 
     # --- réglages ----------------------------------------------------------------
 
@@ -1100,16 +1130,11 @@ class NativePlugin:
         pedalboard, fait une fois) et tout instrument sont recréés (même classe, état et réglages
         restaurés) ; les autres sont simplement arrêtés."""
         with self._lock:
-            if self._reload_persists is None:
-                try:
-                    persists = bool(self._host.request("detect_reload").get("persists"))
-                except HostError:
-                    persists = False
-                object.__setattr__(self, "_reload_persists", persists)
-                object.__setattr__(self, "_spec", None)       # le test a préparé l'hôte à 44,1 kHz
             if self._reload_persists:
                 res = self._host.request("reinstantiate", timeout=LOAD_TIMEOUT_S)
                 object.__setattr__(self, "buses", res.get("buses") or self.buses)
+                if self.main_input_channels == 0:
+                    self._warm_up()
                 self._host.request("release")
                 self._refresh_values()
                 if self._spec is not None:
@@ -1215,11 +1240,13 @@ class NativePlugin:
                 if wrote == 1 and out_ch > 1 and x is None:
                     out[1:, pos:pos + m] = host.a_out[0, :m]
                 if h.nOutChanges:
+                    # Réglages renvoyés par le processeur (vu-mètres, réduction de gain…) : gardés à
+                    # part (out_values) ; raw_value garde la valeur posée, comme pedalboard.
                     oc = host.a_outchanges[:int(h.nOutChanges)]
                     for pid, _off, v in oc:
                         idx = self._id_index.get(int(pid))
                         if idx is not None:
-                            self._values[idx] = f32(v)
+                            self.out_values[idx] = float(v)
                 object.__setattr__(self, "_latency", int(h.latency))
                 object.__setattr__(self, "last_process_us", float(h.processUs))
                 if tr is not None:

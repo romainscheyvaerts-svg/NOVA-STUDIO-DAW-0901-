@@ -374,7 +374,9 @@ def load_json(path):
         return None
 
 
-PARAM_FIELDS = ("name", "display_name", "text", "label", "num_steps", "is_boolean", "is_discrete", "range", "values")
+# is_discrete n'est pas comparé : pedalboard 0.9.25 le donne vrai presque toujours, mais pas toujours
+# pour le même réglage d'un chargement à l'autre (Vital, Auto-Tune) ; les écarts sont comptés à part.
+PARAM_FIELDS = ("name", "display_name", "text", "label", "num_steps", "is_boolean", "range", "values")
 
 
 def cmp_params(a, b):
@@ -386,6 +388,7 @@ def cmp_params(a, b):
         diffs.append(f"clés : {len(a)} / {len(b)}, seulement pedalboard {sorted(sa - sb)[:5]}, seulement natif {sorted(sb - sa)[:5]}")
     bb = {p["name"]: p for p in b}
     n = 0
+    disc = 0
     for p in a:
         q = bb.get(p["name"])
         if q is None:
@@ -395,11 +398,14 @@ def cmp_params(a, b):
                 n += 1
                 if len(diffs) < 8:
                     diffs.append(f"{p['name']}.{f} : {str(p.get(f))[:60]} ≠ {str(q.get(f))[:60]}")
+        if p.get("is_discrete") != q.get("is_discrete"):
+            disc = disc + 1
         if abs(float(p.get("value") or 0) - float(q.get("value") or 0)) > 1e-6:
             n += 1
             if len(diffs) < 8:
                 diffs.append(f"{p['name']}.value : {p.get('value')} ≠ {q.get('value')}")
-    return {"ok": not diffs, "count": len(a), "count_native": len(b), "diffs": diffs, "n_diffs": n}
+    return {"ok": not diffs, "count": len(a), "count_native": len(b), "diffs": diffs, "n_diffs": n,
+            "is_discrete_diffs": disc}
 
 
 def compare(out, pid):

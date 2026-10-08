@@ -372,6 +372,19 @@ namespace nova
                 o.set ("persists", persists);
                 reply (id, o);
             }
+            else if (cmd == "warm_up")
+            {
+                auto& inst = need();
+                guarded ("mise en route", [&] { inst.warmUp (req["seconds"].asDouble (10.0)); });
+                reply (id, Value::object());
+            }
+            else if (cmd == "sync_values")
+            {
+                // Relit toutes les valeurs dans le contrôleur (comme restartComponent kParamValuesChanged).
+                auto& inst = need();
+                guarded ("relecture des réglages", [&] { inst.refreshValuesFromController(); });
+                reply (id, Value::object());
+            }
             else if (cmd == "release") { auto& inst = need(); guarded ("arrêt", [&] { inst.release(); }); reply (id, Value::object()); }
             else if (cmd == "reset") { auto& inst = need(); guarded ("remise à zéro", [&] { inst.reset(); }); reply (id, Value::object()); }
             else if (cmd == "params")

@@ -132,6 +132,9 @@ namespace nova
         // Test de pedalboard (detectReloadType) : du bruit, une remise à zéro, du silence ; vrai si le
         // silence qui suit sort plus fort que 5 × le bruit de fond. Instrument (pas d'entrée) : vrai.
         bool persistsAudioOnReset();
+        // Instrument : « mise en route » de pedalboard (attemptToWarmUp) : à 44,1 kHz, une note (do 4,
+        // vélocité 127) jouée jusqu'à ce qu'il sorte du son (10 s au plus), toutes notes coupées, arrêt.
+        void warmUp (double timeoutSeconds = 10.0);
 
         // ---- état
         bool getState (std::vector<uint8_t>& component, std::vector<uint8_t>& controller, bool& hasController);

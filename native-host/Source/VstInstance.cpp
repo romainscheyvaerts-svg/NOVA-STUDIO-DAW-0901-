@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <set>
 #include <stdexcept>
 
 #include "pluginterfaces/base/funknownimpl.h"
@@ -916,7 +917,19 @@ namespace nova
 
             ProcessContext ctx {};
             ctx.sampleRate = currentRate;
-            if (h.flags & shm::kTransportValid)
+            if (! (h.flags & shm::kTransportValid))
+            {
+                // Sans transport : ce que pedalboard transmet sans tête de lecture (120 BPM, 4/4,
+                // position 0, à l'arrêt, 30 i/s) — les plugins calés sur le tempo sonnent pareil.
+                ctx.tempo = 120.0;
+                ctx.timeSigNumerator = 4;
+                ctx.timeSigDenominator = 4;
+                ctx.frameRate.framesPerSecond = 30;
+                ctx.frameRate.flags = 0;
+                ctx.state = ProcessContext::kProjectTimeMusicValid | ProcessContext::kBarPositionValid
+                          | ProcessContext::kTempoValid | ProcessContext::kSmpteValid | ProcessContext::kTimeSigValid;
+            }
+            else
             {
                 const double bpm = h.tempo > 0 ? h.tempo : 120.0;
                 const int num = h.sigNum > 0 ? h.sigNum : 4, den = h.sigDen > 0 ? h.sigDen : 4;
@@ -979,13 +992,11 @@ namespace nova
                 std::lock_guard<std::mutex> pl (paramLock);
                 for (auto& [id, v] : lastOut) pendingToController[id] = v;
             }
+            // Comme pedalboard : le contrôleur suit (fenêtre, vu-mètres), le cache des valeurs non
+            // (raw_value d'un vu-mètre reste ce que l'hôte a posé) ; le pont les reçoit à part.
             uint32_t k = 0;
             for (auto& [id, v] : lastOut)
-            {
-                const int idx = indexOf (id);
-                if (idx >= 0) cache[(size_t) idx].store ((float) v);
                 if (k < (uint32_t) shm::kMaxOutChanges) h.outChanges[k++] = { id, 0, v };
-            }
             h.nOutChanges = k;
         }
         h.latency = cachedLatency.load();
@@ -1012,10 +1023,13 @@ namespace nova
         refreshParamInfo();
         refreshValuesFromController();
         setState (hasComp ? &comp : nullptr, hasCtrl ? &ctrl : nullptr);
-        // Deux passes (comme pedalboard) : un réglage peut dépendre d'un autre.
+        // Deux passes (comme pedalboard) : un réglage peut dépendre d'un autre. Les réglages qui ne
+        // sont que des relais de contrôleurs MIDI (IMidiMapping : pitch bend, molette…) ne sont pas
+        // reposés : leur valeur « 0 » enverrait un pitch bend tout en bas (Vital : −2 demi-tons).
+        std::set<ParamID> midiProxies (ccMap.begin(), ccMap.end());
         for (int pass = 0; pass < 2; ++pass)
             for (auto& [id, v] : values)
-                if (const int idx = indexOf (id); idx >= 0) setValue (idx, v);
+                if (const int idx = indexOf (id); idx >= 0 && ! midiProxies.count (id)) setValue (idx, v);
         cachedLatency = std::max (0, (int) processor->getLatencySamples());
         if (was)
         {
@@ -1047,6 +1061,40 @@ namespace nova
         for (int c = 0; c < channels; ++c)
             for (int i = 0; i < frames; ++i)
                 magnitude = std::max (magnitude, std::abs (out[(size_t) c * shm::kMaxFrames + (size_t) i]));
+    }
+
+    void VstInstance::warmUp (double timeoutSeconds)
+    {
+        if (mainInChannels() != 0) return;
+        const int ch = std::max (mainInChannels(), mainOutChannels()) == 1 ? 1 : 2;
+        const int frames = 2048;
+        release();
+        prepare (44100.0, frames, true, ch, false);
+        auto h = std::make_unique<shm::Header>();
+        std::vector<float> in ((size_t) shm::kMaxChannels * shm::kMaxFrames, 0.0f),
+                           out ((size_t) shm::kMaxChannels * shm::kMaxFrames, 0.0f), key ((size_t) 2 * shm::kMaxFrames, 0.0f);
+        auto run = [&] (int nEvents, uint8_t s0, uint8_t d1, uint8_t d2) -> float
+        {
+            std::memset (h.get(), 0, sizeof (shm::Header));
+            h->nframes = (uint32_t) frames;
+            h->outChannels = (uint32_t) ch;
+            h->blockSize = (uint32_t) frames;
+            h->nEvents = (uint32_t) nEvents;
+            if (nEvents > 0) h->events[0] = { 0, { s0, d1, d2 }, 3 };
+            processRequest (*h, in.data(), key.data(), out.data());
+            float m = 0;
+            for (int c = 0; c < ch; ++c)
+                for (int i = 0; i < frames; ++i) m = std::max (m, std::abs (out[(size_t) c * shm::kMaxFrames + (size_t) i]));
+            return m;
+        };
+        const double end = nowMs() + timeoutSeconds * 1000.0;
+        const float floor = run (0, 0, 0, 0);
+        float mag = run (1, 0x90, 60, 127);
+        while (mag <= floor * 5.0f && nowMs() < end)
+            mag = run (1, 0x90, 60, 127);
+        run (1, 0xB0, 123, 0);
+        reset();
+        release();
     }
 
     bool VstInstance::persistsAudioOnReset()
