@@ -1585,7 +1585,7 @@ function Studio() {
                   const firstDuration = splitTime - clip.start;
                   const secondDuration = clip.duration - firstDuration;
                   newClips[idx] = { ...clip, duration: firstDuration };
-                  newClips.push({ ...clip, id: `clip-split-${Date.now()}`, start: splitTime, duration: secondDuration, offset: clip.offset + firstDuration });
+                  newClips.push({ ...clip, id: `clip-split-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`, start: splitTime, duration: secondDuration, offset: clip.offset + firstDuration });
               }
             }
             break;

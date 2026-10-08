@@ -111,7 +111,7 @@ const TimeOpsDialog: React.FC<{ state: DAWState; preset?: TimeDialogPreset; onCl
           Repères, accords, tempo et boucle suivent
         </label>
         <p data-testid="timeops-preview" className="rounded-xl bg-nv-well px-3 py-2 text-[11px] leading-snug text-nv-muted">
-          {mode === 'insert' ? 'Insère' : 'Supprime'} <b className="text-nv-ink">{unit === 'bars' ? `${lenBars} mesure${lenBars > 1 ? 's' : ''}${lenBeats ? ` ${lenBeats} temps` : ''}` : fmtS(len)}</b>
+          {mode === 'insert' ? 'Insère' : 'Supprime'} <b className="text-nv-ink">{unit === 'bars' ? ([lenBars ? `${lenBars} mesure${lenBars > 1 ? 's' : ''}` : '', lenBeats ? `${lenBeats} temps` : ''].filter(Boolean).join(' ') || '0 temps') : fmtS(len)}</b>
           {' '}({fmtS(len)}) à <b className="text-nv-ink font-mono">{formatBarsBeats(map, at)}</b>.
           {' '}{mode === 'insert' ? 'Recule' : 'Avance'} : {preview.clips} clip{preview.clips > 1 ? 's' : ''}{rulers ? `, ${preview.markers} repère${preview.markers > 1 ? 's' : ''}, ${preview.chords} accord${preview.chords > 1 ? 's' : ''}, ${preview.tempo} changement${preview.tempo > 1 ? 's' : ''} de tempo` : ''}, et l’automation.
           {unit === 'sec' && Math.abs(len / ins.beatSec - Math.round(len / ins.beatSec)) > 1e-6 && rulers && <span className="block text-amber-300">Pas un nombre entier de temps : le tempo suivra à la mesure près.</span>}

@@ -1482,7 +1482,8 @@ const handleMouseUp = () => {
     }
     rangeDragRef.current = null;
     // Crossfade automatique quand un clip déplacé / rogné touche ou chevauche un voisin.
-    if (editCommands && activeClip && (dragAction === 'MOVE' || dragAction === 'TRIM_START' || dragAction === 'TRIM_END')) {
+    // Un simple clic (aucun déplacement) ne pose pas de crossfade.
+    if (editCommands && activeClip && ((dragAction === 'MOVE' && movedRef.current) || dragAction === 'TRIM_START' || dragAction === 'TRIM_END')) {
         const ids = multiDragRef.current && multiDragRef.current.length > 1 ? multiDragRef.current : [{ trackId: activeClip.trackId, clipId: activeClip.clip.id }];
         const byTrack = new Map<string, string[]>();
         // Clips jumeaux du groupe d'édition (R12) rognés en même temps : crossfade automatique aussi.
