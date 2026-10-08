@@ -604,7 +604,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   useComputerKeyboard();
   const kbOn = computerKeyboardStore.on;
   const kbState = computerKeyboardStore.state;
-  const setKbOn = (v: boolean | ((x: boolean) => boolean)) => computerKeyboardStore.setOn(typeof v === 'function' ? v(computerKeyboardStore.on) : v);
+  const setKbOn = (v: boolean | ((x: boolean) => boolean)) => computerKeyboardStore.setOn(typeof v === 'function' ? v(computerKeyboardStore.on) : v, true);
   /** Notes tenues sur cette piste (clavier de l'ordinateur ou clavier MIDI). */
   const [heldPitches, setHeldPitches] = useState<number[]>([]);
   const heldRef = useRef(new Set<number>());
@@ -622,6 +622,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
     midiInput.setContext({ focusTrackId: track.id });
     return () => {
       if (computerKeyboardStore.forcedTrackId === track.id) computerKeyboardStore.forcedTrackId = null;
+      // Allumé depuis le piano roll : il s'éteint en le fermant (les lettres retrouvent leurs raccourcis).
+      if (computerKeyboardStore.on && computerKeyboardStore.fromRoll) computerKeyboardStore.setOn(false);
       if (midiInput.getContext().focusTrackId === track.id) midiInput.setContext({ focusTrackId: null });
     };
   }, [track.id]);

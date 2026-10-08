@@ -70,10 +70,6 @@ const MidiInputHost: React.FC<Props> = ({ tracks, selectedTrackId, isRecording, 
 
   // --- Clavier de l'ordinateur -------------------------------------------------
   useEffect(() => {
-    try { if (localStorage.getItem('nova.computerKeyboard') === '1') computerKeyboardStore.setOn(true); } catch { /* */ }
-  }, []);
-
-  useEffect(() => {
     const onToggleKey = (e: KeyboardEvent) => {
       if (chordFromEvent(e) !== 'ctrl+shift+k' || typing(e.target)) return;
       e.preventDefault();

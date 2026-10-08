@@ -170,10 +170,13 @@ class ComputerKeyboardStore {
 
   get state(): KeyboardState { return this.kb.state; }
 
-  setOn(on: boolean) {
+  /** Allumé depuis le piano roll : il s'éteint avec lui (comme avant R16). */
+  fromRoll = false;
+
+  setOn(on: boolean, fromRoll = false) {
+    this.fromRoll = on && fromRoll;
     if (this.on === on) return;
     this.on = on;
-    try { localStorage.setItem('nova.computerKeyboard', on ? '1' : '0'); } catch { /* */ }
     this.emit();
   }
   toggle() { this.setOn(!this.on); }
