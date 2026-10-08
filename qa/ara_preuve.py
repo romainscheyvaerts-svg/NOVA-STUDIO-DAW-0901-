@@ -26,7 +26,8 @@ PORT = 8775
 LEAD = Path(r"D:\1 WORK\CONTENU\nova-ara\melodyne\voix_originale.wav")
 DUB = Path(r"D:\1 WORK\CONTENU\nova-ara\vocalign\double_decale.wav")
 PROJECT = OUT / "projet_ara.zip"
-OFFSCREEN = "try { localStorage.setItem('nova.ara.offscreen', '1'); } catch (e) {}"
+# + « Ta voix sur nos beats, en 3 gestes » (première visite) déjà vu : il recouvrait le menu du clip.
+OFFSCREEN = "try { localStorage.setItem('nova.ara.offscreen', '1'); localStorage.setItem('nova_welcome_seen', '1'); } catch (e) {}"
 
 
 def wav16(path):
@@ -107,6 +108,7 @@ async def bridge_snapshot(session, path):
 
 
 def scenario_web(page, log, res, vp):
+    page.add_init_script("try { localStorage.setItem('nova_welcome_seen', '1'); } catch (e) {}")
     prepare(page, port=None, desktop=False)
     open_project_file(page, PROJECT, res, "A0_projet_site")
     res["menu_site"] = clip_menu(page, "Voix lead", "A1_menu_site")

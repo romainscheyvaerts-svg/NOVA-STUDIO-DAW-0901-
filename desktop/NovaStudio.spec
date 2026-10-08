@@ -23,12 +23,14 @@ hiddenimports = ['asio_bridge', 'asio_control_panel', 'nova_bridge_server', 'vst
 datas += [('../bridge-python/stems_worker.py', '.')]
 hiddenimports += collect_submodules('websockets')
 # Hôte ARA2 (Melodyne, VocAlign) : NovaARAHost.exe à côté du pont, avec ses licences
-# (JUCE sous AGPLv3 : sources dans nova-ara-host/, voir LICENCES.md). Facultatif.
+# (sans JUCE : VST3 SDK sous MIT + ARA SDK sous Apache 2.0, voir nova-ara-host/LICENCES.md).
+# Inclus par défaut ; NOVA_EXCLUDE_ARA=1 pour l'exclure.
 hiddenimports += ['ara_host', 'ara_service']
 _ara = '../nova-ara-host/build/NovaARAHost_artefacts/Release/NovaARAHost.exe'
-if os.environ.get('NOVA_INCLUDE_ARA') == '1' and os.path.isfile(_ara):  # opt-in (licence JUCE AGPLv3)
+if os.environ.get('NOVA_EXCLUDE_ARA') != '1' and os.path.isfile(_ara):
     binaries += [(_ara, '.')]
     datas += [('../nova-ara-host/LICENCES.md', 'ara-host')]
+    datas += [(f, 'ara-host/licences') for f in glob.glob('../nova-ara-host/licences/*.txt')]
 
 # pont ASIO : PortAudio compilé avec ASIO (_sounddevice_data)
 datas += collect_data_files('_sounddevice_data')
