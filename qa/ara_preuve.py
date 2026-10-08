@@ -30,7 +30,7 @@ from qalib import *  # noqa
 from stems_separation import start_bridge, stop_bridge, prepare, dismiss_popups  # noqa
 from gel_pre_effet import open_project_file  # noqa
 
-PORT = 8775
+PORT = int(os.environ.get("NOVA_TEST_PORT", "8775"))
 LEAD = Path(r"D:\1 WORK\CONTENU\nova-ara\melodyne\voix_originale.wav")
 DUB = Path(r"D:\1 WORK\CONTENU\nova-ara\vocalign\double_decale.wav")
 PROJECT = OUT / "projet_ara.zip"
@@ -128,7 +128,7 @@ def scenario_melodyne(page, log, res, vp):
     open_project_file(page, PROJECT, res, "B0_projet")
     page.wait_for_timeout(4000)
     res["menu"] = clip_menu(page, "Voix lead", "B1_menu_clip")
-    page.get_by_role("button", name=re.compile(r"Ouvrir dans Melodyne")).first.click()
+    page.get_by_role("menuitem", name=re.compile(r"Ouvrir dans Melodyne")).first.click()
     page.get_by_test_id("ara-dialog-melodyne").wait_for(timeout=8000)
     shot(page, "B2_dialogue")
     t0 = time.time()
@@ -147,7 +147,7 @@ def scenario_melodyne(page, log, res, vp):
     shot(page, "B4_valide")
     page.wait_for_timeout(1500)
     res["menu_apres"] = clip_menu(page, "Voix lead", "B5_menu_apres")
-    page.get_by_role("button", name=re.compile(r"Retoucher dans Melodyne")).first.click()
+    page.get_by_role("menuitem", name=re.compile(r"Retoucher dans Melodyne")).first.click()
     page.get_by_test_id("ara-open").click()
     page.get_by_test_id("ara-open-info").wait_for(timeout=240000)
     res["reouverture"] = page.get_by_test_id("ara-open-info").inner_text()
@@ -164,7 +164,7 @@ def scenario_vocalign(page, log, res, vp):
     open_project_file(page, PROJECT, res, "C0_projet")
     page.wait_for_timeout(4000)
     clip_menu(page, "Double", "C1_menu_double")
-    page.get_by_role("button", name=re.compile(r"Aligner avec VocAlign")).first.click()
+    page.get_by_role("menuitem", name=re.compile(r"Aligner avec VocAlign")).first.click()
     page.get_by_test_id("ara-dialog-vocalign").wait_for(timeout=8000)
     page.wait_for_timeout(1500)
     res["guide"] = page.get_by_test_id("ara-guide").evaluate("e => e.options[e.selectedIndex].text")
