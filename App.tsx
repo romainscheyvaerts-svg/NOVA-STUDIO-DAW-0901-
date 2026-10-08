@@ -15,7 +15,7 @@ import ArrangementView from './components/ArrangementView';
 const MixerView = lazyWithPreload(() => import('./components/MixerView').then(m => ({ default: React.memo(m.default) })));
 // Charge a la demande : PluginEditor tire les 13 interfaces de plugins,
 // soit plus de 8000 lignes qui ne servent qu'a l'ouverture d'un effet.
-import { lazyWithPreload, preloadWhenIdle } from './utils/lazyPreload';
+import { lazyWithPreload, MountWhenOpened, preloadWhenIdle } from './utils/lazyPreload';
 const loadPluginEditor = () => import('./components/PluginEditor');
 const PluginEditor = lazyWithPreload(loadPluginEditor);
 const SynthPanel = lazy(() => import('./components/SynthPanel'));
@@ -111,11 +111,14 @@ const MetronomeDialog = lazyWithPreload(() => import('./components/MetronomeDial
 const TempoDialog = lazyWithPreload(() => import('./components/TempoDialog'));
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import { etirerBufferAsync, facteurPourTempo } from './utils/timeStretch';
-import MobileTracksPage from './components/MobileTracksPage';
-import MobileArrangementPage from './components/MobileArrangementPage';
-import MobilePluginsPage from './components/MobilePluginsPage';
-import MobileMixerPage from './components/MobileMixerPage';
-import MobileBrowserPage from './components/MobileBrowserPage';
+// Pages du téléphone : chargées à la demande (un PC ne les affiche jamais) ; sur téléphone,
+// préchargées dès l'ouverture du studio (Studio : useEffect sur isMobile).
+const MobileTracksPage = lazyWithPreload(() => import('./components/MobileTracksPage'));
+const MobileArrangementPage = lazyWithPreload(() => import('./components/MobileArrangementPage'));
+const MobilePluginsPage = lazyWithPreload(() => import('./components/MobilePluginsPage'));
+const MobileMixerPage = lazyWithPreload(() => import('./components/MobileMixerPage'));
+const MobileBrowserPage = lazyWithPreload(() => import('./components/MobileBrowserPage'));
+const MOBILE_PAGES = [MobileArrangementPage, MobileTracksPage, MobileMixerPage, MobilePluginsPage, MobileBrowserPage];
 import MobileBottomNav from './components/MobileBottomNav';
 import LandingPage from './components/LandingPage';
 import { saveBlob } from './utils/saveBlob';
@@ -195,19 +198,20 @@ import {
   pushSession, pullSession, parseLink, createCloudSession, cloudProjectId, CloudConflictError, LocalCloudSession,
   getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, sessionUrl, signInAccount, call as callCloud,
 } from './services/SessionCloud';
-import DrumMachinePanel from './components/DrumMachinePanel';
+// Boîte à rythmes : chargée à la 1re ouverture (préchargée au repos), absente du démarrage.
+const DrumMachinePanel = lazyWithPreload(() => import('./components/DrumMachinePanel'));
 import ShortcutsHelp from './components/ShortcutsHelp';
-import KeymapEditor from './components/KeymapEditor';
-import WindowLayoutsPanel from './components/WindowLayoutsPanel';
+const KeymapEditor = lazy(() => import('./components/KeymapEditor'));
+const WindowLayoutsPanel = lazy(() => import('./components/WindowLayoutsPanel'));
 
 /** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
 const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
   'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
-import ProToolsWindows from './components/ProToolsWindows';
+import ProToolsWindows, { PRO_TOOLS_WINDOWS_PRELOAD } from './components/ProToolsWindows';
 import { useChordLaneProp } from './components/ChordLane';
-import { HumQuickButtons } from './components/AudioToMidiDialog';
+const HumQuickButtons = lazy(() => import('./components/AudioToMidiDialog').then(m => ({ default: m.HumQuickButtons })));
 import { applyChordOps, chordChanges, chordSig, chordsStore } from './utils/chordTrack';
 import { nextMarkerNumber } from './utils/memoryLocations';
 import { automationRecorder } from './services/AutomationManager';
@@ -652,7 +656,7 @@ export default function App() {
   // dans la même image que le clic (avant : 300 à 450 ms, retenue de React 19 sur React.lazy).
   useEffect(() => preloadWhenIdle([PluginEditor, ExportModal, TempoDialog, MasterAssistantPanel, SaveProjectModal, MixerView, TrackListPanel,
     GroupsListPanel, SessionProPanel, TimeOpsDialog, MetronomeDialog, LoadProjectModal, ImportSessionDialog, PianoRoll, AutomationEditorView,
-    SessionTemplatesModal, AudioSettingsPanel]), []);
+    SessionTemplatesModal, AudioSettingsPanel, ...PRO_TOOLS_WINDOWS_PRELOAD, DrumMachinePanel]), []);
   const paidParam = (() => { try { return new URLSearchParams(window.location.search).get('nova_paid'); } catch { return null; } })();
   if (paidParam && /^cs_(test|live)_[A-Za-z0-9]+$/.test(paidParam)) return <PaymentReturn sessionId={paidParam} />;
   return <Studio />;
@@ -1242,6 +1246,8 @@ function Studio() {
   }, []);
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
+  // Téléphone : ses pages (chargées à la demande) arrivent dès l'ouverture du studio.
+  useEffect(() => { if (isMobile) MOBILE_PAGES.forEach(c => c.preload()); }, [isMobile]);
   // Téléphone (version simple) : pistes masquées, VCA et dossiers simples non affichés (menu « Pistes masquées »).
   const mobileTracks = useMemo(() => { const shown = shownTrackIds(state.tracks); return state.tracks.filter(t => shown.has(t.id) && !t.isVca && t.folder?.kind !== 'basic'); }, [state.tracks]);
   const isMobileRef = useRef(isMobile); isMobileRef.current = isMobile;
@@ -8037,6 +8043,7 @@ function Studio() {
           )}
           {isMobile && (
             <PanelBoundary key={`mobile-${activeMobileTab}`} name={MOBILE_PAGE_NAMES[activeMobileTab] || 'cette page'}>
+              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[12px] text-slate-400" role="status">Chargement…</div>}>
               {activeMobileTab === 'TRACKS' && (
                 <MobileTracksPage
                   tracks={mobileTracks}
@@ -8116,6 +8123,7 @@ function Studio() {
                   selectedTrackId={state.selectedTrackId}
                 />
               )}
+              </Suspense>
             </PanelBoundary>
           )}
           {structurePanel && (
@@ -8225,7 +8233,7 @@ function Studio() {
         currentStyleId={state.vocalMixStyle}
         onApplyStyle={(id: string) => { handleApplyMixStyle(id); }}
         breathMixOption={<BreathMixOption />}
-        humTools={<HumQuickButtons onOpen={() => setVocalToolsOpen(false)} />}
+        humTools={<Suspense fallback={null}><HumQuickButtons onOpen={() => setVocalToolsOpen(false)} /></Suspense>}
         r23Tools={<R23VoiceTools hasVoice={state.tracks.some(t => isVoiceTrack(t) && t.clips.some(c => !c.isMuted))} onAfter={() => setVocalToolsOpen(false)} />}
         breathTools={<BreathPanelTools canTreat={state.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0)}
           projectAuto={state.breathAuto} onProjectAutoChange={(on) => setState(prev => ({ ...prev, breathAuto: on }))} />}
@@ -8408,6 +8416,7 @@ function Studio() {
       {/* File d'exports (R1) : progression et « Ouvrir le dossier » / « Télécharger » à la fin. */}
       <Suspense fallback={null}><ExportQueueToast /></Suspense>
       <PanelBoundary name="la boîte à rythmes" overlay onClose={() => setDrumsOpen(false)}>
+      <MountWhenOpened when={drumsOpen}>
       <DrumMachinePanel
         open={drumsOpen}
         onClose={() => setDrumsOpen(false)}
@@ -8442,11 +8451,12 @@ function Studio() {
         ensureEngine={ensureAudioEngine}
         notify={setAiNotification}
       />
+      </MountWhenOpened>
       </PanelBoundary>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} actions={paletteOpen ? buildPaletteActions() : []} />
       <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} onCustomize={isMobile ? undefined : () => { setShortcutsOpen(false); setKeymapEditorOpen(true); }} onLayouts={() => { setShortcutsOpen(false); setLayoutsOpen(true); }} />
-      {keymapEditorOpen && !isMobile && <KeymapEditor onClose={() => setKeymapEditorOpen(false)} />}
-      {layoutsOpen && <WindowLayoutsPanel onClose={() => setLayoutsOpen(false)} notify={setAiNotification} />}
+      {keymapEditorOpen && !isMobile && <Suspense fallback={null}><KeymapEditor onClose={() => setKeymapEditorOpen(false)} /></Suspense>}
+      {layoutsOpen && <Suspense fallback={null}><WindowLayoutsPanel onClose={() => setLayoutsOpen(false)} notify={setAiNotification} /></Suspense>}
       <PanelBoundary name="les fenêtres d'édition" overlay>
       <ProToolsWindows tracks={state.tracks} markers={state.markers} bpm={state.bpm} setState={setState} onEditClip={handleEditClip}
         onSeek={handleSeek} onAddMarker={handleAddMarker} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}

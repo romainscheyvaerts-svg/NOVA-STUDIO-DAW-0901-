@@ -4,7 +4,8 @@ import { createPortal } from 'react-dom';
 import { Instrumental, User } from '../types';
 import { supabaseManager } from '../services/SupabaseManager';
 import { stripeManager } from '../services/StripeManager';
-import AdminPanel from './AdminPanel';
+// Panneau admin (ajout d'instrus) : chargé à la demande, seul l'admin l'ouvre.
+const AdminPanel = React.lazy(() => import('./AdminPanel'));
 import { audioEngine } from '../engine/AudioEngine';
 import { setDraggedBeat } from '../utils/beatDrag';
 import { tonaliteFr } from '../utils/keyName';
@@ -306,12 +307,12 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
     <div className="h-full flex flex-col bg-[#08090b] relative" data-nova-target="beat-catalog">
       
       {showAdminModal && user && (
-        <AdminPanel 
+        <React.Suspense fallback={null}><AdminPanel 
             user={user} 
             existingInstruments={[]} 
             onSuccess={fetchInstrumentals} 
             onClose={() => setShowAdminModal(false)}
-        />
+        /></React.Suspense>
       )}
 
       {/* Header Compact */}
