@@ -100,12 +100,15 @@ export function planMidiImport(data: MidiFileData, opts: { projectBpm: number; t
       const notes: MidiNote[] = byCh.get(ch)!.map(n => {
         const start = toSec(n.startTick);
         const end = toSec(n.startTick + n.durationTicks);
+        const onPad = isDrums && drumsToRack;
         return {
           id: nid('n'),
-          pitch: isDrums && drumsToRack ? 60 + gmToDrumRow(n.pitch) : n.pitch,
+          pitch: onPad ? 60 + gmToDrumRow(n.pitch) : n.pitch,
           start,
           duration: Math.max(1e-4, end - start),
           velocity: Math.max(1, Math.min(127, n.velocity)) / 127,
+          // Note GM d'origine gardée : l'aller-retour .mid ne ramène pas tout à 7 notes.
+          ...(onPad ? { gm: n.pitch } : {}),
         };
       });
       parts.push({ name, isDrums, channel: ch, program: tr.program, notes });
@@ -163,6 +166,12 @@ export const midiClipsOf = (t: Track): Clip[] => (t.clips || []).filter(c => Arr
 /** Piste qui a des notes à exporter. */
 export const hasMidi = (t: Track): boolean => midiClipsOf(t).length > 0;
 
+/** Note de pad (60 + rangée) → note General MIDI ; la note GM d'origine si elle est toujours sur son pad. */
+function drumNoteOut(t: Track, n: MidiNote): number {
+  if (typeof n.gm === 'number' && n.gm >= 0 && n.gm < 128 && n.pitch - 60 === gmToDrumRow(n.gm)) return n.gm;
+  return drumPitchOut(t, n.pitch);
+}
+
 /** Note de pad (60 + rangée) → note General MIDI. */
 function drumPitchOut(t: Track, pitch: number): number {
   const dm = (t as any).drumMachine as { rows?: { id: string; name: string; sound: string }[] } | undefined;
@@ -199,7 +208,7 @@ export function novaToMidi(sources: ExportSource[], opts: { bpm: number; timeSig
         const startTick = secondsToTicks(s, bpm, ppq);
         const endTick = secondsToTicks(abs + n.duration, bpm, ppq);
         notes.push({
-          pitch: drums ? drumPitchOut(track, n.pitch) : n.pitch,
+          pitch: drums ? drumNoteOut(track, n) : n.pitch,
           velocity: Math.max(1, Math.min(127, Math.round((n.velocity ?? 0.8) * 127))),
           startTick,
           durationTicks: Math.max(1, endTick - startTick),

@@ -140,6 +140,13 @@ export interface MidiNote {
   duration: number; 
   velocity: number; 
   isSelected?: boolean;
+  /**
+   * Batterie importée d'un .mid (V25) : note General MIDI d'origine (40 = caisse
+   * claire électrique, 44 = charley au pied…). Plusieurs notes GM partagent un pad
+   * de la boîte à rythmes ; à l'export, la note revient à sa valeur d'origine tant
+   * qu'elle n'a pas changé de pad.
+   */
+  gm?: number;
 }
 
 /** Groove (V25, utils/groove) : décalage et vélocité par case de grille, comme le Groove Pool de Live. */

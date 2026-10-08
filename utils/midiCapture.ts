@@ -11,7 +11,7 @@
  *
  * Logique pure (horloge et transport injectés) : tests/midiCapture.test.ts.
  */
-import { MidiNote } from '../types';
+import { Clip, MidiNote, TrackType } from '../types';
 
 export interface CapturedEvent {
   pitch: number;
@@ -205,4 +205,32 @@ export function buildCapture(events: CapturedEvent[], opts: { bpm: number; beats
   const end = Math.max(...notes.map(n => n.start + n.duration));
   const start = guessed ? 0 : Math.max(0, Math.round(opts.at / bar) * bar);
   return { start, duration: Math.max(bar, Math.ceil(end / bar - 1e-6) * bar), notes, guessedBpm: guessed, mode: 'stopped' };
+}
+
+/**
+ * Où poser une capture sur la piste visée.
+ * - Pendant la lecture : dans le clip MIDI qui couvre déjà ce passage (les notes
+ *   gardent leur place dans le morceau), sinon un nouveau clip.
+ * - À l'arrêt (comme Ableton) : TOUJOURS un clip à part, jamais mélangé à un
+ *   clip existant. À la tête de lecture si la piste y est libre ; sinon juste
+ *   après les clips qui occupent la place, sur la mesure suivante.
+ */
+export function placeCapture(
+  clips: Pick<Clip, 'id' | 'start' | 'duration' | 'type' | 'notes'>[], res: Pick<CaptureResult, 'start' | 'duration' | 'mode'>, bar: number,
+): { hostId: string | null; start: number } {
+  const midi = clips.filter(c => c.type === TrackType.MIDI && Array.isArray(c.notes));
+  if (res.mode === 'playing') {
+    const host = midi.find(c => c.start <= res.start + 1e-6 && c.start + c.duration > res.start);
+    return { hostId: host?.id ?? null, start: res.start };
+  }
+  const b = bar > 0 ? bar : 2;
+  let start = res.start;
+  // Décale tant que la place [start, start + durée[ chevauche un clip de la piste.
+  for (let guard = 0; guard < 1000; guard++) {
+    const hit = clips.filter(c => c.start < start + res.duration - 1e-6 && c.start + c.duration > start + 1e-6);
+    if (!hit.length) break;
+    const after = Math.max(...hit.map(c => c.start + c.duration));
+    start = Math.ceil(after / b - 1e-6) * b;
+  }
+  return { hostId: null, start };
 }

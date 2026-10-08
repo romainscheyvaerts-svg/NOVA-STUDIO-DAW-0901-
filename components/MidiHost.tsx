@@ -3,7 +3,7 @@ import { Clip, DAWState, Track, TrackType } from '../types';
 import { midiBus, isMidiFile, MidiBusEvent } from '../utils/midiBus';
 import { parseMidi, writeMidi, midiFileName, hasTempoChanges, initialBpm, noteCount, MidiFileData, DRUM_CHANNEL } from '../utils/midiFile';
 import { planMidiImport, partClip, partTrack, exportSources, novaToMidi, TempoMode, DRUM_ROW_IDS, hasMidi } from '../utils/midiImport';
-import { midiCapture, buildCapture } from '../utils/midiCapture';
+import { midiCapture, buildCapture, placeCapture } from '../utils/midiCapture';
 import { saveBlob } from '../utils/saveBlob';
 import { playheadStore } from '../utils/playheadStore';
 import { chordFromEvent } from '../utils/keymap';
@@ -161,9 +161,13 @@ const MidiHost: React.FC<Props> = ({ state, getState, setState, pianoRoll }) => 
     const want = trackId || phrase[phrase.length - 1].trackId || prRef.current?.trackId || st.selectedTrackId;
     const target = st.tracks.find(t => t.id === want && (t.type === TrackType.MIDI || t.type === TrackType.DRUM_RACK || t.type === TrackType.SAMPLER));
     const end = res.start + res.duration;
-    const host = target?.clips.find(c => c.type === TrackType.MIDI && Array.isArray(c.notes) && c.start <= res.start + 1e-6 && c.start + c.duration > res.start);
+    // Pendant la lecture : dans le clip qui couvre déjà ce passage. À l'arrêt : un clip à part (comme Ableton),
+    // à la tête de lecture si la piste y est libre, sinon juste après ce qui occupe la place.
+    const bar = (60 / (st.bpm || 120)) * (st.timeSignature?.numerator || 4);
+    const place = target ? placeCapture(target.clips, res, bar) : { hostId: null, start: res.start };
+    const host = place.hostId ? target!.clips.find(c => c.id === place.hostId) : undefined;
     const clipId = host?.id || `clip-cap-${Date.now().toString(36)}`;
-    const newClip: Clip = { id: clipId, start: res.start, duration: res.duration, offset: 0, fadeIn: 0, fadeOut: 0, name: 'Capture', color: target?.color || '#f43f5e', type: TrackType.MIDI, notes: res.notes, isMuted: false, gain: 1 };
+    const newClip: Clip = { id: clipId, start: place.start, duration: res.duration, offset: 0, fadeIn: 0, fadeOut: 0, name: 'Capture', color: target?.color || '#f43f5e', type: TrackType.MIDI, notes: res.notes, isMuted: false, gain: 1 };
     const newTrackId = `track-cap-${Date.now().toString(36)}`;
     setState(prev => {
       let tracks: Track[];
@@ -190,7 +194,8 @@ const MidiHost: React.FC<Props> = ({ state, getState, setState, pianoRoll }) => 
     });
     if (res.guessedBpm) audioEngine.setBpm(res.guessedBpm);
     midiCapture.clear();
-    notify(`✋ Capturé : ${plural(res.notes.length, 'note')} ${host ? `ajoutée${res.notes.length > 1 ? 's' : ''} dans « ${host.name} »` : target ? `dans un nouveau clip sur « ${target.name} »` : 'sur une nouvelle piste'}${res.guessedBpm ? `, tempo deviné : ${res.guessedBpm} BPM` : ''}. Ctrl+Z pour annuler.`);
+    const moved = !host && target && Math.abs(place.start - res.start) > 1e-6;
+    notify(`✋ Capturé : ${plural(res.notes.length, 'note')} ${host ? `ajoutée${res.notes.length > 1 ? 's' : ''} dans « ${host.name} »` : target ? `dans un nouveau clip sur « ${target.name} »${moved ? ' (posé juste après le clip déjà en place)' : ''}` : 'sur une nouvelle piste'}${res.guessedBpm ? `, tempo deviné : ${res.guessedBpm} BPM` : ''}. Ctrl+Z pour annuler.`);
   }, [getState, setState]);
 
   // ---------------- Bus, raccourci, clavier MIDI, transport ----------------
