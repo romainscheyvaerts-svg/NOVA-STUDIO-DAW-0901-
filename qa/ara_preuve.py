@@ -83,6 +83,7 @@ def clip_menu(page, track, label):
     y = track_y(page, track)
     page.mouse.click(1000, y + 60, button="right")
     page.wait_for_timeout(500)
+    menu_open_for(page, "Melodyne")  # menu du clip regroupé : sous-menu « Voix »
     shot(page, label)
     items = page.evaluate("""() => [...document.querySelectorAll('button')].filter(b => /Melodyne|VocAlign|alignement NOVA|Revenir à l'original/.test(b.textContent||''))
         .map(b => ({ text: b.textContent.trim(), disabled: b.disabled, title: b.title }))""")

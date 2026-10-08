@@ -22,7 +22,7 @@ import numpy as np
 
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-r13")
 sys.path.insert(0, str(Path(__file__).parent))
-from qalib import BASE, Log, launch, new_page, shot, OUT  # noqa
+from qalib import BASE, Log, launch, new_page, shot, OUT, menu_pick  # noqa
 from gel_pre_effet import prepare, open_project_file, export_wav, save_zip  # noqa
 from playwright.sync_api import sync_playwright  # noqa
 
@@ -294,7 +294,7 @@ def part_a(page):
     page.mouse.click(box["x"] + 3.0 * 40 - box["sl"], box["y"] + box["tt"] + 60 - box["st"], button="right")
     page.wait_for_timeout(500)
     shot(page, "A1_menu_clip_transposer")
-    page.get_by_text("Transposer / étirer…", exact=True).first.click()
+    menu_pick(page, "Transposer / étirer…", exact=True)  # sous-menu « Hauteur et temps »
     page.wait_for_selector("[data-testid=transpose-dialog]")
     page.wait_for_timeout(1500)
     out["voix_detectee"] = page.evaluate("() => (document.querySelector('[data-testid=transpose-detected]') || {}).innerText || null")

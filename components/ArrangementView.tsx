@@ -2280,6 +2280,226 @@ useEffect(() => {
     return playheadStore.subscribe(drawPlayhead);
 }, [drawPlayhead, scrollLeft, viewportSize.width, viewportSize.height, headerWidth, isPlaying]);
 
+  /**
+   * Menu contextuel du clip, rangé comme le menu Clip de Pro Tools (avant : plus de
+   * 40 entrées à plat, 892 px de haut). En haut, les gestes de tous les jours ;
+   * puis toujours les mêmes sous-menus, dans le même ordre (souris, clavier, doigt) ;
+   * un sous-menu sans objet pour ce clip reste à sa place, grisé, avec la raison.
+   */
+  const clipMenuEntries = (cm: { x: number; y: number; trackId: string; clip: Clip }): (ContextMenuItem | 'separator')[] => {
+    const isMidiClip = cm.clip.type === TrackType.MIDI;
+    const audioOnly = !isMidiClip;
+    const close = () => setClipContextMenu(null);
+    const group = (label: string, icon: string, entries: (ContextMenuItem | 'separator')[], emptyWhy: string): ContextMenuItem => {
+      const list = entries.filter((x, i, a) => x !== 'separator' || (i > 0 && i < a.length - 1 && a[i - 1] !== 'separator'));
+      const real = list.filter(x => x !== 'separator');
+      return { label, icon, submenu: real.length ? list : undefined, disabled: !real.length, title: real.length ? undefined : emptyWhy, onClick: () => {} };
+    };
+    const selTargets = () => {
+      const ids = selectedClipIds?.has(cm.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [cm.clip.id];
+      return ids.map(clipId => ({ trackId: tracks.find(t => t.clips.some(c => c.id === clipId))?.id || cm.trackId, clipId }));
+    };
+    const gain = clipGainMenuItems(cm.trackId, cm.clip, close);
+    const gainLine = gain.filter(it => /ligne de gain|Rendre le gain|gain d’avant/.test(it.label));
+    const editTools = gain.filter(it => !gainLine.includes(it));
+    const justesse: ContextMenuItem = { label: 'Justesse note par note…', icon: 'fa-wave-square', title: 'Comme Flex Pitch dans Logic : corrige la justesse de ta voix note par note',
+      onClick: () => { openNovaWindow('pitch-editor', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); } };
+    const respirations: ContextMenuItem = { label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX',
+      onClick: () => { requestBreaths({ mode: 'dialog', clipIds: selTargets().map(x => x.clipId), reason: 'menu' }); close(); } };
+
+    // 1. Les gestes de tous les jours.
+    const top: (ContextMenuItem | 'separator')[] = [
+      { label: 'Couper', icon: 'fa-cut', shortcut: 'Ctrl+X', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'CUT'); close(); }},
+      { label: 'Copier', icon: 'fa-copy', shortcut: 'Ctrl+C', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'COPY'); close(); }},
+      { label: 'Coller', icon: 'fa-paste', shortcut: 'Ctrl+V', onClick: () => { onEditClip?.(cm.trackId, '', 'PASTE', { time: playheadStore.get() }); close(); }},
+      { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'DUPLICATE'); close(); }},
+      { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'SPLIT', { time: playheadStore.get() }); close(); }},
+      { label: cm.clip.isMuted ? 'Réactiver' : 'Muter', icon: cm.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'MUTE'); close(); }},
+      'separator',
+      // Les deux outils voix les plus utilisés (audio) ; pour un clip MIDI, le piano roll.
+      ...(audioOnly ? [justesse, respirations] : []),
+      ...(isMidiClip && onEditMidi ? [{ label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(cm.trackId, cm.clip.id); close(); }}] : []),
+      'separator',
+    ];
+
+    // 2. Édition.
+    const edition = group('Édition', 'fa-pen-to-square', [
+      { label: 'Renommer…', icon: 'fa-i-cursor', shortcut: 'Ctrl+Maj+R', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }], focus: 'name' }); close(); }},
+      { label: 'Couleur du clip…', icon: 'fa-palette', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }], focus: 'color' }); close(); }},
+      'separator',
+      // Modes d'édition Pro Tools : Spot (position exacte) et point de synchro.
+      { label: simple ? 'Position exacte…' : 'Position exacte (Spot)…', icon: 'fa-crosshairs', shortcut: 'F3 + clic', title: 'Placer le clip au tick, à la milliseconde ou à l’échantillon près, par son début, sa fin ou son point de synchro (Pro Tools : Spot, F3 puis clic)', onClick: () => { setSpotTarget({ trackId: cm.trackId, clipId: cm.clip.id }); close(); }},
+      { label: 'Point de synchro à la tête de lecture', icon: 'fa-location-dot', shortcut: 'Ctrl+,', onClick: () => {
+          const sp = syncPointAt(cm.clip, playheadStore.get());
+          if (sp === null) window.dispatchEvent(new CustomEvent('nova:notify', { detail: 'Point de synchro : place d’abord la tête de lecture DANS ce clip, sur l’attaque à caler.' }));
+          else onEditClipRaw?.(cm.trackId, cm.clip.id, 'UPDATE_PROPS', { syncPoint: sp });
+          close(); }},
+      ...(syncOffsetOf(cm.clip) !== null ? [{ label: 'Enlever le point de synchro', icon: 'fa-location-pin-lock', onClick: () => { onEditClipRaw?.(cm.trackId, cm.clip.id, 'UPDATE_PROPS', { syncPoint: undefined }); close(); }}] : []),
+      'separator',
+      // Heal, boucle, Répéter (R5).
+      ...editTools,
+      ...(audioOnly ? [{ label: simple ? 'Supprimer les silences…' : 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', title: 'Supprimer les silences : découpe le clip et retire les blancs entre les phrases, avec seuil et marges réglables (Pro Tools : Strip Silence, Ctrl+U)', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); }}] : []),
+      { label: cm.clip.isReversed ? 'Remettre à l’endroit' : 'Inverser', icon: 'fa-rotate-left', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'UPDATE_PROPS', { isReversed: !cm.clip.isReversed }); close(); }},
+    ], '');
+
+    // 3. Gain et fondus.
+    const fades: (ContextMenuItem | 'separator')[] = [];
+    if (audioOnly) {
+      // Fondus en un clic (G7) : avant, seul le glissement du coin (sans indice) en créait.
+      fades.push({
+        label: 'Fondus', icon: 'fa-signal', onClick: () => {}, disabled: true,
+        component: (
+          <div className="px-1 space-y-1" onMouseDown={e => e.stopPropagation()}>
+            {(['in', 'out'] as const).map(which => (
+              <div key={which} className="flex items-center gap-1">
+                <span className="w-24 text-[11px] text-slate-200">{which === 'in' ? "Fondu d'entrée" : 'Fondu de sortie'}</span>
+                {FADE_PRESETS.map(fp => (
+                  <button key={fp.id} type="button" data-testid={`fade-${which}-${fp.id}`}
+                    title={`${which === 'in' ? "Fondu d'entrée" : 'Fondu de sortie'} de ${fp.label}`}
+                    onClick={() => { onEditClip?.(cm.trackId, cm.clip.id, 'UPDATE_PROPS', fadeWithPreset(cm.clip, which, fp.id, bpm)); close(); }}
+                    className="px-1.5 h-6 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:px-2.5 rounded text-[10px] font-bold border border-white/10 text-slate-300 hover:text-white hover:border-cyan-500/50">{fp.label}</button>
+                ))}
+              </div>
+            ))}
+          </div>
+        ),
+      });
+    }
+    if (cm.clip.fadeIn || cm.clip.fadeOut) fades.push({ label: 'Effacer les fondus', icon: 'fa-eraser', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'UPDATE_PROPS', { fadeIn: 0, fadeOut: 0 }); close(); } });
+    if (editCommands && audioOnly) {
+      fades.push({ label: 'Courbes des fondus (Pro Tools)', icon: 'fa-bezier-curve', onClick: () => {}, disabled: true,
+        component: (
+          <div className="px-3 pb-2 pt-1 space-y-1" onMouseDown={e => e.stopPropagation()}>
+            {(['in', 'out'] as const).map(which => {
+              const cur = (which === 'in' ? cm.clip.fadeInCurve : cm.clip.fadeOutCurve) || 'LINEAR';
+              return (
+                <div key={which} className="flex items-center gap-1">
+                  <span className="w-12 text-[10px] text-slate-400">{which === 'in' ? 'Entrée' : 'Sortie'}</span>
+                  {FADE_CURVES.map(cv => (
+                    <button key={cv} title={FADE_CURVE_INFO[cv].hint} aria-pressed={cur === cv}
+                      onClick={() => { const ids = selectedClipIds.has(cm.clip.id) ? Array.from(selectedClipIds) : [cm.clip.id];
+                        editCommands.setFadeCurve(cm.trackId, ids, which, cv); close(); }}
+                      className={`px-1.5 h-6 [@media(pointer:coarse)]:h-9 rounded text-[10px] font-bold border ${cur === cv ? 'bg-amber-500/20 border-amber-500/50 text-amber-200' : 'border-white/10 text-slate-400 hover:text-white'}`}>
+                      {FADE_CURVE_INFO[cv].short}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        ) });
+      // Crossfade avec le clip qui suit (jonction ou chevauchement).
+      const t = tracks.find(tr => tr.id === cm.trackId);
+      const c = cm.clip;
+      const next = t?.clips.filter(o => o.id !== c.id && !o.isMuted && o.start >= c.start && o.start <= c.start + c.duration + 0.002 && o.start + o.duration > c.start + c.duration)
+        .sort((p, q) => p.start - q.start)[0];
+      const prev = t?.clips.filter(o => o.id !== c.id && !o.isMuted && o.start < c.start && o.start + o.duration >= c.start - 0.002 && o.start + o.duration < c.start + c.duration)
+        .sort((p, q) => q.start - p.start)[0];
+      if (next) fades.push({ label: 'Fondu enchaîné avec le clip suivant', icon: 'fa-shuffle', onClick: () => { editCommands.crossfade(cm.trackId, c.id, next.id); close(); } });
+      if (prev) fades.push({ label: 'Fondu enchaîné avec le clip précédent', icon: 'fa-shuffle', onClick: () => { editCommands.crossfade(cm.trackId, prev.id, c.id); close(); } });
+    }
+    const gainFades = group('Gain et fondus', 'fa-volume-high', [
+      { label: 'Gain +3 dB', icon: 'fa-volume-high', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'UPDATE_PROPS', { gain: Math.min(8, (cm.clip.gain ?? 1) * 1.413) }); close(); }},
+      { label: 'Gain -3 dB', icon: 'fa-volume-low', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'UPDATE_PROPS', { gain: Math.max(0.01, (cm.clip.gain ?? 1) / 1.413) }); close(); }},
+      { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'NORMALIZE'); close(); }},
+      ...gainLine,
+      'separator',
+      ...fades,
+    ], '');
+
+    // 4. Hauteur et temps (R13 : transposer / étirer, marqueurs de warp, non destructif).
+    const pitchTime = group('Hauteur et temps', 'fa-arrows-up-down', [
+      ...(audioOnly && !cm.clip.notes ? [
+        { label: simple ? 'Changer la tonalité…' : 'Transposer / étirer…', icon: 'fa-arrows-up-down',
+          title: 'Transposer de ±12 demi-tons au cent près, avec ou sans les formants, et changer la durée sans changer la hauteur ; l’original est gardé (Pro Tools : Clip Transpose et Elastic Audio · Logic : Flex Pitch · Live : Transpose / Warp · FL : Pitch et Stretch)',
+          onClick: () => {
+            const targets = selTargets().filter(tg => { const c = tracks.find(t => t.id === tg.trackId)?.clips.find(x => x.id === tg.clipId); return !!c && !c.notes && c.type !== TrackType.MIDI; });
+            openNovaWindow('transpose', { targets, simple }); close();
+          } },
+        ...(!simple ? [{ label: 'Marqueurs de warp…', icon: 'fa-arrows-left-right-to-line',
+          title: 'Caler les attaques sur la grille en tirant des marqueurs, ou « Quantifier l’audio » d’un coup ; la hauteur ne change pas (Pro Tools : Elastic Audio, vue Warp · Logic : Flex Time · Live : Warp markers · FL : Slice / Stretch)',
+          onClick: () => { openNovaWindow('warp', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); } }] : []),
+      ] : []),
+      ...(cm.clip.warp?.originalBpm && Math.abs(cm.clip.warp.originalBpm - bpm) > 0.5 ? [
+        { label: `Caler sur le tempo (${Math.round(cm.clip.warp.originalBpm)} → ${Math.round(bpm)} BPM)`, icon: 'fa-clock-rotate-left',
+          onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'FIT_TEMPO'); close(); } }
+      ] : []),
+      ...(cm.clip.elastic ? [{ label: 'Revenir à l’original (transposition / warp)', icon: 'fa-rotate-left',
+        title: 'Remet le son d’origine, sa tonalité et sa durée d’avant',
+        onClick: () => { openNovaWindow('transpose', { revert: true, targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); } }] : []),
+    ], isMidiClip ? 'Clip MIDI : transpose et quantifie dans le piano roll.' : 'Rien à régler en hauteur ou en temps sur ce clip.');
+
+    // 5. Voix : justesse de toute la sélection, Melodyne / VocAlign (ARA2, hôte natif du pont : grisés sur le site, raison en infobulle).
+    const voice: (ContextMenuItem | 'separator')[] = [];
+    if (audioOnly) {
+      voice.push(justesse);
+      if (selectedClipIds?.has(cm.clip.id) && selectedClipIds.size >= 2) {
+        const targets: { trackId: string; clipId: string }[] = [];
+        tracks.forEach(tr => { if (tr.type !== TrackType.MIDI) tr.clips.forEach(c => { if (selectedClipIds.has(c.id) && c.type !== TrackType.MIDI) targets.push({ trackId: tr.id, clipId: c.id }); }); });
+        if (targets.length > 1) voice.push({ label: `Justesse : corriger tout (${targets.length} clips)…`, icon: 'fa-wand-magic-sparkles', title: 'Ramène toutes les notes des clips sélectionnés dans la gamme, avec dosage et style. Une seule annulation.',
+          onClick: () => { openNovaWindow('pitch-batch', { targets }); close(); } });
+      }
+      voice.push(respirations, 'separator');
+      const target = { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] };
+      const mel = araAvailability('melodyne', araCtx), va = araAvailability('vocalign', araCtx);
+      voice.push(
+        { label: cm.clip.araEdit?.plugin === 'melodyne' ? 'Retoucher dans Melodyne (ARA)' : 'Ouvrir dans Melodyne (ARA)', icon: 'fa-wand-magic-sparkles', title: mel.tooltip, disabled: !mel.enabled,
+          onClick: () => { openNovaWindow('ara-melodyne', target); close(); } },
+        { label: 'Aligner avec VocAlign… (ARA)', icon: 'fa-align-left', title: va.tooltip, disabled: !va.enabled,
+          onClick: () => { openNovaWindow('ara-vocalign', target); close(); } },
+      );
+      if (!va.enabled) voice.push({ label: 'Caler sur la lead (alignement NOVA)…', icon: 'fa-align-left', title: "Cale doubles, backs et harmonies sur la voix lead, sans plugin",
+        onClick: () => { openNovaWindow('ara-vocalign', target); close(); } });
+      if (cm.clip.araEdit) voice.push({ label: "Revenir à l'original…", icon: 'fa-rotate-left', title: 'Remet la prise d’origine (avant Melodyne / VocAlign)',
+        onClick: () => { openNovaWindow(cm.clip.araEdit!.plugin === 'melodyne' ? 'ara-melodyne' : 'ara-vocalign', target); close(); } });
+    }
+    const voiceGroup = group('Voix', 'fa-microphone', voice, 'Pour les clips audio (voix).');
+
+    // 6. Traitement : AudioSuite, stems, sampler et découpe (R18).
+    const processing = group('Traitement', 'fa-wand-magic-sparkles', [
+      ...(audioOnly ? [{ label: 'AudioSuite (traiter avec un effet)…', icon: 'fa-wand-magic-sparkles',
+        title: 'Appliquer un effet NOVA ou un VST à ce clip, avec poignées ; l’original est gardé (« AudioSuite » de Pro Tools, « Traitement de fichier » de Logic, Edison dans FL)',
+        onClick: () => { openNovaWindow('audiosuite', { targets: selTargets() }); close(); }}] : []),
+      ...(cm.clip.audioSuite ? [{ label: 'Revenir à l’original (AudioSuite)', icon: 'fa-rotate-left',
+        title: `Remet la prise d’origine à la même place (traitements : ${cm.clip.audioSuite.steps.map(x => x.name).join(' + ')})`,
+        onClick: () => { openNovaWindow('audiosuite', { revert: true, targets: [{ trackId: cm.trackId, clipId: cm.clip.id }] }); close(); }}] : []),
+      ...(audioOnly && onSeparateStems ? [
+        { label: 'Séparer en stems…', icon: 'fa-layer-group', title: STEMS_TOOLTIP,
+          onClick: () => { onSeparateStems(cm.trackId, cm.clip.id); close(); } }
+      ] : []),
+      ...(audioOnly && !cm.clip.notes && cm.clip.bufferId ? [
+        'separator' as const,
+        { label: 'Convertir en sampler', icon: 'fa-wave-square',
+          title: 'Met ce son dans un sampler sur une nouvelle piste : il se joue sur tout le clavier, note racine trouvée toute seule (Live : Convert to Simpler · FL : envoyer au Sampler · Logic : Quick Sampler)',
+          onClick: () => { requestSampler({ kind: 'from-clip', trackId: cm.trackId, clipId: cm.clip.id }); close(); } },
+        { label: 'Découper (chop)…', icon: 'fa-cut',
+          title: 'Découpe ce sample sur les attaques ou à la grille, vers des notes d’un sampler (avec un clip MIDI qui rejoue l’original) ou vers des pads (FL : Slicex · Live : Slice to New MIDI Track · Logic : Quick Sampler en Slice)',
+          onClick: () => { requestSampler({ kind: 'chop-clip', trackId: cm.trackId, clipId: cm.clip.id }); close(); } },
+      ] : []),
+    ], 'Pour les clips audio.');
+
+    // 7. MIDI : audio → MIDI (V20, Convert … to MIDI d'Ableton Live), groove, export .mid.
+    const midi = group('MIDI', 'fa-music', [
+      ...(audioOnly ? [
+        { label: 'Mélodie → MIDI (808, piano…)…', icon: 'fa-microphone-lines', title: 'Convertir la mélodie de cette voix en notes MIDI : 808 qui la suit, piano, lead ou nappe (comme Convert Melody to MIDI d’Ableton Live ou « Create MIDI » du Flex Pitch de Logic)',
+          onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }], convert: { mode: 'melody' } }); close(); } },
+        { label: 'Batterie → MIDI…', icon: 'fa-drum', title: 'Convertir cette boucle de batterie en motif : kick, snare / clap, hi-hat dans la boîte à rythmes ou en piste MIDI General MIDI (comme Convert Drums to MIDI d’Ableton Live)',
+          onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }], convert: { mode: 'drums' } }); close(); } },
+        { label: 'Accords → MIDI…', icon: 'fa-guitar', title: 'Trouver les accords de ce sample et les rejouer en MIDI, et remplir la piste d’accords (comme Convert Harmony to MIDI d’Ableton Live ou Chord ID de Logic)',
+          onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }], convert: { mode: 'harmony' } }); close(); } },
+        'separator' as const,
+      ] : []),
+      ...midiClipMenuItems(cm.trackId, cm.clip, close),
+    ], '');
+
+    return [
+      ...top,
+      edition, gainFades, pitchTime, voiceGroup, processing, midi,
+      'separator',
+      { label: 'Supprimer', icon: 'fa-trash', shortcut: 'Suppr', danger: true, onClick: () => { onEditClip?.(cm.trackId, cm.clip.id, 'DELETE'); close(); }},
+    ];
+  };
+
   return (
     <div className="nova-grille flex-1 flex flex-col overflow-hidden relative select-none" onContextMenu={e => e.preventDefault()}>
       <div className="h-12 flex items-center px-4 gap-4 z-30 shrink-0">
@@ -2674,178 +2894,7 @@ useEffect(() => {
       {clipContextMenu && (
         <ContextMenu
             x={clipContextMenu.x} y={clipContextMenu.y} onClose={() => setClipContextMenu(null)}
-            items={[
-                { label: 'Couper', icon: 'fa-cut', shortcut: 'Ctrl+X', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'CUT'); setClipContextMenu(null); }},
-                { label: 'Copier', icon: 'fa-copy', shortcut: 'Ctrl+C', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'COPY'); setClipContextMenu(null); }},
-                { label: 'Coller', icon: 'fa-paste', shortcut: 'Ctrl+V', onClick: () => { onEditClip?.(clipContextMenu.trackId, '', 'PASTE', { time: playheadStore.get() }); setClipContextMenu(null); }},
-                'separator',
-                { label: 'Dupliquer', icon: 'fa-clone', shortcut: 'Ctrl+D', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DUPLICATE'); setClipContextMenu(null); }},
-                { label: 'Diviser', icon: 'fa-scissors', shortcut: 'S', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'SPLIT', { time: playheadStore.get() }); setClipContextMenu(null); }},
-                { label: 'Normaliser', icon: 'fa-wave-square', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'NORMALIZE'); setClipContextMenu(null); }},
-                // Modes d'édition Pro Tools : Spot (position exacte) et point de synchro.
-                { label: simple ? 'Position exacte…' : 'Position exacte (Spot)…', icon: 'fa-crosshairs', shortcut: 'F3 + clic', title: 'Placer le clip au tick, à la milliseconde ou à l’échantillon près, par son début, sa fin ou son point de synchro (Pro Tools : Spot, F3 puis clic)', onClick: () => { setSpotTarget({ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }); setClipContextMenu(null); }},
-                { label: 'Point de synchro à la tête de lecture', icon: 'fa-location-dot', shortcut: 'Ctrl+,', onClick: () => {
-                    const sp = syncPointAt(clipContextMenu.clip, playheadStore.get());
-                    if (sp === null) window.dispatchEvent(new CustomEvent('nova:notify', { detail: 'Point de synchro : place d’abord la tête de lecture DANS ce clip, sur l’attaque à caler.' }));
-                    else onEditClipRaw?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { syncPoint: sp });
-                    setClipContextMenu(null); }},
-                ...(syncOffsetOf(clipContextMenu.clip) !== null ? [{ label: 'Enlever le point de synchro', icon: 'fa-location-pin-lock', onClick: () => { onEditClipRaw?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { syncPoint: undefined }); setClipContextMenu(null); }}] : []),
-                // Pro Tools : Rename (Ctrl+Maj+R), couleur de clip, Strip Silence (Ctrl+U).
-                { label: 'Renommer…', icon: 'fa-i-cursor', shortcut: 'Ctrl+Maj+R', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'name' }); setClipContextMenu(null); }},
-                { label: 'Couleur du clip…', icon: 'fa-palette', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], focus: 'color' }); setClipContextMenu(null); }},
-                // Justesse note par note (V19) : Flex Pitch de Logic, Melodyne, Pitch Editor de FL.
-                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Justesse note par note…', icon: 'fa-wave-square', title: 'Comme Flex Pitch dans Logic : corrige la justesse de ta voix note par note',
-                  onClick: () => { openNovaWindow('pitch-editor', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
-                // Plusieurs clips sélectionnés : « Corriger tout » sur toute la sélection (une annulation).
-                ...(() => {
-                    if (clipContextMenu.clip.type === TrackType.MIDI || !selectedClipIds?.has(clipContextMenu.clip.id) || selectedClipIds.size < 2) return [];
-                    const targets: { trackId: string; clipId: string }[] = [];
-                    tracks.forEach(tr => { if (tr.type !== TrackType.MIDI) tr.clips.forEach(c => { if (selectedClipIds.has(c.id) && c.type !== TrackType.MIDI) targets.push({ trackId: tr.id, clipId: c.id }); }); });
-                    return targets.length > 1 ? [{ label: `Justesse : corriger tout (${targets.length} clips)…`, icon: 'fa-wand-magic-sparkles', title: 'Ramène toutes les notes des clips sélectionnés dans la gamme, avec dosage et style. Une seule annulation.',
-                      onClick: () => { openNovaWindow('pitch-batch', { targets }); setClipContextMenu(null); } }] : [];
-                })(),
-                // Audio → MIDI (V20) : Convert Melody / Drums / Harmony d'Ableton Live, « Create MIDI » du Flex Pitch de Logic.
-                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [
-                  { label: 'Mélodie → MIDI (808, piano…)…', icon: 'fa-microphone-lines', title: 'Convertir la mélodie de cette voix en notes MIDI : 808 qui la suit, piano, lead ou nappe (comme Convert Melody to MIDI d’Ableton Live ou « Create MIDI » du Flex Pitch de Logic)',
-                    onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], convert: { mode: 'melody' } }); setClipContextMenu(null); } },
-                  { label: 'Batterie → MIDI…', icon: 'fa-drum', title: 'Convertir cette boucle de batterie en motif : kick, snare / clap, hi-hat dans la boîte à rythmes ou en piste MIDI General MIDI (comme Convert Drums to MIDI d’Ableton Live)',
-                    onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], convert: { mode: 'drums' } }); setClipContextMenu(null); } },
-                  { label: 'Accords → MIDI…', icon: 'fa-guitar', title: 'Trouver les accords de ce sample et les rejouer en MIDI, et remplir la piste d’accords (comme Convert Harmony to MIDI d’Ableton Live ou Chord ID de Logic)',
-                    onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], convert: { mode: 'harmony' } }); setClipContextMenu(null); } },
-                ] : []),
-                // Melodyne / VocAlign (ARA2, hôte natif du pont) : grisés sur le site, avec la raison en infobulle.
-                ...(clipContextMenu.clip.type !== TrackType.MIDI ? (() => {
-                  const target = { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] };
-                  const mel = araAvailability('melodyne', araCtx), va = araAvailability('vocalign', araCtx);
-                  return [
-                    { label: clipContextMenu.clip.araEdit?.plugin === 'melodyne' ? 'Retoucher dans Melodyne (ARA)' : 'Ouvrir dans Melodyne (ARA)', icon: 'fa-wand-magic-sparkles', title: mel.tooltip, disabled: !mel.enabled,
-                      onClick: () => { openNovaWindow('ara-melodyne', target); setClipContextMenu(null); } },
-                    { label: 'Aligner avec VocAlign… (ARA)', icon: 'fa-align-left', title: va.tooltip, disabled: !va.enabled,
-                      onClick: () => { openNovaWindow('ara-vocalign', target); setClipContextMenu(null); } },
-                    ...(!va.enabled ? [{ label: 'Caler sur la lead (alignement NOVA)…', icon: 'fa-align-left', title: "Cale doubles, backs et harmonies sur la voix lead, sans plugin",
-                      onClick: () => { openNovaWindow('ara-vocalign', target); setClipContextMenu(null); } }] : []),
-                    ...(clipContextMenu.clip.araEdit ? [{ label: "Revenir à l'original…", icon: 'fa-rotate-left', title: 'Remet la prise d’origine (avant Melodyne / VocAlign)',
-                      onClick: () => { openNovaWindow(clipContextMenu.clip.araEdit!.plugin === 'melodyne' ? 'ara-melodyne' : 'ara-vocalign', target); setClipContextMenu(null); } }] : []),
-                  ];
-                })() : []),
-                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'AudioSuite (traiter avec un effet)…', icon: 'fa-wand-magic-sparkles',
-                  title: 'Appliquer un effet NOVA ou un VST à ce clip, avec poignées ; l’original est gardé (« AudioSuite » de Pro Tools, « Traitement de fichier » de Logic, Edison dans FL)',
-                  onClick: () => {
-                    const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id];
-                    const targets = ids.map(clipId => ({ trackId: tracks.find(t => t.clips.some(c => c.id === clipId))?.id || clipContextMenu.trackId, clipId }));
-                    openNovaWindow('audiosuite', { targets }); setClipContextMenu(null);
-                  }}] : []),
-                ...(clipContextMenu.clip.audioSuite ? [{ label: 'Revenir à l’original (AudioSuite)', icon: 'fa-rotate-left',
-                  title: `Remet la prise d’origine à la même place (traitements : ${clipContextMenu.clip.audioSuite.steps.map(x => x.name).join(' + ')})`,
-                  onClick: () => { openNovaWindow('audiosuite', { revert: true, targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
-                // R13 : transposer / étirer, marqueurs de warp (non destructif).
-                ...(clipContextMenu.clip.type !== TrackType.MIDI && !clipContextMenu.clip.notes ? [
-                  { label: simple ? 'Changer la tonalité…' : 'Transposer / étirer…', icon: 'fa-arrows-up-down',
-                    title: 'Transposer de ±12 demi-tons au cent près, avec ou sans les formants, et changer la durée sans changer la hauteur ; l’original est gardé (Pro Tools : Clip Transpose et Elastic Audio · Logic : Flex Pitch · Live : Transpose / Warp · FL : Pitch et Stretch)',
-                    onClick: () => {
-                      const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id];
-                      const targets = ids.map(clipId => ({ trackId: tracks.find(t => t.clips.some(c => c.id === clipId))?.id || clipContextMenu.trackId, clipId }))
-                        .filter(tg => { const c = tracks.find(t => t.id === tg.trackId)?.clips.find(x => x.id === tg.clipId); return !!c && !c.notes && c.type !== TrackType.MIDI; });
-                      openNovaWindow('transpose', { targets, simple }); setClipContextMenu(null);
-                    } },
-                  ...(!simple ? [{ label: 'Marqueurs de warp…', icon: 'fa-arrows-left-right-to-line',
-                    title: 'Caler les attaques sur la grille en tirant des marqueurs, ou « Quantifier l’audio » d’un coup ; la hauteur ne change pas (Pro Tools : Elastic Audio, vue Warp · Logic : Flex Time · Live : Warp markers · FL : Slice / Stretch)',
-                    onClick: () => { openNovaWindow('warp', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); } }] : []),
-                ] : []),
-                ...(clipContextMenu.clip.elastic ? [{ label: 'Revenir à l’original (transposition / warp)', icon: 'fa-rotate-left',
-                  title: 'Remet le son d’origine, sa tonalité et sa durée d’avant',
-                  onClick: () => { openNovaWindow('transpose', { revert: true, targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); } }] : []),
-                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: simple ? 'Supprimer les silences…' : 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', title: 'Supprimer les silences : découpe le clip et retire les blancs entre les phrases, avec seuil et marges réglables (Pro Tools : Strip Silence, Ctrl+U)', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
-                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => { const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id]; requestBreaths({ mode: 'dialog', clipIds: ids, reason: 'menu' }); setClipContextMenu(null); }}] : []),
-                // Gain de clip, Heal, boucle, Répéter, rendre le gain (R5).
-                ...clipGainMenuItems(clipContextMenu.trackId, clipContextMenu.clip, () => setClipContextMenu(null)),
-                // R18 : sampler et découpe (FL : Slicex / « Send to sampler » · Live : Convert to Simpler, Slice to New MIDI Track · Logic : Quick Sampler).
-                ...(clipContextMenu.clip.type !== TrackType.MIDI && !clipContextMenu.clip.notes && clipContextMenu.clip.bufferId ? [
-                  { label: 'Convertir en sampler', icon: 'fa-wave-square',
-                    title: 'Met ce son dans un sampler sur une nouvelle piste : il se joue sur tout le clavier, note racine trouvée toute seule (Live : Convert to Simpler · FL : envoyer au Sampler · Logic : Quick Sampler)',
-                    onClick: () => { requestSampler({ kind: 'from-clip', trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }); setClipContextMenu(null); } },
-                  { label: 'Découper (chop)…', icon: 'fa-cut',
-                    title: 'Découpe ce sample sur les attaques ou à la grille, vers des notes d’un sampler (avec un clip MIDI qui rejoue l’original) ou vers des pads (FL : Slicex · Live : Slice to New MIDI Track · Logic : Quick Sampler en Slice)',
-                    onClick: () => { requestSampler({ kind: 'chop-clip', trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }); setClipContextMenu(null); } },
-                ] : []),
-                ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
-                  { label: 'Séparer en stems…', icon: 'fa-layer-group', title: STEMS_TOOLTIP,
-                    onClick: () => { onSeparateStems(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); } }
-                ] : []),
-                ...(clipContextMenu.clip.type === TrackType.MIDI && onEditMidi ? [
-                  { label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); }}
-                ] : []),
-                ...midiClipMenuItems(clipContextMenu.trackId, clipContextMenu.clip, () => setClipContextMenu(null)),
-                'separator',
-                { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
-                { label: clipContextMenu.clip.isReversed ? 'Remettre à l’endroit' : 'Inverser', icon: 'fa-rotate-left', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { isReversed: !clipContextMenu.clip.isReversed }); setClipContextMenu(null); }},
-                { label: 'Gain +3 dB', icon: 'fa-volume-high', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { gain: Math.min(8, (clipContextMenu.clip.gain ?? 1) * 1.413) }); setClipContextMenu(null); }},
-                { label: 'Gain -3 dB', icon: 'fa-volume-low', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { gain: Math.max(0.01, (clipContextMenu.clip.gain ?? 1) / 1.413) }); setClipContextMenu(null); }},
-                ...(clipContextMenu.clip.warp?.originalBpm && Math.abs(clipContextMenu.clip.warp.originalBpm - bpm) > 0.5 ? [
-                  { label: `Caler sur le tempo (${Math.round(clipContextMenu.clip.warp.originalBpm)} → ${Math.round(bpm)} BPM)`, icon: 'fa-clock-rotate-left',
-                    onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'FIT_TEMPO'); setClipContextMenu(null); } }
-                ] : []),
-                // Fondus en un clic (G7) : avant, seul le glissement du coin (sans indice) en créait.
-                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{
-                  label: 'Fondus', icon: 'fa-signal', onClick: () => {}, disabled: true,
-                  component: (
-                    <div className="px-1 space-y-1" onMouseDown={e => e.stopPropagation()}>
-                      {(['in', 'out'] as const).map(which => (
-                        <div key={which} className="flex items-center gap-1">
-                          <span className="w-24 text-[11px] text-slate-200">{which === 'in' ? "Fondu d'entrée" : 'Fondu de sortie'}</span>
-                          {FADE_PRESETS.map(fp => (
-                            <button key={fp.id} type="button" data-testid={`fade-${which}-${fp.id}`}
-                              title={`${which === 'in' ? "Fondu d'entrée" : 'Fondu de sortie'} de ${fp.label}`}
-                              onClick={() => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', fadeWithPreset(clipContextMenu.clip, which, fp.id, bpm)); setClipContextMenu(null); }}
-                              className="px-1.5 h-6 rounded text-[10px] font-bold border border-white/10 text-slate-300 hover:text-white hover:border-cyan-500/50">{fp.label}</button>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  ),
-                }] : []),
-                ...((clipContextMenu.clip.fadeIn || clipContextMenu.clip.fadeOut) ? [
-                  { label: 'Effacer les fondus', icon: 'fa-eraser', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { fadeIn: 0, fadeOut: 0 }); setClipContextMenu(null); } }
-                ] : []),
-                ...(editCommands && clipContextMenu.clip.type !== TrackType.MIDI ? [
-                  { label: 'Courbes des fondus (Pro Tools)', icon: 'fa-bezier-curve', onClick: () => {}, disabled: true,
-                    component: (
-                      <div className="px-3 pb-2 pt-1 space-y-1" onMouseDown={e => e.stopPropagation()}>
-                        {(['in', 'out'] as const).map(which => {
-                          const cur = (which === 'in' ? clipContextMenu.clip.fadeInCurve : clipContextMenu.clip.fadeOutCurve) || 'LINEAR';
-                          return (
-                            <div key={which} className="flex items-center gap-1">
-                              <span className="w-12 text-[10px] text-slate-400">{which === 'in' ? 'Entrée' : 'Sortie'}</span>
-                              {FADE_CURVES.map(cv => (
-                                <button key={cv} title={FADE_CURVE_INFO[cv].hint} aria-pressed={cur === cv}
-                                  onClick={() => { const ids = selectedClipIds.has(clipContextMenu.clip.id) ? Array.from(selectedClipIds) : [clipContextMenu.clip.id];
-                                    editCommands.setFadeCurve(clipContextMenu.trackId, ids, which, cv); setClipContextMenu(null); }}
-                                  className={`px-1.5 h-6 rounded text-[10px] font-bold border ${cur === cv ? 'bg-amber-500/20 border-amber-500/50 text-amber-200' : 'border-white/10 text-slate-400 hover:text-white'}`}>
-                                  {FADE_CURVE_INFO[cv].short}
-                                </button>
-                              ))}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) },
-                  ...(() => {
-                    // Crossfade avec le clip qui suit (jonction ou chevauchement).
-                    const t = tracks.find(tr => tr.id === clipContextMenu.trackId);
-                    const c = clipContextMenu.clip;
-                    const next = t?.clips.filter(o => o.id !== c.id && !o.isMuted && o.start >= c.start && o.start <= c.start + c.duration + 0.002 && o.start + o.duration > c.start + c.duration)
-                      .sort((p, q) => p.start - q.start)[0];
-                    const prev = t?.clips.filter(o => o.id !== c.id && !o.isMuted && o.start < c.start && o.start + o.duration >= c.start - 0.002 && o.start + o.duration < c.start + c.duration)
-                      .sort((p, q) => q.start - p.start)[0];
-                    const items: ContextMenuItem[] = [];
-                    if (next) items.push({ label: 'Fondu enchaîné avec le clip suivant', icon: 'fa-shuffle', onClick: () => { editCommands.crossfade(clipContextMenu.trackId, c.id, next.id); setClipContextMenu(null); } });
-                    if (prev) items.push({ label: 'Fondu enchaîné avec le clip précédent', icon: 'fa-shuffle', onClick: () => { editCommands.crossfade(clipContextMenu.trackId, prev.id, c.id); setClipContextMenu(null); } });
-                    return items;
-                  })(),
-                ] : []),
-                'separator',
-                { label: 'Supprimer', icon: 'fa-trash', shortcut: 'Suppr', danger: true, onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'DELETE'); setClipContextMenu(null); }}
-            ]}
+            items={clipMenuEntries(clipContextMenu)}
         />
     )}
     {/* Marker Context Menu (inspired by Pro Tools) */}

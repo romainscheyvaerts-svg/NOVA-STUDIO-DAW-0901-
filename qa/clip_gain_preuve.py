@@ -337,11 +337,11 @@ def scenario_pc(page, res):
     # --- Rendre le gain dans le fichier, puis Revenir : même son.
     page.mouse.click(x_of(b, 9.5), lane_top(b, 0) + 100, button="right"); page.wait_for_timeout(300)
     shot(page, "pc_07_menu_du_clip")
-    page.get_by_text("Rendre le gain dans le fichier").first.click(); page.wait_for_timeout(500)
+    qalib.menu_pick(page, "Rendre le gain dans le fichier"); page.wait_for_timeout(500)
     rendu = clip_state(page, "lead")[0]
     x_rendu = render(page, "lead", 11.0)
     page.mouse.click(x_of(b, 9.5), lane_top(b, 0) + 100, button="right"); page.wait_for_timeout(300)
-    page.get_by_text("Revenir au gain d").first.click(); page.wait_for_timeout(400)
+    qalib.menu_pick(page, "Revenir au gain d"); page.wait_for_timeout(400)
     revenu = clip_state(page, "lead")[0]
     x_revenu = render(page, "lead", 11.0)
     res["rendre_le_gain"] = {"clip_rendu": {k: rendu[k] for k in ("gain", "pts", "render")}, "ecart_max_rendu_vs_ligne": float(np.max(np.abs(x_rendu - after))),

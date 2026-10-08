@@ -183,3 +183,38 @@ def run_one(fn, vp="pc", name=None, **kw):
             save_log(log, {"result": result})
             ctx.close(); b.close()
     return result
+
+
+# -- Menu contextuel à sous-menus (menu du clip regroupé : Édition, Gain et fondus, Hauteur et
+#    temps, Voix, Traitement, MIDI). Une entrée rangée dans un sous-menu n'est pas affichée tant
+#    que son sous-menu est fermé : on ouvre d'abord le sous-menu qui la contient (son bouton
+#    porte data-submenu = libellés de ses entrées), comme le ferait un utilisateur.
+def menu_open_for(page, text, exact=False, tap=False):
+    """Ouvre le sous-menu qui contient `text` (chaîne ou motif re). True si l'entrée est visible ensuite."""
+    import re as _re
+    pat = text.pattern if hasattr(text, "pattern") else (("^" + _re.escape(text) + "$") if exact else _re.escape(text))
+    vis = page.evaluate("""(p) => { const rx = new RegExp(p);
+      return [...document.querySelectorAll('[role=menu] button')].some(b => b.getClientRects().length && rx.test((b.innerText || '').trim())); }""", pat)
+    if vis:
+        return True
+    idx = page.evaluate("""(p) => { const rx = new RegExp(p);
+      const t = [...document.querySelectorAll('[role=menu] [data-submenu]')].find(b => (b.dataset.submenu || '').split(String.fromCharCode(10)).some(l => rx.test(l)));
+      return t ? t.dataset.menuIndex : null; }""", pat)
+    if idx is None:
+        return False
+    trig = page.locator(f"[role=menu] [data-menu-index='{idx}']").first
+    if tap: trig.tap()
+    else: trig.click()
+    page.wait_for_timeout(250)
+    return True
+
+
+def menu_pick(page, text, exact=False, tap=False):
+    """Clique l'entrée `text` du menu contextuel ouvert, dans son sous-menu s'il le faut."""
+    import re as _re
+    if not menu_open_for(page, text, exact=exact, tap=tap):
+        raise RuntimeError(f"entrée de menu introuvable : {text}")
+    rx = text if hasattr(text, "pattern") else (_re.compile("^" + _re.escape(text) + "$") if exact else _re.compile(_re.escape(text)))
+    it = page.locator("[role=menu] button", has_text=rx).locator("visible=true").first
+    if tap: it.tap()
+    else: it.click()

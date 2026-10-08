@@ -17,7 +17,7 @@ os.environ["NOVA_URL"] = os.environ.get("NOVA_URL", "http://127.0.0.1:3435/")
 os.environ["QA_OUT"] = r"D:\1 WORK\CONTENU\nova-finitions"
 sys.path.insert(0, str(Path(__file__).parent))
 import v19_justesse as V  # noqa
-from qalib import OUT, Log, launch, new_page, shot, save_log  # noqa
+from qalib import OUT, Log, launch, new_page, shot, save_log, menu_open_for  # noqa
 from gel_pre_effet import prepare, open_project_file  # noqa
 from playwright.sync_api import sync_playwright
 
@@ -76,6 +76,7 @@ def scenario_lot(page, res):
     page.mouse.click(xa, y0); page.wait_for_timeout(150)
     page.keyboard.down("Shift"); page.mouse.click(xa, y1); page.keyboard.up("Shift"); page.wait_for_timeout(200)
     page.mouse.click(xa, y0, button="right"); page.wait_for_timeout(400)
+    menu_open_for(page, "Justesse : corriger tout (2 clips)…", exact=True)  # sous-menu « Voix »
     item = page.get_by_text("Justesse : corriger tout (2 clips)…", exact=True).first
     res["entree_menu"] = item.is_visible()
     shot(page, "justesse_11_menu_corriger_tout_2_clips")

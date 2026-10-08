@@ -394,6 +394,7 @@ def v2ui(page, res):
     shot(page, "v2ui_03_crossfade_pose")
     # --- Courbe du fondu de sortie de A : clic droit → « S » (ligne Sortie)
     page.mouse.click(x_of(box, 1.0), lane_y(box, 0, 0.6), button="right"); page.wait_for_timeout(300)
+    qalib.menu_open_for(page, "Courbes des fondus")  # sous-menu « Gain et fondus »
     shot(page, "v2ui_04_menu_courbes")
     page.locator('button[title^="Courbe en S"]').nth(1).click(); page.wait_for_timeout(300)
     res["courbe_sortie_A"] = clips_of(page, "voix")[0]["fo"]

@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3433/")
 os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-v25")
-from qalib import launch, new_page, shot, overflow_report, BASE, OUT  # noqa: E402
+from qalib import launch, new_page, shot, overflow_report, BASE, OUT, menu_open_for  # noqa: E402
 from scenarios import close_welcome, wait_text_gone  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -85,6 +85,7 @@ def find_clip_menu(pg, t, want="Exporter le clip en .mid"):
             y = box["y"] + box.get("tt", 40) + row * 120 + yoff - box["st"]
             if y > box["y"] + box["h"] - 5: return False
             pg.mouse.click(box["x"] + t * 40 - box["sl"], y, button="right"); pg.wait_for_timeout(250)
+            menu_open_for(pg, want)  # sous-menu « MIDI »
             item = pg.get_by_role("button", name=re.compile(re.escape(want))).or_(pg.get_by_text(want, exact=False))
             if item.count() and item.first.is_visible():
                 return True
@@ -99,6 +100,7 @@ def clip_menu_on_track(pg, name, t):
     hb = head.bounding_box()
     box = canvas_box(pg)
     pg.mouse.click(box["x"] + t * 40 - box["sl"], hb["y"] + hb["height"] / 2 + 4, button="right"); pg.wait_for_timeout(300)
+    menu_open_for(pg, "Exporter le clip en .mid")  # sous-menu « MIDI »
     item = pg.get_by_text("Exporter le clip en .mid", exact=False)
     return item.count() > 0 and item.first.is_visible()
 
