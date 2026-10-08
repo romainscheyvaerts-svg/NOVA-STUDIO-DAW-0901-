@@ -882,12 +882,8 @@ def _python_key(cp) -> Optional[str]:
     """Clé pedalboard d'un réglage C++ (même règle que plugin.parameters)."""
     if _IGNORED_NAMES.match(str(cp.name or "")):
         return None
-    try:
-        from pedalboard._pedalboard import to_python_parameter_name
-        return to_python_parameter_name(cp) or None
-    except Exception:
-        name = str(cp.name or "")
-        return re.sub(r"_+", "_", re.sub(r"[^0-9a-z]", "_", name.lower().strip())).strip("_") or None
+    # Même règle que pedalboard (nom + unité, « # » → « _sharp »…), sans dépendre de lui.
+    return vst_native.python_key(str(cp.name or ""), str(getattr(cp, "label", "") or "")) or None
 
 
 def automatable_info(key: str, cp) -> Dict[str, Any]:
@@ -1267,8 +1263,17 @@ class Slot:
             t0 = time.perf_counter()
             # (R10) Clé de side-chain : seulement pour un plugin dont l'hôte alimente l'entrée clé.
             use_key = key is not None and vst_sidechain.keyed(plugin)
+            native = isinstance(plugin, vst_native.NativePlugin)
             try:
-                if changes or use_key:
+                if native:
+                    # Hôte natif : réglages posés à l'échantillon près par IParameterChanges et clé
+                    # sur le bus side-chain, en un seul appel (aucune découpe du bloc).
+                    if use_key:
+                        self.key_blocks += 1
+                    out = process(plugin, _to_stereo(block), self.sample_rate, BLOCK,
+                                  key=_to_stereo(key) if use_key else None,
+                                  changes=self._native_changes(changes) if changes else None)
+                elif changes or use_key:
                     stereo = _to_stereo(block)
                     full = np.vstack([stereo, _to_stereo(key)]) if use_key else stereo
 
@@ -1395,6 +1400,25 @@ class Slot:
                 self.auto_applied += 1
             except Exception:
                 pass
+
+    def _native_changes(self, changes: List[tuple]) -> List[tuple]:
+        """(Sous self.lock) Mêmes règles que _apply_changes (geste en cours dans la fenêtre :
+        il garde la main), mais rendus à l'hôte natif avec leur décalage au lieu d'être posés."""
+        h = self._cpp if self._cpp is not None else self._handles_now()
+        self._cpp = h
+        out = []
+        for idx, off, value in changes:
+            name = self.auto_keys[idx] if 0 <= idx < len(self.auto_keys) else None
+            cp = h.get(name) if name else None
+            if cp is None:
+                continue
+            if self.watching and self.watch.held(name):
+                self.auto_skipped += 1
+                continue
+            out.append((cp, int(off), float(value)))
+            self.watch.note(name, float(value))
+            self.auto_applied += 1
+        return out
 
     def carry_changes(self, changes: List[tuple]):
         """Bloc jeté (file pleine) : ses réglages sont posés au début du bloc suivant."""
@@ -1682,7 +1706,18 @@ def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], stat
             k = _to_stereo(key)
             ksrc = np.zeros((2, total), np.float32)
             ksrc[:, :min(total, k.shape[1])] = k[:, :total]
-        for start, end, todo in vst_automation.render_chunks(total, events, chunk):
+        native = isinstance(plugin, vst_native.NativePlugin)
+        if native:
+            # Hôte natif : tout le son en un appel (sous-blocs de RENDER_BLOCK comme pedalboard),
+            # automation par IParameterChanges à l'échantillon près, clé sur le bus side-chain ;
+            # la latence est retenue au début puis vidée par du silence (comme ci-dessous).
+            changes = [(handles[name], f, v) for f, name, v in events if name in handles]
+            out = np.asarray(process(plugin, src, sr, RENDER_BLOCK, key=ksrc if use_key else None,
+                                     changes=changes or None), np.float32)
+            if out.shape[-1]:
+                parts.append(_to_stereo(out))
+                got += out.shape[-1]
+        for start, end, todo in ([] if native else vst_automation.render_chunks(total, events, chunk)):
             for _f, name, value in todo:
                 cp = handles.get(name)
                 if cp is not None:
@@ -1699,7 +1734,8 @@ def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], stat
                 got += out.shape[-1]
         flush = 0
         while got < total and flush < 64:  # au plus ~11 s de latence à vider
-            out = np.asarray(process(plugin, np.zeros((2, chunk), np.float32), sr, RENDER_BLOCK), np.float32)
+            zk = np.zeros((2, chunk), np.float32) if (native and use_key) else None
+            out = np.asarray(process(plugin, np.zeros((2, chunk), np.float32), sr, RENDER_BLOCK, key=zk), np.float32)
             flush += 1
             if out.shape[-1]:
                 parts.append(_to_stereo(out))

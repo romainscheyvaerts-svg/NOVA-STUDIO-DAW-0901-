@@ -1030,6 +1030,14 @@ class NativePlugin:
     def has_sidechain(self) -> bool:
         return len((self.buses or {}).get("in") or []) > 1
 
+    @property
+    def sidechain_channels(self) -> int:
+        """(Contrat vst_sidechain) Canaux du 1er bus d'entrée auxiliaire, 0 s'il n'y en a pas."""
+        ins = (self.buses or {}).get("in") or []
+        if len(ins) < 2:
+            return 0
+        return int(ins[1].get("channels") or ins[1].get("default_channels") or 2)
+
     def set_transport(self, tempo: Optional[float] = None, position_samples: Optional[int] = None,
                       playing: bool = False, sig: Tuple[int, int] = (4, 4)):
         """Transport transmis au plugin à chaque bloc (None : aucun, comme pedalboard)."""
@@ -1190,6 +1198,26 @@ class NativePlugin:
             drop = max(0, min(n, int(self._latency) - before))
             return out[:, drop:] if drop else out
 
+    def process_keyed(self, main: np.ndarray, key: Optional[np.ndarray], changes: Any = None,
+                      sample_rate: Optional[float] = None, buffer_size: int = 128) -> np.ndarray:
+        """(Contrat vst_sidechain) main (2, n) + clé (2, n) sur le bus side-chain, réglages
+        [(clé | index | poignée, décalage, valeur 0–1)] par IParameterChanges ; sortie de même
+        longueur, latence du plugin NON retenue (le flux continue celui de process())."""
+        x = np.asarray(main, dtype=np.float32)
+        n = int(x.shape[1])
+        with self._lock:
+            sr = float(sample_rate or (self._spec[0] if self._spec else 48000.0))
+            bs = int(min(int(buffer_size), max(1, n)))
+            self._prepare(sr, bs, int(x.shape[0]), self.has_sidechain)
+            k = None
+            if key is not None and self.has_sidechain:
+                k = np.asarray(key, dtype=np.float32)
+                if k.ndim == 1:
+                    k = k[None, :]
+            out = self._run(np.ascontiguousarray(x), n, bs, int(x.shape[0]), key=k, changes=self._map_changes(changes))
+            object.__setattr__(self, "_provided", self._provided + n)
+            return out
+
     def render_midi(self, midi_messages: Any, duration: float, sample_rate: float, num_channels: int = 2,
                     buffer_size: int = 8192, reset: bool = True, *, changes: Any = None) -> np.ndarray:
         """Instrument : notes → audio (comme le rendu MIDI de pedalboard : durée × fréquence en
@@ -1285,6 +1313,21 @@ class NativePlugin:
 
 def load_plugin(path: str, plugin_name: Optional[str] = None, **kw) -> NativePlugin:
     return NativePlugin(path, plugin_name, **kw)
+
+
+def load_prepared(path: str, plugin_name: Optional[str], state_b64: Optional[str], sample_rate: int,
+                  max_block: int, offline: bool) -> NativePlugin:
+    """(Contrat vst_sidechain.load) Instance chargée, état restauré, préparée et remise à zéro."""
+    p = NativePlugin(path, plugin_name, offline=offline)
+    try:
+        if state_b64:
+            p.raw_state = base64.b64decode(state_b64)
+        p._prepare(float(sample_rate), int(max_block), 2 if p.main_input_channels != 1 else 1, False)
+        p.reset()
+    except BaseException:
+        p.close()
+        raise
+    return p
 
 
 def scan_command() -> Optional[List[str]]:
