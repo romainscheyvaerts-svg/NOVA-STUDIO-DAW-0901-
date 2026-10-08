@@ -1,5 +1,5 @@
 /*
-    NovaARAHost — fenêtre Win32 native (CreateWindowEx) qui accueille la vue IPlugView du plugin.
+    Hôtes natifs de Nova Studio (NovaARAHost, NovaVSTHost) — fenêtre Win32 native (CreateWindowEx) qui accueille la vue IPlugView du plugin.
     Hors écran (offscreen) : sans activation ni bouton de barre des tâches, placée à -20000.
     (c) Make Music.
 */

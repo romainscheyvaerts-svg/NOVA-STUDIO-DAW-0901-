@@ -1,5 +1,5 @@
 /*
-    NovaARAHost — utilitaires communs : sortie JSON (stdout), conversions UTF-8 ↔ UTF-16.
+    Hôtes natifs de Nova Studio (NovaARAHost, NovaVSTHost) — utilitaires communs : sortie JSON (stdout), conversions UTF-8 ↔ UTF-16.
     (c) Make Music. Aucune dépendance tierce.
 */
 #pragma once

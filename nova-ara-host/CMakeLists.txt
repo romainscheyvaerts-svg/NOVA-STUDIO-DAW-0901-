@@ -17,41 +17,18 @@ set(NOVA_LIBS "D:/1 WORK/CODE/_libs/ara-host-sources" CACHE PATH "Dossier des so
 set(NOVA_VST3_SDK_DIR "${NOVA_LIBS}/vst3sdk" CACHE PATH "VST3 SDK (dossier contenant pluginterfaces, base, public.sdk)")
 set(NOVA_ARA_SDK_DIR "${NOVA_LIBS}/ARA_SDK" CACHE PATH "ARA SDK (dossier contenant ARA_API et ARA_Library)")
 
-foreach(f "${NOVA_VST3_SDK_DIR}/pluginterfaces/base/funknown.h"
-          "${NOVA_VST3_SDK_DIR}/public.sdk/source/vst/hosting/module.h"
-          "${NOVA_ARA_SDK_DIR}/ARA_API/ARAInterface.h"
+foreach(f "${NOVA_ARA_SDK_DIR}/ARA_API/ARAInterface.h"
           "${NOVA_ARA_SDK_DIR}/ARA_Library/Dispatch/ARAHostDispatch.cpp")
     if(NOT EXISTS "${f}")
         message(FATAL_ERROR "Source introuvable : ${f} (voir build.bat pour les télécharger)")
     endif()
 endforeach()
 
-set(VST3 "${NOVA_VST3_SDK_DIR}")
 set(ARA "${NOVA_ARA_SDK_DIR}")
 
-# Sous-ensemble « hébergement » du SDK VST3 (le même que la cible sdk_hosting de Steinberg).
-add_library(nova_vst3_hosting STATIC
-    "${VST3}/pluginterfaces/base/coreiids.cpp"
-    "${VST3}/pluginterfaces/base/funknown.cpp"
-    "${VST3}/pluginterfaces/base/ustring.cpp"
-    "${VST3}/pluginterfaces/base/conststringtable.cpp"
-    "${VST3}/public.sdk/source/common/commoniids.cpp"
-    "${VST3}/public.sdk/source/common/commonstringconvert.cpp"
-    "${VST3}/public.sdk/source/common/memorystream.cpp"
-    "${VST3}/public.sdk/source/common/threadchecker_win32.cpp"
-    "${VST3}/public.sdk/source/vst/hosting/connectionproxy.cpp"
-    "${VST3}/public.sdk/source/vst/hosting/eventlist.cpp"
-    "${VST3}/public.sdk/source/vst/hosting/hostclasses.cpp"
-    "${VST3}/public.sdk/source/vst/hosting/module.cpp"
-    "${VST3}/public.sdk/source/vst/hosting/module_win32.cpp"
-    "${VST3}/public.sdk/source/vst/hosting/parameterchanges.cpp"
-    "${VST3}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp"
-    "${VST3}/public.sdk/source/vst/utility/stringconvert.cpp"
-    "${VST3}/public.sdk/source/vst/vstinitiids.cpp")
-target_include_directories(nova_vst3_hosting PUBLIC "${VST3}")
-target_compile_definitions(nova_vst3_hosting PUBLIC
-    $<IF:$<CONFIG:Debug>,DEVELOPMENT=1,RELEASE=1> UNICODE _UNICODE NOMINMAX=1 _CRT_SECURE_NO_WARNINGS)
-target_compile_options(nova_vst3_hosting PRIVATE /W1 /utf-8)
+# Code commun des hôtes natifs (JSON, sortie, fenêtre du plugin) + sous-ensemble « hébergement »
+# du SDK VST3 (cible nova_vst3_hosting), partagés avec NovaVSTHost : ../native-common.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../native-common/vst3_hosting.cmake")
 
 # Bibliothèque hôte ARA (ARA_Library/Dispatch).
 add_library(nova_ara_host STATIC
@@ -64,9 +41,10 @@ target_compile_options(nova_ara_host PRIVATE /W1 /utf-8)
 add_executable(NovaARAHost WIN32
     Source/Main.cpp
     Source/Vst3Plugin.cpp
-    Source/EditorWindow.cpp
+    ${NOVA_EDITOR_SOURCES}
     Source/WasapiOutput.cpp
     Source/NovaARAHost.rc)
+target_include_directories(NovaARAHost PRIVATE "${NOVA_COMMON_DIR}")
 target_compile_options(NovaARAHost PRIVATE /W3 /utf-8 /permissive-)
 target_link_libraries(NovaARAHost PRIVATE nova_vst3_hosting nova_ara_host
     ole32 oleaut32 uuid user32 gdi32 shell32 windowscodecs avrt)

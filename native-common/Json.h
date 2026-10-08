@@ -1,5 +1,5 @@
 /*
-    NovaARAHost — JSON minimal (valeurs, lecture RFC 8259, écriture sur une ligne) et base64.
+    Hôtes natifs de Nova Studio (NovaARAHost, NovaVSTHost) — JSON minimal (valeurs, lecture RFC 8259, écriture sur une ligne) et base64.
     (c) Make Music. Aucune dépendance tierce.
 */
 #pragma once
