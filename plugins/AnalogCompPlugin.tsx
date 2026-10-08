@@ -34,6 +34,13 @@ export function formatAnalog(kind: string, spec: AnalogParamSpec, v: number): st
     case ':1': return `${fr(v)}:1`;
     case '%': return `${Math.round(v)} %`;
     case 'gain': return v <= 0 ? 'coupé' : `${fr(v, 0)} · ${signed(interp(v, prof.gainKnob, prof.gainDb))} dB`;
+    case 'gainIn': return `${fr(v)} · ${signed(interp(v, prof.inKnob, prof.inGainDb))} dB`;
+    case 'dB10': return `${signed(v)}`;
+    case 'loF': case 'midF': case 'hiF': {
+      const fl: number[] = prof[spec.unit] || [];
+      const hz = fl[Math.round(v)] ?? 0;
+      return hz >= 1000 ? `${fr(hz / 1000, hz % 1000 ? 1 : 0)} kHz` : `${Math.round(hz)} Hz`;
+    }
     case 'pos': {
       if (spec.id === 'input' && prof.inGainDb) return `${fr(v)} · gain ${signed(interp(v, prof.inKnob, prof.inGainDb))} dB`;
       if (spec.id === 'output' && prof.outGainDb) return `${fr(v)} · ${signed(interp(v, prof.outKnob, prof.outGainDb))} dB`;

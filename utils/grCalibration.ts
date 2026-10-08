@@ -114,6 +114,34 @@ export async function bisectForTarget(measure: (v: number) => Promise<number> | 
   return { value, grDb: best.g, reached: Math.abs(best.g - target) <= 0.25, steps };
 }
 
+/** Réglage à caler sur un compresseur VST connu (nom de paramètre du plugin, bornes réelles). */
+export interface VstCalSpec { param: string; lo: number; hi: number; sense: 1 | -1; targetDb: number; label: string }
+
+/**
+ * Règles de mix maison (Romain) : voix = optique à lampes (Tube-Tech) ou
+ * VOXBOX calés pour 5 dB max au VU ; bus = 1176 à 5 dB, LA-2A à 2 dB.
+ * Autres compresseurs : le seuil, 5 dB sur une piste, 3 dB sur un bus.
+ */
+export function vstCalibrationSpec(pluginName: string, paramNames: string[] = [], onBus = false): VstCalSpec | null {
+  const n = (pluginName || '').toLowerCase();
+  const has = (p: string) => !paramNames.length || paramNames.includes(p);
+  if (/tube-?tech|cl ?1b/.test(n) && has('threshold_db')) return { param: 'threshold_db', lo: -41, hi: 2, sense: -1, targetDb: 5, label: 'seuil' };
+  if (/1176/.test(n) && has('input')) return { param: 'input', lo: -60, hi: 0, sense: 1, targetDb: 5, label: 'entrée' };
+  if (/la-?2a|teletronix/.test(n) && has('peak_reduct')) return { param: 'peak_reduct', lo: 0, hi: 100, sense: 1, targetDb: 2, label: 'peak reduction' };
+  if (/voxbox/.test(n) && has('comp_thresh')) return { param: 'comp_thresh', lo: 0, hi: 10, sense: 1, targetDb: 5, label: 'compression' };
+  const thr = paramNames.find(p => /^threshold(_db)?$|^thresh$/i.test(p));
+  if (thr) return { param: thr, lo: -60, hi: 0, sense: -1, targetDb: onBus ? 3 : 5, label: 'seuil' };
+  return null;
+}
+
+/** Cible du calage d'un effet NOVA selon sa place (bus ou piste). */
+export function novaTargetFor(kind: string, onBus: boolean): number {
+  const spec = ANALOG_SPECS[kind];
+  if (!spec) return 5;
+  if (kind === 'LEVELER2A') return 2;
+  return onBus && kind !== 'FET76' ? 3 : spec.targetGrDb;
+}
+
 /** Calage d'un effet NOVA sur un son donné. */
 export async function calibrateNova(kind: string, params: Record<string, number>, channels: Float32Array[], sampleRate: number, target?: number): Promise<CalibrationResult> {
   const spec = ANALOG_SPECS[kind];

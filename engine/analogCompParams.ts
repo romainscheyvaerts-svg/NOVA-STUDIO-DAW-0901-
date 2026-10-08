@@ -140,10 +140,49 @@ export const LEVELER2A: AnalogKindSpec = {
   ],
 };
 
+const POS5 = (labels: string[]) => labels.map((label, v) => ({ v, label }));
+
+export const VOXSTRIP: AnalogKindSpec = {
+  kind: 'VOXSTRIP',
+  name: 'Vox Strip',
+  driveParam: 'compThresh',
+  driveSense: 1,
+  targetGrDb: 5,
+  specs: [
+    { id: 'input', label: 'Entrée', min: 2, max: 10, step: 0.1, unit: 'gainIn', auto: true,
+      hint: "Gain d'entrée du préampli à lampes : plus fort = plus de couleur (H2) et plus de compression." },
+    { id: 'compThresh', label: 'Compression', min: 0, max: 10, step: 0.1, unit: '', auto: true,
+      hint: "Quantité de compression (cellule optique, ~3:1). « Caler sur ma voix » la règle pour 5 dB max au VU." },
+    { id: 'attack', label: 'Attaque', min: 0, max: 4, step: 1, unit: '', auto: false, hint: 'Vitesse de réaction de la cellule optique.',
+      choices: POS5(['Rapide', 'Assez rapide', 'Moyenne', 'Assez lente', 'Lente']) },
+    { id: 'release', label: 'Relâchement', min: 0, max: 4, step: 1, unit: '', auto: false, hint: 'Vitesse de retour après une phrase.',
+      choices: POS5(['Rapide', 'Assez rapide', 'Moyen', 'Assez lent', 'Lent']) },
+    { id: 'loPeak', label: 'Grave (bosse)', min: 0, max: 10, step: 0.1, unit: 'dB10', auto: true, hint: 'Bosse dans le grave (égaliseur passif) : du corps, de la chaleur.' },
+    { id: 'loFreq', label: 'Grave : fréquence', min: 0, max: 10, step: 1, unit: 'loF', auto: false, hint: 'Fréquence de la bosse grave (20 Hz à 1 kHz).' },
+    { id: 'midDip', label: 'Médium (creux)', min: -10, max: 0, step: 0.1, unit: 'dB10', auto: true, hint: 'Creux dans le médium : enlève le carton ou le nasal.' },
+    { id: 'midFreq', label: 'Médium : fréquence', min: 0, max: 10, step: 1, unit: 'midF', auto: false, hint: 'Fréquence du creux (200 Hz à 7 kHz).' },
+    { id: 'hiPeak', label: 'Aigu (présence / air)', min: 0, max: 10, step: 0.1, unit: 'dB10', auto: true, hint: 'Bosse dans l\'aigu : présence et air, sans dureté.' },
+    { id: 'hiFreq', label: 'Aigu : fréquence', min: 0, max: 10, step: 1, unit: 'hiF', auto: false, hint: 'Fréquence de la bosse aiguë (1,5 à 20 kHz).' },
+    { id: 'output', label: 'Sortie', min: -30, max: 12, step: 0.1, unit: 'dB', auto: true, hint: 'Volume de sortie.' },
+    { id: 'compOn', label: 'Compresseur', min: 0, max: 1, step: 1, unit: '', auto: false, hint: 'Active ou contourne le compresseur optique.', choices: [{ v: 1, label: 'Actif' }, { v: 0, label: 'Contourné' }] },
+    { id: 'eqOn', label: 'Égaliseur', min: 0, max: 1, step: 1, unit: '', auto: false, hint: "Active ou contourne l'égaliseur passif.", choices: [{ v: 1, label: 'Actif' }, { v: 0, label: 'Contourné' }] },
+    { id: 'lowCut', label: 'Coupe-bas', min: 0, max: 120, step: 1, unit: 'Hz', auto: false, hint: 'Coupe-bas doux (6 dB/octave) avant tout le reste.', choices: [{ v: 0, label: 'Non' }, { v: 80, label: '80 Hz' }, { v: 120, label: '120 Hz' }] },
+    { id: 'transformer', label: 'Transformateur de sortie', min: 0, max: 1, step: 1, unit: '', auto: false, hint: 'Le fer du transformateur arrondit le grave quand on pousse (H3 dans le grave).', choices: [{ v: 1, label: 'Oui' }, { v: 0, label: 'Non' }] },
+    { id: 'mix', label: 'Mélange (parallèle)', min: 0, max: 100, step: 1, unit: '%', auto: true, hint: '100 % = tout traité.' },
+  ],
+  defaults: { input: 5, compThresh: 6, attack: 2, release: 2, loPeak: 0, loFreq: 3, midDip: 0, midFreq: 1, hiPeak: 0, hiFreq: 8, output: 0, compOn: 1, eqOn: 1, lowCut: 0, transformer: 1, mix: 100 },
+  presets: [
+    { id: 'voix', name: 'Voix (règle maison)', hint: 'Compression moyenne, un peu d\'air : clique « Caler sur ma voix » (5 dB max au VU).', params: { attack: 2, release: 2, compOn: 1, eqOn: 1, hiPeak: 3, hiFreq: 8, loPeak: 0, midDip: 0, lowCut: 80 } },
+    { id: 'chaude', name: 'Voix chaude', hint: 'Bosse grave douce et creux dans le bas-médium : ronde et proche.', params: { loPeak: 3, loFreq: 4, midDip: -3, midFreq: 1, hiPeak: 2, hiFreq: 9, eqOn: 1 } },
+    { id: 'brillante', name: 'Voix brillante', hint: 'Présence et air, médium nettoyé.', params: { hiPeak: 5, hiFreq: 7, midDip: -3, midFreq: 3, loPeak: 0, eqOn: 1, lowCut: 120 } },
+  ],
+};
+
 export const ANALOG_SPECS: Record<string, AnalogKindSpec> = {
   OPTO_VINTAGE,
   FET76,
   LEVELER2A,
+  VOXSTRIP,
 };
 
 export const analogSpec = (kind: string): AnalogKindSpec | undefined => ANALOG_SPECS[kind];

@@ -72,7 +72,8 @@ P_SC2 = 66         # 2e filtre du sidechain (biquad b0,b1,b2,a1,a2 : 66..70) ; b
 P_OUT_KNEE = 71    # étage de sortie : dureté du coude de saturation (0 = tanh ; k > 0 : u/(1+|u|^k)^(1/k))
 P_XF_K = 72        # transformateur : saturation du fer dans le grave (y = x + k·x·φ², φ = flux intégré) ; 0 = aucun
 P_XF_A = 73        # transformateur : coefficient de l'intégrateur (fréquence de coin du flux)
-NP = 80
+P_EQ2 = 80         # 4 biquads de couleur supplémentaires (80..99)
+NP = 100
 
 
 @njit(cache=True)
@@ -127,7 +128,7 @@ def process(x, P, l0, dl, tab):
     yprev = np.zeros(2)
     hp = np.zeros((2, 4))  # x1, x2, y1, y2
     hp2 = np.zeros((2, 4))
-    eqs = np.zeros((2, N_EQ, 4))
+    eqs = np.zeros((2, 2 * N_EQ, 4))
     flux = np.zeros(2)
     above = np.zeros(2)
     slow_ok = np.zeros(2)
@@ -283,8 +284,8 @@ def process(x, P, l0, dl, tab):
                 yo = yo + P[P_XF_K] * yo * flux[c] * flux[c]
             if P[P_FINAL_SAT] > 0.0:
                 yo = _shape(yo, 0.0, 0.0, P[P_FINAL_SAT], P[P_FINAL_BIAS], 0.0)
-            for q in range(N_EQ):
-                o0 = P_EQ + 5 * q
+            for q in range(2 * N_EQ):
+                o0 = P_EQ + 5 * q if q < N_EQ else P_EQ2 + 5 * (q - N_EQ)
                 if P[o0] != 0.0:
                     h = eqs[c, q]
                     o = P[o0] * yo + P[o0 + 1] * h[0] + P[o0 + 2] * h[1] - P[o0 + 3] * h[2] - P[o0 + 4] * h[3]
@@ -329,6 +330,10 @@ def biquad(kind, fc, q=0.7071, gain_db=0.0, sr=48000.0):
         sa = 2 * math.sqrt(A) * al
         b = [A * ((A + 1) + (A - 1) * cw + sa), -2 * A * ((A - 1) + (A + 1) * cw), A * ((A + 1) + (A - 1) * cw - sa)]
         a = [(A + 1) - (A - 1) * cw + sa, 2 * ((A - 1) - (A + 1) * cw), (A + 1) - (A - 1) * cw - sa]
+    elif kind == "hp1":
+        w = math.tan(math.pi * fc / sr)
+        h0 = 1.0 / (1.0 + w)
+        return [h0, -h0, 0.0, (w - 1.0) / (w + 1.0), 0.0]
     else:
         raise ValueError(kind)
     return [b[0] / a[0], b[1] / a[0], b[2] / a[0], a[1] / a[0], a[2] / a[0]]

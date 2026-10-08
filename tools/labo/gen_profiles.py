@@ -82,7 +82,24 @@ def leveler2a():
     }
 
 
-GENERATORS = {"OPTO_VINTAGE": opto_vintage, "FET76": fet76, "LEVELER2A": leveler2a}
+def voxstrip():
+    from modeles import voxbox_profil as prof
+    f = prof.load_fit()
+    return {
+        "source": "Mesures labo NOVA de l'UADx Manley VOXBOX, 08/10/2026",
+        "l0": prof.L0, "dl": prof.DL, "defaults": prof.DEFAULT_NOVA,
+        "inKnob": f["in_knob"], "inGainDb": f["in_gain_db"],
+        "thKnob": prof.TH_KNOB, "thrTh": f["thr_th"], "tablesTh": f["tables_th"],
+        "attMs": f["att_ms"], "relMs": f["rel_ms"],
+        "slowFrac": f["slow_frac"], "slowAttMs": f["slow_att_ms"], "slowRelMs": f["slow_rel_ms"],
+        "outA2": f["out_a2"], "outA3": f["out_a3"], "outSat": f["out_sat"], "outBias": f["out_bias"],
+        "outAb": f["out_ab"], "outKnee": f["out_knee"], "xfK": f["xf_k"], "xfFc": f["xf_fc"], "eqBase": f["eq_base"],
+        "lo": f["lo"], "mid": f["mid"], "hi": f["hi"], "loKind": f["lo_kind"], "midKind": f["mid_kind"], "hiKind": f["hi_kind"],
+        "loF": prof.LO_F, "midF": prof.MID_F, "hiF": prof.HI_F,
+    }
+
+
+GENERATORS = {"OPTO_VINTAGE": opto_vintage, "FET76": fet76, "LEVELER2A": leveler2a, "VOXSTRIP": voxstrip}
 
 
 def main():

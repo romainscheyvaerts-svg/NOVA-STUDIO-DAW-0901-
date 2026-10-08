@@ -33,7 +33,7 @@ export const AC = {
   HP_B0: 20, HP_B1: 21, HP_B2: 22, HP_A1: 23, HP_A2: 24, LINK: 25, REL_DUCK: 26, IN_SAT: 27, OUT_SAT: 28,
   DET_REL: 29, ATT2: 30, REL2_FOLLOW: 31, EQ: 32, N_EQ: 4, DRIVE: 52, IN_BIAS: 53, OUT_BIAS: 54,
   FAST_ATT: 55, FAST_REL: 56, FAST_DET_REL: 57, FET_A2: 58, FINAL_SAT: 59, FINAL_BIAS: 60,
-  SLOW_FRAC: 61, SLOW_ATT: 62, SLOW_REL: 63, OUT_AB: 64, IN_AB: 65, SC2: 66, OUT_KNEE: 71, XF_K: 72, XF_A: 73, NP: 80,
+  SLOW_FRAC: 61, SLOW_ATT: 62, SLOW_REL: 63, OUT_AB: 64, IN_AB: 65, SC2: 66, OUT_KNEE: 71, XF_K: 72, XF_A: 73, EQ2: 80, NP: 100,
 } as const;
 
 export interface AnalogCompInternal {
@@ -58,7 +58,7 @@ export interface AnalogCompCore {
 export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   var SR = sampleRate > 0 ? sampleRate : 48000;
   void SR;
-  var NP = 80, NEQ = 4, PEQ = 32;
+  var NP = 100, NEQ = 8, PEQ = 32, PEQ2 = 80;
   var P = new Float64Array(NP);
   var tab = new Float64Array([0, 0]);
   var l0 = -12, dl = 1;
@@ -233,7 +233,7 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
         if (P[72] !== 0) { flux[c2] += (yo - flux[c2]) * P[73]; yo = yo + P[72] * yo * flux[c2] * flux[c2]; }
         if (P[59] > 0) yo = shape(yo, 0, 0, P[59], P[60], 0);
         for (var q = 0; q < NEQ; q++) {
-          var o0 = PEQ + 5 * q;
+          var o0 = q < 4 ? PEQ + 5 * q : PEQ2 + 5 * (q - 4);
           if (P[o0] !== 0) {
             var e0 = (c2 * NEQ + q) * 4;
             var oo = P[o0] * yo + P[o0 + 1] * eqs[e0] + P[o0 + 2] * eqs[e0 + 1] - P[o0 + 3] * eqs[e0 + 2] - P[o0 + 4] * eqs[e0 + 3];

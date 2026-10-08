@@ -20,7 +20,18 @@ THD_LEVELS = [-40, -30, -20, -12, -6, -3, 0]
 def to_nova(s):
     m = dict(BASE)
     m.update(s)
-    return dict(m)
+    from modeles import voxbox_profil as prof
+    near = lambda lst, v: int(min(range(len(lst)), key=lambda i: abs(lst[i] - float(v))))
+    return {
+        "input": float(m["input"]), "compOn": 1 if m["comp_byp"] == "In" else 0, "compThresh": float(m["comp_thresh"]),
+        "attack": prof.ATT_POS.index(m["comp_attack"]), "release": prof.REL_POS.index(m["comp_rel"]),
+        "eqOn": 1 if m["eq_byp"] == "In" else 0,
+        "loPeak": float(m["lo_peak"]), "loFreq": near(prof.LO_F, m["lo_peak_freq"]),
+        "midDip": float(m["mid_dip"]), "midFreq": near(prof.MID_F, m["mid_dip_freq"]),
+        "hiPeak": float(m["hi_peak"]), "hiFreq": near(prof.HI_F, m["hi_peak_freq"]),
+        "lowCut": {"Off": 0, "80 Hz": 80, "120 Hz": 120}[m["low_cut"]],
+        "transformer": 1 if m["transformer_byp"] == "In" else 0, "output": float(m["output"]), "mix": 100,
+    }
 
 
 def _step(name, base, step, hold, rel_obs, freq=1000):

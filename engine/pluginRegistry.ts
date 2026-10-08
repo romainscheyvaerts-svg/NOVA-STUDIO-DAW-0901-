@@ -20,7 +20,7 @@ import { NovaDjFilterUI, NovaLofiUI } from '../plugins/FilterPlugin';
 import { NovaGateFxUI } from '../plugins/GateFxPlugin';
 import { AnalogCompNode } from './AnalogCompNode';
 import { analogAutomatable, analogDefaults } from './analogCompParams';
-import { NovaOptoVintageUI, NovaFet76UI, NovaLeveler2AUI } from '../plugins/AnalogCompPlugin';
+import { NovaOptoVintageUI, NovaFet76UI, NovaLeveler2AUI, NovaVoxStripUI } from '../plugins/AnalogCompPlugin';
 
 export interface RegisteredPlugin {
   type: PluginType;
@@ -168,6 +168,18 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     create: (ctx, plugin) => new AnalogCompNode(ctx, 'LEVELER2A', plugin.params || {}),
     ui: NovaLeveler2AUI as any,
     automatable: analogAutomatable('LEVELER2A'),
+  },
+  {
+    type: 'VOXSTRIP',
+    name: 'Vox Strip',
+    category: 'Compresseurs vintage',
+    icon: 'fa-microphone',
+    color: '#e879f9',
+    description: 'Tranche voix à lampes inspirée d’un channel strip américain : préampli, compresseur optique, égaliseur passif et transformateur. « Caler sur ma voix » vise 5 dB max au VU.',
+    defaultParams: analogDefaults('VOXSTRIP'),
+    create: (ctx, plugin) => new AnalogCompNode(ctx, 'VOXSTRIP', plugin.params || {}),
+    ui: NovaVoxStripUI as any,
+    automatable: analogAutomatable('VOXSTRIP'),
   },
 ];
 
