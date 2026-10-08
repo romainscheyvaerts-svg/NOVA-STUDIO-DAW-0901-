@@ -69,6 +69,7 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.beat', keys: [';', ':'], label: 'Temps précédent / suivant (Maj + , / .)', category: 'Navigation' }),
   nova({ id: 'nova.loop', keys: ['l'], label: 'Boucle on / off', pt: 'Ctrl+Maj+L (Loop Playback)', category: 'Transport' }),
   nova({ id: 'nova.marker', keys: ['k'], label: 'Poser un repère à la tête de lecture', pt: 'Entrée du pavé', category: 'Repères' }),
+  nova({ id: 'nova.tap', keys: ['t'], label: 'Tap tempo (tape au rythme, appliqué après la dernière tape)', pt: 'T dans le champ tempo', category: 'Transport' }),
   nova({ id: 'nova.help', keys: ['?'], label: 'Afficher / masquer l’aide des raccourcis', category: 'Fenêtres' }),
   // Géré par components/FeedbackModal (FeedbackHost), même sur la page d'accueil.
   nova({ id: 'nova.feedback', keys: ['ctrl+shift+b'], label: 'Signaler un bug / proposer une idée', category: 'Fenêtres' }),
@@ -151,7 +152,7 @@ export const KEYMAP: ShortcutDef[] = [
   f({ id: 'kf.paste', keys: ['v'], label: 'Coller', pt: 'V', category: 'Keyboard Focus', command: 'paste' }),
   f({ id: 'kf.undo', keys: ['z'], label: 'Annuler', pt: 'Z', category: 'Keyboard Focus' }),
   f({ id: 'kf.zoomOut', keys: ['r'], label: 'Zoom arrière (en Keyboard Focus, Ctrl+Espace enregistre)', pt: 'R', category: 'Keyboard Focus', command: 'zoomOut', overridesNova: true }),
-  f({ id: 'kf.zoomIn', keys: ['t'], label: 'Zoom avant', pt: 'T', category: 'Keyboard Focus', command: 'zoomIn' }),
+  f({ id: 'kf.zoomIn', keys: ['t'], label: 'Zoom avant', pt: 'T', category: 'Keyboard Focus', command: 'zoomIn', overridesNova: true }),
   f({ id: 'kf.zoomSel', keys: ['e'], label: 'Zoom sur le clip sélectionné', pt: 'E (Zoom Toggle)', category: 'Keyboard Focus', command: 'zoomToSelection' }),
   f({ id: 'kf.prevTrack', keys: ['p'], label: 'Piste du dessus', pt: 'P', category: 'Keyboard Focus' }),
   f({ id: 'kf.nextTrack', keys: [';'], label: 'Piste du dessous', pt: ';', category: 'Keyboard Focus', overridesNova: true }),

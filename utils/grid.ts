@@ -4,6 +4,8 @@
  * timeline de NOVA.
  */
 
+import { tempoMapStore, isPlain44, snapTimeToMap } from './tempoMap';
+
 export interface GridOption {
   value: string; label: string; title: string;
   /** 'temps' : grille en millisecondes ou en images (Pro Tools : min:sec, timecode), indépendante du tempo. */
@@ -54,9 +56,15 @@ export const gridStepSeconds = (gridSize: string, bpm: number): number => {
   return bar / gridSubdivisionsPerBar(gridSize);
 };
 
-/** Temps aimanté sur la grille (Maj = sans grille, géré par l'appelant). */
+/**
+ * Temps aimanté sur la grille (Maj = sans grille, géré par l'appelant).
+ * Piste tempo (R2) : avec une mesure autre que 4/4 ou des changements de tempo,
+ * la grille suit la carte du projet (traits ancrés sur chaque mesure).
+ */
 export const snapToGrid = (time: number, bpm: number, gridSize: string, enabled: boolean): number => {
   if (!enabled) return time;
+  const map = tempoMapStore.get();
+  if (!timeGridStep(gridSize) && !isPlain44(map) && Math.abs(map.segments[0].bpm - bpm) < 1e-6) return snapTimeToMap(map, time, gridSize);
   const step = gridStepSeconds(gridSize, bpm);
   return Math.round(time / step) * step;
 };

@@ -441,7 +441,7 @@ MARKER_JS = """
         version: %(version)s,
         platform: 'windows',
         ui: %(ui)s,
-        features: Object.freeze(['google-login', 'stems']),
+        features: Object.freeze(['google-login', 'stems', 'reveal-download']),
         bridges: Object.freeze({ asio: %(asio)d, vst: %(vst)d })
       }),
       configurable: false, enumerable: false, writable: false
@@ -746,6 +746,10 @@ def run_window(url: str, url_mode: bool) -> None:
             core.ProcessFailed += self.on_process_failed
             core.ContextMenuRequested += self.on_context_menu
             core.WebMessageReceived += self.on_web_message
+            try:  # exports (R1) : « Ouvrir le dossier » montre le fichier téléchargé
+                core.DownloadStarting += self.on_download_starting
+            except Exception:
+                pass
             core.AddScriptToExecuteOnDocumentCreatedAsync(MARKER_JS % {
                 "version": json.dumps(APP_VERSION), "asio": ASIO_PORT, "vst": VST_PORT,
                 "ui": json.dumps(ui.active.id if ui.active else "online")})
@@ -982,12 +986,41 @@ def run_window(url: str, url_mode: bool) -> None:
                 if (urlparse(str(args.Source)).hostname or "").lower() == app_host:
                     self.google.handle(google_msg)
                 return
+            if msg.startswith("nova-desktop:reveal:"):
+                # Seulement depuis le DAW : ouvre l'Explorateur sur le fichier exporté.
+                if (urlparse(str(args.Source)).hostname or "").lower() == app_host:
+                    self.reveal_download(msg[len("nova-desktop:reveal:"):])
+                return
             if msg == "nova-desktop:apply-update" and ui.pending is not None:
                 log.info(f"mise à jour appliquée tout de suite : {ui.pending.id}")
                 ui.active, ui.pending = ui.pending, None
                 ui.downloaded.append(ui.active)
                 self.boot_checked = False
                 self.navigate_app("mise à jour")
+
+        # ── exports : dossier des téléchargements (R1) ──────────────────
+        def on_download_starting(self, sender, args):
+            try:
+                path = str(args.ResultFilePath)
+                self.downloads = (getattr(self, "downloads", []) + [path])[-50:]
+            except Exception:
+                pass
+
+        def reveal_download(self, name: str):
+            """Ouvre l'Explorateur sur le dernier fichier téléchargé de ce nom (sinon le dossier)."""
+            name = os.path.basename(str(name or ""))[:200]
+            stem = os.path.splitext(name)[0].lower()
+            known = list(reversed(getattr(self, "downloads", [])))
+            target = next((p for p in known if os.path.basename(p).lower().startswith(stem) and os.path.exists(p)), None) if stem else None
+            folder = os.path.dirname(known[0]) if known else os.path.join(os.path.expanduser("~"), "Downloads")
+            try:
+                if target:
+                    subprocess.Popen(["explorer", "/select,", os.path.normpath(target)])
+                elif os.path.isdir(folder):
+                    os.startfile(folder)
+                log.info(f"export : dossier ouvert ({'fichier' if target else 'dossier'})")
+            except Exception as e:
+                log.warning(f"export : ouverture du dossier impossible ({type(e).__name__})")
 
         # ── connexion Google (google_login.py) ──────────────────────────
         def post_to_page(self, payload: dict):

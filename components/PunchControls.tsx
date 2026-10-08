@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { PunchSettings } from '../types';
-import { DEFAULT_POST_ROLL_BARS, DEFAULT_PRE_ROLL_BARS, DEFAULT_PUNCH_XFADE_MS, ROLL_CHOICES_BARS, hasPunchZone, rollBars, rollLabel } from '../utils/punch';
+import { DEFAULT_POST_ROLL_BARS, DEFAULT_PRE_ROLL_BARS, DEFAULT_PUNCH_XFADE_MS, ROLL_CHOICES_BARS, ROLL_CHOICES_SEC, hasPunchZone, rollBars, rollLabel } from '../utils/punch';
 
 /**
  * Boutons de punch de la barre de transport : PUNCH, pré-roll, post-roll et
@@ -25,6 +25,11 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const preBars = rollBars(punch, 'pre', bpm);
   const postBars = rollBars(punch, 'post', bpm);
+  // Réglé en secondes (R2) : prioritaire sur les mesures.
+  const preSec = typeof punch?.preRollSec === 'number' ? punch.preRollSec : null;
+  const postSec = typeof punch?.postRollSec === 'number' ? punch.postRollSec : null;
+  const label = (bars: number, sec: number | null, on: boolean) => (sec !== null ? (on && sec > 0 ? `${String(sec).replace('.', ',')}s` : 'off') : rollLabel(bars, on));
+  const howLong = (bars: number, sec: number | null) => (sec !== null ? `${String(sec).replace('.', ',')} s` : `${bars} mesure${bars > 1 ? 's' : ''}`);
   // Pré-roll non réglé : actif en punch seulement (comportement d'avant).
   const preOn = punch?.preRollOn ?? isPunchActive;
   const postOn = punch?.postRollOn ?? true;
@@ -53,11 +58,11 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
       {onUpdatePunch && (
         <>
           <button onClick={() => onUpdatePunch({ preRollOn: !preOn })} aria-pressed={preOn}
-            title={`Pré-roll (comme dans Pro Tools) : la lecture repart ${preBars} mesure${preBars > 1 ? 's' : ''} avant le point d'entrée pour te caler ; seul ce qui suit est gardé. Clic : activer / couper. Durée dans le menu ▾.`}
-            className={`hidden xl:flex items-center ${chip(preOn)}`}>PRÉ {rollLabel(preBars, preOn)}</button>
+            title={`Pré-roll (comme dans Pro Tools) : la lecture repart ${howLong(preBars, preSec)} avant le point d'entrée pour te caler ; seul ce qui suit est gardé. Clic : activer / couper. Durée (mesures ou secondes) dans le menu ▾.`}
+            className={`hidden xl:flex items-center ${chip(preOn)}`}>PRÉ {label(preBars, preSec, preOn)}</button>
           <button onClick={() => onUpdatePunch({ postRollOn: !postOn })} aria-pressed={postOn}
-            title={`Post-roll (comme dans Pro Tools) : la lecture continue ${postBars} mesure${postBars > 1 ? 's' : ''} après le point de sortie, puis s'arrête. Clic : activer / couper.`}
-            className={`hidden xl:flex items-center ${chip(postOn)}`}>POST {rollLabel(postBars, postOn)}</button>
+            title={`Post-roll (comme dans Pro Tools) : la lecture continue ${howLong(postBars, postSec)} après le point de sortie, puis s'arrête. Clic : activer / couper.`}
+            className={`hidden xl:flex items-center ${chip(postOn)}`}>POST {label(postBars, postSec, postOn)}</button>
           {onToggleQuickPunch && (
             <button onClick={onToggleQuickPunch} aria-pressed={quick}
               title="QuickPunch (comme dans Pro Tools) : pendant la lecture, REC (ou R) entre dans l'enregistrement sur la piste armée, un 2e appui en sort, sans arrêter la musique. Idéal pour refaire une fin de phrase."
@@ -82,6 +87,7 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
             {(['pre', 'post'] as const).map(which => {
               const on = which === 'pre' ? preOn : postOn;
               const bars = which === 'pre' ? preBars : postBars;
+              const sec = which === 'pre' ? preSec : postSec;
               return (
                 <div key={which} className="mb-2">
                   <div className="flex items-center justify-between mb-1">
@@ -93,9 +99,17 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
                   </div>
                   <div className="flex gap-1">
                     {ROLL_CHOICES_BARS.filter(b => b > 0).map(b => (
-                      <button key={b} onClick={() => onUpdatePunch(which === 'pre' ? { preRollBars: b, preRollOn: true } : { postRollBars: b, postRollOn: true })}
-                        className={`flex-1 h-7 rounded-md border text-[10px] font-bold ${on && bars === b ? 'bg-amber-500/20 border-amber-500/50 text-amber-200' : 'border-white/10 text-slate-400 hover:text-white'}`}>
+                      <button key={b} onClick={() => onUpdatePunch(which === 'pre' ? { preRollBars: b, preRollSec: undefined, preRollOn: true } : { postRollBars: b, postRollSec: undefined, postRollOn: true })}
+                        className={`flex-1 h-7 rounded-md border text-[10px] font-bold ${on && sec === null && bars === b ? 'bg-amber-500/20 border-amber-500/50 text-amber-200' : 'border-white/10 text-slate-400 hover:text-white'}`}>
                         {b === 0.5 ? '½' : b} mes.
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-1 mt-1" title="En secondes, comme le pré-roll min:sec de Pro Tools : utile sur un son sans tempo (podcast, voix libre)">
+                    {ROLL_CHOICES_SEC.map(sv => (
+                      <button key={sv} onClick={() => onUpdatePunch(which === 'pre' ? { preRollSec: sv, preRollOn: true } : { postRollSec: sv, postRollOn: true })}
+                        className={`flex-1 h-7 rounded-md border text-[10px] font-bold ${on && sec === sv ? 'bg-amber-500/20 border-amber-500/50 text-amber-200' : 'border-white/10 text-slate-400 hover:text-white'}`}>
+                        {sv} s
                       </button>
                     ))}
                   </div>
@@ -109,7 +123,7 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
                 {[0, 5, 10, 20, 50, 100].map(v => <option key={v} value={v}>{v} ms</option>)}
               </select>
             </div>
-            <button onClick={() => onUpdatePunch({ preRollBars: DEFAULT_PRE_ROLL_BARS, postRollBars: DEFAULT_POST_ROLL_BARS, preRollOn: undefined, postRollOn: undefined, crossfadeMs: DEFAULT_PUNCH_XFADE_MS })}
+            <button onClick={() => onUpdatePunch({ preRollBars: DEFAULT_PRE_ROLL_BARS, postRollBars: DEFAULT_POST_ROLL_BARS, preRollSec: undefined, postRollSec: undefined, preRollOn: undefined, postRollOn: undefined, crossfadeMs: DEFAULT_PUNCH_XFADE_MS })}
               className="mt-3 w-full h-7 rounded-md border border-white/10 text-[10px] text-slate-400 hover:text-white">
               Réglages d'origine (2 mesures avant, 1 après, 10 ms)
             </button>

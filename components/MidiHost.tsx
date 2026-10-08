@@ -13,6 +13,7 @@ import { padLoadKey } from '../utils/drumSamples';
 import { midiManager } from '../services/MidiManager';
 import { audioEngine } from '../engine/AudioEngine';
 import GroovePanel from './GroovePanel';
+import { tempoMapStore } from '../utils/tempoMap';
 
 /**
  * Hôte des fonctions MIDI (V25), monté une fois dans App : import et export
@@ -121,7 +122,7 @@ const MidiHost: React.FC<Props> = ({ state, getState, setState, pianoRoll }) => 
     const { sources, relativeTo, name } = exportSources(st.tracks, scope, trackId, clipId);
     const notes = sources.reduce((s, x) => s + x.clips.reduce((a, c) => a + (c.notes?.length || 0), 0), 0);
     if (!notes) { notify(scope === 'all' ? 'Aucune piste MIDI avec des notes à exporter.' : 'Pas de notes à exporter ici.'); return; }
-    const data = novaToMidi(sources, { bpm: st.bpm, timeSignature: st.timeSignature, relativeTo });
+    const data = novaToMidi(sources, { bpm: st.bpm, timeSignature: st.timeSignature, relativeTo, tempoMap: tempoMapStore.get() });
     const bytes = writeMidi(data, { title: st.name });
     const fname = midiFileName(scope === 'all' ? `${st.name || 'Nova'} - MIDI` : name);
     void saveBlob(new Blob([bytes], { type: 'audio/midi' }), fname);

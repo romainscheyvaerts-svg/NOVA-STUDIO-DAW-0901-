@@ -11,6 +11,8 @@ import { useCaptureCount, CAPTURE_HINT } from './MidiFileMenu';
 import { midiBus } from '../utils/midiBus';
 import { midiCapture } from '../utils/midiCapture';
 import ChordRollOverlay from './ChordRollOverlay';
+import { useTempoMap } from './TempoLane';
+import { tempoAt } from '../utils/tempoMap';
 import { ComputerKeyboard, NoteRecorder, isComputerKeyboardCode, defaultKeyLabel, octaveBase, KEY_TO_SEMITONE, DEFAULT_KEYBOARD_STATE, KeyboardState } from '../utils/computerKeyboard';
 import { useTheme } from '../utils/themeStore';
 
@@ -88,10 +90,13 @@ const VELOCITY_HEIGHT = 150;
 
 type DragMode = 'MOVE' | 'RESIZE_R' | 'VELOCITY' | 'SELECT' | 'DRAW' | null;
 
-const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm, onUpdateTrack, onClose, toolbarExtra, isPlaying, onTogglePlay, projectKey, projectScale, onSetProjectKey, allTracks }) => {
+const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, onUpdateTrack, onClose, toolbarExtra, isPlaying, onTogglePlay, projectKey, projectScale, onSetProjectKey, allTracks }) => {
   const light = useTheme().theme === 'light';
   const clipIndex = track.clips.findIndex(c => c.id === clipId);
   const clip = track.clips[clipIndex];
+  // Piste tempo (R2) : la grille et la quantification du clip suivent le tempo à l'endroit du clip.
+  const tempoMap = useTempoMap();
+  const bpm = Math.abs(tempoMap.segments[0].bpm - projectBpm) < 1e-6 ? tempoAt(tempoMap, clip?.start ?? 0) : projectBpm;
   
   const isDrumMode = track.type === TrackType.DRUM_RACK;
   const currentRowHeight = isDrumMode ? DRUM_ROW_HEIGHT : ROW_HEIGHT;

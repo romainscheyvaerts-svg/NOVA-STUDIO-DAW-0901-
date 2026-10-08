@@ -14,6 +14,7 @@
  * pistes MIDI (positions absolues dans le morceau), au format 1.
  */
 import { Clip, MidiNote, Track, TrackType } from '../types';
+import { quartersAt, segmentAtTime, type TempoMap } from './tempoMap';
 import {
   DEFAULT_PPQ, DRUM_CHANNEL, MidiFileData, MidiFileNote, MidiFileTrack, initialBpm, secondsToTicks, ticksToSeconds,
 } from './midiFile';
@@ -189,10 +190,14 @@ export interface ExportSource { track: Track; clips: Clip[] }
  * Construit le fichier : une piste .mid par piste NOVA. `relativeTo` : instant
  * (s) qui devient le tick 0 (début du clip exporté seul, sinon 0).
  */
-export function novaToMidi(sources: ExportSource[], opts: { bpm: number; timeSignature?: { numerator: number; denominator: number }; relativeTo?: number; ppq?: number }): MidiFileData {
+export function novaToMidi(sources: ExportSource[], opts: { bpm: number; timeSignature?: { numerator: number; denominator: number }; relativeTo?: number; ppq?: number; tempoMap?: TempoMap }): MidiFileData {
   const ppq = opts.ppq || DEFAULT_PPQ;
   const bpm = opts.bpm || 120;
   const origin = opts.relativeTo || 0;
+  // Piste tempo (R2) : changements de tempo et de mesure écrits dans le .mid, notes placées en noires.
+  const map = opts.tempoMap && (opts.tempoMap.segments.length > 1 || Math.abs(opts.tempoMap.segments[0].bpm - bpm) < 1e-6) ? opts.tempoMap : null;
+  const q0 = map ? quartersAt(map, origin) : 0;
+  const tickOf = (absSec: number) => (map ? Math.round((quartersAt(map, origin + absSec) - q0) * ppq) : secondsToTicks(absSec, bpm, ppq));
   const MELODIC = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15];
   let nextCh = 0;
   const tracks: MidiFileTrack[] = sources.map(({ track, clips }) => {
@@ -205,8 +210,8 @@ export function novaToMidi(sources: ExportSource[], opts: { bpm: number; timeSig
         const abs = c.start + n.start - origin;
         if (abs + n.duration <= 0) continue;
         const s = Math.max(0, abs);
-        const startTick = secondsToTicks(s, bpm, ppq);
-        const endTick = secondsToTicks(abs + n.duration, bpm, ppq);
+        const startTick = tickOf(s);
+        const endTick = tickOf(abs + n.duration);
         notes.push({
           pitch: drums ? drumNoteOut(track, n) : n.pitch,
           velocity: Math.max(1, Math.min(127, Math.round((n.velocity ?? 0.8) * 127))),
@@ -221,9 +226,26 @@ export function novaToMidi(sources: ExportSource[], opts: { bpm: number; timeSig
   });
   return {
     format: 1, ppq, tracks,
-    tempos: [{ tick: 0, usPerQuarter: Math.round(60_000_000 / bpm), bpm }],
-    timeSignatures: [{ tick: 0, numerator: opts.timeSignature?.numerator || 4, denominator: opts.timeSignature?.denominator || 4 }],
+    tempos: map ? tempoEventsOf(map, origin, q0, ppq) : [{ tick: 0, usPerQuarter: Math.round(60_000_000 / bpm), bpm }],
+    timeSignatures: map ? meterEventsOf(map, origin, q0, ppq) : [{ tick: 0, numerator: opts.timeSignature?.numerator || 4, denominator: opts.timeSignature?.denominator || 4 }],
   };
+}
+
+function tempoEventsOf(map: TempoMap, origin: number, q0: number, ppq: number) {
+  const seg0 = segmentAtTime(map, origin);
+  const out = [{ tick: 0, usPerQuarter: Math.round(60_000_000 / seg0.bpm), bpm: seg0.bpm }];
+  for (const s of map.segments) if (s.time > origin && s.bpm !== out[out.length - 1].bpm) out.push({ tick: Math.round((quartersAt(map, s.time) - q0) * ppq), usPerQuarter: Math.round(60_000_000 / s.bpm), bpm: s.bpm });
+  return out;
+}
+
+function meterEventsOf(map: TempoMap, origin: number, q0: number, ppq: number) {
+  const seg0 = segmentAtTime(map, origin);
+  const out = [{ tick: 0, numerator: seg0.num, denominator: seg0.den }];
+  for (const s of map.segments) {
+    const last = out[out.length - 1];
+    if (s.time > origin && (s.num !== last.numerator || s.den !== last.denominator)) out.push({ tick: Math.round((quartersAt(map, s.time) - q0) * ppq), numerator: s.num, denominator: s.den });
+  }
+  return out;
 }
 
 /** Sources d'un export : 'clip' (un clip), 'track' (une piste), 'all' (toutes les pistes MIDI). */

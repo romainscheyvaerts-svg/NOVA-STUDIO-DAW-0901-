@@ -14,6 +14,8 @@ import LiveRecordingClip from './LiveRecordingClip';
 import AutomationLaneComponent from './AutomationLane';
 import { drawExpandedLanes } from '../utils/automationDraw';
 import { snapToGrid, gridSubdivisionsPerBar, isBeatLine, timeGridStep } from '../utils/grid';
+import { gridLinesInRange, barsInRange } from '../utils/tempoMap';
+import { useTempoMap } from './TempoLane';
 import { editModeStore, effectiveMode, EDIT_MODE_INFO, GRID_KIND_LABEL, moveClipStart, snapPoint, sessionSampleRate, snapsToGrid, syncOffsetOf, syncPointAt, toSample, trimEdgeTime, useEditMode } from '../utils/editModes';
 import { SELECT_CLIP_EVENT, shuffleDrag, shuffleEditClip, shuffleGroupDrag } from '../hooks/useEditModes';
 import EditModeSelector from './EditModeSelector';
@@ -108,6 +110,8 @@ interface ArrangementViewProps {
   takeLanes?: TakeLanesApi;
   /** Piste d'accords (V20, components/ChordLane) : absente quand le couloir est masqué. */
   chordLane?: { height: number; render: (v: ChordLaneView) => React.ReactNode };
+  /** Piste tempo (R2, components/TempoLane) : au-dessus du couloir d'accords, absente quand elle est masquée. */
+  tempoLane?: { height: number; render: (v: ChordLaneView) => React.ReactNode };
 }
 
 /** Contour d'un fondu (courbe choisie) : zone assombrie au-dessus de la courbe + trait. */
@@ -172,12 +176,16 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip: onEditClipRaw, isRecording, recStartTime,
   onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy,
-  punch, onUpdatePunch, editCommands, takeLanes, chordLane
+  punch, onUpdatePunch, editCommands, takeLanes, chordLane, tempoLane
 }) => {
   // Piste d'accords (V20) : couloir sous la règle (comme Logic), au-dessus des pistes.
   const chordH = chordLane ? chordLane.height : 0;
-  /** Haut des pistes, dans le contenu défilant comme dans le calque : règle + couloir d'accords. */
-  const tracksTop = RULER_H + chordH;
+  // Piste tempo (R2) : juste sous la règle, au-dessus des accords.
+  const tempoH = tempoLane ? tempoLane.height : 0;
+  /** Haut des pistes, dans le contenu défilant comme dans le calque : règle + piste tempo + couloir d'accords. */
+  const tracksTop = RULER_H + tempoH + chordH;
+  // Carte des tempos et des mesures : la grille et la règle la suivent (3/4, 6/8, changements).
+  const tempoMap = useTempoMap();
   // Thème affiché : le canvas se redessine quand on passe en clair / sombre.
   const { theme: uiTheme } = useTheme();
   const editPrefs = useEditPrefs();
@@ -808,6 +816,13 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       { label: 'Couleur de la piste…', onClick: () => openNovaWindow('track-color', { trackId }), icon: 'fa-palette' }, ];
     const target = tracks.find(t => t.id === trackId);
     if (isVoiceTrack(target)) menuItems.push({ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => requestBreaths({ mode: 'dialog', trackIds: [trackId], reason: 'menu' }) });
+    // Piste guide (R3) : la voix témoin s'entend pendant la prise, jamais exportée ni mixée.
+    if (target && target.type === TrackType.AUDIO && target.id !== 'instrumental' && !target.instrumentId) menuItems.push({
+      label: target.isGuide ? 'Ce n’est plus une piste guide' : 'Piste guide (s’entend, jamais exportée)',
+      icon: 'fa-headphones',
+      title: 'Voix témoin (démo du topliner, yaourt, ancienne prise) : entendue pendant la prise à son propre niveau, jamais exportée, mixée ni masterisée (Pro Tools : piste guide inactive au bounce).',
+      onClick: () => onUpdateTrack(target.isGuide ? { ...target, isGuide: false, guideMuted: false } : { ...target, isGuide: true, guideMuted: false, guideLevel: target.guideLevel ?? 0.7 }),
+    });
     if (trackId !== 'track-rec-main') menuItems.push({ label: 'Supprimer la piste', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
     if (!simple || target?.isFrozen) menuItems.push({
       label: target?.isFrozen ? 'Dégeler la piste' : 'Geler la piste (freeze)',
@@ -1707,35 +1722,17 @@ const drawTimeline = useCallback(() => {
     ctx.clearRect(0, 0, w, h);
     const cv = canvasTheme();
     
-    const beatPx = (60 / bpm) * zoomH;
     const startTime = pixelsToTime(scrollX);
     const endTime = pixelsToTime(scrollX + w);
-    const startBar = Math.floor(startTime * (bpm / 60) / 4);
-    const endBar = Math.ceil(endTime * (bpm / 60) / 4);
-    
-    const subDivisionsPerBar = gridSubdivisionsPerBar(gridSize);
-    const subStepPx = (4 * beatPx) / subDivisionsPerBar;
     // Grille en temps (ms, images) : traits réguliers indépendants du tempo, par-dessus les mesures.
     const timeStep = timeGridStep(gridSize);
 
+    // Mesures et sous-divisions d'après la carte des tempos (R2) : 3/4, 6/8, 7/8, changements.
     ctx.lineWidth = 1;
-    for (let i = startBar; i <= endBar; i++) {
-        const time = i * 4 * (60 / bpm);
-        const x = timeToPixels(time) - scrollX;
-        ctx.strokeStyle = cv.ink(0.08);
+    for (const ln of gridLinesInRange(tempoMap, Math.max(0, startTime), endTime, timeStep ? '1/1' : gridSize, 5 / Math.max(1e-6, zoomH))) {
+        const x = timeToPixels(ln.time) - scrollX;
+        ctx.strokeStyle = ln.kind === 'bar' ? cv.ink(0.08) : ln.kind === 'beat' ? cv.ink(0.05) : cv.ink(0.035);
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-        
-        if (!timeStep && subStepPx > 5 && subDivisionsPerBar > 1) {
-            for (let j = 1; j < subDivisionsPerBar; j++) {
-                const subX = x + j * subStepPx;
-                if (isBeatLine(j, subDivisionsPerBar)) {
-                    ctx.strokeStyle = cv.ink(0.05);
-                } else {
-                    ctx.strokeStyle = cv.ink(0.035);
-                }
-                ctx.beginPath(); ctx.moveTo(subX, 0); ctx.lineTo(subX, h); ctx.stroke();
-            }
-        }
     }
     if (timeStep && timeToPixels(timeStep) > 5) {
         ctx.strokeStyle = cv.ink(0.04);
@@ -1877,10 +1874,27 @@ const drawTimeline = useCallback(() => {
 
     ctx.fillStyle = cv.textMuted;
     ctx.font = '600 11px Inter';
-    for (let i = startBar; i <= endBar; i++) {
-        const time = i * 4 * (60 / bpm);
-        const x = timeToPixels(time) - scrollX;
-        if (x >= -50) ctx.fillText((i+1).toString(), x + 4, 24);
+    {
+        // Numéros de mesure : un sur deux (ou moins) quand les mesures sont serrées.
+        const bars = barsInRange(tempoMap, Math.max(0, startTime), endTime);
+        const widthPx = bars.length > 1 ? timeToPixels(bars[1].time - bars[0].time) : 999;
+        const every = widthPx >= 24 ? 1 : widthPx >= 12 ? 2 : widthPx >= 6 ? 4 : 8;
+        for (const b of bars) {
+            if (b.bar % every) continue;
+            const x = timeToPixels(b.time) - scrollX;
+            if (x >= -50) ctx.fillText((b.bar + 1).toString(), x + 4, 24);
+        }
+        // Changement de tempo / de mesure : rappel discret dans la règle.
+        ctx.save();
+        ctx.font = '700 9px Inter';
+        for (const s of tempoMap.segments) {
+            if (s.time < startTime - 1 || s.time > endTime) continue;
+            if (s.bar === 0 && tempoMap.segments.length === 1 && s.num === 4 && s.den === 4) continue;
+            const x = timeToPixels(s.time) - scrollX;
+            ctx.fillStyle = '#f59e0b';
+            ctx.fillText(`${s.num}/${s.den}`, x + 4, 36);
+        }
+        ctx.restore();
     }
     
     // Draw Markers (inspired by Pro Tools/Reaper)
@@ -1998,7 +2012,7 @@ const drawTimeline = useCallback(() => {
     }
 
     // La tete de lecture est dessinee sur le calque superieur (drawPlayhead).
-}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, lanesKey, lanesByTrack, hoveredClipId, uiTheme, tracksTop, clipGainEdit.view]);
+}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, lanesKey, lanesByTrack, hoveredClipId, uiTheme, tracksTop, clipGainEdit.view, tempoMap]);
 
 // Calque statique (grille, clips, formes d'onde, reperes) : redessine seulement
 // quand son contenu change, plus a chaque image de la lecture.
@@ -2128,8 +2142,13 @@ useEffect(() => {
         </div>
       </div>
       {/* Piste d'accords : sous la règle (comme la Chord Track de Logic), fixe pendant le défilement vertical. */}
-      {chordLane && (
+      {tempoLane && (
         <div style={{ position: 'absolute', top: TOOLBAR_H + RULER_H, left: 0, right: 0, zIndex: 41 }}>
+          {tempoLane.render({ zoomH, scrollLeft, headerWidth, width: Math.max(0, viewportSize.width - headerWidth) })}
+        </div>
+      )}
+      {chordLane && (
+        <div style={{ position: 'absolute', top: TOOLBAR_H + RULER_H + tempoH, left: 0, right: 0, zIndex: 41 }}>
           {chordLane.render({ zoomH, scrollLeft, headerWidth, width: Math.max(0, viewportSize.width - headerWidth) })}
         </div>
       )}

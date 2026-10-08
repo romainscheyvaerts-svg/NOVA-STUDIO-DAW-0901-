@@ -1,3 +1,4 @@
+import { tempoMapStore, isPlain44, timeToPosition } from './tempoMap';
 import { Clip } from '../types';
 
 /**
@@ -21,6 +22,12 @@ export function secFr(s: number): string {
 
 /** Position en mesure.temps (comme la règle) : 0 s à 120 BPM → « 1.1 ». */
 export function barsBeats(sec: number, bpm: number, beatsPerBar = 4): string {
+  // Piste tempo (R2) : mesure et temps d'après la carte du projet (3/4, 6/8, changements).
+  const map = tempoMapStore.get();
+  if (!isPlain44(map) && Math.abs(map.segments[0].bpm - bpm) < 1e-6) {
+    const p = timeToPosition(map, Math.max(0, sec) + 1e-6);
+    return `${p.bar + 1}.${p.beat + 1}`;
+  }
   const beat = 60 / Math.max(1, bpm);
   const totalBeats = Math.max(0, sec) / beat + 1e-6;
   const bar = Math.floor(totalBeats / beatsPerBar) + 1;

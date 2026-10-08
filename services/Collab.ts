@@ -527,6 +527,8 @@ export const contentOf = (t: Track) => ({
   // Propriétaire nommé (« Feat à distance ») : ignoré par les anciennes versions de NOVA.
   ...(t.collabOwnerKey ? { collabOwnerKey: t.collabOwnerKey, collabOwnerName: t.collabOwnerName, collabOwnerColor: t.collabOwnerColor } : {}),
   drumMachine: t.drumMachine, bass808: t.bass808,
+  // Piste guide (R3) : null = pas un guide (absent : ancienne version). Couper le guide reste un choix d'écoute local.
+  guide: t.isGuide ? { level: t.guideLevel ?? null } : null,
   // Synthé NOVA : null = ancien synthé (les versions précédentes ignorent ce champ).
   ...(t.type === 'MIDI' ? { novaSynth: t.novaSynth ?? null } : {}),
   drumPads: t.drumPads?.map(p => { const { buffer: _b, ...r } = p as any; return r; }),

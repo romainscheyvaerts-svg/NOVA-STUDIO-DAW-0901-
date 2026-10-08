@@ -3,6 +3,7 @@ import type { DAWState } from '../types';
 import { chordFromEvent, findShortcut, keyToken, ShortcutDef } from '../utils/keymap';
 import { runEditCommand } from '../utils/editCommands';
 import { isKeyboardFocus, toggleKeyboardFocus } from '../utils/keyboardFocus';
+import { tempoMapStore, timeToPosition, barToTime } from '../utils/tempoMap';
 import { MarkerRecallBuffer, markerByNumber } from '../utils/memoryLocations';
 import { openNovaWindow } from '../utils/novaWindows';
 import { gridStepSeconds } from '../utils/grid';
@@ -73,12 +74,14 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
 
     const run = (sc: ShortcutDef) => {
       const d = ref.current;
-      const bar = (4 * 60) / (d.stateRef.current.bpm || 120);
+      // Mesure d'après la piste tempo (R2) : 3/4, 6/8, changements de tempo.
+      const m = tempoMapStore.get();
+      const cur = timeToPosition(m, d.getTime());
       switch (sc.id) {
         case 'pt.recordAlt': d.toggleRecord(); return;
         case 'pt.numPlay': d.togglePlay(); return;
-        case 'pt.numRew': d.seek(Math.max(0, d.getTime() - bar)); return;
-        case 'pt.numFf': d.seek(d.getTime() + bar); return;
+        case 'pt.numRew': { const st = barToTime(m, cur.bar); d.seek(Math.max(0, d.getTime() - st > 1e-3 ? st : barToTime(m, Math.max(0, cur.bar - 1)))); return; }
+        case 'pt.numFf': d.seek(barToTime(m, cur.bar + 1)); return;
         case 'pt.numLoop': d.toggleLoop(); return;
         case 'pt.numClick': d.toggleMetronome(); return;
         case 'pt.newMarker': d.addMarker(d.getTime()); return;

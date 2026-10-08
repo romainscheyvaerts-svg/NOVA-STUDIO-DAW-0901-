@@ -46,18 +46,28 @@ export function rollBars(p: Partial<PunchSettings> | null | undefined, which: 'p
   return which === 'pre' ? DEFAULT_PRE_ROLL_BARS : DEFAULT_POST_ROLL_BARS;
 }
 
+/** Choix de pré / post-roll en secondes (R2 : comme Pro Tools en min:sec). */
+export const ROLL_CHOICES_SEC = [1, 2, 3, 5];
+
+/** Pré/post-roll en secondes : réglé en secondes (R2), sinon en mesures. */
+export function rollSeconds(p: Partial<PunchSettings> | null | undefined, which: 'pre' | 'post', bpm: number, ts?: TimeSignature): number {
+  const sec = which === 'pre' ? p?.preRollSec : p?.postRollSec;
+  if (typeof sec === 'number' && Number.isFinite(sec) && sec >= 0) return Math.min(30, sec);
+  return rollBars(p, which, bpm, ts) * barSeconds(bpm, ts);
+}
+
 /**
  * Pré-roll effectif en secondes. Non réglé (projet d'avant) : seulement en punch,
  * comme avant. Réglé : comme dans Pro Tools, pour toute prise.
  */
 export function effectivePreRoll(p: Partial<PunchSettings> | null | undefined, punchActive: boolean, bpm: number, ts?: TimeSignature): number {
   const on = p?.preRollOn === undefined ? punchActive : p.preRollOn;
-  return on ? rollBars(p, 'pre', bpm, ts) * barSeconds(bpm, ts) : 0;
+  return on ? rollSeconds(p, 'pre', bpm, ts) : 0;
 }
 
 export function effectivePostRoll(p: Partial<PunchSettings> | null | undefined, bpm: number, ts?: TimeSignature): number {
   const on = p?.postRollOn === undefined ? true : p.postRollOn;
-  return on ? rollBars(p, 'post', bpm, ts) * barSeconds(bpm, ts) : 0;
+  return on ? rollSeconds(p, 'post', bpm, ts) : 0;
 }
 
 export const punchXfadeSec = (p: Partial<PunchSettings> | null | undefined): number =>

@@ -63,6 +63,12 @@ def launch(p):
             "--use-fake-device-for-media-stream",
             f"--use-file-for-fake-audio-capture={FAKE_WAV}",
             "--autoplay-policy=no-user-gesture-required",
+            # Serveur joint par l'adresse du réseau local (127.0.0.1 déjà pris par un autre
+            # serveur) : contexte sûr quand même (micro, AudioWorklet), comme sur 127.0.0.1.
+            *([f"--unsafely-treat-insecure-origin-as-secure={BASE.rstrip('/')}"] if not re.match(r"https?://(127\.0\.0\.1|localhost|[\w-]+\.localhost)", BASE) else []),
+            # QA_RESOLVE="nova.localhost=192.168.0.14" : un nom en .localhost (contexte sûr pour
+            # Chrome : micro, AudioWorklet) qui pointe vers le serveur de test.
+            *([f"--host-resolver-rules=MAP {os.environ['QA_RESOLVE'].split('=')[0]} {os.environ['QA_RESOLVE'].split('=')[1]}"] if os.environ.get("QA_RESOLVE") else []),
         ],
     )
 

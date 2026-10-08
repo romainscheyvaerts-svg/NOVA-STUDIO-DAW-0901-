@@ -25,6 +25,9 @@ const SaveProjectModal = lazy(() => import('./components/SaveProjectModal'));
 const LoadProjectModal = lazy(() => import('./components/LoadProjectModal'));
 const SessionTemplatesModal = lazy(() => import('./components/SessionTemplatesModal'));
 const ExportModal = lazy(() => import('./components/ExportModal'));
+/** « 1:02,5 » : position courte dans les notifications. */
+const formatClockShort = (t: number) => `${Math.floor(Math.max(0, t) / 60)}:${(Math.max(0, t) % 60).toFixed(1).padStart(4, '0').replace('.', ',')}`;
+const ExportQueueToast = lazy(() => import('./components/ExportQueueToast'));
 const MasterAssistantPanel = lazy(() => import('./components/MasterAssistantPanel'));
 
 const AudioSettingsPanel = lazy(() => import('./components/AudioSettingsPanel'));
@@ -65,6 +68,16 @@ import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
 import { produce } from 'immer';
 import { metronomeService } from './services/MetronomeService';
+import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange, tempoSignature } from './utils/tempoMap';
+import { resolveCountIn, planCountIn } from './utils/countIn';
+import { tempoOpOf, tempoOpSig, sanitizeTempoOp, applyTempoOp } from './utils/collabTempo';
+import { GUIDE_DEFAULT_LEVEL } from './utils/trackStructure';
+import { CAPTURE_MINUTES_KEY, captureMinutes } from './utils/audioCapture';
+import { sharedTap, roundTapped } from './utils/tapTempo';
+import { isKeyboardFocus } from './utils/keyboardFocus';
+import TempoLane, { TEMPO_LANE_H, useTempoLaneShown, tempoLaneStore } from './components/TempoLane';
+const MetronomeDialog = lazy(() => import('./components/MetronomeDialog'));
+const TempoDialog = lazy(() => import('./components/TempoDialog'));
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import { etirerBufferAsync, facteurPourTempo } from './utils/timeStretch';
 import MobileTracksPage from './components/MobileTracksPage';
@@ -475,6 +488,7 @@ const useUndoRedo = (initialState: DAWState) => {
         newState.chords !== curr.present.chords ||
         newState.trackGroups !== curr.present.trackGroups ||
         newState.timeSignature !== curr.present.timeSignature ||
+        newState.tempoEvents !== curr.present.tempoEvents ||
         newState.isLoopActive !== curr.present.isLoopActive ||
         newState.loopStart !== curr.present.loopStart ||
         newState.loopEnd !== curr.present.loopEnd;
@@ -499,7 +513,7 @@ const useUndoRedo = (initialState: DAWState) => {
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
   // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
   // continuait, et pendant une prise il basculait l'enregistrement.
-  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'timeSignature', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords'] as const;
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords'] as const;
   const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
     const out: any = { ...base };
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
@@ -876,13 +890,18 @@ function Studio() {
 
   // Metronome : reglages, tempo et signature suivent l'etat du projet.
   useEffect(() => { metronomeService.setSettings(state.metronome); }, [state.metronome]);
-  useEffect(() => { metronomeService.setBpm(state.bpm); }, [state.bpm]);
-  useEffect(() => { metronomeService.setTimeSignature(state.timeSignature); }, [state.timeSignature]);
+  // Carte des tempos et des mesures (R2) : grille, règle, clic, décompte, compteur, export MIDI.
   useEffect(() => {
-    // On aligne le clic sur la position reelle du playhead au demarrage.
-    if (state.isPlaying && state.metronome.enabled) metronomeService.start(audioEngine.getCurrentTime());
+    const m = buildTempoMap(state.bpm, state.timeSignature, state.tempoEvents);
+    tempoMapStore.set(m);
+    metronomeService.setTempoMap(m);
+  }, [state.bpm, state.timeSignature, state.tempoEvents]);
+  useEffect(() => {
+    // Clic : en lecture (ou seulement pendant la prise, réglage « Prise seulement » de la fenêtre du métronome).
+    const want = state.isPlaying && state.metronome.enabled && (state.metronome.mode !== 'record' || state.isRecording);
+    if (want) metronomeService.start(audioEngine.getCurrentTime());
     else metronomeService.stop();
-  }, [state.isPlaying, state.metronome.enabled]);
+  }, [state.isPlaying, state.isRecording, state.metronome.enabled, state.metronome.mode]);
   
   // Tete de lecture : pendant la lecture la position va dans playheadStore (hors
   // de l'etat React) ; seuls les composants qui l'affichent sont rafraichis.
@@ -1061,8 +1080,10 @@ function Studio() {
       // Le metronome partage le contexte audio du moteur.
       metronomeService.init(audioEngine.ctx);
       metronomeService.setSettings(stateRef.current.metronome);
-      metronomeService.setBpm(stateRef.current.bpm);
-      metronomeService.setTimeSignature(stateRef.current.timeSignature);
+      metronomeService.setTempoMap(buildTempoMap(stateRef.current.bpm, stateRef.current.timeSignature, stateRef.current.tempoEvents));
+      // Horloge du moteur (boucle comprise) et sortie « comme la musique » (carte son, ASIO compris).
+      metronomeService.setClock(() => audioEngine.getClock());
+      metronomeService.setOutputs({ main: audioEngine.getMonitorBus(), system: audioEngine.ctx.destination });
     }
   };
 
@@ -1542,7 +1563,8 @@ function Studio() {
     setVisualState({ currentTime: time });
     audioEngine.seekTo(time, stateRef.current.tracks, stateRef.current.isPlaying);
     // Le clic doit repartir sur la grille a la nouvelle position.
-    if (stateRef.current.isPlaying && stateRef.current.metronome.enabled) {
+    const mt = stateRef.current.metronome;
+    if (stateRef.current.isPlaying && mt.enabled && (mt.mode !== 'record' || stateRef.current.isRecording)) {
       metronomeService.stop();
       metronomeService.start(time);
     }
@@ -1561,6 +1583,9 @@ function Studio() {
         pausePlayback();
       } else {
         audioEngine.startPlayback(stateRef.current.currentTime, stateRef.current.tracks);
+        // Clic lancé tout de suite (pas après le rendu) : le premier temps sonne.
+        const mt = stateRef.current.metronome;
+        if (mt.enabled && mt.mode !== 'record') metronomeService.start(stateRef.current.currentTime);
         setVisualState({ isPlaying: true });
       }
   }, [setVisualState, pausePlayback]);
@@ -1576,10 +1601,14 @@ function Studio() {
   const [takeLanesOpen, setTakeLanesOpen] = useState<Record<string, boolean>>({});
   // Prise écoutée en solo (couloirs) : jamais écrite dans le projet.
   const [takeAudition, setTakeAuditionState] = useState<{ trackId: string; n: number } | null>(null);
-  const finalizeRecording = useCallback(async () => {
-    const result = await audioEngine.stopRecording();
-    const rec = punchRecRef.current;
-    punchRecRef.current = null;
+  /**
+   * @param captured prise récupérée après coup (R3, « Capturer la dernière prise ») :
+   *        rangée comme une prise normale (couloir, niveau, respirations).
+   */
+  const finalizeRecording = useCallback(async (captured?: { clip: Clip; trackId: string }) => {
+    const result = captured ?? await audioEngine.stopRecording();
+    const rec = captured ? null : punchRecRef.current;
+    if (!captured) punchRecRef.current = null;
     // Punch (zone ou QuickPunch) et pré-roll : on ne garde que la fenêtre utile,
     // élargie d'un demi-crossfade de chaque côté (utils/punch).
     const punch = rec?.isPunch ? rec : null;
@@ -1704,7 +1733,7 @@ function Studio() {
       return result;
     }
     if (result && result.clip.buffer) {
-      const parts: string[] = [`🎤 ${takeName} enregistrée`];
+      const parts: string[] = [captured ? `⏪ Capturée : ${takeName} posée à ${formatClockShort(result.clip.start)} (sans avoir appuyé sur REC)` : `🎤 ${takeName} enregistrée`];
       if (cleaned) parts.push(`${cleaned.removedSec.toFixed(1)} s de blanc retirées`);
       if (takeGainDb) parts.push(`niveau ajusté (${takeGainDb > 0 ? '+' : ''}${Math.round(takeGainDb)} dB)`);
       if (mutedOld) parts.push(punch ? 'passage remplacé dans l\'ancienne prise' : `l'ancienne prise est coupée`);
@@ -1717,6 +1746,24 @@ function Studio() {
     }
     return result;
   }, [setState]);
+
+  /**
+   * « Capturer la dernière prise » (R3) : ce que tu viens de chanter pendant la
+   * lecture, sans avoir appuyé sur REC (Logic : Capture as Recording, Maj+R).
+   */
+  const handleCaptureLastTake = useCallback(async () => {
+    await ensureAudioEngine();
+    if (stateRef.current.isRecording) { setAiNotification('⏪ Arrête d\'abord la prise en cours.'); return; }
+    if (!stateRef.current.tracks.some(t => t.isTrackArmed)) {
+      setAiNotification("⏪ Capture après coup : arme une piste (bouton R), lance la lecture et chante — NOVA garde les dernières minutes du micro. Ensuite « Capturer » (Maj+R).");
+      return;
+    }
+    const r = await audioEngine.captureLastTake();
+    if ('error' in r) { setAiNotification(`⏪ ${r.error}`); return; }
+    await finalizeRecording(r);
+  }, [finalizeRecording]);
+  const captureRef = useRef(handleCaptureLastTake);
+  captureRef.current = handleCaptureLastTake;
 
   /** Retire les blancs d'un clip, ou de tous les clips audio d'une piste. */
   const handleCleanSilences = useCallback((trackId: string, clipId?: string) => {
@@ -1763,6 +1810,8 @@ function Studio() {
       draft.tracks.forEach(t => {
         if (t.id === 'instrumental') { t.volume = style.beatVolume; return; }
         if (t.type !== TrackType.AUDIO || t.instrumentId) return;
+        // Piste guide (R3) : jamais mixée (elle reste brute, à son niveau de guide).
+        if (t.isGuide) return;
         if (!collabMixScopeRef.current(t as Track)) return;
         voiceTracks++;
         // Comme un ingé son : le lead devant et au centre, les voix secondaires
@@ -2056,40 +2105,39 @@ function Studio() {
     return report;
   }, [postNova]);
 
-  // Décompte : 4 temps au tempo du beat avant que la prise démarre.
+  // Décompte (R2) : 0, 1, 2 ou 4 mesures (ou temps), au tempo et à la mesure de
+  // l'endroit où la prise commence, avec le son et le volume du métronome. Avant :
+  // toujours 4 temps, et le réglage enregistré (metronome.countIn) n'était jamais lu.
   const [countInBeat, setCountInBeat] = useState<number | null>(null);
   const countInCancelRef = useRef(false);
-  const runCountIn = useCallback(async (bpm: number): Promise<boolean> => {
-    const ctx = audioEngine.ctx;
-    const beat = 60 / Math.max(40, Math.min(240, bpm || 120));
+  /**
+   * Décompte : renvoie l'instant du contexte où il se termine (la lecture et la
+   * prise partent pile là, sans trou), ou ok = false s'il a été annulé.
+   */
+  const runCountIn = useCallback(async (startAt: number): Promise<{ ok: boolean; endsAt: number | null }> => {
+    let enabled = true;
+    try { enabled = localStorage.getItem('nova_count_in') !== '0'; } catch { /* défaut : oui */ }
+    const setting = resolveCountIn(stateRef.current.metronome, enabled);
+    const plan = planCountIn(tempoMapStore.get(), startAt, setting);
+    if (!plan.clicks.length) return { ok: true, endsAt: null };
     countInCancelRef.current = false;
-    // Décompte annulé : les clics déjà programmés ne doivent plus sonner.
-    const clicks: GainNode[] = [];
-    const silence = () => clicks.forEach(g => { try { g.disconnect(); } catch { /* déjà coupé */ } });
-    if (ctx) {
-      const t0 = ctx.currentTime + 0.05;
-      for (let i = 0; i < 4; i++) {
-        const osc = ctx.createOscillator();
-        const g = ctx.createGain();
-        clicks.push(g);
-        osc.frequency.value = i === 0 ? 1500 : 1000;
-        g.gain.setValueAtTime(0.0001, t0 + i * beat);
-        g.gain.exponentialRampToValueAtTime(0.4, t0 + i * beat + 0.002);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * beat + 0.08);
-        // Par le master : le décompte sort aussi par la carte son en ASIO.
-        osc.connect(g).connect(audioEngine.getMonitorBus() || ctx.destination);
-        osc.start(t0 + i * beat);
-        osc.stop(t0 + i * beat + 0.1);
-      }
+    const ctx = audioEngine.ctx;
+    const sched = ctx ? metronomeService.scheduleCountIn(plan) : null;
+    // Horloge de l'affichage calée sur celle du son.
+    const t0 = performance.now() + (sched && ctx ? (sched.startsAt - ctx.currentTime) * 1000 : 60);
+    // Chiffres à l'écran, calés sur les clics (temps de la mesure, ou à rebours en temps).
+    for (const c of plan.clicks) {
+      const wait = t0 + c.at * 1000 - performance.now();
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      if (countInCancelRef.current) { sched?.cancel(); setCountInBeat(null); return { ok: false, endsAt: null }; }
+      setCountInBeat(c.label);
     }
-    for (let i = 4; i >= 1; i--) {
-      if (countInCancelRef.current) { silence(); setCountInBeat(null); return false; }
-      setCountInBeat(i);
-      await new Promise(r => setTimeout(r, beat * 1000));
-    }
+    // On rend la main un peu avant la fin : la lecture est programmée pile sur la fin du dernier temps.
+    const rest = t0 + plan.duration * 1000 - 80 - performance.now();
+    if (rest > 0) await new Promise(r => setTimeout(r, rest));
     setCountInBeat(null);
-    if (countInCancelRef.current) silence();
-    return !countInCancelRef.current;
+    if (countInCancelRef.current) { sched?.cancel(); return { ok: false, endsAt: null }; }
+    return { ok: true, endsAt: sched ? sched.endsAt : null };
   }, []);
 
   // Casque : demandé une fois, avant la première prise. Avec casque on entend
@@ -2109,7 +2157,7 @@ function Studio() {
       const ct = ctRaw && 'id' in ctRaw ? ctRaw : null;
       const sel = st.tracks.find(t => t.id === st.selectedTrackId);
       const target = ct ? ({ ...(stateRef.current.tracks.find(t => t.id === ct.id) || { id: ct.id, name: '' }) } as Track)
-        : isVoiceTrack(sel) ? sel : st.tracks.find(t => t.id === 'track-rec-main') ?? st.tracks.find(t => isVoiceTrack(t));
+        : isVoiceTrack(sel) ? sel : st.tracks.find(t => t.id === 'track-rec-main') ?? st.tracks.find(t => isVoiceTrack(t) && !t.isGuide);
       if (!target) { setNoArmedTrackError(true); setTimeout(() => setNoArmedTrackError(false), 2000); return; }
       if (!(await armForRecording(target.id))) return;
       if (ct?.note) setAiNotification(ct.note);
@@ -2183,7 +2231,7 @@ function Studio() {
       const target = ct ? ({ ...(stateRef.current.tracks.find(t => t.id === ct.id) || { id: ct.id, name: '' }) } as Track)
         : isVoiceTrack(selected)
         ? selected
-        : currentState.tracks.find(t => t.id === 'track-rec-main') ?? currentState.tracks.find(t => isVoiceTrack(t));
+        : currentState.tracks.find(t => t.id === 'track-rec-main') ?? currentState.tracks.find(t => isVoiceTrack(t) && !t.isGuide);
       if (!target) {
         setNoArmedTrackError(true);
         setTimeout(() => setNoArmedTrackError(false), 2000);
@@ -2202,7 +2250,6 @@ function Studio() {
     // Décompte (désactivable).
     let countIn = true;
     try { countIn = localStorage.getItem('nova_count_in') !== '0'; } catch { /* défaut : oui */ }
-    if (countIn && !(await runCountIn(currentState.bpm))) return;
 
     // Punch et pré-roll (utils/punch) : la lecture repart avant le point
     // d'entrée, seule la zone est gardée, arrêt auto après le post-roll.
@@ -2224,11 +2271,26 @@ function Studio() {
     }
     // Une prise écoutée en solo ne doit pas rester en solo pendant l'enregistrement.
     if (audioEngine.getTakeAudition()) { audioEngine.setTakeAudition(null); setTakeAuditionState(null); }
+    // L'enregistreur démarre AVANT le décompte (R2) : à la fin du dernier temps, la
+    // lecture part pile (programmée sur l'horloge du son) et la prise avec elle.
+    // Avant, la prise démarrait ~0,7 s après le décompte (micro préparé après coup).
     const success = await audioEngine.startRecording(startAt, armedTrack.id);
+    let playAt: number | undefined;
+    if (success && countIn) {
+      const ci = await runCountIn(startAt);
+      if (!ci.ok) {
+        await audioEngine.stopRecording();
+        punchRecRef.current = null;
+        if (plan.isPunch) audioEngine.setLoop(st0.isLoopActive, st0.loopStart, st0.loopEnd);
+        return;
+      }
+      playAt = ci.endsAt ?? undefined;
+    }
     if (success) {
       recStartRef.current = startAt;
       track('rec_started', { role: getVocalRole(armedTrack), punch: !!punchRecRef.current });
-      audioEngine.startPlayback(startAt, stateRef.current.tracks);
+      audioEngine.startPlayback(startAt, stateRef.current.tracks, { at: playAt });
+      if (stateRef.current.metronome.enabled) metronomeService.start(startAt);
       setState(produce(draft => {
         draft.isRecording = true;
         draft.isPlaying = true;
@@ -3129,6 +3191,54 @@ function Studio() {
     setState(prev => ({ ...prev, metronome: { ...prev.metronome, enabled: !prev.metronome.enabled } }));
   }, [setState]);
 
+  // R2 : fenêtres « Métronome et décompte », « Tempo et mesure », tap tempo (touche T).
+  const [metronomeDialogOpen, setMetronomeDialogOpen] = useState(false);
+  const [tempoDialog, setTempoDialog] = useState<{ open: boolean; focusBar: number | null }>({ open: false, focusBar: null });
+  const openTempoDialog = useCallback((bar: number | null) => setTempoDialog({ open: true, focusBar: bar }), []);
+  const tempoLaneShown = useTempoLaneShown();
+  const [tapBpm, setTapBpm] = useState<number | null>(null);
+  const tapTimerRef = useRef<number | null>(null);
+  /**
+   * Tap tempo, comme la touche T de Pro Tools : chaque tape s'entend (clic) et
+   * affiche le tempo ; 1,3 s après la dernière (4 tapes ou plus), il est appliqué
+   * au morceau (Ctrl+Z pour revenir).
+   */
+  const handleTap = useCallback(() => {
+    void ensureAudioEngine();
+    const v = sharedTap.tap(performance.now());
+    metronomeService.playPreviewClick(sharedTap.count() === 1);
+    const n = sharedTap.count();
+    if (tapTimerRef.current) window.clearTimeout(tapTimerRef.current);
+    if (!v) { setTapBpm(null); setAiNotification('🥁 Tap tempo : tape au rythme de la prod (4 fois ou plus).'); return; }
+    const r = roundTapped(v);
+    setTapBpm(r);
+    setAiNotification(n < 4 ? `🥁 Tap tempo : ${r} BPM… continue (${n} tapes)` : `🥁 Tap tempo : ${r} BPM — arrête de taper pour l'appliquer`);
+    tapTimerRef.current = window.setTimeout(() => {
+      setTapBpm(null);
+      if (n >= 4 && Math.abs(r - stateRef.current.bpm) >= 0.05) {
+        handleUpdateBpm(r);
+        setAiNotification(`🥁 Tempo réglé à ${r} BPM (tap tempo). Ctrl+Z pour revenir.`);
+      }
+      sharedTap.reset();
+    }, 1300);
+  }, [handleUpdateBpm]);
+
+  // Pistes guides (R3) : entendues pendant la prise, jamais exportées ; coupées ou
+  // rallumées d'un geste (bouton GUIDE de la barre, touche G), niveau réglé à part.
+  const toggleGuides = useCallback(() => {
+    const guides = stateRef.current.tracks.filter(t => t.isGuide);
+    if (!guides.length) return;
+    const mute = guides.some(t => !t.guideMuted);
+    setState(produce((d: DAWState) => { d.tracks.forEach(t => { if (t.isGuide) t.guideMuted = mute; }); }));
+    setAiNotification(mute ? '🎧 Guide coupé (G pour le rallumer).' : "🎧 Guide rallumé : tu l'entends pendant la prise, il ne sera jamais exporté.");
+  }, [setState]);
+  const toggleGuidesRef = useRef(toggleGuides);
+  toggleGuidesRef.current = toggleGuides;
+  const setGuideLevel = useCallback((level: number) => {
+    const v = Math.max(0, Math.min(1.5, level));
+    setState(produce((d: DAWState) => { d.tracks.forEach(t => { if (t.isGuide) { t.guideLevel = v; t.guideMuted = false; } }); }));
+  }, [setState]);
+
   const handleToggleDelayComp = useCallback(() => {
     setState(prev => ({ ...prev, isDelayCompEnabled: !prev.isDelayCompEnabled }));
   }, [setState]);
@@ -3227,7 +3337,11 @@ function Studio() {
 
       if (mod) return; // on ne capture aucun autre raccourci systeme
 
+      // Maj+R : capturer la dernière prise (Logic : Capture as Recording). R seul : enregistrer.
+      if ((e.key === 'r' || e.key === 'R') && e.shiftKey) { e.preventDefault(); void captureRef.current(); return; }
       if (e.key === 'r' || e.key === 'R') { e.preventDefault(); handleToggleRecord(); return; }
+      // G : couper / rallumer la piste guide (R3). En Keyboard Focus, G reste « fondu jusqu'à la fin ».
+      if ((e.key === 'g' || e.key === 'G') && !isKeyboardFocus() && stateRef.current.tracks.some(t => t.isGuide)) { e.preventDefault(); toggleGuidesRef.current(); return; }
       if (e.key === 'l' || e.key === 'L') {
         e.preventDefault();
         setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive }));
@@ -3243,13 +3357,23 @@ function Studio() {
       // , / . : une mesure en arrière / en avant (Maj : un temps)
       if (e.key === ',' || e.key === '.' || e.key === ';' || e.key === ':') {
         e.preventDefault();
-        const beat = 60 / (stateRef.current.bpm || 120);
-        const step = e.shiftKey ? beat : beat * 4;
+        // Mesure / temps d'après la piste tempo (3/4, 6/8, changements de tempo).
+        const m = tempoMapStore.get();
         const dir = (e.key === ',' || e.key === ';') ? -1 : 1;
         const t = audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime;
-        handleSeek(Math.max(0, Math.round((t + dir * step) / step) * step));
+        if (e.shiftKey) {
+          const near = beatsInRange(m, Math.max(0, t - 8), t + 8);
+          const target = dir > 0 ? near.find(b => b.time > t + 1e-3) : [...near].reverse().find(b => b.time < t - 1e-3);
+          handleSeek(Math.max(0, target ? target.time : 0));
+        } else {
+          const p = timeToPosition(m, t);
+          const start = barToTime(m, p.bar);
+          handleSeek(Math.max(0, dir > 0 ? barToTime(m, p.bar + 1) : (t - start > 1e-3 ? start : barToTime(m, Math.max(0, p.bar - 1)))));
+        }
         return;
       }
+      // T : tap tempo (Pro Tools : T dans le champ tempo). En Keyboard Focus, T reste le zoom.
+      if ((e.key === 't' || e.key === 'T') && !isKeyboardFocus()) { e.preventDefault(); if (!e.repeat) handleTap(); return; }
       // K : repère à la tête de lecture
       if (e.key === 'k' || e.key === 'K') {
         e.preventDefault();
@@ -3264,7 +3388,7 @@ function Studio() {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
-  }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, handleAddMarker, undo, redo, setState]);
+  }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, handleAddMarker, undo, redo, setState, handleTap]);
 
   // Raccourcis Pro Tools (utils/keymap) : pavé numérique, Ctrl+E, Keyboard Focus…
   useProToolsShortcuts({
@@ -3647,6 +3771,11 @@ function Studio() {
   // Piste d'accords (V20) : couloir de l'arrangement (absent quand il est masqué) ; accords publiés pour le piano roll.
   const chordLane = useChordLaneProp({ chords: state.chords, tracks: state.tracks, bpm: state.bpm, beatsPerBar: state.timeSignature?.numerator,
     projectKey: state.projectKey, projectScale: state.projectScale, setState });
+  // Piste tempo (R2) : sous la règle quand elle est affichée (fenêtre Tempo et mesure) ou qu'il y a des changements.
+  const tempoEventsList = state.tempoEvents;
+  const tempoLaneProp = useMemo(() => (tempoLaneShown || (tempoEventsList?.length ?? 0) > 0
+    ? { height: TEMPO_LANE_H, render: (v: { zoomH: number; scrollLeft: number; headerWidth: number; width: number }) => <TempoLane {...v} events={tempoEventsList || []} onPick={bar => openTempoDialog(bar)} /> }
+    : undefined), [tempoLaneShown, tempoEventsList, openTempoDialog]);
   // …et au moteur : l'Harmoniseur suit la piste d'accords (lecture et export).
   useEffect(() => { chordsStore.set(state.chords); audioEngine.setChords(state.chords); }, [state.chords]);
 
@@ -4377,6 +4506,9 @@ function Studio() {
             t.collabOwnerName = owner.name; t.collabOwnerColor = owner.color;
           }
           if (ct.drumMachine !== undefined) t.drumMachine = ct.drumMachine;
+          // Piste guide (R3) : marquée chez tous, jamais exportée ; la couper reste local.
+          if (ct.guide === null) { delete t.isGuide; delete t.guideLevel; }
+          else if (ct.guide && typeof ct.guide === 'object') { t.isGuide = true; if (typeof ct.guide.level === 'number') t.guideLevel = ct.guide.level; }
           if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
           if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
           if (ct.novaSynth !== undefined) { if (ct.novaSynth) t.novaSynth = normalizeSynth(ct.novaSynth); else delete t.novaSynth; }
@@ -4479,6 +4611,19 @@ function Studio() {
         [...knownChordsRef.current.keys()].forEach(id => { if (!next.some(c => c.id === id) && !pendingChordsRef.current.has(id)) knownChordsRef.current.delete(id); });
         setState(produce((d: DAWState) => { d.chords = next; }));
         if (!o.replay && upsert.length) setAiNotification(`🎸 ${o.author_name} a ${upsert.length > 1 ? `posé ${upsert.length} accords` : 'changé un accord'} dans la piste d’accords.`);
+        break;
+      }
+      case 'tempo': {
+        // Tempo / mesure / piste tempo d'un autre membre (R2) : le plus récent du journal gagne.
+        if (!lwwRef.current.accept('tempo', o.seq)) break;
+        const op = sanitizeTempoOp(p);
+        if (!op) break;
+        const sig = tempoOpSig(op);
+        if (sig === tempoOpSig(tempoOpOf(stateRef.current))) { knownTempoSigRef.current = sig; break; }
+        knownTempoSigRef.current = sig;
+        audioEngine.setBpm(op.bpm);
+        setState(prev => applyTempoOp(prev, op));
+        if (!o.replay) setAiNotification(`🎼 ${o.author_name} a réglé le tempo : ${op.bpm} BPM, ${op.timeSignature.numerator}/${op.timeSignature.denominator}${op.tempoEvents.length ? ` (${op.tempoEvents.length} changement${op.tempoEvents.length > 1 ? 's' : ''} dans le morceau)` : ''}.`);
         break;
       }
       case 'listen': {
@@ -4952,6 +5097,20 @@ function Studio() {
     remove.forEach(id => { knownChordsRef.current.delete(id); pendingChordsRef.current.add(id); });
     c.client.queue('chords', 'chords', { upsert: upsert.map(x => ({ ...x, by: x.by || c.name })), remove });
   }, [state.chords, collab]);
+
+  // Tempo, mesure et piste tempo (R2) : un changement fait ici part chez les autres.
+  // À l'arrivée dans la session, l'état reçu sert de référence (rien n'est renvoyé).
+  const knownTempoSigRef = useRef<string | null>(null);
+  useEffect(() => { knownTempoSigRef.current = collab ? tempoOpSig(tempoOpOf(stateRef.current)) : null; }, [collab]);
+  useEffect(() => {
+    const c = collabRef.current;
+    if (!c) return;
+    const op = tempoOpOf(state);
+    const sig = tempoOpSig(op);
+    if (sig === knownTempoSigRef.current) return;
+    knownTempoSigRef.current = sig;
+    c.client.queue('tempo', 'tempo', op as unknown as Record<string, unknown>);
+  }, [state.bpm, state.timeSignature, state.tempoEvents, collab]);
 
   // Repères : ceux posés / déplacés / supprimés ici partent chez les autres (avec mon nom).
   useEffect(() => {
@@ -6020,8 +6179,10 @@ function Studio() {
               ...prev.metronome,
               ...(p.enabled !== undefined ? { enabled: !!p.enabled } : {}),
               ...(p.volume !== undefined ? { volume: clamp(p.volume, 0, 1, prev.metronome.volume) } : {}),
-              ...(p.countIn !== undefined ? { countIn: clamp(p.countIn, 0, 4, prev.metronome.countIn) } : {}),
-              ...(p.accentDownbeat !== undefined ? { accentDownbeat: !!p.accentDownbeat } : {})
+              ...(p.countIn !== undefined ? { countIn: clamp(p.countIn, 0, 4, prev.metronome.countIn), countInUnit: p.countInUnit === 'beats' ? 'beats' as const : 'bars' as const } : {}),
+              ...(p.accentDownbeat !== undefined ? { accentDownbeat: !!p.accentDownbeat } : {}),
+              ...(['CLICK', 'WOODBLOCK', 'BEEP', 'COWBELL', 'STICK'].includes(p.sound) ? { sound: p.sound } : {}),
+              ...(p.mode === 'record' || p.mode === 'always' ? { mode: p.mode } : {})
             }
           }));
         });
@@ -6673,6 +6834,12 @@ function Studio() {
           onToggleLoop={() => setState(p => ({ ...p, isLoopActive: !p.isLoopActive }))}
           isMetronomeEnabled={state.metronome.enabled}
           onToggleMetronome={handleToggleMetronome}
+          onOpenMetronome={() => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }}
+          onOpenTempo={() => openTempoDialog(null)}
+          onTap={handleTap} tapBpm={tapBpm}
+          guide={(() => { const g = state.tracks.filter(t => t.isGuide); return g.length ? { count: g.length, muted: g.every(t => t.guideMuted), level: g[0].guideLevel ?? GUIDE_DEFAULT_LEVEL } : undefined; })()}
+          onToggleGuide={toggleGuides} onGuideLevel={setGuideLevel}
+          onCapture={() => { void handleCaptureLastTake(); }} captureReady={state.tracks.some(t => t.isTrackArmed)}
           onStop={handleStop} onTogglePlay={handleTogglePlay} onToggleRecord={handleToggleRecord}
           currentView={shownView} onChangeView={v => setState(s => ({...s, currentView: v}))}
           statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
@@ -6755,6 +6922,7 @@ function Studio() {
                    markers={state.markers} onAddMarker={handleAddMarker}
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker} onAddRegion={handleAddRegion}
                    chordLane={chordLane}
+                   tempoLane={tempoLaneProp}
                 />
                 </StructureTracksContext.Provider>
               )}
@@ -6981,6 +7149,10 @@ function Studio() {
         onCleanSilences={() => { const t = getTargetVoiceTrack(); if (t) handleCleanSilences(t.id); }}
         autoClean={autoCleanSilence}
         onAutoCleanChange={setAutoCleanSilence}
+        captureMinutes={captureMinutes()}
+        onCaptureMinutes={(m: number) => { try { localStorage.setItem(CAPTURE_MINUTES_KEY, String(m)); } catch { /* */ } audioEngine.resizeFlashback(); setAiNotification(`⏪ Capture après coup : NOVA garde les ${captureMinutes()} dernières minutes du micro.`); }}
+        onCapture={() => { setVocalToolsOpen(false); void handleCaptureLastTake(); }}
+        countInLength={(() => { const r = resolveCountIn(state.metronome, true); return r.count === 0 ? 'aucun' : `${r.count} ${r.unit === 'bars' ? (r.count > 1 ? 'mesures' : 'mesure') : (r.count > 1 ? 'temps' : 'temps')}`; })()}
         countIn={countInEnabled}
         onCountInChange={setCountInEnabled}
         monitoring={inputMonitoring}
@@ -7119,6 +7291,31 @@ function Studio() {
       )}
       {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
         onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} />}
+      {/* R2 : métronome et décompte ; tempo, mesure et piste tempo. */}
+      {metronomeDialogOpen && (
+        <Suspense fallback={null}>
+          <MetronomeDialog open={metronomeDialogOpen} onClose={() => setMetronomeDialogOpen(false)}
+            settings={state.metronome} onChange={patch => setState(prev => ({ ...prev, metronome: { ...prev.metronome, ...patch } }))}
+            countInEnabled={countInEnabled} onCountInEnabled={setCountInEnabled}
+            punch={state.punch} onUpdatePunch={handleUpdatePunch} bpm={state.bpm}
+            getRecordStart={() => (state.punch?.enabled && state.punch.punchOut > state.punch.punchIn ? state.punch.punchIn : playheadStore.get())} />
+        </Suspense>
+      )}
+      {tempoDialog.open && (
+        <Suspense fallback={null}>
+          <TempoDialog open={tempoDialog.open} onClose={() => setTempoDialog({ open: false, focusBar: null })}
+            bpm={state.bpm} timeSignature={state.timeSignature} events={state.tempoEvents || []}
+            onChange={p => {
+              if (p.bpm !== undefined) handleUpdateBpm(p.bpm);
+              if (p.timeSignature || p.tempoEvents) setState(prev => ({ ...prev, ...(p.timeSignature ? { timeSignature: p.timeSignature } : {}), ...(p.tempoEvents ? { tempoEvents: p.tempoEvents } : {}) }));
+            }}
+            suggestedBar={timeToPosition(tempoMapStore.get(), playheadStore.get()).bar}
+            focusBar={tempoDialog.focusBar}
+            tempoLaneOn={tempoLaneShown} onTempoLane={on => tempoLaneStore.set(on)} />
+        </Suspense>
+      )}
+      {/* File d'exports (R1) : progression et « Ouvrir le dossier » / « Télécharger » à la fin. */}
+      <Suspense fallback={null}><ExportQueueToast /></Suspense>
       <DrumMachinePanel
         open={drumsOpen}
         onClose={() => setDrumsOpen(false)}

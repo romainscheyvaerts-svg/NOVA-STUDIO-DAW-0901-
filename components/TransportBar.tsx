@@ -6,6 +6,9 @@ import MasterVisualizer from './MasterVisualizer';
 import { midiManager } from '../services/MidiManager';
 import { playheadStore } from '../utils/playheadStore';
 import { formatMesures, nomTonaliteCourt } from '../utils/musicKey';
+import { formatBarsBeats } from '../utils/tempoMap';
+import { useTempoMap } from './TempoLane';
+import GuideControl from './GuideControl';
 import { useSimpleMode, simpleModeStore } from '../utils/simpleMode';
 import ThemeSwitch from './ThemeSwitch';
 import { ChordLaneMenuToggle } from './ChordLane';
@@ -33,6 +36,19 @@ interface TransportProps {
   onToggleQuickPunch?: () => void;
   isMetronomeEnabled?: boolean;
   onToggleMetronome?: () => void;
+  /** R2 : fenêtre du métronome et du décompte, fenêtre Tempo et mesure, tap tempo. */
+  onOpenMetronome?: () => void;
+  onOpenTempo?: () => void;
+  onTap?: () => void;
+  /** Tempo tapé en cours (affiché à côté du bouton TAP). */
+  tapBpm?: number | null;
+  /** R3 : pistes guides (coupées d'un geste, niveau à part) et capture après coup. */
+  guide?: { count: number; muted: boolean; level: number };
+  onToggleGuide?: () => void;
+  onGuideLevel?: (v: number) => void;
+  onCapture?: () => void;
+  /** Une piste est armée : la capture après coup écoute le micro pendant la lecture. */
+  captureReady?: boolean;
   bpm: number;
   onBpmChange: (newBpm: number) => void;
   /** Signature (horloge en mesures). 4/4 par défaut. */
@@ -121,7 +137,10 @@ const lireModeHorloge = (): ClockMode => {
 const PlayheadClock: React.FC<{ bpm: number; numerator: number; denominator: number; compact?: boolean }> = ({ bpm, numerator, denominator, compact = false }) => {
   const ref = useRef<HTMLSpanElement>(null);
   const [mode, setMode] = useState<ClockMode>(lireModeHorloge);
-  const format = (t: number) => mode === 'BARS' ? formatMesures(t + 1e-6, bpm, numerator, denominator) : formatClock(t + 1e-6);
+  // Piste tempo (R2) : mesures | temps | ticks d'après la carte (changements de tempo et de mesure).
+  const map = useTempoMap();
+  const useMap = Math.abs(map.segments[0].bpm - bpm) < 1e-6;
+  const format = (t: number) => mode === 'BARS' ? (useMap ? formatBarsBeats(map, t) : formatMesures(t + 1e-6, bpm, numerator, denominator)) : formatClock(t + 1e-6);
   useEffect(() => {
     let last = '';
     const update = () => {
@@ -131,7 +150,7 @@ const PlayheadClock: React.FC<{ bpm: number; numerator: number; denominator: num
     update();
     return playheadStore.subscribe(update);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, bpm, numerator, denominator]);
+  }, [mode, bpm, numerator, denominator, map]);
   const toggle = () => setMode(m => {
     const next: ClockMode = m === 'TIME' ? 'BARS' : 'TIME';
     try { localStorage.setItem(CLOCK_MODE_KEY, next); } catch { /* stockage indisponible */ }
@@ -157,25 +176,25 @@ const PlayheadClock: React.FC<{ bpm: number; numerator: number; denominator: num
 };
 
 /** Tonalité + signature, compactes, à côté du tempo (connues quand le beat vient du catalogue). */
-const KeyBadge: React.FC<{ projectKey?: number; projectScale?: string; numerator: number; denominator: number }> = ({ projectKey, projectScale, numerator, denominator }) => {
+const KeyBadge: React.FC<{ projectKey?: number; projectScale?: string; numerator: number; denominator: number; onClick?: () => void }> = ({ projectKey, projectScale, numerator, denominator, onClick }) => {
   const nom = nomTonaliteCourt(projectKey, projectScale);
   const court = nomTonaliteCourt(projectKey, projectScale, true);
   return (
-    <div className="hidden lg:flex flex-col items-end leading-tight" title={nom ? `Tonalité du projet : ${nom} · signature ${numerator}/${denominator}` : `Signature ${numerator}/${denominator}`}>
+    <button type="button" onClick={onClick} data-testid="open-tempo" className="hidden lg:flex flex-col items-end leading-tight rounded-md px-1 hover:bg-white/5" title={`${nom ? `Tonalité du projet : ${nom} · ` : ''}mesure ${numerator}/${denominator}. Clic : Tempo et mesure (3/4, 6/8, 7/8, changements dans le morceau, tap tempo T) — Pro Tools : Tempo / Meter.`}>
       {nom ? (
         <span className="text-[10px] font-black whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>
           <span className="hidden 2xl:inline">{nom}</span><span className="2xl:hidden">{court}</span>
         </span>
       ) : null}
       <span className="text-[8px] font-bold text-slate-500 mono nova-chiffres">{numerator}/{denominator}</span>
-    </div>
+    </button>
   );
 };
 
 const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, isPunchActive = false, onTogglePunch,
   punch, onUpdatePunch, onToggleQuickPunch,
-  isMetronomeEnabled = false, onToggleMetronome, bpm, onBpmChange, currentTime,
+  isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
   onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
@@ -382,7 +401,25 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             <PunchControls punch={punch} bpm={bpm} isPunchActive={isPunchActive} onTogglePunch={onTogglePunch}
               onUpdatePunch={onUpdatePunch} onToggleQuickPunch={onToggleQuickPunch} />
           )}
-          <button onClick={onToggleMetronome} title="Métronome" aria-label="Métronome" aria-pressed={isMetronomeEnabled} className={`nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
+          <button onClick={onToggleMetronome} onContextMenu={e => { if (onOpenMetronome) { e.preventDefault(); onOpenMetronome(); } }} title="Métronome (pavé 7). Clic droit ou ▾ : son, volume, accent, décompte (Pro Tools : Click/Countoff Options)" aria-label="Métronome" aria-pressed={isMetronomeEnabled} className={`nova-hit-tactile hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-all ${isMetronomeEnabled ? 'text-cyan-400' : 'text-slate-600 hover:text-white'}`} style={{ backgroundColor: isMetronomeEnabled ? 'rgba(0,242,255,0.2)' : 'transparent', color: isMetronomeEnabled ? 'var(--accent-text)' : 'var(--text-secondary)' }}><i className="fas fa-drum text-xs"></i></button>
+          {onOpenMetronome && (
+            <button type="button" onClick={onOpenMetronome} data-testid="open-metronome" aria-label="Réglages du métronome et du décompte"
+              title="Clic et décompte : son, volume, accent, prise seulement, sortie, décompte en mesures ou en temps, pré-roll (Pro Tools : Click/Countoff Options)"
+              className="nova-hit-tactile hidden md:flex h-8 w-4 -ml-1.5 rounded-md items-center justify-center text-slate-500 hover:text-white">
+              <i className="fas fa-caret-down text-[10px]" aria-hidden="true"></i>
+            </button>
+          )}
+          {guide && guide.count > 0 && onToggleGuide && onGuideLevel && (
+            <div className="hidden md:flex"><GuideControl count={guide.count} muted={guide.muted} level={guide.level} onToggle={onToggleGuide} onLevel={onGuideLevel} /></div>
+          )}
+          {onCapture && captureReady && !isRecording && (
+            <button type="button" onClick={onCapture} data-testid="capture-take"
+              title="Capturer la dernière prise (Maj+R) : ce que tu viens de chanter pendant la lecture, sans avoir appuyé sur REC, posé au bon endroit (Logic : Capture as Recording / Flashback Capture)."
+              aria-label="Capturer la dernière prise"
+              className="nova-hit-tactile hidden md:flex h-8 px-2 rounded-lg items-center text-[9px] font-black tracking-wider border border-amber-500/40 text-amber-300 hover:bg-amber-500/15">
+              <i className="fas fa-history mr-1" aria-hidden="true"></i>CAPTURER
+            </button>
+          )}
           <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" aria-label={isRecording ? "Arrêter l'enregistrement" : 'Enregistrer'} aria-pressed={isRecording} className={`h-12 px-4 2xl:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'transparent' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">{punch?.quickPunch && !simple ? 'QP' : 'Rec'}</span></button>
         </div>
         
@@ -438,7 +475,15 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         </button>
 
         {/* TONALITÉ + SIGNATURE */}
-        <KeyBadge projectKey={projectKey} projectScale={projectScale} numerator={tsNum} denominator={tsDen} />
+        <KeyBadge projectKey={projectKey} projectScale={projectScale} numerator={tsNum} denominator={tsDen} onClick={onOpenTempo} />
+        {onTap && (
+          <button type="button" onPointerDown={e => { e.preventDefault(); onTap(); }} data-testid="transport-tap"
+            title="Tap tempo : tape au rythme de la prod (ou touche T, comme dans Pro Tools). Le tempo s'affiche, « Tempo et mesure » pour l'appliquer."
+            aria-label="Tap tempo"
+            className="hidden sm:flex nova-hit-tactile h-8 px-2 rounded-lg items-center text-[9px] font-black tracking-wider border border-white/10 text-slate-400 hover:text-white select-none touch-manipulation">
+            TAP{tapBpm ? <span className="ml-1 mono text-amber-300">{tapBpm}</span> : null}
+          </button>
+        )}
 
         {/* BPM CONTROL */}
         <div className="hidden sm:flex flex-col items-end cursor-ns-resize group" onMouseDown={handleBpmMouseDown} title="Tempo : glisser vers le haut ou le bas, double-clic pour saisir">
@@ -488,6 +533,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 Boucle
               </button>
             </div>
+            {/* R3 : capture après coup et piste guide, à portée de doigt (freestyle au téléphone) */}
+            {((onCapture && captureReady) || (guide && guide.count > 0 && onToggleGuide)) && (
+              <div className="grid grid-cols-2 gap-2">
+                {onCapture && captureReady && <button type="button" onClick={() => { onCapture(); setIsMobileMenuOpen(false); }} data-testid="menu-capture" className="min-h-12 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-[12px] font-bold"><i className="fas fa-history mr-1.5" aria-hidden="true"></i>Capturer la dernière prise</button>}
+                {guide && guide.count > 0 && onToggleGuide && <button type="button" onClick={onToggleGuide} aria-pressed={!guide.muted} data-testid="menu-guide" className={`min-h-12 rounded-xl text-[12px] font-bold border ${guide.muted ? 'border-white/10 text-slate-400' : 'bg-amber-500/15 border-amber-500/40 text-amber-200'}`}><i className="fas fa-headphones mr-1.5" aria-hidden="true"></i>{guide.muted ? 'Rallumer le guide' : 'Couper le guide'}</button>}
+              </div>
+            )}
 
             {/* Mode simple / avancé : en haut du menu, facile à retrouver */}
             <SimpleModeToggle onDone={() => setIsMobileMenuOpen(false)} />
@@ -611,6 +663,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             {/* BPM CONTROL */}
             <div className="space-y-2">
               <div className="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">Tempo (BPM)</div>
+              {(onTap || onOpenTempo || onOpenMetronome) && (
+                <div className="grid grid-cols-3 gap-2">
+                  {onTap && <button type="button" onPointerDown={e => { e.preventDefault(); onTap(); }} data-testid="menu-tap" className="min-h-12 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 font-black select-none touch-manipulation">TAP{tapBpm ? <span className="ml-1">{tapBpm}</span> : null}</button>}
+                  {onOpenTempo && <button type="button" onClick={() => { onOpenTempo(); setIsMobileMenuOpen(false); }} className="min-h-12 rounded-xl bg-white/[0.04] text-slate-100 text-[12px] font-semibold">Tempo et mesure</button>}
+                  {onOpenMetronome && <button type="button" onClick={() => { onOpenMetronome(); setIsMobileMenuOpen(false); }} className="min-h-12 rounded-xl bg-white/[0.04] text-slate-100 text-[12px] font-semibold">Clic et décompte</button>}
+                </div>
+              )}
               <div className="bg-white/5 p-4 rounded-lg flex items-center justify-center space-x-3">
                 <button onClick={() => onBpmChange(Math.max(20, bpm - 1))} aria-label="Tempo -1" className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">-</button>
                 {isEditingBpm ? (
