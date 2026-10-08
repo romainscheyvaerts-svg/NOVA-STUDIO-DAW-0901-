@@ -145,6 +145,21 @@ def clip_point(page, track_index, t_sec, dy=60):
     return b["x"] + t_sec * ZOOM - b["sl"], b["y"] + b["tt"] + track_index * LANE_H - b["st"] + dy
 
 
+def track_point(page, track_id, t_sec):
+    """Point d'un clip : x d'après le temps, y au milieu de l'en-tête de la piste (aligné sur son couloir)."""
+    b = canvas_box(page)
+    # Piste hors de la zone visible : on la fait défiler au milieu (comme la molette d'un ingé).
+    r = page.evaluate("""(id) => { const h = document.querySelector(`[data-track-header='${id}']`); if (!h) return null;
+      const g = document.querySelector('.nova-grille .custom-scroll'); const zone = (g || document.body).getBoundingClientRect();
+      let q = h.getBoundingClientRect();
+      if (q.top < zone.top + 100 || q.top + 80 > zone.bottom) { h.scrollIntoView({ block: 'center' }); q = h.getBoundingClientRect(); }
+      return { top: q.top, h: q.height }; }""", track_id)
+    page.wait_for_timeout(150)
+    b = canvas_box(page)
+    if not b or not r: return None
+    return b["x"] + t_sec * ZOOM - b["sl"], r["top"] + min(r["h"] * 0.6, 70)
+
+
 def app_state(page, expr="s => s"):
     """Lit l'état du projet en mémoire (window.__novaEdit, posé par le studio) : expr = fonction JS."""
     return page.evaluate(f"() => {{ const s = window.__novaEdit && window.__novaEdit.getState(); return s ? ({expr})(s) : null; }}")

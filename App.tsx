@@ -3774,7 +3774,17 @@ function Studio() {
         case 'nova.guide':
           if (isKeyboardFocus() || !stateRef.current.tracks.some(t => t.isGuide)) return;
           e.preventDefault(); toggleGuidesRef.current(); return;
-        case 'nova.loop': e.preventDefault(); setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive })); return;
+        // Boucle : avec une plage sélectionnée (Sélecteur, Smart Tool), L boucle CETTE plage, comme
+        // Pro Tools (Loop Playback sur la sélection). Avant, il fallait tirer les poignées de la règle.
+        case 'nova.loop': {
+          e.preventDefault();
+          const sel = editSelectionStore.get().time;
+          if (sel && sel.end - sel.start > 0.05 && !(stateRef.current.isLoopActive && Math.abs(stateRef.current.loopStart - sel.start) < 1e-3 && Math.abs(stateRef.current.loopEnd - sel.end) < 1e-3)) {
+            setState(prev => ({ ...prev, isLoopActive: true, loopStart: sel.start, loopEnd: sel.end }));
+            setAiNotification(`🔁 Boucle sur la sélection (${sel.start.toFixed(2).replace('.', ',')} s → ${sel.end.toFixed(2).replace('.', ',')} s). L pour l'arrêter.`);
+          } else setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive }));
+          return;
+        }
         case 'nova.home': e.preventDefault(); handleSeek(0); return;
         case 'nova.end': {
           e.preventDefault();
@@ -4296,6 +4306,13 @@ function Studio() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Palette de commandes (Ctrl+K) : chercher n'importe quelle action par son nom.
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Fenêtre Exporter préchargée et compte vérifié d'avance (3 s après l'arrivée d'un compte) :
+  // la 1re exportation s'ouvrait en ~0,5 s puis restait 4 s sur « VÉRIFICATION… ».
+  useEffect(() => {
+    if (!user || user.id === 'guest') return;
+    const t = window.setTimeout(() => { import('./components/ExportModal').then(m => m.warmExportAdmin()).catch(() => { /* hors ligne */ }); }, 3000);
+    return () => window.clearTimeout(t);
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [keymapEditorOpen, setKeymapEditorOpen] = useState(false);
   const [layoutsOpen, setLayoutsOpen] = useState(false);
 

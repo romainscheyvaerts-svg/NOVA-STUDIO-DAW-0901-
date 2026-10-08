@@ -22,6 +22,14 @@ import { takeExportArrangement } from '../utils/r21Bus';
 
 // Compte admin du studio (tout gratuit pour tester) : lu une fois par session.
 let adminCache: boolean | null = null;
+/**
+ * Vérification du compte (admin / Nova Pro) faite d'avance, quand le studio est prêt : la 1re
+ * ouverture d'« Exporter » affichait « VÉRIFICATION… » jusqu'à 4 s, bouton grisé.
+ */
+export const warmExportAdmin = () => {
+  if (adminCache !== null) return;
+  void billingStatus().then(st => { if (st) adminCache = !!st.admin; }).catch(() => { /* la fenêtre réessaiera */ });
+};
 
 /** Réglages d'export retenus d'une fois sur l'autre (format, stems, queue, artiste…). */
 const PREFS_KEY = 'nova_export_prefs';
