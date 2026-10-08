@@ -295,6 +295,13 @@ GROUPS["cl1b_fm_r"] = dict(GROUPS["cl1b_fm_k"], w_drum=2.0, paths=list(GROUPS["c
                           corpus=[("fm_romain", 0.5), ("fm5", 0.5), ("mfm_a1r1", 0.3), ("mfm_a6r6", 0.3)])
 
 
+# Vox Strip et Leveler 2A : sans loi interne (la relecture de la loi dégradait les autres seuils), toutes les statiques
+GROUPS["voxbox_s"] = dict(GROUPS["voxbox_r"], w_stat=2.0, paths=[q for q in GROUPS["voxbox_r"]["paths"] if q[0][0] != "lwarp"],
+                          stat=[("stat_th2.5", "stat_1k"), ("stat_th5", "stat_1k"), ("stat_th7.5", "stat_1k"), ("stat_th10", "stat_1k")])
+GROUPS["la2a_s"] = dict(GROUPS["la2a_r"], w_stat=2.0, paths=[q for q in GROUPS["la2a_r"]["paths"] if q[0][0] != "lwarp"],
+                        stat=[("stat_pr20", "stat_1k"), ("stat_pr40", "stat_1k"), ("stat_pr60", "stat_1k"), ("stat_pr80", "stat_1k"), ("stat_pr100", "stat_1k")])
+
+
 def stage2_base(gname, start):
     """Base de l'étape 2 : dynamique de l'étape 1 + ancres de vitesse par bouton (départ : temps du tour 1)."""
     d2 = copy.deepcopy(json.load(open(start, encoding="utf-8"))["d2"])
