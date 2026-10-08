@@ -217,9 +217,20 @@ export function sanitizeClipGainFields<T extends Record<string, any>>(c: T): T {
     if (!l || typeof l.id !== 'string' || !finite(l.index) || !finite(l.unit) || l.unit <= 0) delete out.loop;
   }
   if ('gainRender' in out && (!out.gainRender || !Array.isArray(out.gainRender.gainPoints) || !finite(out.gainRender.gain))) delete out.gainRender;
+  // Transposition / étirement (R13) : réglage vérifié ; abîmé, il est retiré (le son rendu, lui, joue normalement).
+  if ('elastic' in out) {
+    const e = out.elastic;
+    const ok = e && finite(e.sourceOffset) && finite(e.sourceDuration) && e.sourceDuration > 0 && finite(e.duration) && e.duration > 0
+      && finite(e.renderedOffset) && finite(e.semitones) && Math.abs(e.semitones) <= 12;
+    if (!ok) delete out.elastic;
+    else {
+      const markers = Array.isArray(e.markers) ? e.markers.filter((m: any) => m && typeof m.id === 'string' && finite(m.src) && finite(m.dst)).sort((a: any, b: any) => a.src - b.src) : [];
+      out.elastic = { ...e, markers: markers.length ? markers : undefined };
+    }
+  }
   return out as T;
 }
 
 /** Clips reçus d'un collaborateur : champs R5 vérifiés (les autres passent tels quels). */
 export const sanitizeIncomingClips = <T extends Record<string, any>>(clips: T[]): T[] =>
-  clips.map(c => (c && ('gainPoints' in c || 'loop' in c || 'gainRender' in c) ? sanitizeClipGainFields(c) : c));
+  clips.map(c => (c && ('gainPoints' in c || 'loop' in c || 'gainRender' in c || 'elastic' in c) ? sanitizeClipGainFields(c) : c));

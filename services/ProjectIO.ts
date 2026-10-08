@@ -141,6 +141,20 @@ export class ProjectIO {
                 }
                 delete sClip.audioSuite.sourceBufferId;
             }
+            // Transposition / étirement / warp (R13) : le son d'origine voyage aussi (rouvrir le réglage, revenir).
+            const elSrcId = clip.elastic?.sourceBufferId;
+            if (elSrcId && sClip.elastic) {
+                const srcBuf = audioBufferRegistry.get(elSrcId);
+                if (srcBuf && !isUnlicensedStoreBeat) {
+                    const filename = `${elSrcId}.wav`;
+                    if (!written.has(filename)) {
+                        written.add(filename);
+                        if (audioFolder) audioFolder.file(filename, wavOf(srcBuf));
+                    }
+                    sClip.elastic.sourceRef = `audio/${filename}`;
+                }
+                delete sClip.elastic.sourceBufferId;
+            }
         }
 
         // Samples perso des pads de batterie (V16) : un WAV par sample.
@@ -358,6 +372,24 @@ export class ProjectIO {
                         const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
                         gr.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-gain-origine`);
                         decoded.set(ref, gr.sourceBufferId);
+                    } catch (e) {
+                        console.warn(`[ProjectIO] Son d'origine illisible : ${ref}`, e);
+                    }
+                }
+            }
+            // Son d'origine d'un clip transposé / étiré / recalé (R13).
+            const el = clip.elastic;
+            if (el?.sourceRef) {
+                const ref = el.sourceRef;
+                delete el.sourceRef;
+                const already = decoded.get(ref);
+                const srcFile = zip.file(ref);
+                if (already) el.sourceBufferId = already;
+                else if (srcFile) {
+                    try {
+                        const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
+                        el.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-elastic-origine`);
+                        decoded.set(ref, el.sourceBufferId);
                     } catch (e) {
                         console.warn(`[ProjectIO] Son d'origine illisible : ${ref}`, e);
                     }

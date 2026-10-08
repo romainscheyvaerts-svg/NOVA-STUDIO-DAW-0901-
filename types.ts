@@ -398,6 +398,54 @@ export interface Clip {
    * son traité comme un clip normal. Voir utils/clipProcess.
    */
   audioSuite?: AudioSuiteInfo;
+  /**
+   * Transposition, étirement et marqueurs de warp (R13, utils/clipTranspose) :
+   * ce clip joue un son rendu hors ligne (transposé, étiré, recalé). Le son
+   * d'origine et les réglages sont gardés pour rouvrir le réglage ou revenir à
+   * l'original. Une ancienne version ignore ce champ et joue le son rendu.
+   */
+  elastic?: ElasticInfo;
+}
+
+/**
+ * Marqueur de warp (R13, Elastic Audio de Pro Tools, Flex Time de Logic) :
+ * l'instant `src` du son d'origine (s) joue à `dst` secondes du début du clip.
+ * (L'ancien `WarpMarker`, en temps musical, n'a jamais été branché.)
+ */
+export interface ElasticMarker { id: string; src: number; dst: number }
+
+/** Ce que garde un clip transposé / étiré / recalé (R13). */
+export interface ElasticInfo {
+  version: 1;
+  /** Son d'origine (registre audio). Absent ou introuvable (reçu en collaboration) : on repart du son rendu. */
+  sourceBufferId?: string;
+  /** Fichier du son d'origine dans un projet sauvegardé (le temps de la sauvegarde). */
+  sourceRef?: string;
+  /** Partie du son d'origine que montre le clip (s, repère du son d'origine). */
+  sourceOffset: number;
+  sourceDuration: number;
+  /** Partie du son d'origine rendue (avec des marges, pour rallonger le clip). */
+  regionStart: number;
+  regionEnd: number;
+  /** Où commence la partie montrée dans le son rendu (s) au moment du rendu. */
+  renderedOffset: number;
+  /** Durée de la partie montrée une fois étirée (s). */
+  duration: number;
+  /** Transposition en demi-tons, au cent près (−12 à +12). */
+  semitones: number;
+  /** Garder les formants (voix naturelle, pas d'effet « chipmunk »). */
+  formants: boolean;
+  /** Moteur choisi : automatique, voix (PSOLA) ou polyphonique (beat, sample). */
+  algo: 'auto' | 'voice' | 'poly';
+  /** Moteur réellement utilisé au dernier rendu. */
+  used?: 'voice' | 'poly';
+  /** Marqueurs de warp (triés). */
+  markers?: ElasticMarker[];
+  /** Calage au tempo (warp automatique, Ableton) : tempo d'origine du son et tempo visé. */
+  tempo?: { sourceBpm: number; bpm: number };
+  /** Nom et calage du clip d'origine. */
+  sourceName?: string;
+  sourceWarp?: WarpSettings;
 }
 
 /** Ce que garde un clip traité par un effet (AudioSuite). */
