@@ -71,11 +71,12 @@ def main():
     ap.add_argument("which", choices=["vst", "nova"])
     ap.add_argument("--only", default="")
     ap.add_argument("--out", default="")
+    ap.add_argument("--carto", action="store_true", help="banc de cartographie (CARTO) au lieu de CASES")
     a = ap.parse_args()
     banc = importlib.import_module(f"bancs.{a.banc}")
     out_dir = a.out or os.path.join(LABO, banc.ID)
     os.makedirs(out_dir, exist_ok=True)
-    tag = "mesures" if a.which == "vst" else "mesures_nova"
+    tag = ("mesures" if a.which == "vst" else "mesures_nova") + ("_carto" if a.carto else "")
     dest = os.path.join(out_dir, f"{tag}.json")
     only = set(x for x in a.only.split(",") if x)
     result = {}
@@ -86,7 +87,7 @@ def main():
     proc = make_proc(banc, a.which)
     result["_meta"] = {"plugin": getattr(proc, "name", banc.NOVA_KIND if a.which == "nova" else banc.PLUGIN),
                        "latency_reported": proc.latency, "sr": bench.SR, "date": time.strftime("%Y-%m-%d %H:%M")}
-    for case in banc.CASES:
+    for case in (banc.CARTO if a.carto else banc.CASES):
         if only and case["name"] not in only:
             continue
         t0 = time.time()
