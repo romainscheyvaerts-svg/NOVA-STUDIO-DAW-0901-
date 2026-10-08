@@ -24,6 +24,10 @@ interface VocalToolsPanelProps {
   onCountInChange: (on: boolean) => void;
   /** Longueur réglée du décompte (« 1 mesure », « 2 temps »…), R2. */
   countInLength?: string;
+  /** R3 : durée gardée par la capture après coup (minutes) et son réglage. */
+  captureMinutes?: number;
+  onCaptureMinutes?: (m: number) => void;
+  onCapture?: () => void;
   monitoring: boolean;
   onMonitoringChange: (on: boolean) => void;
   onAskNova: () => void;
@@ -272,6 +276,16 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
                 label={`Décompte${p.countInLength ? ` (${p.countInLength})` : ''} avant d'enregistrer`}
                 hint="Le temps de te placer devant le micro. Longueur, son et volume : ▾ à côté du métronome (comme Click/Countoff de Pro Tools)."
               />
+              {p.onCaptureMinutes && (
+                <div className="py-2 flex items-center justify-between gap-3" title="Pendant la lecture avec une piste armée, NOVA garde les dernières minutes du micro : « Capturer la dernière prise » (Maj+R) récupère un freestyle chanté sans avoir appuyé sur REC (Logic : Capture as Recording).">
+                  <span className="text-[12px] text-slate-200">Capture après coup : garder</span>
+                  <select value={p.captureMinutes} onChange={e => p.onCaptureMinutes!(Number(e.target.value))} aria-label="Durée gardée par la capture après coup"
+                    className="min-h-9 rounded-lg bg-white/5 border border-white/10 px-2 text-[12px] text-white">
+                    {[1, 2, 5, 10].map(m => <option key={m} value={m}>{m} min</option>)}
+                  </select>
+                  {p.onCapture && <button type="button" onClick={p.onCapture} className="min-h-9 px-2 rounded-lg border border-amber-500/40 text-amber-200 text-[11px] font-bold">Capturer</button>}
+                </div>
+              )}
               <Toggle
                 checked={p.monitoring}
                 onChange={p.onMonitoringChange}

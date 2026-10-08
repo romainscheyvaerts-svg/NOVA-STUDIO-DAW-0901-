@@ -8,6 +8,7 @@ import { playheadStore } from '../utils/playheadStore';
 import { formatMesures, nomTonaliteCourt } from '../utils/musicKey';
 import { formatBarsBeats } from '../utils/tempoMap';
 import { useTempoMap } from './TempoLane';
+import GuideControl from './GuideControl';
 import { useSimpleMode, simpleModeStore } from '../utils/simpleMode';
 import ThemeSwitch from './ThemeSwitch';
 import { ChordLaneMenuToggle } from './ChordLane';
@@ -41,6 +42,13 @@ interface TransportProps {
   onTap?: () => void;
   /** Tempo tapé en cours (affiché à côté du bouton TAP). */
   tapBpm?: number | null;
+  /** R3 : pistes guides (coupées d'un geste, niveau à part) et capture après coup. */
+  guide?: { count: number; muted: boolean; level: number };
+  onToggleGuide?: () => void;
+  onGuideLevel?: (v: number) => void;
+  onCapture?: () => void;
+  /** Une piste est armée : la capture après coup écoute le micro pendant la lecture. */
+  captureReady?: boolean;
   bpm: number;
   onBpmChange: (newBpm: number) => void;
   /** Signature (horloge en mesures). 4/4 par défaut. */
@@ -186,7 +194,7 @@ const KeyBadge: React.FC<{ projectKey?: number; projectScale?: string; numerator
 const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, isPunchActive = false, onTogglePunch,
   punch, onUpdatePunch, onToggleQuickPunch,
-  isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onTap, tapBpm, bpm, onBpmChange, currentTime,
+  isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
   onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
@@ -401,6 +409,17 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               <i className="fas fa-caret-down text-[10px]" aria-hidden="true"></i>
             </button>
           )}
+          {guide && guide.count > 0 && onToggleGuide && onGuideLevel && (
+            <div className="hidden md:flex"><GuideControl count={guide.count} muted={guide.muted} level={guide.level} onToggle={onToggleGuide} onLevel={onGuideLevel} /></div>
+          )}
+          {onCapture && captureReady && !isRecording && (
+            <button type="button" onClick={onCapture} data-testid="capture-take"
+              title="Capturer la dernière prise (Maj+R) : ce que tu viens de chanter pendant la lecture, sans avoir appuyé sur REC, posé au bon endroit (Logic : Capture as Recording / Flashback Capture)."
+              aria-label="Capturer la dernière prise"
+              className="nova-hit-tactile hidden md:flex h-8 px-2 rounded-lg items-center text-[9px] font-black tracking-wider border border-amber-500/40 text-amber-300 hover:bg-amber-500/15">
+              <i className="fas fa-history mr-1" aria-hidden="true"></i>CAPTURER
+            </button>
+          )}
           <button data-nova-target="rec" onClick={onToggleRecord} title="Enregistrer ta voix : le micro s'active tout seul, décompte puis enregistrement (raccourci : R)" aria-label={isRecording ? "Arrêter l'enregistrement" : 'Enregistrer'} aria-pressed={isRecording} className={`h-12 px-4 2xl:px-6 rounded-xl flex items-center space-x-2 border transition-all ${isRecording ? 'bg-red-600 border-red-400 text-white nova-halo-rouge nova-pouls' : 'text-slate-500 hover:text-white'}`} style={{ backgroundColor: isRecording ? '#ef4444' : 'var(--border-dim)', borderColor: isRecording ? '#f87171' : 'transparent' }}><div className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-white' : 'bg-red-600'}`}></div><span className="hidden md:inline font-black uppercase text-[10px] tracking-widest hide-on-tablet-text">{punch?.quickPunch && !simple ? 'QP' : 'Rec'}</span></button>
         </div>
         
@@ -514,6 +533,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 Boucle
               </button>
             </div>
+            {/* R3 : capture après coup et piste guide, à portée de doigt (freestyle au téléphone) */}
+            {((onCapture && captureReady) || (guide && guide.count > 0 && onToggleGuide)) && (
+              <div className="grid grid-cols-2 gap-2">
+                {onCapture && captureReady && <button type="button" onClick={() => { onCapture(); setIsMobileMenuOpen(false); }} data-testid="menu-capture" className="min-h-12 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-[12px] font-bold"><i className="fas fa-history mr-1.5" aria-hidden="true"></i>Capturer la dernière prise</button>}
+                {guide && guide.count > 0 && onToggleGuide && <button type="button" onClick={onToggleGuide} aria-pressed={!guide.muted} data-testid="menu-guide" className={`min-h-12 rounded-xl text-[12px] font-bold border ${guide.muted ? 'border-white/10 text-slate-400' : 'bg-amber-500/15 border-amber-500/40 text-amber-200'}`}><i className="fas fa-headphones mr-1.5" aria-hidden="true"></i>{guide.muted ? 'Rallumer le guide' : 'Couper le guide'}</button>}
+              </div>
+            )}
 
             {/* Mode simple / avancé : en haut du menu, facile à retrouver */}
             <SimpleModeToggle onDone={() => setIsMobileMenuOpen(false)} />

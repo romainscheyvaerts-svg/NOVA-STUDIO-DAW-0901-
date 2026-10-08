@@ -25,6 +25,8 @@ const SaveProjectModal = lazy(() => import('./components/SaveProjectModal'));
 const LoadProjectModal = lazy(() => import('./components/LoadProjectModal'));
 const SessionTemplatesModal = lazy(() => import('./components/SessionTemplatesModal'));
 const ExportModal = lazy(() => import('./components/ExportModal'));
+/** « 1:02,5 » : position courte dans les notifications. */
+const formatClockShort = (t: number) => `${Math.floor(Math.max(0, t) / 60)}:${(Math.max(0, t) % 60).toFixed(1).padStart(4, '0').replace('.', ',')}`;
 const ExportQueueToast = lazy(() => import('./components/ExportQueueToast'));
 const MasterAssistantPanel = lazy(() => import('./components/MasterAssistantPanel'));
 
@@ -69,6 +71,8 @@ import { metronomeService } from './services/MetronomeService';
 import { buildTempoMap, tempoMapStore, timeToPosition, barToTime, beatsInRange, tempoSignature } from './utils/tempoMap';
 import { resolveCountIn, planCountIn } from './utils/countIn';
 import { tempoOpOf, tempoOpSig, sanitizeTempoOp, applyTempoOp } from './utils/collabTempo';
+import { GUIDE_DEFAULT_LEVEL } from './utils/trackStructure';
+import { CAPTURE_MINUTES_KEY, captureMinutes } from './utils/audioCapture';
 import { sharedTap, roundTapped } from './utils/tapTempo';
 import { isKeyboardFocus } from './utils/keyboardFocus';
 import TempoLane, { TEMPO_LANE_H, useTempoLaneShown, tempoLaneStore } from './components/TempoLane';
@@ -1597,10 +1601,14 @@ function Studio() {
   const [takeLanesOpen, setTakeLanesOpen] = useState<Record<string, boolean>>({});
   // Prise écoutée en solo (couloirs) : jamais écrite dans le projet.
   const [takeAudition, setTakeAuditionState] = useState<{ trackId: string; n: number } | null>(null);
-  const finalizeRecording = useCallback(async () => {
-    const result = await audioEngine.stopRecording();
-    const rec = punchRecRef.current;
-    punchRecRef.current = null;
+  /**
+   * @param captured prise récupérée après coup (R3, « Capturer la dernière prise ») :
+   *        rangée comme une prise normale (couloir, niveau, respirations).
+   */
+  const finalizeRecording = useCallback(async (captured?: { clip: Clip; trackId: string }) => {
+    const result = captured ?? await audioEngine.stopRecording();
+    const rec = captured ? null : punchRecRef.current;
+    if (!captured) punchRecRef.current = null;
     // Punch (zone ou QuickPunch) et pré-roll : on ne garde que la fenêtre utile,
     // élargie d'un demi-crossfade de chaque côté (utils/punch).
     const punch = rec?.isPunch ? rec : null;
@@ -1725,7 +1733,7 @@ function Studio() {
       return result;
     }
     if (result && result.clip.buffer) {
-      const parts: string[] = [`🎤 ${takeName} enregistrée`];
+      const parts: string[] = [captured ? `⏪ Capturée : ${takeName} posée à ${formatClockShort(result.clip.start)} (sans avoir appuyé sur REC)` : `🎤 ${takeName} enregistrée`];
       if (cleaned) parts.push(`${cleaned.removedSec.toFixed(1)} s de blanc retirées`);
       if (takeGainDb) parts.push(`niveau ajusté (${takeGainDb > 0 ? '+' : ''}${Math.round(takeGainDb)} dB)`);
       if (mutedOld) parts.push(punch ? 'passage remplacé dans l\'ancienne prise' : `l'ancienne prise est coupée`);
@@ -1738,6 +1746,24 @@ function Studio() {
     }
     return result;
   }, [setState]);
+
+  /**
+   * « Capturer la dernière prise » (R3) : ce que tu viens de chanter pendant la
+   * lecture, sans avoir appuyé sur REC (Logic : Capture as Recording, Maj+R).
+   */
+  const handleCaptureLastTake = useCallback(async () => {
+    await ensureAudioEngine();
+    if (stateRef.current.isRecording) { setAiNotification('⏪ Arrête d\'abord la prise en cours.'); return; }
+    if (!stateRef.current.tracks.some(t => t.isTrackArmed)) {
+      setAiNotification("⏪ Capture après coup : arme une piste (bouton R), lance la lecture et chante — NOVA garde les dernières minutes du micro. Ensuite « Capturer » (Maj+R).");
+      return;
+    }
+    const r = await audioEngine.captureLastTake();
+    if ('error' in r) { setAiNotification(`⏪ ${r.error}`); return; }
+    await finalizeRecording(r);
+  }, [finalizeRecording]);
+  const captureRef = useRef(handleCaptureLastTake);
+  captureRef.current = handleCaptureLastTake;
 
   /** Retire les blancs d'un clip, ou de tous les clips audio d'une piste. */
   const handleCleanSilences = useCallback((trackId: string, clipId?: string) => {
@@ -1784,6 +1810,8 @@ function Studio() {
       draft.tracks.forEach(t => {
         if (t.id === 'instrumental') { t.volume = style.beatVolume; return; }
         if (t.type !== TrackType.AUDIO || t.instrumentId) return;
+        // Piste guide (R3) : jamais mixée (elle reste brute, à son niveau de guide).
+        if (t.isGuide) return;
         if (!collabMixScopeRef.current(t as Track)) return;
         voiceTracks++;
         // Comme un ingé son : le lead devant et au centre, les voix secondaires
@@ -2129,7 +2157,7 @@ function Studio() {
       const ct = ctRaw && 'id' in ctRaw ? ctRaw : null;
       const sel = st.tracks.find(t => t.id === st.selectedTrackId);
       const target = ct ? ({ ...(stateRef.current.tracks.find(t => t.id === ct.id) || { id: ct.id, name: '' }) } as Track)
-        : isVoiceTrack(sel) ? sel : st.tracks.find(t => t.id === 'track-rec-main') ?? st.tracks.find(t => isVoiceTrack(t));
+        : isVoiceTrack(sel) ? sel : st.tracks.find(t => t.id === 'track-rec-main') ?? st.tracks.find(t => isVoiceTrack(t) && !t.isGuide);
       if (!target) { setNoArmedTrackError(true); setTimeout(() => setNoArmedTrackError(false), 2000); return; }
       if (!(await armForRecording(target.id))) return;
       if (ct?.note) setAiNotification(ct.note);
@@ -2203,7 +2231,7 @@ function Studio() {
       const target = ct ? ({ ...(stateRef.current.tracks.find(t => t.id === ct.id) || { id: ct.id, name: '' }) } as Track)
         : isVoiceTrack(selected)
         ? selected
-        : currentState.tracks.find(t => t.id === 'track-rec-main') ?? currentState.tracks.find(t => isVoiceTrack(t));
+        : currentState.tracks.find(t => t.id === 'track-rec-main') ?? currentState.tracks.find(t => isVoiceTrack(t) && !t.isGuide);
       if (!target) {
         setNoArmedTrackError(true);
         setTimeout(() => setNoArmedTrackError(false), 2000);
@@ -3195,6 +3223,22 @@ function Studio() {
     }, 1300);
   }, [handleUpdateBpm]);
 
+  // Pistes guides (R3) : entendues pendant la prise, jamais exportées ; coupées ou
+  // rallumées d'un geste (bouton GUIDE de la barre, touche G), niveau réglé à part.
+  const toggleGuides = useCallback(() => {
+    const guides = stateRef.current.tracks.filter(t => t.isGuide);
+    if (!guides.length) return;
+    const mute = guides.some(t => !t.guideMuted);
+    setState(produce((d: DAWState) => { d.tracks.forEach(t => { if (t.isGuide) t.guideMuted = mute; }); }));
+    setAiNotification(mute ? '🎧 Guide coupé (G pour le rallumer).' : "🎧 Guide rallumé : tu l'entends pendant la prise, il ne sera jamais exporté.");
+  }, [setState]);
+  const toggleGuidesRef = useRef(toggleGuides);
+  toggleGuidesRef.current = toggleGuides;
+  const setGuideLevel = useCallback((level: number) => {
+    const v = Math.max(0, Math.min(1.5, level));
+    setState(produce((d: DAWState) => { d.tracks.forEach(t => { if (t.isGuide) { t.guideLevel = v; t.guideMuted = false; } }); }));
+  }, [setState]);
+
   const handleToggleDelayComp = useCallback(() => {
     setState(prev => ({ ...prev, isDelayCompEnabled: !prev.isDelayCompEnabled }));
   }, [setState]);
@@ -3293,7 +3337,11 @@ function Studio() {
 
       if (mod) return; // on ne capture aucun autre raccourci systeme
 
+      // Maj+R : capturer la dernière prise (Logic : Capture as Recording). R seul : enregistrer.
+      if ((e.key === 'r' || e.key === 'R') && e.shiftKey) { e.preventDefault(); void captureRef.current(); return; }
       if (e.key === 'r' || e.key === 'R') { e.preventDefault(); handleToggleRecord(); return; }
+      // G : couper / rallumer la piste guide (R3). En Keyboard Focus, G reste « fondu jusqu'à la fin ».
+      if ((e.key === 'g' || e.key === 'G') && !isKeyboardFocus() && stateRef.current.tracks.some(t => t.isGuide)) { e.preventDefault(); toggleGuidesRef.current(); return; }
       if (e.key === 'l' || e.key === 'L') {
         e.preventDefault();
         setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive }));
@@ -4458,6 +4506,9 @@ function Studio() {
             t.collabOwnerName = owner.name; t.collabOwnerColor = owner.color;
           }
           if (ct.drumMachine !== undefined) t.drumMachine = ct.drumMachine;
+          // Piste guide (R3) : marquée chez tous, jamais exportée ; la couper reste local.
+          if (ct.guide === null) { delete t.isGuide; delete t.guideLevel; }
+          else if (ct.guide && typeof ct.guide === 'object') { t.isGuide = true; if (typeof ct.guide.level === 'number') t.guideLevel = ct.guide.level; }
           if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
           if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
           if (ct.novaSynth !== undefined) { if (ct.novaSynth) t.novaSynth = normalizeSynth(ct.novaSynth); else delete t.novaSynth; }
@@ -6773,6 +6824,9 @@ function Studio() {
           onOpenMetronome={() => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }}
           onOpenTempo={() => openTempoDialog(null)}
           onTap={handleTap} tapBpm={tapBpm}
+          guide={(() => { const g = state.tracks.filter(t => t.isGuide); return g.length ? { count: g.length, muted: g.every(t => t.guideMuted), level: g[0].guideLevel ?? GUIDE_DEFAULT_LEVEL } : undefined; })()}
+          onToggleGuide={toggleGuides} onGuideLevel={setGuideLevel}
+          onCapture={() => { void handleCaptureLastTake(); }} captureReady={state.tracks.some(t => t.isTrackArmed)}
           onStop={handleStop} onTogglePlay={handleTogglePlay} onToggleRecord={handleToggleRecord}
           currentView={shownView} onChangeView={v => setState(s => ({...s, currentView: v}))}
           statusMessage={externalImportNotice} noArmedTrackError={noArmedTrackError}
@@ -7082,6 +7136,9 @@ function Studio() {
         onCleanSilences={() => { const t = getTargetVoiceTrack(); if (t) handleCleanSilences(t.id); }}
         autoClean={autoCleanSilence}
         onAutoCleanChange={setAutoCleanSilence}
+        captureMinutes={captureMinutes()}
+        onCaptureMinutes={(m: number) => { try { localStorage.setItem(CAPTURE_MINUTES_KEY, String(m)); } catch { /* */ } audioEngine.resizeFlashback(); setAiNotification(`⏪ Capture après coup : NOVA garde les ${captureMinutes()} dernières minutes du micro.`); }}
+        onCapture={() => { setVocalToolsOpen(false); void handleCaptureLastTake(); }}
         countInLength={(() => { const r = resolveCountIn(state.metronome, true); return r.count === 0 ? 'aucun' : `${r.count} ${r.unit === 'bars' ? (r.count > 1 ? 'mesures' : 'mesure') : (r.count > 1 ? 'temps' : 'temps')}`; })()}
         countIn={countInEnabled}
         onCountInChange={setCountInEnabled}

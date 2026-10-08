@@ -810,6 +810,13 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       { label: 'Couleur de la piste…', onClick: () => openNovaWindow('track-color', { trackId }), icon: 'fa-palette' }, ];
     const target = tracks.find(t => t.id === trackId);
     if (isVoiceTrack(target)) menuItems.push({ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => requestBreaths({ mode: 'dialog', trackIds: [trackId], reason: 'menu' }) });
+    // Piste guide (R3) : la voix témoin s'entend pendant la prise, jamais exportée ni mixée.
+    if (target && target.type === TrackType.AUDIO && target.id !== 'instrumental' && !target.instrumentId) menuItems.push({
+      label: target.isGuide ? 'Ce n’est plus une piste guide' : 'Piste guide (s’entend, jamais exportée)',
+      icon: 'fa-headphones',
+      title: 'Voix témoin (démo du topliner, yaourt, ancienne prise) : entendue pendant la prise à son propre niveau, jamais exportée, mixée ni masterisée (Pro Tools : piste guide inactive au bounce).',
+      onClick: () => onUpdateTrack(target.isGuide ? { ...target, isGuide: false, guideMuted: false } : { ...target, isGuide: true, guideMuted: false, guideLevel: target.guideLevel ?? 0.7 }),
+    });
     if (trackId !== 'track-rec-main') menuItems.push({ label: 'Supprimer la piste', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
     if (!simple || target?.isFrozen) menuItems.push({
       label: target?.isFrozen ? 'Dégeler la piste' : 'Geler la piste (freeze)',

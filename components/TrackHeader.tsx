@@ -504,6 +504,15 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
               </span>
             )}
             {!isRenaming && <TrackStructureInline track={track} />}
+            {/* Piste guide (R3) : pastille ; clic = couper / rallumer CE guide (jamais exporté). */}
+            {!isRenaming && track.isGuide && (
+              <button type="button" data-testid={`guide-pill-${track.id}`} aria-pressed={!track.guideMuted}
+                onClick={(e) => { e.stopPropagation(); onUpdate({ ...track, guideMuted: !track.guideMuted }); }}
+                title={`Piste guide : ${track.guideMuted ? 'coupée' : `entendue à ${Math.round((track.guideLevel ?? 0.7) * 100)} %`}. Jamais exportée, mixée ni masterisée. Clic : couper / rallumer.`}
+                className={`shrink-0 h-5 px-1.5 rounded text-[9px] font-black border ${track.guideMuted ? 'text-slate-500 border-white/10 line-through' : 'text-amber-300 border-amber-500/50 bg-amber-500/15'}`}>
+                GUIDE
+              </button>
+            )}
             {!isRenaming && !insertStripShown && outdatedPill}
             {/* Feat à distance : propriétaire (son nom, sa couleur) et pastille REC quand il enregistre (piste verrouillée). */}
             {!isRenaming && recBy && (

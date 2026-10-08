@@ -39,6 +39,21 @@ import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
 import { events808 } from '../utils/bass808';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
+import { CaptureRing as _CaptureRing, chooseCapture, captureMinutes, captureWorkletSource, type PlayRun } from '../utils/audioCapture';
+void _CaptureRing;
+
+/** Module AudioWorklet de la capture après coup, chargé une fois par contexte. */
+const flashbackLoads = new WeakMap<BaseAudioContext, Promise<void>>();
+function loadFlashbackModule(ctx: AudioContext): Promise<void> {
+  let p = flashbackLoads.get(ctx);
+  if (!p) {
+    const url = URL.createObjectURL(new Blob([captureWorkletSource()], { type: 'application/javascript' }));
+    p = ctx.audioWorklet.addModule(url).finally(() => URL.revokeObjectURL(url));
+    flashbackLoads.set(ctx, p);
+    p.catch(() => flashbackLoads.delete(ctx));
+  }
+  return p;
+}
 import { placeHumTake } from './humTake';
 import { VSTPluginNode } from './VSTPluginNode';
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback, isFrozenBus, isFeedCovered, busFrozenSlices } from '../utils/freeze';
@@ -426,6 +441,8 @@ export class AudioEngine {
       const m = this.measureRecordLatency();
       this.lastLatency = this.lastLatency ? this.lastLatency * 0.6 + m.total * 0.4 : m.total;
       if (this.recordingTrackId) this.latencySamples.push(m.total);
+      // Capture après coup : la latence de chaque passage de lecture, comme pour une prise.
+      if (this.flashback && this.isPlaying) { const r = this.flashbackRuns[this.flashbackRuns.length - 1]; if (r && r.to === null) (r.lat = r.lat || []).push(m.total); }
       try { window.dispatchEvent(new CustomEvent('nova:latency', { detail: { ms: Math.round(this.lastLatency * 1000), mode: m.mode, offsetMs: this.recOffsetMs } })); } catch { /* */ }
     };
     tick();
@@ -457,6 +474,130 @@ export class AudioEngine {
     this.isLoopActive = active;
     this.loopStart = start;
     this.loopEnd = end;
+  }
+
+  // -------------------------------------------------------------------------
+  // Capture audio après coup (R3, utils/audioCapture) : Flashback Capture de Logic
+  // -------------------------------------------------------------------------
+  private flashback: { node: AudioWorkletNode; src: AudioNode; sink: GainNode; seconds: number } | null = null;
+  private flashbackRuns: PlayRun[] = [];
+  private flashbackReq = 0;
+
+  /** Anneau du micro branché sur l'entrée armée (micro ou ASIO) ; il n'écrit que pendant la lecture. */
+  private async attachFlashback() {
+    if (!this.ctx?.audioWorklet) return;
+    const src: AudioNode | null = (this.isUsingASIOInput() && this.asioInput?.getNode()) || this.monitorSource;
+    if (!src) return;
+    if (this.flashback?.src === src) return;
+    this.detachFlashback();
+    try {
+      await loadFlashbackModule(this.ctx);
+      const seconds = captureMinutes() * 60;
+      const node = new AudioWorkletNode(this.ctx, 'nova-flashback', {
+        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+        processorOptions: { capacity: Math.round(seconds * this.ctx.sampleRate) },
+      });
+      const sink = this.ctx.createGain();
+      sink.gain.value = 0;
+      src.connect(node); node.connect(sink); sink.connect(this.ctx.destination);
+      this.flashback = { node, src, sink, seconds };
+      this.flashbackRuns = [];
+      if (this.isPlaying) this.flashbackRunStart(this.ctx.currentTime, this.playbackStartTime);
+    } catch (e) {
+      console.warn('[AudioEngine] Capture après coup indisponible', e);
+    }
+  }
+
+  private detachFlashback() {
+    const f = this.flashback;
+    if (!f) return;
+    try { f.src.disconnect(f.node); } catch { /* déjà débranché */ }
+    try { f.node.disconnect(); f.sink.disconnect(); } catch { /* */ }
+    this.flashback = null;
+    this.flashbackRuns = [];
+  }
+
+  private flashbackRunStart(from: number, startTime: number) {
+    if (!this.flashback) return;
+    this.flashback.node.port.postMessage({ type: 'on' });
+    const m = this.measureRecordLatency();
+    this.flashbackRuns.push({ from, to: null, startTime, lat: [m.total] });
+    if (this.flashbackRuns.length > 200) this.flashbackRuns.splice(0, this.flashbackRuns.length - 200);
+  }
+
+  /** Fin d'un passage ; au bouclage l'écriture continue (le tour suivant commence aussitôt). */
+  private flashbackRunEnd(at: number, continues: boolean) {
+    if (!this.flashback) return;
+    const last = this.flashbackRuns[this.flashbackRuns.length - 1];
+    if (last && last.to === null) last.to = at;
+    if (!continues) this.flashback.node.port.postMessage({ type: 'off' });
+  }
+
+  /** Capture prête (piste armée et au moins un passage de lecture). */
+  public hasFlashback(): boolean {
+    const now = this.ctx?.currentTime ?? 0;
+    return !!this.flashback && this.flashbackRuns.some(r => (r.to ?? now) - r.from >= 0.5);
+  }
+
+  /** Nouvelle durée de capture (réglage) : l'anneau est recréé à la bonne taille. */
+  public resizeFlashback() { if (this.flashback) { this.detachFlashback(); void this.attachFlashback(); } }
+
+  /** Durée gardée en mémoire (s), 0 sans piste armée. */
+  public flashbackSeconds(): number { return this.flashback?.seconds ?? 0; }
+
+  /**
+   * « Capturer la dernière prise » : ce que le micro a reçu pendant le dernier passage
+   * de lecture (sans REC), posé au bon endroit, latence compensée comme une prise.
+   */
+  public async captureLastTake(): Promise<{ clip: Clip; trackId: string } | { error: string }> {
+    const ctx = this.ctx, f = this.flashback, trackId = this.monitoringTrackId;
+    if (!ctx || !f || !trackId) return { error: "Arme d'abord une piste (bouton R) : NOVA écoute le micro pendant la lecture." };
+    if (this.recordingTrackId) return { error: "Une prise est en cours : arrête-la d'abord." };
+    const sr = ctx.sampleRate;
+    const info = await this.flashbackAsk({ type: 'info' });
+    const oldestCtx = info && typeof info.oldest === 'number' ? info.oldest / sr : null;
+    const pick = chooseCapture(this.flashbackRuns, ctx.currentTime, oldestCtx);
+    if (!pick) return { error: 'Rien à capturer : lance la lecture avec une piste armée et chante, puis capture.' };
+    const got = await this.flashbackAsk({ type: 'read', from: Math.round(pick.from * sr), to: Math.round(pick.to * sr) });
+    const samples: Float32Array | null = got?.samples || null;
+    if (!samples || samples.length < sr * 0.3) return { error: 'Rien à capturer : la lecture était trop courte.' };
+    // Même placement qu'une prise : position dans le morceau, moins la latence mesurée + le réglage fin.
+    const firstCtx = got.firstFrame / sr;
+    const run = this.flashbackRuns.filter(r => r.from <= firstCtx + 1e-6).pop();
+    const rawStart = firstCtx - (run ? run.startTime : (pick.from - pick.songTime));
+    // Même règle qu'une prise : moyenne des latences mesurées pendant le passage, plus le réglage fin.
+    const lats = run?.lat?.length ? run.lat : null;
+    const measured = lats ? lats.reduce((s, v) => s + v, 0) / lats.length : (this.lastLatency || this.measureRecordLatency().total);
+    const latency = measured + this.recOffsetMs / 1000;
+    let start = rawStart - latency;
+    let body = samples;
+    if (start < 0) { body = samples.subarray(Math.min(samples.length, Math.round(-start * sr))); start = 0; }
+    if (body.length < sr * 0.2) return { error: 'Rien à capturer.' };
+    const buffer = ctx.createBuffer(1, body.length, sr);
+    buffer.copyToChannel(body, 0);
+    const blob = encodeWav24(body, sr);
+    try { window.dispatchEvent(new CustomEvent('nova:take-aligned', { detail: { ms: Math.round(latency * 1000), sec: latency, raw: rawStart, capture: true } })); } catch { /* */ }
+    return {
+      trackId,
+      clip: {
+        id: `cap-${Date.now()}`, name: 'Capture', start, duration: buffer.duration, offset: 0, fadeIn: 0.01, fadeOut: 0.01,
+        type: TrackType.AUDIO, color: '#f59e0b', audioRef: URL.createObjectURL(blob), buffer,
+      },
+    };
+  }
+
+  private flashbackAsk(msg: Record<string, unknown>): Promise<any> {
+    const f = this.flashback;
+    if (!f) return Promise.resolve(null);
+    const id = ++this.flashbackReq;
+    return new Promise(resolve => {
+      const onMsg = (e: MessageEvent) => { if (e.data?.id === id) done(e.data); };
+      const timer = setTimeout(() => done(null), 3000);
+      function done(v: any) { f!.node.port.removeEventListener('message', onMsg as any); clearTimeout(timer); resolve(v); }
+      f.node.port.addEventListener('message', onMsg as any);
+      f.node.port.start();
+      f.node.port.postMessage({ ...msg, id });
+    });
   }
 
   /**
@@ -649,6 +790,9 @@ export class AudioEngine {
    *        fader et le pan restent appliques a la lecture, sinon ils l'etaient deux fois).
    */
   public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean } = {}): Promise<AudioBuffer> {
+    // Pistes guides (R3) : entendues pendant la prise, jamais dans un export, un master ni un mix auto.
+    // (Gel d'une piste, rendu avant fader : la piste elle-même est rendue.)
+    if (!options.preFader) tracks = tracks.filter(t => !t.isGuide);
     // Structure Pro Tools : pistes inactives, dossiers simples et VCA hors du rendu ; Muet / Solo / VCA / bus résolus.
     tracks = engineView(tracks).tracks;
     const totalSamples = Math.ceil(totalDuration * targetSampleRate);
@@ -1092,6 +1236,7 @@ export class AudioEngine {
       }
       this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
       this.wireMonitor(dsp);
+      void this.attachFlashback();
       this.setTrackLowLatency(trackId, true);
       this.syncDirectMonitor();
       this.startLatencyWatch();
@@ -1314,6 +1459,7 @@ export class AudioEngine {
   }
 
   public disarmTrack() {
+    this.detachFlashback();
     if (this.monitoringTrackId) this.setTrackLowLatency(this.monitoringTrackId, false);
     this.stopLatencyWatch();
     if (this.asioBridge && this.asioConnected) this.asioBridge.setMonitor(false, this.monitorLevel, -1);
@@ -1504,7 +1650,7 @@ export class AudioEngine {
     buffer.copyToChannel(body, 0);
     const blob = encodeWav24(body, sr);
     console.log(`[AudioEngine] Prise replacée : latence ${Math.round(latency * 1000)} ms (mesurée ${Math.round(measured * 1000)} ms, réglage ${this.recOffsetMs} ms)`);
-    try { window.dispatchEvent(new CustomEvent('nova:take-aligned', { detail: { ms: Math.round(latency * 1000) } })); } catch { /* */ }
+    try { window.dispatchEvent(new CustomEvent('nova:take-aligned', { detail: { ms: Math.round(latency * 1000), sec: latency, raw: rawStart } })); } catch { /* */ }
 
     return {
       trackId,
@@ -1566,6 +1712,7 @@ export class AudioEngine {
       this.monitorSource = this.ctx!.createMediaStreamSource(this.activeMonitorStream);
       this.wireMonitor(dsp);
       this.monitoringTrackId = trackId;
+      void this.attachFlashback();
       console.log("[AudioEngine] Track re-armed OK:", trackId);
     } catch (e) {
       console.error("[AudioEngine] Re-arm ERROR:", e);
@@ -1596,6 +1743,7 @@ export class AudioEngine {
     // exactement là (1er kick de la batterie, 1re 808) était sautée.
     this.playbackStartTime = this.nextScheduleTime - startOffset;
     this.midiRunStart = startOffset;
+    this.flashbackRunStart(this.nextScheduleTime, this.playbackStartTime);
     // Synthé NOVA : chorus calé sur le temps du morceau (identique à l'export).
     this.tracksDSP.forEach(d => { if (d.synth instanceof NovaSynthNode) d.synth.syncTimeline(this.playbackStartTime, this.nextScheduleTime); });
     // Gate rythmique : motif calé sur la grille du morceau (même calcul qu'à l'export).
@@ -1621,6 +1769,7 @@ export class AudioEngine {
     // apres un stop la position de DEPART de la lecture, pas celle de l'arret.
     const wasPlaying = this.isPlaying;
     if (this.isPlaying) this.pausedAt = this.getCurrentTime();
+    if (this.isPlaying && this.ctx) this.flashbackRunEnd(this.ctx.currentTime, false);
     this.isPlaying = false;
     // Fin de passe d'automation (modes Touch / Latch / Write) : à la position d'arrêt.
     if (wasPlaying) { try { window.dispatchEvent(new CustomEvent('nova:transport-stop', { detail: { time: this.pausedAt } })); } catch { /* hors navigateur */ } }
@@ -1644,12 +1793,23 @@ export class AudioEngine {
     this.activeMidiNotes.clear();
     if (this.ctx) {
       const now = this.ctx.currentTime;
-      this.tracksDSP.forEach(dsp => {
+      // Valeurs figées à l'arrêt : calculées d'après la piste (volume, VCA, guide, automation
+      // à la position d'arrêt), pas relues sur gain.value — figée par le navigateur sur une
+      // piste silencieuse, elle ramenait un ancien réglage (ex. niveau du guide changé à l'arrêt).
+      const live = new Map((this.liveTracks || []).map(t => [t.id, t] as const));
+      this.tracksDSP.forEach((dsp, id) => {
         try {
+          const t = live.get(id);
+          const vLane = t ? playedLanes(t).find(l => l.parameterName === 'volume' && l.points.length > 0) : undefined;
+          const pLane = t ? playedLanes(t).find(l => l.parameterName === 'pan' && l.points.length > 0) : undefined;
+          const vol = !t ? dsp.gain.gain.value
+            : (t.isMuted || this.soloSilencedIds.has(id)) ? 0
+            : vLane ? this.valeurAutomationA(this.sortedOf(vLane.points), this.pausedAt) : t.volume;
+          const pan = !t ? dsp.panner.pan.value : pLane ? this.valeurAutomationA(this.sortedOf(pLane.points), this.pausedAt) : t.pan;
           dsp.gain.gain.cancelScheduledValues(now);
-          dsp.gain.gain.setValueAtTime(dsp.gain.gain.value, now);
+          dsp.gain.gain.setValueAtTime(vol, now);
           dsp.panner.pan.cancelScheduledValues(now);
-          dsp.panner.pan.setValueAtTime(dsp.panner.pan.value, now);
+          dsp.panner.pan.setValueAtTime(pan, now);
         } catch (e) {}
       });
       // Réglages d'effets programmés d'avance : plus rien ne doit bouger après l'arrêt.
@@ -1812,6 +1972,9 @@ export class AudioEngine {
     const previousStartTime = this.playbackStartTime;
     this.playbackStartTime = boundaryContextTime - this.loopStart;
     this.pendingLoopWrap = { atContextTime: boundaryContextTime, previousStartTime };
+    // Capture après coup : chaque tour de boucle est un passage à part.
+    this.flashbackRunEnd(boundaryContextTime, true);
+    this.flashbackRunStart(boundaryContextTime, this.playbackStartTime);
     this.syncTimelineEffects(this.playbackStartTime, boundaryContextTime);
 
     tracks.forEach(track => this.applyAutomation(track, this.loopStart));
@@ -2812,7 +2975,11 @@ export class AudioEngine {
       const t = this.ctx.currentTime;
       // Pendant la lecture, un paramètre automatisé garde la valeur de sa courbe.
       const target = (track.isMuted || this.soloSilencedIds.has(track.id)) ? 0 : this.automatedValue(track, 'volume', track.volume);
-      dsp.gain.gain.setTargetAtTime(target, t, 0.015);
+      // À l'arrêt : valeur posée tout de suite. Une piste sans son en cours n'est pas
+      // « calculée » par le navigateur : une rampe programmée n'y avance pas, et
+      // gain.value relu plus tard (arrêt, retour au début) renvoyait l'ANCIENNE valeur.
+      if (!this.isPlaying) { try { dsp.gain.gain.cancelScheduledValues(t); dsp.gain.gain.setValueAtTime(target, t); } catch { /* */ } }
+      else dsp.gain.gain.setTargetAtTime(target, t, 0.015);
       dsp.panner.pan.setTargetAtTime(this.automatedValue(track, 'pan', track.pan), t, 0.015);
       this.pluginAutoSent.forEach((_, k) => { if (k.startsWith(`${track.id}|`)) this.pluginAutoSent.delete(k); });
 

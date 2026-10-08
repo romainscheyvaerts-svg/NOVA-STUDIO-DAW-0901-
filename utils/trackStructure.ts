@@ -497,6 +497,12 @@ export const createVca = (tracks: Track[], o: { id: string; name: string; member
 /** Sortie « dans le vide » : bus que personne n'écoute, piste de destination inactive. */
 export const VOID_OUTPUT = '__nova_void__';
 
+/** Niveau d'une piste guide quand il n'est pas réglé (×0,7, environ −3 dB). */
+export const GUIDE_DEFAULT_LEVEL = 0.7;
+/** Facteur de niveau d'une piste guide (1 pour les autres pistes). */
+export const guideFactor = (t: Pick<Track, 'isGuide' | 'guideLevel'>): number =>
+  (t.isGuide ? Math.max(0, Math.min(1.5, typeof t.guideLevel === 'number' && Number.isFinite(t.guideLevel) ? t.guideLevel : GUIDE_DEFAULT_LEVEL)) : 1);
+
 export interface EngineView {
   /** Pistes jouées par le moteur (pistes actives, avec Muet / Solo / VCA / sorties résolus). */
   tracks: Track[];
@@ -571,7 +577,8 @@ export const engineView = (tracks: Track[]): EngineView => {
     const folderMute = anc.some(a => a.isMuted);
     const folderSolo = anc.some(a => a.isSolo);
     const v = memberOf.has(t.id) ? vcaChain(t, vcas, tracks, memberOf) : { gain: 1, mute: false, solo: false };
-    if (v.gain !== 1) vcaScale.set(t.id, v.gain);
+    // Échelle du fader (VCA × niveau d'une piste guide) : appliquée aussi aux réglages directs du fader.
+    if (v.gain * guideFactor(t) !== 1) vcaScale.set(t.id, v.gain * guideFactor(t));
 
     // Sortie résolue.
     let output = t.outputTrackId;
@@ -591,20 +598,23 @@ export const engineView = (tracks: Track[]): EngineView => {
     const taps: TrackSend[] = extraTaps.map(id => ({ id, level: 1, isEnabled: true }));
     const sends = keptSends.length === sendsIn.length && !taps.length ? sendsIn : [...keptSends, ...taps];
 
-    const mute = !!t.isMuted || folderMute || v.mute;
+    // Piste guide (R3) : son niveau à part (×guideLevel) et coupée d'un geste (guideMuted).
+    const gf = guideFactor(t);
+    const mute = !!t.isMuted || folderMute || v.mute || (!!t.isGuide && !!t.guideMuted);
     const solo = !!t.isSolo || folderSolo || v.solo;
-    const changed = mute !== !!t.isMuted || solo !== !!t.isSolo || v.gain !== 1 || output !== t.outputTrackId || sends !== sendsIn;
+    const gain = v.gain * gf;
+    const changed = mute !== !!t.isMuted || solo !== !!t.isSolo || gain !== 1 || output !== t.outputTrackId || sends !== sendsIn;
     if (!changed) { out.push(t); continue; }
-    const sig = `${mute ? 1 : 0}|${solo ? 1 : 0}|${v.gain}|${output}|${sends === sendsIn ? '=' : JSON.stringify(sends)}`;
+    const sig = `${mute ? 1 : 0}|${solo ? 1 : 0}|${gain}|${output}|${sends === sendsIn ? '=' : JSON.stringify(sends)}`;
     const prev = derivedCache.get(t);
     if (prev && prev.sig === sig) { out.push(prev.out); continue; }
     const d: Track = { ...t, isMuted: mute, isSolo: solo, outputTrackId: output, sends };
-    if (v.gain !== 1) {
-      d.volume = t.volume * v.gain;
-      // Automation du volume : la courbe passe aussi par le VCA.
+    if (gain !== 1) {
+      d.volume = t.volume * gain;
+      // Automation du volume : la courbe passe aussi par le VCA (et le niveau du guide).
       if (t.automationLanes?.some(l => l.parameterName === 'volume' && l.points.length)) {
         d.automationLanes = t.automationLanes.map(l => (l.parameterName === 'volume'
-          ? { ...l, points: l.points.map(p => ({ ...p, value: p.value * v.gain })) } : l));
+          ? { ...l, points: l.points.map(p => ({ ...p, value: p.value * gain })) } : l));
       }
     }
     derivedCache.set(t, { sig, out: d });
