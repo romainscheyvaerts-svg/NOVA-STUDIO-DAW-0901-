@@ -92,6 +92,9 @@ export class CollabOutbox {
     return q || f || null;
   }
 
+  /** Modification en attente pour cette clé, SANS celle en cours d'envoi. */
+  peekQueued(key: string): Record<string, any> | null { return this.entries.get(key)?.op || null; }
+
   has(key: string): boolean { return this.entries.has(key) || this.inflight?.key === key; }
   /** Nombre de modifications pas encore parties (celle en cours d'envoi comprise). */
   size(): number { return this.entries.size + (this.inflight ? 1 : 0); }

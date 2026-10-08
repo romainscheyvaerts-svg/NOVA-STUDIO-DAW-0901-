@@ -118,6 +118,13 @@ export class CollabClient {
   lastSeq = 0;
   /** Plus grand numéro du journal vu (reçu en direct, rattrapé, ou envoyé) : « horizon » de synchronisation. */
   horizon = 0;
+  /**
+   * Numéro du journal jusqu'auquel TOUT ce qu'on a reçu est appliqué (rattrapage traité,
+   * opérations en échec exclues) : l'instantané en ligne l'enregistre (collabSeq). Avant :
+   * lastSeq, mis à jour avant que les opérations soient appliquées — l'instantané pouvait
+   * annoncer une opération qu'il ne contenait pas encore, et celui qui arrivait la sautait.
+   */
+  safeSeq = 0;
   readonly deviceId = collabDeviceId();
   /** Page (chargement) qui a envoyé l'opération : voir collabPageId. */
   readonly pageId = collabPageId;
@@ -204,6 +211,7 @@ export class CollabClient {
     this.lastSeq = Math.max(0, fromSeq);
     this.floorSeq = this.lastSeq;
     this.horizon = Math.max(this.horizon, this.floorSeq);
+    this.safeSeq = Math.max(this.safeSeq, this.floorSeq);
     this.setStatus({ joined: true, reachable: true });
     const ch = catalogSupabase.channel(r.channel, { config: { broadcast: { self: false }, presence: { key: this.memberKey } } });
     this.channelRef = ch;
@@ -460,6 +468,13 @@ export class CollabClient {
         if (ops.length) { this.lastSeq = Math.max(this.lastSeq, ...ops.map(o => o.seq)); after = Math.max(after, ...ops.map(o => o.seq)); }
         if (ops.length < 500) break;
       }
+      // Tout ce qui précède est appliqué (file d'application vidée) : l'instantané peut l'annoncer.
+      // (sans attendre ici : le rattrapage ne doit pas être ralenti par un téléchargement d'audio)
+      const upTo = this.lastSeq;
+      void this.chain.then(() => {
+        const failedMin = this.failed.size ? Math.min(...[...this.failed.keys()]) - 1 : Infinity;
+        this.safeSeq = Math.max(this.safeSeq, Math.min(upTo, failedMin));
+      });
       this.setStatus({ reachable: true, catchingUp: false, lastSyncAt: Date.now(), lastError: null });
     } catch (e: any) {
       console.warn('[Collab] rattrapage', e);

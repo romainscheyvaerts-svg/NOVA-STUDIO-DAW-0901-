@@ -178,7 +178,7 @@ import { CollabRtc, RtcSignal } from './services/CollabRtc';
 import { sessionPrint, trackParts } from './utils/collabFingerprint';
 import {
   CONTENT_FORMAT, KnownContent, canSendContent, canSendMix, canonicalOrder, contentAllowed, contentDelta, deleteAllowed, isEmptyDelta,
-  knownOf, mergeClips, metaSigOf, mixAllowed, noteMerged, noteSent, orderOf, pendingClipIds, sameOrder, SONG_FIELDS, SongField, songFieldsOf, sanitizeSongField,
+  knownOf, mergeClips, metaSigOf, mixAllowed, noteMerged, noteSent, orderOf, pendingClipIds, sameOrder, SONG_FIELDS, SongField, songFieldsOf, sanitizeSongField, clipSig,
 } from './utils/collabContent';
 import { HistoryEntry, UndoAction, SONG_LABEL, applyClipsUndo, clipsText, clipsUndo, joinLabels, mixFieldLabel, pushHistory } from './utils/collabHistory';
 import RemoteIngePanel from './components/RemoteIngePanel';
@@ -4656,7 +4656,7 @@ function Studio() {
       // En collaboration, seul l'artiste écrit l'instantané (les autres passent par le journal).
       const collabNow = collabRef.current;
       // Plusieurs artistes : seul l'hôte l'écrit (avant : chacun l'écrasait toutes les 20 s).
-      const r = await pushSession({ ...st, id: cloudProjectId(cur.id), collabSeq: collabNow?.client.lastSeq ?? st.collabSeq }, user?.owned_instruments || [], { id: cur.id, secret: cur.secret }, cur.version, progress, { force: opts.force || (collabNow?.role === 'artist' && collabNow.host) });
+      const r = await pushSession({ ...st, id: cloudProjectId(cur.id), collabSeq: collabNow ? collabNow.client.safeSeq : st.collabSeq }, user?.owned_instruments || [], { id: cur.id, secret: cur.secret }, cur.version, progress, { force: opts.force || (collabNow?.role === 'artist' && collabNow.host) });
       setCloudSession({ ...cur, version: r.version, name: st.name || cur.name, syncedAt: Date.now() });
       if (opts.interactive) setTimeout(() => setCloudProgress(null), 1500);
       return true;
@@ -4846,6 +4846,9 @@ function Studio() {
   const knownFieldsRef = useRef(new Map<string, Record<string, string>>());
   /** Champs modifiés ici, pas encore mis en file (250 ms) : jamais écrasés par ceux de l'autre. */
   const pendingMixRef = useRef(new Map<string, Set<string>>());
+  /** Champs reçus pendant que le nôtre partait : départagés par le numéro du journal (voir onSent). */
+  const deferredMixRef = useRef(new Map<string, { seq: number; value: unknown; who: string }>());
+  const deferredClipRef = useRef(new Map<string, { seq: number; clip: Clip | null }>());
   const lwwRef = useRef(new LwwClock());
   const freezeDirtyRef = useRef(new Set<string>());
   const [collabStatus, setCollabStatus] = useState<CollabStatus | null>(null);
@@ -5052,6 +5055,14 @@ function Studio() {
   };
 
   /** Applique une opération reçue d'un collaborateur. */
+  /**
+   * Opérations reçues : l'état de référence (stateRef) est mis à jour TOUT DE SUITE, pas au
+   * prochain rendu, pour que l'opération suivante du journal (appliquée juste après) le voie.
+   * Avant : une piste créée puis supprimée dans le même rattrapage (rechargement) restait,
+   * la suppression ne la trouvant pas encore.
+   */
+  const remoteSet = (fn: (s: DAWState) => DAWState) => { stateRef.current = fn(stateRef.current); setState(fn); };
+  const remoteSetSilently = (fn: (s: DAWState) => DAWState) => { stateRef.current = fn(stateRef.current); setSilently(fn); };
   const applyCollabOp = useCallback(async (o: CollabOp) => {
     const c = collabRef.current;
     if (!c) return;
@@ -5095,7 +5106,7 @@ function Studio() {
         let released: string[] = [];
         let posed = false;
         touch(p.trackId);
-        setSilently(produce((d: DAWState) => {
+        remoteSetSilently(produce((d: DAWState) => {
           const t = d.tracks.find(x => x.id === p.trackId);
           const r = t ? applyPreviewOnEngineer(t as Track, p) : null;
           if (r) { released = r.released; posed = true; }
@@ -5122,7 +5133,7 @@ function Studio() {
       } else if ((o.kind === 'vst_param_ack' || o.kind === 'vst_params') && o.role === 'artist' && c.role === 'engineer') {
         if (o.kind === 'vst_param_ack' && p.ok && typeof p.stateB64 === 'string') {
           // État relu chez l'artiste : notre prochain envoi de mix ne le réécrase pas.
-          setSilently(produce((d: DAWState) => { d.tracks.forEach(t => t.plugins.forEach(x => { if (x.id === p.pluginId && x.type === 'VST3') x.params = { ...x.params, stateB64: p.stateB64 }; })); }));
+          remoteSetSilently(produce((d: DAWState) => { d.tracks.forEach(t => t.plugins.forEach(x => { if (x.id === p.pluginId && x.type === 'VST3') x.params = { ...x.params, stateB64: p.stateB64 }; })); }));
         }
         vstReqsRef.current.resolve(String(p.reqId), p);
       } else if (o.kind === 'vst_catalog' && o.role === 'artist' && c.role === 'engineer') {
@@ -5144,7 +5155,19 @@ function Studio() {
         const fields: MixFields = p.fields && typeof p.fields === 'object' ? p.fields : legacyMixToFields(p.mix);
         const pend = pendingMixRef.current.get(tid);
         const queued = (c.client.outbox.peek('mix:' + tid)?.fields || {}) as MixFields;
-        const ok = new Set(Object.keys(fields).filter(f => lwwRef.current.accept(`${tid}:${f}`, o.seq) && !pend?.has(f) && !(f in queued)));
+        // Un champ modifié ici et pas encore enregistré par le serveur n'est pas écrasé tout de suite :
+        // la valeur reçue est mise de côté, et départagée quand notre numéro du journal est connu
+        // (avant : si notre envoi était DÉJÀ en route avec un numéro plus petit, chacun gardait la sienne).
+        const ok = new Set<string>();
+        for (const f of Object.keys(fields)) {
+          const key = `${tid}:${f}`;
+          if (pend?.has(f) || f in queued) {
+            const d = deferredMixRef.current.get(key);
+            if (!d || d.seq < o.seq) deferredMixRef.current.set(key, { seq: o.seq, value: fields[f], who: o.author_name });
+            continue;
+          }
+          if (lwwRef.current.accept(key, o.seq)) ok.add(f);
+        }
         if (!ok.size) break;
         const known = { ...(knownFieldsRef.current.get(tid) || {}) };
         ok.forEach(f => { known[f] = fieldSig(fields[f]); });
@@ -5160,14 +5183,14 @@ function Studio() {
             text: `a changé ${joinLabels([...ok].map(f => mixFieldLabel(f, pname)))} de « ${curT.name} »`,
             undo: Object.keys(undoFields).length ? { kind: 'mix', trackId: tid, fields: undoFields } : undefined });
         }
-        setState(produce((d: DAWState) => { const t = d.tracks.find(x => x.id === tid); if (t) applyMixFields(t as Track, fields, f => ok.has(f)); }));
+        remoteSet(produce((d: DAWState) => { const t = d.tracks.find(x => x.id === tid); if (t) applyMixFields(t as Track, fields, f => ok.has(f)); }));
         onRemoteMixRef.current?.(tid, fields);
         break;
       }
       case 'lock': {
         if (!lwwRef.current.accept(`lock:${p.trackId}`, o.seq)) break;
         touch(p.trackId);
-        setState(produce((d: DAWState) => {
+        remoteSet(produce((d: DAWState) => {
           const t = d.tracks.find(x => x.id === p.trackId);
           if (!t) return;
           if (p.lock) { t.volumeLock = p.lock; t.volume = p.lock.volume; } else delete t.volumeLock;
@@ -5198,6 +5221,18 @@ function Studio() {
           const pending = pendingClipIds(known, cur.clips || []);
           const incoming = (Array.isArray(ct.clips) ? sanitizeIncomingClips(ct.clips) : []) as unknown as Clip[];
           const r = mergeClips(cur.clips || [], incoming, p, id => lwwRef.current.accept(`clip:${tid}:${id}`, o.seq), pending);
+          // Clips modifiés ici pendant que l'autre envoyait les siens : mis de côté, départagés
+          // quand notre numéro du journal est connu (voir onSent « content »).
+          if (pending.size) {
+            const inc = new Map(incoming.map(x => [x.id, x]));
+            const touched = [...(Array.isArray(p.changed) ? p.changed : []), ...(Array.isArray(p.removed) ? p.removed : [])].filter((x: unknown): x is string => typeof x === 'string');
+            for (const cid of touched) {
+              if (!pending.has(cid)) continue;
+              const key = `${tid}:${cid}`;
+              const d = deferredClipRef.current.get(key);
+              if (!d || d.seq < o.seq) deferredClipRef.current.set(key, { seq: o.seq, clip: inc.get(cid) || null });
+            }
+          }
           const localMetaPending = !!known && known.meta !== metaSigOf(contentOf(cur as Track));
           const metaOk = !!p.meta && !localMetaPending && lwwRef.current.accept(`cmeta:${tid}`, o.seq);
           plan = { metaOk, upsert: r.taken, remove: r.dropped };
@@ -5209,7 +5244,7 @@ function Studio() {
           contentResetRef.current.add(tid);
           if (clipWise) (Array.isArray(ct.clips) ? ct.clips : []).forEach((x: any) => { if (x && typeof x.id === 'string') lwwRef.current.accept(`clip:${tid}:${x.id}`, o.seq); });
         }
-        setState(produce((d: DAWState) => {
+        remoteSet(produce((d: DAWState) => {
           let t = d.tracks.find(x => x.id === tid);
           if (!t) {
             // Piste créée par un collaborateur (batterie, basse, piste d'envoi…)
@@ -5312,7 +5347,7 @@ function Studio() {
         const next = canonicalOrder(stateRef.current.tracks, ids);
         knownOrderRef.current = orderOf(next);
         if (sameOrder(orderOf(next), orderOf(stateRef.current.tracks))) break;
-        setState(prev => ({ ...prev, tracks: canonicalOrder(prev.tracks, ids) }));
+        remoteSet(prev => ({ ...prev, tracks: canonicalOrder(prev.tracks, ids) }));
         break;
       }
       case 'song': {
@@ -5331,7 +5366,7 @@ function Studio() {
           knownSongRef.current.set(f, fieldSig(v));
         }
         if (!Object.keys(patch).length) break;
-        setState(prev => {
+        remoteSet(prev => {
           const n: any = { ...prev };
           for (const [k, v] of Object.entries(patch)) { if (v === null) delete n[k]; else n[k] = v; }
           return n;
@@ -5346,7 +5381,7 @@ function Studio() {
         if (!lwwRef.current.accept(`freeze:${p.trackId}`, o.seq)) break;
         await ensureBuffers(c.client.link, p.audio);
         touch(p.trackId);
-        setState(produce((d: DAWState) => {
+        remoteSet(produce((d: DAWState) => {
           const t = d.tracks.find(x => x.id === p.trackId);
           if (!t) return;
           t.frozenClip = p.frozenClip;
@@ -5378,7 +5413,7 @@ function Studio() {
         }
         if (won.length) {
           won.forEach(touch);
-          setState(produce((d: DAWState) => { d.tracks.forEach(t => { if (won.includes(t.id)) { t.collabOwnerKey = key; t.collabOwnerName = o.author_name; t.collabOwnerColor = color; } }); }));
+          remoteSet(produce((d: DAWState) => { d.tracks.forEach(t => { if (won.includes(t.id)) { t.collabOwnerKey = key; t.collabOwnerName = o.author_name; t.collabOwnerColor = color; } }); }));
         }
         break;
       }
@@ -5401,7 +5436,7 @@ function Studio() {
         if (JSON.stringify(next) === before) break;
         next.forEach(m => knownMarkersRef.current.set(m.id, markerSig(m)));
         (Array.isArray(p.remove) ? p.remove : []).forEach((id: string) => { if (!next.some(m => m.id === id)) knownMarkersRef.current.delete(id); });
-        setState(produce((d: DAWState) => { d.markers = next; }));
+        remoteSet(produce((d: DAWState) => { d.markers = next; }));
         if (!o.replay) noteHistoryRef.current?.({ seq: o.seq, who: by, role: o.role, text: upsert.length === 1 ? `a posé le repère « ${String(upsert[0].name || 'Repère').slice(0, 60)} »` : 'a modifié les repères' });
         if (!o.replay && upsert.length === 1) setAiNotification(`📍 ${by} a posé le repère « ${String(upsert[0].name || 'Repère').slice(0, 60)} ».`);
         break;
@@ -5421,7 +5456,7 @@ function Studio() {
         if (JSON.stringify(next) === JSON.stringify(cur)) break;
         next.forEach(c => { if (!pendingChordsRef.current.has(c.id)) knownChordsRef.current.set(c.id, chordSig(c)); });
         [...knownChordsRef.current.keys()].forEach(id => { if (!next.some(c => c.id === id) && !pendingChordsRef.current.has(id)) knownChordsRef.current.delete(id); });
-        setState(produce((d: DAWState) => { d.chords = next; }));
+        remoteSet(produce((d: DAWState) => { d.chords = next; }));
         if (!o.replay) noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: "a modifié la piste d'accords" });
         if (!o.replay && upsert.length) setAiNotification(`🎸 ${o.author_name} a ${upsert.length > 1 ? `posé ${upsert.length} accords` : 'changé un accord'} dans la piste d’accords.`);
         break;
@@ -5439,7 +5474,7 @@ function Studio() {
           noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: `a réglé le tempo (${was.bpm} → ${op.bpm} BPM)`, undo: { kind: 'tempo', op: was as unknown as Record<string, unknown> } });
         }
         audioEngine.setBpm(op.bpm);
-        setState(prev => applyTempoOp(prev, op));
+        remoteSet(prev => applyTempoOp(prev, op));
         if (!o.replay) setAiNotification(`🎼 ${o.author_name} a réglé le tempo : ${op.bpm} BPM, ${op.timeSignature.numerator}/${op.timeSignature.denominator}${op.tempoEvents.length ? ` (${op.tempoEvents.length} changement${op.tempoEvents.length > 1 ? 's' : ''} dans le morceau)` : ''}.`);
         break;
       }
@@ -5451,7 +5486,7 @@ function Studio() {
         const sig = groupsSig(applyGroupsOp(stateRef.current, op));
         knownGroupsSigRef.current = sig;
         if (sig === groupsSig(stateRef.current)) break;
-        setState(prev => applyGroupsOp(prev, op));
+        remoteSet(prev => applyGroupsOp(prev, op));
         if (!o.replay) noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: `a modifié les groupes (${op.groups.length})` });
         if (!o.replay) setAiNotification(`🔗 ${o.author_name} a modifié les groupes (${op.groups.length} groupe${op.groups.length > 1 ? 's' : ''}${op.settings.suspended ? ', suspendus' : ''}).`);
         break;
@@ -5467,7 +5502,7 @@ function Studio() {
         const r = runTimeOpOn(cur, op);
         const mark = (s: DAWState): DAWState => ({ ...s, collabTimeOps: [...(s.collabTimeOps || []).filter(x => x !== op.id).slice(-199), op.id] });
         rememberTimeOp(r.state);
-        setState(prev => mark(prev === cur ? r.state : runTimeOpOn(prev, op).state));
+        remoteSet(prev => mark(prev === cur ? r.state : runTimeOpOn(prev, op).state));
         if (!o.replay) setAiNotification(`⏱️ ${o.author_name} : ${r.report.summary}.`);
         if (!o.replay) noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: r.report.summary });
         break;
@@ -5591,7 +5626,7 @@ function Studio() {
     const bufferIds = t.clips.map(cl => cl.bufferId).filter(Boolean) as string[];
     setTimeout(() => bufferIds.forEach(id => releaseBufferIfUnused(id, removedClipIds)), 0);
     audioEngine.disposeTrack(trackId);
-    setState(prev => ({
+    remoteSet(prev => ({
       ...prev,
       tracks: prev.tracks.filter(x => x.id !== trackId).map(x => ({ ...x, sends: (x.sends || []).filter(sd => sd.id !== trackId), outputTrackId: x.outputTrackId === trackId ? 'master' : x.outputTrackId })),
       selectedTrackId: prev.selectedTrackId === trackId ? null : prev.selectedTrackId,
@@ -5713,6 +5748,32 @@ function Studio() {
     if (Object.keys(changed).length) c.client.queue('song', 'song', { fields: changed });
   }, [state.projectKey, state.projectScale, state.arrangements, state.lyrics, state.lyricsRegions, collab]);
 
+  // Page fermée, rechargée ou mise en arrière-plan : les réglages qui attendaient leur envoi
+  // (regroupés 250 ms) partent tout de suite dans la file — gardée dans le navigateur, elle
+  // repart au retour. Avant : un réglage fait juste avant F5 était perdu.
+  useEffect(() => {
+    if (!collab) return;
+    const flushMixNow = () => {
+      const cc = collabRef.current;
+      if (!cc) return;
+      mixTimersRef.current.forEach(t => window.clearTimeout(t));
+      mixTimersRef.current.clear();
+      pendingMixRef.current.forEach((wanted, tid) => {
+        const cur = stateRef.current.tracks.find(x => x.id === tid);
+        if (!cur || !wanted.size) return;
+        const all = mixFieldsOf(cur);
+        const fields: MixFields = {};
+        wanted.forEach(f => { if (f in all) fields[f] = all[f]; });
+        if (Object.keys(fields).length) cc.client.queue('mix:' + tid, 'mix', { trackId: tid, fields });
+      });
+      pendingMixRef.current.clear();
+    };
+    const onHide = () => { if (document.visibilityState === 'hidden') flushMixNow(); };
+    window.addEventListener('pagehide', flushMixNow);
+    document.addEventListener('visibilitychange', onHide);
+    return () => { window.removeEventListener('pagehide', flushMixNow); document.removeEventListener('visibilitychange', onHide); };
+  }, [collab]);
+
   // Fin d'une prise : elle part tout de suite (le contenu attendait la fin de l'enregistrement).
   useEffect(() => { if (!state.isRecording && collabRef.current) contentFlushRef.current?.(); }, [state.isRecording]);
 
@@ -5781,13 +5842,54 @@ function Studio() {
       client.onFailure = (o) => setAiNotification(`⚠️ Une modification de ${o.author_name} n'a pas pu être reçue (connexion). Demande-lui de la renvoyer, ou recharge la session (panneau Collaboration).`);
       client.onSent = (kind, op, seq) => {
         const tid = typeof op.trackId === 'string' ? op.trackId : '';
-        if (kind === 'mix' && op.fields && typeof op.fields === 'object') Object.keys(op.fields).forEach(f => lwwRef.current.note(`${tid}:${f}`, seq));
+        if (kind === 'mix' && op.fields && typeof op.fields === 'object') Object.keys(op.fields).forEach(f => {
+          const key = `${tid}:${f}`;
+          lwwRef.current.note(key, seq);
+          // Valeur reçue mise de côté pendant notre envoi : la plus récente du journal gagne, chez nous aussi.
+          const d = deferredMixRef.current.get(key);
+          if (!d) return;
+          deferredMixRef.current.delete(key);
+          if (d.seq < seq) return;
+          if (pendingMixRef.current.get(tid)?.has(f) || (client.outbox.peekQueued('mix:' + tid)?.fields || {})[f] !== undefined) return; // changé à nouveau ici : le nôtre partira après
+          lwwRef.current.accept(key, d.seq);
+          knownFieldsRef.current.set(tid, { ...(knownFieldsRef.current.get(tid) || {}), [f]: fieldSig(d.value) });
+          remoteSet(produce((dr: DAWState) => { const t = dr.tracks.find(x => x.id === tid); if (t) applyMixFields(t as Track, { [f]: d.value }, () => true); }));
+        });
         else if (kind === 'content' || kind === 'lock' || kind === 'freeze') {
           lwwRef.current.note(`${kind}:${tid}`, seq);
           // Clip par clip : nos clips envoyés ne seront pas écrasés par une version plus ancienne.
           if (kind === 'content') {
             [...(Array.isArray(op.changed) ? op.changed : []), ...(Array.isArray(op.removed) ? op.removed : [])].forEach((id: unknown) => { if (typeof id === 'string') lwwRef.current.note(`clip:${tid}:${id}`, seq); });
             if (op.meta) lwwRef.current.note(`cmeta:${tid}`, seq);
+            // Clips reçus pendant notre envoi : le plus récent du journal gagne, chez nous aussi.
+            const sentClips = new Map(((op.content as any)?.clips || []).map((x: any) => [x.id, x]));
+            const upsert: Clip[] = [];
+            const drop: string[] = [];
+            [...(Array.isArray(op.changed) ? op.changed : []), ...(Array.isArray(op.removed) ? op.removed : [])].forEach((cid: unknown) => {
+              if (typeof cid !== 'string') return;
+              const key = `${tid}:${cid}`;
+              const d = deferredClipRef.current.get(key);
+              if (!d) return;
+              deferredClipRef.current.delete(key);
+              if (d.seq < seq) return;
+              // Changé à nouveau ici depuis l'envoi : le nôtre repartira et gagnera.
+              const local = stateRef.current.tracks.find(x => x.id === tid)?.clips.find(x => x.id === cid);
+              const sent = sentClips.get(cid) as Clip | undefined;
+              if ((local && sent && clipSig(local) !== clipSig(sent)) || (!!local !== !!sent)) return;
+              lwwRef.current.accept(`clip:${tid}:${cid}`, d.seq);
+              if (d.clip) upsert.push(d.clip); else drop.push(cid);
+            });
+            if (upsert.length || drop.length) {
+              knownContentRef.current.set(tid, noteMerged(knownContentRef.current.get(tid), upsert, drop));
+              remoteSet(produce((dr: DAWState) => {
+                const t = dr.tracks.find(x => x.id === tid);
+                if (!t) return;
+                const gone = new Set(drop);
+                const clips = (t.clips as Clip[]).filter(x => !gone.has(x.id));
+                for (const u of upsert) { const i = clips.findIndex(x => x.id === u.id); if (i >= 0) clips[i] = { ...u }; else clips.push({ ...u }); }
+                t.clips = clips as any;
+              }));
+            }
           }
         }
         else if (kind === 'track_del') lwwRef.current.note(`track:${tid}`, seq);
@@ -5918,6 +6020,8 @@ function Studio() {
     knownChordsRef.current.clear();
     pendingChordsRef.current.clear();
     knownContentRef.current.clear();
+    deferredMixRef.current.clear();
+    deferredClipRef.current.clear();
     knownOrderRef.current = null;
     lastOrderListRef.current = null;
     knownSongRef.current.clear();
