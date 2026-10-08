@@ -290,7 +290,7 @@ const ChannelStrip: React.FC<{
             <button 
               onClick={(e) => handleFXClick(e, p)}
               aria-label={`Ouvrir ${pluginDisplayName(p)} (${track.name})`}
-              className={`w-full h-full bg-black/40 rounded border border-white/5 text-[10px] font-black hover:border-cyan-500/40 transition-all px-1.5 text-left truncate flex items-center pr-12 cursor-grab active:cursor-grabbing ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}
+              className={`w-full h-full bg-black/40 [[data-theme=light]_&]:bg-nv-surface rounded border border-white/5 text-[10px] font-black hover:border-cyan-500/40 transition-all px-1.5 text-left truncate flex items-center pr-12 cursor-grab active:cursor-grabbing ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}
             >
                <i className="fas fa-grip-vertical text-slate-700 mr-1.5 text-[8px]"></i>
                <PluginName plugin={p} className="font-semibold" />

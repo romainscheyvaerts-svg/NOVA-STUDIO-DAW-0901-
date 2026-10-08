@@ -392,7 +392,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                         <span className="text-slate-600" aria-hidden="true">•</span>
                         {/* Liste étroite : tonalité OU genre, sinon les deux sortaient en « T… • F#… » (QA 04/10). */}
                         {inst.key
-                            ? <span className="mono shrink-0 text-cyan-300/80">{tonaliteFr(inst.key)}</span>
+                            ? <span className="mono shrink-0 text-cyan-300">{tonaliteFr(inst.key)}</span>
                             : <span className="truncate">{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>}
                     </div>
                 </div>
