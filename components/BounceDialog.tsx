@@ -128,7 +128,7 @@ const BounceDialog: React.FC<Props> = ({ open, mode, trackId, range, tracks, set
             <div className="space-y-2 rounded-xl border border-cyan-500/30 p-2">
               <button type="button" disabled={!!busy} onClick={() => void doRange(true)} data-testid="bounce-wet"
                 title="Rend la plage AVEC les effets de la piste sur une nouvelle piste, comme à la lecture (Logic : Bounce in Place · Ableton : Bounce to New Track · FL : Consolidate) ; les clips d'origine de la plage sont coupés"
-                className={`${btn} w-full bg-nv-accent text-left text-nv-accent-ink`}>
+                className={`${btn} w-full bg-cyan-500 text-left text-black hover:bg-cyan-400`}>
                 <i className="fas fa-wand-magic-sparkles mr-2" />Avec effets <span className="font-normal opacity-80">· bounce in place</span>
               </button>
               {tailRow}
@@ -158,7 +158,7 @@ const BounceDialog: React.FC<Props> = ({ open, mode, trackId, range, tracks, set
                 {vstNeeded && <p role="alert" className="rounded-lg bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-500">Cette piste a des VST : connecte le pont (appli Windows Nova Studio), sinon le rendu gelé à jour est utilisé s'il existe.</p>}
                 <button type="button" disabled={!!busy} onClick={() => void doCommit()} data-testid="commit-run"
                   title="Pro Tools 2020+ : Commit · Logic : Bounce in Place (remplacer) · Ableton : Freeze and Flatten"
-                  className={`${btn} w-full bg-nv-accent text-nv-accent-ink`}><i className="fas fa-check-double mr-2" />Commit</button>
+                  className={`${btn} w-full bg-cyan-500 text-black hover:bg-cyan-400`}><i className="fas fa-check-double mr-2" />Commit</button>
               </>
             )}
           </>
@@ -176,7 +176,7 @@ const BounceDialog: React.FC<Props> = ({ open, mode, trackId, range, tracks, set
                 </label>
                 <button type="button" disabled={!!busy} onClick={() => void doPrint()} data-testid="print-run"
                   title="Pro Tools : enregistrer un bus sur une piste audio (print) · Logic : Bounce in Place d'un aux · Ableton : Resample"
-                  className={`${btn} w-full bg-nv-accent text-nv-accent-ink`}><i className="fas fa-print mr-2" />Imprimer</button>
+                  className={`${btn} w-full bg-cyan-500 text-black hover:bg-cyan-400`}><i className="fas fa-print mr-2" />Imprimer</button>
               </>
             )}
           </>

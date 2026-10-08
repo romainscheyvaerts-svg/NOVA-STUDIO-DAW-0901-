@@ -187,7 +187,7 @@ const AudioSuiteDialog: React.FC<Props> = ({ open, targets, range, tracks, setSt
 
   const tab = (s: Source, label: string, title: string, disabled = false) => (
     <button type="button" role="tab" aria-selected={source === s} disabled={disabled} onClick={() => setSource(s)} title={title}
-      className={`flex-1 min-h-[36px] [@media(pointer:coarse)]:min-h-[44px] rounded-lg px-2 text-[12px] font-bold disabled:opacity-40 ${source === s ? 'bg-nv-accent text-nv-accent-ink' : 'text-nv-muted hover:bg-nv-accent/10'}`}>{label}</button>
+      className={`flex-1 min-h-[36px] [@media(pointer:coarse)]:min-h-[44px] rounded-lg px-2 text-[12px] font-bold disabled:opacity-40 ${source === s ? 'bg-cyan-500 text-black hover:bg-cyan-400' : 'text-nv-muted hover:bg-nv-accent/10'}`}>{label}</button>
   );
   const sel = 'w-full rounded-lg border border-nv-line bg-nv-well px-2 py-2 text-[12px] text-nv-ink';
 
@@ -248,7 +248,7 @@ const AudioSuiteDialog: React.FC<Props> = ({ open, targets, range, tracks, setSt
 
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={!!busy || !chosen || !!blocked || !resolved.length} onClick={() => void apply()} data-testid="audiosuite-run"
-            className="min-h-[40px] [@media(pointer:coarse)]:min-h-[48px] flex-1 rounded-xl bg-nv-accent px-4 text-[13px] font-bold text-nv-accent-ink disabled:opacity-40">
+            className="min-h-[40px] [@media(pointer:coarse)]:min-h-[48px] flex-1 rounded-xl bg-cyan-500 px-4 text-[13px] font-bold text-black hover:bg-cyan-400 disabled:opacity-40">
             <i className="fas fa-wand-magic-sparkles mr-2" />Traiter
           </button>
           {revertable.length > 0 && (

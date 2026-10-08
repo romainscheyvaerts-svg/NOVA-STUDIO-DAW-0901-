@@ -178,7 +178,7 @@ const TrackPresetDialog: React.FC<Props> = ({ open, trackId, tracks, setState, o
                           <form className="flex gap-1" onSubmit={e => { e.preventDefault(); void act(async () => { await renamePreset(p.id, renaming.name); setRenaming(null); await refresh(); }); }}>
                             <input autoFocus value={renaming.name} onChange={e => setRenaming({ id: p.id, name: e.target.value })} aria-label="Nouveau nom"
                               className="min-w-0 flex-1 rounded-lg border border-nv-line bg-nv-well px-2 py-1 text-[13px] outline-none focus:border-nv-accent" />
-                            <button type="submit" className={`${btn} bg-nv-accent text-nv-accent-ink`}>OK</button>
+                            <button type="submit" className={`${btn} bg-cyan-500 text-black hover:bg-cyan-400`}>OK</button>
                           </form>
                         ) : (
                           <p className="flex items-center gap-2 text-[13px] font-bold">
@@ -194,7 +194,7 @@ const TrackPresetDialog: React.FC<Props> = ({ open, trackId, tracks, setState, o
                       {track && (
                         <button type="button" disabled={busy} onClick={() => void recallOn(p)} data-testid="track-preset-apply"
                           title={`Remplace la chaîne de « ${track.name} » par celle du preset (une seule étape d’annulation)`}
-                          className={`${btn} bg-nv-accent text-nv-accent-ink`}><i className="fas fa-wand-magic-sparkles mr-1" />Appliquer à {track.name}</button>
+                          className={`${btn} bg-cyan-500 text-black hover:bg-cyan-400`}><i className="fas fa-wand-magic-sparkles mr-1" />Appliquer à {track.name}</button>
                       )}
                       <button type="button" disabled={busy} onClick={() => void createWith(p)} data-testid="track-preset-new"
                         title="Crée une nouvelle piste avec cette chaîne (Pro Tools : New Track > Track Preset)"
@@ -232,7 +232,7 @@ const TrackPresetDialog: React.FC<Props> = ({ open, trackId, tracks, setState, o
             <form className="flex gap-1" onSubmit={e => { e.preventDefault(); void saveCurrent(); }}>
               <input autoFocus value={saveName} onChange={e => setSaveName(e.target.value)} aria-label="Nom du Track Preset" data-testid="track-preset-name"
                 className="min-w-0 flex-1 rounded-lg border border-nv-line bg-nv-well px-3 py-2 text-[13px] outline-none focus:border-nv-accent" />
-              <button type="submit" disabled={busy || !saveName.trim()} className={`${btn} bg-nv-accent text-nv-accent-ink`}>Enregistrer</button>
+              <button type="submit" disabled={busy || !saveName.trim()} className={`${btn} bg-cyan-500 text-black hover:bg-cyan-400`}>Enregistrer</button>
               <button type="button" onClick={() => setSaveName(null)} className={`${btn} text-nv-muted`}>Annuler</button>
             </form>
           ))}

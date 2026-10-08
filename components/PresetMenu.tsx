@@ -13,6 +13,7 @@
  * d'annulation, un seul envoi en collaboration).
  */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { PluginInstance } from '../types';
 import {
   applyPluginPreset, CompareState, compareInit, compareModified, compareOnEdit, compareToggle, comparing, makePluginPreset,
@@ -216,8 +217,9 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
         </button>
       )}
 
-      {open && pos && (
-        <div ref={panelRef} role="menu" data-testid="preset-panel" onClick={e => e.stopPropagation()}
+      {/* Hors de la fenêtre de l'effet (elle est déplaçable : un parent transformé décalait le panneau). */}
+      {open && pos && createPortal(
+        <div ref={panelRef} role="menu" data-testid="preset-panel" onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}
           className="fixed z-[950] max-h-[min(70vh,520px)] overflow-y-auto rounded-xl border border-nv-line bg-nv-raised p-2 text-nv-ink shadow-2xl"
           style={{ left: pos.left, top: pos.top, width: pos.width }}>
           <p className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wide text-nv-muted truncate">Presets · {plugin.params?.name || plugin.name}</p>
@@ -230,7 +232,7 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
             {!simple && current && !current.bundled && (
               <button type="button" disabled={busy} onClick={() => void save(current.name, current)} data-testid="preset-save"
                 title={`Enregistre le réglage actuel dans « ${current.name} » (Pro Tools : Save Settings, Ctrl+S dans le Librarian)`}
-                className="min-h-[34px] rounded-lg bg-nv-accent px-3 text-[11px] font-bold text-nv-accent-ink disabled:opacity-40">
+                className="min-h-[34px] rounded-lg bg-cyan-500 px-3 text-[11px] font-bold text-black hover:bg-cyan-400 disabled:opacity-40">
                 <i className="fas fa-floppy-disk mr-1" />Enregistrer
               </button>
             )}
@@ -244,7 +246,7 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
             <form className="mb-2 flex gap-1" onSubmit={e => { e.preventDefault(); void save(saveAs); }}>
               <input autoFocus value={saveAs} onChange={e => setSaveAs(e.target.value)} placeholder="Nom du preset (ex. Voix rap · 2:1)" aria-label="Nom du preset" data-testid="preset-name"
                 className="min-w-0 flex-1 rounded-lg border border-nv-line bg-nv-well px-2 py-1.5 text-[12px] text-nv-ink outline-none focus:border-nv-accent" />
-              <button type="submit" disabled={busy || !saveAs.trim()} className="rounded-lg bg-nv-accent px-3 text-[11px] font-bold text-nv-accent-ink disabled:opacity-40">OK</button>
+              <button type="submit" disabled={busy || !saveAs.trim()} className="rounded-lg bg-cyan-500 px-3 text-[11px] font-bold text-black hover:bg-cyan-400 disabled:opacity-40">OK</button>
             </form>
           )}
 
@@ -261,7 +263,7 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
                     <form className="flex gap-1" onSubmit={e => { e.preventDefault(); void act(async () => { const n = await renamePreset(p.id, renaming.name); if (isCur) onApply({ presetName: n.name }); setRenaming(null); await refresh(); setStatus({ kind: 'ok', text: `Renommé en « ${n.name} ».` }); }); }}>
                       <input autoFocus value={renaming.name} onChange={e => setRenaming({ id: p.id, name: e.target.value })} aria-label="Nouveau nom"
                         className="min-w-0 flex-1 rounded-lg border border-nv-line bg-nv-well px-2 py-1 text-[12px] text-nv-ink outline-none focus:border-nv-accent" />
-                      <button type="submit" className="rounded-lg bg-nv-accent px-2 text-[11px] font-bold text-nv-accent-ink">OK</button>
+                      <button type="submit" className="rounded-lg bg-cyan-500 px-2 text-[11px] font-bold text-black">OK</button>
                       <button type="button" onClick={() => setRenaming(null)} className="rounded-lg px-2 text-[11px] text-nv-muted">Annuler</button>
                     </form>
                   </li>
@@ -307,7 +309,8 @@ const PresetMenu: React.FC<PresetMenuProps> = ({ plugin, onApply, onReloaded, si
               <input ref={fileRef} type="file" accept={`${PRESET_EXT},application/json`} className="hidden" onChange={e => void onImport(e.target.files?.[0])} />
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
