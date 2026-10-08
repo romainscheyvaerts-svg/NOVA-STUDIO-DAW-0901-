@@ -1325,6 +1325,14 @@ class NativePlugin:
             self._editor_open.clear()
             object.__setattr__(self, "_values_dirty", True)
 
+    def bring_editor_to_front(self):
+        if _u32 is not None:
+            try:
+                _u32.AllowSetForegroundWindow(self._host.pid)
+            except Exception:
+                pass
+        self._host.request("show_editor", offscreen=False, title=self.name)
+
     def has_editor(self) -> bool:
         return bool(self._host.request("has_editor").get("has_editor"))
 

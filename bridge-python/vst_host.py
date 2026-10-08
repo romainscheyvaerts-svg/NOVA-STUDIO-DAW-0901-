@@ -305,6 +305,7 @@ class JuceThread:
         self.jobs: "queue.Queue" = queue.Queue()
         self._editor_close: Optional[threading.Event] = None
         self.editor_slot: Optional["Slot"] = None
+        self._native_editors: Dict[int, threading.Event] = {}
 
     def call(self, fn, *args) -> Future:
         fut: Future = Future()
@@ -319,13 +320,49 @@ class JuceThread:
         return self.call(fn, *args).result(timeout=timeout)
 
     def open_editor(self, slot: "Slot", on_closed: Callable[[], None]):
+        if isinstance(slot.plugin, vst_native.NativePlugin):
+            # Hôte natif : la fenêtre vit dans le processus du plugin ; ce thread reste libre
+            # (un chargement ne la ferme plus) et plusieurs fenêtres peuvent rester ouvertes.
+            self._open_native_editor(slot, on_closed)
+            return
         if self._editor_close is not None:
             self._editor_close.set()  # un seul éditeur à la fois
         self.jobs.put(("editor", slot, on_closed, None))
 
     def close_editor(self, slot: "Slot"):
+        ev = self._native_editors.get(id(slot))
+        if ev is not None:
+            ev.set()
+            return
         if self.editor_slot is slot and self._editor_close is not None:
             self._editor_close.set()
+
+    def _open_native_editor(self, slot: "Slot", on_closed: Callable[[], None]):
+        if id(slot) in self._native_editors:
+            try:
+                slot.plugin.bring_editor_to_front()      # déjà ouverte : ramenée devant
+            except Exception as e:
+                logger.debug(f"Fenêtre de {slot.name} : {e}")
+            return
+        ev = threading.Event()
+        self._native_editors[id(slot)] = ev
+        plugin = slot.plugin
+
+        def run():
+            try:
+                logger.info(f"🪟 Fenêtre ouverte : {slot.name}")
+                plugin.show_editor(ev)
+            except Exception as e:
+                logger.error(f"Fenêtre de {slot.name} : {e}")
+            finally:
+                if self._native_editors.get(id(slot)) is ev:
+                    self._native_editors.pop(id(slot), None)
+                logger.info(f"🪟 Fenêtre fermée : {slot.name}")
+                try:
+                    on_closed()
+                except Exception as e:
+                    logger.error(f"Fermeture de fenêtre : {e}")
+        threading.Thread(target=run, name=f"editor-{slot.slot_id[:12]}", daemon=True).start()
 
     def release(self, obj):
         """Détruit un plugin sur ce thread (destructeur JUCE)."""
