@@ -261,3 +261,134 @@ describe('réparation d’un écart (version complète qui fait foi)', () => {
     expect(r2.clips.some(c => c.id === 'fantome')).toBe(true);
   });
 });
+
+/**
+ * Envois EN ROUTE : comme dans l'appli, on ne connaît notre numéro du journal qu'à la
+ * réponse du serveur. Pendant ce temps, une version reçue d'un clip qu'on vient d'envoyer
+ * est mise de côté, puis départagée à la réponse (App : deferredClipRef / onSent).
+ */
+class InflightPeer extends Peer {
+  inflight: { clips: Clip[]; changed: string[]; removed: string[]; op: Op } | null = null;
+  deferred = new Map<string, { seq: number; clip: Clip | null }>();
+  /** Envoi : le serveur l'enregistre tout de suite (numéro attribué), la réponse arrive plus tard (ack). */
+  startSend(server: Server) {
+    if (this.inflight) return false;
+    const d = contentDelta(this.known, 'm', this.clips);
+    if (isEmptyDelta({ ...d, meta: false })) return false;
+    const clips = JSON.parse(JSON.stringify(this.clips));
+    const op = server.post(this.name, clips, d.changed, d.removed);
+    this.seen.add(op.seq);
+    this.inflight = { clips, changed: d.changed, removed: d.removed, op };
+    return true;
+  }
+  ack(_server?: Server) {
+    const f = this.inflight!;
+    this.inflight = null;
+    const o = f.op;
+    [...f.changed, ...f.removed].forEach(id => this.lww.note(`clip:${id}`, o.seq));
+    // Départage des versions reçues pendant l'envoi (comme onSent dans App).
+    const sent = new Map(f.clips.map(c => [c.id, c]));
+    const upsert: Clip[] = []; const drop: string[] = [];
+    for (const id of [...f.changed, ...f.removed]) {
+      const dd = this.deferred.get(id);
+      if (!dd) continue;
+      this.deferred.delete(id);
+      if (dd.seq < o.seq) continue;
+      const local = this.clips.find(c => c.id === id);
+      const s = sent.get(id);
+      if ((local && s && clipSig(local) !== clipSig(s)) || (!!local !== !!s)) continue;
+      this.lww.accept(`clip:${id}`, dd.seq);
+      if (dd.clip) upsert.push(dd.clip); else drop.push(id);
+    }
+    this.known = noteSent(this.known, { meta: 'm', clips: f.clips, changed: f.changed, removed: f.removed });
+    if (upsert.length || drop.length) {
+      this.known = noteMerged(this.known, upsert, drop);
+      this.clips = this.clips.filter(c => !drop.includes(c.id));
+      for (const u of upsert) { const i = this.clips.findIndex(c => c.id === u.id); if (i >= 0) this.clips[i] = { ...u }; else this.clips.push({ ...u }); }
+    }
+    return o;
+  }
+  receive(o: Op) {
+    if (this.seen.has(o.seq)) return;
+    this.seen.add(o.seq);
+    const pending = pendingClipIds(this.known, this.clips);
+    if (this.inflight) [...this.inflight.changed, ...this.inflight.removed].forEach(id => pending.add(id));
+    const inc = new Map(o.clips.map(c => [c.id, c]));
+    for (const id of [...o.changed, ...o.removed]) {
+      if (!pending.has(id)) continue;
+      const d = this.deferred.get(id);
+      if (!d || d.seq < o.seq) this.deferred.set(id, { seq: o.seq, clip: inc.get(id) || null });
+    }
+    const r = mergeClips(this.clips, o.clips, o, id => this.lww.accept(`clip:${id}`, o.seq), pending);
+    this.clips = r.clips;
+    this.known = noteMerged(this.known, r.taken, r.dropped);
+  }
+}
+
+describe('envois en route (numéro du journal connu à la réponse)', () => {
+  it('Lina déplace la phrase 2, Max baisse la phrase 3, les deux envois se croisent : les deux restent', () => {
+    const init = [clip('p1', 0), clip('p2', 2), clip('p3', 4)];
+    const s = new Server();
+    const lina = new InflightPeer('lina', init), max = new InflightPeer('max', init);
+    lina.edit(cs => cs.map(c => (c.id === 'p2' ? { ...c, start: 2.5 } : c)));
+    max.edit(cs => cs.map(c => (c.id === 'p3' ? { ...c, gain: 0.6 } : c)));
+    lina.startSend(s); max.startSend(s);   // enregistrés 101 (Lina) et 102 (Max), réponses pas encore arrivées
+    const [a, b] = s.ops.slice(-2);
+    max.receive(a); lina.receive(b);         // chacun reçoit l'autre AVANT sa propre réponse
+    lina.ack(); max.ack();
+    expect(lina.view()).toEqual(max.view());
+    expect(lina.clips.find(c => c.id === 'p2')!.start).toBe(2.5);
+    expect(max.clips.find(c => c.id === 'p3')!.gain).toBe(0.6);
+  });
+
+  it('même clip, envois croisés : le plus récent du journal gagne chez les deux', () => {
+    const init = [clip('p1', 0)];
+    const s = new Server();
+    const lina = new InflightPeer('lina', init), max = new InflightPeer('max', init);
+    lina.edit(cs => cs.map(c => ({ ...c, start: 1 })));
+    max.edit(cs => cs.map(c => ({ ...c, gain: 0.5 })));
+    lina.startSend(s); max.startSend(s);   // 101 (Lina), 102 (Max : plus récent)
+    const [a, b] = s.ops.slice(-2);
+    lina.receive(b); max.receive(a);         // reçus pendant que les deux réponses sont en route
+    lina.ack(); max.ack();
+    expect(lina.view()).toEqual(max.view());
+    expect(lina.clips[0].gain).toBe(0.5);
+  });
+
+  it('fuzz : 300 sessions à 3, envois en route qui se croisent, livraisons désordonnées → même résultat partout', () => {
+    for (let run = 0; run < 300; run++) {
+      const rand = rng(5000 + run);
+      const init = Array.from({ length: 4 }, (_, i) => clip(`c${i}`, i * 2));
+      const s = new Server();
+      const peers = [new InflightPeer('a', init), new InflightPeer('b', init), new InflightPeer('c', init)];
+      let n = 0;
+      const deliver = (p: InflightPeer) => { for (const o of [...s.ops].sort(() => rand() - 0.5)) if (rand() < 0.5) p.receive(o); };
+      for (let step = 0; step < 40; step++) {
+        const p = peers[Math.floor(rand() * 3)];
+        const r = rand();
+        if (r < 0.35) {
+          p.edit(cs => {
+            const q = rand();
+            if (q < 0.2 || !cs.length) return [...cs, clip(`new-${p.name}-${n++}`, rand() * 10)];
+            const i = Math.floor(rand() * cs.length);
+            if (q < 0.35) return cs.filter((_, x) => x !== i);
+            if (q < 0.7) return cs.map((c, x) => (x === i ? { ...c, start: Math.round(rand() * 100) / 10 } : c));
+            return cs.map((c, x) => (x === i ? { ...c, gain: Math.round(rand() * 10) / 10 } : c));
+          });
+        } else if (r < 0.55) p.startSend(s);
+        else if (r < 0.75) { if (p.inflight) p.ack(); }
+        else deliver(p);
+      }
+      // Fin : tout part, tout arrive.
+      for (let round = 0; round < 30; round++) {
+        let any = false;
+        for (const p of peers) { if (p.inflight) { p.ack(); any = true; } if (p.startSend(s)) { p.ack(); any = true; } }
+        for (const p of peers) for (const o of [...s.ops].sort(() => rand() - 0.5)) p.receive(o);
+        if (!any) break;
+      }
+      const v = peers[0].view();
+      expect(peers[1].view(), `session ${run}`).toEqual(v);
+      expect(peers[2].view(), `session ${run}`).toEqual(v);
+    }
+  });
+});
