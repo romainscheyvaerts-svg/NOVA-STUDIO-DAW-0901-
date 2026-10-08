@@ -176,15 +176,22 @@ const TrackMeter: React.FC<Props> = ({ pointId, grTrackId, orientation = 'vertic
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     let W = 0, H = 0, dpr = 1, lastKey = '', lastClip = -1, lastRead = '', lastGr = '';
-    const resize = () => {
+    // Taille lue dans le ResizeObserver (une seule mise en page pour tous les mètres). Avant,
+    // chaque mètre lisait clientWidth à son montage puis redimensionnait son canvas : 45 mises en
+    // page forcées à l'ouverture de la console de 40 pistes (≈ 270 ms bloquées).
+    const resize = (w0?: number, h0?: number) => {
       dpr = Math.min(2, window.devicePixelRatio || 1);
-      const w = Math.max(1, Math.round(canvas.clientWidth)), h = Math.max(1, Math.round(canvas.clientHeight));
+      const w = Math.max(1, Math.round(w0 ?? canvas.clientWidth)), h = Math.max(1, Math.round(h0 ?? canvas.clientHeight));
       if (w === W && h === H) return false;
       W = w; H = h; canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); lastKey = '';
       return true;
     };
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(entries => {
+      const r = entries[entries.length - 1].contentRect;
+      if (resize(r.width, r.height)) frame(performance.now());
+    }) : null;
     const frame = (now: number) => {
-      if (!W) resize();
+      if (!W) { if (ro) return; resize(); }
       const v = meterBank.view(pointId, now);
       const s = meterPrefs.scale();
       const gr = grTrackId ? audioEngine.getTrackGainReduction(grTrackId) : null;
@@ -216,9 +223,8 @@ const TrackMeter: React.FC<Props> = ({ pointId, grTrackId, orientation = 'vertic
         if (g !== lastGr) { lastGr = g; grRef.current.textContent = g; grRef.current.title = gr ? `Réduction de gain : ${gr.db.toFixed(1).replace('.', ',')} dB` : ''; }
       }
     };
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => { if (resize()) frame(performance.now()); }) : null;
     ro?.observe(canvas);
-    resize(); frame(performance.now());
+    if (!ro) { resize(); frame(performance.now()); }
     const unsub = meterClock.subscribe(frame);
     const unsubPrefs = meterPrefs.subscribe(() => { lastKey = ''; frame(performance.now()); });
     return () => { unsub(); unsubPrefs(); ro?.disconnect(); };

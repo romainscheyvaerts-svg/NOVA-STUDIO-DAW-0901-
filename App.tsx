@@ -12,24 +12,12 @@ import { LoudnessPanelHost, loudnessPanel } from './components/meters/LoudnessPa
 import MobileTransport from './components/MobileTransport';
 import AdminTemplateButton from './components/AdminTemplateButton';
 import ArrangementView from './components/ArrangementView';
-const MixerView = lazy(() => import('./components/MixerView').then(m => ({ default: React.memo(m.default) })));
+const MixerView = lazyWithPreload(() => import('./components/MixerView').then(m => ({ default: React.memo(m.default) })));
 // Charge a la demande : PluginEditor tire les 13 interfaces de plugins,
 // soit plus de 8000 lignes qui ne servent qu'a l'ouverture d'un effet.
+import { lazyWithPreload, preloadWhenIdle } from './utils/lazyPreload';
 const loadPluginEditor = () => import('./components/PluginEditor');
-const PluginEditor = lazy(loadPluginEditor);
-/**
- * Fenêtre d'effet préchargée quand le navigateur est libre (quelques secondes après
- * l'ouverture) : le 1er toucher / clic sur un effet l'ouvre tout de suite, même sur un PC
- * chargé (avant : « Chargement… » pendant plus d'une seconde, le temps d'arriver).
- */
-function preloadPluginEditorWhenIdle(): () => void {
-  if (typeof window === 'undefined') return () => {};
-  const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
-  let idle: number | null = null;
-  const go = () => { void loadPluginEditor().catch(() => { /* réessayé à l'ouverture de la fenêtre */ }); };
-  const t = window.setTimeout(() => { if (w.requestIdleCallback) idle = w.requestIdleCallback(go, { timeout: 5000 }); else go(); }, 2500);
-  return () => { window.clearTimeout(t); if (idle !== null) w.cancelIdleCallback?.(idle); };
-}
+const PluginEditor = lazyWithPreload(loadPluginEditor);
 const SynthPanel = lazy(() => import('./components/SynthPanel'));
 import ChatAssistant from './components/ChatAssistant';
 import ViewModeSwitcher from './components/ViewModeSwitcher';
@@ -43,25 +31,25 @@ import { dockItem, useDockFit } from './utils/dockFit';
 import SamplerHost from './components/SamplerHost';
 import { openSamplerPanel } from './utils/samplerPanelStore';
 import { requestSampler } from './utils/samplerPanelStore';
-const TrackListPanel = lazy(() => import('./components/TrackListPanel'));
-const GroupsListPanel = lazy(() => import('./components/GroupsListPanel'));
-const TimeOpsDialog = lazy(() => import('./components/TimeOpsDialog'));
-const SessionProPanel = lazy(() => import('./components/SessionProPanel'));
-const ImportSessionDialog = lazy(() => import('./components/ImportSessionDialog'));
+const TrackListPanel = lazyWithPreload(() => import('./components/TrackListPanel'));
+const GroupsListPanel = lazyWithPreload(() => import('./components/GroupsListPanel'));
+const TimeOpsDialog = lazyWithPreload(() => import('./components/TimeOpsDialog'));
+const SessionProPanel = lazyWithPreload(() => import('./components/SessionProPanel'));
+const ImportSessionDialog = lazyWithPreload(() => import('./components/ImportSessionDialog'));
 const BusPanel = lazy(() => import('./components/BusPanel'));
 const AuthScreen = lazy(() => import('./components/AuthScreen'));
-const AutomationEditorView = lazy(() => import('./components/AutomationEditorView'));
+const AutomationEditorView = lazyWithPreload(() => import('./components/AutomationEditorView'));
 const ShareModal = lazy(() => import('./components/ShareModal'));
-const SaveProjectModal = lazy(() => import('./components/SaveProjectModal'));
-const LoadProjectModal = lazy(() => import('./components/LoadProjectModal'));
-const SessionTemplatesModal = lazy(() => import('./components/SessionTemplatesModal'));
-const ExportModal = lazy(() => import('./components/ExportModal'));
+const SaveProjectModal = lazyWithPreload(() => import('./components/SaveProjectModal'));
+const LoadProjectModal = lazyWithPreload(() => import('./components/LoadProjectModal'));
+const SessionTemplatesModal = lazyWithPreload(() => import('./components/SessionTemplatesModal'));
+const ExportModal = lazyWithPreload(() => import('./components/ExportModal'));
 /** « 1:02,5 » : position courte dans les notifications. */
 const formatClockShort = (t: number) => `${Math.floor(Math.max(0, t) / 60)}:${(Math.max(0, t) % 60).toFixed(1).padStart(4, '0').replace('.', ',')}`;
 const ExportQueueToast = lazy(() => import('./components/ExportQueueToast'));
-const MasterAssistantPanel = lazy(() => import('./components/MasterAssistantPanel'));
+const MasterAssistantPanel = lazyWithPreload(() => import('./components/MasterAssistantPanel'));
 
-const AudioSettingsPanel = lazy(() => import('./components/AudioSettingsPanel'));
+const AudioSettingsPanel = lazyWithPreload(() => import('./components/AudioSettingsPanel'));
 const CueMixPanel = lazy(() => import('./components/CueMixPanel'));
 
 const PluginManager = lazy(() => import('./components/PluginManager'));
@@ -94,7 +82,7 @@ import PreFxReplayPanel from './components/PreFxReplayPanel';
 import FrozenEditsNotice from './components/FrozenEditsNotice';
 import { recFreezeStore } from './utils/recFreezeStore';
 import { ProjectIO } from './services/ProjectIO';
-const PianoRoll = lazy(() => import('./components/PianoRoll'));
+const PianoRoll = lazyWithPreload(() => import('./components/PianoRoll'));
 import MidiHost from './components/MidiHost'; // V25 : .mid, groove, capture MIDI
 import MidiInputHost from './components/MidiInputHost'; // R16 : clavier de l'ordinateur, fenêtre MIDI, MIDI Learn
 import { midiManager } from './services/MidiManager';
@@ -119,8 +107,8 @@ import './utils/keymapStore';
 import { scrubControl } from './utils/scrubControl';
 import { registerLayoutPart } from './utils/windowLayouts';
 import TempoLane, { TEMPO_LANE_H, useTempoLaneShown, tempoLaneStore } from './components/TempoLane';
-const MetronomeDialog = lazy(() => import('./components/MetronomeDialog'));
-const TempoDialog = lazy(() => import('./components/TempoDialog'));
+const MetronomeDialog = lazyWithPreload(() => import('./components/MetronomeDialog'));
+const TempoDialog = lazyWithPreload(() => import('./components/TempoDialog'));
 import { audioBufferRegistry } from './utils/audioBufferRegistry';
 import { etirerBufferAsync, facteurPourTempo } from './utils/timeStretch';
 import MobileTracksPage from './components/MobileTracksPage';
@@ -650,7 +638,11 @@ function PaymentReturn({ sessionId }: { sessionId: string }) {
 }
 
 export default function App() {
-  useEffect(() => preloadPluginEditorWhenIdle(), []);
+  // Fenêtres et vues du quotidien préchargées quand le navigateur est libre : elles s'ouvrent
+  // dans la même image que le clic (avant : 300 à 450 ms, retenue de React 19 sur React.lazy).
+  useEffect(() => preloadWhenIdle([PluginEditor, ExportModal, TempoDialog, MasterAssistantPanel, SaveProjectModal, MixerView, TrackListPanel,
+    GroupsListPanel, SessionProPanel, TimeOpsDialog, MetronomeDialog, LoadProjectModal, ImportSessionDialog, PianoRoll, AutomationEditorView,
+    SessionTemplatesModal, AudioSettingsPanel]), []);
   const paidParam = (() => { try { return new URLSearchParams(window.location.search).get('nova_paid'); } catch { return null; } })();
   if (paidParam && /^cs_(test|live)_[A-Za-z0-9]+$/.test(paidParam)) return <PaymentReturn sessionId={paidParam} />;
   return <Studio />;
