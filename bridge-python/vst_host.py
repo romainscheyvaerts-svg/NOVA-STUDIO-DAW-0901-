@@ -1502,6 +1502,15 @@ class Slot:
                     cp = h.get(name)
                     if cp is None:
                         continue
+                    if isinstance(cp, vst_native.NativeCppParam):
+                        # Hôte natif : tous les pas en un aller-retour.
+                        try:
+                            got = cp._plugin._texts([(cp.host_index, vst_native.f32(i / steps)) for i in range(steps + 1)])
+                            out[name] = [t if ok else vst_native._fallback_text(vst_native.f32(i / steps))
+                                         for i, (ok, t) in enumerate(got)]
+                        except Exception:
+                            out[name] = [""] * (steps + 1)
+                        continue
                     texts = []
                     for i in range(steps + 1):
                         try:

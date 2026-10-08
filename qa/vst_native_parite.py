@@ -196,6 +196,13 @@ def run_engine(engine, pid, out, foreign=None, only_foreign=False):
     import vst_host
     assert vst_host.ENGINE == engine, (vst_host.ENGINE, engine)
     vst_host.LOAD_TIMEOUT_S = 1200.0   # pedalboard est lent sur cette machine chargée (Pro-Q 4 : 5 s + 50 s de réglages)
+    # Machine très chargée (Pro Tools, autres agents) et processus en priorité « inférieure à la
+    # normale » : des minutes sans processeur. Délais du banc allongés (pas ceux du pont).
+    import vst_native
+    vst_native.CALL_TIMEOUT_S = 1800.0
+    vst_native.PROCESS_TIMEOUT_S = 1800.0
+    _rs = vst_host.JuceThread.run_sync
+    vst_host.JuceThread.run_sync = lambda self, fn, *a, timeout=1800.0: _rs(self, fn, *a, timeout=max(timeout, 1800.0))
     spec = PLUGINS[pid]
     path, name = spec["path"], spec.get("plugin_name")
     tag = f"{pid}.{engine}" + (".foreign" if only_foreign else "")

@@ -86,6 +86,13 @@ def run(engine, test, out):
     import numpy as np
     import vst_host
     vst_host.LOAD_TIMEOUT_S = 1200.0
+    # Machine très chargée (Pro Tools, autres agents) et processus en priorité « inférieure à la
+    # normale » : des minutes sans processeur. Délais du banc allongés (pas ceux du pont).
+    import vst_native
+    vst_native.CALL_TIMEOUT_S = 1800.0
+    vst_native.PROCESS_TIMEOUT_S = 1800.0
+    _rs = vst_host.JuceThread.run_sync
+    vst_host.JuceThread.run_sync = lambda self, fn, *a, timeout=1800.0: _rs(self, fn, *a, timeout=max(timeout, 1800.0))
     juce = vst_host.JuceThread()
     res = {"engine": engine, "test": test}
     logf = open(os.path.join(out, f"{test}.{engine}.log"), "w", encoding="utf-8")
@@ -146,16 +153,18 @@ def run(engine, test, out):
                     auto = [{"name": "output_level", "frames": [0, at], "values": [hi["value"], lo["value"]]}]
                     y = vst_host.render_offline(juce, PROC3, None, state, tone, SR, 0.0, None, auto)
                     res[f"export_first_change_{at}"] = first_change(ref, y)
+                    np.save(os.path.join(out, f"automation.{engine}.export{at}.npy"), y)
                     # niveau juste avant / juste après le palier (dB, rapport sortie / référence)
                     a0 = y[:, at - 480:at]
                     a1 = y[:, at + 4800:at + 9600]
                     res[f"export_level_{at}"] = [round(20 * np.log10(np.sqrt(np.mean(a0 ** 2)) / np.sqrt(np.mean(ref[:, at - 480:at] ** 2))), 2),
                                                  round(20 * np.log10(np.sqrt(np.mean(a1 ** 2)) / np.sqrt(np.mean(ref[:, at + 4800:at + 9600] ** 2))), 2)]
-                # Lecture : changement porté par la trame (décalage dans le bloc)
-                s.set_automation_map(["output_level"])
+                # Lecture : changement porté par la trame (décalage dans le bloc), instance neuve
+                s.unload()
                 for at in (96000, 96037):
-                    s.set_parameters([{"name": "output_level", "value": hi["value"]}])
-                    s._reprepare_for_test = True
+                    s = vst_host.Slot("live", PROC3, None, SR, juce)
+                    s.load(state)
+                    s.set_automation_map(["output_level"])
                     blocks = []
                     for a in range(0, tone.shape[1], vst_host.BLOCK):
                         ch = [(0, at - a, lo["value"])] if a <= at < a + vst_host.BLOCK else None
@@ -163,7 +172,8 @@ def run(engine, test, out):
                     live = np.concatenate(blocks, axis=1)
                     lat = s.latency_samples
                     res[f"live_first_change_{at}"] = first_change(ref[:, :live.shape[1] - lat], live[:, lat:])
-                s.unload()
+                    np.save(os.path.join(out, f"automation.{engine}.live{at}.npy"), live)
+                    s.unload()
             elif test == "ruby2":
                 path = os.path.join(par.VST3, "RUBY2.vst3")
                 t = time.perf_counter()

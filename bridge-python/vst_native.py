@@ -516,7 +516,8 @@ class HostProcess:
     def alive(self) -> bool:
         return not self.dead and self.proc.poll() is None
 
-    def request(self, cmd: str, timeout: float = CALL_TIMEOUT_S, **kw) -> dict:
+    def request(self, cmd: str, timeout: Optional[float] = None, **kw) -> dict:
+        timeout = CALL_TIMEOUT_S if timeout is None else timeout
         if not self.alive():
             raise HostCrashed(self.crash_reason or "le processus du plugin s'est arrêté")
         rid = next(self._ids)
@@ -554,7 +555,8 @@ class HostProcess:
 
     # --- audio ------------------------------------------------------------------
 
-    def run(self, timeout: float = PROCESS_TIMEOUT_S) -> None:
+    def run(self, timeout: Optional[float] = None) -> None:
+        timeout = PROCESS_TIMEOUT_S if timeout is None else timeout
         """Demande posée dans la zone : l'hôte traite, on attend la fin (ou la mort du processus)."""
         if not self.alive():
             raise HostCrashed(self.crash_reason or "le processus du plugin s'est arrêté")
