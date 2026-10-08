@@ -6429,6 +6429,18 @@ function Studio() {
     if (!c.client.broadcast('tp', msg as unknown as Record<string, unknown>) && action !== 'sync') c.client.queue('tp', 'transport', msg as unknown as Record<string, unknown>);
   }, []);
   useEffect(() => { if (isListenHost) sendTransport(state.isPlaying ? 'play' : 'pause'); }, [state.isPlaying, isListenHost, sendTransport]);
+  // L'hôte déplace la tête de lecture à l'arrêt : les invités suivent ce geste (et seulement lui).
+  useEffect(() => {
+    if (!isListenHost) return;
+    let t: number | null = null;
+    const off = playheadStore.subscribe(() => {
+      if (stateRef.current.isPlaying) return;
+      if (t) window.clearTimeout(t);
+      t = window.setTimeout(() => { t = null; sendTransport('seek'); }, 150);
+    });
+    return () => { off(); if (t) window.clearTimeout(t); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isListenHost, sendTransport]);
   useEffect(() => {
     if (!isListenHost) return;
     const id = window.setInterval(() => sendTransport('sync'), 1000);
@@ -6470,7 +6482,10 @@ function Studio() {
       }
     } else {
       if (stateRef.current.isPlaying) { pausePlayback(); log('pause', target.pos); }
-      if (Math.abs(playheadStore.get() - target.pos) > 0.05) handleSeek(target.pos);
+      // À l'arrêt, seuls les gestes de l'hôte (pause, déplacement) replacent la tête de lecture : le
+      // recalage périodique ne doit pas empêcher l'invité de se déplacer pour poser un repère, éditer…
+      // (avant : ramené chaque seconde à la position de l'hôte).
+      if (m.action !== 'sync' && Math.abs(playheadStore.get() - target.pos) > 0.05) handleSeek(target.pos);
     }
   };
 
