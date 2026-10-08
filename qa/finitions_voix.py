@@ -165,7 +165,8 @@ def scenario_gel_vst(page, res):
 
 def scenario_mixauto(page, res, case=True):
     f = OUT / "projet_mixauto.zip"
-    projet(f, [R.track("track-rec-main", "LEAD", [])], breathAuto=False)
+    # Une ancienne prise plus loin (30 s) : seule la NOUVELLE prise doit être traitée.
+    projet(f, [R.track("track-rec-main", "LEAD", [R.clip("old-1", "Ancienne prise", 30, 10, "audio/voix.wav", takeNumber=1)])], breathAuto=False)
     R.open_project(page, f)
     R.close_overlays(page)
     if not case:
@@ -202,7 +203,8 @@ def scenario_mixauto(page, res, case=True):
     # Annuler (notification) : retire les respirations, garde la prise et le style.
     page.get_by_test_id("breath-undo").click(); page.wait_for_timeout(700)
     res["apres_annuler"] = R.st(page, clips)
-    res["ok"] = (bool(res["apres_prise"]["style"]) and any(c[2] > 0 for c in res["apres_prise"]["clips"])
+    res["ok"] = (bool(res["apres_prise"]["style"]) and any(c[2] > 0 for c in res["apres_prise"]["clips"] if c[0] != "Ancienne prise")
+                 and all(c[2] == 0 for c in res["apres_prise"]["clips"] if c[0] == "Ancienne prise")
                  and res["apres_annuler"]["style"] == res["apres_prise"]["style"]
                  and all(c[2] == 0 for c in res["apres_annuler"]["clips"]) and len(res["apres_annuler"]["clips"]) == len(res["apres_prise"]["clips"]))
 

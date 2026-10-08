@@ -1781,9 +1781,9 @@ function Studio() {
     setAiNotification(`${style.emoji} Mix « ${style.name} » appliqué sur tes pistes voix — Annuler pour revenir`);
     track('mix_style_applied', { style: style.id, auto });
     // Case « Traiter les respirations » du Mix auto (cochée par défaut) : suivie
-    // par tous les chemins (menu, Nova, style mis tout seul après la 1re prise).
-    // Après la prise, on laisse la nouvelle prise arriver dans l'état.
-    setTimeout(breathsAfterMixStyle, auto ? 400 : 0);
+    // par tous les chemins (menu, Nova, style mis tout seul après la 1re prise :
+    // là, coachAfterTake ne traite que la prise qui vient d'être enregistrée).
+    if (!auto) setTimeout(() => breathsAfterMixStyle(), 0);
     return true;
   }, [setState]);
 
@@ -1921,6 +1921,12 @@ function Studio() {
   coachAfterTakeRef.current = (trackId, buffer, takeName, start) => {
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!t) return;
+    // Style mis tout seul après la prise : respirations de CETTE prise (case du Mix auto),
+    // après le mode auto des respirations s'il est actif (même traitement : rien en double).
+    const breathsOfTake = () => {
+      const clipIds = t.clips.filter(c => !c.isMuted && (c.buffer === buffer || (!!c.bufferId && audioBufferRegistry.get(c.bufferId) === buffer))).map(c => c.id);
+      setTimeout(() => breathsAfterMixStyle({ trackIds: [trackId], ...(clipIds.length ? { clipIds } : {}) }), 400);
+    };
     const role = getVocalRole(t);
     const s = takeStats(buffer);
     const level = s.silent || s.rmsDb < -50 ? 'silent' : s.peakDb > -0.3 ? 'clip' : s.rmsDb < -38 ? 'low' : 'ok';
@@ -1941,6 +1947,7 @@ function Studio() {
       const sid = suggestVocalMixStyle(stateRef.current.bpm, stateRef.current.beatGenre, stateRef.current.beatTitle);
       breakHistory(); // Ctrl+Z retire le style, pas la prise
       handleApplyMixStyle(sid, true);
+      breathsOfTake();
       autoStyleNote = ` J'ai quand même mis le style « ${findVocalMixStyle(sid)?.name} » pour que tu entendes le rendu.`;
     }
     if (s.peakDb > -0.3) {
@@ -1966,6 +1973,7 @@ function Studio() {
       const sid = suggestVocalMixStyle(st.bpm, st.beatGenre, st.beatTitle);
       breakHistory(); // Ctrl+Z retire le style, pas la prise
       handleApplyMixStyle(sid, true);
+      breathsOfTake();
       const style = findVocalMixStyle(sid);
       text += ` Pour que tu entendes ta voix comme sur un vrai son, j'ai mis le style « ${style?.name} », adapté à ce beat. Réécoute ! Tu peux en essayer un autre, ou passer aux backs.`;
       const replayMix = { label: '▶ Réécouter avec le mix', actions: [{ action: 'SEEK', payload: { time: start } }, { action: 'PLAY', payload: {} }] as AIAction[] };

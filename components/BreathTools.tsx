@@ -134,20 +134,22 @@ export const BreathHost: React.FC<HostProps> = ({ tracks, setState, undo, breakH
     if (!ids.length) { if (r.mode !== 'auto' && r.reason !== 'mix') showToast(r.only === 'extra' ? 'Aucune piste de backs / doubles / ad-libs à traiter.' : 'Aucune piste voix à traiter (enregistre d’abord une prise).', false); return; }
     let settings = p.settings;
     if (r.remove) settings = { ...settings, leadRemove: r.only !== 'extra' ? true : settings.leadRemove, extraRemove: true };
-    showToast('🌬️ Je cherche les respirations…', false, true);
+    // Après un style de Mix auto, pas de « Je cherche… » : la notification de la prise (ou du style) reste visible.
+    const quiet = r.reason === 'mix';
+    if (!quiet) showToast('🌬️ Je cherche les respirations…', false, true);
     await detectAll(tracksRef.current, settings, ids, r.clipIds);
     const plans = planBreaths(tracksRef.current, bufferOf, settings, { trackIds: ids, clipIds: r.clipIds });
     const total = breathTotal(plans);
     if (!total) {
-      if (r.mode === 'auto' || r.reason === 'mix') setToast(null);
-      else showToast('🌬️ Aucune respiration nette trouvée (essaie la sensibilité « forte » dans Respirations…).', false);
+      if (r.mode === 'auto') setToast(null);
+      else if (!quiet) showToast('🌬️ Aucune respiration nette trouvée (essaie la sensibilité « forte » dans Respirations…).', false);
       return;
     }
     // Déjà traité exactement ainsi (Mix auto juste après le traitement de fin de prise) : rien à refaire.
     const cur = tracksRef.current;
     if (applyBreathPlan(cur, plans).every((t, i) => t === cur[i])) {
-      if (r.mode === 'auto' || r.reason === 'mix') setToast(null);
-      else showToast(`🌬️ ${summarizeBreathPlan(plans.filter(pl => pl.count > 0))} (déjà fait)`, false);
+      if (r.mode === 'auto') setToast(null);
+      else if (!quiet) showToast(`🌬️ ${summarizeBreathPlan(plans.filter(pl => pl.count > 0))} (déjà fait)`, false);
       return;
     }
     // Fin de prise : étape d'annulation à part (Annuler retire le traitement, pas la prise).
@@ -641,8 +643,14 @@ export const BreathMixOption: React.FC = () => {
   );
 };
 
-/** Après un style de Mix auto : respirations aussi, si la case est cochée. */
-export const breathsAfterMixStyle = () => { if (getBreathPrefs().withMix) requestBreaths({ mode: 'apply', reason: 'mix' }); };
+/**
+ * Après un style de Mix auto : respirations aussi, si la case est cochée.
+ * `scope` : seulement ces pistes / clips (style mis tout seul après une prise :
+ * seule la prise qui vient d'être enregistrée est traitée).
+ */
+export const breathsAfterMixStyle = (scope?: { trackIds?: string[]; clipIds?: string[] }) => {
+  if (getBreathPrefs().withMix) requestBreaths({ mode: 'apply', reason: 'mix', ...(scope || {}) });
+};
 
 export { BREATH_REMOVE_DB };
 export type { BreathEdit };
