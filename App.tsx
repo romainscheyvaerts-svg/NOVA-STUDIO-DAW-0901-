@@ -165,6 +165,11 @@ import { placeTake, trimToPlan } from './utils/multiTake';
 import { compTakeGroup, keepTakeGroup, deleteTakeGroup, takeGroupLinked } from './utils/takeGroups';
 import type { TakeResult } from './engine/AudioEngine';
 import { useR21 } from './hooks/useR21';
+import { useR23 } from './hooks/useR23';
+import { BeatSwapDialog, BeatSwapResultCard } from './components/BeatSwapDialog';
+import { RepunchCompareCard, R23VoiceTools } from './components/RepunchUI';
+import { applyBeatSwapOp, BeatSwapOp, hasVoicesToKeep } from './utils/beatSwap';
+import { currentBeatClip } from './services/beatSwapRun';
 import { openSessionPanel, useSessionPanel } from './utils/r21Bus';
 import { notesCount } from './utils/sessionNotes';
 import { nextVersionNumber, versionName } from './utils/projectVersions';
@@ -566,7 +571,11 @@ const useUndoRedo = (initialState: DAWState) => {
         newState.loopEnd !== curr.present.loopEnd ||
         // R21 : arrangements et liste des clips (Ctrl+Z remet les clips retirés de la liste).
         newState.arrangements !== curr.present.arrangements ||
-        newState.clipBin !== curr.present.clipBin;
+        newState.clipBin !== curr.present.clipBin ||
+        // R23 : changer de beat change aussi la tonalité du projet et le titre du beat (une étape).
+        newState.projectKey !== curr.present.projectKey ||
+        newState.projectScale !== curr.present.projectScale ||
+        newState.beatTitle !== curr.present.beatTitle;
 
       if (!modificationReelle) return { ...curr, present: newState };
 
@@ -588,7 +597,7 @@ const useUndoRedo = (initialState: DAWState) => {
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
   // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
   // continuait, et pendant une prise il basculait l'enregistrement.
-  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords', 'arrangements', 'clipBin'] as const;
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'groupSettings', 'timeSignature', 'tempoEvents', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords', 'arrangements', 'clipBin', 'projectKey', 'projectScale', 'beatTitle', 'beatGenre'] as const;
   const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
     const out: any = { ...base };
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
@@ -659,7 +668,7 @@ function Studio() {
   // Pending data from landing page to load after entering studio
   const [pendingInstrumental, setPendingInstrumental] = useState<any>(null);
   // Chargement d'un beat du catalogue (défini plus bas, appelé depuis l'accueil).
-  const loadCatalogBeatRef = useRef<((inst: any) => Promise<void>) | null>(null);
+  const loadCatalogBeatRef = useRef<((inst: any, opts?: { direct?: boolean }) => Promise<void>) | null>(null);
   const [pendingAudioFile, setPendingAudioFile] = useState<File | null>(null);
   const [pendingProject, setPendingProject] = useState<any>(null);
 
@@ -1894,6 +1903,8 @@ function Studio() {
       }
     }));
     if (!kept.length || !placed.size) return first || null;
+    // R23 : « Refaire ce passage » attend la prise pour comparer avant / après.
+    try { window.dispatchEvent(new CustomEvent('nova:take-placed', { detail: { trackIds: [...placed.keys()], isPunch: !!punch, in: rec?.in ?? null, out: rec?.out ?? null } })); } catch { /* hors navigateur */ }
     // Respirations traitées automatiquement (si activé) : seulement le passage
     // qui vient d'être enregistré (tours de boucle, morceaux nettoyés, punch).
     const trackIds = [...placed.keys()];
@@ -4839,6 +4850,56 @@ function Studio() {
     lww: () => lwwRef.current,
   });
   r21Ref.current = r21;
+
+  // --- R23 · Changer de beat en gardant les voix, repunch intelligent (hooks/useR23).
+  const r23 = useR23(state, {
+    stateRef, setState, setSilently, breakHistory, undo, redo,
+    notify: (msg) => setAiNotification(msg),
+    openStore: () => { if (isMobileRef.current) setActiveMobileTab('BROWSER'); else { setIsSidebarOpen(true); setActiveSideBrowserTab('STORE'); } },
+    fetchBeat: async (src) => {
+      await ensureAudioEngine();
+      if (src.kind === 'catalog') {
+        const inst = src.inst;
+        let url = '';
+        if (inst?.preview_url) url = supabaseManager.getPublicInstrumentUrl(inst.preview_url);
+        else if (inst?.drive_file_id) url = supabaseManager.getDrivePreviewUrl(inst.drive_file_id);
+        if (!url) throw new Error("Ce beat n'a pas de fichier audio disponible.");
+        const ab = await loadBeatAudio(url, String(inst.title || 'Beat'), fetchAudio);
+        const buffer = await audioEngine.ctx!.decodeAudioData(ab);
+        const k = lireTonalite(inst.key);
+        return { buffer, audioRef: url, bpm: Number(inst.bpm) > 0 ? Number(inst.bpm) : undefined, key: k ? { root: k.rootKey, scale: k.scale } : null, instrumentId: inst.id, genre: inst.genre || undefined, title: String(inst.title || 'Beat') };
+      }
+      // Beat de l'ordinateur : Nova Pro (comme l'import d'un son).
+      if (!(await requireProRef.current('Importer un beat de ton ordinateur (une instru venue d’ailleurs) fait partie de Nova Pro.'))) throw new Error('Importer un beat de ton ordinateur fait partie de Nova Pro.');
+      const ab = src.file ? await src.file.arrayBuffer() : await fetchAudio(src.url);
+      const buffer = await audioEngine.ctx!.decodeAudioData(ab);
+      return { buffer, audioRef: src.url, title: src.name.replace(/\.[^/.]+$/, '') };
+    },
+    loadDirect: (src) => {
+      if (src.kind === 'catalog') void loadCatalogBeatRef.current?.(src.inst, { direct: true });
+      else void handleUniversalAudioImport(src.file || src.url, src.name, 'instrumental', 0);
+    },
+    usesProjectKey: (type) => usesProjectKey(type as any),
+    armForRedo: async (trackId) => {
+      const st = stateRef.current;
+      const t = st.tracks.find(x => x.id === trackId);
+      if (!t) return false;
+      const others = st.tracks.filter(x => x.isTrackArmed && x.id !== trackId);
+      if (!others.length) return t.isTrackArmed ? ((await rearmArmedRef.current?.()) ?? true) : armForRecording(trackId);
+      // Multipiste (R14) : la piste s'ajoute aux pistes déjà armées.
+      if (!t.isTrackArmed) setState(produce((d: DAWState) => { const x = d.tracks.find(y => y.id === trackId); if (x) x.isTrackArmed = true; }));
+      const err = await audioEngine.armTrack(trackId, { spec: t.recordInput ?? null });
+      if (err) { setAiNotification(`🎤 ${err}`); return false; }
+      return (await rearmArmedRef.current?.()) ?? true;
+    },
+    toggleRecord: () => { void toggleRecordRef.current?.(); },
+    playFrom: (t) => { handleSeek(t); if (!stateRef.current.isPlaying) void handleTogglePlay(); },
+    isRecording: () => !!stateRef.current.isRecording,
+    onSwapped: (next, info) => { void sendBeatSwapRef.current?.(next, info); },
+  });
+  const r23Ref = useRef(r23);
+  r23Ref.current = r23;
+  const sendBeatSwapRef = useRef<((next: DAWState, info: Omit<BeatSwapOp, 'tracks' | 'id'> & { trackIds: string[] }) => Promise<void>) | null>(null);
   /** « Écouter ensemble » : hôte qui guide la lecture (null : chacun écoute de son côté). */
   const [listenTogether, setListenTogether] = useState<{ hostKey: string; hostName: string } | null>(null);
   const listenTogetherRef = useRef(listenTogether);
@@ -5291,6 +5352,23 @@ function Studio() {
         if (!o.replay) setAiNotification(`⏱️ ${o.author_name} : ${r.report.summary}.`);
         break;
       }
+      case 'beatswap': {
+        // R23 : un membre a changé de beat (une seule opération) : voix recalées, beat, tempo,
+        // repères, accords, tonalité — appliqués ensemble, une seule étape d'annulation ici aussi.
+        if (!lwwRef.current.accept('beatswap', o.seq)) break;
+        await ensureBuffers(c.client.link, p.audio);
+        const cur = stateRef.current;
+        const next = applyBeatSwapOp(cur, p as unknown as BeatSwapOp, clips => sanitizeIncomingClips(clips as any) as any);
+        if (next === cur) break;
+        (Array.isArray(p.tracks) ? p.tracks : []).forEach((x: any) => { if (x && typeof x.id === 'string') touch(x.id); });
+        rememberTimeOp(next);
+        audioEngine.setBpm(next.bpm);
+        breakHistory();
+        setState(prev => (prev === cur ? next : applyBeatSwapOp(prev, p as unknown as BeatSwapOp, clips => sanitizeIncomingClips(clips as any) as any)));
+        breakHistory();
+        if (!o.replay) setAiNotification(`🔁 ${o.author_name} a changé de beat${p.beatTitle ? ` (« ${String(p.beatTitle).slice(0, 60)} »)` : ''} : tes voix sont recalées — ${String(p.summary || '').slice(0, 160)}. Ctrl+Z pour revenir.`);
+        break;
+      }
       case 'listen': {
         // « Écouter ensemble » lancé (ou arrêté) par l'hôte.
         if (!lwwRef.current.accept('listen', o.seq)) break;
@@ -5489,6 +5567,7 @@ function Studio() {
         else if (kind === 'markers') { [...(Array.isArray(op.upsert) ? op.upsert : []), ...((Array.isArray(op.remove) ? op.remove : []).map((id: string) => ({ id })))].forEach((m: any) => lwwRef.current.note(`marker:${m.id}`, seq)); }
         else if (kind === 'listen') lwwRef.current.note('listen', seq);
         else if (kind === 'groups') lwwRef.current.note('groups', seq);
+        else if (kind === 'beatswap') lwwRef.current.note('beatswap', seq);
         else if (kind === 'chords') [...(Array.isArray(op.upsert) ? op.upsert : []).map((c: any) => c?.id), ...(Array.isArray(op.remove) ? op.remove : [])]
           .forEach((id: unknown) => { if (typeof id === 'string') { lwwRef.current.note(`chord:${id}`, seq); pendingChordsRef.current.delete(id); } });
         else if (kind === 'chat' && typeof op.localId === 'string') setCollabMessages(m => m.map(x => (x.id === op.localId ? { ...x, pending: false } : x)));
@@ -5803,6 +5882,25 @@ function Studio() {
     if (!c) return;
     rememberTimeOp(next);
     c.client.queue(`timeop:${op.id}`, 'timeop', op as unknown as Record<string, unknown>);
+  };
+  // R23 : changer de beat = UNE opération pour les autres (voix recalées et leur audio, beat,
+  // tempo, repères, accords, tonalité) ; rien n'est renvoyé en écho par le suivi habituel.
+  sendBeatSwapRef.current = async (next, info) => {
+    const c = collabRef.current;
+    if (!c) return;
+    rememberTimeOp(next);
+    const tracks = info.trackIds.map(id => next.tracks.find(t => t.id === id)).filter((t): t is Track => !!t);
+    const id = `bs-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    try {
+      const audio = await uploadBuffers(c.client.link, tracks.flatMap(t => contentBufferIds(t)), (sent, total) => c.client.reportUpload(sent, total));
+      const { trackIds: _ids, ...rest } = info;
+      c.client.queue(`beatswap:${id}`, 'beatswap', { ...rest, id, audio, tracks: tracks.map(t => ({ id: t.id, clips: contentOf(t).clips, takeMeta: t.takeMeta, instrumentId: t.instrumentId ?? null })) } as unknown as Record<string, unknown>);
+      tracks.forEach(t => knownSigRef.current.set('content:' + t.id, sigOf(contentOf(t))));
+    } catch (e) {
+      // Réseau coupé pendant l'envoi de l'audio : les pistes repartent par le suivi habituel.
+      console.warn('[Collab] changement de beat', e);
+      tracks.forEach(t => contentDirtyRef.current.add(t.id));
+    }
   };
 
   // Repères : ceux posés / déplacés / supprimés ici partent chez les autres (avec mon nom).
@@ -6296,7 +6394,12 @@ function Studio() {
     return () => { window.removeEventListener('nova:preview-start', onPreview); window.removeEventListener('nova:notify', onNotify); };
   }, [pausePlayback]);
 
-  const handleLoadCatalogBeat = async (inst: any) => {
+  const handleLoadCatalogBeat = async (inst: any, opts?: { direct?: boolean }) => {
+    // R23 : des voix sont posées sur un beat → « Remplacer l'instru » (voix recalées, transposées).
+    if (!opts?.direct && r23Ref.current && ((currentBeatClip(stateRef.current) && hasVoicesToKeep(stateRef.current.tracks)) || r23Ref.current.waitingForBeat)) {
+      r23Ref.current.openSwap({ kind: 'catalog', inst, title: String(inst?.title || 'Beat') });
+      return;
+    }
     let audioUrl = '';
     if (inst?.preview_url) audioUrl = supabaseManager.getPublicInstrumentUrl(inst.preview_url);
     else if (inst?.drive_file_id) audioUrl = supabaseManager.getDrivePreviewUrl(inst.drive_file_id);
@@ -6395,7 +6498,7 @@ function Studio() {
       draft.name = `Instru · ${String(inst.title || 'Mélodie').slice(0, 40)}`;
     }));
     stateRef.current = { ...stateRef.current, projectMode: 'BEATMAKING' };
-    await handleLoadCatalogBeat(inst);
+    await handleLoadCatalogBeat(inst, { direct: true });
     setState(produce((draft: DAWState) => {
       const t = draft.tracks.find(x => x.id === 'instrumental');
       if (t) t.name = 'MÉLODIE';
@@ -7456,6 +7559,11 @@ function Studio() {
     // Beat du catalogue : même chemin que « Essayer » (remplace le beat, règle tempo et Auto-Tune).
     const beat = takeDraggedBeat(url);
     if (beat) return loadCatalogBeatRef.current?.(beat);
+    // R23 : un fichier lâché sur la piste BEAT alors que des voix sont posées → changer de beat en les gardant.
+    if (trackId === 'instrumental' && currentBeatClip(stateRef.current) && hasVoicesToKeep(stateRef.current.tracks)) {
+      r23Ref.current?.openSwap({ kind: 'file', url, name });
+      return;
+    }
     // Id vide = nouvelle piste (fichiers en trop d'un dépôt multiple).
     return handleUniversalAudioImport(url, name, trackId || undefined, time);
   });
@@ -7993,6 +8101,10 @@ function Studio() {
         onClose={() => setNextStep(null)}
       />
 
+      {/* R23 : changer de beat (fenêtre + carte Avant / Après), passage refait (avant / après) */}
+      {r23.swap && <BeatSwapDialog api={r23} compact={isMobile} onChooseFile={(f) => { void r23.chooseSource({ kind: 'file', url: URL.createObjectURL(f), name: f.name, file: f }); }} />}
+      <BeatSwapResultCard api={r23} compact={isMobile} />
+      <RepunchCompareCard api={r23} compact={isMobile} />
       <AutoCompCard proposal={autoCompProposal}
         onKeep={() => { autoCompBeforeRef.current = null; setAutoCompProposal(null); setAiNotification("✓ Comp de l'IA gardé — tu peux encore le retoucher en balayant dans les couloirs."); }}
         onRevert={handleAutoCompRevert}
@@ -8004,6 +8116,7 @@ function Studio() {
         onApplyStyle={(id: string) => { handleApplyMixStyle(id); }}
         breathMixOption={<BreathMixOption />}
         humTools={<HumQuickButtons onOpen={() => setVocalToolsOpen(false)} />}
+        r23Tools={<R23VoiceTools hasVoice={state.tracks.some(t => isVoiceTrack(t) && t.clips.some(c => !c.isMuted))} onAfter={() => setVocalToolsOpen(false)} />}
         breathTools={<BreathPanelTools canTreat={state.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0)}
           projectAuto={state.breathAuto} onProjectAutoChange={(on) => setState(prev => ({ ...prev, breathAuto: on }))} />}
         canClean={!!getTargetVoiceTrack()?.clips.length}

@@ -59,6 +59,8 @@ import { matchShortcut, shortcutHint, takenByPianoRoll } from '../utils/keymap';
 import { scrubControl } from '../utils/scrubControl';
 import { registerLayoutPart } from '../utils/windowLayouts';
 import { editGroupsStore, invertFromEvent, mateFade, mateGain, MateSnap, mateTrimEnd, mateTrimStart, snapMates } from '../utils/editGroups';
+import { r23Bus } from '../utils/r23Store';
+import { RedoSpotsOverlay } from './RepunchUI';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -861,6 +863,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const menuItems: (ContextMenuItem | 'separator')[] = [ { label: 'Dupliquer la piste', onClick: () => onDuplicateTrack?.(trackId), icon: 'fa-copy' },
       { label: 'Couleur de la piste…', onClick: () => openNovaWindow('track-color', { trackId }), icon: 'fa-palette' }, ];
     const target = tracks.find(t => t.id === trackId);
+    // R23 : changer de beat en gardant les voix ; repérer les passages à refaire.
+    if (target && target.id === 'instrumental') menuItems.unshift({ label: 'Remplacer l’instru… (garder les voix)', icon: 'fa-random', title: 'Nouveau beat : tes voix sont recalées sur son tempo et transposées dans sa tonalité, en une seule annulation.', onClick: () => { setContextMenu(null); r23Bus.emit({ kind: 'openSwap' }); } });
+    if (isVoiceTrack(target) && target.clips.some(c => !c.isMuted)) menuItems.push({ label: 'Repérer les passages à refaire', icon: 'fa-redo', title: 'Justesse, calage sur le temps, niveau, saturation, bruit : les passages qui détonnent passent en rouge, « Refaire » pose le punch.', onClick: () => { setContextMenu(null); r23Bus.emit({ kind: 'findSpots', trackId }); } });
     if (isVoiceTrack(target)) menuItems.push({ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => requestBreaths({ mode: 'dialog', trackIds: [trackId], reason: 'menu' }) });
     // Piste guide (R3) : la voix témoin s'entend pendant la prise, jamais exportée ni mixée.
     if (target && target.type === TrackType.AUDIO && target.id !== 'instrumental' && !target.instrumentId) menuItems.push({
@@ -2579,6 +2584,15 @@ useEffect(() => {
           })()}
         </div>
       )}
+      {/* R23 : passages « à refaire » (bandeau rouge en bas de la piste) */}
+      <div style={{ position: 'absolute', top: TOOLBAR_H + tracksTop, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 23 }}>
+        {(() => {
+          let y = 0;
+          const rows = visibleTracks.map(t => { const r = { trackId: t.id, top: y - scrollTop, height: zoomV }; y += zoomV + extraH(t); return r; });
+          return <RedoSpotsOverlay rows={rows} zoomH={zoomH} scrollLeft={scrollLeft} width={Math.max(1, viewportSize.width - headerWidth)}
+            coarse={typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches} />;
+        })()}
+      </div>
       {editingMarkerId && (() => {
         const mk = markers.find(m => m.id === editingMarkerId);
         if (!mk) return null;

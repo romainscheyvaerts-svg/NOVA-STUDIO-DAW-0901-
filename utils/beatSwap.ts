@@ -10,14 +10,14 @@
  *      (mesure, temps) garde sa place — étirement non destructif (R13) ;
  *   3. elles sont transposées par l'intervalle le plus court (−2 plutôt que
  *      +10), PSOLA formants gardés (R13) ;
- *   4. repères, accords, boucle et zone de punch suivent ; la tonalité du
+ *   4. repères, accords et boucle suivent ; la tonalité du
  *      projet et des Auto-Tune passe à celle du nouveau beat.
  * Tout le projet change en UNE étape d'annulation.
  *
  * Module pur (sans DOM, sans moteur audio) : testé dans tests/beatSwap.test.ts.
  */
 import { TrackType } from '../types';
-import type { Clip, DAWState, Marker, PunchSettings, Track } from '../types';
+import type { Clip, DAWState, Marker, Track } from '../types';
 import type { ChordEvent } from './chordDetect';
 
 // ─── Tonalités ───────────────────────────────────────────────────────────────
@@ -144,7 +144,7 @@ export function planSwap(old: BeatInfo, next: BeatInfo, o: SwapOptions = {}): Sw
   if (Math.abs(semitones) > SEMITONE_ALERT) {
     warnings.push(`${semitones > 0 ? '+' : '−'}${Math.abs(semitones)} demi-tons : au-delà de ±3, la voix risque de sonner trafiquée. Les formants sont gardés, mais réécoute bien (ou garde la tonalité d'origine).`);
   }
-  if (eff.folded && retime) warnings.push(`Le nouveau beat est annoncé à ${round1(next.bpm)} BPM : tes voix suivent sa pulsation en ${eff.folded === 'half' ? 'demi-tempo' : 'double tempo'} (${round1(targetBpm)} BPM), c'est plus naturel.`);
+  if (eff.folded && retime) warnings.push(`Le nouveau beat est annoncé à ${fr1(next.bpm)} BPM : tes voix suivent sa pulsation en ${eff.folded === 'half' ? 'demi-tempo' : 'double tempo'} (${fr1(targetBpm)} BPM), c'est plus naturel.`);
   if (!old.key || !next.key) warnings.push(`Tonalité ${!old.key ? "de l'ancien beat" : 'du nouveau beat'} inconnue : tes voix ne sont pas transposées.`);
   return {
     oldBpm: old.bpm, newBpm: next.bpm, targetBpm, folded: retime ? eff.folded : null, factor, tempoChange,
@@ -154,6 +154,8 @@ export function planSwap(old: BeatInfo, next: BeatInfo, o: SwapOptions = {}): Sw
 }
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
+/** « 6,4 » (virgule décimale). */
+const fr1 = (v: number) => String(round1(v)).replace('.', ',');
 const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
 
 /** Instant du projet après le changement de beat (la même position musicale). */
@@ -162,8 +164,8 @@ export const swapTime = (p: Pick<SwapPlan, 'dbOld' | 'dbNew' | 'factor'>, t: num
 /** Résumé lisible : « 94 → 100 BPM (+6 %), Sol mineur → La mineur (+2 demi-tons) ». */
 export function planSummary(p: SwapPlan): string {
   const parts: string[] = [];
-  if (p.retime && Math.abs(p.factor - 1) > 1e-4) parts.push(`${round1(p.oldBpm)} → ${round1(p.targetBpm)} BPM (${p.tempoChange > 0 ? '+' : '−'}${round1(Math.abs(p.tempoChange) * 100)} %)`);
-  else parts.push(`tempo gardé (${round1(p.targetBpm)} BPM)`);
+  if (p.retime && Math.abs(p.factor - 1) > 1e-4) parts.push(`${fr1(p.oldBpm)} → ${fr1(p.targetBpm)} BPM (${p.tempoChange > 0 ? '+' : '−'}${fr1(Math.abs(p.tempoChange) * 100)} %)`);
+  else parts.push(`tempo gardé (${fr1(p.targetBpm)} BPM)`);
   if (p.semitones) parts.push(`${keyName(p.fromKey)} → ${keyName(p.toKey)} (${p.semitones > 0 ? '+' : '−'}${Math.abs(p.semitones)} demi-ton${Math.abs(p.semitones) > 1 ? 's' : ''})`);
   else if (p.fromKey && p.toKey) parts.push(`${keyName(p.toKey)} (même gamme, pas de transposition)`);
   return parts.join(' · ');
@@ -283,9 +285,6 @@ export function applySwap(state: DAWState, inp: SwapInput): DAWState {
     return out;
   });
 
-  const punch: PunchSettings = state.punch && (state.punch.punchOut > state.punch.punchIn)
-    ? { ...state.punch, punchIn: Math.max(0, r6(f(state.punch.punchIn))), punchOut: Math.max(0, r6(f(state.punch.punchOut))) }
-    : state.punch;
   const next: DAWState = {
     ...state,
     tracks,
@@ -294,7 +293,7 @@ export function applySwap(state: DAWState, inp: SwapInput): DAWState {
     chords: mapChords(state.chords, f, st),
     loopStart: Math.max(0, r6(f(state.loopStart))),
     loopEnd: Math.max(0, r6(f(state.loopEnd))),
-    punch,
+    // La zone de punch n'est pas touchée : elle n'entre pas dans l'annulation (Pro Tools non plus).
     beatTitle: inp.beat.title ?? state.beatTitle,
     beatGenre: inp.beat.genre ?? state.beatGenre,
   };
@@ -369,9 +368,10 @@ export function attackNear(x: Float32Array, sr: number, near: number, span = 0.0
   for (let k = a; k + blk <= b; k += blk) { let s = 0; for (let i = k; i < k + blk; i++) s += x[i] * x[i]; e.push(Math.sqrt(s / blk)); }
   const peak = Math.max(...e);
   if (!(peak > 1e-4)) return null;
-  // Niveau d'avant l'attaque (bas de la fenêtre) : une attaque doit monter nettement.
-  const floor = Math.min(...e.slice(0, Math.max(1, Math.floor(e.length / 3))));
-  if (peak < floor * 2) return null;
+  // Niveau d'avant l'attaque (début de la fenêtre) : son PLUS FORT bloc — une basse ou une nappe
+  // qui tient (808 à 55 Hz : les blocs de 1 ms ondulent avec elle) ne doit pas passer pour l'attaque.
+  const floor = Math.max(...e.slice(0, Math.max(1, Math.floor(e.length / 3))));
+  if (peak < floor * 1.4) return null;
   const want = floor + (peak - floor) * 0.5;
   const i = e.findIndex(v => v >= want);
   return i < 0 ? null : (a + i * blk) / sr;
@@ -461,4 +461,51 @@ export function analyzeBeatGrid(x: Float32Array, sr: number, approxBpm: number, 
   const mean = env.odf.reduce((a, b) => a + b, 0) / frames;
   const confidence = Math.max(0, Math.min(1, (bestS / Math.max(1e-9, mean) - 1) / 8));
   return { bpm: Math.round(bpm * 1000) / 1000, downbeat: Math.round(downbeat * 1e5) / 1e5, beatPhase: Math.round(phase * 1e5) / 1e5, confidence: Math.round(confidence * 100) / 100 };
+}
+
+// ─── Collaboration : le changement de beat voyage en UNE opération ─────────────
+
+/** Ce que reçoit l'invité : les pistes touchées (voix recalées, beat), tempo, repères, accords, tonalité. */
+export interface BeatSwapOp {
+  id: string;
+  tracks: { id: string; clips: Clip[]; takeMeta?: Track['takeMeta']; instrumentId?: string | number | null }[];
+  bpm: number;
+  tempoEvents?: DAWState['tempoEvents'];
+  markers: Marker[];
+  chords?: ChordEvent[];
+  projectKey?: number;
+  projectScale?: string;
+  beatTitle?: string;
+  beatGenre?: string;
+  /** « 94 → 100 BPM (+6,4 %) · Sol mineur → La mineur (+2 demi-tons) » */
+  summary: string;
+}
+
+/** Applique une opération reçue (pistes inconnues ici : ignorées, elles arrivent par leur contenu). */
+export function applyBeatSwapOp(state: DAWState, op: BeatSwapOp, cleanClips: (clips: Clip[]) => Clip[] = c => c): DAWState {
+  if (!op || !Array.isArray(op.tracks) || !(op.bpm > 0)) return state;
+  const byId = new Map(op.tracks.filter(t => t && typeof t.id === 'string' && Array.isArray(t.clips)).map(t => [t.id, t]));
+  const tracks = state.tracks.map(t => {
+    const x = byId.get(t.id);
+    if (!x) return t;
+    const out: Track = { ...t, clips: cleanClips(x.clips) };
+    if (x.takeMeta !== undefined) out.takeMeta = x.takeMeta;
+    if (x.instrumentId === null) delete (out as any).instrumentId;
+    else if (x.instrumentId !== undefined) out.instrumentId = x.instrumentId as any;
+    if (out.isFrozen && out.type === TrackType.AUDIO) {
+      out.isFrozen = false;
+      delete (out as any).frozenClip; delete (out as any).frozenClipIds; delete (out as any).frozenSourceSig; delete (out as any).frozenPluginSig; delete (out as any).frozenUpToPluginIndex;
+    }
+    return out;
+  });
+  const next: DAWState = {
+    ...state, tracks, bpm: Math.max(20, Math.min(999, op.bpm)),
+    markers: Array.isArray(op.markers) ? op.markers.filter(m => m && typeof m.time === 'number') : state.markers,
+    chords: Array.isArray(op.chords) ? op.chords : state.chords,
+  };
+  if (Array.isArray(op.tempoEvents)) next.tempoEvents = op.tempoEvents;
+  if (typeof op.projectKey === 'number') { next.projectKey = mod12(op.projectKey); next.projectScale = op.projectScale || 'MINOR'; }
+  if (typeof op.beatTitle === 'string') next.beatTitle = op.beatTitle.slice(0, 120);
+  if (typeof op.beatGenre === 'string') next.beatGenre = op.beatGenre.slice(0, 60);
+  return next;
 }
