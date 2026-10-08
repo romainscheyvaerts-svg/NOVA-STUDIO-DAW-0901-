@@ -100,7 +100,7 @@ export interface PendingUpload {
 
 export type AuthStage = 'LOGIN' | 'REGISTER' | 'VERIFY_EMAIL' | 'FORGOT_PASSWORD';
 
-export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
+export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX' | 'GATE' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
 
 export interface PluginMetadata {
   id: string;
@@ -132,6 +132,17 @@ export interface PluginInstance {
    * Absent : actif (anciens projets). Indépendant du bypass. Voir utils/trackStructure.
    */
   isInactive?: boolean;
+  /**
+   * Side-chain (R7, Pro Tools « Key Input ») : la détection du Compresseur, du
+   * Gate, du Gate rythmique ou du De-esser écoute une autre piste (son id) ou
+   * un bus nommé (« bus:<id du bus> ») au lieu du son de sa piste. Le filtre et
+   * l'écoute de la clé sont dans params (keyHpf, keyLpf, keyListen). Voir engine/sidechain.ts.
+   */
+  sidechainSourceId?: string;
+  /** Nom de la source quand elle a été choisie (retrouver la clé dans un preset de chaîne / un modèle). */
+  sidechainSourceName?: string;
+  /** Prise de la clé : « pre » (défaut) = après les effets de la source, avant son fader et son mute ; « post » = après le fader. */
+  sidechainTap?: 'pre' | 'post';
 }
 
 export interface TrackSend {

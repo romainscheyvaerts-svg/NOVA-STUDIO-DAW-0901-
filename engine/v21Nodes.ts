@@ -11,6 +11,7 @@ import { createPsolaCore, createHarmonyMath, psolaLatencySamples } from './psola
 import { createTimeFxCore } from './timeFxCore';
 import { createDjFilterCore, createLofiCore } from './colorFxCore';
 import { createGateCore } from './gateCore';
+import { createNoiseGateCore } from './noiseGateCore';
 import { loadWorkletModule } from '../plugins/vocalDspUtils';
 import { V21Type, V21_DEFAULTS, V21_SPECS, sanitizeV21 } from './v21Params';
 import { scaleIntervals } from '../utils/scales';
@@ -33,14 +34,14 @@ type Desc = { name: string; defaultValue: number; minValue: number; maxValue: nu
  * sur la piste d'accords, en lecture comme à l'export : lu à l'échantillon
  * près et remis au cœur (`chordIn`), qui le range avec l'entrée.
  */
-const processorCode = (name: string, defs: string, make: string, toCore: string, descriptors: Desc[], chord = false) => `
+const processorCode = (name: string, defs: string, make: string, toCore: string, descriptors: Desc[], chord = false, key = false) => `
 ${defs}
 const __make = (${make});
 const __toCore = (${toCore});
-const __desc = ${JSON.stringify([...descriptors.map(d => ({ ...d, automationRate: 'k-rate' })), ...(chord ? [{ name: 'chord', defaultValue: 0, minValue: 0, maxValue: 49151, automationRate: 'a-rate' }] : [])])};
-const __names = __desc.filter(d => d.name !== 'chord').map(d => d.name);
+const __desc = ${JSON.stringify([...descriptors.map(d => ({ ...d, automationRate: 'k-rate' })), ...(chord ? [{ name: 'chord', defaultValue: 0, minValue: 0, maxValue: 49151, automationRate: 'a-rate' }] : []), ...(key ? KEY_DESC.map(d => ({ ...d, automationRate: 'k-rate' })) : [])])};
+const __names = __desc.filter(d => d.name !== 'chord' && d.name !== 'keyOn' && d.name !== 'keyListen').map(d => d.name);
 // Réglages à pas entier (interrupteurs, division…) : arrondis comme sanitizeV21, même quand une voie les fait glisser.
-const __ints = __desc.filter(d => d.name !== 'chord').map(d => !!d.int);
+const __ints = __desc.filter(d => d.name !== 'chord' && d.name !== 'keyOn' && d.name !== 'keyListen').map(d => !!d.int);
 class NovaV21Processor extends AudioWorkletProcessor {
   static get parameterDescriptors() { return __desc; }
   constructor(options) {
@@ -69,6 +70,12 @@ class NovaV21Processor extends AudioWorkletProcessor {
     }
     if (this.dirty) { this.dirty = false; this.core.setParams(__toCore(this.ep, sampleRate)); }
     if (this.core.chordIn && parameters.chord) this.core.chordIn(parameters.chord);
+    // Clé externe (side-chain, R7) : entrée 2, branchée par le moteur.
+    if (this.core.setKey && parameters.keyOn) {
+      const k = inputs[1];
+      const on = parameters.keyOn[0] >= 0.5 && !!k && k.length > 0;
+      this.core.setKey(on ? k[0] : null, on ? (k[1] || k[0]) : null, on, on && parameters.keyListen[0] >= 0.5);
+    }
     const out = outputs[0];
     if (!out || !out[0]) return true;
     const n = out[0].length;
@@ -136,10 +143,21 @@ export function djFilterToCore(p: Record<string, any>) {
 export function gateToCore(p: Record<string, any>) {
   const steps: number[] = [];
   for (let i = 1; i <= 16; i++) { const v = +p['s' + i]; steps.push(Number.isFinite(v) ? v : 1); }
-  return { steps, rate: +p.rate || 4, length: +p.length || 16, depth: p.depth === undefined ? 1 : +p.depth, attack: p.attack === undefined ? 2 : +p.attack, release: p.release === undefined ? 20 : +p.release, bpm: +p.bpm || 120 };
+  return { steps, rate: +p.rate || 4, length: +p.length || 16, depth: p.depth === undefined ? 1 : +p.depth, attack: p.attack === undefined ? 2 : +p.attack, release: p.release === undefined ? 20 : +p.release, bpm: +p.bpm || 120, keyThreshold: p.keyThreshold === undefined ? -30 : +p.keyThreshold };
 }
 export function lofiToCore(p: Record<string, any>) {
   return { bits: +p.bits || 16, rate: +p.rate || 48000, lowCut: +p.lowCut || 20, highCut: +p.highCut || 20000, drive: +p.drive || 0, noise: +p.noise || 0, mix: p.mix === undefined ? 1 : +p.mix, output: +p.output || 0 };
+}
+
+/** Side-chain (R7) : clé branchée (keyOn) et écoute de la clé (keyListen). */
+const KEY_DESC = [
+  { name: 'keyOn', defaultValue: 0, minValue: 0, maxValue: 1 },
+  { name: 'keyListen', defaultValue: 0, minValue: 0, maxValue: 1 },
+];
+
+export function noiseGateToCore(p: Record<string, any>) {
+  const n = (v: any, d: number) => (Number.isFinite(+v) ? +v : d);
+  return { threshold: n(p.threshold, -40), range: n(p.range, 80), attack: n(p.attack, 0.5), hold: n(p.hold, 20), release: n(p.release, 80) };
 }
 
 interface WorkletSpec {
@@ -154,6 +172,8 @@ interface WorkletSpec {
   timeline?: boolean;
   /** AudioParam « chord » (accord en cours, piste d'accords). */
   chord?: boolean;
+  /** Entrée de clé externe (side-chain, R7). */
+  sidechain?: boolean;
 }
 
 const descriptorsOf = (type: V21Type) => {
@@ -171,13 +191,13 @@ const TIMELINE_DESC = [
   { name: 'originLo', defaultValue: 0, minValue: -2, maxValue: 2 },
 ];
 
-const makeSpec = (type: V21Type, processor: string, defs: string, make: string, toCore: (p: Record<string, any>) => any, latencySamples?: (sr: number) => number, opts: { timeline?: boolean; chord?: boolean } = {}): WorkletSpec => {
+const makeSpec = (type: V21Type, processor: string, defs: string, make: string, toCore: (p: Record<string, any>) => any, latencySamples?: (sr: number) => number, opts: { timeline?: boolean; chord?: boolean; key?: boolean } = {}): WorkletSpec => {
   const desc = descriptorsOf(type);
-  const timeline = !!opts.timeline, chord = !!opts.chord;
+  const timeline = !!opts.timeline, chord = !!opts.chord, key = !!opts.key;
   const all = timeline ? [...desc, ...TIMELINE_DESC] : desc;
   // Clé (et nom du processeur) versionnée : un module déjà chargé sous l'ancien code n'est pas réutilisé.
-  const proc = chord ? `${processor}-c` : processor;
-  return { key: `${proc}-2`, processor: proc, code: processorCode(proc, defs, make, toCore.toString(), all, chord), audioParams: desc.map(d => d.name), latencySamples, timeline, chord };
+  const proc = chord ? `${processor}-c` : key ? `${processor}-k` : processor;
+  return { key: `${proc}-2`, processor: proc, code: processorCode(proc, defs, make, toCore.toString(), all, chord, key), audioParams: desc.map(d => d.name), latencySamples, timeline, chord, sidechain: key };
 };
 
 let SPECS: Record<V21Type, WorkletSpec> | null = null;
@@ -189,7 +209,9 @@ const specs = (): Record<V21Type, WorkletSpec> => {
     DJFILTER: makeSpec('DJFILTER', 'nova-v21-djfilter', `const createDjFilterCore = (${createDjFilterCore.toString()});`, `(sr) => { const c = createDjFilterCore(sr); c.meters = () => ({ cutoff: c.cutoffHz() }); return c; }`, djFilterToCore),
     LOFI: makeSpec('LOFI', 'nova-v21-lofi', `const createLofiCore = (${createLofiCore.toString()});`, `(sr) => createLofiCore(sr)`, lofiToCore),
     // Aucune latence (gain par échantillon) ; motif calé sur la ligne de temps du morceau.
-    GATEFX: makeSpec('GATEFX', 'nova-v21-gate', `const createGateCore = (${createGateCore.toString()});`, `(sr) => createGateCore(sr)`, gateToCore, undefined, { timeline: true }),
+    GATEFX: makeSpec('GATEFX', 'nova-v21-gate', `const createGateCore = (${createGateCore.toString()});`, `(sr) => createGateCore(sr)`, gateToCore, undefined, { timeline: true, key: true }),
+    // Porte de bruit / expandeur (R7) : aucune latence, clé externe possible.
+    GATE: makeSpec('GATE', 'nova-v21-noisegate', `const createNoiseGateCore = (${createNoiseGateCore.toString()});`, `(sr) => createNoiseGateCore(sr)`, noiseGateToCore, undefined, { key: true }),
   };
   return SPECS;
 };
@@ -208,6 +230,9 @@ export class V21EffectNode {
   private failed = false;
   /** Instant du contexte où le morceau commence (effets calés sur la ligne de temps). */
   private origin = 0;
+  /** Entrée de la clé externe (side-chain, R7) : Gate et Gate rythmique ; null sinon. */
+  public readonly sidechainInput: GainNode | null = null;
+  private keyActive = false;
 
   constructor(ctx: BaseAudioContext, type: V21Type, params?: Record<string, any>, bpm?: number) {
     this.ctx = ctx;
@@ -217,6 +242,11 @@ export class V21EffectNode {
     this.output = ctx.createGain();
     this.input.channelCount = 2;
     this.input.channelCountMode = 'explicit';
+    if (this.spec.sidechain) {
+      const k = ctx.createGain();
+      k.channelCount = 2; k.channelCountMode = 'explicit'; k.channelInterpretation = 'speakers';
+      (this as any).sidechainInput = k;
+    }
     this.params = this.withScale({ ...V21_DEFAULTS[type](), ...sanitizeV21(type, params || {}), ...(bpm ? { bpm } : {}) });
     this.ready = this.init();
   }
@@ -227,14 +257,16 @@ export class V21EffectNode {
       const parameterData: Record<string, number> = {};
       for (const k of this.spec.audioParams) if (Number.isFinite(+this.params[k])) parameterData[k] = +this.params[k];
       if (this.spec.timeline) { const hi = Math.floor(this.origin); parameterData.originHi = hi; parameterData.originLo = this.origin - hi; }
+      if (this.spec.sidechain) { parameterData.keyOn = this.keyActive ? 1 : 0; parameterData.keyListen = +this.params.keyListen >= 0.5 ? 1 : 0; }
       this.worklet = new AudioWorkletNode(this.ctx, this.spec.processor, {
-        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+        numberOfInputs: this.spec.sidechain ? 2 : 1, numberOfOutputs: 1, outputChannelCount: [2],
         channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
         parameterData,
         processorOptions: { params: this.params },
       });
       this.worklet.port.onmessage = (e) => { this.meters = e.data || {}; this.metersAt = Date.now(); };
       this.input.connect(this.worklet);
+      if (this.sidechainInput) this.sidechainInput.connect(this.worklet, 0, 1);
       this.worklet.connect(this.output);
     } catch (e) {
       console.warn(`[NOVA ${this.type}] AudioWorklet indisponible, effet contourné :`, e);
@@ -256,6 +288,10 @@ export class V21EffectNode {
     if (!this.worklet) return;
     // Réglages automatisables : AudioParam, pris en compte au bloc près (lecture ET export).
     const msg: Record<string, any> = {};
+    if (this.spec.sidechain && 'keyListen' in clean) {
+      const ap = (this.worklet.parameters as any).get('keyListen') as AudioParam | undefined;
+      try { ap?.setValueAtTime(+clean.keyListen >= 0.5 ? 1 : 0, this.ctx.currentTime); } catch { /* */ }
+    }
     for (const [k, v] of Object.entries(clean)) {
       const ap = this.spec.audioParams.includes(k) ? (this.worklet.parameters as any).get(k) as AudioParam | undefined : undefined;
       if (ap && typeof v === 'number') { try { ap.setValueAtTime(v, this.ctx.currentTime); } catch { ap.value = v; } }
@@ -264,6 +300,15 @@ export class V21EffectNode {
     if ('scale' in clean) msg._scale = this.params._scale;
     if (Object.keys(msg).length) this.worklet.port.postMessage({ params: msg });
   }
+
+  /** Clé externe branchée (side-chain, R7) : la détection suit `sidechainInput`. */
+  public setSidechainActive(on: boolean) {
+    if (!this.spec.sidechain || on === this.keyActive) return;
+    this.keyActive = on;
+    const ap = this.worklet ? ((this.worklet.parameters as any).get('keyOn') as AudioParam | undefined) : undefined;
+    try { ap?.setValueAtTime(on ? 1 : 0, this.ctx.currentTime); } catch { /* */ }
+  }
+  public get sidechainActive() { return this.keyActive; }
 
   /** AudioParam d'un réglage automatisable (lecture et export y programment la voie d'avance), sinon null. */
   public automationParam(key: string): AudioParam | null {

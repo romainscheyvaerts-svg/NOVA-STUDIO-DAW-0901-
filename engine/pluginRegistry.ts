@@ -18,6 +18,7 @@ import { NovaVoiceShifterUI } from '../plugins/VoiceShifterPlugin';
 import { NovaTimeFxUI } from '../plugins/TimeFxPlugin';
 import { NovaDjFilterUI, NovaLofiUI } from '../plugins/FilterPlugin';
 import { NovaGateFxUI } from '../plugins/GateFxPlugin';
+import { NovaNoiseGateUI } from '../plugins/NoiseGatePlugin';
 
 export interface RegisteredPlugin {
   type: PluginType;
@@ -99,11 +100,23 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     category: 'Effets trap',
     icon: 'fa-grip-lines-vertical',
     color: '#e879f9',
-    description: 'Motif de 16 pas calé sur le tempo qui hache le son : stutter, half, triolets, pompe ; profondeur, attaque et relâchement automatisables (comme Gross Beat, le Trance Gate ou ShaperBox).',
+    description: 'Motif de 16 pas calé sur le tempo qui hache le son : stutter, half, triolets, pompe ; profondeur, attaque et relâchement automatisables ; avec une clé (side-chain), il s’ouvre au rythme d’une autre piste (comme Gross Beat, le Trance Gate ou ShaperBox).',
     defaultParams: V21_DEFAULTS.GATEFX,
     create: (ctx, plugin, bpm) => new V21EffectNode(ctx, 'GATEFX', plugin.params || {}, bpm),
     ui: NovaGateFxUI as any,
     automatable: v21Automatable('GATEFX'),
+  },
+  {
+    type: 'GATE',
+    name: 'Gate',
+    category: 'Dynamique',
+    icon: 'fa-door-open',
+    color: '#34d399',
+    description: 'Porte de bruit / expandeur : coupe le souffle entre les phrases ou raccourcit un kick ; avec une clé (side-chain), un pad ou une 808 ne passent qu’au rythme du kick ou des charleys (comme le Dyn3 Expander/Gate de Pro Tools ou le Gate d’Ableton).',
+    defaultParams: V21_DEFAULTS.GATE,
+    create: (ctx, plugin, bpm) => new V21EffectNode(ctx, 'GATE', plugin.params || {}, bpm),
+    ui: NovaNoiseGateUI as any,
+    automatable: v21Automatable('GATE'),
   },
   {
     type: 'DJFILTER',

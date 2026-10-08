@@ -68,6 +68,7 @@ import { ChordEvent, chordSteps } from '../utils/chordDetect';
 import { engineView, VOID_OUTPUT } from '../utils/trackStructure';
 import { legacyAutomatable, paramsWithoutAutomated, hasPluginLane, pluginParamStaticValue } from './automationParams';
 import { isMuteParam, muteGainPoints, muteLaneOf } from '../utils/muteAutomation';
+import { SidechainRouter, KeyPath, KeyRoute, keyRoutes, pdcKeysFor, latencyBefore, isKeyedNode } from './sidechain';
 
 interface TrackDSP {
   input: GainNode;          
@@ -847,6 +848,8 @@ export class AudioEngine {
       silenced?: boolean;
       /** Effets créés pour le rendu (automation de leurs paramètres). */
       pluginNodes?: Map<string, any>;
+      /** Latence des effets avant chaque effet (side-chain, R7). */
+      pluginOffsets?: Map<string, number>;
       synth?: TrackSynth;
       sampler?: AudioSampler;
       drumRack?: DrumRackNode;
@@ -897,6 +900,8 @@ export class AudioEngine {
       let postLatency = 0;
       let frozenInput: GainNode | undefined;
       const pluginNodes = new Map<string, any>();
+      /** Latence des effets avant chaque effet (offset d'une clé de side-chain, R7). */
+      const pluginOffsets = new Map<string, number>();
       const addPlugin = (plugin: PluginInstance, isPost: boolean) => {
         // Inactif : absent du rendu (aucune latence). Bypass : contourné, retardé de sa latence (comme en lecture).
         if (plugin.isInactive) return;
@@ -916,6 +921,7 @@ export class AudioEngine {
             return;
           }
           pluginNodes.set(plugin.id, entry.node);
+          pluginOffsets.set(plugin.id, offlineLatency);
           if (entry.node?.ready instanceof Promise) pendingPlugins.push(entry.node.ready);
           head.connect(entry.input);
           head = entry.output;
@@ -948,7 +954,7 @@ export class AudioEngine {
       panner.pan.value = options.preFader ? 0 : track.pan;
 
       const rt: RenderTrack = {
-        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pre: preNode, muteGain, silenced,
+        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pluginOffsets, pre: preNode, muteGain, silenced,
         frozenInput, frozenClipId: frozen ? track.frozenClip!.id : undefined, postLatency,
       };
 
@@ -1027,11 +1033,34 @@ export class AudioEngine {
       });
     }
 
-    // --- 2-PDC. Compensation de latence (bus, envois) : mêmes règles qu'en lecture.
+    // --- 2-SC. Side-chain (R7) : clé = sortie de la chaîne (ou fader) de la source, filtrée, vers l'effet à clé.
+    const offlineKeys: { route: KeyRoute; path: KeyPath }[] = [];
+    for (const r of keyRoutes(tracks)) {
+      const node = rendered.get(r.targetTrackId)?.pluginNodes?.get(r.pluginId);
+      if (!isKeyedNode(node)) continue;
+      const srcs = r.sources.filter(sid => rendered.has(sid));
+      if (!srcs.length) continue;
+      const path = new KeyPath(offlineCtx);
+      path.setFilters(r.hpf, r.lpf);
+      srcs.forEach(sid => { const rs = rendered.get(sid)!; path.setSource(sid, r.tap === 'post' ? rs.gain : (rs.pre || rs.input)); });
+      path.connectTo(node.sidechainInput);
+      node.setSidechainActive!(true);
+      offlineKeys.push({ route: { ...r, sources: srcs }, path });
+    }
+
+    // --- 2-PDC. Compensation de latence (bus, envois, clés de side-chain) : mêmes règles qu'en lecture.
     {
       const nodes = new Map<string, PdcNode>();
-      rendered.forEach((rt, id) => nodes.set(id, { latency: rt.latency || 0, outputs: rt.outputs || [] }));
+      const routesR = offlineKeys.map(k => k.route);
+      rendered.forEach((rt, id) => nodes.set(id, {
+        latency: rt.latency || 0, outputs: rt.outputs || [],
+        ...(routesR.length ? { keys: pdcKeysFor(routesR, id, (tid, pid) => rendered.get(tid)?.pluginOffsets?.get(pid) || 0) } : {}),
+      }));
       const pdc = computePdc(nodes);
+      offlineKeys.forEach(({ route, path }) => route.sources.forEach(sid => {
+        const d = path.delayOf(sid);
+        if (d) d.delayTime.value = toSamples(pdc.get(sid)?.keyDelays.get(route.pluginId) ?? 0);
+      }));
       rendered.forEach((rt, id) => {
         const r = pdc.get(id);
         rt.down = r?.down || 0;
@@ -1341,6 +1370,8 @@ export class AudioEngine {
   private midiRunStart: number | null = null;
   /** Dernier retard PDC demandé par nœud (delayTime.value est en retard d'un rendu). */
   private pdcSet = new WeakMap<DelayNode, number>();
+  /** Side-chain (R7) : clés câblées en lecture (engine/sidechain.ts). */
+  private sidechain = new SidechainRouter(() => this.ctx);
 
   public setRecordingFreeze(trackId: string, freeze: { clip: Clip; upTo: number; clipIds: string[] } | null) {
     if (freeze) this.recFreezes.set(trackId, freeze); else this.recFreezes.delete(trackId);
@@ -1435,7 +1466,12 @@ export class AudioEngine {
   private recomputePdc() {
     if (!this.ctx) return;
     const nodes = new Map<string, PdcNode>();
-    this.tracksDSP.forEach((d, id) => nodes.set(id, { latency: this.pdcSuspended ? 0 : (d.pluginLatency || 0), outputs: d.outputs || [] }));
+    // Clés de side-chain (R7) : traitées comme des sorties de la piste source (alignées sur l'effet à clé).
+    const routes = this.sidechain.current();
+    this.tracksDSP.forEach((d, id) => nodes.set(id, {
+      latency: this.pdcSuspended ? 0 : (d.pluginLatency || 0), outputs: d.outputs || [],
+      ...(routes.length ? { keys: pdcKeysFor(routes, id, (tid, pid) => this.keyOffset(tid, pid)) } : {}),
+    }));
     const res = computePdc(nodes);
     const t = this.ctx.currentTime;
     const setDelay = (node: DelayNode | undefined, sec: number) => {
@@ -1456,9 +1492,37 @@ export class AudioEngine {
       setDelay(d.outDelay, r && main !== undefined ? (r.delays.get(main) ?? r.down) : 0);
       d.sendDelays?.forEach((node, sendId) => setDelay(node, r?.delays.get(sendId) ?? 0));
     });
+    this.sidechain.applyDelays(res, setDelay, this.pdcSuspended);
     // Latences changées (effet ajouté, gel de prise…) : l'avance des gates aussi.
     this.resyncTimelineEffects();
   }
+
+  /** Latence (s) des effets placés avant un effet à clé sur sa piste (offset de la clé, PDC). */
+  private keyOffset(trackId: string, pluginId: string): number {
+    if (this.pdcSuspended) return 0;
+    const dsp = this.tracksDSP.get(trackId);
+    if (!dsp) return 0;
+    return latencyBefore(dsp.chainIds || [], pluginId, id => dsp.pluginChain.get(id)?.instance?.latency);
+  }
+
+  /**
+   * Side-chain (R7) : câble les clés des effets (prise « pre » = sortie de la
+   * chaîne de la source, avant son mute et son fader ; « post » = après le
+   * fader). Idempotent : appelé à chaque mise à jour de piste (un recâblage de
+   * la source coupe ses sorties, il est réparé ici). PDC refaite si la
+   * topologie des clés change.
+   */
+  private syncSidechains(allTracks: Track[]) {
+    const routes = keyRoutes(allTracks);
+    if (!routes.length && !this.sidechain.current().length) return;
+    const changed = this.sidechain.sync(routes,
+      (tid, pid) => this.tracksDSP.get(tid)?.pluginChain.get(pid)?.instance,
+      (tid, tap) => { const d = this.tracksDSP.get(tid); return d ? (tap === 'post' ? d.gain : (d.chainOut || null)) : null; });
+    if (changed) this.recomputePdc();
+  }
+
+  /** Effet à clé : chemin de sa clé en lecture (mesures, QA). */
+  public getSidechainPath(pluginId: string): KeyPath | null { return this.sidechain.pathOf(pluginId); }
 
   /**
    * Effets calés sur la ligne de temps du morceau (gate rythmique) d'une chaîne :
@@ -2054,7 +2118,8 @@ export class AudioEngine {
 
   private scheduleClips(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number, maxLatency: number, latencies: Map<string, number>) {
       tracks.map(t => this.eff(t)).forEach(track => {
-      if (track.isMuted) return; 
+      // Piste muette : rien à jouer, SAUF si elle sert de clé de side-chain avant fader (kick fantôme, R7).
+      if (track.isMuted && !this.sidechain.isPreKeySource(track.id)) return; 
       const isFrozenRender = isTrackFrozen(track);
       if (!isFrozenRender && track.type !== TrackType.AUDIO && track.type !== TrackType.SAMPLER && track.type !== TrackType.BUS && track.type !== TrackType.SEND) return;
 
@@ -2074,7 +2139,7 @@ export class AudioEngine {
 
   private scheduleMidi(tracks: Track[], projectWindowStart: number, projectWindowEnd: number, contextScheduleTime: number) {
       tracks.map(t => this.eff(t)).forEach(track => {
-        if (track.isMuted) return;
+        if (track.isMuted && !this.sidechain.isPreKeySource(track.id)) return;
         if (track.type !== TrackType.MIDI && track.type !== TrackType.SAMPLER && track.type !== TrackType.DRUM_RACK) return;
         // Piste gelee : seules les notes ajoutees apres le rendu sont jouees.
         const midiClips = isTrackFrozen(track) ? uncoveredClips(track) : track.clips;
@@ -3042,6 +3107,7 @@ export class AudioEngine {
         if (sendGain) sendGain.gain.setTargetAtTime(forcedOff ? 0 : this.automatedValue(track, `send::${send.id}`, send.level), t, 0.015);
         if (typeof send.pan === 'number') dsp.sendPanners?.get(send.id)?.pan.setTargetAtTime(send.pan, t, 0.015);
       });
+      this.syncSidechains(allTracks);
       return;
     }
     dsp.graphSignature = signature;
@@ -3285,6 +3351,7 @@ export class AudioEngine {
       if (!currentSendIds.has(sendId)) { try { node.disconnect(); } catch (e) {} dsp!.sendPanners!.delete(sendId); }
     });
     dsp.outputs = outputs;
+    this.syncSidechains(allTracks);
     this.recomputePdc();
   }
 

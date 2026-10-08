@@ -24,6 +24,12 @@ export interface GateCoreParams {
   attack: number;
   release: number;
   bpm: number;
+  /**
+   * Seuil de la clé (dBFS, R7) : avec une clé externe (side-chain), le motif
+   * est remplacé par la clé — le gate s'ouvre quand elle dépasse ce seuil
+   * (charleys, kick, voix d'une autre piste) et se ferme de « profondeur » sinon.
+   */
+  keyThreshold?: number;
 }
 
 export function createGateCore(sr: number) {
@@ -32,6 +38,10 @@ export function createGateCore(sr: number) {
   let clock = 0;
   let step = 0;
   let aC = 1, rC = 1;
+  // Clé externe (side-chain, R7) : enveloppe crête (relâchement 10 ms), hystérésis 4 dB.
+  let kL: Float32Array | null = null, kR: Float32Array | null = null, keyOn = false, listen = false;
+  let kEnv = 0, kOpen = false, kThrOpen = 0.0316, kThrClose = 0.02;
+  const kRel = Math.exp(-1 / (0.01 * sr));
   const coef = (ms: number) => 1 - Math.exp(-1 / Math.max(1, (ms || 0) * 0.001 * sr));
   const clampN = (v: number, a: number, b: number) => (Number.isFinite(v) ? Math.max(a, Math.min(b, v)) : a);
   const setParams = (p: Partial<GateCoreParams>) => {
@@ -42,6 +52,9 @@ export function createGateCore(sr: number) {
     P.bpm = clampN(+P.bpm || 120, 20, 400);
     aC = coef(clampN(+P.attack, 0, 200));
     rC = coef(clampN(+P.release, 0, 1000));
+    const kt = Number.isFinite(+(P.keyThreshold as any)) ? clampN(+(P.keyThreshold as any), -80, 0) : -30;
+    kThrOpen = Math.pow(10, kt / 20);
+    kThrClose = Math.pow(10, (kt - 4) / 20);
   };
   setParams({});
   /** Pas joué à la position `t` (s du morceau). */
@@ -54,7 +67,9 @@ export function createGateCore(sr: number) {
     setParams,
     /** Position (s dans le morceau) du premier échantillon du prochain bloc. */
     setClock(t: number) { if (Number.isFinite(t)) clock = t; },
-    reset() { g = 1; },
+    reset() { g = 1; kEnv = 0; kOpen = false; },
+    /** Clé externe du bloc suivant (null = motif), écoute de la clé. */
+    setKey(l: Float32Array | null, r: Float32Array | null, on: boolean, lis: boolean) { kL = l; kR = r || l; keyOn = !!on && !!l; listen = keyOn && !!lis; },
     stepAt,
     /** Gain visé à la position `t`. */
     targetAt(t: number) {
@@ -69,15 +84,24 @@ export function createGateCore(sr: number) {
         const t = clock + i * dt;
         const k = Math.floor(t / per + 1e-9);
         const s = ((k % len) + len) % len;
-        const lv = +steps[s];
-        const target = 1 - depth * (1 - (lv > 1 ? 1 : lv < 0 || !(lv === lv) ? 0 : lv));
+        let target: number;
+        if (keyOn && kL && kR) {
+          // Clé externe : ouvert tant que la clé dépasse le seuil (le motif ne joue pas).
+          const a = Math.max(Math.abs(kL[i]), Math.abs(kR[i]));
+          kEnv = a > kEnv ? a : kEnv * kRel + a * (1 - kRel);
+          if (kEnv >= kThrOpen) kOpen = true; else if (kEnv < kThrClose) kOpen = false;
+          target = kOpen ? 1 : 1 - depth;
+        } else {
+          const lv = +steps[s];
+          target = 1 - depth * (1 - (lv > 1 ? 1 : lv < 0 || !(lv === lv) ? 0 : lv));
+        }
         g += (target - g) * (target > g ? aC : rC);
-        oL[i] = iL[i] * g;
-        if (oR) oR[i] = iR[i] * g;
+        if (listen && kL && kR) { oL[i] = kL[i]; if (oR) oR[i] = kR[i]; }
+        else { oL[i] = iL[i] * g; if (oR) oR[i] = iR[i] * g; }
         if (i === 0) step = s;
       }
       clock += n * dt;
     },
-    meters() { return { step, gain: g }; },
+    meters() { return { step: keyOn ? -1 : step, gain: g, keyOn }; },
   };
 }

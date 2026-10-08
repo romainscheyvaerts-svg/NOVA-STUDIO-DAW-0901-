@@ -22,7 +22,7 @@ export interface V21ParamSpec {
 
 export interface V21Preset { id: string; name: string; hint: string; params: Record<string, number | string> }
 
-export type V21Type = 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX';
+export type V21Type = 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX' | 'GATE';
 
 // ---------------------------------------------------------------------------
 // Harmoniseur
@@ -209,11 +209,12 @@ export const GATEFX_SPECS: V21ParamSpec[] = [
   { id: 'depth', label: 'Profondeur', min: 0, max: 1, step: 0.01, unit: '%', hint: '100 % = un pas fermé est muet ; 50 % = il est seulement baissé (effet de pompe doux).' },
   { id: 'attack', label: 'Attaque', min: 0, max: 50, step: 0.5, unit: 'ms', hint: 'Temps d’ouverture au début d’un pas ouvert : 1 à 3 ms = coupe nette sans clic, plus long = attaque adoucie.' },
   { id: 'release', label: 'Relâchement', min: 1, max: 300, step: 1, unit: 'ms', hint: 'Temps de fermeture à la fin d’un pas : court = hachage sec (stutter), long = effet de pompe façon sidechain.' },
+  { id: 'keyThreshold', label: 'Seuil de la clé', min: -80, max: 0, step: 0.5, unit: 'dB', hint: 'Avec une clé externe (side-chain) : le motif est remplacé par la clé. Le gate s’ouvre quand la clé (charleys, kick, voix d’une autre piste) dépasse ce seuil, et se ferme sinon.' },
   ...stepIds.map((id, i) => ({ id, label: `Pas ${i + 1}`, min: 0, max: 1, step: 0.05, unit: '%', hint: `Niveau du pas ${i + 1} : 0 = fermé, 100 % = ouvert. Automatisable pour faire évoluer le motif.` })),
 ];
 
 const OPEN = Array(16).fill(1);
-export const DEFAULT_GATEFX = { rate: 4, length: 16, depth: 1, attack: 2, release: 20, ...gatePattern([1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1]), isEnabled: true };
+export const DEFAULT_GATEFX = { rate: 4, length: 16, depth: 1, attack: 2, release: 20, keyThreshold: -30, ...gatePattern([1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1]), isEnabled: true };
 
 export const GATEFX_PRESETS: V21Preset[] = [
   { id: 'trance-16', name: 'Trance gate 1/16', hint: 'Le hachage classique en doubles croches, comme le Trance Gate.', params: { rate: 4, length: 16, depth: 1, attack: 2, release: 20, ...gatePattern([1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1]) } },
@@ -227,18 +228,39 @@ export const GATEFX_PRESETS: V21Preset[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Gate (porte de bruit / expandeur, clé externe possible) — R7
+// ---------------------------------------------------------------------------
+
+export const GATE_SPECS: V21ParamSpec[] = [
+  { id: 'threshold', label: 'Seuil', min: -80, max: 0, step: 0.5, unit: 'dB', hint: 'Le son passe quand la détection (le son lui-même, ou la clé externe) dépasse ce seuil. Pro Tools : Threshold du Dyn3 Expander/Gate.' },
+  { id: 'range', label: 'Plage', min: 0, max: 80, step: 1, unit: 'dB', hint: 'Combien la porte baisse le son quand elle est fermée : 80 dB = silence, 6 à 12 dB = expandeur doux (garde un peu de respiration).' },
+  { id: 'attack', label: 'Ouverture', min: 0, max: 50, step: 0.1, unit: 'ms', hint: 'Temps d’ouverture : 0,1 à 1 ms garde l’attaque d’un kick, plus long adoucit.' },
+  { id: 'hold', label: 'Maintien', min: 0, max: 500, step: 1, unit: 'ms', hint: 'La porte reste ouverte ce temps après le dernier passage au-dessus du seuil : évite qu’elle claque sur une fin de note.' },
+  { id: 'release', label: 'Fermeture', min: 1, max: 1000, step: 1, unit: 'ms', hint: 'Temps de fermeture : court = coupe sèche (gate rythmique au kick), long = fondu naturel.' },
+];
+
+export const DEFAULT_GATE = { threshold: -40, range: 80, attack: 0.5, hold: 20, release: 80, isEnabled: true };
+
+export const GATE_PRESETS: V21Preset[] = [
+  { id: 'voix-propre', name: 'Voix sans bruit de fond', hint: 'Coupe le souffle et le bruit de la cabine entre les phrases, sans manger les fins de mots.', params: { threshold: -45, range: 18, attack: 1, hold: 60, release: 150 } },
+  { id: 'kick-sec', name: 'Kick / 808 serré', hint: 'Raccourcit la queue d’un kick ou d’une 808 : la porte se ferme vite après le coup.', params: { threshold: -24, range: 60, attack: 0.1, hold: 30, release: 60 } },
+  { id: 'hache-cle', name: 'Haché par la clé (side-chain)', hint: 'Avec une clé (charleys, kick…) : le son ne passe que quand la clé joue. Choisis la clé en haut de la fenêtre.', params: { threshold: -30, range: 80, attack: 0.5, hold: 0, release: 30 } },
+  { id: 'expandeur', name: 'Expandeur doux', hint: 'Baisse de 8 dB seulement sous le seuil : nettoie sans effet de porte.', params: { threshold: -38, range: 8, attack: 2, hold: 50, release: 200 } },
+];
+
+// ---------------------------------------------------------------------------
 
 export const V21_SPECS: Record<V21Type, V21ParamSpec[]> = {
-  HARMONIZER: HARMONIZER_SPECS, VOICESHIFT: VOICESHIFT_SPECS, TIMEFX: TIMEFX_SPECS, DJFILTER: DJFILTER_SPECS, LOFI: LOFI_SPECS, GATEFX: GATEFX_SPECS,
+  HARMONIZER: HARMONIZER_SPECS, VOICESHIFT: VOICESHIFT_SPECS, TIMEFX: TIMEFX_SPECS, DJFILTER: DJFILTER_SPECS, LOFI: LOFI_SPECS, GATEFX: GATEFX_SPECS, GATE: GATE_SPECS,
 };
 
 export const V21_PRESETS: Record<V21Type, V21Preset[]> = {
-  HARMONIZER: HARMONIZER_PRESETS, VOICESHIFT: VOICESHIFT_PRESETS, TIMEFX: TIMEFX_PRESETS, DJFILTER: DJFILTER_PRESETS, LOFI: LOFI_PRESETS, GATEFX: GATEFX_PRESETS,
+  HARMONIZER: HARMONIZER_PRESETS, VOICESHIFT: VOICESHIFT_PRESETS, TIMEFX: TIMEFX_PRESETS, DJFILTER: DJFILTER_PRESETS, LOFI: LOFI_PRESETS, GATEFX: GATEFX_PRESETS, GATE: GATE_PRESETS,
 };
 
 export const V21_DEFAULTS: Record<V21Type, () => Record<string, any>> = {
   HARMONIZER: () => ({ ...DEFAULT_HARMONIZER }), VOICESHIFT: () => ({ ...DEFAULT_VOICESHIFT }), TIMEFX: () => ({ ...DEFAULT_TIMEFX }),
-  DJFILTER: () => ({ ...DEFAULT_DJFILTER }), LOFI: () => ({ ...DEFAULT_LOFI }), GATEFX: () => ({ ...DEFAULT_GATEFX }),
+  DJFILTER: () => ({ ...DEFAULT_DJFILTER }), LOFI: () => ({ ...DEFAULT_LOFI }), GATEFX: () => ({ ...DEFAULT_GATEFX }), GATE: () => ({ ...DEFAULT_GATE }),
 };
 
 /** Ramène des réglages reçus (fenêtre, automation, projet ancien) dans leurs bornes. Les clés inconnues passent telles quelles. */
