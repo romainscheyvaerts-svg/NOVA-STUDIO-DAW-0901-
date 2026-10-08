@@ -1,6 +1,7 @@
 import { DRUM_LIBRARY, DRUM_LIBRARY_STYLES, LibCategory, libUrl } from './drumLibrary';
 import { Clip, DrumPad, TrackType } from '../types';
 import { FACTORY_KITS } from './drumFactory';
+import { rowStepsPerBar } from './drumPatterns';
 
 /**
  * Boîte à rythmes Make Music : 7 rangées de pads, un motif de 16 pas par
@@ -43,6 +44,17 @@ export interface DrumRow {
   reverse?: boolean;
   /** Tranche d'une boucle découpée (numéro de tranche, à partir de 1). */
   slice?: number;
+  // --- R18 · Éditeur de pas façon FL Studio (Graph Editor), champs optionnels ---
+  /** Panoramique par pas (-1 … 1, 0 = celui du pad). Même longueur que `steps`. */
+  stepPan?: number[];
+  /** Hauteur par pas en demi-tons (-12 … +12), ajoutée à l'accordage du pad. */
+  stepPitch?: number[];
+  /** Résolution de la rangée : 1/16 (défaut), 1/32, triolets de croches (1/8 T) ou de doubles (1/16 T). */
+  rate?: import('./drumPatterns').StepRate;
+  /** Longueur propre de la rangée en pas (polymétrie : la rangée boucle toute seule). Absent : le motif entier. */
+  len?: number;
+  /** Swing propre de la rangée (0 … 0.6). Absent : le swing global. */
+  swing?: number;
 }
 
 export interface DrumMachine {
@@ -205,14 +217,21 @@ export function makeDrumMachine(kitId: string): DrumMachine {
 
 /** Passe le motif à 1, 2 ou 4 mesures (les mesures ajoutées reprennent les premières). */
 export function setBars(dm: DrumMachine, bars: 1 | 2 | 4): DrumMachine {
-  const len = STEPS * bars;
+  const ext = (a: number[] | undefined, len: number, d: number) => Array.from({ length: len }, (_, i) => a?.[i] ?? a?.[i % Math.max(1, a.length)] ?? d);
   return {
     ...dm, bars,
-    rows: dm.rows.map(r => ({
-      ...r,
-      steps: Array.from({ length: len }, (_, i) => r.steps[i] ?? r.steps[i % Math.max(1, r.steps.length)] ?? 0),
-      ratchet: Array.from({ length: len }, (_, i) => r.ratchet[i] ?? r.ratchet[i % Math.max(1, r.ratchet.length)] ?? 1),
-    })),
+    rows: dm.rows.map(r => {
+      // Rangée à longueur propre (polymétrie) : elle ne change pas avec le motif.
+      if (r.len && r.len > 0) return r;
+      const len = rowStepsPerBar(r) * bars;
+      return {
+        ...r,
+        steps: ext(r.steps, len, 0),
+        ratchet: ext(r.ratchet, len, 1),
+        ...(r.stepPan ? { stepPan: ext(r.stepPan, len, 0) } : {}),
+        ...(r.stepPitch ? { stepPitch: ext(r.stepPitch, len, 0) } : {}),
+      };
+    }),
   };
 }
 

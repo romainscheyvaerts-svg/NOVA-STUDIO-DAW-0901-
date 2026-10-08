@@ -1,0 +1,290 @@
+{
+  "id": "cloches",
+  "name": "Glockenspiel",
+  "version": 1,
+  "license": "Domaine public de fait : University of Iowa MIS, « used for any projects, without restrictions »",
+  "source": "https://theremin.music.uiowa.edu/MIS-Pitches-2012/MISBells2012.html",
+  "release": 1.5,
+  "zones": [
+    {
+      "file": "C5_plastic.ogg",
+      "root": 72,
+      "tune": -11,
+      "lo": 60,
+      "hi": 73,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "C5_brass.ogg",
+      "root": 72,
+      "tune": -12,
+      "lo": 60,
+      "hi": 73,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Ds5_plastic.ogg",
+      "root": 75,
+      "tune": -11,
+      "lo": 74,
+      "hi": 76,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "Ds5_brass.ogg",
+      "root": 75,
+      "tune": -11,
+      "lo": 74,
+      "hi": 76,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Fs5_plastic.ogg",
+      "root": 78,
+      "tune": -9,
+      "lo": 77,
+      "hi": 79,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "Fs5_brass.ogg",
+      "root": 78,
+      "tune": -9,
+      "lo": 77,
+      "hi": 79,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "A5_plastic.ogg",
+      "root": 81,
+      "tune": -10,
+      "lo": 80,
+      "hi": 82,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "A5_brass.ogg",
+      "root": 81,
+      "tune": -10,
+      "lo": 80,
+      "hi": 82,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "C6_plastic.ogg",
+      "root": 84,
+      "tune": -14,
+      "lo": 83,
+      "hi": 85,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "C6_brass.ogg",
+      "root": 84,
+      "tune": -14,
+      "lo": 83,
+      "hi": 85,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Ds6_plastic.ogg",
+      "root": 87,
+      "tune": -15,
+      "lo": 86,
+      "hi": 88,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "Ds6_brass.ogg",
+      "root": 87,
+      "tune": -14,
+      "lo": 86,
+      "hi": 88,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Fs6_plastic.ogg",
+      "root": 90,
+      "tune": -15,
+      "lo": 89,
+      "hi": 91,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "Fs6_brass.ogg",
+      "root": 90,
+      "tune": -15,
+      "lo": 89,
+      "hi": 91,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "A6_plastic.ogg",
+      "root": 93,
+      "tune": -15,
+      "lo": 92,
+      "hi": 94,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "A6_brass.ogg",
+      "root": 93,
+      "tune": -15,
+      "lo": 92,
+      "hi": 94,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "C7_plastic.ogg",
+      "root": 96,
+      "tune": -19,
+      "lo": 95,
+      "hi": 97,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "C7_brass.ogg",
+      "root": 96,
+      "tune": -19,
+      "lo": 95,
+      "hi": 97,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Ds7_plastic.ogg",
+      "root": 99,
+      "tune": -19,
+      "lo": 98,
+      "hi": 100,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "Ds7_brass.ogg",
+      "root": 99,
+      "tune": -19,
+      "lo": 98,
+      "hi": 100,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Fs7_plastic.ogg",
+      "root": 102,
+      "tune": -19,
+      "lo": 101,
+      "hi": 103,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "Fs7_brass.ogg",
+      "root": 102,
+      "tune": -19,
+      "lo": 101,
+      "hi": 103,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "A7_plastic.ogg",
+      "root": 105,
+      "tune": -20,
+      "lo": 104,
+      "hi": 106,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "A7_brass.ogg",
+      "root": 105,
+      "tune": -20,
+      "lo": 104,
+      "hi": 106,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "C8_plastic.ogg",
+      "root": 108,
+      "tune": -27,
+      "lo": 107,
+      "hi": 109,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "C8_brass.ogg",
+      "root": 108,
+      "tune": -27,
+      "lo": 107,
+      "hi": 109,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    },
+    {
+      "file": "Ds8_plastic.ogg",
+      "root": 111,
+      "tune": -29,
+      "lo": 110,
+      "hi": 117,
+      "velLo": 1,
+      "velHi": 90,
+      "rr": 0
+    },
+    {
+      "file": "Ds8_brass.ogg",
+      "root": 111,
+      "tune": -29,
+      "lo": 110,
+      "hi": 117,
+      "velLo": 91,
+      "velHi": 127,
+      "rr": 0
+    }
+  ]
+}

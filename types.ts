@@ -200,6 +200,14 @@ export interface MidiNote {
    * clip, affichée en gris, jamais jouée ni exportée.
    */
   muted?: boolean;
+  /**
+   * R18 · Réglages par note venus de la boîte à rythmes (Graph Editor de FL
+   * Studio) : panoramique (-1 … 1, ajouté à celui du pad) et hauteur en
+   * demi-tons (ajoutée à l'accordage). Le sampler mélodique les suit aussi.
+   * Absents : 0 (une ancienne version les ignore).
+   */
+  pan?: number;
+  tune?: number;
 }
 
 /** Groove (V25, utils/groove) : décalage et vélocité par case de grille, comme le Groove Pool de Live. */
@@ -873,6 +881,13 @@ export interface Track {
    * Absent : l'ancien synthé simple (les anciens projets sonnent comme avant).
    */
   novaSynth?: import('./utils/novaSynth').NovaSynthSettings;
+  /**
+   * R18 · Piste MIDI jouée par le sampler mélodique (ton son, chromatique,
+   * ADSR, boucle, glide, mono / poly) ou, R20, par un instrument
+   * multi-échantillons (piano, Rhodes, guitare, cordes, cloches, nappe).
+   * Absent : synthé. Une ancienne version l'ignore et joue le synthé.
+   */
+  melodicSampler?: import('./utils/melodicSampler').MelodicSamplerSettings;
   /**
    * Piste MIDI (mode instru) jouée par un instrument VST3 du PC (pont VST).
    * Les notes sont rendues hors temps réel dans frozenClip (isFrozen, aucun

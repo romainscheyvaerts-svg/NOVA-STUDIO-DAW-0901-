@@ -8,6 +8,7 @@ import { novaBridge } from './NovaBridge';
 import { isTrackFrozen, FREEZE_SAME_SOUND, FREEZE_OTHER_SOUND } from '../utils/freeze';
 import { getEditAuthor, SESSION_SCHEMA_VERSION, stampJournal } from '../utils/preFxEdits';
 import { padSampleFiles, restorePadSamples } from '../utils/drumSamples';
+import { samplerBufferKey } from '../utils/melodicSampler';
 import { salvageJson, repairProject } from '../utils/projectRepair';
 
 /** Rapport de réparation posé sur l'état chargé (propriété non énumérable). */
@@ -161,6 +162,15 @@ export class ProjectIO {
         for (const f of padSampleFiles(track, k => audioBufferRegistry.get(k))) {
             if (!written.has(f.filename)) { written.add(f.filename); if (audioFolder) audioFolder.file(f.filename, wavOf(f.buffer)); }
             sTrack.drumMachine.samples[f.id].audioRef = `audio/${f.filename}`;
+        }
+
+        // Son du sampler mélodique (R18) : un WAV (les instruments R20 sont des fichiers du site).
+        const msId = track.melodicSampler?.sampleId;
+        const msBuf = msId ? audioBufferRegistry.get(samplerBufferKey(msId)) : undefined;
+        if (msId && msBuf && sTrack.melodicSampler) {
+            const filename = `${samplerBufferKey(msId)}.wav`;
+            if (!written.has(filename)) { written.add(filename); if (audioFolder) audioFolder.file(filename, wavOf(msBuf)); }
+            sTrack.melodicSampler.audioRef = `audio/${filename}`;
         }
 
         // RENDU GELÉ (effets VST3 du PC rendus dans l'audio) : il permet de
@@ -431,6 +441,17 @@ export class ProjectIO {
                     }
                 }
             }
+        }
+
+        // Son du sampler mélodique (R18).
+        const ms = (track as any).melodicSampler;
+        if (ms && typeof ms.audioRef === 'string') {
+            const ref = ms.audioRef as string;
+            delete ms.audioRef;
+            try {
+                const f = zip.file(ref);
+                if (f && ms.sampleId) audioBufferRegistry.register(await audioEngine.ctx!.decodeAudioData(await f.async("arraybuffer")), samplerBufferKey(ms.sampleId));
+            } catch { /* son illisible : le sampler reste muet */ }
         }
 
         // Samples perso des pads de batterie (V16).

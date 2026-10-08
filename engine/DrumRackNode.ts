@@ -71,7 +71,7 @@ export class DrumRackNode {
   /**
    * Triggers a specific Pad by ID (1-30) or MIDI Note (60-89)
    */
-  public trigger(padIdOrNote: number, velocity: number = 1.0, time: number = 0) {
+  public trigger(padIdOrNote: number, velocity: number = 1.0, time: number = 0, ex?: { pan?: number; tune?: number }) {
     // Determine Pad ID. If > 30, assume it's a MIDI note.
     // MIDI 60 = Pad 1.
     const padId = padIdOrNote > 30 ? padIdOrNote - 59 : padIdOrNote;
@@ -95,7 +95,8 @@ export class DrumRackNode {
     // Create Source
     const source = this.ctx.createBufferSource();
     source.buffer = buffer;
-    const tune = pad.tune || 0;
+    // Hauteur du pas (R18, Graph Editor de FL) ajoutée à l'accordage du pad.
+    const tune = (pad.tune || 0) + (ex?.tune || 0);
     if (tune) source.playbackRate.value = Math.pow(2, tune / 12);
 
     // Create Gain (Volume * Velocity)
@@ -112,7 +113,7 @@ export class DrumRackNode {
 
     // Create Panner
     const panner = this.ctx.createStereoPanner();
-    panner.pan.value = pad.pan;
+    panner.pan.value = Math.max(-1, Math.min(1, pad.pan + (ex?.pan || 0)));
 
     // Graph: Source -> Gain -> Panner -> Output
     source.connect(gainNode);

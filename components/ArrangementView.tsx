@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { requestSampler } from '../utils/samplerPanelStore';
 import { breathGainAt } from '../utils/breathEnvelope';
 import { requestBreaths } from '../utils/breathBus';
 import { isVoiceTrack } from '../utils/vocalRoles';
@@ -2736,6 +2737,15 @@ useEffect(() => {
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => { const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id]; requestBreaths({ mode: 'dialog', clipIds: ids, reason: 'menu' }); setClipContextMenu(null); }}] : []),
                 // Gain de clip, Heal, boucle, Répéter, rendre le gain (R5).
                 ...clipGainMenuItems(clipContextMenu.trackId, clipContextMenu.clip, () => setClipContextMenu(null)),
+                // R18 : sampler et découpe (FL : Slicex / « Send to sampler » · Live : Convert to Simpler, Slice to New MIDI Track · Logic : Quick Sampler).
+                ...(clipContextMenu.clip.type !== TrackType.MIDI && !clipContextMenu.clip.notes && clipContextMenu.clip.bufferId ? [
+                  { label: 'Convertir en sampler', icon: 'fa-wave-square',
+                    title: 'Met ce son dans un sampler sur une nouvelle piste : il se joue sur tout le clavier, note racine trouvée toute seule (Live : Convert to Simpler · FL : envoyer au Sampler · Logic : Quick Sampler)',
+                    onClick: () => { requestSampler({ kind: 'from-clip', trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }); setClipContextMenu(null); } },
+                  { label: 'Découper (chop)…', icon: 'fa-cut',
+                    title: 'Découpe ce sample sur les attaques ou à la grille, vers des notes d’un sampler (avec un clip MIDI qui rejoue l’original) ou vers des pads (FL : Slicex · Live : Slice to New MIDI Track · Logic : Quick Sampler en Slice)',
+                    onClick: () => { requestSampler({ kind: 'chop-clip', trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }); setClipContextMenu(null); } },
+                ] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
                   { label: 'Séparer en stems…', icon: 'fa-layer-group', title: STEMS_TOOLTIP,
                     onClick: () => { onSeparateStems(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); } }

@@ -13,6 +13,7 @@ import { gainToDbText } from '../utils/db';
 import { useSimpleMode } from '../utils/simpleMode';
 import { sendLabel } from '../utils/sendLabels';
 import { openSynthPanel } from '../utils/synthPanelStore';
+import { openSamplerPanel } from '../utils/samplerPanelStore';
 import { editModeStore, useEditMode } from '../utils/editModes';
 import { breathGainAt, breathSig } from '../utils/breathEnvelope';
 import { envelopeGainAt, gainPointsSig } from '../utils/clipGain';
@@ -830,9 +831,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   {/* Synthé NOVA (V24) : sons et réglages de l'instrument de la piste MIDI */}
                   {track.type === TrackType.MIDI && !track.bass808 && !track.vstInstrument && !track.drumMachine && (
                     <button type="button" data-testid={`synth-pill-${track.id}`}
-                      onClick={(e) => { e.stopPropagation(); openSynthPanel(track.id); }}
-                      aria-label={`Ouvrir le synthé de ${track.name}`}
-                      title={`Synthé NOVA : ${track.novaSynth?.name || 'synthé simple'}`}
+                      onClick={(e) => { e.stopPropagation(); if (track.melodicSampler) openSamplerPanel(track.id); else openSynthPanel(track.id); }}
+                      aria-label={track.melodicSampler ? `Ouvrir le sampler de ${track.name}` : `Ouvrir le synthé de ${track.name}`}
+                      title={track.melodicSampler ? `Sampler : ${track.melodicSampler.sampleName || 'vide'}` : `Synthé NOVA : ${track.novaSynth?.name || 'synthé simple'}`}
                       className="nova-hit w-8 h-8 rounded-md text-[11px] bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30">
                       <i className="fas fa-sliders-h"></i>
                     </button>

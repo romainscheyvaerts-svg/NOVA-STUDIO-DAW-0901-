@@ -22,6 +22,9 @@ import ViewModeSwitcher from './components/ViewModeSwitcher';
 import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
+import SamplerHost from './components/SamplerHost';
+import { openSamplerPanel } from './utils/samplerPanelStore';
+import { requestSampler } from './utils/samplerPanelStore';
 const TrackListPanel = lazy(() => import('./components/TrackListPanel'));
 const GroupsListPanel = lazy(() => import('./components/GroupsListPanel'));
 const TimeOpsDialog = lazy(() => import('./components/TimeOpsDialog'));
@@ -57,6 +60,7 @@ import VstInstrumentPicker from './components/VstInstrumentPicker';
 import Bass808Controls from './components/Bass808Controls';
 import { BASS808_TRACK_ID, kit808Style, starter808Notes } from './utils/bass808';
 import { normalizeSynth } from './utils/novaSynth';
+import { normalizeSampler } from './utils/melodicSampler';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
 import { renderTrackFreeze, renderTrackPreview, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
@@ -4874,6 +4878,7 @@ function Studio() {
       if (!t) return;
       // Ancien son retiré : le synthé Nova joue en attendant le rendu du nouveau.
       if (t.vstInstrument || t.isFrozen) { old = t.frozenClip?.bufferId; clearInstrumentRender(t); }
+      delete t.melodicSampler;
       t.vstInstrument = instrumentFromPlugin(p);
     }));
     if (old) setTimeout(() => releaseBufferIfUnused(old, []), 0);
@@ -4884,6 +4889,8 @@ function Studio() {
     let old: string | undefined;
     setState(produce((d: DAWState) => {
       const t = d.tracks.find(x => x.id === trackId);
+      // Sampler / instrument NOVA (R18, R20) : la piste revient au synthé.
+      if (t?.melodicSampler) delete t.melodicSampler;
       if (!t?.vstInstrument) return;
       old = t.frozenClip?.bufferId;
       clearInstrumentRender(t);
@@ -5072,6 +5079,8 @@ function Studio() {
           if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
           if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
           if (ct.novaSynth !== undefined) { if (ct.novaSynth) t.novaSynth = normalizeSynth(ct.novaSynth); else delete t.novaSynth; }
+          // Sampler mélodique / instrument (R18, R20) : réglages bornés à la réception.
+          if (ct.melodicSampler !== undefined) { if (ct.melodicSampler) t.melodicSampler = normalizeSampler(ct.melodicSampler); else delete t.melodicSampler; }
           // Ligne de gain, boucles, Heal (R5) : champs vérifiés à la réception (utils/collabMerge).
           t.clips = Array.isArray(ct.clips) ? sanitizeIncomingClips(ct.clips) : t.clips;
           // Couloirs de prises (champ ajouté) : absent = envoyé par une ancienne version, on garde les noms locaux.
@@ -6513,6 +6522,8 @@ function Studio() {
       case 'ADD_TRACK':
       case 'CREATE_TRACK': {
         const type = (String(p.type || 'AUDIO').toUpperCase() as TrackType);
+        // R18 / R20 : piste Sampler (ton son ou un instrument NOVA : piano, rhodes, guitare, cordes, cloches, pad).
+        if (type === TrackType.MELODIC_SAMPLER) { requestSampler({ kind: 'new', instrument: typeof p.instrument === 'string' ? p.instrument : undefined }); break; }
         // Mode instru (beatmaker) : la piste MIDI existe. En mode voix, pas de MIDI
         // pour ne pas embrouiller l'artiste.
         if (stateRef.current.projectMode === 'BEATMAKING' && (type === TrackType.MIDI || type === TrackType.SAMPLER)) { handleNewMidiTrack(); break; }
@@ -8266,7 +8277,7 @@ function Studio() {
         onApply={applyMasterNova} onRemove={removeMasterNova} onSetBypass={bypassMasterNova} onClose={() => setMasterNovaOpen(false)} />}
       <ShareClipModal open={shareOpen} autoRun={shareAuto} onClose={() => { setShareOpen(false); setShareAuto(null); }} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
       {(() => {
-        const st = synthPanelTrackId ? state.tracks.find(t => t.id === synthPanelTrackId && t.type === TrackType.MIDI && !t.bass808) : undefined;
+        const st = synthPanelTrackId ? state.tracks.find(t => t.id === synthPanelTrackId && t.type === TrackType.MIDI && !t.bass808 && !t.melodicSampler) : undefined;
         if (!st) return null;
         return (
           <PanelBoundary name="le synthé" overlay onClose={closeSynthPanel}>
@@ -8284,6 +8295,9 @@ function Studio() {
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}
       
       <MidiHost state={state} getState={getStateForMidi} setState={setState} pianoRoll={midiEditorOpen} />
+      {/* R18 / R20 : sampler mélodique, instruments NOVA, « Convertir en sampler », découpe d'un clip. */}
+      <SamplerHost tracks={state.tracks} bpm={state.bpm} isMobile={isMobile} setState={setState} getState={() => stateRef.current}
+        notify={setAiNotification} ensureEngine={ensureAudioEngine} openPianoRoll={(trackId, clipId) => setMidiEditorOpen({ trackId, clipId })} />
       <MidiInputHost tracks={state.tracks} selectedTrackId={state.selectedTrackId} isRecording={state.isRecording}
         onArm={id => { void armForRecording(id); }} onToggleRecord={() => { void handleToggleRecord(); }} />
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
@@ -8300,7 +8314,14 @@ function Studio() {
                    if (!t || t.type !== TrackType.MIDI || !(state.projectMode === 'BEATMAKING' || collab?.role === 'beatmaker')) return null;
                    return (
                      <>
-                     {!t.vstInstrument && (
+                     {t.melodicSampler && !t.vstInstrument && (
+                       <button type="button" onClick={() => openSamplerPanel(t.id)} data-testid="open-sampler-panel"
+                         title="Ouvrir le sampler : ton son ou un instrument NOVA, note racine, enveloppe, boucle, glissé (Sampler de FL, Simpler de Live)"
+                         className="nova-hit h-8 px-2.5 rounded-lg text-[11px] font-bold border bg-amber-500/15 border-amber-400/50 text-amber-100 hover:bg-amber-500/25 shrink-0">
+                         <i className="fas fa-wave-square mr-1" />{t.melodicSampler.sampleName || 'Sampler'}
+                       </button>
+                     )}
+                     {!t.vstInstrument && !t.melodicSampler && (
                        <button type="button" onClick={() => openSynthPanel(t.id)} data-testid="open-synth-panel"
                          title="Ouvrir le synthé NOVA : 48 sons (pianos, nappes, plucks, cloches…) et tous les réglages"
                          className="nova-hit h-8 px-2.5 rounded-lg text-[11px] font-bold border bg-cyan-500/15 border-cyan-400/50 text-cyan-100 hover:bg-cyan-500/25 shrink-0">
@@ -8312,6 +8333,7 @@ function Studio() {
                        stale={!!t.vstInstrument && !isInstrumentRenderCurrent(t, state.bpm)}
                        onChoose={(p) => handleChooseInstrument(t.id, p)}
                        onUseSynth={() => handleUseSynth(t.id)}
+                       onChooseSampler={(instrument) => requestSampler({ kind: 'assign', trackId: t.id, instrument })}
                        onRetry={() => vstInstruments.retry(t.id)}
                        onError={(msg) => notifyInstrument(`🎹 ${msg}`)}
                      />
