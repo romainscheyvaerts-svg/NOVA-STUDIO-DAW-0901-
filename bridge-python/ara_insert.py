@@ -268,12 +268,18 @@ class AraInsertSlot:
         x = np.ascontiguousarray(x[:2], dtype="<f4")
         pos = int(round(timeline))
         t0 = time.perf_counter()
-        with self.lock:
-            p = self._pipe
-            p.write(struct.pack("<IIIIq", PIPE_MAGIC, n, 2, 1, pos) + x.tobytes())
-            head = _read_exact(p, 16)
-            magic, nn, nc, flags = struct.unpack("<IIII", head)
-            data = _read_exact(p, 4 * nn * nc)
+        try:
+            with self.lock:
+                p = self._pipe
+                p.write(struct.pack("<IIIIq", PIPE_MAGIC, n, 2, 1, pos) + x.tobytes())
+                head = _read_exact(p, 16)
+                magic, nn, nc, flags = struct.unpack("<IIII", head)
+                data = _read_exact(p, 4 * nn * nc)
+        except (OSError, ara_host.AraHostError) as e:
+            # Hôte arrêté (plugin planté) : la piste continue avec le son de ses clips ; le pont
+            # signale la panne (PLUGIN_CRASHED) et NOVA recharge l'insert.
+            self.mark_failed("exception", f"l'hôte ARA s'est arrêté ({e})")
+            return self.dry_block(block)
         self.proc_seconds += time.perf_counter() - t0
         self.proc_blocks += 1
         self.blocks += 1

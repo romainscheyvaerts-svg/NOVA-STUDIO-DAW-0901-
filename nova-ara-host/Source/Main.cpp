@@ -802,7 +802,7 @@ namespace nova
         Value showEditor (const Value& req)
         {
             if (! plugin) throw std::runtime_error ("Aucun plugin chargé");
-            if (! plugin->hasEditor()) throw std::runtime_error ("Ce plugin n'a pas de fenêtre");
+            if (editorWindow == nullptr && docked == nullptr && ! plugin->hasEditor()) throw std::runtime_error ("Ce plugin n'a pas de fenêtre");
             const bool offscreen = req["offscreen"].asBool (false);
             if (editorWindow == nullptr || editorWindow->offscreen != offscreen)
             {
@@ -1313,6 +1313,13 @@ namespace nova
             }
             if (docked != nullptr && renderersChange) notifySelectionLive ({});
             ++docVersion;
+            // Fenêtre demandée avant le premier son : ouverte maintenant (évènement editor_opened).
+            if (pendingEditor != nullptr && ! liveRegions.empty())
+            {
+                auto r = std::move (pendingEditor);
+                try { auto res = editor (*r); io::event ("editor_opened", res); }
+                catch (const std::exception& e) { io::log (std::string ("Fenêtre du plugin : ") + e.what()); }
+            }
 
             auto out = Value::object();
             out.set ("version", docVersion);
@@ -1480,11 +1487,23 @@ namespace nova
         Value editor (const Value& req)
         {
             if (! plugin) throw std::runtime_error ("Aucun plugin chargé");
-            if (! plugin->hasEditor()) throw std::runtime_error ("Ce plugin n'a pas de fenêtre");
             const auto mode = req["mode"].asString();
             auto out = Value::object();
+            // Melodyne plante (violation d'accès) si sa fenêtre s'ouvre sur un document ARA sans aucun
+            // son : la demande attend le premier document (doc), qui l'applique.
+            if (mode != "hide" && dc && liveRegions.empty() && clips.empty() && docked == nullptr && editorWindow == nullptr)
+            {
+                pendingEditor = std::make_unique<Value> (req);
+                out.set ("mode", mode);
+                out.set ("pending", true);
+                return out;
+            }
+            // (Vue déjà ouverte : Melodyne refuse d'en créer une 2e, hasEditor dirait faux.)
+            if (mode != "hide" && docked == nullptr && editorWindow == nullptr && ! plugin->hasEditor())
+                throw std::runtime_error ("Ce plugin n'a pas de fenêtre");
             if (mode == "hide")
             {
+                pendingEditor.reset();
                 if (docked) docked->setBounds (0, 0, 1, 1, false);
                 if (editorWindow) editorWindow->hide();
                 if (req["release"].asBool (false)) { docked.reset(); editorWindow.reset(); }
@@ -1517,6 +1536,13 @@ namespace nova
             }
             else if (mode == "bounds")
             {
+                if (docked == nullptr && pendingEditor != nullptr)
+                {
+                    for (const char* k : { "x", "y", "w", "h", "visible" }) if (req.has (k)) pendingEditor->set (k, req[k]);
+                    out.set ("mode", mode);
+                    out.set ("pending", true);
+                    return out;
+                }
                 if (docked == nullptr) throw std::runtime_error ("Aucun panneau ancré");
                 docked->setBounds (x, y, w, h, visible);
             }
@@ -1860,6 +1886,9 @@ namespace nova
             std::vector<ARA::ARAPlaybackRegionRef> regions;
             for (auto& [id, r] : liveRegions)
                 if (ids.empty() || std::find (ids.begin(), ids.end(), id) != ids.end()) regions.push_back (r->region);
+            // Document encore vide (fenêtre ouverte avant le premier envoi de NOVA) : rien à montrer.
+            // Melodyne n'aime pas une sélection vide (il s'arrête) ; elle viendra avec le document.
+            if (regions.empty()) return 0;
             std::vector<ARA::ARARegionSequenceRef> seqs;
             if (liveSequence) seqs.push_back (liveSequence);
             ARA::SizedStruct<ARA_STRUCT_MEMBER (ARAViewSelection, timeRange)> sel;
@@ -2296,6 +2325,7 @@ namespace nova
         std::vector<std::vector<float>> streamBuf;
         std::vector<float*> streamPtrs;
         std::unique_ptr<DockedEditor> docked;
+        std::unique_ptr<Value> pendingEditor;   // fenêtre demandée avant le premier son
         AudioPipe pipe;
     };
 

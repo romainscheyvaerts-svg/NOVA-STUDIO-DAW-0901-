@@ -147,6 +147,7 @@ export class AraInsertNode extends VSTPluginNode {
       try { window.dispatchEvent(new CustomEvent('nova:ara-transport', { detail: { kind: e.kind, value: e.value, pluginId: this.plugin.id } })); } catch { /* */ }
     }
     if (e?.event === 'capture') { this.capture = { state: String(e.state || ''), seconds: e.seconds, error: e.error }; notifyAra(); }
+    if (e?.event === 'editor_opened') { this.dockState = e.mode === 'float' ? 'floating' : e.visible === false ? 'hidden' : 'docked'; notifyAra(); }
     if (e?.event === 'editor_closed') { this.dockState = 'hidden'; this.dockWanted = { ...this.dockWanted, mode: 'hide', visible: false }; notifyAra(); }
   }
 
@@ -257,7 +258,8 @@ export class AraInsertNode extends VSTPluginNode {
     if (!(await this.ready())) throw new Error('Plugin pas encore chargé sur le pont');
     const r = await novaBridge.araInsertEditor(this.slotId!, { mode: this.dockState === 'docked' ? 'bounds' : 'dock', parent, ...rect, visible })
       .catch(() => novaBridge.araInsertEditor(this.slotId!, { mode: 'dock', parent, ...rect, visible }));
-    this.dockState = visible ? 'docked' : 'hidden';
+    // pending : le plugin attend le premier son de la piste (évènement editor_opened).
+    this.dockState = r?.pending ? 'hidden' : visible ? 'docked' : 'hidden';
     notifyAra();
     return r;
   }
@@ -276,8 +278,8 @@ export class AraInsertNode extends VSTPluginNode {
   async floatEditor(): Promise<void> {
     this.dockWanted = { ...this.dockWanted, mode: 'float', visible: true };
     if (!(await this.ready())) throw new Error('Plugin pas encore chargé sur le pont');
-    await novaBridge.araInsertEditor(this.slotId!, { mode: 'float' });
-    this.dockState = 'floating';
+    const r = await novaBridge.araInsertEditor(this.slotId!, { mode: 'float' });
+    this.dockState = r?.pending ? 'hidden' : 'floating';
     notifyAra();
   }
 
