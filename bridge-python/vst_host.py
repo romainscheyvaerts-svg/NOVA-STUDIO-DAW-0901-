@@ -633,7 +633,7 @@ class OfflinePool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 MAX_LISTED_VALUES = 128
-MAX_PARAMS = 512
+MAX_PARAMS = 4096
 
 # Contrôleurs MIDI que JUCE expose comme des réglages (IMidiMapping) : sans
 # texte, ils noyaient les vrais réglages (C6 : 54 réglages + 130 contrôleurs).
@@ -734,6 +734,13 @@ def _norm(x: str) -> str:
     return re.sub(r"[\s_\-]+", "", x.lower())
 
 
+def _loose(x: str) -> str:
+    """Lettres et chiffres seulement (le signe d'un nombre compte : « -6 » ≠ « 6 »)."""
+    t = str(x).strip().lower()
+    sign = "-" if re.match(r"^[-−]\s*\d", t) else ""
+    return sign + re.sub(r"[^0-9a-z]+", "", t)
+
+
 _NUM = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
 _OFF_WORDS = re.compile(r"\b(not|off|disabled|inactive|no)\b|^0$", re.I)
 
@@ -807,6 +814,10 @@ def apply_param(plugin, key: str, p, it: Dict[str, Any]):
             # « 2:1 » → « 2.00:1 »).
             vv = _valid_strings(p)
             hit = next((v for v in vv if v == text), None) or next((v for v in vv if _norm(v) == _norm(text)), None)
+            if hit is None:
+                # « Alto / Tenor » → « Alto-Tenor » (ponctuation ignorée), si une seule valeur correspond.
+                loose = [v for v in vv if _loose(v) and _loose(v) == _loose(text)]
+                hit = loose[0] if len(loose) == 1 else None
             if hit is None:
                 b = _bool_from(text)
                 hit = _two_state_choice(vv, b) if b is not None else None

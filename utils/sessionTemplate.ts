@@ -405,8 +405,15 @@ export const instantiateTemplate = (tpl: SessionTemplate, opts: InstantiateOptio
     const plugins: PluginInstance[] = [];
     for (const p0 of t.plugins || []) {
       let p: PluginInstance = { ...p0, params: { ...(p0.params || {}) } };
+      // Plugin absent remplacé dès la fabrication du modèle (templateSpec : True Iron → saturation NOVA…).
+      const repl = p.params.templateReplacement as { from: string; to: string; inactive?: boolean; note?: string } | undefined;
+      if (repl?.from && repl.to) {
+        report.replaced.push({ track: t.name, plugin: repl.from, by: repl.to });
+        report.messages.push(`${repl.from} manquant sur ${t.name} : remplacé par ${repl.to}${repl.inactive ? ' (laissé inactif)' : ''}${repl.note ? ` — ${repl.note}` : ''}.`);
+      }
       // « Activer tous les effets » : inactifs (info gardée : templateWasInactive) et en bypass.
-      if (opts.enableAll && (!p.isEnabled || p.isInactive)) {
+      // Un remplaçant « laissé inactif » (équivalence lointaine) n'est jamais activé d'office.
+      if (opts.enableAll && !repl?.inactive && (!p.isEnabled || p.isInactive)) {
         if (p.isInactive) { delete p.isInactive; p.params.templateWasInactive = true; }
         p.isEnabled = true;
         report.enabled++;
