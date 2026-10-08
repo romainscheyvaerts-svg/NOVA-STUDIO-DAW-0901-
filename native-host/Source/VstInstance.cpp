@@ -710,6 +710,7 @@ namespace nova
         }
         auto o = json::Value::object();
         o.set ("ok", ok);
+        o.set ("unchanged", same);
         o.set ("main_in", mainInChannels());
         o.set ("main_out", mainOutChannels());
         o.set ("sidechain", sidechainActive());

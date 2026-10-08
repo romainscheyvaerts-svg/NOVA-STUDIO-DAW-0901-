@@ -1155,6 +1155,12 @@ class NativePlugin:
         res = self._host.request("prepare", sample_rate=float(sr), block=int(block), offline=bool(self.offline),
                                  channels=int(channels), sidechain=bool(sidechain))
         object.__setattr__(self, "buses", res.get("buses") or self.buses)
+        # Un plugin peut « accepter » la disposition demandée et rester en mono (shells Waves « Mono ») :
+        # on juge sur ce qu'il a retenu.
+        if res.get("ok") and (int(res.get("main_in") or 0) not in (0, int(channels))
+                              or int(res.get("main_out") or 0) != int(channels)):
+            res["ok"] = False
+            self._host.request("release")
         if not res.get("ok"):
             object.__setattr__(self, "_spec", None)
             raise ValueError(f"Plugin '{self.name}' does not support {channels}-channel output. (Main bus currently "
