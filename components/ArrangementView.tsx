@@ -977,7 +977,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     for (const t of visibleTracks) {
         // Crayon sur une ligne d'automation ouverte (sous les clips).
         if (activeTool === 'DRAW' && y >= currentY + zoomV && y < currentY + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80
-            && clipGainEdit.onAutomationDown(e, t, x, y - currentY - zoomV)) return;
+            && clipGainEdit.onAutomationDown(e, t, x, y - currentY - zoomV, y)) return;
         if (y >= currentY && y < currentY + zoomV) {
             const clip = clipAtTime(rowClips(t), time);
             if (clip) {

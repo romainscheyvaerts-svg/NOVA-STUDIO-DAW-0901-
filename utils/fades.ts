@@ -133,8 +133,8 @@ export function clipGainEvents(
   return ev;
 }
 
-/** Ligne de gain : un point toutes les ~2 ms jusqu'à 32 s de pente (points exacts à 0,1 dB près). */
-const envelopeCurvePoints = (d: number) => Math.max(8, Math.min(16384, Math.ceil(d * 500) + 1));
+/** Ligne de gain : un point toutes les ~0,5 ms jusqu'à 32 s de pente (coins des formes du crayon fidèles). */
+const envelopeCurvePoints = (d: number) => Math.max(8, Math.min(65536, Math.ceil(d * 2000) + 1));
 
 /**
  * Plan de gain d'un clip dont des respirations sont traitées ou qui a une

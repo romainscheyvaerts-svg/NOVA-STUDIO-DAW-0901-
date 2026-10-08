@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import type { AutomationLane, AutomationPoint, Clip, ContextMenuItem, EditorTool, Track } from '../types';
 import { TrackType } from '../types';
 import {
@@ -32,11 +33,11 @@ const isAudio = (c: Clip) => c.type !== TrackType.MIDI && !!(c.bufferId || c.buf
 const AMBER = '#fbbf24';
 
 type Drag =
-  | { kind: 'point'; trackId: string; clipId: string; index: number; moved: boolean }
-  | { kind: 'global'; trackId: string; clipId: string; lastY: number; db: number }
+  | { kind: 'point'; trackId: string; clipId: string; index: number; moved: boolean; h: number }
+  | { kind: 'global'; trackId: string; clipId: string; lastY: number; db: number; h: number }
   | { kind: 'curve'; trackId: string; clipId: string; index: number; startY: number; curve0: number; sign: number }
   | { kind: 'pencil'; trackId: string; clip0: Clip; stroke: PencilStroke; moved: boolean; clipTop: number; h: number }
-  | { kind: 'auto'; track: Track; lane: AutomationLane; points0: AutomationPoint[]; stroke: PencilStroke; laneTop: number; moved: boolean }
+  | { kind: 'auto'; track: Track; lane: AutomationLane; points0: AutomationPoint[]; stroke: PencilStroke; lyDown: number; yDown: number; moved: boolean }
   | { kind: 'loop'; trackId: string; clipId: string; clips0: Clip[]; lastIds: string[] };
 
 export interface ClipGainEditDeps {
@@ -123,7 +124,7 @@ export function useClipGainEdit(deps: ClipGainEditDeps) {
         window.setTimeout(() => setTip(null), 600);
         return true;
       }
-      start({ kind: 'point', trackId: a.trackId, clipId: c.id, index: sp.index, moved: false });
+      start({ kind: 'point', trackId: a.trackId, clipId: c.id, index: sp.index, moved: false, h });
       setTip({ x: e.clientX, y: e.clientY, text: dbText(totalDbOf(c) + sp.p.db) });
       return true;
     }
@@ -136,7 +137,7 @@ export function useClipGainEdit(deps: ClipGainEditDeps) {
     const ly = lineY(h, totalDbOf(c) + envDb);
     if (Math.abs(ly - y) > grab()) return false;
     if (e.shiftKey) {
-      start({ kind: 'global', trackId: a.trackId, clipId: c.id, lastY: e.clientY, db: totalDbOf(c) });
+      start({ kind: 'global', trackId: a.trackId, clipId: c.id, lastY: e.clientY, db: totalDbOf(c), h });
       setTip({ x: e.clientX, y: e.clientY, text: `Tout le clip · ${dbText(totalDbOf(c))}` });
       return true;
     }
@@ -151,13 +152,13 @@ export function useClipGainEdit(deps: ClipGainEditDeps) {
     const srcP = Math.max(c.offset || 0, Math.min((c.offset || 0) + c.duration, (c.offset || 0) + (tp - c.start)));
     const r = addGainPoint(sorted, srcP, envelopeDbAt(sorted, srcP));
     patch(a.trackId, c.id, { gainPoints: r.points });
-    start({ kind: 'point', trackId: a.trackId, clipId: c.id, index: r.index, moved: false });
+    start({ kind: 'point', trackId: a.trackId, clipId: c.id, index: r.index, moved: false, h });
     setTip({ x: e.clientX, y: e.clientY, text: `Point posé · ${dbText(totalDbOf(c) + r.points[r.index].db)}` });
     return true;
   };
 
-  /** Crayon sur une voie d'automation ouverte (relY : depuis le haut des voies de la piste). */
-  const onAutomationDown = (e: React.MouseEvent | React.PointerEvent, track: Track, x: number, relY: number): boolean => {
+  /** Crayon sur une voie d'automation ouverte (relY : depuis le haut des voies de la piste ; yContent : ordonnée du contenu). */
+  const onAutomationDown = (e: React.MouseEvent | React.PointerEvent, track: Track, x: number, relY: number, yContent: number): boolean => {
     const lanes = (track.automationLanes || []).filter(l => l.isExpanded);
     const lane = lanes[Math.floor(relY / LANE_HEIGHT)];
     if (!lane || e.button === 2) return false;
@@ -166,7 +167,7 @@ export function useClipGainEdit(deps: ClipGainEditDeps) {
     const v0 = laneValueAt(lane, ly);
     const v = clipGainViewStore.get();
     const stroke: PencilStroke = { shape: v.shape, t0: t, t1: t, v0, v1: v0, period: gridStep(), step: ref.current.snap(e) ? gridStep() : undefined, samples: [{ t: timeAt(x), v: v0 }], seed: Date.now() & 0xffff, ramp: 0.002 };
-    start({ kind: 'auto', track, lane, points0: sortedPoints(lane.points), stroke, laneTop: Math.floor(relY / LANE_HEIGHT) * LANE_HEIGHT, moved: false });
+    start({ kind: 'auto', track, lane, points0: sortedPoints(lane.points), stroke, lyDown: ly, yDown: yContent, moved: false });
     setTip({ x: e.clientX, y: e.clientY, text: `Crayon · automation` });
     return true;
   };
@@ -203,9 +204,7 @@ export function useClipGainEdit(deps: ClipGainEditDeps) {
       return true;
     }
     if (d.kind === 'auto') {
-      const top = laneTopOf?.(d.track.id);
-      if (top === null || top === undefined) return true;
-      const ly = yContent - top - d.laneTop;
+      const ly = d.lyDown + (yContent - d.yDown);
       const v1 = laneValueAt(d.lane, ly);
       const s = d.stroke;
       s.t1 = snapT(t, e); s.v1 = v1;
@@ -234,7 +233,7 @@ export function useClipGainEdit(deps: ClipGainEditDeps) {
     const laneTop = laneTopOf?.(d.trackId);
     if (d.kind === 'point') {
       if (laneTop === null || laneTop === undefined) return true;
-      const h = (laneHeight.current || 120) - 4;
+      const h = d.h;
       const y = yContent - laneTop - 2;
       const sorted = sortGainPoints(c.gainPoints);
       const tp = snapT(t, e);
@@ -247,7 +246,7 @@ export function useClipGainEdit(deps: ClipGainEditDeps) {
       return true;
     }
     if (d.kind === 'global') {
-      const h = (laneHeight.current || 120) - 4;
+      const h = d.h;
       const dbPerPx = 52 / Math.max(10, h - 22) * (e.shiftKey ? 0.2 : 1);
       d.db = Math.max(-40, Math.min(12, d.db - (e.clientY - d.lastY) * dbPerPx));
       d.lastY = e.clientY;
@@ -280,12 +279,8 @@ export function useClipGainEdit(deps: ClipGainEditDeps) {
     return true;
   };
 
-  /** Hauteur des lignes de clips (zoomV), pour les gestes en cours. */
-  const laneHeight = useRef(120);
-
   /** Curseur et aide au survol (null : rien de spécial ici). */
   const cursorAt = (c: Clip, x: number, relY: number, laneH: number, tool: EditorTool, edgePx: number): { cursor: string; hint?: string } | null => {
-    laneHeight.current = laneH;
     if (!isAudio(c)) return null;
     const v = clipGainViewStore.get();
     if (tool === 'DRAW') return { cursor: 'crosshair', hint: `Crayon (${PENCIL_SHAPES.find(s => s.id === v.shape)?.label}) : dessine la ligne de gain` };
@@ -386,11 +381,13 @@ const btn = (on: boolean) => `h-9 [@media(pointer:coarse)]:h-10 min-w-9 [@media(
 /** Crayon (+ formes), ligne de gain, infos de gain, boucle : à côté des outils de l'arrangement. */
 export const ClipGainToolbar: React.FC<{ activeTool: EditorTool; setActiveTool: (t: EditorTool) => void; compact?: boolean }> = ({ activeTool, setActiveTool, compact }) => {
   const v = useClipGainView();
-  const [shapesOpen, setShapesOpen] = useState(false);
+  // Menu des formes : posé sur la page (au-dessus des pistes et de leurs en-têtes).
+  const [shapesOpen, setShapesOpen] = useState<{ x: number; y: number } | null>(null);
+  const shapeBtnRef = useRef<HTMLButtonElement>(null);
   const shape = PENCIL_SHAPES.find(s => s.id === v.shape) || PENCIL_SHAPES[0];
   useEffect(() => {
     if (!shapesOpen) return;
-    const close = () => setShapesOpen(false);
+    const close = () => setShapesOpen(null);
     window.addEventListener('pointerdown', close);
     return () => window.removeEventListener('pointerdown', close);
   }, [shapesOpen]);
@@ -403,24 +400,24 @@ export const ClipGainToolbar: React.FC<{ activeTool: EditorTool; setActiveTool: 
           className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'DRAW' ? 'bg-amber-400 text-black' : 'text-slate-500 hover:text-white'}`}>
           <i className="fas fa-pencil-alt text-[12px]" />
         </button>
-        <button type="button" data-testid="pencil-shape" aria-haspopup="menu" aria-expanded={shapesOpen}
-          onPointerDown={e => e.stopPropagation()} onClick={() => setShapesOpen(o => !o)}
+        <button ref={shapeBtnRef} type="button" data-testid="pencil-shape" aria-haspopup="menu" aria-expanded={!!shapesOpen}
+          onPointerDown={e => e.stopPropagation()}
+          onClick={() => setShapesOpen(o => { if (o) return null; const r = shapeBtnRef.current?.getBoundingClientRect(); return { x: r ? r.left - 40 : 0, y: r ? r.bottom + 4 : 48 }; })}
           title={`Forme du crayon : ${shape.label}. ${shape.hint}`} aria-label={`Forme du crayon : ${shape.label}`}
           className="w-6 [@media(pointer:coarse)]:w-8 h-9 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center text-slate-400 hover:text-white">
           <i className={`fas ${shape.icon} text-[10px]`} />
         </button>
-        {shapesOpen && (
-          <div role="menu" className="absolute left-0 top-11 z-[120] w-56 p-1 rounded-xl border border-white/10 shadow-2xl" style={{ background: 'var(--bg-surface)' }} onPointerDown={e => e.stopPropagation()}>
+        {shapesOpen && createPortal(
+          <div role="menu" aria-label="Formes du crayon" className="fixed z-[500] w-56 p-1 rounded-xl border border-white/10 shadow-2xl" style={{ left: Math.max(4, shapesOpen.x), top: shapesOpen.y, background: 'var(--bg-surface)' }} onPointerDown={e => e.stopPropagation()}>
             {PENCIL_SHAPES.map(s => (
               <button key={s.id} type="button" role="menuitemradio" aria-checked={v.shape === s.id} data-testid={`pencil-shape-${s.id}`}
-                onClick={() => { clipGainViewStore.set({ shape: s.id as PencilShape }); setActiveTool('DRAW'); setShapesOpen(false); }}
+                onClick={() => { clipGainViewStore.set({ shape: s.id as PencilShape }); setActiveTool('DRAW'); setShapesOpen(null); }}
                 title={s.hint}
-                className={`w-full flex items-center gap-2 px-2.5 py-2 [@media(pointer:coarse)]:py-3 rounded-lg text-left text-[12px] ${v.shape === s.id ? 'bg-amber-400/15 text-amber-200' : 'text-slate-300 hover:bg-white/5'}`}>
+                className={`w-full flex items-center gap-2 px-2.5 py-2 [@media(pointer:coarse)]:py-3 rounded-lg text-left text-[12px] ${v.shape === s.id ? 'bg-amber-400/15 text-amber-500' : 'opacity-80 hover:bg-white/5'}`}>
                 <i className={`fas ${s.icon} w-4 text-center text-[11px]`} />{s.label}
               </button>
             ))}
-          </div>
-        )}
+          </div>, document.body)}
       </div>
       <button type="button" data-testid="toggle-gain-line" aria-pressed={v.line} onClick={() => clipGainViewStore.set({ line: !v.line })}
         title="Ligne de gain des clips (Pro Tools : Ctrl+Maj+−, ici aussi Alt+G) : clique sur la ligne pour poser un point, tire-le, Alt+clic pour l'enlever, Ctrl+glisser pour courber un segment, Maj+glisser pour tout le clip. Ctrl+Maj+↑ / ↓ : ±0,5 dB."
