@@ -2,6 +2,9 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { AutomationLane as IAutomationLane, AutomationPoint, AutomationCurveType } from '../types';
 import { automationParamLabel, automationRangeText, automationValueText, CURVE_LABELS_FR } from '../utils/automationLabels';
+import { parsePluginParam } from '../utils/automationWrite';
+import { onVstCatalogChange } from '../utils/vstParamCatalog';
+import { liveVstNodes } from '../engine/VSTPluginNode';
 
 // Curve interpolation for rendering (same as AutomationManager)
 const interpolateCurve = (
@@ -49,6 +52,13 @@ const AutomationLane: React.FC<AutomationLaneProps> = ({
   const [hoveredPointId, setHoveredPointId] = useState<string | null>(null);
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
   const [showCurveMenu, setShowCurveMenu] = useState<{ x: number, y: number } | null>(null);
+  // Réglage d'un VST (R9) : nom et valeurs affichés par le plugin, lus par le pont.
+  const [, setCatalogTick] = useState(0);
+  useEffect(() => onVstCatalogChange(() => setCatalogTick(t => t + 1)), []);
+  useEffect(() => {
+    const pp = parsePluginParam(lane.parameterName);
+    if (pp) liveVstNodes.get(pp.pluginId)?.requestTexts([pp.key]);
+  }, [lane.parameterName]);
   
   // Constantes visuelles "Haute Visibilité"
   const POINT_RADIUS = 6; 

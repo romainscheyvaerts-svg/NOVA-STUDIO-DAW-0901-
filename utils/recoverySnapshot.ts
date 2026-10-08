@@ -1,6 +1,7 @@
 import { Clip, DAWState, Track, TrackType } from '../types';
 import { trackBufferIds } from './freeze';
 import { padSampleKey } from './drumSamples';
+import { samplerBufferKey } from './melodicSampler';
 import { countVoiceTakes } from './sessionSummary';
 import type { RecoveredTake, StoredAudio, VersionRecord } from './recoveryStore';
 
@@ -18,6 +19,7 @@ export function trackAudioIds(t: Track): string[] {
   const ids = trackBufferIds(t);
   const s = (t as any).drumMachine?.samples;
   if (s) for (const id of Object.keys(s)) ids.push(padSampleKey(id));
+  if (t.melodicSampler?.sampleId) ids.push(samplerBufferKey(t.melodicSampler.sampleId));
   return ids;
 }
 
@@ -44,6 +46,8 @@ export function snapshotOf(state: DAWState, owned: (string | number)[] = []): Sn
     if (isUnlicensedBeat(t, owned)) { needsCatalogBeat = needsCatalogBeat || t.clips.length > 0; continue; }
     for (const id of trackAudioIds(t)) audioIds.add(id);
   }
+  // R21 · Clips de la liste des clips (hors timeline) : leur son est gardé aussi.
+  for (const c of state.clipBin || []) if (c.bufferId) audioIds.add(c.bufferId);
   // Ce qui est en cours (lecture, prise, armement) ne fait pas partie de la version.
   const clean = { ...state, isPlaying: false, isRecording: false, recStartTime: null };
   const beat = state.tracks.find(t => t.id === 'instrumental')?.clips[0];

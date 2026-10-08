@@ -6,6 +6,7 @@ import { useBridgeState } from '../hooks/useNovaBridge';
 import { useInstrumentStatus } from '../utils/instrumentStore';
 import { BridgeConnectPanel, VST_BRIDGE_DOWNLOAD_URL } from './VstBrowserTab';
 import { isNovaDesktop } from '../utils/desktopApp';
+import { INSTRUMENT_PRESETS } from '../utils/instrumentPresets';
 
 /**
  * Choix du son d'une piste MIDI (mode instru) : synthé Nova ou instrument VST3
@@ -17,9 +18,11 @@ const VstInstrumentPicker: React.FC<{
   stale?: boolean;
   onChoose: (p: BridgePlugin) => void;
   onUseSynth: () => void;
+  /** R18 / R20 : sampler (instrument NOVA multi-échantillons, ou ton son). */
+  onChooseSampler?: (instrument?: string) => void;
   onRetry: () => void;
   onError: (msg: string) => void;
-}> = ({ track, stale, onChoose, onUseSynth, onRetry, onError }) => {
+}> = ({ track, stale, onChoose, onUseSynth, onChooseSampler, onRetry, onError }) => {
   const bridge = useBridgeState();
   const status = useInstrumentStatus(track.id);
   const [open, setOpen] = useState(false);
@@ -69,7 +72,8 @@ const VstInstrumentPicker: React.FC<{
   }, [plugins, query]);
 
   const busy = status.loading || status.rendering;
-  const label = inst ? inst.name : 'Synthé Nova';
+  const ms = track.melodicSampler;
+  const label = inst ? inst.name : ms ? (INSTRUMENT_PRESETS.find(p => p.id === ms.instrument)?.name || ms.sampleName || 'Sampler') : 'Synthé Nova';
 
   const editor = async () => {
     try {
@@ -104,12 +108,35 @@ const VstInstrumentPicker: React.FC<{
           style={(() => { const r = boxRef.current?.getBoundingClientRect(); return r ? { top: r.bottom + 8, left: Math.max(16, Math.min(r.left, window.innerWidth - 336)) } : { top: 64, left: 16 }; })()}>
           <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Son de la piste</div>
 
-          <button type="button" onClick={() => { if (inst) onUseSynth(); setOpen(false); }}
-            className={`w-full p-2.5 rounded-lg border flex items-center gap-2 text-xs ${!inst ? 'border-cyan-500/40 bg-cyan-500/10 text-white' : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05]'}`}>
+          <button type="button" onClick={() => { if (inst || ms) onUseSynth(); setOpen(false); }}
+            className={`w-full p-2.5 rounded-lg border flex items-center gap-2 text-xs ${!inst && !ms ? 'border-cyan-500/40 bg-cyan-500/10 text-white' : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05]'}`}>
             <i className="fas fa-wave-square text-cyan-400 w-4"></i>
             <span className="flex-1 text-left font-bold">Synthé Nova</span>
-            {!inst && <i className="fas fa-check text-cyan-400"></i>}
+            {!inst && !ms && <i className="fas fa-check text-cyan-400"></i>}
           </button>
+
+          {onChooseSampler && (
+            <div className="space-y-1.5" data-testid="picker-nova-instruments">
+              <div className="text-[9px] font-black uppercase tracking-widest text-slate-400" title="Instruments multi-échantillons libres de droits (domaine public / CC0), joués par le sampler NOVA : comme le Sampler de Live ou de Logic, ou DirectWave dans FL Studio">Instruments NOVA</div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {INSTRUMENT_PRESETS.map(p => (
+                  <button key={p.id} type="button" title={p.hint} data-nova-instrument={p.id}
+                    onClick={() => { onChooseSampler(p.id); setOpen(false); }}
+                    className={`min-h-[44px] rounded-lg border px-1.5 py-1 text-left ${ms?.instrument === p.id ? 'border-amber-400/60 bg-amber-500/15 text-white' : 'border-white/10 bg-white/[0.02] text-slate-200 hover:bg-white/[0.06]'}`}>
+                    <span className="block text-[13px] leading-none">{p.emoji}</span>
+                    <span className="block text-[10px] font-bold truncate mt-0.5">{p.name}</span>
+                  </button>
+                ))}
+              </div>
+              <button type="button" onClick={() => { onChooseSampler(undefined); setOpen(false); }}
+                title="Ton propre son sur tout le clavier : fichier, micro ou clip (Sampler de FL, Simpler de Live, Quick Sampler de Logic)"
+                className={`w-full p-2 rounded-lg border flex items-center gap-2 text-xs ${ms && !ms.instrument ? 'border-amber-400/60 bg-amber-500/15 text-white' : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05]'}`}>
+                <i className="fas fa-microphone-lines text-amber-300 w-4"></i>
+                <span className="flex-1 text-left font-bold">Sampler (ton son, ton micro)</span>
+                {ms && !ms.instrument && <i className="fas fa-check text-amber-300"></i>}
+              </button>
+            </div>
+          )}
 
           {inst && (
             <div className="p-2.5 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 space-y-2">

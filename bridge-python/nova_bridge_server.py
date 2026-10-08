@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NOVA BRIDGE VST3 — v10
+NOVA BRIDGE VST3 — v11
 
 Pont local entre Nova Studio (navigateur) et les plugins VST3 installés sur le PC
 (effets, et depuis la v5 instruments : notes rendues en audio hors temps réel).
@@ -74,6 +74,22 @@ Protocole (WebSocket ws://127.0.0.1:8765)
                                   stems, seconds, device, outdir | error, code: not_installed|cancelled|error}.
     (v9) Plugins ARA2 (Melodyne, VocAlign) par l'hôte natif NovaARAHost.exe : voir ara_service.py
     (ARA_STATUS, ARA_OPEN, ARA_ALIGN, ARA_COMMIT, ARA_SHOW, ARA_TRANSPORT, ARA_CLOSE, ARA_EVENT).
+    (v11) Automation des VST (R9) :
+    AUTOMATABLE slot_id         → parameters:[{name, display_name, value, text, label?, num_steps?,
+                                  is_boolean?}] : réglages automatisables, lus sans conversion texte
+                                  (rapide même pour 700 réglages)
+    SET_AUTOMATION_MAP slot_id names:[…]
+                                → table index → réglage des trames temps réel (drapeau PARAMS) ;
+                                  missing : réglages inconnus du plugin
+    PARAM_TEXTS slot_id names:[…] [steps=100]
+                                → texts:{name:[texte affiché pour 0, 1/steps, … 1]}
+    WATCH_PARAMS slot_id on     → écriture Touch / Latch : les réglages bougés dans la fenêtre du
+                                  plugin sont signalés par PARAM_CHANGED {slot_id, changes:[{name,
+                                  value, text}]} (relevé toutes les ~40 ms) ; pendant 0,4 s après un
+                                  geste, l'automation reçue ne reprend pas la main sur ce réglage
+    AUTOMATION_STATS slot_id    → applied, skipped (automation posée / laissée au geste en cours)
+    RENDER : automation:[{name, frames:[…], values:[…]}] (images depuis le début du son envoyé,
+             valeurs brutes 0–1) rejouée à l'échantillon près.
   Événements : EDITOR_CLOSED (avec l'état), LATENCY (latence mesurée qui change),
     (v10) PLUGIN_CRASHED {slot_id, reason: exception|nan|hang, error, name} : le plugin
       a levé une exception, sort des NaN en continu ou s'est figé (> 2 s sur un bloc).
@@ -100,6 +116,12 @@ Protocole (WebSocket ws://127.0.0.1:8765)
       u8 type=1 | u8 L | slot_id (L octets UTF-8) | bourrage jusqu'à un multiple de 4
       | u32 seq | u16 nframes | u8 nch | u8 flags | float32[nframes*nch] entrelacés
       Réponse : même seq, nch=2. Traitement strictement dans l'ordre, par slot.
+      (v11) flags & 1 (PARAMS) : après l'audio, u16 count | u16 0 | count × (u16 index,
+        u16 décalage dans le bloc, f32 valeur brute 0–1) : réglages posés à l'échantillon
+        près (bloc découpé), index dans la table SET_AUTOMATION_MAP.
+      (v11) flags & 2 (SIDECHAIN) : nch=4, canaux 3-4 = clé de side-chain (voir vst_sidechain) :
+        passée à l'entrée clé du plugin quand l'hôte sait l'alimenter (LOAD_PLUGIN
+        sidechain_inputs > 0), sinon ignorée. HELLO sidechain=true : hôte natif présent.
     type 2 — rendu hors temps réel (gel / export)
       u8 type=2 | u8 0 | u16 0 | u32 J | JSON (J octets) | bourrage 4 | float32 entrelacés
       JSON requête : {action:"RENDER", req_id, slot_id | path+plugin_name+state,
@@ -134,12 +156,14 @@ from websockets.asyncio.server import serve, ServerConnection
 import ara_service
 import license_watch
 import stems_service
+import vst_automation
 import vst_host
+import vst_sidechain
 import vst_probe
 import plugin_guard
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events, calibrate_gr_offline
 
-VERSION = 10
+VERSION = 11
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
@@ -186,6 +210,15 @@ def parse_audio_frame(buf: bytes):
     seq, nframes, nch, flags = struct.unpack_from("<IHBB", buf, h)
     data = np.frombuffer(buf, dtype="<f4", count=nframes * nch, offset=h + 8)
     return slot_id, seq, nframes, nch, flags, data
+
+
+def parse_audio_extras(buf: bytes, nframes: int, nch: int, flags: int):
+    """(v11) Réglages horodatés qui suivent l'audio (drapeau PARAMS)."""
+    if not flags & vst_automation.FLAG_PARAMS:
+        return None
+    L = buf[1]
+    off = _align4(2 + L) + 8 + nframes * nch * 4
+    return vst_automation.parse_param_section(buf, off) or None
 
 
 def build_audio_frame(slot_id: str, seq: int, stereo: np.ndarray) -> bytes:
@@ -498,6 +531,11 @@ class NovaBridgeServer:
                               # plantent isolés (« unstable » dans la liste et au chargement).
                               "shells": True, "plugin_guard": True,
                               "crash_events": True, "quarantine": True,
+                              # (v11) automation des réglages à l'échantillon près, écriture depuis la fenêtre
+                              "automation": vst_host.HAS_PEDALBOARD, "param_watch": vst_host.HAS_PEDALBOARD,
+                              # (v11, R10) clé de side-chain des VST3 : seulement avec l'hôte natif
+                              # (pedalboard désactive les bus d'entrée auxiliaires, voir vst_sidechain)
+                              "sidechain": vst_sidechain.host_feeds_sidechain(), "sidechain_protocol": True,
                               "ara": bool(ara_service.ara_host.find_host_exe())})
 
     async def _a_get_plugin_list(self, ws, req):
@@ -614,7 +652,9 @@ class NovaBridgeServer:
         return {"success": True, "slot_id": slot.slot_id, "name": slot.name, "vendor": slot.vendor,
                 "latency_samples": slot.latency_samples, "buffer_latency_samples": 0,
                 "sample_rate": slot.sample_rate, "state": state, "has_editor": vst_host.HAS_PEDALBOARD,
-                "is_instrument": slot.is_instrument, "reused": reused}
+                "is_instrument": slot.is_instrument, "reused": reused,
+                # (R10) None : l'hôte ne sait pas alimenter l'entrée clé ; 0 : pas d'entrée clé ; 2 : clé stéréo
+                "sidechain_inputs": slot.sidechain_inputs}
 
     async def _a_unload_plugin(self, ws, req):
         sid = str(req.get("slot_id", ""))
@@ -695,6 +735,82 @@ class NovaBridgeServer:
         await self._in_slot(slot, slot.set_parameter, req.get("name"), req.get("value"))
         self._reply(ws, req, {"action": "PARAM_CHANGED", "name": req.get("name"), "value": req.get("value")})
 
+    # --- automation (v11, R9) ------------------------------------------------------
+
+    async def _a_automatable(self, ws, req):
+        slot = self._slot(req)
+        self._reply(ws, req, {"success": True, "parameters": await self._in_slot(slot, slot.automatable)})
+
+    async def _a_set_automation_map(self, ws, req):
+        slot = self._slot(req)
+        names = req.get("names") if isinstance(req.get("names"), list) else []
+        res = await self._in_slot(slot, slot.set_automation_map, names)
+        self._reply(ws, req, {"success": True, **res})
+
+    async def _a_param_texts(self, ws, req):
+        slot = self._slot(req)
+        names = [str(n) for n in (req.get("names") or []) if n] if isinstance(req.get("names"), list) else []
+        texts = await self._in_slot(slot, slot.param_texts, names, int(req.get("steps") or 100))
+        self._reply(ws, req, {"success": True, "texts": texts})
+
+    async def _a_automation_stats(self, ws, req):
+        slot = self._slot(req)
+        if req.get("reset"):
+            slot.proc_seconds, slot.proc_blocks, slot.auto_applied, slot.auto_skipped = 0.0, 0, 0, 0
+        avg = slot.proc_seconds / slot.proc_blocks * 1e6 if slot.proc_blocks else 0.0
+        self._reply(ws, req, {"success": True, "applied": slot.auto_applied, "skipped": slot.auto_skipped,
+                              "watching": slot.watching, "blocks": slot.proc_blocks, "avg_block_us": round(avg, 1),
+                              "key_blocks": slot.key_blocks, "sidechain_inputs": slot.sidechain_inputs,
+                              "last_gr_db": round(float(getattr(slot.plugin, "last_gr_db", 0.0) or 0.0), 2)})
+
+    async def _a_watch_params(self, ws, req):
+        slot = self._slot(req)
+        on = bool(req.get("on"))
+        await self._in_slot(slot, slot.set_watching, on)
+        if on and not getattr(slot, "_watch_task", None):
+            slot._watch_task = asyncio.create_task(self._watch_loop(slot))
+        self._reply(ws, req, {"success": True, "watching": slot.watching})
+
+    async def _watch_loop(self, slot: Slot):
+        """Relevé des réglages bougés dans la fenêtre du plugin (écriture Touch / Latch).
+        Intervalle ≥ 40 ms et ≥ 8 × la durée d'un relevé (la charge reste minime)."""
+        try:
+            while slot.watching and self.slots.get(slot.slot_id) is slot and not slot.failed:
+                t0 = time.perf_counter()
+                moved = await self._in_slot(slot, slot.poll_changes)
+                cost = time.perf_counter() - t0
+                if moved and slot.owner is not None:
+                    h = slot._cpp or {}
+                    for m in moved:
+                        cp = h.get(m["name"])
+                        m["text"] = vst_host._text_of(cp) if cp is not None else ""
+                    await self._send(slot.owner, {"action": "PARAM_CHANGED", "slot_id": slot.slot_id, "changes": moved})
+                await asyncio.sleep(max(0.04, 8 * cost))
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"[{slot.name}] relevé des réglages : {e}")
+        finally:
+            slot._watch_task = None
+
+    async def _a_debug_editor_set(self, ws, req):
+        """(Tests, NOVA_BRIDGE_DEBUG=1) Bouge un réglage comme le ferait la fenêtre du
+        plugin (sans passer par Nova) : simule un geste Touch sans afficher de fenêtre."""
+        if os.environ.get("NOVA_BRIDGE_DEBUG") != "1":
+            raise RuntimeError("Action de test désactivée")
+        slot = self._slot(req)
+        name, value = str(req.get("name") or ""), float(req.get("value"))
+
+        def now():
+            h = slot.handles()
+            cp = h.get(name)
+            if cp is None:
+                raise KeyError(f"Réglage inconnu : {name}")
+            with slot.lock:
+                cp.raw_value = value
+        await self._in_slot(slot, now)
+        self._reply(ws, req, {"success": True})
+
     async def _a_show_editor(self, ws, req):
         slot = self._slot(req)
         if not vst_host.HAS_PEDALBOARD:
@@ -736,14 +852,17 @@ class NovaBridgeServer:
         if q is None:
             self._reply(ws, req, {"action": "AUDIO_PROCESSED", "channels": channels})
             return
-        self._enqueue(q, (ws, "json", 0, np.array(channels, dtype=np.float32)))
+        self._enqueue(q, (ws, "json", 0, np.array(channels, dtype=np.float32), None, None))
 
     # --- audio temps réel -----------------------------------------------------
 
-    def _enqueue(self, q: asyncio.Queue, item):
+    def _enqueue(self, q: asyncio.Queue, item, slot: Optional[Slot] = None):
         if q.qsize() >= MAX_QUEUE_BLOCKS:
             try:
-                q.get_nowait()  # le plus ancien est déjà en retard côté DAW
+                old = q.get_nowait()  # le plus ancien est déjà en retard côté DAW
+                # Ses réglages d'automation ne sont pas perdus : posés au bloc suivant.
+                if slot is not None and old is not None and len(old) > 4 and old[4]:
+                    slot.carry_changes(old[4])
             except asyncio.QueueEmpty:
                 pass
         q.put_nowait(item)
@@ -751,13 +870,17 @@ class NovaBridgeServer:
     def _on_audio(self, ws, buf: bytes):
         try:
             slot_id, seq, nframes, nch, flags, data = parse_audio_frame(buf)
+            changes = parse_audio_extras(buf, nframes, nch, flags)
         except Exception:
             return
         q = self.slot_queues.get(slot_id)
         if q is None:
             return  # plugin pas (encore) chargé : le DAW compte un bloc manquant
         block = data.reshape(nframes, nch).T if nch > 1 else data.reshape(1, nframes)
-        self._enqueue(q, (ws, "bin", seq, block))
+        key = None
+        if flags & vst_automation.FLAG_SIDECHAIN and nch >= 4:
+            block, key = block[:2], block[2:4]
+        self._enqueue(q, (ws, "bin", seq, block, changes, key), self.slots.get(slot_id))
 
     async def _slot_worker(self, slot: Slot, q: asyncio.Queue):
         """Un consommateur par slot : blocs traités et renvoyés dans l'ordre.
@@ -770,13 +893,14 @@ class NovaBridgeServer:
             if item is None:
                 return
             try:
-                ws, kind, seq, block = item
+                ws, kind, seq, block, changes, key = item
                 if not slot.loaded.is_set() or (slot.plugin is None and not slot.failed):
                     continue
                 if slot.failed:
                     out = slot.dry_block(block)
                 else:
-                    fut = self.loop.run_in_executor(slot.executor, slot.process_block, block)
+                    extra = (changes, key) if (changes or key is not None) else ()
+                    fut = self.loop.run_in_executor(slot.executor, slot.process_block, block, *extra)
                     try:
                         out = await asyncio.wait_for(asyncio.shield(fut), vst_host.HANG_TIMEOUT_S)
                     except asyncio.TimeoutError:
@@ -878,6 +1002,9 @@ class NovaBridgeServer:
             nframes = int(meta.get("nframes") or (data.size // nch))
             sr = int(meta.get("sample_rate") or 48000)
             audio = data[: nframes * nch].reshape(nframes, nch).T
+            key = None
+            if meta.get("sidechain") and nch >= 4:
+                audio, key = audio[:2], audio[2:4]
             path, pname, state = meta.get("path"), meta.get("plugin_name"), meta.get("state")
             slot = self.slots.get(str(meta.get("slot_id") or ""))
             if slot is not None and slot.plugin is not None:
@@ -889,7 +1016,7 @@ class NovaBridgeServer:
             t = time.time()
             out = await self.loop.run_in_executor(self.render_pool, render_offline, self.juce, path, pname, state,
                                                   audio, sr, float(meta.get("tail_seconds") or 0),
-                                                  {"ws": ws, "source": "render"})
+                                                  {"ws": ws, "source": "render"}, meta.get("automation"), key)
             logger.info(f"🎚️ Rendu {os.path.basename(path)} : {out.shape[1] / sr:.1f} s en {time.time() - t:.1f} s")
             reply = {"action": "RENDER", "req_id": meta.get("req_id"), "success": True,
                      "nch": 2, "nframes": int(out.shape[1]), "sample_rate": sr}

@@ -141,7 +141,10 @@ export function removePad(dm: DrumMachine, rowIndex: number): DrumMachine {
   const patterns = dm.patterns?.map(p => {
     const steps = { ...p.steps }; const ratchet = { ...p.ratchet };
     delete steps[row.id]; delete ratchet[row.id];
-    return { ...p, steps, ratchet };
+    const pan = p.pan ? { ...p.pan } : undefined; const pitch = p.pitch ? { ...p.pitch } : undefined;
+    if (pan) delete pan[row.id];
+    if (pitch) delete pitch[row.id];
+    return { ...p, steps, ratchet, ...(pan ? { pan } : {}), ...(pitch ? { pitch } : {}) };
   });
   return pruneSamples({ ...dm, rows, ...(patterns ? { patterns } : {}) });
 }

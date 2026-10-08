@@ -212,7 +212,7 @@ def prepare(page, bridge=None, desktop=False, login=True):
     else:
         page.route_web_socket(re.compile(r"^ws://(127\.0\.0\.1|localhost):8765"), lambda ws: ws.close())
     page.route_web_socket(re.compile(r"^ws://(127\.0\.0\.1|localhost):8766"), lambda ws: ws.close())
-    page.route("**/worklets/vst-bridge-worker-v4.js", lambda r: r.fulfill(status=200, content_type="text/javascript", body=WORKER_STUB))
+    page.route("**/worklets/vst-bridge-worker-v5.js", lambda r: r.fulfill(status=200, content_type="text/javascript", body=WORKER_STUB))
     page.route("**/functions/v1/nova-billing", lambda r: r.fulfill(status=200, content_type="application/json",
                body=json.dumps({"plans": [], "admin": True, "unlocked": True, "free_exports_left": 10})))
 

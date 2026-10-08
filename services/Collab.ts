@@ -3,6 +3,7 @@ import { call, sha1, CHUNK, CloudLink } from './SessionCloud';
 import { wavOf } from './AudioUtils';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { padSampleKey } from '../utils/drumSamples';
+import { samplerBufferKey } from '../utils/melodicSampler';
 import { audioEngine } from '../engine/AudioEngine';
 import { Clip, CollabRole, Track } from '../types';
 import { CollabOutbox, CollabOutboxOptions, CollabOutboxStore } from '../utils/collabOutbox';
@@ -531,6 +532,8 @@ export const contentOf = (t: Track) => ({
   guide: t.isGuide ? { level: t.guideLevel ?? null } : null,
   // Synthé NOVA : null = ancien synthé (les versions précédentes ignorent ce champ).
   ...(t.type === 'MIDI' ? { novaSynth: t.novaSynth ?? null } : {}),
+  // Sampler mélodique / instrument (R18, R20) : null = synthé. Champ absent d'une ancienne version.
+  ...(t.type === 'MIDI' && t.melodicSampler ? { melodicSampler: t.melodicSampler } : t.type === 'MIDI' ? { melodicSampler: null } : {}),
   drumPads: t.drumPads?.map(p => { const { buffer: _b, ...r } = p as any; return r; }),
   clips: (t.clips || []).map(clipForWire),
   // Couloirs de prises (noms, heures, tours de boucle) : champ ajouté. L'audio
@@ -553,6 +556,8 @@ export const contentBufferIds = (t: Track): string[] => Array.from(new Set([
   // Batterie : sans eux, les pads perso (samples glissés, tranches d'une découpe)
   // restaient muets chez l'autre (motifs et réglages arrivaient, pas le son).
   ...Object.keys((t as any).drumMachine?.samples || {}).map(padSampleKey),
+  // Sampler mélodique (R18) : son perso (les instruments R20 sont sur le site, rien à envoyer).
+  t.melodicSampler?.sampleId ? samplerBufferKey(t.melodicSampler.sampleId) : undefined,
 ].filter(Boolean) as string[]));
 export const mixOf = (t: Track) => ({
   volume: t.volumeLock ? undefined : t.volume, pan: t.pan, isMuted: t.isMuted,

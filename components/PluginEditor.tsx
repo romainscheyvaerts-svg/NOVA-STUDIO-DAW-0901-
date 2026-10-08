@@ -189,7 +189,8 @@ const PluginEditor: React.FC<PluginEditorProps> = ({ plugin, trackId, onClose, o
 
   // --- SPECIAL CASE: VST3 EXTERNALS ---
   if (plugin.type === 'VST3') {
-      const vstWindow = <VSTPluginWindow plugin={plugin} onClose={onClose} trackId={trackId} track={track} onToggleFreeze={onToggleFreeze} presetSlot={isMobile ? undefined : presetMenu()} />;
+      const vstWindow = <VSTPluginWindow plugin={plugin} onClose={onClose} trackId={trackId} track={track} onToggleFreeze={onToggleFreeze} presetSlot={isMobile ? undefined : presetMenu()}
+        tracks={allTracks} onUpdateTrack={onUpdateTrack} onUpdateParams={stableUpdateParams} />;
       if (isMobile) return mobileShell(vstWindow);
       return (
           <div className="fixed inset-0 flex items-center justify-center z-[300] pointer-events-none">

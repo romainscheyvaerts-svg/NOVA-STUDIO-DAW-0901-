@@ -4,6 +4,7 @@ import { useBridgeState, useVstNodeInfo } from '../hooks/useNovaBridge';
 import { liveVstNodes } from '../engine/VSTPluginNode';
 import { isFreezeStale, isPluginBaked } from '../utils/freeze';
 import { BridgeConnectPanel } from './VstBrowserTab';
+import { SidechainPanel } from './SidechainPanel';
 
 interface VSTPluginWindowProps {
   plugin: PluginInstance;
@@ -14,6 +15,10 @@ interface VSTPluginWindowProps {
   onToggleFreeze?: (trackId: string) => void;
   /** Presets du plugin (R4) : état lu par le pont, rechargé et vérifié. */
   presetSlot?: React.ReactNode;
+  /** Barre « Clé » (R10) : pistes de la session et mises à jour. */
+  tracks?: Track[];
+  onUpdateTrack?: (t: Track) => void;
+  onUpdateParams?: (p: Record<string, any>) => void;
 }
 
 /**
@@ -21,7 +26,7 @@ interface VSTPluginWindowProps {
  * fenêtre sur le PC (pont VST) ; ici : état, latence, bouton d'ouverture.
  * Sans pont (téléphone) : l'effet est déjà rendu dans l'audio de la piste.
  */
-const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ plugin, onClose, trackId, track, onToggleFreeze, presetSlot }) => {
+const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ plugin, onClose, trackId, track, onToggleFreeze, presetSlot, tracks, onUpdateTrack, onUpdateParams }) => {
   const bridge = useBridgeState();
   const info = useVstNodeInfo(plugin.id);
   const [opening, setOpening] = useState(false);
@@ -120,6 +125,13 @@ const VSTPluginWindow: React.FC<VSTPluginWindowProps> = ({ plugin, onClose, trac
         </button>
       </div>
       {presetSlot && <div className="flex items-center gap-1 rounded-xl bg-white/[0.03] border border-white/10 p-1">{presetSlot}</div>}
+      {/* Side-chain (R10) : même barre « Clé » que les effets NOVA (source, prise avant / après fader, filtre). */}
+      {!baked && track && tracks && onUpdateTrack && onUpdateParams && (
+        <div className="-mx-4 overflow-hidden rounded-xl border border-white/10">
+          <SidechainPanel plugin={track.plugins.find(p => p.id === plugin.id) || plugin} track={track} tracks={tracks}
+            onUpdateTrack={onUpdateTrack} onUpdateParams={onUpdateParams} compact vstKey={info?.sidechain ?? null} />
+        </div>
+      )}
       {body}
     </div>
   );

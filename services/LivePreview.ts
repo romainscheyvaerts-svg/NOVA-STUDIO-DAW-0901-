@@ -1,5 +1,6 @@
 import type { Clip, FreezeRef, Track } from '../types';
 import { isTrackFrozen, isVst, lastVstIndex, pluginsSignature } from '../utils/freeze';
+import { vstAutomationSig } from '../utils/vstAutomation';
 
 /**
  * Collaboration « En direct » : l'ingé ENTEND les VST du PC de l'artiste.
@@ -134,6 +135,7 @@ export function applyPreviewOnEngineer(t: Track, p: PreviewPayload, now = Date.n
   t.frozenUpToPluginIndex = upTo;
   t.frozenClipIds = Object.keys(p.refs);
   t.frozenPluginSig = pluginsSignature(t.plugins || [], upTo);
+  t.frozenVstAutoSig = vstAutomationSig(t, upTo);
   delete t.frozenSourceSig;
   delete t.frozenAuto;
   t.clips = (t.clips || []).map(c => {

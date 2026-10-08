@@ -88,6 +88,25 @@ fenêtre de plugin ouverte se ferme si un autre plugin doit être chargé ou
 rendu pendant ce temps. Les plugins que pedalboard ne sait pas charger
 (certaines protections iLok) renvoient une erreur claire au DAW.
 
+### v11 – automation et side-chain des VST (R9, R10)
+
+- **Automation** (`vst_automation.py`) : chaque bloc temps réel peut porter des
+  réglages horodatés à l'échantillon près (drapeau PARAMS) ; le pont découpe le
+  bloc aux décalages. `RENDER` accepte `automation` (mêmes changements pour
+  l'export / le gel). `AUTOMATABLE`, `SET_AUTOMATION_MAP`, `PARAM_TEXTS`,
+  `WATCH_PARAMS` → `PARAM_CHANGED` (gestes faits dans la fenêtre du plugin,
+  écriture Touch / Latch), `AUTOMATION_STATS`. Les réglages sont lus / écrits par
+  les poignées C++ de pedalboard (aucune conversion texte pendant le traitement).
+- **Side-chain** (`vst_sidechain.py`) : trames à 4 canaux (drapeau SIDECHAIN) et
+  `RENDER sidechain=true` ; `Slot.process_block(block, changes, key)` passe la clé
+  à un hôte qui sait alimenter l'entrée side-chain. **pedalboard ne le peut pas**
+  (il désactive les bus d'entrée auxiliaires) : `LOAD_PLUGIN` répond
+  `sidechain_inputs: null` et NOVA affiche « clé routée, pas encore reçue ».
+  Le contrat exact que l'hôte VST3 natif (SDK VST3 MIT) devra remplir est décrit
+  en tête de `vst_sidechain.py` ; `nova:debug-ducker` (NOVA_BRIDGE_DEBUG=1) est un
+  effet à clé de référence qui suit ce contrat, pour les tests.
+- Tests : `venv\Scripts\python.exe -m unittest discover -s tests -p "test_vst_*.py"`.
+
 ### 2. ASIO Bridge (`asio_bridge.py`) ⭐ NOUVEAU
 Bridge pour connecter le DAW web à une carte son ASIO.
 
