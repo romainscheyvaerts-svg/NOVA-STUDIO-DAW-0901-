@@ -33,6 +33,10 @@ def scenario_shuffle(page, res):
     y0 = pe.lane_y(box, 0, 0.85)
     page.mouse.click(pe.x_of(box, 1.0), y0); page.wait_for_timeout(150)
     page.keyboard.down("Shift"); page.mouse.click(pe.x_of(box, 3.0), y0); page.keyboard.up("Shift"); page.wait_for_timeout(150)
+    page.wait_for_timeout(500)
+    # Départ relevé APRÈS la sélection : un clic sur un clip collé à un autre pose le crossfade
+    # anti-clic automatique (10 ms), qui n'est pas l'objet de la mesure.
+    res["depart"] = {"voix": me.spans(page, "voix"), "back": me.spans(page, "back")}
     shot(page, "edition_01_shuffle_selection_A_B")
     # Glisse A (donc A + B) sur la piste du dessous, au début du morceau.
     x0 = pe.x_of(box, 1.0)
