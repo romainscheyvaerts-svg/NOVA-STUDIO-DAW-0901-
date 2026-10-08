@@ -899,6 +899,12 @@ function Studio() {
     playheadStore.set(t);
     setVisualState({ isPlaying: false, currentTime: t });
   }, [setVisualState]);
+  // Une fenêtre qui prend la main sur le moteur (Fredonne → MIDI sur le beat) demande l'arrêt de la lecture.
+  useEffect(() => {
+    const onPause = () => { if (stateRef.current.isPlaying) pausePlayback(); };
+    window.addEventListener('nova:transport-pause', onPause);
+    return () => window.removeEventListener('nova:transport-pause', onPause);
+  }, [pausePlayback]);
 
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);

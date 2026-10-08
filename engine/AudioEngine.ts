@@ -39,6 +39,7 @@ import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
 import { events808 } from '../utils/bass808';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
+import { placeHumTake } from './humTake';
 import { VSTPluginNode } from './VSTPluginNode';
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback, isFrozenBus, isFeedCovered, busFrozenSlices } from '../utils/freeze';
 import { PRE_VOLUME } from '../utils/preFxEdits';
@@ -395,10 +396,10 @@ export class AudioEngine {
    * l'artiste entend la lecture + retard de sa voix jusqu'à l'enregistreur.
    * C'est de cette durée qu'une prise arrive en retard sur la grille.
    */
-  public measureRecordLatency(): { total: number; mode: 'asio' | 'navigateur' } {
+  public measureRecordLatency(stream?: MediaStream | null): { total: number; mode: 'asio' | 'navigateur' } {
     if (!this.ctx) return { total: 0, mode: 'navigateur' };
     const sr = this.ctx.sampleRate;
-    if (this.isUsingASIOInput() && this.asioStreamActive) {
+    if (!stream && this.isUsingASIOInput() && this.asioStreamActive) {
       // pilote (entrée + sortie) + file de sortie du pont + tampon d'envoi (2 × 256)
       // + tampon d'entrée de Nova + réseau local
       const fill = this.asioInput?.fillSec ?? 0.03;
@@ -408,7 +409,7 @@ export class AudioEngine {
     const out = (this.ctx.baseLatency || 0) + ((this.ctx as any).outputLatency || 0);
     let inp = 0.01;
     try {
-      const s = this.activeMonitorStream?.getAudioTracks()[0]?.getSettings() as any;
+      const s = (stream || this.activeMonitorStream)?.getAudioTracks()[0]?.getSettings() as any;
       if (s && typeof s.latency === 'number' && s.latency > 0) inp = s.latency;
     } catch { /* défaut 10 ms */ }
     return { total: Math.min(0.5, out + inp), mode: 'navigateur' };
@@ -454,6 +455,109 @@ export class AudioEngine {
     this.loopStart = start;
     this.loopEnd = end;
   }
+
+  // -------------------------------------------------------------------------
+  // « Fredonne → MIDI » au micro (V20, components/AudioToMidiDialog)
+  // -------------------------------------------------------------------------
+
+  private humTake: {
+    stream: MediaStream; src: MediaStreamAudioSourceNode; session: NovaRecorderSession; playStart: number; from: number;
+    withBeat: boolean; timer: number; clicks: GainNode; loop: [boolean, number, number];
+  } | null = null;
+
+  /**
+   * Démarre une prise « Fredonne → MIDI » : une mesure de décompte au clic,
+   * puis la voix est captée par l'enregistreur calé (comme une prise
+   * normale). `withBeat` (« Fredonner sur le beat ») : le MORCEAU joue,
+   * depuis une mesure avant `from` (décompte sur le beat) et pendant toute la
+   * prise ; sinon le clic continue seul. La boucle est suspendue le temps de
+   * la prise. Renvoie l'instant (horloge) où commence la prise.
+   */
+  public async startHumTake(stream: MediaStream, tracks: Track[], from: number, bpm: number, beatsPerBar: number, withBeat: boolean): Promise<{ recordAt: number }> {
+    await this.init();
+    await this.resume();
+    const ctx = this.ctx!;
+    this.cancelHumTake();
+    if (this.isPlaying) this.stopAll();
+    await ensureRecorderModule(ctx);
+    const src = ctx.createMediaStreamSource(stream);
+    const session = new NovaRecorderSession(ctx, src);
+    const beat = 60 / Math.max(20, bpm || 120);
+    const bars = Math.max(1, Math.round(beatsPerBar || 4));
+    const preRoll = beat * bars;
+    const loop: [boolean, number, number] = [this.isLoopActive, this.loopStart, this.loopEnd];
+    this.isLoopActive = false;
+    let countInAt: number, playStart: number;
+    if (withBeat) {
+      // Pistes pas encore câblées (moteur jamais lancé) : on les câble, sinon la lecture serait muette.
+      tracks.forEach(t => { if (!this.tracksDSP.has(t.id)) this.updateTrack(t, tracks); });
+      this.startPlayback(from - preRoll, tracks);
+      playStart = this.playbackStartTime;
+      countInAt = playStart + from - preRoll;
+    } else {
+      countInAt = ctx.currentTime + 0.15;
+      playStart = countInAt - (from - preRoll);
+    }
+    const clicks = ctx.createGain();
+    clicks.connect(ctx.destination);
+    // Clic : la mesure de décompte (plus aigu sur le 1er temps), puis seul s'il n'y a pas le beat.
+    let k = 0;
+    const tick = () => {
+      const until = ctx.currentTime + 0.5;
+      for (let guard = 0; guard < 64; guard++, k++) {
+        const at = countInAt + k * beat;
+        const countIn = k < bars;
+        if (at >= until || (!countIn && withBeat)) break;
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.value = k % bars === 0 ? 1600 : 1100;
+        g.gain.setValueAtTime(countIn ? 0.35 : 0.15, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.05);
+        o.connect(g); g.connect(clicks); o.start(at); o.stop(at + 0.06);
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 100);
+    this.humTake = { stream, src, session, playStart, from, withBeat, timer, clicks, loop };
+    return { recordAt: countInAt + preRoll };
+  }
+
+  /**
+   * Fin de la prise « Fredonne → MIDI » : la voix est replacée comme une prise
+   * normale (latence de sortie + d'entrée mesurée + réglage fin « Calage des
+   * prises ») et rendue à partir de `from`. null : rien de capté.
+   */
+  public async stopHumTake(): Promise<{ data: Float32Array; sr: number; start: number; latency: number } | null> {
+    const h = this.humTake;
+    if (!h || !this.ctx) return null;
+    this.humTake = null;
+    const ctx = this.ctx;
+    const latency = this.measureRecordLatency(h.stream).total + this.recOffsetMs / 1000;
+    window.clearInterval(h.timer);
+    if (h.withBeat) this.stopAll();
+    [this.isLoopActive, this.loopStart, this.loopEnd] = h.loop;
+    try { h.clicks.disconnect(); } catch { /* */ }
+    const { samples, firstFrame } = await h.session.stop(h.src);
+    try { h.src.disconnect(); } catch { /* */ }
+    h.stream.getTracks().forEach(t => t.stop());
+    if (!samples.length || firstFrame < 0) return null;
+    const p = placeHumTake(samples, ctx.sampleRate, firstFrame, h.playStart, latency, h.from);
+    console.log(`[AudioEngine] Fredonne → MIDI : prise replacée de ${Math.round(latency * 1000)} ms${h.withBeat ? ' (sur le beat)' : ''}`);
+    return { data: p.data, sr: ctx.sampleRate, start: p.start, latency };
+  }
+
+  /** Abandon de la prise « Fredonne → MIDI » (fenêtre fermée). */
+  public cancelHumTake() {
+    const h = this.humTake;
+    if (!h) return;
+    this.humTake = null;
+    window.clearInterval(h.timer);
+    if (h.withBeat) this.stopAll();
+    [this.isLoopActive, this.loopStart, this.loopEnd] = h.loop;
+    try { h.clicks.disconnect(); } catch { /* */ }
+    void h.session.stop(h.src).catch(() => {});
+    h.stream.getTracks().forEach(t => t.stop());
+  }
+
+  public isHumTakeActive() { return !!this.humTake; }
   
   public playTestTone() { /* ... */ }
 
