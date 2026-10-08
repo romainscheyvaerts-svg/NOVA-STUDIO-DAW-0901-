@@ -36,11 +36,11 @@ export const BridgeConnectPanel: React.FC<{ compact?: boolean }> = ({ compact })
         </ol>
       )}
       <button
-        onClick={() => { void novaBridge.connect(); }}
+        onClick={() => { void (bridge.status === 'reconnecting' ? novaBridge.retryNow() : novaBridge.connect()); }}
         disabled={bridge.status === 'connecting'}
         className="w-full h-11 rounded-xl bg-cyan-500 text-black text-xs font-black uppercase tracking-wide hover:bg-cyan-400 disabled:opacity-60 transition-colors"
       >
-        {bridge.status === 'connecting' ? 'Connexion…' : 'Connecter le pont VST'}
+        {bridge.status === 'connecting' ? 'Connexion…' : bridge.status === 'reconnecting' ? `Reconnexion au pont… (essai ${bridge.attempt || 1}) · réessayer` : 'Connecter le pont VST'}
       </button>
       {bridge.status === 'unavailable' && (
         <p role="status" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">

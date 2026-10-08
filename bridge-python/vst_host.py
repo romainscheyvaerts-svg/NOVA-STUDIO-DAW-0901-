@@ -20,6 +20,14 @@ Hôte VST3 du pont Nova (pedalboard de Spotify).
                   notes (MIDI) en audio, hors temps réel.
 - JuceThread    : le seul thread autorisé à préparer / détruire un plugin et à
                   afficher sa fenêtre (contrainte de JUCE).
+- Pannes (v10)  : un plugin qui lève une exception, sort des NaN en continu ou
+                  se fige pendant le traitement passe en « panne » : son slot
+                  laisse passer le signal SEC (retardé de sa latence, la piste
+                  reste alignée) au lieu de rendre du silence à vie. La sortie
+                  de chaque plugin est nettoyée (NaN / infini → 0, ±4 max).
+                  CrashGuard : un marqueur disque est posé pendant chaque
+                  chargement natif ; s'il reste au démarrage suivant, le pont
+                  est mort en chargeant ce plugin. Deux fois : quarantaine.
 """
 
 import base64
@@ -483,9 +491,18 @@ LICENSE_WAIT_S = 15 * 60.0   # le temps de saisir un numéro de série, de se co
 def instantiate(juce: "JuceThread", path: str, plugin_name: Optional[str], state_b64: Optional[str],
                 sample_rate: int, block: int, context: Optional[dict] = None):
     """prepare_plugin sur le thread JUCE, sous surveillance. Une fenêtre de
-    licence modale bloque le chargement : on attend alors jusqu'à 15 min."""
+    licence modale bloque le chargement : on attend alors jusqu'à 15 min.
+    Plugin en quarantaine (il a fait planter le pont) : refusé (PluginQuarantined).
+    Un marqueur disque couvre le chargement natif ; il n'est effacé qu'une fois
+    le chargement fini (même après un délai dépassé)."""
+    guard = CRASH_GUARD
+    if guard is not None and guard.is_quarantined(path):
+        raise PluginQuarantined(guard.message(path))
+    token = guard.begin(path) if guard is not None else None
     w = WATCHER.begin(path, plugin_name, context) if WATCHER is not None else None
     fut = juce.call(prepare_plugin, path, plugin_name, state_b64, sample_rate, block)
+    if token is not None:
+        fut.add_done_callback(lambda _f: guard.end(token))
     t0 = time.time()
     try:
         while True:
@@ -500,6 +517,134 @@ def instantiate(juce: "JuceThread", path: str, plugin_name: Optional[str], state
     finally:
         if w is not None:
             w.end()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUARANTAINE : plugins qui font planter le pont au chargement
+# ─────────────────────────────────────────────────────────────────────────────
+
+QUARANTINE_AFTER = 2
+
+
+class PluginQuarantined(RuntimeError):
+    """Plugin qui a fait planter le pont plusieurs fois au chargement."""
+
+
+def _guard_dir() -> str:
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(base, "NovaStudio", "crash_guard")
+
+
+class CrashGuard:
+    """Marqueurs de chargement natif + compteur de plantages par plugin.
+
+    begin(path) écrit loading/<id>.json AVANT l'instanciation native, end() l'efface
+    après. Un marqueur encore là au démarrage (recover) = le processus est mort
+    pendant ce chargement : un plantage de plus pour ce plugin. À partir de
+    QUARANTINE_AFTER, le plugin n'est plus chargé (rescan = on réessaie)."""
+
+    def __init__(self, directory: Optional[str] = None):
+        self.dir = directory or _guard_dir()
+        self.loading_dir = os.path.join(self.dir, "loading")
+        self.counts_path = os.path.join(self.dir, "crashes.json")
+        self.lock = threading.Lock()
+        self.crashes: Dict[str, Dict[str, Any]] = {}
+        self._seq = 0
+        try:
+            with open(self.counts_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                self.crashes = {k: v for k, v in data.items() if isinstance(v, dict)}
+        except Exception:
+            self.crashes = {}
+
+    def _save(self):
+        try:
+            os.makedirs(self.dir, exist_ok=True)
+            tmp = self.counts_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.crashes, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, self.counts_path)
+        except Exception as e:
+            logger.debug(f"Compteur de plantages non écrit : {e}")
+
+    def begin(self, path: str) -> Optional[str]:
+        with self.lock:
+            self._seq += 1
+            token = os.path.join(self.loading_dir, f"{os.getpid()}-{self._seq}-{int(time.time() * 1000)}.json")
+        try:
+            os.makedirs(self.loading_dir, exist_ok=True)
+            with open(token, "w", encoding="utf-8") as f:
+                json.dump({"path": path, "t": time.time(), "pid": os.getpid()}, f)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError:
+                    pass
+            return token
+        except Exception as e:
+            logger.debug(f"Marqueur de chargement non écrit : {e}")
+            return None
+
+    def end(self, token: Optional[str]):
+        if not token:
+            return
+        try:
+            os.remove(token)
+        except OSError:
+            pass
+
+    def recover(self) -> List[str]:
+        """(Démarrage) Marqueurs restés = plantages pendant un chargement."""
+        crashed: List[str] = []
+        try:
+            names = os.listdir(self.loading_dir)
+        except OSError:
+            return crashed
+        for n in names:
+            fp = os.path.join(self.loading_dir, n)
+            try:
+                with open(fp, "r", encoding="utf-8") as f:
+                    path = str(json.load(f).get("path") or "")
+            except Exception:
+                path = ""
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+            if path:
+                crashed.append(path)
+        if crashed:
+            with self.lock:
+                for path in crashed:
+                    e = self.crashes.setdefault(path, {"count": 0})
+                    e["count"] = int(e.get("count", 0)) + 1
+                    e["last"] = time.time()
+                self._save()
+        return crashed
+
+    def count(self, path: str) -> int:
+        return int((self.crashes.get(path) or {}).get("count", 0))
+
+    def is_quarantined(self, path: str) -> bool:
+        return self.count(path) >= QUARANTINE_AFTER
+
+    def quarantined(self) -> List[str]:
+        return [p for p in self.crashes if self.is_quarantined(p)]
+
+    def message(self, path: str) -> str:
+        name = os.path.basename(path.rstrip("\\/"))
+        name = name[:-5] if name.lower().endswith(".vst3") else name
+        return (f"{name} a fait planter le pont {self.count(path)} fois : désactivé. "
+                f"Rescanner les plugins pour réessayer")
+
+    def clear(self):
+        with self.lock:
+            self.crashes = {}
+            self._save()
+
+
+CRASH_GUARD: Optional[CrashGuard] = None
 
 
 def _restore_and_reset(plugin, state_b64: Optional[str]):
@@ -794,6 +939,19 @@ OFFLINE = OfflinePool()
 
 BLOCK = 128          # taille du bloc temps réel (quantum Web Audio)
 RENDER_BLOCK = 512
+OUT_LIMIT = 4.0      # sortie d'un plugin bornée (±12 dB) : un plugin qui s'emballe n'abîme pas le mix
+NAN_LIMIT = 8        # blocs NaN / infinis d'affilée avant de déclarer le plugin en panne
+HANG_TIMEOUT_S = 2.0 # un bloc qui prend plus que ça : plugin figé
+
+
+def sanitize(out: np.ndarray) -> bool:
+    """Nettoie EN PLACE (NaN / infini → 0, borné à ±OUT_LIMIT). Renvoie True si
+    le bloc contenait des valeurs non finies."""
+    bad = not bool(np.isfinite(out).all())
+    if bad:
+        np.nan_to_num(out, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    np.clip(out, -OUT_LIMIT, OUT_LIMIT, out=out)
+    return bad
 
 
 class Slot:
@@ -823,6 +981,14 @@ class Slot:
         self.loaded = threading.Event()
         self.error: Optional[str] = None
         self.is_instrument = False
+        # Panne (v10) : « exception », « nan » ou « hang ». Le slot passe alors
+        # le signal sec, retardé de sa latence (ligne à retard _dry_hist).
+        self.failed: Optional[str] = None
+        self.fail_error: Optional[str] = None
+        self.crash_reported = False
+        self._nan_blocks = 0
+        self._dry_lock = threading.Lock()
+        self._dry_hist: Optional[np.ndarray] = None
 
     @property
     def latency_samples(self) -> int:
@@ -845,9 +1011,34 @@ class Slot:
         self.loaded.set()
         return restored
 
+    def mark_failed(self, reason: str, error: str):
+        """Panne : à partir de maintenant, signal sec (une seule fois)."""
+        if self.failed:
+            return
+        self.fail_error = str(error)[:300]
+        self.failed = reason
+        logger.error(f"[{self.name}] en panne ({reason}) : {self.fail_error} : le son passe sans l'effet")
+
+    def dry_block(self, block: np.ndarray) -> np.ndarray:
+        """Signal sec retardé de la latence du flux (la piste reste alignée).
+        N'utilise PAS self.lock : un thread de traitement figé peut le garder."""
+        x = _to_stereo(block)
+        n = x.shape[1]
+        with self._dry_lock:
+            if self._dry_hist is None:
+                self._dry_hist = np.zeros((2, self.latency_samples), np.float32)
+            buf = np.concatenate([self._dry_hist, x], axis=1)
+            self._dry_hist = buf[:, n:]
+            out = np.array(buf[:, :n], dtype=np.float32, copy=True)
+        np.clip(out, -OUT_LIMIT, OUT_LIMIT, out=out)
+        return out
+
     def process_block(self, block: np.ndarray) -> np.ndarray:
-        """block (nch, n) → sortie stéréo (2, n), latence constante."""
+        """block (nch, n) → sortie stéréo (2, n), latence constante.
+        Plugin en panne (exception, NaN en continu, figé) : signal sec."""
         n = block.shape[1]
+        if self.failed:
+            return self.dry_block(block)
         with self.lock:
             plugin = self.plugin
             if plugin is None:
@@ -855,9 +1046,16 @@ class Slot:
             try:
                 out = plugin.process(_to_stereo(block), self.sample_rate, buffer_size=BLOCK, reset=False)
             except Exception as e:
-                logger.error(f"[{self.name}] erreur de traitement : {e}")
-                return np.zeros((2, n), np.float32)
-            out = _to_stereo(np.asarray(out, dtype=np.float32))
+                self.mark_failed("exception", f"{type(e).__name__}: {e}")
+                return self.dry_block(block)
+            out = np.array(_to_stereo(np.asarray(out, dtype=np.float32)), dtype=np.float32, copy=True)
+            if sanitize(out):
+                self._nan_blocks += 1
+                if self._nan_blocks >= NAN_LIMIT:
+                    self.mark_failed("nan", f"{self._nan_blocks} blocs NaN / infinis d'affilée")
+                    return self.dry_block(block)
+            else:
+                self._nan_blocks = 0
             fifo = np.concatenate([self._fifo, out], axis=1) if self._fifo.shape[1] else out
             if fifo.shape[1] < n:
                 pad = n - fifo.shape[1]
@@ -970,13 +1168,32 @@ class Slot:
                 "plugin_latency_before": before, "plugin_latency_after": after}
 
     def unload(self):
-        self.juce.close_editor(self)
-        with self.lock:
-            plugin, self.plugin = self.plugin, None
-        if plugin is not None:
-            self.juce.release(plugin)
-            plugin = None
-        self.executor.shutdown(wait=False)
+        """Libère l'instance. Ne bloque jamais l'appelant (boucle asyncio) : si le
+        verrou est tenu par un traitement figé, la libération part dans un thread
+        à part et attend qu'il rende la main."""
+        try:
+            self.juce.close_editor(self)
+        except Exception:
+            pass
+        if self.failed != "hang" and self.lock.acquire(timeout=0.5):
+            try:
+                plugin, self.plugin = self.plugin, None
+            finally:
+                self.lock.release()
+            if plugin is not None:
+                self.juce.release(plugin)
+                plugin = None
+            self.executor.shutdown(wait=False)
+            return
+
+        def later():
+            with self.lock:
+                plugin, self.plugin = self.plugin, None
+            if plugin is not None:
+                self.juce.release(plugin)
+
+        threading.Thread(target=later, name=f"unload-{self.slot_id[:12]}", daemon=True).start()
+        self.executor.shutdown(wait=False, cancel_futures=True)
 
 
 def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], state_b64: Optional[str],

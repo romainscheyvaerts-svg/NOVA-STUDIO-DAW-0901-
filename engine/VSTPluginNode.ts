@@ -14,6 +14,11 @@ import { novaBridge, BridgeState } from '../services/NovaBridge';
  *   l'artiste reste sans retard.
  * - La fenêtre du plugin s'ouvre sur le PC (openEditor) ; à sa fermeture,
  *   l'état du plugin est remonté au projet (vstStateEvents).
+ * - Plugin en panne sur le pont (PLUGIN_CRASHED : exception, figé, NaN) : passe-plat
+ *   immédiat, la piste continue sans lui ; relance automatique ~1 s après, au plus
+ *   VST_CRASH_RETRIES fois en 10 min pour ce plugin, puis il reste contourné
+ *   (« désactivé : il plante »). Événement fenêtre « nova:vst-crash » pour l'appli.
+ *   Plugin en quarantaine (il a fait planter le pont au chargement) : erreur, pas de relance.
  */
 
 /** Pré-tampon, en échantillons : absorbe les à-coups du pont sans craquement. */
@@ -68,6 +73,28 @@ const notifyInfo = () => infoListeners.forEach(cb => { try { cb(); } catch { /* 
 
 const workletLoaded = new WeakMap<BaseAudioContext, Promise<void>>();
 
+/** Relances automatiques après un plantage, par plugin, sur une fenêtre de 10 min. */
+export const VST_CRASH_RETRIES = 2;
+export const VST_CRASH_WINDOW_MS = 10 * 60 * 1000;
+export const VST_CRASH_RETRY_DELAY_MS = 1000;
+/** Plantages récents par plugin (survit à la reconstruction du nœud). */
+const crashHistory = new Map<string, number[]>();
+/** Tests : oublie les plantages mémorisés. */
+export const resetVstCrashHistory = () => crashHistory.clear();
+
+export interface VstCrashDetail {
+  pluginId: string;
+  name: string;
+  reason: string;
+  error: string | null;
+  willRetry: boolean;
+  /** Message prêt à afficher. */
+  message: string;
+}
+
+const crashReasonLabel = (reason: string): string =>
+  reason === 'hang' ? 'il ne répondait plus' : reason === 'nan' ? 'son invalide' : 'erreur interne';
+
 export class VSTPluginNode {
   public readonly input: GainNode;
   public readonly output: GainNode;
@@ -95,6 +122,9 @@ export class VSTPluginNode {
   /** Réglages de Nova déjà appliqués (JSON) : réappliqués s'ils changent (Annuler, nouveau mix). */
   private knownSettings = 'null';
   private readonly quiet: boolean;
+  /** Plantage à répétition ou quarantaine : plus de relance automatique (reconnexion comprise). */
+  private crashDisabled = false;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * opts.quiet : plugin posé par NOVA lui-même (autotune du PC) : chargement
@@ -188,6 +218,7 @@ export class VSTPluginNode {
 
   dispose() {
     this.disposed = true;
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
     this.unsubs.forEach(u => u());
     this.unsubs = [];
     this.teardown();
@@ -233,10 +264,41 @@ export class VSTPluginNode {
     this.statusListeners.forEach(cb => { try { cb(status); } catch { /* écouteur fautif */ } });
   }
 
+  /**
+   * Le pont signale une panne de CE plugin : passe-plat tout de suite (la piste
+   * continue), relance si le plafond n'est pas atteint.
+   */
+  private onCrash(reason: string, error: string | null) {
+    if (this.disposed) return;
+    const now = Date.now();
+    const id = this.plugin.id;
+    const recent = (crashHistory.get(id) || []).filter(t => now - t < VST_CRASH_WINDOW_MS);
+    const willRetry = recent.length < VST_CRASH_RETRIES;
+    recent.push(now);
+    crashHistory.set(id, recent);
+    const name = this.loadedName || this.plugin.name || 'Le plugin';
+    this.teardown();
+    const message = willRetry
+      ? `${name} a planté (${crashReasonLabel(reason)}) : relance…`
+      : `${name} désactivé : il plante (${recent.length} fois en 10 min). Le son passe sans lui.`;
+    this.crashDisabled = !willRetry;
+    this.setStatus('error', message);
+    const detail: VstCrashDetail = { pluginId: id, name, reason, error, willRetry, message };
+    try {
+      if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') window.dispatchEvent(new CustomEvent('nova:vst-crash', { detail }));
+    } catch { /* hors navigateur */ }
+    if (!willRetry) return;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      if (!this.disposed && !this.crashDisabled && novaBridge.isConnected()) void this.start();
+    }, VST_CRASH_RETRY_DELAY_MS);
+  }
+
   private onBridgeState(s: BridgeState) {
     if (this.disposed) return;
     if (s.status === 'connected') {
-      if (this.status === 'offline' || this.status === 'error') void this.start();
+      if ((this.status === 'offline' || this.status === 'error') && !this.crashDisabled) void this.start();
     } else if (this.status !== 'offline') {
       this.teardown();
       this.setStatus('offline');
@@ -293,6 +355,7 @@ export class VSTPluginNode {
           this.pluginLatencySamples = Number(ev.latency_samples) || 0;
           this.updateLatency(true);
         }
+        if (ev.action === 'PLUGIN_CRASHED' && this.slotId === slotId) this.onCrash(String(ev.reason || 'exception'), ev.error ?? null);
       });
 
       const port = novaBridge.attachAudio(slotId);
@@ -311,6 +374,8 @@ export class VSTPluginNode {
       if (this.disposed || seq !== this.loadSeq) return;
       this.teardown();
       this.licenseRequired = !!e?.licenseRequired;
+      // (pont v10) Il a fait planter le pont au chargement : plus de relance automatique.
+      if (e?.quarantined) this.crashDisabled = true;
       this.setStatus('error', e?.message || 'Chargement impossible');
       // Plugin posé par Nova : le projet repasse sur l'effet de NOVA (voir App, VST_MIX_FALLBACK).
       if (this.plugin.params?.novaSlot) {
