@@ -219,7 +219,7 @@ def run_pc(b, theme="dark"):
     errors = [round((notes[k][0] - (rec_start + targets[k])) * 1000, 3) for k in range(min(16, len(notes)))]
     RES["mesures"]["16_notes_ecart_ms"] = errors
     ok("16 notes enregistrées", len(notes) == 16, len(notes))
-    ok("positions à ±1 ms malgré une gigue de 2 à 30 ms", len(errors) == 16 and max(abs(e) for e in errors) <= 1.0, {"max_ecart_ms": max([abs(e) for e in errors] or [99]), "ecarts_ms": errors})
+    ok("positions à ±1 ms malgré une gigue d’arrivée de 5 à 45 ms", len(errors) == 16 and max(abs(e) for e in errors) <= 1.0, {"max_ecart_ms": max([abs(e) for e in errors] or [99]), "ecarts_ms": errors})
     durs = [round(n[2], 3) for n in notes]
     ok("durées gardées (0,12 s)", all(abs(d - 0.12) < 0.0015 for d in durs), durs[:6])
     pg.wait_for_timeout(600)
