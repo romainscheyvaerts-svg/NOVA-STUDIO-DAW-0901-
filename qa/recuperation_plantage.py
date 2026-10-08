@@ -157,6 +157,7 @@ def scenario(p, name, kill):
         res["prise_enregistree_s"] = round(recorded, 2)
         res["mise_a_mort"] = kill
         main, kids = browser_tree(profile)
+        kill_ms = time.time() * 1000
         if kill == "onglet":
             # Onglet tué : le processus de rendu meurt net (comme un plantage de l'onglet).
             renderers = [k for k in kids if any(a.startswith("--type=renderer") for a in (k.cmdline() or []))]
@@ -182,6 +183,10 @@ def scenario(p, name, kill):
         dlg.wait_for(timeout=30000)
         page.wait_for_timeout(500)
         res["proposition"] = dlg.inner_text()[:600]
+        # Début réel de la capture (horodatage du journal de prise) -> durée captée jusqu'à la mise à mort.
+        takes = page.evaluate("async () => { const m = await window.__novaAppModule('/utils/recoveryStore.ts'); return (await m.recoveryStore().pendingTakes()).map(t => ({ startedAt: t.startedAt, samples: t.samples, sr: t.sampleRate })); }")
+        if takes:
+            res["capte_jusqu_a_la_mise_a_mort_s"] = round((kill_ms - takes[-1]["startedAt"]) / 1000, 2)
         page.screenshot(path=str(OUT / f"recup_{name}_2_proposition.png"))
         page.get_by_role("button", name="Récupérer la session").click()
         for _ in range(60):
@@ -195,7 +200,8 @@ def scenario(p, name, kill):
         recup = [c for t in st["tracks"] for c in t["clips"] if "récupérée" in (c["name"] or "")]
         res["etat_apres"] = st
         res["prise_recuperee_s"] = recup[0]["duration"] if recup else 0
-        res["perte_s"] = round(res["prise_enregistree_s"] - res["prise_recuperee_s"], 2)
+        ref = res.get("capte_jusqu_a_la_mise_a_mort_s", res["prise_enregistree_s"])
+        res["perte_s"] = round(ref - res["prise_recuperee_s"], 2)
         guitare = next((t for t in st["tracks"] if t["id"] == "guitare"), None)
         res["projet_revenu"] = bool(guitare and guitare["clips"] and st["markers"] >= 1)
         res["notification"] = page.evaluate("() => Array.from(document.querySelectorAll('[role=status], [role=alert]')).map(e => e.innerText).filter(t => /récup|🛟/i.test(t)).slice(0, 3)")
