@@ -31,24 +31,30 @@ pedalboard_native`) et par `bridge-python/NovaVSTBridge.spec`. Rien d'autre : we
 redistribuable), NovaARAHost (MIT + Apache 2.0). PyInstaller (GPL avec exception pour le
 chargeur) n'impose rien aux programmes construits.
 
-## Plan de retrait de pedalboard (une fois la parité prouvée sur toute la liste)
+## Plan de retrait de pedalboard
 
-1. Moteur par défaut : `DEFAULT_ENGINE = "native"` dans `bridge-python/vst_native.py`
-   (`NOVA_VST_ENGINE=pedalboard` reste possible tant que le paquet est installé).
-2. `desktop/build.py` : étape `native_host()` sur le modèle de `ara_host()` (construit
-   `native-host/build.bat` si l'exe manque) ; `desktop/NovaStudio.spec` : `binaries +=
-   [('../native-host/build/NovaVSTHost_artefacts/Release/NovaVSTHost.exe', '.')]`, `datas +=
-   [('../native-host/LICENCES.md', 'vst-host'), ('../native-host/licences/*.txt',
-   'vst-host/licences')]`, `hiddenimports += ['vst_native', 'nova_vst3host']`.
-3. Retirer pedalboard : `desktop/NovaStudio.spec` (`'pedalboard'` de la boucle
-   `collect_all`, `hiddenimports pedalboard_native`), `desktop/requirements.txt`
-   (`pedalboard==0.9.25`), `bridge-python/requirements.txt`, `bridge-python/NovaVSTBridge.spec`
-   (`collect_all('pedalboard')`, `pedalboard_native`) ; `bridge-python/start_bridge.bat`
-   (installation de pedalboard).
-4. Code qui ne sert plus qu'avec pedalboard (garder pour le repli ou retirer ensuite) :
-   `vst_shell.py` (relais de la fabrique des shells Waves), essai jetable de `plugin_guard.py`,
-   `JuceThread` (garde un rôle : un seul fil pour les chargements) ; `capture_ir.py` et
-   `juce_state.py` (outils, hors installateur) importent pedalboard directement.
-5. Vérifier : `python -m unittest discover -s tests -q` sans pedalboard installé, banc
-   `qa/vst_native_parite.py` et `qa/vst_native_mieux.py`, modèle LENNON
-   (`scripts/template_from_spec.ts --activate-all`), puis l'installateur.
+Parité prouvée le 08/10/2026 sur la liste de référence (voir
+`D:\1 WORK\CONTENU\nova-hote-vst\SYNTHESE.md`). Déjà fait dans cette branche :
+
+1. Moteur par défaut : `DEFAULT_ENGINE = "native"` (`bridge-python/vst_native.py`) ;
+   `NOVA_VST_ENGINE=pedalboard` reste possible tant que le paquet est installé.
+2. `desktop/build.py` : étape `native_host()` (construit `native-host/build.bat` si l'exe manque) ;
+   `desktop/NovaStudio.spec` et `bridge-python/NovaVSTBridge.spec` : `NovaVSTHost.exe`, ce fichier
+   et `licences/` livrés (`_internal/vst-host/`), `vst_native` / `nova_vst3host` en imports cachés.
+
+Reste à faire pour retirer pedalboard (et donc toute composante GPL) :
+
+3. `desktop/NovaStudio.spec` : retirer `'pedalboard'` de la boucle `collect_all` et
+   `hiddenimports += ['pedalboard_native']` ; `desktop/requirements.txt` : `pedalboard==0.9.25` ;
+   `bridge-python/NovaVSTBridge.spec` : `collect_all('pedalboard')`, `pedalboard_native` ;
+   `bridge-python/requirements.txt` et `start_bridge.bat` (installation de pedalboard).
+4. Code qui ne sert plus qu'avec pedalboard (à garder pour le repli tant qu'il est livré, à
+   retirer ensuite) : `vst_shell.py` (relais de la fabrique des shells Waves), essai jetable de
+   `plugin_guard.py` ; outils hors installateur qui importent pedalboard : `capture_ir.py`,
+   `juce_state.py`, `qa/vst_native_parite.py` (comparaison, reste un outil de développement).
+5. Vérifier : `python -m unittest discover -s tests -q` sans pedalboard installé, puis
+   l'installateur (sans lancer `desktop\build.bat` hors de la machine de construction).
+
+Points connus (voir la synthèse) : EchoBoy (modulation aléatoire) et Vital (phases aléatoires)
+ne sont pas déterministes, y compris avec pedalboard ; `is_discrete` de pedalboard est une valeur
+non initialisée dans sa version de JUCE (le natif répond « vrai », sa réponse dominante).
