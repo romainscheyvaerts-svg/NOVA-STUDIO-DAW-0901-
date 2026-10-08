@@ -32,6 +32,14 @@ export interface BridgePlugin {
   license?: 'activation' | 'nag' | null;
   /** (pont v6) Lecture en arrière-plan : ok, error, activation, hang, crash. */
   scanStatus?: string | null;
+  /** Plugin d'un fichier « shell » (Waves : WaveShell1-VST3 17.1) : nom du fichier. Chargé par pluginName. */
+  shell?: string | null;
+  /** Nom sans variante (« C6 » pour « C6 Stereo »). */
+  family?: string | null;
+  /** Variante lue dans le nom : mono, stereo, mono/stereo. */
+  channels?: 'mono' | 'stereo' | 'mono/stereo' | null;
+  /** Plugin qui a fait planter le pont (isolé : il n'est plus chargé). */
+  unstable?: boolean;
 }
 
 /**
@@ -312,9 +320,11 @@ class NovaBridgeService {
       this.pending.delete(msg.req_id);
       window.clearTimeout(p.timer);
       if (msg.success === false) {
-        const err: Error & { licenseRequired?: boolean } = new Error(msg.error || 'Erreur du pont VST');
+        const err: Error & { licenseRequired?: boolean; unstable?: boolean } = new Error(msg.error || 'Erreur du pont VST');
         // (v7) Chargement discret refusé par une fenêtre de licence / démo.
         if (msg.license_required) err.licenseRequired = true;
+        // Plugin qui plante le pont (isolé par le pont, qui continue) : à ne pas recharger.
+        if (msg.unstable) err.unstable = true;
         p.reject(err);
       } else p.resolve(msg);
       return;
@@ -425,6 +435,8 @@ class NovaBridgeService {
       isInstrument: typeof p.is_instrument === 'boolean' ? p.is_instrument : (p.category === 'Instrument' ? true : null),
       license: p.license === 'activation' || p.license === 'nag' ? p.license : null,
       scanStatus: p.scan_status ?? null,
+      ...(p.shell ? { shell: String(p.shell), family: p.family ?? null, channels: p.channels ?? null } : {}),
+      ...(p.unstable ? { unstable: true } : {}),
     }));
     const prog = Array.isArray(r.probe_progress) ? r.probe_progress : null;
     this.setBridgeState({

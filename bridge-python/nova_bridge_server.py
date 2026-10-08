@@ -119,6 +119,7 @@ import license_watch
 import stems_service
 import vst_host
 import vst_probe
+import plugin_guard
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events
 
 VERSION = 9
@@ -470,6 +471,9 @@ class NovaBridgeServer:
                               "instruments": vst_host.HAS_PEDALBOARD,
                               "license_events": license_watch.IS_WINDOWS,
                               "params_text": True, "stems": True,
+                              # Plugins d'un shell (Waves) chargés par leur nom ; plugins qui
+                              # plantent isolés (« unstable » dans la liste et au chargement).
+                              "shells": True, "plugin_guard": True,
                               "ara": bool(ara_service.ara_host.find_host_exe())})
 
     async def _a_get_plugin_list(self, ws, req):
@@ -478,15 +482,20 @@ class NovaBridgeServer:
             self._probed.clear()
             # Choix explicite : les plugins en attente d'activation sont relus.
             await self.loop.run_in_executor(self.misc_pool, vst_probe.forget_unsettled)
+            await self.loop.run_in_executor(self.misc_pool, plugin_guard.retry_unstable)
             await self._scan()
         await self.scan_done.wait()
         effects_only = bool(req.get("effects_only"))
         plugins = []
+        unstable = plugin_guard.unstable_keys()
         for p in self.plugins:
             if effects_only and p["category"] != "Effect":
                 continue
             lic = p.get("license") or self.licenses.status(p["path"], p.get("plugin_name"))
-            plugins.append({**p, "license": lic} if lic else p)
+            item = {**p, "license": lic} if lic else p
+            if unstable and plugin_guard.key_of(p["path"], p.get("plugin_name")) in unstable:
+                item = {**item, "unstable": True}
+            plugins.append(item)
         pending = self.probe_task is not None and not self.probe_task.done()
         self._reply(ws, req, {"success": True, "plugins": plugins, "instruments_pending": pending,
                               "probe_progress": self.probe_progress if pending else None})
@@ -524,6 +533,14 @@ class NovaBridgeServer:
             await self._in_slot(slot, slot.load, req.get("state"), ctx)
             if ctx.get("license_seen"):
                 raise LicenseRequired(f"{slot.name} demande une licence ou une activation : il n'est pas utilisé")
+        except plugin_guard.PluginUnstable as e:
+            # Plugin qui plante (essai isolé raté) : refusé, le pont continue.
+            slot.error = str(e)
+            slot.loaded.set()
+            if self.slots.get(slot_id) is slot:
+                self._drop_slot(slot_id)
+            self._reply(ws, req, {"success": False, "error": str(e), "unstable": True})
+            return
         except LicenseRequired as e:
             slot.error = str(e)
             slot.loaded.set()
@@ -894,6 +911,11 @@ def main():
     if "--probe-vst3" in sys.argv:
         vst_probe.child_main()  # processus enfant : lecture des plugins (voir vst_probe)
         return
+    if "--trial-load" in sys.argv:
+        plugin_guard.trial_child_main()  # processus jetable : essai d'un plugin à risque (voir plugin_guard)
+        return
+    plugin_guard.MAIN_SCRIPT = MAIN_SCRIPT
+    plugin_guard.startup()  # témoin resté = le pont est mort pendant un chargement
     # Console Windows redirigée (fichier, pipe) : cp1252 refusait les accents/emojis.
     for stream in (sys.stdout, sys.stderr):
         try:

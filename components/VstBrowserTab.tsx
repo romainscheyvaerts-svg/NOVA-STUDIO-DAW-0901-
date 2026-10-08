@@ -158,7 +158,7 @@ const VstBrowserTab: React.FC<{
             <div className="text-xs font-bold text-white truncate">{p.name}{araPluginKey(p.path || p.name) && (
               <span title={ARA_BADGE_TOOLTIP} data-testid="ara-badge" className="ml-1.5 rounded border border-fuchsia-400/50 bg-fuchsia-500/15 px-1 py-px align-middle text-[9px] font-black tracking-wider text-fuchsia-200">ARA</span>
             )}</div>
-            <div className="text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}{p.category === 'Instrument' ? ' · instrument' : ''}{araPluginKey(p.path || p.name) ? ' · sur un clip (clic droit)' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}</div>
+            <div className="text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}{p.category === 'Instrument' ? ' · instrument' : ''}{araPluginKey(p.path || p.name) ? ' · sur un clip (clic droit)' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}{p.channels ? ` · ${p.channels === 'mono' ? 'mono' : p.channels === 'stereo' ? 'stéréo' : 'mono → stéréo'}` : ''}{p.unstable ? ' · instable sur le pont (fait planter le pont : isolé, non chargé)' : ''}</div>
           </div>
         </div>
       ))}
