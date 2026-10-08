@@ -3459,6 +3459,42 @@ export class AudioEngine {
     });
   }
 
+  /**
+   * Audio source d'une piste (ses clips audio non muets, bout à bout dans
+   * l'ordre de la ligne de temps, gain de clip compris, sans les silences
+   * entre clips), plafonné à `maxSeconds`. Sert au calage « Caler sur ma
+   * voix » des compresseurs : on règle sur ce que la piste va vraiment chanter.
+   */
+  public getTrackSourceAudio(trackId: string, maxSeconds = 90): { channels: Float32Array[]; sampleRate: number } | null {
+    const tracks = this.liveTracks || [];
+    const track = tracks.find(t => t.id === trackId);
+    if (!track) return null;
+    const clips = [...(track.clips || [])].filter(c => !c.isMuted && c.type !== TrackType.MIDI).sort((a, b) => a.start - b.start);
+    const parts: { buf: AudioBuffer; from: number; len: number; gain: number }[] = [];
+    let sr = 0, total = 0;
+    for (const c of clips) {
+      const buf = c.buffer || (c.bufferId ? audioBufferRegistry.get(c.bufferId) : undefined) || audioBufferRegistry.get(c.id);
+      if (!buf) continue;
+      if (!sr) sr = buf.sampleRate;
+      if (buf.sampleRate !== sr) continue;
+      const from = Math.max(0, Math.floor((c.offset || 0) * sr));
+      const len = Math.max(0, Math.min(buf.length - from, Math.floor((c.duration || 0) * sr)));
+      const room = Math.floor(maxSeconds * sr) - total;
+      if (len <= 0 || room <= 0) continue;
+      parts.push({ buf, from, len: Math.min(len, room), gain: c.gain ?? 1 });
+      total += Math.min(len, room);
+    }
+    if (!total) return null;
+    const L = new Float32Array(total), R = new Float32Array(total);
+    let at = 0;
+    for (const p of parts) {
+      const a = p.buf.getChannelData(0), b = p.buf.numberOfChannels > 1 ? p.buf.getChannelData(1) : a;
+      for (let i = 0; i < p.len; i++) { L[at + i] = a[p.from + i] * p.gain; R[at + i] = b[p.from + i] * p.gain; }
+      at += p.len;
+    }
+    return { channels: [L, R], sampleRate: sr };
+  }
+
   /** Réglages automatisables des effets du registre (V21 : harmoniseur, tape stop…) de la piste. */
   public getTrackPluginParameters(trackId: string): { pluginId: string, pluginName: string, params: PluginParameter[] }[] {
     const track = this.liveTracks?.find(t => t.id === trackId);

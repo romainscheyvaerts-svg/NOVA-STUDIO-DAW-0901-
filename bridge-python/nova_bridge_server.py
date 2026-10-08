@@ -137,7 +137,7 @@ import stems_service
 import vst_host
 import vst_probe
 import plugin_guard
-from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events
+from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events, calibrate_gr_offline
 
 VERSION = 10
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
@@ -493,7 +493,7 @@ class NovaBridgeServer:
                               "pedalboard": vst_host.HAS_PEDALBOARD,
                               "instruments": vst_host.HAS_PEDALBOARD,
                               "license_events": license_watch.IS_WINDOWS,
-                              "params_text": True, "stems": True,
+                              "params_text": True, "stems": True, "calibrate_gr": vst_host.HAS_PEDALBOARD,
                               # Plugins d'un shell (Waves) chargés par leur nom ; plugins qui
                               # plantent isolés (« unstable » dans la liste et au chargement).
                               "shells": True, "plugin_guard": True,
@@ -869,6 +869,9 @@ class NovaBridgeServer:
             if meta.get("action") == "ARA_ALIGN":
                 await self._ara_align(ws, meta, data)
                 return
+            if meta.get("action") == "CALIBRATE_GR":
+                await self._calibrate_gr(ws, meta, data)
+                return
             nch = int(meta.get("nch") or 2)
             nframes = int(meta.get("nframes") or (data.size // nch))
             sr = int(meta.get("sample_rate") or 48000)
@@ -893,6 +896,40 @@ class NovaBridgeServer:
             logger.error(f"RENDER : {e}")
             await self._send(ws, build_render_frame({"action": "RENDER", "req_id": meta.get("req_id"),
                                                      "success": False, "error": str(e)}, None))
+
+
+async def _calibrate_gr(self, ws, meta: dict, data):
+    """(v10) Calage « réduction cible » d'un compresseur VST : rendu hors ligne
+    de la voix envoyée, dichotomie sur le réglage, puis le réglage trouvé est
+    posé sur l'instance de la piste (slot)."""
+    try:
+        nch = int(meta.get("nch") or 2)
+        nframes = int(meta.get("nframes") or (data.size // nch))
+        sr = int(meta.get("sample_rate") or 48000)
+        audio = data[: nframes * nch].reshape(nframes, nch).T
+        slot = self.slots.get(str(meta.get("slot_id") or ""))
+        if slot is None or slot.plugin is None:
+            raise ValueError("Plugin de la piste introuvable sur le pont")
+        state = await self._in_slot(slot, slot.get_state)
+        t = time.time()
+        res = await self.loop.run_in_executor(
+            self.render_pool, calibrate_gr_offline, self.juce, slot.path, slot.plugin_name, state, audio, sr,
+            str(meta.get("param")), float(meta.get("lo")), float(meta.get("hi")), int(meta.get("sense") or 1),
+            float(meta.get("target_db") or 5.0), {"ws": ws, "source": "calibrate"})
+        applied = await self._in_slot(slot, slot.set_parameters, [{"name": meta.get("param"), "real": res["value"]}], None)
+        logger.info(f"🎯 Calage {slot.name} : {meta.get('param')} = {res.get('text')} -> {res['gr_db']:.2f} dB au VU "
+                    f"({len(res['steps'])} rendus, {time.time() - t:.1f} s)")
+        reply = {"action": "CALIBRATE_GR", "req_id": meta.get("req_id"), "success": True, "nch": 2, "nframes": 0,
+                 "value": res["value"], "text": res.get("text"), "gr_db": res["gr_db"], "reached": res["reached"],
+                 "why": res.get("why"), "steps": res["steps"], "applied": applied.get("results")}
+        await self._send(ws, build_render_frame(reply, None))
+    except Exception as e:
+        logger.error(f"CALIBRATE_GR : {e}")
+        await self._send(ws, build_render_frame({"action": "CALIBRATE_GR", "req_id": meta.get("req_id"),
+                                                 "success": False, "error": str(e)}, None))
+
+
+NovaBridgeServer._calibrate_gr = _calibrate_gr
 
 
 def _stems_server_methods():

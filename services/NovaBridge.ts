@@ -106,7 +106,12 @@ export interface BridgeState {
   attempt?: number;
   /** Reconnexion automatique : heure (ms, Date.now) du prochain essai. */
   nextRetryAt?: number | null;
+  /** (v10) Calage « réduction cible » d'un compresseur VST (rendu hors ligne + dichotomie). */
+  calibrateGr?: boolean;
 }
+
+/** Première version du pont qui sait caler un compresseur sur une réduction cible. */
+export const BRIDGE_CALIBRATE_VERSION = 10;
 
 /** Première version du pont qui héberge les plugins ARA (Melodyne, VocAlign). */
 export const BRIDGE_ARA_VERSION = 9;
@@ -364,6 +369,7 @@ class NovaBridgeService {
             paramsText: !!hello.params_text && (Number(hello.version) || 0) >= BRIDGE_PARAMS_TEXT_VERSION,
             stems: !!hello.stems && (Number(hello.version) || 0) >= BRIDGE_STEMS_VERSION,
             ara: !!hello.ara && (Number(hello.version) || 0) >= BRIDGE_ARA_VERSION,
+            calibrateGr: !!hello.calibrate_gr && (Number(hello.version) || 0) >= BRIDGE_CALIBRATE_VERSION,
           });
           this.ensureWorker();
           done(true);
@@ -706,6 +712,35 @@ class NovaBridgeService {
       ws.send(buf);
     });
     return res.channels as Float32Array[];
+  }
+
+  /**
+   * (v10) Calage « réduction cible » d'un compresseur VST de la piste : le pont
+   * rend la voix hors ligne, cherche par dichotomie la valeur de `param`
+   * (valeur réelle du plugin, entre lo et hi ; sense = +1 si monter le réglage
+   * comprime plus) qui donne `targetDb` de réduction max au VU, puis pose ce
+   * réglage sur l'instance de la piste.
+   */
+  async calibrateGr(opts: { slotId: string; param: string; lo: number; hi: number; sense: 1 | -1; targetDb: number;
+    sampleRate: number; channels: Float32Array[] }): Promise<{ value: number; text?: string; grDb: number; reached: boolean; why?: string; steps: { value: number; gr_db: number }[] }> {
+    if (!this.state.calibrateGr) throw new Error('Mets à jour Nova Studio pour Windows pour caler tes compresseurs VST.');
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('Pont VST non connecté');
+    const nch = Math.max(1, Math.min(2, opts.channels.length));
+    const nframes = opts.channels[0]?.length || 0;
+    const req_id = this.nextId++;
+    const meta = JSON.stringify({
+      action: 'CALIBRATE_GR', req_id, slot_id: opts.slotId, param: opts.param, lo: opts.lo, hi: opts.hi, sense: opts.sense,
+      target_db: opts.targetDb, sample_rate: Math.round(opts.sampleRate), nch, nframes,
+    });
+    const buf = encodeType2Frame(meta, opts.channels.slice(0, nch));
+    const timeoutMs = 60000 + (nframes / Math.max(1, opts.sampleRate)) * 4000 * 14;
+    const res = await new Promise<any>((resolve, reject) => {
+      const timer = window.setTimeout(() => { this.pending.delete(req_id); reject(new Error('Calage trop long')); }, timeoutMs);
+      this.pending.set(req_id, { resolve, reject, timer });
+      ws.send(buf);
+    });
+    return { value: Number(res.value), text: res.text, grDb: Number(res.gr_db), reached: !!res.reached, why: res.why, steps: res.steps || [] };
   }
 
   /**

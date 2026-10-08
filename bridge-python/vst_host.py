@@ -1269,6 +1269,37 @@ class Slot:
         self.executor.shutdown(wait=False, cancel_futures=True)
 
 
+def calibrate_gr_offline(juce: JuceThread, path: str, plugin_name: Optional[str], state_b64: Optional[str],
+                         audio: np.ndarray, sample_rate: int, param: str, lo: float, hi: float, sense: int,
+                         target_db: float, context: Optional[dict] = None) -> Dict[str, Any]:
+    """Calage « réduction cible » sur l'instance HORS LIGNE (aucune fenêtre, le
+    son en cours n'est pas touché) : dichotomie sur `param` (valeur réelle du
+    plugin) pour que la réduction max au VU vaille `target_db`."""
+    import gr_calibration
+    sr = int(sample_rate)
+    entry = OFFLINE.acquire(juce, path, plugin_name, state_b64, sr, RENDER_BLOCK, context)
+    plugin = entry.plugin
+    try:
+        if param not in plugin.parameters:
+            raise KeyError(f"Réglage inconnu : {param}")
+        p = plugin.parameters[param]
+
+        def apply(v):
+            apply_param(plugin, param, p, {"real": float(v)})
+        res = gr_calibration.calibrate_plugin(plugin, apply, _to_stereo(audio), sr, float(lo), float(hi),
+                                              int(sense), float(target_db), block=RENDER_BLOCK)
+        res["text"] = _text_of(p)
+        return res
+    finally:
+        plugin = None
+        # l'instance hors ligne a changé de réglage : on la jette (prochain rendu = état de la piste)
+        OFFLINE.release(entry)
+        try:
+            OFFLINE.reap(path)
+        except Exception:
+            pass
+
+
 def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], state_b64: Optional[str],
                    audio: np.ndarray, sample_rate: int, tail_seconds: float,
                    context: Optional[dict] = None) -> np.ndarray:
