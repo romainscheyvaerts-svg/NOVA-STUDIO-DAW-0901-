@@ -38,6 +38,8 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 
 import license_watch
+import plugin_guard
+import vst_shell
 
 try:
     import pedalboard
@@ -170,6 +172,15 @@ def _open_plugin(path: str, plugin_name: Optional[str] = None):
     if not os.path.exists(path):
         raise FileNotFoundError(f"Plugin introuvable : {path}")
     if plugin_name:
+        # Fichier « shell » (Waves) : la factory ne montre que ce plugin le
+        # temps du chargement (sinon JUCE crée une instance de chacun des 725
+        # plugins du shell : 10 min). Voir vst_shell.
+        try:
+            plugin = vst_shell.load_from_shell(path, plugin_name, lambda b, n: load_plugin(b, plugin_name=n))
+            if plugin is not None:
+                return plugin
+        except KeyError:
+            pass  # nom absent du shell : chargement ordinaire ci-dessous
         try:
             return load_plugin(path, plugin_name=plugin_name)
         except Exception:
@@ -289,6 +300,7 @@ class JuceThread:
 
     def release(self, obj):
         """Détruit un plugin sur ce thread (destructeur JUCE)."""
+        _MONO.discard(id(obj))
         holder = [obj]
         self.jobs.put(("job", holder.clear, (), None))
 
@@ -384,9 +396,28 @@ def prepare_plugin(path: str, plugin_name: Optional[str], state_b64: Optional[st
         plugin([], duration=block / float(sample_rate), sample_rate=int(sample_rate), num_channels=2,
                buffer_size=block, reset=False)
     else:
-        plugin.process(np.zeros((2, block), np.float32), int(sample_rate), buffer_size=block, reset=False)
+        try:
+            plugin.process(np.zeros((2, block), np.float32), int(sample_rate), buffer_size=block, reset=False)
+        except ValueError as e:
+            # Variante mono (« C6 Mono ») : 1 canal en entrée et en sortie. NOVA
+            # traite en stéréo : on lui donne la somme L+R et on double sa sortie.
+            if "channel" not in str(e).lower():
+                raise
+            plugin.process(np.zeros((1, block), np.float32), int(sample_rate), buffer_size=block, reset=False)
+            _MONO.add(id(plugin))
     plugin.reset()
     return plugin, restored
+
+
+# Plugins mono (id) : traités sur un canal, sortie doublée (voir process()).
+_MONO: set = set()
+
+
+def process(plugin, block: np.ndarray, sample_rate: int, buffer_size: int, reset: bool = False) -> np.ndarray:
+    """plugin.process, en mono pour les variantes mono (somme L+R en entrée)."""
+    if id(plugin) in _MONO:
+        block = np.ascontiguousarray(block.mean(axis=0, keepdims=True) if block.shape[0] > 1 else block, dtype=np.float32)
+    return plugin.process(block, int(sample_rate), buffer_size=buffer_size, reset=reset)
 
 
 def _is_instrument(plugin) -> bool:
@@ -484,19 +515,23 @@ def instantiate(juce: "JuceThread", path: str, plugin_name: Optional[str], state
                 sample_rate: int, block: int, context: Optional[dict] = None):
     """prepare_plugin sur le thread JUCE, sous surveillance. Une fenêtre de
     licence modale bloque le chargement : on attend alors jusqu'à 15 min."""
+    # Plugin connu pour planter (ou à risque) : essai dans un processus jetable
+    # d'abord ; s'il plante, PluginUnstable et le pont continue (plugin_guard).
+    plugin_guard.check(path, plugin_name)
     w = WATCHER.begin(path, plugin_name, context) if WATCHER is not None else None
-    fut = juce.call(prepare_plugin, path, plugin_name, state_b64, sample_rate, block)
     t0 = time.time()
     try:
-        while True:
-            try:
-                return fut.result(timeout=1.0)
-            except FutureTimeout:
-                limit = LICENSE_WAIT_S if (w is not None and w.seen) else LOAD_TIMEOUT_S
-                if time.time() - t0 > limit:
-                    # Fini plus tard (fenêtre fermée) : l'instance orpheline est libérée.
-                    fut.add_done_callback(lambda f: juce.release(f.result()[0]) if not f.exception() else None)
-                    raise TimeoutError("Le plugin ne répond pas (fenêtre de licence restée ouverte ?)")
+        with plugin_guard.loading(path, plugin_name):   # témoin : resté si le pont meurt ici
+            fut = juce.call(prepare_plugin, path, plugin_name, state_b64, sample_rate, block)
+            while True:
+                try:
+                    return fut.result(timeout=1.0)
+                except FutureTimeout:
+                    limit = LICENSE_WAIT_S if (w is not None and w.seen) else LOAD_TIMEOUT_S
+                    if time.time() - t0 > limit:
+                        # Fini plus tard (fenêtre fermée) : l'instance orpheline est libérée.
+                        fut.add_done_callback(lambda f: juce.release(f.result()[0]) if not f.exception() else None)
+                        raise TimeoutError("Le plugin ne répond pas (fenêtre de licence restée ouverte ?)")
     finally:
         if w is not None:
             w.end()
@@ -598,6 +633,23 @@ class OfflinePool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 MAX_LISTED_VALUES = 128
+MAX_PARAMS = 4096
+
+# Contrôleurs MIDI que JUCE expose comme des réglages (IMidiMapping) : sans
+# texte, ils noyaient les vrais réglages (C6 : 54 réglages + 130 contrôleurs).
+_MIDI_CC = re.compile(
+    r"^(control_\d+|pitch_bend|after_touch|bank_select|modulation_wheel|breath_controller|foot_controller|"
+    r"portamento_(time|on_off|source)|data_(entry|increment|decrement)|channel_volume|balance|pan_position|"
+    r"expression_control|effect_control_\d|general_control_\d|(sustain|sostenuto|soft|legato|hold2)_pedal_on_off|"
+    r"sound_variation|timbre|release_time|attack_time|brightness|sound_control_\d+|reverb_depth|tremolo_depth|"
+    r"chorus_depth|celeste_depth|phaser_depth|n?rpn_\d|all_sound_off|reset_all|local_control_on_off|all_notes_off|"
+    r"omni_mode_(on|off)|mono_mode_on|poly_mode_on)$")
+
+
+def is_midi_cc_param(key: str, p) -> bool:
+    if not _MIDI_CC.match(key):
+        return False
+    return _text_of(p).strip() == ""
 
 
 def _text_of(p) -> str:
@@ -682,13 +734,26 @@ def _norm(x: str) -> str:
     return re.sub(r"[\s_\-]+", "", x.lower())
 
 
+def _loose(x: str) -> str:
+    """Lettres et chiffres seulement (le signe d'un nombre compte : « -6 » ≠ « 6 »)."""
+    t = str(x).strip().lower()
+    sign = "-" if re.match(r"^[-−]\s*\d", t) else ""
+    return sign + re.sub(r"[^0-9a-z]+", "", t)
+
+
 _NUM = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
 _OFF_WORDS = re.compile(r"\b(not|off|disabled|inactive|no)\b|^0$", re.I)
 
 
 def _first_number(x) -> Optional[float]:
     m = _NUM.search(str(x))
-    return float(m.group(0).replace(",", ".")) if m else None
+    if not m:
+        return None
+    n = float(m.group(0).replace(",", "."))
+    # « 20.00k » (Trackspacer), « 1.5 kHz » : milliers.
+    if re.match(r"\s*k(hz)?(?![a-z])", str(x)[m.end():], re.I):
+        n *= 1000.0
+    return n
 
 
 def _valid_strings(p) -> List[str]:
@@ -756,6 +821,10 @@ def apply_param(plugin, key: str, p, it: Dict[str, Any]):
             vv = _valid_strings(p)
             hit = next((v for v in vv if v == text), None) or next((v for v in vv if _norm(v) == _norm(text)), None)
             if hit is None:
+                # « Alto / Tenor » → « Alto-Tenor » (ponctuation ignorée), si une seule valeur correspond.
+                loose = [v for v in vv if _loose(v) and _loose(v) == _loose(text)]
+                hit = loose[0] if len(loose) == 1 else None
+            if hit is None:
                 b = _bool_from(text)
                 hit = _two_state_choice(vv, b) if b is not None else None
             if hit is None:
@@ -785,7 +854,7 @@ def _reprepare(plugin, sample_rate: int, block: int) -> int:
     """(Thread JUCE) Nouvelle préparation (reset=True) : c'est là que le plugin
     publie sa nouvelle latence (mesuré sur Auto-Tune Pro ; un reset() seul la
     fait relire à l'ancienne valeur). Renvoie la latence annoncée."""
-    plugin.process(np.zeros((2, block), np.float32), int(sample_rate), buffer_size=block, reset=True)
+    process(plugin, np.zeros((2, block), np.float32), int(sample_rate), block, reset=True)
     return _latency_of(plugin)
 
 
@@ -853,7 +922,7 @@ class Slot:
             if plugin is None:
                 return np.zeros((2, n), np.float32)
             try:
-                out = plugin.process(_to_stereo(block), self.sample_rate, buffer_size=BLOCK, reset=False)
+                out = process(plugin, _to_stereo(block), self.sample_rate, BLOCK)
             except Exception as e:
                 logger.error(f"[{self.name}] erreur de traitement : {e}")
                 return np.zeros((2, n), np.float32)
@@ -909,13 +978,17 @@ class Slot:
         with self.lock:
             params = getattr(self.plugin, "parameters", {}) or {}
             wanted = set(names) if names else None
-            for key, p in list(params.items())[:256]:
+            for key, p in params.items():
                 if wanted is not None and key not in wanted:
                     continue
+                if wanted is None and is_midi_cc_param(key, p):
+                    continue  # « Control 21 », « Pitch Bend »… (Waves : 130 de ces faux réglages)
                 try:
                     out.append(param_info(key, p))
                 except Exception:
                     pass
+                if len(out) >= MAX_PARAMS:
+                    break
         return out
 
     def set_parameter(self, name: str, value: float):
@@ -999,13 +1072,13 @@ def render_offline(juce: JuceThread, path: str, plugin_name: Optional[str], stat
         chunk = 8192
         got = 0
         for start in range(0, total, chunk):
-            out = np.asarray(plugin.process(src[:, start:start + chunk], sr, buffer_size=RENDER_BLOCK, reset=False), np.float32)
+            out = np.asarray(process(plugin, src[:, start:start + chunk], sr, RENDER_BLOCK), np.float32)
             if out.shape[-1]:
                 parts.append(_to_stereo(out))
                 got += out.shape[-1]
         flush = 0
         while got < total and flush < 64:  # au plus ~11 s de latence à vider
-            out = np.asarray(plugin.process(np.zeros((2, chunk), np.float32), sr, buffer_size=RENDER_BLOCK, reset=False), np.float32)
+            out = np.asarray(process(plugin, np.zeros((2, chunk), np.float32), sr, RENDER_BLOCK), np.float32)
             flush += 1
             if out.shape[-1]:
                 parts.append(_to_stereo(out))

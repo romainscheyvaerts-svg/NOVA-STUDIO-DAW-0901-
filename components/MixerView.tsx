@@ -52,6 +52,9 @@ const VUMeter: React.FC<{ analyzer: AnalyserNode | null }> = ({ analyzer }) => {
   return <canvas ref={canvasRef} width={6} height={120} className="rounded-full overflow-hidden" />;
 };
 
+/** Même envoi : même destination ET même emplacement (Pro Tools : deux envois a et d vers RV PLATE). */
+const sameSend = (a: TrackSend, b: TrackSend) => a.id === b.id && (a.slot ?? null) === (b.slot ?? null);
+
 const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], onUpdate: (t: Track) => void }> = ({ send, track, allTracks, onUpdate }) => {
   // Pendant la lecture, l'envoi suit son automation.
   const shownLevel = useLiveParam(track.id, `send::${send.id}`, send.level);
@@ -60,7 +63,7 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], on
   return (
     <div className="flex flex-col items-center justify-center min-w-0" title={`Envoi vers ${sendLabel(send.id, allTracks)}${sendHelp(send.id) ? ` : ${sendHelp(send.id)}` : ''}`}>
        <SmartKnob 
-          id={`${track.id}-send-${send.id}`}
+          id={`${track.id}-send-${send.id}${send.slot !== undefined ? `-${send.slot}` : ''}`}
           targetId={track.id}
           paramId={`send::${send.id}`} 
           label={sendLabel(send.id, allTracks, true)}
@@ -72,14 +75,14 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], on
           defaultValue={1}
           format={gainToDbText}
           onChange={(val) => {
-              const newSends = track.sends.map(s => s.id === send.id ? { ...s, level: val } : s);
+              const newSends = track.sends.map(s => sameSend(s, send) ? { ...s, level: val } : s);
               onUpdate({ ...track, sends: newSends });
           }}
        />
        {/* Pré / post-fader (Pro Tools « PRE ») : pré = le fader de la piste ne change pas l'envoi. */}
        <button
           type="button"
-          onClick={() => onUpdate({ ...track, sends: track.sends.map(s => s.id === send.id ? { ...s, preFader: !s.preFader } : s) })}
+          onClick={() => onUpdate({ ...track, sends: track.sends.map(s => sameSend(s, send) ? { ...s, preFader: !s.preFader } : s) })}
           aria-pressed={!!send.preFader}
           aria-label={send.preFader ? `Envoi vers ${sendLabel(send.id, allTracks)} : pré-fader (touche pour le passer après le fader)` : `Envoi vers ${sendLabel(send.id, allTracks)} : post-fader (touche pour le passer avant le fader)`}
           title={send.preFader ? 'Pré-fader : l’envoi part avant le fader (le fader ne le change pas). Touche pour repasser en post-fader.' : 'Post-fader : l’envoi suit le fader de la piste. Touche pour le passer en pré-fader.'}
@@ -240,7 +243,7 @@ const ChannelStrip: React.FC<{
       )}
       {!isMaster && sendViewSlot === null && (track.type === TrackType.AUDIO || track.type === TrackType.SAMPLER) && (
         <div className="h-[104px] shrink-0 bg-black/20 border-b border-white/[0.04] p-2 grid grid-cols-3 gap-2 items-start overflow-hidden">
-          {track.sends.map(s => <SendKnob key={s.id} send={s} track={track} allTracks={allTracks} onUpdate={onUpdate} />)}
+          {track.sends.map((s, i) => <SendKnob key={`${s.id}-${s.slot ?? i}`} send={s} track={track} allTracks={allTracks} onUpdate={onUpdate} />)}
         </div>
       )}
       

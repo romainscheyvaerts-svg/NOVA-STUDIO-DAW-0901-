@@ -78,6 +78,7 @@ import { classifyPlugin } from './vstKnowledge';
 import { compact, resolveVst, VstCandidate, VstMatch } from './vstMatch';
 import { builtinPlugin, newTemplateId, SessionTemplate, TEMPLATE_FORMAT, TEMPLATE_VERSION, TemplateTrack } from './sessionTemplate';
 import { SEND_LABELS } from './sendLabels';
+import { matchParam, settingFor, ValueConvert, parseNumber } from './vstParamAlias';
 
 export const SPEC_FORMAT = 'nova-template-spec';
 
@@ -238,6 +239,22 @@ export interface ParamResolution {
   key: string | null;
   how: 'known' | 'guessed' | 'missing';
   warning?: string;
+  /** Conversion de valeur propre à l'alias (utils/vstParamAlias). */
+  convert?: ValueConvert;
+  /** Autres clés réglées à la même valeur (« Sens 1-4 »). */
+  also?: string[];
+}
+
+/** Plugin absent remplacé (VST installé le plus proche, ou effet de NOVA). */
+export interface InsertReplacement {
+  /** Plugin de la session d'origine. */
+  from: string;
+  /** Remplaçant (nom du VST, ou libellé de l'effet NOVA). */
+  to: string;
+  kind: 'vst' | 'builtin';
+  /** Laissé inactif (équivalence trop lointaine pour l'activer). */
+  inactive: boolean;
+  note: string;
 }
 
 export interface InsertReport {
@@ -252,6 +269,8 @@ export interface InsertReport {
   /** Index de l'effet dans la piste du modèle. */
   index: number;
   pluginId: string;
+  /** Plugin absent remplacé : par quoi, et pourquoi. */
+  replacement?: InsertReplacement;
 }
 
 export interface SpecBuildReport {
@@ -272,15 +291,13 @@ export const pedalboardKey = (display: string): string => {
   return k;
 };
 
-/** Clé réelle d'un réglage d'après son nom affiché (casse, espaces, tirets ignorés). */
-export const matchParamName = (asked: string, params: KnownParam[]): string | null => {
-  const a = compact(asked);
-  if (!a) return null;
-  const disp = (p: KnownParam) => p.displayName || p.display_name || '';
-  const hit = params.find(p => compact(disp(p)) === a) || params.find(p => compact(p.name) === a)
-    || params.find(p => p.name === pedalboardKey(asked));
-  return hit ? hit.name : null;
-};
+/**
+ * Clé réelle d'un réglage d'après son nom affiché : nom identique, alias du
+ * plugin, puis correspondance approchée (abréviations, numéros de bande) —
+ * voir utils/vstParamAlias.
+ */
+export const matchParamName = (asked: string, params: KnownParam[], plugin?: string | null): string | null =>
+  matchParam(asked, params, plugin)?.key ?? null;
 
 /** La valeur demandée est-elle plausible pour ce paramètre (liste de choix connue) ? */
 const valueWarning = (p: KnownParam | undefined, value: string): string | undefined => {
@@ -292,37 +309,18 @@ const valueWarning = (p: KnownParam | undefined, value: string): string | undefi
   return `« ${value} » n'est pas dans les choix connus (${p.values.slice(0, 6).join(', ')}${p.values.length > 6 ? '…' : ''})`;
 };
 
-const UNIT_RE = /(khz|hz|ms|s|db(?:tp|fs)?|%)\s*$/i;
-const unitOfText = (t?: string) => ((t || '').trim().match(UNIT_RE)?.[1] || '').toLowerCase();
-
 /**
- * Réglage à envoyer au pont pour une valeur texte de la fiche :
- *  - paramètre à liste de choix (« Vocal », « Low Cut », « On ») : le texte, que le
- *    pont retrouve dans la liste (casse, « 2:1 » → « 2.00:1 », valeur la plus proche) ;
+ * Réglage à envoyer au pont pour une valeur texte de la fiche (voir
+ * utils/vstParamAlias.settingFor) :
+ *  - paramètre à liste de choix : le texte EXACT de la liste (« Alto / Tenor » →
+ *    « Alto-Tenor », « normal » → « Norm ») ou, à défaut, le texte que le pont
+ *    rapproche (« 2:1 » → « 2.00:1 », valeur la plus proche) ;
  *  - paramètre continu : le NOMBRE dans l'unité du plugin (« 7 kHz » → 7000 si le
  *    plugin affiche des Hz, « 0.2 s » → 200 si le plugin affiche des ms ; « 35 % »
- *    → 0.35 si le plugin va de 0 à 1).
+ *    → 0.35 si le plugin va de 0 à 1 ; « 1K5 » → 1500).
  */
-export const settingForParam = (p: KnownParam | undefined, key: string, value: string): { name: string; text?: string; real?: number } => {
-  const v = String(value).trim();
-  if (!p) return { name: key, text: v };
-  const bool = p.isBoolean || p.is_boolean;
-  if ((p.values && p.values.length && !/^[-+]?\d/.test(v)) || bool || /:\d/.test(v)) return { name: key, text: v };
-  const m = v.replace(',', '.').match(/^([-+]?\d+(?:\.\d+)?)\s*([a-z%]*)/i);
-  if (!m) return { name: key, text: v };
-  let n = Number(m[1]);
-  const from = (m[2] || '').toLowerCase();
-  const to = unitOfText(p.text);
-  if (from === 'khz' && to === 'hz') n *= 1000;
-  else if (from === 'hz' && to === 'khz') n /= 1000;
-  else if (from === 's' && to === 'ms') n *= 1000;
-  else if (from === 'ms' && to === 's') n /= 1000;
-  else if (from === '%' && to !== '%') {
-    const hi = Array.isArray(p.range) ? Number(p.range[1]) : NaN;
-    if (Number.isFinite(hi) && hi <= 1.5) n /= 100;
-  }
-  return { name: key, real: Math.round(n * 1e6) / 1e6 };
-};
+export const settingForParam = (p: KnownParam | undefined, key: string, value: string, convert?: ValueConvert): { name: string; text?: string; real?: number } =>
+  settingFor(p, key, value, convert);
 
 export const dbToGain = (db: number) => Math.pow(10, db / 20);
 
@@ -568,16 +566,27 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
       }
       const ruleExcluded = isExcluded({ name: ins.plugin, vendor: ins.vendor || '', path: '' });
       const excluded = ruleExcluded && !keepExcluded;
-      const match = excluded ? null : resolveVst(ins.plugin, ins.vendor, list, keepExcluded ? NO_EXCLUSIONS : undefined);
+      const match = excluded ? null : resolveVst(ins.plugin, ins.vendor, list, { ...(keepExcluded ? NO_EXCLUSIONS : {}), channels: t.channels || null });
       if (excluded) report.warnings.push(`${t.name} : ${ins.plugin} est exclu (règle du studio : Slate sauf MetaTune / VerbSuite Classics, SSL).`);
       else if (ruleExcluded) report.warnings.push(`${t.name} : ${ins.plugin} est hors règles du studio (SSL / Slate) mais GARDÉ : modèle fidèle à la session Pro Tools.`);
       else if (!match) report.warnings.push(`${t.name} : ${ins.plugin}${ins.vendor ? ` (${ins.vendor})` : ''} absent de ce PC.`);
       else if (match.kind !== 'exact') report.warnings.push(`${t.name} : ${ins.plugin} → ${match.plugin.name}${match.note ? ` (${match.note})` : ''}.`);
+      // Plugin absent : remplaçant (VST installé le plus proche, ou effet NOVA).
+      const repl = !match && !excluded ? replacementFor(ins, list, keepExcluded) : null;
+      if (repl) {
+        const rp = buildReplacement(repl, ins, pluginId, state, srcState, spec.bpm || 120);
+        plugins.push(rp.plugin);
+        report.warnings.push(`${t.name} : ${ins.plugin} manquant : remplacé par ${repl.to}${repl.inactive ? ' (laissé inactif)' : ''} — ${repl.note}.`);
+        report.inserts.push({ track: t.name, plugin: ins.plugin, vendor: ins.vendor, active: active && !repl.inactive, builtin: repl.kind === 'builtin', match: repl.match, excluded: false, params: rp.params, index: i, pluginId, replacement: { from: ins.plugin, to: repl.to, kind: repl.kind, inactive: repl.inactive, note: repl.note } });
+        return;
+      }
       const known = knownParamsFor(match, opts.knowledge, ins.plugin);
+      const pluginLabel = match?.plugin.pluginName || match?.plugin.name || ins.plugin;
+      const siblings: Record<string, string> = Object.fromEntries(Object.entries(ins.params || {}).map(([k, v]) => [k, typeof v === 'boolean' ? (v ? 'On' : 'Off') : String(v)]));
       const params: ParamResolution[] = Object.entries(ins.params || {}).map(([asked, raw]) => {
         const value = typeof raw === 'boolean' ? (raw ? 'On' : 'Off') : String(raw);
-        const key = known.length ? matchParamName(asked, known) : null;
-        if (key) return { asked, value, key, how: 'known', warning: valueWarning(known.find(p => p.name === key), value) };
+        const m = known.length ? matchParam(asked, known, pluginLabel) : null;
+        if (m) return { asked, value, key: m.key, how: 'known', warning: valueWarning(known.find(p => p.name === m.key), value), ...(m.convert ? { convert: m.convert } : {}), ...(m.also ? { also: m.also } : {}) };
         const guess = pedalboardKey(asked);
         return guess ? { asked, value, key: guess, how: 'guessed' as const } : { asked, value, key: null, how: 'missing' as const };
       });
@@ -590,7 +599,9 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
           localPath: match?.plugin.path || '',
           pluginName: match?.plugin.pluginName || null,
           novaQuiet: true,
-          novaSettings: params.filter(x => x.key).map(x => (x.how === 'known' ? settingForParam(known.find(k => k.name === x.key), x.key!, x.value) : { name: x.key!, text: x.value })),
+          novaSettings: params.filter(x => x.key).flatMap(x => (x.how === 'known'
+            ? [x.key!, ...(x.also || [])].map(k => settingFor(known.find(kp => kp.name === k), k, x.value, x.convert, siblings))
+            : [{ name: x.key!, text: x.value }])),
           ...(ins.stateB64 ? { stateB64: ins.stateB64 } : {}),
           templateSpec: {
             plugin: ins.plugin, vendor: ins.vendor || '', active: srcState === 'active', state: srcState,
@@ -677,6 +688,129 @@ export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = 
   };
   report.mixRules = checkMixRules(template);
   return { template, report };
+};
+
+// ─── Plugins absents : remplaçants ──────────────────────────────────────────────
+
+/** Remplaçant prévu pour un plugin absent du PC (relevé LENNON, 08/10/2026). */
+export interface MissingReplacement {
+  /** VST installés à essayer, dans l'ordre (nom du plugin dans la liste du pont). */
+  vst?: string[];
+  /** Effet de NOVA si aucun de ces VST n'est là. */
+  builtin?: PluginType;
+  /** Réglages du VST remplaçant (nom affiché → valeur), d'après les réglages lus. */
+  vstSettings?: (src: Record<string, string>) => Record<string, string>;
+  /** Réglages de l'effet NOVA, d'après les réglages lus. */
+  builtinParams?: (src: Record<string, string>) => Record<string, any>;
+  /** Laissé inactif : l'équivalence ne permet pas de l'activer les yeux fermés. */
+  inactive?: boolean;
+  /** Pourquoi ce remplaçant (affiché dans le rapport). */
+  why: string;
+}
+
+const numOf = (v: string | undefined, dflt: number): number => {
+  const n = v === undefined ? null : parseNumber(String(v));
+  return n && Number.isFinite(n.n) ? n.n : dflt;
+};
+
+/**
+ * Remplaçants (règles de Romain) :
+ *  - True Iron (transformateur Kazrog) → la saturation NOVA, réglée à l'équivalent ;
+ *  - Oxford SuprEsser → DeEdger, sinon le de-esser NOVA, vers 8 kHz ;
+ *  - Neutron 4, Ozone 11 Exciter, soothe2, Gullfoss, Weiss → l'équivalent installé
+ *    le plus proche (Ozone 9…) ou l'effet NOVA, laissé INACTIF avec une note ;
+ *  - PURPLE2AA → PURPLE4AA (même série Acustica Purple).
+ */
+export const MISSING_REPLACEMENTS: Record<string, MissingReplacement> = {
+  trueiron: {
+    builtin: 'VOCALSATURATOR',
+    // Transformateur léger : Crush 0.1 dB, Strength 5/10, Mix 100 % → bande douce, drive bas.
+    builtinParams: src => ({
+      mode: 'TAPE',
+      drive: Math.round(Math.max(4, Math.min(60, 6 + numOf(src['Strength'], 5) * 1.2 + numOf(src['Crush'], 0) * 4)) * 10) / 10,
+      mix: Math.max(0, Math.min(1, numOf(src['Mix'], 100) / 100)),
+      outputGain: Math.round(Math.pow(10, numOf(src['Out'], 0) / 20) * 1000) / 1000,
+      tone: 0,
+    }),
+    why: 'saturation de transformateur : la saturation NOVA (bande, drive doux) réglée à l’équivalent',
+  },
+  oxfordsupresserds: {
+    vst: ['DeEdger'],
+    builtin: 'DEESSER',
+    vstSettings: () => ({ Active: 'On', Freq: '8000 Hz' }),
+    builtinParams: src => ({ frequency: 8000, threshold: numOf(src['Threshold'], -18), q: 1, mode: 'BELL', reduction: 0.6 }),
+    why: 'de-esser vers 8 kHz (règle de Romain)',
+  },
+  neutron4: { vst: ['Ozone 9'], builtin: 'PROEQ12', inactive: true, why: 'tranche iZotope la plus proche installée (Ozone 9) ; Neutron 4 n’a pas de VST3 sur ce PC, réglages d’origine non lus (activation refusée dans Pro Tools)' },
+  ozone11exciter: { vst: ['Ozone 9 Exciter'], builtin: 'VOCALSATURATOR', inactive: true, why: 'même module en version 9 (Ozone 9 Exciter) ; réglages d’origine non lus' },
+  soothe2: { vst: ['Ozone 9 Spectral Shaper'], builtin: 'DEESSER', inactive: true, why: 'atténuation des résonances : Ozone 9 Spectral Shaper, le plus proche installé ; réglages d’origine non lus' },
+  gullfoss: { vst: ['Ozone 9 Dynamic EQ'], builtin: 'PROEQ12', inactive: true, why: 'égalisation automatique : Ozone 9 Dynamic EQ, le plus proche installé ; réglages d’origine non lus' },
+  weisscompressorlimiter: { vst: ['Weiss DS1-MK3'], builtin: 'COMPRESSOR', inactive: true, why: 'même famille Weiss (Softube Weiss DS1-MK3) ; réglages d’origine non lus' },
+  purple2aa: { vst: ['PURPLE4AA'], why: 'même série Acustica Purple, version 4 (PURPLE4AA) ; PURPLE2AA n’a pas de VST3 sur ce PC' },
+};
+
+interface ResolvedReplacement {
+  to: string;
+  kind: 'vst' | 'builtin';
+  inactive: boolean;
+  note: string;
+  match: VstMatch | null;
+  rule: MissingReplacement;
+  builtin?: PluginType;
+}
+
+const BUILTIN_REPLACEMENT_FR: Partial<Record<PluginType, string>> = {
+  VOCALSATURATOR: 'la saturation NOVA', DEESSER: 'le de-esser NOVA', PROEQ12: "l'égaliseur NOVA", COMPRESSOR: 'le compresseur NOVA',
+};
+
+const replacementFor = (ins: SpecInsert, list: VstCandidate[], keepExcluded: boolean): ResolvedReplacement | null => {
+  const rule = MISSING_REPLACEMENTS[compact(ins.plugin)];
+  if (!rule) return null;
+  for (const name of rule.vst || []) {
+    const m = resolveVst(name, undefined, list, { ...(keepExcluded ? NO_EXCLUSIONS : {}), allowOtherVersion: false });
+    if (m && !m.plugin.unavailable) return { to: m.plugin.name, kind: 'vst', inactive: !!rule.inactive, note: rule.why, match: m, rule };
+  }
+  if (rule.builtin) {
+    return { to: BUILTIN_REPLACEMENT_FR[rule.builtin] || rule.builtin, kind: 'builtin', inactive: !!rule.inactive, note: rule.why, match: null, rule, builtin: rule.builtin };
+  }
+  return null;
+};
+
+const buildReplacement = (r: ResolvedReplacement, ins: SpecInsert, pluginId: string, state: SpecInsertState, srcState: SpecInsertState, bpm: number): { plugin: PluginInstance; params: ParamResolution[] } => {
+  const src: Record<string, string> = Object.fromEntries(Object.entries(ins.params || {}).map(([k, v]) => [k, typeof v === 'boolean' ? (v ? 'On' : 'Off') : String(v)]));
+  const info = { from: ins.plugin, to: r.to, kind: r.kind, inactive: r.inactive, note: r.note };
+  const spec = {
+    plugin: ins.plugin, vendor: ins.vendor || '', active: srcState === 'active', state: srcState,
+    ...(ins.slot ? { slot: ins.slot } : {}),
+    ...(ins.wasInactiveInProTools || srcState === 'inactive' ? { wasInactiveInProTools: true } : {}),
+    ...(ins.note ? { note: ins.note } : {}),
+    originalParams: src,
+  };
+  // Inactif : demandé par la règle, ou par l'état d'origine (sans « activer tout »).
+  const inactive = r.inactive || state === 'inactive';
+  if (r.kind === 'builtin') {
+    const bp = builtinPlugin(r.builtin!, { ...(r.rule.builtinParams ? r.rule.builtinParams(src) : {}), isEnabled: state !== 'bypass', name: `${r.builtin} (remplace ${ins.plugin})` }, pluginId, bpm);
+    bp.isEnabled = state !== 'bypass';
+    if (inactive) bp.isInactive = true;
+    bp.params = { ...bp.params, templateSpec: spec, templateReplacement: info, ...(srcState === 'inactive' ? { templateWasInactive: true } : {}) };
+    return { plugin: bp, params: [] };
+  }
+  const m = r.match!;
+  const settings = r.rule.vstSettings ? r.rule.vstSettings(src) : {};
+  const params: ParamResolution[] = Object.entries(settings).map(([asked, value]) => ({ asked, value, key: pedalboardKey(asked), how: 'guessed' as const }));
+  const plugin: PluginInstance = {
+    id: pluginId, name: m.plugin.name, type: 'VST3', isEnabled: state !== 'bypass', latency: 0,
+    ...(inactive ? { isInactive: true } : {}),
+    params: {
+      name: m.plugin.name, vendor: m.plugin.vendor || '', localPath: m.plugin.path, pluginName: m.plugin.pluginName || null,
+      novaQuiet: true,
+      novaSettings: params.map(x => ({ name: x.key!, text: x.value })),
+      templateSpec: spec,
+      templateReplacement: info,
+      ...(srcState === 'inactive' ? { templateWasInactive: true } : {}),
+    },
+  };
+  return { plugin, params };
 };
 
 // ─── Règles de mix du studio ───────────────────────────────────────────────────

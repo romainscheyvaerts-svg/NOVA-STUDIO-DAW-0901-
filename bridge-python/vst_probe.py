@@ -40,8 +40,12 @@ FIRST_TIMEOUT_S = 40.0      # démarrage de l'enfant (exécutable PyInstaller) +
 WORKERS = 6
 CACHE_VERSION = 2
 
-# Une classe : (nom, sous-catégories), ex. ("Vital", "Instrument|Synth")
-Classes = List[Tuple[str, str]]
+# Une classe : (nom, sous-catégories[, éditeur]), ex. ("Vital", "Instrument|Synth", "Matt Tytel")
+Classes = List[Tuple[str, ...]]
+# Un shell Waves contient 725 plugins (WaveShell1-VST3 17.1) : l'ancienne
+# limite (512) coupait la liste ; un cache à 512 classes pile est relu.
+MAX_CLASSES = 4096
+OLD_CLASS_CAP = 512
 
 
 def is_instrument_subcats(sub: str) -> bool:
@@ -125,19 +129,31 @@ def read_classes(bundle: str) -> Classes:
     has2 = _vcall(fac, 0, ctypes.c_int32, [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)],
                   ctypes.addressof(iid), ctypes.byref(f2)) == 0 and bool(f2.value)
     out: Classes = []
-    for i in range(max(0, min(int(count), 512))):
+    vendor = ""
+    try:
+        class _PFactoryInfo(ctypes.Structure):
+            _fields_ = [("vendor", ctypes.c_char * 64), ("url", ctypes.c_char * 256),
+                        ("email", ctypes.c_char * 128), ("flags", ctypes.c_int32)]
+        fi = _PFactoryInfo()
+        if _vcall(fac, 3, ctypes.c_int32, [ctypes.POINTER(_PFactoryInfo)], ctypes.byref(fi)) == 0:
+            vendor = _txt(fi.vendor)
+    except Exception:
+        pass
+    for i in range(max(0, min(int(count), MAX_CLASSES))):
         if has2:
             ci = _PClassInfo2()
             if _vcall(f2.value, 7, ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(_PClassInfo2)], i, ctypes.byref(ci)) != 0:
                 continue
             sub = _txt(ci.subCategories)
+            cls_vendor = _txt(ci.vendor) or vendor
         else:
             ci = _PClassInfo()
             if _vcall(fac, 5, ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(_PClassInfo)], i, ctypes.byref(ci)) != 0:
                 continue
             sub = ""
+            cls_vendor = vendor
         if _txt(ci.category) == "Audio Module Class":
-            out.append((_txt(ci.name), sub))
+            out.append((_txt(ci.name), sub, cls_vendor))
     # Pas de FreeLibrary : certains plugins plantent en se déchargeant ; l'enfant
     # est de toute façon fermé à la fin (os._exit).
     return out
@@ -310,8 +326,8 @@ def record_loaded(path: str, plugin_name: Optional[str], is_instrument: bool):
     with _cache_lock:
         cache = _load_cache()
         hit = cache.get(path)
-        if hit and hit.get("st") == "ok":
-            return
+        if hit and (hit.get("st") == "ok" or (isinstance(hit.get("c"), list) and len(hit["c"]) > 1)):
+            return  # déjà lu (un shell garde sa liste complète)
         name = plugin_name or os.path.basename(path)[:-5]
         cache[path] = {"m": fp[0], "s": fp[1], "st": "ok",
                        "c": [[name, "Instrument" if is_instrument else "Fx"]]}
@@ -450,9 +466,13 @@ def _run_child(cmd: List[str], paths: List[str], results: Dict[str, Probe],
 
 def apply_classes(plugins: List[dict], results: Dict[str, Probe]) -> List[dict]:
     """Inventaire complété : is_instrument / category des plugins lus, et
-    scan_status / license (activation demandée) des autres. Un bundle à
-    plusieurs plugins garde son entrée (effet) et gagne une entrée par
-    instrument (plugin_name)."""
+    scan_status / license (activation demandée) des autres. Un fichier à
+    plusieurs plugins (« shell » : WaveShell de Waves, 725 plugins) est
+    remplacé par une entrée par plugin (plugin_name = nom de la classe,
+    chargé par vst_shell), effets ET instruments : « C6 Stereo », « C6 Mono »…
+    Chaque entrée porte `shell` (nom du fichier), `family` (« C6 ») et
+    `channels` (mono / stereo / mono/stereo, d'après le nom)."""
+    import vst_shell
     out: List[dict] = []
     seen = {(p["name"].lower(), (p.get("vendor") or "").lower()) for p in plugins}
     for e in plugins:
@@ -474,14 +494,25 @@ def apply_classes(plugins: List[dict], results: Dict[str, Probe]) -> List[dict]:
             out.append({**e, "is_instrument": instr, "category": "Instrument" if instr else "Effect",
                         "sub_categories": [s for s in classes[0][1].split("|") if s]})
             continue
-        out.append({**e, "is_instrument": False})
-        for name, sub in classes:
-            key = (name.lower(), (e.get("vendor") or "").lower())
-            if not is_instrument_subcats(sub) or key in seen:
-                continue
+        shell = os.path.basename(e["path"])
+        if shell.lower().endswith(".vst3"):
+            shell = shell[:-5]
+        for c in classes:
+            name, sub = c[0], c[1]
+            vendor = (c[2] if len(c) > 2 else "") or e.get("vendor") or ""
+            key = (name.lower(), vendor.lower())
+            if not name or key in seen:
+                continue  # même plugin dans un autre shell (versions Waves) : le premier gagne
             seen.add(key)
-            out.append({**e, "name": name, "uid": "", "id": f"path:{e['path']}#{name}", "category": "Instrument",
-                        "is_instrument": True, "sub_categories": [s for s in sub.split("|") if s], "plugin_name": name})
+            instr = is_instrument_subcats(sub)
+            item = {**e, "name": name, "vendor": vendor, "uid": "", "id": f"path:{e['path']}#{name}",
+                    "category": "Instrument" if instr else "Effect", "is_instrument": instr,
+                    "sub_categories": [s for s in sub.split("|") if s], "plugin_name": name,
+                    "shell": shell, "family": vst_shell.family_of(name)}
+            ch = vst_shell.channels_of(name)
+            if ch:
+                item["channels"] = ch
+            out.append(item)
     out.sort(key=lambda p: (p["category"] != "Effect", p["name"].lower()))
     return out
 
@@ -502,6 +533,8 @@ def probe_bundles(bundles: List[str], main_script: Optional[str] = None,
             continue
         prints[b] = fp
         hit = cache.get(b)
+        if hit and isinstance(hit.get("c"), list) and len(hit["c"]) == OLD_CLASS_CAP:
+            hit = None  # liste coupée par l'ancienne limite : relue
         if hit and hit.get("m") == fp[0] and hit.get("s") == fp[1]:
             c = hit.get("c")
             results[b] = {"c": [tuple(x) for x in c] if isinstance(c, list) else None,

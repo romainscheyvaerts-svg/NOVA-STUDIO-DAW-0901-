@@ -120,6 +120,12 @@ export interface ResolveOptions {
   exclusions?: ExclusionList;
   /** Autoriser une autre version du même plugin (dernier recours, signalé). */
   allowOtherVersion?: boolean;
+  /**
+   * Variante voulue quand le nom n'en dit rien : piste mono de Pro Tools →
+   * « C6 Mono » (le pont la traite en mono et double sa sortie), piste stéréo
+   * → « C6 Stereo ». Défaut : stéréo d'abord.
+   */
+  channels?: 'mono' | 'stereo' | null;
 }
 
 /**
@@ -131,7 +137,8 @@ export const resolveVst = (
   name: string, vendor: string | undefined, list: VstCandidate[], opts: ResolveOptions = {},
 ): VstMatch | null => {
   const ex = opts.exclusions || DEFAULT_EXCLUSIONS;
-  const wantedCh = channelsOf(name);
+  const nameCh = channelsOf(name);
+  const wantedCh = nameCh || opts.channels || null;
   const wantFull = compact(name);
   const wantBase = compact(baseName(name));
   const wantFamily = family(baseName(name));
@@ -151,7 +158,7 @@ export const resolveVst = (
     const chNote = gotCh ? `version ${gotCh === 'mono/stereo' ? 'mono/stéréo' : gotCh === 'stereo' ? 'stéréo' : 'mono'}` : 'version standard';
     if (wantBase && names.some(x => compact(x) === wantFull || compact(baseName(x)) === wantBase)) {
       // Même plugin (éditeur / tirets / casse près) : exact si la variante est la même.
-      const exact = wantedCh === gotCh && vendorOk;
+      const exact = nameCh === gotCh && vendorOk;
       scored.push({ c, kind: exact ? 'exact' : 'variant', score: (exact ? 0 : 10) + penalty + channelRank(wantedCh, gotCh), note: exact ? undefined : chNote });
       continue;
     }
