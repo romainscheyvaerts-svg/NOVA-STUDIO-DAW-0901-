@@ -4836,6 +4836,8 @@ function Studio() {
   /** Pistes au dernier passage de la détection (pour savoir qui possédait une piste supprimée). */
   const lastTracksRef = useRef<Track[]>([]);
   const remoteTouchedRef = useRef(new Set<string>());
+  /** Contenu remplacé en entier par l'autre (piste créée, ancienne version de NOVA) : « connu » d'office. */
+  const contentResetRef = useRef(new Set<string>());
   const contentDirtyRef = useRef(new Set<string>());
   const mixTimersRef = useRef(new Map<string, number>());
   // Mix champ par champ (règle : dernière écriture gagne, par paramètre ; utils/collabMerge).
@@ -5038,11 +5040,12 @@ function Studio() {
   }, []);
 
   /** Ce que tout le monde a déjà (rien n'est renvoyé). mix:false : le mix est suivi champ par champ à part. */
-  const rememberTrack = (t: Track, opts: { mix?: boolean } = {}) => {
+  const rememberTrack = (t: Track, opts: { mix?: boolean; content?: boolean } = {}) => {
     if (opts.mix !== false || !knownFieldsRef.current.has(t.id)) knownFieldsRef.current.set(t.id, fieldSigsOf(mixFieldsOf(t)));
     const content = contentOf(t);
     knownSigRef.current.set('content:' + t.id, sigOf(content));
-    knownContentRef.current.set(t.id, knownOf(metaSigOf(content), t.clips || []));
+    // Contenu : seulement s'il vient d'être remplacé en entier (sinon nos clips pas encore partis seraient « connus » et jamais envoyés).
+    if (opts.content !== false || !knownContentRef.current.has(t.id)) knownContentRef.current.set(t.id, knownOf(metaSigOf(content), t.clips || []));
     if (t.frozenClip) knownFreezeRef.current.set(t.id, t.frozenClip.id);
   };
 
@@ -5201,6 +5204,7 @@ function Studio() {
           if (r.taken.length || r.dropped.length) noteClipHistoryRef.current?.(o, cur as Track, r.taken, r.dropped);
         } else {
           touch(tid);
+          contentResetRef.current.add(tid);
           if (clipWise) (Array.isArray(ct.clips) ? ct.clips : []).forEach((x: any) => { if (x && typeof x.id === 'string') lwwRef.current.accept(`clip:${tid}:${x.id}`, o.seq); });
         }
         setState(produce((d: DAWState) => {
@@ -5597,7 +5601,11 @@ function Studio() {
     let contentChanged = false;
     for (const t of state.tracks) {
       // Reçu de l'autre : contenu / gel connus (le mix, lui, est suivi champ par champ à la réception).
-      if (remoteTouchedRef.current.has(t.id)) { rememberTrack(t, { mix: false }); remoteTouchedRef.current.delete(t.id); continue; }
+      if (remoteTouchedRef.current.has(t.id)) {
+        rememberTrack(t, { mix: false, content: contentResetRef.current.has(t.id) });
+        remoteTouchedRef.current.delete(t.id); contentResetRef.current.delete(t.id);
+        continue;
+      }
       const isNew = !knownContentRef.current.has(t.id);
       if (isNew) {
         // Piste créée ici pendant la collaboration : elle appartient à son créateur — à son
@@ -6345,7 +6353,7 @@ function Studio() {
   }, [state.trackGroups, state.groupSettings, collab]);
   /** Après une opération sur le temps : ce qu'elle a changé est connu de tous (rien n'est renvoyé). */
   const rememberTimeOp = (next: DAWState) => {
-    next.tracks.forEach(t => remoteTouchedRef.current.add(t.id));
+    next.tracks.forEach(t => { remoteTouchedRef.current.add(t.id); contentResetRef.current.add(t.id); });
     knownMarkersRef.current = new Map((next.markers || []).map(m => [m.id, markerSig(m)]));
     knownChordsRef.current = new Map((next.chords || []).map(c => [c.id, chordSig(c)]));
     knownTempoSigRef.current = tempoOpSig(tempoOpOf(next));

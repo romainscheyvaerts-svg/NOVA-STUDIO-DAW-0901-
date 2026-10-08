@@ -184,6 +184,10 @@ def run():
         connect(A, cloud, rt, "A", LINA, "lina@test.local")
         connect(E, cloud, rt, "E", MAX, "max@test.local")
         connect(B, cloud, rt, "B", SAM, "sam@test.local")
+        # Serveur de développement froid (première compilation) : on le réchauffe avant de mesurer quoi que ce soit.
+        for pg in (A, E, B):
+            pg.goto(BASE, wait_until="domcontentloaded", timeout=180000)
+            pg.get_by_text("Nouveau Projet").first.wait_for(timeout=180000)
 
         # ------------------------------------------------------------ 1. invitation, rôles, présence
         def a_start():
