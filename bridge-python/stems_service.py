@@ -295,6 +295,11 @@ class StemsService:
             self.cancelled.discard(job_id)
             shutil.rmtree(outdir / ".partiel", ignore_errors=True)
             try:
+                # Le clip envoyé (Original.wav, écrit par le pont dans ce dossier) ne sert plus :
+                # sans lui, une séparation annulée laissait un dossier « Original.wav » seul
+                # dans Documents\Nova Studio\Stems à chaque annulation.
+                if Path(wav_in).parent.resolve() == outdir.resolve():
+                    Path(wav_in).unlink(missing_ok=True)
                 if not any(outdir.iterdir()):
                     outdir.rmdir()
             except OSError:

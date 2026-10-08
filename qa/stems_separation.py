@@ -217,6 +217,11 @@ def wait_done(page, timeout=600):
     raise TimeoutError("séparation trop longue")
 
 
+def stem_headers(page):
+    """Nombre de pistes « … (stem) » du projet (état de NOVA, pas seulement celles à l'écran)."""
+    return page.evaluate("""() => (window.__novaEdit.getState().tracks || []).filter(t => /\(stem\)$/.test(t.name || '')).length""")
+
+
 def scenario_separation(page, log, res, vp):
     prepare(page, port=PORT_REAL)
     open_project_file(page, PROJECT, res, "C0_projet")
@@ -259,16 +264,55 @@ def scenario_separation(page, log, res, vp):
         .map(e => (e.value || e.textContent || '').trim()).filter(t => /\\(stem\\)$/.test(t)).filter((t, i, a) => a.indexOf(t) === i)""")
     page.get_by_role("button", name="Fermer").first.click()
     # Annulation d'une séparation
+    n_before = stem_headers(page)
     open_stems_menu(page, "C7")
     page.get_by_test_id("stems-start").click()
     page.get_by_test_id("stems-running").wait_for(timeout=15000)
-    page.wait_for_timeout(2500)
+    # Sur la carte graphique, 4 stems prennent ~3 s en tout : une attente fixe de 2,5 s laissait
+    # parfois la séparation finir avant le clic (bouton « Annuler » disparu). On annule dès le
+    # premier pourcentage affiché.
+    t0 = time.time()
+    while time.time() - t0 < 3 and not re.search(r"\d+ %", page.get_by_test_id("stems-running").inner_text()):
+        page.wait_for_timeout(100)
     res["avant_annulation"] = page.get_by_test_id("stems-running").inner_text()[:80]
     page.get_by_test_id("stems-running").get_by_role("button", name="Annuler", exact=True).click()
     page.get_by_test_id("stems-ready").wait_for(timeout=30000)
+    page.get_by_test_id("stems-cancelled").wait_for(timeout=5000)
+    res["message_annulation"] = page.get_by_test_id("stems-cancelled").inner_text()
+    # Même si le PC finit le calcul juste après le clic, aucune piste ne doit arriver.
+    page.wait_for_timeout(5000)
+    res["pistes_stem_avant_annulation"] = n_before
+    res["pistes_stem_apres_annulation"] = stem_headers(page)
     res["sorties_partielles"] = [str(p) for p in SORTIES.rglob(".partiel")]
-    page.wait_for_timeout(500)
     shot(page, "C8_separation_annulee")
+    if res["pistes_stem_apres_annulation"] != n_before:
+        raise AssertionError(f"annulation : {n_before} → {res['pistes_stem_apres_annulation']} pistes (stem)")
+    # Annulation tardive (≥ 90 %, écriture des WAV) : le PC rend souvent le résultat quand même ;
+    # NOVA doit l'ignorer (avant la correction : les 4 pistes arrivaient malgré « Annuler »).
+    page.get_by_test_id("stems-start").click()
+    page.get_by_test_id("stems-running").wait_for(timeout=15000)
+    late = None
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        run = page.get_by_test_id("stems-running")
+        txt = run.inner_text() if run.count() else ""
+        m = re.search(r"(\d+) %", txt)
+        if m and int(m.group(1)) >= 90:
+            try:
+                run.get_by_role("button", name="Annuler", exact=True).click(timeout=1000)
+                late = txt[:80]
+            except Exception:
+                pass
+            break
+        if not run.count():
+            break
+        page.wait_for_timeout(30)
+    res["annulation_tardive"] = late or "séparation finie avant 90 % visibles : non testée"
+    page.wait_for_timeout(6000)
+    res["pistes_stem_apres_annulation_tardive"] = stem_headers(page)
+    shot(page, "C9_annulation_tardive")
+    if late and res["pistes_stem_apres_annulation_tardive"] != n_before:
+        raise AssertionError(f"annulation tardive : {n_before} → {res['pistes_stem_apres_annulation_tardive']} pistes (stem)")
 
 
 def measure(parts, sr):
@@ -323,6 +367,12 @@ if __name__ == "__main__":
         report["C_separation"] = run_one(scenario_separation, "pc", "C_separation")
     finally:
         stop_bridge(br)
+    # Séparations annulées : aucun dossier laissé derrière (avant : « Original.wav » seul).
+    report["dossiers_annules_restants"] = [str(d) for d in SORTIES.rglob("*") if d.is_dir()
+                                           and {f.name for f in d.iterdir()} == {"Original.wav"}]
+    if report["dossiers_annules_restants"] and report["C_separation"].get("ok"):
+        report["C_separation"]["ok"] = False
+        report["C_separation"]["notes"].append("dossiers de séparations annulées restés : " + ", ".join(report["dossiers_annules_restants"]))
     sys.path.insert(0, str(ROOT / "bridge-python"))
     try:
         report["mesures_pont"] = measure(parts, sr)

@@ -148,8 +148,34 @@ class StemsServiceTest(unittest.TestCase):
         self.assertFalse(th.is_alive())
         self.assertIsInstance(got.get("e"), StemsCancelled)
         self.assertFalse((self.out / "f" / ".partiel").exists())
+        self.assertTrue(self.wav.exists())  # une entrée hors du dossier de sortie n'est jamais touchée
         self.assertEqual(self.svc.status()["busy"], 0)
         self.assertFalse(self.svc.cancel("j6"))  # plus rien à annuler
+
+    def test_cancel_leaves_no_folder(self):
+        """Comme le pont : le clip (Original.wav) est écrit dans le dossier de sortie. Annulé,
+        le dossier disparaît en entier (avant : un dossier avec Original.wav seul restait)."""
+        self.install_fake("slow")
+        outdir = self.out / "Projet" / "clip 2026"
+        outdir.mkdir(parents=True)
+        src = outdir / "Original.wav"
+        src.write_bytes(self.wav.read_bytes())
+        got = {}
+        started = threading.Event()
+
+        def run():
+            try:
+                self.svc.separate("j7", src, outdir, 2, lambda e: started.set())
+            except Exception as e:  # noqa: BLE001
+                got["e"] = e
+
+        th = threading.Thread(target=run)
+        th.start()
+        self.assertTrue(started.wait(15))
+        self.assertTrue(self.svc.cancel("j7"))
+        th.join(20)
+        self.assertIsInstance(got.get("e"), StemsCancelled)
+        self.assertFalse(outdir.exists())
 
     def test_cancel_unknown_job(self):
         self.assertFalse(self.svc.cancel("rien"))

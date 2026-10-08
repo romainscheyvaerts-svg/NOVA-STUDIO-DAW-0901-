@@ -34,6 +34,10 @@ let job: Job | null = null;
 const jobListeners = new Set<() => void>();
 const setJob = (j: Job | null) => { job = j; jobListeners.forEach(cb => cb()); };
 const patchJob = (id: string, p: Partial<Job>) => { if (job && job.jobId === id) setJob({ ...job, ...p }); };
+// Séparations annulées par l'utilisateur : si le PC finit quand même (clic « Annuler » pendant
+// l'écriture des WAV, ~3 s en tout sur la carte graphique), le résultat est ignoré, aucune
+// piste n'est ajoutée (avant : « Annuler » à 96 % ajoutait quand même les 4 pistes).
+const cancelledJobs = new Set<string>();
 const useJob = () => useSyncExternalStore(cb => { jobListeners.add(cb); return () => { jobListeners.delete(cb); }; }, () => job);
 
 novaBridge.onStemsEvent(e => {
@@ -78,6 +82,7 @@ const StemSeparationDialog: React.FC<Props> = ({ target, projectName, getClipBuf
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [count, setCount] = useState<StemCount>(2);
   const [connecting, setConnecting] = useState(false);
+  const [cancelledNote, setCancelledNote] = useState(false);
   const availability = stemsAvailability(bridge, isNovaDesktop());
 
   // Appli Windows : le pont démarre avec elle, on s'y connecte tout seul (un essai).
@@ -115,22 +120,31 @@ const StemSeparationDialog: React.FC<Props> = ({ target, projectName, getClipBuf
     if (!target) return;
     const buffer = getClipBuffer(target.trackId, target.clipId);
     if (!buffer) { setModuleError('Le son de ce clip n’est pas encore chargé.'); return; }
+    setCancelledNote(false);
     const jobId = `stems-${Date.now().toString(36)}`;
     const t = target;
     setJob({ jobId, target: t, stems: count, phase: 'running', pct: 0, message: 'Envoi du clip au PC', startedAt: Date.now() });
     try {
       const res = await novaBridge.separateStems({ jobId, channels: bufferChannels(buffer), sampleRate: buffer.sampleRate, stems: count, project: projectName, clip: t.clipName });
+      if (cancelledJobs.delete(jobId)) return;
       const names = onApply(t, res);
       if (!names) throw new StemsError('Le clip a été supprimé pendant la séparation : rien n’a été ajouté.', 'error');
       patchJob(jobId, { phase: 'done', pct: 100, summary: `${names.length} pistes ajoutées : ${names.join(', ')} (en ${formatSeconds(res.seconds)}${res.device === 'cuda' ? ', carte graphique' : ''})`, outdir: res.outdir });
     } catch (e) {
-      if ((e as StemsError)?.code === 'cancelled') { setJob(null); return; }
+      if (cancelledJobs.delete(jobId)) return;
+      if ((e as StemsError)?.code === 'cancelled') { if (job?.jobId === jobId) setJob(null); return; }
       patchJob(jobId, { phase: 'error', error: describeStemsError(e) });
       if ((e as StemsError)?.code === 'not_installed') setModule(m => (m ? { ...m, installed: false } : m));
     }
   };
 
-  const cancel = () => { if (current) novaBridge.stemsCancel({ jobId: current.jobId }).catch(() => undefined); };
+  const cancel = () => {
+    if (!current || current.phase !== 'running') return;
+    cancelledJobs.add(current.jobId);
+    novaBridge.stemsCancel({ jobId: current.jobId }).catch(() => undefined);
+    setJob(null);
+    setCancelledNote(true);
+  };
 
   // --- Pastille (fenêtre fermée, séparation qui continue ou vient de finir) ---------------
   if (!target) {
@@ -257,6 +271,7 @@ const StemSeparationDialog: React.FC<Props> = ({ target, projectName, getClipBuf
     body = (
       <div className="space-y-3" data-testid="stems-ready">
         {finished?.phase === 'done' && <p className="text-[12px] text-emerald-300" role="status">✅ {finished.summary}</p>}
+        {cancelledNote && !finished && <p className="text-[12px] text-slate-300" role="status" data-testid="stems-cancelled">Séparation annulée : aucune piste ajoutée.</p>}
         {(finished?.phase === 'error' || moduleError) && <p className="text-[12px] text-rose-300" role="alert">❌ {finished?.error || moduleError}</p>}
         <div role="radiogroup" aria-label="Nombre de stems" className="space-y-2">
           {choice(2, 'Voix + instru (2 stems)', 'Voix (stem) et Instru (stem).', 'Enlever la voix d’une instru (karaoké, beat), isoler la voix d’un morceau de référence.')}
