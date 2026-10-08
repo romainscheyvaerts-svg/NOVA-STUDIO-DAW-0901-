@@ -1481,6 +1481,9 @@ export class AudioEngine {
           dsp.panner.pan.setValueAtTime(dsp.panner.pan.value, now);
         } catch (e) {}
       });
+      // Réglages d'effets programmés d'avance : plus rien ne doit bouger après l'arrêt.
+      this.pluginAutoParams.forEach(ap => { try { const v = ap.value; ap.cancelScheduledValues(now); ap.setValueAtTime(v, now); } catch { /* effet libéré */ } });
+      this.pluginAutoParams.clear();
     }
     this.stopScrubbing();
   }
@@ -1901,6 +1904,8 @@ export class AudioEngine {
   private autoOverrides = new Map<string, number>();
   /** Dernière valeur envoyée à un effet (un appel par changement réel). */
   private pluginAutoSent = new Map<string, number>();
+  /** AudioParam d'effets où l'automation est programmée d'avance en lecture (figés à l'arrêt). */
+  private pluginAutoParams = new Set<AudioParam>();
   private sortedLaneCache = new WeakMap<AutomationPoint[], AutomationPoint[]>();
 
   private sortedOf(points: AutomationPoint[]): AutomationPoint[] {
@@ -1916,7 +1921,13 @@ export class AudioEngine {
       return;
     }
     this.autoOverrides.set(key, value);
-    if (parsePluginParam(param)) { this.applyPluginAutomation(trackId, param, value); return; }
+    if (parsePluginParam(param)) {
+      // Écriture : ce qui était programmé d'avance sur le réglage ne doit pas reprendre la main.
+      const a = this.pluginAutoParam(trackId, param);
+      if (a && this.ctx) { try { a.ap.cancelScheduledValues(this.ctx.currentTime); } catch { /* */ } }
+      this.applyPluginAutomation(trackId, param, value);
+      return;
+    }
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp || !this.ctx) return;
     const track = this.liveTracks?.find(t => t.id === trackId);
@@ -2014,7 +2025,54 @@ export class AudioEngine {
     return lead;
   }
 
-  private schedulePluginAutomation(trackId: string, param: string, points: AutomationPoint[], start: number, when: number) {
+  /** AudioParam d'un réglage d'effet automatisable (limiteur, effets V21), et son avance PDC. */
+  private pluginAutoParam(trackId: string, param: string): { ap: AudioParam; lead: number } | null {
+    const pp = parsePluginParam(param);
+    if (!pp) return null;
+    const inst = this.tracksDSP.get(trackId)?.pluginChain.get(pp.pluginId)?.instance;
+    if (!inst || typeof inst.automationParam !== 'function' || inst instanceof VSTPluginNode) return null;
+    let ap: AudioParam | null = null;
+    try { ap = inst.automationParam(pp.key); } catch { ap = null; }
+    return ap ? { ap, lead: this.pluginLead(trackId, pp.pluginId) } : null;
+  }
+
+  /**
+   * Lecture : voie d'automation d'un effet programmée D'AVANCE sur son AudioParam
+   * pour la fenêtre [start, end[ du morceau (comme à l'export, au bloc près),
+   * au lieu d'un minuteur (≈ 10 ms d'écart, mesuré). Un point du morceau à T
+   * s'applique à l'instant base + T − avance (PDC).
+   */
+  private programPluginWindow(ap: AudioParam, pts: AutomationPoint[], start: number, end: number, when: number, lead: number) {
+    const base = when - start;
+    try {
+      for (let k = 0; k < pts.length; k++) {
+        const tp = pts[k].time - lead;
+        if (tp < start || tp >= end) continue;
+        const at = base + tp;
+        ap.setValueAtTime(pts[k].value, at);
+        const nx = pts[k + 1];
+        if (nx) this.programmerSegment(ap, pts[k], nx, at, base + nx.time - lead);
+      }
+      this.pluginAutoParams.add(ap);
+    } catch { /* valeur hors limites : le réglage de l'effet reste */ }
+  }
+
+  /** Départ de lecture / bouclage : valeur à `time` posée à l'instant `at`, puis le segment en cours. */
+  private programPluginStart(ap: AudioParam, pts: AutomationPoint[], time: number, at: number, lead: number) {
+    try {
+      ap.cancelScheduledValues(at);
+      const t = time + lead;
+      const v = valueAtPoints(pts, t, 0);
+      ap.setValueAtTime(v, at);
+      const i = pts.findIndex(pt => pt.time > t);
+      if (i > 0) this.programmerSegment(ap, { ...pts[i - 1], time: t, value: v }, pts[i], at, at + (pts[i].time - t));
+      this.pluginAutoParams.add(ap);
+    } catch { /* */ }
+  }
+
+  private schedulePluginAutomation(trackId: string, param: string, points: AutomationPoint[], start: number, when: number, end?: number) {
+    const a = end !== undefined ? this.pluginAutoParam(trackId, param) : null;
+    if (a) { this.programPluginWindow(a.ap, this.sortedOf(points), start, end!, when, a.lead); return; }
     const pp = parsePluginParam(param);
     const v = valueAtPoints(this.sortedOf(points), start + (pp ? this.pluginLead(trackId, pp.pluginId) : 0), 0);
     const key = `${trackId}|${param}`;
@@ -2118,7 +2176,7 @@ export class AudioEngine {
         // Mode Off : rien n'est rejoué ; un paramètre en cours d'écriture suit le fader.
         playedLanes(track).forEach(lane => {
             if (lane.points.length === 0 || this.autoOverrides.has(`${track.id}|${lane.parameterName}`)) return;
-            if (parsePluginParam(lane.parameterName)) { this.schedulePluginAutomation(track.id, lane.parameterName, lane.points, start, when); return; }
+            if (parsePluginParam(lane.parameterName)) { this.schedulePluginAutomation(track.id, lane.parameterName, lane.points, start, when, end); return; }
 
             lane.points.forEach((point, index) => {
                 if (point.time >= start && point.time < end) {
@@ -2727,7 +2785,13 @@ export class AudioEngine {
 
     playedLanes(track).forEach(lane => {
         if (lane.points.length === 0 || this.autoOverrides.has(`${track.id}|${lane.parameterName}`)) return;
-        if (parsePluginParam(lane.parameterName)) { this.applyPluginAutomation(track.id, lane.parameterName, valueAtPoints(sortedPoints(lane.points), time, 0)); return; }
+        if (parsePluginParam(lane.parameterName)) {
+          // En lecture, sur un AudioParam : posé à l'instant exact du départ (ou du bouclage).
+          const a = this.isPlaying ? this.pluginAutoParam(track.id, lane.parameterName) : null;
+          if (a) this.programPluginStart(a.ap, this.sortedOf(lane.points), time, this.playbackStartTime + time, a.lead);
+          else this.applyPluginAutomation(track.id, lane.parameterName, valueAtPoints(sortedPoints(lane.points), time, 0));
+          return;
+        }
 
         let prevPoint = lane.points[0];
         let nextPoint = lane.points[lane.points.length - 1];

@@ -26,12 +26,14 @@ import { scaleIntervals } from '../utils/scales';
  * autres réglages (gamme, tempo) passent par message. `toCore` (autonome,
  * sérialisé) traduit les réglages de l'effet pour le cœur.
  */
-const processorCode = (name: string, defs: string, make: string, toCore: string, descriptors: { name: string; defaultValue: number; minValue: number; maxValue: number }[]) => `
+const processorCode = (name: string, defs: string, make: string, toCore: string, descriptors: { name: string; defaultValue: number; minValue: number; maxValue: number; int?: boolean }[]) => `
 ${defs}
 const __make = (${make});
 const __toCore = (${toCore});
 const __desc = ${JSON.stringify(descriptors.map(d => ({ ...d, automationRate: 'k-rate' })))};
 const __names = __desc.map(d => d.name);
+// Réglages à pas entier (interrupteurs, division…) : arrondis comme sanitizeV21, même quand une voie les fait glisser.
+const __ints = __desc.map(d => !!d.int);
 class NovaV21Processor extends AudioWorkletProcessor {
   static get parameterDescriptors() { return __desc; }
   constructor(options) {
@@ -56,7 +58,7 @@ class NovaV21Processor extends AudioWorkletProcessor {
     if (this.core.setClock && parameters.originHi) this.core.setClock(currentTime - (parameters.originHi[0] + parameters.originLo[0]));
     for (let i = 0; i < __names.length; i++) {
       const a = parameters[__names[i]];
-      if (a && a.length) { const v = a[0]; if (this.ep[__names[i]] !== v) { this.ep[__names[i]] = v; this.dirty = true; } }
+      if (a && a.length) { const v = __ints[i] ? Math.round(a[0]) : a[0]; if (this.ep[__names[i]] !== v) { this.ep[__names[i]] = v; this.dirty = true; } }
     }
     if (this.dirty) { this.dirty = false; this.core.setParams(__toCore(this.ep, sampleRate)); }
     const out = outputs[0];
@@ -144,7 +146,7 @@ interface WorkletSpec {
 
 const descriptorsOf = (type: V21Type) => {
   const d = V21_DEFAULTS[type]();
-  return V21_SPECS[type].map(s => ({ name: s.id, defaultValue: typeof d[s.id] === 'number' ? d[s.id] : s.min, minValue: s.min, maxValue: s.max }));
+  return V21_SPECS[type].map(s => ({ name: s.id, defaultValue: typeof d[s.id] === 'number' ? d[s.id] : s.min, minValue: s.min, maxValue: s.max, ...(s.step >= 1 ? { int: true } : {}) }));
 };
 
 /**
@@ -246,6 +248,12 @@ export class V21EffectNode {
     }
     if ('scale' in clean) msg._scale = this.params._scale;
     if (Object.keys(msg).length) this.worklet.port.postMessage({ params: msg });
+  }
+
+  /** AudioParam d'un réglage automatisable (lecture et export y programment la voie d'avance), sinon null. */
+  public automationParam(key: string): AudioParam | null {
+    if (!this.worklet || !this.spec.audioParams.includes(key)) return null;
+    return (this.worklet.parameters as any).get(key) ?? null;
   }
 
   /** Effet calé sur le morceau (gate rythmique) ? */

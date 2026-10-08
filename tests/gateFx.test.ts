@@ -122,5 +122,20 @@ describe('Gate rythmique : effet NOVA', () => {
     };
     expect(block(10.03)).toBeCloseTo(1, 2);
     expect(block(10.15)).toBeCloseTo(0, 2);
+    // Réglage à pas entier qu'une voie d'automation fait glisser (division 3,6) : arrondi comme sanitizeV21.
+    const p2 = params(9, 0); p2.rate = new Float32Array([3.6]);
+    proc.process([[new Float32Array(128), new Float32Array(128)]], [[new Float32Array(128), new Float32Array(128)]], p2);
+    expect(proc.ep.rate).toBe(4);
+  });
+
+  it('automation en lecture : l’effet expose ses AudioParam (programmés d’avance par le moteur), seulement les réglages automatisables', () => {
+    const fakeCtx: any = { sampleRate: SR, currentTime: 0, createGain: () => ({ connect() {}, disconnect() {}, channelCount: 2, channelCountMode: 'explicit' }) };
+    const n: any = new V21EffectNode(fakeCtx, 'GATEFX', {});
+    const got: string[] = [];
+    n.worklet = { parameters: { get: (k: string) => { got.push(k); return { name: k }; } } };
+    expect(n.automationParam('depth')).toEqual({ name: 'depth' });
+    expect(n.automationParam('originHi')).toBeNull(); // horloge interne, jamais une voie d'automation
+    expect(n.automationParam('inconnu')).toBeNull();
+    expect(new V21EffectNode(fakeCtx, 'LOFI', {}).automationParam('mix')).toBeNull(); // pas encore chargé
   });
 });
