@@ -12,7 +12,9 @@ export type NovaWindowName = 'memory-locations' | 'strip-silence' | 'clip-props'
   // Commit / gel de plusieurs pistes (hooks/useProToolsEcarts).
   | 'batch-render'
   // Entrées nommées (I/O Setup simplifié, utils/ioNames).
-  | 'io-names';
+  | 'io-names'
+  // R24 : voix par l'IA locale (appli Windows) : retirer la réverbe, transcrire les paroles.
+  | 'voice-deverb' | 'voice-transcribe';
 
 export interface NovaWindowDetail {
   name: NovaWindowName;

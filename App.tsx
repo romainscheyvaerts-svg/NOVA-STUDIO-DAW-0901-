@@ -149,6 +149,7 @@ import { playheadStore } from './utils/playheadStore';
 import { useLatestCallback } from './utils/useLatestCallback';
 import RecordingCoach from './components/RecordingCoach';
 import LyricsPrompter from './components/LyricsPrompter';
+import { projectTimedWords, withLyricsCorrections } from './utils/voiceLyrics';
 import MicLevelMeter from './components/MicLevelMeter';
 import WelcomeSteps from './components/WelcomeSteps';
 import ShareClipModal from './components/ShareClipModal';
@@ -9574,6 +9575,14 @@ function Studio() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { if (lyricsOpen) track('lyrics_opened'); }, [lyricsOpen]);
+  // R24 : « Ouvrir le prompteur » après une transcription (components/VoiceAIDialog).
+  useEffect(() => {
+    const open = () => setLyricsOpen(true);
+    window.addEventListener('nova:open-lyrics', open);
+    return () => window.removeEventListener('nova:open-lyrics', open);
+  }, []);
+  // R24 : mots transcrits des clips voix (prompteur calé sur la voix).
+  const lyricsTimedWords = useMemo(() => projectTimedWords(state.tracks), [state.tracks]);
   useEffect(() => { if (shareOpen) track('share_opened'); }, [shareOpen]);
   useEffect(() => { if (isExportMenuOpen) track('export_opened'); }, [isExportMenuOpen]);
   useEffect(() => { if (takeHomeOpen) track('takehome_opened'); }, [takeHomeOpen]);
@@ -10360,7 +10369,8 @@ function Studio() {
         open={lyricsOpen}
         onClose={() => setLyricsOpen(false)}
         lyrics={state.lyrics || ''}
-        onLyricsChange={text => setState(prev => ({ ...prev, lyrics: text }))}
+        onLyricsChange={text => setState(prev => withLyricsCorrections(prev, text))}
+        timedWords={lyricsTimedWords}
         start={state.lyricsStart ?? 0}
         onStartChange={t => setState(prev => ({ ...prev, lyricsStart: Math.max(0, t) }))}
         speed={state.lyricsSpeed ?? 16}
@@ -10537,7 +10547,8 @@ function Studio() {
       <ProToolsWindows tracks={state.tracks} markers={state.markers} bpm={state.bpm} setState={setState} onEditClip={handleEditClip}
         onSeek={handleSeek} onAddMarker={handleAddMarkerHere} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
         getPlayhead={() => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime)}
-        onOpenShortcuts={() => setShortcutsOpen(true)} projectKey={state.projectKey} projectScale={state.projectScale} beatsPerBar={state.timeSignature?.numerator} />
+        onOpenShortcuts={() => setShortcutsOpen(true)} projectKey={state.projectKey} projectScale={state.projectScale} beatsPerBar={state.timeSignature?.numerator}
+        lyrics={state.lyrics || ''} />
       </PanelBoundary>
       {/* Respirations : fenêtre, traitement en un clic, mode auto après chaque prise (components/BreathTools). */}
       <BreathHost tracks={state.tracks} setState={setState} undo={undo} breakHistory={breakHistory} projectAuto={state.breathAuto} isMobile={isMobile}

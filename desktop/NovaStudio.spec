@@ -17,10 +17,13 @@ if not os.path.isfile('build/ui-bundle/desktop-ui.json'):
 datas += [('build/ui-bundle', 'ui')]
 binaries = []
 hiddenimports = ['asio_bridge', 'asio_control_panel', 'nova_bridge_server', 'vst_host', 'vst_probe', 'license_watch',
-                 'stems_service', 'stems_install', 'project_store', 'take_writer', 'comtypes', 'comtypes.client']
+                 'stems_service', 'stems_install', 'project_store', 'take_writer', 'comtypes', 'comtypes.client',
+                 'voice_service', 'voice_install', 'deverb_service', 'transcribe_service']
 # Séparation de stems (module optionnel installé à la demande) : le moteur est copié
 # depuis l'appli vers %LOCALAPPDATA%\NovaStudio\stems et lancé avec le Python de ce module.
 datas += [('../bridge-python/stems_worker.py', '.')]
+# R24 : voix par l'IA locale (module optionnel), même principe : %LOCALAPPDATA%\NovaStudio\voice.
+datas += [('../bridge-python/voice_worker.py', '.')]
 hiddenimports += collect_submodules('websockets')
 # Hôte ARA2 (Melodyne, VocAlign) : NovaARAHost.exe à côté du pont, avec ses licences
 # (sans JUCE : VST3 SDK sous MIT + ARA SDK sous Apache 2.0, voir nova-ara-host/LICENCES.md).

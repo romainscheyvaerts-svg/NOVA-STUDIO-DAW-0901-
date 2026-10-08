@@ -23,7 +23,10 @@ const TransposeDialog = lazyWithPreload(() => import('./TransposeDialog'));
 const WarpMarkers = lazyWithPreload(() => import('./WarpMarkers'));
 const BatchRenderDialog = lazyWithPreload(() => import('./BatchRenderDialog'));
 const IoNamesDialog = lazyWithPreload(() => import('./IoNamesDialog'));
+// R24 : voix par l'IA locale (retirer la réverbe, transcrire les paroles).
+const VoiceAIDialog = lazyWithPreload(() => import('./VoiceAIDialog'));
 export const PRO_TOOLS_WINDOWS_PRELOAD = [PitchEditor, TrackPresetDialog, StripSilenceDialog, AudioSuiteDialog, TransposeDialog, PitchBatchDialog, AudioToMidiDialog, BounceDialog, WarpMarkers];
+import type { VoiceMode } from './VoiceAIDialog';
 import { editingElastic, elasticBlock, elasticRevertPatch, withDuration, withTempo } from '../utils/clipTranspose';
 import { applyClipPatches, doneMessage, renderElasticClip } from '../services/elasticRender';
 import { audioSuiteRevertPatch, patchClip } from '../utils/clipProcess';
@@ -46,6 +49,8 @@ interface Props {
   projectScale?: string;
   /** Temps par mesure (audio → MIDI, V20). */
   beatsPerBar?: number;
+  /** Paroles du projet (R24 : transcription → prompteur). */
+  lyrics?: string;
 }
 
 /**
@@ -54,7 +59,7 @@ interface Props {
  * couleur de piste ; plus le témoin Commands Keyboard Focus.
  * App.tsx ne fait que monter ce composant.
  */
-const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEditClip, onSeek, onAddMarker, onUpdateMarker, onDeleteMarker, getPlayhead, onOpenShortcuts, projectKey, projectScale, beatsPerBar }) => {
+const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEditClip, onSeek, onAddMarker, onUpdateMarker, onDeleteMarker, getPlayhead, onOpenShortcuts, projectKey, projectScale, beatsPerBar, lyrics }) => {
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [batch, setBatch] = useState<NovaWindowDetail | null>(null);
   const [ioNames, setIoNames] = useState(false);
@@ -69,6 +74,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
   const [suite, setSuite] = useState<NovaWindowDetail | null>(null);
   const [transpose, setTranspose] = useState<NovaWindowDetail | null>(null);
   const [warp, setWarp] = useState<NovaWindowDetail | null>(null);
+  const [voice, setVoice] = useState<{ mode: VoiceMode; targets: { trackId: string; clipId: string }[] } | null>(null);
   const tracksRef = React.useRef(tracks);
   tracksRef.current = tracks;
   const say = (detail: string) => { try { window.dispatchEvent(new CustomEvent('nova:notify', { detail })); } catch { /* hors navigateur */ } };
@@ -162,6 +168,8 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       else if (d.name === 'transpose' && d.targets?.length) { if (d.revert) revertElastic(d.targets); else setTranspose(d); }
       else if (d.name === 'warp' && d.targets?.length) setWarp(d);
       else if (d.name === 'elastic-tce' && d.targets?.length && d.tce) void tceRender(d.targets[0].trackId, d.targets[0].clipId, d.tce);
+      // R24 : voix par l'IA locale.
+      else if ((d.name === 'voice-deverb' || d.name === 'voice-transcribe') && d.targets?.length) setVoice({ mode: d.name === 'voice-deverb' ? 'deverb' : 'transcribe', targets: d.targets });
     };
     window.addEventListener(NOVA_WINDOW_EVENT, onOpen);
     return () => window.removeEventListener(NOVA_WINDOW_EVENT, onOpen);
@@ -272,6 +280,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       <MountWhenOpened when={ioNames}><IoNamesDialog open={ioNames} onClose={() => setIoNames(false)} /></MountWhenOpened>
       <MountWhenOpened when={!!batch}><BatchRenderDialog open={!!batch} tracks={tracks} preselected={batch?.trackIds || []} onClose={() => setBatch(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!suite}><AudioSuiteDialog open={!!suite} targets={suite?.targets} range={suite?.range} tracks={tracks} setState={setState} onClose={() => setSuite(null)} /></MountWhenOpened>
+      <MountWhenOpened when={!!voice}><VoiceAIDialog request={voice} tracks={tracks} lyrics={lyrics || ''} setState={setState} onClose={() => setVoice(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!transpose}><TransposeDialog open={!!transpose} targets={transpose?.targets || []} tracks={tracks} bpm={bpm} simple={!!transpose?.simple} setState={setState} onClose={() => setTranspose(null)} /></MountWhenOpened>
       <MountWhenOpened when={!!warp}><WarpMarkers open={!!warp} trackId={warp?.targets?.[0]?.trackId} clipId={warp?.targets?.[0]?.clipId} tracks={tracks} bpm={bpm} setState={setState} onClose={() => setWarp(null)} /></MountWhenOpened>
       {focus && (

@@ -426,6 +426,39 @@ export interface Clip {
    * une ancienne version l'ignore. Absent : clip libre.
    */
   lock?: ClipLock;
+  /**
+   * R24 : paroles transcrites sur le PC (Whisper local), mot par mot. Les temps
+   * sont en secondes du SON du clip (même repère que `offset`) : ils suivent les
+   * déplacements et les rognages. Valables tant que `bufferId` est le même
+   * (utils/voiceLyrics). Une ancienne version ignore ce champ.
+   */
+  transcript?: ClipTranscript;
+}
+
+/** R24 : un mot transcrit (temps en secondes du son du clip). */
+export interface TranscriptWord {
+  w: string;
+  s: number;
+  e: number;
+  /** Confiance du modèle (0–1). */
+  p?: number;
+  /** Début d'une phrase (segment de Whisper) : nouvelle ligne des paroles. */
+  b?: boolean;
+}
+
+/** R24 : transcription d'un clip voix (Whisper local, appli Windows). */
+export interface ClipTranscript {
+  version: 1;
+  /** Langue reconnue (« fr », « en »). */
+  language: string;
+  /** Modèle utilisé (« large-v3-turbo »…). */
+  model: string;
+  words: TranscriptWord[];
+  /** Son transcrit : un autre son (traitement, retouche) rend les temps caducs. */
+  bufferId?: string;
+  at: number;
+  /** Afficher le texte au-dessus du clip. */
+  show?: boolean;
 }
 
 export type ClipLock = 'edit' | 'time';
@@ -485,8 +518,8 @@ export interface AudioSuiteInfo {
   /** Décalage du clip dans le son d'origine et dans le son traité, au moment du traitement (retour exact). */
   sourceOffset?: number;
   processedOffset?: number;
-  /** Effets appliqués, dans l'ordre. */
-  steps: { type: PluginType; name: string; preset?: string; at: number }[];
+  /** Effets appliqués, dans l'ordre (« AI_DEVERB » : réverbe de la pièce retirée par l'IA du PC, R24). */
+  steps: { type: PluginType | 'AI_DEVERB'; name: string; preset?: string; at: number }[];
   /** Nom et calage du clip d'origine. */
   sourceName?: string;
   sourceWarp?: WarpSettings;
