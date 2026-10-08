@@ -21,6 +21,8 @@ export interface NovaWindowDetail {
   bounce?: { mode: 'commit' | 'range'; trackIds?: string[]; start?: number; end?: number };
   /** AudioSuite (R6) : plage de la sélection (sinon les clips visés). */
   range?: { start: number; end: number; trackIds: string[] };
+  /** AudioSuite : « Revenir à l'original » tout de suite (sans fenêtre). */
+  revert?: boolean;
 }
 
 export const NOVA_WINDOW_EVENT = 'nova:open-window';

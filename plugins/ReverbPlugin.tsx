@@ -18,6 +18,19 @@ import { EnvelopeDucker, SMOOTH, setParamSmooth } from './vocalDspUtils';
 
 export type ReverbMode = 'ROOM' | 'HALL' | 'PLATE' | 'CATHEDRAL' | 'SHIMMER' | 'SPRING';
 
+
+/** Générateur pseudo-aléatoire à graine (mulberry32) : la réponse de la réverbe ne change pas d'un rendu à l'autre. */
+const seededRandom = (key: string): (() => number) => {
+  let a = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) a = Math.imul(a ^ key.charCodeAt(i), 0x01000193);
+  return () => {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
 export interface ReverbParams {
   decay: number;        // 0.1 to 15 seconds
   preDelay: number;     // 0 to 200ms (stored in seconds)
@@ -370,14 +383,19 @@ export class ReverbNode {
     const attackN = Math.floor(attack * sr);
     const earlyN = Math.floor(0.08 * sr);
 
+    // Bruit REPRODUCTIBLE : mêmes réglages = même réponse, à chaque rendu (export,
+    // gel, Commit, bus imprimé : deux rendus du même son sont identiques à
+    // l'échantillon près). Gauche et droite restent décorrélées (graines différentes).
+    const sig = this.irSignature();
     for (let ch = 0; ch < 2; ch++) {
       const data = ir.getChannelData(ch);
+      const random = seededRandom(`${sig}|${sr}|${ch}`);
       let lp1 = 0, lp2 = 0, eL = 1, eH = 1;
       for (let i = 0; i < length; i++) {
-        let n = Math.random() + Math.random() - 1;
+        let n = random() + random() - 1;
         // Debut de queue plus « granuleux » quand la diffusion est faible
         if (i < earlyN && diffusion < 1) {
-          const sparse = Math.random() < 0.1 ? 1.8 : diffusion;
+          const sparse = random() < 0.1 ? 1.8 : diffusion;
           const w = i / earlyN;
           n *= sparse + (1 - sparse) * w;
         }

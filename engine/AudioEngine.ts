@@ -633,11 +633,19 @@ export class AudioEngine {
   /**
    * @param options.preFader rendu AVANT fader/pan/automation (gel de piste : le
    *        fader et le pan restent appliques a la lecture, sinon ils l'etaient deux fois).
+   * @param options.pluginAutomation avec preFader : l'automation des réglages d'effets
+   *        est rejouée quand même (Commit / bounce : le rendu remplace les effets).
    */
-  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean } = {}): Promise<AudioBuffer> {
+  public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean; pluginAutomation?: boolean } = {}): Promise<AudioBuffer> {
     // Structure Pro Tools : pistes inactives, dossiers simples et VCA hors du rendu ; Muet / Solo / VCA / bus résolus.
     tracks = engineView(tracks).tracks;
     const totalSamples = Math.ceil(totalDuration * targetSampleRate);
+    // Latences et compensations en échantillons entiers : un effet retarde le son d'un
+    // nombre entier d'échantillons (lookahead arrondi dans le worklet). Une compensation
+    // fractionnaire (3 ms = 132,3 échantillons à 44,1 kHz) faisait interpoler les sources
+    // entre deux échantillons : léger filtrage des aigus, et un rendu (commit, bus
+    // imprimé) ne retombait plus exactement sur l'export.
+    const toSamples = (sec: number) => Math.round(sec * targetSampleRate) / targetSampleRate;
     const offlineCtx = new OfflineAudioContext(2, totalSamples, targetSampleRate);
     // Les noeuds de plugins/instruments n'utilisent que l'API BaseAudioContext.
     const renderCtx = offlineCtx as unknown as AudioContext;
@@ -692,6 +700,14 @@ export class AudioEngine {
       input.channelCount = 2;
       input.channelCountMode = 'explicit';
       input.channelInterpretation = 'speakers';
+      // Source muette (valeur 0) branchée pendant tout le rendu : la chaîne reste
+      // « active ». Sinon Chrome arrête les filtres (EQ, de-esser…) dès que le
+      // dernier clip de la piste est fini et coupe net leur résonance : un léger
+      // clic, et un rendu (bounce, commit) ne retombait plus sur l'export.
+      const keepAlive = offlineCtx.createConstantSource();
+      keepAlive.offset.value = 0;
+      keepAlive.connect(input);
+      keepAlive.start(0);
       const gain = offlineCtx.createGain();
       const panner = offlineCtx.createStereoPanner();
       const output = offlineCtx.createGain();
@@ -723,11 +739,11 @@ export class AudioEngine {
             try { entry.node?.dispose?.(); } catch { /* */ }
             if (!(typeof l === 'number' && l > 0 && l < 0.5)) return;
             const bd = offlineCtx.createDelay(1);
-            bd.delayTime.value = l;
+            bd.delayTime.value = toSamples(l);
             head.connect(bd);
             head = bd;
-            offlineLatency += l;
-            if (isPost) postLatency += l;
+            offlineLatency += toSamples(l);
+            if (isPost) postLatency += toSamples(l);
             return;
           }
           pluginNodes.set(plugin.id, entry.node);
@@ -735,8 +751,8 @@ export class AudioEngine {
           head.connect(entry.input);
           head = entry.output;
           if (typeof l === 'number' && l > 0 && l < 0.5) {
-            offlineLatency += l;
-            if (isPost) postLatency += l;
+            offlineLatency += toSamples(l);
+            if (isPost) postLatency += toSamples(l);
           }
         } catch (e) {
           console.warn(`[Render] Plugin ignore (${plugin.type}) :`, e);
@@ -848,8 +864,8 @@ export class AudioEngine {
         const r = pdc.get(id);
         rt.down = r?.down || 0;
         const main = rt.outDelay ? rt.outputs?.[0] : undefined;
-        if (rt.outDelay && r && main !== undefined) rt.outDelay.delayTime.value = r.delays.get(main) ?? r.down;
-        rt.sendDelays?.forEach((node, sendId) => { node.delayTime.value = r?.delays.get(sendId) ?? 0; });
+        if (rt.outDelay && r && main !== undefined) rt.outDelay.delayTime.value = toSamples(r.delays.get(main) ?? r.down);
+        rt.sendDelays?.forEach((node, sendId) => { node.delayTime.value = toSamples(r?.delays.get(sendId) ?? 0); });
       });
       // Effets calés sur le morceau (gate rythmique) : temps 0 du rendu = startOffset du morceau.
       rendered.forEach(rt => { if (rt.pluginNodes) this.syncChainTimeline([...rt.pluginNodes.values()], -startOffset, rt.down || 0); });
@@ -917,7 +933,7 @@ export class AudioEngine {
         }
 
         const isFrozenRender = !!rt.frozenInput && (clip.id === rt.frozenClipId || !!clip.isFreezeSlice);
-        const clipStartInProject = clip.start - startOffset - (((isFrozenRender ? rt.postLatency : rt.latency) || 0) + (rt.down || 0));
+        const clipStartInProject = clip.start - startOffset - toSamples(((isFrozenRender ? rt.postLatency : rt.latency) || 0) + (rt.down || 0));
         if (clipStartInProject + clip.duration < 0) continue;
         if (clipStartInProject > totalDuration) continue;
 
@@ -958,7 +974,7 @@ export class AudioEngine {
         if (clip.isMuted || clip.type !== TrackType.MIDI || !clip.notes) continue;
 
         // PDC : notes avancées de la latence de tout le chemin (comme en lecture).
-        const lat = (rt.latency || 0) + (rt.down || 0);
+        const lat = toSamples((rt.latency || 0) + (rt.down || 0));
         for (const note of (rt.synth instanceof NovaSynthNode ? notesInTimeOrder(clip.notes) : clip.notes)) {
           const noteStart = clip.start + note.start - startOffset - lat;
           const noteEnd = noteStart + note.duration;
@@ -991,11 +1007,11 @@ export class AudioEngine {
       const rt = rendered.get(track.id)!;
       if (!rt.bass808 || !track.bass808) continue;
       const clips = isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []);
-      rt.bass808.playVoices(planOfClips(clips, track.bass808), startOffset + (rt.latency || 0) + (rt.down || 0));
+      rt.bass808.playVoices(planOfClips(clips, track.bass808), startOffset + toSamples((rt.latency || 0) + (rt.down || 0)));
     }
 
     // --- 5c. Automation des paramètres d'effets : mêmes valeurs qu'en lecture.
-    if (!options.preFader) this.scheduleOfflinePluginAutomation(offlineCtx, tracks, rendered, totalDuration, startOffset);
+    if (!options.preFader || options.pluginAutomation) this.scheduleOfflinePluginAutomation(offlineCtx, tracks, rendered, totalDuration, startOffset);
     // --- 5d. Piste d'accords suivie par l'Harmoniseur (gel compris : elle fait partie du son de la piste).
     this.scheduleOfflineChords(tracks, rendered, totalDuration, startOffset);
 

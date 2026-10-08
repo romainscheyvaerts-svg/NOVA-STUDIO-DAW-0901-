@@ -2,6 +2,7 @@ import React from 'react';
 import type { EditCommands } from '../hooks/useEditCommands';
 import { useEditSelection } from '../utils/editSelection';
 import { selLength } from '../utils/timeSelection';
+import { openNovaWindow } from '../utils/novaWindows';
 
 /**
  * Barre d'actions de la sélection de plage (Sélecteur / Smart Tool) : tout ce
@@ -18,7 +19,8 @@ const RangeActionsBar: React.FC<{ commands: EditCommands }> = ({ commands }) => 
     { label: 'Copier', icon: 'fa-copy', title: 'Copier la plage (Ctrl+C)', run: commands.copySelection },
     { label: 'Dupliquer', icon: 'fa-clone', title: 'Dupliquer la plage juste après (Ctrl+D, « Duplicate » de Pro Tools)', run: commands.duplicateSelection },
     { label: 'Séparer', icon: 'fa-grip-lines-vertical', title: 'Séparer les clips aux bords de la plage (Ctrl+E, « Separate Clip » de Pro Tools)', run: commands.separate },
-    { label: 'Consolider', icon: 'fa-layer-group', title: 'Consolider : un seul clip par piste sur la plage, sans effets (Alt+Maj+3, « Consolidate Clip » de Pro Tools)', run: () => { void commands.consolidateSelection(); } },
+    { label: 'Consolider', icon: 'fa-layer-group', title: 'Consolider la plage : sans effets (Alt+Maj+3, « Consolidate Clip » de Pro Tools) ou avec effets sur une nouvelle piste (« Bounce in Place » de Logic, « Bounce to New Track » d’Ableton)', run: () => openNovaWindow('bounce', { bounce: { mode: 'range' }, range: { start: time.start, end: time.end, trackIds: time.trackIds } }) },
+    { label: 'AudioSuite', icon: 'fa-wand-magic-sparkles', title: 'Traiter les clips de la plage avec un effet NOVA ou un VST, avec poignées ; l’original est gardé (« AudioSuite » de Pro Tools, « Traitement de fichier » de Logic)', run: () => openNovaWindow('audiosuite', { range: { start: time.start, end: time.end, trackIds: time.trackIds } }) },
     { label: 'Fondus', icon: 'fa-bezier-curve', title: 'Créer des fondus sur la plage : entrée, sortie ou crossfade sur une jonction (Ctrl+F, « Fades » de Pro Tools)', run: commands.fadesFromSelection },
     { label: 'Boucler', icon: 'fa-sync-alt', title: 'Boucler la lecture sur la plage (« Loop Playback » sur la sélection)', run: commands.loopSelection },
     { label: 'Punch', icon: 'fa-bullseye', title: 'La plage devient la zone de punch : REC ne remplacera qu\'elle (Punch-in / punch-out de Pro Tools)', run: commands.punchSelection },

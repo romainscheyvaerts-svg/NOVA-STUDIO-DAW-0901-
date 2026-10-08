@@ -350,6 +350,9 @@ export interface AudioSuiteInfo {
   sourceRef?: string;
   /** Instant du son d'origine qui correspond au début du son traité (s). */
   regionStart: number;
+  /** Décalage du clip dans le son d'origine et dans le son traité, au moment du traitement (retour exact). */
+  sourceOffset?: number;
+  processedOffset?: number;
   /** Effets appliqués, dans l'ordre. */
   steps: { type: PluginType; name: string; preset?: string; at: number }[];
   /** Nom et calage du clip d'origine. */

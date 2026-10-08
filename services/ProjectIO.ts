@@ -109,6 +109,20 @@ export class ProjectIO {
                 }
                 delete sClip.araEdit.sourceBufferId;
             }
+            // AudioSuite (R6) : la prise d'origine voyage aussi (« Revenir à l'original » après réouverture).
+            const asSrcId = clip.audioSuite?.sourceBufferId;
+            if (asSrcId && sClip.audioSuite) {
+                const srcBuf = audioBufferRegistry.get(asSrcId);
+                if (srcBuf && !isUnlicensedStoreBeat) {
+                    const filename = `${asSrcId}.wav`;
+                    if (!written.has(filename)) {
+                        written.add(filename);
+                        if (audioFolder) audioFolder.file(filename, wavOf(srcBuf));
+                    }
+                    sClip.audioSuite.sourceRef = `audio/${filename}`;
+                }
+                delete sClip.audioSuite.sourceBufferId;
+            }
         }
 
         // Samples perso des pads de batterie (V16) : un WAV par sample.
@@ -262,6 +276,24 @@ export class ProjectIO {
                         const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
                         ae.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-ara-origine`);
                         decoded.set(ref, ae.sourceBufferId);
+                    } catch (e) {
+                        console.warn(`[ProjectIO] Prise d'origine illisible : ${ref}`, e);
+                    }
+                }
+            }
+            // Prise d'origine d'un clip traité par AudioSuite (R6).
+            const suite = clip.audioSuite;
+            if (suite?.sourceRef) {
+                const ref = suite.sourceRef;
+                delete suite.sourceRef;
+                const already = decoded.get(ref);
+                const srcFile = zip.file(ref);
+                if (already) suite.sourceBufferId = already;
+                else if (srcFile) {
+                    try {
+                        const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
+                        suite.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-audiosuite-origine`);
+                        decoded.set(ref, suite.sourceBufferId);
                     } catch (e) {
                         console.warn(`[ProjectIO] Prise d'origine illisible : ${ref}`, e);
                     }
