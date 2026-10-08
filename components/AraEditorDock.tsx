@@ -212,6 +212,15 @@ const AraEditorDock: React.FC<Props> = ({ tracks, selectedTrackId, onCommit, onS
         <span className="rounded border border-fuchsia-400/50 bg-fuchsia-500/15 px-1.5 py-px text-[9px] font-black tracking-wider text-fuchsia-200">ARA</span>
         <span className="truncate">Piste « {track.name} » · {info?.regions ?? 0} clip{(info?.regions ?? 0) > 1 ? 's' : ''}{sel.clipIds.some(id => track.clips.some(c => c.id === id)) ? ' · sélection' : ' · toute la piste'}</span>
         {info?.syncing && <span className="text-cyan-300" data-testid="ara-dock-sync"><i className="fas fa-circle-notch fa-spin mr-1" />Mise à jour…</span>}
+        {kind === 'vocalign' && info?.capture && (
+          <span data-testid="ara-dock-capture" className={info.capture.state === 'error' ? 'text-amber-300' : info.capture.state === 'done' ? 'text-emerald-300' : 'text-cyan-300'}
+            title="VocAlign 6 Standard (VST3) n’aligne pas par ARA : NOVA lui fait capturer le guide et le double tout seul, puis la piste joue le double calé.">
+            {info.capture.state === 'running' ? <><i className="fas fa-circle-notch fa-spin mr-1" />Capture VocAlign…</>
+              : info.capture.state === 'done' ? `Double calé (capture ${info.capture.seconds ?? '?'} s)`
+              : info.capture.state === 'waiting_guide' ? 'Choisis le guide (la lead)'
+              : info.capture.state === 'error' ? `Capture impossible : ${info.capture.error || ''}` : ''}
+          </span>
+        )}
         {kind === 'vocalign' && (
           <label className="flex items-center gap-1.5">Guide
             <select data-testid="ara-dock-guide" value={guideId || ''} onChange={e => onSetGuide?.(track.id, plugin.id, e.target.value || null)}

@@ -3,7 +3,7 @@ import type { Track } from '../types';
 import type { ChordEvent } from '../utils/chordDetect';
 import { liveAraInserts, onAraInsertsChange } from '../engine/AraInsertNode';
 import { araDocumentFor, araInsertOf, araMusicFor } from '../utils/araInsert';
-import { araPluginKey } from '../utils/araEdit';
+import { araPluginKey, guessLeadTrack } from '../utils/araEdit';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { tempoMapStore } from '../utils/tempoMap';
 import { novaBridge, BridgePlugin } from '../services/NovaBridge';
@@ -26,9 +26,16 @@ export function useAraInserts(tracks: Track[], chords?: ChordEvent[] | null) {
       const p = araInsertOf(t);
       const node = p ? liveAraInserts.get(p.id) : undefined;
       if (!node) continue;
-      const doc = araDocumentFor(t, id => audioBufferRegistry.get(id)?.duration ?? null);
+      const dur = (id: string) => audioBufferRegistry.get(id)?.duration ?? null;
+      const doc = araDocumentFor(t, dur);
       if (doc.skipped.some(s => s.reason === 'son pas encore chargé')) waiting = true;
-      node.setDocument(doc, music);
+      // VocAlign : le guide (la lead) choisi dans la barre de l'effet, sinon la piste qui y ressemble.
+      let guide = null;
+      if (node.kind === 'vocalign') {
+        const gt = tracks.find(x => x.id === p!.params?.guideTrackId) || guessLeadTrack(tracks, t.id);
+        if (gt) { const g = araDocumentFor(gt, dur); guide = { sources: g.sources, regions: g.regions }; }
+      }
+      node.setDocument(doc, music, guide);
     }
     if (!waiting) return;
     const timer = setTimeout(() => setVer(v => v + 1), 1000);

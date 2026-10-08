@@ -33,6 +33,8 @@ export interface AraInsertInfo {
   syncError: string | null;
   /** Sons envoyés au plugin (une fois chacun). */
   sources: number;
+  /** VocAlign (capture transparente) : en cours, faite, en attente du guide, erreur. */
+  capture: { state: string; seconds?: number; error?: string } | null;
   dock: 'docked' | 'floating' | 'hidden';
 }
 
@@ -49,6 +51,10 @@ export class AraInsertNode extends VSTPluginNode {
   public readonly kind: AraPluginKey;
   private doc: AraDocument | null = null;
   private music: AraMusic | null = null;
+  /** VocAlign : clips de la piste guide (la lead). */
+  private guide: Pick<AraDocument, 'sources' | 'regions'> | null = null;
+  /** VocAlign (capture transparente) : état de la capture sur le pont. */
+  private capture: { state: string; seconds?: number; error?: string } | null = null;
   private wantedSig = '';
   private sentSig = '';
   private uploaded = new Set<string>();
@@ -140,16 +146,18 @@ export class AraInsertNode extends VSTPluginNode {
     if (e?.event === 'transport_request' && typeof window !== 'undefined') {
       try { window.dispatchEvent(new CustomEvent('nova:ara-transport', { detail: { kind: e.kind, value: e.value, pluginId: this.plugin.id } })); } catch { /* */ }
     }
+    if (e?.event === 'capture') { this.capture = { state: String(e.state || ''), seconds: e.seconds, error: e.error }; notifyAra(); }
     if (e?.event === 'editor_closed') { this.dockState = 'hidden'; this.dockWanted = { ...this.dockWanted, mode: 'hide', visible: false }; notifyAra(); }
   }
 
   // --- Document de la piste ----------------------------------------------------------
 
   /** Document ARA de la piste (clips, sons) et contexte musical : envoyé si quelque chose a changé. */
-  setDocument(doc: AraDocument, music: AraMusic | null) {
-    const sig = araDocSignature(doc, music);
+  setDocument(doc: AraDocument, music: AraMusic | null, guide?: Pick<AraDocument, 'sources' | 'regions'> | null) {
+    const sig = araDocSignature(doc, music) + (guide ? JSON.stringify([guide.sources.map(s => s.id), guide.regions]) : '');
     this.doc = doc;
     this.music = music;
+    this.guide = guide || null;
     if (sig === this.wantedSig) return;
     this.wantedSig = sig;
     this.scheduleSync(SYNC_DEBOUNCE_MS);
@@ -182,14 +190,14 @@ export class AraInsertNode extends VSTPluginNode {
     this.syncing = true;
     notifyAra();
     try {
-      const body = { sources: doc.sources, regions: doc.regions, track: doc.track, ...(this.music || {}) };
+      const body = { sources: doc.sources, regions: doc.regions, track: doc.track, ...(this.music || {}), ...(this.guide ? { guide: this.guide } : {}) };
       let r = await novaBridge.araInsertDoc(slotId, body);
       if (!r.applied && r.missing?.length) {
         for (const id of r.missing) {
           const b = audioBufferRegistry.get(id);
           if (!b) throw new Error('Son du clip introuvable : rouvre le projet');
           const channels = Array.from({ length: Math.min(2, b.numberOfChannels) }, (_, c) => b.getChannelData(c));
-          const name = doc.sources.find(s => s.id === id)?.name || 'Son';
+          const name = doc.sources.find(s => s.id === id)?.name || this.guide?.sources.find(s => s.id === id)?.name || 'Son';
           await novaBridge.araInsertSource(slotId, { id, name, sampleRate: b.sampleRate, channels });
           this.uploaded.add(id);
         }
@@ -295,7 +303,7 @@ export class AraInsertNode extends VSTPluginNode {
   getAraInfo(): AraInsertInfo {
     return {
       pluginId: this.plugin.id, kind: this.kind, docVersion: this.docVersion, regions: this.doc?.regions.length || 0,
-      syncing: this.syncing || !!this.syncTimer, syncError: this.syncError, sources: this.uploaded.size, dock: this.dockState,
+      syncing: this.syncing || !!this.syncTimer, syncError: this.syncError, sources: this.uploaded.size, dock: this.dockState, capture: this.capture,
     };
   }
 

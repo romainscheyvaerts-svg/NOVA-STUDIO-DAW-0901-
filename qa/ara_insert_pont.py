@@ -245,8 +245,96 @@ async def scenario(rep):
         nova.task.cancel()
 
 
+VA = r"C:\Program Files\Common Files\VST3\VocAlign6Standard.vst3"
+DUB = Path(r"D:\1 WORK\CONTENU\nova-ara\vocalign\double_decale.wav")
+
+
+def resample(x, sr0):
+    if sr0 == SR:
+        return x.astype(np.float32)
+    t = np.arange(int(len(x) * SR / sr0)) / SR
+    return np.interp(t, np.arange(len(x)) / sr0, x).astype(np.float32)
+
+
+def envelope(y, hop=0.005):
+    h = int(hop * SR)
+    n = len(y) // h
+    e = np.sqrt((y[: n * h].reshape(n, h) ** 2).mean(1))
+    return np.log10(e + 1e-4)
+
+
+def local_lag(g, d, win=0.5, maxlag=0.12, hop=0.005):
+    """Retard local guide ↔ double sur l'ENVELOPPE (fenêtres de 0,5 s), comme mesure_calage.py."""
+    eg, ed = envelope(g, hop), envelope(d, hop)
+    W, L = int(win / hop), int(maxlag / hop)
+    lags = []
+    for s in range(L, len(eg) - W - L, W // 2):
+        a = eg[s:s + W] - eg[s:s + W].mean()
+        if a.std() < 0.15:
+            continue
+        cs = [float(np.dot(a, ed[s + l:s + l + W] - ed[s + l:s + l + W].mean())) for l in range(-L, L + 1)]
+        lags.append((int(np.argmax(cs)) - L) * hop * 1000)
+    lags = np.abs(np.array(lags))
+    return {"fenetres": int(len(lags)), "moyen_abs_ms": round(float(lags.mean()), 1), "max_abs_ms": round(float(lags.max()), 1)} if len(lags) else {}
+
+
+async def scenario_vocalign(rep):
+    """VocAlign en insert sur la piste du double, guide = la lead (capture transparente)."""
+    import websockets
+    async with websockets.connect(f"ws://127.0.0.1:{PORT}", max_size=1 << 30) as ws:
+        nova = Nova(ws)
+        slot = "ara-test-double"
+        ld = await nova.req("LOAD_PLUGIN", slot_id=slot, path=VA, sample_rate=SR, ara="vocalign")
+        rep["load"] = {k: ld.get(k) for k in ("success", "name", "latency_samples", "ara", "error")}
+        lead, sr0 = read_wav(VOICE)
+        dub, sr1 = read_wav(DUB)
+        lead, dub = resample(lead[:, 0], sr0), resample(dub[:, 0], sr1)
+        for sid, a in (("buf-lead", lead), ("buf-double", dub)):
+            await nova.req("ARA_INSERT_SOURCE", binary=True, frame_audio=a, slot_id=slot, id=sid, name=sid, sample_rate=SR, nch=1, nframes=len(a))
+        start = 2.0
+        r = await nova.req("ARA_INSERT_DOC", slot_id=slot, sources=[{"id": "buf-double", "name": "Double"}],
+                           regions=[{"id": "c-dbl", "source": "buf-double", "name": "Double", "offset": 0, "start": start, "duration": len(dub) / SR}],
+                           track={"name": "Double"}, bpm=95,
+                           guide={"sources": [{"id": "buf-lead", "name": "Lead"}],
+                                  "regions": [{"id": "c-lead", "source": "buf-lead", "name": "Lead", "offset": 0, "start": start, "duration": len(lead) / SR}]})
+        rep["doc"] = {k: r.get(k) for k in ("applied", "capture", "missing")}
+        # Avant la fin de la capture : la piste joue son double tel quel (le son reçu de NOVA).
+        t0 = time.time()
+        st = {}
+        while time.time() - t0 < 300:
+            st = await nova.req("ARA_INSERT_CAPTURE", slot_id=slot)
+            if st.get("state") in ("done", "error"):
+                break
+            await asyncio.sleep(1)
+        rep["capture"] = {k: st.get(k) for k in ("state", "error", "seconds", "aligned_s", "aligned_start_s")}
+        rep["capture_attente_s"] = round(time.time() - t0, 1)
+        end = start + len(dub) / SR + 0.5
+        y = await nova.play(slot, 0, end)
+        a, b = int(start * SR), int(start * SR) + len(lead)
+        guide = np.zeros(y.shape[1], np.float32)
+        guide[a:min(b, len(guide))] = lead[: min(b, len(guide)) - a]
+        dub_on_tl = np.zeros(y.shape[1], np.float32)
+        dub_on_tl[a:min(a + len(dub), len(guide))] = dub[: min(a + len(dub), len(guide)) - a]
+        rep["calage"] = {"double_avant": local_lag(guide, dub_on_tl), "double_cale_sur_la_piste": local_lag(guide, y[0])}
+        meta, data = await nova.req("ARA_INSERT_RENDER", slot_id=slot, start=0, duration=end, sample_rate=SR, timeout=600)
+        z = data[: meta["nframes"] * meta["nch"]].reshape(meta["nframes"], meta["nch"]).T
+        n = min(z.shape[1], y.shape[1])
+        rep["export_ecart_max_avec_lecture"] = float(np.max(np.abs(z[:, :n] - y[:, :n])))
+        try:
+            snap = OUT / "vocalign_insert_fenetre.png"
+            await nova.req("ARA_INSERT_SNAPSHOT", slot_id=slot, path=str(snap))
+            rep["fenetre"] = str(snap)
+        except Exception as e:
+            rep["fenetre"] = f"pas de capture : {e}"
+        await nova.req("UNLOAD_PLUGIN", slot_id=slot)
+        nova.task.cancel()
+
+
 def main():
     env = dict(os.environ, NOVA_BRIDGE_PORT=str(PORT), NOVA_ARA_HOST=str(HOST_EXE), PYTHONIOENCODING="utf-8")
+    if "vocalign" in sys.argv[1:]:
+        global scenario
+        scenario = scenario_vocalign
     log = open(OUT / f"pont-{PORT}.log", "w", encoding="utf-8")
     p = subprocess.Popen([str(BRIDGE_PY), "nova_bridge_server.py"], cwd=str(ROOT / "bridge-python"), env=env,
                          stdout=log, stderr=subprocess.STDOUT, creationflags=0x08000000)
@@ -262,7 +350,7 @@ def main():
         asyncio.run(scenario(rep))
     finally:
         subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True, creationflags=0x08000000)
-        (OUT / "ara_insert_pont.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+        (OUT / ("ara_insert_vocalign.json" if "vocalign" in sys.argv[1:] else "ara_insert_pont.json")).write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
         print(json.dumps(rep, ensure_ascii=False, indent=1, default=str)[:8000])
 
 

@@ -126,6 +126,21 @@ class AraInsertSlot:
         self.auto_applied = 0
         self.auto_skipped = 0
         self.key_blocks = 0
+        # VocAlign : l'édition installée (VST3 « VocAlign 6 Standard VST ») n'aligne pas par ARA
+        # (fabrique ARA présente, mais sa fenêtre reste en « Capture » : l'ARA de VocAlign passe par
+        # la variante ARA / AAX). Mode capture transparent : le double (la piste) et le guide (la
+        # lead) sont capturés tout seuls, puis la piste joue le double calé à sa place.
+        # NOVA_VOCALIGN_ARA=1 : essayer l'ARA (variante ARA de VocAlign Pro / Ultra / Project).
+        self.capture_mode = kind == "vocalign" and os.environ.get("NOVA_VOCALIGN_ARA") != "1"
+        self.aligned: Optional[np.ndarray] = None      # (2, n) double calé, à la fréquence du slot
+        self.aligned_start = 0                           # échantillon du morceau du 1er échantillon
+        self.capture_sig = ""
+        self.capture_state = "idle"                      # idle | waiting_guide | running | done | error
+        self.capture_error: Optional[str] = None
+        self.capture_seconds = 0.0
+        self._capture_lock = threading.Lock()
+        self._capture_thread: Optional[threading.Thread] = None
+        self._capture_req: Optional[dict] = None
 
     @property
     def latency_samples(self) -> int:
@@ -135,6 +150,22 @@ class AraInsertSlot:
 
     def load(self, state_b64: Optional[str], context: Optional[dict] = None) -> bool:
         h = ara_host.AraHostProcess(on_event=self._event)
+        if self.capture_mode:
+            try:
+                info = h.call("load", plugin=self.path, sample_rate=self.sample_rate, ara=False, timeout=180)
+                # Fenêtre hors écran, sans activation : le bouton « Capture » du double y est cliqué.
+                h.call("show_editor", offscreen=True, title="VocAlign (Nova Studio)", timeout=60)
+            except Exception:
+                h.close()
+                raise
+            self.host = h
+            self.name = info.get("name") or self.name
+            self.vendor = info.get("vendor") or ""
+            self.plugin_latency = 0
+            with self.lock:
+                self.plugin = h
+            self.loaded.set()
+            return False
         try:
             info = h.call("load", plugin=self.path, sample_rate=self.sample_rate, timeout=180)
             so = h.call("stream_open", sample_rate=self.sample_rate, max_block=MAX_BLOCK, timeout=60)
@@ -210,6 +241,8 @@ class AraInsertSlot:
         """Bloc de la piste → sortie du plugin à la position du morceau. Transport arrêté (ou
         trame sans position) : silence (le plugin n'a rien à jouer)."""
         n = block.shape[1]
+        if self.capture_mode:
+            return self._play_aligned(block, timeline)
         if timeline is None or timeline < 0 or self._pipe is None:
             z = self._zeros.get(n)
             if z is None:
@@ -234,9 +267,155 @@ class AraInsertSlot:
         out = np.frombuffer(data, "<f4").reshape(nc, nn)
         return np.array(out[:2], dtype=np.float32, copy=True)
 
+    def _play_aligned(self, block: np.ndarray, timeline: Optional[float]) -> np.ndarray:
+        """VocAlign (capture) : le double calé, à la position du morceau ; tant qu'il n'est pas
+        prêt, la piste joue ses clips tels quels (le son reçu de NOVA)."""
+        n = block.shape[1]
+        a = self.aligned
+        if timeline is None or timeline < 0:
+            return np.zeros((2, n), np.float32)
+        if a is None:
+            return self.dry_block(block)
+        out = np.zeros((2, n), np.float32)
+        i0 = int(round(timeline)) - self.aligned_start
+        lo, hi = max(0, i0), min(a.shape[1], i0 + n)
+        if hi > lo:
+            out[:, lo - i0:hi - i0] = a[:, lo:hi]
+        self.blocks += 1
+        self.rendered_blocks += 1
+        return out
+
+    def aligned_range(self, start: float, duration: float, sr: int) -> np.ndarray:
+        """VocAlign (capture) : plage du morceau du double calé (export, gel)."""
+        n = int(round(duration * sr))
+        out = np.zeros((2, n), np.float32)
+        a = self.aligned
+        if a is None:
+            return out
+        if sr != self.sample_rate:
+            a = _resample(a, self.sample_rate, sr)
+        i0 = int(round(start * sr)) - int(round(self.aligned_start * sr / self.sample_rate))
+        lo, hi = max(0, i0), min(a.shape[1], i0 + n)
+        if hi > lo:
+            out[:, lo - i0:hi - i0] = a[:, lo:hi]
+        return out
+
+    # --- VocAlign : capture transparente ------------------------------------------------
+
+    def _mix(self, regions: List[dict], w0: int, n: int) -> np.ndarray:
+        """Clips (régions) posés sur la fenêtre [w0, w0 + n[ du morceau, en mono."""
+        out = np.zeros(n, np.float32)
+        cache: Dict[str, np.ndarray] = {}
+        for r in regions:
+            sid = str(r.get("source"))
+            if sid not in cache:
+                a, sr = stems_service.read_wav(self.sources[sid])
+                a = a.mean(axis=0).astype(np.float32)
+                if sr != self.sample_rate:
+                    a = _resample(a[None, :], sr, self.sample_rate)[0]
+                cache[sid] = a
+            a = cache[sid]
+            off = int(round(float(r.get("offset") or 0) * self.sample_rate))
+            st = int(round(float(r.get("start") or 0) * self.sample_rate)) - w0
+            ln = int(round(float(r.get("duration") or 0) * self.sample_rate))
+            ln = min(ln, a.shape[0] - off)
+            lo, hi = max(0, st), min(n, st + ln)
+            if hi > lo:
+                out[lo:hi] += a[off + (lo - st): off + (hi - st)]
+        return out
+
+    def _sync_capture(self, req: dict) -> dict:
+        guide = req.get("guide") or {}
+        srcs = list(req.get("sources") or []) + list(guide.get("sources") or [])
+        missing = sorted({str(s.get("id")) for s in srcs if str(s.get("id")) not in self.sources})
+        if missing:
+            return {"success": True, "applied": False, "missing": missing}
+        regions = req.get("regions") or []
+        gregions = guide.get("regions") or []
+        self.doc_version += 1
+        if not regions:
+            self.aligned, self.capture_state = None, "idle"
+            return {"success": True, "applied": True, "version": self.doc_version, "capture": self.capture_state}
+        if not gregions:
+            self.aligned, self.capture_state = None, "waiting_guide"
+            self._event({"event": "capture", "state": self.capture_state})
+            return {"success": True, "applied": True, "version": self.doc_version, "capture": self.capture_state}
+        sig = json.dumps([regions, gregions], sort_keys=True)
+        if sig != self.capture_sig:
+            self.capture_sig = sig
+            self._capture_req = {"regions": regions, "guide": gregions, "sig": sig}
+            self.capture_state = "running"
+            self._start_capture()
+        return {"success": True, "applied": True, "version": self.doc_version, "capture": self.capture_state}
+
+    def _start_capture(self):
+        with self._capture_lock:
+            if self._capture_thread is not None and self._capture_thread.is_alive():
+                return   # la capture en cours reprendra la dernière demande à la fin
+            self._capture_thread = threading.Thread(target=self._capture_loop, name="vocalign-capture", daemon=True)
+            self._capture_thread.start()
+
+    def _capture_loop(self):
+        while True:
+            job = self._capture_req
+            if job is None:
+                return
+            self._capture_req = None
+            try:
+                self._capture_once(job)
+            except Exception as e:
+                self.capture_state, self.capture_error = "error", str(e)
+                self._event({"event": "capture", "state": "error", "error": str(e)})
+                logger.error(f"VocAlign (capture) : {e}")
+            if self._capture_req is None:
+                return
+
+    def _capture_once(self, job: dict):
+        h = self.host
+        if h is None:
+            return
+        import ara_service
+        sr = self.sample_rate
+        allr = job["regions"] + job["guide"]
+        w0 = max(0, int(round((min(float(r["start"]) for r in allr) - 0.25) * sr)))
+        w1 = int(round((max(float(r["start"]) + float(r["duration"]) for r in allr) + 0.25) * sr))
+        n = max(1, w1 - w0)
+        dub = self._mix(job["regions"], w0, n)
+        gd = self._mix(job["guide"], w0, n)
+        dp, gp, out = self.dir / "capture_double.wav", self.dir / "capture_guide.wav", self.dir / "capture_cale.wav"
+        stems_service.write_wav_float(dp, dub[None, :], sr)
+        stems_service.write_wav_float(gp, gd[None, :], sr)
+        self.capture_state, self.capture_error = "running", None
+        self._event({"event": "capture", "state": "running", "seconds": n / sr})
+        t = time.time()
+        kw = dict(dub=str(dp), guide=str(gp), out=str(out), passes=2, wait_s=4, realtime=True, keep=False,
+                  clicks=[{"click": ara_service.VOCALIGN_DUB_CAPTURE}], target_index=1, timeout=120 + 3 * n / sr)
+        try:
+            r = h.call("capture_align", **kw)
+        except ara_host.AraHostError as e:
+            if "fenêtre" not in str(e).lower():
+                raise
+            # Panneau fermé (fenêtre ancrée masquée) : capture dans une fenêtre hors écran.
+            h.call("editor", mode="hide", release=True, timeout=30)
+            h.call("show_editor", offscreen=True, title="VocAlign (Nova Studio)", timeout=60)
+            r = h.call("capture_align", **kw)
+        a, asr = stems_service.read_wav(str(out))
+        if asr != sr:
+            a = _resample(a, asr, sr)
+        st = a if a.shape[0] >= 2 else np.vstack([a, a])
+        self.aligned_start = w0
+        self.aligned = np.ascontiguousarray(st[:2], dtype=np.float32)
+        self.capture_seconds = round(time.time() - t, 1)
+        self.capture_state = "done" if self._capture_req is None else "running"
+        self._event({"event": "capture", "state": "done", "seconds": self.capture_seconds, "sidechain": r.get("sidechain"),
+                     "peak": r.get("peak")})
+        logger.info(f"🎙️ VocAlign (insert) : double calé en {self.capture_seconds:.1f} s ({n / sr:.1f} s de son)")
+
     # --- état : archive ARA (retouches) + état VST3 (réglages hors ARA) ------------------
 
     def get_state(self) -> Optional[str]:
+        if self.capture_mode:
+            return None
         h = self.host
         if h is None:
             return pack_state(self.pending_archive, self.pending_vst)
@@ -299,6 +478,8 @@ class AraInsertSlot:
         h = self.host
         if h is None:
             raise ara_host.AraHostError("Insert ARA pas encore chargé")
+        if self.capture_mode:
+            return self._sync_capture(req)
         srcs = req.get("sources") or []
         missing = [str(s.get("id")) for s in srcs if str(s.get("id")) not in self.sources]
         if missing:
@@ -349,6 +530,16 @@ def unpack_state(state: Optional[str]):
         except Exception:
             return None, None
     return state, None
+
+
+def _resample(a: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
+    """Rééchantillonnage linéaire (sons d'une autre fréquence que la session)."""
+    if sr_in == sr_out or a.shape[-1] == 0:
+        return a
+    n = int(round(a.shape[-1] * sr_out / sr_in))
+    x = np.arange(n) * (sr_in / sr_out)
+    src = np.arange(a.shape[-1])
+    return np.stack([np.interp(x, src, ch).astype(np.float32) for ch in a])
 
 
 def _read_exact(f, n: int) -> bytes:
@@ -479,6 +670,14 @@ def install(Server, build_render_frame, parse_render_frame):
         self._reply(ws, req, {"success": True, **{k: v for k, v in res.items() if k not in ("id", "ok")},
                               "pont_blocs": slot.blocks, "pont_blocs_rendus": slot.rendered_blocks})
 
+    async def _a_ara_insert_capture(self, ws, req):
+        """VocAlign (capture) : état de la capture transparente."""
+        slot = _insert(self, req)
+        self._reply(ws, req, {"success": True, "capture_mode": slot.capture_mode, "state": slot.capture_state,
+                              "error": slot.capture_error, "seconds": slot.capture_seconds,
+                              "aligned_s": (slot.aligned.shape[1] / slot.sample_rate) if slot.aligned is not None else 0,
+                              "aligned_start_s": slot.aligned_start / slot.sample_rate})
+
     async def _a_ara_insert_editor(self, ws, req):
         slot = _insert(self, req)
         kw = {k: req[k] for k in ("mode", "parent", "x", "y", "w", "h", "visible", "release") if k in req}
@@ -523,6 +722,16 @@ def install(Server, build_render_frame, parse_render_frame):
             sr = int(meta.get("sample_rate") or slot.sample_rate)
             start = float(meta.get("start") or 0.0)
             dur = float(meta.get("duration") or 0.0)
+            if slot.capture_mode:
+                # VocAlign (capture) : le double calé ; on attend la capture en cours.
+                t0 = time.time()
+                while slot.capture_state == "running" and time.time() - t0 < 600:
+                    await asyncio.sleep(0.2)
+                a = slot.aligned_range(start, dur, sr)
+                head = {"action": "ARA_INSERT_RENDER", "req_id": req_id, "success": True, "nch": 2, "nframes": int(a.shape[1]),
+                        "sample_rate": sr, "latency": 0, "capture": slot.capture_state}
+                await self._send(ws, build_render_frame(head, a.T.reshape(-1)))
+                return
             out = str(slot.dir / f"rendu_{int(time.time() * 1000)}.wav")
             t = time.time()
             res = await self.loop.run_in_executor(self.render_pool, lambda: slot.host.call(
@@ -542,7 +751,7 @@ def install(Server, build_render_frame, parse_render_frame):
                                                      "error": str(e), "nch": 0, "nframes": 0}, None))
 
     for fn in (_a_load_plugin, _a_show_editor, _a_close_editor, _a_ara_insert_doc, _a_ara_insert_state, _a_ara_insert_editor,
-               _a_ara_insert_select, _a_ara_insert_params, _a_ara_insert_param, _a_ara_insert_snapshot, _a_ara_insert_render):
+               _a_ara_insert_select, _a_ara_insert_capture, _a_ara_insert_params, _a_ara_insert_param, _a_ara_insert_snapshot, _a_ara_insert_render):
         setattr(Server, fn.__name__, fn)
     Server._ara_insert_source = _ara_insert_source
     Server._ara_insert_render_frame = _ara_insert_render
