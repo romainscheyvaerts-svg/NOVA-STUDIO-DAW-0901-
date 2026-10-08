@@ -16,6 +16,8 @@ import { sendColor, sendHelp, sendLabel, trackDisplayName } from '../utils/sendL
 import InsertListPopover from './InsertListPopover';
 import { canvasTheme } from '../utils/canvasTheme';
 import { MIXER_INSERT_ROWS, splitInserts } from '../utils/insertRows';
+import { FloatingMenu, handlePluginModifierClick, InactiveStripVeil, MixerStructureButtons, pluginStateClass, pluginStateHelp, pluginStateMenuItems, SendSlotsPopover, SendViewPicker, SendViewStrip, TrackIOSelectors, useLongPress, VcaStrip } from './TrackStructure';
+import { sendSlots, shownTrackIds } from '../utils/trackStructure';
 
 // Track Group Colors (inspired by Pro Tools)
 const GROUP_COLORS = [
@@ -87,8 +89,23 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], on
   );
 };
 
+/** Bouton « Envois a-j » : les 10 envois de la piste (niveau, pan, mute, pré / post). */
+const SendsButton: React.FC<{ track: Track, allTracks: Track[] }> = ({ track, allTracks }) => {
+    const [anchor, setAnchor] = useState<DOMRect | null>(null);
+    const used = sendSlots(track.sends).filter(Boolean).length;
+    return (
+        <>
+            <button type="button" data-testid={`sends-open-${track.id}`} onClick={(e) => setAnchor((e.currentTarget as HTMLElement).getBoundingClientRect())}
+                title="Envois a à j (Pro Tools : 10 envois par piste, avec pan et mute)"
+                className="h-6 [@media(pointer:coarse)]:h-8 rounded border border-white/5 bg-black/60 px-2 flex items-center text-[8px] font-black text-slate-500 hover:border-white/20">
+                <span className="mr-2">Envois</span><span className="flex-1 text-left font-mono text-cyan-300">a-j · {used}/10</span><i className="fas fa-caret-down text-[8px] text-slate-600" />
+            </button>
+            {anchor && <SendSlotsPopover track={track} all={allTracks} anchor={anchor} onClose={() => setAnchor(null)} />}
+        </>
+    );
+};
+
 const IOSection: React.FC<{ track: Track, allTracks: Track[], onUpdate: (t: Track) => void }> = ({ track, allTracks, onUpdate }) => {
-    const validDestinations = getValidDestinations(track.id, allTracks);
     
     return (
         <div className="flex flex-col space-y-1 mb-2 px-1">
@@ -113,25 +130,9 @@ const IOSection: React.FC<{ track: Track, allTracks: Track[], onUpdate: (t: Trac
                 </div>
             )}
 
-            {/* OUTPUT SELECTOR */}
-            <div className="relative group/io">
-                <div className="h-6 bg-black/60 [[data-theme=light]_&]:bg-nv-surface rounded flex items-center px-2 border border-white/5 cursor-pointer hover:border-white/20">
-                    <span className="text-[8px] font-black text-slate-500 mr-2" title="Sortie : où part le son de la tranche (master ou un bus)">Sortie</span>
-                    <span className="text-[8px] font-mono text-amber-400 truncate flex-1">
-                        {getRouteLabel(track.outputTrackId, allTracks)}
-                    </span>
-                    <i className="fas fa-caret-down text-[8px] text-slate-600"></i>
-                </div>
-                <select 
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                    value={track.outputTrackId || 'master'}
-                    onChange={(e) => onUpdate({ ...track, outputTrackId: e.target.value })}
-                >
-                    {validDestinations.map(dest => (
-                        <option key={dest.id} value={dest.id}>{dest.id === 'master' ? 'Master (sortie)' : trackDisplayName(dest, allTracks)}</option>
-                    ))}
-                </select>
-            </div>
+            {/* ENTRÉE / SORTIE façon Pro Tools : master, bus nommés, pistes (utils/trackStructure). */}
+            <TrackIOSelectors track={track} allTracks={allTracks} />
+            <SendsButton track={track} allTracks={allTracks} />
         </div>
     );
 };
@@ -150,9 +151,14 @@ const ChannelStrip: React.FC<{
   onReorderPlugins?: (trackId: string, fromIndex: number, toIndex: number) => void,
   /** Ouvrir tout de suite le renommage (nouveau bus, audit G20). */
   autoRename?: boolean,
-  onRenameDone?: () => void
-}> = ({ track, allTracks, onUpdate, isMaster = false, onOpenPlugin, onToggleBypass, onRemovePlugin, onDropPlugin, onRequestAddPlugin, onCopyPluginToTrack, onReorderPlugins, autoRename, onRenameDone }) => {
+  onRenameDone?: () => void,
+  /** Send View (Pro Tools) : envoi a-j affiché en grand (null : vue normale). */
+  sendViewSlot?: number | null
+}> = ({ track, allTracks, onUpdate, isMaster = false, onOpenPlugin, onToggleBypass, onRemovePlugin, onDropPlugin, onRequestAddPlugin, onCopyPluginToTrack, onReorderPlugins, autoRename, onRenameDone, sendViewSlot = null }) => {
   const [isDragOver, setIsDragOver] = useState(false);
+  // Menu d'un effet (clic droit, appui long) : actif / bypass / inactif.
+  const [fxMenu, setFxMenu] = useState<{ x: number; y: number; p: PluginInstance } | null>(null);
+  const { consumed: fxConsumed, ...fxLpHandlers } = useLongPress((x, y) => { const id = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest('[data-fx-id]')?.getAttribute('data-fx-id'); const p = track.plugins.find(pl => pl.id === id); if (p) setFxMenu({ x, y, p }); });
   // Renommer la tranche : double-clic sur le nom (G12), ou tout de suite pour un nouveau bus.
   const [renaming, setRenaming] = useState(!!autoRename);
   useEffect(() => { if (autoRename) setRenaming(true); }, [autoRename]);
@@ -224,10 +230,15 @@ const ChannelStrip: React.FC<{
       onDragOver={handleDragOver}
       onDragLeave={() => setIsDragOver(false)}
       onDrop={handleDrop}
-      className={`flex-shrink-0 bg-[#0c0e12] border-r border-white/5 flex flex-col h-full transition-all touch-manipulation ${isMaster ? 'w-64 border-l-2 border-cyan-500/20' : track.type === TrackType.BUS ? 'w-48 bg-[#14161a]' : 'w-44'} ${isDragOver ? 'bg-cyan-500/20' : ''}`}
+      data-inactive={track.isInactive ? '1' : undefined}
+      className={`relative flex-shrink-0 bg-[#0c0e12] border-r border-white/5 flex flex-col h-full transition-all touch-manipulation ${isMaster ? 'w-64 border-l-2 border-cyan-500/20' : track.type === TrackType.BUS ? 'w-48 bg-[#14161a]' : 'w-44'} ${isDragOver ? 'bg-cyan-500/20' : ''}`}
     >
       
-      {!isMaster && (track.type === TrackType.AUDIO || track.type === TrackType.SAMPLER) && (
+      {!isMaster && <InactiveStripVeil track={track} all={allTracks} />}
+      {!isMaster && sendViewSlot !== null && (
+        <div className="h-[104px] shrink-0 bg-cyan-500/[0.04] border-b border-white/[0.04] p-2 overflow-hidden"><SendViewStrip track={track} all={allTracks} slot={sendViewSlot} /></div>
+      )}
+      {!isMaster && sendViewSlot === null && (track.type === TrackType.AUDIO || track.type === TrackType.SAMPLER) && (
         <div className="h-[104px] shrink-0 bg-black/20 border-b border-white/[0.04] p-2 grid grid-cols-3 gap-2 items-start overflow-hidden">
           {track.sends.map(s => <SendKnob key={s.id} send={s} track={track} allTracks={allTracks} onUpdate={onUpdate} />)}
         </div>
@@ -247,6 +258,10 @@ const ChannelStrip: React.FC<{
           <div 
             key={p.id} 
             className="relative group/fxslot w-full h-5 [@media(pointer:coarse)]:h-8 fx-slot"
+            data-fx-id={p.id}
+            data-fx-state={p.isInactive ? 'inactive' : p.isEnabled ? 'active' : 'bypass'}
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setFxMenu({ x: e.clientX, y: e.clientY, p }); }}
+            {...fxLpHandlers}
             draggable
             onDragStart={(e) => {
               e.dataTransfer.setData('pluginData', JSON.stringify(p));
@@ -287,10 +302,11 @@ const ChannelStrip: React.FC<{
               }
             }}
           >
-            <button 
-              onClick={(e) => handleFXClick(e, p)}
+            <button
+              onClick={(e) => { if (fxConsumed()) return; if (handlePluginModifierClick(e, track.id, p, () => onToggleBypass?.(track.id, p.id))) return; handleFXClick(e, p); }}
+              title={pluginStateHelp(p)}
               aria-label={`Ouvrir ${pluginDisplayName(p)} (${track.name})`}
-              className={`w-full h-full bg-black/40 [[data-theme=light]_&]:bg-nv-surface rounded border border-white/5 text-[10px] font-black hover:border-cyan-500/40 transition-all px-1.5 text-left truncate flex items-center pr-12 cursor-grab active:cursor-grabbing ${p.isEnabled ? 'text-cyan-400' : 'text-slate-600'}`}
+              className={`w-full h-full bg-black/40 [[data-theme=light]_&]:bg-nv-surface rounded border border-white/5 text-[10px] font-black hover:border-cyan-500/40 transition-all px-1.5 text-left truncate flex items-center pr-12 cursor-grab active:cursor-grabbing ${p.isEnabled && !p.isInactive ? 'text-cyan-400' : 'text-slate-600'} ${pluginStateClass(p)}`}
             >
                <i className="fas fa-grip-vertical text-slate-700 mr-1.5 text-[8px]"></i>
                <PluginName plugin={p} className="font-semibold" />
@@ -338,6 +354,10 @@ const ChannelStrip: React.FC<{
           >
             <i className="fas fa-plus text-[8px]"></i>{track.plugins.length === 0 && <span>Effet</span>}
           </button>
+        )}
+        {fxMenu && (
+          <FloatingMenu x={fxMenu.x} y={fxMenu.y} title={fxMenu.p.name || fxMenu.p.type} onClose={() => setFxMenu(null)}
+            items={pluginStateMenuItems(track.id, fxMenu.p, () => onOpenPlugin?.(track.id, fxMenu.p))} />
         )}
         {insertList && (
           <InsertListPopover anchor={insertList} title={`Effets de ${track.name}`} plugins={track.plugins}
@@ -548,16 +568,22 @@ const MixerView: React.FC<{
   trackGroups?: TrackGroup[],
   onCreateGroup?: (trackIds: string[]) => void,
   onUpdateGroup?: (group: TrackGroup) => void,
-  onDeleteGroup?: (groupId: string) => void
-}> = ({ 
-  tracks, onUpdateTrack, onOpenPlugin, onToggleBypass, onRemovePlugin, 
+  onDeleteGroup?: (groupId: string) => void,
+  /** Send View (Pro Tools) : envoi a-j affiché en grand dans chaque tranche (null : vue normale). */
+  sendViewSlot?: number | null
+}> = ({
+  tracks, onUpdateTrack, onOpenPlugin, onToggleBypass, onRemovePlugin,
   onDropPluginOnTrack, onRequestAddPlugin, onAddBus,
   onCopyPluginToTrack, onReorderPlugins,
-  trackGroups = [], onCreateGroup, onUpdateGroup, onDeleteGroup
+  trackGroups = [], onCreateGroup, onUpdateGroup, onDeleteGroup, sendViewSlot = null
 }) => {
-  const audioTracks = tracks.filter(t => t.type === TrackType.AUDIO || t.type === TrackType.SAMPLER || t.type === TrackType.MIDI);
-  const busTracks = tracks.filter(t => t.type === TrackType.BUS && t.id !== 'master');
-  const sendTracks = tracks.filter(t => t.type === TrackType.SEND);
+  // Pistes masquées : hors de la console (comme Pro Tools) ; dossiers simples sans tranche ; VCA à part.
+  // (masquée elle-même, ou dans un dossier masqué / replié).
+  const shown = shownTrackIds(tracks);
+  const audioTracks = tracks.filter(t => shown.has(t.id) && (t.type === TrackType.AUDIO || t.type === TrackType.SAMPLER || t.type === TrackType.MIDI));
+  const busTracks = tracks.filter(t => t.type === TrackType.BUS && t.id !== 'master' && shown.has(t.id) && !t.isVca && t.folder?.kind !== 'basic');
+  const sendTracks = tracks.filter(t => t.type === TrackType.SEND && shown.has(t.id));
+  const vcaTracks = tracks.filter(t => t.isVca && shown.has(t.id));
   const masterTrack = tracks.find(t => t.id === 'master');
 
   // Get selected tracks for grouping
@@ -663,17 +689,20 @@ const MixerView: React.FC<{
               onRequestAddPlugin={onRequestAddPlugin} 
               onCopyPluginToTrack={onCopyPluginToTrack}
               onReorderPlugins={onReorderPlugins}
+              sendViewSlot={sendViewSlot}
             />
           </div>
         );
       })}
       
       {/* ADD BUS / CREATE GROUP Section */}
-      <div className="flex flex-col items-center justify-center px-2 border-r border-white/5 min-w-[60px] space-y-3">
+      <div className="flex flex-col items-center justify-center px-2 border-r border-white/5 min-w-[88px] space-y-2 overflow-y-auto">
          <button onClick={() => { busWanted.current = true; onAddBus?.(); }} className="w-12 h-12 rounded-2xl border border-dashed border-amber-500/30 text-amber-500 hover:bg-amber-500/10 flex items-center justify-center transition-all group" title="Ajouter un bus (piste de regroupement : plusieurs pistes y passent pour être traitées ensemble)" aria-label="Ajouter un bus">
             <i className="fas fa-plus group-hover:scale-125 transition-transform"></i>
          </button>
          <span className="text-[10px] font-bold text-amber-500 whitespace-nowrap">+ Bus</span>
+         <MixerStructureButtons tracks={tracks} />
+         <SendViewPicker slot={sendViewSlot} />
          
          {/* Create Group Button (inspired by Pro Tools) */}
          {onCreateGroup && (
@@ -748,9 +777,11 @@ const MixerView: React.FC<{
          )}
       </div>
 
-      {busTracks.map(t => <div key={t.id} data-strip-id={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} autoRename={renameBusId === t.id} onRenameDone={() => setRenameBusId(null)} onUpdate={(updatedTrack) => onUpdateTrack(updatedTrack)} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>)}
+      {busTracks.map(t => <div key={t.id} data-strip-id={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} autoRename={renameBusId === t.id} onRenameDone={() => setRenameBusId(null)} onUpdate={(updatedTrack) => onUpdateTrack(updatedTrack)} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} sendViewSlot={sendViewSlot} /></div>)}
       <div className="w-4 bg-black/30 border-r border-white/5" />
-      {sendTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>)}
+      {sendTracks.map(t => <div key={t.id} className="snap-start"><ChannelStrip track={t} allTracks={tracks} onUpdate={onUpdateTrack} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} sendViewSlot={sendViewSlot} /></div>)}
+      {vcaTracks.length > 0 && <div className="w-2 bg-black/30 border-r border-white/5" />}
+      {vcaTracks.map(v => <div key={v.id} className="snap-start"><VcaStrip vca={v} all={tracks} /></div>)}
       <div className="w-10 shrink-0 bg-black/50 border-r border-white/5" />
       {/* Master toujours visible à droite (G20), comme Logic / Pro Tools. */}
       <div className="snap-start sticky right-0 z-20 shrink-0 shadow-[-16px_0_24px_rgba(0,0,0,0.65)] [[data-theme=light]_&]:shadow-[-10px_0_18px_rgba(15,23,42,0.08)]" data-strip-id="master"><ChannelStrip track={masterTrack || { id: 'master', name: 'MASTER BUS', type: TrackType.BUS, color: '#00f2ff', isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1.0, pan: 0, outputTrackId: '', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0 }} allTracks={tracks} onUpdate={onUpdateTrack} isMaster={true} onOpenPlugin={onOpenPlugin} onToggleBypass={onToggleBypass} onRemovePlugin={onRemovePlugin} onDropPlugin={onDropPluginOnTrack} onRequestAddPlugin={onRequestAddPlugin} onCopyPluginToTrack={onCopyPluginToTrack} onReorderPlugins={onReorderPlugins} /></div>

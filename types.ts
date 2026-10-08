@@ -117,9 +117,21 @@ export interface PluginInstance {
   id: string;
   name: string;
   type: PluginType;
+  /**
+   * BYPASS (Pro Tools : Ctrl+clic) : faux = le son passe sans traitement, mais
+   * l'effet reste chargé et sa latence reste compensée (alignement gardé).
+   */
   isEnabled: boolean;
   params: Record<string, any>;
   latency: number; 
+  /**
+   * INACTIF (Pro Tools « Make Inactive », Ctrl+Démarrer+clic ; dans NOVA
+   * Ctrl+Alt+clic ou le menu de l'effet) : l'effet est retiré du graphe audio,
+   * ne consomme rien et n'a plus de latence (PDC recalculée). Ses réglages
+   * (params, stateB64 d'un VST) sont gardés pour le recharger à l'identique.
+   * Absent : actif (anciens projets). Indépendant du bypass. Voir utils/trackStructure.
+   */
+  isInactive?: boolean;
 }
 
 export interface TrackSend {
@@ -131,11 +143,36 @@ export interface TrackSend {
    * avant le fader et le pan de la piste. Absent : post-fader (comme avant).
    */
   preFader?: boolean;
+  /**
+   * Pan propre de l'envoi (-1 … 1), Pro Tools « FMP » éteint. Absent : l'envoi
+   * suit le pan de la piste (comme avant).
+   */
+  pan?: number;
+  /** Mute de l'envoi (Pro Tools) : coupé mais routé (PDC et câblage gardés). */
+  isMuted?: boolean;
+  /** Position de l'envoi dans la piste : 0 = a … 9 = j (Pro Tools : 10 envois). Absent : ordre du tableau. */
+  slot?: number;
+}
+
+/** Bus interne nommé (I/O Setup de Pro Tools) : « LEAD A », « VOX ALL », « RV »… */
+export interface NamedBus {
+  id: string;
+  name: string;
+  /** Mono (1) ou stéréo (2, par défaut). Informatif. */
+  channels?: 1 | 2;
+}
+
+/** Dossier de pistes (Pro Tools 2020.3+). */
+export interface TrackFolder {
+  /** routing = « Routing Folder » (c'est un bus : les enfants y sont routés) ; basic = « Basic Folder » (range seulement). */
+  kind: 'routing' | 'basic';
+  /** Déplié (enfants visibles). Absent : déplié. */
+  isOpen?: boolean;
 }
 
 export interface MidiNote {
   id: string;
-  pitch: number; 
+  pitch: number;
   start: number; 
   duration: number; 
   velocity: number; 
@@ -634,6 +671,28 @@ export interface Track {
    * ancienne version l'ignore et joue simplement le comp. Voir utils/playlists.
    */
   takeMeta?: TakeMeta[];
+
+  // ─── Structure façon Pro Tools (utils/trackStructure.ts) ───────────────────
+  /** Piste masquée (liste des pistes de Pro Tools) : elle joue quand même si elle est active. */
+  isHidden?: boolean;
+  /** Piste inactive (Pro Tools « Make Inactive ») : aucun traitement, aucune voix, routage gardé. */
+  isInactive?: boolean;
+  /** La piste est un dossier (routage ou simple). */
+  folder?: TrackFolder;
+  /** Dossier parent (id de la piste dossier). */
+  parentFolderId?: string;
+  /** La piste est un VCA Master : pas de son, son fader pilote les membres (dB relatifs). */
+  isVca?: boolean;
+  /** VCA qui pilote cette piste (choisi à la main). */
+  vcaId?: string;
+  /** VCA : groupe dont les pistes sont membres (en plus des pistes choisies à la main). */
+  vcaGroupId?: string;
+  /** Entrée : bus interne nommé écouté par cette piste (aux / bus). */
+  inputBusId?: string;
+  /** Sortie : bus interne nommé (prioritaire sur outputTrackId, résolu vers la piste qui l'écoute). */
+  outputBusId?: string;
+  /** Bus nommés de la session (I/O Setup) : rangés sur la piste master seulement. */
+  ioBuses?: NamedBus[];
 }
 
 /** Infos d'un couloir de prise (Track.takeMeta). */

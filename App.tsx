@@ -16,6 +16,8 @@ import ViewModeSwitcher from './components/ViewModeSwitcher';
 import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
+const TrackListPanel = lazy(() => import('./components/TrackListPanel'));
+const BusPanel = lazy(() => import('./components/BusPanel'));
 const AuthScreen = lazy(() => import('./components/AuthScreen'));
 const AutomationEditorView = lazy(() => import('./components/AutomationEditorView'));
 const ShareModal = lazy(() => import('./components/ShareModal'));
@@ -99,6 +101,9 @@ import {
   normalizeInviteCode, ownerFromContent, ownerRoleOf, participantOf, peerViews, pickPeerColor, recordBlock, PeerInfo, PeerRec, TransportMsg, MAX_PARTICIPANTS,
 } from './utils/collabPeers';
 import { localCollabOutboxStore } from './utils/collabOutbox';
+import { engineView, shownTrackIds, withPluginState } from './utils/trackStructure';
+import { structureBus, StructurePanel } from './utils/structureBus';
+import { StructureTracksContext } from './components/TrackStructure';
 import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
 import RemoteIngePanel from './components/RemoteIngePanel';
@@ -845,16 +850,20 @@ function Studio() {
     if (!audioEngine.ctx) return;
     // Routage, solo et envois agissent sur les autres pistes (bus, pistes
     // rendues muettes par un solo) : dans ce cas on met tout a jour, comme avant.
-    const routing = state.tracks.map(t =>
+    // Structure Pro Tools (utils/trackStructure) : le moteur ne reçoit que les pistes
+    // jouées (actives), avec Muet / Solo de dossier, VCA et bus nommés résolus.
+    const played = engineView(state.tracks);
+    const routing = played.tracks.map(t =>
       `${t.id}>${t.outputTrackId || ''}|${t.isSolo ? 1 : 0}|${t.isFrozen ? 1 : 0}|${(t.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}:${sd.level}`).join(',')}`
-    ).join(';');
+    ).join(';') + `#${[...played.excluded].join(',')}`;
     const previous = engineTracksRef.current;
     const full = !previous || routing !== engineRoutingRef.current;
-    state.tracks.forEach(t => {
+    played.excluded.forEach(id => audioEngine.disposeTrack(id));
+    played.tracks.forEach(t => {
       if (!full && atomic.get(t.id) === t) return; // volume / pan déjà réglés directement
-      if (full || previous!.get(t.id) !== t) audioEngine.updateTrack(t, state.tracks);
+      if (full || previous!.get(t.id) !== t) audioEngine.updateTrack(t, played.tracks);
     });
-    engineTracksRef.current = new Map(state.tracks.map(t => [t.id, t]));
+    engineTracksRef.current = new Map(played.tracks.map(t => [t.id, t]));
     engineRoutingRef.current = routing;
   }, [state.tracks]); 
   useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
@@ -1011,6 +1020,8 @@ function Studio() {
   }, []);
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
+  // Téléphone (version simple) : pistes masquées, VCA et dossiers simples non affichés (menu « Pistes masquées »).
+  const mobileTracks = useMemo(() => { const shown = shownTrackIds(state.tracks); return state.tracks.filter(t => shown.has(t.id) && !t.isVca && t.folder?.kind !== 'basic'); }, [state.tracks]);
   const isMobileRef = useRef(isMobile); isMobileRef.current = isMobile;
   const activeTabRef = useRef(activeMobileTab); activeTabRef.current = activeMobileTab;
 
@@ -4041,6 +4052,29 @@ function Studio() {
   }, []);
 
   // --- Collaboration à distance (artiste, ingé son, beatmaker) -----------------------
+  // --- Structure Pro Tools (utils/trackStructure) : liste des pistes, bus nommés, Send View, états d'effets.
+  const [structurePanel, setStructurePanel] = useState<StructurePanel | null>(null);
+  const [sendViewSlot, setSendViewSlot] = useState<number | null>(null);
+  const handleSetPluginState = useCallback(async (trackId: string, pluginId: string, next: 'active' | 'bypass' | 'inactive') => {
+    // VST inactif : son état est relu sur le pont AVANT d'être déchargé (rechargé à l'identique ensuite).
+    if (next === 'inactive') {
+      const node = liveVstNodes.get(pluginId);
+      if (node) { try { await Promise.race([node.syncState(), new Promise(r => setTimeout(r, 1500))]); } catch { /* état déjà connu */ } }
+    }
+    setState(prev => ({
+      ...prev,
+      tracks: prev.tracks.map(t => (t.id !== trackId ? t : { ...t, plugins: t.plugins.map(p => (p.id === pluginId ? withPluginState(p, next) : p)) })),
+    }));
+  }, [setState]);
+  useEffect(() => structureBus.on(cmd => {
+    if (cmd.kind === 'tracks') {
+      setState(prev => { const tracks = cmd.apply(prev.tracks); return tracks === prev.tracks ? prev : { ...prev, tracks }; });
+      if (cmd.label) { setAiNotification(cmd.label); setTimeout(() => setAiNotification(null), 2500); }
+    } else if (cmd.kind === 'pluginState') void handleSetPluginState(cmd.trackId, cmd.pluginId, cmd.state);
+    else if (cmd.kind === 'panel') setStructurePanel(cmd.panel);
+    else if (cmd.kind === 'sendView') setSendViewSlot(cmd.slot);
+  }), [setState, handleSetPluginState, setAiNotification]);
+
   const COLLAB_ACTIVE_KEY = 'nova_collab_active';
   const [collabOpen, setCollabOpen] = useState(false);
   const collabOpenRef = useRef(false);
@@ -6724,6 +6758,7 @@ function Studio() {
           {!isMobile && (
             <>
               {shownView === 'ARRANGEMENT' && (
+                <StructureTracksContext.Provider value={state.tracks}>
                 <ArrangementView
                    tracks={state.tracks} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
                    onSetLoop={onSetLoopStable}
@@ -6744,6 +6779,7 @@ function Studio() {
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker} onAddRegion={handleAddRegion}
                    chordLane={chordLane}
                 />
+                </StructureTracksContext.Provider>
               )}
 
               {shownView === 'MIXER' && (
@@ -6756,6 +6792,7 @@ function Studio() {
                     onCopyPluginToTrack={handleCopyPluginToTrack} onReorderPlugins={handleReorderPlugins}
                     trackGroups={state.trackGroups} onCreateGroup={handleCreateGroup}
                     onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup}
+                    sendViewSlot={sendViewSlot}
                  /></Suspense>
               )}
 
@@ -6774,6 +6811,11 @@ function Studio() {
           {!isMobile && (
             <div data-nova-dock className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-28 border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
               <div className="flex shrink-0 items-center gap-2">
+                <button type="button" data-testid="dock-track-list" onClick={() => setStructurePanel(p => (p === 'tracks' ? null : 'tracks'))} aria-pressed={structurePanel === 'tracks'}
+                  title="Liste des pistes (Pro Tools « Track List ») : afficher / masquer, activer, dossiers, VCA"
+                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${structurePanel === 'tracks' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
+                  <i className="fas fa-list mr-1.5 text-[10px]" />Pistes{state.tracks.some(t => t.isHidden) ? ` · ${state.tracks.filter(t => t.isHidden).length} masquée${state.tracks.filter(t => t.isHidden).length > 1 ? 's' : ''}` : ''}
+                </button>
                 <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen}
                   title="Collaborer à distance : artiste, ingé son, beatmaker"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${collabOpen ? 'border-violet-400 bg-violet-500/25 text-white' : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'}`}>
@@ -6806,11 +6848,18 @@ function Studio() {
           )}
 
           {/* Mode Mobile - Nouveau système de pages */}
+          {isMobile && state.tracks.some(t => t.isHidden) && (activeMobileTab === 'TRACKS' || activeMobileTab === 'MIXER' || activeMobileTab === 'ARRANGEMENT') && (
+            <button type="button" data-testid="mobile-hidden-tracks" onClick={() => setStructurePanel('hidden')}
+              title="Pistes masquées : les révéler (et les activer)"
+              className="absolute right-2 top-2 z-[60] h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
+              <i className="fas fa-eye-slash mr-1.5 text-[10px] text-nv-muted" />Pistes masquées ({state.tracks.filter(t => t.isHidden).length})
+            </button>
+          )}
           {isMobile && (
             <>
               {activeMobileTab === 'TRACKS' && (
                 <MobileTracksPage
-                  tracks={state.tracks}
+                  tracks={mobileTracks}
                   currentTime={state.currentTime}
                   isPlaying={state.isPlaying}
                   isRecording={state.isRecording}
@@ -6828,7 +6877,7 @@ function Studio() {
 
               {activeMobileTab === 'ARRANGEMENT' && (
                 <MobileArrangementPage
-                  tracks={state.tracks}
+                  tracks={mobileTracks}
                   isRecording={state.isRecording}
                   recStartTime={state.recStartTime}
                   currentTime={state.currentTime}
@@ -6858,7 +6907,7 @@ function Studio() {
 
               {activeMobileTab === 'MIXER' && (
                 <MobileMixerPage
-                  tracks={state.tracks}
+                  tracks={mobileTracks}
                   selectedTrackId={state.selectedTrackId}
                   onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
                   onUpdateTrack={handleUpdateTrack}
@@ -6888,6 +6937,15 @@ function Studio() {
                 />
               )}
             </>
+          )}
+          {structurePanel && (
+            <Suspense fallback={null}>
+              {structurePanel === 'buses'
+                ? <BusPanel tracks={state.tracks} onClose={() => setStructurePanel(null)}
+                    className={isMobile ? 'fixed inset-x-2 bottom-2 top-16 z-[700]' : 'absolute left-2 top-2 bottom-2 z-[650] w-[380px] max-w-[calc(100%-16px)]'} />
+                : <TrackListPanel tracks={state.tracks} mode={isMobile || structurePanel === 'hidden' ? 'hidden' : 'full'} onClose={() => setStructurePanel(null)}
+                    className={isMobile ? 'fixed inset-x-2 bottom-2 top-16 z-[700]' : 'absolute left-2 top-2 bottom-2 z-[650] w-[340px] max-w-[calc(100%-16px)]'} />}
+            </Suspense>
           )}
         </main>
       </div>

@@ -32,13 +32,39 @@
  *    stateB64 facultatif (état complet du plugin, si on l'a) ;
  *  - sends : vers une piste aux / bus par son nom, levelDb, pre (pré-fader), active.
  *
+ * STRUCTURE PRO TOOLS (session LENNON : voir utils/trackStructure.ts) — champs
+ * facultatifs, ignorés par les anciennes versions :
+ *  - piste : "hidden": true (masquée), "inactive": true (inactive, « prête à
+ *    servir ») ;
+ *  - dossiers : une piste dossier s'écrit { "name": "VOX", "kind": "folder",
+ *    "folderKind": "routing" | "basic" } (ou kind "routing-folder" /
+ *    "basic-folder") ; une piste rangée dedans porte "folder": { "kind":
+ *    "routing" | "basic", "name": "VOX" } (ou "folder": "VOX", ou "parent":
+ *    "VOX"). Un dossier cité mais absent de la liste est créé avant sa 1re
+ *    piste. Dossier de routage = un bus : ses pistes y sortent par défaut ;
+ *  - VCA : { "name": "PRE ALL VOX", "kind": "vca" } ; un membre porte
+ *    "vca": "PRE ALL VOX" (VCA créé s'il manque) ;
+ *  - inserts : "state": "active" | "bypass" | "inactive" (Pro Tools : actif,
+ *    en bypass, désactivé). Compatibilité : "active": false ou "enabled": false
+ *    = inactif (« désactivé » dans le Session Info de Pro Tools) ;
+ *  - envois a à j : { "to": "RV", "levelDb": -12, "pan": -30 (ou "<30", "30>",
+ *    "L30", "C"), "mute": true, "pre": true, "slot": "c" (ou 2) } ;
+ *  - bus internes nommés (I/O Setup) : "buses": ["LEAD A", "VOX ALL", …] en
+ *    tête de fiche ; "input": "LEAD A" sur un aux (il écoute ce bus) ;
+ *    "output": "LEAD A" (nom de bus OU de piste ; une piste du même nom passe
+ *    en premier). Un bus cité en entrée / sortie est créé s'il manque ;
+ *  - option du constructeur « activer tous les effets inactifs »
+ *    (BuildOptions.activateAll, --activate-all) : les effets inactifs dans Pro
+ *    Tools deviennent actifs, l'information est gardée (params.templateSpec.state,
+ *    params.templateWasInactive) ; les effets en bypass restent en bypass.
+ *
  * buildTemplateFromSpec() résout chaque plugin dans la liste VST du PC (nom +
  * éditeur, variantes tolérées : utils/vstMatch) et chaque réglage dans les
  * paramètres connus du plugin (base data/vst-knowledge ou relecture du pont).
  * scripts/template_from_spec.ts fait le contrôle réel : réglage puis relecture
  * sur le pont VST, état du plugin capturé, rapport.
  */
-import { PluginInstance, PluginType, TrackSend, TrackType } from '../types';
+import { NamedBus, PluginInstance, PluginType, TrackSend, TrackType } from '../types';
 import { isExcluded } from './autotuneVst';
 import { classifyPlugin } from './vstKnowledge';
 import { compact, resolveVst, VstCandidate, VstMatch } from './vstMatch';
@@ -49,11 +75,17 @@ export const SPEC_FORMAT = 'nova-template-spec';
 
 export type SpecParamValue = string | number | boolean;
 
+export type SpecInsertState = 'active' | 'bypass' | 'inactive';
+
 export interface SpecInsert {
   plugin: string;
   vendor?: string;
-  /** Actif dans la session d'origine (défaut : oui). */
+  /** État dans la session d'origine (Pro Tools : actif, en bypass, désactivé). Prioritaire sur active / enabled. */
+  state?: SpecInsertState;
+  /** Ancien format : false = inactif (« désactivé » dans Pro Tools). Défaut : actif. */
   active?: boolean;
+  /** Ancien format (synonyme de active). */
+  enabled?: boolean;
   /** Réglages : nom affiché → valeur texte affichée par le plugin. */
   params?: Record<string, SpecParamValue>;
   /** État complet du plugin (base64), si on l'a. */
@@ -63,15 +95,26 @@ export interface SpecInsert {
 }
 
 export interface SpecSend {
+  /** Piste (aux / bus) ou bus nommé de destination. */
   to: string;
   levelDb?: number;
   /** Niveau linéaire 0–1 (si levelDb absent). */
   level?: number;
   pre?: boolean;
   active?: boolean;
+  /** Pan de l'envoi : -100 … 100, « <30 », « 30> », « L30 », « C ». Absent : suit le pan de la piste. */
+  pan?: number | string;
+  /** Envoi muet (Pro Tools). */
+  mute?: boolean;
+  /** Emplacement : « a » … « j » ou 0 … 9. */
+  slot?: number | string;
 }
 
-export type SpecKind = 'audio' | 'midi' | 'instrument' | 'bus' | 'aux' | 'return' | 'master';
+export type SpecKind = 'audio' | 'midi' | 'instrument' | 'bus' | 'aux' | 'return' | 'master'
+  | 'folder' | 'routing-folder' | 'basic-folder' | 'vca';
+
+/** Dossier parent d'une piste : { kind, name } ou son nom. */
+export type SpecFolderRef = { kind?: 'routing' | 'basic'; name: string } | string;
 
 export interface SpecTrack {
   name: string;
@@ -83,10 +126,24 @@ export interface SpecTrack {
   pan?: number | string;
   mute?: boolean;
   solo?: boolean;
-  /** Piste de sortie par son nom (« Bus voix », « Master »). Défaut : master. */
+  /** Piste de sortie ou bus nommé (« Bus voix », « LEAD A », « Master »). Défaut : master (ou le dossier de routage parent). */
   output?: string;
+  /** Entrée : bus nommé écouté (aux / bus). */
+  input?: string;
   inserts?: SpecInsert[];
   sends?: SpecSend[];
+  /** Piste masquée (liste des pistes). */
+  hidden?: boolean;
+  /** Piste inactive (Pro Tools « Make Inactive »). */
+  inactive?: boolean;
+  /** Piste dossier : routage (bus) ou simple (range). Avec kind « folder ». */
+  folderKind?: 'routing' | 'basic';
+  /** Dossier parent. */
+  folder?: SpecFolderRef;
+  /** Dossier parent (nom), synonyme de folder. */
+  parent?: string;
+  /** VCA qui pilote la piste (nom). */
+  vca?: string;
 }
 
 export interface TemplateSpec {
@@ -102,6 +159,8 @@ export interface TemplateSpec {
   timeSignature?: string;
   /** « F# minor », « C major ». */
   key?: string;
+  /** Bus internes nommés (I/O Setup) : noms, ou { name, channels }. */
+  buses?: (string | { name: string; channels?: 1 | 2 })[];
   tracks: SpecTrack[];
 }
 
@@ -264,6 +323,60 @@ const builtinTypeOf = (ins: SpecInsert): PluginType | null => {
 const KIND_TYPE: Record<SpecKind, TrackType> = {
   audio: TrackType.AUDIO, midi: TrackType.MIDI, instrument: TrackType.MIDI, bus: TrackType.BUS,
   aux: TrackType.SEND, return: TrackType.SEND, master: TrackType.BUS,
+  folder: TrackType.BUS, 'routing-folder': TrackType.BUS, 'basic-folder': TrackType.BUS, vca: TrackType.BUS,
+};
+
+/** État d'un insert de la fiche (state, puis ancien active / enabled). */
+export const specInsertState = (ins: SpecInsert): SpecInsertState => {
+  if (ins.state === 'active' || ins.state === 'bypass' || ins.state === 'inactive') return ins.state;
+  if (ins.active === false || ins.enabled === false) return 'inactive';
+  return 'active';
+};
+
+/** Type de dossier d'une piste de la fiche (null : pas un dossier). */
+const folderKindOf = (t: SpecTrack): 'routing' | 'basic' | null =>
+  t.kind === 'routing-folder' ? 'routing' : t.kind === 'basic-folder' ? 'basic' : t.kind === 'folder' ? (t.folderKind || 'basic') : null;
+
+/** Dossier de routage : c'est un bus (on peut y sortir). */
+const isRoutingKind = (t: SpecTrack): boolean => folderKindOf(t) === 'routing';
+
+const folderRefOf = (t: SpecTrack): { kind?: 'routing' | 'basic'; name: string } | null => {
+  const f = t.folder ?? t.parent;
+  if (!f) return null;
+  return typeof f === 'string' ? { name: f } : (f.name ? f : null);
+};
+
+/** « c » → 2, « 3 » → 3 (emplacement d'envoi a-j). */
+const slotOf = (v: SpecSend['slot']): number | undefined => {
+  if (v === undefined || v === null || v === '') return undefined;
+  if (typeof v === 'number') return v >= 0 && v < 10 ? Math.floor(v) : undefined;
+  const t = String(v).trim().toLowerCase();
+  if (/^[a-j]$/.test(t)) return t.charCodeAt(0) - 97;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 && n < 10 ? Math.floor(n) : undefined;
+};
+
+/**
+ * Fiche complétée : dossiers et VCA cités mais absents ajoutés (dossier avant
+ * sa 1re piste, VCA avant le master).
+ */
+const normalizeSpecTracks = (spec: TemplateSpec): SpecTrack[] => {
+  const list = [...spec.tracks];
+  const isNamed = (name: string, pred: (t: SpecTrack) => boolean) => list.some(t => pred(t) && compact(t.name) === compact(name));
+  for (const t of [...list]) {
+    const ref = folderRefOf(t);
+    if (ref && !isNamed(ref.name, x => !!folderKindOf(x))) {
+      const at = list.indexOf(t);
+      list.splice(at, 0, { name: ref.name, kind: 'folder', folderKind: ref.kind || 'basic' });
+    }
+  }
+  for (const t of [...list]) {
+    if (t.vca && !isNamed(t.vca, x => x.kind === 'vca')) {
+      const mi = list.findIndex(x => x.kind === 'master');
+      list.splice(mi < 0 ? list.length : mi, 0, { name: t.vca, kind: 'vca' });
+    }
+  }
+  return list;
 };
 
 const PALETTE = ['#3b82f6', '#60a5fa', '#a855f7', '#c084fc', '#22c55e', '#eab308', '#f97316', '#ef4444', '#14b8a6', '#ec4899'];
@@ -310,18 +423,47 @@ const knownParamsFor = (m: VstMatch | null, kb: KnowledgeEntry[] | undefined, na
 };
 
 /** Fiche → modèle NOVA + rapport (plugins trouvés, réglages résolus, avertissements). */
-export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {}): { template: SessionTemplate; report: SpecBuildReport } => {
-  if (!spec || spec.format !== SPEC_FORMAT) throw new Error("Ce n'est pas une fiche de modèle NOVA (format « nova-template-spec »).");
-  if (!Array.isArray(spec.tracks) || !spec.tracks.length) throw new Error('La fiche ne contient aucune piste.');
+export const buildTemplateFromSpec = (spec0: TemplateSpec, opts: BuildOptions = {}): { template: SessionTemplate; report: SpecBuildReport } => {
+  if (!spec0 || spec0.format !== SPEC_FORMAT) throw new Error("Ce n'est pas une fiche de modèle NOVA (format « nova-template-spec »).");
+  if (!Array.isArray(spec0.tracks) || !spec0.tracks.length) throw new Error('La fiche ne contient aucune piste.');
+  const spec: TemplateSpec = { ...spec0, tracks: normalizeSpecTracks(spec0) };
   const report: SpecBuildReport = { inserts: [], warnings: [], mixRules: [] };
   const list: VstCandidate[] = opts.plugins || (opts.knowledge || []).map(e => ({ name: e.name, scanName: e.scanName, vendor: e.vendor, path: e.path, pluginName: e.pluginName ?? null, unavailable: !!e.status && e.status !== 'ok' }));
 
   // Retours (aux) : ceux qui reçoivent des envois ; bus : ceux où des pistes sortent.
   const sentTo = new Set(spec.tracks.flatMap(t => (t.sends || []).map(s => compact(s.to))));
+  // Bus nommés (I/O Setup) : déclarés, ou cités en entrée d'un aux.
+  const buses: NamedBus[] = [];
+  const busByName = new Map<string, NamedBus>();
+  const addBus = (name: string, channels?: 1 | 2): NamedBus => {
+    const k = compact(name);
+    const have = busByName.get(k);
+    if (have) return have;
+    let id = `bus:${pedalboardKey(name).replace(/_/g, '-') || 'bus'}`; let n = 2;
+    while (buses.some(b => b.id === id)) id = `bus:${pedalboardKey(name).replace(/_/g, '-')}-${n++}`;
+    const b: NamedBus = { id, name: name.trim(), ...(channels === 1 ? { channels: 1 as const } : {}) };
+    buses.push(b); busByName.set(k, b);
+    return b;
+  };
+  for (const b of spec.buses || []) { if (typeof b === 'string') addBus(b); else if (b?.name) addBus(b.name, b.channels); }
+  for (const t of spec.tracks) if (t.input) addBus(t.input);
+  // Aux qui écoute un bus : c'est un retour si on y envoie (par son nom ou par celui de son bus).
+  for (const t of spec.tracks) if (t.input && sentTo.has(compact(t.input))) sentTo.add(compact(t.name));
   const typeOf = (t: SpecTrack): TrackType => (t.kind === 'aux' ? (sentTo.has(compact(t.name)) ? TrackType.SEND : TrackType.BUS) : KIND_TYPE[t.kind] ?? TrackType.AUDIO);
   const ids = assignIds(spec, typeOf);
   const byName = new Map<string, string>();
-  spec.tracks.forEach(t => byName.set(compact(t.name), ids.get(t)!));
+  // Les pistes « sonores » d'abord : un dossier ne masque pas une piste du même nom.
+  [...spec.tracks].sort((a, b) => Number(!!folderKindOf(b) || b.kind === 'vca') - Number(!!folderKindOf(a) || a.kind === 'vca'))
+    .forEach(t => { if (!folderKindOf(t) || isRoutingKind(t)) byName.set(compact(t.name), ids.get(t)!); });
+  const folderIdByName = new Map<string, string>();
+  spec.tracks.forEach(t => { if (folderKindOf(t)) folderIdByName.set(compact(t.name), ids.get(t)!); });
+  const vcaIdByName = new Map<string, string>();
+  spec.tracks.forEach(t => { if (t.kind === 'vca') vcaIdByName.set(compact(t.name), ids.get(t)!); });
+  /** Piste qui écoute un bus (la 1re). */
+  const listenerOf = (busId: string): string | undefined => {
+    const t = spec.tracks.find(x => x.input && busByName.get(compact(x.input))?.id === busId);
+    return t ? ids.get(t) : undefined;
+  };
   byName.set('master', ids.get(spec.tracks.find(t => t.kind === 'master')!) || 'master');
   byName.set('masterbus', byName.get('master')!);
   const targetId = (name: string | undefined, from: string): string => {
@@ -329,6 +471,25 @@ export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {
     const id = byName.get(compact(name));
     if (!id) report.warnings.push(`${from} : sortie « ${name} » introuvable, envoyée au master.`);
     return id || byName.get('master')!;
+  };
+  /** Sortie : piste du même nom, sinon bus nommé (créé s'il manque). */
+  const outputOfSpec = (t: SpecTrack, parentFolder: SpecTrack | undefined): { outputTrackId: string; outputBusId?: string } => {
+    if (t.kind === 'master') return { outputTrackId: '' };
+    if (!t.output) {
+      if (parentFolder && isRoutingKind(parentFolder)) return { outputTrackId: ids.get(parentFolder)! };
+      return { outputTrackId: byName.get('master')! };
+    }
+    const id = byName.get(compact(t.output));
+    if (id && id !== ids.get(t)) return { outputTrackId: id };
+    const bus = busByName.get(compact(t.output));
+    if (bus) return { outputTrackId: listenerOf(bus.id) || byName.get('master')!, outputBusId: bus.id };
+    // Ni piste ni bus déclaré : on crée le bus (Pro Tools sort vers un bus par son nom).
+    if (!/^(master|main|out|sortie)/i.test(t.output.trim())) {
+      const b = addBus(t.output);
+      report.warnings.push(`${t.name} : sortie « ${t.output} » = bus nommé sans piste qui l'écoute (son coupé tant qu'aucun aux ne l'écoute).`);
+      return { outputTrackId: byName.get('master')!, outputBusId: b.id };
+    }
+    return { outputTrackId: targetId(t.output, t.name) };
   };
 
   const tracks: TemplateTrack[] = spec.tracks.map((t, ti) => {
@@ -339,14 +500,19 @@ export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {
     const plugins: PluginInstance[] = [];
     (t.inserts || []).forEach((ins, i) => {
       const pluginId = `pl-${id}-${i + 1}`;
-      const active = opts.activateAll ? true : ins.active !== false;
+      // Pro Tools : actif / bypass / inactif. « Activer tous les effets inactifs » : l'inactif devient actif (info gardée).
+      const srcState = specInsertState(ins);
+      const state: SpecInsertState = opts.activateAll && srcState === 'inactive' ? 'active' : srcState;
+      const active = state === 'active';
       const bType = builtinTypeOf(ins);
       if (bType) {
         const params: Record<string, any> = {};
         for (const [k, v] of Object.entries(ins.params || {})) params[k] = v;
-        const p = builtinPlugin(bType, { ...params, isEnabled: active }, pluginId, spec.bpm || 120);
-        p.isEnabled = active;
-        if (ins.active === false) p.params.templateWasInactive = true;
+        const p = builtinPlugin(bType, { ...params, isEnabled: state !== 'bypass' }, pluginId, spec.bpm || 120);
+        p.isEnabled = state !== 'bypass';
+        if (state === 'inactive') p.isInactive = true;
+        if (srcState === 'inactive') p.params.templateWasInactive = true;
+        if (srcState !== 'active') p.params.templateSpecState = srcState;
         plugins.push(p);
         report.inserts.push({ track: t.name, plugin: ins.plugin, vendor: 'NOVA', active, builtin: true, match: null, excluded: false, params: [], index: i, pluginId });
         return;
@@ -365,7 +531,8 @@ export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {
         return guess ? { asked, value, key: guess, how: 'guessed' as const } : { asked, value, key: null, how: 'missing' as const };
       });
       const p: PluginInstance = {
-        id: pluginId, name: match?.plugin.name || ins.plugin, type: 'VST3', isEnabled: active && !excluded, latency: 0,
+        id: pluginId, name: match?.plugin.name || ins.plugin, type: 'VST3', isEnabled: state !== 'bypass' && !excluded, latency: 0,
+        ...(state === 'inactive' ? { isInactive: true } : {}),
         params: {
           name: match?.plugin.name || ins.plugin,
           vendor: ins.vendor || match?.plugin.vendor || '',
@@ -374,7 +541,8 @@ export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {
           novaQuiet: true,
           novaSettings: params.filter(x => x.key).map(x => (x.how === 'known' ? settingForParam(known.find(k => k.name === x.key), x.key!, x.value) : { name: x.key!, text: x.value })),
           ...(ins.stateB64 ? { stateB64: ins.stateB64 } : {}),
-          templateSpec: { plugin: ins.plugin, vendor: ins.vendor || '', active: ins.active !== false, ...(ins.note ? { note: ins.note } : {}) },
+          templateSpec: { plugin: ins.plugin, vendor: ins.vendor || '', active: srcState === 'active', state: srcState, ...(ins.note ? { note: ins.note } : {}) },
+          ...(srcState === 'inactive' ? { templateWasInactive: true } : {}),
           ...(match ? {} : { templateMissing: true }),
         },
       };
@@ -382,22 +550,50 @@ export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {
       report.inserts.push({ track: t.name, plugin: ins.plugin, vendor: ins.vendor, active, builtin: false, match, excluded, params, index: i, pluginId });
     });
     const sends: TrackSend[] = (t.sends || []).map(s => {
-      const to = byName.get(compact(s.to));
+      // Vers une piste par son nom, sinon vers la piste qui écoute le bus de ce nom.
+      const bus = busByName.get(compact(s.to));
+      const to = byName.get(compact(s.to)) || (bus ? listenerOf(bus.id) : undefined);
       if (!to) report.warnings.push(`${t.name} : envoi vers « ${s.to} » introuvable (ignoré).`);
       const level = s.levelDb !== undefined ? Math.min(1.5, dbToGain(s.levelDb)) : Math.max(0, Math.min(1.5, s.level ?? 0.25));
-      return to ? { id: to, level, isEnabled: s.active !== false, ...(s.pre ? { preFader: true } : {}) } : null;
+      const slot = slotOf(s.slot);
+      return to ? {
+        id: to, level, isEnabled: s.active !== false, ...(s.pre ? { preFader: true } : {}),
+        ...(s.pan !== undefined && s.pan !== null && s.pan !== '' ? { pan: panOf(s.pan) } : {}),
+        ...(s.mute ? { isMuted: true } : {}),
+        ...(slot !== undefined ? { slot } : {}),
+      } : null;
     }).filter((x): x is TrackSend => !!x);
+    const parentRef = folderRefOf(t);
+    const parentFolder = parentRef ? spec.tracks.find(x => folderKindOf(x) && compact(x.name) === compact(parentRef.name)) : undefined;
+    const fk = folderKindOf(t);
+    const out = outputOfSpec(t, parentFolder);
+    const inputBus = t.input ? busByName.get(compact(t.input)) : undefined;
+    const vcaId = t.vca ? vcaIdByName.get(compact(t.vca)) : undefined;
     return {
       id, name: t.name, type,
-      color: t.color || (t.kind === 'master' ? '#00f2ff' : PALETTE[ti % PALETTE.length]),
+      color: t.color || (t.kind === 'master' ? '#00f2ff' : fk ? (fk === 'routing' ? '#f59e0b' : '#64748b') : t.kind === 'vca' ? '#8b5cf6' : PALETTE[ti % PALETTE.length]),
       isMuted: !!t.mute, isSolo: !!t.solo,
       volume: Math.round(volume * 10000) / 10000,
       pan: panOf(t.pan),
-      outputTrackId: t.kind === 'master' ? '' : targetId(t.output, t.name),
+      outputTrackId: t.kind === 'vca' || fk === 'basic' ? '' : out.outputTrackId,
+      ...(out.outputBusId && t.kind !== 'vca' && fk !== 'basic' ? { outputBusId: out.outputBusId } : {}),
       sends,
       plugins,
+      ...(t.hidden ? { isHidden: true } : {}),
+      ...(t.inactive ? { isInactive: true } : {}),
+      ...(fk ? { folder: { kind: fk, isOpen: true } } : {}),
+      ...(parentFolder ? { parentFolderId: ids.get(parentFolder)! } : {}),
+      ...(t.kind === 'vca' ? { isVca: true } : {}),
+      ...(vcaId ? { vcaId } : {}),
+      ...(inputBus ? { inputBusId: inputBus.id } : {}),
     } as TemplateTrack;
   });
+  // Bus nommés : rangés sur la piste master (comme l'I/O Setup est rangé avec la session).
+  if (buses.length) {
+    const m = tracks.find(x => x.id === byName.get('master'));
+    if (m) m.ioBuses = buses;
+    else report.warnings.push('Bus nommés ignorés : la fiche n’a pas de piste master.');
+  }
 
   const ts = spec.timeSignature?.match(/^(\d+)\s*\/\s*(\d+)$/);
   const key = parseKey(spec.key);

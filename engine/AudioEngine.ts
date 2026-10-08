@@ -49,6 +49,7 @@ import { applyGainEvents, clipGainEvents } from '../utils/fades';
 import { breathSig } from '../utils/breathEnvelope';
 import { auditionClips } from '../utils/playlists';
 import { ChordEvent, chordSteps } from '../utils/chordDetect';
+import { engineView, VOID_OUTPUT } from '../utils/trackStructure';
 
 interface TrackDSP {
   input: GainNode;          
@@ -57,7 +58,9 @@ interface TrackDSP {
   gain: GainNode;           
   analyzer: AnalyserNode;
   inputAnalyzer?: AnalyserNode; 
-  pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any; connectedTo?: AudioNode }>;
+  pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any; connectedTo?: AudioNode; bypassDelay?: DelayNode }>;
+  /** Pan propre des envois (TrackSend.pan, Pro Tools « FMP » éteint). */
+  sendPanners?: Map<string, StereoPannerNode>;
   /** Effets actifs cables (ordre de la chaine) et, sur une piste gelee, ceux apres le rendu. */
   chainIds?: string[];
   postChainIds?: string[];
@@ -632,6 +635,8 @@ export class AudioEngine {
    *        fader et le pan restent appliques a la lecture, sinon ils l'etaient deux fois).
    */
   public async renderProject(tracks: Track[], totalDuration: number, startOffset: number = 0, targetSampleRate: number = 44100, onProgress?: (progress: number) => void, options: { preFader?: boolean; keepPreVolume?: boolean } = {}): Promise<AudioBuffer> {
+    // Structure Pro Tools : pistes inactives, dossiers simples et VCA hors du rendu ; Muet / Solo / VCA / bus résolus.
+    tracks = engineView(tracks).tracks;
     const totalSamples = Math.ceil(totalDuration * targetSampleRate);
     const offlineCtx = new OfflineAudioContext(2, totalSamples, targetSampleRate);
     // Les noeuds de plugins/instruments n'utilisent que l'API BaseAudioContext.
@@ -708,15 +713,27 @@ export class AudioEngine {
       let frozenInput: GainNode | undefined;
       const pluginNodes = new Map<string, any>();
       const addPlugin = (plugin: PluginInstance, isPost: boolean) => {
-        if (!plugin.isEnabled) return;
+        // Inactif : absent du rendu (aucune latence). Bypass : contourné, retardé de sa latence (comme en lecture).
+        if (plugin.isInactive) return;
         try {
           const entry = this.createPluginNode(plugin, this.currentBpm, renderCtx);
           if (!entry) return;
+          const l = entry.node?.latency;
+          if (!plugin.isEnabled) {
+            try { entry.node?.dispose?.(); } catch { /* */ }
+            if (!(typeof l === 'number' && l > 0 && l < 0.5)) return;
+            const bd = offlineCtx.createDelay(1);
+            bd.delayTime.value = l;
+            head.connect(bd);
+            head = bd;
+            offlineLatency += l;
+            if (isPost) postLatency += l;
+            return;
+          }
           pluginNodes.set(plugin.id, entry.node);
           if (entry.node?.ready instanceof Promise) pendingPlugins.push(entry.node.ready);
           head.connect(entry.input);
           head = entry.output;
-          const l = entry.node?.latency;
           if (typeof l === 'number' && l > 0 && l < 0.5) {
             offlineLatency += l;
             if (isPost) postLatency += l;
@@ -786,7 +803,7 @@ export class AudioEngine {
       // Part déjà jouée depuis le rendu du bus VST gelé (tranches) : pas d'envoi direct en plus.
       rt.outputs = [];
       rt.sendDelays = new Map();
-      if (!(dest && isFeedCovered(track, destId, tracks))) {
+      if (!(dest && isFeedCovered(track, destId, tracks)) && destId !== VOID_OUTPUT) {
         // PDC : même alignement qu'en lecture (retard réglé après le câblage).
         rt.outDelay = offlineCtx.createDelay(PDC_MAX_SECONDS);
         rt.output.connect(rt.outDelay);
@@ -804,10 +821,17 @@ export class AudioEngine {
         if (!target) return;
         const sendGain = offlineCtx.createGain();
         // Pré-fader : après les effets, sans le fader ni le pan (la piste muette coupe quand même l'envoi).
-        sendGain.gain.value = send.preFader && rt.silenced ? 0 : send.level;
-        (send.preFader && rt.pre ? rt.pre : rt.panner).connect(sendGain);
+        // Envoi muet (Pro Tools) : câblé mais à zéro.
+        sendGain.gain.value = (send.preFader && rt.silenced) || send.isMuted ? 0 : send.level;
+        const ownPan = typeof send.pan === 'number';
+        (send.preFader && rt.pre ? rt.pre : (ownPan ? rt.gain : rt.panner)).connect(sendGain);
         const sendDelay = offlineCtx.createDelay(PDC_MAX_SECONDS);
-        sendGain.connect(sendDelay);
+        if (ownPan) {
+          const sp = offlineCtx.createStereoPanner();
+          sp.pan.value = Math.max(-1, Math.min(1, send.pan!));
+          sendGain.connect(sp);
+          sp.connect(sendDelay);
+        } else sendGain.connect(sendDelay);
         sendDelay.connect(target.input);
         rt.sendDelays!.set(send.id, sendDelay);
         rt.outputs!.push(send.id);
@@ -1195,6 +1219,17 @@ export class AudioEngine {
     const postIds = dsp.postChainIds || [];
     dsp.pluginLatency = ids.reduce((acc, id) => acc + lat(id), 0);
     dsp.postFreezeLatency = postIds.reduce((acc, id) => acc + lat(id), 0);
+    // Effets en bypass : leur retard suit leur latence (chargement d'un VST, piste armée…).
+    const tNow = this.ctx?.currentTime || 0;
+    ids.forEach(id => {
+      const bd = dsp.pluginChain.get(id)?.bypassDelay;
+      if (!bd) return;
+      const v = lat(id);
+      if (Math.abs((this.pdcSet.get(bd) ?? -1) - v) <= 1e-9) return;
+      this.pdcSet.set(bd, v);
+      bd.delayTime.cancelScheduledValues(tNow);
+      bd.delayTime.setValueAtTime(v, tNow);
+    });
     this.recomputePdc();
   }
 
@@ -1527,6 +1562,7 @@ export class AudioEngine {
 
   public startPlayback(startOffset: number, tracks: Track[]) {
     if (!this.ctx) return;
+    tracks = engineView(tracks).tracks;
     if (this.isPlaying) this.stopAll();
     // L'extrait du catalogue jouait en même temps que le projet : on le coupe
     // (lecteur interne ici, lecteur <audio> du catalogue via l'événement).
@@ -1606,6 +1642,7 @@ export class AudioEngine {
   }
 
   public seekTo(time: number, tracks: Track[], wasPlaying: boolean) {
+    tracks = engineView(tracks).tracks;
     this.stopAll();
     this.pausedAt = time;
     tracks.forEach(track => this.applyAutomation(track, time));
@@ -1651,6 +1688,7 @@ export class AudioEngine {
    * continuait de sonner jusqu'à l'arrêt.
    */
   public setLiveTracks(tracks: Track[]) {
+    tracks = engineView(tracks).tracks;
     if (!this.isPlaying || !this.ctx) { this.liveTracks = tracks; return; }
     const next = this.computeClipSigs(tracks);
     const now = this.ctx.currentTime;
@@ -2621,7 +2659,7 @@ export class AudioEngine {
         if (audible.has(t.id)) continue;
         const feedsAudible =
           (!!t.outputTrackId && audible.has(t.outputTrackId)) ||
-          (t.sends || []).some(sd => sd.isEnabled && sd.level > 0 && audible.has(sd.id));
+          (t.sends || []).some(sd => sd.isEnabled && !sd.isMuted && sd.level > 0 && audible.has(sd.id));
         if (feedsAudible) { audible.add(t.id); changed = true; }
       }
     }
@@ -2637,8 +2675,8 @@ export class AudioEngine {
         ? `frozen:${freezeIndex(track)}:${uncoveredClips(track).length > 0 ? 1 : 0}:${track.frozenClip!.id}`
         : 'live',
       track.outputTrackId || '',
-      track.plugins.map(p => `${p.id}:${p.isEnabled ? 1 : 0}`).join(','),
-      (track.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}${sd.preFader ? ':pre' : ''}`).join(',')
+      track.plugins.map(p => `${p.id}:${p.isInactive ? 'x' : p.isEnabled ? 1 : 0}`).join(','),
+      (track.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}${sd.preFader ? ':pre' : ''}${typeof sd.pan === 'number' ? ':pan' : ''}`).join(',')
     ].join('|');
   }
 
@@ -2659,6 +2697,7 @@ export class AudioEngine {
 
     dsp.pluginChain.forEach(entry => {
       try { entry.input.disconnect(); entry.output.disconnect(); } catch (e) {}
+      try { entry.bypassDelay?.disconnect(); } catch (e) {}
       try { entry.instance?.dispose?.(); } catch (e) {}
     });
     dsp.pluginChain.clear();
@@ -2667,6 +2706,7 @@ export class AudioEngine {
     dsp.sends.clear();
 
     dsp.sendDelays?.forEach(n => { try { n.disconnect(); } catch (e) {} });
+    dsp.sendPanners?.forEach(n => { try { n.disconnect(); } catch (e) {} });
     [dsp.input, dsp.preFaderTap, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
       .forEach(n => { try { n?.disconnect(); } catch (e) {} });
 
@@ -2676,6 +2716,17 @@ export class AudioEngine {
 
   public updateTrack(track: Track, allTracks: Track[]) {
     if (!this.ctx) return;
+    // Structure Pro Tools (utils/trackStructure) : piste inactive, dossier simple
+    // ou VCA = rien dans le moteur ; Muet / Solo de dossier, VCA et bus nommés résolus.
+    {
+      const src = allTracks.find(t => t.id === track.id) === track ? allTracks : allTracks.map(t => (t.id === track.id ? track : t));
+      const view = engineView(src);
+      this.vcaScale = view.vcaScale;
+      const played = view.byId.get(track.id);
+      if (!played) { if (this.tracksDSP.has(track.id)) this.disposeTrack(track.id); return; }
+      track = played;
+      allTracks = view.tracks;
+    }
     track = this.eff(track);
 
     // Pre-cree les DSP de toutes les pistes: sinon une piste routee vers un bus
@@ -2736,8 +2787,8 @@ export class AudioEngine {
     const coveredOut = !!track.outputTrackId && isFeedCovered(track, track.outputTrackId, allTracks);
     // Envoi pré-fader : le fader ne le baisse pas, mais couper la piste (mute / solo) le coupe.
     const preSilenced = track.isMuted || this.soloSilencedIds.has(track.id);
-    const sendLevelOf = (send: { id: string; isEnabled: boolean; level: number; preFader?: boolean }) =>
-      (!send.isEnabled || isFeedCovered(track, send.id, allTracks) || (send.preFader && preSilenced)) ? 0 : send.level;
+    const sendLevelOf = (send: { id: string; isEnabled: boolean; level: number; preFader?: boolean; isMuted?: boolean }) =>
+      (!send.isEnabled || send.isMuted || isFeedCovered(track, send.id, allTracks) || (send.preFader && preSilenced)) ? 0 : send.level;
     const signature = this.graphSignatureOf(track, coveredOut ? 'covered-out' : '');
     if (dsp.graphSignature === signature) {
       const t = this.ctx.currentTime;
@@ -2757,8 +2808,9 @@ export class AudioEngine {
       });
       (track.sends || []).forEach(send => {
         const sendGain = dsp.sends.get(send.id);
-        const forcedOff = !send.isEnabled || isFeedCovered(track, send.id, allTracks) || (!!send.preFader && preSilenced);
+        const forcedOff = !send.isEnabled || !!send.isMuted || isFeedCovered(track, send.id, allTracks) || (!!send.preFader && preSilenced);
         if (sendGain) sendGain.gain.setTargetAtTime(forcedOff ? 0 : this.automatedValue(track, `send::${send.id}`, send.level), t, 0.015);
+        if (typeof send.pan === 'number') dsp.sendPanners?.get(send.id)?.pan.setTargetAtTime(send.pan, t, 0.015);
       });
       return;
     }
@@ -2792,6 +2844,7 @@ export class AudioEngine {
         try { entry.output.disconnect(entry.connectedTo); } catch (e) {}
         entry.connectedTo = undefined;
       }
+      if (entry.bypassDelay) { try { entry.bypassDelay.disconnect(); } catch (e) {} }
     });
     const link = (from: AudioNode, to: AudioNode) => {
       from.connect(to);
@@ -2812,6 +2865,8 @@ export class AudioEngine {
     const lowLatency = this.lowLatencyTracks.has(track.id);
 
     const wire = (plugin: PluginInstance, isPost: boolean) => {
+      // Effet INACTIF : ni chargé ni câblé, aucune latence (il est libéré plus bas).
+      if (plugin.isInactive) return;
       currentPluginIds.add(plugin.id);
       let pEntry = dsp!.pluginChain.get(plugin.id);
       if (!pEntry) {
@@ -2837,6 +2892,14 @@ export class AudioEngine {
       if (pEntry && plugin.isEnabled) {
         link(head, pEntry.input);
         head = pEntry.output;
+        chainIds.push(plugin.id);
+        if (isPost) postIds.push(plugin.id);
+      } else if (pEntry) {
+        // BYPASS (Pro Tools) : le son contourne l'effet, retardé de sa latence
+        // (réglée par recomputeTrackLatency) : l'alignement de la session est gardé.
+        if (!pEntry.bypassDelay) pEntry.bypassDelay = this.ctx!.createDelay(1);
+        link(head, pEntry.bypassDelay);
+        head = pEntry.bypassDelay;
         chainIds.push(plugin.id);
         if (isPost) postIds.push(plugin.id);
       }
@@ -2867,7 +2930,7 @@ export class AudioEngine {
     dsp.chainIds = chainIds;
     dsp.postChainIds = postIds;
     // Un limiteur à crête vraie sur le master remplace le limiteur de sécurité (jamais deux à la suite).
-    if (track.id === 'master') this.setSafetyLimiter(!track.plugins.some(p => p.isEnabled && isTruePeakLimiter(p.type)));
+    if (track.id === 'master') this.setSafetyLimiter(!track.plugins.some(p => p.isEnabled && !p.isInactive && isTruePeakLimiter(p.type)));
     this.recomputeTrackLatency(track.id);
 
     dsp.pluginChain.forEach((val, id) => {
@@ -2875,6 +2938,7 @@ export class AudioEngine {
         try {
           val.input.disconnect();
           val.output.disconnect();
+          val.bypassDelay?.disconnect();
           if (val.instance.dispose) {
               val.instance.dispose();
           }
@@ -2910,7 +2974,8 @@ export class AudioEngine {
     if (!dsp.outDelay) dsp.outDelay = this.ctx.createDelay(PDC_MAX_SECONDS);
     try { dsp.outDelay.disconnect(); } catch (e) {}
     const outputs: string[] = [];
-    if (!coveredOut) {
+    // Sortie vers un bus que personne n'écoute / une piste inactive : le son part dans le vide (Pro Tools).
+    if (!coveredOut && track.outputTrackId !== VOID_OUTPUT) {
       dsp.output.connect(dsp.outDelay);
       dsp.outDelay.connect(destNode);
       outputs.push(destId);
@@ -2923,6 +2988,8 @@ export class AudioEngine {
     });
     if (!dsp.sendDelays) dsp.sendDelays = new Map();
     dsp.sendDelays.forEach(node => { try { node.disconnect(); } catch (e) {} });
+    if (!dsp.sendPanners) dsp.sendPanners = new Map();
+    dsp.sendPanners.forEach(node => { try { node.disconnect(); } catch (e) {} });
     
     // Process each send in the track's sends array
     if (track.sends && track.sends.length > 0) {
@@ -2943,14 +3010,24 @@ export class AudioEngine {
         // Post-fader : après le fader et le pan ; pré-fader : après les effets, avant le fader.
         try { dsp!.panner.disconnect(sendGain); } catch (e) {}
         try { dsp!.preFaderTap?.disconnect(sendGain); } catch (e) {}
-        (send.preFader && dsp!.preFaderTap ? dsp!.preFaderTap : dsp!.panner).connect(sendGain);
+        // Pan propre de l'envoi (Pro Tools « FMP » éteint) : post-fader pris AVANT le pan de la piste.
+        const ownPan = typeof send.pan === 'number';
+        (send.preFader && dsp!.preFaderTap ? dsp!.preFaderTap : (ownPan ? dsp!.gain : dsp!.panner)).connect(sendGain);
+        let sendTail: AudioNode = sendGain;
+        if (ownPan) {
+          let sp = dsp!.sendPanners!.get(send.id);
+          if (!sp) { sp = this.ctx!.createStereoPanner(); dsp!.sendPanners!.set(send.id, sp); }
+          sp.pan.setValueAtTime(Math.max(-1, Math.min(1, send.pan!)), now);
+          sendGain.connect(sp);
+          sendTail = sp;
+        }
         
         // Find the destination send/bus track and connect
         const destSendDSP = this.tracksDSP.get(send.id);
         if (destSendDSP) {
           let sendDelay = dsp!.sendDelays!.get(send.id);
           if (!sendDelay) { sendDelay = this.ctx!.createDelay(PDC_MAX_SECONDS); dsp!.sendDelays!.set(send.id, sendDelay); }
-          sendGain.connect(sendDelay);
+          sendTail.connect(sendDelay);
           sendDelay.connect(destSendDSP.input);
           outputs.push(send.id);
           // console.log(`[AudioEngine] Send connected: ${track.name} -> ${send.id} (level: ${sendLevel})`);
@@ -2970,6 +3047,9 @@ export class AudioEngine {
     });
     dsp.sendDelays.forEach((node, sendId) => {
       if (!currentSendIds.has(sendId)) { try { node.disconnect(); } catch (e) {} dsp!.sendDelays!.delete(sendId); }
+    });
+    dsp.sendPanners.forEach((node, sendId) => {
+      if (!currentSendIds.has(sendId)) { try { node.disconnect(); } catch (e) {} dsp!.sendPanners!.delete(sendId); }
     });
     dsp.outputs = outputs;
     this.recomputePdc();
@@ -3361,7 +3441,11 @@ export class AudioEngine {
     });
   }
 
+  /** Gain des VCA par piste membre (utils/trackStructure, engineView). */
+  private vcaScale: Map<string, number> = new Map();
+
   public setTrackVolume(trackId: string, volume: number, isMuted: boolean) {
+    volume *= this.vcaScale.get(trackId) ?? 1;
     const dsp = this.tracksDSP.get(trackId);
     const live = this.liveTracks?.find(t => t.id === trackId);
     // Read : la courbe garde la main pendant la lecture (le fader ne la combat pas).

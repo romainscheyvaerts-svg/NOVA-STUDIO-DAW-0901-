@@ -226,7 +226,7 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
                               {t.source?.kind === 'spec' && <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-bold text-violet-200">Depuis une fiche</span>}
                             </div>
                             <p className="text-[11px] text-slate-400 mt-1">
-                              {plural(info.tracks, 'piste')} · {plural(info.buses, 'bus', 'bus')} · {plural(info.sends, 'retour')} · {plural(info.plugins, 'effet')}{info.vst ? ` (${info.vst} VST)` : ''}{info.inactive ? ` · ${plural(info.inactive, 'effet inactif', 'effets inactifs')}` : ''}
+                              {plural(info.tracks, 'piste')} · {plural(info.buses, 'bus', 'bus')} · {plural(info.sends, 'retour')} · {plural(info.plugins, 'effet')}{info.vst ? ` (${info.vst} VST)` : ''}{info.inactive ? ` · ${plural(info.inactive, 'effet inactif', 'effets inactifs')}` : ''}{info.folders ? ` · ${plural(info.folders, 'dossier')}` : ''}{info.vcas ? ` · ${plural(info.vcas, 'VCA', 'VCA')}` : ''}{info.hiddenTracks ? ` · ${plural(info.hiddenTracks, 'piste masquée', 'pistes masquées')}` : ''}{info.inactiveTracks ? ` · ${plural(info.inactiveTracks, 'piste inactive', 'pistes inactives')}` : ''}
                               {t.session.bpm ? ` · ${t.session.bpm} BPM` : ''}{!t.bundled ? ` · ${formatAgo(t.updatedAt)}` : ''}
                             </p>
                             {t.description && <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{t.description}</p>}
@@ -242,7 +242,7 @@ const SessionTemplatesModal: React.FC<SessionTemplatesModalProps> = ({ initialMo
                             </fieldset>
                             <label className="flex items-start gap-3 min-h-[36px] text-[13px]">
                               <input type="checkbox" checked={enableAll} onChange={e => setEnableAll(e.target.checked)} className="mt-0.5 w-5 h-5 accent-cyan-400" data-testid="tpl-enable-all" />
-                              <span>Activer tous les effets{info.inactive ? ` (${plural(info.inactive, 'effet désactivé', 'effets désactivés')} dans le modèle)` : ''}<span className="block text-[11px] text-slate-500">Pour les effets coupés dans la session d'origine mais qui servent au mix.</span></span>
+                              <span>Activer tous les effets inactifs{info.inactive ? ` (${plural(info.inactive, 'effet inactif ou en bypass', 'effets inactifs ou en bypass')} dans le modèle)` : ''}<span className="block text-[11px] text-slate-500">Pour les effets coupés dans la session d'origine (Pro Tools) mais qui servent au mix : on garde la trace de ce qui était inactif.</span></span>
                             </label>
                             {inStudio && <p className="text-[11px] text-amber-200">Ton projet en cours sera remplacé : sauvegarde-le avant si tu veux le garder.</p>}
                             <div className="flex flex-wrap gap-2">
