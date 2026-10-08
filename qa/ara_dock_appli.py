@@ -240,6 +240,21 @@ def main():
             # Fermeture du panneau : masquée (l'insert reste actif).
             page.get_by_role("button", name="Fermer le panneau").click(); page.wait_for_timeout(1500)
             rep["panneau_ferme"] = {"info": page.evaluate(INFO_JS).get("info", {}).get("dock")}
+            # « Valider (Commit) » : clip rendu par Melodyne, insert retiré, original et retouches gardés.
+            page.evaluate("async () => { const m = await window.__novaAppModule('/components/AraEditorDock.tsx'); m.openAraDock('lead'); }")
+            page.get_by_test_id("ara-dock-commit").wait_for(timeout=20000)
+            page.get_by_test_id("ara-dock-commit").click()
+            t1 = time.time()
+            commit = {}
+            while time.time() - t1 < 240:
+                commit = page.evaluate("""() => { const s = window.__novaEdit.getState(); const t = s.tracks.find(x => x.id === 'lead');
+                    const c = t.clips[0]; return { inserts: t.plugins.map(p => p.name), clip: c.name, araEdit: c.araEdit ? { plugin: c.araEdit.plugin, mode: c.araEdit.mode,
+                    original_garde: !!c.araEdit.sourceBufferId, archive_octets: c.araEdit.archive ? Math.round(c.araEdit.archive.length * 3 / 4) : 0 } : null }; }""")
+                if commit.get("araEdit"):
+                    break
+                page.wait_for_timeout(500)
+            rep["commit"] = {**commit, "secondes": round(time.time() - t1, 1)}
+            capture_window(hwnd_app, OUT / "D4_appli_apres_commit.png")
             b.close()
     finally:
         for proc in (app, br):

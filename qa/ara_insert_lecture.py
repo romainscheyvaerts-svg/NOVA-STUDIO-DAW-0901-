@@ -31,14 +31,14 @@ EXE = os.environ.get("NOVA_CHROME", r"C:\Users\lenno\AppData\Local\ms-playwright
 
 JS = r"""
 async ({ mel }) => {
-  const { audioEngine: e } = await import('/engine/AudioEngine.ts');
-  const { TrackType } = await import('/types.ts');
-  const { novaBridge } = await import('/services/NovaBridge.ts');
-  const { liveAraInserts } = await import('/engine/AraInsertNode.ts');
-  const { audioBufferRegistry } = await import('/utils/audioBufferRegistry.ts');
-  const A = await import('/utils/araInsert.ts');
-  const { buildTempoMap } = await import('/utils/tempoMap.ts');
-  const { renderTrackFreeze } = await import('/services/VstFreeze.ts');
+  const { audioEngine: e } = await window.__novaAppModule('/engine/AudioEngine.ts');
+  const { TrackType } = await window.__novaAppModule('/types.ts');
+  const { novaBridge } = await window.__novaAppModule('/services/NovaBridge.ts');
+  const { liveAraInserts } = await window.__novaAppModule('/engine/AraInsertNode.ts');
+  const { audioBufferRegistry } = await window.__novaAppModule('/utils/audioBufferRegistry.ts');
+  const A = await window.__novaAppModule('/utils/araInsert.ts');
+  const { buildTempoMap } = await window.__novaAppModule('/utils/tempoMap.ts');
+  const { renderTrackFreeze } = await window.__novaAppModule('/services/VstFreeze.ts');
   const out = {};
   await e.init(); await e.resume();
   if (!(await novaBridge.connect())) return { error: 'pont injoignable' };
@@ -153,6 +153,9 @@ def main():
             pg = b.new_page()
             errs = []
             pg.on("pageerror", lambda x: errs.append(str(x)[:300]))
+            sys.path.insert(0, str(Path(__file__).parent))
+            from qalib import APP_MODULE_INIT
+            pg.add_init_script(APP_MODULE_INIT)
             pg.add_init_script(f"try {{ localStorage.setItem('nova.bridge.url', 'ws://127.0.0.1:{PORT}'); localStorage.setItem('nova_welcome_seen', '1'); }} catch (e) {{}} window.__araDiag = {1 if os.environ.get('ARA_DIAG') else 0};")
             pg.goto(URL, wait_until="domcontentloaded")
             pg.wait_for_timeout(3000)
