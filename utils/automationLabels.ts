@@ -9,6 +9,7 @@ import { LIMITER_AUTOMATABLE } from '../engine/LimiterNode';
 import { legacyParamLabel } from '../engine/automationParams';
 import { isMuteParam, muteValueText } from './muteAutomation';
 import { analogParamLabel, ANALOG_SPECS } from '../engine/analogCompParams';
+import { vstParamDisplayName, vstValueText } from './vstParamCatalog';
 
 /**
  * Automation en français et en vraies unités (audit G22) : « Volume » en dB
@@ -29,6 +30,9 @@ export function automationParamLabel(param: string, tracks?: Track[] | null): st
   const pp = parsePluginParam(param);
   if (pp) {
     const pl = tracks?.flatMap(t => t.plugins || []).find(x => x.id === pp.pluginId);
+    // VST du PC (R9) : nom du réglage tel que le plugin l'affiche (« Pro-C 3 · Threshold »).
+    if (pl?.type === 'VST3') return `${pluginDisplayName(pl)} · ${vstParamDisplayName(pl.id, pp.key) || pp.key}`;
+    if (!pl) { const vn = vstParamDisplayName(pp.pluginId, pp.key); if (vn) return vn; }
     const limiterLabel = pl?.type === 'LIMITER' ? LIMITER_AUTOMATABLE.find(a => a.id === pp.key)?.label || null
       : pl && ANALOG_SPECS[pl.type] ? analogParamLabel(pl.type, pp.key) : null;
     // Effets historiques (R8) : Compresseur, EQ, Reverb, Délai, De-esser, Saturation, Doubleur, Nova Tune.
@@ -41,6 +45,10 @@ export function automationParamLabel(param: string, tracks?: Track[] | null): st
 
 export function automationValueText(param: string, v: number): string {
   if (isMuteParam(param)) return muteValueText(v);
+  // VST (R9) : valeur affichée par le plugin (« -24.0 dB », « 1.2 kHz »), lue par le pont.
+  const pp = parsePluginParam(param);
+  const vt = pp ? vstValueText(pp.pluginId, pp.key, v) : null;
+  if (vt) return vt;
   if (isGain(param)) return gainDbFr(v);
   if (param === 'pan') return panToText(v);
   if (param === 'width') return v <= 0.005 ? 'Mono' : `${Math.round(v * 100)} %`;
@@ -49,6 +57,10 @@ export function automationValueText(param: string, v: number): string {
 
 export function automationRangeText(param: string, min: number, max: number): string {
   if (isMuteParam(param)) return 'Son / Muet';
+  const pp = parsePluginParam(param);
+  const lo = pp ? vstValueText(pp.pluginId, pp.key, min) : null;
+  const hi = pp ? vstValueText(pp.pluginId, pp.key, max) : null;
+  if (lo && hi) return `${lo} à ${hi}`;
   if (isGain(param)) return `${gainDbFr(min)} à ${gainDbFr(max)}`;
   if (param === 'pan') return 'G 100 à D 100';
   return `${min.toFixed(1).replace('.', ',')} à ${max.toFixed(1).replace('.', ',')}`;

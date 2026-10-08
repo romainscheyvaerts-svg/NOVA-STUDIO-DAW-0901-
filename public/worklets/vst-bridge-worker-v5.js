@@ -1,5 +1,5 @@
 /**
- * VST Bridge Worker v4 (nom versionné : voir vst-bridge-processor-v4.js)
+ * VST Bridge Worker v5 (nom versionné : voir vst-bridge-processor-v5.js)
  *
  * Tient la connexion AUDIO avec le pont VST (ws://127.0.0.1:8765) hors du
  * thread principal : un rendu React ou un calcul de forme d'onde ne retarde
@@ -8,6 +8,10 @@
  * Trame binaire (little-endian), aller et retour :
  *   u8 type=1 | u8 L | slot_id (L octets UTF-8) | bourrage jusqu'à un multiple de 4
  *   | u32 seq | u16 nframes | u8 nch | u8 flags | float32[nframes*nch] entrelacés
+ *   v5 : flags & 1 → réglages horodatés après l'audio :
+ *        u16 count | u16 0 | count × (u16 index, u16 décalage, f32 valeur brute)
+ *        flags & 2 → nch = 4, canaux 3-4 = clé de side-chain.
+ *   Retour : toujours nch = 2, flags = 0.
  */
 
 let ws = null;
@@ -60,11 +64,14 @@ function header(slotId) {
   return h;
 }
 
-function sendBlock(slotId, seq, data) {
+function sendBlock(slotId, seq, data, nch, params) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const { bytes, headerLen } = header(slotId);
-  const nframes = data.length / 2;
-  const buf = new ArrayBuffer(headerLen + data.byteLength);
+  const ch = nch === 4 ? 4 : 2;
+  const nframes = data.length / ch;
+  const pc = params ? Math.floor(params.length / 3) : 0;
+  const extra = pc ? 4 + pc * 8 : 0;
+  const buf = new ArrayBuffer(headerLen + data.byteLength + extra);
   const u8 = new Uint8Array(buf);
   u8[0] = 1;
   u8[1] = bytes.length;
@@ -73,9 +80,19 @@ function sendBlock(slotId, seq, data) {
   const h = headerLen - 8;
   dv.setUint32(h, seq >>> 0, true);
   dv.setUint16(h + 4, nframes, true);
-  dv.setUint8(h + 6, 2);
-  dv.setUint8(h + 7, 0);
+  dv.setUint8(h + 6, ch);
+  dv.setUint8(h + 7, (pc ? 1 : 0) | (ch === 4 ? 2 : 0));
   new Float32Array(buf, headerLen, data.length).set(data);
+  if (pc) {
+    let o = headerLen + data.byteLength;
+    dv.setUint16(o, pc, true); dv.setUint16(o + 2, 0, true); o += 4;
+    for (let i = 0; i < pc; i++) {
+      dv.setUint16(o, params[3 * i], true);
+      dv.setUint16(o + 2, params[3 * i + 1], true);
+      dv.setFloat32(o + 4, params[3 * i + 2], true);
+      o += 8;
+    }
+  }
   ws.send(buf);
 }
 
@@ -91,7 +108,7 @@ onmessage = (e) => {
     ports.set(slotId, port);
     port.onmessage = (ev) => {
       const b = ev.data;
-      if (b && b.data) sendBlock(slotId, b.seq, b.data);
+      if (b && b.data) sendBlock(slotId, b.seq, b.data, b.nch || 2, b.params || null);
     };
   } else if (m.type === 'detach') {
     const p = ports.get(m.slotId);

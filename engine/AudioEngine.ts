@@ -34,7 +34,7 @@ import { AudioSampler } from './AudioSampler';
 import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
 import { loadSamplerZones, samplerSoundSig } from '../utils/samplerLoad';
-import { interpolateCurve, playedLanes, parsePluginParam, valueAtPoints, sortedPoints } from '../utils/automationWrite';
+import { interpolateCurve, playedLanes, parsePluginParam, valueAtPoints, sortedPoints, isWriteMode, automationModeOf } from '../utils/automationWrite';
 import { DrumRackNode } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
@@ -67,7 +67,7 @@ function loadFlashbackModule(ctx: AudioContext): Promise<void> {
   return p;
 }
 import { placeHumTake } from './humTake';
-import { VSTPluginNode } from './VSTPluginNode';
+import { VSTPluginNode, vstParamCatalog } from './VSTPluginNode';
 import { installWorkletGuard, installWorkletRetirement, onWorkletCrash, ownsNode, retireWorkletsOf } from './workletGuard';
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback, isFrozenBus, isFeedCovered, busFrozenSlices } from '../utils/freeze';
 import { PRE_VOLUME } from '../utils/preFxEdits';
@@ -1909,6 +1909,15 @@ export class AudioEngine {
     if (changed) this.recomputePdc();
   }
 
+  /**
+   * Écriture d'automation (R9) : sur une piste en Touch, Latch, Write ou Trim, le pont
+   * signale les réglages bougés dans la fenêtre de ses VST (enregistrés dans la voie).
+   */
+  private syncVstWatch(track: Track, dsp: TrackDSP) {
+    const on = isWriteMode(automationModeOf(track));
+    dsp.pluginChain.forEach(entry => { if (entry.instance instanceof VSTPluginNode) entry.instance.setWatch(on); });
+  }
+
   /** Effet à clé : chemin de sa clé en lecture (mesures, QA). */
   public getSidechainPath(pluginId: string): KeyPath | null { return this.sidechain.pathOf(pluginId); }
 
@@ -2582,6 +2591,9 @@ export class AudioEngine {
    * planificateur gardait les pistes du moment du « Play » : un clip supprimé
    * continuait de sonner jusqu'à l'arrêt.
    */
+  /** Pistes de la session telles que le moteur les joue (clés de side-chain des rendus VST, R10). */
+  public getLiveTracks(): Track[] { return this.liveTracks || []; }
+
   public setLiveTracks(tracks: Track[]) {
     this.practiceRawTracks = tracks;
     tracks = engineView(tracks).tracks;
@@ -3165,14 +3177,19 @@ export class AudioEngine {
     } catch { /* paramètre déjà libéré */ }
   }
 
-  /** Paramètre d'un effet natif (les VST3 du pont ne sont pas automatisés). */
+  /** Paramètre d'un effet : natif (updateParams) ou VST3 du pont (R9 : valeur brute posée tout de suite). */
   private applyPluginAutomation(trackId: string, param: string, value: number) {
     const p = parsePluginParam(param);
     if (!p || !Number.isFinite(value)) return;
     const key = `${trackId}|${param}`;
     if (this.pluginAutoSent.get(key) === value) return;
     const inst = this.tracksDSP.get(trackId)?.pluginChain.get(p.pluginId)?.instance;
-    if (!inst || typeof inst.updateParams !== 'function' || inst instanceof VSTPluginNode) return;
+    if (inst instanceof VSTPluginNode) {
+      this.pluginAutoSent.set(key, value);
+      inst.setParamNow(p.key, value);
+      return;
+    }
+    if (!inst || typeof inst.updateParams !== 'function') return;
     this.pluginAutoSent.set(key, value);
     try { inst.updateParams({ [p.key]: value }); } catch { /* effet en cours de reconstruction */ }
   }
@@ -3284,7 +3301,8 @@ export class AudioEngine {
     const pp = parsePluginParam(param);
     if (!pp) return null;
     const inst = this.tracksDSP.get(trackId)?.pluginChain.get(pp.pluginId)?.instance;
-    if (!inst || typeof inst.automationParam !== 'function' || inst instanceof VSTPluginNode) return null;
+    // VST3 (R9) : AudioParam du worklet du pont, valeurs envoyées avec l'audio à l'échantillon près.
+    if (!inst || typeof inst.automationParam !== 'function') return null;
     let ap: AudioParam | null = null;
     try { ap = inst.automationParam(pp.key); } catch { ap = null; }
     return ap ? { ap, lead: this.pluginLead(trackId, pp.pluginId) } : null;
@@ -3877,6 +3895,7 @@ export class AudioEngine {
         if (typeof send.pan === 'number') dsp.sendPanners?.get(send.id)?.pan.setTargetAtTime(send.pan, t, 0.015);
       });
       this.syncSidechains(allTracks);
+      this.syncVstWatch(track, dsp);
       return;
     }
     dsp.graphSignature = signature;
@@ -4141,6 +4160,7 @@ export class AudioEngine {
     });
     dsp.outputs = outputs;
     this.syncSidechains(allTracks);
+    this.syncVstWatch(track, dsp);
     this.recomputePdc();
     // R11 : point de mesure de la piste (pré-fader : après les effets ; post : après fader et pan).
     // Pré-fader pris sur chainOut (R7/R8) : le mute automatisé agit comme le mute fixe, après ce point.
@@ -4267,6 +4287,12 @@ export class AudioEngine {
   public getTrackPluginParameters(trackId: string): { pluginId: string, pluginName: string, params: PluginParameter[] }[] {
     const track = this.liveTracks?.find(t => t.id === trackId);
     return (track?.plugins || []).flatMap(pl => {
+      if (pl.type === 'VST3') {
+        // VST du PC (R9) : réglages lus par le pont (noms du plugin), valeur brute 0–1.
+        const list = vstParamCatalog.get(pl.id) || [];
+        if (!list.length) return [];
+        return [{ pluginId: pl.id, pluginName: pl.params?.name || pl.name || 'VST', params: list.map(a => ({ id: a.name, name: a.displayName, type: 'float' as const, min: 0, max: 1, value: a.value as any, unit: a.label })) }];
+      }
       const reg = getRegisteredPlugin(pl.type);
       // Effets historiques (R8) : Compresseur, EQ, Reverb, Délai, De-esser, Saturation, Doubleur, Nova Tune.
       const list = reg?.automatable?.length ? reg.automatable : legacyAutomatable(pl.type);

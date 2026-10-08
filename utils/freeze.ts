@@ -1,6 +1,7 @@
 import { BreathEdit, Clip, FreezeRef, PluginInstance, Track, TrackType } from '../types';
 import { breathSig } from './breathEnvelope';
 import { envelopeDbAt, gainPointsSig, sortGainPoints } from './clipGain';
+import { vstAutomationSig } from './vstAutomation';
 
 /**
  * Regles du gel de piste, partagees par le moteur audio, la sauvegarde et l'interface.
@@ -387,6 +388,8 @@ export const needsRerender = (t: Track): boolean => {
  */
 export const isFreezeStale = (t: Track): boolean => {
   if (!t.frozenClip) return false;
+  // (R9) L'automation d'un VST rendu a changé (ou elle n'était pas dans ce rendu).
+  if (vstAutomationSig(t, freezeIndex(t)) !== (t.frozenVstAutoSig || '')) return true;
   if (t.frozenPluginSig) return pluginsSignature(t.plugins || [], freezeIndex(t)) !== t.frozenPluginSig;
   return needsRerender(t);
 };

@@ -826,6 +826,11 @@ export interface Track {
    */
   frozenPluginSig?: string;
   /**
+   * (R9) Empreinte de l'automation des VST rendus (voies jouées des effets
+   * [0..frozenUpToPluginIndex]) : si elle change, le rendu est périmé.
+   */
+  frozenVstAutoSig?: string;
+  /**
    * Gel automatique (sauvegarde / fermeture sur le PC avec le pont VST) : la
    * piste se dégèle toute seule quand la session rouvre sur un PC qui a les
    * plugins ; un gel manuel (CPU) reste, lui, tel quel.

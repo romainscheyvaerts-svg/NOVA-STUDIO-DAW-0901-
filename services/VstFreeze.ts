@@ -8,6 +8,8 @@ import {
   needsRerender, pluginsSignature, SEND_RENDER_TAIL,
 } from '../utils/freeze';
 import { makeFreezeBase, PRE_VOLUME } from '../utils/preFxEdits';
+import { vstAutomationFor, vstAutomationSig } from '../utils/vstAutomation';
+import { keyRoutes } from '../engine/sidechain';
 
 /**
  * Rendu des effets VST3 (via le pont du PC) dans l'audio de la piste, pour que
@@ -30,6 +32,8 @@ export interface FreezeResult {
   pluginSig: string;
   /** Place de chaque clip rendu dans le rendu, telle qu'au moment du rendu. */
   anchors: Map<string, NonNullable<Clip['freezeRef']>>;
+  /** (R9) Empreinte de l'automation des VST rendus. */
+  vstAutoSig?: string;
 }
 
 /**
@@ -42,6 +46,7 @@ export function applyFreezeResult(t: Track, r: FreezeResult, by?: string): void 
   t.frozenClipIds = r.clipIds;
   t.frozenSourceSig = r.sig;
   t.frozenPluginSig = r.pluginSig;
+  t.frozenVstAutoSig = r.vstAutoSig || '';
   t.clips = (t.clips || []).map(c => {
     const ref = r.anchors.get(c.id);
     if (!ref) return c;
@@ -84,11 +89,71 @@ const isolated = (track: Track, plugins: PluginInstance[], clips?: Clip[], withP
 const channelsOf = (b: AudioBuffer): Float32Array[] =>
   Array.from({ length: Math.min(2, b.numberOfChannels) }, (_, c) => b.getChannelData(c));
 
+/** Passe-haut / passe-bas de la clé (mêmes réglages que la barre « Clé ») sur un son hors ligne. */
+async function filterKey(b: AudioBuffer, hpf: number, lpf: number): Promise<AudioBuffer> {
+  if (hpf <= 20 && lpf >= 20000) return b;
+  const ctx = new OfflineAudioContext(2, b.length, b.sampleRate);
+  const src = ctx.createBufferSource();
+  src.buffer = b;
+  let node: AudioNode = src;
+  const ny = b.sampleRate / 2 * 0.99;
+  if (hpf > 20) { const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.Q.value = 0.7071; f.frequency.value = Math.min(ny, hpf); node.connect(f); node = f; }
+  if (lpf < 20000) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 0.7071; f.frequency.value = Math.min(ny, lpf); node.connect(f); node = f; }
+  node.connect(ctx.destination);
+  src.start(0);
+  return ctx.startRendering();
+}
+
+/**
+ * (R10) Clés de side-chain des VST de `plugins` pour un rendu hors ligne : chaque
+ * source (piste ou pistes d'un bus nommé), avant ou après fader comme en lecture,
+ * filtrée comme la barre « Clé », alignée sur le temps du morceau (startTime).
+ * Une source dont les VST ont un rendu à jour joue ce rendu ; sinon ses VST
+ * passent sans effet dans la clé. `all` : pistes de la session (sinon celles du moteur).
+ */
+export async function renderVstKeys(plugins: PluginInstance[], host: Track, frames: number, sampleRate: number, startTime = 0, all?: Track[]): Promise<Map<string, Float32Array[]>> {
+  const out = new Map<string, Float32Array[]>();
+  const keyed = plugins.filter(p => isVst(p) && p.isEnabled && !p.isInactive && p.sidechainSourceId);
+  if (!keyed.length) return out;
+  const tracks = (all && all.length ? all : audioEngine.getLiveTracks()).map(t => (t.id === host.id ? { ...t, plugins: host.plugins } : t));
+  const routes = keyRoutes(tracks);
+  for (const p of keyed) {
+    const r = routes.find(x => x.pluginId === p.id && x.targetTrackId === host.id);
+    if (!r) continue;
+    const srcs: Track[] = [];
+    for (const id of r.sources) {
+      const s = tracks.find(t => t.id === id);
+      if (!s || !canBakeTrack(s)) continue;
+      const own = activeVst(s) && s.frozenClip && !isFreezeStale(s) && freezeIndex(s) >= lastVstIndex(s) ? { ...s, isFrozen: true } : s;
+      // Avant fader : un kick muet fait quand même pomper (comme en lecture).
+      srcs.push({ ...own, isSolo: false, ...(r.tap === 'pre' ? { isMuted: false } : {}), outputTrackId: '', sends: [], sendFreezes: undefined });
+    }
+    if (!srcs.length) continue;
+    const dur = frames / sampleRate;
+    const raw = await audioEngine.renderProject(srcs, dur, startTime, sampleRate, undefined, { preFader: r.tap === 'pre' });
+    const kb = await filterKey(raw, r.hpf, r.lpf);
+    out.set(p.id, [0, 1].map(c => { const x = new Float32Array(frames); x.set(kb.getChannelData(Math.min(c, kb.numberOfChannels - 1)).subarray(0, frames)); return x; }));
+  }
+  return out;
+}
+
+/** Options du rendu d'une chaîne : position du son dans le morceau, clés de side-chain (R10). */
+export interface ChainRenderOptions {
+  /** Temps du morceau (s) du premier échantillon (automation des VST : R9). */
+  startTime?: number;
+  /** Clé de side-chain par effet VST (id → 2 canaux, alignés sur le son). Absent : calculée (R10). */
+  keys?: Map<string, Float32Array[]>;
+  /** Pistes de la session (sources des clés) ; sinon celles du moteur. */
+  allTracks?: Track[];
+}
+
 /**
  * Passe un son (stéréo) dans une chaîne d'effets : VST3 par le pont, effets
  * natifs hors ligne. La durée ne change pas (la queue doit déjà être dans le son).
+ * Les voies d'automation des VST (R9) de `host` sont rejouées par le pont, à
+ * l'échantillon près, comme en lecture.
  */
-export async function renderThroughChain(input: AudioBuffer, plugins: PluginInstance[], host: Track, onStep?: (msg: string) => void): Promise<AudioBuffer> {
+export async function renderThroughChain(input: AudioBuffer, plugins: PluginInstance[], host: Track, onStep?: (msg: string) => void, opts: ChainRenderOptions = {}): Promise<AudioBuffer> {
   await audioEngine.init();
   const ctx = audioEngine.ctx!;
   const sr = input.sampleRate;
@@ -98,15 +163,22 @@ export async function renderThroughChain(input: AudioBuffer, plugins: PluginInst
   }
   const duration = input.length / sr;
   let buffer = input;
+  const keys = opts.keys || await renderVstKeys(plugins, host, input.length, sr, opts.startTime || 0, opts.allTracks);
   for (const seg of segments) {
     if (seg.kind === 'vst') {
       const p = seg.plugin;
       onStep?.(`Rendu ${p.params?.name || p.name}…`);
       const live = liveVstNodes.get(p.id);
+      const automation = vstAutomationFor(host, p.id, opts.startTime || 0, sr, buffer.length);
+      if (automation.length && !novaBridge.getBridgeState().automation) {
+        throw new Error("Mets à jour le pont VST (Nova Studio pour Windows) pour rendre l'automation des VST.");
+      }
       const out = await novaBridge.render({
         slotId: live?.getSlotId() || null,
         path: p.params?.localPath, pluginName: p.params?.pluginName || null, stateB64: p.params?.stateB64 || null,
         sampleRate: sr, channels: channelsOf(buffer), tailSeconds: 0,
+        ...(automation.length ? { automation } : {}),
+        ...(keys.get(p.id) ? { key: keys.get(p.id)! } : {}),
       });
       const next = ctx.createBuffer(2, buffer.length, sr);
       for (let c = 0; c < 2; c++) next.copyToChannel(out[Math.min(c, out.length - 1)].subarray(0, buffer.length), c);
@@ -134,7 +206,7 @@ export async function renderThroughChain(input: AudioBuffer, plugins: PluginInst
  * opts.withPreVolume : le volume avant effets passe dans le rendu (export) ;
  * sinon il reste appliqué à la lecture (il s'édite sur la tablette).
  */
-export async function renderTrackFreeze(track: Track, upTo: number, onStep?: (msg: string) => void, opts: { withPreVolume?: boolean } = {}): Promise<FreezeResult> {
+export async function renderTrackFreeze(track: Track, upTo: number, onStep?: (msg: string) => void, opts: { withPreVolume?: boolean; allTracks?: Track[] } = {}): Promise<FreezeResult> {
   if (!canBakeTrack(track)) throw new Error("Le beat n'est jamais rendu dans un fichier (licence).");
   await audioEngine.init();
   const ctx = audioEngine.ctx!;
@@ -155,7 +227,7 @@ export async function renderTrackFreeze(track: Track, upTo: number, onStep?: (ms
   const dry = await audioEngine.renderProject([isolated(track, firstNative, undefined, !!opts.withPreVolume)], duration, 0, sr, undefined, { preFader: true, keepPreVolume: !!opts.withPreVolume });
   // 2) Effets suivants : VST3 par le pont, effets natifs hors ligne
   const rest = segments[0]?.kind === 'native' ? plugins.slice(plugins.indexOf(firstNative[firstNative.length - 1]) + 1) : plugins;
-  const buffer = await renderThroughChain(dry, rest, track, onStep);
+  const buffer = await renderThroughChain(dry, rest, track, onStep, { allTracks: opts.allTracks });
 
   const clipId = `frozen-${track.id}-${Date.now()}`;
   audioBufferRegistry.register(buffer, clipId);
@@ -167,6 +239,7 @@ export async function renderTrackFreeze(track: Track, upTo: number, onStep?: (ms
   return {
     clip, upTo, clipIds: clips.map(c => c.id), sig: freezeSignature(clips, track.plugins || [], upTo),
     pluginSig: pluginsSignature(track.plugins || [], upTo), anchors: anchorClipsToRender(clips, clipId),
+    vstAutoSig: vstAutomationSig(track, upTo),
   };
 }
 
@@ -191,7 +264,7 @@ export async function renderTrackPreview(
   const firstNative = segments[0]?.kind === 'native' ? (segments[0] as { kind: 'native'; plugins: PluginInstance[] }).plugins : [];
   const dry = await audioEngine.renderProject([isolated(track, firstNative)], duration, Math.max(0, win.from), sr, undefined, { preFader: true });
   const rest = segments[0]?.kind === 'native' ? plugins.slice(plugins.indexOf(firstNative[firstNative.length - 1]) + 1) : plugins;
-  const buffer = await renderThroughChain(dry, rest, track, onStep);
+  const buffer = await renderThroughChain(dry, rest, track, onStep, { startTime: Math.max(0, win.from) });
   const id = `preview-${track.id}-${Date.now()}`;
   audioBufferRegistry.register(buffer, id);
   return {
@@ -363,6 +436,7 @@ export function applyBusFreezeResult(tracks: Track[], r: BusFreezeResult, by?: s
   bus.frozenUpToPluginIndex = r.upTo;
   bus.frozenClipIds = [];
   bus.frozenPluginSig = r.pluginSig;
+  bus.frozenVstAutoSig = vstAutomationSig(bus, r.upTo);
   delete bus.frozenSourceSig;
   for (const s of tracks) {
     const p = r.perSource.get(s.id);
@@ -483,7 +557,7 @@ export async function prepareTracksForOffline(tracks: Track[], onStep?: (msg: st
     }
     if (bridge) {
       try {
-        const r = await renderTrackFreeze(t, lastVstIndex(t), onStep, { withPreVolume: true });
+        const r = await renderTrackFreeze(t, lastVstIndex(t), onStep, { withPreVolume: true, allTracks: tracks });
         temp.push(r.clip.bufferId!);
         const ft: Track = { ...withoutPreVolume(t), isFrozen: true };
         applyFreezeResult(ft, r);

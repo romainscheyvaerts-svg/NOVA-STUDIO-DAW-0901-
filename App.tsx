@@ -179,7 +179,7 @@ import { gainToDbText } from './utils/db';
 import { isNovaDesktop } from './utils/desktopApp';
 import { AutotuneVstManager } from './components/AutotuneVstPanel';
 import { handleNovaVstAction, VST_ACTIONS } from './services/NovaVstMix';
-import { novaVstEvents } from './engine/VSTPluginNode';
+import { novaVstEvents, vstParamEvents } from './engine/VSTPluginNode';
 import {
   pushSession, pullSession, parseLink, createCloudSession, cloudProjectId, CloudConflictError, LocalCloudSession,
   getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, sessionUrl, signInAccount, call as callCloud,
@@ -3173,6 +3173,23 @@ function Studio() {
     // Chargement / réglage par Nova : conséquence, pas une étape d'annulation de plus.
     if (source === 'load' || source === 'nova') setSilently(update); else setState(update);
   }), [setState, setSilently]);
+
+  // Écriture d'automation des VST (R9) : un réglage bougé dans la fenêtre du plugin
+  // (signalé par le pont) pendant la lecture, piste en Touch / Latch / Write / Trim,
+  // est enregistré dans sa voie, comme un fader. Pas d'écho vers le plugin.
+  useEffect(() => vstParamEvents.on(({ pluginId, changes }) => {
+    const track = stateRef.current.tracks.find(t => (t.plugins || []).some(p => p.id === pluginId && p.type === 'VST3'));
+    if (!track || !automationRecorder.canWrite(track.id)) return;
+    const params: Record<string, number> = {};
+    const before: Record<string, number> = {};
+    changes.forEach(c => { if (Number.isFinite(c.value)) params[c.name] = c.value; if (typeof c.from === 'number') before[c.name] = c.from; });
+    if (!Object.keys(params).length) return;
+    if (!automationRecorder.capturePluginParams(track.id, pluginId, params, before)) return;
+    setSilently(produce((draft: DAWState) => {
+      const pl = draft.tracks.find(t => t.id === track.id)?.plugins.find(p => p.id === pluginId);
+      if (pl) pl.params = { ...pl.params, ...params };
+    }));
+  }), [setSilently]);
 
   /**
    * Session à enregistrer comme modèle : l'état des VST3 chargés est relu sur le

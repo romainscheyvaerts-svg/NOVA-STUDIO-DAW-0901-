@@ -26,8 +26,12 @@ import type { PluginInstance, Track } from '../types';
 import type { PdcKey, PdcResult } from '../utils/pdc';
 import { busById, busesOf, engineView } from '../utils/trackStructure';
 
-/** Effets qui acceptent une clé externe. Le limiteur à crête vraie n'en a pas : son plafond doit suivre SON signal. */
-export const SIDECHAIN_TYPES = ['COMPRESSOR', 'GATE', 'GATEFX', 'DEESSER', 'OPTO_VINTAGE', 'FET76', 'LEVELER2A', 'VOXSTRIP'] as const;
+/**
+ * Effets qui acceptent une clé externe. Le limiteur à crête vraie n'en a pas : son plafond doit suivre SON signal.
+ * VST3 (R10) : la clé part au pont avec l'audio (4 canaux) ; elle n'est utilisée que si l'hôte du pont
+ * alimente l'entrée side-chain du plugin (LOAD_PLUGIN sidechain_inputs > 0, voir bridge-python/vst_sidechain.py).
+ */
+export const SIDECHAIN_TYPES = ['COMPRESSOR', 'GATE', 'GATEFX', 'DEESSER', 'OPTO_VINTAGE', 'FET76', 'LEVELER2A', 'VOXSTRIP', 'VST3'] as const;
 export const supportsSidechain = (type: string) => (SIDECHAIN_TYPES as readonly string[]).includes(type);
 
 export const BUS_KEY_PREFIX = 'bus:';
