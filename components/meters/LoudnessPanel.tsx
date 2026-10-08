@@ -51,7 +51,7 @@ export const LufsChip: React.FC<{ className?: string }> = ({ className = '' }) =
     <button type="button" onClick={() => loudnessPanel.toggle()} aria-pressed={isOpen} data-testid="lufs-chip"
       title="Loudness du master (EBU R128) : LUFS intégré (I) et momentané (M). Clic : fenêtre Loudness (LRA, crête vraie, corrélation, goniomètre, spectre, cibles Spotify / YouTube / Apple / TikTok)"
       aria-label="Ouvrir la fenêtre Loudness"
-      className={`h-10 px-2 rounded-lg border flex flex-col justify-center items-end leading-none gap-0.5 font-mono tabular-nums ${isOpen ? 'border-cyan-400/60 bg-cyan-500/10' : 'border-white/10 bg-black/50'} ${className}`}>
+      className={`h-10 min-w-[58px] shrink-0 whitespace-nowrap px-2 rounded-lg border flex flex-col justify-center items-end leading-none gap-0.5 font-mono tabular-nums ${isOpen ? 'border-cyan-400/60 bg-cyan-500/10' : 'border-white/10 bg-black/50'} ${className}`}>
       <span className="text-[10px] text-slate-200"><span className="text-[8px] text-slate-500 mr-1 font-sans font-bold">I</span><span ref={iRef}>−∞</span></span>
       <span className="text-[9px] text-slate-400"><span className="text-[8px] text-slate-500 mr-1 font-sans font-bold">M</span><span ref={mRef}>−∞</span></span>
     </button>
