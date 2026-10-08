@@ -1,3 +1,7 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Barre du haut : éléments repliés faute de place (utils/barFit.ts) ; le menu ☰ les reprend. */
+[data-bar-folded] { display: none !important; }
+[data-bar-menu] .nova-bar-menu { display: flex !important; }

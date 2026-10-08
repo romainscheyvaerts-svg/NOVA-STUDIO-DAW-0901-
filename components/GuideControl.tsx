@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { barItem } from '../utils/barFit';
 
 interface Props {
   count: number;
@@ -36,8 +37,8 @@ const GuideControl: React.FC<Props> = ({ count, muted, level, onToggle, onLevel,
     <div className="flex items-center" data-testid="guide-control">
       <button type="button" onClick={onToggle} aria-pressed={!muted} data-testid="guide-toggle"
         title={`Piste guide (${count}) : ${muted ? 'coupée' : `entendue à ${pct(level)}`}. Clic ou touche G : couper / rallumer. Jamais exportée ni mixée (Pro Tools : piste guide inactive au bounce).`}
-        className={`nova-hit-tactile h-8 px-2 rounded-lg text-[9px] font-black tracking-wider border transition-all ${muted ? 'text-slate-500 border-white/10 line-through' : 'bg-amber-500/15 text-amber-300 border-amber-500/40'}`}>
-        <i className="fas fa-headphones mr-1" aria-hidden="true"></i>{compact ? '' : 'GUIDE'}
+        className={`nova-hit-tactile h-8 px-2 rounded-lg whitespace-nowrap text-[9px] font-black tracking-wider border transition-all ${muted ? 'text-slate-500 border-white/10 line-through' : 'bg-amber-500/15 text-amber-300 border-amber-500/40'}`}>
+        <i className="fas fa-headphones" aria-hidden="true"></i>{compact ? null : <span {...barItem('libelle-guide', 8)} className="ml-1">GUIDE</span>}
       </button>
       <button ref={btn} type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} aria-label="Niveau de la piste guide" data-testid="guide-level-open"
         title="Niveau du guide, à part du mix"
