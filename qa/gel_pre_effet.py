@@ -257,17 +257,35 @@ def export_wav(page, dest: Path, label):
     b.click(); page.wait_for_timeout(1200)
     shot(page, f"{label}_export_fenetre")
     try:
-        with page.expect_download(timeout=240000) as dl:
-            quick = page.get_by_text("Mon morceau complet", exact=True).locator("visible=true")
-            if quick.count():
-                quick.first.click()
-            else:
-                # Mode avancé (ingé, collaboration) : la fenêtre s'ouvre sur Mix / Stems / Voix seules (audit G19).
-                page.locator("button", has_text=re.compile(r"^\s*Mix\s*$")).locator("visible=true").first.click(); page.wait_for_timeout(300)
-                page.locator("button", has_text=re.compile(r"^\s*EXPORTER\s*$", re.I)).locator("visible=true").last.click()
-        dl.value.save_as(str(dest))
+        # Sur tablette / téléphone, le navigateur ne télécharge pas tout seul : le fichier prêt
+        # s'affiche avec un bouton « Télécharger » qu'il faut toucher (comme l'utilisateur).
+        got = []
+        page.on("download", lambda d: got.append(d))
+        quick = page.get_by_text("Mon morceau complet", exact=True).locator("visible=true")
+        if quick.count():
+            quick.first.click()
+        else:
+            # Mode avancé (ingé, collaboration) : la fenêtre s'ouvre sur Mix / Stems / Voix seules (audit G19).
+            page.locator("button", has_text=re.compile(r"^\s*Mix\s*$")).locator("visible=true").first.click(); page.wait_for_timeout(300)
+            page.locator("button", has_text=re.compile(r"^\s*EXPORTER\s*$", re.I)).locator("visible=true").last.click()
+        t0 = time.time()
+        tapped = False
+        while not got and time.time() - t0 < 240:
+            btn = page.get_by_role("button", name=re.compile(r"^\s*Télécharger\s*$")).locator("visible=true")
+            if not tapped and btn.count():
+                btn.first.click(); tapped = True
+            page.wait_for_timeout(500)
+        if not got:
+            raise TimeoutError("export : aucun fichier téléchargé en 240 s")
+        got[0].save_as(str(dest))
     finally:
         page.wait_for_timeout(800)
+        # Notification « Prêt : … » fermée (comme l'utilisateur) : elle recouvre le bas de l'écran.
+        try:
+            for b in page.get_by_role("button", name="Fermer la notification").locator("visible=true").all():
+                b.click(timeout=2000)
+        except Exception:
+            pass
         for _ in range(3):
             close = page.get_by_role("button", name=re.compile("^(Fermer|Close)$")).locator("visible=true")
             try:

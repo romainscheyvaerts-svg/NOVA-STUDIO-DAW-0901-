@@ -142,7 +142,7 @@ import { CrashRecoveryDialog, VersionsDialog } from './components/RecoveryDialog
 import ProGateModal from './components/ProGateModal';
 import CollabPanel, { CollabMessage } from './components/CollabPanel';
 import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
-import { collabRoleStore, collabLiveStore } from './utils/collabStore';
+import { collabRoleStore, collabLiveStore, CollabPeerMark } from './utils/collabStore';
 import {
   applyMarkerOps, claimWins, contentVerdict, followTarget, isSessionFull, markerChanges, markerSig, myRecordTarget, myTrackName, needsResync,
   normalizeInviteCode, ownerFromContent, ownerRoleOf, participantOf, peerViews, pickPeerColor, recordBlock, PeerInfo, PeerRec, TransportMsg, MAX_PARTICIPANTS,
@@ -169,8 +169,15 @@ import { sanitizeTimeOp, TimeOp } from './utils/timeOps';
 import { R12Panel, TimeDialogPreset, openR12Panel } from './utils/r12Bus';
 import ArrangeLane, { ARRANGE_LANE_H, useArrangeLaneShown } from './components/ArrangeLane';
 import { StructureTracksContext } from './components/TrackStructure';
-import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf, sanitizeIncomingClips } from './utils/collabMerge';
+import { applyMixFields, touchesPlugins, touchesAutomation, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf, sanitizeIncomingClips } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
+import { CollabRtc, RtcSignal } from './services/CollabRtc';
+import { sessionPrint, trackParts } from './utils/collabFingerprint';
+import {
+  CONTENT_FORMAT, KnownContent, canSendContent, canSendMix, canonicalOrder, contentAllowed, contentDelta, deleteAllowed, isEmptyDelta,
+  knownOf, mergeClips, metaSigOf, mixAllowed, noteMerged, noteSent, orderOf, pendingClipIds, sameOrder, SONG_FIELDS, SongField, songFieldsOf, sanitizeSongField, clipSig,
+} from './utils/collabContent';
+import { HistoryEntry, UndoAction, SONG_LABEL, applyClipsUndo, clipsText, clipsUndo, joinLabels, mixFieldLabel, pushHistory } from './utils/collabHistory';
 import RemoteIngePanel from './components/RemoteIngePanel';
 import LiveVstRemotePanel from './components/LiveVstRemotePanel';
 import { useRemoteInge } from './hooks/useRemoteInge';
@@ -4678,7 +4685,7 @@ function Studio() {
       // En collaboration, seul l'artiste écrit l'instantané (les autres passent par le journal).
       const collabNow = collabRef.current;
       // Plusieurs artistes : seul l'hôte l'écrit (avant : chacun l'écrasait toutes les 20 s).
-      const r = await pushSession({ ...st, id: cloudProjectId(cur.id), collabSeq: collabNow?.client.lastSeq ?? st.collabSeq }, user?.owned_instruments || [], { id: cur.id, secret: cur.secret }, cur.version, progress, { force: opts.force || (collabNow?.role === 'artist' && collabNow.host) });
+      const r = await pushSession({ ...st, id: cloudProjectId(cur.id), collabSeq: collabNow ? collabNow.client.safeSeq : st.collabSeq }, user?.owned_instruments || [], { id: cur.id, secret: cur.secret }, cur.version, progress, { force: opts.force || (collabNow?.role === 'artist' && collabNow.host) });
       setCloudSession({ ...cur, version: r.version, name: st.name || cur.name, syncedAt: Date.now() });
       if (opts.interactive) setTimeout(() => setCloudProgress(null), 1500);
       return true;
@@ -4748,6 +4755,22 @@ function Studio() {
     if (invite) pendingArrivalRef.current = role === 'artist' || role === 'engineer' || role === 'beatmaker' ? role : 'any';
     else if (role === 'artist' || role === 'engineer' || role === 'beatmaker') pendingCollabRoleRef.current = role;
     void openCloudSession(link);
+  }, []);
+
+  // Page rechargée (F5, onglet rouvert) en pleine collaboration : on rouvre la session en
+  // ligne puis on rejoint tout seul, même rôle (avant : retour à l'accueil, la collaboration
+  // était perdue jusqu'à ce qu'on rouvre le lien d'invitation).
+  useEffect(() => {
+    let raw: string | null = null;
+    try { raw = new URLSearchParams(window.location.search).get('session'); } catch { /* */ }
+    if (raw || remoteLinkFromUrl) return;
+    let saved: { sessionId?: string } | null = null;
+    try { saved = JSON.parse(localStorage.getItem('nova_collab_active') || 'null'); } catch { /* */ }
+    const cs = getLocalCloudSession();
+    if (!saved || !cs || saved.sessionId !== cs.id || !cs.secret) return;
+    setAiNotification('👥 Reprise de la collaboration après le rechargement…');
+    void openCloudSession({ id: cs.id, secret: cs.secret });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // --- Collaboration à distance (artiste, ingé son, beatmaker) -----------------------
@@ -4820,21 +4843,49 @@ function Studio() {
   collabRef.current = collab;
   const [collabOnline, setCollabOnline] = useState<CollabMember[]>([]);
   const [collabMessages, setCollabMessages] = useState<CollabMessage[]>([]);
+  const collabMessagesRef = useRef(collabMessages);
+  collabMessagesRef.current = collabMessages;
   const [collabBusy, setCollabBusy] = useState<string | null>(null);
   const pendingCollabRoleRef = useRef<CollabRole | null>(null);
   // Signatures connues (envoyées ou reçues) par domaine : rien n'est renvoyé en écho.
   const knownSigRef = useRef(new Map<string, string>());
+  /** Contenu connu de tous, clip par clip (utils/collabContent) : seuls les clips changés partent. */
+  const knownContentRef = useRef(new Map<string, KnownContent>());
+  /** Ordre des pistes connu de tous, et dernière liste reçue (ordre identique chez tous). */
+  const knownOrderRef = useRef<string[] | null>(null);
+  const lastOrderListRef = useRef<string[] | null>(null);
+  /** Tonalité, arrangements, paroles : empreinte connue de tous, champ par champ. */
+  const knownSongRef = useRef(new Map<string, string>());
+  /** Envoi du contenu peu après la dernière modification (avant : toutes les 10 s). */
+  const contentFlushRef = useRef<(() => void) | null>(null);
+  const contentTimerRef = useRef<number | null>(null);
+  const tooBigNotifiedRef = useRef(new Set<string>());
+  /** Historique « qui a changé quoi » (utils/collabHistory), avec retour arrière. */
+  const [collabHistory, setCollabHistory] = useState<HistoryEntry[]>([]);
+  const noteHistoryRef = useRef<((e: { seq: number; who: string; role: CollabRole; text: string; trackId?: string; undo?: UndoAction }) => void) | null>(null);
+  const noteClipHistoryRef = useRef<((o: CollabOp, before: Track, taken: Clip[], dropped: string[]) => void) | null>(null);
+  /** Piste que je modifie en ce moment (annoncée aux autres : verrou doux). */
+  const noteEditingRef = useRef<((trackId: string) => void) | null>(null);
   const knownFreezeRef = useRef(new Map<string, string>());
+  /** Pistes au dernier passage de la détection (pour savoir qui possédait une piste supprimée). */
+  const lastTracksRef = useRef<Track[]>([]);
   const remoteTouchedRef = useRef(new Set<string>());
+  /** Contenu remplacé en entier par l'autre (piste créée, ancienne version de NOVA) : « connu » d'office. */
+  const contentResetRef = useRef(new Set<string>());
   const contentDirtyRef = useRef(new Set<string>());
   const mixTimersRef = useRef(new Map<string, number>());
   // Mix champ par champ (règle : dernière écriture gagne, par paramètre ; utils/collabMerge).
   const knownFieldsRef = useRef(new Map<string, Record<string, string>>());
   /** Champs modifiés ici, pas encore mis en file (250 ms) : jamais écrasés par ceux de l'autre. */
   const pendingMixRef = useRef(new Map<string, Set<string>>());
+  /** Champs reçus pendant que le nôtre partait : départagés par le numéro du journal (voir onSent). */
+  const deferredMixRef = useRef(new Map<string, { seq: number; value: unknown; who: string }>());
+  const deferredClipRef = useRef(new Map<string, { seq: number; clip: Clip | null }>());
   const lwwRef = useRef(new LwwClock());
   const freezeDirtyRef = useRef(new Set<string>());
   const [collabStatus, setCollabStatus] = useState<CollabStatus | null>(null);
+  /** Ma clé de membre (une par appareil), connue après avoir rejoint : l'audio en direct en a besoin. */
+  const [collabMemberKey, setCollabMemberKey] = useState<string | null>(null);
   const [peerSeenAt, setPeerSeenAt] = useState<number | null>(null);
   // --- « Feat à distance » : plusieurs artistes (et l'ingé, le beatmaker) -----------------
   /** Personnes vues (opérations reçues, liste du serveur) : pour « hors ligne » et « en retard ». */
@@ -5076,13 +5127,41 @@ function Studio() {
   }, []);
 
   /** Ce que tout le monde a déjà (rien n'est renvoyé). mix:false : le mix est suivi champ par champ à part. */
-  const rememberTrack = (t: Track, opts: { mix?: boolean } = {}) => {
+  const rememberTrack = (t: Track, opts: { mix?: boolean; content?: boolean } = {}) => {
     if (opts.mix !== false || !knownFieldsRef.current.has(t.id)) knownFieldsRef.current.set(t.id, fieldSigsOf(mixFieldsOf(t)));
-    knownSigRef.current.set('content:' + t.id, sigOf(contentOf(t)));
+    const content = contentOf(t);
+    knownSigRef.current.set('content:' + t.id, sigOf(content));
+    // Contenu : seulement s'il vient d'être remplacé en entier (sinon nos clips pas encore partis seraient « connus » et jamais envoyés).
+    if (opts.content !== false || !knownContentRef.current.has(t.id)) knownContentRef.current.set(t.id, knownOf(metaSigOf(content), t.clips || []));
     if (t.frozenClip) knownFreezeRef.current.set(t.id, t.frozenClip.id);
   };
 
+  /**
+   * Même réglage de la session (tempo, groupes, ordre, tonalité, repères, accords) modifié ici
+   * et en route vers le serveur : on ne sait pas encore qui est le plus récent. L'opération
+   * reçue est mise de côté et rejouée quand notre numéro du journal est connu (onSent) — la
+   * plus récente gagne chez tous. Avant : chacun gardait la sienne si nos envois se croisaient.
+   */
+  const deferredOpsRef = useRef(new Map<string, CollabOp[]>());
+  const deferIfMineInFlight = (outKey: string, o: CollabOp): boolean => {
+    const c = collabRef.current;
+    if (!c || o.replay || !c.client.outbox.has(outKey)) return false;
+    // Plusieurs reçues entre-temps : toutes gardées, rejouées dans l'ordre du journal.
+    const list = deferredOpsRef.current.get(outKey) || [];
+    if (!list.some(x => x.seq === o.seq)) list.push(o);
+    deferredOpsRef.current.set(outKey, list);
+    return true;
+  };
+
   /** Applique une opération reçue d'un collaborateur. */
+  /**
+   * Opérations reçues : l'état de référence (stateRef) est mis à jour TOUT DE SUITE, pas au
+   * prochain rendu, pour que l'opération suivante du journal (appliquée juste après) le voie.
+   * Avant : une piste créée puis supprimée dans le même rattrapage (rechargement) restait,
+   * la suppression ne la trouvant pas encore.
+   */
+  const remoteSet = (fn: (s: DAWState) => DAWState) => { stateRef.current = fn(stateRef.current); setState(fn); };
+  const remoteSetSilently = (fn: (s: DAWState) => DAWState) => { stateRef.current = fn(stateRef.current); setSilently(fn); };
   const applyCollabOp = useCallback(async (o: CollabOp) => {
     const c = collabRef.current;
     if (!c) return;
@@ -5100,10 +5179,17 @@ function Studio() {
       seenPeersRef.current.set(pk, { ...prev, name: o.author_name || prev?.name || '?', role: o.role, ...(o.replay ? {} : { seenAt: Date.now() }) });
       if (!o.replay && (!prev?.seenAt || Date.now() - prev.seenAt > 5000)) setPeersTick(x => x + 1);
     }
-    if ((o.kind === 'mix' || o.kind === 'freeze') && o.role !== 'engineer') return refuse('réservé à l’ingé son');
+    if (o.kind === 'freeze' && o.role !== 'engineer') return refuse('réservé à l’ingé son');
+    // Mix : l'ingé partout ; un artiste / beatmaker sur SES pistes et sur les pistes partagées (utils/collabContent).
+    if (o.kind === 'mix' && !mixAllowed(existing, { role: o.role, memberKey: o.member_key })) return refuse('piste d’un autre');
     if (o.kind === 'lock' && !(o.role === 'artist' || (o.role === 'engineer' && !p.lock))) return refuse('verrou');
-    // Chacun ses pistes : la version de Sam n'écrase jamais la prise de Léo (utils/collabPeers).
-    if (o.kind === 'content') { const v = contentVerdict(existing, { role: o.role, memberKey: o.member_key }); if (!v.ok) return refuse(v.reason || 'refusée'); }
+    // Chacun ses pistes : la version de Sam n'écrase jamais la prise de Léo (utils/collabPeers) ;
+    // l'ingé retouche les prises des artistes, clip par clip seulement (utils/collabContent).
+    if (o.kind === 'content') {
+      const v = p.cv >= CONTENT_FORMAT ? contentAllowed(existing, { role: o.role, memberKey: o.member_key }, true) : contentVerdict(existing, { role: o.role, memberKey: o.member_key });
+      if (!v.ok) return refuse(v.reason || 'refusée');
+    }
+    if (o.kind === 'track_del' && !deleteAllowed(existing, { role: o.role, memberKey: o.member_key })) return refuse('suppression non autorisée');
     // En direct : l'ingé règle les VST hébergés par le pont du PC de l'artiste.
     if (LIVE_PREVIEW_KINDS.has(o.kind)) {
       if (o.replay) return; // ancien aperçu : l'ingé en redemande un à jour
@@ -5119,7 +5205,7 @@ function Studio() {
         let released: string[] = [];
         let posed = false;
         touch(p.trackId);
-        setSilently(produce((d: DAWState) => {
+        remoteSetSilently(produce((d: DAWState) => {
           const t = d.tracks.find(x => x.id === p.trackId);
           const r = t ? applyPreviewOnEngineer(t as Track, p) : null;
           if (r) { released = r.released; posed = true; }
@@ -5146,7 +5232,7 @@ function Studio() {
       } else if ((o.kind === 'vst_param_ack' || o.kind === 'vst_params') && o.role === 'artist' && c.role === 'engineer') {
         if (o.kind === 'vst_param_ack' && p.ok && typeof p.stateB64 === 'string') {
           // État relu chez l'artiste : notre prochain envoi de mix ne le réécrase pas.
-          setSilently(produce((d: DAWState) => { d.tracks.forEach(t => t.plugins.forEach(x => { if (x.id === p.pluginId && x.type === 'VST3') x.params = { ...x.params, stateB64: p.stateB64 }; })); }));
+          remoteSetSilently(produce((d: DAWState) => { d.tracks.forEach(t => t.plugins.forEach(x => { if (x.id === p.pluginId && x.type === 'VST3') x.params = { ...x.params, stateB64: p.stateB64 }; })); }));
         }
         vstReqsRef.current.resolve(String(p.reqId), p);
       } else if (o.kind === 'vst_catalog' && o.role === 'artist' && c.role === 'engineer') {
@@ -5168,19 +5254,42 @@ function Studio() {
         const fields: MixFields = p.fields && typeof p.fields === 'object' ? p.fields : legacyMixToFields(p.mix);
         const pend = pendingMixRef.current.get(tid);
         const queued = (c.client.outbox.peek('mix:' + tid)?.fields || {}) as MixFields;
-        const ok = new Set(Object.keys(fields).filter(f => lwwRef.current.accept(`${tid}:${f}`, o.seq) && !pend?.has(f) && !(f in queued)));
+        // Un champ modifié ici et pas encore enregistré par le serveur n'est pas écrasé tout de suite :
+        // la valeur reçue est mise de côté, et départagée quand notre numéro du journal est connu
+        // (avant : si notre envoi était DÉJÀ en route avec un numéro plus petit, chacun gardait la sienne).
+        const ok = new Set<string>();
+        for (const f of Object.keys(fields)) {
+          const key = `${tid}:${f}`;
+          if (pend?.has(f) || f in queued) {
+            const d = deferredMixRef.current.get(key);
+            if (!d || d.seq < o.seq) deferredMixRef.current.set(key, { seq: o.seq, value: fields[f], who: o.author_name });
+            continue;
+          }
+          if (lwwRef.current.accept(key, o.seq)) ok.add(f);
+        }
         if (!ok.size) break;
         const known = { ...(knownFieldsRef.current.get(tid) || {}) };
         ok.forEach(f => { known[f] = fieldSig(fields[f]); });
         knownFieldsRef.current.set(tid, known);
-        setState(produce((d: DAWState) => { const t = d.tracks.find(x => x.id === tid); if (t) applyMixFields(t as Track, fields, f => ok.has(f)); }));
+        // Historique : ce qu'on avait avant (pour « Annuler »).
+        const curT = stateRef.current.tracks.find(x => x.id === tid);
+        if (curT && !o.replay) {
+          const before = mixFieldsOf(curT);
+          const undoFields: MixFields = {};
+          ok.forEach(f => { if (f in before) undoFields[f] = before[f]; });
+          const pname = (id: string) => curT.plugins.find(x => x.id === id)?.name || (fields[`plugin:${id}`] as any)?.name;
+          noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, trackId: tid,
+            text: `a changé ${joinLabels([...ok].map(f => mixFieldLabel(f, pname)))} de « ${curT.name} »`,
+            undo: Object.keys(undoFields).length ? { kind: 'mix', trackId: tid, fields: undoFields } : undefined });
+        }
+        remoteSet(produce((d: DAWState) => { const t = d.tracks.find(x => x.id === tid); if (t) applyMixFields(t as Track, fields, f => ok.has(f)); }));
         onRemoteMixRef.current?.(tid, fields);
         break;
       }
       case 'lock': {
         if (!lwwRef.current.accept(`lock:${p.trackId}`, o.seq)) break;
         touch(p.trackId);
-        setState(produce((d: DAWState) => {
+        remoteSet(produce((d: DAWState) => {
           const t = d.tracks.find(x => x.id === p.trackId);
           if (!t) return;
           if (p.lock) { t.volumeLock = p.lock; t.volume = p.lock.volume; } else delete t.volumeLock;
@@ -5190,68 +5299,182 @@ function Studio() {
         break;
       }
       case 'content': {
-        // Version plus ancienne arrivée en retard : ignorée.
-        if (!lwwRef.current.accept(`content:${p.trackId}`, o.seq)) break;
+        const tid = String(p.trackId || '');
+        // Piste supprimée plus tard dans le journal : une version plus ancienne ne la ressuscite pas.
+        const delSeq = lwwRef.current.get(`track:${tid}`);
+        if (delSeq !== undefined && delSeq > o.seq) break;
+        // Format clip par clip (cv:2, utils/collabContent) ; sinon version complète (ancienne version de NOVA).
+        const clipWise = Number(p.cv) >= CONTENT_FORMAT;
+        if (!clipWise && !lwwRef.current.accept(`content:${tid}`, o.seq)) break;
         await ensureBuffers(c.client.link, p.audio);
-        touch(p.trackId);
         // Propriétaire : celui que dit le contenu, sinon l'auteur (ancienne version de NOVA).
         const owner = ownerFromContent(p.content, { role: o.role, memberKey: o.member_key, name: o.author_name || '' });
-        const isNewTrack = !stateRef.current.tracks.some(x => x.id === p.trackId);
-        setState(produce((d: DAWState) => {
-          const ct = p.content || {};
-          let t = d.tracks.find(x => x.id === p.trackId);
+        const isNewTrack = !stateRef.current.tracks.some(x => x.id === tid);
+        const ct = p.content || {};
+        // Clip par clip : la décision (horloge par clip, modifications locales pas encore
+        // parties) est prise ici, une fois ; la mise à jour de l'état l'applique.
+        let plan: { metaOk: boolean; upsert: Clip[]; remove: string[] } | null = null;
+        if (clipWise && !isNewTrack) {
+          const cur = stateRef.current.tracks.find(x => x.id === tid)!;
+          const known = knownContentRef.current.get(tid);
+          const pending = pendingClipIds(known, cur.clips || []);
+          const incoming = (Array.isArray(ct.clips) ? sanitizeIncomingClips(ct.clips) : []) as unknown as Clip[];
+          const r = mergeClips(cur.clips || [], incoming, p, id => lwwRef.current.accept(`clip:${tid}:${id}`, o.seq), pending);
+          // Clips modifiés ici pendant que l'autre envoyait les siens : mis de côté, départagés
+          // quand notre numéro du journal est connu (voir onSent « content »).
+          if (pending.size) {
+            const inc = new Map(incoming.map(x => [x.id, x]));
+            const touched = [...(Array.isArray(p.changed) ? p.changed : []), ...(Array.isArray(p.removed) ? p.removed : [])].filter((x: unknown): x is string => typeof x === 'string');
+            for (const cid of touched) {
+              if (!pending.has(cid)) continue;
+              const key = `${tid}:${cid}`;
+              const d = deferredClipRef.current.get(key);
+              if (!d || d.seq < o.seq) deferredClipRef.current.set(key, { seq: o.seq, clip: inc.get(cid) || null });
+            }
+          }
+          const localMetaPending = !!known && known.meta !== metaSigOf(contentOf(cur as Track));
+          const metaOk = !!p.meta && !localMetaPending && lwwRef.current.accept(`cmeta:${tid}`, o.seq);
+          plan = { metaOk, upsert: r.taken, remove: r.dropped };
+          knownContentRef.current.set(tid, noteMerged(known, r.taken, r.dropped, metaOk ? metaSigOf(ct) : undefined));
+          if (!metaOk && !r.taken.length && !r.dropped.length) break;
+          if (r.taken.length || r.dropped.length) noteClipHistoryRef.current?.(o, cur as Track, r.taken, r.dropped);
+        } else {
+          touch(tid);
+          contentResetRef.current.add(tid);
+          if (clipWise) (Array.isArray(ct.clips) ? ct.clips : []).forEach((x: any) => { if (x && typeof x.id === 'string') lwwRef.current.accept(`clip:${tid}:${x.id}`, o.seq); });
+        }
+        remoteSet(produce((d: DAWState) => {
+          let t = d.tracks.find(x => x.id === tid);
           if (!t) {
             // Piste créée par un collaborateur (batterie, basse, piste d'envoi…)
             t = {
-              id: p.trackId, name: ct.name || 'PISTE', type: ct.type || TrackType.AUDIO, color: ct.color || '#94a3b8',
+              id: tid, name: ct.name || 'PISTE', type: ct.type || TrackType.AUDIO, color: ct.color || '#94a3b8',
               isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false, volume: 1, pan: 0,
               outputTrackId: ct.outputTrackId || 'master', sends: [], clips: [], plugins: [], automationLanes: [], totalLatency: 0,
             } as Track;
             const at = d.tracks.findIndex(x => x.type === TrackType.BUS || x.type === TrackType.SEND || x.id === 'master');
             d.tracks.splice(at >= 0 ? at : d.tracks.length, 0, t);
             if (p.mix) Object.assign(t, { volume: p.mix.volume ?? 1, pan: p.mix.pan ?? 0, sends: p.mix.sends || [], plugins: p.mix.plugins || [] });
+            // Tout son mix (automation, tranche, structure) : champ ajouté.
+            if (p.mixFields && typeof p.mixFields === 'object') applyMixFields(t as Track, p.mixFields, () => true);
+            // Ordre des pistes : le même chez tous (dernière liste reçue).
+            if (lastOrderListRef.current) d.tracks = canonicalOrder(d.tracks as Track[], lastOrderListRef.current) as any;
+            t = d.tracks.find(x => x.id === tid)!;
           }
-          t.name = ct.name ?? t.name;
-          t.color = ct.color ?? t.color;
-          if (ct.collabOwner) t.collabOwner = ct.collabOwner;
-          else if (isNewTrack && (o.role === 'artist' || o.role === 'beatmaker')) t.collabOwner = o.role;
-          // Piste nommée à son auteur (« Couplet de Léo ») : son nom et sa couleur s'affichent chez tous.
-          if (owner && !t.collabOwnerKey && (ct.collabOwnerKey || isNewTrack)) {
-            t.collabOwnerKey = owner.key; t.collabOwnerName = owner.name; t.collabOwnerColor = owner.color;
-          } else if (owner && ct.collabOwnerKey && t.collabOwnerKey === owner.key) {
-            t.collabOwnerName = owner.name; t.collabOwnerColor = owner.color;
+          if (!plan || plan.metaOk) {
+            t.name = ct.name ?? t.name;
+            t.color = ct.color ?? t.color;
+            if (ct.collabOwner) t.collabOwner = ct.collabOwner;
+            else if (isNewTrack && (o.role === 'artist' || o.role === 'beatmaker')) t.collabOwner = o.role;
+            // Piste nommée à son auteur (« Couplet de Léo ») : son nom et sa couleur s'affichent chez tous.
+            if (owner && !t.collabOwnerKey && (ct.collabOwnerKey || isNewTrack)) {
+              t.collabOwnerKey = owner.key; t.collabOwnerName = owner.name; t.collabOwnerColor = owner.color;
+            } else if (owner && ct.collabOwnerKey && t.collabOwnerKey === owner.key) {
+              t.collabOwnerName = owner.name; t.collabOwnerColor = owner.color;
+            }
+            if (ct.drumMachine !== undefined) t.drumMachine = ct.drumMachine;
+            // Piste guide (R3) : marquée chez tous, jamais exportée ; la couper reste local.
+            if (ct.guide === null) { delete t.isGuide; delete t.guideLevel; }
+            else if (ct.guide && typeof ct.guide === 'object') { t.isGuide = true; if (typeof ct.guide.level === 'number') t.guideLevel = ct.guide.level; }
+            if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
+            if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
+            if (ct.novaSynth !== undefined) { if (ct.novaSynth) t.novaSynth = normalizeSynth(ct.novaSynth); else delete t.novaSynth; }
+            // Sampler mélodique / instrument (R18, R20) : réglages bornés à la réception.
+            if (ct.melodicSampler !== undefined) { if (ct.melodicSampler) t.melodicSampler = normalizeSampler(ct.melodicSampler); else delete t.melodicSampler; }
+            // Respirations : rôle de la piste (lead / extra / ignorée).
+            if (ct.breathKind === 'lead' || ct.breathKind === 'extra' || ct.breathKind === 'skip') t.breathKind = ct.breathKind;
+            else if (clipWise) delete t.breathKind;
+            // Couloirs de prises (champ ajouté) : absent = envoyé par une ancienne version, on garde les noms locaux.
+            t.takeMeta = mergeIncomingTakeMeta(t.takeMeta as TakeMeta[] | undefined, ct.takeMeta);
+            // Instrument VST du beatmaker : on reçoit le rendu de ses notes.
+            if (ct.vstInstrument) {
+              const keep = t.vstInstrument?.path === ct.vstInstrument.path ? t.vstInstrument.stateB64 : undefined;
+              t.vstInstrument = { ...ct.vstInstrument, ...(keep ? { stateB64: keep } : {}) };
+              const r = ct.instrumentRender;
+              if (r?.frozenClip) {
+                t.isFrozen = true;
+                t.frozenClip = r.frozenClip;
+                t.frozenUpToPluginIndex = -1;
+                t.frozenClipIds = r.frozenClipIds;
+                t.frozenSourceSig = r.frozenSourceSig;
+                delete t.frozenPluginSig;
+              } else clearInstrumentRender(t);
+            } else if (t.vstInstrument) {
+              clearInstrumentRender(t);
+              delete t.vstInstrument;
+            }
           }
-          if (ct.drumMachine !== undefined) t.drumMachine = ct.drumMachine;
-          // Piste guide (R3) : marquée chez tous, jamais exportée ; la couper reste local.
-          if (ct.guide === null) { delete t.isGuide; delete t.guideLevel; }
-          else if (ct.guide && typeof ct.guide === 'object') { t.isGuide = true; if (typeof ct.guide.level === 'number') t.guideLevel = ct.guide.level; }
-          if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
-          if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
-          if (ct.novaSynth !== undefined) { if (ct.novaSynth) t.novaSynth = normalizeSynth(ct.novaSynth); else delete t.novaSynth; }
-          // Sampler mélodique / instrument (R18, R20) : réglages bornés à la réception.
-          if (ct.melodicSampler !== undefined) { if (ct.melodicSampler) t.melodicSampler = normalizeSampler(ct.melodicSampler); else delete t.melodicSampler; }
-          // Ligne de gain, boucles, Heal (R5) : champs vérifiés à la réception (utils/collabMerge).
-          t.clips = Array.isArray(ct.clips) ? sanitizeIncomingClips(ct.clips) : t.clips;
-          // Couloirs de prises (champ ajouté) : absent = envoyé par une ancienne version, on garde les noms locaux.
-          t.takeMeta = mergeIncomingTakeMeta(t.takeMeta as TakeMeta[] | undefined, ct.takeMeta);
-          // Instrument VST du beatmaker : on reçoit le rendu de ses notes.
-          if (ct.vstInstrument) {
-            const keep = t.vstInstrument?.path === ct.vstInstrument.path ? t.vstInstrument.stateB64 : undefined;
-            t.vstInstrument = { ...ct.vstInstrument, ...(keep ? { stateB64: keep } : {}) };
-            const r = ct.instrumentRender;
-            if (r?.frozenClip) {
-              t.isFrozen = true;
-              t.frozenClip = r.frozenClip;
-              t.frozenUpToPluginIndex = -1;
-              t.frozenClipIds = r.frozenClipIds;
-              t.frozenSourceSig = r.frozenSourceSig;
-              delete t.frozenPluginSig;
-            } else clearInstrumentRender(t);
-          } else if (t.vstInstrument) {
-            clearInstrumentRender(t);
-            delete t.vstInstrument;
+          if (plan) {
+            // Clip par clip : seulement ceux retenus (les autres, et les nôtres pas encore partis, restent).
+            const clips = [...(t.clips || [])];
+            for (const inc of plan.upsert) {
+              const i = clips.findIndex(x => x.id === inc.id);
+              if (i >= 0) clips[i] = { ...inc, ...((clips[i] as any).buffer && clips[i].bufferId === inc.bufferId ? { buffer: (clips[i] as any).buffer } : {}) } as Clip;
+              else clips.push({ ...inc } as Clip);
+            }
+            const gone = new Set(plan.remove);
+            t.clips = clips.filter(x => !gone.has(x.id));
+          } else {
+            // Ligne de gain, boucles, Heal (R5) : champs vérifiés à la réception (utils/collabMerge).
+            t.clips = Array.isArray(ct.clips) ? sanitizeIncomingClips(ct.clips) : t.clips;
           }
         }));
+        break;
+      }
+      case 'track_del': {
+        // Piste supprimée par son propriétaire (ou une piste partagée par l'ingé) : supprimée chez tous.
+        const tid = String(p.trackId || '');
+        if (!lwwRef.current.accept(`track:${tid}`, o.seq)) break;
+        const t = stateRef.current.tracks.find(x => x.id === tid);
+        if (!t) break;
+        // Quelqu'un enregistre dessus en ce moment (journal en retard) : on garde la piste (rien ne se perd).
+        if (stateRef.current.isRecording && t.isTrackArmed) break;
+        knownContentRef.current.delete(tid);
+        knownFieldsRef.current.delete(tid);
+        knownSigRef.current.delete('content:' + tid);
+        removeTrackLocallyRef.current?.(tid);
+        noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: `a supprimé la piste « ${t.name} »` });
+        if (!o.replay) setAiNotification(`🗑️ ${o.author_name} a supprimé la piste « ${t.name} ».`);
+        break;
+      }
+      case 'order': {
+        if (deferIfMineInFlight('order', o)) break;
+        // Ordre des pistes : la dernière liste du journal gagne ; même résultat chez tous.
+        if (!lwwRef.current.accept('order', o.seq)) break;
+        const ids: string[] = Array.isArray(p.ids) ? p.ids.filter((x: unknown): x is string => typeof x === 'string').slice(0, 500) : [];
+        if (!ids.length) break;
+        lastOrderListRef.current = ids;
+        const next = canonicalOrder(stateRef.current.tracks, ids);
+        knownOrderRef.current = orderOf(next);
+        if (sameOrder(orderOf(next), orderOf(stateRef.current.tracks))) break;
+        remoteSet(prev => ({ ...prev, tracks: canonicalOrder(prev.tracks, ids) }));
+        break;
+      }
+      case 'song': {
+        if (deferIfMineInFlight('song', o)) break;
+        // Tonalité, gamme, arrangements, paroles : champ par champ, le plus récent du journal gagne ;
+        // un champ changé ici et pas encore parti n'est pas écrasé.
+        const fields = p.fields && typeof p.fields === 'object' ? p.fields as Record<string, unknown> : {};
+        const mine = songFieldsOf(stateRef.current as any);
+        const patch: Record<string, unknown> = {};
+        for (const f of SONG_FIELDS) {
+          if (!(f in fields)) continue;
+          const v = sanitizeSongField(f, fields[f]);
+          if (v === undefined) continue;
+          const localPending = knownSongRef.current.has(f) && knownSongRef.current.get(f) !== fieldSig(mine[f]);
+          if (localPending || !lwwRef.current.accept(`song:${f}`, o.seq)) continue;
+          patch[f] = v;
+          knownSongRef.current.set(f, fieldSig(v));
+        }
+        if (!Object.keys(patch).length) break;
+        remoteSet(prev => {
+          const n: any = { ...prev };
+          for (const [k, v] of Object.entries(patch)) { if (v === null) delete n[k]; else n[k] = v; }
+          return n;
+        });
+        if (!o.replay) noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: `a changé ${joinLabels(Object.keys(patch).map(k => SONG_LABEL[k as SongField] || k))}`,
+          undo: { kind: 'song', fields: Object.fromEntries(Object.keys(patch).map(k => [k, (mine as Record<string, unknown>)[k] ?? null])) } });
+        if (!o.replay && ('projectKey' in patch || 'projectScale' in patch)) setAiNotification(`🎹 ${o.author_name} a réglé la tonalité du morceau.`);
         break;
       }
       case 'freeze': {
@@ -5259,7 +5482,7 @@ function Studio() {
         if (!lwwRef.current.accept(`freeze:${p.trackId}`, o.seq)) break;
         await ensureBuffers(c.client.link, p.audio);
         touch(p.trackId);
-        setState(produce((d: DAWState) => {
+        remoteSet(produce((d: DAWState) => {
           const t = d.tracks.find(x => x.id === p.trackId);
           if (!t) return;
           t.frozenClip = p.frozenClip;
@@ -5271,6 +5494,7 @@ function Studio() {
           const refs = p.refs || {};
           t.clips = t.clips.map(cl => (refs[cl.id] ? { ...cl, freezeRef: refs[cl.id] } : cl));
         }));
+        if (!o.replay) noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, trackId: p.trackId, text: `a gelé « ${stateRef.current.tracks.find(x => x.id === p.trackId)?.name || 'une piste'} » avec ses effets` });
         setAiNotification(`❄️ ${o.author_name} a gelé « ${stateRef.current.tracks.find(x => x.id === p.trackId)?.name || 'une piste'} » avec ses effets : tu l'entends telle qu'il / elle la règle, et tu peux toujours éditer tes prises.`);
         break;
       }
@@ -5290,7 +5514,7 @@ function Studio() {
         }
         if (won.length) {
           won.forEach(touch);
-          setState(produce((d: DAWState) => { d.tracks.forEach(t => { if (won.includes(t.id)) { t.collabOwnerKey = key; t.collabOwnerName = o.author_name; t.collabOwnerColor = color; } }); }));
+          remoteSet(produce((d: DAWState) => { d.tracks.forEach(t => { if (won.includes(t.id)) { t.collabOwnerKey = key; t.collabOwnerName = o.author_name; t.collabOwnerColor = color; } }); }));
         }
         break;
       }
@@ -5304,6 +5528,7 @@ function Studio() {
         break;
       }
       case 'markers': {
+        if (deferIfMineInFlight('markers', o)) break;
         // Repères partagés : le plus récent du journal gagne, repère par repère.
         const accept = (id: string) => lwwRef.current.accept(`marker:${id}`, o.seq);
         const by = o.author_name;
@@ -5313,7 +5538,8 @@ function Studio() {
         if (JSON.stringify(next) === before) break;
         next.forEach(m => knownMarkersRef.current.set(m.id, markerSig(m)));
         (Array.isArray(p.remove) ? p.remove : []).forEach((id: string) => { if (!next.some(m => m.id === id)) knownMarkersRef.current.delete(id); });
-        setState(produce((d: DAWState) => { d.markers = next; }));
+        remoteSet(produce((d: DAWState) => { d.markers = next; }));
+        if (!o.replay) noteHistoryRef.current?.({ seq: o.seq, who: by, role: o.role, text: upsert.length === 1 ? `a posé le repère « ${String(upsert[0].name || 'Repère').slice(0, 60)} »` : 'a modifié les repères' });
         if (!o.replay && upsert.length === 1) setAiNotification(`📍 ${by} a posé le repère « ${String(upsert[0].name || 'Repère').slice(0, 60)} ».`);
         break;
       }
@@ -5323,6 +5549,7 @@ function Studio() {
         break;
       }
       case 'chords': {
+        if (deferIfMineInFlight('chords', o)) break;
         // Piste d'accords (V20) : le plus récent du journal gagne, accord par accord ;
         // nos accords pas encore enregistrés restent (ils partiront après et gagneront partout).
         const accept = (id: string) => lwwRef.current.accept(`chord:${id}`, o.seq);
@@ -5332,11 +5559,13 @@ function Studio() {
         if (JSON.stringify(next) === JSON.stringify(cur)) break;
         next.forEach(c => { if (!pendingChordsRef.current.has(c.id)) knownChordsRef.current.set(c.id, chordSig(c)); });
         [...knownChordsRef.current.keys()].forEach(id => { if (!next.some(c => c.id === id) && !pendingChordsRef.current.has(id)) knownChordsRef.current.delete(id); });
-        setState(produce((d: DAWState) => { d.chords = next; }));
+        remoteSet(produce((d: DAWState) => { d.chords = next; }));
+        if (!o.replay) noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: "a modifié la piste d'accords" });
         if (!o.replay && upsert.length) setAiNotification(`🎸 ${o.author_name} a ${upsert.length > 1 ? `posé ${upsert.length} accords` : 'changé un accord'} dans la piste d’accords.`);
         break;
       }
       case 'tempo': {
+        if (deferIfMineInFlight('tempo', o)) break;
         // Tempo / mesure / piste tempo d'un autre membre (R2) : le plus récent du journal gagne.
         if (!lwwRef.current.accept('tempo', o.seq)) break;
         const op = sanitizeTempoOp(p);
@@ -5344,12 +5573,17 @@ function Studio() {
         const sig = tempoOpSig(op);
         if (sig === tempoOpSig(tempoOpOf(stateRef.current))) { knownTempoSigRef.current = sig; break; }
         knownTempoSigRef.current = sig;
+        if (!o.replay) {
+          const was = tempoOpOf(stateRef.current);
+          noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: `a réglé le tempo (${was.bpm} → ${op.bpm} BPM)`, undo: { kind: 'tempo', op: was as unknown as Record<string, unknown> } });
+        }
         audioEngine.setBpm(op.bpm);
-        setState(prev => applyTempoOp(prev, op));
+        remoteSet(prev => applyTempoOp(prev, op));
         if (!o.replay) setAiNotification(`🎼 ${o.author_name} a réglé le tempo : ${op.bpm} BPM, ${op.timeSignature.numerator}/${op.timeSignature.denominator}${op.tempoEvents.length ? ` (${op.tempoEvents.length} changement${op.tempoEvents.length > 1 ? 's' : ''} dans le morceau)` : ''}.`);
         break;
       }
       case 'groups': {
+        if (deferIfMineInFlight('groups', o)) break;
         // Groupes (R12) : toute la liste en une opération ; le plus récent du journal gagne.
         if (!lwwRef.current.accept('groups', o.seq)) break;
         const op = sanitizeGroupsOp(p);
@@ -5357,7 +5591,8 @@ function Studio() {
         const sig = groupsSig(applyGroupsOp(stateRef.current, op));
         knownGroupsSigRef.current = sig;
         if (sig === groupsSig(stateRef.current)) break;
-        setState(prev => applyGroupsOp(prev, op));
+        remoteSet(prev => applyGroupsOp(prev, op));
+        if (!o.replay) noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: `a modifié les groupes (${op.groups.length})` });
         if (!o.replay) setAiNotification(`🔗 ${o.author_name} a modifié les groupes (${op.groups.length} groupe${op.groups.length > 1 ? 's' : ''}${op.settings.suspended ? ', suspendus' : ''}).`);
         break;
       }
@@ -5366,11 +5601,15 @@ function Studio() {
         // (mêmes identifiants) ; rien n'est renvoyé en écho (contenu, repères, accords, tempo connus).
         const op = sanitizeTimeOp(p);
         if (!op) break;
+        // Déjà dans ce projet (instantané pris après l'avoir reçue en direct) : jamais deux fois.
+        if ((stateRef.current.collabTimeOps || []).includes(op.id)) break;
         const cur = stateRef.current;
         const r = runTimeOpOn(cur, op);
+        const mark = (s: DAWState): DAWState => ({ ...s, collabTimeOps: [...(s.collabTimeOps || []).filter(x => x !== op.id).slice(-199), op.id] });
         rememberTimeOp(r.state);
-        setState(prev => (prev === cur ? r.state : runTimeOpOn(prev, op).state));
+        remoteSet(prev => mark(prev === cur ? r.state : runTimeOpOn(prev, op).state));
         if (!o.replay) setAiNotification(`⏱️ ${o.author_name} : ${r.report.summary}.`);
+        if (!o.replay) noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: r.report.summary });
         break;
       }
       case 'beatswap': {
@@ -5412,16 +5651,44 @@ function Studio() {
     }
   }, [setState]);
 
-  /** Envoie le contenu d'une piste (prises, motifs) avec son audio. */
+  /**
+   * Envoie le contenu d'une piste (prises, motifs) avec son audio : seulement
+   * les clips changés depuis ce que tout le monde a (format clip par clip,
+   * utils/collabContent). Le contenu complet reste dans l'opération pour les
+   * anciennes versions de NOVA.
+   */
   const sendTrackContent = useCallback(async (trackId: string) => {
     const c = collabRef.current;
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!c || !t) return;
     const content = contentOf(t);
+    const metaSig = metaSigOf(content);
+    const known = knownContentRef.current.get(t.id);
+    const delta = contentDelta(known, metaSig, t.clips || []);
+    if (known && isEmptyDelta(delta)) return;
     const audio = await uploadBuffers(c.client.link, contentBufferIds(t), (sent, total) => c.client.reportUpload(sent, total));
     const isNew = !knownFieldsRef.current.has(t.id);
-    await c.client.send('content', { trackId, content, audio, ...(isNew ? { mix: mixOf(t) } : {}) });
+    try {
+      await c.client.send('content', {
+        trackId, content, audio, cv: CONTENT_FORMAT, changed: delta.changed, removed: delta.removed, meta: delta.meta,
+        // Rien de connu (piste neuve, ou réparation d'un écart) : cette version fait foi en entier.
+        ...(known ? {} : { full: true }),
+        ...(isNew ? { mix: mixOf(t), mixFields: mixFieldsOf(t) } : {}),
+      });
+    } catch (e: any) {
+      // Trop lourd pour le serveur (1,5 Mo) : on le dit clairement, une fois par piste.
+      if (e?.permanent || Number(e?.status) === 413) {
+        if (!tooBigNotifiedRef.current.has(t.id)) {
+          tooBigNotifiedRef.current.add(t.id);
+          setAiNotification(`⚠️ « ${t.name} » n'a pas pu partir chez les autres : ${e?.message || 'refusée par le serveur'} Découpe-la (moins de clips ou de notes d'un coup) ou gèle-la, puis réessaie.`);
+        }
+        knownContentRef.current.set(t.id, noteSent(known, { meta: metaSig, clips: t.clips || [], changed: delta.changed, removed: delta.removed }));
+        return;
+      }
+      throw e;
+    }
     knownSigRef.current.set('content:' + t.id, sigOf(content));
+    knownContentRef.current.set(t.id, noteSent(known, { meta: metaSig, clips: t.clips || [], changed: delta.changed, removed: delta.removed }));
     if (isNew) knownFieldsRef.current.set(t.id, fieldSigsOf(mixFieldsOf(t)));
     if (c.role === 'artist' && previewWantedRef.current.has(t.id) && hasArtistVst(t)) previewSchedRef.current?.request(t.id);
   }, []);
@@ -5440,14 +5707,70 @@ function Studio() {
     });
   }, []);
 
-  // Détection des modifications locales, selon le rôle.
+  /** Envoi du contenu des pistes modifiées (et des gels de l'ingé pas encore partis). */
+  const contentBusyRef = useRef(false);
+  const flushContentNow = useCallback(async () => {
+    if (contentBusyRef.current || stateRef.current.isRecording || !collabRef.current) return;
+    if (contentDirtyRef.current.size === 0 && freezeDirtyRef.current.size === 0) return;
+    contentBusyRef.current = true;
+    try {
+      const ids = Array.from(contentDirtyRef.current);
+      contentDirtyRef.current.clear();
+      for (const tid of ids) {
+        try { await sendTrackContent(tid); } catch (e) { console.warn('[Collab] contenu', e); contentDirtyRef.current.add(tid); }
+      }
+      // Gels de l'ingé pas partis (réseau coupé pendant l'envoi) : renvoyés.
+      const fz = Array.from(freezeDirtyRef.current);
+      freezeDirtyRef.current.clear();
+      for (const tid of fz) {
+        try { await sendFreeze(tid); } catch (e) { console.warn('[Collab] gel', e); freezeDirtyRef.current.add(tid); }
+      }
+    } finally {
+      contentBusyRef.current = false;
+    }
+  }, [sendTrackContent, sendFreeze]);
+  /**
+   * Une prise, une édition de clip : envoyée ~0,8 s après la dernière modification
+   * (avant : jusqu'à 10 s d'attente, mesuré 9,8 s entre la fin d'une prise et son
+   * arrivée chez l'ingé). Jamais pendant une prise : elle part à l'arrêt.
+   */
+  contentFlushRef.current = () => {
+    if (contentTimerRef.current) window.clearTimeout(contentTimerRef.current);
+    contentTimerRef.current = window.setTimeout(() => { contentTimerRef.current = null; void flushContentNow(); }, 800);
+  };
+
+  /** Piste supprimée par l'autre : comme une suppression locale (moteur, buffers), sans renvoyer d'opération. */
+  const removeTrackLocallyRef = useRef<((trackId: string) => void) | null>(null);
+  removeTrackLocallyRef.current = (trackId) => {
+    const t = stateRef.current.tracks.find(x => x.id === trackId);
+    if (!t) return;
+    const removedClipIds = t.clips.map(cl => cl.id);
+    const bufferIds = t.clips.map(cl => cl.bufferId).filter(Boolean) as string[];
+    setTimeout(() => bufferIds.forEach(id => releaseBufferIfUnused(id, removedClipIds)), 0);
+    audioEngine.disposeTrack(trackId);
+    remoteSet(prev => ({
+      ...prev,
+      tracks: prev.tracks.filter(x => x.id !== trackId).map(x => ({ ...x, sends: (x.sends || []).filter(sd => sd.id !== trackId), outputTrackId: x.outputTrackId === trackId ? 'master' : x.outputTrackId })),
+      selectedTrackId: prev.selectedTrackId === trackId ? null : prev.selectedTrackId,
+    }));
+  };
+
+  // Détection des modifications locales : ce qui part chez les autres, selon les droits de chacun.
   useEffect(() => {
     const c = collabRef.current;
     if (!c) return;
+    // Un autre projet est ouvert (la collaboration va se fermer) : rien ne part, surtout pas des suppressions.
+    if (cloudRef.current && state.id !== cloudProjectId(cloudRef.current.id)) return;
+    const me = { role: c.role, key: c.key };
+    let contentChanged = false;
     for (const t of state.tracks) {
       // Reçu de l'autre : contenu / gel connus (le mix, lui, est suivi champ par champ à la réception).
-      if (remoteTouchedRef.current.has(t.id)) { rememberTrack(t, { mix: false }); remoteTouchedRef.current.delete(t.id); continue; }
-      const isNew = !knownSigRef.current.has('content:' + t.id);
+      if (remoteTouchedRef.current.has(t.id)) {
+        rememberTrack(t, { mix: false, content: contentResetRef.current.has(t.id) });
+        remoteTouchedRef.current.delete(t.id); contentResetRef.current.delete(t.id);
+        continue;
+      }
+      const isNew = !knownContentRef.current.has(t.id);
       if (isNew) {
         // Piste créée ici pendant la collaboration : elle appartient à son créateur — à son
         // rôle ET à lui (« Feat à distance ») : son nom et sa couleur s'affichent chez les autres.
@@ -5462,10 +5785,14 @@ function Studio() {
           continue;
         }
         contentDirtyRef.current.add(t.id);
+        contentChanged = true;
         continue;
       }
-      if (c.role === 'engineer') {
-        // Seuls les réglages modifiés partent (les autres ne sont jamais écrasés chez l'artiste).
+      // Mix : l'ingé partout ; un artiste / beatmaker sur SES pistes et les pistes partagées.
+      // Avant : seul l'ingé envoyait ; le volume ou l'effet qu'un artiste mettait sur SA voix
+      // restait chez lui (mesuré : « Voix lead : mix, effets » différents après une prise).
+      if (canSendMix(t, me)) {
+        // Seuls les réglages modifiés partent (les autres ne sont jamais écrasés chez l'autre).
         const changed = changedFields(knownFieldsRef.current.get(t.id), mixFieldsOf(t));
         const names = Object.keys(changed);
         if (names.length) {
@@ -5473,6 +5800,7 @@ function Studio() {
           const pend = pendingMixRef.current.get(t.id) || new Set<string>();
           names.forEach(n => pend.add(n));
           pendingMixRef.current.set(t.id, pend);
+          noteEditingRef.current?.(t.id);
           const old = mixTimersRef.current.get(t.id);
           if (old) window.clearTimeout(old);
           mixTimersRef.current.set(t.id, window.setTimeout(() => {
@@ -5491,38 +5819,92 @@ function Studio() {
             onLocalMixRef.current?.(t.id, fields);
           }, 250));
         }
-        // Gel avec ses VST (pas l'aperçu reçu de l'artiste) : le rendu part chez l'artiste.
-        if (t.isFrozen && t.frozenClip && !t.livePreview && knownFreezeRef.current.get(t.id) !== t.frozenClip.id) {
-          knownFreezeRef.current.set(t.id, t.frozenClip.id);
-          void sendFreeze(t.id).catch(e => { console.warn('[Collab] gel', e); freezeDirtyRef.current.add(t.id); });
-        }
       }
-      if (ownsContent(t, c.role, c.key) && knownSigRef.current.get('content:' + t.id) !== sigOf(contentOf(t))) contentDirtyRef.current.add(t.id);
+      // Gel avec ses VST (pas l'aperçu reçu de l'artiste) : le rendu part chez l'artiste.
+      if (c.role === 'engineer' && t.isFrozen && t.frozenClip && !t.livePreview && knownFreezeRef.current.get(t.id) !== t.frozenClip.id) {
+        knownFreezeRef.current.set(t.id, t.frozenClip.id);
+        void sendFreeze(t.id).catch(e => { console.warn('[Collab] gel', e); freezeDirtyRef.current.add(t.id); });
+      }
+      // Contenu : le propriétaire, et l'ingé sur les pistes des artistes (comp, respirations, gain, justesse).
+      if (canSendContent(t, me) && !isEmptyDelta(contentDelta(knownContentRef.current.get(t.id), metaSigOf(contentOf(t)), t.clips || []))) {
+        if (!contentDirtyRef.current.has(t.id)) noteEditingRef.current?.(t.id);
+        contentDirtyRef.current.add(t.id);
+        contentChanged = true;
+      }
     }
+    // Pistes supprimées ici : supprimées chez tous (avant : elles restaient chez les autres).
+    const present = new Set(state.tracks.map(t => t.id));
+    for (const id of [...knownContentRef.current.keys()]) {
+      if (present.has(id)) continue;
+      const gone = lastTracksRef.current.find(x => x.id === id);
+      knownContentRef.current.delete(id);
+      knownFieldsRef.current.delete(id);
+      knownSigRef.current.delete('content:' + id);
+      contentDirtyRef.current.delete(id);
+      // Seulement ce qu'on a le droit de supprimer pour tous (sa piste ; une piste partagée : l'ingé).
+      if (gone && deleteAllowed(gone, { role: c.role, memberKey: c.client.memberKey || c.key })) c.client.queue(`del:${id}`, 'track_del', { trackId: id });
+    }
+    lastTracksRef.current = state.tracks;
+    // Ordre des pistes (glisser une piste, nouvelle piste) : le même chez tous.
+    const order = orderOf(state.tracks);
+    if (knownOrderRef.current && !sameOrder(order, knownOrderRef.current)) {
+      knownOrderRef.current = order;
+      lastOrderListRef.current = order;
+      c.client.queue('order', 'order', { ids: order });
+    } else if (!knownOrderRef.current) knownOrderRef.current = order;
+    if (contentChanged) contentFlushRef.current?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.tracks, collab, setState, sendFreeze]);
 
-  // Toutes les 10 s : prises et pistes modifiées envoyées (jamais pendant une prise).
+  // Tonalité, gamme, arrangements, paroles : champ par champ (le plus récent gagne).
+  useEffect(() => {
+    const c = collabRef.current;
+    if (!c) return;
+    const fields = songFieldsOf(state as any);
+    const changed: Record<string, unknown> = {};
+    for (const f of SONG_FIELDS) {
+      const sig = fieldSig(fields[f]);
+      if (!knownSongRef.current.has(f)) { knownSongRef.current.set(f, sig); continue; }
+      if (knownSongRef.current.get(f) !== sig) { changed[f] = fields[f]; knownSongRef.current.set(f, sig); }
+    }
+    if (Object.keys(changed).length) c.client.queue('song', 'song', { fields: changed });
+  }, [state.projectKey, state.projectScale, state.arrangements, state.lyrics, state.lyricsRegions, collab]);
+
+  // Page fermée, rechargée ou mise en arrière-plan : les réglages qui attendaient leur envoi
+  // (regroupés 250 ms) partent tout de suite dans la file — gardée dans le navigateur, elle
+  // repart au retour. Avant : un réglage fait juste avant F5 était perdu.
   useEffect(() => {
     if (!collab) return;
-    let busy = false;
-    const id = window.setInterval(async () => {
-      if (busy || stateRef.current.isRecording || (contentDirtyRef.current.size === 0 && freezeDirtyRef.current.size === 0)) return;
-      busy = true;
-      const ids = Array.from(contentDirtyRef.current);
-      contentDirtyRef.current.clear();
-      for (const tid of ids) {
-        try { await sendTrackContent(tid); } catch (e) { console.warn('[Collab] contenu', e); contentDirtyRef.current.add(tid); }
-      }
-      // Gels de l'ingé pas partis (réseau coupé pendant l'envoi) : renvoyés.
-      const fz = Array.from(freezeDirtyRef.current);
-      freezeDirtyRef.current.clear();
-      for (const tid of fz) {
-        try { await sendFreeze(tid); } catch (e) { console.warn('[Collab] gel', e); freezeDirtyRef.current.add(tid); }
-      }
-      busy = false;
-    }, 10000);
+    const flushMixNow = () => {
+      const cc = collabRef.current;
+      if (!cc) return;
+      mixTimersRef.current.forEach(t => window.clearTimeout(t));
+      mixTimersRef.current.clear();
+      pendingMixRef.current.forEach((wanted, tid) => {
+        const cur = stateRef.current.tracks.find(x => x.id === tid);
+        if (!cur || !wanted.size) return;
+        const all = mixFieldsOf(cur);
+        const fields: MixFields = {};
+        wanted.forEach(f => { if (f in all) fields[f] = all[f]; });
+        if (Object.keys(fields).length) cc.client.queue('mix:' + tid, 'mix', { trackId: tid, fields });
+      });
+      pendingMixRef.current.clear();
+    };
+    const onHide = () => { if (document.visibilityState === 'hidden') flushMixNow(); };
+    window.addEventListener('pagehide', flushMixNow);
+    document.addEventListener('visibilitychange', onHide);
+    return () => { window.removeEventListener('pagehide', flushMixNow); document.removeEventListener('visibilitychange', onHide); };
+  }, [collab]);
+
+  // Fin d'une prise : elle part tout de suite (le contenu attendait la fin de l'enregistrement).
+  useEffect(() => { if (!state.isRecording && collabRef.current) contentFlushRef.current?.(); }, [state.isRecording]);
+
+  // Filet de sécurité : toutes les 10 s, ce qui n'est pas parti (réseau, envoi interrompu) repart.
+  useEffect(() => {
+    if (!collab) return;
+    const id = window.setInterval(() => { void flushContentNow(); }, 10000);
     return () => window.clearInterval(id);
-  }, [collab, sendTrackContent, sendFreeze]);
+  }, [collab, flushContentNow]);
 
   /** Démarre (ou rejoint) la collaboration avec un rôle. */
   // --- Nova Pro : verrou des fonctions payantes ---------------------------------------
@@ -5582,8 +5964,59 @@ function Studio() {
       client.onFailure = (o) => setAiNotification(`⚠️ Une modification de ${o.author_name} n'a pas pu être reçue (connexion). Demande-lui de la renvoyer, ou recharge la session (panneau Collaboration).`);
       client.onSent = (kind, op, seq) => {
         const tid = typeof op.trackId === 'string' ? op.trackId : '';
-        if (kind === 'mix' && op.fields && typeof op.fields === 'object') Object.keys(op.fields).forEach(f => lwwRef.current.note(`${tid}:${f}`, seq));
-        else if (kind === 'content' || kind === 'lock' || kind === 'freeze') lwwRef.current.note(`${kind}:${tid}`, seq);
+        if (kind === 'mix' && op.fields && typeof op.fields === 'object') Object.keys(op.fields).forEach(f => {
+          const key = `${tid}:${f}`;
+          lwwRef.current.note(key, seq);
+          // Valeur reçue mise de côté pendant notre envoi : la plus récente du journal gagne, chez nous aussi.
+          const d = deferredMixRef.current.get(key);
+          if (!d) return;
+          deferredMixRef.current.delete(key);
+          if (d.seq < seq) return;
+          if (pendingMixRef.current.get(tid)?.has(f) || (client.outbox.peekQueued('mix:' + tid)?.fields || {})[f] !== undefined) return; // changé à nouveau ici : le nôtre partira après
+          lwwRef.current.accept(key, d.seq);
+          knownFieldsRef.current.set(tid, { ...(knownFieldsRef.current.get(tid) || {}), [f]: fieldSig(d.value) });
+          remoteSet(produce((dr: DAWState) => { const t = dr.tracks.find(x => x.id === tid); if (t) applyMixFields(t as Track, { [f]: d.value }, () => true); }));
+        });
+        else if (kind === 'content' || kind === 'lock' || kind === 'freeze') {
+          lwwRef.current.note(`${kind}:${tid}`, seq);
+          // Clip par clip : nos clips envoyés ne seront pas écrasés par une version plus ancienne.
+          if (kind === 'content') {
+            [...(Array.isArray(op.changed) ? op.changed : []), ...(Array.isArray(op.removed) ? op.removed : [])].forEach((id: unknown) => { if (typeof id === 'string') lwwRef.current.note(`clip:${tid}:${id}`, seq); });
+            if (op.meta) lwwRef.current.note(`cmeta:${tid}`, seq);
+            // Clips reçus pendant notre envoi : le plus récent du journal gagne, chez nous aussi.
+            const sentClips = new Map(((op.content as any)?.clips || []).map((x: any) => [x.id, x]));
+            const upsert: Clip[] = [];
+            const drop: string[] = [];
+            [...(Array.isArray(op.changed) ? op.changed : []), ...(Array.isArray(op.removed) ? op.removed : [])].forEach((cid: unknown) => {
+              if (typeof cid !== 'string') return;
+              const key = `${tid}:${cid}`;
+              const d = deferredClipRef.current.get(key);
+              if (!d) return;
+              deferredClipRef.current.delete(key);
+              if (d.seq < seq) return;
+              // Changé à nouveau ici depuis l'envoi : le nôtre repartira et gagnera.
+              const local = stateRef.current.tracks.find(x => x.id === tid)?.clips.find(x => x.id === cid);
+              const sent = sentClips.get(cid) as Clip | undefined;
+              if ((local && sent && clipSig(local) !== clipSig(sent)) || (!!local !== !!sent)) return;
+              lwwRef.current.accept(`clip:${tid}:${cid}`, d.seq);
+              if (d.clip) upsert.push(d.clip); else drop.push(cid);
+            });
+            if (upsert.length || drop.length) {
+              knownContentRef.current.set(tid, noteMerged(knownContentRef.current.get(tid), upsert, drop));
+              remoteSet(produce((dr: DAWState) => {
+                const t = dr.tracks.find(x => x.id === tid);
+                if (!t) return;
+                const gone = new Set(drop);
+                const clips = (t.clips as Clip[]).filter(x => !gone.has(x.id));
+                for (const u of upsert) { const i = clips.findIndex(x => x.id === u.id); if (i >= 0) clips[i] = { ...u }; else clips.push({ ...u }); }
+                t.clips = clips as any;
+              }));
+            }
+          }
+        }
+        else if (kind === 'track_del') lwwRef.current.note(`track:${tid}`, seq);
+        else if (kind === 'order') lwwRef.current.note('order', seq);
+        else if (kind === 'song' && op.fields && typeof op.fields === 'object') Object.keys(op.fields).forEach(f => lwwRef.current.note(`song:${f}`, seq));
         else if (kind === 'own' && Array.isArray(op.trackIds)) (op.trackIds as string[]).forEach(id => { if (claimSeqRef.current.get(id) === Infinity) claimSeqRef.current.set(id, seq); });
         else if (kind === 'markers') { [...(Array.isArray(op.upsert) ? op.upsert : []), ...((Array.isArray(op.remove) ? op.remove : []).map((id: string) => ({ id })))].forEach((m: any) => lwwRef.current.note(`marker:${m.id}`, seq)); }
         else if (kind === 'listen') lwwRef.current.note('listen', seq);
@@ -5593,16 +6026,30 @@ function Studio() {
           .forEach((id: unknown) => { if (typeof id === 'string') { lwwRef.current.note(`chord:${id}`, seq); pendingChordsRef.current.delete(id); } });
         else if (kind === 'chat' && typeof op.localId === 'string') setCollabMessages(m => m.map(x => (x.id === op.localId ? { ...x, pending: false } : x)));
         else if (kind === 'notes') r21Ref.current?.onNotesSent(op, seq);
+        else if (kind === 'tempo') lwwRef.current.note('tempo', seq);
+        // Opérations reçues pendant que la nôtre (même réglage) partait : rejouées maintenant, la plus
+        // récente du journal l'emporte (les plus anciennes que la nôtre seront écartées par l'horloge).
+        if (['order', 'song', 'markers', 'chords', 'tempo', 'groups'].includes(kind)) {
+          const waiting = deferredOpsRef.current.get(kind) || [];
+          deferredOpsRef.current.delete(kind);
+          if (waiting.length) setTimeout(() => { [...waiting].sort((a, b) => a.seq - b.seq).forEach(w => { void applyCollabOp(w); }); }, 0);
+        }
       };
       client.onStatus(s => setCollabStatus(s));
-      client.onEphemeral = (ev, payload) => { if (ev === 'tp' && payload && typeof payload === 'object') followTransportRef.current(payload as TransportMsg & { by?: string }); };
+      // Messages éphémères : lecture de l'hôte, latence, empreintes, audio en direct (voir onEphemeralRef).
+      client.onEphemeral = (ev, payload) => onEphemeralRef.current?.(ev, payload);
       lwwRef.current.clear();
       claimSeqRef.current.clear();
       claimed.forEach(id => claimSeqRef.current.set(id, Infinity));
       opRecsRef.current.clear();
       seenPeersRef.current.clear();
       // Le projet en cours devient la base : on ne renvoie pas ce que tout le monde a déjà.
+      knownContentRef.current.clear();
       stateRef.current.tracks.forEach(t => rememberTrack(t));
+      lastTracksRef.current = stateRef.current.tracks;
+      knownOrderRef.current = orderOf(stateRef.current.tracks);
+      lastOrderListRef.current = null;
+      knownSongRef.current = new Map(Object.entries(songFieldsOf(stateRef.current as any)).map(([k, v]) => [k, fieldSig(v)]));
       knownMarkersRef.current = new Map((stateRef.current.markers || []).map(m => [m.id, markerSig(m)]));
       knownChordsRef.current = new Map((stateRef.current.chords || []).map(c => [c.id, chordSig(c)]));
       pendingChordsRef.current.clear();
@@ -5611,6 +6058,7 @@ function Studio() {
       collabRoleStore.set(role);
       client.setPresence({ color: myColor, ...(host ? { host: true } : {}) });
       const members = await client.join(stateRef.current.collabSeq || 0);
+      setCollabMemberKey(client.memberKey || null);
       (members || []).forEach(m => {
         const k = participantOf(m.member_key);
         if (k !== myKey && !seenPeersRef.current.has(k)) seenPeersRef.current.set(k, { name: m.display_name, role: m.role });
@@ -5685,6 +6133,8 @@ function Studio() {
     setCollab(null);
     collabRef.current = null;
     setCollabOnline([]);
+    setCollabMemberKey(null);
+    setCollabHistory([]);
     setCollabStatus(null);
     setPeerSeenAt(null);
     mixTimersRef.current.forEach(t => window.clearTimeout(t));
@@ -5700,6 +6150,14 @@ function Studio() {
     knownMarkersRef.current.clear();
     knownChordsRef.current.clear();
     pendingChordsRef.current.clear();
+    knownContentRef.current.clear();
+    deferredMixRef.current.clear();
+    deferredOpsRef.current.clear();
+    deferredClipRef.current.clear();
+    knownOrderRef.current = null;
+    lastOrderListRef.current = null;
+    knownSongRef.current.clear();
+    if (contentTimerRef.current) { window.clearTimeout(contentTimerRef.current); contentTimerRef.current = null; }
     setListenTogether(null);
     setInviteCode(null);
     collabLiveStore.set({ meKey: null, recs: {} });
@@ -5769,9 +6227,295 @@ function Studio() {
     const c = collabRef.current;
     const recs: Record<string, string> = {};
     if (c) currentRecs().forEach(r => { recs[r.trackId] = r.name; });
-    collabLiveStore.set({ meKey: c?.key || null, recs });
+    // Qui modifie / qui regarde quelle piste (verrou doux, liseré de couleur dans les en-têtes).
+    const edits: Record<string, CollabPeerMark[]> = {};
+    const sels: Record<string, CollabPeerMark[]> = {};
+    if (c) collabOnlineRef.current.forEach(m => {
+      if (participantOf(m.member_key) === c.key) return;
+      const mark = { name: m.display_name, color: m.color || '#94a3b8' };
+      if (m.edit && !(edits[m.edit] ||= []).some(x => x.name === mark.name)) edits[m.edit].push(mark);
+      if (m.sel && !(sels[m.sel] ||= []).some(x => x.name === mark.name)) sels[m.sel].push(mark);
+    });
+    collabLiveStore.set({ meKey: c?.key || null, recs, edits, sels });
   };
   useEffect(() => { refreshCollabLiveRef.current(); }, [collabOnline, collab, collabStatus?.realtime]);
+
+  // --- Historique « qui a changé quoi », avec retour arrière (utils/collabHistory) ------------------
+  noteHistoryRef.current = (e) => {
+    const color = collabOnlineRef.current.find(m => m.display_name === e.who)?.color;
+    setCollabHistory(h => pushHistory(h, { id: `${e.seq}:${e.trackId || ''}:${e.text}`.slice(0, 160), at: Date.now(), color, ...e }));
+  };
+  noteClipHistoryRef.current = (o, before, taken, dropped) => {
+    if (o.replay) return;
+    const had = new Set((before.clips || []).map(cl => cl.id));
+    const added = taken.filter(cl => !had.has(cl.id)).length;
+    noteHistoryRef.current?.({
+      seq: o.seq, who: o.author_name, role: o.role, trackId: before.id,
+      text: clipsText(before.name, taken.length - added, added, dropped.length),
+      undo: clipsUndo(before.id, before.clips || [], taken, dropped),
+    });
+  };
+  /** Puis-je annuler cette modification (avec mes droits : elle repartira chez tous) ? */
+  const canUndoEntry = (e: HistoryEntry): boolean => {
+    const c = collabRef.current;
+    if (!c || !e.undo || e.undone) return false;
+    const me = { role: c.role, key: c.key };
+    if (e.undo.kind === 'mix' || e.undo.kind === 'clips') {
+      const tid = e.undo.trackId;
+      const t = stateRef.current.tracks.find(x => x.id === tid);
+      if (!t) return false;
+      return e.undo.kind === 'mix' ? canSendMix(t, me) : canSendContent(t, me);
+    }
+    return true;
+  };
+  const undoCollabEntry = useCallback((id: string) => {
+    const e = collabHistoryRef.current.find(x => x.id === id);
+    if (!e || !e.undo || !canUndoEntryRef.current(e)) return;
+    const u = e.undo;
+    if (u.kind === 'mix') {
+      setState(produce((d: DAWState) => { const t = d.tracks.find(x => x.id === u.trackId); if (t) applyMixFields(t as Track, u.fields, () => true); }));
+    } else if (u.kind === 'clips') {
+      setState(produce((d: DAWState) => { const t = d.tracks.find(x => x.id === u.trackId); if (t) t.clips = applyClipsUndo(t.clips as Clip[], u) as any; }));
+    } else if (u.kind === 'song') {
+      setState(prev => { const n: any = { ...prev }; for (const [k, v] of Object.entries(u.fields)) { if (v === null) delete n[k]; else n[k] = v; } return n; });
+    } else if (u.kind === 'tempo') {
+      const op = sanitizeTempoOp(u.op);
+      if (op) { audioEngine.setBpm(op.bpm); setState(prev => applyTempoOp(prev, op)); }
+    }
+    setCollabHistory(h => h.map(x => (x.id === id ? { ...x, undone: true } : x)));
+    setAiNotification(`↩️ Annulé : ${e.who} ${e.text}. Le retour en arrière part chez tout le monde.`);
+  }, [setState]);
+  const collabHistoryRef = useRef(collabHistory);
+  collabHistoryRef.current = collabHistory;
+  const canUndoEntryRef = useRef(canUndoEntry);
+  canUndoEntryRef.current = canUndoEntry;
+
+  // --- Verrou doux : qui modifie quelle piste en ce moment ------------------------------------------
+  const editTimerRef = useRef<number | null>(null);
+  const softWarnRef = useRef(new Map<string, number>());
+  noteEditingRef.current = (trackId) => {
+    const c = collabRef.current;
+    if (!c) return;
+    c.client.setPresence({ edit: trackId });
+    if (editTimerRef.current) window.clearTimeout(editTimerRef.current);
+    editTimerRef.current = window.setTimeout(() => { editTimerRef.current = null; collabRef.current?.client.setPresence({ edit: null }); }, 4000);
+    const other = collabOnlineRef.current.find(m => m.edit === trackId && participantOf(m.member_key) !== c.key);
+    if (other) {
+      const last = softWarnRef.current.get(trackId) || 0;
+      if (Date.now() - last > 20000) {
+        softWarnRef.current.set(trackId, Date.now());
+        const name = stateRef.current.tracks.find(x => x.id === trackId)?.name || 'cette piste';
+        setAiNotification(`✋ ${other.display_name} modifie aussi « ${name} » en ce moment : vos changements se fusionnent (le plus récent gagne, réglage par réglage et clip par clip). Un mot dans le chat évite les surprises.`);
+      }
+    }
+  };
+  useEffect(() => { collabRef.current?.client.setPresence({ sel: state.selectedTrackId || null }); }, [state.selectedTrackId, collab]);
+
+  // --- Latence avec chacun (aller-retour par le direct) et vérification de synchronisation --------------
+  const [peerLatency, setPeerLatency] = useState<Record<string, number>>({});
+  const [peerSync, setPeerSync] = useState<Record<string, { ok: boolean; at: number; diff?: string[] }>>({});
+  const fpMissRef = useRef(new Map<string, number>());
+  /** Dernière réparation automatique par piste (au plus une toutes les 30 s). */
+  const healRef = useRef(new Map<string, number>());
+  const healStableRef = useRef(new Map<string, { pair: string; n: number }>());
+  const peerLatencyRef = useRef(peerLatency);
+  peerLatencyRef.current = peerLatency;
+  const peerSyncRef = useRef(peerSync);
+  peerSyncRef.current = peerSync;
+  const onEphemeralRef = useRef<((ev: string, payload: any) => void) | null>(null);
+  onEphemeralRef.current = (ev, payload) => {
+    const c = collabRef.current;
+    if (!c || !payload || typeof payload !== 'object') return;
+    const meKey = c.client.memberKey;
+    if (ev === 'tp') { followTransportRef.current(payload as TransportMsg & { by?: string }); return; }
+    if (ev === 'ping') { if (payload.from !== meKey) c.client.broadcast('pong', { to: payload.from, from: meKey, t: payload.t }); return; }
+    if (ev === 'pong') {
+      if (payload.to !== meKey || !Number.isFinite(payload.t)) return;
+      const rtt = Math.max(0, Date.now() - payload.t);
+      const who = participantOf(String(payload.from || ''));
+      setPeerLatency(prev => ({ ...prev, [who]: prev[who] ? Math.round(prev[who] * 0.6 + rtt * 0.4) : rtt }));
+      return;
+    }
+    if (ev === 'fp') {
+      // Empreinte d'un autre au même « horizon » (mêmes opérations vues) : elle doit être la nôtre.
+      const who = participantOf(String(payload.from || ''));
+      if (!who || who === c.key) return;
+      const st = c.client.getStatus();
+      if (st.pending > 0 || st.catchingUp || c.client.pendingApply() > 0 || contentDirtyRef.current.size || pendingMixRef.current.size) return;
+      if (Number(payload.h) !== c.client.horizon || Number(payload.p) > 0) return;
+      const mine = sessionPrint(stateRef.current);
+      if (mine.sig === payload.sig) { fpMissRef.current.set(who, 0); setPeerSync(prev => ({ ...prev, [who]: { ok: true, at: Date.now() } })); return; }
+      const n = (fpMissRef.current.get(who) || 0) + 1;
+      fpMissRef.current.set(who, n);
+      if (n < 3) return; // passager (une opération en route) : on attend la confirmation
+      const theirs = (payload.tr && typeof payload.tr === 'object') ? payload.tr as Record<string, string> : {};
+      const diff = mine.tracks.filter(t => theirs[t.id] !== t.sig).map(t => t.name).slice(0, 6);
+      for (const [k, v] of Object.entries(payload.song && typeof payload.song === 'object' ? payload.song : {})) if (mine.song[k] !== v) diff.push(k === 'order' ? 'ordre des pistes' : k);
+      setPeerSync(prev => ({ ...prev, [who]: { ok: false, at: Date.now(), diff } }));
+      // Réparation automatique : pour chaque piste qui diffère, UNE seule personne fait foi et
+      // renvoie tout (mix + clips) — son propriétaire ; une piste partagée : l'ingé (sinon l'hôte).
+      // Tout le monde converge vers sa version (règle « dernière écriture gagne »).
+      const engineerOnline = collabOnlineRef.current.some(m => m.role === 'engineer');
+      const healed: string[] = [];
+      for (const t of stateRef.current.tracks) {
+        const mySig = mine.tracks.find(x => x.id === t.id)?.sig;
+        if (theirs[t.id] === undefined || mySig === theirs[t.id]) continue;
+        // Seulement un écart IMMOBILE (mêmes deux versions à 3 vérifications de suite) : personne n'est
+        // en train de modifier cette piste ; sinon on écraserait une modification en route.
+        const pair = `${mySig}|${theirs[t.id]}`;
+        const sk = `${who}:${t.id}`;
+        const prevStable = healStableRef.current.get(sk);
+        const n2 = prevStable && prevStable.pair === pair ? prevStable.n + 1 : 1;
+        healStableRef.current.set(sk, { pair, n: n2 });
+        if (n2 < 3) continue;
+        const iAmRef = t.collabOwnerKey ? t.collabOwnerKey === c.key
+          : ownerRoleOf(t) === null ? (c.role === 'engineer' || (!engineerOnline && c.host)) : ownerRoleOf(t) === c.role;
+        if (!iAmRef || healRef.current.get(t.id)! > Date.now() - 30000) continue;
+        healRef.current.set(t.id, Date.now());
+        knownFieldsRef.current.delete(t.id);
+        knownContentRef.current.delete(t.id);
+        healed.push(t.name);
+      }
+      if (healed.length) {
+        fpMissRef.current.set(who, 0);
+        setSilently(prev => ({ ...prev, tracks: [...prev.tracks] })); // la détection renvoie tout
+        setAiNotification(`🩹 Écart avec ${payload.name || 'un collaborateur'} sur ${healed.map(n => `« ${n} »`).join(', ')} : ta version (qui fait foi) est renvoyée à tous.`);
+      }
+      return;
+    }
+    if (ev === 'rtc') { void rtcRef.current?.handle(payload as RtcSignal); }
+  };
+  useEffect(() => {
+    if (!collab) { setPeerLatency({}); setPeerSync({}); fpMissRef.current.clear(); return; }
+    const ping = window.setInterval(() => {
+      const c = collabRef.current;
+      if (c) c.client.broadcast('ping', { from: c.client.memberKey, t: Date.now() });
+    }, 5000);
+    const fp = window.setInterval(() => {
+      const c = collabRef.current;
+      if (!c) return;
+      const st = c.client.getStatus();
+      if (st.realtime !== 'live' || st.pending > 0 || st.catchingUp || stateRef.current.isRecording) return;
+      const print = sessionPrint(stateRef.current);
+      c.client.broadcast('fp', { from: c.client.memberKey, name: c.name, sig: print.sig, h: c.client.horizon, p: st.pending + contentDirtyRef.current.size,
+        tr: Object.fromEntries(print.tracks.map(t => [t.id, t.sig])), song: print.song });
+    }, 8000);
+    return () => { window.clearInterval(ping); window.clearInterval(fp); };
+  }, [collab]);
+
+  // --- Audio en direct : talkback et écoute du mix de l'ingé (services/CollabRtc) ----------------------
+  const rtcRef = useRef<CollabRtc | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const [talkOn, setTalkOn] = useState(false);
+  const [mixOutOn, setMixOutOn] = useState(false);
+  /** Flux reçus : par personne, talkback et / ou mix. */
+  const [remoteAudio, setRemoteAudio] = useState<Record<string, { talk?: boolean; mix?: boolean }>>({});
+  const [listenRemoteMix, setListenRemoteMix] = useState(false);
+  const remoteAudioRef = useRef(remoteAudio);
+  remoteAudioRef.current = remoteAudio;
+  const talkOnRef = useRef(talkOn);
+  talkOnRef.current = talkOn;
+  const mixOutOnRef = useRef(mixOutOn);
+  mixOutOnRef.current = mixOutOn;
+  const audioElsRef = useRef(new Map<string, HTMLAudioElement>());
+  const rtcPlay = (id: string, stream: MediaStream | null, muted: boolean) => {
+    let el = audioElsRef.current.get(id);
+    if (!stream) { if (el) { el.pause(); el.srcObject = null; el.remove(); audioElsRef.current.delete(id); } return; }
+    if (!el) { el = document.createElement('audio'); el.autoplay = true; el.setAttribute('data-collab-audio', id); el.style.display = 'none'; document.body.appendChild(el); audioElsRef.current.set(id, el); }
+    if (el.srcObject !== stream) el.srcObject = stream;
+    el.muted = muted;
+    void el.play().catch(() => { /* lecture autorisée au prochain geste */ });
+  };
+  useEffect(() => {
+    if (!collab || !collabMemberKey) return;
+    const meKey = collabMemberKey;
+    const rtc = new CollabRtc({
+      me: meKey,
+      send: (sig) => collabRef.current?.client.broadcast('rtc', sig as unknown as Record<string, unknown>) ?? false,
+      onRemote: (peer, kind, stream) => {
+        const who = participantOf(peer);
+        setRemoteAudio(prev => ({ ...prev, [who]: { ...prev[who], [kind]: !!stream } }));
+        // Talkback coupé pendant une prise (il ne doit pas finir dans le micro) ; mix : seulement si on l'écoute.
+        rtcPlay(`${peer}:${kind}`, stream, kind === 'talk' ? !!stateRef.current.isRecording : !listenRemoteMixRef.current);
+      },
+    });
+    rtcRef.current = rtc;
+    return () => {
+      rtc.close();
+      rtcRef.current = null;
+      audioElsRef.current.forEach((_el, id) => rtcPlay(id, null, true));
+      micStreamRef.current?.getTracks().forEach(t => t.stop());
+      micStreamRef.current = null;
+      setTalkOn(false); setMixOutOn(false); setRemoteAudio({}); setListenRemoteMix(false);
+      audioEngine.setCollabOutputMuted(false);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collab?.client, collabMemberKey]);
+  const listenRemoteMixRef = useRef(listenRemoteMix);
+  listenRemoteMixRef.current = listenRemoteMix;
+  // Joignables : les autres présents dans le direct.
+  useEffect(() => {
+    const me = collabRef.current?.client.memberKey;
+    rtcRef.current?.setPeers(collabOnline.map(m => m.member_key).filter(k => k && k !== me));
+  }, [collabOnline]);
+  // Pendant une prise : talkback reçu coupé (casque de l'artiste) ; mix reçu : selon l'écoute choisie.
+  useEffect(() => {
+    audioElsRef.current.forEach((el, id) => { el.muted = id.endsWith(':talk') ? !!state.isRecording : !listenRemoteMix; });
+  }, [state.isRecording, listenRemoteMix]);
+  // Une prise commence pendant l'écoute du mix de l'ingé : on rend son propre son (retour casque).
+  useEffect(() => {
+    if (!state.isRecording || !listenRemoteMixRef.current) return;
+    setListenRemoteMix(false);
+    audioEngine.setCollabOutputMuted(false);
+    audioElsRef.current.forEach((el, id) => { if (id.endsWith(':mix')) el.muted = true; });
+    setAiNotification("🎧 Prise en cours : l'écoute du mix de l'ingé est coupée, tu entends ton propre retour.");
+  }, [state.isRecording]);
+  /** Talkback : maintenir pour parler (le micro reste ouvert, coupé entre deux appuis). */
+  const setTalk = useCallback(async (on: boolean) => {
+    const c = collabRef.current;
+    const rtc = rtcRef.current;
+    if (!c || !rtc) return;
+    if (on && !micStreamRef.current) {
+      try {
+        micStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      } catch {
+        setAiNotification("🎙️ Talkback : le micro n'est pas disponible (autorise-le dans le navigateur).");
+        return;
+      }
+      rtc.setLocal('talk', micStreamRef.current, collabOnlineRef.current.map(m => m.member_key));
+    }
+    micStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = on; });
+    setTalkOn(on);
+    c.client.setPresence({ talk: on });
+  }, []);
+  /** Ingé : diffuser son mix en direct à l'artiste (comme Audiomovers). */
+  const toggleMixOut = useCallback(async () => {
+    const c = collabRef.current;
+    const rtc = rtcRef.current;
+    if (!c || !rtc) return;
+    const on = !rtc.isSending('mix');
+    if (on) {
+      await ensureAudioEngine();
+      const stream = audioEngine.getCollabMixStream();
+      if (!stream) { setAiNotification("🎧 Le moteur audio n'est pas prêt : lance la lecture une fois, puis réessaie."); return; }
+      rtc.setLocal('mix', stream, collabOnlineRef.current.map(m => m.member_key));
+    } else rtc.setLocal('mix', null, []);
+    setMixOutOn(on);
+    c.client.setPresence({ mixOut: on });
+    setAiNotification(on
+      ? '📡 Ton mix part en direct (Opus stéréo haut débit) : les autres peuvent l’écouter dans Collaboration, en suivant ta lecture.'
+      : '📡 Diffusion du mix arrêtée.');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const toggleListenRemoteMix = useCallback(() => {
+    setListenRemoteMix(on => {
+      const next = !on;
+      // On coupe sa propre sortie : sinon on entend les deux mix, décalés.
+      audioEngine.setCollabOutputMuted(next);
+      audioElsRef.current.forEach((el, id) => { if (id.endsWith(':mix')) { el.muted = !next; if (next) void el.play().catch(() => {}); } });
+      return next;
+    });
+  }, []);
   // Les verrous reçus par le journal expirent : on rafraîchit de temps en temps.
   useEffect(() => {
     if (!collab) return;
@@ -5892,7 +6636,7 @@ function Studio() {
   }, [state.trackGroups, state.groupSettings, collab]);
   /** Après une opération sur le temps : ce qu'elle a changé est connu de tous (rien n'est renvoyé). */
   const rememberTimeOp = (next: DAWState) => {
-    next.tracks.forEach(t => remoteTouchedRef.current.add(t.id));
+    next.tracks.forEach(t => { remoteTouchedRef.current.add(t.id); contentResetRef.current.add(t.id); });
     knownMarkersRef.current = new Map((next.markers || []).map(m => [m.id, markerSig(m)]));
     knownChordsRef.current = new Map((next.chords || []).map(c => [c.id, chordSig(c)]));
     knownTempoSigRef.current = tempoOpSig(tempoOpOf(next));
@@ -5902,6 +6646,7 @@ function Studio() {
     const c = collabRef.current;
     if (!c) return;
     rememberTimeOp(next);
+    setSilently(prev => ({ ...prev, collabTimeOps: [...(prev.collabTimeOps || []).filter(x => x !== op.id).slice(-199), op.id] }));
     c.client.queue(`timeop:${op.id}`, 'timeop', op as unknown as Record<string, unknown>);
   };
   // R23 : changer de beat = UNE opération pour les autres (voix recalées et leur audio, beat,
@@ -5949,6 +6694,18 @@ function Studio() {
     if (!c.client.broadcast('tp', msg as unknown as Record<string, unknown>) && action !== 'sync') c.client.queue('tp', 'transport', msg as unknown as Record<string, unknown>);
   }, []);
   useEffect(() => { if (isListenHost) sendTransport(state.isPlaying ? 'play' : 'pause'); }, [state.isPlaying, isListenHost, sendTransport]);
+  // L'hôte déplace la tête de lecture à l'arrêt : les invités suivent ce geste (et seulement lui).
+  useEffect(() => {
+    if (!isListenHost) return;
+    let t: number | null = null;
+    const off = playheadStore.subscribe(() => {
+      if (stateRef.current.isPlaying) return;
+      if (t) window.clearTimeout(t);
+      t = window.setTimeout(() => { t = null; sendTransport('seek'); }, 150);
+    });
+    return () => { off(); if (t) window.clearTimeout(t); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isListenHost, sendTransport]);
   useEffect(() => {
     if (!isListenHost) return;
     const id = window.setInterval(() => sendTransport('sync'), 1000);
@@ -5990,7 +6747,10 @@ function Studio() {
       }
     } else {
       if (stateRef.current.isPlaying) { pausePlayback(); log('pause', target.pos); }
-      if (Math.abs(playheadStore.get() - target.pos) > 0.05) handleSeek(target.pos);
+      // À l'arrêt, seuls les gestes de l'hôte (pause, déplacement) replacent la tête de lecture : le
+      // recalage périodique ne doit pas empêcher l'invité de se déplacer pour poser un repère, éditer…
+      // (avant : ramené chaque seconde à la position de l'hôte).
+      if (m.action !== 'sync' && Math.abs(playheadStore.get() - target.pos) > 0.05) handleSeek(target.pos);
     }
   };
 
@@ -6002,7 +6762,11 @@ function Studio() {
     collabOnline.forEach(m => {
       const k = participantOf(m.member_key);
       const prev = map.get(k);
-      map.set(k, { key: k, name: m.display_name || prev?.name || '?', role: m.role, online: true, color: m.color, rec: m.rec, playing: m.playing, st: m.st, host: m.host, seenAt: prev?.seenAt });
+      // Même compte sur plusieurs appareils (PC + tablette) : une personne, ses appareils comptés ;
+      // ce qu'il fait (enregistre, écoute) vient de n'importe lequel.
+      const devices = (prev?.online ? prev.devices || 1 : 0) + 1;
+      map.set(k, { key: k, name: m.display_name || prev?.name || '?', role: m.role, online: true, color: m.color || prev?.color,
+        rec: m.rec || (prev?.online ? prev.rec : null), playing: m.playing || (prev?.online && prev.playing), st: m.st, host: m.host || (prev?.online && prev.host), seenAt: prev?.seenAt, devices });
     });
     if (!map.has(collab.key)) map.set(collab.key, { key: collab.key, name: collab.name, role: collab.role, online: true, color: collab.color, host: collab.host });
     const me = map.get(collab.key)!;
@@ -6011,6 +6775,25 @@ function Studio() {
     return peerViews([...map.values()], collab.key, names);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collab, collabOnline, peersTick]);
+  // Un collaborateur vient de perdre le direct (en retard, ou parti depuis moins de 2 min) : rattrapage
+  // rapproché, ce qu'il envoie au retour du réseau arrive en ~2 s au lieu de ~10 s.
+  const onlineBeforeRef = useRef(new Set<string>());
+  const droppedAtRef = useRef(new Map<string, number>());
+  useEffect(() => {
+    const c = collabRef.current;
+    if (!c) { onlineBeforeRef.current.clear(); droppedAtRef.current.clear(); return; }
+    const now = Date.now();
+    const onlineNow = new Set(collabPeerViews.filter(v => v.online && !v.me).map(v => v.key));
+    onlineBeforeRef.current.forEach(k => { if (!onlineNow.has(k)) droppedAtRef.current.set(k, now); });
+    onlineNow.forEach(k => droppedAtRef.current.delete(k));
+    onlineBeforeRef.current = onlineNow;
+    const away = collabPeerViews.some(v => !v.me && v.state === 'late') || [...droppedAtRef.current.values()].some(t => now - t < 120_000);
+    c.client.setFastPoll(away);
+    if (!away) return;
+    // Fin de la fenêtre de 2 min : on réévalue (sinon le rattrapage rapproché resterait).
+    const id = window.setTimeout(() => setPeersTick(x => x + 1), 121_000);
+    return () => window.clearTimeout(id);
+  }, [collabPeerViews]);
   // « en retard » → « hors ligne » au bout d'une minute sans nouvelles : on recalcule.
   useEffect(() => {
     if (!collab) return;
@@ -6058,6 +6841,7 @@ function Studio() {
     } catch (e: any) {
       const msg = String(e?.message || '');
       if (/inconnue/i.test(msg)) throw new Error('Les codes ne marchent pas encore : demande plutôt le lien d’invitation.');
+      if (/Abonnement/i.test(msg)) { setCollabGate('subscribe'); throw new Error('Pour rejoindre une collaboration, il faut l’abonnement collaboration (5 €/mois) : abonne-toi ci-dessous, puis entre à nouveau le code.'); }
       throw new Error(/introuvable|expir/i.test(msg) ? 'Code inconnu ou expiré (24 h) : demande un nouveau code à la personne qui t’invite.' : `Code impossible à vérifier : ${msg || 'connexion'}. Réessaie.`);
     }
     const link = parseLink(r?.link || '');
@@ -6086,6 +6870,14 @@ function Studio() {
       engineTime: () => ({ t: Date.now(), pos: stateRef.current.isPlaying ? audioEngine.getCurrentTime() : playheadStore.get(), playing: !!stateRef.current.isPlaying }),
       recs: () => collabLiveStore.get().recs,
       previews: () => previewTrackerRef.current.all(),
+      /** Empreinte de ce qui est partagé (utils/collabFingerprint) : identique chez tous après synchronisation. */
+      fingerprint: () => sessionPrint(stateRef.current),
+      /** Ce qui est partagé d'une piste, en clair (pour dire précisément ce qui diffère). */
+      parts: (id: string) => { const t = stateRef.current.tracks.find(x => x.id === id); return t ? JSON.parse(JSON.stringify(trackParts(t))) : null; },
+      messages: () => collabMessagesRef.current.map(m => ({ from: m.from, text: m.text, mine: !!m.mine, pending: !!m.pending })),
+      history: () => collabHistoryRef.current.map(h => ({ who: h.who, text: h.text, undo: !!h.undo, undone: !!h.undone })),
+      audio: () => ({ rtc: rtcRef.current?.connectionStates() || {}, remote: remoteAudioRef.current, talkOn: talkOnRef.current, mixOut: mixOutOnRef.current }),
+      latency: () => ({ server: collabRef.current?.client.getStatus().rttMs ?? null, peers: peerLatencyRef.current, sync: peerSyncRef.current, horizon: collabRef.current?.client.horizon ?? null }),
       track: (idOrName: string) => {
         const t = stateRef.current.tracks.find(x => x.id === idOrName || x.name === idOrName);
         return t ? {
@@ -6094,7 +6886,15 @@ function Studio() {
         } : null;
       },
     };
-    return () => { delete (window as any).__novaCollab; };
+    // Scénarios de bout en bout (serveur de développement seulement) : modifier l'état
+    // comme le ferait l'interface (même chemin : setState → détection → collaboration).
+    if (import.meta.env.DEV) {
+      (window as any).__novaTest = {
+        update: (recipe: (d: DAWState) => void) => setState(produce(recipe)),
+        getState: () => stateRef.current,
+      };
+    }
+    return () => { delete (window as any).__novaCollab; delete (window as any).__novaTest; };
   }, []);
   // Délais d'attente de l'aperçu (pont de l'artiste qui ne répond pas → message clair).
   useEffect(() => {
@@ -7642,6 +8442,8 @@ function Studio() {
   const [nextStep, setNextStep] = useState<'take' | 'export' | null>(null);
   const nextStepSeenRef = useRef(new Set<string>());
   showNextStepRef.current = (trigger) => {
+    // En collaboration, pas de carte « Faire mixer par un pro / studio » : l'ingé (ou l'autre artiste) est déjà là.
+    if (collabRef.current || remoteRef.current?.active) return;
     if (nextStepSeenRef.current.has(trigger)) return;
     nextStepSeenRef.current.add(trigger);
     setNextStep(trigger);
@@ -8519,6 +9321,20 @@ function Studio() {
         onAddMarker={(name) => handleAddMarker(playheadStore.get(), name || undefined)}
         onSeek={(sec) => { handleSeek(Math.max(0, sec)); }}
         position={() => (stateRef.current.isPlaying ? audioEngine.getCurrentTime() : playheadStore.get())}
+        history={collab ? collabHistory.map(h => ({ ...h, canUndo: canUndoEntry(h) })) : undefined}
+        onUndo={undoCollabEntry}
+        latency={collab ? { serverMs: collabStatus?.rttMs ?? null, peers: peerLatency } : undefined}
+        sync={collab ? peerSync : undefined}
+        audio={collab ? (() => {
+          const nameOf = (k: string) => collabOnline.find(m => participantOf(m.member_key) === k)?.display_name || '?';
+          const mixFrom = Object.entries(remoteAudio).find(([, v]) => v.mix)?.[0];
+          return {
+            talkOn, onTalk: (on: boolean) => { void setTalk(on); },
+            canMixOut: collab.role === 'engineer', mixOutOn, onToggleMixOut: () => { void toggleMixOut(); },
+            remoteMixFrom: mixFrom ? nameOf(mixFrom) : null, listening: listenRemoteMix, onToggleListen: toggleListenRemoteMix,
+            talking: collabOnline.filter(m => m.talk && remoteAudio[participantOf(m.member_key)]?.talk && participantOf(m.member_key) !== collab.key).map(m => m.display_name),
+          };
+        })() : null}
         remoteRoleFromUrl={remoteRoleFromUrl}
         onStartRemote={(r, n, l) => { void startRemote(r, n, l); }}
         remoteBusy={remote.connecting}
