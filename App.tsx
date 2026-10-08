@@ -2298,6 +2298,12 @@ function Studio() {
     let armedTrack = currentState.tracks.find(t => t.isTrackArmed);
     // Collaboration : jamais sur la piste d'un autre, ni pendant qu'il y enregistre.
     if (armedTrack) { const why = collabRecGuardRef.current(armedTrack.id); if (why) { setAiNotification(`🔒 ${why}`); return; } }
+    // Piste « armée » dans le projet mais micro fermé côté moteur (annuler / rétablir, session
+    // reprise, collaboration) : on réarme. Avant, la prise échouait (« No monitor stream ») —
+    // mesuré dans le soak : 8 prises sur 10 ratées après des annulations.
+    if (armedTrack && !audioEngine.isMonitoring(armedTrack.id)) {
+      if (!(await armForRecording(armedTrack.id))) return;
+    }
     if (!armedTrack) {
       const ctRaw = collabRecTargetRef.current?.(currentState.selectedTrackId) ?? null;
       if (ctRaw && 'error' in ctRaw) { setAiNotification(`🔒 ${ctRaw.error}`); return; }

@@ -417,6 +417,11 @@ export class AudioEngine {
     return audioBufferRegistry.get(clipId);
   }
 
+  /** La piste a-t-elle vraiment son micro ouvert (armement effectif côté moteur) ? */
+  public isMonitoring(trackId: string): boolean {
+    return this.monitoringTrackId === trackId && (!!this.activeMonitorStream || !!this.armingPromise);
+  }
+
   /** Pistes qui ont une chaîne audio dans le moteur. */
   public trackIds(): string[] {
     return [...this.tracksDSP.keys()];
