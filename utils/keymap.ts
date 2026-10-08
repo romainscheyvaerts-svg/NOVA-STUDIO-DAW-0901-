@@ -11,11 +11,17 @@
  * - context « focus » : actifs seulement en Commands Keyboard Focus (une
  *   touche = une commande, comme Pro Tools) ; ils remplacent alors quelques
  *   lettres de NOVA (R n'enregistre plus, il dézoome : Ctrl+Espace enregistre).
+ * - context « midi » : clavier de l'ordinateur joué comme un clavier MIDI, dans
+ *   le piano roll quand le bouton « Clavier » est allumé (Live : Computer MIDI
+ *   Keyboard). Géré par components/PianoRoll + utils/computerKeyboard, par
+ *   position physique (A en QWERTY = Q en AZERTY) ; ces lettres remplacent
+ *   alors les raccourcis de NOVA (S ne coupe plus, L ne boucle plus…), voulu.
  */
+import { KEY_TO_SEMITONE, OCTAVE_DOWN, OCTAVE_UP, VELOCITY_DOWN, VELOCITY_UP } from './computerKeyboard';
 import type { EditCommandId } from './editCommands';
 
-export type ShortcutContext = 'global' | 'focus';
-export type ShortcutCategory = 'Transport' | 'Édition' | 'Modes d’édition' | 'Navigation' | 'Zoom et affichage' | 'Repères' | 'Fenêtres' | 'Keyboard Focus';
+export type ShortcutContext = 'global' | 'focus' | 'midi';
+export type ShortcutCategory = 'Transport' | 'Édition' | 'Modes d’édition' | 'Navigation' | 'Zoom et affichage' | 'Repères' | 'Fenêtres' | 'Keyboard Focus' | 'Clavier MIDI';
 
 export interface ShortcutDef {
   id: string;
@@ -30,13 +36,27 @@ export interface ShortcutDef {
   /** Commande d'édition (bus utils/editCommands). */
   command?: EditCommandId;
   arg?: any;
-  /** Lettre de NOVA remplacée en Keyboard Focus (documenté, voulu). */
+  /** Lettre de NOVA remplacée en Keyboard Focus ou par le clavier MIDI (documenté, voulu). */
   overridesNova?: boolean;
 }
 
 const g = (d: Omit<ShortcutDef, 'context' | 'owner'>): ShortcutDef => ({ ...d, context: 'global', owner: 'keymap' });
 const nova = (d: Omit<ShortcutDef, 'context' | 'owner'>): ShortcutDef => ({ ...d, context: 'global', owner: 'nova' });
 const f = (d: Omit<ShortcutDef, 'context' | 'owner'>): ShortcutDef => ({ ...d, context: 'focus', owner: 'keymap' });
+const m = (d: Omit<ShortcutDef, 'context' | 'owner' | 'category'>): ShortcutDef => ({ ...d, context: 'midi', owner: 'nova', category: 'Clavier MIDI' });
+
+/** Lettre QWERTY d'un code de touche (« KeyA » → « a », « Semicolon » → « ; »). */
+const letterOf = (code: string) => (code === 'Semicolon' ? ';' : code === 'Quote' ? "'" : code.replace(/^Key/, '').toLowerCase());
+const NOTE_FR = ['Do', 'Do#', 'Ré', 'Mib', 'Mi', 'Fa', 'Fa#', 'Sol', 'Lab', 'La', 'Sib', 'Si'];
+const WHITE = Object.entries(KEY_TO_SEMITONE).filter(([, n]) => [0, 2, 4, 5, 7, 9, 11].includes(n % 12));
+const BLACK = Object.entries(KEY_TO_SEMITONE).filter(([, n]) => ![0, 2, 4, 5, 7, 9, 11].includes(n % 12));
+/** Raccourcis du clavier MIDI : pour l'aide, et pour vérifier qu'ils ne se marchent pas dessus. */
+export const MIDI_KEYBOARD_SHORTCUTS: ShortcutDef[] = [
+  m({ id: 'midi.white', keys: WHITE.map(([c]) => letterOf(c)), label: `Touches blanches : ${WHITE.map(([, n]) => NOTE_FR[n % 12]).join(' ')} (en AZERTY : Q S D F G H J K L M ù)`, pt: 'Live : Computer MIDI Keyboard', overridesNova: true }),
+  m({ id: 'midi.black', keys: BLACK.map(([c]) => letterOf(c)), label: `Touches noires : ${BLACK.map(([, n]) => NOTE_FR[n % 12]).join(' ')} (en AZERTY : Z E T Y U O P)`, pt: 'Live : rangée du dessus', overridesNova: true }),
+  m({ id: 'midi.octave', keys: [letterOf(OCTAVE_DOWN), letterOf(OCTAVE_UP)], label: 'Octave − / + (en AZERTY : W / X)', pt: 'Live : Z / X', overridesNova: true }),
+  m({ id: 'midi.velocity', keys: [letterOf(VELOCITY_DOWN), letterOf(VELOCITY_UP)], label: 'Vélocité − / + (20, 40… 127)', pt: 'Live : C / V', overridesNova: true }),
+];
 
 export const KEYMAP: ShortcutDef[] = [
   // --- Déjà dans NOVA ------------------------------------------------------------
@@ -72,7 +92,7 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.quickFades', keys: ['ctrl+alt+f'], label: 'Fondus rapides (10 ms) sur les clips sélectionnés, contre les clics', pt: 'Ctrl+F (Fades) / Batch Fades', category: 'Édition', command: 'quickFades' }),
   g({ id: 'pt.selectAll', keys: ['ctrl+a'], label: 'Sélectionner tous les clips', pt: 'Ctrl+A', category: 'Édition', command: 'selectAllClips' }),
   g({ id: 'pt.rename', keys: ['ctrl+shift+r'], label: 'Renommer le clip', pt: 'Ctrl+Maj+R (Rename Clip)', category: 'Édition', command: 'renameClip' }),
-  g({ id: 'pt.stripSilence', keys: ['ctrl+u'], label: 'Strip Silence : retirer les blancs (fenêtre)', pt: 'Ctrl+U', category: 'Édition', command: 'stripSilence' }),
+  g({ id: 'pt.stripSilence', keys: ['ctrl+u'], label: 'Supprimer les silences (Strip Silence) : retirer les blancs (fenêtre)', pt: 'Ctrl+U', category: 'Édition', command: 'stripSilence' }),
   g({ id: 'nova.breaths', keys: ['ctrl+alt+r'], label: 'Respirations : baisser la lead, supprimer sur les backs (fenêtre)', pt: 'Pas dans Pro Tools : comme Breath Control de Waves / De-breath de RX', category: 'Édition', command: 'breaths' }),
   g({ id: 'pt.nudgeL', keys: ['arrowleft', 'numsub'], label: 'Nudge : clip(s) sélectionné(s) d’un pas de grille vers la gauche ; sans sélection, la tête de lecture', pt: 'Pavé − (Nudge)', category: 'Édition', command: 'nudgeLeft' }),
   g({ id: 'pt.nudgeR', keys: ['arrowright', 'numadd'], label: 'Nudge : clip(s) sélectionné(s) d’un pas de grille vers la droite ; sans sélection, la tête de lecture', pt: 'Pavé + (Nudge)', category: 'Édition', command: 'nudgeRight' }),
@@ -129,6 +149,9 @@ export const KEYMAP: ShortcutDef[] = [
   f({ id: 'kf.zoom3', keys: ['3'], label: 'Zoom préréglé 3', pt: '3', category: 'Keyboard Focus', command: 'zoomPreset', arg: 3, overridesNova: true }),
   f({ id: 'kf.zoom4', keys: ['4'], label: 'Zoom préréglé 4', pt: '4', category: 'Keyboard Focus', command: 'zoomPreset', arg: 4 }),
   f({ id: 'kf.zoom5', keys: ['5'], label: 'Zoom préréglé 5 (au plus près)', pt: '5', category: 'Keyboard Focus', command: 'zoomPreset', arg: 5 }),
+
+  // --- Clavier MIDI de l'ordinateur (piano roll, bouton « Clavier » allumé) -------
+  ...MIDI_KEYBOARD_SHORTCUTS,
 ];
 
 // --- Normalisation des touches ------------------------------------------------------
@@ -185,7 +208,7 @@ export const findShortcut = (chord: string, keyboardFocus: boolean): ShortcutDef
 /** Conflits : une même combinaison pour deux raccourcis du même contexte. */
 export const findConflicts = (map: ShortcutDef[] = KEYMAP): string[] => {
   const out: string[] = [];
-  for (const ctx of ['global', 'focus'] as ShortcutContext[]) {
+  for (const ctx of ['global', 'focus', 'midi'] as ShortcutContext[]) {
     const seen = new Map<string, string>();
     for (const s of map.filter(x => x.context === ctx)) {
       for (const k of s.keys) {
@@ -195,10 +218,10 @@ export const findConflicts = (map: ShortcutDef[] = KEYMAP): string[] => {
       }
     }
   }
-  // En Keyboard Focus, remplacer une lettre de NOVA doit être voulu (overridesNova).
+  // En Keyboard Focus ou au clavier MIDI, remplacer une lettre de NOVA doit être voulu (overridesNova).
   const novaKeys = new Map<string, string>();
-  map.filter(s => s.owner === 'nova').forEach(s => s.keys.forEach(k => novaKeys.set(k, s.id)));
-  for (const s of map.filter(x => x.context === 'focus')) {
+  map.filter(s => s.owner === 'nova' && s.context === 'global').forEach(s => s.keys.forEach(k => novaKeys.set(k, s.id)));
+  for (const s of map.filter(x => x.context === 'focus' || x.context === 'midi')) {
     for (const k of s.keys) if (novaKeys.has(k) && !s.overridesNova) out.push(`focus « ${k} » remplace ${novaKeys.get(k)} sans le dire`);
   }
   return out;
@@ -217,7 +240,7 @@ export const chordLabel = (chord: string): string =>
 
 export const shortcutKeysLabel = (s: ShortcutDef): string => s.keys.map(chordLabel).join(' · ');
 
-export const SHORTCUT_CATEGORIES: ShortcutCategory[] = ['Transport', 'Édition', 'Modes d’édition', 'Navigation', 'Zoom et affichage', 'Repères', 'Fenêtres', 'Keyboard Focus'];
+export const SHORTCUT_CATEGORIES: ShortcutCategory[] = ['Transport', 'Édition', 'Modes d’édition', 'Navigation', 'Zoom et affichage', 'Repères', 'Fenêtres', 'Keyboard Focus', 'Clavier MIDI'];
 
 /** Recherche dans l'aide : libellé, touches, équivalent Pro Tools (sans accents ni casse). */
 export const searchShortcuts = (query: string, map: ShortcutDef[] = KEYMAP): ShortcutDef[] => {

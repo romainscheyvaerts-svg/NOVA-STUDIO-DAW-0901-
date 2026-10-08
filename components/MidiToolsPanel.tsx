@@ -200,7 +200,7 @@ const MidiToolsPanel: React.FC<Props> = ({ notes, selectedIds, ctx, onPreview, o
           <>
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Outils · {scope}</span>
-              <button type="button" aria-label="Fermer" onClick={onClose} className="w-9 h-9 rounded-full hover:bg-white/10"><i className="fas fa-times" /></button>
+              <button type="button" aria-label="Fermer" onClick={onClose} className="w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-full hover:bg-white/10"><i className="fas fa-times" /></button>
             </div>
             <div className="grid grid-cols-2 gap-1.5">
               {MIDI_TOOLS.map(t => (

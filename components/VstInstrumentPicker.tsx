@@ -88,7 +88,7 @@ const VstInstrumentPicker: React.FC<{
         aria-expanded={open}
         aria-haspopup="dialog"
         title="Son de la piste : synthé Nova ou instrument VST de ton PC"
-        className={`h-8 px-3 rounded-lg border flex items-center gap-2 text-[10px] font-bold max-w-[220px] ${inst ? 'bg-fuchsia-500/15 border-fuchsia-500/40 text-fuchsia-200' : 'bg-white/5 border-white/10 text-slate-300 hover:text-white'}`}
+        className={`h-8 [@media(pointer:coarse)]:h-10 px-3 rounded-lg border flex items-center gap-2 text-[10px] font-bold max-w-[220px] ${inst ? 'bg-fuchsia-500/15 border-fuchsia-500/40 text-fuchsia-200' : 'bg-white/5 border-white/10 text-slate-300 hover:text-white'}`}
       >
         <i className={`fas ${inst ? 'fa-plug' : 'fa-wave-square'} text-[9px]`}></i>
         <span className="truncate">{label}</span>

@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3429/")
-os.environ["QA_OUT"] = r"D:\1 WORK\CONTENU\nova-modes-edition"
+os.environ.setdefault("QA_OUT", r"D:\1 WORK\CONTENU\nova-modes-edition")
 sys.path.insert(0, str(Path(__file__).parent))
 import qalib  # noqa
 from qalib import OUT, Log, new_page, shot, save_log  # noqa
@@ -284,6 +284,25 @@ def scenario_pc(page, res):
     res["spot_origine"] = clip_of(page, "voix", "A")["start"]
     res["spot_ok"] = (res["spot_ouvert"] and abs(res["spot_mesures"] - 14) < 1e-6 and abs(res["spot_minsec"] - 12.345) < 1e-6
                       and abs(res["spot_echantillons"] - 13) < 1e-6 and abs(res["spot_synchro"] - 7.7) < 1e-6 and abs(res["spot_origine"] - 0.125) < 1e-6)
+    # R1 (audit UX 08/10) : début hors tick (9 s + 14 994 éch.). « Placer » sans retoucher en Mesures ne
+    # bouge pas le clip, et Mesures → Min:sec → Échantillons affiche l'échantillon exact (avant : +5).
+    s_c = int(round(9 * sr)) + 14994
+    start_c = "() => Math.round(window.__novaEdit.getState().tracks.find(t => t.id === 'voix').clips.find(c => c.id === 'C').start * window.__novaEditMode.sampleRate())"
+    place(page, "voix", {"C": {"start": s_c / sr}})
+    page.mouse.click(pe.x_of(box, 9.9), pe.lane_y(box, 0, 0.85)); page.wait_for_timeout(400)
+    page.get_by_role("radio", name="Mesures|temps|ticks").click(); page.wait_for_timeout(80)
+    res["r1_texte_mesures"] = page.locator('[data-testid="spot-input"]').input_value()
+    page.locator('[data-testid="spot-apply"]').click(); page.wait_for_timeout(300)
+    res["r1_placer_sans_retoucher"] = page.evaluate(start_c)
+    page.mouse.click(pe.x_of(box, 9.9), pe.lane_y(box, 0, 0.85)); page.wait_for_timeout(400)
+    page.get_by_role("radio", name="Min:sec").click(); page.wait_for_timeout(80)
+    page.get_by_role("radio", name="Échantillons").click(); page.wait_for_timeout(80)
+    res["r1_texte_echantillons"] = page.locator('[data-testid="spot-input"]').input_value()
+    shot(page, "pc_18b_spot_echantillon_exact")
+    page.keyboard.press("Escape"); page.wait_for_timeout(150)
+    res["r1_attendu"] = s_c
+    res["r1_ok"] = res["r1_placer_sans_retoucher"] == s_c and res["r1_texte_echantillons"] == str(s_c)
+    res["spot_ok"] = res["spot_ok"] and res["r1_ok"]
 
     # ---------------- Tab to Transient : attaques de A à 0,5 et 1,2 s du fichier
     page.keyboard.press("F2"); page.wait_for_timeout(150)
@@ -386,6 +405,9 @@ def main(names):
                 except Exception: pass
             res["secs"] = round(time.time() - t, 1)
             res["erreurs_page"] = [e["text"][:300] for e in log.errors()][:20]
+            # Bilan : une vérification « …_ok » en échec fait échouer le scénario (avant, « ok » restait vrai).
+            res["echecs"] = [k for k, v in res.items() if k.endswith("_ok") and v is False]
+            res["ok"] = res["ok"] and not res["echecs"]
             save_log(log, {"result": res})
             (OUT / f"mesures_{n}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
             summary[n] = res
