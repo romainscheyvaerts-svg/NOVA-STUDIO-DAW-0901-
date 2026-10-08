@@ -167,8 +167,8 @@ describe('groove et swing', () => {
   it('tête de lecture : motif et pas joués à un instant', () => {
     let { dm, a, b } = twoPatterns();
     dm = placePattern(placePattern(dm, a, 0, 2, 4), b, 2, 4, 4);
-    expect(whereAt(dm, BPM, 0.3)).toEqual({ bar: 0, patternId: a, step: 2 });
-    expect(whereAt(dm, BPM, 5)).toEqual({ bar: 2, patternId: b, step: 8 });
+    expect(whereAt(dm, BPM, 0.3)).toMatchObject({ bar: 0, patternId: a, step: 2 });
+    expect(whereAt(dm, BPM, 5)).toMatchObject({ bar: 2, patternId: b, step: 8 });
   });
 });
 

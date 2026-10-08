@@ -33,6 +33,7 @@ const notesInTimeOrder = <T extends { start: number }>(notes: T[]): T[] => {
 import { AudioSampler } from './AudioSampler';
 import { DrumSamplerNode } from './DrumSamplerNode';
 import { MelodicSamplerNode } from './MelodicSamplerNode';
+import { loadSamplerZones, samplerSoundSig } from '../utils/samplerLoad';
 import { interpolateCurve, playedLanes, parsePluginParam, valueAtPoints, sortedPoints } from '../utils/automationWrite';
 import { DrumRackNode } from './DrumRackNode'; // NEW
 import { DrumPadFxBank } from './DrumPadFx';
@@ -973,6 +974,8 @@ export class AudioEngine {
       sampler?: AudioSampler;
       drumRack?: DrumRackNode;
       bass808?: Bass808Node;
+      /** Sampler mélodique / instrument multi-échantillons (R18, R20). */
+      melodicSampler?: MelodicSamplerNode;
       strip?: StripNodes | null;
     }
     const rendered = new Map<string, RenderTrack>();
@@ -1082,7 +1085,16 @@ export class AudioEngine {
       };
 
       // Instruments (pistes MIDI / sampler / drum rack)
-      if (track.type === TrackType.MIDI && track.bass808) {
+      if (track.type === TrackType.MIDI && track.melodicSampler) {
+        // Sampler mélodique (R18) / instrument multi-échantillons (R20) : mêmes sons qu'en lecture.
+        const ms = new MelodicSamplerNode(renderCtx);
+        ms.setSettings(track.melodicSampler);
+        ms.output.connect(input);
+        rt.melodicSampler = ms;
+        const live = this.tracksDSP.get(track.id)?.melodicSampler;
+        if (live?.hasSound() && this.samplerSigs.get(track.id) === samplerSoundSig(track.melodicSampler)) ms.setZones(live.getZones());
+        else pendingPlugins.push(loadSamplerZones(track.melodicSampler, this.ctx || renderCtx).then(z => ms.setZones(z)));
+      } else if (track.type === TrackType.MIDI && track.bass808) {
         rt.bass808 = new Bass808Node(renderCtx, track.bass808.style);
         rt.bass808.setGlideTime(track.bass808.glideTime);
         rt.bass808.output.connect(input);
@@ -1295,9 +1307,10 @@ export class AudioEngine {
     }
 
     // --- 5. Clips MIDI : on rejoue les notes sur l'instrument de la piste
-    for (const track of tracks) {
+    // (sampler mélodique : après le chargement de ses sons, plus bas).
+    const playMidiOffline = (track: Track) => {
       const rt = rendered.get(track.id)!;
-      if (!rt.synth && !rt.sampler && !rt.drumRack) continue;
+      if (!rt.synth && !rt.sampler && !rt.drumRack && !rt.melodicSampler) return;
       // Piste gelee : seules les notes ajoutees apres le rendu sont rejouees.
       for (const clip of (isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || []))) {
         if (clip.isMuted || clip.type !== TrackType.MIDI || !clip.notes) continue;
@@ -1320,19 +1333,26 @@ export class AudioEngine {
             rt.sampler.triggerAttack(note.pitch, note.velocity, attackAt);
             rt.sampler.triggerRelease(note.pitch, releaseAt);
           } else if (rt.drumRack) {
-            rt.drumRack.trigger(note.pitch, note.velocity, attackAt);
+            rt.drumRack.trigger(note.pitch, note.velocity, attackAt, note);
+          } else if (rt.melodicSampler) {
+            rt.melodicSampler.triggerAttack(note.pitch, note.velocity, attackAt, note);
+            rt.melodicSampler.triggerRelease(note.pitch, releaseAt);
           }
         }
         processedClips++;
         if (onProgress) onProgress(Math.round((processedClips / Math.max(1, totalClips)) * 80));
       }
       // Contrôleurs MIDI (R16) : pitch bend, modulation, expression… mêmes instants qu'en lecture.
-      if (rt.synth) this.scheduleOfflineControllers(track, rt.synth, startOffset + toSamples((rt.latency || 0) + (rt.down || 0)), totalDuration);
-    }
+      const ctlTarget = rt.synth || rt.melodicSampler;
+      if (ctlTarget) this.scheduleOfflineControllers(track, ctlTarget, startOffset + toSamples((rt.latency || 0) + (rt.down || 0)), totalDuration);
+    };
+    for (const track of tracks) if (!rendered.get(track.id)!.melodicSampler) playMidiOffline(track);
 
     if (pendingPlugins.length > 0) {
       await Promise.all(pendingPlugins.map(pr => pr.catch(() => undefined)));
     }
+    // --- 5a. Sampler mélodique / instruments (R18, R20) : sons chargés, notes jouées.
+    for (const track of tracks) if (rendered.get(track.id)!.melodicSampler) playMidiOffline(track);
 
     // --- 5b. 808 : plan monophonique (glissés), une fois son son prêt
     for (const track of tracks) {
@@ -2356,7 +2376,7 @@ export class AudioEngine {
       if (dsp.bass808) dsp.bass808.stopAll(boundaryContextTime);
       if (dsp.sampler) dsp.sampler.stopAll();
       if (dsp.drumSampler) dsp.drumSampler.stop();
-      if (dsp.melodicSampler) dsp.melodicSampler.stopAll();
+      if (dsp.melodicSampler) dsp.melodicSampler.stopAll(boundaryContextTime);
     });
     this.activeMidiNotes.clear();
 
@@ -2468,7 +2488,7 @@ export class AudioEngine {
         const synth = this.tracksDSP.get(track.id)?.synth;
         const novaSynth = synth instanceof NovaSynthNode;
         // Contrôleurs MIDI (R16) : valeur tenue au départ (chasse), puis chaque point de la fenêtre.
-        if (synth) this.scheduleControllers(track.id, midiClips, ws, Math.min(we, loopEnd), contextScheduleTime, firstWindow);
+        if (synth || this.tracksDSP.get(track.id)?.melodicSampler) this.scheduleControllers(track.id, midiClips, ws, Math.min(we, loopEnd), contextScheduleTime, firstWindow);
         midiClips.forEach(clip => {
            if (clip.type !== TrackType.MIDI || !clip.notes) return;
            
@@ -2484,10 +2504,10 @@ export class AudioEngine {
 
                if (noteAbsStart >= loopEnd) return;
                if (noteAbsStart >= ws && noteAbsStart < we) {
-                   this.triggerTrackAttack(track.id, note.pitch, note.velocity, contextScheduleTime + (noteAbsStart - ws));
+                   this.triggerTrackAttack(track.id, note.pitch, note.velocity, contextScheduleTime + (noteAbsStart - ws), note);
                } else if (firstWindow && lat > 0 && noteAbsStart >= projectWindowStart && noteAbsStart < ws) {
                    // Trop tard pour être calée : jouée tout de suite plutôt que perdue.
-                   this.triggerTrackAttack(track.id, note.pitch, note.velocity, contextScheduleTime);
+                   this.triggerTrackAttack(track.id, note.pitch, note.velocity, contextScheduleTime, note);
                }
 
                if (noteAbsEnd >= ws && noteAbsEnd < we) {
@@ -2543,7 +2563,7 @@ export class AudioEngine {
   }
 
   /** Export : tous les contrôleurs d'une piste (temps 0 du rendu = `from` du morceau). */
-  private scheduleOfflineControllers(track: Track, synth: TrackSynth, from: number, totalDuration: number) {
+  private scheduleOfflineControllers(track: Track, synth: { setController(key: string, value: number, time: number): void }, from: number, totalDuration: number) {
     const clips = (isTrackFrozen(track) ? uncoveredClips(track) : (track.clips || [])).filter(c => c.type === TrackType.MIDI);
     const keys = this.ccKeysOf(clips);
     if (!keys.length) return;
@@ -2570,9 +2590,11 @@ export class AudioEngine {
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp || dsp.bass808) return;
     try { dsp.synth?.setController(key, value, Math.max(time, this.ctx.currentTime)); } catch { /* instrument sans contrôleurs */ }
+    try { dsp.melodicSampler?.setController(key, value, Math.max(time, this.ctx.currentTime)); } catch { /* sampler */ }
   }
 
-  public triggerTrackAttack(trackId: string, pitch: number, velocity: number, time: number = 0) {
+  /** `ex` : panoramique et hauteur propres à la note (R18, pas de la boîte à rythmes). */
+  public triggerTrackAttack(trackId: string, pitch: number, velocity: number, time: number = 0, ex?: { pan?: number; tune?: number }) {
       if (!this.ctx) return;
       const dsp = this.tracksDSP.get(trackId);
       if (!dsp) return;
@@ -2581,9 +2603,9 @@ export class AudioEngine {
       
       if (dsp.bass808) dsp.bass808.triggerAttack(pitch, velocity, now);
       else if (dsp.synth) dsp.synth.triggerAttack(pitch, velocity, now);
-      else if (dsp.melodicSampler) dsp.melodicSampler.triggerAttack(pitch, velocity, now);
+      else if (dsp.melodicSampler) dsp.melodicSampler.triggerAttack(pitch, velocity, now, ex);
       else if (dsp.drumSampler) dsp.drumSampler.trigger(velocity, now);
-      else if (dsp.drumRack) dsp.drumRack.trigger(pitch, velocity, now);
+      else if (dsp.drumRack) dsp.drumRack.trigger(pitch, velocity, now, ex);
       else if (dsp.sampler) dsp.sampler.triggerAttack(pitch, velocity, now);
   }
 
@@ -2626,6 +2648,31 @@ export class AudioEngine {
   public getDrumRackNode(trackId: string) { return this.tracksDSP.get(trackId)?.drumRack || null; }
   public getDrumSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.drumSampler || null; }
   public getMelodicSamplerNode(trackId: string) { return this.tracksDSP.get(trackId)?.melodicSampler || null; }
+
+  /** Sons chargés de chaque sampler (empreinte de samplerSoundSig) : rechargés seulement s'ils changent. */
+  private samplerSigs = new Map<string, string>();
+  private samplerLoading = new Set<string>();
+  private samplerListeners = new Set<(trackId: string) => void>();
+  /** Instrument / sample du sampler : (re)chargé si le son a changé ou n'était pas encore arrivé (collaboration, ouverture). */
+  private refreshSamplerZones(trackId: string, s: import('../utils/melodicSampler').MelodicSamplerSettings, node: MelodicSamplerNode) {
+    const sig = samplerSoundSig(s);
+    if (this.samplerSigs.get(trackId) === sig && (node.hasSound() || this.samplerLoading.has(trackId))) return;
+    if (!s.instrument && !s.sampleId) { node.setZones([]); this.samplerSigs.set(trackId, sig); return; }
+    this.samplerSigs.set(trackId, sig);
+    if (!this.ctx) return;
+    this.samplerLoading.add(trackId);
+    loadSamplerZones(s, this.ctx).then(z => {
+      // Réponse périmée (le son a changé pendant le chargement) : ignorée.
+      if (this.samplerSigs.get(trackId) !== sig || this.tracksDSP.get(trackId)?.melodicSampler !== node) return;
+      node.setZones(z);
+      this.samplerListeners.forEach(l => l(trackId));
+    }).catch(() => { this.samplerSigs.delete(trackId); /* son indisponible : réessayé à la prochaine mise à jour */ })
+      .finally(() => this.samplerLoading.delete(trackId));
+  }
+  /** Prévenu quand les sons d'un sampler sont prêts (écran du sampler). */
+  public onSamplerReady(fn: (trackId: string) => void) { this.samplerListeners.add(fn); return () => { this.samplerListeners.delete(fn); }; }
+  /** Recharge forcée (sample perso remplacé, son reçu d'un collaborateur) : à la prochaine mise à jour de la piste. */
+  public reloadSampler(trackId: string) { this.samplerSigs.delete(trackId); }
 
   /**
    * Parametre audio pilote par une voie d'automation.
@@ -3279,7 +3326,10 @@ export class AudioEngine {
       inputAnalyzer: this.ctx.createAnalyser()
     };
 
-    if (track.type === TrackType.MIDI && track.bass808) {
+    if (track.type === TrackType.MIDI && track.melodicSampler) {
+      dsp.melodicSampler = new MelodicSamplerNode(this.ctx);
+      dsp.melodicSampler.output.connect(dsp.input);
+    } else if (track.type === TrackType.MIDI && track.bass808) {
       dsp.bass808 = new Bass808Node(this.ctx, track.bass808.style);
       dsp.bass808.output.connect(dsp.input);
     } else if (track.type === TrackType.MIDI) {
@@ -3414,8 +3464,27 @@ export class AudioEngine {
     const dsp = this.ensureTrackDSP(track);
     if (!dsp) return;
 
+    // Sampler mélodique (R18) / instrument multi-échantillons (R20) : prend la place du synthé.
+    if (track.type === TrackType.MIDI && track.melodicSampler) {
+      if (!dsp.melodicSampler) {
+        try { dsp.synth?.releaseAll(); dsp.synth?.output.disconnect(); } catch (e) {}
+        try { dsp.bass808?.stopAll(); dsp.bass808?.output.disconnect(); } catch (e) {}
+        const old = dsp.synth;
+        if (old) setTimeout(() => { retireWorkletsOf(old); try { if (old instanceof NovaSynthNode) old.destroy(); } catch (e) {} }, 60);
+        dsp.synth = undefined; dsp.bass808 = undefined;
+        dsp.melodicSampler = new MelodicSamplerNode(this.ctx);
+        dsp.melodicSampler.output.connect(dsp.input);
+      }
+      dsp.melodicSampler.setSettings(track.melodicSampler);
+      this.refreshSamplerZones(track.id, track.melodicSampler, dsp.melodicSampler);
+    } else if (track.type === TrackType.MIDI && dsp.melodicSampler) {
+      try { dsp.melodicSampler.stopAll(); dsp.melodicSampler.output.disconnect(); dsp.melodicSampler.dispose(); } catch (e) {}
+      dsp.melodicSampler = undefined;
+      this.samplerSigs.delete(track.id);
+      if (!track.bass808) { dsp.synth = makeTrackSynth(this.ctx, track); dsp.synth.output.connect(dsp.input); }
+    }
     // Piste MIDI : synthé ou 808 selon track.bass808 (peut changer : annuler, collaboration).
-    if (track.type === TrackType.MIDI) {
+    if (track.type === TrackType.MIDI && !track.melodicSampler) {
       if (track.bass808 && !dsp.bass808) {
         try { dsp.synth?.releaseAll(); dsp.synth?.output.disconnect(); } catch (e) {}
         dsp.synth = undefined;

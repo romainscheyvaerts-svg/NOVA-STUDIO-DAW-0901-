@@ -1,307 +1,279 @@
-
-
-export interface MelodicSamplerParams {
-  // Source
-  rootKey: number;        // MIDI Note (0-127)
-  fineTune: number;       // Cents (-100 to 100)
-  glide: number;          // Portamento time (0 to 1s)
-  loop: boolean;
-  loopStart: number;      // 0-1
-  loopEnd: number;        // 0-1
-  
-  // ADSR
-  attack: number;
-  decay: number;
-  sustain: number;
-  release: number;
-  
-  // Filter
-  filterCutoff: number;   // Hz
-  filterRes: number;      // Q
-  velocityToFilter: number; // 0-1 amount
-  
-  // LFO
-  lfoRate: number;        // Hz
-  lfoAmount: number;      // 0-1
-  lfoDest: 'PITCH' | 'FILTER' | 'VOLUME';
-  
-  // FX Chain
-  saturation: number;     // 0-1 Drive
-  bitCrush: number;       // 0-1 (Reduction)
-  chorus: number;         // 0-1 Mix
-  width: number;          // 0-1 Stereo Width
-  
-  isEnabled: boolean;
-}
+import {
+  DEFAULT_SAMPLER, MelodicSamplerSettings, normalizeSampler, pickZone, playbackRateFor, SamplerZone, velocityGain,
+} from '../utils/melodicSampler';
 
 /**
- * Single Voice Logic
- * Handles one note instance with its own filter and envelope
+ * R18 · Moteur du sampler mélodique et R20 · instruments multi-échantillons.
+ *
+ * Chaque note choisit une zone (note, vélocité, round-robin), lit son
+ * échantillon à la bonne vitesse (racine + accord fin + hauteur de la note +
+ * pitch bend), avec une enveloppe ADSR, une boucle, un glissé (portamento)
+ * et un mode mono (legato, pile de notes comme un synthé mono) ou poly.
+ * Pitch bend (« pb »), modulation (« cc1 », vibrato), volume (« cc7 ») et
+ * expression (« cc11 ») de R16 sont suivis. Même code en lecture et à
+ * l'export (OfflineAudioContext).
  */
-class Voice {
-  source: AudioBufferSourceNode;
-  filter: BiquadFilterNode;
+
+/** Ancienne interface (éditeur d'avant R18) : gardée pour la compatibilité des types. */
+export type MelodicSamplerParams = MelodicSamplerSettings;
+
+export interface LoadedZone extends SamplerZone { buffer: AudioBuffer }
+
+interface Voice {
+  pitch: number;
+  src: AudioBufferSourceNode;
   env: GainNode;
-  panner: StereoPannerNode; // Per voice panning if needed, but usually global
-  
-  constructor(ctx: AudioContext, destination: AudioNode) {
-    this.source = ctx.createBufferSource();
-    this.filter = ctx.createBiquadFilter();
-    this.env = ctx.createGain();
-    
-    this.source.connect(this.filter);
-    this.filter.connect(this.env);
-    this.env.connect(destination);
-    
-    this.filter.type = 'lowpass';
-    this.env.gain.value = 0;
-  }
-  
-  stop(time: number) {
-    try {
-        this.source.stop(time);
-        // Clean disconnect after stop?
-        setTimeout(() => {
-            this.source.disconnect();
-            this.filter.disconnect();
-            this.env.disconnect();
-        }, (time - this.source.context.currentTime + 1) * 1000);
-    } catch(e) {}
-  }
+  pan?: StereoPannerNode;
+  filter?: BiquadFilterNode;
+  /** Vitesse de la zone pour la note (sans pitch bend). */
+  rate: number;
+  zone: LoadedZone;
+  peak: number;
+  releasedAt: number | null;
+  startedAt: number;
 }
 
+const MAX_VOICES = 32;
+const SEMI = 100; // cents
+
 export class MelodicSamplerNode {
-  private ctx: AudioContext;
-  public input: GainNode; 
+  private ctx: BaseAudioContext;
+  public input: GainNode;
   public output: GainNode;
-  
-  // FX Chain
-  private saturator: WaveShaperNode;
-  private bitCrushGain: GainNode; // Simulated
-  private filterChain: GainNode;
-  private chorusNode: GainNode; // Placeholder for internal chorus logic or insert
-  private widthNode: ChannelSplitterNode; // Mid/Side
-  private widthMerger: ChannelMergerNode;
-  private masterGain: GainNode;
-  
-  private buffer: AudioBuffer | null = null;
-  private activeVoices: Map<number, Voice> = new Map();
-  private lastNoteFreq: number | null = null; // For Glide
-  
-  // Global LFO
-  private lfo: OscillatorNode;
-  private lfoGain: GainNode;
+  private bus: GainNode;
+  private expr: GainNode;
+  private settings: MelodicSamplerSettings = { ...DEFAULT_SAMPLER };
+  private zones: LoadedZone[] = [];
+  private voices: Voice[] = [];
+  /** Mono : notes tenues (la dernière joue ; la relâcher revient à la précédente). */
+  private held: { pitch: number; velocity: number }[] = [];
+  /** Hauteur de la note précédente (demi-tons, glissé). */
+  private lastPitch: number | null = null;
+  private vibratoOn = false;
+  private rr = 0;
+  /** Pitch bend en cents (R16). */
+  private bendCents = 0;
+  private vibrato: OscillatorNode;
+  private vibratoDepth: GainNode;
 
-  private params: MelodicSamplerParams = {
-    rootKey: 60, // C4
-    fineTune: 0,
-    glide: 0.05,
-    loop: false,
-    loopStart: 0,
-    loopEnd: 1,
-    attack: 0.01,
-    decay: 0.3,
-    sustain: 0.5,
-    release: 0.5,
-    filterCutoff: 20000,
-    filterRes: 0,
-    velocityToFilter: 0.5,
-    lfoRate: 4,
-    lfoAmount: 0,
-    lfoDest: 'PITCH',
-    saturation: 0,
-    bitCrush: 0,
-    chorus: 0,
-    width: 0.5,
-    isEnabled: true
-  };
-
-  constructor(ctx: AudioContext) {
+  constructor(ctx: BaseAudioContext) {
     this.ctx = ctx;
     this.input = ctx.createGain();
     this.output = ctx.createGain();
-    
-    // --- FX CHAIN SETUP ---
-    // Voices -> Input -> Saturator -> Width -> Master -> Output
-    
-    this.saturator = ctx.createWaveShaper();
-    this.makeDistortionCurve(0); // Init linear
-    
-    this.widthNode = ctx.createChannelSplitter(2);
-    this.widthMerger = ctx.createChannelMerger(2);
-    this.masterGain = ctx.createGain();
-
-    // Input -> Saturator
-    this.input.connect(this.saturator);
-    
-    // Saturator -> M/S Width (Simplified)
-    // We use channel splitter/merger to offset phases
-    const delaySide = ctx.createDelay();
-    delaySide.delayTime.value = 0; // 0 to 20ms based on width
-    
-    this.saturator.connect(delaySide);
-    delaySide.connect(this.widthMerger, 0, 0); // L -> L
-    this.saturator.connect(this.widthMerger, 0, 1); // L -> R (Mono source assumed or summed)
-    
-    this.widthMerger.connect(this.masterGain);
-    this.masterGain.connect(this.output);
-    
-    // LFO Setup
-    this.lfo = ctx.createOscillator();
-    this.lfoGain = ctx.createGain();
-    this.lfo.connect(this.lfoGain);
-    this.lfo.start();
+    this.bus = ctx.createGain();
+    this.expr = ctx.createGain();
+    this.bus.connect(this.expr);
+    this.expr.connect(this.output);
+    this.input.connect(this.output);
+    // Vibrato (CC1 modulation) : un LFO partagé branché sur le détune de chaque voix.
+    this.vibrato = ctx.createOscillator();
+    this.vibrato.frequency.value = 5.5;
+    this.vibratoDepth = ctx.createGain();
+    this.vibratoDepth.gain.value = 0;
+    this.vibrato.connect(this.vibratoDepth);
+    this.vibrato.start();
+    this.applyGain();
   }
 
-  private makeDistortionCurve(amount: number) {
-    const k = amount * 100;
-    const n = 44100;
-    const curve = new Float32Array(n);
-    const deg = Math.PI / 180;
-    for (let i = 0; i < n; ++i) {
-      const x = (i * 2) / n - 1;
-      // Soft clipping curve
-      curve[i] = (3 + k) * x * 20 * deg / (Math.PI + k * Math.abs(x));
-    }
-    this.saturator.curve = curve;
+  // ===== Réglages et sons =====
+
+  public setSettings(s: Partial<MelodicSamplerSettings>) {
+    this.settings = normalizeSampler({ ...this.settings, ...s });
+    this.applyGain();
   }
-  
-  // Bitcrusher Simulation via Quantization curve
-  private makeBitCrushCurve(amount: number) {
-     if (amount <= 0) return this.makeDistortionCurve(this.params.saturation);
-     
-     const steps = Math.pow(2, 16 - (amount * 12)); // Reduce resolution
-     const n = 44100;
-     const curve = new Float32Array(n);
-     for (let i = 0; i < n; i++) {
-         const x = (i * 2) / n - 1;
-         curve[i] = Math.round(x * steps) / steps;
-     }
-     this.saturator.curve = curve;
+  public getSettings(): MelodicSamplerSettings { return { ...this.settings }; }
+
+  private applyGain() {
+    this.bus.gain.value = Math.pow(10, this.settings.gainDb / 20);
   }
 
+  /** Zones prêtes à jouer (instrument multi-échantillons ou sample perso). */
+  public setZones(zones: LoadedZone[]) {
+    this.zones = zones.filter(z => !!z.buffer);
+  }
+  public getZones(): LoadedZone[] { return this.zones; }
+  public hasSound() { return this.zones.length > 0; }
+
+  /** Ancienne API : un seul son, sur toutes les notes (racine des réglages). */
   public loadBuffer(buffer: AudioBuffer) {
-    this.buffer = buffer;
+    this.setZones([{ file: '', buffer, root: this.settings.rootKey, tune: this.settings.fineTune, lo: 0, hi: 127, velLo: 1, velHi: 127 }]);
   }
+  public getBuffer(): AudioBuffer | null { return this.zones[0]?.buffer || null; }
+  /** Ancienne API (éditeur d'avant R18). */
+  public updateParams(p: Partial<MelodicSamplerSettings>) { this.setSettings(p); }
+  public getParams() { return this.getSettings(); }
 
-  public updateParams(p: Partial<MelodicSamplerParams>) {
-    this.params = { ...this.params, ...p };
-    
-    // Apply Global Updates
-    if (p.saturation !== undefined || p.bitCrush !== undefined) {
-        if (this.params.bitCrush > 0) this.makeBitCrushCurve(this.params.bitCrush);
-        else this.makeDistortionCurve(this.params.saturation);
+  // ===== Notes =====
+
+  public triggerAttack(pitch: number, velocity: number, time: number, ex?: { pan?: number; tune?: number }) {
+    const now = Math.max(time, this.ctx.currentTime);
+    const s = this.settings;
+    if (s.mono) {
+      const prev = this.held.length ? this.held[this.held.length - 1] : null;
+      this.held = this.held.filter(h => h.pitch !== pitch);
+      this.held.push({ pitch, velocity });
+      const live = this.voices.find(v => v.releasedAt === null);
+      // Legato : la voix tenue glisse vers la nouvelle note (sans nouvelle attaque).
+      if (prev && live && s.glide > 0) { this.glideVoice(live, pitch, now); return; }
+      this.voices.forEach(v => { if (v.releasedAt === null) this.release(v, now, 0.006); });
+    } else {
+      // Même note rejouée : la précédente se relâche (piano, comme un vrai clavier).
+      this.voices.forEach(v => { if (v.pitch === pitch && v.releasedAt === null) this.release(v, now); });
     }
-    
-    if (p.lfoRate !== undefined) {
-        this.lfo.frequency.setValueAtTime(this.params.lfoRate, this.ctx.currentTime);
-    }
-
-    if (p.width !== undefined) {
-        // Simple Haas effect for width
-        // Access delay node if we stored it reference, or rebuild graph. 
-        // For simplicity, we just keep it minimal here.
-    }
-  }
-  
-  public getParams() { return { ...this.params }; }
-  public getBuffer() { return this.buffer; }
-
-  public triggerAttack(pitch: number, velocity: number, time: number) {
-     if (!this.buffer || !this.params.isEnabled) return;
-     
-     const now = Math.max(time, this.ctx.currentTime);
-     
-     // Create Voice
-     const voice = new Voice(this.ctx, this.input);
-     voice.source.buffer = this.buffer;
-     voice.source.loop = this.params.loop;
-     
-     if (this.params.loop) {
-         voice.source.loopStart = this.params.loopStart * this.buffer.duration;
-         voice.source.loopEnd = this.params.loopEnd * this.buffer.duration;
-     }
-
-     // Pitch Logic
-     const rootFreq = 440 * Math.pow(2, (this.params.rootKey - 69) / 12);
-     const targetFreq = 440 * Math.pow(2, (pitch - 69) / 12);
-     
-     // Fine Tune
-     const detuneFactor = Math.pow(2, this.params.fineTune / 1200);
-     const finalFreq = targetFreq * detuneFactor;
-     
-     // Portamento (Glide)
-     const startFreq = (this.lastNoteFreq && this.params.glide > 0) ? this.lastNoteFreq : finalFreq;
-     const basePlaybackRate = startFreq / rootFreq; // Assuming sample is at rootKey
-     const targetPlaybackRate = finalFreq / rootFreq;
-     
-     voice.source.playbackRate.setValueAtTime(basePlaybackRate, now);
-     if (this.params.glide > 0 && this.lastNoteFreq) {
-         voice.source.playbackRate.linearRampToValueAtTime(targetPlaybackRate, now + this.params.glide);
-     }
-     this.lastNoteFreq = finalFreq;
-
-     // Filter Logic
-     // Velocity opens filter
-     const cutoff = Math.min(20000, Math.max(20, this.params.filterCutoff + (velocity * this.params.velocityToFilter * 5000)));
-     voice.filter.frequency.setValueAtTime(cutoff, now);
-     voice.filter.Q.value = this.params.filterRes;
-
-     // LFO Modulation (Connect Global LFO to Voice Parameter)
-     if (this.params.lfoAmount > 0) {
-         this.lfoGain.gain.setValueAtTime(this.params.lfoAmount * 100, now); // Scale
-         this.lfoGain.disconnect();
-         if (this.params.lfoDest === 'PITCH') {
-             this.lfoGain.connect(voice.source.detune);
-             this.lfoGain.gain.value = this.params.lfoAmount * 100; // Cents
-         } else if (this.params.lfoDest === 'FILTER') {
-             this.lfoGain.connect(voice.filter.frequency);
-             this.lfoGain.gain.value = this.params.lfoAmount * 1000; // Hz
-         } else if (this.params.lfoDest === 'VOLUME') {
-             this.lfoGain.connect(voice.env.gain);
-             this.lfoGain.gain.value = this.params.lfoAmount * 0.5;
-         }
-     }
-
-     // ADSR Envelope
-     const { attack, decay, sustain } = this.params;
-     voice.env.gain.cancelScheduledValues(now);
-     voice.env.gain.setValueAtTime(0, now);
-     voice.env.gain.linearRampToValueAtTime(velocity, now + attack);
-     voice.env.gain.exponentialRampToValueAtTime(Math.max(0.001, velocity * sustain), now + attack + decay);
-     
-     voice.source.start(now);
-     
-     // Store voice
-     this.activeVoices.set(pitch, voice);
+    this.start(pitch, velocity, now, ex);
   }
 
   public triggerRelease(pitch: number, time: number) {
-      const voice = this.activeVoices.get(pitch);
-      if (voice) {
-          const now = Math.max(time, this.ctx.currentTime);
-          // Release phase
-          voice.env.gain.cancelScheduledValues(now);
-          voice.env.gain.setValueAtTime(voice.env.gain.value, now);
-          voice.env.gain.exponentialRampToValueAtTime(0.0001, now + this.params.release);
-          
-          voice.stop(now + this.params.release + 0.1);
-          this.activeVoices.delete(pitch);
+    const now = Math.max(time, this.ctx.currentTime);
+    if (this.settings.mono) {
+      const top = this.held.length ? this.held[this.held.length - 1].pitch : null;
+      this.held = this.held.filter(h => h.pitch !== pitch);
+      const live = this.voices.find(v => v.releasedAt === null);
+      if (top === pitch && this.held.length && live) {
+        // Retour à la note encore tenue (mono, comme un synthé).
+        const back = this.held[this.held.length - 1];
+        if (this.settings.glide > 0) this.glideVoice(live, back.pitch, now);
+        else { this.release(live, now, 0.006); this.start(back.pitch, back.velocity, now); }
+        return;
       }
+      if (top !== pitch && this.held.length) return;
+      this.voices.forEach(v => { if (v.releasedAt === null) this.release(v, now); });
+      return;
+    }
+    this.voices.forEach(v => { if (v.pitch === pitch && v.releasedAt === null) this.release(v, now); });
   }
 
-  public stopAll() {
-      const now = this.ctx.currentTime;
-      this.activeVoices.forEach(v => v.stop(now));
-      this.activeVoices.clear();
+  private start(pitch: number, velocity: number, now: number, ex?: { pan?: number; tune?: number }) {
+    const zone = pickZone(this.zones, pitch, velocity * 127, this.rr++);
+    if (!zone) return;
+    const s = this.settings;
+    const buf = zone.buffer;
+    const p = pitch + (ex?.tune || 0);
+    const rate = playbackRateFor(p, zone.root, zone.tune || 0);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    // Glissé (portamento) : la note part de la hauteur de la précédente.
+    const from = s.glide > 0 && this.lastPitch !== null && !zone.exact ? playbackRateFor(this.lastPitch, zone.root, zone.tune || 0) : rate;
+    src.playbackRate.setValueAtTime(from, now);
+    if (from !== rate) src.playbackRate.setTargetAtTime(rate, now, Math.max(0.002, s.glide / 3));
+    this.lastPitch = p;
+    src.detune.setValueAtTime(this.bendCents, now);
+    if (this.vibratoOn) this.vibratoDepth.connect(src.detune);
+
+    const offset = Math.max(0, Math.min(buf.duration - 0.001, zone.offset || 0));
+    const sliceEnd = zone.end && zone.end > offset ? zone.end : 0;
+    if (typeof zone.loopStart === 'number' && typeof zone.loopEnd === 'number' && zone.loopEnd > zone.loopStart + 0.005) {
+      src.loop = true;
+      src.loopStart = zone.loopStart;
+      src.loopEnd = Math.min(buf.duration, zone.loopEnd);
+    }
+
+    const env = this.ctx.createGain();
+    const peak = velocityGain(velocity, s.velSens);
+    const g = env.gain;
+    const slice = !!(zone.exact && sliceEnd);
+    if (slice) {
+      // Tranche d'un chop : jouée telle quelle (bords coupés sur des passages par zéro),
+      // pour que les tranches mises bout à bout redonnent exactement l'original.
+      g.setValueAtTime(peak, now);
+    } else {
+      g.setValueAtTime(0, now);
+      const atk = Math.max(0.0015, s.attack);
+      g.linearRampToValueAtTime(peak, now + atk);
+      if (s.sustain < 0.999) g.setTargetAtTime(peak * s.sustain, now + atk, Math.max(0.003, s.decay / 3));
+    }
+
+    let node: AudioNode = src;
+    let filter: BiquadFilterNode | undefined;
+    if (s.cutoff < 19999) {
+      filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = s.cutoff;
+      filter.Q.value = s.resonance;
+      node.connect(filter); node = filter;
+    }
+    node.connect(env);
+    let pan: StereoPannerNode | undefined;
+    if (ex?.pan) {
+      pan = this.ctx.createStereoPanner();
+      pan.pan.value = Math.max(-1, Math.min(1, ex.pan));
+      env.connect(pan); pan.connect(this.bus);
+    } else env.connect(this.bus);
+
+    if (slice) {
+      src.start(now, offset, sliceEnd - offset);
+    } else if (sliceEnd) {
+      // Zone bornée (hors chop) : jouée jusqu'à sa fin avec un micro-fondu de sortie.
+      const dur = (sliceEnd - offset) / rate;
+      src.start(now, offset);
+      g.setValueAtTime(peak, now + Math.max(0.002, dur - 0.004));
+      g.linearRampToValueAtTime(0, now + dur);
+      src.stop(now + dur + 0.01);
+    } else {
+      src.start(now, offset);
+    }
+    const v: Voice = { pitch, src, env, pan, filter, rate, zone, peak, releasedAt: null, startedAt: now };
+    src.onended = () => {
+      try { src.disconnect(); env.disconnect(); filter?.disconnect(); pan?.disconnect(); } catch { /* déjà débranché */ }
+      if (this.vibratoOn) try { this.vibratoDepth.disconnect(src.detune); } catch { /* pas branché */ }
+      this.voices = this.voices.filter(x => x !== v);
+    };
+    this.voices.push(v);
+    // Polyphonie bornée : la voix la plus ancienne s'éteint.
+    if (this.voices.length > MAX_VOICES) this.release(this.voices[0], now, 0.01);
   }
 
-  // FIX: Added a dispose method to properly clean up audio nodes (LFO, voices) when the plugin is removed, preventing memory leaks and orphaned audio processes.
+  private glideVoice(v: Voice, pitch: number, now: number) {
+    const rate = playbackRateFor(pitch, v.zone.root, v.zone.tune || 0);
+    v.src.playbackRate.cancelScheduledValues(now);
+    v.src.playbackRate.setTargetAtTime(rate, now, Math.max(0.002, this.settings.glide / 3));
+    v.pitch = pitch;
+    v.rate = rate;
+    this.lastPitch = pitch;
+  }
+
+  private release(v: Voice, now: number, fast?: number) {
+    if (v.releasedAt !== null) return;
+    // Tranche : elle va au bout d'elle-même (sauf coupure forcée : arrêt, même tranche rejouée).
+    if (v.zone.exact && fast === undefined) return;
+    v.releasedAt = now;
+    const rel = fast ?? Math.max(0.005, this.settings.release);
+    const g = v.env.gain;
+    const anyG = g as AudioParam & { cancelAndHoldAtTime?: (t: number) => AudioParam };
+    if (anyG.cancelAndHoldAtTime) anyG.cancelAndHoldAtTime(now);
+    else { g.cancelScheduledValues(now); }
+    g.setTargetAtTime(0, now, rel / 4);
+    try { v.src.stop(now + rel * 1.6 + 0.02); } catch { /* déjà arrêtée */ }
+  }
+
+  // ===== Contrôleurs MIDI (R16) =====
+
+  /** `key` : « pb » (0-16383, centre 8192), « cc1 » (vibrato), « cc7 » (volume), « cc11 » (expression). */
+  public setController(key: string, value: number, time: number) {
+    const t = Math.max(time, this.ctx.currentTime);
+    if (key === 'pb') {
+      const norm = Math.max(-1, Math.min(1, (value - 8192) / 8192));
+      this.bendCents = norm * this.settings.bendRange * SEMI;
+      this.voices.forEach(v => { if (v.releasedAt === null || v.releasedAt > t) v.src.detune.setValueAtTime(this.bendCents, t); });
+    } else if (key === 'cc1') {
+      if (value > 0 && !this.vibratoOn) {
+        this.vibratoOn = true;
+        this.voices.forEach(v => { try { this.vibratoDepth.connect(v.src.detune); } catch { /* voix finie */ } });
+      }
+      this.vibratoDepth.gain.setValueAtTime((value / 127) * 50, t); // jusqu'à ±50 cents
+    } else if (key === 'cc7' || key === 'cc11') {
+      this.expr.gain.setValueAtTime(Math.pow(Math.max(0, Math.min(127, value)) / 127, 1.6), t);
+    }
+  }
+
+  public stopAll(time?: number) {
+    const now = Math.max(time ?? 0, this.ctx.currentTime);
+    this.held = [];
+    this.voices.forEach(v => this.release(v, now, 0.01));
+  }
+
   public dispose() {
-      try { this.lfo.stop(); } catch(e) {}
-      try { this.lfo.disconnect(); } catch(e) {}
-      try { this.lfoGain.disconnect(); } catch(e) {}
-      this.activeVoices.forEach(v => v.stop(this.ctx.currentTime));
-      this.activeVoices.clear();
+    this.stopAll();
+    try { this.vibrato.stop(); this.vibrato.disconnect(); this.vibratoDepth.disconnect(); } catch { /* déjà arrêté */ }
   }
 }

@@ -56,6 +56,7 @@ import VstInstrumentPicker from './components/VstInstrumentPicker';
 import Bass808Controls from './components/Bass808Controls';
 import { BASS808_TRACK_ID, kit808Style, starter808Notes } from './utils/bass808';
 import { normalizeSynth } from './utils/novaSynth';
+import { normalizeSampler } from './utils/melodicSampler';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
 import { renderTrackFreeze, renderTrackPreview, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
@@ -4972,6 +4973,8 @@ function Studio() {
           if (ct.drumPads !== undefined) t.drumPads = ct.drumPads;
           if (ct.bass808 !== undefined) t.bass808 = ct.bass808;
           if (ct.novaSynth !== undefined) { if (ct.novaSynth) t.novaSynth = normalizeSynth(ct.novaSynth); else delete t.novaSynth; }
+          // Sampler mélodique / instrument (R18, R20) : réglages bornés à la réception.
+          if (ct.melodicSampler !== undefined) { if (ct.melodicSampler) t.melodicSampler = normalizeSampler(ct.melodicSampler); else delete t.melodicSampler; }
           // Ligne de gain, boucles, Heal (R5) : champs vérifiés à la réception (utils/collabMerge).
           t.clips = Array.isArray(ct.clips) ? sanitizeIncomingClips(ct.clips) : t.clips;
           // Couloirs de prises (champ ajouté) : absent = envoyé par une ancienne version, on garde les noms locaux.

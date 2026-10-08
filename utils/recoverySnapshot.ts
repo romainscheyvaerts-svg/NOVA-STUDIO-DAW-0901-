@@ -1,6 +1,7 @@
 import { Clip, DAWState, Track, TrackType } from '../types';
 import { trackBufferIds } from './freeze';
 import { padSampleKey } from './drumSamples';
+import { samplerBufferKey } from './melodicSampler';
 import { countVoiceTakes } from './sessionSummary';
 import type { RecoveredTake, StoredAudio, VersionRecord } from './recoveryStore';
 
@@ -18,6 +19,7 @@ export function trackAudioIds(t: Track): string[] {
   const ids = trackBufferIds(t);
   const s = (t as any).drumMachine?.samples;
   if (s) for (const id of Object.keys(s)) ids.push(padSampleKey(id));
+  if (t.melodicSampler?.sampleId) ids.push(samplerBufferKey(t.melodicSampler.sampleId));
   return ids;
 }
 
