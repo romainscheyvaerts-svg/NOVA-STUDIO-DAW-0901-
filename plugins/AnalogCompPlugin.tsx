@@ -33,6 +33,7 @@ export function formatAnalog(kind: string, spec: AnalogParamSpec, v: number): st
     case 'dB': return `${signed(v)} dB`;
     case ':1': return `${fr(v)}:1`;
     case '%': return `${Math.round(v)} %`;
+    case 'gain': return v <= 0 ? 'coupé' : `${fr(v, 0)} · ${signed(interp(v, prof.gainKnob, prof.gainDb))} dB`;
     case 'pos': {
       if (spec.id === 'input' && prof.inGainDb) return `${fr(v)} · gain ${signed(interp(v, prof.inKnob, prof.inGainDb))} dB`;
       if (spec.id === 'output' && prof.outGainDb) return `${fr(v)} · ${signed(interp(v, prof.outKnob, prof.outGainDb))} dB`;
@@ -41,7 +42,7 @@ export function formatAnalog(kind: string, spec: AnalogParamSpec, v: number): st
       const ms = t ? interp(v, knob, t) : NaN;
       return Number.isFinite(ms) ? `${fr(v)} · ≈ ${msText(ms)}` : fr(v);
     }
-    default: return fr(v);
+    default: return fr(v, spec.step >= 1 ? 0 : 1);
   }
 }
 

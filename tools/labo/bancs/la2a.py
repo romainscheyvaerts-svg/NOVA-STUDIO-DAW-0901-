@@ -3,6 +3,7 @@
 ID = "ua_la2a"
 PLUGIN = "uaudio_teletronix_la-2a_silver.vst3"
 NOVA_KIND = "LEVELER2A"
+PY_PROFILE = "modeles.la2a_profil"
 
 VOIX = r"D:\1 WORK\CONTENU\nova-autotune\micro_sec_12s.wav"
 BATTERIE = r"D:\1 WORK\CONTENU\nova-v20\materiaux\B_boucle_batterie.wav"
@@ -88,4 +89,32 @@ CASES = [
         {"type": "real_signal", "name": "voix", "path": VOIX, "seconds": 12, "rms_db": -18}]},
     {"name": "melange", "settings": {"peak_reduct": "70", "mix": 50.0}, "tests": [
         {"type": "tone_levels", "name": "stat_1k", "freq": 1000, "levels": LEVELS[::2], "dur": 4.0}]},
+]
+
+PY_PROFILE = "modeles.la2a_profil"
+
+# ── Cartographie fine (calage du profil Leveler 2A) ──────────────────────────
+CARTO_LEVELS = [-60, -55, -50, -46, -42, -39, -36, -33, -30, -28, -26, -24, -22, -20, -18, -16, -14, -12, -10, -8,
+                -6, -4, -2, 0]
+CARTO = [
+    *[{"name": f"c_pr{p}", "settings": {"peak_reduct": str(p)}, "tests": [
+        {"type": "tone_levels", "name": "stat_1k", "freq": 1000, "levels": CARTO_LEVELS, "dur": 3.0}]}
+      for p in [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]],
+    *[{"name": f"c_lim{p}", "settings": {"peak_reduct": str(p), "comp_limit": "Limit"}, "tests": [
+        {"type": "tone_levels", "name": "stat_1k", "freq": 1000, "levels": CARTO_LEVELS, "dur": 3.0}]}
+      for p in [20, 40, 60, 80, 100]],
+    *[{"name": f"c_emph{e}_f{f}", "settings": {"peak_reduct": "50", "emphasis": float(e)}, "tests": [
+        {"type": "tone_levels", "name": "stat", "freq": f, "levels": [-30, -24, -18, -12, -6], "dur": 3.0}]}
+      for e in [0, 10, 25, 40, 50, 75, 100] for f in [100, 300, 1000, 3000, 5000, 10000]],
+    *[{"name": f"c_gain{g}", "settings": {"peak_reduct": "0", "gain": str(g)}, "tests": [
+        {"type": "tone_levels", "name": "g", "freq": 1000, "levels": [-60, -50], "dur": 0.3}]}
+      for g in range(0, 101, 5)],
+    *[{"name": f"c_t_pr{p}", "settings": {"peak_reduct": str(p)}, "tests": [
+        {"type": "step_response", "name": f"h{h}", "base_db": -50, "step_db": 25, "hold": h, "rel_obs": 10.0}
+        for h in [0.05, 0.1, 0.3, 1.0, 3.0]]}
+      for p in [40, 60, 80]],
+    *[{"name": f"c_t_lim{p}", "settings": {"peak_reduct": str(p), "comp_limit": "Limit"}, "tests": [
+        {"type": "step_response", "name": f"h{h}", "base_db": -50, "step_db": 25, "hold": h, "rel_obs": 10.0}
+        for h in [0.1, 1.0]]}
+      for p in [60]],
 ]

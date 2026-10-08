@@ -20,7 +20,7 @@ import { NovaDjFilterUI, NovaLofiUI } from '../plugins/FilterPlugin';
 import { NovaGateFxUI } from '../plugins/GateFxPlugin';
 import { AnalogCompNode } from './AnalogCompNode';
 import { analogAutomatable, analogDefaults } from './analogCompParams';
-import { NovaOptoVintageUI, NovaFet76UI } from '../plugins/AnalogCompPlugin';
+import { NovaOptoVintageUI, NovaFet76UI, NovaLeveler2AUI } from '../plugins/AnalogCompPlugin';
 
 export interface RegisteredPlugin {
   type: PluginType;
@@ -156,6 +156,18 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     create: (ctx, plugin) => new AnalogCompNode(ctx, 'FET76', plugin.params || {}),
     ui: NovaFet76UI as any,
     automatable: analogAutomatable('FET76'),
+  },
+  {
+    type: 'LEVELER2A',
+    name: 'Leveler 2A',
+    category: 'Compresseurs vintage',
+    icon: 'fa-sliders-h',
+    color: '#fcd34d',
+    description: 'Niveleur optique à lampes inspiré d’un classique des années 60 : lent, doux, très musical. Sur un bus, « Caler sur ma voix » vise 2 dB max au VU.',
+    defaultParams: analogDefaults('LEVELER2A'),
+    create: (ctx, plugin) => new AnalogCompNode(ctx, 'LEVELER2A', plugin.params || {}),
+    ui: NovaLeveler2AUI as any,
+    automatable: analogAutomatable('LEVELER2A'),
   },
 ];
 

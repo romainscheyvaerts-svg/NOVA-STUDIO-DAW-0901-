@@ -64,7 +64,25 @@ def fet76():
     }
 
 
-GENERATORS = {"OPTO_VINTAGE": opto_vintage, "FET76": fet76}
+def leveler2a():
+    from modeles import la2a_profil as prof
+    f = prof.load_fit()
+    return {
+        "source": "Mesures labo NOVA de l'UADx LA-2A Silver, 08/10/2026",
+        "l0": prof.L0, "dl": prof.DL,
+        "prKnob": prof.PR_KNOB, "thrPr": f["thr_pr"], "tablesPr": f["tables_pr"],
+        "limKnob": prof.LIM_KNOB, "thrLim": f["thr_lim"], "tablesLim": f["tables_lim"],
+        "emphKnob": prof.EMPH_KNOB, "sc": f["sc"],
+        "gainKnob": f["gain_knob"], "gainDb": f["gain_db"],
+        "outA2": f["out_a2"], "outA3": f["out_a3"], "outSat": f["out_sat"], "outBias": f["out_bias"],
+        "outAb": f.get("out_ab", 0.0), "outKnee": f.get("out_knee", 0.0), "eq": f.get("eq", []),
+        "rectHalf": int(f["rect_half"]), "detRelMs": f["det_rel_ms"],
+        "attMs": f["att_ms"], "relMs": f["rel_ms"], "slowFrac": f["slow_frac"], "slowAttMs": f["slow_att_ms"],
+        "slowRelMs": f["slow_rel_ms"],
+    }
+
+
+GENERATORS = {"OPTO_VINTAGE": opto_vintage, "FET76": fet76, "LEVELER2A": leveler2a}
 
 
 def main():

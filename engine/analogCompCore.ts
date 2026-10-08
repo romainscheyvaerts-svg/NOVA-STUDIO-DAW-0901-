@@ -33,7 +33,7 @@ export const AC = {
   HP_B0: 20, HP_B1: 21, HP_B2: 22, HP_A1: 23, HP_A2: 24, LINK: 25, REL_DUCK: 26, IN_SAT: 27, OUT_SAT: 28,
   DET_REL: 29, ATT2: 30, REL2_FOLLOW: 31, EQ: 32, N_EQ: 4, DRIVE: 52, IN_BIAS: 53, OUT_BIAS: 54,
   FAST_ATT: 55, FAST_REL: 56, FAST_DET_REL: 57, FET_A2: 58, FINAL_SAT: 59, FINAL_BIAS: 60,
-  SLOW_FRAC: 61, SLOW_ATT: 62, SLOW_REL: 63, OUT_AB: 64, IN_AB: 65, NP: 72,
+  SLOW_FRAC: 61, SLOW_ATT: 62, SLOW_REL: 63, OUT_AB: 64, IN_AB: 65, SC2: 66, OUT_KNEE: 71, XF_K: 72, XF_A: 73, NP: 80,
 } as const;
 
 export interface AnalogCompInternal {
@@ -58,7 +58,7 @@ export interface AnalogCompCore {
 export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   var SR = sampleRate > 0 ? sampleRate : 48000;
   void SR;
-  var NP = 72, NEQ = 4, PEQ = 32;
+  var NP = 80, NEQ = 4, PEQ = 32;
   var P = new Float64Array(NP);
   var tab = new Float64Array([0, 0]);
   var l0 = -12, dl = 1;
@@ -69,6 +69,8 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   var A = new Float64Array(2), A2 = new Float64Array(2), env = new Float64Array(2), mem = new Float64Array(2);
   var yprev = new Float64Array(2), above = new Float64Array(2), slowOk = new Float64Array(2);
   var hp = new Float64Array(8); // par canal : x1, x2, y1, y2
+  var hp2 = new Float64Array(8);
+  var flux = new Float64Array(2);
   var eqs = new Float64Array(2 * NEQ * 4);
   var lv = new Float64Array(2), xin = new Float64Array(2);
   var envf = new Float64Array(2), Af = new Float64Array(2), lvf = new Float64Array(2), As = new Float64Array(2);
@@ -78,7 +80,7 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
     A[0] = A[1] = 1; A2[0] = A2[1] = 1; env[0] = env[1] = 0; mem[0] = mem[1] = 0;
     yprev[0] = yprev[1] = 0; above[0] = above[1] = 0; slowOk[0] = slowOk[1] = 0;
     envf[0] = envf[1] = 0; Af[0] = Af[1] = 1; lvf[0] = lvf[1] = 0; As[0] = As[1] = 1;
-    hp.fill(0); eqs.fill(0);
+    hp.fill(0); hp2.fill(0); eqs.fill(0); flux[0] = flux[1] = 0;
     mGrA = 1; mIn = 0; mOut = 0; curAe = 1;
   }
   reset();
@@ -86,6 +88,19 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   function shape(x: number, a2: number, a3: number, sat: number, bias: number, ab: number) {
     var y = x + a2 * x * x + a3 * x * x * x + ab * x * (x < 0 ? -x : x);
     if (sat > 0) { var tb = Math.tanh(bias); y = sat * (Math.tanh(y / sat + bias) - tb) / (1 - tb * tb); }
+    return y;
+  }
+
+  /** Étage à coude réglable (k grand = coude dur), gain unité en petit signal. */
+  function shapeK(x: number, a2: number, a3: number, sat: number, bias: number, ab: number, k: number) {
+    var y = x + a2 * x * x + a3 * x * x * x + ab * x * (x < 0 ? -x : x);
+    if (sat > 0) {
+      var ab0 = bias < 0 ? -bias : bias;
+      var fb = bias / Math.pow(1 + Math.pow(ab0, k), 1 / k);
+      var d = Math.pow(1 + Math.pow(ab0, k), -1 / k - 1);
+      var u = y / sat + bias, au = u < 0 ? -u : u;
+      y = sat * (u / Math.pow(1 + Math.pow(au, k), 1 / k) - fb) / d;
+    }
     return y;
   }
 
@@ -122,6 +137,12 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
           var o = P[20] * s + P[21] * hp[h0] + P[22] * hp[h0 + 1] - P[23] * hp[h0 + 2] - P[24] * hp[h0 + 3];
           hp[h0 + 1] = hp[h0]; hp[h0] = s; hp[h0 + 3] = hp[h0 + 2]; hp[h0 + 2] = o;
           s = o;
+        }
+        if (P[66] !== 0) {
+          var g0 = c * 4;
+          var o2 = P[66] * s + P[67] * hp2[g0] + P[68] * hp2[g0 + 1] - P[69] * hp2[g0 + 2] - P[70] * hp2[g0 + 3];
+          hp2[g0 + 1] = hp2[g0]; hp2[g0] = s; hp2[g0 + 3] = hp2[g0 + 2]; hp2[g0 + 2] = o2;
+          s = o2;
         }
         var r = P[3] > 0.5 ? (s > 0 ? s : 0) : (s > 0 ? s : -s);
         r = r / P[1];
@@ -208,7 +229,8 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
         if (P[58] !== 0) xv = xv + P[58] * (1 - gg) * xv * xv;
         var yc = xv * gg;
         yprev[c2] = yc;
-        var yo = shape(yc * drv, P[16], P[17], P[28], P[54], P[64]) * P[18];
+        var yo = (P[71] > 0 ? shapeK(yc * drv, P[16], P[17], P[28], P[54], P[64], P[71]) : shape(yc * drv, P[16], P[17], P[28], P[54], P[64])) * P[18];
+        if (P[72] !== 0) { flux[c2] += (yo - flux[c2]) * P[73]; yo = yo + P[72] * yo * flux[c2] * flux[c2]; }
         if (P[59] > 0) yo = shape(yo, 0, 0, P[59], P[60], 0);
         for (var q = 0; q < NEQ; q++) {
           var o0 = PEQ + 5 * q;

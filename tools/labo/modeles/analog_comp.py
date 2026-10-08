@@ -68,7 +68,27 @@ P_SLOW_ATT = 62    # cellule lente en série : coefficient de charge
 P_SLOW_REL = 63    # cellule lente en série : coefficient de relâchement (exponentiel)
 P_OUT_AB = 64      # étage de sortie : terme x|x| (H3, H5 qui montent de 1 dB par dB, comme un FET)
 P_IN_AB = 65       # étage d'entrée : terme x|x|
-NP = 72
+P_SC2 = 66         # 2e filtre du sidechain (biquad b0,b1,b2,a1,a2 : 66..70) ; b0 = 0 -> ignoré
+P_OUT_KNEE = 71    # étage de sortie : dureté du coude de saturation (0 = tanh ; k > 0 : u/(1+|u|^k)^(1/k))
+P_XF_K = 72        # transformateur : saturation du fer dans le grave (y = x + k·x·φ², φ = flux intégré) ; 0 = aucun
+P_XF_A = 73        # transformateur : coefficient de l'intégrateur (fréquence de coin du flux)
+NP = 80
+
+
+@njit(cache=True)
+def _clip_k(u, k):
+    return u / (1.0 + abs(u) ** k) ** (1.0 / k)
+
+
+@njit(cache=True)
+def _shape_k(x, a2, a3, sat, bias, ab, k):
+    """Étage à coude réglable (k grand = coude dur), gain unité en petit signal."""
+    y = x + a2 * x * x + a3 * x * x * x + ab * x * abs(x)
+    if sat > 0.0:
+        fb = _clip_k(bias, k)
+        d = (1.0 + abs(bias) ** k) ** (-1.0 / k - 1.0)
+        y = sat * (_clip_k(y / sat + bias, k) - fb) / d
+    return y
 
 
 @njit(cache=True)
@@ -106,7 +126,9 @@ def process(x, P, l0, dl, tab):
     mem = np.zeros(2)
     yprev = np.zeros(2)
     hp = np.zeros((2, 4))  # x1, x2, y1, y2
+    hp2 = np.zeros((2, 4))
     eqs = np.zeros((2, N_EQ, 4))
+    flux = np.zeros(2)
     above = np.zeros(2)
     slow_ok = np.zeros(2)
     envf = np.zeros(2)
@@ -123,6 +145,14 @@ def process(x, P, l0, dl, tab):
             if P[P_HP_B0] != 0.0:
                 h = hp[c]
                 o = P[P_HP_B0] * s + P[P_HP_B1] * h[0] + P[P_HP_B2] * h[1] - P[P_HP_A1] * h[2] - P[P_HP_A2] * h[3]
+                h[1] = h[0]
+                h[0] = s
+                h[3] = h[2]
+                h[2] = o
+                s = o
+            if P[P_SC2] != 0.0:
+                h = hp2[c]
+                o = P[P_SC2] * s + P[P_SC2 + 1] * h[0] + P[P_SC2 + 2] * h[1] - P[P_SC2 + 3] * h[2] - P[P_SC2 + 4] * h[3]
                 h[1] = h[0]
                 h[0] = s
                 h[3] = h[2]
@@ -244,7 +274,13 @@ def process(x, P, l0, dl, tab):
             yc = xv * g
             yprev[c] = yc
             drv = P[P_DRIVE] if P[P_DRIVE] != 0.0 else 1.0
-            yo = _shape(yc * drv, P[P_OUT_A2], P[P_OUT_A3], P[P_OUT_SAT], P[P_OUT_BIAS], P[P_OUT_AB]) * P[P_MAKEUP]
+            if P[P_OUT_KNEE] > 0.0:
+                yo = _shape_k(yc * drv, P[P_OUT_A2], P[P_OUT_A3], P[P_OUT_SAT], P[P_OUT_BIAS], P[P_OUT_AB], P[P_OUT_KNEE]) * P[P_MAKEUP]
+            else:
+                yo = _shape(yc * drv, P[P_OUT_A2], P[P_OUT_A3], P[P_OUT_SAT], P[P_OUT_BIAS], P[P_OUT_AB]) * P[P_MAKEUP]
+            if P[P_XF_K] != 0.0:
+                flux[c] += (yo - flux[c]) * P[P_XF_A]
+                yo = yo + P[P_XF_K] * yo * flux[c] * flux[c]
             if P[P_FINAL_SAT] > 0.0:
                 yo = _shape(yo, 0.0, 0.0, P[P_FINAL_SAT], P[P_FINAL_BIAS], 0.0)
             for q in range(N_EQ):

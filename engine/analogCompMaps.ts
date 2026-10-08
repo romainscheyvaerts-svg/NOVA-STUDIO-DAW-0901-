@@ -12,7 +12,7 @@ export type AnalogKind = 'OPTO_VINTAGE' | 'FET76' | 'LEVELER2A' | 'VOXSTRIP';
 
 export function buildAnalogInternal(kind: string, p: Record<string, number>, prof: any, sampleRate: number): AnalogCompInternal {
   var SR = sampleRate > 0 ? sampleRate : 48000;
-  var P = new Float64Array(72);
+  var P = new Float64Array(80);
   function num(v: any, d: number) { var x = +v; return x === x && isFinite(x) ? x : d; }
   function interp(x: number, xs: number[], ys: number[]) {
     var n = xs.length;
@@ -114,6 +114,37 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
       var f = prof.scFilters && prof.scFilters[String(sc)];
       setHp(f ? biquad('hp', f[0], f[1], 0) : biquad('hp', sc, 0.7071, 0));
     }
+    P[25] = 0;
+    return { P: P, tab: tab, l0: prof.l0, dl: prof.dl };
+  }
+  if (kind === 'LEVELER2A') {
+    var pr = num(p.peakReduction, 50);
+    var thrL: number;
+    if (num(p.limit, 0) >= 0.5) {
+      var prl = Math.max(pr, prof.limKnob[0]);
+      thrL = interp(prl, prof.limKnob, prof.thrLim);
+      tab = tableFor(prl, prof.limKnob, prof.tablesLim);
+      if (pr < prof.limKnob[0]) thrL = interp(pr, prof.prKnob, prof.thrPr) + (prof.thrLim[0] - interp(prof.limKnob[0], prof.prKnob, prof.thrPr));
+    } else {
+      thrL = interp(pr, prof.prKnob, prof.thrPr);
+      tab = tableFor(pr, prof.prKnob, prof.tablesPr);
+    }
+    // filtre du détecteur selon l'accentuation des aigus : [g0, fc_hp, q_hp, fc_pk, q_pk, g_pk]
+    var em = num(p.emphasis, 0), scp: number[] = [];
+    for (var ci = 0; ci < 6; ci++) { var col: number[] = []; for (var ri = 0; ri < prof.sc.length; ri++) col.push(prof.sc[ri][ci]); scp.push(interp(em, prof.emphKnob, col)); }
+    P[1] = Math.pow(10, (thrL - scp[0]) / 20);
+    setHp(biquad('hp', scp[1], scp[2], 0));
+    var pk = biquad('peak', scp[3], scp[4], scp[5]);
+    for (var k3 = 0; k3 < 5; k3++) P[66 + k3] = pk[k3];
+    P[3] = prof.rectHalf ? 1 : 0;
+    P[29] = prof.detRelMs > 0 ? coef(prof.detRelMs) : 0;
+    P[5] = coef(prof.attMs); P[30] = P[5]; P[8] = coef(prof.relMs); P[10] = -1;
+    P[61] = prof.slowFrac; P[62] = coef(prof.slowAttMs); P[63] = coef(prof.slowRelMs);
+    P[52] = Math.pow(10, interp(num(p.gain, 50), prof.gainKnob, prof.gainDb) / 20);
+    P[18] = 1;
+    P[16] = prof.outA2; P[17] = prof.outA3; P[28] = prof.outSat; P[54] = prof.outBias; P[64] = prof.outAb; P[71] = prof.outKnee || 0;
+    for (var q3 = 0; q3 < prof.eq.length && q3 < 4; q3++) { var e3 = prof.eq[q3]; setEq(q3, biquad(e3[0], e3[1], e3[2], e3[3])); }
+    P[19] = Math.min(1, Math.max(0, num(p.mix, 100) / 100));
     P[25] = 0;
     return { P: P, tab: tab, l0: prof.l0, dl: prof.dl };
   }

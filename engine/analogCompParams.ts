@@ -112,9 +112,38 @@ export const FET76: AnalogKindSpec = {
   ],
 };
 
+export const LEVELER2A: AnalogKindSpec = {
+  kind: 'LEVELER2A',
+  name: 'Leveler 2A',
+  driveParam: 'peakReduction',
+  driveSense: 1,
+  targetGrDb: 2,
+  specs: [
+    { id: 'peakReduction', label: 'Réduction (Peak Reduction)', min: 0, max: 100, step: 0.5, unit: '', auto: true,
+      hint: "Un seul bouton pour la compression : plus haut = plus de réduction. Sur un bus, vise 2 dB max au VU (« Caler sur ma voix » le fait pour toi)." },
+    { id: 'gain', label: 'Gain', min: 0, max: 100, step: 0.5, unit: 'gain', auto: true,
+      hint: "Gain de sortie à lampes (0 = coupé, 50 ≈ +14,5 dB). Poussé fort, l'étage de sortie sature doucement (H2 puis H3)." },
+    { id: 'limit', label: 'Mode', min: 0, max: 1, step: 1, unit: '', auto: false,
+      hint: 'Compress : taux doux (~3:1 à 4:1). Limit : taux élevé, la cellule tient plus fermement les crêtes.',
+      choices: [{ v: 0, label: 'Compress' }, { v: 1, label: 'Limit' }] },
+    { id: 'emphasis', label: 'Accentuation des aigus (détection)', min: 0, max: 100, step: 1, unit: '%', auto: false,
+      hint: "Rend la détection plus sensible aux aigus (sifflantes, cymbales) et moins aux graves : la voix est tenue sur sa brillance plutôt que sur son corps." },
+    { id: 'mix', label: 'Mélange (parallèle)', min: 0, max: 100, step: 1, unit: '%', auto: true,
+      hint: '100 % = tout compressé ; moins = compression parallèle.' },
+  ],
+  defaults: { peakReduction: 20, gain: 25, limit: 0, emphasis: 0, mix: 100 },
+  presets: [
+    { id: 'bus', name: 'Bus voix (règle maison)', hint: 'Compress, réduction douce : clique « Caler sur ma voix » pour 2 dB max au VU.', params: { limit: 0, emphasis: 0, mix: 100 } },
+    { id: 'voix-lead', name: 'Voix lead', hint: 'Plus de réduction, accentuation légère des aigus : la voix reste stable et brillante.', params: { peakReduction: 45, gain: 40, limit: 0, emphasis: 20, mix: 100 } },
+    { id: 'basse', name: 'Basse', hint: 'Limit : la basse ne dépasse plus, sans perdre sa rondeur.', params: { peakReduction: 50, gain: 45, limit: 1, emphasis: 0, mix: 100 } },
+    { id: 'chaleur', name: 'Chaleur à lampes', hint: 'Peu de compression, gain poussé : la couleur de l\'étage à lampes.', params: { peakReduction: 15, gain: 60, limit: 0, emphasis: 0, mix: 100 } },
+  ],
+};
+
 export const ANALOG_SPECS: Record<string, AnalogKindSpec> = {
   OPTO_VINTAGE,
   FET76,
+  LEVELER2A,
 };
 
 export const analogSpec = (kind: string): AnalogKindSpec | undefined => ANALOG_SPECS[kind];

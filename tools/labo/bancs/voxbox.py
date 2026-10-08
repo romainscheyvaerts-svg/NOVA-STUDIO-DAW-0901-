@@ -87,3 +87,31 @@ CASES = [
                                          "comp_rel": "Medium"}, "tests": [
         {"type": "real_signal", "name": "voix", "path": VOIX, "seconds": 12, "rms_db": -20}]},
 ]
+
+PY_PROFILE = "modeles.voxbox_profil"
+
+# ── Cartographie fine (calage du profil Vox Strip) ────────────────────────────
+LO_F = [20.0, 35.0, 50.0, 70.0, 100.0, 150.0, 200.0, 300.0, 500.0, 700.0, 1000.0]
+MID_F = [200.0, 300.0, 500.0, 700.0, 1000.0, 1500.0, 2000.0, 3000.0, 4000.0, 5000.0, 7000.0]
+HI_F = [1500.0, 2000.0, 3000.0, 4000.0, 5000.0, 6400.0, 8000.0, 10000.0, 12000.0, 16000.0, 20000.0]
+CARTO_LEVELS = [-60, -55, -50, -45, -42, -39, -36, -33, -30, -28, -26, -24, -22, -20, -18, -16, -14, -12, -10,
+                -8, -6, -4, -2, 0]
+CARTO = [
+    *[{"name": f"c_in{i}", "settings": {"input": float(i)}, "tests": [
+        {"type": "tone_levels", "name": "g", "freq": 1000, "levels": [-60, -50], "dur": 0.3}]} for i in range(0, 11)],
+    *[{"name": f"c_th{t}", "settings": {"comp_byp": "In", "comp_thresh": float(t)}, "tests": [
+        {"type": "tone_levels", "name": "stat_1k", "freq": 1000, "levels": CARTO_LEVELS, "dur": 2.5}]}
+      for t in range(0, 11)],
+    *[{"name": f"c_lo{int(f)}_{g}", "settings": {"eq_byp": "In", "lo_peak": float(g), "lo_peak_freq": f}, "tests": [
+        {"type": "freq_response", "name": "fr", "level_db": -40}]} for f in LO_F for g in (5, 10)],
+    *[{"name": f"c_mid{int(f)}_{g}", "settings": {"eq_byp": "In", "mid_dip": float(g), "mid_dip_freq": f}, "tests": [
+        {"type": "freq_response", "name": "fr", "level_db": -40}]} for f in MID_F for g in (-5, -10)],
+    *[{"name": f"c_hi{int(f)}_{g}", "settings": {"eq_byp": "In", "hi_peak": float(g), "hi_peak_freq": f}, "tests": [
+        {"type": "freq_response", "name": "fr", "level_db": -40}]} for f in HI_F for g in (5, 10)],
+    {"name": "c_eqflat", "settings": {"eq_byp": "In"}, "tests": [{"type": "freq_response", "name": "fr", "level_db": -40}]},
+    {"name": "c_flat", "settings": {}, "tests": [{"type": "freq_response", "name": "fr", "level_db": -40}]},
+    *[{"name": f"c_t_a{a}_r{r}".replace(" ", ""), "settings": {"comp_byp": "In", "comp_thresh": 7.0, "comp_attack": a, "comp_rel": r},
+       "tests": [{"type": "step_response", "name": f"h{h}", "base_db": -50, "step_db": 25, "hold": h, "rel_obs": 6.0}
+                 for h in [0.1, 1.0, 3.0]]}
+      for a in ["Fast", "Med Fast", "Medium", "Med Slow", "Slow"] for r in ["Fast", "Med Fast", "Medium", "Med Slow", "Slow"]],
+]
