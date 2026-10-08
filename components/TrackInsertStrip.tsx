@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { PluginInstance } from '../types';
 import { PluginName, usePluginTitle } from './PluginName';
+import { pluginDisplayName } from '../utils/pluginLabel';
 
 /**
  * Effets de la piste, lisibles d'un coup d'œil (comme les inserts de Pro Tools) :
@@ -41,14 +42,14 @@ const Chip: React.FC<{ p: PluginInstance; baked: boolean } & Omit<TrackInsertStr
         title={bakedVst
           ? "Rendu (VST du PC) : déjà inclus dans l'audio de la piste. Pour le régler, ouvre le projet sur ton PC avec le pont VST."
           : baked ? 'Inclus dans le rendu gelé de la piste' : `${title} · Ctrl+clic : activer / désactiver`}
-        aria-label={`Ouvrir ${p.name || p.type}`}
-        className={`max-w-full h-5 rounded-md border px-1.5 text-[10px] font-semibold flex items-center transition-colors ${p.isEnabled
-          ? (p.type === 'VST3' ? 'border-fuchsia-400/25 bg-fuchsia-500/10 text-fuchsia-100 hover:bg-fuchsia-500/20' : 'border-cyan-400/20 bg-black/40 text-cyan-100 hover:bg-white/10')
+        aria-label={`Ouvrir ${pluginDisplayName(p)}`}
+        className={`nova-hit-tactile max-w-full h-5 rounded-md border px-1.5 text-[10px] font-semibold flex items-center transition-colors ${p.isEnabled
+          ? (p.type === 'VST3' ? 'border-fuchsia-400/25 bg-fuchsia-500/10 text-fuchsia-100 hover:bg-fuchsia-500/20' : 'border-cyan-400/20 bg-black/40 [[data-theme=light]_&]:bg-nv-surface text-cyan-100 hover:bg-white/10')
           : 'border-white/5 bg-black/20 text-slate-500 line-through'}`}
       >
         <PluginName plugin={p} showDetail compact />
       </button>
-      {!baked && <button type="button" onClick={(e) => onRemove(e, p.id)} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${p.name || p.type}`}><i className="fas fa-times"></i></button>}
+      {!baked && <button type="button" onClick={(e) => onRemove(e, p.id)} className="delete-fx" title="Retirer l'effet" aria-label={`Retirer ${pluginDisplayName(p)}`}><i className="fas fa-times"></i></button>}
     </div>
   );
 };
@@ -84,7 +85,7 @@ const TrackInsertStrip: React.FC<TrackInsertStripProps> = (props) => {
   return (
     <div className="mt-1 flex items-center gap-1 min-h-0 shrink-0">
       {props.leading}
-      <div ref={box} className={`flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden no-scrollbar ${props.idle ? 'opacity-50' : ''}`} data-testid={`inserts-${trackId}`}
+      <div ref={box} className={`flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden no-scrollbar ${props.idle ? 'opacity-70' : ''}`} data-testid={`inserts-${trackId}`}
         title={props.idle ? 'Piste vide : ces effets sont prêts pour ta prochaine prise ici' : undefined}>
         {plugins.map(p => <Chip key={p.id} p={p} baked={isBaked(p)} {...props} />)}
       </div>
@@ -93,7 +94,7 @@ const TrackInsertStrip: React.FC<TrackInsertStripProps> = (props) => {
           title={`${hidden} autre${hidden > 1 ? 's' : ''} effet${hidden > 1 ? 's' : ''} : voir la liste complète`}
           aria-label={`Voir les ${plugins.length} effets`}
           data-testid={`inserts-plus-${trackId}`}
-          className="shrink-0 h-5 rounded-md bg-cyan-500/20 px-1.5 text-[10px] font-black text-cyan-200 hover:bg-cyan-500/35">
+          className="nova-hit-tactile shrink-0 h-5 rounded-md bg-cyan-500/20 px-1.5 text-[10px] font-black text-cyan-200 hover:bg-cyan-500/35">
           +{hidden}
         </button>
       )}

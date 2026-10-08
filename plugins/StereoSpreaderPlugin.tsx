@@ -679,7 +679,7 @@ export const StereoSpreaderUI: React.FC<{ node: StereoSpreaderNode, initialParam
 
       {/* Main Controls */}
       <div className="grid grid-cols-4 gap-4">
-        <SpreaderKnob label="Width" value={(params.width || 1) / 2} factor={200} suffix="%" onChange={(v) => updateParam('width', v * 2)} color="#00f2ff" />
+        <SpreaderKnob label="Largeur" value={(params.width || 1) / 2} factor={200} suffix="%" onChange={(v) => updateParam('width', v * 2)} color="#00f2ff" />
         <SpreaderKnob label="Balance" value={((params.balance || 0) + 1) / 2} factor={100} suffix="" onChange={(v) => updateParam('balance', v * 2 - 1)} color="#a855f7" displayVal={Math.round((params.balance || 0) * 100)} />
         <SpreaderKnob label="Haas Delay" value={(params.haasDelay || 0.015) / 0.03} factor={30} suffix="ms" onChange={(v) => updateParam('haasDelay', v * 0.03)} color="#f59e0b" />
         <SpreaderKnob label="Haas Mix" value={params.haasAmount || 0} factor={100} suffix="%" onChange={(v) => updateParam('haasAmount', v)} color="#f59e0b" />

@@ -64,11 +64,11 @@ const MonitorControl: React.FC<{ compact?: boolean; mini?: boolean; trackId?: st
         <button type="button" onClick={toggle} aria-pressed={on}
           aria-label={on ? 'Couper le retour casque' : 'Activer le retour casque'}
           title={on ? 'Retour de ta voix dans le casque : actif (clic pour couper)' : "Retour casque coupé (clic pour l'activer, avec un casque seulement)"}
-          className={`shrink-0 h-5 w-6 rounded text-[11px] ${on ? 'bg-red-500 text-white' : 'bg-white/10 text-slate-500'}`}>🎧</button>
+          className={`nova-hit-tactile shrink-0 h-5 w-6 rounded text-[11px] ${on ? 'bg-red-600 text-white' : 'bg-white/10 text-slate-400'}`}>🎧</button>
         {onExpand && (
           <button type="button" onClick={onExpand} aria-label="Réglages d'entrée (volume du retour, latence)"
             title="Réglages d'entrée : volume du retour casque, latence"
-            className="shrink-0 h-5 w-5 rounded bg-white/5 text-[9px] text-slate-400 hover:text-white"><i className="fas fa-cog" /></button>
+            className="nova-hit-tactile shrink-0 h-5 w-5 rounded bg-white/5 text-[9px] text-slate-400 hover:text-white"><i className="fas fa-cog" /></button>
         )}
       </div>
     );

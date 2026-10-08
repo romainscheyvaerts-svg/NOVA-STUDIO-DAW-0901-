@@ -405,7 +405,27 @@ def f4(b, R):
     x0 = rec["x"] + rec["width"] + 25
     pg.mouse.dblclick(x0, rec["y"] + 60); pg.wait_for_timeout(600)
     S(pg, "f4", "01_double_clic_clip")
-    R["menu_ouvert"] = pg.locator("[data-testid=fade-in-10ms]").count() > 0
+    # Depuis la parité Pro Tools, le double-clic sur un clip audio ouvre « Renommer le clip »
+    # (le menu des fondus reste au clic droit).
+    dlg = pg.locator("[data-testid=clip-props]")
+    R["renommer_ouvert"] = dlg.count() > 0 and "Renommer le clip" in dlg.first.inner_text()
+    champ = dlg.get_by_role("textbox", name="Nom")
+    R["nom_avant"] = champ.input_value() if champ.count() else None
+    R["champ_focalise"] = pg.evaluate("() => document.activeElement?.getAttribute('aria-label') === 'Nom'")
+    if champ.count():
+        champ.fill("Couplet 1"); champ.press("Enter"); pg.wait_for_timeout(500)
+    S(pg, "f4", "02_apres_renommage")
+    noms = "() => (window.__novaEdit?.getState().tracks.find(t => t.id === 'track-rec-main')?.clips || []).map(c => c.name)"
+    R["noms_clips"] = pg.evaluate(noms)
+    R["renomme"] = pg.locator("[data-testid=clip-props]").count() == 0 and "Couplet 1" in R["noms_clips"]
+    pg.keyboard.press("Control+z"); pg.wait_for_timeout(500)
+    R["annulable"] = "Couplet 1" not in pg.evaluate(noms)
+    # Le menu du clip (fondus) reste accessible au clic droit.
+    pg.mouse.click(x0, rec["y"] + 60, button="right"); pg.wait_for_timeout(500)
+    R["menu_clic_droit"] = pg.locator("[data-testid=fade-in-10ms]").count() > 0
+    S(pg, "f4", "03_clic_droit_menu")
+    pg.keyboard.press("Escape")
+    R["ok"] = bool(R["renommer_ouvert"] and R["renomme"])
     R["errors"] = errors(pg)
     ctx.close()
 

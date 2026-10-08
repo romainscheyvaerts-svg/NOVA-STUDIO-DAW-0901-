@@ -507,7 +507,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 onClick={(e) => { e.stopPropagation(); openSynthPanel(track.id); }}
                 title={`Synthé NOVA : ${track.novaSynth?.name || 'synthé simple'} (ouvrir les sons et réglages)`}
                 aria-label={`Ouvrir le synthé de ${track.name}`}
-                className="shrink-0 w-6 h-6 rounded-md border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
+                className="nova-hit-tactile shrink-0 w-6 h-6 rounded-md border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
                 <i className="fas fa-sliders-h text-[9px]"></i>
               </button>
             )}
@@ -719,7 +719,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                   <div className="flex-1 h-8 relative border-r border-cyan-500/20 hover:bg-white/5 transition-colors">
                       <div className="absolute inset-0 flex flex-col justify-center px-2 pointer-events-none">
                           <span className="text-[9px] font-black uppercase text-cyan-100 truncate">
-                              {instrumentPlugin.type === 'DRUM_RACK_UI' ? 'Drum Rack 30' : (instrumentPlugin.type === 'DRUM_SAMPLER' ? 'Single Drum' : 'Melodic Sampler')}
+                              {instrumentPlugin.type === 'DRUM_RACK_UI' ? 'Batterie 30 pads' : (instrumentPlugin.type === 'DRUM_SAMPLER' ? 'Échantillon de batterie' : 'Échantillonneur mélodique')}
                           </span>
                           <span className="text-[7px] text-slate-500 font-mono">Instrument</span>
                       </div>

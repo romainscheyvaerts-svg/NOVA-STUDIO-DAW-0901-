@@ -880,10 +880,10 @@ export const ProfessionalReverbUI: React.FC<{
 
       {/* Main controls row 1 */}
       <div className="grid grid-cols-6 gap-4">
-        <ReverbKnob label="Decay" value={params.decay} min={0.1} max={15} suffix="s" color="#6366f1" onChange={v => handleParamChange('decay', v)} />
+        <ReverbKnob label="Durée" value={params.decay} min={0.1} max={15} suffix="s" color="#6366f1" onChange={v => handleParamChange('decay', v)} />
         <ReverbKnob label="Pre-Delay" value={params.preDelay} min={0} max={0.2} factor={1000} suffix="ms" color="#6366f1" onChange={v => handleParamChange('preDelay', v)} />
-        <ReverbKnob label="Size" value={params.size} min={0} max={1} factor={100} suffix="%" color="#6366f1" onChange={v => handleParamChange('size', v)} />
-        <ReverbKnob label="Damping" value={params.damping} min={0} max={1} factor={100} suffix="%" color="#6366f1" onChange={v => handleParamChange('damping', v)} />
+        <ReverbKnob label="Taille" value={params.size} min={0} max={1} factor={100} suffix="%" color="#6366f1" onChange={v => handleParamChange('size', v)} />
+        <ReverbKnob label="Amorti" value={params.damping} min={0} max={1} factor={100} suffix="%" color="#6366f1" onChange={v => handleParamChange('damping', v)} />
         <ReverbKnob label="Diffusion" value={params.diffusion ?? 0.8} min={0} max={1} factor={100} suffix="%" color="#818cf8" onChange={v => handleParamChange('diffusion', v)} />
         <ReverbKnob label="Mix" value={params.mix} min={0} max={1} factor={100} suffix="%" color="#22d3ee" onChange={v => handleParamChange('mix', v)} />
       </div>
@@ -891,10 +891,10 @@ export const ProfessionalReverbUI: React.FC<{
       {/* Advanced controls row 2 */}
       <div className="grid grid-cols-7 gap-3 pt-4 border-t border-white/5">
         <ReverbKnob label="ER Level" value={params.erLevel} min={0} max={1} factor={100} suffix="%" color="#818cf8" onChange={v => handleParamChange('erLevel', v)} />
-        <ReverbKnob label="Low Cut" value={params.lowCut} min={20} max={1000} log suffix="Hz" color="#f43f5e" onChange={v => handleParamChange('lowCut', v)} />
-        <ReverbKnob label="High Cut" value={params.highCut} min={1000} max={20000} log suffix="Hz" color="#f43f5e" onChange={v => handleParamChange('highCut', v)} />
+        <ReverbKnob label="Coupe-bas" value={params.lowCut} min={20} max={1000} log suffix="Hz" color="#f43f5e" onChange={v => handleParamChange('lowCut', v)} />
+        <ReverbKnob label="Coupe-haut" value={params.highCut} min={1000} max={20000} log suffix="Hz" color="#f43f5e" onChange={v => handleParamChange('highCut', v)} />
         <ReverbKnob label="Bass Boost" value={params.bassBoost ?? 0} min={0} max={1} factor={100} suffix="%" color="#f97316" onChange={v => handleParamChange('bassBoost', v)} />
-        <ReverbKnob label="Width" value={params.width} min={0} max={2} factor={100} suffix="%" color="#a855f7" onChange={v => handleParamChange('width', v)} />
+        <ReverbKnob label="Largeur" value={params.width} min={0} max={2} factor={100} suffix="%" color="#a855f7" onChange={v => handleParamChange('width', v)} />
         <ReverbKnob label="Mod" value={params.modDepth} min={0} max={1} factor={100} suffix="%" color="#a855f7" onChange={v => handleParamChange('modDepth', v)} />
         <ReverbKnob label="Ducking" value={params.ducking} min={0} max={1} factor={100} suffix="%" color="#10b981" onChange={v => handleParamChange('ducking', v)} />
       </div>

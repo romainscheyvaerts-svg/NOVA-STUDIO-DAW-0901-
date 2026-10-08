@@ -320,7 +320,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
           onClick={() => { setToast(null); setIsOpen(true); onRequestOpen?.(); }}
           // Au-dessus du bouton Nova (bas droite) : avant, centré en bas, il cachait « Piste voix / Paroles /
           // Mix auto » pendant 6 s, et passait par-dessus les menus et fenêtres (z 900).
-          className="fixed left-1/2 -translate-x-1/2 bottom-36 md:left-auto md:right-6 md:translate-x-0 md:bottom-28 z-[520] w-[min(520px,calc(100vw-24px))] rounded-2xl border border-cyan-500/30 bg-[#0d1117]/95 px-4 py-3 text-left shadow-2xl backdrop-blur pointer-events-auto">
+          className="fixed left-1/2 -translate-x-1/2 bottom-36 md:left-auto md:right-6 md:translate-x-0 md:bottom-28 z-[565] w-[min(520px,calc(100vw-24px))] rounded-2xl border border-cyan-500/30 bg-[#0d1117]/95 px-4 py-3 text-left shadow-2xl backdrop-blur pointer-events-auto">
           <span className="block text-[12px] text-slate-100 line-clamp-3">{toast.text}</span>
           {toast.hasChoices && <span className="mt-1 block text-[11px] font-bold text-cyan-300">Voir les propositions de Nova →</span>}
         </button>,
@@ -490,7 +490,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       {!isMobile && !isOpen && unread.n > 0 && !projectState?.isRecording && (
         <button type="button" data-testid="nova-tip-pill" onClick={() => setIsOpen(true)}
           title={unread.last} aria-label={`Nova : ${tipPillLabel(unread.n)} (ouvrir)`}
-          className="absolute right-24 bottom-5 h-9 px-3.5 whitespace-nowrap rounded-full border border-cyan-400/40 bg-[#0f1115]/95 text-[12px] font-bold text-cyan-200 shadow-lg hover:bg-cyan-500/15 flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
+          className="nova-hit-tactile absolute right-24 bottom-5 h-9 px-3.5 whitespace-nowrap rounded-full border border-cyan-400/40 bg-[#0f1115]/95 text-[12px] font-bold text-cyan-200 shadow-lg hover:bg-cyan-500/15 flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
           <i className="fas fa-lightbulb text-[11px] text-amber-300" aria-hidden="true"></i>{tipPillLabel(unread.n)}
         </button>
       )}

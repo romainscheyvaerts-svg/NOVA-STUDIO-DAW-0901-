@@ -49,7 +49,8 @@ def make_reference(path):
 
 
 TAP = """async () => {
-  const { audioEngine } = await import('/engine/AudioEngine.ts');
+  // Instance du moteur de l'APPLI (robuste aux rechargements à chaud de Vite, voir qalib).
+  const { audioEngine } = await (window.__novaAppModule ? window.__novaAppModule('/engine/AudioEngine.ts') : import('/engine/AudioEngine.ts'));
   const ctx = audioEngine.getAudioContext(), tap = audioEngine.getMasterMeterInput();
   if (!ctx || !tap) return 'pas de moteur';
   if (!window.__cap) {

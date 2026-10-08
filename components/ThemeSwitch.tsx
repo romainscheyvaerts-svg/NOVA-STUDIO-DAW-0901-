@@ -54,7 +54,7 @@ export const ThemeToggleButton: React.FC<{ className?: string }> = ({ className 
       onClick={() => themeStore.toggle()}
       title={toLight ? 'Passer au thème clair' : 'Passer au thème sombre'}
       aria-label={toLight ? 'Passer au thème clair' : 'Passer au thème sombre'}
-      className={`w-10 h-10 rounded-full flex items-center justify-center bg-white/[0.06] hover:bg-white/10 text-slate-300 hover:text-white transition-colors duration-150 ${className}`}
+      className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-white/[0.06] hover:bg-white/10 text-slate-300 hover:text-white transition-colors duration-150 ${className}`}
     >
       <i className={`fas ${toLight ? 'fa-sun' : 'fa-moon'} text-[14px]`} aria-hidden="true"></i>
     </button>

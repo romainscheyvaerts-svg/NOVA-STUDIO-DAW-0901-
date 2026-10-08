@@ -22,6 +22,25 @@ VIEWPORTS = {
 
 WRITE_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 
+# Module de l'APPLI, pas une 2e copie. Quand le serveur Vite a vu des fichiers modifiés,
+# il sert le moteur sous « /engine/AudioEngine.ts?t=… » : un import('/engine/AudioEngine.ts')
+# nu crée alors une AUTRE instance (sans contexte audio, sans pistes), et les scénarios qui
+# écoutent le master (v15_master…) échouaient. `await window.__novaAppModule(chemin)` importe
+# l'URL réellement chargée par l'appli (la plus récente), sinon le chemin nu.
+APP_MODULE_INIT = r"""
+try { performance.setResourceTimingBufferSize(50000); } catch (e) {}
+window.__novaAppModule = async (path) => {
+  let best = null, bestT = -1;
+  for (const e of performance.getEntriesByType('resource')) {
+    let u; try { u = new URL(e.name); } catch (_) { continue; }
+    if (u.origin !== location.origin || u.pathname !== path) continue;
+    const t = +(u.searchParams.get('t') || 0);
+    if (t >= bestT) { bestT = t; best = u.pathname + u.search; }
+  }
+  return import(/* @vite-ignore */ best || path);
+};
+"""
+
 
 class Log:
     def __init__(self, name):
@@ -77,6 +96,7 @@ def new_page(browser, vp="pc", log=None, touch=None, storage=None):
     # pour rejouer les gestes de l'arrangement avec le couloir.
     if os.environ.get("QA_CHORD_LANE") == "1":
         ctx.add_init_script("try { localStorage.setItem('nova_chord_lane', '1'); } catch (e) {}")
+    ctx.add_init_script(APP_MODULE_INIT)
     page = ctx.new_page()
     page.set_default_timeout(15000)
     if log is not None:

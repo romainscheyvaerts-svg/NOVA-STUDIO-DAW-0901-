@@ -392,7 +392,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                         <span className="text-slate-600" aria-hidden="true">•</span>
                         {/* Liste étroite : tonalité OU genre, sinon les deux sortaient en « T… • F#… » (QA 04/10). */}
                         {inst.key
-                            ? <span className="mono shrink-0 text-cyan-300/80">{tonaliteFr(inst.key)}</span>
+                            ? <span className="mono shrink-0 text-cyan-300">{tonaliteFr(inst.key)}</span>
                             : <span className="truncate">{inst.genre || (isMelody(inst) ? 'Mélodie' : 'Beat')}</span>}
                     </div>
                 </div>
@@ -402,7 +402,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                   <button
                     type="button"
                     onClick={() => onMakeBeat(inst)}
-                    className="nova-hit mr-2 h-9 px-3 rounded-lg bg-violet-500 text-white text-[11px] font-black hover:bg-violet-400 active:scale-95 transition-all"
+                    className="nova-hit mr-2 h-9 px-3 rounded-lg bg-violet-600 text-white text-[11px] font-black hover:bg-violet-700 active:scale-95 transition-all"
                     title="Ouvrir un projet pour faire une instru (batterie) sur cette mélodie, et y poser ta voix"
                   >
                     🥁 Faire une instru

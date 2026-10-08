@@ -541,13 +541,13 @@ export const VocalDenoiserUI: React.FC<VocalDenoiserUIProps> = ({ node, initialP
       <div className="grid grid-cols-4 gap-4">
         <ProKnob label="Seuil" value={params.threshold} min={-60} max={0} suffix="dB" color="#14b8a6" onChange={(v) => handleParamChange('threshold', v)} />
         <ProKnob label="Plage" value={params.range} min={-80} max={0} suffix="dB" color="#f59e0b" onChange={(v) => handleParamChange('range', v)} />
-        <ProKnob label="Attack" value={params.attack} min={0.0001} max={0.1} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('attack', v)} />
+        <ProKnob label="Attaque" value={params.attack} min={0.0001} max={0.1} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('attack', v)} />
         <ProKnob label="Maintien" value={params.hold} min={0} max={0.5} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('hold', v)} />
       </div>
 
       {/* Main Controls Row 2 */}
       <div className="grid grid-cols-4 gap-4">
-        <ProKnob label="Release" value={params.release} min={0.01} max={2.0} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('release', v)} />
+        <ProKnob label="Relâche" value={params.release} min={0.01} max={2.0} suffix="ms" factor={1000} color="#fff" onChange={(v) => handleParamChange('release', v)} />
         <ProKnob label="Filtre de détection" value={params.scFreq} min={20} max={20000} suffix="Hz" color="#8b5cf6" log onChange={(v) => handleParamChange('scFreq', v)} />
         <div className="flex flex-col items-center justify-center">
           <button

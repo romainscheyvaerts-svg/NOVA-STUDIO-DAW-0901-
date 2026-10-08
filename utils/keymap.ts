@@ -55,6 +55,7 @@ export const KEYMAP: ShortcutDef[] = [
   nova({ id: 'nova.undo', keys: ['ctrl+z'], label: 'Annuler', pt: 'Ctrl+Z', category: 'Édition' }),
   nova({ id: 'nova.redo', keys: ['ctrl+y', 'ctrl+shift+z'], label: 'Rétablir', pt: 'Ctrl+Maj+Z', category: 'Édition' }),
   nova({ id: 'nova.save', keys: ['ctrl+s'], label: 'Sauvegarder', pt: 'Ctrl+S', category: 'Fenêtres' }),
+  nova({ id: 'nova.export', keys: ['ctrl+shift+e'], label: 'Exporter (mix, stems, voix seules)', pt: 'Bounce to Disk : Ctrl+Alt+B', category: 'Fenêtres' }),
   nova({ id: 'nova.copy', keys: ['ctrl+c'], label: 'Copier le clip', pt: 'Ctrl+C', category: 'Édition' }),
   nova({ id: 'nova.cut', keys: ['ctrl+x'], label: 'Couper le clip', pt: 'Ctrl+X', category: 'Édition' }),
   nova({ id: 'nova.paste', keys: ['ctrl+v'], label: 'Coller à la tête de lecture', pt: 'Ctrl+V', category: 'Édition' }),

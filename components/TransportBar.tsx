@@ -214,7 +214,12 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
   const handleBpmMouseDown = (e: React.MouseEvent) => {
     if (e.detail === 2) { 
-      setIsEditingBpm(true);
+      // Champ prérempli avec le tempo ACTUEL : il gardait celui de l'ouverture du studio (120), et le
+      // quitter sans rien taper remettait le morceau à 120 BPM (mélodie à 94 → 120).
+      // preventDefault : sinon ce même appui (sur un bloc non focalisable) retirait aussitôt le focus
+      // du champ qui venait de s'ouvrir, et il se refermait : « double-clic pour saisir » ne marchait pas.
+      e.preventDefault();
+      setTempBpm(String(bpm)); setIsEditingBpm(true);
       return;
     }
     const startY = e.clientY;
@@ -411,7 +416,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             type="button"
             onClick={() => openFeedback()}
             data-nova-action="feedback"
-            className="w-9 h-9 rounded-full hidden sm:flex items-center justify-center border transition-all text-slate-400 hover:text-white hover:bg-white/10"
+            className="nova-hit-tactile w-9 h-9 rounded-full hidden sm:flex items-center justify-center border transition-all text-slate-400 hover:text-white hover:bg-white/10"
             title="Signaler un bug ou proposer une idée (Ctrl+Maj+B)"
             aria-label="Signaler un bug ou proposer une idée"
             style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}
@@ -619,7 +624,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                     className="w-20 bg-white/10 border border-cyan-500/50 rounded text-center text-2xl font-black text-white outline-none"
                   />
                 ) : (
-                  <div onClick={() => setIsEditingBpm(true)} className="text-3xl font-black text-cyan-400 cursor-pointer">{bpm}</div>
+                  <div onClick={() => { setTempBpm(String(bpm)); setIsEditingBpm(true); }} className="text-3xl font-black text-cyan-400 cursor-pointer">{bpm}</div>
                 )}
                 <button onClick={() => onBpmChange(Math.min(999, bpm + 1))} aria-label="Tempo +1" className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">+</button>
               </div>

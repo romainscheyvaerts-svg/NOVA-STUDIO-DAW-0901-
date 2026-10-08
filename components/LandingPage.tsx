@@ -280,7 +280,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
           <div className="flex items-center gap-3">
             <div className="text-right">
               <p className="text-xs font-bold text-white">{user.username || user.email}</p>
-              <p className="text-[10px] text-slate-500">{user.plan || 'FREE'}</p>
+              <p className="text-[10px] text-slate-500">{!user.plan || /^free$/i.test(user.plan) ? 'Gratuit' : user.plan}</p>
             </div>
             <button
               onClick={onLogout}
@@ -293,8 +293,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
         ) : (
           <button
             onClick={() => setShowAuthModal(true)}
-            className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-lg text-sm font-bold text-white hover:opacity-90 transition-all shadow-lg shadow-cyan-500/20"
+            className="px-4 py-2.5 bg-cyan-500 rounded-lg text-sm font-bold text-black hover:opacity-90 transition-all shadow-lg shadow-cyan-500/20"
           >
+            {/* Texte noir sur l'accent : le blanc sur le dégradé cyan → bleu ne faisait que 3:1. */}
             <i className="fas fa-user mr-2"></i>
             Connexion
           </button>
@@ -429,7 +430,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
           {/* Footer sidebar */}
           <div className="nova-signature mt-auto p-4 border-t border-white/5">
             <button type="button" onClick={() => openFeedback()} data-nova-action="feedback-accueil" title="Signaler un bug ou proposer une idée (Ctrl+Maj+B)"
-              className="w-full mb-2 min-h-[36px] rounded-lg text-[11px] font-bold text-slate-400 hover:text-white hover:bg-white/5 transition-colors">
+              className="w-full mb-2 min-h-10 rounded-lg text-[12px] font-bold text-slate-400 hover:text-white hover:bg-white/5 transition-colors">
               <i className="fas fa-comment-dots mr-1.5" aria-hidden="true"></i>Signaler un bug / une idée
             </button>
             <p className="text-[9px] text-slate-600 text-center">
@@ -443,11 +444,11 @@ const LandingPage: React.FC<LandingPageProps> = ({
           <div className="p-4 border-b border-white/5 bg-[#0c0d10]/50">
             <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-white/[0.06] bg-white/[0.03] p-1" role="tablist" aria-label="Bibliothèque">
               <button type="button" role="tab" aria-selected={shelf === 'BEATS'} onClick={() => setShelf('BEATS')}
-                className={`h-9 px-4 rounded-lg text-[12px] font-bold transition-all ${shelf === 'BEATS' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(34,211,238,0.45)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
+                className={`nova-hit-tactile h-9 px-4 rounded-lg text-[12px] font-bold transition-all ${shelf === 'BEATS' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(34,211,238,0.45)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
                 🎧 Instrus <span className={`ml-1 rounded-md px-1.5 py-0.5 text-[10px] mono ${shelf === 'BEATS' ? 'bg-cyan-400/15 text-cyan-300' : 'bg-white/5 text-slate-500'}`}>{instrumentals.filter(i => !isMelody(i)).length}</span>
               </button>
               <button type="button" role="tab" aria-selected={shelf === 'MELODIES'} onClick={() => setShelf('MELODIES')}
-                className={`h-9 px-4 rounded-lg text-[12px] font-bold transition-all ${shelf === 'MELODIES' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(167,139,250,0.5)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
+                className={`nova-hit-tactile h-9 px-4 rounded-lg text-[12px] font-bold transition-all ${shelf === 'MELODIES' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(167,139,250,0.5)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
                 🎹 Mélodies <span className={`ml-1 rounded-md px-1.5 py-0.5 text-[10px] mono ${shelf === 'MELODIES' ? 'bg-violet-400/15 text-violet-300' : 'bg-white/5 text-slate-500'}`}>{instrumentals.filter(isMelody).length}</span>
               </button>
             </div>
@@ -504,7 +505,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                       {/* Overlay au hover */}
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                         {isMelody(inst) ? (
-                          <span className="px-3 py-2 rounded-full bg-violet-500 text-white text-[11px] font-black shadow-lg">🥁 Faire une instru</span>
+                          <span className="px-3 py-2 rounded-full bg-violet-600 text-white text-[11px] font-black shadow-lg">🥁 Faire une instru</span>
                         ) : (
                           <div className="w-14 h-14 rounded-full bg-cyan-500 flex items-center justify-center shadow-lg">
                             <i className="fas fa-arrow-right text-white text-lg"></i>

@@ -695,10 +695,10 @@ export const SyncDelayUI: React.FC<{ node: SyncDelayNode, initialParams: DelayPa
 
       {/* Main Controls */}
       <div className="grid grid-cols-5 gap-4">
-        <DelayKnob label="Feedback" value={params.feedback} min={0} max={0.95} factor={100} suffix="%" color="#00f2ff" onChange={v => handleParamChange('feedback', v)} />
+        <DelayKnob label="Retour" value={params.feedback} min={0} max={0.95} factor={100} suffix="%" color="#00f2ff" onChange={v => handleParamChange('feedback', v)} />
         <DelayKnob label="Tone LP" value={params.feedbackLP || 8000} min={1000} max={20000} log suffix="Hz" color="#00f2ff" onChange={v => handleParamChange('feedbackLP', v)} />
         <DelayKnob label="Saturation" value={params.saturation || 0.3} min={0} max={1} factor={100} suffix="%" color="#f59e0b" onChange={v => handleParamChange('saturation', v)} />
-        <DelayKnob label="Width" value={params.stereoWidth || 1} min={0} max={1} factor={100} suffix="%" color="#a855f7" onChange={v => handleParamChange('stereoWidth', v)} />
+        <DelayKnob label="Largeur" value={params.stereoWidth || 1} min={0} max={1} factor={100} suffix="%" color="#a855f7" onChange={v => handleParamChange('stereoWidth', v)} />
         <DelayKnob label="Mix" value={params.mix} min={0} max={1} factor={100} suffix="%" color="#fff" onChange={v => handleParamChange('mix', v)} />
       </div>
 
