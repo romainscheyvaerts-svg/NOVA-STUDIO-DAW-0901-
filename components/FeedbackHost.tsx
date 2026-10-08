@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { OPEN_FEEDBACK_EVENT, OpenFeedbackOptions } from '../services/feedback';
 import { recordAction } from '../utils/feedbackLog';
 import { isFeedbackShortcut } from '../utils/feedbackShortcut';
-import { MountWhenOpened } from '../utils/lazyPreload';
+import { lazyWithPreload, MountWhenOpened, preloadWhenIdle } from '../utils/lazyPreload';
 
-// La fenêtre (formulaire, historique, contexte) n'est chargée qu'à la 1re ouverture :
-// elle sortait du paquet principal de chaque démarrage pour un usage rare.
-const FeedbackModal = React.lazy(() => import('./FeedbackModal'));
+// La fenêtre (formulaire, historique, contexte) sort du paquet principal (usage rare) ; elle est
+// préchargée au repos pour s'ouvrir dans la même image que Ctrl+Maj+B.
+const FeedbackModal = lazyWithPreload(() => import('./FeedbackModal'));
 
 /**
  * Hôte de « Signaler un bug / proposer une idée », monté une seule fois à la racine
@@ -15,6 +15,7 @@ const FeedbackModal = React.lazy(() => import('./FeedbackModal'));
 export const FeedbackHost: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [initial, setInitial] = useState<OpenFeedbackOptions | undefined>(undefined);
+  useEffect(() => preloadWhenIdle([FeedbackModal], 6000), []);
   useEffect(() => {
     const onOpen = (e: Event) => {
       setInitial({ ...((e as CustomEvent).detail || {}) });
