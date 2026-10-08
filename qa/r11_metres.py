@@ -110,6 +110,20 @@ JS_A = "async () => {" + ENGINE_PRELUDE + r"""
   const gainQ = quiet.out_rms - quiet.in_rms, gainL = loud.out_rms - loud.in_rms;
   out.compresseur = { faible: quiet, fort: loud, gain_sous_le_seuil_dB: db(gainQ), reduction_mesuree_dB: db(gainQ - gainL), reduction_affichee_dB: db(loud.gr) };
   meterBank.setTapMode('post');
+  // 6. Export (rendu hors ligne) : la tête de tranche s'applique aussi au fichier, automation de la largeur comprise.
+  e.stopAll(); current.forEach(t => e.disposeTrack(t.id)); current = [];
+  const pk = (b, ch, a = 0, z = 1) => { const x = b.getChannelData(ch); let m = 0; for (let i = Math.floor(a * x.length); i < Math.floor(z * x.length); i++) m = Math.max(m, Math.abs(x[i])); return db(20 * Math.log10(Math.max(m, 1e-12))); };
+  const r1 = await e.renderProject([track('ref', same), track('inv', same, { phaseInvert: true })], 1, 0, SR);
+  const r2 = await e.renderProject([track('mono', L6, { monoSum: true })], 1, 0, SR);
+  const r3 = await e.renderProject([track('trim', same, { inputTrimDb: 6 })], 1, 0, SR);
+  const r4 = await e.renderProject([track('w0', anti, { stereoWidth: 0 })], 1, 0, SR);
+  const lane = { id: 'l-w', parameterName: 'width', points: [{ id: 'a', time: 0, value: 1 }, { id: 'b', time: 1, value: 1 }, { id: 'c', time: 1.01, value: 0 }, { id: 'd', time: 2, value: 0 }], color: '#fff', isExpanded: true, min: 0, max: 2 };
+  const r5 = await e.renderProject([track('wauto', anti, { automationLanes: [lane] })], 2, 0, SR);
+  out.export = {
+    phase_somme_dBFS: [pk(r1, 0), pk(r1, 1)], mono_dBFS: [pk(r2, 0), pk(r2, 1)], trim_plus_6_dBFS: [pk(r3, 0), pk(r3, 1)],
+    largeur_0_dBFS: [pk(r4, 0), pk(r4, 1)],
+    largeur_automatisee_1_puis_0_dBFS: { avant_1s: pk(r5, 0, 0.05, 0.45), apres_1s: pk(r5, 0, 0.55, 0.95) },
+  };
   out.banc = meterBank.info();
   return out;
 }"""
@@ -133,6 +147,12 @@ def run_A(b):
     ok["trim_plus_6"] = abs(res["trim_plus_6"]["tp"] - (-12.04 + 6)) < 0.2
     li = res["limiteur"]; ok["gr_limiteur"] = abs(li["reduction_affichee_dB"] - li["reduction_mesuree_dB"]) < 0.5
     co = res["compresseur"]; ok["gr_compresseur"] = abs(co["reduction_affichee_dB"] - co["reduction_mesuree_dB"]) < 1.0
+    ex = res["export"]
+    ok["export_phase_annule"] = max(ex["phase_somme_dBFS"]) <= -100
+    ok["export_mono"] = all(abs(v + 12.04) < 0.05 for v in ex["mono_dBFS"])
+    ok["export_trim"] = all(abs(v + 6.02) < 0.05 for v in ex["trim_plus_6_dBFS"])
+    ok["export_largeur_0"] = max(ex["largeur_0_dBFS"]) <= -100
+    la = ex["largeur_automatisee_1_puis_0_dBFS"]; ok["export_largeur_automatisee"] = abs(la["avant_1s"] + 12.04) < 0.1 and la["apres_1s"] <= -100
     res["verdicts"] = ok
     res["erreurs_page"] = [x["text"] for x in log.errors()][:5]
     return res

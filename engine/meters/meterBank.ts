@@ -17,6 +17,16 @@
  * Affichage : une seule boucle requestAnimationFrame partagée, limitée à
  * 30 images/s (meterClock) ; les composants dessinent dans des canvas sans
  * rendu React pendant la lecture.
+ *
+ * Coût mesuré (qa/r11_metres.py, partie C, PC de Romain, Chrome headless,
+ * 40 pistes stéréo + master, 08/10/2026) :
+ *  - fil audio : 65 ms par seconde de son, soit 6,5 % d'un cœur, dans le pire
+ *    cas (40 sinus continus : la crête vraie se recalcule sans cesse) ; sur
+ *    une musique qui respire, le noyau des pistes coûte ~4 fois moins (banc
+ *    vitest : 1 ms/s par piste au lieu de 5,5 sans portillon) ;
+ *  - fil principal : 125 messages/s traités en 2,9 ms/s ; 40 vumètres de
+ *    console dessinés à 30 images/s en 34 ms/s au plus (sans le saut des
+ *    images inchangées que fait TrackMeter).
  */
 import { createMeterCore } from './meterCore';
 import { LoudnessMeter, correlationOf } from './loudness';
