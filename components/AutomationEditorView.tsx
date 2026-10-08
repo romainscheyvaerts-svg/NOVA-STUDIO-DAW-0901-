@@ -57,7 +57,7 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
       // Check if already exists
       if (track.automationLanes.some(l => l.parameterName === paramId)) return;
 
-      const initialVal = paramId === 'volume' ? track.volume : paramId === 'preVolume' ? 1 : (paramId === 'pan' ? track.pan : 0.5);
+      const initialVal = paramId === 'volume' ? track.volume : paramId === 'preVolume' ? 1 : paramId === 'trim' ? Math.pow(10, (track.inputTrimDb || 0) / 20) : paramId === 'width' ? (track.stereoWidth ?? 1) : (paramId === 'pan' ? track.pan : 0.5);
 
       const newLane: AutomationLane = {
           id: `auto-${Date.now()}`,
@@ -79,7 +79,10 @@ const AutomationEditorView: React.FC<AutomationEditorViewProps> = ({
           { id: 'volume', name: 'Volume', min: 0, max: 1.5 },
           // Avant les effets : un fondu attaque le compresseur et la reverb (piste gelée : rejoué au dégel).
           { id: 'preVolume', name: 'Volume avant effets', min: 0, max: 1.5 },
-          { id: 'pan', name: 'Panoramique', min: -1, max: 1 }
+          { id: 'pan', name: 'Panoramique', min: -1, max: 1 },
+          // Tête de tranche (R11) : trim d'entrée (gain, jusqu'à +12 dB) et largeur stéréo (0 = mono, 2 = très large).
+          { id: 'trim', name: "Trim d'entrée", min: 0, max: 4 },
+          { id: 'width', name: 'Largeur stéréo', min: 0, max: 2 }
       ];
       
       // Sends

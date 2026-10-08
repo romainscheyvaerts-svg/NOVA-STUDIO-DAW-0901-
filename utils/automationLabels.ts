@@ -13,12 +13,14 @@ import { analogParamLabel, ANALOG_SPECS } from '../engine/analogCompParams';
  * (« −6,0 dB », pas « 0.50 »), panoramique « G 30 / D 30 », envois nommés
  * comme partout (« Envoi Reverb courte »).
  */
-const isGain = (p: string) => p === 'volume' || p === 'preVolume' || p.startsWith('send::');
+const isGain = (p: string) => p === 'volume' || p === 'preVolume' || p === 'trim' || p.startsWith('send::');
 
 export function automationParamLabel(param: string, tracks?: Track[] | null): string {
   if (param === 'volume') return 'Volume';
   if (param === 'preVolume') return 'Volume avant effets';
   if (param === 'pan') return 'Panoramique';
+  if (param === 'trim') return "Trim d'entrée";
+  if (param === 'width') return 'Largeur stéréo';
   if (param.startsWith('send::')) return `Envoi ${sendLabel(param.slice(6), tracks)}`;
   // Réglage d'un effet NOVA (limiteur, V21 : harmoniseur, tape stop…) : « Tape stop · Durée de l'arrêt ».
   const pp = parsePluginParam(param);
@@ -35,6 +37,7 @@ export function automationParamLabel(param: string, tracks?: Track[] | null): st
 export function automationValueText(param: string, v: number): string {
   if (isGain(param)) return gainDbFr(v);
   if (param === 'pan') return panToText(v);
+  if (param === 'width') return v <= 0.005 ? 'Mono' : `${Math.round(v * 100)} %`;
   return v.toFixed(2).replace('.', ',');
 }
 

@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import TrackMeter from './meters/TrackMeter';
 import { AutotuneBadge } from './AutotuneVstPanel';
 import { useCollabRole, requestVolumeLock, useCollabLive } from '../utils/collabStore';
 import { requestRemoteSend, useRemoteBadge } from '../utils/remoteStore';
@@ -449,6 +450,10 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined, scrollMarginTop: 44, scrollMarginBottom: 8 }}
     >
       <TrackStructureBadge track={track} />
+      {/* Vrai mètre G / D de la piste + réduction de gain (R11), au bord droit comme dans Pro Tools. */}
+      <div className="absolute right-0.5 top-1.5 bottom-1.5 w-[9px] z-20" data-testid={`header-meter-${track.id}`}>
+        <TrackMeter pointId={track.id} grTrackId={track.id} grText={false} marks={false} label={track.name} className="w-full" />
+      </div>
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center truncate flex-1 pr-2">
           <div 

@@ -67,6 +67,10 @@ import { gainPointsSig } from '../utils/clipGain';
 import { auditionClips } from '../utils/playlists';
 import { ChordEvent, chordSteps } from '../utils/chordDetect';
 import { engineView, VOID_OUTPUT } from '../utils/trackStructure';
+// R11 : vrais mètres (AudioWorklet partagé) et tête de tranche (trim, Ø, mono, largeur).
+import { meterBank } from './meters/meterBank';
+import { buildStrip, disposeStrip, setStrip, stripParam, stripSignature, StripNodes, TRIM_PARAM, WIDTH_PARAM } from './meters/channelStrip';
+import { GrPart, readGainReduction } from './meters/gainReduction';
 
 interface TrackDSP {
   input: GainNode;          
@@ -122,6 +126,8 @@ interface TrackDSP {
   // reconstruire — et donc de couper brievement — le graphe quand rien de
   // structurel n'a change.
   graphSignature?: string;
+  /** Tête de tranche (R11) : trim, Ø, mono, largeur ; absente si la piste est neutre. */
+  strip?: StripNodes | null;
 }
 
 /** Journal d'une prise en cours (utils/recoveryStore.TakeJournal). */
@@ -348,7 +354,16 @@ export class AudioEngine {
     this.masterAnalyzerR.smoothingTimeConstant = 0.5;
 
     this.masterOutput.connect(this.masterLimiter);
-    this.masterLimiter.connect(this.masterAnalyzer);
+    // R11 : le DynamicsCompressorNode de Chrome ajoute un gain de compensation
+    // automatique (« makeup ») de (1 / gain à 0 dBFS)^0,6 : +0,57 dB ici, sur
+    // TOUT le mix, même très en dessous du seuil. L'écoute était donc 0,57 dB
+    // plus forte que l'export (qui n'a pas ce limiteur) et le LUFS lu en
+    // direct ne collait pas à celui du fichier. On retire ce gain juste après.
+    const safetyTrim = this.ctx.createGain();
+    const fullRangeDb = this.masterLimiter.threshold.value * (1 - 1 / this.masterLimiter.ratio.value);
+    safetyTrim.gain.value = Math.pow(Math.pow(10, fullRangeDb / 20), 0.6);
+    this.masterLimiter.connect(safetyTrim);
+    safetyTrim.connect(this.masterAnalyzer);
     // Sortie « navigateur » coupée pendant le flux ASIO : le mix part alors par
     // la carte, sinon l'artiste l'entendait deux fois (écho / effet de phase).
     this.browserOutput = this.ctx.createGain();
@@ -358,6 +373,8 @@ export class AudioEngine {
     this.masterAnalyzer.connect(this.masterSplitter);
     this.masterSplitter.connect(this.masterAnalyzerL, 0);
     this.masterSplitter.connect(this.masterAnalyzerR, 1);
+    // R11 : mètres du master (crête vraie, LUFS, corrélation) sur la sortie finale.
+    meterBank.init(this.ctx, this.masterAnalyzer);
 
     this.previewGain = this.ctx.createGain();
     this.previewAnalyzer = this.ctx.createAnalyser();
@@ -941,6 +958,7 @@ export class AudioEngine {
       sampler?: AudioSampler;
       drumRack?: DrumRackNode;
       bass808?: Bass808Node;
+      strip?: StripNodes | null;
     }
     const rendered = new Map<string, RenderTrack>();
     // Certains plugins (AutoTune) s'initialisent de maniere asynchrone : on
@@ -972,6 +990,9 @@ export class AudioEngine {
       const output = offlineCtx.createGain();
 
       let head: AudioNode = input;
+      // Tête de tranche (R11) : trim, Ø, mono, largeur, comme en lecture.
+      const strip = buildStrip(offlineCtx, track);
+      if (strip) { input.connect(strip.input); head = strip.output; }
       // Piste gelee : meme cablage qu'en lecture (rendu -> effets restants).
       const frozen = isTrackFrozen(track);
       // Bus d'effets gelé : ce qui y entre encore en direct (envoi ajouté ailleurs) passe par ses effets non rendus.
@@ -1035,7 +1056,7 @@ export class AudioEngine {
       panner.pan.value = options.preFader ? 0 : track.pan;
 
       const rt: RenderTrack = {
-        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pre: preNode, silenced,
+        input, gain, panner, output, sends: new Map(), latency: offlineLatency, pluginNodes, pre: preNode, silenced, strip,
         frozenInput, frozenClipId: frozen ? track.frozenClip!.id : undefined, postLatency,
       };
 
@@ -1150,7 +1171,7 @@ export class AudioEngine {
 
       playedLanes(track).forEach(lane => {
         if (options.preFader && lane.parameterName !== PRE_VOLUME) return;
-        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends, (rt.frozenInput || rt.input).gain);
+        const cible = this.cibleAutomation(lane.parameterName, rt.gain.gain, rt.panner.pan, rt.sends, (rt.frozenInput || rt.input).gain, rt.strip);
         if (!cible || !lane.points || lane.points.length === 0) return;
 
         const points = [...lane.points].sort((a, b) => a.time - b.time);
@@ -2302,9 +2323,12 @@ export class AudioEngine {
     gain: AudioParam,
     pan: AudioParam,
     sends: Map<string, GainNode>,
-    pre?: AudioParam
+    pre?: AudioParam,
+    strip?: StripNodes | null
   ): AudioParam | null {
     if (nomParametre === 'volume') return gain;
+    // Tête de tranche (R11) : trim d'entrée (gain) et largeur stéréo.
+    if (nomParametre === TRIM_PARAM || nomParametre === WIDTH_PARAM) return stripParam(strip, nomParametre);
     // Volume AVANT effets (tête de chaîne) : édité sur une piste gelée, il
     // attaque le compresseur et la reverb au dégel. Piste gelée : après le rendu.
     if (nomParametre === PRE_VOLUME) return pre || null;
@@ -2411,7 +2435,7 @@ export class AudioEngine {
     if (!dsp || !this.ctx) return;
     const track = this.liveTracks?.find(t => t.id === trackId);
     if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
-    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
     if (!cible) return;
     const now = this.ctx.currentTime;
     try { cible.cancelScheduledValues(now); cible.setTargetAtTime(value, now, 0.01); } catch { /* valeur hors limites */ }
@@ -2445,7 +2469,7 @@ export class AudioEngine {
     const dsp = this.tracksDSP.get(trackId);
     if (!dsp) return;
     if (param === 'volume' && track && (track.isMuted || this.soloSilencedIds.has(trackId))) return;
-    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+    const cible = this.cibleAutomation(param, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
     if (!cible) return;
     const now = this.ctx.currentTime;
     const t0 = now + 0.01;
@@ -2741,7 +2765,7 @@ export class AudioEngine {
                 if (point.time >= start && point.time < end) {
                     const scheduleTime = when + (point.time - start);
                     
-                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+                    const ancre = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
                     if (ancre) ancre.setValueAtTime(point.value, scheduleTime);
                     
                     const nextPoint = lane.points[index + 1];
@@ -2749,7 +2773,7 @@ export class AudioEngine {
                         // On programme la rampe meme si le point suivant sort de la
                         // fenetre : sinon la valeur restait en palier jusqu'a lui.
                         const nextScheduleTime = when + (nextPoint.time - start);
-                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+                        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
                         if (cible) {
                             this.programmerSegment(cible, point, nextPoint, scheduleTime, nextScheduleTime);
                         }
@@ -3039,6 +3063,8 @@ export class AudioEngine {
     dsp.sendPanners?.forEach(n => { try { n.disconnect(); } catch (e) {} });
     [dsp.input, dsp.preFaderTap, dsp.gain, dsp.panner, dsp.analyzer, dsp.output, dsp.inputAnalyzer, dsp.outDelay]
       .forEach(n => { try { n?.disconnect(); } catch (e) {} });
+    meterBank.detachTrack(trackId);
+    disposeStrip(dsp.strip);
 
     this.tracksDSP.delete(trackId);
     this.recomputePdc();
@@ -3119,7 +3145,7 @@ export class AudioEngine {
     const preSilenced = track.isMuted || this.soloSilencedIds.has(track.id);
     const sendLevelOf = (send: { id: string; isEnabled: boolean; level: number; preFader?: boolean; isMuted?: boolean }) =>
       (!send.isEnabled || send.isMuted || isFeedCovered(track, send.id, allTracks) || (send.preFader && preSilenced)) ? 0 : send.level;
-    const signature = this.graphSignatureOf(track, coveredOut ? 'covered-out' : '');
+    const signature = this.graphSignatureOf(track, (coveredOut ? 'covered-out' : '') + stripSignature(track));
     if (dsp.graphSignature === signature) {
       const t = this.ctx.currentTime;
       // Pendant la lecture, un paramètre automatisé garde la valeur de sa courbe.
@@ -3130,6 +3156,7 @@ export class AudioEngine {
       if (!this.isPlaying) { try { dsp.gain.gain.cancelScheduledValues(t); dsp.gain.gain.setValueAtTime(target, t); } catch { /* */ } }
       else dsp.gain.gain.setTargetAtTime(target, t, 0.015);
       dsp.panner.pan.setTargetAtTime(this.automatedValue(track, 'pan', track.pan), t, 0.015);
+      if (dsp.strip) setStrip(dsp.strip, track, t, !this.isPlaying, { trim: this.automationOwns(track, TRIM_PARAM), width: this.automationOwns(track, WIDTH_PARAM) });
       this.pluginAutoSent.forEach((_, k) => { if (k.startsWith(`${track.id}|`)) this.pluginAutoSent.delete(k); });
 
       // Seuls les effets cables ont une entree (sur une piste gelee : ceux
@@ -3169,7 +3196,15 @@ export class AudioEngine {
     // the plugin's internal graph. The plugins manage their own internal connections.
     // We only disconnect the chain between plugins below by rebuilding it.
     
+    // Tête de tranche (R11) : entrée -> trim / Ø / mono / largeur -> effets.
+    disposeStrip(dsp.strip);
+    dsp.strip = buildStrip(this.ctx, track);
     let head: AudioNode = dsp.input;
+    if (dsp.strip) {
+      dsp.input.connect(dsp.strip.input);
+      head = dsp.strip.output;
+      setStrip(dsp.strip, track, now, true, { trim: this.automationOwns(track, TRIM_PARAM), width: this.automationOwns(track, WIDTH_PARAM) });
+    }
     // Sorties d'effets cablees au passage precedent : on ne coupe QUE ces liens
     // (pas le graphe interne des effets). Sans ca, reordonner ou geler une chaine
     // laissait l'ancien lien en place et doublait le signal.
@@ -3399,6 +3434,8 @@ export class AudioEngine {
     });
     dsp.outputs = outputs;
     this.recomputePdc();
+    // R11 : point de mesure de la piste (pré-fader : après les effets ; post : après fader et pan).
+    meterBank.attachTrack(track.id, dsp.preFaderTap!, dsp.analyzer);
   }
 
   private applyAutomation(track: Track, time: number) {
@@ -3437,7 +3474,7 @@ export class AudioEngine {
         }
         
         const now = this.ctx.currentTime;
-        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp));
+        const cible = this.cibleAutomation(lane.parameterName, dsp.gain.gain, dsp.panner.pan, dsp.sends, this.preParam(dsp), dsp.strip);
         if (cible) cible.setValueAtTime(value, now);
     });
 }
@@ -3541,6 +3578,26 @@ export class AudioEngine {
   public getTrackAnalyzer(trackId: string) { const dsp = this.tracksDSP.get(trackId); if (!dsp) return null; if (this.monitoringTrackId === trackId && dsp.inputAnalyzer) return dsp.inputAnalyzer; return dsp.analyzer; }
   public getPluginNodeInstance(trackId: string, pluginId: string) { return this.tracksDSP.get(trackId)?.pluginChain.get(pluginId)?.instance || null; }
   public setRecMode(active: boolean) { this.isRecMode = active; }
+  /**
+   * R11 : réduction de gain des dynamiques de la piste (compresseur, de-esser,
+   * limiteur…), en dB positifs, avec le détail par effet. null : aucune
+   * dynamique mesurable. Sur le master, le limiteur de sécurité compte aussi.
+   */
+  public getTrackGainReduction(trackId: string): { db: number; parts: GrPart[] } | null {
+    const dsp = this.tracksDSP.get(trackId);
+    const parts: GrPart[] = [];
+    dsp?.pluginChain.forEach((entry, pluginId) => {
+      if (dsp.chainIds && !dsp.chainIds.includes(pluginId)) return;
+      const db = readGainReduction(entry.instance);
+      if (db !== null) parts.push({ pluginId, db });
+    });
+    if (trackId === 'master' && this.masterLimiter && this.safetyLimiterOn) {
+      parts.push({ pluginId: 'safety-limiter', db: Math.abs(this.masterLimiter.reduction || 0) });
+    }
+    if (!parts.length) return null;
+    return { db: parts.reduce((s, p) => s + p.db, 0), parts };
+  }
+
   public getRMS(analyser: AnalyserNode | null): number {
     if (!analyser) return 0;
     const data = new Uint8Array(analyser.frequencyBinCount);

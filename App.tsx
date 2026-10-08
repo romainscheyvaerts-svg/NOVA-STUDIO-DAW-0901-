@@ -8,6 +8,7 @@ import { audioEngine } from './engine/AudioEngine';
 import { dspMonitor, safeModeStore } from './engine/dspMonitor';
 import { estimatedLoadPct as estimatedDspLoadPct, pickAutoFreeze, SafetyContext as DspSafetyContext } from './utils/dspLoad';
 import TransportBar from './components/TransportBar';
+import { LoudnessPanelHost } from './components/meters/LoudnessPanel';
 import MobileTransport from './components/MobileTransport';
 import AdminTemplateButton from './components/AdminTemplateButton';
 import ArrangementView from './components/ArrangementView';
@@ -7124,6 +7125,8 @@ function Studio() {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden [overflow:clip] relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
       {saveState.isSaving && <SaveOverlay progress={saveState.progress} message={saveState.message} />}
+      {/* Fenêtre Loudness du master (R11) : ouverte depuis le transport ou la console. */}
+      <LoudnessPanelHost />
 
       {/* TransportBar - Desktop, Tablet ET Mobile avec menu hamburger */}
       <div className="relative z-50">
