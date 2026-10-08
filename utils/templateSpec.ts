@@ -32,6 +32,21 @@
  *    stateB64 facultatif (état complet du plugin, si on l'a) ;
  *  - sends : vers une piste aux / bus par son nom, levelDb, pre (pré-fader), active.
  *
+ * Champs « structure Pro Tools » (relevé fidèle d'une session ; le constructeur
+ * les garde dans le modèle, sous `proTools` / `templateSpec`, sans tous les
+ * appliquer encore) :
+ *  - piste : hidden (masquée), inactive (piste désactivée), folder { kind:
+ *    'routing' | 'basic', name } (dossier parent), vca (VCA qui la pilote),
+ *    input (bus d'entrée exact), output (bus de sortie exact), channels ;
+ *  - insert : slot (a…j), state 'active' | 'bypass' | 'inactive' (trois états
+ *    distincts dans Pro Tools ; `active` reste accepté), wasInactiveInProTools,
+ *    targetGainReductionDb (réduction visée : NOVA cale le seuil sur le signal),
+ *    hosted (plugins contenus dans un hôte comme Blue Cat's PatchWork) ;
+ *  - envoi : slot (a…j), pan, mute, pre ;
+ *  - fiche : keepExcludedPlugins (« fidèle à la session Pro Tools » : les plugins
+ *    exclus par les règles du studio — SSL, Slate — sont gardés et chargés, avec
+ *    un avertissement, au lieu d'être écartés).
+ *
  * buildTemplateFromSpec() résout chaque plugin dans la liste VST du PC (nom +
  * éditeur, variantes tolérées : utils/vstMatch) et chaque réglage dans les
  * paramètres connus du plugin (base data/vst-knowledge ou relecture du pont).
@@ -49,11 +64,44 @@ export const SPEC_FORMAT = 'nova-template-spec';
 
 export type SpecParamValue = string | number | boolean;
 
+/** État d'un insert dans Pro Tools : actif, en bypass (chargé mais court-circuité) ou inactif (désactivé, aucun calcul). */
+export type SpecInsertState = 'active' | 'bypass' | 'inactive';
+
+/** Plugin hébergé dans un autre (Blue Cat's PatchWork : chaînes PRE / parallèles / POST). */
+export interface SpecHostedPlugin {
+  plugin: string;
+  vendor?: string;
+  section: 'pre' | 'parallel' | 'post';
+  /** Chaîne parallèle (1–8), ou rang dans PRE / POST. */
+  chain?: number;
+  slot?: number;
+  /** Faux : slot coupé dans l'hôte. */
+  active?: boolean;
+  /** « Plug-In Missing! » dans l'hôte. */
+  missing?: boolean;
+  params?: Record<string, SpecParamValue>;
+  note?: string;
+}
+
 export interface SpecInsert {
   plugin: string;
   vendor?: string;
-  /** Actif dans la session d'origine (défaut : oui). */
+  /** Actif dans la session d'origine (défaut : oui). Préférer `state`. */
   active?: boolean;
+  /** Lettre de l'insert dans Pro Tools (a…j). */
+  slot?: string;
+  /** État exact dans Pro Tools (prioritaire sur `active`). */
+  state?: SpecInsertState;
+  /** L'insert était inactif dans Pro Tools (noté même si le modèle l'active). */
+  wasInactiveInProTools?: boolean;
+  /** Réduction de gain visée en dB (compresseurs) : NOVA calera le seuil sur le vrai signal. */
+  targetGainReductionDb?: number;
+  /** Plugins contenus (hôte de type PatchWork). */
+  hosted?: SpecHostedPlugin[];
+  /** Licence absente ou expirée sur le PC d'origine (ex. SSL Native) : réglages non lisibles, insert gardé sans réglages. */
+  licenseExpired?: boolean;
+  /** Valeurs lues sur la fenêtre d'origine (potards sans afficheur : « ≈ ») : pour mémoire, non envoyées au plugin. */
+  readings?: Record<string, string>;
   /** Réglages : nom affiché → valeur texte affichée par le plugin. */
   params?: Record<string, SpecParamValue>;
   /** État complet du plugin (base64), si on l'a. */
@@ -69,6 +117,17 @@ export interface SpecSend {
   level?: number;
   pre?: boolean;
   active?: boolean;
+  /** Lettre de l'envoi dans Pro Tools (a…j). */
+  slot?: string;
+  /** Pan de l'envoi, même écriture que la piste. */
+  pan?: number | string;
+  /** Envoi coupé (mute). */
+  mute?: boolean;
+}
+
+export interface SpecFolder {
+  kind: 'routing' | 'basic';
+  name: string;
 }
 
 export type SpecKind = 'audio' | 'midi' | 'instrument' | 'bus' | 'aux' | 'return' | 'master';
@@ -85,6 +144,20 @@ export interface SpecTrack {
   solo?: boolean;
   /** Piste de sortie par son nom (« Bus voix », « Master »). Défaut : master. */
   output?: string;
+  /** Entrée exacte (bus ou entrée physique), pour mémoire. */
+  input?: string;
+  /** Mono / stéréo dans la session d'origine. */
+  channels?: 'mono' | 'stereo';
+  /** Piste masquée dans la session d'origine (prête à être affichée). */
+  hidden?: boolean;
+  /** Piste désactivée dans la session d'origine. */
+  inactive?: boolean;
+  /** Dossier parent. */
+  folder?: SpecFolder;
+  /** VCA qui pilote la piste. */
+  vca?: string;
+  /** Remarque libre. */
+  note?: string;
   inserts?: SpecInsert[];
   sends?: SpecSend[];
 }
@@ -102,8 +175,17 @@ export interface TemplateSpec {
   timeSignature?: string;
   /** « F# minor », « C major ». */
   key?: string;
+  /** « Fidèle à la session Pro Tools » : garder les plugins exclus par les règles du studio (SSL, Slate). */
+  keepExcludedPlugins?: boolean;
+  /** Dossiers simples (sans audio) et VCA de la session d'origine : pour mémoire (pas de piste NOVA). */
+  folders?: { name: string; kind: 'routing' | 'basic'; parent?: string; hidden?: boolean; inactive?: boolean; open?: boolean }[];
+  vcas?: { name: string; folder?: string; hidden?: boolean; inactive?: boolean; members?: string[] }[];
   tracks: SpecTrack[];
 }
+
+/** Actif dans la session d'origine ? (`state` prioritaire sur `active`). */
+export const insertWasActive = (ins: SpecInsert): boolean =>
+  ins.state ? ins.state === 'active' : ins.active !== false;
 
 /** Paramètre connu d'un plugin (base de connaissance ou relecture du pont). */
 export interface KnownParam {
@@ -297,9 +379,14 @@ export interface BuildOptions {
   knowledge?: KnowledgeEntry[];
   /** « Activer tous les effets » : les effets désactivés dans Pro Tools sont activés. */
   activateAll?: boolean;
+  /** Garder les plugins exclus (SSL, Slate…) ; prioritaire sur `spec.keepExcludedPlugins`. */
+  keepExcluded?: boolean;
   id?: string;
   now?: number;
 }
+
+/** Aucune exclusion (modèle fidèle à la session d'origine). */
+const NO_EXCLUSIONS = { exclusions: { vendors: [] as string[], plugins: [] as string[], allow: [] as string[] } };
 
 const knownParamsFor = (m: VstMatch | null, kb: KnowledgeEntry[] | undefined, name: string): KnownParam[] => {
   if (!kb?.length) return [];
@@ -314,6 +401,7 @@ export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {
   if (!spec || spec.format !== SPEC_FORMAT) throw new Error("Ce n'est pas une fiche de modèle NOVA (format « nova-template-spec »).");
   if (!Array.isArray(spec.tracks) || !spec.tracks.length) throw new Error('La fiche ne contient aucune piste.');
   const report: SpecBuildReport = { inserts: [], warnings: [], mixRules: [] };
+  const keepExcluded = opts.keepExcluded ?? !!spec.keepExcludedPlugins;
   const list: VstCandidate[] = opts.plugins || (opts.knowledge || []).map(e => ({ name: e.name, scanName: e.scanName, vendor: e.vendor, path: e.path, pluginName: e.pluginName ?? null, unavailable: !!e.status && e.status !== 'ok' }));
 
   // Retours (aux) : ceux qui reçoivent des envois ; bus : ceux où des pistes sortent.
@@ -339,21 +427,24 @@ export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {
     const plugins: PluginInstance[] = [];
     (t.inserts || []).forEach((ins, i) => {
       const pluginId = `pl-${id}-${i + 1}`;
-      const active = opts.activateAll ? true : ins.active !== false;
+      const wasActive = insertWasActive(ins);
+      const active = opts.activateAll ? true : wasActive;
       const bType = builtinTypeOf(ins);
       if (bType) {
         const params: Record<string, any> = {};
         for (const [k, v] of Object.entries(ins.params || {})) params[k] = v;
         const p = builtinPlugin(bType, { ...params, isEnabled: active }, pluginId, spec.bpm || 120);
         p.isEnabled = active;
-        if (ins.active === false) p.params.templateWasInactive = true;
+        if (!wasActive) p.params.templateWasInactive = true;
         plugins.push(p);
         report.inserts.push({ track: t.name, plugin: ins.plugin, vendor: 'NOVA', active, builtin: true, match: null, excluded: false, params: [], index: i, pluginId });
         return;
       }
-      const excluded = isExcluded({ name: ins.plugin, vendor: ins.vendor || '', path: '' });
-      const match = excluded ? null : resolveVst(ins.plugin, ins.vendor, list);
+      const ruleExcluded = isExcluded({ name: ins.plugin, vendor: ins.vendor || '', path: '' });
+      const excluded = ruleExcluded && !keepExcluded;
+      const match = excluded ? null : resolveVst(ins.plugin, ins.vendor, list, keepExcluded ? NO_EXCLUSIONS : undefined);
       if (excluded) report.warnings.push(`${t.name} : ${ins.plugin} est exclu (règle du studio : Slate sauf MetaTune / VerbSuite Classics, SSL).`);
+      else if (ruleExcluded) report.warnings.push(`${t.name} : ${ins.plugin} est hors règles du studio (SSL / Slate) mais GARDÉ : modèle fidèle à la session Pro Tools.`);
       else if (!match) report.warnings.push(`${t.name} : ${ins.plugin}${ins.vendor ? ` (${ins.vendor})` : ''} absent de ce PC.`);
       else if (match.kind !== 'exact') report.warnings.push(`${t.name} : ${ins.plugin} → ${match.plugin.name}${match.note ? ` (${match.note})` : ''}.`);
       const known = knownParamsFor(match, opts.knowledge, ins.plugin);
@@ -374,7 +465,17 @@ export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {
           novaQuiet: true,
           novaSettings: params.filter(x => x.key).map(x => (x.how === 'known' ? settingForParam(known.find(k => k.name === x.key), x.key!, x.value) : { name: x.key!, text: x.value })),
           ...(ins.stateB64 ? { stateB64: ins.stateB64 } : {}),
-          templateSpec: { plugin: ins.plugin, vendor: ins.vendor || '', active: ins.active !== false, ...(ins.note ? { note: ins.note } : {}) },
+          templateSpec: {
+            plugin: ins.plugin, vendor: ins.vendor || '', active: wasActive,
+            ...(ins.state ? { state: ins.state } : {}),
+            ...(ins.slot ? { slot: ins.slot } : {}),
+            ...(ins.wasInactiveInProTools || ins.state === 'inactive' ? { wasInactiveInProTools: true } : {}),
+            ...(ins.targetGainReductionDb !== undefined ? { targetGainReductionDb: ins.targetGainReductionDb } : {}),
+            ...(ins.hosted?.length ? { hosted: ins.hosted } : {}),
+            ...(ruleExcluded ? { outsideStudioRules: true } : {}),
+            ...(ins.licenseExpired ? { licenseExpired: true } : {}),
+            ...(ins.note ? { note: ins.note } : {}),
+          },
           ...(match ? {} : { templateMissing: true }),
         },
       };
@@ -385,7 +486,11 @@ export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {
       const to = byName.get(compact(s.to));
       if (!to) report.warnings.push(`${t.name} : envoi vers « ${s.to} » introuvable (ignoré).`);
       const level = s.levelDb !== undefined ? Math.min(1.5, dbToGain(s.levelDb)) : Math.max(0, Math.min(1.5, s.level ?? 0.25));
-      return to ? { id: to, level, isEnabled: s.active !== false, ...(s.pre ? { preFader: true } : {}) } : null;
+      return to ? {
+        id: to, level, isEnabled: s.active !== false && !s.mute, ...(s.pre ? { preFader: true } : {}),
+        ...(s.pan !== undefined ? { pan: panOf(s.pan) } : {}),
+        ...(s.slot || s.mute ? { proTools: { ...(s.slot ? { slot: s.slot } : {}), ...(s.mute ? { mute: true } : {}) } } : {}),
+      } as TrackSend : null;
     }).filter((x): x is TrackSend => !!x);
     return {
       id, name: t.name, type,
@@ -396,6 +501,9 @@ export const buildTemplateFromSpec = (spec: TemplateSpec, opts: BuildOptions = {
       outputTrackId: t.kind === 'master' ? '' : targetId(t.output, t.name),
       sends,
       plugins,
+      ...(t.hidden || t.inactive || t.folder || t.vca || t.input
+        ? { proTools: { ...(t.hidden ? { hidden: true } : {}), ...(t.inactive ? { inactive: true } : {}), ...(t.folder ? { folder: t.folder } : {}), ...(t.vca ? { vca: t.vca } : {}), ...(t.input ? { input: t.input } : {}) } }
+        : {}),
     } as TemplateTrack;
   });
 
