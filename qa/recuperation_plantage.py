@@ -215,6 +215,52 @@ def scenario(p, name, kill):
     return res
 
 
+def scenario_versions(p):
+    """Historique : plusieurs versions, restauration d'une ancienne depuis « Enregistrer » → « Versions de la session »."""
+    res = {"scenario": "historique_versions", "ok": False}
+    profile = Path(tempfile.mkdtemp(prefix="nova-recup-versions-", dir=os.environ.get("QA_TMP") or None))
+    proj = OUT / "recuperation_projet.novaproj.zip"
+    make_project(proj)
+    try:
+        ctx, page = launch(p, profile)
+        open_project(page, proj)
+        vers = "async () => { const m = await window.__novaAppModule('/utils/recoveryStore.ts'); return (await m.recoveryStore().listVersions()).map(v => ({ id: v.id, reason: v.reason })); }"
+        # Version 1 : projet ouvert (tempo 120) ; version 2 : tempo 97 et un repère de plus.
+        page.evaluate("() => window.DAW_CONTROL.setBpm(120)")
+        t0 = time.time()
+        while time.time() - t0 < 25 and not page.evaluate(vers): page.wait_for_timeout(1000)
+        page.evaluate("() => window.DAW_CONTROL.setBpm(97)")
+        t0 = time.time()
+        while time.time() - t0 < 25 and len(page.evaluate(vers)) < 2: page.wait_for_timeout(1000)
+        res["versions"] = len(page.evaluate(vers))
+        res["tempo_avant_restauration"] = page.evaluate("() => window.DAW_CONTROL.getState().bpm")
+        page.keyboard.press("Control+s"); page.wait_for_timeout(900)
+        page.get_by_test_id("open-versions").click()
+        dlg = page.get_by_test_id("versions-dialog")
+        dlg.wait_for(timeout=10000)
+        page.wait_for_timeout(800)
+        page.screenshot(path=str(OUT / "recup_versions_liste.png"))
+        rows = dlg.get_by_role("button", name="Restaurer")
+        res["lignes"] = rows.count()
+        rows.nth(rows.count() - 1).click()  # la plus ancienne
+        for _ in range(30):
+            page.wait_for_timeout(500)
+            if page.evaluate("() => window.DAW_CONTROL.getState().bpm") == 120: break
+        page.wait_for_timeout(1500)
+        res["tempo_apres_restauration"] = page.evaluate("() => window.DAW_CONTROL.getState().bpm")
+        res["versions_apres"] = len(page.evaluate(vers))
+        res["raisons"] = [v["reason"] for v in page.evaluate(vers)]
+        page.screenshot(path=str(OUT / "recup_versions_restauree.png"))
+        res["ok"] = res["tempo_avant_restauration"] == 97 and res["tempo_apres_restauration"] == 120 and "restore" in res["raisons"]
+        try: ctx.close()
+        except Exception: pass
+    except Exception as e:  # noqa
+        res["erreur"] = f"{type(e).__name__}: {str(e)[:400]}"
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
+    return res
+
+
 if __name__ == "__main__":
     out = {"date": time.strftime("%Y-%m-%d %H:%M"), "url": BASE, "duree_prise_visee_s": REC_SECONDS, "scenarios": []}
     with sync_playwright() as p:
@@ -222,6 +268,9 @@ if __name__ == "__main__":
             r = scenario(p, name, kill)
             print(json.dumps({k: v for k, v in r.items() if k != "etat_apres"}, ensure_ascii=False))
             out["scenarios"].append(r)
+        r = scenario_versions(p)
+        print(json.dumps(r, ensure_ascii=False))
+        out["scenarios"].append(r)
     out["ok"] = all(s.get("ok") for s in out["scenarios"])
     (OUT / "recuperation_plantage.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     print("OK" if out["ok"] else "ÉCHEC", "→", OUT / "recuperation_plantage.json")

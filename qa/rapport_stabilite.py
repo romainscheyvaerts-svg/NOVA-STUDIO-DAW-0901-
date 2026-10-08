@@ -205,6 +205,9 @@ th{background:#f0f0f2}.grid{display:grid;grid-template-columns:repeat(auto-fit,m
     if rec:
         h.append("<h2>4. Récupération après plantage (navigateur réellement tué au milieu d'une prise)</h2><table><tr><th>Scénario</th><th>Capté jusqu'à la mise à mort</th><th>Prise récupérée</th><th>Perte</th><th>Projet revenu</th><th>Résultat</th></tr>")
         for s in rec.get("scenarios", []):
+            if s.get("scenario") == "historique_versions":
+                h.append(f"<tr><td>historique des versions ({esc(s.get('versions'))} versions, restauration de la plus ancienne)</td><td colspan='3'>tempo {esc(s.get('tempo_avant_restauration'))} → {esc(s.get('tempo_apres_restauration'))} après restauration ; la version d'avant gardée ({esc(', '.join(s.get('raisons') or []))})</td><td>—</td><td class='{'ok' if s.get('ok') else 'ko'}'>{'OK' if s.get('ok') else 'ÉCHEC'}</td></tr>")
+                continue
             h.append(f"<tr><td>{esc(s['scenario'].replace('_', ' '))} ({esc(s.get('processus_tues'))} processus tués)</td><td>{esc(s.get('capte_jusqu_a_la_mise_a_mort_s'))} s</td><td>{esc(s.get('prise_recuperee_s'))} s</td><td>{esc(s.get('perte_s'))} s</td><td>{'oui' if s.get('projet_revenu') else 'non'}</td><td class='{'ok' if s.get('ok') else 'ko'}'>{'OK' if s.get('ok') else 'ÉCHEC'}</td></tr>")
         h.append("</table><p class='note'>Avant : sauvegarde automatique seulement à l'arrêt (zip complet), jamais pendant une prise : une prise en cours était perdue en entier.</p>")
 

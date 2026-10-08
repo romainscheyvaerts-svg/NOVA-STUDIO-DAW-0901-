@@ -4024,7 +4024,7 @@ function Studio() {
   const lastSavedSigRef = useRef<unknown[] | null>(null);
   const purgeTakesAfterSaveRef = useRef(false);
   // Dernière version écrite (diagnostic) : une ref, pas un état (pas de rendu de tout le studio toutes les 15 s).
-  const lastAutosaveRef = useRef<{ at: number; ms: number } | null>(null);
+  const lastAutosaveRef = useRef<{ at: number; ms: number; syncMs: number; audioWritten: number } | null>(null);
   const autosaveNow = useCallback(async (reason: VersionReason = 'auto', force = false) => {
     if (autosaveBusy.current) { autosavePending.current = reason; return; }
     const st = stateRef.current;
@@ -4037,7 +4037,10 @@ function Studio() {
     if (!hasContent) return;
     autosaveBusy.current = true;
     try {
+      const t0 = performance.now();
       const snap = snapshotOf(st, user?.owned_instruments || []);
+      // Travail synchrone (fil de l'interface) : la mise en JSON. L'écriture IndexedDB est asynchrone.
+      const syncMs = Math.round((performance.now() - t0) * 10) / 10;
       const r = await recoveryStore().saveVersion({
         projectId: st.id, name: st.name || 'Session', reason, ...snap,
         getAudio: id => {
@@ -4046,7 +4049,7 @@ function Studio() {
         },
       });
       lastSavedSigRef.current = sig;
-      if (r) lastAutosaveRef.current = { at: r.versionId, ms: r.ms };
+      if (r) lastAutosaveRef.current = { at: r.versionId, ms: r.ms, syncMs, audioWritten: r.audioWritten };
       if (purgeTakesAfterSaveRef.current) { purgeTakesAfterSaveRef.current = false; await recoveryStore().purgeTakes(); }
       if (!autosaveNotified.current) {
         autosaveNotified.current = true;
@@ -5847,6 +5850,8 @@ function Studio() {
         bufferSeconds: Math.round(audioBufferRegistry.ids().reduce((s, id) => s + (audioBufferRegistry.get(id)?.duration || 0) * (audioBufferRegistry.get(id)?.numberOfChannels || 1), 0)),
         tracks: stateRef.current.tracks.length,
         clips: stateRef.current.tracks.reduce((s, t) => s + t.clips.length, 0),
+        // Dernière sauvegarde automatique : heure et durée (ms) — elle ne doit jamais geler l'interface.
+        autosave: lastAutosaveRef.current,
       }),
     };
     // Dépôt d'un fichier ou d'un beat sur l'en-tête d'une piste (TrackHeader) :
