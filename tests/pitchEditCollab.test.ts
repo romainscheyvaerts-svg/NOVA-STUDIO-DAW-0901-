@@ -21,8 +21,11 @@ describe('clip corrigé en collaboration', () => {
   });
   const voice = makeTrack({ id: 'track-rec-main', name: 'Voix', clips: [corrected] });
 
-  it('le son envoyé est le son corrigé (comme n’importe quelle prise)', () => {
-    expect(contentBufferIds(voice)).toEqual(['justesse-c1-1']);
+  it('le son envoyé est le son corrigé, et la prise d’origine (l’autre peut revenir à l’original)', () => {
+    // Collaboration pro : la prise d'origine voyage aussi (déjà en ligne la plupart du temps :
+    // c'était la prise, ses morceaux ne repartent pas), sinon l'ingé qui corrige laisse
+    // l'artiste sans « revenir à l'original ».
+    expect(contentBufferIds(voice)).toEqual(['justesse-c1-1', 'rec-1']);
   });
 
   it('le clip voyage avec ses champs (position, nom, justesse)', () => {

@@ -66,7 +66,10 @@ export async function call<T = any>(action: string, body: Record<string, unknown
     try { payload = await (error as any).context?.json?.(); } catch { /* corps illisible */ }
     const status = (error as any).context?.status;
     if (status === 409 && payload) throw new CloudConflictError(payload.version, payload.updated_at, payload.updated_from);
-    throw new Error(payload?.error || error.message || 'Erreur réseau');
+    // Code HTTP gardé : la collaboration distingue « réseau » (on réessaie) et « refusé » (inutile de réessayer).
+    const err = new Error(payload?.error || error.message || 'Erreur réseau') as Error & { status?: number };
+    if (typeof status === 'number') err.status = status;
+    throw err;
   }
   return data as T;
 }

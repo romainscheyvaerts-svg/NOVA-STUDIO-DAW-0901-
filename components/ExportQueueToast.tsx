@@ -27,7 +27,7 @@ const ExportQueueToast: React.FC = () => {
   if (!jobs.length) return null;
   const reveal = canRevealDownloads();
   return (
-    <div className="fixed z-[1300] bottom-20 md:bottom-4 left-4 right-4 md:left-auto md:w-[380px] flex flex-col gap-2 pointer-events-none" aria-live="polite" data-export-queue="">
+    <div className="fixed z-[1300] bottom-20 md:bottom-4 left-4 right-4 md:left-auto md:w-[380px] [.nova-collab-open_&]:md:left-4 [.nova-collab-open_&]:md:right-auto flex flex-col gap-2 pointer-events-none" aria-live="polite" data-export-queue="">
       {jobs.slice(-4).map(j => (
         <div key={j.id} role="status" data-export-job={j.status}
           className="pointer-events-auto rounded-2xl border border-nv-line/15 bg-nv-raised shadow-2xl p-3 text-nv-ink">

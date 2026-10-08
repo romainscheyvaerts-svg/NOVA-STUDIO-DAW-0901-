@@ -4332,6 +4332,33 @@ export class AudioEngine {
   /** Contexte audio de lecture (lecteur du morceau de référence). */
   public getAudioContext(): AudioContext | null { return this.ctx; }
 
+  /**
+   * Collaboration : le mix master (après le limiteur de sécurité, comme on
+   * l'entend) en flux, pour l'envoyer en direct à l'artiste (services/CollabRtc,
+   * « Écouter le mix de l'ingé »). Créé une fois, réutilisé.
+   */
+  private collabMixDest: MediaStreamAudioDestinationNode | null = null;
+  public getCollabMixStream(): MediaStream | null {
+    if (!this.ctx || !this.masterAnalyzer) return null;
+    if (!this.collabMixDest) {
+      this.collabMixDest = this.ctx.createMediaStreamDestination();
+      this.collabMixDest.channelCount = 2;
+      this.masterAnalyzer.connect(this.collabMixDest);
+    }
+    return this.collabMixDest.stream;
+  }
+
+  /**
+   * Collaboration : couper SA sortie le temps d'écouter le mix de l'ingé en
+   * direct (sinon on entend les deux, décalés). N'affecte ni l'export ni le flux.
+   */
+  private collabOutputMuted = false;
+  public setCollabOutputMuted(muted: boolean) {
+    this.collabOutputMuted = muted;
+    if (this.mainOut && this.ctx) this.mainOut.gain.setTargetAtTime(muted ? 0 : 1, this.ctx.currentTime, 0.02);
+  }
+  public isCollabOutputMuted() { return this.collabOutputMuted; }
+
   /** Entrée des mesures du master (après limiteur de sécurité) : la référence y passe pour être entendue et mesurée. */
   public getMasterMeterInput(): AudioNode | null { return this.masterAnalyzer; }
   /** Où envoyer les sons de service (décompte) : le master, pour qu'ils sortent aussi en ASIO. */
