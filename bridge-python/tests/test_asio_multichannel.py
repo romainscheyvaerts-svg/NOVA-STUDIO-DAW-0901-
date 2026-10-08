@@ -145,6 +145,43 @@ class TestStream(Base):
         self.assertLess(np.max(np.abs(live[:, 6:])), 1e-6)           # sorties 7-8 : rien
         st.stop()
 
+    def _play(self, st, fake, pattern, callbacks):
+        """Le DAW envoie ses blocs selon `pattern(k)` (nombre de blocs remis avant le
+        callback k) ; rend la part de silence dans la 2e moitié de la sortie."""
+        t = 0
+        for k in range(callbacks):
+            for _ in range(pattern(k)):
+                x = (0.2 + 0.1 * np.sin(2 * np.pi * 1000 * (t + np.arange(256)) / SR)).astype(np.float32)
+                st.write_output(np.stack([x, x], 1), [0, 1])
+                t += 256
+            fake.step(1)
+        out = fake.captured()[:, 0]
+        half = out[len(out) // 2:]
+        return float(np.mean(np.abs(half) < 1e-7))
+
+    def test_output_absorbs_bursty_daw(self):
+        """Navigateur occupé : les blocs du DAW arrivent par paquets (10 blocs toutes les
+        10 périodes, ≈ 58 ms). Avant, la file retombait à 2 blocs dès qu'elle en dépassait 6 :
+        ~80 % de silence. La marge s'adapte (une fois) et le son passe en entier."""
+        st, fake = self.open_stream(input_channels=0, output_channels=0)
+        silence = self._play(st, fake, lambda k: 10 if k % 10 == 0 else 0, 600)
+        self.assertLess(silence, 0.02)
+        stats = st.get_stats()
+        self.assertLessEqual(stats['queue_ms'], (24 + 4) * 256 / SR * 1000 + 1e-6)   # latence toujours bornée
+        self.assertGreater(stats['out_target_ms'], 2 * 256 / SR * 1000)
+        st.stop()
+
+    def test_output_steady_daw_keeps_low_latency(self):
+        """Blocs réguliers : la marge reste au minimum (2 blocs), aucun bloc jeté."""
+        st, fake = self.open_stream(input_channels=0, output_channels=0)
+        silence = self._play(st, fake, lambda k: 3 if k == 0 else 1, 600)
+        self.assertEqual(silence, 0.0)
+        stats = st.get_stats()
+        self.assertAlmostEqual(stats['out_target_ms'], 2 * 256 / SR * 1000, places=3)
+        self.assertLessEqual(stats['queue_ms'], 3 * 256 / SR * 1000 + 1e-6)
+        self.assertEqual(stats['dropped_frames'], 0)
+        st.stop()
+
     def test_direct_monitor_routes(self):
         st, fake = self.open_stream(input_channels=0, output_channels=0)
         st.config.direct_monitor = True

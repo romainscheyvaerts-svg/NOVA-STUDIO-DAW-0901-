@@ -18,6 +18,13 @@ E. Mixes casque : 2 mixes (artiste sur 3-4, ingé sur 5-6), sortie MESURÉE sur 
    changé pour de vrai (flux recréé) ; carte à une seule paire de sorties → message clair.
 F. Captures PC, tablette, téléphone.
 
+Machine chargée (labo de calcul en parallèle) : les durées se comptent sur l'horloge du SON
+(AudioContext, wait_audio), pas sur la montre, et les niveaux de la carte se mesurent sur les
+passages sans trou de blocs (clean_runs / levels_clean). Mesuré le 08/10 : pendant la lecture,
+le moteur audio headless rendait 2,3 s de son pour 2,9 s de montre, et 25 à 90 % de la
+capture de la carte était faite de blocs de silence ; prises trop courtes (dernier tour de
+boucle inachevé, plantage comparé à la montre) et niveaux faussés en découlaient.
+
 Usage : NOVA_URL=http://127.0.0.1:3455/ PYTHONIOENCODING=utf-8 python qa/r14_r15_multipiste.py
 Résultats : D:\\1 WORK\\CONTENU\\nova-r14-r15\\ (r14_r15.json + captures + projets enregistrés)
 """
@@ -149,6 +156,72 @@ def tone_db(x, f, sr=SR, seg=4096, agg="median"):
     return db(float(np.median(amps) if agg == "median" else np.max(amps)))
 
 
+def clean_runs(out, min_gap=32, guard=64, min_len=2048):
+    """Passages SANS trou de blocs dans une capture de la carte (images × canaux).
+
+    Machine très chargée : le moteur audio du navigateur headless rend moins vite que le
+    temps réel pendant la lecture (mesuré : 2,3 s de son pour 2,9 s de montre) et la carte
+    simulée joue des blocs de silence entre deux blocs reçus (25 à 90 % de la capture). Un
+    trou = au moins `min_gap` échantillons à zéro sur TOUS les canaux ; ses bords (± `guard`)
+    sont écartés aussi. Les niveaux se mesurent sur le reste."""
+    x = np.asarray(out)
+    if x.ndim == 1:
+        x = x[:, None]
+    silent = np.all(np.abs(x) < 1e-7, axis=1).astype(np.int8)
+    bad = np.zeros(len(x), bool)
+    edges = np.flatnonzero(np.diff(np.concatenate(([0], silent, [0]))))
+    for a, b in zip(edges[::2], edges[1::2]):
+        if b - a >= min_gap:
+            bad[max(0, a - guard):min(len(x), b + guard)] = True
+    good = np.flatnonzero(np.diff(np.concatenate(([0], (~bad).astype(np.int8), [0]))))
+    return [(int(a), int(b)) for a, b in zip(good[::2], good[1::2]) if b - a >= min_len]
+
+
+LS_FREQS = FREQS + [660.0]
+
+
+def levels_clean(out, ch, runs, freqs=LS_FREQS):
+    """Niveau (dB crête) de chaque raie, par moindres carrés sur chaque passage sans trou
+    (toutes les raies connues ajustées ensemble : pas de fuite d'une raie sur l'autre),
+    médiane des passages. Aucun passage propre : −120 dB."""
+    amps = {f: [] for f in freqs}
+    for a, b in runs:
+        y = np.asarray(out[a:b, ch], dtype=np.float64)
+        k = np.arange(b - a)
+        cols = [fn(2 * np.pi * f * k / SR) for f in freqs for fn in (np.sin, np.cos)]
+        c, *_ = np.linalg.lstsq(np.column_stack(cols + [np.ones(len(k))]), y, rcond=None)
+        for i, f in enumerate(freqs):
+            amps[f].append(math.hypot(c[2 * i], c[2 * i + 1]))
+    return {f: (db(float(np.median(v))) if v else -120.0) for f, v in amps.items()}
+
+
+def clic_db_clean(out, ch, runs):
+    """Clic du métronome (1000 / 1500 Hz) : maximum sur les passages sans trou."""
+    best = -120.0
+    for a, b in runs:
+        if b - a >= 4096:
+            best = max(best, tone_db(out[a:b, ch], 1000, agg="max"), tone_db(out[a:b, ch], 1500, agg="max"))
+    return best
+
+
+def dump_clean(seconds, min_clean=0.35, tries=4, page=None):
+    """Capture des sorties ; si les trous de blocs en couvrent trop, on recapture (la lecture
+    continue) : attente de stabilité, bornée. Rend (capture, passages propres, part propre)."""
+    best = None
+    for i in range(tries):
+        out = dump_outputs(seconds)
+        runs = clean_runs(out)
+        part = sum(b - a for a, b in runs) / max(1, len(out))
+        if best is None or part > best[2]:
+            best = (out, runs, part)
+        if part >= min_clean:
+            break
+        if page is not None:
+            page.wait_for_timeout(400)
+    res["mesures"].setdefault("trous_de_blocs", []).append({"part_propre": round(best[2], 3), "essais": i + 1})
+    return best
+
+
 # ─── navigateur ──────────────────────────────────────────────────────────────
 
 INIT = """
@@ -204,7 +277,27 @@ def armed_state(page):
     return page.evaluate(f"""async () => {{ const e = {ENGINE}; return {{ ui: window.DAW_CONTROL.getState().tracks.filter(t => t.isTrackArmed).map(t => t.id), engine: e.armedIds(), info: e.getInputInfo() }}; }}""")
 
 
-def record(page, seconds, start=0.0):
+AUDIO_NOW = f"async () => {{ const e = {ENGINE}; return e.ctx ? e.ctx.currentTime : 0; }}"
+
+
+def wait_audio(page, seconds, label=None):
+    """Attend `seconds` sur l'horloge du SON (AudioContext), pas sur la montre.
+
+    Machine très chargée : le moteur audio du navigateur headless (sortie factice) prend du
+    retard sur la montre (mesuré : 3,8 s de son pour 4,6 s de montre). Une prise dure le temps
+    du son : attendre la montre donnait des prises trop courtes (dernier tour de boucle
+    inachevé, prise neuve plus courte que la zone mesurée). Plafond : 4× la durée + 20 s."""
+    t0 = page.evaluate(AUDIO_NOW); w0 = time.time()
+    while time.time() - w0 < seconds * 4 + 20:
+        if page.evaluate(AUDIO_NOW) - t0 >= seconds:
+            break
+        page.wait_for_timeout(40)
+    son, montre = page.evaluate(AUDIO_NOW) - t0, time.time() - w0
+    res["mesures"].setdefault("horloges", []).append({"etape": label, "son_s": round(son, 3), "montre_s": round(montre, 3)})
+    return son
+
+
+def record(page, seconds, start=0.0, label=None):
     page.evaluate("(t) => window.DAW_CONTROL.seek(t)", start)
     page.wait_for_timeout(300)
     page.evaluate("() => window.DAW_CONTROL.toggleRecord()")
@@ -212,7 +305,7 @@ def record(page, seconds, start=0.0):
         if page.evaluate("() => window.DAW_CONTROL.getState().isRecording"):
             break
         page.wait_for_timeout(50)
-    page.wait_for_timeout(int(seconds * 1000))
+    wait_audio(page, seconds, label)
     if page.evaluate("() => window.DAW_CONTROL.getState().isRecording"):
         page.evaluate("() => window.DAW_CONTROL.toggleRecord()")
     for _ in range(100):
@@ -349,14 +442,19 @@ def run(p, ctx, page, profile, fake, proj_path, errs):
     # Maj+clic sur Micro 3 : armée seule.
     page.get_by_role("button", name="Armer l'enregistrement : Micro 3").first.click(modifiers=["Shift"])
     page.wait_for_timeout(2500)
-    st3 = armed_state(page)
-    note = page.evaluate("() => document.body.innerText.match(/navigateur ne donne que[^\\n]*/)?.[0] || null")
+    # Machine chargée : l'entrée se rouvre plus lentement ; on attend l'état stable (10 s au plus).
+    for _ in range(40):
+        st3 = armed_state(page)
+        note = page.evaluate("() => document.body.innerText.match(/navigateur ne donne que[^\\n]*/)?.[0] || null")
+        if st3["ui"] == ["mic3"] and st3["engine"] == ["mic3"] and note:
+            break
+        page.wait_for_timeout(250)
     ok("A · Maj+clic arme la piste seule (comme Pro Tools)", st3["ui"] == ["mic3"] and st3["engine"] == ["mic3"], st3["ui"])
     ok("A · entrée 3 demandée au navigateur (2 entrées) : message clair", bool(note) and "Nova Studio" in (note or ""), note)
     page.screenshot(path=str(OUT / "A2_entree_absente_message_pc.png"))
     arm(page, ["mic3"], False)
     arm(page, ["mic1", "mic2"])
-    record(page, 4.0, 0.0)
+    record(page, 4.0, 0.0, "A")
     proj, z = save_zip(page, "A_navigateur_2_pistes")
     a, worst = analyse_pass(proj, z, ["mic1", "mic2"], "A_navigateur")
     ok("A · chaque piste a SON signal (entrée 1 = 220 Hz, entrée 2 = 330 Hz)",
@@ -396,7 +494,7 @@ def run_bridge(p, ctx, page, profile, fake, proj_path, errs):
        sorted(st["engine"]) == sorted(MICS) and st["info"]["mode"] == "asio" and sorted(tuple(a["channels"]) for a in st["info"]["armed"]) == [(0,), (1,), (2,), (3,)],
        st["info"])
     page.screenshot(path=str(OUT / "B1_quatre_pistes_armees_vumetres_pc.png"))
-    record(page, 5.0, 0.0)
+    record(page, 5.0, 0.0, "B")
     proj, z = save_zip(page, "B_pont_4_pistes")
     b, worst = analyse_pass(proj, z, MICS, "B_pont_4_pistes")
     ok("B · chaque prise contient le bon signal (220 / 330 / 440 / 550 Hz)",
@@ -462,7 +560,7 @@ def run_multi_tools(p, ctx, page, profile, fake, proj_path, errs):
     # ── C2. Loop Record multipiste : boucle 1,0 → 3,0 s, un peu plus de 2 tours ──
     page.evaluate("() => window.DAW_CONTROL.setLoop(true, 1.0, 3.0)")
     page.wait_for_timeout(500)
-    record(page, 4.6, 1.0)
+    record(page, 4.6, 1.0, "C2 loop record")
     page.evaluate("() => window.DAW_CONTROL.setLoop(false, 1.0, 3.0)")
     page.wait_for_timeout(500)
     page.screenshot(path=str(OUT / "C2_loop_record_multipiste_couloirs_pc.png"))
@@ -505,7 +603,7 @@ def run_multi_tools(p, ctx, page, profile, fake, proj_path, errs):
 
     # ── C4. Capture après coup multipiste : lecture 0,5 → 2,8 s sans REC, puis « Capturer » ──
     page.evaluate("() => window.DAW_CONTROL.seek(0.5)"); page.wait_for_timeout(300)
-    page.evaluate("() => window.DAW_CONTROL.togglePlay()"); page.wait_for_timeout(2300)
+    page.evaluate("() => window.DAW_CONTROL.togglePlay()"); wait_audio(page, 2.3, "C4 lecture")
     page.evaluate("() => window.DAW_CONTROL.togglePlay()"); page.wait_for_timeout(600)
     page.evaluate("() => window.DAW_CONTROL.captureLastTake()"); page.wait_for_timeout(2500)
     proj, z = save_zip(page, "C4_capture")
@@ -540,7 +638,8 @@ def run_crash(p, ctx, page, profile, fake, proj_path, errs):
             break
         page.wait_for_timeout(50)
     rec_start = time.time()
-    page.wait_for_timeout(4000)
+    a0 = page.evaluate(AUDIO_NOW)
+    wait_audio(page, 4.0, "D prise avant plantage")
     page.screenshot(path=str(OUT / "D1_prise_multipiste_avant_plantage_pc.png"))
     key = str(profile).lower()
     main_pr, kids = None, []
@@ -554,10 +653,13 @@ def run_crash(p, ctx, page, profile, fake, proj_path, errs):
             pass
     renderers = [k for k in kids if any(a.startswith("--type=renderer") for a in (k.cmdline() or []))]
     kill_t = time.time()
+    son_avant = page.evaluate(AUDIO_NOW) - a0
     for r in renderers:
         try: r.kill()
         except Exception: pass
-    res["plantage"] = {"processus_rendu_tues": len(renderers), "prise_avant_mise_a_mort_s": round(kill_t - rec_start, 2)}
+    # Durée de la prise au moment du plantage : horloge du SON (la montre avance plus vite
+    # quand la machine est chargée ; voir wait_audio).
+    res["plantage"] = {"processus_rendu_tues": len(renderers), "prise_avant_mise_a_mort_s": round(son_avant, 2), "montre_s": round(kill_t - rec_start, 2)}
     time.sleep(2)
     page = ctx.new_page()
     page.set_default_timeout(20000)
@@ -630,7 +732,7 @@ def run_cues(p, ctx, page, profile, fake, proj_path, errs):
       window.DAW_CONTROL.updateTrack({ ...t, clips: t.clips.map(c => /récupérée/.test(c.name || '') ? { ...c, isMuted: true } : c) }); }""")
     page.wait_for_timeout(1000)
     arm(page, MICS)
-    record(page, 4.0, 0.0)
+    record(page, 7.0, 0.0, "E")
     arm(page, MICS, False)
     # Fenêtre « Mixes casque » : création des deux mixes depuis l'interface.
     page.evaluate("() => window.dispatchEvent(new Event('nova:open-cue-mixes'))")
@@ -664,13 +766,13 @@ def run_cues(p, ctx, page, profile, fake, proj_path, errs):
         mbtn.first.click(); page.wait_for_timeout(400)
     # Lecture depuis 0,4 s (les prises jouent), mesure de 1,5 s en sortie de la carte.
     page.evaluate("() => window.DAW_CONTROL.seek(0.4)"); page.wait_for_timeout(300)
-    page.evaluate("() => window.DAW_CONTROL.togglePlay()"); page.wait_for_timeout(2200)
-    out = dump_outputs(1.5)
+    page.evaluate("() => window.DAW_CONTROL.togglePlay()"); wait_audio(page, 2.2, "E lecture")
+    out, runs, part = dump_clean(1.5, page=page)
     page.evaluate("() => window.DAW_CONTROL.togglePlay()"); page.wait_for_timeout(500)
-    lv = {pair: {f: round(tone_db(out[:, ch], f), 1) for f in FREQS} for pair, ch in (("1-2 G", 0), ("3-4 G", 2), ("5-6 G", 4), ("5-6 D", 5))}
+    lv = {pair: {f: round(v, 1) for f, v in levels_clean(out, ch, runs).items() if f in FREQS} for pair, ch in (("1-2 G", 0), ("3-4 G", 2), ("5-6 G", 4), ("5-6 D", 5))}
     # Clic du métronome (son « CLICK » : 1000 Hz, 1500 Hz accentué) ; les impulsions des prises n'y pèsent rien.
-    clicks = {k: round(max(tone_db(out[:, ch], 1000, agg="max"), tone_db(out[:, ch], 1500, agg="max")), 1) for k, ch in (("3-4", 2), ("5-6", 4))}
-    res["mesures"]["mixes_casque"] = {"raies_dB": lv, "clic_dB": clicks}
+    clicks = {k: round(clic_db_clean(out, ch, runs), 1) for k, ch in (("3-4", 2), ("5-6", 4))}
+    res["mesures"]["mixes_casque"] = {"raies_dB": lv, "clic_dB": clicks, "part_sans_trou": round(part, 3)}
     a = lv["3-4 G"]; i = lv["5-6 G"]; d = lv["5-6 D"]; m0 = lv["1-2 G"]
     ok("E · sortie 1-2 : le mix principal (les 4 pistes au même niveau)", max(m0.values()) - min(m0.values()) < 1.5 and min(m0.values()) > -40, m0)
     ok("E · casque artiste (3-4) mesuré : Micro 1 plein (comme sur 1-2), Micro 2 à −12 dB (±0,5), Micro 3 et 4 coupés",
@@ -685,8 +787,8 @@ def run_cues(p, ctx, page, profile, fake, proj_path, errs):
     arm(page, ["live"])
     page.wait_for_timeout(1500)
     stats = bridge_call({"action": "QA_STATS"}, "QA_STATS")
-    out2 = dump_outputs(1.0)
-    live = {k: round(tone_db(out2[:, ch], 660), 1) for k, ch in (("1-2", 0), ("3-4", 2), ("5-6", 4))}
+    out2, runs2, _ = dump_clean(1.0, page=page)
+    live = {k: round(levels_clean(out2, ch, runs2)[660.0], 1) for k, ch in (("1-2", 0), ("3-4", 2), ("5-6", 4))}
     res["mesures"]["voix_directe"] = {"raie_660_dB": live, "routes_du_pont": stats.get("monitor_routes")}
     ok("E · voix en direct par le pont : 1-2 au niveau du retour, casque artiste à −6 dB, absente du casque ingé (coupée)",
        stats.get("direct") and abs((live["1-2"] - live["3-4"]) - 6.02) < 0.5 and live["5-6"] < live["1-2"] - 50 and live["1-2"] > -20,
@@ -697,8 +799,8 @@ def run_cues(p, ctx, page, profile, fake, proj_path, errs):
     page.screenshot(path=str(OUT / "E2_mixes_casque_regles_pc.png"))
     # Écouter le casque de l'artiste sur la sortie principale.
     page.get_by_test_id(f"cue-listen-{art['id']}").click(); page.wait_for_timeout(1200)
-    out3 = dump_outputs(0.8)
-    lis = round(tone_db(out3[:, 0], 660), 1)
+    out3, runs3, _ = dump_clean(0.8, page=page)
+    lis = round(levels_clean(out3, 0, runs3)[660.0], 1)
     ok("E · « Écouter » : la sortie 1-2 joue le casque de l'artiste (voix à −6 dB comme dans son casque)", abs(lis - live["3-4"]) < 0.6, {"sortie_1_2_660_dB": lis, "casque_artiste": live["3-4"]})
     page.get_by_test_id(f"cue-listen-{art['id']}").click(); page.wait_for_timeout(400)
     page.keyboard.press("Escape")
@@ -746,8 +848,9 @@ def run_one_pair_and_screens(p, ctx, page, profile, fake, proj_path, errs):
         arm(page, ["live"])
         art = page.evaluate("() => window.DAW_CONTROL.getState().cueMixes[0].id")
         page.get_by_test_id(f"cue-listen-{art}").click(); page.wait_for_timeout(1200)
-        out = dump_outputs(0.8)
-        ok("E · carte à une paire : « Écouter » le casque de l'artiste sur 1-2 (voix à −6 dB)", abs(tone_db(out[:, 0], 660) - (db(0.2) - 6.02)) < 0.8, {"sortie_1_660_dB": round(tone_db(out[:, 0], 660), 1)})
+        out, runs1, _ = dump_clean(0.8, page=page)
+        v660 = levels_clean(out, 0, runs1)[660.0]
+        ok("E · carte à une paire : « Écouter » le casque de l'artiste sur 1-2 (voix à −6 dB)", abs(v660 - (db(0.2) - 6.02)) < 0.8, {"sortie_1_660_dB": round(v660, 1)})
         page.get_by_test_id(f"cue-listen-{art}").click(); page.wait_for_timeout(300)
         page.evaluate("() => { const b = document.querySelector('[aria-label=\"Fermer les mixes casque\"]'); if (b) b.click(); }")
         arm(page, ["live"], False)

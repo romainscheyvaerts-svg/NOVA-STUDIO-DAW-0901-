@@ -15,7 +15,21 @@ import ArrangementView from './components/ArrangementView';
 const MixerView = lazy(() => import('./components/MixerView').then(m => ({ default: React.memo(m.default) })));
 // Charge a la demande : PluginEditor tire les 13 interfaces de plugins,
 // soit plus de 8000 lignes qui ne servent qu'a l'ouverture d'un effet.
-const PluginEditor = lazy(() => import('./components/PluginEditor'));
+const loadPluginEditor = () => import('./components/PluginEditor');
+const PluginEditor = lazy(loadPluginEditor);
+/**
+ * Fenêtre d'effet préchargée quand le navigateur est libre (quelques secondes après
+ * l'ouverture) : le 1er toucher / clic sur un effet l'ouvre tout de suite, même sur un PC
+ * chargé (avant : « Chargement… » pendant plus d'une seconde, le temps d'arriver).
+ */
+function preloadPluginEditorWhenIdle(): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+  let idle: number | null = null;
+  const go = () => { void loadPluginEditor().catch(() => { /* réessayé à l'ouverture de la fenêtre */ }); };
+  const t = window.setTimeout(() => { if (w.requestIdleCallback) idle = w.requestIdleCallback(go, { timeout: 5000 }); else go(); }, 2500);
+  return () => { window.clearTimeout(t); if (idle !== null) w.cancelIdleCallback?.(idle); };
+}
 const SynthPanel = lazy(() => import('./components/SynthPanel'));
 import ChatAssistant from './components/ChatAssistant';
 import ViewModeSwitcher from './components/ViewModeSwitcher';
@@ -632,6 +646,7 @@ function PaymentReturn({ sessionId }: { sessionId: string }) {
 }
 
 export default function App() {
+  useEffect(() => preloadPluginEditorWhenIdle(), []);
   const paidParam = (() => { try { return new URLSearchParams(window.location.search).get('nova_paid'); } catch { return null; } })();
   if (paidParam && /^cs_(test|live)_[A-Za-z0-9]+$/.test(paidParam)) return <PaymentReturn sessionId={paidParam} />;
   return <Studio />;

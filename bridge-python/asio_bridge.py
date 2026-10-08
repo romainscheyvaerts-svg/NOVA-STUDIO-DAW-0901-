@@ -623,6 +623,10 @@ MAX_BRIDGE_CHANNELS = 32
 """Canaux transportés au plus dans chaque sens (entrées de la carte, sorties) : au-delà, le
 réseau local et le navigateur porteraient des canaux que personne n'écoute."""
 
+# Marge de la file de sortie vers la carte, en blocs : 2 au départ, 24 au plus (≈ 140 ms à 256).
+OUT_TARGET_MIN = 2
+OUT_TARGET_MAX = 24
+
 # Protocole binaire v2 (R15) : chaque bloc d'entrée porte son numéro d'échantillon (depuis le
 # démarrage du flux) et l'heure de son convertisseur, pour recaler à l'échantillon près et
 # détecter les blocs perdus. Le client l'annonce par {"action": "HELLO", "protocol": 2} ;
@@ -713,7 +717,11 @@ class ASIOAudioStream:
         self.dropped_input_blocks = 0
         # Sortie : anneau d'échantillons. L'ancienne file de 100 blocs pouvait
         # accumuler ~0,6 s de retard ; ici le remplissage est borné et ramené
-        # vers ~2 blocs (le minimum qui absorbe la gigue du réseau local).
+        # vers la marge (2 blocs au départ : le minimum qui absorbe la gigue du réseau local).
+        # Marge adaptative : chaque fois que la file se vide en pleine lecture (navigateur
+        # occupé, blocs arrivés par paquets), elle grandit de 2 blocs, jusqu'à OUT_TARGET_MAX.
+        # Avant, la file retombait toujours à 2 blocs : des paquets de 10 blocs donnaient
+        # ~50 % de silence sur la carte (mesuré, tests/test_asio_multichannel).
         self._out_cap = 1 << 16
         self._alloc_output(self.out_channels)
         self.dropped_frames = 0
@@ -728,6 +736,8 @@ class ASIOAudioStream:
         self._out_r = 0
         self._out_fill = 0
         self._out_started = False
+        self._out_target_blocks = OUT_TARGET_MIN
+        self.out_underflows = 0
 
     # ── callback temps réel ──────────────────────────────────────────────────
     def _audio_callback(self, indata: np.ndarray, outdata: np.ndarray,
@@ -763,7 +773,7 @@ class ASIOAudioStream:
         # Sortie (anneau à latence bornée)
         outdata.fill(0)
         with self._lock:
-            target = 2 * frames
+            target = self._out_target_blocks * frames
             if not self._out_started and self._out_fill >= target:
                 self._out_started = True
             if self._out_started and self._out_fill > 0:
@@ -776,7 +786,11 @@ class ASIOAudioStream:
                 self._out_r = (self._out_r + n) % self._out_cap
                 self._out_fill -= n
                 if self._out_fill == 0:
+                    # File vidée en pleine lecture : le DAW est en retard. La marge grandit
+                    # (bornée) pour que le prochain à-coup passe sans trou.
                     self._out_started = False
+                    self.out_underflows += 1
+                    self._out_target_blocks = min(OUT_TARGET_MAX, self._out_target_blocks + 2)
                 self.stats['blocks_out'] += 1
 
         # Retour direct (matrice entrée → sortie), comme le monitoring d'une console
@@ -953,8 +967,8 @@ class ASIOAudioStream:
                     self._out[0:n - first, d] += audio_data[first:n, j]
             self._out_fill = min(self._out_cap - 1, self._out_fill + n)
             block = max(64, self.block_size)
-            if self._out_fill > 6 * block:
-                drop = self._out_fill - 2 * block
+            if self._out_fill > (self._out_target_blocks + 4) * block:
+                drop = self._out_fill - self._out_target_blocks * block
                 self._out_r = (self._out_r + drop) % self._out_cap
                 self._out_fill -= drop
                 self.dropped_frames += drop
@@ -1016,6 +1030,9 @@ class ASIOAudioStream:
             # Attente actuelle dans la file de sortie (ms) : sert au calage des prises
             'queue_ms': (self._out_fill / float(self.config.sample_rate)) * 1000.0 if self.config.sample_rate else 0.0,
             'dropped_frames': self.dropped_frames,
+            # Marge de la file de sortie (adaptative) et nombre de fois où elle s'est vidée
+            'out_target_ms': (self._out_target_blocks * max(64, self.block_size) / float(self.config.sample_rate)) * 1000.0 if self.config.sample_rate else 0.0,
+            'out_underflows': self.out_underflows,
             'direct_monitor': self.config.direct_monitor,
             'monitor_gain': self.config.monitor_gain,
         }
