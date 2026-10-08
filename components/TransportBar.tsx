@@ -266,7 +266,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
     navigateur: 'navigateur', historique: 'annuler / rétablir', ouvrir: 'ouvrir', sauver: 'sauvegarder', import: 'importer',
     'midi-fichiers': 'MIDI', partager: 'partager', master: 'Master Nova', exporter: 'exporter', audio: 'réglages audio',
     pdc: 'PDC', punch: 'punch', guide: 'guide', capturer: 'capturer', 'metronome-reglages': 'clic et décompte', tap: 'tap tempo',
-    vues: simple ? 'mode avancé' : 'vues', feedback: 'signaler un bug', theme: 'thème', compte: 'compte', affichage: "mode d'affichage", 'midi-clavier': 'MIDI', 'midi-absent': 'MIDI',
+    vues: simple ? 'mode avancé' : 'vues', palette: 'chercher une action (Ctrl+K)', feedback: 'signaler un bug', theme: 'thème', compte: 'compte', affichage: "mode d'affichage", 'midi-clavier': 'MIDI', 'midi-absent': 'MIDI',
   };
   const foldedNames = folded.map(f => FOLD_LABELS[f]).filter(Boolean);
 
@@ -355,7 +355,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           </button>
           {/* Palette de commandes : toute action par son nom (Ctrl+K), sans connaître le menu. */}
           {onOpenPalette && (
-            <button type="button" onClick={onOpenPalette} data-testid="open-palette"
+            <button type="button" {...barItem('palette', 40)} onClick={onOpenPalette} data-testid="open-palette"
               className="hidden md:flex w-8 h-8 shrink-0 rounded-lg items-center justify-center border border-white/10 bg-white/[0.05] text-slate-300 hover:bg-white/10 hover:text-white"
               title="Chercher une action par son nom : exporter, tempo, bus, Strip Silence… (Ctrl+K)" aria-label="Chercher une action (Ctrl+K)">
               <i className="fas fa-search text-[11px]" aria-hidden="true"></i>
