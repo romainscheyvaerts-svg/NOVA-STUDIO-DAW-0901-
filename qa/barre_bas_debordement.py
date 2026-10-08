@@ -13,13 +13,13 @@ bouton fait moins de 40 px de haut (doigt), ou si « Piste voix » / « Mix auto
 Cas : 1024 et 1180 (tablette, tactile), 1280 à 1920 (PC) ; navigateur ouvert et fermé ;
 projet voix et projet beatmaking (Batterie, 808, Sampler, MIDI en plus) ; thème sombre et clair.
 
-NOVA_URL=http://127.0.0.1:3481/ PYTHONIOENCODING=utf-8 QA_PHASE=apres python qa/barre_bas_debordement.py
+NOVA_URL=http://127.0.0.1:3491/ PYTHONIOENCODING=utf-8 QA_PHASE=apres python qa/barre_bas_debordement.py
 Sorties : D:\\1 WORK\\CONTENU\\nova-pro\\<phase>\\barre_bas\\ (captures + barre_bas_debordement.json)
 """
 import json, os, sys, zipfile, io, wave
 from pathlib import Path
 
-os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3481/")
+os.environ.setdefault("NOVA_URL", "http://127.0.0.1:3491/")
 PHASE = os.environ.get("QA_PHASE", "apres")
 os.environ.setdefault("QA_OUT", rf"D:\1 WORK\CONTENU\nova-pro\{PHASE}\barre_bas")
 sys.path.insert(0, str(Path(__file__).parent))

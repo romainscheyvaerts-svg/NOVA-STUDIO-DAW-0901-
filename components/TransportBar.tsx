@@ -49,6 +49,8 @@ interface TransportProps {
   /** R2 : fenêtre du métronome et du décompte, fenêtre Tempo et mesure, tap tempo. */
   onOpenMetronome?: () => void;
   onOpenTempo?: () => void;
+  /** Palette de commandes (Ctrl+K) : chercher n'importe quelle action par son nom. */
+  onOpenPalette?: () => void;
   onTap?: () => void;
   /** Tempo tapé en cours (affiché à côté du bouton TAP). */
   tapBpm?: number | null;
@@ -209,7 +211,7 @@ const KeyBadge: React.FC<{ projectKey?: number; projectScale?: string; numerator
 const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   isPlaying, onTogglePlay, onStop, isRecording, onToggleRecord, isLoopActive, onToggleLoop, isPunchActive = false, onTogglePunch,
   punch, onUpdatePunch, onToggleQuickPunch,
-  isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
+  isMetronomeEnabled = false, onToggleMetronome, onOpenMetronome, onOpenTempo, onOpenPalette, onTap, tapBpm, guide, onToggleGuide, onGuideLevel, onCapture, captureReady, bpm, onBpmChange, currentTime,
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
   onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
@@ -351,6 +353,14 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
           >
             <i className={`fas ${isMobileMenuOpen ? 'fa-times' : 'fa-bars'} text-lg`}></i>
           </button>
+          {/* Palette de commandes : toute action par son nom (Ctrl+K), sans connaître le menu. */}
+          {onOpenPalette && (
+            <button type="button" onClick={onOpenPalette} data-testid="open-palette"
+              className="hidden md:flex w-8 h-8 shrink-0 rounded-lg items-center justify-center border border-white/10 bg-white/[0.05] text-slate-300 hover:bg-white/10 hover:text-white"
+              title="Chercher une action par son nom : exporter, tempo, bus, Strip Silence… (Ctrl+K)" aria-label="Chercher une action (Ctrl+K)">
+              <i className="fas fa-search text-[11px]" aria-hidden="true"></i>
+            </button>
+          )}
 
           <div className="hidden md:flex items-center space-x-2">
             <button {...barItem('navigateur', 22)}
@@ -583,6 +593,14 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
         <div className="fixed inset-x-0 top-16 bottom-0 z-[540] bg-black/50" onClick={() => setIsMobileMenuOpen(false)} aria-hidden="true" />
         <div role="dialog" aria-label="Menu" className="fixed top-16 left-0 right-0 md:right-auto md:w-[400px] z-[550] max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain border-b md:border-r border-white/10 shadow-2xl" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-dim)', touchAction: 'pan-y' }}>
           <div className="p-4 space-y-3" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
+            {onOpenPalette && (
+              <button type="button" data-testid="menu-palette" onClick={() => { setIsMobileMenuOpen(false); onOpenPalette(); }}
+                className="w-full min-h-12 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-left text-[13px] font-bold text-cyan-100 flex items-center gap-2">
+                <i className="fas fa-search text-cyan-300" aria-hidden="true"></i>
+                <span className="flex-1">Chercher une action…</span>
+                <kbd className="hidden md:inline rounded border border-white/15 px-1.5 font-mono text-[10px] text-slate-300">Ctrl+K</kbd>
+              </button>
+            )}
 
             {/* Téléphone : métronome et boucle (masqués dans la barre sous 768 px) */}
             <div className="grid grid-cols-2 gap-2">

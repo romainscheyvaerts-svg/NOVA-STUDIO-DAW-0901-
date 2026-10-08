@@ -8,7 +8,7 @@ import { audioEngine } from './engine/AudioEngine';
 import { dspMonitor, safeModeStore } from './engine/dspMonitor';
 import { estimatedLoadPct as estimatedDspLoadPct, pickAutoFreeze, SafetyContext as DspSafetyContext } from './utils/dspLoad';
 import TransportBar from './components/TransportBar';
-import { LoudnessPanelHost } from './components/meters/LoudnessPanel';
+import { LoudnessPanelHost, loudnessPanel } from './components/meters/LoudnessPanel';
 import MobileTransport from './components/MobileTransport';
 import AdminTemplateButton from './components/AdminTemplateButton';
 import ArrangementView from './components/ArrangementView';
@@ -36,6 +36,8 @@ import ViewModeSwitcher from './components/ViewModeSwitcher';
 import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
+import CommandPalette from './components/CommandPalette';
+import type { PaletteAction } from './utils/commandPalette';
 import { dockItem, useDockFit } from './utils/dockFit';
 import SamplerHost from './components/SamplerHost';
 import { openSamplerPanel } from './utils/samplerPanelStore';
@@ -111,7 +113,7 @@ import { GUIDE_DEFAULT_LEVEL } from './utils/trackStructure';
 import { CAPTURE_MINUTES_KEY, captureMinutes } from './utils/audioCapture';
 import { sharedTap, roundTapped } from './utils/tapTempo';
 import { isKeyboardFocus } from './utils/keyboardFocus';
-import { isShortcut, matchShortcut, takenByPianoRoll } from './utils/keymap';
+import { isShortcut, matchShortcut, takenByPianoRoll, shortcutHint } from './utils/keymap';
 import './utils/keymapStore';
 import { scrubControl } from './utils/scrubControl';
 import { registerLayoutPart } from './utils/windowLayouts';
@@ -166,7 +168,7 @@ import { placeTake, trimToPlan } from './utils/multiTake';
 import { compTakeGroup, keepTakeGroup, deleteTakeGroup, takeGroupLinked } from './utils/takeGroups';
 import type { TakeResult } from './engine/AudioEngine';
 import { useR21 } from './hooks/useR21';
-import { openSessionPanel, useSessionPanel } from './utils/r21Bus';
+import { openSessionPanel, openImportSession, useSessionPanel } from './utils/r21Bus';
 import { notesCount } from './utils/sessionNotes';
 import { nextVersionNumber, versionName } from './utils/projectVersions';
 import { sanitizeTimeOp, TimeOp } from './utils/timeOps';
@@ -206,7 +208,7 @@ import WindowLayoutsPanel from './components/WindowLayoutsPanel';
 
 /** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
 const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
-  'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser'] as const;
+  'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
 import ProToolsWindows from './components/ProToolsWindows';
@@ -3707,7 +3709,8 @@ function Studio() {
     // Fenêtre au premier plan (la plus haute) qui a un bouton « Fermer ».
     const CLOSE_SEL = 'button[aria-label^="Fermer"], button[title^="Fermer"]';
     const topOverlayClose = (): HTMLButtonElement | null => {
-      const els = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], .fixed.inset-0'))
+      // [data-nova-window] : fenêtres flottantes non modales (Repères…), fermées aussi par Échap comme dans Pro Tools.
+      const els = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"], .fixed.inset-0, [data-nova-window]'))
         .filter(el => el.getClientRects().length > 0 && el.querySelector(CLOSE_SEL));
       if (!els.length) return null;
       const z = (el: HTMLElement) => Number(getComputedStyle(el).zIndex) || 0;
@@ -3800,6 +3803,7 @@ function Studio() {
         case 'nova.tap': if (isKeyboardFocus()) return; e.preventDefault(); if (!e.repeat) handleTap(); return;
         case 'nova.marker': e.preventDefault(); handleAddMarker(now()); return;
         case 'nova.help': e.preventDefault(); setShortcutsOpen(v => !v); return;
+        case 'nova.palette': e.preventDefault(); setPaletteOpen(v => !v); return;
         case 'nova.stop': if (!stateRef.current.isPlaying) return; e.preventDefault(); handleStop(); return;
         case 'nova.metronome': e.preventDefault(); void handleToggleMetronome(); return;
         case 'view.mixEdit': e.preventDefault(); setState(s => ({ ...s, currentView: s.currentView === 'MIXER' ? 'ARRANGEMENT' : 'MIXER' })); return;
@@ -4290,6 +4294,8 @@ function Studio() {
 
   // Aide-mémoire des raccourcis (touche « ? »)
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Palette de commandes (Ctrl+K) : chercher n'importe quelle action par son nom.
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [keymapEditorOpen, setKeymapEditorOpen] = useState(false);
   const [layoutsOpen, setLayoutsOpen] = useState(false);
 
@@ -7591,6 +7597,85 @@ function Studio() {
     );
   }
 
+  /**
+   * Actions de la palette de commandes (Ctrl+K). Les raccourcis de la table (utils/keymap) s'y
+   * ajoutent tout seuls (components/CommandPalette) ; ici, ce qui n'a pas de touche : fenêtres,
+   * pistes, vues, gestes voix et beat. Construites à l'ouverture (fonctions du rendu en cours).
+   */
+  const buildPaletteActions = (): PaletteAction[] => {
+    const st = stateRef.current;
+    const sel = editSelectionStore.get();
+    const selTrack = st.tracks.find(t => t.id === st.selectedTrackId);
+    const clipTargets = sel.clipIds.length
+      ? st.tracks.flatMap(t => t.clips.filter(c => sel.clipIds.includes(c.id)).map(c => ({ trackId: t.id, clipId: c.id })))
+      : [];
+    const needClip = clipTargets.length ? undefined : 'Sélectionne d’abord un clip (clic dessus).';
+    const needTrack = selTrack ? undefined : 'Sélectionne d’abord une piste.';
+    const k = (id: string) => shortcutHint(id) || undefined;
+    const importAudio = () => {
+      const input = document.createElement('input');
+      input.type = 'file'; input.accept = 'audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a';
+      input.onchange = () => { const f = input.files?.[0]; if (f) void handleNewAudioImport(f); };
+      input.click();
+    };
+    const simpleNow = simpleModeStore.get().simple;
+    const a = (group: string, id: string, label: string, run: () => void, extra: Partial<PaletteAction> = {}): PaletteAction => ({ id, label, group, run, ...extra });
+    return [
+      // Fichier et livraison
+      a('Fichier', 'nova.export', 'Exporter : mix, stems par piste ou par bus, voix seule', () => { void handleExportMix(); }, { keys: k('nova.export'), pt: 'Bounce to Disk (Ctrl+Alt+B)', keywords: 'bounce export stems wav mp3 demo démo livrer' }),
+      a('Fichier', 'nova.save', 'Sauvegarder le projet', () => setIsSaveMenuOpen(true), { keys: k('nova.save'), pt: 'Save (Ctrl+S)', keywords: 'enregistrer save' }),
+      a('Fichier', 'pal.open', 'Ouvrir un projet', () => setIsLoadMenuOpen(true), { pt: 'Open Session (Ctrl+O)', keywords: 'charger load open' }),
+      a('Fichier', 'pal.templates', 'Modèles : nouveau projet depuis un modèle', () => setTemplatesModal('browse'), { pt: 'Create Session from Template', keywords: 'template modèle nouvelle session' }),
+      a('Fichier', 'pal.saveTemplate', 'Enregistrer le projet comme modèle', () => setTemplatesModal('save'), { pt: 'Save as Template', keywords: 'template' }),
+      a('Fichier', 'pal.importAudio', 'Importer un fichier audio (beat, prise, sample)', importAudio, { pt: 'Import Audio (Ctrl+Maj+I)', keywords: 'beat instru wav mp3 importer charger' }),
+      a('Fichier', 'nova.importSession', 'Importer depuis une session (pistes, effets, envois)', () => openImportSession(), { keys: k('nova.importSession'), pt: 'Import Session Data (Alt+Maj+I)' }),
+      a('Fichier', 'pal.versions', 'Versions de la session', () => openSessionPanel('versions'), { pt: 'Save As New Version', keywords: 'version historique' }),
+      a('Fichier', 'pal.notes', 'Notes et commentaires de session', () => openSessionPanel('notes'), { pt: 'Comments', keywords: 'notes commentaires' }),
+      a('Fichier', 'pal.clips', 'Liste des clips', () => openSessionPanel('clips'), { pt: 'Clips List', keywords: 'clips region' }),
+      a('Fichier', 'pal.arrangements', 'Arrangements alternatifs du morceau (version radio, couplet en plus…)', () => openSessionPanel('arrangements'), { keywords: 'arrangement playlist' }),
+      a('Fichier', 'pal.share', 'Partager le projet', () => setShareOpen(true), { keywords: 'lien partager' }),
+      // Voix
+      a('Voix', 'pal.voiceTrack', 'Ajouter une piste voix (armée, prête à enregistrer)', () => { void handleAddVoiceTrack(); }, { pt: 'New Track (Ctrl+Maj+N)', keywords: 'piste voix micro enregistrer nouvelle' }),
+      a('Voix', 'pal.mixAuto', 'Mix auto de la voix (styles de mix)', () => setVocalToolsOpen(true), { keywords: 'mix auto style voix preset chaîne' }),
+      a('Voix', 'pal.trackPreset', `Preset de piste (« Voix lead Make Music »…)${selTrack ? ` sur ${selTrack.name}` : ''}`, () => openNovaWindow('track-preset', { trackId: selTrack?.id }), { pt: 'Track Presets', keywords: 'preset chaîne voix lead make music', disabledReason: needTrack }),
+      a('Voix', 'pal.lyrics', 'Paroles : prompteur pendant la prise', () => setLyricsOpen(o => !o), { keywords: 'paroles texte prompteur' }),
+      a('Voix', 'pal.pitch', 'Justesse note par note du clip', () => openNovaWindow('pitch-editor', { targets: clipTargets }), { pt: 'Melodyne / Elastic Pitch', keywords: 'justesse autotune pitch notes', disabledReason: needClip }),
+      a('Voix', 'pal.melodyne', 'Ouvrir le clip dans Melodyne (ARA)', () => openNovaWindow('ara-melodyne', { targets: clipTargets }), { pt: 'ARA Melodyne', keywords: 'melodyne ara justesse', disabledReason: needClip }),
+      // Pistes et mix
+      a('Pistes', 'pal.audioTrack', 'Nouvelle piste audio', () => handleCreateTrack(TrackType.AUDIO, 'AUDIO'), { pt: 'New Track (Ctrl+Maj+N)', keywords: 'piste audio nouvelle' }),
+      a('Pistes', 'pal.bus', 'Nouveau bus (groupe de pistes)', () => handleCreateTrack(TrackType.BUS, 'BUS'), { pt: 'New Aux Input', keywords: 'bus aux sous-groupe' }),
+      a('Pistes', 'pal.reverbReturn', 'Nouvelle piste de retour réverbe', () => handleCreateTrack(TrackType.SEND, 'REVERB', 'REVERB'), { pt: 'New Aux + Send', keywords: 'retour reverb réverbe envoi send aux' }),
+      a('Pistes', 'pal.delayReturn', 'Nouvelle piste de retour écho (délai)', () => handleCreateTrack(TrackType.SEND, 'DELAY', 'DELAY'), { pt: 'New Aux + Send', keywords: 'retour delay délai echo écho envoi send aux' }),
+      a('Pistes', 'pal.trackList', 'Liste des pistes (afficher, masquer, dossiers, VCA)', () => setStructurePanel('tracks'), { pt: 'Track List', keywords: 'vca dossier masquer pistes' }),
+      a('Pistes', 'pal.groups', 'Groupes de pistes', () => setR12Panel({ panel: 'groups' }), { pt: 'Groups List', keywords: 'groupe' }),
+      a('Pistes', 'pal.time', 'Insérer ou supprimer du temps', () => openR12Panel('time', { preset: { mode: 'insert', at: playheadStore.get() } }), { keys: k('pt.insertTime'), pt: 'Insert Silence / Insert Time' }),
+      a('Mix', 'pal.masterNova', 'Master Nova : mastering en un clic', () => setMasterNovaOpen(true), { pt: 'Mastering Assistant (Logic)', keywords: 'master mastering spotify loudness' }),
+      a('Mix', 'pal.loudness', 'Loudness du master (LUFS, true peak)', () => loudnessPanel.set(true), { keywords: 'lufs loudness true peak mètres metre' }),
+      a('Mix', 'pal.cue', 'Mixes casque (cue) des artistes', () => setCueMixesOpen(true), { keywords: 'casque cue retour headphone' }),
+      a('Mix', 'pal.plugins', 'Gestionnaire de plugins (VST)', () => setIsPluginManagerOpen(true), { pt: 'Plug-In Manager', keywords: 'vst plugins effets' }),
+      // Beat
+      a('Beat', 'pal.drums', 'Boîte à rythmes', () => setDrumsOpen(true), { keywords: 'batterie drums beat pas step' }),
+      a('Beat', 'pal.808', 'Basse 808 (piano roll accordé)', () => handleOpen808(), { keywords: '808 basse bass' }),
+      a('Beat', 'pal.midi', 'Nouvelle piste MIDI et son piano roll', () => handleNewMidiTrack(), { pt: 'New Instrument Track', keywords: 'midi piano roll synthé instrument' }),
+      a('Beat', 'pal.sampler', 'Nouvelle piste Sampler', () => requestSampler({ kind: 'new' }), { keywords: 'sampler sample chop' }),
+      // Réglages
+      a('Réglages', 'pal.tempo', 'Tempo, mesure et tonalité', () => openTempoDialog(null), { pt: 'Tempo / Meter', keywords: 'bpm tempo mesure tonalité gamme key' }),
+      a('Réglages', 'pal.metronome', 'Clic et décompte', () => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }, { pt: 'Click / Countoff', keywords: 'clic métronome décompte count' }),
+      a('Réglages', 'pal.audio', 'Réglages audio (carte son, latence, entrées)', () => setIsAudioSettingsOpen(true), { pt: 'Playback Engine / I/O Setup', keywords: 'asio carte son latence buffer entrée' }),
+      a('Réglages', 'pal.theme', `Thème ${theme === 'light' ? 'sombre' : 'clair'}`, () => toggleTheme(), { keywords: 'thème clair sombre dark light' }),
+      a('Réglages', 'pal.simple', simpleNow ? 'Passer en mode avancé (console, routage, automation)' : 'Passer en mode simple', () => simpleModeStore.setPref(!simpleNow), { keywords: 'mode simple avancé' }),
+      // Vues
+      a('Vues', 'view.arrangement', 'Arrangement (fenêtre d’édition)', () => setState(s => ({ ...s, currentView: 'ARRANGEMENT' })), { pt: 'Edit Window', keywords: 'edit arrangement timeline' }),
+      a('Vues', 'view.mixer', 'Console de mixage', () => setState(s => ({ ...s, currentView: 'MIXER' })), { keys: k('view.mixEdit'), pt: 'Mix Window (Ctrl+=)', keywords: 'console mixer mix' }),
+      a('Vues', 'pal.automation', 'Éditeur d’automation', () => setState(s => ({ ...s, currentView: 'AUTOMATION' })), { keywords: 'automation volume' }),
+      a('Vues', 'pal.memory', 'Repères (Memory Locations)', () => openNovaWindow('memory-locations'), { keys: k('pt.memoryWindow'), pt: 'Memory Locations (Ctrl+5)', keywords: 'marqueur repère marker' }),
+      a('Vues', 'pal.collab', 'Collaborer à distance (artiste, ingé, beatmaker)', () => setCollabOpen(true), { keywords: 'collab collaboration distance ingé' }),
+      a('Aide', 'nova.help', 'Aide des raccourcis clavier', () => setShortcutsOpen(true), { keys: k('nova.help'), keywords: 'aide raccourcis help' }),
+      a('Aide', 'keymap.editor', 'Personnaliser les raccourcis (jeu Pro Tools, FL, Live)', () => setKeymapEditorOpen(true), { keys: k('keymap.editor'), pt: 'Keyboard Shortcuts' }),
+      a('Aide', 'layout.list', 'Dispositions de fenêtres', () => setLayoutsOpen(true), { keys: k('layout.list'), pt: 'Window Configurations' }),
+    ];
+  };
+
   return (
     <div className="flex flex-col h-full w-full overflow-hidden [overflow:clip] relative transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
       {saveState.isSaving && <SaveOverlay progress={saveState.progress} message={saveState.message} />}
@@ -7618,6 +7703,7 @@ function Studio() {
           onToggleMetronome={handleToggleMetronome}
           onOpenMetronome={() => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }}
           onOpenTempo={() => openTempoDialog(null)}
+          onOpenPalette={() => setPaletteOpen(true)}
           onTap={handleTap} tapBpm={tapBpm}
           guide={(() => { const g = state.tracks.filter(t => t.isGuide); return g.length ? { count: g.length, muted: g.every(t => t.guideMuted), level: g[0].guideLevel ?? GUIDE_DEFAULT_LEVEL } : undefined; })()}
           onToggleGuide={toggleGuides} onGuideLevel={setGuideLevel}
@@ -7746,22 +7832,22 @@ function Studio() {
               <div className="flex shrink-0 items-center gap-2">
                 <button type="button" data-testid="dock-track-list" {...dockItem(3)} aria-label="Liste des pistes" onClick={() => setStructurePanel(p => (p === 'tracks' ? null : 'tracks'))} aria-pressed={structurePanel === 'tracks'}
                   title="Liste des pistes (Pro Tools « Track List ») : afficher / masquer, activer, dossiers, VCA"
-                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${structurePanel === 'tracks' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
+                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${structurePanel === 'tracks' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}>
                   <i data-dock-icon className="fas fa-list mr-1.5 text-[10px]" /><span data-dock-label>Pistes{state.tracks.some(t => t.isHidden) ? ` · ${state.tracks.filter(t => t.isHidden).length} masquée${state.tracks.filter(t => t.isHidden).length > 1 ? 's' : ''}` : ''}</span>
                 </button>
                 <button type="button" data-testid="dock-groups" {...dockItem(2)} aria-label="Groupes" onClick={() => setR12Panel(p => (p?.panel === 'groups' ? null : { panel: 'groups' }))} aria-pressed={r12Panel?.panel === 'groups'}
                   title="Groupes (Pro Tools « Groups List ») : édition et mix liés, <TOUT>, suspendre (Ctrl+Maj+G), créer (Ctrl+G)"
-                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${r12Panel?.panel === 'groups' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
+                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${r12Panel?.panel === 'groups' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}>
                   <i data-dock-icon className="fas fa-object-group mr-1.5 text-[10px]" /><span data-dock-label>Groupes{state.trackGroups.length ? ` · ${state.trackGroups.length}` : ''}{state.groupSettings?.suspended ? ' ⏸' : ''}</span>
                 </button>
                 <button type="button" data-testid="dock-time" {...dockItem(1)} aria-label="Insérer ou supprimer du temps" onClick={() => openR12Panel('time', { preset: (() => { const sel = editSelectionStore.get().time; return sel ? { mode: 'insert' as const, at: sel.start, length: sel.end - sel.start, trackIds: sel.trackIds } : { mode: 'insert' as const, at: playheadStore.get() }; })() })}
                   title="Insérer / supprimer du temps (Pro Tools : Insert Silence, Insert Time, Cut Time) — Ctrl+Alt+I"
-                  className="h-10 rounded-full border border-nv-line bg-nv-well px-3 text-[11px] font-bold whitespace-nowrap text-nv-muted hover:text-nv-ink">
+                  className="h-10 rounded-full border border-nv-line/15 bg-nv-raised px-3 text-[11px] font-bold whitespace-nowrap text-nv-muted hover:text-nv-ink">
                   <i data-dock-icon className="fas fa-arrows-alt-h mr-1.5 text-[10px]" /><span data-dock-label>Temps</span>
                 </button>
                 <button type="button" data-testid="dock-session" {...dockItem(1)} aria-label="Session : notes, clips, arrangements, versions" onClick={() => openSessionPanel(sessionTab ? null : 'notes')} aria-pressed={!!sessionTab}
                   title="Session : notes et commentaires (Pro Tools : Comments), liste des clips (Clips List), arrangements, versions (Save As New Version), importer depuis une session (Import Session Data, Alt+Maj+I)"
-                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${sessionTab ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
+                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${sessionTab ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line/15 bg-nv-raised text-nv-muted hover:text-nv-ink'}`}>
                   <i data-dock-icon className="fas fa-folder-open text-[10px] mr-1.5" aria-hidden="true" /><span data-dock-label>Session{notesCount(state) ? ` · 📝${notesCount(state)}` : ''}</span>
                 </button>
                 <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen} {...dockItem(4)} aria-label="Collaborer"
@@ -8224,6 +8310,7 @@ function Studio() {
         notify={setAiNotification}
       />
       </PanelBoundary>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} actions={paletteOpen ? buildPaletteActions() : []} />
       <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} onCustomize={isMobile ? undefined : () => { setShortcutsOpen(false); setKeymapEditorOpen(true); }} onLayouts={() => { setShortcutsOpen(false); setLayoutsOpen(true); }} />
       {keymapEditorOpen && !isMobile && <KeymapEditor onClose={() => setKeymapEditorOpen(false)} />}
       {layoutsOpen && <WindowLayoutsPanel onClose={() => setLayoutsOpen(false)} notify={setAiNotification} />}
