@@ -15,9 +15,9 @@ numpy>=1.24.0
 
 # === VST3 SUPPORT ===
 
-# Spotify's Pedalboard - Best VST3 support for Python (RECOMMENDED)
-# Supports VST3 and AU plugins with full audio processing
-pedalboard>=0.9.0
+# Hôte VST3 natif : NovaVSTHost.exe (../native-host, SDK VST3 sous MIT), aucun paquet Python.
+# pedalboard (GPLv3) n'est plus utilisé ; seulement pour comparer (NOVA_VST_ENGINE=pedalboard,
+# installé à part : pip install pedalboard).
 
 # === ASIO AUDIO BRIDGE ===
 

@@ -57,7 +57,7 @@ Applications. Windows 10/11 64 bits.
   (Internet requis à ce moment-là). En dernier recours l'appli affiche un message avec le lien.
 - **Visual C++** : les DLL nécessaires (`vcruntime140.dll`, `vcruntime140_1.dll`,
   `msvcp140.dll`) sont livrées avec l'appli ; `build.py` vérifie les dépendances de chaque
-  module natif (pedalboard, numpy, PortAudio…) et échoue s'il en manque une.
+  module natif (numpy, PortAudio, NovaVSTHost…) et échoue s'il en manque une.
 - **.NET Framework 4.7.2+** (pythonnet) : inclus dans Windows 10 (1803+) et 11.
 - **SmartScreen** : l'installateur n'est pas signé. Au 1er lancement, Windows affiche
   « Windows a protégé votre ordinateur » → « Informations complémentaires » → « Exécuter

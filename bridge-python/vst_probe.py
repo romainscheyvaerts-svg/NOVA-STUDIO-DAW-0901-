@@ -26,6 +26,7 @@ import logging
 import os
 import platform
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -475,15 +476,31 @@ def _run_child(cmd: List[str], paths: List[str], results: Dict[str, Probe],
                 stalls = 0
 
 
+_CHANNEL_SUFFIX = re.compile(r"\s+(mono/stereo|stereo|mono|m/s)$", re.I)
+
+
+def channels_of(name: str) -> Optional[str]:
+    """« C6 Stereo » → stereo, « C6 Mono » → mono, « RVerb Mono/Stereo » → mono/stereo."""
+    m = _CHANNEL_SUFFIX.search(name or "")
+    if not m:
+        return None
+    v = m.group(1).lower()
+    return "mono/stereo" if v in ("mono/stereo", "m/s") else v
+
+
+def family_of(name: str) -> str:
+    """« C6 Stereo » → « C6 » (nom sans variante mono / stéréo)."""
+    return _CHANNEL_SUFFIX.sub("", name or "").strip()
+
+
 def apply_classes(plugins: List[dict], results: Dict[str, Probe]) -> List[dict]:
     """Inventaire complété : is_instrument / category des plugins lus, et
     scan_status / license (activation demandée) des autres. Un fichier à
     plusieurs plugins (« shell » : WaveShell de Waves, 725 plugins) est
     remplacé par une entrée par plugin (plugin_name = nom de la classe,
-    chargé par vst_shell), effets ET instruments : « C6 Stereo », « C6 Mono »…
+    chargé par son nom de classe), effets ET instruments : « C6 Stereo », « C6 Mono »…
     Chaque entrée porte `shell` (nom du fichier), `family` (« C6 ») et
     `channels` (mono / stereo / mono/stereo, d'après le nom)."""
-    import vst_shell
     out: List[dict] = []
     seen = {(p["name"].lower(), (p.get("vendor") or "").lower()) for p in plugins}
     for e in plugins:
@@ -519,8 +536,8 @@ def apply_classes(plugins: List[dict], results: Dict[str, Probe]) -> List[dict]:
             item = {**e, "name": name, "vendor": vendor, "uid": "", "id": f"path:{e['path']}#{name}",
                     "category": "Instrument" if instr else "Effect", "is_instrument": instr,
                     "sub_categories": [s for s in sub.split("|") if s], "plugin_name": name,
-                    "shell": shell, "family": vst_shell.family_of(name)}
-            ch = vst_shell.channels_of(name)
+                    "shell": shell, "family": family_of(name)}
+            ch = channels_of(name)
             if ch:
                 item["channels"] = ch
             out.append(item)

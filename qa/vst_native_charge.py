@@ -64,9 +64,8 @@ def main():
     # pedalboard
     try:
         from pedalboard import load_plugin
-        import vst_shell
         if spec.get("plugin_name"):
-            q = vst_shell.load_from_shell(spec["path"], spec["plugin_name"], lambda b, n: load_plugin(b, plugin_name=n))
+            q = load_plugin(spec["path"], plugin_name=spec["plugin_name"])   # shell Waves : lent sans l'hôte natif
         else:
             try:
                 q = load_plugin(spec["path"])

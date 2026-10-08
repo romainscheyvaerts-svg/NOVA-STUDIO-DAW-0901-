@@ -98,20 +98,32 @@ def find_host_exe() -> Optional[str]:
     return None
 
 
+def pedalboard_requested() -> bool:
+    """pedalboard (GPLv3) n'est ni livré ni importé par défaut : seulement si NOVA_VST_ENGINE=pedalboard
+    et qu'il a été installé à part (outil de comparaison, ancien comportement)."""
+    return (os.environ.get("NOVA_VST_ENGINE") or "").strip().lower() == "pedalboard"
+
+
+def load_pedalboard():
+    """Import paresseux et protégé de pedalboard (module, None s'il manque). Par importlib : la
+    construction de l'installateur (PyInstaller) ne le voit pas et ne l'embarque pas."""
+    if not pedalboard_requested():
+        return None
+    import importlib
+    try:
+        return importlib.import_module("pedalboard")
+    except Exception:
+        return None
+
+
 def select_engine(has_pedalboard: bool) -> str:
-    """« native » ou « pedalboard » (ou « none ») : réglage NOVA_VST_ENGINE, sinon
-    DEFAULT_ENGINE ; repli sur l'autre moteur quand celui demandé manque."""
-    want = (os.environ.get("NOVA_VST_ENGINE") or DEFAULT_ENGINE).strip().lower()
-    native_ok = IS_WINDOWS and find_host_exe() is not None
-    if want == "native":
-        if native_ok:
-            return "native"
+    """« native » (défaut) ou « pedalboard » (NOVA_VST_ENGINE=pedalboard et paquet installé à part),
+    sinon « none »."""
+    if pedalboard_requested():
         if has_pedalboard:
-            logger.warning("NovaVSTHost.exe introuvable : moteur pedalboard utilisé")
             return "pedalboard"
-        return "none"
-    if has_pedalboard:
-        return "pedalboard"
+        logger.warning("NOVA_VST_ENGINE=pedalboard mais pedalboard n'est pas installé : moteur natif")
+    native_ok = IS_WINDOWS and find_host_exe() is not None
     return "native" if native_ok else "none"
 
 

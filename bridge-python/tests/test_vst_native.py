@@ -117,11 +117,15 @@ class TestEngine(unittest.TestCase):
     def test_select(self):
         old = os.environ.get("NOVA_VST_ENGINE")
         try:
+            want = "native" if vn.find_host_exe() else "none"
             os.environ["NOVA_VST_ENGINE"] = "pedalboard"
-            self.assertEqual(vn.select_engine(True), "pedalboard")
+            self.assertEqual(vn.select_engine(True), "pedalboard")      # demandé et installé à part
+            self.assertEqual(vn.select_engine(False), want)             # demandé mais absent : natif
             os.environ["NOVA_VST_ENGINE"] = "native"
-            want = "native" if vn.find_host_exe() else "pedalboard"
             self.assertEqual(vn.select_engine(True), want)
+            os.environ.pop("NOVA_VST_ENGINE")
+            self.assertEqual(vn.select_engine(True), want)              # défaut : natif, même si pedalboard est là
+            self.assertIsNone(vn.load_pedalboard())                     # jamais importé sans demande
         finally:
             if old is None:
                 os.environ.pop("NOVA_VST_ENGINE", None)

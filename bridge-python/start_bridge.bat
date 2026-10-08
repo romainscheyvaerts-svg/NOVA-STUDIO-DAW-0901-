@@ -22,7 +22,7 @@ if errorlevel 1 (
 
 echo.
 echo Installation des dependances...
-pip install websockets numpy pedalboard 2>nul
+pip install websockets numpy 2>nul
 
 echo.
 echo ========================================

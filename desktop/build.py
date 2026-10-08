@@ -174,7 +174,7 @@ NATIVE_HOST_EXE = os.path.join(REPO, "native-host", "build", "NovaVSTHost_artefa
 def native_host() -> None:
     """Hôte VST3 natif (NovaVSTHost.exe, SDK VST3 sous MIT, sans JUCE) : moteur VST par défaut du
     pont (bridge-python/vst_native.py), construit depuis native-host/ s'il manque. Inclus par défaut
-    avec ses licences ; NOVA_EXCLUDE_NATIVE_VST=1 pour l'exclure (le pont garde alors pedalboard)."""
+    avec ses licences ; NOVA_EXCLUDE_NATIVE_VST=1 pour l'exclure (le pont n'a alors plus de moteur VST)."""
     if os.environ.get("NOVA_EXCLUDE_NATIVE_VST") == "1":
         print("    hôte VST natif : exclu (NOVA_EXCLUDE_NATIVE_VST=1)")
         return
@@ -186,7 +186,7 @@ def native_host() -> None:
         subprocess.check_call(["cmd", "/c", bat], cwd=os.path.dirname(bat), creationflags=0x08000000)
         print("    hôte VST natif construit")
     except Exception as e:  # noqa: BLE001 - non bloquant
-        print(f"    hôte VST natif NON construit ({e}) : le pont utilisera pedalboard")
+        print(f"    hôte VST natif NON construit ({e}) : le pont n'aura pas de moteur VST")
 
 
 def pyinstaller() -> None:

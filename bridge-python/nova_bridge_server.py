@@ -544,21 +544,17 @@ class NovaBridgeServer:
             self._probed.clear()
             # Choix explicite : les plugins en attente d'activation sont relus.
             await self.loop.run_in_executor(self.misc_pool, vst_probe.forget_unsettled)
-            await self.loop.run_in_executor(self.misc_pool, plugin_guard.retry_unstable)
             if vst_host.CRASH_GUARD is not None:
                 vst_host.CRASH_GUARD.clear()  # on réessaie les plugins qui avaient planté
             await self._scan()
         await self.scan_done.wait()
         effects_only = bool(req.get("effects_only"))
         plugins = []
-        unstable = plugin_guard.unstable_keys()
         for p in self.plugins:
             if effects_only and p["category"] != "Effect":
                 continue
             lic = p.get("license") or self.licenses.status(p["path"], p.get("plugin_name"))
             item = {**p, "license": lic} if lic else p
-            if unstable and plugin_guard.key_of(p["path"], p.get("plugin_name")) in unstable:
-                item = {**item, "unstable": True}
             if vst_host.CRASH_GUARD is not None and vst_host.CRASH_GUARD.is_quarantined(p["path"]):
                 item = {**item, "quarantined": True}
             plugins.append(item)
@@ -1143,11 +1139,6 @@ def main():
     if "--probe-vst3" in sys.argv:
         vst_probe.child_main()  # processus enfant : lecture des plugins (voir vst_probe)
         return
-    if "--trial-load" in sys.argv:
-        plugin_guard.trial_child_main()  # processus jetable : essai d'un plugin à risque (voir plugin_guard)
-        return
-    plugin_guard.MAIN_SCRIPT = MAIN_SCRIPT
-    plugin_guard.startup()  # témoin resté = le pont est mort pendant un chargement
     # Console Windows redirigée (fichier, pipe) : cp1252 refusait les accents/emojis.
     for stream in (sys.stdout, sys.stderr):
         try:

@@ -41,7 +41,7 @@ async def smoke():
         rt.check("pont ASIO : GET_DEVICES répond", d.get("action") == "DEVICES", f"{len(names)} périphérique(s)")
     async with websockets.connect("ws://127.0.0.1:8765", origin=ORIGIN, max_size=None) as ws:
         h = await ask(ws, {"action": "HELLO", "req_id": "h"})
-        rt.check("pont VST : HELLO (pedalboard chargé)", h.get("success") and h.get("pedalboard"), str(h.get("version")))
+        rt.check("pont VST : HELLO (moteur natif)", h.get("success") and h.get("engine") == "native", str(h.get("version")))
         lst = await ask(ws, {"action": "GET_PLUGIN_LIST", "req_id": "l", "effects_only": True})
         plugins = lst.get("plugins") or []
         rt.check("pont VST : liste des plugins", len(plugins) > 0, f"{len(plugins)} effets")

@@ -2,7 +2,8 @@
 # Recette PyInstaller du pont VST3 (NovaVSTBridge.exe, un seul fichier).
 #
 # Construction (Windows, depuis bridge-python/) :
-#   venv\Scripts\python.exe -m pip install pyinstaller websockets numpy pedalboard
+#   venv\Scripts\python.exe -m pip install pyinstaller websockets numpy
+#   (moteur VST : NovaVSTHost.exe, construit par ../native-host/build.bat ; pedalboard n'est plus livré)
 #   venv\Scripts\python.exe -m PyInstaller NovaVSTBridge.spec --noconfirm --workpath %TEMP%\nova-vst-build
 # Résultat : dist\NovaVSTBridge.exe (dist/ et build/ ne sont pas versionnés).
 from PyInstaller.utils.hooks import collect_all, collect_submodules
@@ -11,10 +12,7 @@ datas = []
 binaries = []
 hiddenimports = collect_submodules('websockets')
 
-# pedalboard embarque un module natif (JUCE) et ses données : on prend tout.
-tmp_ret = collect_all('pedalboard')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-hiddenimports += ['pedalboard_native', 'vst_host', 'vst_probe', 'license_watch', 'stems_service', 'stems_install', 'vst_automation', 'vst_sidechain']
+hiddenimports += ['vst_host', 'vst_probe', 'license_watch', 'stems_service', 'stems_install', 'vst_automation', 'vst_sidechain']
 datas += [('stems_worker.py', '.')]  # séparation de stems : moteur lancé dans le module optionnel
 # Hôte VST3 natif (moteur par défaut, MIT, sans JUCE) : voir ../native-host/LICENCES.md
 import glob, os
@@ -35,7 +33,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     # Inutiles au pont : on allège l'exécutable.
-    excludes=['tkinter', 'matplotlib', 'PIL', 'pytest', 'IPython', 'sounddevice'],
+    excludes=['pedalboard', 'pedalboard_native', 'vst_shell'] + ['tkinter', 'matplotlib', 'PIL', 'pytest', 'IPython', 'sounddevice'],
     noarchive=False,
     optimize=0,
 )

@@ -3,7 +3,8 @@
 Module de l'hôte VST3 natif attendu par vst_sidechain (contrat écrit en tête de
 vst_sidechain.py) : il n'est importable que si le moteur natif est choisi
 (NOVA_VST_ENGINE=native, ou moteur par défaut, avec NovaVSTHost.exe présent).
-Sinon ImportError : le pont garde pedalboard et annonce la clé comme non prise en charge.
+Sinon (NOVA_VST_ENGINE=pedalboard, ou NovaVSTHost.exe absent) ImportError : la clé est annoncée
+non prise en charge.
 
     load(path, plugin_name, state_b64, sample_rate, max_block, offline) -> Instance
     Instance = vst_native.NativePlugin : sidechain_channels, latency_samples,
@@ -13,13 +14,7 @@ Sinon ImportError : le pont garde pedalboard et annonce la clé comme non prise 
 
 import vst_native
 
-try:
-    import pedalboard  # noqa: F401
-    _HAS_PEDALBOARD = True
-except ImportError:  # pragma: no cover
-    _HAS_PEDALBOARD = False
-
-if vst_native.select_engine(_HAS_PEDALBOARD) != "native":
+if vst_native.select_engine(vst_native.load_pedalboard() is not None) != "native":
     raise ImportError("moteur VST natif non choisi (NOVA_VST_ENGINE) ou NovaVSTHost.exe absent")
 
 NativePlugin = vst_native.NativePlugin

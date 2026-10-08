@@ -198,6 +198,11 @@ export const PARAM_ALIASES: Record<string, Record<string, AliasTarget>> = {
   deedger: {
     mode: { to: 'ch_mode' },
   },
+  // Acustica RUBY2 (chargé par l'hôte VST natif) : « Flat » relevé dans Pro Tools = gain de coupe
+  // aigu à 0 (seule valeur exposée en VST3).
+  ruby2: {
+    highcutgain: { to: 'high_cut_gain', convert: { kind: 'map', values: { Flat: 0 } } },
+  },
   ua1176ae: {
     hr: NOT_EXPOSED('inverseur HR de la fenêtre UADx, sans paramètre VST3 équivalent (« headroom » est un autre réglage)'),
   },

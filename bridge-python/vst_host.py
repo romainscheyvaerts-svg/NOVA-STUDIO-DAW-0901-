@@ -55,21 +55,17 @@ import numpy as np
 import license_watch
 import plugin_guard
 import vst_automation
-import vst_shell
 import vst_sidechain
-
-try:
-    import pedalboard
-    from pedalboard import load_plugin
-    HAS_PEDALBOARD = True
-except ImportError:  # pragma: no cover - le pont reste joignable, sans VST
-    pedalboard = None
-    load_plugin = None
-    HAS_PEDALBOARD = False
 
 logger = logging.getLogger('NovaBridge.VST')
 
 import vst_native  # noqa: E402  (moteur natif, voir plus haut)
+
+# pedalboard (GPLv3) : plus livré ni importé. Repli de développement seulement, importé à la demande
+# (NOVA_VST_ENGINE=pedalboard et paquet installé à part, voir vst_native.load_pedalboard).
+pedalboard = vst_native.load_pedalboard()
+load_plugin = getattr(pedalboard, "load_plugin", None)
+HAS_PEDALBOARD = load_plugin is not None
 
 ENGINE = vst_native.select_engine(HAS_PEDALBOARD)
 NATIVE = ENGINE == "native"
@@ -194,22 +190,15 @@ def _open_plugin(path: str, plugin_name: Optional[str] = None):
         return vst_sidechain.DebugDucker()   # effet à clé de référence (tests, NOVA_BRIDGE_DEBUG=1)
     if NATIVE:
         # Hôte natif : un processus par plugin, chargé par nom de classe (shells Waves
-        # compris, sans vst_shell), dossier UADx compris.
+        # compris), dossier UADx compris.
         return vst_native.load_plugin(path, plugin_name)
     if not HAS_PEDALBOARD:
         raise RuntimeError("pedalboard n'est pas installé")
     if not os.path.exists(path):
         raise FileNotFoundError(f"Plugin introuvable : {path}")
     if plugin_name:
-        # Fichier « shell » (Waves) : la factory ne montre que ce plugin le
-        # temps du chargement (sinon JUCE crée une instance de chacun des 725
-        # plugins du shell : 10 min). Voir vst_shell.
-        try:
-            plugin = vst_shell.load_from_shell(path, plugin_name, lambda b, n: load_plugin(b, plugin_name=n))
-            if plugin is not None:
-                return plugin
-        except KeyError:
-            pass  # nom absent du shell : chargement ordinaire ci-dessous
+        # Fichier « shell » (Waves) : avec pedalboard, très lent (une instance de chaque plugin du
+        # shell) ; l'hôte natif charge directement la classe voulue.
         try:
             return load_plugin(path, plugin_name=plugin_name)
         except Exception:
@@ -612,9 +601,7 @@ def instantiate(juce: "JuceThread", path: str, plugin_name: Optional[str], state
     le chargement fini (même après un délai dépassé)."""
     if NATIVE:
         return _instantiate_native(juce, path, plugin_name, state_b64, sample_rate, block, context)
-    # Plugin connu pour planter (ou à risque) : essai dans un processus jetable
-    # d'abord ; s'il plante, PluginUnstable et le pont continue (plugin_guard).
-    plugin_guard.check(path, plugin_name)
+    # (pedalboard, repli de développement) : plugin dans le processus du pont, sous la quarantaine.
     guard = CRASH_GUARD
     if guard is not None and guard.is_quarantined(path):
         raise PluginQuarantined(guard.message(path))
@@ -622,19 +609,18 @@ def instantiate(juce: "JuceThread", path: str, plugin_name: Optional[str], state
     w = WATCHER.begin(path, plugin_name, context) if WATCHER is not None else None
     t0 = time.time()
     try:
-        with plugin_guard.loading(path, plugin_name):   # témoin : resté si le pont meurt ici
-            fut = juce.call(prepare_plugin, path, plugin_name, state_b64, sample_rate, block)
-            if token is not None:
-                fut.add_done_callback(lambda _f: guard.end(token))
-            while True:
-                try:
-                    return fut.result(timeout=1.0)
-                except FutureTimeout:
-                    limit = LICENSE_WAIT_S if (w is not None and w.seen) else LOAD_TIMEOUT_S
-                    if time.time() - t0 > limit:
-                        # Fini plus tard (fenêtre fermée) : l'instance orpheline est libérée.
-                        fut.add_done_callback(lambda f: juce.release(f.result()[0]) if not f.exception() else None)
-                        raise TimeoutError("Le plugin ne répond pas (fenêtre de licence restée ouverte ?)")
+        fut = juce.call(prepare_plugin, path, plugin_name, state_b64, sample_rate, block)
+        if token is not None:
+            fut.add_done_callback(lambda _f: guard.end(token))
+        while True:
+            try:
+                return fut.result(timeout=1.0)
+            except FutureTimeout:
+                limit = LICENSE_WAIT_S if (w is not None and w.seen) else LOAD_TIMEOUT_S
+                if time.time() - t0 > limit:
+                    # Fini plus tard (fenêtre fermée) : l'instance orpheline est libérée.
+                    fut.add_done_callback(lambda f: juce.release(f.result()[0]) if not f.exception() else None)
+                    raise TimeoutError("Le plugin ne répond pas (fenêtre de licence restée ouverte ?)")
     finally:
         if w is not None:
             w.end()
