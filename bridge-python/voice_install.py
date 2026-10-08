@@ -5,8 +5,8 @@ NOVA - installation du module optionnel « voix par l'IA locale » (R24).
 Installé à la demande, fonction par fonction, hors de l'installateur de Nova Studio :
 
     %LOCALAPPDATA%\\NovaStudio\\voice\\
-        env\\                 Python 3.12 dédié : faster-whisper (MIT), CTranslate2 (MIT),
-                              soundfile, numpy, scipy
+        env\\                 Python 3.12 dédié : soundfile, numpy, scipy ; plus, pour la
+                              transcription, faster-whisper (MIT) et CTranslate2 (MIT)
         cuda\\                cuBLAS pour la carte NVIDIA : liens vers celui de PyTorch du
                               module stems quand il est là (rien à télécharger), sinon le
                               paquet officiel nvidia-cublas-cu12 (PyPI) dans env\\
@@ -55,8 +55,15 @@ DEEPFILTER_URL = "https://github.com/Rikorose/DeepFilterNet/releases/download/v0
 DEEPFILTER_SHA256 = "75e11fa16445f560cb6b021521ddb89e89270d13b83089705d98776f58fd7915"
 DEEPFILTER_BYTES = 26_912_256
 
+# Paquets Python par groupe : la déréverbération n'a besoin que du socle audio.
+PACKAGES = {
+    "base": ["soundfile", "numpy<2.4", "scipy"],
+    "whisper": [f"faster-whisper=={FASTER_WHISPER_VERSION}", "huggingface_hub"],
+}
+
 # Tailles annoncées avant l'installation (téléchargement), en octets.
-ENV_BYTES = 230_000_000          # Python 3.12 + faster-whisper, CTranslate2, onnxruntime, scipy…
+ENV_BYTES = 75_000_000           # Python 3.12 + numpy, scipy, soundfile
+WHISPER_PKG_BYTES = 130_000_000  # faster-whisper, CTranslate2, onnxruntime, tokenizers, av
 CUBLAS_BYTES = 570_000_000       # paquet NVIDIA, seulement sans le module stems en version carte graphique
 
 FEATURES = ("transcribe", "deverb")
@@ -90,8 +97,12 @@ def read_installed(home: Path) -> dict:
 def download_estimate(home: Path, feature: str, variant: str = "auto", model: str = "large-v3-turbo") -> int:
     """Octets à télécharger pour installer `feature` maintenant (pour l'annoncer)."""
     info = read_installed(home)
-    total = 0 if env_python(home).is_file() and info.get("env") else ENV_BYTES
+    groups = set((info.get("env") or {}).get("packages") or [])
+    have_env = env_python(home).is_file() and "base" in groups
+    total = 0 if have_env else ENV_BYTES
     if feature == "transcribe":
+        if not (have_env and "whisper" in groups):
+            total += WHISPER_PKG_BYTES
         cuda = variant == "cuda" or (variant == "auto" and Installer.nvidia_ok())
         if cuda and not (home / "cuda" / CUBLAS_DLLS[0]).is_file() and stems_torch_lib() is None:
             total += CUBLAS_BYTES
@@ -123,18 +134,27 @@ class Installer(stems_install.Installer):
 
     # --- étapes -------------------------------------------------------------------
 
-    def ensure_env(self, uv: Path, pct_from: float, pct_to: float):
+    def ensure_env(self, uv: Path, pct_from: float, pct_to: float, groups: list):
+        """Environnement Python dédié, avec les groupes de paquets demandés (socle audio,
+        faster-whisper). Ce qui est déjà là n'est pas retéléchargé."""
         info = read_installed(self.home)
+        have = set((info.get("env") or {}).get("packages") or [])
         py = env_python(self.home)
-        if py.is_file() and info.get("env"):
+        if not py.is_file():
+            have = set()
+        todo = [g for g in groups if g not in have]
+        if not todo:
             self.progress(pct_to, "env", "Environnement Python déjà prêt")
-            return py
-        self.run([uv, "venv", "--clear", "--python", PYTHON_VERSION, str(self.home / "env")],
-                 "python", pct_from, pct_from + (pct_to - pct_from) * 0.3, "Préparation de Python 3.12 (dédié à la voix)", 1.5e8)
-        self.run([uv, "pip", "install", "--python", py, f"faster-whisper=={FASTER_WHISPER_VERSION}",
-                  "soundfile", "numpy<2.4", "scipy", "huggingface_hub"],
-                 "packages", pct_from + (pct_to - pct_from) * 0.3, pct_to, "Installation de faster-whisper et des outils audio", 4e8)
-        return py
+            return py, sorted(have)
+        mid = pct_from + (pct_to - pct_from) * 0.3
+        if not have:
+            self.run([uv, "venv", "--clear", "--python", PYTHON_VERSION, str(self.home / "env")],
+                     "python", pct_from, mid, "Préparation de Python 3.12 (dédié à la voix)", 1.5e8)
+        pkgs = [p for g in sorted(set(todo) | {"base"}) for p in PACKAGES[g]]
+        label = "Installation de faster-whisper et des outils audio" if "whisper" in todo else "Installation des outils audio"
+        self.run([uv, "pip", "install", "--python", py] + pkgs, "packages", mid, pct_to, label,
+                 4e8 if "whisper" in todo else 1.6e8)
+        return py, sorted(have | set(todo) | {"base"})
 
     def ensure_cuda(self, uv: Path, py: Path, pct_from: float, pct_to: float) -> str:
         """cuBLAS pour la carte graphique. Renvoie « cuda » ou « cpu »."""
@@ -215,8 +235,11 @@ class Installer(stems_install.Installer):
         self.write_info(info)
         uv = self.find_uv()
         self.log(f"uv : {uv}")
-        py = self.ensure_env(uv, 3, 30)
-        info["env"] = {"python": PYTHON_VERSION, "faster_whisper": FASTER_WHISPER_VERSION}
+        py, groups = self.ensure_env(uv, 3, 30, ["base", "whisper"] if self.feature == "transcribe" else ["base"])
+        info = read_installed(self.home)
+        info["env"] = {"python": PYTHON_VERSION, "packages": groups,
+                       **({"faster_whisper": FASTER_WHISPER_VERSION} if "whisper" in groups else {})}
+        info.setdefault("features", {}).pop(self.feature, None)
         self.write_info(info)
         self.copy_worker()
         if self.feature == "transcribe":

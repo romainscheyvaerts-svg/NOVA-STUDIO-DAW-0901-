@@ -130,12 +130,11 @@ def pick_device(wanted: str) -> str:
 LANGUAGES = {"fr": "fr", "en": "en", "auto": None, "mix": "fr"}
 
 
-def transcribe_audio(model, mono16k, language: str | None, on_progress=None):
+def transcribe_audio(model, mono16k, language: str | None, on_progress=None, vad: bool = True):
     """Mots horodatés. Renvoie (mots, segments, langue)."""
     segs, info = model.transcribe(
-        mono16k, language=language, word_timestamps=True, vad_filter=True, beam_size=5,
-        condition_on_previous_text=False,
-        vad_parameters={"min_silence_duration_ms": 500, "speech_pad_ms": 200})
+        mono16k, language=language, word_timestamps=True, vad_filter=vad, beam_size=5,
+        condition_on_previous_text=False)  # détecteur de voix : réglages par défaut (mesurés les meilleurs sur du chant)
     words, segments = [], []
     dur = max(0.1, float(info.duration))
     for s in segs:
@@ -148,6 +147,13 @@ def transcribe_audio(model, mono16k, language: str | None, on_progress=None):
             token = w.word.strip()
             if not token:
                 continue
+            # Élision coupée par Whisper (« J » + « 'ai », « c » + « 'est ») : un seul mot.
+            if not first and words and not w.word[:1].isspace() and token[:1] in "'’-":
+                prev = words[-1]
+                prev["w"] += token
+                prev["e"] = round(w.end, 3)
+                prev["p"] = round(min(prev["p"], float(w.probability)), 3)
+                continue
             item = {"w": token, "s": round(w.start, 3), "e": round(w.end, 3), "p": round(float(w.probability), 3)}
             if first:
                 item["b"] = True
@@ -156,6 +162,71 @@ def transcribe_audio(model, mono16k, language: str | None, on_progress=None):
         if on_progress:
             on_progress(min(1.0, s.end / dur))
     return words, segments, info.language
+
+
+def phrase_spans(mono16k, max_s: float = 25.0):
+    """Phrases chantées (détecteur de voix Silero de faster-whisper) : (début, fin) en échantillons."""
+    from faster_whisper.vad import VadOptions, get_speech_timestamps
+    spans = get_speech_timestamps(mono16k, VadOptions(min_silence_duration_ms=400, speech_pad_ms=150))
+    out = []
+    for sp in spans:
+        s, e = int(sp["start"]), int(sp["end"])
+        # Bouts très courts (« yeah ») collés à la phrase d'avant s'ils sont proches.
+        if out and (s - out[-1][1] < 0.25 * 16000 or e - s < 0.6 * 16000) and e - out[-1][0] < max_s * 16000:
+            out[-1] = (out[-1][0], e)
+        else:
+            out.append((s, e))
+    return out
+
+
+def phrase_language(model, chunk, allowed=("fr", "en")) -> str:
+    """Langue d'une phrase : le français d'abord ; l'anglais seulement s'il est nettement plus
+    probable (une phrase française avec « game », « baby », « flow » reste en français)."""
+    try:
+        _lang, _p, probs = model.detect_language(chunk)
+    except Exception:
+        return allowed[0]
+    p = {k: v for k, v in probs if k in allowed}
+    fr, en = p.get("fr", 0.0), p.get("en", 0.0)
+    return "en" if en > 0.5 and en > 3 * fr else "fr"
+
+
+def transcribe_by_phrase(model, mono16k, on_progress=None):
+    """Mode « Français + anglais (rap) » : la langue est choisie phrase par phrase (Whisper n'en
+    choisit qu'une pour 30 s de son, et traduit ou saute une phrase anglaise au milieu d'un texte
+    français). Les phrases voisines de même langue sont transcrites ensemble, pour garder le
+    contexte : un texte tout en français donne le même résultat qu'en mode « fr ».
+    Renvoie (mots, segments, langue de chaque phrase)."""
+    spans = phrase_spans(mono16k)
+    langs = [phrase_language(model, mono16k[s:e]) for s, e in spans]
+    blocks = []  # (début, fin, langue) : suites de phrases de même langue
+    for (s, e), lang in zip(spans, langs):
+        if blocks and blocks[-1][2] == lang:
+            blocks[-1] = (blocks[-1][0], e, lang)
+        else:
+            blocks.append((s, e, lang))
+    if len(blocks) <= 1:  # une seule langue : exactement comme le mode d'une langue (tout le son, même découpe)
+        w, seg, _ = transcribe_audio(model, mono16k, blocks[0][2] if blocks else "fr", on_progress)
+        return w, seg, langs
+    words, segments = [], []
+    for k, (s, e, lang) in enumerate(blocks):
+        # Un peu de marge autour du bloc (début et fin de mot), sans déborder sur le bloc voisin.
+        a = max(0, s - 2400 if k == 0 or blocks[k - 1][1] < s - 2400 else blocks[k - 1][1])
+        b = min(len(mono16k), e + 2400 if k + 1 == len(blocks) or blocks[k + 1][0] > e + 2400 else blocks[k + 1][0])
+        w, seg, _ = transcribe_audio(model, mono16k[a:b], lang, vad=False)
+        off = a / 16000
+        for x in w:
+            x["s"] = round(x["s"] + off, 3)
+            x["e"] = round(x["e"] + off, 3)
+        for x in seg:
+            x["s"] = round(x["s"] + off, 3)
+            x["e"] = round(x["e"] + off, 3)
+            x["language"] = lang
+        words += w
+        segments += seg
+        if on_progress:
+            on_progress((k + 1) / max(1, len(blocks)))
+    return words, segments, langs
 
 
 def run_transcribe(a) -> int:
@@ -184,15 +255,22 @@ def run_transcribe(a) -> int:
         emit("progress", pct=round(8 + 90 * f, 1), message="Transcription en cours")
 
     emit("progress", pct=8, message="Transcription en cours")
+
+    def go(m):
+        if a.language == "mix":  # langue choisie phrase par phrase
+            w, seg, langs = transcribe_by_phrase(m, mono, progress)
+            return w, seg, ("en" if langs and langs.count("en") > len(langs) / 2 else "fr")
+        return transcribe_audio(m, mono, lang, progress)
+
     try:
-        words, segments, detected = transcribe_audio(model, mono, lang, progress)
+        words, segments, detected = go(model)
     except Exception as e:  # mémoire de la carte pleine, pilote qui lâche
         if device != "cuda":
             raise
         emit("fallback", message=f"Échec sur la carte graphique ({str(e)[:120]}) : nouvel essai sur le processeur")
         device = "cpu"
         model = load_whisper(a.model, device)
-        words, segments, detected = transcribe_audio(model, mono, lang, progress)
+        words, segments, detected = go(model)
     emit("done", words=words, segments=segments, language=detected or lang or "fr", model=a.model,
          device=device, seconds=round(time.time() - t0, 2), duration=round(duration, 3))
     return 0

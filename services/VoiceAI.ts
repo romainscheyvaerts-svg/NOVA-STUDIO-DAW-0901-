@@ -29,9 +29,12 @@ export const DEVERB_TOOLTIP =
 export const TRANSCRIBE_TOOLTIP =
   'Écrit les paroles du clip mot par mot, calées sur le temps, dans ton prompteur et l’onglet Paroles. Calcul gratuit sur ton PC (appli Windows), rien n’est envoyé sur Internet.';
 
+/** Réglage conseillé : le français d'abord, les phrases en anglais restent en anglais (mesures R24). */
+export const DEFAULT_LANGUAGE: TranscribeLanguage = 'mix';
+
 export const LANGUAGE_OPTIONS: { id: TranscribeLanguage; label: string; hint: string }[] = [
-  { id: 'fr', label: 'Français', hint: 'Le plus juste pour un texte en français.' },
-  { id: 'mix', label: 'Français + anglais (rap)', hint: 'Garde les mots anglais (« game », « flow », « baby ») dans un texte français.' },
+  { id: 'mix', label: 'Français + anglais (rap)', hint: 'Conseillé : le français d’abord ; une phrase en anglais reste en anglais, les mots anglais (« game », « flow ») sont gardés.' },
+  { id: 'fr', label: 'Français seulement', hint: 'Tout le texte est lu comme du français (un peu plus rapide).' },
   { id: 'en', label: 'Anglais', hint: 'Texte entièrement en anglais.' },
   { id: 'auto', label: 'Détecter la langue', hint: 'Whisper choisit la langue tout seul.' },
 ];

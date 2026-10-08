@@ -15,7 +15,7 @@ import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { DAWState, Track } from '../types';
 import { novaBridge, BridgeState, VoiceError, VoiceFeature, VoiceModuleStatus } from '../services/NovaBridge';
 import {
-  applyTranscriptions, blendDeverb, DEVERB_TOOLTIP, deverbBlock, deverbPatch, deverbRegion, describeVoiceError,
+  applyTranscriptions, blendDeverb, DEFAULT_LANGUAGE, DEVERB_TOOLTIP, deverbBlock, deverbPatch, deverbRegion, describeVoiceError,
   formatBytes, installButtonLabel, LANGUAGE_OPTIONS, LyricsMode, progressLabel, sliceChannels, TranscribedClip,
   TranscribeLanguage, transcribeBlock, transcribeRegion, transcriptionSummary, TRANSCRIBE_TOOLTIP, voiceAvailability,
 } from '../services/VoiceAI';
@@ -148,7 +148,7 @@ const VoiceAIDialog: React.FC<Props> = ({ request, tracks, lyrics, setState, onC
   const [module, setModule] = useState<VoiceModuleStatus | null>(null);
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
-  const [language, setLanguage] = useState<TranscribeLanguage>('fr');
+  const [language, setLanguage] = useState<TranscribeLanguage>(DEFAULT_LANGUAGE);
   const [lyricsMode, setLyricsMode] = useState<LyricsMode>('keep');
   const [showOnClip, setShowOnClip] = useState(true);
   const [amount, setAmount] = useState(0.8);

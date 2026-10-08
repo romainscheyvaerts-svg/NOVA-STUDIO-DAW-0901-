@@ -68,7 +68,7 @@ class VoiceServiceTest(unittest.TestCase):
     def install_fake(self, mode="ok", features=("transcribe", "deverb")):
         (self.home / "voice_worker.py").write_text(FAKE_WORKER, encoding="utf-8")
         (self.home / "mode.txt").write_text(mode)
-        info = {"env": {"python": "3.12"}, "features": {f: {"model": "large-v3-turbo", "device": "cuda"} for f in features}}
+        info = {"env": {"python": "3.12", "packages": ["base", "whisper"]}, "features": {f: {"model": "large-v3-turbo", "device": "cuda"} for f in features}}
         (self.home / "installed.json").write_text(json.dumps(info))
 
     # --- état ----------------------------------------------------------------------
@@ -95,9 +95,12 @@ class VoiceServiceTest(unittest.TestCase):
             est = voice_install.download_estimate(self.home, "transcribe", "cuda")
         # Environnement déjà là et cuBLAS repris du module stems : seulement le modèle.
         self.assertEqual(est, voice_install.WHISPER_MODELS["large-v3-turbo"]["bytes"])
-        self.assertEqual(est_full - est, voice_install.ENV_BYTES + voice_install.CUBLAS_BYTES
-                         if voice_install.stems_torch_lib() is None else voice_install.ENV_BYTES)
+        base = voice_install.ENV_BYTES + voice_install.WHISPER_PKG_BYTES
+        self.assertEqual(est_full - est, base + voice_install.CUBLAS_BYTES if voice_install.stems_torch_lib() is None else base)
         self.assertEqual(voice_install.download_estimate(self.home, "transcribe", "cpu"), voice_install.WHISPER_MODELS["large-v3-turbo"]["bytes"])
+        # Déréverbération seule : le socle audio et DeepFilterNet, sans faster-whisper.
+        (self.home / "installed.json").write_text(json.dumps({"env": {"packages": []}}))
+        self.assertEqual(voice_install.download_estimate(self.home, "deverb"), voice_install.ENV_BYTES + voice_install.DEEPFILTER_BYTES)
 
     # --- calculs ---------------------------------------------------------------------
 
