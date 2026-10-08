@@ -140,9 +140,9 @@ def fermer_carte(pg):
 
 
 # ------------------------------------------------------------------ 1. artiste débutant (téléphone)
-def artiste(b, theme):
-    ctx, pg, log = contexte(b, "tel", theme, simple=True, welcome="0")
-    P = Parcours(f"artiste_tel_{theme}", pg, log, "tel")
+def artiste(b, theme, vp="tel"):
+    ctx, pg, log = contexte(b, vp, theme, simple=True, welcome="0")
+    P = Parcours(f"artiste_{vp}_{theme}", pg, log, vp)
 
     def beat():
         P.pg.goto(BASE, wait_until="domcontentloaded")
@@ -167,18 +167,18 @@ def artiste(b, theme):
     def mix_auto():
         fermer_carte(P.pg)
         t = time.time()
-        tap(bouton(P.pg, "Trap autotune|Mix auto"), "tel")
+        tap(bouton(P.pg, "Trap autotune|Mix auto"), vp)
         P.pg.get_by_role("dialog", name=re.compile("Mix auto")).wait_for(timeout=8000)
         P.chrono("ouverture_mix_auto", t)
         P.ecran("mix_auto")
-        tap(P.pg.get_by_role("dialog", name=re.compile("Mix auto")).get_by_role("button", name="Rap clair").first, "tel")
+        tap(P.pg.get_by_role("dialog", name=re.compile("Mix auto")).get_by_role("button", name="Rap clair").first, vp)
         P.pg.wait_for_timeout(1200)
         P.ecran("mix_auto_rap_clair")
     P.etape("Mix auto : changer de style", mix_auto)
 
     def respirations():
         t = time.time()
-        tap(P.pg.locator("[data-testid=breath-all]").first, "tel")
+        tap(P.pg.locator("[data-testid=breath-all]").first, vp)
         for _ in range(30):
             P.pg.wait_for_timeout(400)
             if re.search(r"respiration", P.pg.inner_text("body")[-800:], re.I):
@@ -191,17 +191,18 @@ def artiste(b, theme):
 
     def exporter():
         P.pg.keyboard.press("Escape"); P.pg.wait_for_timeout(400)
-        tap(bouton(P.pg, "Ouvrir le menu"), "tel"); P.pg.wait_for_timeout(500)
-        P.ecran("menu")
+        if not visible(bouton(P.pg, r"^\W*Exporter\s*$")):
+            tap(bouton(P.pg, "Ouvrir le menu"), vp); P.pg.wait_for_timeout(500)
+            P.ecran("menu")
         t = time.time()
-        tap(bouton(P.pg, r"^\W*Exporter\s*$"), "tel"); P.pg.wait_for_timeout(900)
+        tap(bouton(P.pg, r"^\W*Exporter\s*$"), vp); P.pg.wait_for_timeout(900)
         P.chrono("ouverture_export", t)
         P.ecran("export")
-        if COURT or theme != "dark":
-            return {"export": "sauté (--court ou thème clair)"}
+        if COURT or theme != "dark" or vp != "tel":
+            return {"export": "sauté (--court, thème clair ou tablette)"}
         t = time.time()
         with P.pg.expect_download(timeout=600000) as dl:
-            tap(bouton(P.pg, "Démo gratuite du morceau complet"), "tel")
+            tap(bouton(P.pg, "Démo gratuite du morceau complet"), vp)
             P.pg.wait_for_timeout(1500)
             P.ecran("export_en_cours")
         d = dl.value
@@ -452,7 +453,7 @@ def collab(b):
 
 
 PROFILS = {
-    "artiste": lambda b: [artiste(b, t) for t in ("dark", "light")],
+    "artiste": lambda b: [artiste(b, "dark"), artiste(b, "light"), artiste(b, "dark", "tab")],
     "inge": lambda b: [inge(b, t) for t in ("dark", "light")],
     "beatmaker": lambda b: [beatmaker(b, "pc", "dark"), beatmaker(b, "tab", "light")],
     "collab": collab,

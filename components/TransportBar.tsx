@@ -214,6 +214,9 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
     if (e.detail === 2) { 
       // Champ prérempli avec le tempo ACTUEL : il gardait celui de l'ouverture du studio (120), et le
       // quitter sans rien taper remettait le morceau à 120 BPM (mélodie à 94 → 120).
+      // preventDefault : sinon ce même appui (sur un bloc non focalisable) retirait aussitôt le focus
+      // du champ qui venait de s'ouvrir, et il se refermait : « double-clic pour saisir » ne marchait pas.
+      e.preventDefault();
       setTempBpm(String(bpm)); setIsEditingBpm(true);
       return;
     }
