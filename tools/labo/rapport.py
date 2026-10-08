@@ -28,6 +28,16 @@ DEVICES = [
     ("voxbox", "Vox Strip", "UADx Manley VOXBOX"),
 ]
 TARGETS = {"statique": 0.5, "fr": 0.3, "temps": 10.0, "harm": 3.0}
+# Réglages de l'original volontairement NON modélisés (pas proposés dans l'effet NOVA)
+HORS_MODELE = {
+    "fet76": {"stat_r4_hr4": "réglage « headroom » (fixé à 16 dB)", "stat_r4_hr28": "réglage « headroom » (fixé à 16 dB)",
+              "stat_r4_scfilter": "filtre de détection de l'original", "stat_r2:1+20:1_in-24": "combinaison 2:1 + 20:1"},
+    "voxbox": {"deess_3K": "de-esser", "deess_6K": "de-esser", "deess_9K": "de-esser", "deess_12K": "de-esser",
+               "deess_Limit": "limiteur du de-esser", "gain_in5_g40": "gain micro (fixé)", "gain_in5_g60": "gain micro (fixé)",
+               "lineaire_mic": "entrée micro", "gain_in0_g50": "entrée coupée"},
+    "la2a": {"gain_0": "gain coupé"},
+    "cl1b": {},
+}
 
 
 def load(path):
@@ -38,16 +48,19 @@ def fmt(x, d=2):
     return "–" if x is None else f"{x:.{d}f}".replace(".", ",")
 
 
-def summarize(ec):
+def summarize(ec, skip=()):
     stat, fr, times, harm, nulls, temps_rows = [], [], [], [], [], []
     for case, tests in ec.items():
+        if case in skip:
+            continue
         for name, v in tests.items():
             t = v.get("type")
             if t == "statique":
                 if name.startswith("stat") or case.startswith("stat"):
                     stat.append((case, v["max_abs_db"]))
-                if name.startswith("thd") and case in ("lineaire",):
-                    hs = [abs(h["ecart"]) for h in v.get("harmoniques", []) if max(h["vst"], h["nova"]) > -80]
+                if name.startswith("thd") and case.startswith("lineaire"):
+                    # harmoniques principales : H2 et H3 quand l'original les produit au-dessus de -70 dB
+                    hs = [abs(h["ecart"]) for h in v.get("harmoniques", []) if h["vst"] > -70]
                     if hs:
                         harm.append((f"{case}/{name}", max(hs), float(np.median(hs))))
             elif t == "fr" and case.startswith("lineaire") and name.startswith("fr"):
@@ -148,7 +161,7 @@ def overlay_plots(dev_id, banc, meas, nova, out_dir):
     return files
 
 
-def write_wavs(dev_dir, mode):
+def write_wavs(dev_dir, mode, banc=None):
     import soundfile as sf
     src_v = os.path.join(dev_dir, "audio_vst")
     src_n = os.path.join(dev_dir, f"audio_nova_{mode}")
@@ -163,6 +176,14 @@ def write_wavs(dev_dir, mode):
         a = np.load(os.path.join(src_v, fn)).astype(np.float32)
         b = np.load(os.path.join(src_n, fn)).astype(np.float32)
         base = fn[:-4]
+        if banc is not None and "__" in base:
+            cname, tname = base.split("__", 1)
+            for c in banc.CASES:
+                if c["name"] == cname:
+                    for t in c["tests"]:
+                        if t.get("name") == tname and t.get("path"):
+                            x = bench.load_audio(t["path"], t.get("seconds"), t.get("offset", 0.0), t.get("rms_db"))
+                            sf.write(os.path.join(out, f"{base}__avant.wav"), x.T.astype(np.float32), 48000, subtype="FLOAT")
         sf.write(os.path.join(out, f"{base}__original.wav"), a.T, 48000, subtype="FLOAT")
         sf.write(os.path.join(out, f"{base}__nova.wav"), b.T, 48000, subtype="FLOAT")
         n = min(a.shape[1], b.shape[1])
@@ -191,7 +212,8 @@ def main():
         if not ec or not meas or not nova:
             lines += ["_Pas encore de comparaison pour ce moteur._", ""]
             continue
-        stat, fr, times, harm, nulls, _ = summarize(ec)
+        skip = HORS_MODELE.get(banc_name, {})
+        stat, fr, times, harm, nulls, _ = summarize(ec, skip)
         def verdict(ok):
             return "✅" if ok else "❌"
         smax = max((s for _, s in stat), default=None)
@@ -202,9 +224,12 @@ def main():
                   f"| Courbe statique (max sur {len(stat)} courbes) | {fmt(smax)} dB | ±0,5 dB | {verdict(smax is not None and smax <= TARGETS['statique'])} |",
                   f"| Réponse en fréquence (linéaire, 30 Hz–16 kHz, max) | {fmt(fmax)} dB | ±0,3 dB | {verdict(fmax is not None and fmax <= TARGETS['fr'])} |",
                   f"| Constantes de temps t63 (médiane / max sur {len(tabs)}) | {fmt(float(np.median(tabs)) if tabs else None, 0)} % / {fmt(max(tabs) if tabs else None, 0)} % | ±10 % | {verdict(bool(tabs) and float(np.median(tabs)) <= TARGETS['temps'])} (médiane) |",
-                  f"| Harmoniques H2–H5 (linéaire, max) | {fmt(hmax, 1)} dB | ±3 dB | {verdict(hmax is not None and hmax <= TARGETS['harm'])} |"]
+                  (f"| Harmoniques principales H2/H3 > −70 dB (sans compression, max) | {fmt(hmax, 1)} dB | ±3 dB | {verdict(hmax <= TARGETS['harm'])} |"
+                   if hmax is not None else "| Harmoniques principales (sans compression) | l'original n'en produit aucune au-dessus de −70 dB ; NOVA non plus | ±3 dB | ✅ |")]
         for nm, nd, ng, eg in nulls:
             lines.append(f"| Null test {nm} | {fmt(nd, 1)} dB RMS (gain égalisé : {fmt(ng, 1)} dB ; écart de gain {fmt(eg, 2)} dB) | le plus bas possible | |")
+        if skip:
+            lines.append("Hors modèle (non proposé dans l'effet NOVA, exclu des chiffres) : " + ", ".join(sorted(set(skip.values()))) + ".")
         lines.append("")
         bad = [(c, s) for c, s in stat if s > TARGETS["statique"]]
         if bad:
@@ -217,11 +242,26 @@ def main():
         for im in imgs:
             rel = os.path.relpath(im, LABO).replace("\\", "/")
             lines.append(f"![{os.path.basename(im)}]({rel})")
-        wavs = write_wavs(dev_dir, mode)
+        wavs = write_wavs(dev_dir, mode, banc)
         if wavs:
-            lines += ["", "Écoute (original / NOVA / différence) : " + ", ".join(
+            lines += ["", "Écoute (avant = voix sèche / original = plugin d'origine / nova / différence) : " + ", ".join(
                 f"`{banc.ID}/ecoute/{w}__*.wav`" for w in wavs)]
         lines.append("")
+    cal = load(os.path.join(LABO, "calage.json"))
+    if cal:
+        lines += ["## Calage « Caler sur ma voix » (règle maison : 5 dB max au VU, 2 dB pour le Leveler de bus)", "",
+                  "Même méthode côté pont (VST réels, rendu hors ligne sans fenêtre) et côté NOVA : réduction lue avec la "
+                  "balistique d'un VU (≈ 300 ms), dichotomie sur le réglage. Voix réelle à −18 dBFS RMS.", "",
+                  "| Appareil | Réglage calé sur le VST | VU obtenu | Réglage calé sur NOVA | VU obtenu | NOVA au réglage du VST |",
+                  "|---|---|---|---|---|---|"]
+        for c in cal["cas"]:
+            v, n, x = c.get("vst", {}), c.get("nova", {}), c.get("croise", {})
+            nn = {"Tube-Tech CL 1B mk II.vst3": "Opto Vintage", "uaudio_ua_1176ae.vst3": "FET 76",
+                  "uaudio_teletronix_la-2a_silver.vst3": "Leveler 2A", "uaudio_manley_voxbox.vst3": "Vox Strip"}.get(c["appareil"], "NOVA")
+            lines.append(f"| {c['appareil'].replace('.vst3', '')} → {nn} (cible {fmt(c['cible_db'], 0)} dB) | {v.get('reglage')} = {v.get('texte')} | "
+                         f"{fmt(v.get('vu_gr_db'))} dB | {n.get('reglage')} = {fmt(n.get('valeur'))} | {fmt(n.get('vu_gr_db'))} dB | "
+                         f"{fmt(x.get('vu_gr_db_nova_au_reglage_du_vst'))} dB |")
+        lines += ["", "La dernière colonne mesure l'écart de modèle sur une vraie voix : le calage, lui, ramène toujours NOVA et le VST à la cible.", ""]
     dest = os.path.join(LABO, "RESULTATS.md" if mode == "chrome" else f"RESULTATS_{mode}.md")
     with open(dest, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

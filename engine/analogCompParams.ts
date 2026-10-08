@@ -96,7 +96,7 @@ export const FET76: AnalogKindSpec = {
       hint: "7 = le plus rapide (~80 ms, son plus fort et plus agressif), 1 = le plus lent (~1 s, plus doux)." },
     { id: 'ratio', label: 'Taux', min: 0, max: 24, step: 1, unit: '', auto: false,
       hint: "Plus le taux est haut, plus le seuil monte et plus la compression est ferme. « Écrasé » (4+20) : le son de bus agressif.",
-      choices: [{ v: 2, label: '2:1' }, { v: 4, label: '4:1' }, { v: 8, label: '8:1' }, { v: 20, label: '20:1' }, { v: 24, label: 'Écrasé', hint: '4:1 + 20:1 enfoncés ensemble' }] },
+      choices: [{ v: 0, label: 'Aucun', hint: 'Aucun bouton enfoncé : pas de compression, seulement la couleur des transistors et des transformateurs.' }, { v: 2, label: '2:1' }, { v: 4, label: '4:1' }, { v: 8, label: '8:1' }, { v: 20, label: '20:1' }, { v: 24, label: 'Écrasé', hint: '4:1 + 20:1 enfoncés ensemble' }] },
     { id: 'slo', label: 'Attaque lente (SLO)', min: 0, max: 1, step: 1, unit: '', auto: false,
       hint: "Attaque d'environ 10 ms : laisse passer les transitoires (batterie, consonnes) tout en tenant le niveau.",
       choices: [{ v: 0, label: 'Non' }, { v: 1, label: 'Oui' }] },
