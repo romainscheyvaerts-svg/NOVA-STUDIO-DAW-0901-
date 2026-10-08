@@ -12,7 +12,7 @@ export type AnalogKind = 'OPTO_VINTAGE' | 'FET76' | 'LEVELER2A' | 'VOXSTRIP';
 
 export function buildAnalogInternal(kind: string, p: Record<string, number>, prof: any, sampleRate: number): AnalogCompInternal {
   var SR = sampleRate > 0 ? sampleRate : 48000;
-  var P = new Float64Array(100);
+  var P = new Float64Array(387);
   function num(v: any, d: number) { var x = +v; return x === x && isFinite(x) ? x : d; }
   function interp(x: number, xs: number[], ys: number[]) {
     var n = xs.length;
@@ -43,6 +43,14 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
       var sb = 2 * Math.sqrt(A) * al;
       b = [A * ((A + 1) + (A - 1) * cw + sb), -2 * A * ((A - 1) + (A + 1) * cw), A * ((A + 1) + (A - 1) * cw - sb)];
       a = [(A + 1) - (A - 1) * cw + sb, 2 * ((A - 1) - (A + 1) * cw), (A + 1) - (A - 1) * cw - sb];
+    } else if (kindB === 'ap2') {
+      // passe-tout du 2e ordre (phase seule : filtres de suréchantillonnage, transformateurs)
+      b = [1 - al, -2 * cw, 1 + al]; a = [1 + al, -2 * cw, 1 - al];
+    } else if (kindB === 'ap1') {
+      // passe-tout du 1er ordre (Thiran) : retard fractionnaire de fc échantillons (à 48 kHz)
+      var dd = Math.min(1.9, Math.max(0, fc * SR / 48000));
+      var ap = (1 - dd) / (1 + dd);
+      return [ap, 1, 0, ap, 0];
     } else if (kindB === 'hp1') {
       var wt = Math.tan(Math.PI * fc / SR), h0 = 1 / (1 + wt);
       return [h0, -h0, 0, (wt - 1) / (wt + 1), 0];
@@ -62,6 +70,59 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
     var out: number[] = [];
     for (var i = 0; i < tables[j].length; i++) out.push(tables[j - 1][i] * (1 - t) + tables[j][i] * t);
     return out;
+  }
+
+  /** Tour 2 : cellule multi-composantes (dB) mesurée ; sa / sr = vitesses données par les boutons. */
+  function applyDyn2(d: any, sa: number, sr: number) {
+    if (!d || !d.comps) return;
+    P[100] = 1;
+    for (var z3 = 101; z3 < 125; z3++) P[z3] = 0;
+    for (var k = 0; k < d.comps.length && k < 3; k++) {
+      var cp = d.comps[k], o = 101 + 8 * k;
+      var ea = cp.length > 6 ? cp[6] : 1, er = cp.length > 7 ? cp[7] : 1;
+      var ka = Math.pow(sa, ea), kr = Math.pow(sr, er);
+      P[o] = cp[0];
+      P[o + 1] = coef(cp[1] / ka);
+      P[o + 2] = cp[2];
+      P[o + 3] = cp[3] > 0 ? coef(cp[3] / kr) : 0;
+      P[o + 4] = cp[4];
+      P[o + 5] = cp[5] * kr / SR;
+      P[o + 6] = cp.length > 8 && cp[8] > 0 ? cp[8] * ka * 1000 / SR : 0;
+    }
+    P[126] = num(d.ant, 0);
+    P[108] = d.max ? 1 : 0;
+    P[127] = d.hold_ms > 0 ? coef(d.hold_ms) : 0;
+    if (d.thr_db) P[1] *= Math.pow(10, d.thr_db / 20);
+    var det = d.det;
+    if (det) {
+      P[125] = det[0];
+      P[4] = det[1] > 0 ? coef(det[1]) : 0;
+      P[29] = det[2] > 0 ? coef(det[2]) : 0;
+      P[3] = det[3];
+    }
+    P[61] = 0; P[55] = 0; P[11] = 0;
+  }
+  /** Tour 2 : correction linéaire mesurée (module + phase) dans les biquads libres. */
+  function applyLti(lti: any) {
+    if (!lti) return;
+    var j = 0;
+    for (var q = 0; q < 8 && j < lti.length; q++) {
+      var o = q < 4 ? 32 + 5 * q : 80 + 5 * (q - 4);
+      if (P[o] !== 0) continue;
+      var e = lti[j++];
+      setEq(q, biquad(e[0], e[1], e[2], e[3]));
+    }
+  }
+  function finish(t: number[], sa: number, sr: number, d: any) {
+    applyDyn2(d, sa, sr);
+    applyLti(prof.lti);
+    P[128] = Math.round(num(prof.lat, 0) * SR / 48000);
+    // étage de sortie tabulé (caractéristique de transfert mesurée), s'il existe
+    if (prof.ws && prof.ws.table && prof.ws.table.length === 257) {
+      P[129] = prof.ws.max;
+      for (var w = 0; w < 257; w++) P[130 + w] = prof.ws.table[w];
+    }
+    return { P: P, tab: t, l0: prof.l0, dl: prof.dl };
   }
 
   P[0] = 1; P[5] = 1; P[18] = 1; P[19] = 1; P[1] = 1e6;
@@ -118,7 +179,10 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
       setHp(f ? biquad('hp', f[0], f[1], 0) : biquad('hp', sc, 0.7071, 0));
     }
     P[25] = 0;
-    return { P: P, tab: tab, l0: prof.l0, dl: prof.dl };
+    var d2o = prof.dyn2 ? prof.dyn2[mode === 0 ? 'fix' : mode === 1 ? 'fm' : 'man'] : null;
+    var sao = d2o && d2o.att_scale ? interpLog(att, d2o.att_knob, d2o.att_scale) : 1;
+    var sro = d2o && d2o.rel_scale ? interpLog(rel, d2o.rel_knob, d2o.rel_scale) : 1;
+    return finish(tab, sao, sro, d2o);
   }
   if (kind === 'VOXSTRIP') {
     var dv = prof.defaults || {};
@@ -138,7 +202,8 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
     P[61] = prof.slowFrac; P[62] = coef(prof.slowAttMs); P[63] = coef(prof.slowRelMs);
     var slot = 0;
     var lc = Math.round(pv('lowCut'));
-    if (lc > 0) setEq(slot++, biquad('hp1', lc, 0.7071, 0));
+    // coupe-bas : fréquence de coin EFFECTIVE mesurée (le « 80 Hz » de l'original coupe à ~108 Hz, 1er ordre)
+    if (lc > 0) setEq(slot++, biquad('hp1', prof.lowcutFc && prof.lowcutFc[String(lc)] ? prof.lowcutFc[String(lc)] : lc, 0.7071, 0));
     if (pv('eqOn') >= 0.5) {
       var bands: [string, string, string][] = [['lo', 'loFreq', 'loPeak'], ['mid', 'midFreq', 'midDip'], ['hi', 'hiFreq', 'hiPeak']];
       for (var bi = 0; bi < 3; bi++) {
@@ -152,11 +217,13 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
     }
     for (var eb = 0; eb < prof.eqBase.length && slot < 8; eb++) { var e4 = prof.eqBase[eb]; setEq(slot++, biquad(e4[0], e4[1], e4[2], e4[3])); }
     P[16] = prof.outA2; P[17] = prof.outA3; P[28] = prof.outSat; P[54] = prof.outBias; P[64] = prof.outAb; P[71] = prof.outKnee;
-    if (pv('transformer') >= 0.5) { P[72] = prof.xfK; P[73] = 1 - Math.exp(-2 * Math.PI * prof.xfFc / SR); }
+    // mode 2 (saturation du grave à l'entrée, mesurée) : présente aussi transformateur coupé, comme sur l'original
+    if (pv('transformer') >= 0.5 || num(prof.xfMode, 0) === 2) { P[72] = prof.xfK; P[73] = 1 - Math.exp(-2 * Math.PI * prof.xfFc / SR); P[74] = num(prof.xfMode, 0); }
     P[18] = Math.pow(10, pv('output') / 20);
     P[19] = Math.min(1, Math.max(0, num(p.mix, 100) / 100));
     P[25] = 0;
-    return { P: P, tab: tab, l0: prof.l0, dl: prof.dl };
+    var d2v = prof.dyn2;
+    return finish(tab, d2v && d2v.att_scale ? d2v.att_scale[ai] : 1, d2v && d2v.rel_scale ? d2v.rel_scale[rj] : 1, d2v);
   }
   if (kind === 'LEVELER2A') {
     var pr = num(p.peakReduction, 50);
@@ -187,7 +254,8 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
     for (var q3 = 0; q3 < prof.eq.length && q3 < 4; q3++) { var e3 = prof.eq[q3]; setEq(q3, biquad(e3[0], e3[1], e3[2], e3[3])); }
     P[19] = Math.min(1, Math.max(0, num(p.mix, 100) / 100));
     P[25] = 0;
-    return { P: P, tab: tab, l0: prof.l0, dl: prof.dl };
+    var d2l = num(p.limit, 0) >= 0.5 && prof.dyn2_lim ? prof.dyn2_lim : prof.dyn2;
+    return finish(tab, 1, 1, d2l);
   }
   if (kind === 'FET76') {
     // Bouton ENTRÉE (gain mesuré, non linéaire) -> niveau interne ; seuil interne fixe
@@ -215,7 +283,11 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
     for (var q2 = 0; q2 < prof.eq.length && q2 < 4; q2++) { var e = prof.eq[q2]; setEq(q2, biquad(e[0], e[1], e[2], e[3])); }
     P[19] = Math.min(1, Math.max(0, num(p.mix, 100) / 100));
     P[25] = 0;
-    return { P: P, tab: tab, l0: prof.l0, dl: prof.dl };
+    var d2f = prof.dyn2;
+    var saf = 1;
+    if (d2f) saf = num(p.slo, 0) >= 0.5 ? num(d2f.slo_scale, 1) : (d2f.att_scale ? interpLog(num(p.attack, 4), d2f.att_knob, d2f.att_scale) : 1);
+    var srf = d2f && d2f.rel_scale ? interpLog(relK, d2f.rel_knob, d2f.rel_scale) : 1;
+    return finish(tab, saf, srf, d2f);
   }
   return { P: P, tab: tab, l0: -12, dl: 1 };
 }

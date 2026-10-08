@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
-import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta } from './types';
+import { Track, TrackType, DAWState, ProjectPhase, PluginInstance, PluginType, MobileTab, TrackSend, Clip, AIAction, AutomationLane, AIChatMessage, ViewMode, User, Theme, DrumPad, Marker, TrackGroup, CollabRole, TakeMeta, CueMix } from './types';
 import { themeStore, useTheme } from './utils/themeStore';
 import { openNovaWindow } from './utils/novaWindows';
 import PanelBoundary from './components/PanelBoundary';
@@ -42,6 +42,7 @@ const ExportQueueToast = lazy(() => import('./components/ExportQueueToast'));
 const MasterAssistantPanel = lazy(() => import('./components/MasterAssistantPanel'));
 
 const AudioSettingsPanel = lazy(() => import('./components/AudioSettingsPanel'));
+const CueMixPanel = lazy(() => import('./components/CueMixPanel'));
 
 const PluginManager = lazy(() => import('./components/PluginManager'));
 
@@ -93,6 +94,10 @@ import { GUIDE_DEFAULT_LEVEL } from './utils/trackStructure';
 import { CAPTURE_MINUTES_KEY, captureMinutes } from './utils/audioCapture';
 import { sharedTap, roundTapped } from './utils/tapTempo';
 import { isKeyboardFocus } from './utils/keyboardFocus';
+import { isShortcut, matchShortcut, takenByPianoRoll } from './utils/keymap';
+import './utils/keymapStore';
+import { scrubControl } from './utils/scrubControl';
+import { registerLayoutPart } from './utils/windowLayouts';
 import TempoLane, { TEMPO_LANE_H, useTempoLaneShown, tempoLaneStore } from './components/TempoLane';
 const MetronomeDialog = lazy(() => import('./components/MetronomeDialog'));
 const TempoDialog = lazy(() => import('./components/TempoDialog'));
@@ -138,7 +143,11 @@ import { localCollabOutboxStore } from './utils/collabOutbox';
 import { engineView, shownTrackIds, withPluginState } from './utils/trackStructure';
 import { structureBus, StructurePanel } from './utils/structureBus';
 import { useR12, linkedMixUpdates, selectedTrackIds, runTimeOpOn } from './hooks/useR12';
-import { createGroup, updateGroup, deleteGroup, newGroupId, groupsOpOf, groupsSig, sanitizeGroupsOp, applyGroupsOp } from './utils/editGroups';
+import { createGroup, updateGroup, deleteGroup, newGroupId, groupsOpOf, groupsSig, sanitizeGroupsOp, applyGroupsOp, editGroupsStore } from './utils/editGroups';
+import { armAlone, takeArmShift, recordTargets, inputsMessage, linkedRecordMates } from './utils/multiRecord';
+import { placeTake, trimToPlan } from './utils/multiTake';
+import { compTakeGroup, keepTakeGroup, deleteTakeGroup, takeGroupLinked } from './utils/takeGroups';
+import type { TakeResult } from './engine/AudioEngine';
 import { sanitizeTimeOp, TimeOp } from './utils/timeOps';
 import { R12Panel, TimeDialogPreset, openR12Panel } from './utils/r12Bus';
 import ArrangeLane, { ARRANGE_LANE_H, useArrangeLaneShown } from './components/ArrangeLane';
@@ -171,6 +180,12 @@ import {
 } from './services/SessionCloud';
 import DrumMachinePanel from './components/DrumMachinePanel';
 import ShortcutsHelp from './components/ShortcutsHelp';
+import KeymapEditor from './components/KeymapEditor';
+import WindowLayoutsPanel from './components/WindowLayoutsPanel';
+
+/** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
+const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
+  'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
 import ProToolsWindows from './components/ProToolsWindows';
@@ -315,7 +330,8 @@ const createDefaultPlugins = (type: PluginType, mix: number = 0.3, bpm: number =
   if (type === 'FLANGER') params = { rate: 0.5, depth: 0.5, feedback: 0.7, manual: 0.3, mix: 0.5, invertPhase: false, isEnabled: true };
   if (type === 'DOUBLER') params = { detune: 0.4, width: 0.8, gainL: 0.7, gainR: 0.7, directOn: true, isEnabled: true };
   if (type === 'STEREOSPREADER') params = { width: 1.0, haasDelay: 0.015, lowBypass: 0.8, isEnabled: true };
-  if (type === 'DEESSER') params = { threshold: -25, frequency: 6500, q: 1.0, reduction: 0.6, mode: 'BELL', isEnabled: true };
+  // De-esser : 8 kHz et détection relative par défaut (mesures du labo, règle de Romain)
+  if (type === 'DEESSER') params = { threshold: -30, frequency: 8000, q: 1.0, reduction: 0.6, mode: 'BELL', isEnabled: true, detection: 'RELATIVE', relThreshold: -6, listen: 0 };
   if (type === 'DENOISER') params = { threshold: -45, range: -20, attack: 0.005, hold: 0.05, release: 0.15, scFreq: 1000, flip: false, isEnabled: true };
   if (type === 'VOCALSATURATOR') params = { drive: 20, mix: 0.5, tone: 0.0, eqLow: 0, eqMid: 0, eqHigh: 0, mode: 'TAPE', isEnabled: true, outputGain: 1.0 };
   { const reg = getRegisteredPlugin(type); if (reg) { params = reg.defaultParams(); name = paramsOverride?.name || reg.name; } }
@@ -730,8 +746,12 @@ function Studio() {
         const takes = await store.takesToRecover();
         const items = takes.map(t => {
           const id = `recup-${t.meta.takeId}`;
-          const b = ctx.createBuffer(1, t.samples.length, t.meta.sampleRate || ctx.sampleRate);
-          b.copyToChannel(t.samples, 0);
+          // R14 : entrée stéréo = échantillons entrelacés G/D dans le journal.
+          const nc = t.meta.channels && t.meta.channels > 1 ? t.meta.channels : 1;
+          const len = Math.floor(t.samples.length / nc);
+          const b = ctx.createBuffer(nc, Math.max(1, len), t.meta.sampleRate || ctx.sampleRate);
+          if (nc === 1) b.copyToChannel(t.samples, 0);
+          else for (let c = 0; c < nc; c++) { const x = new Float32Array(len); for (let i = 0; i < len; i++) x[i] = t.samples[i * nc + c]; b.copyToChannel(x, c); }
           audioBufferRegistry.register(b, id);
           return { take: t, bufferId: id };
         });
@@ -832,6 +852,8 @@ function Studio() {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isPluginManagerOpen, setIsPluginManagerOpen] = useState(false); 
   const [isAudioSettingsOpen, setIsAudioSettingsOpen] = useState(false);
+  // R15 : fenêtre « Mixes casque » (ouverte depuis les Réglages audio ou le menu).
+  const [cueMixesOpen, setCueMixesOpen] = useState(false);
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false); 
   const [isLoadMenuOpen, setIsLoadMenuOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
@@ -1633,18 +1655,32 @@ function Studio() {
             setTimeout(() => setAiNotice(n => (n?.text === `🔒 ${why}` ? null : n)), 7000);
             return;
         }
+        // Pendant une prise, les pistes armées ne changent pas (la prise les enregistre).
+        if (stateRef.current.isRecording) {
+            setAiNotification('⏺️ Arrête la prise en cours avant d’armer ou de désarmer une piste.');
+            return;
+        }
         if (updatedTrack.isTrackArmed) {
-            // Une seule piste armee a la fois
-            setState(produce(draft => {
-                draft.tracks.forEach(t => {
-                    if (t.id !== updatedTrack.id) t.isTrackArmed = false;
-                });
-            }));
+            // R14 : plusieurs pistes armées (Pro Tools). Maj+clic = la piste seule ;
+            // « Armement exclusif » (Réglages audio) inverse. Un armement lié par groupe
+            // (R12) n'est jamais « seule ».
+            const linking = groupLinkingRef.current;
+            const midi = isMidiRecordTrack(updatedTrack);
+            const alone = midi || (!linking && armAlone(takeArmShift()));
+            // Les jumelles d'un groupe à armement lié restent armées avec elle.
+            const keep = new Set([updatedTrack.id, ...(alone && !midi ? linkedRecordMates(stateRef.current, updatedTrack.id) : [])]);
+            const others = stateRef.current.tracks.filter(t => t.isTrackArmed && !keep.has(t.id)
+                && (alone || isMidiRecordTrack(t)));   // prises MIDI et audio : jamais ensemble
+            if (others.length) {
+                const ids = new Set(others.map(t => t.id));
+                others.forEach(t => { if (!isMidiRecordTrack(t)) audioEngine.disarmTrack(t.id); });
+                setState(produce(draft => { draft.tracks.forEach(t => { if (ids.has(t.id)) t.isTrackArmed = false; }); }));
+            }
             // Piste MIDI (R16) : pas de micro, le clavier MIDI (ou celui de l'ordinateur) joue dessus.
-            if (isMidiRecordTrack(updatedTrack)) { audioEngine.disarmTrack(); void announceMidiArmRef.current?.(updatedTrack); }
+            if (midi) { audioEngine.disarmTrack(); void announceMidiArmRef.current?.(updatedTrack); }
             // Si le micro est refuse ou absent, on le dit et on desarme : sinon
             // la piste paraissait prete et l'enregistrement echouait en silence.
-            else audioEngine.armTrack(updatedTrack.id).then(erreur => {
+            else audioEngine.armTrack(updatedTrack.id, { spec: updatedTrack.recordInput ?? null }).then(erreur => {
                 if (!erreur) return;
                 setAiNotification(`🎤 ${erreur}`);
                 setTimeout(() => setAiNotification(null), 5000);
@@ -1654,7 +1690,7 @@ function Studio() {
                 }));
             });
         } else {
-            audioEngine.disarmTrack();
+            audioEngine.disarmTrack(updatedTrack.id);
         }
     }
 
@@ -1770,72 +1806,41 @@ function Studio() {
    * @param captured prise récupérée après coup (R3, « Capturer la dernière prise ») :
    *        rangée comme une prise normale (couloir, niveau, respirations).
    */
-  const finalizeRecording = useCallback(async (captured?: { clip: Clip; trackId: string }) => {
+  const finalizeRecording = useCallback(async (captured?: TakeResult[]) => {
     // Prise MIDI armée (R16) : écrite par finalizeMidiRecording, pas de micro.
     if (!captured && midiInput.isRecording) { finalizeMidiRef.current?.(); return null; }
-    const result = captured ?? await audioEngine.stopRecording();
+    // R14 : une prise par piste armée (même passage, mêmes échantillons, groupées).
+    const results = captured ?? await audioEngine.stopRecordingAll();
     const rec = captured ? null : punchRecRef.current;
     if (!captured) punchRecRef.current = null;
     // Punch (zone ou QuickPunch) et pré-roll : on ne garde que la fenêtre utile,
     // élargie d'un demi-crossfade de chaque côté (utils/punch).
     const punch = rec?.isPunch ? rec : null;
     const xfade = punchXfadeSec(stateRef.current.punch);
-    let punchIn = 0, punchOut = 0;
-    if (rec) {
-      // La boucle avait été suspendue pendant le punch : on la remet.
-      const st = stateRef.current;
-      if (rec.isPunch) audioEngine.setLoop(st.isLoopActive, st.loopStart, st.loopEnd);
-      if (result && result.clip.buffer) {
-        const c = result.clip;
-        const t = trimTake(c, rec.in, rec.out, rec.isPunch ? xfade : 0.01);
-        if (!t) {
-          setState(produce(draft => { draft.isRecording = false; draft.recStartTime = null; }));
-          setAiNotification(rec.isPunch ? 'Punch : rien n\'a été enregistré dans la zone (la prise s\'est arrêtée avant).' : 'Rien n\'a été enregistré après le pré-roll.');
-          return null;
-        }
-        Object.assign(c, t);
-        punchIn = rec.in ?? c.start;
-        punchOut = rec.out ?? (c.start + c.duration);
-      }
+    // La boucle avait été suspendue pendant le punch : on la remet.
+    if (rec?.isPunch) { const st = stateRef.current; audioEngine.setLoop(st.isLoopActive, st.loopStart, st.loopEnd); }
+    const kept = results.filter(r => r.clip.buffer && trimToPlan(r.clip, rec, xfade));
+    if (rec && results.length && !kept.length) {
+      setState(produce(draft => { draft.isRecording = false; draft.recStartTime = null; }));
+      setAiNotification(rec.isPunch ? 'Punch : rien n\'a été enregistré dans la zone (la prise s\'est arrêtée avant).' : 'Rien n\'a été enregistré après le pré-roll.');
+      return null;
     }
+    const multi = kept.length > 1;
+    const group = multi ? kept.find(r => r.group)?.group : undefined;
+    // Une seule piste : nettoyage auto et niveau automatique (comme avant). Plusieurs
+    // pistes (batterie, duo) : l'équilibre entre les micros est gardé tel quel, et les
+    // prises ne sont pas découpées différemment (elles restent alignées et se compent ensemble).
     let cleaned: StripSilenceResult | null = null;
-    let takeName = '';
-    let mutedOld = 0;
     let takeGain = 1;
     let takeGainDb = 0;
-    // Loop Record : un clip par tour gardé (même audio, offsets différents).
-    let loopTakes: { clip: Clip; pass: number; active: boolean; wall: number }[] = [];
-    let firstTake = 0;
-    if (result && result.clip.buffer) {
-      const track = stateRef.current.tracks.find(t => t.id === result.trackId);
-      const takeNumber = nextTakeNumber(track || { clips: [] });
-      firstTake = takeNumber;
-      takeName = `Prise ${takeNumber}`;
-      result.clip.name = takeName;
-      result.clip.takeNumber = takeNumber;
-      if (rec?.loop) {
-        const { kept, active } = keptLoopPasses(splitLoopPasses(result.clip, rec.loop.start, rec.loop.end));
-        if (kept.length > 1) {
-          const off0 = result.clip.offset || 0;
-          loopTakes = kept.map((ps, i) => ({
-            pass: ps.pass,
-            active: ps.pass === active,
-            wall: (rec.wall || Date.now()) + Math.max(0, ps.offset - off0) * 1000,
-            clip: {
-              ...result.clip, id: `${result.clip.id}-l${ps.pass}`, start: ps.start, duration: ps.duration, offset: ps.offset,
-              takeNumber: takeNumber + i, name: `Prise ${takeNumber + i}`, fadeIn: 0.01, fadeOut: 0.01,
-              ...(ps.pass === active ? {} : { isMuted: true }),
-            },
-          }));
-          takeName = `Prises ${takeNumber} à ${takeNumber + kept.length - 1}`;
-        }
-      }
-      if (autoCleanRef.current && !punch && !loopTakes.length) {
-        cleaned = stripSilenceFromClip({ ...result.clip, bufferId: result.clip.id }, result.clip.buffer);
+    const first = kept[0];
+    if (!multi && first) {
+      if (autoCleanRef.current && !punch && !rec?.loop) {
+        cleaned = stripSilenceFromClip({ ...first.clip, bufferId: first.clip.id }, first.clip.buffer!);
       }
       // Niveau automatique : qu'on chante fort ou doucement, chaque prise arrive
       // au même niveau dans le mix (-20 dBFS moyen sur la voix), sans saturer.
-      const lv = takeStats(result.clip.buffer);
+      const lv = takeStats(first.clip.buffer!);
       // En punch, la nouvelle partie garde le niveau de la prise qu'elle complète.
       if (!punch && !lv.silent && lv.rmsDb > -60) {
         let g = -20 - lv.rmsDb;
@@ -1845,73 +1850,55 @@ function Studio() {
       }
     }
     const recWall = rec?.wall || Date.now();
+    const stamp = Date.now().toString(36);
+    const placed = new Map<string, ReturnType<typeof placeTake>>();
     setState(produce(draft => {
       draft.isRecording = false;
       draft.recStartTime = null;
-      if (result && result.clip.buffer) {
-        const clip = result.clip;
-        const clipId = clip.id;
-        audioBufferRegistry.registerWithUrl(clip.buffer, clip.audioRef!, clipId);
-
-        // originStart : position d'origine (Pro Tools : Original Time Stamp), pour le Spot.
-        const toStore = (c: Clip): Clip => { const x: Clip = { ...c, bufferId: clipId, gain: (c.gain ?? 1) * takeGain, originStart: c.originStart ?? Math.max(0, c.start - (c.offset || 0)) }; delete x.buffer; return x; };
-        const track = draft.tracks.find(t => t.id === result.trackId);
-        if (track) {
-          const takeStart = loopTakes.length ? Math.min(...loopTakes.map(l => l.clip.start)) : clip.start;
-          const takeEnd = loopTakes.length ? Math.max(...loopTakes.map(l => l.clip.start + l.clip.duration)) : clip.start + clip.duration;
-          if (punch && punchOut > punchIn) {
-            // Punch : l'ancienne prise est découpée autour de la zone (avant /
-            // après gardés), avec un crossfade à puissance égale centré sur
-            // chaque point de punch. Le passage remplacé reste dans le couloir
-            // de l'ancienne prise (muté) : on peut y revenir par le comp.
-            const stamp = Date.now().toString(36);
-            const before = track.clips as Clip[];
-            const cut = cutAroundPunch(before, punchIn, punchOut, xfade, stamp);
-            mutedOld += cut.replaced;
-            track.clips = [...cut.clips, ...punchedPassages(before, punchIn, punchOut, stamp)] as any;
-          } else {
-            track.clips.forEach(c => {
-              if (!c.isMuted && c.start < takeEnd && c.start + c.duration > takeStart) { c.isMuted = true; mutedOld++; }
-            });
-          }
-          if (loopTakes.length) {
-            track.clips.push(...loopTakes.map(l => toStore(l.clip)));
-            let meta = track.takeMeta as TakeMeta[] | undefined;
-            for (const l of loopTakes) meta = patchMeta(meta, l.clip.takeNumber!, { recordedAt: Math.round(l.wall), loopPass: l.pass });
-            track.takeMeta = meta;
-          } else {
-            if (cleaned) track.clips.push(...cleaned.clips.map(toStore));
-            else track.clips.push(toStore(clip));
-            track.takeMeta = patchMeta(track.takeMeta as TakeMeta[] | undefined, clip.takeNumber!, { recordedAt: recWall });
-          }
-        }
+      for (const r of kept) {
+        const clip = r.clip;
+        audioBufferRegistry.registerWithUrl(clip.buffer!, clip.audioRef!, clip.id);
+        const track = draft.tracks.find(t => t.id === r.trackId);
+        if (!track) continue;
+        const p = placeTake(track as Track, clip, {
+          rec: rec ? { in: rec.in, out: rec.out, isPunch: rec.isPunch, loop: rec.loop, wall: rec.wall } : null,
+          xfade, takeGain, cleaned: cleaned && r === first ? cleaned.clips : null, group, wall: recWall, stamp,
+        });
+        track.clips = p.clips as any;
+        track.takeMeta = p.takeMeta;
+        placed.set(r.trackId, p);
       }
     }));
+    if (!kept.length || !placed.size) return first || null;
     // Respirations traitées automatiquement (si activé) : seulement le passage
     // qui vient d'être enregistré (tours de boucle, morceaux nettoyés, punch).
-    if (result && result.clip.buffer) {
-      const newIds = loopTakes.length ? loopTakes.map(l => l.clip.id) : cleaned ? cleaned.clips.map(c => c.id) : [result.clip.id];
-      setTimeout(() => requestBreaths({ mode: 'auto', trackIds: [result.trackId], clipIds: newIds, reason: 'take' }), 400);
+    const trackIds = [...placed.keys()];
+    const clipIds = [...placed.values()].flatMap(p => p.newClipIds);
+    setTimeout(() => requestBreaths({ mode: 'auto', trackIds, clipIds, reason: 'take' }), 400);
+    const p0 = placed.get(first.trackId)!;
+    const names = (ids: string[]) => ids.map(id => `« ${stateRef.current.tracks.find(t => t.id === id)?.name || id} »`).join(', ');
+    if (p0.loopCount) {
+      setTakeLanesOpen(prev => ({ ...prev, ...Object.fromEntries(trackIds.map(id => [id, true])) }));
+      setAiNotification(`🔁 ${p0.loopCount} prises enregistrées en boucle (Prise ${p0.firstTake} à ${p0.firstTake + p0.loopCount - 1})${multi ? ` sur ${trackIds.length} pistes (${names(trackIds)}), groupées par tour` : ''} — tu entends la Prise ${p0.activeTake}. Balaie un passage dans un couloir pour le garder${multi ? ' (les autres pistes suivent)' : ''}. Annuler pour revenir.`);
+      return first;
     }
-    if (loopTakes.length && result) {
-      const act = loopTakes.find(l => l.active)!;
-      setTakeLanesOpen(prev => ({ ...prev, [result.trackId]: true }));
-      setAiNotification(`🔁 ${loopTakes.length} prises enregistrées en boucle (Prise ${firstTake} à ${firstTake + loopTakes.length - 1}) — tu entends la Prise ${act.clip.takeNumber}. Balaie un passage dans un couloir pour le garder. Annuler pour revenir.`);
-      return result;
+    const mutedOld = [...placed.values()].reduce((s, p) => s + p.mutedOld, 0);
+    const parts: string[] = [
+      captured ? `⏪ Capturée : ${p0.takeName} posée à ${formatClockShort(first.clip.start)}${multi ? ` sur ${trackIds.length} pistes` : ''} (sans avoir appuyé sur REC)`
+        : multi ? `🎤 ${trackIds.length} pistes enregistrées ensemble (${names(trackIds)}) : prises groupées, alignées à l'échantillon`
+        : `🎤 ${p0.takeName} enregistrée`,
+    ];
+    if (cleaned) parts.push(`${cleaned.removedSec.toFixed(1)} s de blanc retirées`);
+    if (takeGainDb) parts.push(`niveau ajusté (${takeGainDb > 0 ? '+' : ''}${Math.round(takeGainDb)} dB)`);
+    if (mutedOld) parts.push(punch ? 'passage remplacé dans l\'ancienne prise' : `l'ancienne prise est coupée`);
+    parts.push('▶ pour l\'écouter · Annuler pour revenir');
+    setAiNotification(parts.join(' — '));
+    // QuickPunch : la lecture continue, pas de carte de coaching au milieu (ni en multipiste).
+    if (!rec?.quick && !multi) {
+      const buf = first.clip.buffer!, start = first.clip.start, nm = p0.takeName;
+      setTimeout(() => coachAfterTakeRef.current?.(first.trackId, buf, nm, start), 120);
     }
-    if (result && result.clip.buffer) {
-      const parts: string[] = [captured ? `⏪ Capturée : ${takeName} posée à ${formatClockShort(result.clip.start)} (sans avoir appuyé sur REC)` : `🎤 ${takeName} enregistrée`];
-      if (cleaned) parts.push(`${cleaned.removedSec.toFixed(1)} s de blanc retirées`);
-      if (takeGainDb) parts.push(`niveau ajusté (${takeGainDb > 0 ? '+' : ''}${Math.round(takeGainDb)} dB)`);
-      if (mutedOld) parts.push(punch ? 'passage remplacé dans l\'ancienne prise' : `l'ancienne prise est coupée`);
-      parts.push('▶ pour l\'écouter · Annuler pour revenir');
-      setAiNotification(parts.join(' — '));
-      const buf = result.clip.buffer;
-      const start = result.clip.start;
-      // QuickPunch : la lecture continue, pas de carte de coaching au milieu.
-      if (!rec?.quick) setTimeout(() => coachAfterTakeRef.current?.(result.trackId, buf, takeName, start), 120);
-    }
-    return result;
+    return first;
   }, [setState]);
 
   /**
@@ -1925,9 +1912,10 @@ function Studio() {
       setAiNotification("⏪ Capture après coup : arme une piste (bouton R), lance la lecture et chante — NOVA garde les dernières minutes du micro. Ensuite « Capturer » (Maj+R).");
       return;
     }
-    const r = await audioEngine.captureLastTake();
+    // R14 : toutes les pistes armées, le même passage (prises alignées et groupées).
+    const r = await audioEngine.captureLastTakes();
     if ('error' in r) { setAiNotification(`⏪ ${r.error}`); return; }
-    await finalizeRecording(r);
+    await finalizeRecording(r.takes);
   }, [finalizeRecording]);
   const captureRef = useRef(handleCaptureLastTake);
   captureRef.current = handleCaptureLastTake;
@@ -2043,7 +2031,7 @@ function Studio() {
   const isVoiceTrack = (t?: Track | null): t is Track =>
     !!t && t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId;
 
-  /** Arme une piste voix (une seule à la fois) ; false si le micro est inaccessible. */
+  /** Arme une piste voix (la piste seule : REC sans piste armée) ; false si le micro est inaccessible. */
   const armForRecording = useCallback(async (trackId: string): Promise<boolean> => {
     setState(produce(draft => {
       draft.tracks.forEach(t => { t.isTrackArmed = t.id === trackId; });
@@ -2051,7 +2039,7 @@ function Studio() {
     }));
     const armedMidi = stateRef.current.tracks.find(t => t.id === trackId);
     if (armedMidi && isMidiRecordTrack(armedMidi)) { audioEngine.disarmTrack(); await announceMidiArmRef.current?.(armedMidi, true); return true; }
-    const erreur = await audioEngine.armTrack(trackId);
+    const erreur = await audioEngine.armTrack(trackId, { spec: armedMidi?.recordInput ?? null, alone: true });
     if (erreur) {
       setAiNotification(`🎤 ${erreur}`);
       setState(produce(draft => {
@@ -2320,6 +2308,8 @@ function Studio() {
     const st = stateRef.current;
     let armed = st.tracks.find(t => t.isTrackArmed);
     if (armed) { const why = collabRecGuardRef.current(armed.id); if (why) { setAiNotification(`🔒 ${why}`); return; } }
+    // Pistes armées mais micro fermé côté moteur (annuler, session reprise) : on les rouvre.
+    if (armed && !(await rearmArmedRef.current?.())) return;
     if (!armed) {
       const ctRaw = collabRecTargetRef.current?.(st.selectedTrackId) ?? null;
       if (ctRaw && 'error' in ctRaw) { setAiNotification(`🔒 ${ctRaw.error}`); return; }
@@ -2335,7 +2325,7 @@ function Studio() {
     // Boucle suspendue pendant la prise : un retour au début décalerait l'audio.
     audioEngine.setLoop(false, st.loopStart, st.loopEnd);
     const at = audioEngine.getCurrentTime();
-    const ok = await audioEngine.startRecording(at, armed.id);
+    const ok = await audioEngine.startRecording(at, recordIdsRef.current?.(armed.id) || [armed.id]);
     if (!ok) {
       audioEngine.setLoop(st.isLoopActive, st.loopStart, st.loopEnd);
       setAiNotification("🎤 QuickPunch : l'enregistrement n'a pas pu démarrer. Vérifie que le micro est autorisé.");
@@ -2407,10 +2397,9 @@ function Studio() {
     if (armedTrack) { const why = collabRecGuardRef.current(armedTrack.id); if (why) { setAiNotification(`🔒 ${why}`); return; } }
     // Piste « armée » dans le projet mais micro fermé côté moteur (annuler / rétablir, session
     // reprise, collaboration) : on réarme. Avant, la prise échouait (« No monitor stream ») —
-    // mesuré dans le soak : 8 prises sur 10 ratées après des annulations.
-    if (armedTrack && !audioEngine.isMonitoring(armedTrack.id)) {
-      if (!(await armForRecording(armedTrack.id))) return;
-    }
+    // mesuré dans le soak : 8 prises sur 10 ratées après des annulations. R14 : TOUTES les
+    // pistes armées sont rouvertes (sans désarmer les autres).
+    if (armedTrack && !(await rearmArmedRef.current?.())) return;
     if (!armedTrack) {
       const ctRaw = collabRecTargetRef.current?.(currentState.selectedTrackId) ?? null;
       if (ctRaw && 'error' in ctRaw) { setAiNotification(`🔒 ${ctRaw.error}`); return; }
@@ -2462,7 +2451,7 @@ function Studio() {
     // L'enregistreur démarre AVANT le décompte (R2) : à la fin du dernier temps, la
     // lecture part pile (programmée sur l'horloge du son) et la prise avec elle.
     // Avant, la prise démarrait ~0,7 s après le décompte (micro préparé après coup).
-    const success = await audioEngine.startRecording(startAt, armedTrack.id);
+    const success = await audioEngine.startRecording(startAt, recordIdsRef.current?.(armedTrack.id) || [armedTrack.id]);
     let playAt: number | undefined;
     if (success && countIn) {
       const ci = await runCountIn(startAt);
@@ -2491,6 +2480,29 @@ function Studio() {
       setAiNotification("🎤 L'enregistrement n'a pas pu démarrer. Vérifie que le micro est autorisé, puis réessaie.");
     }
   }, [setState, finalizeRecording, armForRecording, runCountIn, countInBeat]);
+  /**
+   * R14 · Pistes que REC enregistre : toutes les pistes audio armées (la 1re en tête),
+   * sauf celles qu'un autre musicien tient en collaboration.
+   */
+  const recordIdsRef = useRef<((first: string) => string[]) | null>(null);
+  recordIdsRef.current = (first: string) => {
+    const ids = recordTargets(stateRef.current.tracks).map(t => t.id).filter(id => id === first || !collabRecGuardRef.current(id));
+    return [first, ...ids.filter(id => id !== first)];
+  };
+  /** Rouvre l'entrée de chaque piste audio armée que le moteur n'écoute pas (sans toucher aux autres). */
+  const rearmArmedRef = useRef<(() => Promise<boolean>) | null>(null);
+  rearmArmedRef.current = async () => {
+    for (const t of recordTargets(stateRef.current.tracks)) {
+      if (audioEngine.armedIds().includes(t.id)) continue;
+      const erreur = await audioEngine.armTrack(t.id, { spec: t.recordInput ?? null });
+      if (erreur) {
+        setAiNotification(`🎤 ${erreur}`);
+        setState(produce(draft => { const x = draft.tracks.find(y => y.id === t.id); if (x) x.isTrackArmed = false; }));
+        return false;
+      }
+    }
+    return true;
+  };
   // Deux appuis rapides sur REC lançaient deux décomptes et deux prises (la
   // seconde affichait une erreur alors que l'enregistrement tournait).
   const recBusyRef = useRef(false);
@@ -3678,93 +3690,87 @@ function Studio() {
       const mod = e.ctrlKey || e.metaKey;
       // Fenêtre modale ouverte : R, espace, Entrée… n'agissent plus sur le projet derrière.
       if (!mod && blockingOverlay()) return;
-      // Batterie / piano roll ouverts : seule la barre d'espace (lecture / pause) passe.
-      if (!mod && e.code !== 'Space' && document.querySelector('[data-nova-transport]')) return;
+      // Batterie / piano roll ouverts : seule la lecture / pause passe (et les combinaisons Ctrl).
+      if (!mod && !isShortcut(e, 'nova.play') && document.querySelector('[data-nova-transport]')) return;
+      // Piano roll ouvert : ses propres raccourcis passent avant (Ctrl+A, Ctrl+D…).
+      if (takenByPianoRoll(e)) return;
       // Entrée sur un bouton : on laisse le bouton s'activer (clavier).
       if (e.key === 'Enter' && e.target instanceof HTMLElement && e.target.closest('button, a, [role="button"]')) return;
 
-      // Lecture / pause : la barre d'espace ne doit ni defiler la page ni
-      // re-declencher le bouton qui a le focus.
-      if (e.code === 'Space' && !mod) {
+      // Maj+Espace (Pro Tools : Half-Speed Playback) : bascule la lecture ralentie 50 % / 100 % (R13).
+      if (e.code === 'Space' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         if (e.repeat) return;
         spaceDown = true;
-        // Maj+Espace (Pro Tools : Half-Speed Playback) : bascule la lecture ralentie 50 % / 100 % (R13).
-        if (e.shiftKey) {
-          const slow = practiceSpeedStore.get() < 0.999;
-          practiceSpeedStore.set(slow ? 1 : 0.5);
-          window.dispatchEvent(new CustomEvent('nova:notify', { detail: slow ? 'Vitesse normale (100 %).' : 'Lecture ralentie à 50 %, hauteur gardée (Maj+Espace pour revenir à 100 %).' }));
-          if (!stateRef.current.isPlaying) handleTogglePlay();
+        const slow = practiceSpeedStore.get() < 0.999;
+        practiceSpeedStore.set(slow ? 1 : 0.5);
+        window.dispatchEvent(new CustomEvent('nova:notify', { detail: slow ? 'Vitesse normale (100 %).' : 'Lecture ralentie à 50 %, hauteur gardée (Maj+Espace pour revenir à 100 %).' }));
+        if (!stateRef.current.isPlaying) handleTogglePlay();
+        return;
+      }
+      // Table ACTIVE des raccourcis (utils/keymapStore : préréglage + remappages).
+      let id = matchShortcut(e, APP_SHORTCUT_IDS);
+      // Maj + touche de mesure = un temps (en positions US, Maj compte dans la combinaison).
+      if (!id && e.shiftKey) id = matchShortcut({ key: e.key, code: e.code, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, shiftKey: false }, ['nova.barPrev', 'nova.barNext']);
+      if (!id) return;
+      const now = () => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime);
+      switch (id) {
+        // Lecture / pause : la touche ne doit ni défiler la page ni re-déclencher le bouton qui a le focus.
+        case 'nova.play': e.preventDefault(); if (e.repeat) return; spaceDown = e.code === 'Space'; handleTogglePlay(); return;
+        case 'nova.undo': e.preventDefault(); undo(); return;
+        case 'nova.redo': e.preventDefault(); redo(); return;
+        case 'nova.save': e.preventDefault(); setIsSaveMenuOpen(true); return;
+        // Exporter (Logic : « Exporter… » ; l'ingé n'a plus à passer par le menu).
+        case 'nova.export': e.preventDefault(); void handleExportMix(); return;
+        // Capturer la dernière prise (Logic : Capture as Recording).
+        case 'nova.capture': e.preventDefault(); void captureRef.current(); return;
+        case 'nova.record': e.preventDefault(); handleToggleRecord(); return;
+        // Couper / rallumer la piste guide (R3). En Keyboard Focus, G reste « fondu jusqu'à la fin ».
+        case 'nova.guide':
+          if (isKeyboardFocus() || !stateRef.current.tracks.some(t => t.isGuide)) return;
+          e.preventDefault(); toggleGuidesRef.current(); return;
+        case 'nova.loop': e.preventDefault(); setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive })); return;
+        case 'nova.home': e.preventDefault(); handleSeek(0); return;
+        case 'nova.end': {
+          e.preventDefault();
+          const end = Math.max(0, ...stateRef.current.tracks.flatMap(t => t.clips.map(c => c.start + c.duration)));
+          handleSeek(end);
           return;
         }
-        handleTogglePlay();
-        return;
-      }
-
-      if (mod && (e.key === 'z' || e.key === 'Z')) {
-        e.preventDefault();
-        if (e.shiftKey) redo(); else undo();
-        return;
-      }
-      if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
-      if (mod && (e.key === 's' || e.key === 'S')) { e.preventDefault(); setIsSaveMenuOpen(true); return; }
-      // Exporter : Ctrl+Maj+E (Logic : « Exporter… » ; l'ingé n'a plus à passer par le menu).
-      if (mod && e.shiftKey && (e.key === 'e' || e.key === 'E')) { e.preventDefault(); void handleExportMix(); return; }
-
-      if (mod) return; // on ne capture aucun autre raccourci systeme
-
-      // Maj+R : capturer la dernière prise (Logic : Capture as Recording). R seul : enregistrer.
-      if ((e.key === 'r' || e.key === 'R') && e.shiftKey) { e.preventDefault(); void captureRef.current(); return; }
-      if (e.key === 'r' || e.key === 'R') { e.preventDefault(); handleToggleRecord(); return; }
-      // G : couper / rallumer la piste guide (R3). En Keyboard Focus, G reste « fondu jusqu'à la fin ».
-      if ((e.key === 'g' || e.key === 'G') && !isKeyboardFocus() && stateRef.current.tracks.some(t => t.isGuide)) { e.preventDefault(); toggleGuidesRef.current(); return; }
-      if (e.key === 'l' || e.key === 'L') {
-        e.preventDefault();
-        setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive }));
-        return;
-      }
-      if (e.key === 'Home' || e.key === 'Enter') { e.preventDefault(); handleSeek(0); return; }
-      if (e.key === 'End') {
-        e.preventDefault();
-        const end = Math.max(0, ...stateRef.current.tracks.flatMap(t => t.clips.map(c => c.start + c.duration)));
-        handleSeek(end);
-        return;
-      }
-      // , / . : une mesure en arrière / en avant (Maj : un temps)
-      if (e.key === ',' || e.key === '.' || e.key === ';' || e.key === ':') {
-        e.preventDefault();
-        // Mesure / temps d'après la piste tempo (3/4, 6/8, changements de tempo).
-        const m = tempoMapStore.get();
-        const dir = (e.key === ',' || e.key === ';') ? -1 : 1;
-        const t = audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime;
-        if (e.shiftKey) {
-          const near = beatsInRange(m, Math.max(0, t - 8), t + 8);
-          const target = dir > 0 ? near.find(b => b.time > t + 1e-3) : [...near].reverse().find(b => b.time < t - 1e-3);
-          handleSeek(Math.max(0, target ? target.time : 0));
-        } else {
-          const p = timeToPosition(m, t);
-          const start = barToTime(m, p.bar);
-          handleSeek(Math.max(0, dir > 0 ? barToTime(m, p.bar + 1) : (t - start > 1e-3 ? start : barToTime(m, Math.max(0, p.bar - 1)))));
+        // Une mesure en arrière / en avant (Maj : un temps), d'après la piste tempo (3/4, 6/8, changements de tempo).
+        case 'nova.barPrev': case 'nova.barNext': {
+          e.preventDefault();
+          const m = tempoMapStore.get();
+          const dir = id === 'nova.barPrev' ? -1 : 1;
+          const t = now();
+          if (e.shiftKey) {
+            const near = beatsInRange(m, Math.max(0, t - 8), t + 8);
+            const target = dir > 0 ? near.find(b => b.time > t + 1e-3) : [...near].reverse().find(b => b.time < t - 1e-3);
+            handleSeek(Math.max(0, target ? target.time : 0));
+          } else {
+            const p = timeToPosition(m, t);
+            const start = barToTime(m, p.bar);
+            handleSeek(Math.max(0, dir > 0 ? barToTime(m, p.bar + 1) : (t - start > 1e-3 ? start : barToTime(m, Math.max(0, p.bar - 1)))));
+          }
+          return;
         }
-        return;
+        // Tap tempo (Pro Tools : T dans le champ tempo). En Keyboard Focus, T reste le zoom.
+        case 'nova.tap': if (isKeyboardFocus()) return; e.preventDefault(); if (!e.repeat) handleTap(); return;
+        case 'nova.marker': e.preventDefault(); handleAddMarker(now()); return;
+        case 'nova.help': e.preventDefault(); setShortcutsOpen(v => !v); return;
+        case 'nova.stop': if (!stateRef.current.isPlaying) return; e.preventDefault(); handleStop(); return;
+        case 'nova.metronome': e.preventDefault(); void handleToggleMetronome(); return;
+        case 'view.mixEdit': e.preventDefault(); setState(s => ({ ...s, currentView: s.currentView === 'MIXER' ? 'ARRANGEMENT' : 'MIXER' })); return;
+        case 'view.arrangement': e.preventDefault(); setState(s => ({ ...s, currentView: 'ARRANGEMENT' })); return;
+        case 'view.mixer': e.preventDefault(); setState(s => ({ ...s, currentView: 'MIXER' })); return;
+        case 'view.browser': e.preventDefault(); setIsSidebarOpen(v => !v); return;
       }
-      // T : tap tempo (Pro Tools : T dans le champ tempo). En Keyboard Focus, T reste le zoom.
-      if ((e.key === 't' || e.key === 'T') && !isKeyboardFocus()) { e.preventDefault(); if (!e.repeat) handleTap(); return; }
-      // K : repère à la tête de lecture
-      if (e.key === 'k' || e.key === 'K') {
-        e.preventDefault();
-        const t = audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime;
-        handleAddMarker(t);
-        return;
-      }
-      if (e.key === '?') { e.preventDefault(); setShortcutsOpen(v => !v); return; }
-      if (e.key === 'Escape' && stateRef.current.isPlaying) { e.preventDefault(); handleStop(); return; }
     };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
-  }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, handleAddMarker, undo, redo, setState, handleTap]);
+  }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, handleAddMarker, undo, redo, setState, handleTap, handleToggleMetronome]);
 
   // Raccourcis Pro Tools (utils/keymap) : pavé numérique, Ctrl+E, Keyboard Focus…
   useProToolsShortcuts({
@@ -3779,7 +3785,32 @@ function Studio() {
     selectTrack: (id) => setVisualState({ selectedTrackId: id }),
     undo,
     notify: setAiNotification,
+    toggleQuickPunch: () => handleToggleQuickPunch(),
+    toggleCountIn: () => {
+      let on = true;
+      try { on = localStorage.getItem('nova_count_in') !== '0'; } catch { /* défaut : oui */ }
+      setCountInEnabled(!on);
+      setAiNotification(!on ? '🥁 Décompte avant l’enregistrement activé.' : 'Décompte avant l’enregistrement désactivé.');
+    },
+    toggleMidiMerge: () => {
+      const next = midiInput.prefs.mode === 'merge' ? 'replace' : 'merge';
+      midiInput.setPrefs({ mode: next });
+      setAiNotification(next === 'merge' ? '🎹 Prise MIDI : fusion (les nouvelles notes s’ajoutent).' : '🎹 Prise MIDI : remplacement (la prise remplace les notes).');
+    },
+    openKeymapEditor: () => setKeymapEditorOpen(true),
+    openLayouts: () => setLayoutsOpen(true),
   });
+
+  // Scrub / shuttle (R17) : le moteur, et la position validée au relâchement.
+  useEffect(() => {
+    scrubControl.configure({
+      engine: audioEngine,
+      getTracks: () => stateRef.current.tracks,
+      commit: (t) => handleSeek(t),
+      stopPlayback: () => { if (stateRef.current.isPlaying) void handleTogglePlay(); },
+      getTime: () => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime),
+    });
+  }, [handleSeek, handleTogglePlay]);
 
   const handleRequestAddPlugin = useCallback((trackId: string, x: number, y: number) => {
     setAddPluginMenu({ trackId, x, y });
@@ -4025,33 +4056,36 @@ function Studio() {
     }
   }, [handleSeek, handleTogglePlay]);
   /** Balayage (ou tap) sur un couloir : ce passage de la prise n passe dans la piste. */
+  /** R14 : groupe de prises lié pour ce geste (groupes suspendus / Maj+Ctrl : la piste seule). */
+  const takeGroupOn = () => takeGroupLinked({ suspended: stateRef.current.groupSettings?.suspended, invert: editGroupsStore.invertHeld() });
   const handleCompSwipe = useCallback((trackId: string, n: number, a: number, b: number | null) => {
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!t) return;
     const range = b === null ? compTapRange(t.clips, n, a) : { start: Math.min(a, b), end: Math.max(a, b) };
     if (!range) return;
-    const r = compSwipe(t.clips, n, range.start, range.end);
+    // R14 : le même passage des prises jumelles (même prise multipiste) suit.
+    const { results, mates } = compTakeGroup(stateRef.current.tracks, trackId, n, range.start, range.end, takeGroupOn());
+    const r = results.get(trackId)!;
     if (!r.changed || !r.zone) return;
     breakHistory();
     setState(produce((draft: DAWState) => {
-      const d = draft.tracks.find(x => x.id === trackId);
-      if (d) d.clips = r.clips as any;
+      results.forEach((res, id) => { const d = draft.tracks.find(x => x.id === id); if (d && res.changed) d.clips = res.clips as any; });
     }));
     breakHistory();
     if (takeAudition) { setTakeAuditionState(null); audioEngine.setTakeAudition(null); }
     const at = (x: number) => `${Math.floor(x / 60)}:${(x % 60).toFixed(1).padStart(4, '0').replace('.', ',')}`;
-    setAiNotification(`✂️ ${takeName(t, n)} gardée de ${at(r.zone.start)} à ${at(r.zone.end)} (crossfades posés aux raccords) — Annuler pour revenir.`);
+    setAiNotification(`✂️ ${takeName(t, n)} gardée de ${at(r.zone.start)} à ${at(r.zone.end)}${mates ? ` sur ${mates + 1} pistes (prises du même passage)` : ''} (crossfades posés aux raccords) — Annuler pour revenir.`);
   }, [setState, breakHistory, takeAudition]);
   const handleKeepTake = useCallback((trackId: string, n: number) => {
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!t) return;
+    const res = keepTakeGroup(stateRef.current.tracks, trackId, n, takeGroupOn());
     breakHistory();
     setState(produce((draft: DAWState) => {
-      const d = draft.tracks.find(x => x.id === trackId);
-      if (d) d.clips = keepTake(d.clips as Clip[], n) as any;
+      res.forEach((clips, id) => { const d = draft.tracks.find(x => x.id === id); if (d) d.clips = clips as any; });
     }));
     breakHistory();
-    setAiNotification(`✓ ${takeName(t, n)} gardée en entier (les autres prises restent dans leurs couloirs) — Annuler pour revenir.`);
+    setAiNotification(`✓ ${takeName(t, n)} gardée en entier${res.size > 1 ? ` sur ${res.size} pistes (prises du même passage)` : ''} (les autres prises restent dans leurs couloirs) — Annuler pour revenir.`);
   }, [setState, breakHistory]);
   const handleRenameTake = useCallback((trackId: string, n: number, name: string) => {
     breakHistory();
@@ -4078,17 +4112,19 @@ function Studio() {
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!t) return;
     const name = takeName(t, n);
-    const r = deleteTake(t, n);
-    const bufs = Array.from(new Set(t.clips.filter(c => r.removedClipIds.includes(c.id)).map(c => c.bufferId).filter(Boolean))) as string[];
-    if (takeAudition?.trackId === trackId && takeAudition.n === n) { setTakeAuditionState(null); audioEngine.setTakeAudition(null); }
+    // R14 : les prises du même passage (autres pistes) partent avec elle.
+    const all = deleteTakeGroup(stateRef.current.tracks, trackId, n, takeGroupOn());
+    const r = all.get(trackId)!;
+    const removedIds = [...all.values()].flatMap(x => x.removedClipIds);
+    const bufs = Array.from(new Set(stateRef.current.tracks.flatMap(tr => all.has(tr.id) ? tr.clips : []).filter(c => removedIds.includes(c.id)).map(c => c.bufferId).filter(Boolean))) as string[];
+    if (takeAudition && all.has(takeAudition.trackId) && all.get(takeAudition.trackId)!.n === takeAudition.n) { setTakeAuditionState(null); audioEngine.setTakeAudition(null); }
     breakHistory();
     setState(produce((draft: DAWState) => {
-      const d = draft.tracks.find(x => x.id === trackId);
-      if (d) { d.clips = r.clips as any; d.takeMeta = r.takeMeta; }
+      all.forEach((res, id) => { const d = draft.tracks.find(x => x.id === id); if (d) { d.clips = res.clips as any; d.takeMeta = res.takeMeta; } });
     }));
     breakHistory();
-    setTimeout(() => bufs.forEach(id => releaseBufferIfUnused(id, r.removedClipIds)), 0);
-    setAiNotification(`🗑️ ${name} supprimée${r.replacedBy.length ? ` — la Prise ${r.replacedBy.join(', ')} la remplace dans ta voix finale` : ''}. Annuler pour la retrouver.`);
+    setTimeout(() => bufs.forEach(id => releaseBufferIfUnused(id, removedIds)), 0);
+    setAiNotification(`🗑️ ${name} supprimée${all.size > 1 ? ` sur ${all.size} pistes (prises du même passage)` : ''}${r.replacedBy.length ? ` — la Prise ${r.replacedBy.join(', ')} la remplace dans ta voix finale` : ''}. Annuler pour la retrouver.`);
   }, [setState, breakHistory, releaseBufferIfUnused, takeAudition]);
 
   // ===== « Meilleure prise » par l'IA locale (V22) : note chaque prise, propose un comp.
@@ -4139,6 +4175,10 @@ function Studio() {
     setAiNotification("↩ Ton comp d'avant est revenu.");
   }, [setState, breakHistory]);
 
+  /** Accès des scénarios (window.DAW_CONTROL) aux gestes récents, sans figer leur version. */
+  const qaHooksRef = useRef<{ compTake: (t: string, n: number, a: number, b: number | null) => void; setPunch: (p: any) => void; setCueMixes: (m: CueMix[]) => void }>(
+    { compTake: () => {}, setPunch: () => {}, setCueMixes: () => {} });
+  qaHooksRef.current.compTake = handleCompSwipe;
   const takeLanesApi = useMemo<TakeLanesApi>(() => ({
     open: takeLanesOpen, audition: takeAudition,
     onToggle: handleToggleTakeLanes, onAudition: handleAuditionTake, onComp: handleCompSwipe, onKeep: handleKeepTake,
@@ -4158,6 +4198,8 @@ function Studio() {
   // Punch-in / punch-out (utils/punch) : points indépendants de la boucle, posés
   // dans la règle ou depuis la sélection ; pré/post-roll réglables ; QuickPunch.
   const punchRecRef = useRef<{ in: number | null; out: number | null; isPunch: boolean; autoStopAt: number | null; quick?: boolean; stopping?: boolean; loop?: { start: number; end: number }; wall?: number } | null>(null);
+  qaHooksRef.current.setPunch = (patch: any) => handleUpdatePunchRef.current?.(patch);
+  const handleUpdatePunchRef = useRef<((p: any) => void) | null>(null);
   /** Réglages du punch : pas une édition du projet (pas d'étape d'annulation, comme Pro Tools). */
   const handleUpdatePunch = useCallback((patch: Partial<DAWState['punch']>) => {
     const p = { ...stateRef.current.punch, ...patch };
@@ -4165,6 +4207,7 @@ function Studio() {
     if (p.postRollBars !== undefined) p.postRoll = p.postRollBars * (240 / (stateRef.current.bpm || 120));
     setVisualState({ punch: p });
   }, [setVisualState]);
+  handleUpdatePunchRef.current = handleUpdatePunch;
   const handleTogglePunch = useCallback(() => {
     const st = stateRef.current;
     if (st.punch?.enabled) {
@@ -4205,6 +4248,8 @@ function Studio() {
 
   // Aide-mémoire des raccourcis (touche « ? »)
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [keymapEditorOpen, setKeymapEditorOpen] = useState(false);
+  const [layoutsOpen, setLayoutsOpen] = useState(false);
 
   // ===== Batterie Make Music (piste PERCUSSIONS) =====
   const [drumsOpen, setDrumsOpen] = useState(false);
@@ -4462,6 +4507,39 @@ function Studio() {
     }, 30000);
     return () => window.clearInterval(id);
   }, [showLanding, historyBufferIds]);
+  // R14 · Entrée physique des pistes armées (sélecteur d'entrée) : le moteur suit.
+  useEffect(() => {
+    for (const t of state.tracks) if (t.isTrackArmed && audioEngine.armedIds().includes(t.id)) void audioEngine.setTrackInput(t.id, t.recordInput ?? null);
+  }, [state.tracks]);
+  // R14 · Entrée demandée absente (navigateur limité à 2 entrées, carte plus petite) : message clair.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      const t = stateRef.current.tracks.find(x => x.id === d.trackId);
+      const msg = inputsMessage({ names: [t?.name || 'Piste'], available: d.available || 2, mode: d.mode === 'asio' ? 'asio' : 'navigateur' });
+      if (msg) setAiNotification(`🎤 ${msg}`);
+    };
+    window.addEventListener('nova:input-missing', on);
+    return () => window.removeEventListener('nova:input-missing', on);
+  }, []);
+  // R15 · Mixes casque : le moteur suit le projet (niveaux, paires, pistes).
+  const cueSyncedRef = useRef(false);
+  useEffect(() => {
+    const mixes = state.cueMixes || [];
+    if (!mixes.length && !cueSyncedRef.current) return;
+    cueSyncedRef.current = mixes.length > 0;
+    audioEngine.setCueMixes(mixes, state.tracks);
+  }, [state.cueMixes, state.tracks]);
+  useEffect(() => {
+    const open = () => { setIsAudioSettingsOpen(false); setCueMixesOpen(true); };
+    window.addEventListener('nova:open-cue-mixes', open);
+    return () => window.removeEventListener('nova:open-cue-mixes', open);
+  }, []);
+  // Réglages des mixes casque : pas une étape d'annulation (comme les réglages de retour).
+  const handleCueMixesChange = useCallback((mixes: CueMix[]) => {
+    setSilently(prev => ({ ...prev, cueMixes: mixes }));
+  }, [setSilently]);
+  qaHooksRef.current.setCueMixes = handleCueMixesChange;
   // Journal de prise : le moteur écrit chaque morceau capté pendant l'enregistrement.
   useEffect(() => {
     audioEngine.setTakeJournalFactory(m => {
@@ -4471,7 +4549,9 @@ function Studio() {
         takeId: `take-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         projectId: st.id, trackId: m.trackId, trackName: t?.name || 'Prise',
         sampleRate: m.sampleRate, recordedAt: m.recordedAt, latency: m.latency,
-      });
+        // R14 : prise multipiste (groupe) et entrée stéréo (2 canaux entrelacés).
+        ...(m.group ? { group: m.group } : {}), ...(m.channels && m.channels > 1 ? { channels: m.channels } : {}),
+      }, m.channels && m.channels > 1 ? Math.round(m.sampleRate / 2) * m.channels : undefined);
     });
     return () => audioEngine.setTakeJournalFactory(null);
   }, []);
@@ -4599,6 +4679,26 @@ function Studio() {
   // --- Structure Pro Tools (utils/trackStructure) : liste des pistes, bus nommés, Send View, états d'effets.
   const [structurePanel, setStructurePanel] = useState<StructurePanel | null>(null);
   const [sendViewSlot, setSendViewSlot] = useState<number | null>(null);
+  // Dispositions de fenêtres (R17, utils/windowLayouts) : vue, navigateur, panneau du bas.
+  const layoutUiRef = useRef({ sidebar: isSidebarOpen, sideTab: activeSideBrowserTab, panel: structurePanel });
+  layoutUiRef.current = { sidebar: isSidebarOpen, sideTab: activeSideBrowserTab, panel: structurePanel };
+  useEffect(() => {
+    const offs = [
+      registerLayoutPart('view', {
+        get: () => stateRef.current.currentView,
+        set: (v) => {
+          if (!['ARRANGEMENT', 'MIXER', 'AUTOMATION'].includes(v)) return;
+          if (v !== 'ARRANGEMENT' && simpleModeStore.get().simple) simpleModeStore.setPref(false);
+          setState(s => ({ ...s, currentView: v }));
+          if (document.body.getAttribute('data-view-mode') === 'MOBILE' && (v === 'MIXER' || v === 'ARRANGEMENT')) setActiveMobileTab(v as MobileTab);
+        },
+      }),
+      registerLayoutPart('sidebar', { get: () => layoutUiRef.current.sidebar, set: (v) => setIsSidebarOpen(!!v) }),
+      registerLayoutPart('sideTab', { get: () => layoutUiRef.current.sideTab, set: (v) => { if (v === 'STORE' || v === 'FX' || v === 'BRIDGE') setActiveSideBrowserTab(v); } }),
+      registerLayoutPart('panel', { get: () => layoutUiRef.current.panel, set: (v) => setStructurePanel(v ?? null) }),
+    ];
+    return () => offs.forEach(f => f());
+  }, [setState]);
   const handleSetPluginState = useCallback(async (trackId: string, pluginId: string, next: 'active' | 'bypass' | 'inactive') => {
     // VST inactif : son état est relu sur le pont AVANT d'être déchargé (rechargé à l'identique ensuite).
     if (next === 'inactive') {
@@ -6296,6 +6396,12 @@ function Studio() {
       seek: handleSeek,
       toggleRecord: () => toggleRecordRef.current?.(),
       freeze: (trackId: string) => freezeTrackRef.current?.(trackId),
+      // R14 / R15 : mêmes chemins que l'interface (couloirs, punch, boucle, mixes casque, capture).
+      compTake: (trackId: string, n: number, a: number, b: number | null) => qaHooksRef.current.compTake(trackId, n, a, b),
+      setPunch: (patch: any) => qaHooksRef.current.setPunch(patch),
+      setLoop: (on: boolean, start: number, end: number) => setState(s => ({ ...s, isLoopActive: on, loopStart: start, loopEnd: end })),
+      setCueMixes: (mixes: CueMix[]) => qaHooksRef.current.setCueMixes(mixes),
+      captureLastTake: () => captureRef.current?.(),
       undo,
       redo,
       setView: (v: string) => setState(s => ({ ...s, currentView: v as any })),
@@ -8009,7 +8115,9 @@ function Studio() {
         notify={setAiNotification}
       />
       </PanelBoundary>
-      <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} onCustomize={isMobile ? undefined : () => { setShortcutsOpen(false); setKeymapEditorOpen(true); }} onLayouts={() => { setShortcutsOpen(false); setLayoutsOpen(true); }} />
+      {keymapEditorOpen && !isMobile && <KeymapEditor onClose={() => setKeymapEditorOpen(false)} />}
+      {layoutsOpen && <WindowLayoutsPanel onClose={() => setLayoutsOpen(false)} notify={setAiNotification} />}
       <PanelBoundary name="les fenêtres d'édition" overlay>
       <ProToolsWindows tracks={state.tracks} markers={state.markers} bpm={state.bpm} setState={setState} onEditClip={handleEditClip}
         onSeek={handleSeek} onAddMarker={handleAddMarker} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
@@ -8255,6 +8363,7 @@ function Studio() {
       <Suspense fallback={null}>
       {isPluginManagerOpen && <PluginManager onClose={() => setIsPluginManagerOpen(false)} onPluginsDiscovered={(plugins) => { console.log("Plugins refreshed:", plugins.length); setIsPluginManagerOpen(false); }} />}
       {isAudioSettingsOpen && <AudioSettingsPanel onClose={() => setIsAudioSettingsOpen(false)} />}
+      {cueMixesOpen && <CueMixPanel tracks={state.tracks} mixes={state.cueMixes || []} onChange={handleCueMixesChange} onClose={() => setCueMixesOpen(false)} isMobile={isMobile} />}
       <AutotuneVstManager />
       </Suspense>
       

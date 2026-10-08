@@ -1,5 +1,6 @@
 
 import React, { useEffect, useRef } from 'react';
+import { ownsLongPress, swallowReleaseClick } from '../utils/touchGestures';
 
 /**
  * TouchInteractionManager
@@ -57,8 +58,9 @@ const TouchInteractionManager: React.FC = () => {
     };
 
     const handleTouchStart = (e: TouchEvent) => {
-      // On ignore le multitouch pour les interactions contextuelles
-      if (e.touches.length > 1) return;
+      // On ignore le multitouch pour les interactions contextuelles ; un 2e doigt
+      // (défilement, zoom) annule aussi l'appui long en attente du premier.
+      if (e.touches.length > 1) { cancelLongPress(); return; }
       // Boutons et champs : deux taps rapides = deux actions (BPM +/+, zoom,
       // fondus…), pas un clic droit qui avalait le second tap.
       if ((e.target as HTMLElement)?.closest?.('button, input, select, textarea, a, [role="button"], [data-no-longpress]')) return;
@@ -99,9 +101,15 @@ const TouchInteractionManager: React.FC = () => {
       lastTapRef.current = { time: now, x: currentPos.x, y: currentPos.y };
 
       // --- LOGIQUE LONG PRESS ---
+      // Une zone qui gère elle-même son appui long (arrangement, warp, effets…) en
+      // est le seul arbitre : sinon les deux appuis longs se suivaient (le menu du
+      // clip ouvert par l'arrangement, puis ce clic droit simulé par-dessus).
+      if (ownsLongPress(e.target)) return;
       timerRef.current = window.setTimeout(() => {
         isLongPressTriggered.current = true;
         triggerRightClick(e.target as HTMLElement, touch);
+        // Le clic du lever du doigt ne doit pas activer le menu ouvert sous le doigt.
+        swallowReleaseClick(touch.clientX, touch.clientY);
       }, LONG_PRESS_DURATION);
     };
 

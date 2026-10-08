@@ -187,7 +187,8 @@ const WarpMarkers: React.FC<Props> = ({ open, trackId, clipId, tracks, bpm, setS
     }
     setSel(id);
     const d = { id, src: h.src, free: e.shiftKey, moved: false, timer: undefined as number | undefined };
-    // Appui long au doigt (sans bouger) : retirer le marqueur.
+    // Appui long au doigt (sans bouger) : retirer le marqueur. Seul arbitre de l’appui long sur
+    // ce canvas (data-own-longpress) : le clic droit simulé du gestionnaire global ne s’y ajoute plus.
     if (e.pointerType === 'touch') d.timer = window.setTimeout(() => { if (drag.current && !drag.current.moved) { setInfo(cur => (cur ? removeMarker(cur, id) : cur)); setSel(null); drag.current = null; } }, 650);
     drag.current = d;
   };
@@ -255,7 +256,7 @@ const WarpMarkers: React.FC<Props> = ({ open, trackId, clipId, tracks, bpm, setS
         </div>
 
         <div ref={boxRef} className="w-full overflow-hidden rounded-xl border border-nv-line">
-          <canvas ref={canvasRef} data-testid="warp-canvas" style={{ touchAction: 'none', display: 'block' }}
+          <canvas ref={canvasRef} data-testid="warp-canvas" data-own-longpress="" style={{ touchAction: 'none', display: 'block' }}
             onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onDoubleClick={onDouble} onContextMenu={onContext} />
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-nv-muted" data-testid="warp-status">

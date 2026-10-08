@@ -294,6 +294,7 @@ export function mergeIncomingTakeMeta(local: TakeMeta[] | undefined, incoming: u
     if (typeof m.name === 'string' && m.name.trim()) x.name = m.name.slice(0, 40);
     if (typeof m.recordedAt === 'number') x.recordedAt = m.recordedAt;
     if (typeof m.loopPass === 'number') x.loopPass = m.loopPass;
+    if (typeof m.group === 'string' && m.group) x.group = m.group.slice(0, 64);
     if (m.score && typeof m.score.total === 'number') x.score = m.score;
     return x;
   });

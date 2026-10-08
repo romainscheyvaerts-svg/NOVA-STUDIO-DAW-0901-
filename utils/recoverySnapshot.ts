@@ -97,7 +97,13 @@ export function stateFromVersion<B>(
 /** Prise récupérée -> clip mono à sa place (position de départ moins la latence mesurée). */
 export function recoveredTakeClip(take: RecoveredTake, bufferId: string): Clip {
   const m = take.meta;
-  const start = Math.max(0, (m.recordedAt || 0) - (m.latency || 0));
+  // Comme une prise normale : position de lecture moins la latence, l'avance du son
+  // (décompte, pré-roll) retirée ; ce qui tomberait avant 0 s est rogné (pas décalé),
+  // pour que les pistes d'une prise multipiste restent alignées.
+  let start = (m.recordedAt || 0) - (m.latency || 0);
+  let offset = Math.max(0, Number(m.lead) || 0);
+  if (start < 0) { offset += -start; start = 0; }
+  offset = Math.min(offset, take.seconds);
   const when = new Date(m.startedAt);
   const hh = `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`;
   return {
@@ -105,13 +111,13 @@ export function recoveredTakeClip(take: RecoveredTake, bufferId: string): Clip {
     bufferId,
     name: `Prise récupérée (${hh})`,
     start,
-    duration: take.seconds,
-    offset: 0,
+    duration: Math.max(0.01, take.seconds - offset),
+    offset,
     fadeIn: 0.01,
     fadeOut: 0.01,
     type: TrackType.AUDIO,
     color: '#f59e0b',
-    originStart: start,
+    originStart: Math.max(0, start - offset),
   } as Clip;
 }
 

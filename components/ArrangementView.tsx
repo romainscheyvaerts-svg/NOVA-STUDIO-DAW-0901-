@@ -28,6 +28,7 @@ import { openNovaWindow } from '../utils/novaWindows';
 import WaveformRenderer from './WaveformRenderer';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { playheadStore } from '../utils/playheadStore';
+import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures';
 import { visibleEnvelope } from '../utils/waveformPeaks';
 import { useLatestCallback } from '../utils/useLatestCallback';
 import { useSimpleMode } from '../utils/simpleMode';
@@ -54,6 +55,9 @@ import { shownTrackIds } from '../utils/trackStructure';
 import { structureMenuItems } from './TrackStructure';
 import { ClipGainToolbar, ClipToolsHost, clipGainMenuItems, useClipGainEdit } from './ClipGainTools';
 import { envelopeGainAt } from '../utils/clipGain';
+import { matchShortcut, shortcutHint, takenByPianoRoll } from '../utils/keymap';
+import { scrubControl } from '../utils/scrubControl';
+import { registerLayoutPart } from '../utils/windowLayouts';
 import { editGroupsStore, invertFromEvent, mateFade, mateGain, MateSnap, mateTrimEnd, mateTrimStart, snapMates } from '../utils/editGroups';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
@@ -171,8 +175,17 @@ const fracToClipGain = (f: number): number => {
 /** Ordonnée de la poignée de gain, relative au haut du clip (zone de forme d'onde : y+18 … y+h-4). */
 const clipGainHandleY = (clipH: number, gain: number): number => 18 + Math.max(4, clipH - 22) * (1 - clipGainToFrac(gain));
 
-type DragAction = 'MOVE' | 'SCRUB' | 'TRIM_START' | 'TRIM_END' | 'TCE_START' | 'TCE_END' | 'FADE_IN' | 'FADE_OUT' | 'GAIN' | 'XFADE' | 'RANGE' | null;
+type DragAction = 'MOVE' | 'SCRUB' | 'AUDIO_SCRUB' | 'TRIM_START' | 'TRIM_END' | 'TCE_START' | 'TCE_END' | 'FADE_IN' | 'FADE_OUT' | 'GAIN' | 'XFADE' | 'RANGE' | null;
 type LoopDragMode = 'START' | 'END' | 'BODY' | null;
+
+/** Raccourcis gérés par l'arrangement (table active : utils/keymapStore). */
+const TOOL_OF: Record<string, EditorTool> = {
+  'tool.select': 'SELECT', 'tool.split': 'SPLIT', 'tool.erase': 'ERASE', 'tool.range': 'RANGE', 'tool.smart': 'SMART',
+  'tool.draw': 'DRAW', 'tool.zoom': 'ZOOM', 'tool.scrub': 'SCRUB',
+};
+/** Ordre de l'Échap de Pro Tools (Cycle through Edit tools). */
+const TOOL_CYCLE: EditorTool[] = ['ZOOM', 'SMART', 'RANGE', 'SELECT', 'SCRUB', 'DRAW'];
+const ARRANGEMENT_SHORTCUT_IDS = [...Object.keys(TOOL_OF), 'tool.cycle', 'pt.split', 'pt.consolidate', 'nova.copy', 'nova.cut', 'nova.paste', 'nova.duplicate', 'nova.delete', 'nova.mute', 'nova.split'];
 
 // Grille : 1/1 à 1/32 et triolets (utils/grid) ; hors grille, à l'échantillon près (Slip).
 const getSnappedTime = (time: number, bpm: number, gridSize: string, enabled: boolean): number => (enabled ? snapToGrid(time, bpm, gridSize, true) : toSample(time));
@@ -229,11 +242,28 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   // Smart Tool (Pro Tools) par défaut à la souris ; au doigt, le Grabber (déplacement) comme avant.
   const [activeTool, setActiveTool] = useState<EditorTool>(() =>
     typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? 'SELECT' : 'SMART');
+  const activeToolRef = useRef(activeTool);
+  activeToolRef.current = activeTool;
   // Sélection de plage (Sélecteur / moitié haute du Smart Tool) : partagée avec les commandes.
   const { time: timeSel } = useEditSelection();
   const rangeDragRef = useRef<{ anchor: number; anchorTrack: string; clickClip?: { trackId: string; clip: Clip } } | null>(null);
   const [zoomV, setZoomV] = useState(120); 
   const [zoomH, setZoomH] = useState(40);  
+  // Scrub audible en cours (R17) : point de départ (shuttle) et mode.
+  const audioScrubRef = useRef<{ originX: number; shuttle: boolean } | null>(null);
+  // Disposition de fenêtres (R17) : le zoom de l'arrangement en fait partie.
+  const zoomLayoutRef = useRef({ h: zoomH, v: zoomV });
+  zoomLayoutRef.current = { h: zoomH, v: zoomV };
+  useEffect(() => registerLayoutPart('zoom', {
+    get: () => ({ ...zoomLayoutRef.current, scroll: scrollContainerRef.current?.scrollLeft ?? 0 }),
+    set: (z) => {
+      if (!z || typeof z !== 'object') return;
+      if (Number.isFinite(z.h)) setZoomH(Math.max(10, Math.min(300, z.h)));
+      if (Number.isFinite(z.v)) setZoomV(Math.max(40, Math.min(400, z.v)));
+      if (Number.isFinite(z.scroll)) requestAnimationFrame(() => { const el = scrollContainerRef.current; if (el) el.scrollLeft = z.scroll; });
+    },
+  }), []);
+  useEffect(() => registerLayoutPart('tool', { get: () => activeToolRef.current, set: (t) => { if (typeof t === 'string') setActiveTool(t as EditorTool); } }), []);
   // Grille et mode : préférence + projet (utils/editModes), plus un état local.
   const gridSize = em.gridSize;
   const setGridSize = (g: string) => editModeStore.set({ gridSize: g });
@@ -376,14 +406,17 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       const mod = e.ctrlKey || e.metaKey;
       const sel = selectedClip;
 
-      // Outils : 1 sélection, 2 ciseaux, 3 gomme (annoncés dans les infobulles)
-      if (!mod && !e.altKey) {
-        if (e.key === '4') { setActiveTool('RANGE'); return; }
-        if (e.key === '5') { setActiveTool('SMART'); return; }
-        if (e.key === '1') { setActiveTool('SELECT'); return; }
-        if (e.key === '2') { setActiveTool('SPLIT'); return; }
-        if (e.key === '3') { setActiveTool('ERASE'); return; }
-        if (e.key === '6') { setActiveTool('DRAW'); return; }
+      // Piano roll ouvert : ses propres raccourcis passent avant (Ctrl+A, Ctrl+D, Suppr…).
+      if (takenByPianoRoll(e)) return;
+      // Table ACTIVE des raccourcis (utils/keymapStore) : préréglage + remappages.
+      const id = matchShortcut(e, ARRANGEMENT_SHORTCUT_IDS);
+
+      // Outils : chiffres de NOVA et F5–F10 de Pro Tools (annoncés dans les infobulles).
+      if (id && id.startsWith('tool.')) {
+        e.preventDefault();
+        if (id === 'tool.cycle') { const i = TOOL_CYCLE.indexOf(activeTool); setActiveTool(TOOL_CYCLE[(i + 1) % TOOL_CYCLE.length]); return; }
+        setActiveTool(TOOL_OF[id]);
+        return;
       }
 
       // Nudge (Pro Tools) : ← / → déplacent la sélection d'un pas (réglable), Maj = 10 pas.
@@ -398,22 +431,21 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       }
 
       // Coller se fait sur la piste selectionnee, meme sans clip selectionne.
-      // Sélection de plage (Pro Tools) : Ctrl+E séparer, Ctrl+F fondus, Alt+Maj+3 consolider,
-      // Ctrl+C / X / D et Suppr sur la plage, Ctrl+V colle une plage copiée.
-      if (editCommands) {
+      // Sélection de plage (Pro Tools) : séparer, consolider, copier / couper / dupliquer
+      // et supprimer la plage, coller une plage copiée.
+      if (editCommands && id) {
         const ts = editSelectionStore.get().time;
-        if (mod && !e.shiftKey && (e.key === 'e' || e.key === 'E')) { e.preventDefault(); editCommands.separate(); return; }
-        if (ts && mod && !e.shiftKey && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); editCommands.fadesFromSelection(); return; }
-        if (ts && e.altKey && e.shiftKey && e.code === 'Digit3') { e.preventDefault(); void editCommands.consolidateSelection(); return; }
-        if (ts && mod && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); editCommands.copySelection(); return; }
-        if (ts && mod && (e.key === 'x' || e.key === 'X')) { e.preventDefault(); editCommands.cutSelection(); return; }
-        if (ts && mod && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); editCommands.duplicateSelection(); return; }
-        if (ts && !mod && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); editCommands.deleteSelection(); return; }
-        if (mod && (e.key === 'v' || e.key === 'V') && editCommands.hasRangeClipboard()) { e.preventDefault(); editCommands.pasteRange(); return; }
-        if (mod && (e.key === 'c' || e.key === 'C' || e.key === 'x' || e.key === 'X')) editCommands.markClipClipboard();
+        if (id === 'pt.split') { e.preventDefault(); editCommands.separate(); return; }
+        if (ts && id === 'pt.consolidate') { e.preventDefault(); void editCommands.consolidateSelection(); return; }
+        if (ts && id === 'nova.copy') { e.preventDefault(); editCommands.copySelection(); return; }
+        if (ts && id === 'nova.cut') { e.preventDefault(); editCommands.cutSelection(); return; }
+        if (ts && id === 'nova.duplicate') { e.preventDefault(); editCommands.duplicateSelection(); return; }
+        if (ts && id === 'nova.delete') { e.preventDefault(); editCommands.deleteSelection(); return; }
+        if (id === 'nova.paste' && editCommands.hasRangeClipboard()) { e.preventDefault(); editCommands.pasteRange(); return; }
+        if (id === 'nova.copy' || id === 'nova.cut') editCommands.markClipClipboard();
       }
 
-      if (mod && (e.key === 'v' || e.key === 'V')) {
+      if (id === 'nova.paste') {
         const target = sel?.trackId || selectedTrackId;
         if (target) { e.preventDefault(); onEditClip?.(target, '', 'PASTE', { time: playheadStore.get() }); }
         return;
@@ -426,39 +458,29 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         ? tracks.flatMap(tr => tr.clips.filter(c => selectedClipIds.has(c.id)).map(c => ({ trackId: tr.id, clipId: c.id })))
         : (sel ? [{ trackId: sel.trackId, clipId: sel.clip.id }] : []);
 
-      if (cibles.length === 0) return;
+      if (cibles.length === 0 || !id) return;
 
-      if (mod && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); if (sel) onEditClip?.(sel.trackId, sel.clip.id, 'COPY'); return; }
-      if (mod && (e.key === 'x' || e.key === 'X')) {
-        e.preventDefault();
-        cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'CUT'));
-        setSelectedClip(null); setSelectedClipIds(new Set());
-        return;
-      }
-      if (mod && (e.key === 'd' || e.key === 'D')) {
-        e.preventDefault();
-        cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'DUPLICATE'));
-        return;
-      }
-      if (mod) return;
-
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        e.preventDefault();
-        cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'DELETE'));
-        setSelectedClip(null); setSelectedClipIds(new Set());
-        return;
-      }
-      if (e.key === 'm' || e.key === 'M') {
-        e.preventDefault();
-        cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'MUTE'));
-        return;
-      }
-      if (e.key === 's' || e.key === 'S') {
-        e.preventDefault();
-        // La decoupe s'applique a tous les clips traverses par la tete de lecture.
-        const t = playheadStore.get();
-        cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'SPLIT', { time: t }));
-        return;
+      switch (id) {
+        case 'nova.copy': e.preventDefault(); if (sel) onEditClip?.(sel.trackId, sel.clip.id, 'COPY'); return;
+        case 'nova.cut':
+          e.preventDefault();
+          cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'CUT'));
+          setSelectedClip(null); setSelectedClipIds(new Set());
+          return;
+        case 'nova.duplicate': e.preventDefault(); cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'DUPLICATE')); return;
+        case 'nova.delete':
+          e.preventDefault();
+          cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'DELETE'));
+          setSelectedClip(null); setSelectedClipIds(new Set());
+          return;
+        case 'nova.mute': e.preventDefault(); cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'MUTE')); return;
+        case 'nova.split': {
+          e.preventDefault();
+          // La decoupe s'applique a tous les clips traverses par la tete de lecture.
+          const t = playheadStore.get();
+          cibles.forEach(c => onEditClip?.(c.trackId, c.clipId, 'SPLIT', { time: t }));
+          return;
+        }
       }
     };
 
@@ -469,7 +491,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     window.addEventListener('keydown', handleKD);
     window.addEventListener('keyup', handleKU);
     return () => { window.removeEventListener('keydown', handleKD); window.removeEventListener('keyup', handleKU); window.removeEventListener('blur', handleBlur); };
-  }, [selectedClip, selectedClipIds, tracks, selectedTrackId, onEditClip, editCommands]);
+  }, [selectedClip, selectedClipIds, tracks, selectedTrackId, onEditClip, editCommands, activeTool]);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -911,9 +933,24 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     for (const t of visibleTracks) { if (t.id === trackId) return yy; yy += zoomV + extraH(t); }
     return null;
   };
-  /** Appui long du doigt sur un clip (tablette) : son menu, comme le clic droit. */
+  /** Appui long du doigt (tablette) : le menu du clip, comme le clic droit ; ailleurs, le clic droit de l'endroit. */
   const longPressRef = useRef<{ timer: number; x: number; y: number } | null>(null);
   const cancelLongPress = () => { if (longPressRef.current) { window.clearTimeout(longPressRef.current.timer); longPressRef.current = null; } };
+  /** Doigts posés sur la zone des pistes, et celui qui mène le geste (le premier). Un 2e doigt
+   *  = défilement / zoom à deux doigts : jamais un appui long, jamais un nouveau geste. */
+  const touchPointersRef = useRef<Set<number>>(new Set());
+  const gestureFingerRef = useRef<number | null>(null);
+  /** Geste interrompu par un 2e doigt : sa fin n'est pas un « clic » (Spot n'ouvre rien). */
+  const gestureAbortedRef = useRef(false);
+  const endTouch = (pointerId: number) => {
+    touchPointersRef.current.delete(pointerId);
+    cancelLongPress();
+    // Le lever d'un 2e doigt ne termine pas le geste du premier.
+    if (gestureFingerRef.current !== pointerId) return;
+    gestureFingerRef.current = null;
+    touchRef.current = false;
+    handleMouseUp();
+  };
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
@@ -1004,6 +1041,32 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     
     // Sous la règle, le couloir d'accords (au-dessus) reçoit ses propres clics.
     if (e.clientY - rect.top < tracksTop) return;
+
+    // Outil Zoom (Pro Tools : Zoomer, F5) : clic = zoom avant centré sur ce point, Alt+clic = zoom arrière.
+    if (activeTool === 'ZOOM' && e.button === 0) {
+        e.preventDefault();
+        const next = Math.max(10, Math.min(300, Math.round(zoomH * (e.altKey ? 0.5 : 2))));
+        const offsetPx = e.clientX - rect.left - headerWidth;
+        setZoomH(next);
+        requestAnimationFrame(() => { const el = scrollContainerRef.current; if (el) el.scrollLeft = Math.max(0, time * next - offsetPx); });
+        return;
+    }
+    // Scrub audible (R17) : outil Scrubber (F9), ou Ctrl+glisser avec le Sélecteur / le haut du
+    // Smart Tool (Pro Tools : « Temporary Scrub mode »). Alt + Scrubber = shuttle.
+    if (e.button === 0 && !e.shiftKey) {
+        let laneTop = tracksTop;
+        let inLane = false;
+        for (const t of visibleTracks) { if (y >= laneTop && y < laneTop + zoomV) { inLane = true; break; } laneTop += zoomV + extraH(t); }
+        const ctrlScrub = (e.ctrlKey || e.metaKey) && inLane && (activeTool === 'RANGE' || (activeTool === 'SMART' && y - laneTop < zoomV * 0.5));
+        if (activeTool === 'SCRUB' || ctrlScrub) {
+            e.preventDefault();
+            const shuttle = activeTool === 'SCRUB' && e.altKey;
+            audioScrubRef.current = { originX: e.clientX, shuttle };
+            if (shuttle) scrubControl.shuttleAt(0, time); else scrubControl.begin(time);
+            setDragAction('AUDIO_SCRUB');
+            return;
+        }
+    }
     let currentY = tracksTop;
     for (const t of visibleTracks) {
         // Crayon sur une ligne d'automation ouverte (sous les clips).
@@ -1315,6 +1378,8 @@ const handleMouseMove = (e: React.MouseEvent) => {
             }
             laneY += zoomV + extraH(t);
         }
+        if (activeTool === 'ZOOM') cursor = 'zoom-in';
+        else if (activeTool === 'SCRUB') cursor = 'col-resize';
         const el = scrollContainerRef.current;
         if (el.style.cursor !== cursor) el.style.cursor = cursor;
         if (hint) setHoverHint({ x: e.clientX, y: e.clientY, text: hint });
@@ -1497,15 +1562,24 @@ const handleMouseMove = (e: React.MouseEvent) => {
         groupMatesRef.current.forEach(m => onEditClip?.(m.trackId, m.clip.id, 'UPDATE_PROPS', mateFade(m.clip, 'out', fadeOut)));
     } else if (dragAction === 'SCRUB') {
         onSeek(time);
+    } else if (dragAction === 'AUDIO_SCRUB') {
+        const sr = audioScrubRef.current;
+        // Shuttle : la vitesse dépend de la distance au point de départ (100 px = temps réel).
+        if (sr?.shuttle) scrubControl.shuttleAt(Math.max(-8, Math.min(8, (e.clientX - sr.originX) / 100)));
+        else scrubControl.move(Math.max(0, x / zoomH));
     }
 };
 
 const handleMouseUp = () => {
+    if (dragAction === 'AUDIO_SCRUB') {
+        if (audioScrubRef.current?.shuttle) scrubControl.stopShuttle(); else scrubControl.end();
+        audioScrubRef.current = null;
+    }
     clipGainEdit.onUp();
     setDragTipPos(null);
     if (longPressRef.current) { clearTimeout(longPressRef.current.timer); longPressRef.current = null; }
     // Spot (Pro Tools) : un clic (sans glisser) sur un clip ouvre « Position exacte ».
-    if (dragAction === 'MOVE' && activeClip && !movedRef.current && editModeStore.get().mode === 'SPOT') {
+    if (dragAction === 'MOVE' && activeClip && !movedRef.current && !gestureAbortedRef.current && editModeStore.get().mode === 'SPOT') {
         setSpotTarget({ trackId: activeClip.trackId, clipId: activeClip.clip.id });
     }
     shuffleInitRef.current = null;
@@ -2206,6 +2280,10 @@ useEffect(() => {
             <button onClick={() => setActiveTool('RANGE')} aria-pressed={activeTool === 'RANGE'} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'RANGE' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
               title="Sélecteur (comme dans Pro Tools) (4) : glisse pour choisir une plage de temps sur une ou plusieurs pistes, puis coupe, copie, duplique, consolide, boucle ou exporte-la" aria-label="Sélecteur de plage"><i className="fas fa-i-cursor text-[12px]"></i></button>
             <button onClick={() => setActiveTool('ERASE')} className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'ERASE' ? 'bg-red-500 text-white' : 'text-slate-500 hover:text-white'}`} title="Gomme : supprimer un clip (3)" aria-label="Outil gomme"><i className="fas fa-eraser text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('SCRUB')} aria-pressed={activeTool === 'SCRUB'} data-testid="tool-scrub" className={`w-9 h-9 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-lg flex items-center justify-center transition-all ${activeTool === 'SCRUB' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
+              title={`Scrubber (${shortcutHint('tool.scrub') || 'F9'}) : glisse sur la forme d'onde pour l'entendre, au rythme de ta main (ou de ton doigt). Alt+glisser = shuttle. Avec le Sélecteur, Ctrl+glisser fait la même chose.`} aria-label="Outil scrub"><i className="fas fa-headphones text-[12px]"></i></button>
+            <button onClick={() => setActiveTool('ZOOM')} aria-pressed={activeTool === 'ZOOM'} data-testid="tool-zoom" className={`hidden [@media(pointer:fine)]:flex w-9 h-9 rounded-lg items-center justify-center transition-all ${activeTool === 'ZOOM' ? 'bg-[#38bdf8] text-black nova-halo' : 'text-slate-500 hover:text-white'}`}
+              title={`Zoom (${shortcutHint('tool.zoom') || 'F5'}) : clic = zoom avant sur ce point, Alt+clic = zoom arrière`} aria-label="Outil zoom"><i className="fas fa-magnifying-glass text-[12px]"></i></button>
           </div>
           {/* Trim TCE (R13) : le bord d'un clip audio l'étire au lieu de le rogner. */}
           {!simple && (
@@ -2300,17 +2378,53 @@ useEffect(() => {
             if (e.pointerType === 'mouse') return;
             // Pas d'événements souris « de compatibilité » en double après le doigt.
             e.preventDefault();
+            const fingers = touchPointersRef.current;
+            // Premier doigt posé (isPrimary) : aucun autre doigt n'est sur l'écran
+            // (un lever perdu ne laisse pas un doigt fantôme).
+            if (e.isPrimary) fingers.clear();
+            fingers.add(e.pointerId);
+            // Deuxième doigt : défilement ou zoom à deux doigts, pas un nouveau geste
+            // (ni un appui long sous ce doigt, ni la fin de celui du premier doigt).
+            if (fingers.size > 1) {
+              cancelLongPress();
+              // Le geste du premier doigt s'arrête là (sans valoir un clic) : le clip ne suit
+              // plus ce doigt et le navigateur peut faire défiler / zoomer à deux doigts.
+              if (gestureFingerRef.current !== null) {
+                gestureFingerRef.current = null;
+                gestureAbortedRef.current = true;
+                touchRef.current = false;
+                try { handleMouseUp(); } finally { gestureAbortedRef.current = false; }
+              }
+              return;
+            }
+            gestureFingerRef.current = e.pointerId;
             touchRef.current = true;
+            // « Le clip a bougé » vaut pour CE geste (un déplacement précédent ne bloque pas l'appui long).
+            movedRef.current = false;
             handleMouseDown(e);
-            // Appui long sur un clip (doigt immobile 0,55 s) : en mode Spot, « Position exacte » ;
-            // sinon le menu du clip (qui propose aussi le Spot).
+            // Appui long (doigt immobile 0,55 s). Seul arbitre ici (data-own-longpress) :
+            // sur un clip, en mode Spot « Position exacte », sinon le menu du clip ;
+            // ailleurs (règle, piste vide), le clic droit de l'endroit. Les en-têtes de
+            // pistes gardent l'appui long du gestionnaire global.
+            const sc = scrollContainerRef.current;
+            if (!sc || e.clientX - sc.getBoundingClientRect().left < headerWidth) { cancelLongPress(); return; }
             const cx = e.clientX, cy = e.clientY;
             cancelLongPress();
             longPressRef.current = { x: cx, y: cy, timer: window.setTimeout(() => {
               longPressRef.current = null;
+              // Crayon de gain / d'automation en cours, ou clip déjà déplacé : le geste continue.
+              if (clipGainActiveRef.current || movedRef.current || touchPointersRef.current.size !== 1) return;
               const hit = clipAtPoint(cx, cy);
-              if (!hit) return;
               touchRef.current = false; handleMouseUp();
+              // Le clic envoyé au lever du doigt ne doit pas activer le menu ouvert dessous
+              // (il « Normalisait » le clip et refermait le menu).
+              swallowReleaseClick(cx, cy);
+              if (!hit) {
+                // Clic droit de l'endroit (marqueur / punch sur la règle, menu de la grille,
+                // pattern MIDI sur une piste d'instrument), comme le gestionnaire global le faisait.
+                scrollContainerRef.current?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 2, buttons: 2 }));
+                return;
+              }
               if (editModeStore.get().mode === 'SPOT') {
                 suppressCtxUntilRef.current = Date.now() + 1500;
                 setSpotTarget({ trackId: hit.trackId, clipId: hit.clip.id });
@@ -2321,16 +2435,18 @@ useEffect(() => {
           }}
           onPointerMove={(e) => {
             if (e.pointerType === 'mouse') return;
+            if (e.pointerId !== gestureFingerRef.current) return;
             const lp = longPressRef.current;
             if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancelLongPress();
             handleMouseMove(e);
           }}
-          onPointerUp={(e) => { if (e.pointerType !== 'mouse') { cancelLongPress(); touchRef.current = false; handleMouseUp(); } }}
-          onPointerCancel={(e) => { if (e.pointerType !== 'mouse') { cancelLongPress(); touchRef.current = false; handleMouseUp(); } }}
+          onPointerUp={(e) => { if (e.pointerType !== 'mouse') endTouch(e.pointerId); }}
+          onPointerCancel={(e) => { if (e.pointerType !== 'mouse') endTouch(e.pointerId); }}
           onScroll={(e) => { setScrollLeft(e.currentTarget.scrollLeft); setScrollTop(e.currentTarget.scrollTop); }}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onContextMenu={(e) => e.preventDefault()}
+          {...{ [OWN_LONG_PRESS_ATTR]: '' }}
       >
         {/* Container for all content with proper dimensions */}
         <div style={{ width: totalContentWidth + headerWidth, minHeight: totalArrangementHeight, position: 'relative' }}>
@@ -2338,6 +2454,7 @@ useEffect(() => {
           {/* SIDEBAR - sticky left only (scrolls vertically with content) */}
           <div 
               ref={sidebarContainerRef}
+              {...{ [OWN_LONG_PRESS_ATTR]: 'off' }}
               className="z-40 flex flex-col"
               style={{ 
                   position: 'sticky', 

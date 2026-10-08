@@ -52,6 +52,8 @@ class MetronomeService {
 
   private outputGain: GainNode | null = null;
   private outputs: { main: AudioNode | null; system: AudioNode | null } = { main: null, system: null };
+  /** R15 : autres départs du clic (mixes casque), gardés quand la sortie change. */
+  private taps = new Set<AudioNode>();
   /** Clics programmés (pour les couper net à l'arrêt). */
   private live = new Set<AudioScheduledSourceNode>();
   /** Derniers clics programmés (tests, preuves) : instant du contexte et accent. */
@@ -65,6 +67,7 @@ class MetronomeService {
   }
 
   public init(audioContext: AudioContext) {
+    if (this.ctx !== audioContext) this.taps.clear();
     this.ctx = audioContext;
     this.outputGain = this.ctx.createGain();
     this.outputGain.gain.value = this.settings.volume;
@@ -84,6 +87,18 @@ class MetronomeService {
     try { this.outputGain.disconnect(); } catch { /* pas encore relié */ }
     const target = (this.settings.output === 'system' ? this.outputs.system : this.outputs.main) || this.outputs.system || this.ctx.destination;
     this.outputGain.connect(target);
+    this.taps.forEach(n => { try { this.outputGain!.connect(n); } catch { /* autre contexte */ } });
+  }
+
+  /** R15 : le clic part aussi vers ce nœud (entrée clic des mixes casque). */
+  public addTap(node: AudioNode) {
+    this.taps.add(node);
+    if (this.outputGain) { try { this.outputGain.connect(node); } catch { /* */ } }
+  }
+
+  public removeTap(node: AudioNode) {
+    this.taps.delete(node);
+    if (this.outputGain) { try { this.outputGain.disconnect(node); } catch { /* */ } }
   }
 
   public setClock(fn: (() => TransportClock | null) | null) { this.clock = fn; }

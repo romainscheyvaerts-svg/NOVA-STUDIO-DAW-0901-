@@ -23,7 +23,7 @@ class ModelProc:
         P, l0, dl, tab = self.cfg
         y, A = ac.process(np.ascontiguousarray(x, dtype=np.float64), P, float(l0), float(dl), tab)
         self.last_A = A
-        return y
+        return ac.compensate(y, P)
 
     def close(self):
         pass

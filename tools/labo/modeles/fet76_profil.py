@@ -100,6 +100,19 @@ def nova_to_internal(p, fit):
         P[ac.P_EQ + 5 * q:ac.P_EQ + 5 * q + 5] = ac.biquad(kind, fc, qq, gdb, SR)
     P[ac.P_MIX] = min(1.0, max(0.0, p.get("mix", 100.0) / 100.0))
     P[ac.P_LINK] = 0.0
+    d2 = fit.get("dyn2")
+    if d2:
+        if int(p.get("slo", 0)):
+            sa = d2.get("slo_scale", 1.0)
+        else:
+            sa = ac.interp_log(d2["att_knob"], d2["att_scale"], float(p.get("attack", 4.0))) if d2.get("att_scale") else 1.0
+        sr = ac.interp_log(d2["rel_knob"], d2["rel_scale"], rel) if d2.get("rel_scale") else 1.0
+        ac.apply_dyn2(P, d2, sa, sr, SR)
+        if d2.get("fb"):
+            P[ac.P_FB] = 1.0
+            tab = ac.ff_to_fb(tab, L0, DL)
+    ac.apply_lti(P, fit.get("lti"), SR, fit.get("lat", 0))
+    ac.apply_ws(P, fit.get("ws"))
     return P, L0, DL, np.ascontiguousarray(tab)
 
 

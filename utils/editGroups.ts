@@ -149,7 +149,34 @@ const clampPan = (v: number) => Math.max(-1, Math.min(1, v));
  * Pro Tools : chaque fader garde son écart), muet / solo / mode d'automation
  * recopiés, envois vers la même destination : niveau relatif et muet recopié.
  */
+/** Piste qu'un armement lié arme : une piste audio enregistrable (pas le beat, pas MIDI). */
+const recordable = (t: Track): boolean => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && !t.isInactive;
+
+/**
+ * R14 · Armement lié : autres pistes à armer / désarmer avec `trackId` (groupes actifs
+ * dont l'attribut « Armement » est coché, quel que soit leur type).
+ */
+export function linkedRecordMates(ctx: { tracks: Track[]; trackGroups?: TrackGroup[]; groupSettings?: GroupSettings }, trackId: string, invert = false): string[] {
+  const out = new Set<string>();
+  for (const g of ctx.trackGroups || []) {
+    if (!g.linkedRecord || !g.trackIds.includes(trackId) || !effectiveOn(g, ctx.groupSettings, invert)) continue;
+    for (const id of g.trackIds) {
+      if (id === trackId) continue;
+      const t = ctx.tracks.find(x => x.id === id);
+      if (t && recordable(t)) out.add(id);
+    }
+  }
+  return [...out];
+}
+
 export function mixLinkUpdates(prev: Track, next: Track, ctx: GroupCtx, invert = false): Track[] {
+  // R14 · Armement lié : indépendant des attributs de mix (groupes d'édition compris).
+  if (!!prev.isTrackArmed !== !!next.isTrackArmed) {
+    return linkedRecordMates({ tracks: ctx.tracks, trackGroups: ctx.groups, groupSettings: ctx.settings }, prev.id, invert)
+      .map(id => ctx.tracks.find(t => t.id === id)!)
+      .filter(t => !!t.isTrackArmed !== !!next.isTrackArmed)
+      .map(t => ({ ...t, isTrackArmed: !!next.isTrackArmed }));
+  }
   const changed: MixAttr[] = [];
   if (prev.volume !== next.volume) changed.push('volume');
   if (!!prev.isMuted !== !!next.isMuted) changed.push('mute');
@@ -317,6 +344,7 @@ export function sanitizeGroup(raw: unknown): TrackGroup | null {
   if (r.isActive === false) g.isActive = false;
   if (r.linkedSends) g.linkedSends = true;
   if (r.linkedAutomation) g.linkedAutomation = true;
+  if (r.linkedRecord) g.linkedRecord = true;
   if (r.deduced) g.deduced = true;
   return g;
 }

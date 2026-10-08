@@ -202,6 +202,7 @@ export const LEGACY_AUTOMATABLE: Record<string, LegacyAutomatable[]> = {
   ],
   DEESSER: [
     { id: 'threshold', label: 'Seuil', min: -60, max: 0, unit: 'dB' },
+    { id: 'relThreshold', label: 'Seuil relatif', min: -30, max: 6, unit: 'dB' },
     { id: 'frequency', label: 'Fréquence', min: 2000, max: 12000, unit: 'Hz' },
   ],
   VOCALSATURATOR: [

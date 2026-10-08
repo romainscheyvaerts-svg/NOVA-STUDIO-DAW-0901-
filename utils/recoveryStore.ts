@@ -71,6 +71,15 @@ export interface TakeMetaRecord {
   endedAt: number | null;
   samples: number;
   chunks: number;
+  /** R14 · Groupe de prises (passage multipiste) : les pistes récupérées vont ensemble. */
+  group?: string;
+  /** R14 · Canaux (2 = entrée stéréo, échantillons entrelacés G/D). Absent : mono. */
+  channels?: number;
+  /**
+   * Avance du son sur le départ de la lecture (s, décompte / pré-roll), notée pendant la
+   * prise : retirée à la récupération (la prise revient à sa place exacte).
+   */
+  lead?: number;
 }
 
 export interface RecoveredTake { meta: TakeMetaRecord; samples: Float32Array; seconds: number }
@@ -344,7 +353,7 @@ export class RecoveryStore {
     const samples = new Float32Array(total);
     let o = 0;
     for (const c of chunks) { samples.set(c, o); o += c.length; }
-    return { meta: { ...meta, samples: total, chunks: chunks.length }, samples, seconds: total / (meta.sampleRate || 44100) };
+    return { meta: { ...meta, samples: total, chunks: chunks.length }, samples, seconds: total / (meta.sampleRate || 44100) / Math.max(1, meta.channels || 1) };
   }
 
   /**
@@ -396,6 +405,16 @@ export class TakeJournal {
 
   get takeId() { return this.meta.takeId; }
 
+  /** Complète la description de la prise (écrite avec le prochain morceau). */
+  annotate(patch: Partial<Pick<TakeMetaRecord, 'lead'>>) {
+    if (this.closed) return;
+    Object.assign(this.meta, patch);
+    this.metaDirty = true;
+  }
+
+  /** Description à réécrire (avance notée) ; le nombre d'échantillons, lui, se relit dans les morceaux. */
+  private metaDirty = false;
+
   /** Morceau capté (mono). Écrit dès qu'une demi-seconde s'est accumulée. */
   push(chunk: Float32Array) {
     if (this.closed || this.failed || !chunk.length) return;
@@ -416,9 +435,15 @@ export class TakeJournal {
     this.meta.samples += block.length;
     this.meta.chunks = this.seq;
     const meta = { ...this.meta };
+    // Une seule écriture durable par morceau (avant : morceau + description à chaque fois) : avec
+    // 4 pistes armées, la file d'IndexedDB prenait du retard et un plantage en perdait la fin.
+    // La description n'est réécrite que si elle a changé (avance notée) ; la récupération relit
+    // la longueur dans les morceaux eux-mêmes.
+    const withMeta = this.metaDirty || seq === 0;
+    this.metaDirty = false;
     this.writing = this.writing
       .then(() => this.db.put(TAKE_CHUNKS, [this.meta.takeId, seq], block, { durable: true }))
-      .then(() => this.db.put(TAKES, this.meta.takeId, meta, { durable: true }))
+      .then(() => (withMeta ? this.db.put(TAKES, this.meta.takeId, meta, { durable: true }) : undefined))
       .catch(() => { this.failed = true; });
     return this.writing;
   }

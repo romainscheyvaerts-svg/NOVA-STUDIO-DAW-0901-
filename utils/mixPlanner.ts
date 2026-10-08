@@ -343,7 +343,7 @@ export const planVoiceMix = (ctx: PlanContext): MixPlan => {
       addVst(voice, 'deess', de, s, says);
       say('deess', label(de), says);
     } else {
-      voice.builtin.push({ slot: 'deess', type: 'DEESSER', params: { threshold: -40, frequency: 6500, reduction: 0.4 + 0.4 * v('deess') }, says: [], reason: 'aucun de-esser VST' });
+      voice.builtin.push({ slot: 'deess', type: 'DEESSER', params: { threshold: -40, frequency: 8000, detection: 'RELATIVE', relThreshold: Math.round(-5 - 4 * v('deess')), reduction: 0.4 + 0.4 * v('deess') }, says: [], reason: 'aucun de-esser VST' });
       plan.summary.push('de-esser : celui de NOVA (aucun de-esser VST installé)');
     }
   }

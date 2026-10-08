@@ -7,6 +7,8 @@ import {
   setTracksInactive, showAndActivate, vcaMembers,
 } from '../utils/trackStructure';
 import { applyTracks, structureBus } from '../utils/structureBus';
+import InputSelect from './InputSelect';
+import { isAudioRecordTrack } from '../utils/multiRecord';
 import { useEditGroups } from '../utils/editGroups';
 import { gainToDbText, panToText } from '../utils/db';
 import { getValidDestinations } from './RoutingManager';
@@ -14,6 +16,7 @@ import { trackDisplayName } from '../utils/sendLabels';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { openNovaWindow } from '../utils/novaWindows';
 import { canCommit, canPrintBus, canRestore, commitLabel, restoreCommitted } from '../utils/commit';
+import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures';
 
 /**
  * Morceaux d'interface de la structure façon Pro Tools (voir utils/trackStructure) :
@@ -40,12 +43,22 @@ export function useLongPress(onLong: (x: number, y: number) => void, ms = 520) {
   const clear = () => { if (timer.current) window.clearTimeout(timer.current); timer.current = null; };
   useEffect(() => clear, []);
   return {
+    // Seul arbitre de l'appui long sur cet élément (le gestionnaire global s'y tait).
+    [OWN_LONG_PRESS_ATTR]: '',
     onPointerDown: (e: React.PointerEvent) => {
-      if (e.pointerType === 'mouse') return;
+      // Remis à zéro aussi pour la souris : après un appui long au doigt, le clic du
+      // lever est avalé, et le clic souris suivant ne doit pas être ignoré.
       fired.current = false;
+      if (e.pointerType === 'mouse') return;
       start.current = { x: e.clientX, y: e.clientY };
       clear();
-      timer.current = window.setTimeout(() => { fired.current = true; onLong(start.current!.x, start.current!.y); }, ms);
+      timer.current = window.setTimeout(() => {
+        fired.current = true;
+        const { x, y } = start.current!;
+        onLong(x, y);
+        // Le clic du lever du doigt ne doit pas activer le menu ouvert sous le doigt.
+        swallowReleaseClick(x, y);
+      }, ms);
     },
     onPointerMove: (e: React.PointerEvent) => {
       if (!start.current || !timer.current) return;
@@ -295,6 +308,12 @@ export const TrackIOSelectors: React.FC<{ track: Track; allTracks: Track[] }> = 
   const inBus = track.inputBusId ? buses.find(b => b.id === track.inputBusId) : undefined;
   return (
     <>
+      {/* R14 · Entrée physique de la piste (micro / entrée de la carte), comme le sélecteur d'entrée de Pro Tools. */}
+      {isAudioRecordTrack(track) && (
+        <div className="relative" data-testid={`physical-input-${track.id}`}>
+          <InputSelect track={track} />
+        </div>
+      )}
       {canListen && !track.isVca && track.id !== 'master' && (
         <div className="relative" data-testid={`input-select-${track.id}`}>
           <div className="h-6 bg-black/60 rounded flex items-center px-2 border border-white/5 cursor-pointer hover:border-white/20">

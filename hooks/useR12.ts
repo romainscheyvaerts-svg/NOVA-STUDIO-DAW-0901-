@@ -9,6 +9,7 @@ import { playheadStore } from '../utils/playheadStore';
 import { splitClipsAt } from '../utils/timeSelection';
 import { applyTimeOp, newTimeOpId, opIdGen, TimeOp, TimeOpReport } from '../utils/timeOps';
 import { openR12Panel, r12Bus, R12Panel, TimeDialogPreset } from '../utils/r12Bus';
+import { takeGroupLinked, takeGroupTracksAt } from '../utils/takeGroups';
 
 /**
  * R12 · Branchements de App (court) : groupes d'édition et de mix, opérations
@@ -78,9 +79,15 @@ export function useR12(state: DAWState, d: R12Deps) {
       const s = dRef.current.stateRef.current;
       const focus = sel.focusTrackId || s.selectedTrackId;
       if (!focus) return false;
-      const ids = expandEditTracks([focus], editGroupsStore.get(), editGroupsStore.invertHeld());
-      if (ids.length < 2) return false;
+      const inv = editGroupsStore.invertHeld();
       const at = playheadStore.get();
+      let ids = expandEditTracks([focus], editGroupsStore.get(), inv);
+      // R14 : les prises d'un même passage multipiste (take group) se coupent ensemble.
+      if (takeGroupLinked({ suspended: s.groupSettings?.suspended, invert: inv })) {
+        const mates = takeGroupTracksAt(s.tracks, focus, at);
+        if (mates.length) ids = s.tracks.map(t => t.id).filter(id => ids.includes(id) || mates.includes(id));
+      }
+      if (ids.length < 2) return false;
       const gen = opIdGen(`gs${Date.now().toString(36)}`);
       let n = 0;
       dRef.current.setState(prev => ({
