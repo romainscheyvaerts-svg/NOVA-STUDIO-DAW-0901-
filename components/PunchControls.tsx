@@ -61,13 +61,13 @@ const PunchControls: React.FC<Props> = ({ punch, bpm, isPunchActive, onTogglePun
           {onToggleQuickPunch && (
             <button onClick={onToggleQuickPunch} aria-pressed={quick}
               title="QuickPunch (comme dans Pro Tools) : pendant la lecture, REC (ou R) entre dans l'enregistrement sur la piste armée, un 2e appui en sort, sans arrêter la musique. Idéal pour refaire une fin de phrase."
-              className={`h-6 px-1.5 rounded-md text-[9px] font-black tracking-wider border transition-all ${quick ? 'bg-red-500/25 text-red-300 border-red-500/50' : 'text-slate-500 border-white/10 hover:text-white'}`}>
+              className={`nova-hit-tactile h-6 px-1.5 rounded-md text-[9px] font-black tracking-wider border transition-all ${quick ? 'bg-red-500/25 text-red-300 border-red-500/50' : 'text-slate-500 border-white/10 hover:text-white'}`}>
               QP
             </button>
           )}
           <button ref={btnRef} onClick={() => setOpen(o => !o)} aria-expanded={open} aria-label="Réglages du punch, du pré-roll et du post-roll"
             title="Réglages du punch : pré-roll, post-roll, crossfade"
-            className="h-6 w-5 rounded-md text-slate-500 hover:text-white flex items-center justify-center">
+            className="nova-hit-tactile h-6 w-5 rounded-md text-slate-500 hover:text-white flex items-center justify-center">
             <i className="fas fa-caret-down text-[10px]"></i>
           </button>
         </>

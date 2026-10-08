@@ -507,7 +507,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 onClick={(e) => { e.stopPropagation(); openSynthPanel(track.id); }}
                 title={`Synthé NOVA : ${track.novaSynth?.name || 'synthé simple'} (ouvrir les sons et réglages)`}
                 aria-label={`Ouvrir le synthé de ${track.name}`}
-                className="shrink-0 w-6 h-6 rounded-md border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
+                className="nova-hit-tactile shrink-0 w-6 h-6 rounded-md border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
                 <i className="fas fa-sliders-h text-[9px]"></i>
               </button>
             )}

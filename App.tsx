@@ -3768,15 +3768,21 @@ function Studio() {
 
   // Première visite du studio : les 3 gestes à connaître.
   const [welcomeOpen, setWelcomeOpen] = useState(false);
+  // Arrivé par un lien de session (invitation, collaboration) : lu au premier rendu, avant
+  // que l'adresse soit nettoyée. La session a déjà son beat : « Choisis un beat » n'a pas de sens.
+  const [arrivedByLink] = useState(() => { try { return !!new URLSearchParams(window.location.search).get('session'); } catch { return false; } });
   useEffect(() => {
     if (showLanding) return;
     let seen = true;
     try { seen = localStorage.getItem('nova_welcome_seen') === '1'; } catch { /* */ }
+    // Lien de session partagée : « Choisis un beat » recouvrait le choix du rôle de l'invité,
+    // puis revenait à la fermeture du panneau. On le garde pour une prochaine visite.
+    if (arrivedByLink) seen = true;
     if (!seen) {
       const t = setTimeout(() => setWelcomeOpen(true), 1200);
       return () => clearTimeout(t);
     }
-  }, [showLanding]);
+  }, [showLanding, arrivedByLink]);
   const closeWelcome = () => {
     setWelcomeOpen(false);
     try { localStorage.setItem('nova_welcome_seen', '1'); } catch { /* */ }
@@ -6843,7 +6849,7 @@ function Studio() {
       />
 
       <WelcomeSteps
-        open={welcomeOpen && !proGate}
+        open={welcomeOpen && !proGate && !collabArrival && !collabOpen}
         beatLoaded={!!state.tracks.find(t => t.id === 'instrumental')?.clips.length}
         beatLoading={externalImportNotice?.startsWith('Chargement') ? externalImportNotice.replace(/^Chargement\s*:\s*/, '').replace(/\.{3}$/, '') : null}
         isMobile={isMobile}
@@ -6907,7 +6913,7 @@ function Studio() {
         <div className="fixed inset-0 z-[600] flex items-end sm:items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="casque-titre">
           <div className="w-full max-w-sm rounded-3xl bg-[#14161a] border border-white/10 p-6 text-center shadow-2xl">
             <div className="text-5xl mb-3">🎧</div>
-            <h2 id="casque-titre" className="text-lg font-black text-white mb-2">Tu as un casque ou des écouteurs ?</h2>
+            <h2 id="casque-titre" className="text-lg font-black text-white mb-2">Tu as un casque ou des écouteurs{' '}?</h2>
             <p className="text-sm text-slate-300 mb-5">
               Avec un casque, tu entends ta voix pendant que tu enregistres. Sans casque, on coupe ce retour
               pour éviter le larsen : tu entends seulement le beat.

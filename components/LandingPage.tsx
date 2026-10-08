@@ -444,11 +444,11 @@ const LandingPage: React.FC<LandingPageProps> = ({
           <div className="p-4 border-b border-white/5 bg-[#0c0d10]/50">
             <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-white/[0.06] bg-white/[0.03] p-1" role="tablist" aria-label="Bibliothèque">
               <button type="button" role="tab" aria-selected={shelf === 'BEATS'} onClick={() => setShelf('BEATS')}
-                className={`h-9 px-4 rounded-lg text-[12px] font-bold transition-all ${shelf === 'BEATS' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(34,211,238,0.45)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
+                className={`nova-hit-tactile h-9 px-4 rounded-lg text-[12px] font-bold transition-all ${shelf === 'BEATS' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(34,211,238,0.45)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
                 🎧 Instrus <span className={`ml-1 rounded-md px-1.5 py-0.5 text-[10px] mono ${shelf === 'BEATS' ? 'bg-cyan-400/15 text-cyan-300' : 'bg-white/5 text-slate-500'}`}>{instrumentals.filter(i => !isMelody(i)).length}</span>
               </button>
               <button type="button" role="tab" aria-selected={shelf === 'MELODIES'} onClick={() => setShelf('MELODIES')}
-                className={`h-9 px-4 rounded-lg text-[12px] font-bold transition-all ${shelf === 'MELODIES' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(167,139,250,0.5)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
+                className={`nova-hit-tactile h-9 px-4 rounded-lg text-[12px] font-bold transition-all ${shelf === 'MELODIES' ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(167,139,250,0.5)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
                 🎹 Mélodies <span className={`ml-1 rounded-md px-1.5 py-0.5 text-[10px] mono ${shelf === 'MELODIES' ? 'bg-violet-400/15 text-violet-300' : 'bg-white/5 text-slate-500'}`}>{instrumentals.filter(isMelody).length}</span>
               </button>
             </div>

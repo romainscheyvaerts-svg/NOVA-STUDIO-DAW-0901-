@@ -230,7 +230,7 @@ const CollabPanel: React.FC<Props> = (p) => {
           <button type="button" data-testid="arrival-join" disabled={!!p.busy || !arrivalRole}
             onClick={() => arrivalRole && p.onJoin?.(arrivalRole, arrivalName.trim() || ROLE_LABEL[arrivalRole])}
             className={`${btn} h-11 w-full bg-cyan-500 text-black`}>{p.busy || (arrivalRole ? `Rejoindre comme ${ROLE_LABEL[arrivalRole].toLowerCase()}` : 'Choisis ton rôle pour rejoindre')}</button>
-          <button type="button" onClick={p.onCancelArrival} className="w-full text-center text-[11px] text-slate-500 underline">Pas maintenant (juste écouter la session)</button>
+          <button type="button" onClick={p.onCancelArrival} className="w-full min-h-10 text-center text-[12px] text-slate-400 underline">Pas maintenant (juste écouter la session)</button>
         </div>
       ) : !p.active ? (
         <div className="p-4 space-y-3 overflow-y-auto">
@@ -340,7 +340,7 @@ const CollabPanel: React.FC<Props> = (p) => {
                 <span>Ou donne ce code : <span className="font-mono text-[15px] font-black tracking-[0.15em] text-white">{formatInviteCode(p.inviteCode.code)}</span> <span className="text-slate-500">(valable 24 h)</span></span>
               ) : p.inviteCode === 'loading' ? <span className="text-slate-500">Code en cours de création…</span>
                 : p.inviteCode === 'unavailable' ? (
-                  <span className="text-slate-500">Code indisponible pour l'instant : envoie le lien. <button type="button" onClick={p.onRefreshCode} className="underline">Réessayer</button></span>
+                  <span className="text-slate-500">Code indisponible pour l'instant : envoie le lien. <button type="button" onClick={p.onRefreshCode} className="nova-hit-tactile underline">Réessayer</button></span>
                 ) : null}
             </div>
             <p className="text-[11px] text-slate-500">La personne choisit son rôle en arrivant : artiste, ingé son ou beatmaker.</p>
@@ -419,9 +419,9 @@ const CollabPanel: React.FC<Props> = (p) => {
             )}
             <input ref={inputRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') send(); }}
               placeholder="Message… (« à 0:42 » = position)" aria-label="Message" className="h-11 flex-1 min-w-0 rounded-xl border border-white/10 bg-black/40 px-3 text-[13px] text-white" />
-            <button type="button" onClick={send} className={`${btn} h-11 bg-cyan-500 text-black`} aria-label="Envoyer">➤</button>
+            <button type="button" onClick={send} className={`${btn} h-11 min-w-11 bg-cyan-500 text-black`} aria-label="Envoyer">➤</button>
           </div>
-          <button type="button" onClick={p.onLeave} className="pb-3 text-[11px] text-slate-500 underline">Quitter la collaboration</button>
+          <button type="button" onClick={p.onLeave} className="min-h-10 pb-1 text-[12px] text-slate-400 underline">Quitter la collaboration</button>
         </>
       )}
     </div>

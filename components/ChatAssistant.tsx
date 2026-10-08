@@ -490,7 +490,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ onSendMessage, onExecuteA
       {!isMobile && !isOpen && unread.n > 0 && !projectState?.isRecording && (
         <button type="button" data-testid="nova-tip-pill" onClick={() => setIsOpen(true)}
           title={unread.last} aria-label={`Nova : ${tipPillLabel(unread.n)} (ouvrir)`}
-          className="absolute right-24 bottom-5 h-9 px-3.5 whitespace-nowrap rounded-full border border-cyan-400/40 bg-[#0f1115]/95 text-[12px] font-bold text-cyan-200 shadow-lg hover:bg-cyan-500/15 flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
+          className="nova-hit-tactile absolute right-24 bottom-5 h-9 px-3.5 whitespace-nowrap rounded-full border border-cyan-400/40 bg-[#0f1115]/95 text-[12px] font-bold text-cyan-200 shadow-lg hover:bg-cyan-500/15 flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
           <i className="fas fa-lightbulb text-[11px] text-amber-300" aria-hidden="true"></i>{tipPillLabel(unread.n)}
         </button>
       )}
