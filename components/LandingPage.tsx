@@ -23,6 +23,8 @@ interface LandingPageProps {
   /** Session sauvegardée automatiquement sur l'appareil (null si aucune). */
   savedSession?: SavedSessionMeta | null;
   onResumeSession?: () => void;
+  /** Historique des versions gardées sur l'appareil. */
+  onOpenVersions?: () => void;
   onLogin: (user: User) => void;
   onLogout: () => void;
   /** « Nouveau projet depuis un modèle » (modèles de session). */
@@ -38,6 +40,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
   onEnterWithProject,
   savedSession,
   onResumeSession,
+  onOpenVersions,
   onLogin,
   onLogout,
   onOpenTemplates
@@ -326,6 +329,11 @@ const LandingPage: React.FC<LandingPageProps> = ({
                   </p>
                   <p className="text-[10px] text-slate-500">{formatAgo(savedSession.savedAt)}</p>
                 </div>
+              </button>
+            )}
+            {savedSession && onOpenVersions && (
+              <button type="button" onClick={onOpenVersions} className="w-full min-h-11 -mt-1 text-[12px] text-slate-400 hover:text-white underline">
+                🕘 Autres versions de la session
               </button>
             )}
             

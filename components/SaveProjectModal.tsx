@@ -15,10 +15,12 @@ interface SaveProjectModalProps {
   onTakeHome?: () => void;
   /** « Enregistrer comme modèle » : structure de la session sans audio (Session Template). */
   onSaveAsTemplate?: () => void;
+  /** Historique des versions gardées sur l'appareil (sauvegarde automatique). */
+  onOpenVersions?: () => void;
 }
 
 const SaveProjectModal: React.FC<SaveProjectModalProps> = ({ 
-  isOpen, onClose, currentName, user, onSaveCloud, onSaveLocal, onSaveAsCopy, onOpenAuth, onTakeHome, onSaveAsTemplate
+  isOpen, onClose, currentName, user, onSaveCloud, onSaveLocal, onSaveAsCopy, onOpenAuth, onTakeHome, onSaveAsTemplate, onOpenVersions
 }) => {
   const [name, setName] = useState(currentName);
   const [error, setError] = useState<string | null>(null);
@@ -169,6 +171,13 @@ const SaveProjectModal: React.FC<SaveProjectModalProps> = ({
                     className="col-span-2 p-4 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/10 text-left transition-all">
                     <span className="block text-[12px] font-black text-white">📐 Enregistrer comme modèle</span>
                     <span className="block text-[11px] text-slate-400 mt-1">Pistes, bus, envois et effets réglés, sans l'audio : pour démarrer tes prochains projets avec le même routage.</span>
+                  </button>
+                )}
+                {onOpenVersions && (
+                  <button type="button" onClick={onOpenVersions} data-testid="open-versions"
+                    className="col-span-2 p-4 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/10 text-left transition-all">
+                    <span className="block text-[12px] font-black text-white">🕘 Versions de la session</span>
+                    <span className="block text-[11px] text-slate-400 mt-1">Sauvegardées toutes seules sur cet appareil (20 dernières + une par heure) : reviens à une version d'avant en un clic.</span>
                   </button>
                 )}
             </div>
