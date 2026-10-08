@@ -266,9 +266,9 @@ export const StudioFlangerUI: React.FC<{ node: FlangerNode, initialParams: Flang
       </div>
 
       <div className="grid grid-cols-5 gap-4">
-        <FlangerKnob label="Rate" value={params.rate / 10} factor={10} suffix="Hz" onChange={v => handleParamChange('rate', v * 10)} defaultValue={0.05} />
-        <FlangerKnob label="Depth" value={params.depth} factor={100} suffix="%" onChange={v => handleParamChange('depth', v)} defaultValue={0.5} />
-        <FlangerKnob label="Feedback" value={params.feedback} factor={90} suffix="%" onChange={v => handleParamChange('feedback', v)} defaultValue={0.7} />
+        <FlangerKnob label="Vitesse" value={params.rate / 10} factor={10} suffix="Hz" onChange={v => handleParamChange('rate', v * 10)} defaultValue={0.05} />
+        <FlangerKnob label="Profondeur" value={params.depth} factor={100} suffix="%" onChange={v => handleParamChange('depth', v)} defaultValue={0.5} />
+        <FlangerKnob label="Retour" value={params.feedback} factor={90} suffix="%" onChange={v => handleParamChange('feedback', v)} defaultValue={0.7} />
         <FlangerKnob label="Manual" value={params.manual} factor={15} suffix="ms" onChange={v => handleParamChange('manual', v)} defaultValue={0.3} />
         <FlangerKnob label="Mix" value={params.mix} factor={100} suffix="%" onChange={v => handleParamChange('mix', v)} defaultValue={0.5} />
       </div>

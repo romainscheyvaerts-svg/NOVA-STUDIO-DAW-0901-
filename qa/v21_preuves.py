@@ -143,8 +143,18 @@ for (const [nom, pls] of Object.entries(chains)) {
   res[nom] = { voix_ms: onset(bv), beat_ms: onset(bb) };
 }
 // Lecture réelle : départ des clips avancé de la latence déclarée.
+// Robustesse (08/10) : « departs_ms: [] » venait d'un moteur dans un état imprévu
+// (instance partagée avec l'appli : boucle active, lecture/prise en cours, contexte
+// suspendu) ou d'une fenêtre d'attente trop courte quand l'onglet est chargé.
+// On repart d'un transport propre, on attend que l'horloge audio tourne, puis on
+// attend les 2 départs (jusqu'à 5 s) ; sinon on rend un diagnostic au lieu d'une liste vide muette.
 await E.init(); await E.resume();
+if (E.isPlaying) E.stopAll();
+E.setLoop(false, 0, 8);
+E.setDelayCompensationSuspended?.(false);
 const ctxSR = E.ctx.sampleRate;
+const tc0 = E.ctx.currentTime; await new Promise(r => setTimeout(r, 300));
+const horloge_tourne = E.ctx.currentTime > tc0;
 const buf = new AudioBuffer({ length: ctxSR / 10, numberOfChannels: 2, sampleRate: ctxSR });
 const tr = [track('voix', buf, [plugin('HARMONIZER', {}, 'live-h')]), track('beat', buf, [])];
 tr.forEach(t => { t.clips[0].start = 1.0; t.clips[0].duration = 0.1; });
@@ -153,11 +163,14 @@ await new Promise(r => setTimeout(r, 800));
 const starts = []; const orig = AudioBufferSourceNode.prototype.start;
 AudioBufferSourceNode.prototype.start = function (when, off, dur) { if (this.buffer === buf) starts.push(when); return orig.call(this, when, off, dur); };
 E.startPlayback(0, tr); const t0 = E.playbackStartTime;
-await new Promise(r => setTimeout(r, 1500)); E.stopAll();
+for (let k = 0; k < 50 && starts.length < 2; k++) await new Promise(r => setTimeout(r, 100));
+await new Promise(r => setTimeout(r, 200)); E.stopAll();
 AudioBufferSourceNode.prototype.start = orig;
 const lat = E.getTrackLatency('voix');
 res['lecture réelle'] = { latence_declaree_ms: Math.round(lat * 1e6) / 1000, departs_ms: starts.map(w => Math.round((w - t0) * 1e6) / 1000),
   arrivee_voix_ms: starts.length ? Math.round((starts[0] - t0 + E.getPluginNodeInstance('voix', 'live-h').latency) * 1e6) / 1000 : null };
+if (starts.length < 2) res['lecture réelle'].diagnostic = { etat_contexte: E.ctx.state, horloge_tourne, pistes_moteur: ['voix', 'beat'].filter(id => E.tracksDSP?.has?.(id)), boucle: E.isLoopActive };
+tr.forEach(t => E.disposeTrack(t.id));
 return res;
 }"""
 
@@ -221,7 +234,13 @@ with sync_playwright() as p:
     errs = []
     pg.on("pageerror", lambda e: errs.append(str(e)[:300]))
     pg.goto(URL, wait_until="domcontentloaded", timeout=60000)
-    pg.wait_for_timeout(2500)
+    # Accueil réellement affiché (serveur Vite à froid : 10 s et plus) avant de mesurer :
+    # sinon la compilation des modules occupe l'onglet pendant la lecture chronométrée.
+    try:
+        pg.get_by_text("Nouveau Projet").first.wait_for(timeout=45000)
+    except Exception:
+        pass
+    pg.wait_for_timeout(1500)
     res = {}
     which = sys.argv[1:] or ["export", "pdc", "lecture"]
     if "export" in which:

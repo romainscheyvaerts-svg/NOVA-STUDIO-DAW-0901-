@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import MobileContainer from './MobileContainer';
 import { Track, TrackType } from '../types';
+import { structureBus } from '../utils/structureBus';
 
 interface MobileMixerPageProps {
   tracks: Track[];
@@ -258,15 +259,16 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                   <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${plugin.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-500'}`}>
                     <i className="fas fa-plug text-xs"></i>
                   </div>
-                  <span className={`text-sm font-medium truncate ${plugin.isEnabled ? 'text-white' : 'text-slate-500'}`}>
-                    {plugin.name}
+                  <span className={`text-sm font-medium truncate ${plugin.isEnabled && !plugin.isInactive ? 'text-white' : 'text-slate-500'} ${plugin.isInactive ? 'italic' : ''}`}>
+                    {plugin.name}{plugin.isInactive && <span className="ml-1.5 text-[11px] not-italic text-slate-500">· inactif</span>}
                   </span>
                 </button>
                 <button
                   type="button"
-                  aria-label={plugin.isEnabled ? `Désactiver ${plugin.name}` : `Activer ${plugin.name}`}
-                  aria-pressed={plugin.isEnabled}
-                  onClick={() => onToggleBypass?.(current.id, plugin.id)}
+                  aria-label={plugin.isInactive ? `Rendre ${plugin.name} actif` : plugin.isEnabled ? `Désactiver ${plugin.name}` : `Activer ${plugin.name}`}
+                  aria-pressed={plugin.isEnabled && !plugin.isInactive}
+                  title={plugin.isInactive ? 'Inactif (Pro Tools) : touche pour le rendre actif' : undefined}
+                  onClick={() => (plugin.isInactive ? structureBus.emit({ kind: 'pluginState', trackId: current.id, pluginId: plugin.id, state: 'active' }) : onToggleBypass?.(current.id, plugin.id))}
                   className={`w-11 h-11 rounded-lg flex items-center justify-center ${plugin.isEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-500'}`}
                 >
                   <i className="fas fa-power-off text-sm"></i>

@@ -4,7 +4,7 @@ import { panToText } from '../utils/db';
 
 /**
  * Briques communes des fenêtres V21 (Harmoniseur, Voix grave / aiguë, Tape
- * stop & half-time, Filtre DJ, Lo-fi) : tout en français, gains en dB,
+ * stop & half-time, Filtre DJ, Lo-fi, Gate rythmique) : tout en français, gains en dB,
  * curseurs larges (doigt et souris), préréglages en un clic, infobulles qui
  * citent l'équivalent dans Logic / FL / Live. Pas de bouton marche / arrêt
  * interne : seul celui de la barre de PluginEditor existe (règle de l'audit).
@@ -25,6 +25,8 @@ export function formatV21(spec: V21ParamSpec, v: number): string {
     case 'dB/oct': return `${Math.round(v)} dB/oct`;
     case 'degrés': return `${signed(v, 0)}`;
     case 'pan': return panToText(v) === 'C' ? 'Centre' : panToText(v);
+    case 'ms': return `${fr(v, v < 10 && !Number.isInteger(v) ? 1 : 0)} ms`;
+    case 'pas': return `${Math.round(v)} pas`;
     default: return spec.min < 0 ? signed(v, 2) : fr(v, 2);
   }
 }

@@ -12,6 +12,7 @@ import { prepareTracksForOffline } from '../services/VstFreeze';
 import { track } from '../utils/analytics';
 import { consumeSelectionExport, editSelectionStore } from '../utils/editSelection';
 import { simpleModeStore } from '../utils/simpleMode';
+import { MidiExportRow } from './MidiFileMenu';
 
 // Compte admin du studio (tout gratuit pour tester) : lu une fois par session.
 let adminCache: boolean | null = null;
@@ -23,7 +24,8 @@ interface ExportModalProps {
   /** Instrumentaux du catalogue achetes par l'utilisateur. */
   ownedInstrumentIds?: (string | number)[];
   /** Démo taguée / extrait à partager (dispo sans licence). */
-  onOpenShare?: () => void;
+  /** Fenêtre « Fais écouter ton son » ; 'demo' y lance directement la démo MP3. */
+  onOpenShare?: (auto?: 'demo') => void;
   /** Identifiant stable du projet (achat « mes pistes seules » rattaché au projet). */
   projectKey?: string;
   /** Export terminé (carte « Et maintenant ? »). */
@@ -415,7 +417,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                     <p className="text-[11px] text-slate-400">{advanced ? 'Réglages avancés : format, qualité, pistes séparées' : 'Choisis ce que tu veux faire de ton son'}</p>
                 </div>
             </div>
-            <button aria-label="Fermer" title="Fermer" onClick={onClose} disabled={isRendering} className="w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
+            <button aria-label="Fermer" title="Fermer" onClick={onClose} disabled={isRendering} className="nova-hit w-8 h-8 rounded-full hover:bg-white/10 text-slate-500 hover:text-white flex items-center justify-center transition-colors">
                 <i className="fas fa-times"></i>
             </button>
         </div>
@@ -430,7 +432,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                   </p>
                 )}
                 {onOpenShare && (
-                  <button type="button" onClick={onOpenShare} disabled={isRendering} className={`${choix} border-cyan-400/40 bg-cyan-500/10 hover:bg-cyan-500/15`}>
+                  <button type="button" onClick={() => onOpenShare()} disabled={isRendering} className={`${choix} border-cyan-400/40 bg-cyan-500/10 hover:bg-cyan-500/15`}>
                     <span className="text-2xl leading-none" aria-hidden="true">📲</span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-black text-white">Extrait 30 s pour les réseaux</span>
@@ -463,9 +465,9 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                       </div>
                     </div>
                     {onOpenShare && (
-                      <button type="button" onClick={onOpenShare} disabled={isRendering}
+                      <button type="button" onClick={() => onOpenShare('demo')} disabled={isRendering}
                         className="w-full min-h-11 rounded-xl border border-cyan-400/40 bg-cyan-500/10 px-3 py-2 text-left text-[13px] font-bold text-cyan-100 hover:bg-cyan-500/20">
-                        ⬇️ Démo gratuite du morceau complet <span className="font-normal text-cyan-200/80">(MP3 avec le tag)</span>
+                        ⬇️ Démo gratuite du morceau complet <span className="font-normal text-cyan-200">(MP3 avec le tag)</span>
                       </button>
                     )}
                     <button type="button" onClick={() => openBuyBeat(projectState.tracks)}
@@ -671,7 +673,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                         <div className="bg-white/5 p-3 rounded-lg space-y-2">
                              <div className="flex justify-between text-[9px]">
                                 <span className="text-slate-500">Taille estimée</span>
-                                <span className="text-white font-mono">~{(format === 'MP3' ? getDuration() * (parseInt(mp3Bitrate, 10) || 320) * 1000 / 8 / 1024 / 1024 : getDuration() * sampleRate * (parseInt(bitDepth)/8) * 2 / 1024 / 1024).toFixed(1)} Mo</span>
+                                <span className="text-white font-mono">~{(format === 'MP3' ? getDuration() * (parseInt(mp3Bitrate, 10) || 320) * 1000 / 8 / 1024 / 1024 : getDuration() * sampleRate * (parseInt(bitDepth)/8) * 2 / 1024 / 1024).toFixed(1).replace(".", ",")} Mo</span>
                              </div>
                              <div className="flex justify-between text-[9px]">
                                 <span className="text-slate-500">Durée</span>
@@ -726,7 +728,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
                             {onOpenShare && (
                               <button
                                 type="button"
-                                onClick={onOpenShare}
+                                onClick={() => onOpenShare()}
                                 className="mt-2 w-full min-h-10 py-2 leading-tight rounded-lg border border-cyan-400/40 text-cyan-200 text-[11px] font-bold hover:bg-cyan-500/10"
                               >
                                 📲 Démo gratuite (MP3 tagué) ou extrait 30 s à partager
@@ -757,6 +759,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
             </div>
             )}
 
+            {/* Notes MIDI en .mid (V25) */}
+            <MidiExportRow tracks={projectState.tracks} />
         </div>
       </div>
     </div>

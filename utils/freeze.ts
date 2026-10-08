@@ -1,4 +1,5 @@
-import { Clip, PluginInstance, Track, TrackType } from '../types';
+import { BreathEdit, Clip, FreezeRef, PluginInstance, Track, TrackType } from '../types';
+import { breathSig } from './breathEnvelope';
 
 /**
  * Regles du gel de piste, partagees par le moteur audio, la sauvegarde et l'interface.
@@ -55,9 +56,46 @@ export const anchorClipsToRender = (clips: Clip[], renderId: string): Map<string
       renderId, anchor: c.start - offset, from: offset, to: offset + c.duration,
       fadeIn: c.fadeIn || 0, fadeOut: c.fadeOut || 0, gain: c.gain ?? 1, srcClipId: c.id,
       ...(c.fadeInCurve ? { fadeInCurve: c.fadeInCurve } : {}), ...(c.fadeOutCurve ? { fadeOutCurve: c.fadeOutCurve } : {}),
+      // Respirations déjà traitées dans le rendu (utils/breaths).
+      ...(c.breaths?.length ? { breaths: c.breaths.map(e => ({ ...e })) } : {}),
     });
   }
   return out;
+};
+
+const breathKey = (e: BreathEdit) => breathSig([e]);
+
+/**
+ * Respirations d'une tranche de rendu (repère du rendu) : seulement celles que
+ * le rendu ne contient pas déjà. Les zones sont en secondes de l'audio source :
+ * on les décale de l'ancrage (temps du rendu = ancrage + temps source).
+ * exact = false : une respiration rendue a été changée ou retirée depuis le
+ * gel ; le rendu la contient encore, seule une nouvelle passe (regel) la rend.
+ */
+export const sliceBreaths = (c: Pick<Clip, 'breaths'>, ref: FreezeRef): { edits?: BreathEdit[]; exact: boolean } => {
+  const cur = c.breaths || [];
+  const old = ref.breaths || [];
+  if (!cur.length && !old.length) return { exact: true };
+  const curKeys = new Set(cur.map(breathKey));
+  const oldKeys = new Set(old.map(breathKey));
+  const exact = old.every(e => curKeys.has(breathKey(e)));
+  const added = cur.filter(e => !oldKeys.has(breathKey(e))).map(e => ({ ...e, start: e.start + ref.anchor, end: e.end + ref.anchor }));
+  return { edits: added.length ? added : undefined, exact };
+};
+
+/**
+ * Piste gelée dont des respirations rendues ont changé : le rendu ne peut pas
+ * les « défaire », il faut la regeler (ou la dégeler) pour entendre le
+ * nouveau traitement. Les respirations ajoutées, elles, s'entendent tout de
+ * suite (tranches). Ancien modèle (un seul rendu) : toute modification.
+ */
+export const breathsNeedRefreeze = (t: Track): boolean => {
+  if (!isTrackFrozen(t)) return false;
+  if (!t.frozenPluginSig) {
+    const covered = coveredClipIds(t);
+    return (t.clips || []).some(c => (!covered || covered.has(c.id)) && !!c.breaths?.length) && needsRerender(t);
+  }
+  return (t.clips || []).some(c => isAnchored(t, c) && !sliceBreaths(c, c.freezeRef!).exact);
 };
 
 const playbackCache = new WeakMap<Track, { render: Clip[]; live: Clip[] }>();
@@ -114,6 +152,8 @@ export const sliceAnchored = (
         fadeOut: endsAtRenderEnd && sameOut ? 0 : Math.max(userFadeOut, endsAtRenderEnd ? 0 : 0.005),
         isFreezeSlice: true,
         freezeRef: undefined,
+        // Respirations : le rendu contient déjà celles du gel ; on n'ajoute que les nouvelles.
+        breaths: sliceBreaths(c, ref).edits,
       });
     }
     // Clip rallongé au-delà de ce qui a été rendu : ces parties passent en direct.
@@ -219,6 +259,8 @@ export const trackBufferIds = (t: Track): string[] => {
   (t.clips || []).forEach(c => { if (c.bufferId) ids.push(c.bufferId); });
   // Prise d'origine d'un clip corrigé en justesse (V19) : gardée pour revenir en arrière.
   (t.clips || []).forEach(c => { if (c.pitchEdit?.sourceBufferId) ids.push(c.pitchEdit.sourceBufferId); });
+  // Prise d'origine d'un clip retouché par Melodyne / VocAlign (ARA).
+  (t.clips || []).forEach(c => { if (c.araEdit?.sourceBufferId) ids.push(c.araEdit.sourceBufferId); });
   if (t.frozenClip?.bufferId) ids.push(t.frozenClip.bufferId);
   (t.sendFreezes || []).forEach(sf => { if (sf.clip.bufferId) ids.push(sf.clip.bufferId); });
   (t.freezeBase?.clips || []).forEach(c => { const b = (c as { bufferId?: string }).bufferId; if (b) ids.push(b); });
@@ -264,6 +306,8 @@ const clipSig = (c: Clip): string => [
   c.isMuted ? 1 : 0, c.isReversed ? 1 : 0, c.bufferId || '', c.notes ? fnv(JSON.stringify(c.notes)) : '',
   // Courbes de fondu : ajoutées seulement si présentes (signatures des gels d'avant inchangées).
   ...(c.fadeInCurve || c.fadeOutCurve ? [`${c.fadeInCurve || ''}/${c.fadeOutCurve || ''}`] : []),
+  // Respirations traitées (utils/breaths) : idem, seulement si présentes.
+  ...(c.breaths?.length ? [fnv(breathSig(c.breaths))] : []),
 ].join(':');
 
 const pluginSig = (p: PluginInstance): string => {

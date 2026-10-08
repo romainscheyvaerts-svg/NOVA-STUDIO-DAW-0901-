@@ -9,6 +9,7 @@ import {
   planBreaths, saveBreathPrefs, summarizeBreathPlan,
 } from '../utils/breaths';
 import { isVoiceTrack } from '../utils/vocalRoles';
+import { isTrackFrozen } from '../utils/freeze';
 
 /**
  * Respirations (comme Breath Control de Waves / De-breath de RX) :
@@ -62,11 +63,18 @@ interface HostProps {
   /** Réglage « auto après chaque prise » du projet (absent : préférence de l'appareil). */
   projectAuto?: boolean;
   isMobile?: boolean;
+  /**
+   * Pistes gelées traitées : le rendu contient l'ancienne version. L'hôte les
+   * regèle si c'est sûr (pas de VST, ou pont connecté) ; « blocked » = à
+   * dégeler pour entendre le traitement (VST sans le pont).
+   */
+  onFrozenTreated?: (trackIds: string[]) => Promise<{ refrozen: string[]; blocked: string[] }>;
+  onUnfreeze?: (trackId: string) => void;
 }
 
-interface Toast { id: number; text: string; canUndo: boolean; busy?: boolean }
+interface Toast { id: number; text: string; canUndo: boolean; busy?: boolean; action?: { label: string; run: () => void } }
 
-export const BreathHost: React.FC<HostProps> = ({ tracks, setState, undo, breakHistory, projectAuto, isMobile }) => {
+export const BreathHost: React.FC<HostProps> = ({ tracks, setState, undo, breakHistory, projectAuto, isMobile, onFrozenTreated, onUnfreeze }) => {
   const tracksRef = useRef(tracks);
   tracksRef.current = tracks;
   const autoRef = useRef(projectAuto);
@@ -75,11 +83,39 @@ export const BreathHost: React.FC<HostProps> = ({ tracks, setState, undo, breakH
   const [toast, setToast] = useState<Toast | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
-  const showToast = useCallback((text: string, canUndo: boolean, busy = false) => {
+  const showToast = useCallback((text: string, canUndo: boolean, busy = false, action?: Toast['action']) => {
     window.clearTimeout(toastTimer.current);
-    setToast({ id: Date.now(), text, canUndo, busy });
-    if (!busy) toastTimer.current = window.setTimeout(() => setToast(null), canUndo ? 10000 : 5000);
+    setToast({ id: Date.now(), text, canUndo, busy, action });
+    if (!busy) toastTimer.current = window.setTimeout(() => setToast(null), action ? 16000 : canUndo ? 10000 : 5000);
   }, []);
+
+  /**
+   * Pistes gelées : le rendu contient encore l'ancienne version. Regel
+   * automatique quand c'est sûr ; sinon, un bouton pour dégeler.
+   */
+  const frozenRef = useRef(onFrozenTreated);
+  frozenRef.current = onFrozenTreated;
+  const unfreezeRef = useRef(onUnfreeze);
+  unfreezeRef.current = onUnfreeze;
+  const afterFrozen = useCallback(async (trackIds: string[], text: string) => {
+    const nameOf = (id: string) => tracksRef.current.find(t => t.id === id)?.name || 'piste';
+    const frozen = trackIds.filter(id => { const t = tracksRef.current.find(x => x.id === id); return !!t && isTrackFrozen(t); });
+    const run = frozenRef.current;
+    if (!frozen.length || !run) return;
+    const names = (ids: string[]) => ids.map(id => `« ${nameOf(id)} »`).join(', ');
+    showToast(`${text} · ❄️ ${names(frozen)} ${frozen.length > 1 ? 'sont gelées' : 'est gelée'} : je ${frozen.length > 1 ? 'les' : 'la'} regèle pour que tu entendes le traitement…`, true, true);
+    let res: { refrozen: string[]; blocked: string[] };
+    try { res = await run(frozen); } catch { res = { refrozen: [], blocked: [] }; }
+    const parts = [text];
+    if (res.refrozen.length) parts.push(`❄️ ${names(res.refrozen)} ${res.refrozen.length > 1 ? 'regelées' : 'regelée'} : tu entends le traitement.`);
+    if (res.blocked.length) {
+      parts.push(`❄️ Piste gelée ${names(res.blocked)} : dégèle-la pour entendre le traitement.`);
+      const id = res.blocked[0];
+      showToast(parts.join(' · '), true, false, unfreezeRef.current ? { label: 'Dégeler', run: () => unfreezeRef.current?.(id) } : undefined);
+      return;
+    }
+    showToast(parts.join(' · '), true);
+  }, [showToast]);
 
   /** Pistes visées par une demande (voix seulement ; aucune → toutes les voix). */
   const targetTracks = useCallback((r: BreathRequest): string[] => {
@@ -95,23 +131,34 @@ export const BreathHost: React.FC<HostProps> = ({ tracks, setState, undo, breakH
   const applyNow = useCallback(async (r: BreathRequest) => {
     const p = getBreathPrefs();
     const ids = targetTracks(r);
-    if (!ids.length) { if (r.mode !== 'auto') showToast(r.only === 'extra' ? 'Aucune piste de backs / doubles / ad-libs à traiter.' : 'Aucune piste voix à traiter (enregistre d’abord une prise).', false); return; }
+    if (!ids.length) { if (r.mode !== 'auto' && r.reason !== 'mix') showToast(r.only === 'extra' ? 'Aucune piste de backs / doubles / ad-libs à traiter.' : 'Aucune piste voix à traiter (enregistre d’abord une prise).', false); return; }
     let settings = p.settings;
     if (r.remove) settings = { ...settings, leadRemove: r.only !== 'extra' ? true : settings.leadRemove, extraRemove: true };
-    showToast('🌬️ Je cherche les respirations…', false, true);
+    // Après un style de Mix auto, pas de « Je cherche… » : la notification de la prise (ou du style) reste visible.
+    const quiet = r.reason === 'mix';
+    if (!quiet) showToast('🌬️ Je cherche les respirations…', false, true);
     await detectAll(tracksRef.current, settings, ids, r.clipIds);
     const plans = planBreaths(tracksRef.current, bufferOf, settings, { trackIds: ids, clipIds: r.clipIds });
     const total = breathTotal(plans);
     if (!total) {
-      if (r.mode === 'auto' || r.reason === 'mix') setToast(null);
-      else showToast('🌬️ Aucune respiration nette trouvée (essaie la sensibilité « forte » dans Respirations…).', false);
+      if (r.mode === 'auto') setToast(null);
+      else if (!quiet) showToast('🌬️ Aucune respiration nette trouvée (essaie la sensibilité « forte » dans Respirations…).', false);
+      return;
+    }
+    // Déjà traité exactement ainsi (Mix auto juste après le traitement de fin de prise) : rien à refaire.
+    const cur = tracksRef.current;
+    if (applyBreathPlan(cur, plans).every((t, i) => t === cur[i])) {
+      if (r.mode === 'auto') setToast(null);
+      else if (!quiet) showToast(`🌬️ ${summarizeBreathPlan(plans.filter(pl => pl.count > 0))} (déjà fait)`, false);
       return;
     }
     // Fin de prise : étape d'annulation à part (Annuler retire le traitement, pas la prise).
     if (r.mode === 'auto' || r.reason === 'mix') breakHistory();
     setState(prev => ({ ...prev, tracks: applyBreathPlan(prev.tracks, plans) }));
-    showToast(`🌬️ ${summarizeBreathPlan(plans.filter(pl => pl.count > 0))}`, true);
-  }, [breakHistory, setState, showToast, targetTracks]);
+    const text = `🌬️ ${summarizeBreathPlan(plans.filter(pl => pl.count > 0))}`;
+    showToast(text, true);
+    void afterFrozen(plans.filter(pl => pl.clips.length).map(pl => pl.trackId), text);
+  }, [afterFrozen, breakHistory, setState, showToast, targetTracks]);
 
   useEffect(() => {
     const on = (e: Event) => {
@@ -142,9 +189,11 @@ export const BreathHost: React.FC<HostProps> = ({ tracks, setState, undo, breakH
       return { ...prev, tracks: next };
     });
     const touched = plans.filter(pl => pl.count > 0 || pl.kind === 'skip');
-    showToast(`🌬️ ${summarizeBreathPlan(touched.length ? touched : plans)}`, true);
+    const text = `🌬️ ${summarizeBreathPlan(touched.length ? touched : plans)}`;
+    showToast(text, true);
     setDialog(null);
-  }, [setState, showToast]);
+    void afterFrozen(plans.filter(pl => pl.clips.length).map(pl => pl.trackId), text);
+  }, [afterFrozen, setState, showToast]);
 
   return (
     <>
@@ -157,11 +206,15 @@ export const BreathHost: React.FC<HostProps> = ({ tracks, setState, undo, breakH
           className="fixed bottom-24 left-1/2 z-[720] flex w-[92vw] sm:w-auto sm:max-w-[640px] -translate-x-1/2 items-center gap-3 rounded-2xl border border-violet-400/40 bg-[#17131f]/95 px-4 py-3 text-[12.5px] text-violet-50 shadow-2xl">
           {toast.busy && <i className="fas fa-circle-notch fa-spin text-violet-300" aria-hidden />}
           <span className="min-w-0 leading-snug">{toast.text}</span>
+          {toast.action && (
+            <button type="button" onClick={() => { toast.action!.run(); setToast(null); }} data-testid="breath-toast-action"
+              className="shrink-0 rounded-lg bg-cyan-500/20 px-3 py-2 text-[12px] font-black text-cyan-200 hover:bg-cyan-500/30">{toast.action.label}</button>
+          )}
           {toast.canUndo && (
             <button type="button" onClick={() => { undo(); setToast(null); }} data-testid="breath-undo"
               className="shrink-0 rounded-lg bg-violet-500/20 px-3 py-2 text-[12px] font-black text-violet-200 hover:bg-violet-500/30">Annuler</button>
           )}
-          {!toast.busy && <button type="button" aria-label="Fermer" onClick={() => setToast(null)} className="shrink-0 h-8 w-8 rounded-lg text-violet-300/70 hover:text-white">✕</button>}
+          {!toast.busy && <button type="button" aria-label="Fermer" onClick={() => setToast(null)} className="nova-hit shrink-0 h-8 w-8 rounded-lg text-violet-300/70 hover:text-white">✕</button>}
         </div>
       )}
     </>
@@ -272,7 +325,7 @@ const BreathDialog: React.FC<DialogProps> = ({ request, tracks, targetIds, isMob
       <span className="text-[12px] font-bold text-slate-300">Sensibilité</span>
       {BREATH_SENSITIVITIES.map(o => (
         <button key={o.id} type="button" role="radio" aria-checked={s.sensitivity === o.id} title={o.hint} onClick={() => setS({ sensitivity: o.id })}
-          className={`h-10 rounded-lg px-3 text-[12px] font-bold ${s.sensitivity === o.id ? 'bg-violet-500 text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>{o.label}</button>
+          className={`h-10 rounded-lg px-3 text-[12px] font-bold ${s.sensitivity === o.id ? 'bg-violet-600 text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>{o.label}</button>
       ))}
       {!isMobile && (
         <label className="ml-auto flex items-center gap-2 text-[11.5px] text-slate-400" title="Fondus d’entrée et de sortie de chaque respiration, dans la zone : jamais de clic, jamais sur le mot">
@@ -297,7 +350,7 @@ const BreathDialog: React.FC<DialogProps> = ({ request, tracks, targetIds, isMob
       <button type="button" onClick={() => setBreathPrefs({ settings: DEFAULT_BREATH_SETTINGS })} className="mr-auto h-11 rounded-lg px-3 text-[12px] font-bold text-slate-400 hover:text-white">Réglages par défaut</button>
       <button type="button" onClick={onClose} className="h-11 rounded-lg bg-white/5 px-4 text-[12px] font-bold text-slate-300">Annuler</button>
       <button type="button" disabled={!!progress || !plans.length} data-testid="breath-apply" onClick={() => onApply(plans, kinds)}
-        className="h-11 rounded-lg bg-violet-500 px-4 text-[12px] font-black text-white disabled:cursor-not-allowed disabled:opacity-40">
+        className="h-11 rounded-lg bg-violet-600 px-4 text-[12px] font-black text-white disabled:cursor-not-allowed disabled:opacity-40">
         {plans.length > 1 ? `Traiter ${plans.length} voix` : 'Appliquer'}
       </button>
     </div>
@@ -326,7 +379,7 @@ const BreathDialog: React.FC<DialogProps> = ({ request, tracks, targetIds, isMob
                       <button type="button" aria-label="Baisser plus" onClick={() => setS({ leadDb: Math.min(40, s.leadDb + 5) })} className="h-11 w-11 rounded-lg bg-white/5 text-white">+</button>
                     </>}
                     <button type="button" disabled={!pl || !!progress} onClick={() => pl && onApply([pl], { [t.id]: k })}
-                      className="h-11 rounded-lg bg-violet-500 px-4 text-[12px] font-black text-white disabled:opacity-40">Appliquer</button>
+                      className="h-11 rounded-lg bg-violet-600 px-4 text-[12px] font-black text-white disabled:opacity-40">Appliquer</button>
                   </div>
                 </div>
               );
@@ -335,7 +388,7 @@ const BreathDialog: React.FC<DialogProps> = ({ request, tracks, targetIds, isMob
           {sensitivity}
           {status}
           <button type="button" disabled={!!progress || !plans.length} onClick={() => onApply(plans, kinds)} data-testid="breath-apply"
-            className="mt-3 h-12 w-full rounded-xl bg-violet-500 text-[13px] font-black text-white disabled:opacity-40">Toutes les voix ({total})</button>
+            className="mt-3 h-12 w-full rounded-xl bg-violet-600 text-[13px] font-black text-white disabled:opacity-40">Toutes les voix ({total})</button>
         </div>
       </div>
     );
@@ -536,7 +589,7 @@ const BreathPreview: React.FC<PreviewProps> = ({ clip, regions, detected, exclud
         <button type="button" onClick={() => (playMode === 'avant' ? stop() : play('avant'))} data-testid="breath-play-before"
           className={`h-10 rounded-lg px-3 text-[12px] font-bold ${playMode === 'avant' ? 'bg-cyan-500 text-black' : 'bg-white/5 text-slate-200'}`}>{playMode === 'avant' ? '■ Stop' : '▶ Avant'}</button>
         <button type="button" onClick={() => (playMode === 'apres' ? stop() : play('apres'))} data-testid="breath-play-after"
-          className={`h-10 rounded-lg px-3 text-[12px] font-bold ${playMode === 'apres' ? 'bg-violet-500 text-white' : 'bg-white/5 text-slate-200'}`}>{playMode === 'apres' ? '■ Stop' : '▶ Après'}</button>
+          className={`h-10 rounded-lg px-3 text-[12px] font-bold ${playMode === 'apres' ? 'bg-violet-600 text-white' : 'bg-white/5 text-slate-200'}`}>{playMode === 'apres' ? '■ Stop' : '▶ Après'}</button>
         <span className="text-[11px] text-slate-500">Touche une zone pour l’exclure ou la remettre · glisse pour en ajouter une.</span>
       </div>
     </div>
@@ -561,12 +614,12 @@ export const BreathPanelTools: React.FC<PanelProps> = ({ canTreat, projectAuto, 
     <div className="mt-3 rounded-xl border border-violet-400/25 bg-violet-500/[0.06] p-3" data-testid="breath-panel">
       <button type="button" disabled={!canTreat} onClick={() => requestBreaths({ mode: 'apply', reason: 'panel' })} data-testid="breath-all"
         title="Comme Breath Control de Waves / De-breath de RX : la lead est baissée, les backs, doubles et ad-libs sont nettoyés. Une seule annulation."
-        className="w-full h-11 rounded-xl bg-violet-500 text-white font-black text-[13px] disabled:opacity-40 hover:bg-violet-400">
+        className="w-full h-11 rounded-xl bg-violet-600 text-white font-black text-[13px] disabled:opacity-40 hover:bg-violet-700">
         🌬️ Traiter les respirations de toutes les voix
       </button>
       <p className="mt-1.5 text-[11px] text-slate-400">
         Lead : {s.leadRemove ? 'supprimées' : `−${s.leadDb} dB`} · Backs / ad-libs : {s.extraRemove ? 'supprimées' : `−${s.extraDb} dB`} · Sensibilité {BREATH_SENSITIVITIES.find(o => o.id === s.sensitivity)?.label.toLowerCase()}
-        {' · '}<button type="button" className="font-bold text-violet-300 underline-offset-2 hover:underline" onClick={() => requestBreaths({ mode: 'dialog', reason: 'panel' })}>Réglages et aperçu…</button>
+        {' · '}<button type="button" className="nova-hit-tactile font-bold text-violet-300 underline-offset-2 hover:underline" onClick={() => requestBreaths({ mode: 'dialog', reason: 'panel' })}>Réglages et aperçu…</button>
       </p>
       <label className="mt-2 flex min-h-10 cursor-pointer items-start gap-2 text-[12.5px] text-white">
         <input type="checkbox" checked={auto} onChange={e => { setBreathPrefs({ auto: e.target.checked }); onProjectAutoChange?.(e.target.checked); }}
@@ -590,8 +643,14 @@ export const BreathMixOption: React.FC = () => {
   );
 };
 
-/** Après un style de Mix auto : respirations aussi, si la case est cochée. */
-export const breathsAfterMixStyle = () => { if (getBreathPrefs().withMix) requestBreaths({ mode: 'apply', reason: 'mix' }); };
+/**
+ * Après un style de Mix auto : respirations aussi, si la case est cochée.
+ * `scope` : seulement ces pistes / clips (style mis tout seul après une prise :
+ * seule la prise qui vient d'être enregistrée est traitée).
+ */
+export const breathsAfterMixStyle = (scope?: { trackIds?: string[]; clipIds?: string[] }) => {
+  if (getBreathPrefs().withMix) requestBreaths({ mode: 'apply', reason: 'mix', ...(scope || {}) });
+};
 
 export { BREATH_REMOVE_DB };
 export type { BreathEdit };

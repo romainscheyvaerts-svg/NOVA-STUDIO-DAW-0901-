@@ -238,7 +238,7 @@ const MobileTracksPage: React.FC<MobileTracksPageProps> = ({
               <div className="px-4 pb-2 flex gap-2 overflow-x-auto no-scrollbar" onClick={e => e.stopPropagation()}>
                 {track.plugins.map(p => (
                   <button key={p.id} type="button" onClick={() => onOpenPlugin?.(track.id, p.id)}
-                    className={`shrink-0 h-9 px-3 rounded-lg text-[12px] font-bold border ${p.isEnabled ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200' : 'border-white/10 bg-white/5 text-slate-500 line-through'}`}>
+                    className={`shrink-0 h-9 px-3 rounded-lg text-[12px] font-bold border ${p.isInactive ? 'border-dashed border-white/10 bg-white/5 text-slate-500 italic' : p.isEnabled ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200' : 'border-white/10 bg-white/5 text-slate-500 line-through'}`}>
                     {p.name || p.type}
                   </button>
                 ))}

@@ -93,7 +93,7 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
       </div>
       <button ref={btnRef} type="button" onClick={() => setMenu(v => !v)} aria-haspopup="menu" aria-expanded={menu} aria-label={`Grille ${gridLabel(em.gridSize)} (valeur de grille)`}
         data-testid="grid-value"
-        title="Valeur de la grille (Pro Tools : Grid value) : 1 mesure à 1/32, triolets ; grille absolue ou relative ; Tab to Transient."
+        title="Valeur de la grille (Pro Tools : Grid value) : 1 mesure à 1/32, triolets, millisecondes et images ; grille absolue ou relative ; Tab to Transient."
         className={`h-9 [@media(pointer:coarse)]:h-10 px-2.5 rounded-lg border text-[11px] font-bold tabular-nums transition-colors ${em.mode === 'GRID' ? 'bg-blue-500/10 border-blue-500/40 text-blue-200' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
         <i className="fas fa-th mr-1.5 text-[10px]" aria-hidden />{gridLabel(em.gridSize)}<i className="fas fa-chevron-down ml-1.5 text-[8px]" aria-hidden />
       </button>
@@ -101,13 +101,18 @@ const EditModeSelector: React.FC<{ compact?: boolean }> = ({ compact = false }) 
         <div ref={menuRef} role="menu" aria-label="Grille" style={{ left: pos.left, top: pos.top }}
           className="fixed z-[1000] w-64 rounded-xl border border-white/10 bg-[#14161a] p-2 shadow-[0_10px_40px_rgba(0,0,0,0.8)]">
           <div className="px-1 pb-1 text-[10px] font-bold text-slate-500">Valeur de grille</div>
-          <div className="grid grid-cols-3 gap-0.5">
-            {GRID_OPTIONS.map(o => (
-              <button key={o.value} type="button" role="menuitemradio" aria-checked={em.gridSize === o.value} title={o.title}
-                onClick={() => { editModeStore.set({ gridSize: o.value }); setMenu(false); }}
-                className={`px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 rounded-lg text-[10px] font-bold ${em.gridSize === o.value ? 'bg-blue-500/15 text-blue-300' : 'text-slate-300 hover:bg-white/5'}`}>{o.label}</button>
-            ))}
-          </div>
+          {([['musique', null], ['temps', 'En temps (min:s, images)']] as const).map(([kind, title]) => (
+            <React.Fragment key={kind}>
+              {title && <div className="px-1 pb-1 pt-2 text-[10px] font-bold text-slate-500" title="Pro Tools : grille en min:sec ou en timecode, indépendante du tempo (vidéo, podcast, son sans tempo)">{title}</div>}
+              <div className="grid grid-cols-3 gap-0.5">
+                {GRID_OPTIONS.filter(o => (o.kind || 'musique') === kind).map(o => (
+                  <button key={o.value} type="button" role="menuitemradio" aria-checked={em.gridSize === o.value} title={o.title} data-grid-option={o.value}
+                    onClick={() => { editModeStore.set({ gridSize: o.value }); setMenu(false); }}
+                    className={`px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 rounded-lg text-[10px] font-bold ${em.gridSize === o.value ? 'bg-blue-500/15 text-blue-300' : 'text-slate-300 hover:bg-white/5'}`}>{o.label}</button>
+                ))}
+              </div>
+            </React.Fragment>
+          ))}
           <div className="h-px bg-white/5 my-2" />
           <div className="px-1 pb-1 text-[10px] font-bold text-slate-500">Mode Grid</div>
           <div className="grid grid-cols-2 gap-1">

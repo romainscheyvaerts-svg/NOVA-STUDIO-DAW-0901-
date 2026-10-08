@@ -210,25 +210,25 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
       : 'fixed inset-x-0 bottom-0 z-[560] flex justify-center px-4 pb-3 pointer-events-none'}
       onClick={narrow ? p.onClose : undefined} role="dialog" aria-modal={narrow ? 'true' : undefined} aria-labelledby="drums-title"
       onDragOver={allowDrop} onDrop={e => onDropFiles(e, null)}>
-      <div className={`w-full flex flex-col bg-[#121418] border border-white/10 shadow-2xl pb-[env(safe-area-inset-bottom)] pointer-events-auto ${narrow ? 'max-h-[92vh] rounded-t-3xl' : 'max-w-4xl max-h-[min(80vh,760px)] rounded-3xl shadow-black/60'}`} onClick={e => e.stopPropagation()}>
+      <div className={`w-full flex flex-col bg-nv-surface border border-white/[0.06] shadow-2xl pb-[env(safe-area-inset-bottom)] pointer-events-auto ${narrow ? 'max-h-[92vh] rounded-t-3xl' : 'max-w-4xl max-h-[min(80vh,760px)] rounded-3xl shadow-black/60'}`} onClick={e => e.stopPropagation()}>
         {/* En-tête */}
         <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-white/5">
           <h2 id="drums-title" className="text-[16px] font-black text-white mr-auto whitespace-nowrap">🥁 Batterie <span className="hidden sm:inline text-slate-400 font-bold text-[12px]">Make Music</span></h2>
           {p.onOpen808 && (
             <button type="button" onClick={p.onOpen808} title="Basse 808 : joue-la au piano roll, accordée sur la tonalité, avec glissés"
-              className="h-10 px-3 rounded-xl whitespace-nowrap text-[12px] font-black bg-fuchsia-500/20 text-fuchsia-100 border border-fuchsia-400/40 hover:bg-fuchsia-500/30">
-              🔊 808{p.has808 ? '' : ' +'}
+              className="h-10 px-3 rounded-xl whitespace-nowrap text-[12px] font-black bg-white/[0.06] text-slate-200 hover:bg-white/10">
+              <i className="fas fa-wave-square mr-1.5 text-fuchsia-400" aria-hidden />808{p.has808 ? '' : ' +'}
             </button>
           )}
           <button type="button" onClick={() => setChop(chop ? null : 'new')} aria-expanded={!!chop}
             title="Découper une boucle en tranches sur des pads (comme Slicex dans FL Studio, ou Simpler en mode Slice dans Ableton)"
-            className={`h-10 px-3 rounded-xl text-[12px] font-black border ${chop ? 'bg-pink-500 text-black border-pink-400' : 'bg-pink-500/15 text-pink-100 border-pink-400/40 hover:bg-pink-500/25'}`}>
-            ✂️<span className="hidden sm:inline"> Découper</span>
+            className={`h-10 px-3 rounded-xl text-[12px] font-black ${chop ? 'bg-pink-500 text-black' : 'bg-white/[0.06] text-slate-200 hover:bg-white/10'}`}>
+            <i className={`fas fa-cut ${chop ? '' : 'text-pink-400'}`} aria-hidden /><span className="hidden sm:inline"> Découper</span>
           </button>
           {dm && !narrow && (
             <button type="button" onClick={() => setKeysOn(v => !v)} aria-pressed={keysOn}
               title={keysOn ? "Clavier de l'ordinateur → pads : activé (rangée du milieu = pads 1 à 10). Clique pour le couper." : "Jouer les pads au clavier de l'ordinateur (comme le « typing keyboard » de FL Studio)"}
-              className={`h-10 px-3 rounded-xl text-[12px] font-black border ${keysOn ? 'bg-white text-black border-white' : 'bg-white/5 text-slate-200 border-white/10'}`}>
+              className={`h-10 px-3 rounded-xl text-[12px] font-black ${keysOn ? 'bg-cyan-500 text-black' : 'bg-white/[0.06] text-slate-200 hover:bg-white/10'}`}>
               <i className="fas fa-keyboard" />
             </button>
           )}
@@ -237,15 +237,15 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               <i className={`fas ${p.isPlaying ? 'fa-pause' : 'fa-play'} mr-1.5`} />{p.isPlaying ? 'Pause' : 'Écouter'}
             </button>
           )}
-          <button type="button" onClick={p.onClose} aria-label="Fermer" className="w-10 h-10 rounded-xl bg-white/5 text-slate-300"><i className="fas fa-times" /></button>
+          <button type="button" onClick={p.onClose} aria-label="Fermer la batterie" title="Fermer (Échap)" className="w-10 h-10 rounded-xl bg-white/[0.06] text-slate-300 hover:text-white"><i className="fas fa-times" /></button>
         </div>
 
         <div className="overflow-y-auto px-4 py-3 space-y-3">
           {/* Kits */}
-          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Style de batterie">
             {DRUM_KITS.map(k => (
-              <button key={k.id} type="button" onClick={() => p.onKit(k.id)}
-                className={`shrink-0 h-10 px-3 rounded-xl border text-[12px] font-bold ${dm?.kitId === k.id ? 'border-cyan-400 bg-cyan-500/15 text-white' : 'border-white/10 bg-white/[0.03] text-slate-200'}`}>
+              <button key={k.id} type="button" onClick={() => p.onKit(k.id)} aria-pressed={dm?.kitId === k.id}
+                className={`nova-hit-tactile shrink-0 h-9 px-3 rounded-xl text-[12px] font-bold ${dm?.kitId === k.id ? 'bg-cyan-500/15 text-white ring-1 ring-cyan-400/70' : 'bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white'}`}>
                 {k.emoji} {k.name}
               </button>
             ))}
@@ -308,11 +308,11 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                           {r.solo && <span className="text-amber-300"> S</span>}
                         </button>
                       ) : (
-                      <div className="sticky left-0 z-10 bg-[#121418] pr-1 flex items-center gap-1 w-[118px] shrink-0">
+                      <div className="sticky left-0 z-10 bg-nv-surface pr-1 flex items-center gap-1 w-[150px] shrink-0">
                         <button type="button" onClick={() => p.onAudition(ri)}
-                          title={`Écouter le son${keyOf(ri) ? ` (touche ${keyOf(ri)})` : ''}. Glisse un fichier audio ici pour mettre TON son sur ce pad.`}
+                          title={`${r.name} : écouter le son${keyOf(ri) ? ` (touche ${keyOf(ri)})` : ''}. Glisse un fichier audio ici pour mettre TON son sur ce pad.`}
                           onDragOver={allowDrop} onDrop={e => onDropFiles(e, ri)}
-                          className={`flex-1 min-w-0 h-9 rounded-lg text-left px-2 text-[11px] font-bold truncate ${flash === ri ? 'bg-cyan-400 text-black' : 'bg-white/5 text-white hover:bg-white/10'}`}>
+                          className={`flex-1 min-w-0 h-9 rounded-lg text-left px-2 text-[11px] font-bold truncate ${flash === ri ? 'bg-cyan-400 text-black' : 'bg-white/[0.04] text-white hover:bg-white/[0.08]'}`}>
                           {keyOf(ri) && <span className="mr-1 inline-block min-w-[14px] px-0.5 rounded bg-white/10 text-[9px] text-center text-slate-300">{keyOf(ri)}</span>}
                           {userSampleId(r.sound) && <i className={`fas ${r.slice ? 'fa-cut text-pink-300' : 'fa-user text-amber-300'} mr-1 text-[9px]`} />}
                           <span className={r.muted ? 'line-through opacity-50' : ''}>{r.name}</span>
@@ -337,9 +337,9 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                             onPointerLeave={() => { if (pressTimer.current) window.clearTimeout(pressTimer.current); }}
                             onContextMenu={e => { e.preventDefault(); cycleRoll(ri, si); }}
                             className={`relative rounded-md border transition-colors ${narrow ? 'nova-hit flex-1 min-w-0 h-10' : 'nova-hit-tactile shrink-0 w-8 h-9 [@media(pointer:coarse)]:w-9 [@media(pointer:coarse)]:h-10'} ${playStep === si ? 'ring-2 ring-white/70' : ''} ${
-                              v >= 100 ? 'bg-gradient-to-b from-cyan-400 to-violet-500 border-transparent'
-                              : v > 0 ? 'bg-cyan-500/45 border-transparent'
-                              : beatStart ? 'bg-white/[0.09] border-white/10' : 'bg-white/[0.04] border-white/5'}`}
+                              v >= 100 ? 'bg-cyan-400 border-transparent'
+                              : v > 0 ? 'bg-cyan-400/40 border-transparent'
+                              : beatStart ? 'bg-white/[0.09] border-transparent' : 'bg-white/[0.04] border-transparent'}`}
                           >
                             {roll > 1 && v > 0 && <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black text-black">×{roll}</span>}
                           </button>
@@ -352,7 +352,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
               {!narrow && moreRight && (
                 <button type="button" onClick={() => gridRef.current?.scrollBy({ left: gridRef.current.clientWidth * 0.6, behavior: 'smooth' })}
                   aria-label="Voir les pas suivants" title="Pas suivants"
-                  className="absolute right-0 inset-y-0 mb-1 w-11 flex items-center justify-end pr-1.5 rounded-r-lg bg-gradient-to-l from-[#121418] via-[#121418]/85 to-transparent text-white/80">
+                  className="absolute right-0 inset-y-0 mb-1 w-11 flex items-center justify-end pr-1.5 rounded-r-lg bg-gradient-to-l from-nv-surface via-nv-surface/85 to-transparent text-white/80">
                   <i className="fas fa-chevron-right" />
                 </button>
               )}
@@ -399,13 +399,13 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                 </label>
                 <button type="button" onClick={() => padFileRef.current?.click()} disabled={dm.rows.length >= MAX_PADS}
                   title="Ajouter un pad avec TON son (fichier audio). Tu peux aussi glisser des fichiers sur la batterie."
-                  className="h-10 px-3 rounded-lg bg-white/5 text-slate-200 hover:text-white disabled:opacity-40"><i className="fas fa-plus mr-1" />Pad</button>
+                  className="h-10 px-3 rounded-lg bg-white/[0.06] text-slate-200 hover:text-white disabled:opacity-40"><i className="fas fa-plus mr-1" />Pad</button>
                 {sliceCount > 1 && (
                   <button type="button" onClick={() => p.onChange(reorderSlices(dm, shuffledOrder(sliceCount, Date.now())))}
                     title="Rejoue les tranches dans un autre ordre (comme « Randomize » dans Slicex). Annuler pour revenir."
-                    className="h-10 px-3 rounded-lg bg-pink-500/15 text-pink-100 hover:bg-pink-500/25">🎲 Remixer</button>
+                    className="h-10 px-3 rounded-lg bg-white/[0.06] text-slate-200 hover:bg-white/10">🎲 Remixer</button>
                 )}
-                <button type="button" onClick={p.onRemove} className="ml-auto h-10 px-3 rounded-lg bg-white/5 text-slate-300 hover:text-white">Retirer la batterie</button>
+                <button type="button" onClick={p.onRemove} className="ml-auto h-10 px-3 rounded-lg bg-white/[0.06] text-slate-300 hover:text-red-300">Retirer la batterie</button>
               </div>
               <p className="text-[11px] text-slate-500">
                 {narrow && "Touche le nom d'un pad pour l'écouter et le choisir ; 1–8 / 9–16 change de moitié de mesure (le point bleu montre où joue la lecture). "}

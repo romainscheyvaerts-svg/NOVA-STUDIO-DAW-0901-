@@ -3,7 +3,7 @@ import type { Clip, Track } from '../types';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import type { PitchNote, PitchTrack } from '../utils/pitchAnalysis';
 import {
-  autoCorrect, centsFromScale, correctionCurve, CorrectStyle, guessKey, hasEdits, isNeutral, NATURAL_TRANSITION_MS,
+  autoCorrect, centsFromScale, correctionCurve, CorrectStyle, displayPitchCurve, guessKey, hasEdits, isNeutral, NATURAL_TRANSITION_MS,
   NEUTRAL_EDIT, NoteEdit, nudgeEdit, snapEdit, targetCenter, targetPitch,
 } from '../utils/pitchCorrect';
 import {
@@ -350,8 +350,9 @@ const PitchEditor: React.FC<Props> = ({ open, trackId, clipId, tracks, projectKe
       }
       ctx.stroke();
     };
-    drawCurve(midi, 'rgba(203,213,225,0.55)', 1.2);
-    if (changed) drawCurve(target, '#67e8f9', 1.8);
+    // Sans les petits pics de bord de passage (fin / début de note avant un blanc) : affichage seulement.
+    drawCurve(displayPitchCurve(midi), 'rgba(203,213,225,0.55)', 1.2);
+    if (changed && target) drawCurve(displayPitchCurve(target), '#67e8f9', 1.8);
     // Étiquettes des notes (par-dessus les courbes) : nom et écart à la gamme.
     const fs = Math.max(9, Math.min(12, rowH * 0.55));
     ctx.font = `bold ${fs}px ui-sans-serif, system-ui`; ctx.textBaseline = 'middle';

@@ -6,13 +6,16 @@ import { isVoiceTrack } from '../utils/vocalRoles';
 import { Track, TrackType, PluginType, PluginInstance, Clip, EditorTool, ContextMenuItem, AutomationLane, AutomationPoint, Marker } from '../types';
 import TrackHeader from './TrackHeader';
 import ContextMenu from './ContextMenu';
+import { midiClipMenuItems, midiTrackMenuItems } from './MidiFileMenu';
+import { midiBus, isMidiFile } from '../utils/midiBus';
 import TimelineGridMenu from './TimelineGridMenu'; 
+import { ChordLaneToggleButton, ChordLaneView } from './ChordLane';
 import LiveRecordingClip from './LiveRecordingClip'; 
 import AutomationLaneComponent from './AutomationLane';
 import { drawExpandedLanes } from '../utils/automationDraw';
-import { snapToGrid, gridSubdivisionsPerBar, isBeatLine } from '../utils/grid';
-import { editModeStore, effectiveMode, EDIT_MODE_INFO, GRID_KIND_LABEL, moveClipStart, snapPoint, sessionSampleRate, snapsToGrid, syncOffsetOf, syncPointAt, toSample, useEditMode } from '../utils/editModes';
-import { SELECT_CLIP_EVENT, shuffleDrag, shuffleEditClip } from '../hooks/useEditModes';
+import { snapToGrid, gridSubdivisionsPerBar, isBeatLine, timeGridStep } from '../utils/grid';
+import { editModeStore, effectiveMode, EDIT_MODE_INFO, GRID_KIND_LABEL, moveClipStart, snapPoint, sessionSampleRate, snapsToGrid, syncOffsetOf, syncPointAt, toSample, trimEdgeTime, useEditMode } from '../utils/editModes';
+import { SELECT_CLIP_EVENT, shuffleDrag, shuffleEditClip, shuffleGroupDrag } from '../hooks/useEditModes';
 import EditModeSelector from './EditModeSelector';
 import SpotDialog from './SpotDialog';
 import { useArrangementCommands } from '../hooks/useArrangementCommands';
@@ -34,12 +37,16 @@ import type { EditCommands } from '../hooks/useEditCommands';
 import { bufferDurationOf } from '../hooks/useEditCommands';
 import { CrossfadeCurve } from '../types';
 import { STEMS_TOOLTIP } from '../services/StemSeparation';
+import { araAvailability } from '../utils/araEdit';
+import { useAraContext } from './AraDialog';
 import { TakeLanesApi, TakeLaneHeaders, TakeLanesOverlay, TAKE_LANE_H, takeColor } from './PlaylistLanes';
 import { listLanes, mainRowClips, clipAtTime, takeCount, TakeLane } from '../utils/playlists';
 import { takeNumberOf } from '../utils/takes';
 import { dragTipText, FADE_PRESETS, fadeWithPreset } from '../utils/dragLabels';
 import { canvasTheme } from '../utils/canvasTheme';
 import { useTheme } from '../utils/themeStore';
+import { shownTrackIds } from '../utils/trackStructure';
+import { structureMenuItems } from './TrackStructure';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -97,6 +104,8 @@ interface ArrangementViewProps {
   editCommands?: EditCommands;
   /** Couloirs de prises (Playlists) et comp à la souris. components/PlaylistLanes */
   takeLanes?: TakeLanesApi;
+  /** Piste d'accords (V20, components/ChordLane) : absente quand le couloir est masqué. */
+  chordLane?: { height: number; render: (v: ChordLaneView) => React.ReactNode };
 }
 
 /** Contour d'un fondu (courbe choisie) : zone assombrie au-dessus de la courbe + trait. */
@@ -123,6 +132,14 @@ const FADE_HANDLE_PX = 14;
 // +12 dB tout en haut de la forme d'onde, 0 dB à 20 % sous le haut, -40 dB en bas.
 const CLIP_GAIN_MAX_DB = 12;
 const CLIP_GAIN_MIN_DB = -40;
+/** Hauteur de la barre d'outils de l'arrangement (h-12). */
+const TOOLBAR_H = 48;
+/**
+ * Hauteur de la règle (mesures, marqueurs, boucle, punch), dessinée en haut du
+ * calque. Le couloir d'accords (s'il est affiché) vient juste dessous, comme
+ * la Chord Track de Logic, puis les pistes : `tracksTop` = règle + couloir.
+ */
+export const RULER_H = 40;
 const CLIP_GAIN_ZERO_FRAC = 0.8;
 const CLIP_GAIN_GRAB_PX = 5;
 const clipGainToFrac = (g: number): number => {
@@ -153,8 +170,12 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   onDropPluginOnTrack, onMovePlugin, onMoveClip, onSelectPlugin, onRemovePlugin, onRequestAddPlugin,
   onAddTrack, onDuplicateTrack, onDeleteTrack, onFreezeTrack, onImportFile, onEditClip: onEditClipRaw, isRecording, recStartTime,
   onCreatePattern, onSwapInstrument, onEditMidi, onSeparateStems, onAudioDrop, onMoveClipsBy,
-  punch, onUpdatePunch, editCommands, takeLanes
+  punch, onUpdatePunch, editCommands, takeLanes, chordLane
 }) => {
+  // Piste d'accords (V20) : couloir sous la règle (comme Logic), au-dessus des pistes.
+  const chordH = chordLane ? chordLane.height : 0;
+  /** Haut des pistes, dans le contenu défilant comme dans le calque : règle + couloir d'accords. */
+  const tracksTop = RULER_H + chordH;
   // Thème affiché : le canvas se redessine quand on passe en clair / sombre.
   const { theme: uiTheme } = useTheme();
   const editPrefs = useEditPrefs();
@@ -171,7 +192,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     isShiftDownRef.current || ctrlDownRef.current || !!(ev && (ev.ctrlKey || ev.metaKey || ev.shiftKey));
   const snapNow = (ev?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } | null) => snapsToGrid(effectiveMode(editModeStore.get(), invertOf(ev)));
   // Shuffle : clips de la piste au début du glissement (chaque mouvement repart d'eux).
-  const shuffleInitRef = useRef<{ trackId: string; clips: Clip[] } | null>(null);
+  // group : toutes les pistes (ordre affiché) pour déplacer la sélection, changement de piste compris.
+  const shuffleInitRef = useRef<{ trackId: string; clips: Clip[]; group: { id: string; kind: string; clips: Clip[] }[]; ids: string[]; shift: number } | null>(null);
   // Le clip a-t-il vraiment bougé (Spot : un simple clic ouvre « Position exacte ») ?
   const movedRef = useRef(false);
   const [dragInvert, setDragInvert] = useState(false);
@@ -251,6 +273,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   const [hoveredClipId, setHoveredClipId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: (ContextMenuItem | 'separator')[] } | null>(null);
   const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; trackId: string; clip: Clip } | null>(null);
+  // Melodyne / VocAlign : pont + plugins présents ? (commandes grisées sinon)
+  const araCtx = useAraContext();
   // Reordonnancement des pistes par glisser-deposer (le TrackHeader emettait
   // deja les evenements, mais ArrangementView les ignorait).
   const dragTrackIdRef = useRef<string | null>(null);
@@ -517,7 +541,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   // Mode simple : ni bus ni lignes d'automation à l'écran (gardés dans le projet).
   const { simple } = useSimpleMode();
   const visibleTracks = useMemo(() => {
-    const list = tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master' && !(simple && t.type === TrackType.BUS));
+    // Structure Pro Tools : pistes masquées et pistes de dossiers repliés hors de l'écran (utils/trackStructure).
+    const shown = shownTrackIds(tracks);
+    const list = tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master' && !(simple && t.type === TrackType.BUS) && shown.has(t.id));
     if (!simple) return list;
     return list.map(t => t.automationLanes.some(l => l.isExpanded)
       ? { ...t, automationLanes: t.automationLanes.map(l => ({ ...l, isExpanded: false })) }
@@ -576,7 +602,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
   // Raccourcis Pro Tools (utils/keymap → utils/editCommands) : versions de base sur la sélection de clips.
   useArrangementCommands({ tracks, selectedTrackId, selectedClip, selectedClipIds, setSelectedClipIds, onEditClip, zoomH, setZoomH, zoomV, setZoomV, bpm,
     viewportWidth: viewportSize.width - headerWidth, scrollTo: (left) => { if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = left; } });
-  const totalArrangementHeight = useMemo(() => 40 + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + extraH(t), 0), [visibleTracks, zoomV, lanesKey]);
+  const totalArrangementHeight = useMemo(() => tracksTop + 500 + visibleTracks.reduce((acc, t) => acc + zoomV + extraH(t), 0), [visibleTracks, zoomV, lanesKey, tracksTop]);
 
   // Mode avancé (G13) : FX, M, S, envois et R mangeaient le nom (« LEAD C... ») ;
   // colonne un peu plus large sur grand écran, tant que l'utilisateur ne l'a pas réglée.
@@ -635,7 +661,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       
       
       let targetTrackId: string | null = null;
-      let currentY = 40;
+      let currentY = tracksTop;
       for (const t of visibleTracks) {
           if (y >= currentY && y < currentY + zoomV) {
               targetTrackId = t.id;
@@ -643,6 +669,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           }
           currentY += zoomV + extraH(t);
       }
+
+      // Fichiers .mid (V25) : pistes ou clips créés à l'endroit du dépôt (components/MidiHost).
+      const midiDropped = Array.from(e.dataTransfer.files || []).filter(isMidiFile);
+      midiDropped.forEach(f => midiBus.emit({ type: 'import-file', file: f, trackId: targetTrackId, time: dropTime }));
+      if (midiDropped.length && midiDropped.length === e.dataTransfer.files.length) return;
       
       if (!targetTrackId) {
           targetTrackId = visibleTracks.find(t => t.id === 'instrumental')?.id || 
@@ -668,7 +699,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           const AUDIO_EXT = /\.(wav|wave|mp3|aif|aiff|flac|ogg|oga|opus|m4a|aac|webm|caf)$/i;
           const files = Array.from(e.dataTransfer.files);
           const audio = files.filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
-          const refused = files.length - audio.length;
+          const refused = files.length - audio.length - midiDropped.length;
           // Plusieurs fichiers : un par piste, à partir de celle visée (comme dans les autres DAW).
           const startIdx = Math.max(0, visibleTracks.findIndex(t => t.id === targetTrackId));
           const targets = visibleTracks.slice(startIdx).filter(t => t.type === TrackType.AUDIO);
@@ -780,6 +811,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (onSwapInstrument && target && (target.type === TrackType.MIDI || target.type === TrackType.SAMPLER || target.type === TrackType.DRUM_RACK)) {
       menuItems.push({ label: "Changer d'instrument", onClick: () => onSwapInstrument(trackId), icon: 'fa-exchange-alt' });
     }
+    menuItems.push(...midiTrackMenuItems(target, () => setContextMenu(null)));
+    menuItems.push(...structureMenuItems(target, tracks));
     setContextMenu({ x: e.clientX, y: e.clientY, items: menuItems });
   };
   
@@ -822,10 +855,10 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const sc = scrollContainerRef.current;
     if (!sc) return null;
     const rect = sc.getBoundingClientRect();
-    if (clientX - rect.left < headerWidth || clientY - rect.top < 40) return null;
+    if (clientX - rect.left < headerWidth || clientY - rect.top < tracksTop) return null;
     const x = clientX - rect.left - headerWidth + sc.scrollLeft;
     const y = clientY - rect.top + sc.scrollTop;
-    let currentY = 40;
+    let currentY = tracksTop;
     for (const t of visibleTracks) {
       if (y >= currentY && y < currentY + zoomV) {
         const clip = clipAtTime(rowClips(t), x / zoomH);
@@ -850,7 +883,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     const time = (x / zoomH);
     const useSnap = snapNow(e);
 
-    if (e.clientY - rect.top < 40) {
+    if (e.clientY - rect.top < RULER_H) {
         // --- Marqueurs (drapeaux dessines dans les 14 premiers pixels du ruler)
         const localY = e.clientY - rect.top;
         const hitMarker = localY < 16
@@ -926,7 +959,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
         return;
     }
     
-    let currentY = 40;
+    // Sous la règle, le couloir d'accords (au-dessus) reçoit ses propres clics.
+    if (e.clientY - rect.top < tracksTop) return;
+    let currentY = tracksTop;
     for (const t of visibleTracks) {
         if (y >= currentY && y < currentY + zoomV) {
             const clip = clipAtTime(rowClips(t), time);
@@ -969,7 +1004,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 setInitialClipState({ ...clip });
                 movedRef.current = false;
                 // Shuffle : photo des clips de la piste (Alt+glisser = copie libre, hors Shuffle).
-                shuffleInitRef.current = editModeStore.get().mode === 'SHUFFLE' && !e.altKey ? { trackId: t.id, clips: t.clips.map(c => ({ ...c })) } : null;
+                shuffleInitRef.current = editModeStore.get().mode === 'SHUFFLE' && !e.altKey ? {
+                    trackId: t.id, clips: t.clips.map(c => ({ ...c })),
+                    group: visibleTracks.map(tr => ({ id: tr.id, kind: tr.type === TrackType.MIDI ? 'MIDI' : tr.type === TrackType.AUDIO ? 'AUDIO' : String(tr.type), clips: tr.clips })),
+                    ids: multiDragRef.current && multiDragRef.current.length > 1 ? multiDragRef.current.map(it => it.clipId) : [clip.id], shift: 0,
+                } : null;
                 // Ne re-sélectionner la piste que si elle change : chaque setState du
                 // studio relance l'anti-rebond de l'historique (300 ms), et le début
                 // d'un glissement (déplacement, rognage, fondu, gain) n'était alors
@@ -1043,7 +1082,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
     if (e.button === 2) {
       e.preventDefault();
       // Zone vide d'une piste instrument : proposer la creation d'un pattern MIDI.
-      let laneY = 40;
+      let laneY = tracksTop;
       let laneTrack: Track | undefined;
       for (const t of visibleTracks) {
         const trackHeight = zoomV + extraH(t);
@@ -1064,7 +1103,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
     // Zone vide d'une piste : Sélecteur, ou moitié haute avec le Smart Tool → plage de temps.
     {
-      let laneY = 40;
+      let laneY = tracksTop;
       for (const t of visibleTracks) {
         const laneH = zoomV + extraH(t);
         if (y >= laneY && y < laneY + zoomV) {
@@ -1156,7 +1195,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
 
             const t0 = x0 / zoomH, t1 = x1 / zoomH;
             const ids = new Set<string>();
-            let laneY = 40;
+            let laneY = tracksTop;
             for (const t of visibleTracks) {
                 const laneHeight = zoomV + extraH(t);
                 // La bande de clips occupe zoomV, les voies d'automation sont ignorees.
@@ -1178,7 +1217,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
         let hint: string | null = null;
         let hovered: string | null = null;
         const tHover = x / zoomH;
-        let laneY = 40;
+        let laneY = tracksTop;
         for (const t of visibleTracks) {
             if (y >= laneY && y < laneY + zoomV) {
                 const c = clipAtTime(rowClips(t), tHover);
@@ -1215,7 +1254,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
         // Plage : du point d'ancrage au pointeur, sur toutes les pistes traversées.
         const rd = rangeDragRef.current;
         let overId = rd.anchorTrack;
-        let laneY = 40;
+        let laneY = tracksTop;
         for (const t of visibleTracks) {
             const laneH = zoomV + extraH(t);
             if (y >= laneY && y < laneY + laneH) { overId = t.id; break; }
@@ -1260,10 +1299,24 @@ const handleMouseMove = (e: React.MouseEvent) => {
         const dt = dx / zoomH;
         const inv = invertOf(e);
         if (inv !== dragInvert) setDragInvert(inv);
-        // Shuffle : le clip s'insère au bord le plus proche, la suite se recolle / avance.
+        // Shuffle (Pro Tools) : toute la sélection s'insère au bord le plus proche, les
+        // pistes de départ se recollent, celles d'arrivée avancent ; on peut changer de piste.
         const shInit = shuffleInitRef.current;
-        if (editModeStore.get().mode === 'SHUFFLE' && shInit && shInit.trackId === activeClip.trackId) {
-            shuffleDrag(shInit.trackId, shInit.clips, activeClip.clip.id, 'MOVE', initialClipState.start + dt);
+        if (editModeStore.get().mode === 'SHUFFLE' && shInit) {
+            const from = shInit.group.findIndex(g => g.id === shInit.trackId);
+            let row = -1, yy = 40;
+            for (let i = 0; i < visibleTracks.length; i++) {
+                const hh = zoomV + extraH(visibleTracks[i]);
+                if (y >= yy && y < yy + hh) { row = i; break; }
+                yy += hh;
+            }
+            const wantShift = row >= 0 && from >= 0 ? row - from : shInit.shift;
+            const r = shuffleGroupDrag(shInit.group, shInit.ids, activeClip.clip.id, initialClipState.start + dt, wantShift);
+            if (r && r.trackShift !== shInit.shift) {
+                shInit.shift = r.trackShift;
+                const dest = shInit.group[from + r.trackShift];
+                if (dest) setActiveClip({ trackId: dest.id, clip: activeClip.clip });
+            }
             return;
         }
         // Grid relatif : on aimante le déplacement (la prise garde son décalage) ;
@@ -1274,7 +1327,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
 
         // Détecter la piste cible en fonction de la position Y
         let targetTrackId = activeClip.trackId;
-        let currentY = 40;
+        let currentY = tracksTop;
         for (const t of visibleTracks) {
             const trackHeight = zoomV + extraH(t);
             if (y >= currentY && y < currentY + trackHeight) {
@@ -1313,7 +1366,8 @@ const handleMouseMove = (e: React.MouseEvent) => {
             shuffleDrag(shInit.trackId, shInit.clips, activeClip.clip.id, 'TRIM_START', toSample(init.start + (x - dragStartX) / zoomH));
             return;
         }
-        const rawStart = getSnappedTime(init.start + (x - dragStartX) / zoomH, bpm, gridSize, useSnap);
+        // Grid relatif : le bord avance par pas de grille en gardant son décalage (Pro Tools).
+        const rawStart = trimEdgeTime({ settings: editModeStore.get(), invert: invertOf(e), bpm, origEdge: init.start, rawEdge: init.start + (x - dragStartX) / zoomH });
         const maxStart = init.start + init.duration - 0.05;
         const minStart = init.start - (init.offset || 0);
         const newStart = Math.min(maxStart, Math.max(0, Math.max(minStart, rawStart)));
@@ -1331,7 +1385,7 @@ const handleMouseMove = (e: React.MouseEvent) => {
             shuffleDrag(shInit.trackId, shInit.clips, activeClip.clip.id, 'TRIM_END', toSample(init.start + init.duration + (x - dragStartX) / zoomH));
             return;
         }
-        const rawEnd = getSnappedTime(init.start + init.duration + (x - dragStartX) / zoomH, bpm, gridSize, useSnap);
+        const rawEnd = trimEdgeTime({ settings: editModeStore.get(), invert: invertOf(e), bpm, origEdge: init.start + init.duration, rawEdge: init.start + init.duration + (x - dragStartX) / zoomH });
         const newDuration = Math.max(0.05, rawEnd - init.start);
         onEditClip?.(activeClip.trackId, activeClip.clip.id, 'UPDATE_PROPS', {
             duration: newDuration,
@@ -1630,6 +1684,8 @@ const drawTimeline = useCallback(() => {
     
     const subDivisionsPerBar = gridSubdivisionsPerBar(gridSize);
     const subStepPx = (4 * beatPx) / subDivisionsPerBar;
+    // Grille en temps (ms, images) : traits réguliers indépendants du tempo, par-dessus les mesures.
+    const timeStep = timeGridStep(gridSize);
 
     ctx.lineWidth = 1;
     for (let i = startBar; i <= endBar; i++) {
@@ -1638,7 +1694,7 @@ const drawTimeline = useCallback(() => {
         ctx.strokeStyle = cv.ink(0.08);
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
         
-        if (subStepPx > 5 && subDivisionsPerBar > 1) {
+        if (!timeStep && subStepPx > 5 && subDivisionsPerBar > 1) {
             for (let j = 1; j < subDivisionsPerBar; j++) {
                 const subX = x + j * subStepPx;
                 if (isBeatLine(j, subDivisionsPerBar)) {
@@ -1650,6 +1706,13 @@ const drawTimeline = useCallback(() => {
             }
         }
     }
+    if (timeStep && timeToPixels(timeStep) > 5) {
+        ctx.strokeStyle = cv.ink(0.04);
+        for (let k = Math.max(0, Math.floor(startTime / timeStep)); k * timeStep <= endTime; k++) {
+            const tx = timeToPixels(k * timeStep) - scrollX;
+            ctx.beginPath(); ctx.moveTo(tx, 0); ctx.lineTo(tx, h); ctx.stroke();
+        }
+    }
 
     if (isLoopActive && loopEnd > loopStart) {
         const loopStartX = timeToPixels(loopStart) - scrollX;
@@ -1658,7 +1721,7 @@ const drawTimeline = useCallback(() => {
         if (loopStartX + loopWidth > 0 && loopStartX < w) {
             // Zone de loop avec opacité augmentée
             ctx.fillStyle = cv.accentFill(0.15);
-            ctx.fillRect(loopStartX, 40, loopWidth, h - 40);
+            ctx.fillRect(loopStartX, tracksTop, loopWidth, h - tracksTop);
 
             // Lignes verticales de début et fin de loop plus visibles
             ctx.strokeStyle = cv.accent;
@@ -1666,13 +1729,13 @@ const drawTimeline = useCallback(() => {
 
             // Ligne de début
             ctx.beginPath();
-            ctx.moveTo(loopStartX, 40);
+            ctx.moveTo(loopStartX, tracksTop);
             ctx.lineTo(loopStartX, h);
             ctx.stroke();
 
             // Ligne de fin
             ctx.beginPath();
-            ctx.moveTo(loopEndX, 40);
+            ctx.moveTo(loopEndX, tracksTop);
             ctx.lineTo(loopEndX, h);
             ctx.stroke();
 
@@ -1680,22 +1743,22 @@ const drawTimeline = useCallback(() => {
             ctx.fillStyle = cv.accent;
             // Poignée début (triangle)
             ctx.beginPath();
-            ctx.moveTo(loopStartX - 8, 40);
-            ctx.lineTo(loopStartX + 8, 40);
-            ctx.lineTo(loopStartX, 55);
+            ctx.moveTo(loopStartX - 8, tracksTop);
+            ctx.lineTo(loopStartX + 8, tracksTop);
+            ctx.lineTo(loopStartX, tracksTop + 15);
             ctx.fill();
 
             // Poignée fin (triangle)
             ctx.beginPath();
-            ctx.moveTo(loopEndX - 8, 40);
-            ctx.lineTo(loopEndX + 8, 40);
-            ctx.lineTo(loopEndX, 55);
+            ctx.moveTo(loopEndX - 8, tracksTop);
+            ctx.lineTo(loopEndX + 8, tracksTop);
+            ctx.lineTo(loopEndX, tracksTop + 15);
             ctx.fill();
         }
     }
     
     // Dessiner les clips SANS translate - coordonnées relatives au viewport
-    let currentY = 40; // Position absolue dans le document
+    let currentY = tracksTop; // Position absolue dans le document
     visibleTracks.forEach((track) => {
         const trackH = zoomV;
         const totalAutomationHeight = extraH(track);
@@ -1704,18 +1767,18 @@ const drawTimeline = useCallback(() => {
         const viewportY = currentY - scrollTop;
 
         // Vérifier si la piste est visible dans le viewport
-        if (viewportY + trackH > 40 && viewportY < h) {
+        if (viewportY + trackH > tracksTop && viewportY < h) {
             rowClips(track).forEach(clip => {
                 const cx = timeToPixels(clip.start) - scrollX;
                 const cw = timeToPixels(clip.duration);
                 if (cx + cw > 0 && cx < w) {
                     // Dessiner le clip à sa position relative dans le viewport
-                    const clipY = Math.max(viewportY + 2, 40); // Ne pas dessiner au-dessus du ruler
+                    const clipY = Math.max(viewportY + 2, tracksTop); // Ne pas dessiner sous la règle ni le couloir d'accords
                     const clipH = Math.min(trackH - 4, viewportY + trackH - 2 - clipY);
                     if (clipH > 0) {
                         drawClip(ctx, clip, track.color, cx, clipY, cw, clipH, (selectedClip?.clip.id === clip.id) || (activeClip?.clip.id === clip.id) || selectedClipIds.has(clip.id), zoomH, hoveredClipId === clip.id);
                         const bx = takeBadgeX(track, clip);
-                        if (bx !== null && viewportY + 3 >= 40) {
+                        if (bx !== null && viewportY + 3 >= tracksTop) {
                             const n = lanesByTrack.get(track.id)!.length;
                             const x0 = bx - scrollX, y0 = viewportY + 3;
                             ctx.save();
@@ -1737,12 +1800,12 @@ const drawTimeline = useCallback(() => {
         }
         
         // Crossfades (zone commune de deux clips en fondu croisé) : les deux courbes, en ambre.
-        if (viewportY + trackH > 40 && viewportY < h) {
+        if (viewportY + trackH > tracksTop && viewportY < h) {
             for (const z of crossfadeZones(track.clips)) {
                 const a = track.clips.find(c => c.id === z.a)!, b = track.clips.find(c => c.id === z.b)!;
                 const zx = timeToPixels(z.start) - scrollX, zw = timeToPixels(z.end - z.start);
                 if (zx + zw < 0 || zx > w || zw < 2) continue;
-                const zy = Math.max(viewportY + 2, 40), zh = Math.min(trackH - 4, viewportY + trackH - 2 - zy);
+                const zy = Math.max(viewportY + 2, tracksTop), zh = Math.min(trackH - 4, viewportY + trackH - 2 - zy);
                 if (zh <= 0) continue;
                 ctx.save();
                 ctx.fillStyle = 'rgba(251,191,36,0.10)';
@@ -1763,7 +1826,7 @@ const drawTimeline = useCallback(() => {
         if (totalAutomationHeight > 0) drawExpandedLanes(ctx, track, viewportY + trackH, w, h, zoomH, scrollX);
 
         // Dessiner les séparateurs de pistes (position relative au viewport)
-        if (viewportY + trackH + totalAutomationHeight > 40 && viewportY < h) {
+        if (viewportY + trackH + totalAutomationHeight > tracksTop && viewportY < h) {
             const lineY = viewportY + trackH + totalAutomationHeight;
             ctx.strokeStyle = cv.ink(0.1);
             ctx.lineWidth = 1;
@@ -1777,9 +1840,9 @@ const drawTimeline = useCallback(() => {
     });
 
     ctx.fillStyle = cv.surface;
-    ctx.fillRect(0, 0, w, 40);
+    ctx.fillRect(0, 0, w, RULER_H);
     ctx.strokeStyle = cv.ink(0.1);
-    ctx.beginPath(); ctx.moveTo(0, 40); ctx.lineTo(w, 40); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, RULER_H); ctx.lineTo(w, RULER_H); ctx.stroke();
 
     ctx.fillStyle = cv.textMuted;
     ctx.font = '600 11px Inter';
@@ -1798,12 +1861,12 @@ const drawTimeline = useCallback(() => {
                 // Region marker (like Pro Tools Memory Locations)
                 const endX = timeToPixels(marker.endTime) - scrollX;
                 ctx.fillStyle = marker.color + '22';
-                ctx.fillRect(markerX, 0, endX - markerX, 40);
+                ctx.fillRect(markerX, 0, endX - markerX, RULER_H);
                 ctx.strokeStyle = marker.color;
                 ctx.lineWidth = 2;
                 ctx.beginPath();
-                ctx.moveTo(markerX, 0); ctx.lineTo(markerX, 40);
-                ctx.moveTo(endX, 0); ctx.lineTo(endX, 40);
+                ctx.moveTo(markerX, 0); ctx.lineTo(markerX, RULER_H);
+                ctx.moveTo(endX, 0); ctx.lineTo(endX, RULER_H);
                 ctx.stroke();
             }
             
@@ -1845,17 +1908,17 @@ const drawTimeline = useCallback(() => {
             ctx.fillRect(px0, 31, px1 - px0, 8);
             if (on) {
                 ctx.fillStyle = 'rgba(239, 68, 68, 0.06)';
-                ctx.fillRect(px0, 40, px1 - px0, h - 40);
+                ctx.fillRect(px0, tracksTop, px1 - px0, h - tracksTop);
                 ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
                 ctx.lineWidth = 1;
                 ctx.setLineDash([3, 3]);
-                ctx.beginPath(); ctx.moveTo(px0 + 0.5, 40); ctx.lineTo(px0 + 0.5, h); ctx.moveTo(px1 - 0.5, 40); ctx.lineTo(px1 - 0.5, h); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(px0 + 0.5, tracksTop); ctx.lineTo(px0 + 0.5, h); ctx.moveTo(px1 - 0.5, tracksTop); ctx.lineTo(px1 - 0.5, h); ctx.stroke();
                 ctx.setLineDash([]);
             }
             // Poignées : crochets d'entrée et de sortie.
             ctx.fillStyle = on ? '#ef4444' : 'rgba(239, 68, 68, 0.6)';
-            ctx.beginPath(); ctx.moveTo(px0, 26); ctx.lineTo(px0 + 7, 26); ctx.lineTo(px0, 40); ctx.closePath(); ctx.fill();
-            ctx.beginPath(); ctx.moveTo(px1, 26); ctx.lineTo(px1 - 7, 26); ctx.lineTo(px1, 40); ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(px0, 26); ctx.lineTo(px0 + 7, 26); ctx.lineTo(px0, RULER_H); ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(px1, 26); ctx.lineTo(px1 - 7, 26); ctx.lineTo(px1, RULER_H); ctx.closePath(); ctx.fill();
             if (px1 - px0 > 50) {
                 ctx.fillStyle = '#fff';
                 ctx.font = 'bold 8px Inter';
@@ -1869,12 +1932,12 @@ const drawTimeline = useCallback(() => {
         const sx = timeToPixels(timeSel.start) - scrollX;
         const sw = Math.max(1, timeToPixels(timeSel.end - timeSel.start));
         if (sx + sw > 0 && sx < w) {
-            let ly = 40;
+            let ly = tracksTop;
             visibleTracks.forEach(t => {
                 const laneH = zoomV + extraH(t);
                 if (timeSel.trackIds.includes(t.id)) {
                     const vy = ly - scrollTop;
-                    const top = Math.max(40, vy), bottom = Math.min(h, vy + zoomV);
+                    const top = Math.max(tracksTop, vy), bottom = Math.min(h, vy + zoomV);
                     if (bottom > top) {
                         ctx.fillStyle = 'rgba(186, 230, 253, 0.22)';
                         ctx.fillRect(sx, top, sw, bottom - top);
@@ -1904,7 +1967,7 @@ const drawTimeline = useCallback(() => {
     }
 
     // La tete de lecture est dessinee sur le calque superieur (drawPlayhead).
-}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, lanesKey, lanesByTrack, hoveredClipId, uiTheme]);
+}, [visibleTracks, zoomV, zoomH, activeClip, selectedClip, isLoopActive, loopStart, loopEnd, bpm, viewportSize.width, viewportSize.height, headerWidth, gridSize, scrollLeft, scrollTop, markers, selectedClipIds, marquee, punch, timeSel, lanesKey, lanesByTrack, hoveredClipId, uiTheme, tracksTop]);
 
 // Calque statique (grille, clips, formes d'onde, reperes) : redessine seulement
 // quand son contenu change, plus a chaque image de la lecture.
@@ -2026,10 +2089,17 @@ useEffect(() => {
             </div>
         </div>
         <div className="flex items-center space-x-3 shrink-0">
+             {!simple && <ChordLaneToggleButton />}
              <i className="fas fa-search-plus text-[10px]"></i>
              <input type="range" min="10" max="300" step="1" value={zoomH} onChange={(e) => setZoomH(parseInt(e.target.value))} className="w-24 accent-cyan-500 h-1 bg-white/5 rounded-full" />
         </div>
       </div>
+      {/* Piste d'accords : sous la règle (comme la Chord Track de Logic), fixe pendant le défilement vertical. */}
+      {chordLane && (
+        <div style={{ position: 'absolute', top: TOOLBAR_H + RULER_H, left: 0, right: 0, zIndex: 41 }}>
+          {chordLane.render({ zoomH, scrollLeft, headerWidth, width: Math.max(0, viewportSize.width - headerWidth) })}
+        </div>
+      )}
       {/* SINGLE SCROLL CONTAINER - sidebar is sticky left, canvas is sticky top */}
       <div 
           ref={scrollContainerRef} 
@@ -2101,8 +2171,8 @@ useEffect(() => {
                   borderRight: '1px solid var(--border-dim)'
               }}
           >
-            {/* Ruler spacer */}
-            <div style={{ height: 40, flexShrink: 0, backgroundColor: 'var(--bg-surface)' }} />
+            {/* Règle + couloir d'accords */}
+            <div style={{ height: tracksTop, flexShrink: 0, backgroundColor: 'var(--bg-surface)' }} />
             {/* Track Headers */}
             {visibleTracks.map((track) => (
               <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>
@@ -2149,7 +2219,7 @@ useEffect(() => {
           {isRecording && recStartTime !== null && (
              visibleTracks.map((track, idx) => {
                if (!track.isTrackArmed) return null;
-               let topY = 40; for (let i = 0; i < idx; i++) topY += zoomV + extraH(visibleTracks[i]);
+               let topY = tracksTop; for (let i = 0; i < idx; i++) topY += zoomV + extraH(visibleTracks[i]);
                return <div key={`live-${track.id}`} style={{ position: 'absolute', top: `${topY + 2}px`, left: headerWidth, height: `${zoomV - 4}px`, right: 0, pointerEvents: 'none' }}><LiveRecordingClip trackId={track.id} recStartTime={recStartTime} zoomH={zoomH} height={zoomV - 4} /></div>;
              })
           )}
@@ -2157,15 +2227,16 @@ useEffect(() => {
       </div>
       {/* CANVAS - Overlay fixe pour la grille et la timeline */}
       <canvas 
-          ref={canvasRef} 
+          ref={canvasRef}
+          data-tracks-top={tracksTop} 
           style={{ 
               position: 'absolute',
-              top: 48, // Hauteur de la toolbar
+              top: TOOLBAR_H, // sous la barre d'outils : règle, couloir d'accords, pistes
               left: headerWidth,
               right: 0,
               bottom: 0,
               width: `calc(100% - ${headerWidth}px)`,
-              height: 'calc(100% - 48px)',
+              height: `calc(100% - ${TOOLBAR_H}px)`,
               pointerEvents: 'none',
               zIndex: 20
           }} 
@@ -2175,24 +2246,25 @@ useEffect(() => {
           ref={overlayRef}
           style={{
               position: 'absolute',
-              top: 48,
+              top: TOOLBAR_H,
               left: headerWidth,
               right: 0,
               bottom: 0,
               width: `calc(100% - ${headerWidth}px)`,
-              height: 'calc(100% - 48px)',
+              height: `calc(100% - ${TOOLBAR_H}px)`,
               pointerEvents: 'none',
-              zIndex: 21
+              // Au-dessus du couloir d'accords et des couloirs de prises : la tête de lecture les traverse.
+              zIndex: 42
           }}
       />
       {/* Couloirs de prises (au-dessus des calques dessinés, sous la règle) */}
       {takeLanes && visibleTracks.some(t => openLanesOf(t).length > 0) && (
-        <div style={{ position: 'absolute', top: 48 + 40, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 22 }}>
+        <div style={{ position: 'absolute', top: TOOLBAR_H + tracksTop, left: headerWidth, right: 0, bottom: 12, overflow: 'hidden', pointerEvents: 'none', zIndex: 22 }}>
           {(() => {
-            let y = 40;
+            let y = tracksTop;
             return visibleTracks.map(t => {
               const lanes = openLanesOf(t);
-              const top = y + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80 - scrollTop - 40;
+              const top = y + zoomV + t.automationLanes.filter(l => l.isExpanded).length * 80 - scrollTop - tracksTop;
               y += zoomV + extraH(t);
               if (!lanes.length || top > viewportSize.height || top + lanes.length * TAKE_LANE_H < 0) return null;
               return <TakeLanesOverlay key={t.id} track={t} lanes={lanes} api={takeLanes} top={top} zoomH={zoomH} scrollLeft={scrollLeft}
@@ -2285,6 +2357,38 @@ useEffect(() => {
                 // Justesse note par note (V19) : Flex Pitch de Logic, Melodyne, Pitch Editor de FL.
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Justesse note par note…', icon: 'fa-wave-square', title: 'Comme Flex Pitch dans Logic : corrige la justesse de ta voix note par note',
                   onClick: () => { openNovaWindow('pitch-editor', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
+                // Plusieurs clips sélectionnés : « Corriger tout » sur toute la sélection (une annulation).
+                ...(() => {
+                    if (clipContextMenu.clip.type === TrackType.MIDI || !selectedClipIds?.has(clipContextMenu.clip.id) || selectedClipIds.size < 2) return [];
+                    const targets: { trackId: string; clipId: string }[] = [];
+                    tracks.forEach(tr => { if (tr.type !== TrackType.MIDI) tr.clips.forEach(c => { if (selectedClipIds.has(c.id) && c.type !== TrackType.MIDI) targets.push({ trackId: tr.id, clipId: c.id }); }); });
+                    return targets.length > 1 ? [{ label: `Justesse : corriger tout (${targets.length} clips)…`, icon: 'fa-wand-magic-sparkles', title: 'Ramène toutes les notes des clips sélectionnés dans la gamme, avec dosage et style. Une seule annulation.',
+                      onClick: () => { openNovaWindow('pitch-batch', { targets }); setClipContextMenu(null); } }] : [];
+                })(),
+                // Audio → MIDI (V20) : Convert Melody / Drums / Harmony d'Ableton Live, « Create MIDI » du Flex Pitch de Logic.
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? [
+                  { label: 'Mélodie → MIDI (808, piano…)…', icon: 'fa-microphone-lines', title: 'Convertir la mélodie de cette voix en notes MIDI : 808 qui la suit, piano, lead ou nappe (comme Convert Melody to MIDI d’Ableton Live ou « Create MIDI » du Flex Pitch de Logic)',
+                    onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], convert: { mode: 'melody' } }); setClipContextMenu(null); } },
+                  { label: 'Batterie → MIDI…', icon: 'fa-drum', title: 'Convertir cette boucle de batterie en motif : kick, snare / clap, hi-hat dans la boîte à rythmes ou en piste MIDI General MIDI (comme Convert Drums to MIDI d’Ableton Live)',
+                    onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], convert: { mode: 'drums' } }); setClipContextMenu(null); } },
+                  { label: 'Accords → MIDI…', icon: 'fa-guitar', title: 'Trouver les accords de ce sample et les rejouer en MIDI, et remplir la piste d’accords (comme Convert Harmony to MIDI d’Ableton Live ou Chord ID de Logic)',
+                    onClick: () => { openNovaWindow('audio-to-midi', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }], convert: { mode: 'harmony' } }); setClipContextMenu(null); } },
+                ] : []),
+                // Melodyne / VocAlign (ARA2, hôte natif du pont) : grisés sur le site, avec la raison en infobulle.
+                ...(clipContextMenu.clip.type !== TrackType.MIDI ? (() => {
+                  const target = { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] };
+                  const mel = araAvailability('melodyne', araCtx), va = araAvailability('vocalign', araCtx);
+                  return [
+                    { label: clipContextMenu.clip.araEdit?.plugin === 'melodyne' ? 'Retoucher dans Melodyne (ARA)' : 'Ouvrir dans Melodyne (ARA)', icon: 'fa-wand-magic-sparkles', title: mel.tooltip, disabled: !mel.enabled,
+                      onClick: () => { openNovaWindow('ara-melodyne', target); setClipContextMenu(null); } },
+                    { label: 'Aligner avec VocAlign… (ARA)', icon: 'fa-align-left', title: va.tooltip, disabled: !va.enabled,
+                      onClick: () => { openNovaWindow('ara-vocalign', target); setClipContextMenu(null); } },
+                    ...(!va.enabled ? [{ label: 'Caler sur la lead (alignement NOVA)…', icon: 'fa-align-left', title: "Cale doubles, backs et harmonies sur la voix lead, sans plugin",
+                      onClick: () => { openNovaWindow('ara-vocalign', target); setClipContextMenu(null); } }] : []),
+                    ...(clipContextMenu.clip.araEdit ? [{ label: "Revenir à l'original…", icon: 'fa-rotate-left', title: 'Remet la prise d’origine (avant Melodyne / VocAlign)',
+                      onClick: () => { openNovaWindow(clipContextMenu.clip.araEdit!.plugin === 'melodyne' ? 'ara-melodyne' : 'ara-vocalign', target); setClipContextMenu(null); } }] : []),
+                  ];
+                })() : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Strip Silence…', icon: 'fa-compress-alt', shortcut: 'Ctrl+U', onClick: () => { openNovaWindow('strip-silence', { targets: [{ trackId: clipContextMenu.trackId, clipId: clipContextMenu.clip.id }] }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI ? [{ label: 'Respirations…', icon: 'fa-wind', shortcut: 'Ctrl+Alt+R', title: 'Baisser les respirations (lead) ou les supprimer (backs), comme Breath Control de Waves / De-breath de RX', onClick: () => { const ids = selectedClipIds?.has(clipContextMenu.clip.id) && selectedClipIds.size > 1 ? Array.from(selectedClipIds) : [clipContextMenu.clip.id]; requestBreaths({ mode: 'dialog', clipIds: ids, reason: 'menu' }); setClipContextMenu(null); }}] : []),
                 ...(clipContextMenu.clip.type !== TrackType.MIDI && onSeparateStems ? [
@@ -2294,6 +2398,7 @@ useEffect(() => {
                 ...(clipContextMenu.clip.type === TrackType.MIDI && onEditMidi ? [
                   { label: 'Ouvrir dans le piano roll', icon: 'fa-music', onClick: () => { onEditMidi(clipContextMenu.trackId, clipContextMenu.clip.id); setClipContextMenu(null); }}
                 ] : []),
+                ...midiClipMenuItems(clipContextMenu.trackId, clipContextMenu.clip, () => setClipContextMenu(null)),
                 'separator',
                 { label: clipContextMenu.clip.isMuted ? 'Réactiver' : 'Muter', icon: clipContextMenu.clip.isMuted ? 'fa-volume-up' : 'fa-volume-mute', shortcut: 'M', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'MUTE'); setClipContextMenu(null); }},
                 { label: clipContextMenu.clip.isReversed ? 'Remettre à l’endroit' : 'Inverser', icon: 'fa-rotate-left', onClick: () => { onEditClip?.(clipContextMenu.trackId, clipContextMenu.clip.id, 'UPDATE_PROPS', { isReversed: !clipContextMenu.clip.isReversed }); setClipContextMenu(null); }},

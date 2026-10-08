@@ -11,6 +11,7 @@ import { useSimpleMode } from '../utils/simpleMode';
 import { sendLabel } from '../utils/sendLabels';
 import { openSynthPanel } from '../utils/synthPanelStore';
 import { editModeStore, useEditMode } from '../utils/editModes';
+import { breathGainAt, breathSig } from '../utils/breathEnvelope';
 
 /** Horloge de la barre du haut : seule elle se re-rend pendant la lecture. */
 const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) => {
@@ -20,7 +21,7 @@ const MobileClock: React.FC<{ format: (t: number) => string }> = ({ format }) =>
       <span className="text-cyan-400 font-mono text-sm font-bold tracking-wider">
         {format(t + 1e-6)}
       </span>
-      <span className="text-white/30 font-mono text-xs ml-2">
+      <span className="text-white/50 font-mono text-xs ml-2">
         {(t + 1e-6).toFixed(1)}s
       </span>
     </>
@@ -370,13 +371,17 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
     if (!buffer) return null;
 
     const centerY = height / 2;
-    const cacheKey = `${bufferKeyOf(buffer)}|${clip.offset || 0}|${Math.round(width)}|${height}`;
+    // Respirations traitées (utils/breaths) : la forme d'onde montre le creux.
+    const breaths = clip.breaths?.length && !clip.isReversed ? clip.breaths : undefined;
+    const off = clip.offset || 0;
+    const cacheKey = `${bufferKeyOf(buffer)}|${off}|${clip.duration}|${Math.round(width)}|${height}|${breathSig(breaths)}`;
     let polygon = wavePointsCache.get(cacheKey);
     if (polygon === undefined) {
     const channelData = buffer.getChannelData(0);
     const samples = channelData.length;
-    const step = Math.max(1, Math.floor(samples / width));
-    const offsetSamples = Math.floor((clip.offset || 0) * buffer.sampleRate);
+    // Seulement la partie jouée du fichier (offset → offset + durée), pas tout le fichier.
+    const step = Math.max(1, Math.floor((clip.duration * buffer.sampleRate) / Math.max(1, width)));
+    const offsetSamples = Math.floor(off * buffer.sampleRate);
     
     const points: string[] = [];
     const pointsNeg: string[] = [];
@@ -392,8 +397,9 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         if (sample > max) max = sample;
       }
 
-      const y1 = centerY + max * centerY * 0.85;
-      const y2 = centerY + min * centerY * 0.85;
+      const g = breaths ? breathGainAt(breaths, off + ((i + 0.5) / width) * clip.duration) : 1;
+      const y1 = centerY + max * g * centerY * 0.85;
+      const y2 = centerY + min * g * centerY * 0.85;
       points.push(`${i},${y1}`);
       pointsNeg.unshift(`${i},${y2}`);
     }
@@ -416,6 +422,18 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
           fill={`url(#waveGrad-${clip.id})`}
         />
         <line x1="0" y1={centerY} x2={width} y2={centerY} stroke={color} strokeOpacity="0.2" strokeWidth="1" />
+        {/* Repère violet des respirations traitées, comme sur l'ordinateur. */}
+        {breaths?.map((b, i) => {
+          const x0 = ((b.start - off) / clip.duration) * width, x1 = ((b.end - off) / clip.duration) * width;
+          if (x1 <= 0 || x0 >= width) return null;
+          const l = Math.max(0, x0), w = Math.max(2, Math.min(width, x1) - l);
+          return (
+            <g key={i} data-testid="mobile-breath-mark">
+              <rect x={l} y={0} width={w} height={height} fill="rgba(167,139,250,0.16)" />
+              <rect x={l} y={height - 3} width={w} height={3} fill="#a78bfa" />
+            </g>
+          );
+        })}
       </svg>
     );
   }, []);
@@ -568,7 +586,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
         {/* Lecture / stop : déjà dans la barre du haut (il y avait deux transports). */}
         {/* Time Display */}
         <div className="flex-1 flex items-center justify-center">
-          <div className="bg-black/40 rounded-lg px-3 py-1 border border-white/10">
+          <div className="bg-black/40 [[data-theme=light]_&]:bg-nv-surface rounded-lg px-3 py-1 border border-white/10">
             <MobileClock format={formatBarsBeat} />
           </div>
         </div>
@@ -657,7 +675,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
             className="flex items-center justify-center border-b border-white/10 bg-[#0f1114]"
             style={{ height: TIMELINE_HEIGHT }}
           >
-            <span className="text-[9px] font-bold text-white/30 uppercase">Pistes</span>
+            <span className="text-[9px] font-bold text-white/50 uppercase">Pistes</span>
           </div>
 
           {/* Track headers */}
@@ -680,7 +698,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                     className="w-2 h-2 rounded-full flex-shrink-0"
                     style={{ backgroundColor: track.color }}
                   />
-                  <span title={track.name} className="text-[11px] leading-4 font-semibold text-white/90 truncate flex-1">
+                  <span title={track.name} className="text-[10px] min-[400px]:text-[11px] leading-4 font-semibold tracking-tight text-white/90 truncate flex-1">
                     {track.name}
                   </span>
                   {/* G26 : en mode simple aussi, on voit que la voix a des effets. */}
@@ -966,7 +984,7 @@ const MobileArrangementPage: React.FC<MobileArrangementPageProps> = ({
                   {/* Empty track hint */}
                   {track.clips.length === 0 && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <span className="text-[10px] text-white/20 font-medium">Vide</span>
+                      <span className="text-[10px] text-white/40 font-medium">Vide</span>
                     </div>
                   )}
                 </div>

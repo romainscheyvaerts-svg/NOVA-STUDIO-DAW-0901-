@@ -221,6 +221,13 @@ export function novaThemePlugin(root) {
       // bg-white plein devient l'encre en clair : son texte noir passe en blanc.
       '[data-theme="light"] :is([class~="bg-white"], [class~="hover:bg-white"]:hover)': { '--nv-t-black': '255 255 255' },
       '[data-theme="light"] .nova-sombre': dark,
+      // Textes « white/20…/55 » : discrets sur fond sombre, mais l'encre à 30 % sur le gris
+      // clair tombait à 1,9:1 (horloge, « PISTES », « Libre », BPM du téléphone). En clair :
+      // /20-/35 → 50 % d'encre (texte d'appoint), /40-/55 → 66 % (≥ 4,5:1), la hiérarchie
+      // reste (prompteur : lignes passées plus pâles). Sur pastille pleine, --nv-t-white
+      // reste blanc ; les fenêtres .nova-sombre gardent leurs valeurs.
+      [`[data-theme="light"] :is(${['20', '25', '30', '35'].map((a) => `.text-white\\/${a}`).join(', ')}):not(.nova-sombre *)`]: { color: 'rgb(var(--nv-t-white) / 0.5)' },
+      [`[data-theme="light"] :is(${['40', '45', '50', '55'].map((a) => `.text-white\\/${a}`).join(', ')}):not(.nova-sombre *)`]: { color: 'rgb(var(--nv-t-white) / 0.66)' },
       // Voiles noirs épais : en clair, un panneau flottant (prompteur, bulles)
       // devient une surface blanche, et un fond de fenêtre (inset-0) un voile
       // d'encre léger, au lieu d'un gris boueux.

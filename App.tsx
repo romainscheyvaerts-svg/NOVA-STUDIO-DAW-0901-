@@ -16,6 +16,8 @@ import ViewModeSwitcher from './components/ViewModeSwitcher';
 import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
+const TrackListPanel = lazy(() => import('./components/TrackListPanel'));
+const BusPanel = lazy(() => import('./components/BusPanel'));
 const AuthScreen = lazy(() => import('./components/AuthScreen'));
 const AutomationEditorView = lazy(() => import('./components/AutomationEditorView'));
 const ShareModal = lazy(() => import('./components/ShareModal'));
@@ -46,7 +48,7 @@ import { normalizeSynth } from './utils/novaSynth';
 import LicenseNotice from './components/LicenseNotice';
 import { vstStateEvents } from './engine/VSTPluginNode';
 import { renderTrackFreeze, renderTrackPreview, tracksNeedingVstRender, renderRangeFor, syncLiveVstStates, FreezeResult, applyFreezeResult, busesNeedingVstRender, renderBusFreeze, applyBusFreezeResult, BusFreezeResult } from './services/VstFreeze';
-import { canBakeTrack, hasVst, freezeSignature, trackBufferIds } from './utils/freeze';
+import { canBakeTrack, hasVst, freezeSignature, trackBufferIds, isTrackFrozen, preFreezePlugins, isVst, freezeIndex, breathsNeedRefreeze } from './utils/freeze';
 import { getEditAuthor, setEditAuthor } from './utils/preFxEdits';
 import { usePreFxReplay } from './hooks/usePreFxReplay';
 import { mergeSessionEdits } from './utils/preFxMerge';
@@ -55,6 +57,7 @@ import FrozenEditsNotice from './components/FrozenEditsNotice';
 import { recFreezeStore } from './utils/recFreezeStore';
 import { ProjectIO } from './services/ProjectIO';
 const PianoRoll = lazy(() => import('./components/PianoRoll'));
+import MidiHost from './components/MidiHost'; // V25 : .mid, groove, capture MIDI
 import { midiManager } from './services/MidiManager';
 import { AUDIO_CONFIG, UI_CONFIG } from './utils/constants';
 import SideBrowser2 from './components/SideBrowser2';
@@ -98,6 +101,9 @@ import {
   normalizeInviteCode, ownerFromContent, ownerRoleOf, participantOf, peerViews, pickPeerColor, recordBlock, PeerInfo, PeerRec, TransportMsg, MAX_PARTICIPANTS,
 } from './utils/collabPeers';
 import { localCollabOutboxStore } from './utils/collabOutbox';
+import { engineView, shownTrackIds, withPluginState } from './utils/trackStructure';
+import { structureBus, StructurePanel } from './utils/structureBus';
+import { StructureTracksContext } from './components/TrackStructure';
 import { applyMixFields, touchesPlugins, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
 import RemoteIngePanel from './components/RemoteIngePanel';
@@ -129,6 +135,9 @@ import ShortcutsHelp from './components/ShortcutsHelp';
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
 import ProToolsWindows from './components/ProToolsWindows';
+import { useChordLaneProp } from './components/ChordLane';
+import { HumQuickButtons } from './components/AudioToMidiDialog';
+import { applyChordOps, chordChanges, chordSig, chordsStore } from './utils/chordTrack';
 import { nextMarkerNumber } from './utils/memoryLocations';
 import { automationRecorder } from './services/AutomationManager';
 import { DrumMachine, makeDrumMachineLib, drumPadsFor, suggestDrumKit, DRUM_KITS } from './utils/drumKits';
@@ -461,6 +470,7 @@ const useUndoRedo = (initialState: DAWState) => {
         newState.bpm !== curr.present.bpm ||
         newState.name !== curr.present.name ||
         newState.markers !== curr.present.markers ||
+        newState.chords !== curr.present.chords ||
         newState.trackGroups !== curr.present.trackGroups ||
         newState.timeSignature !== curr.present.timeSignature ||
         newState.isLoopActive !== curr.present.isLoopActive ||
@@ -487,7 +497,7 @@ const useUndoRedo = (initialState: DAWState) => {
   // ramenait aussi isPlaying / isRecording / currentTime de l'instantané :
   // Ctrl+Z pendant la lecture affichait « arrêté » alors que le son
   // continuait, et pendant une prise il basculait l'enregistrement.
-  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'timeSignature', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle'] as const;
+  const PROJECT_KEYS = ['tracks', 'bpm', 'name', 'markers', 'trackGroups', 'timeSignature', 'isLoopActive', 'loopStart', 'loopEnd', 'vocalMixStyle', 'chords'] as const;
   const withProjectOf = (base: DAWState, snap: DAWState): DAWState => {
     const out: any = { ...base };
     for (const k of PROJECT_KEYS) out[k] = (snap as any)[k];
@@ -815,6 +825,7 @@ function Studio() {
   const clipboardClipRef = useRef<Clip | null>(null);
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
+  const getStateForMidi = useCallback(() => stateRef.current, []);
 
   // --- Protection contre la perte de travail ---
   // Fermer l'onglet ou recharger detruisait toute la session sans le moindre
@@ -839,16 +850,20 @@ function Studio() {
     if (!audioEngine.ctx) return;
     // Routage, solo et envois agissent sur les autres pistes (bus, pistes
     // rendues muettes par un solo) : dans ce cas on met tout a jour, comme avant.
-    const routing = state.tracks.map(t =>
+    // Structure Pro Tools (utils/trackStructure) : le moteur ne reçoit que les pistes
+    // jouées (actives), avec Muet / Solo de dossier, VCA et bus nommés résolus.
+    const played = engineView(state.tracks);
+    const routing = played.tracks.map(t =>
       `${t.id}>${t.outputTrackId || ''}|${t.isSolo ? 1 : 0}|${t.isFrozen ? 1 : 0}|${(t.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}:${sd.level}`).join(',')}`
-    ).join(';');
+    ).join(';') + `#${[...played.excluded].join(',')}`;
     const previous = engineTracksRef.current;
     const full = !previous || routing !== engineRoutingRef.current;
-    state.tracks.forEach(t => {
+    played.excluded.forEach(id => audioEngine.disposeTrack(id));
+    played.tracks.forEach(t => {
       if (!full && atomic.get(t.id) === t) return; // volume / pan déjà réglés directement
-      if (full || previous!.get(t.id) !== t) audioEngine.updateTrack(t, state.tracks);
+      if (full || previous!.get(t.id) !== t) audioEngine.updateTrack(t, played.tracks);
     });
-    engineTracksRef.current = new Map(state.tracks.map(t => [t.id, t]));
+    engineTracksRef.current = new Map(played.tracks.map(t => [t.id, t]));
     engineRoutingRef.current = routing;
   }, [state.tracks]); 
   useEffect(() => { audioEngine.setLoop(state.isLoopActive, state.loopStart, state.loopEnd); }, [state.isLoopActive, state.loopStart, state.loopEnd]);
@@ -893,6 +908,12 @@ function Studio() {
     playheadStore.set(t);
     setVisualState({ isPlaying: false, currentTime: t });
   }, [setVisualState]);
+  // Une fenêtre qui prend la main sur le moteur (Fredonne → MIDI sur le beat) demande l'arrêt de la lecture.
+  useEffect(() => {
+    const onPause = () => { if (stateRef.current.isPlaying) pausePlayback(); };
+    window.addEventListener('nova:transport-pause', onPause);
+    return () => window.removeEventListener('nova:transport-pause', onPause);
+  }, [pausePlayback]);
 
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);
@@ -999,6 +1020,8 @@ function Studio() {
   }, []);
   useEffect(() => { document.body.setAttribute('data-view-mode', viewMode); }, [viewMode]);
   const isMobile = viewMode === 'MOBILE';
+  // Téléphone (version simple) : pistes masquées, VCA et dossiers simples non affichés (menu « Pistes masquées »).
+  const mobileTracks = useMemo(() => { const shown = shownTrackIds(state.tracks); return state.tracks.filter(t => shown.has(t.id) && !t.isVca && t.folder?.kind !== 'basic'); }, [state.tracks]);
   const isMobileRef = useRef(isMobile); isMobileRef.current = isMobile;
   const activeTabRef = useRef(activeMobileTab); activeTabRef.current = activeMobileTab;
 
@@ -1774,6 +1797,10 @@ function Studio() {
     }));
     setAiNotification(`${style.emoji} Mix « ${style.name} » appliqué sur tes pistes voix — Annuler pour revenir`);
     track('mix_style_applied', { style: style.id, auto });
+    // Case « Traiter les respirations » du Mix auto (cochée par défaut) : suivie
+    // par tous les chemins (menu, Nova, style mis tout seul après la 1re prise :
+    // là, coachAfterTake ne traite que la prise qui vient d'être enregistrée).
+    if (!auto) setTimeout(() => breathsAfterMixStyle(), 0);
     return true;
   }, [setState]);
 
@@ -1911,6 +1938,12 @@ function Studio() {
   coachAfterTakeRef.current = (trackId, buffer, takeName, start) => {
     const t = stateRef.current.tracks.find(x => x.id === trackId);
     if (!t) return;
+    // Style mis tout seul après la prise : respirations de CETTE prise (case du Mix auto),
+    // après le mode auto des respirations s'il est actif (même traitement : rien en double).
+    const breathsOfTake = () => {
+      const clipIds = t.clips.filter(c => !c.isMuted && (c.buffer === buffer || (!!c.bufferId && audioBufferRegistry.get(c.bufferId) === buffer))).map(c => c.id);
+      setTimeout(() => breathsAfterMixStyle({ trackIds: [trackId], ...(clipIds.length ? { clipIds } : {}) }), 400);
+    };
     const role = getVocalRole(t);
     const s = takeStats(buffer);
     const level = s.silent || s.rmsDb < -50 ? 'silent' : s.peakDb > -0.3 ? 'clip' : s.rmsDb < -38 ? 'low' : 'ok';
@@ -1931,6 +1964,7 @@ function Studio() {
       const sid = suggestVocalMixStyle(stateRef.current.bpm, stateRef.current.beatGenre, stateRef.current.beatTitle);
       breakHistory(); // Ctrl+Z retire le style, pas la prise
       handleApplyMixStyle(sid, true);
+      breathsOfTake();
       autoStyleNote = ` J'ai quand même mis le style « ${findVocalMixStyle(sid)?.name} » pour que tu entendes le rendu.`;
     }
     if (s.peakDb > -0.3) {
@@ -1956,6 +1990,7 @@ function Studio() {
       const sid = suggestVocalMixStyle(st.bpm, st.beatGenre, st.beatTitle);
       breakHistory(); // Ctrl+Z retire le style, pas la prise
       handleApplyMixStyle(sid, true);
+      breathsOfTake();
       const style = findVocalMixStyle(sid);
       text += ` Pour que tu entendes ta voix comme sur un vrai son, j'ai mis le style « ${style?.name} », adapté à ce beat. Réécoute ! Tu peux en essayer un autre, ou passer aux backs.`;
       const replayMix = { label: '▶ Réécouter avec le mix', actions: [{ action: 'SEEK', payload: { time: start } }, { action: 'PLAY', payload: {} }] as AIAction[] };
@@ -2668,6 +2703,57 @@ function Studio() {
     }
   }, [setState]);
 
+  /**
+   * Respirations traitées sur une piste gelée : son rendu contient encore
+   * l'ancienne version. On la regèle (même plage d'effets) quand c'est sûr :
+   * aucun VST dans le rendu, ou pont connecté. Le regel n'est pas une étape
+   * d'annulation : Ctrl+Z revient à l'état d'avant (ancien rendu compris).
+   * blocked : pistes à dégeler pour entendre le traitement (VST sans le pont).
+   */
+  const refreezeAfterEdit = useCallback(async (trackIds: string[]): Promise<{ refrozen: string[]; blocked: string[] }> => {
+    // Laisse le traitement arriver dans l'état avant de regarder les pistes.
+    const before = stateRef.current;
+    for (let i = 0; i < 40 && stateRef.current === before; i++) await new Promise(r => setTimeout(r, 25));
+    const refrozen: string[] = [];
+    const blocked: string[] = [];
+    for (const id of trackIds) {
+      const t = stateRef.current.tracks.find(x => x.id === id);
+      if (!t || !isTrackFrozen(t) || t.vstInstrument) continue;
+      // Rendu fait par l'ingé à distance (ses VST) : on ne peut pas le refaire ici.
+      const remoteRender = !!t.remote && stateRef.current.remoteInge?.role === 'artist';
+      if (remoteRender || (preFreezePlugins(t).some(isVst) && !novaBridge.isConnected())) {
+        if (breathsNeedRefreeze(t)) blocked.push(id);
+        continue;
+      }
+      try {
+        await ensureAudioEngine();
+        const renderId = t.frozenClip!.id;
+        const r = await renderTrackFreeze(t, freezeIndex(t));
+        // Modifiée pendant le rendu (ou Annuler) : ce rendu ne correspond plus.
+        const matches = (tt: Track | undefined) => !!tt && !!tt.isFrozen && tt.frozenClip?.id === renderId
+          && freezeSignature(tt.clips || [], tt.plugins || [], r.upTo) === r.sig;
+        if (!matches(stateRef.current.tracks.find(x => x.id === id))) {
+          if (r.clip.bufferId) audioBufferRegistry.remove(r.clip.bufferId);
+          continue;
+        }
+        const oldBufferId = t.frozenClip!.bufferId;
+        setSilently(produce((draft: DAWState) => {
+          const tt = draft.tracks.find(x => x.id === id);
+          // (L'état a pu bouger entre-temps : on revérifie au moment d'appliquer.)
+          if (!matches(tt as Track | undefined)) { setTimeout(() => releaseBufferIfUnused(r.clip.bufferId, []), 0); return; }
+          applyFreezeResult(tt as Track, r, getEditAuthor() || undefined);
+        }));
+        refrozen.push(id);
+        if (oldBufferId && oldBufferId !== r.clip.bufferId) setTimeout(() => releaseBufferIfUnused(oldBufferId, []), 50);
+      } catch (e) {
+        console.warn('[Respirations] Regel impossible', e);
+        const cur = stateRef.current.tracks.find(x => x.id === id);
+        if (cur && breathsNeedRefreeze(cur)) blocked.push(id);
+      }
+    }
+    return { refrozen, blocked };
+  }, [setSilently, releaseBufferIfUnused]);
+
   // --- Effets VST3 : état remonté au projet, rendu à la sauvegarde ----------------
 
   // État d'un VST3 (fenêtre du plugin fermée, chargement) : enregistré dans le
@@ -3172,6 +3258,8 @@ function Studio() {
       }
       if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
       if (mod && (e.key === 's' || e.key === 'S')) { e.preventDefault(); setIsSaveMenuOpen(true); return; }
+      // Exporter : Ctrl+Maj+E (Logic : « Exporter… » ; l'ingé n'a plus à passer par le menu).
+      if (mod && e.shiftKey && (e.key === 'e' || e.key === 'E')) { e.preventDefault(); void handleExportMix(); return; }
 
       if (mod) return; // on ne capture aucun autre raccourci systeme
 
@@ -3435,6 +3523,7 @@ function Studio() {
   const [lyricsOpen, setLyricsOpen] = useState(false);
   // Extrait 30 s / démo taguée
   const [shareOpen, setShareOpen] = useState(false);
+  const [shareAuto, setShareAuto] = useState<'demo' | null>(null);
   // Comping : zones où garder une prise (parties du morceau, boucle).
   const compZones = useMemo<CompZone[]>(() => {
     const zones: CompZone[] = [];
@@ -3591,6 +3680,11 @@ function Studio() {
     onToggle: handleToggleTakeLanes, onAudition: handleAuditionTake, onComp: handleCompSwipe, onKeep: handleKeepTake,
     onRename: handleRenameTake, onDuplicate: handleDuplicateTake, onDelete: handleDeleteTake, onAutoComp: handleAutoComp,
   }), [takeLanesOpen, takeAudition, handleToggleTakeLanes, handleAuditionTake, handleCompSwipe, handleKeepTake, handleRenameTake, handleDuplicateTake, handleDeleteTake, handleAutoComp]);
+  // Piste d'accords (V20) : couloir de l'arrangement (absent quand il est masqué) ; accords publiés pour le piano roll.
+  const chordLane = useChordLaneProp({ chords: state.chords, tracks: state.tracks, bpm: state.bpm, beatsPerBar: state.timeSignature?.numerator,
+    projectKey: state.projectKey, projectScale: state.projectScale, setState });
+  // …et au moteur : l'Harmoniseur suit la piste d'accords (lecture et export).
+  useEffect(() => { chordsStore.set(state.chords); audioEngine.setChords(state.chords); }, [state.chords]);
 
   // Punch-in / punch-out (utils/punch) : points indépendants de la boucle, posés
   // dans la règle ou depuis la sélection ; pré/post-roll réglables ; QuickPunch.
@@ -3656,6 +3750,13 @@ function Studio() {
   };
 
   /** Applique un motif : pads + clip régénérés (une étape d'historique). */
+  // Batterie → MIDI (V20, components/AudioToMidiDialog) : le motif d'une boucle part dans la boîte à rythmes.
+  useEffect(() => {
+    const on = (e: Event) => { const dm = (e as CustomEvent<{ dm?: DrumMachine }>).detail?.dm; if (dm) applyDrumMachineRef.current?.(dm); };
+    window.addEventListener('nova:apply-drum-machine', on);
+    return () => window.removeEventListener('nova:apply-drum-machine', on);
+  }, []);
+  const applyDrumMachineRef = useRef<((dm: DrumMachine) => void) | null>(null);
   const applyDrumMachine = useCallback((dmIn: DrumMachine) => {
     let dm = dmIn;
     setState(produce((draft: DAWState) => {
@@ -3684,6 +3785,7 @@ function Studio() {
       t.drumPads = drumPadsFor(dm) as any;
     }));
   }, [setState]);
+  applyDrumMachineRef.current = applyDrumMachine;
 
   const handleSetDrumKit = useCallback((kitId?: string) => {
     const st = stateRef.current;
@@ -3765,15 +3867,21 @@ function Studio() {
 
   // Première visite du studio : les 3 gestes à connaître.
   const [welcomeOpen, setWelcomeOpen] = useState(false);
+  // Arrivé par un lien de session (invitation, collaboration) : lu au premier rendu, avant
+  // que l'adresse soit nettoyée. La session a déjà son beat : « Choisis un beat » n'a pas de sens.
+  const [arrivedByLink] = useState(() => { try { return !!new URLSearchParams(window.location.search).get('session'); } catch { return false; } });
   useEffect(() => {
     if (showLanding) return;
     let seen = true;
     try { seen = localStorage.getItem('nova_welcome_seen') === '1'; } catch { /* */ }
+    // Lien de session partagée : « Choisis un beat » recouvrait le choix du rôle de l'invité,
+    // puis revenait à la fermeture du panneau. On le garde pour une prochaine visite.
+    if (arrivedByLink) seen = true;
     if (!seen) {
       const t = setTimeout(() => setWelcomeOpen(true), 1200);
       return () => clearTimeout(t);
     }
-  }, [showLanding]);
+  }, [showLanding, arrivedByLink]);
   const closeWelcome = () => {
     setWelcomeOpen(false);
     try { localStorage.setItem('nova_welcome_seen', '1'); } catch { /* */ }
@@ -3944,6 +4052,29 @@ function Studio() {
   }, []);
 
   // --- Collaboration à distance (artiste, ingé son, beatmaker) -----------------------
+  // --- Structure Pro Tools (utils/trackStructure) : liste des pistes, bus nommés, Send View, états d'effets.
+  const [structurePanel, setStructurePanel] = useState<StructurePanel | null>(null);
+  const [sendViewSlot, setSendViewSlot] = useState<number | null>(null);
+  const handleSetPluginState = useCallback(async (trackId: string, pluginId: string, next: 'active' | 'bypass' | 'inactive') => {
+    // VST inactif : son état est relu sur le pont AVANT d'être déchargé (rechargé à l'identique ensuite).
+    if (next === 'inactive') {
+      const node = liveVstNodes.get(pluginId);
+      if (node) { try { await Promise.race([node.syncState(), new Promise(r => setTimeout(r, 1500))]); } catch { /* état déjà connu */ } }
+    }
+    setState(prev => ({
+      ...prev,
+      tracks: prev.tracks.map(t => (t.id !== trackId ? t : { ...t, plugins: t.plugins.map(p => (p.id === pluginId ? withPluginState(p, next) : p)) })),
+    }));
+  }, [setState]);
+  useEffect(() => structureBus.on(cmd => {
+    if (cmd.kind === 'tracks') {
+      setState(prev => { const tracks = cmd.apply(prev.tracks); return tracks === prev.tracks ? prev : { ...prev, tracks }; });
+      if (cmd.label) { setAiNotification(cmd.label); setTimeout(() => setAiNotification(null), 2500); }
+    } else if (cmd.kind === 'pluginState') void handleSetPluginState(cmd.trackId, cmd.pluginId, cmd.state);
+    else if (cmd.kind === 'panel') setStructurePanel(cmd.panel);
+    else if (cmd.kind === 'sendView') setSendViewSlot(cmd.slot);
+  }), [setState, handleSetPluginState, setAiNotification]);
+
   const COLLAB_ACTIVE_KEY = 'nova_collab_active';
   const [collabOpen, setCollabOpen] = useState(false);
   const collabOpenRef = useRef(false);
@@ -3981,6 +4112,9 @@ function Studio() {
   /** Revendications de pistes (« own ») : numéro retenu par piste (la première gagne). */
   const claimSeqRef = useRef(new Map<string, number>());
   const knownMarkersRef = useRef(new Map<string, string>());
+  // Piste d'accords (V20) : accords déjà partagés, et les nôtres pas encore enregistrés par le serveur.
+  const knownChordsRef = useRef(new Map<string, string>());
+  const pendingChordsRef = useRef(new Set<string>());
   /** « Écouter ensemble » : hôte qui guide la lecture (null : chacun écoute de son côté). */
   const [listenTogether, setListenTogether] = useState<{ hostKey: string; hostName: string } | null>(null);
   const listenTogetherRef = useRef(listenTogether);
@@ -4368,6 +4502,20 @@ function Studio() {
         if (!o.replay && upsert.length === 1) setAiNotification(`📍 ${by} a posé le repère « ${String(upsert[0].name || 'Repère').slice(0, 60)} ».`);
         break;
       }
+      case 'chords': {
+        // Piste d'accords (V20) : le plus récent du journal gagne, accord par accord ;
+        // nos accords pas encore enregistrés restent (ils partiront après et gagneront partout).
+        const accept = (id: string) => lwwRef.current.accept(`chord:${id}`, o.seq);
+        const upsert = (Array.isArray(p.upsert) ? p.upsert : []).map((x: any) => ({ ...x, by: x?.by || o.author_name }));
+        const cur = stateRef.current.chords || [];
+        const next = applyChordOps(cur, upsert, p.remove, accept, pendingChordsRef.current);
+        if (JSON.stringify(next) === JSON.stringify(cur)) break;
+        next.forEach(c => { if (!pendingChordsRef.current.has(c.id)) knownChordsRef.current.set(c.id, chordSig(c)); });
+        [...knownChordsRef.current.keys()].forEach(id => { if (!next.some(c => c.id === id) && !pendingChordsRef.current.has(id)) knownChordsRef.current.delete(id); });
+        setState(produce((d: DAWState) => { d.chords = next; }));
+        if (!o.replay && upsert.length) setAiNotification(`🎸 ${o.author_name} a ${upsert.length > 1 ? `posé ${upsert.length} accords` : 'changé un accord'} dans la piste d’accords.`);
+        break;
+      }
       case 'listen': {
         // « Écouter ensemble » lancé (ou arrêté) par l'hôte.
         if (!lwwRef.current.accept('listen', o.seq)) break;
@@ -4565,6 +4713,8 @@ function Studio() {
         else if (kind === 'own' && Array.isArray(op.trackIds)) (op.trackIds as string[]).forEach(id => { if (claimSeqRef.current.get(id) === Infinity) claimSeqRef.current.set(id, seq); });
         else if (kind === 'markers') { [...(Array.isArray(op.upsert) ? op.upsert : []), ...((Array.isArray(op.remove) ? op.remove : []).map((id: string) => ({ id })))].forEach((m: any) => lwwRef.current.note(`marker:${m.id}`, seq)); }
         else if (kind === 'listen') lwwRef.current.note('listen', seq);
+        else if (kind === 'chords') [...(Array.isArray(op.upsert) ? op.upsert : []).map((c: any) => c?.id), ...(Array.isArray(op.remove) ? op.remove : [])]
+          .forEach((id: unknown) => { if (typeof id === 'string') { lwwRef.current.note(`chord:${id}`, seq); pendingChordsRef.current.delete(id); } });
         else if (kind === 'chat' && typeof op.localId === 'string') setCollabMessages(m => m.map(x => (x.id === op.localId ? { ...x, pending: false } : x)));
       };
       client.onStatus(s => setCollabStatus(s));
@@ -4577,6 +4727,8 @@ function Studio() {
       // Le projet en cours devient la base : on ne renvoie pas ce que tout le monde a déjà.
       stateRef.current.tracks.forEach(t => rememberTrack(t));
       knownMarkersRef.current = new Map((stateRef.current.markers || []).map(m => [m.id, markerSig(m)]));
+      knownChordsRef.current = new Map((stateRef.current.chords || []).map(c => [c.id, chordSig(c)]));
+      pendingChordsRef.current.clear();
       setCollab({ client, role, name, host, key: myKey, color: myColor });
       collabRef.current = { client, role, name, host, key: myKey, color: myColor };
       collabRoleStore.set(role);
@@ -4669,6 +4821,8 @@ function Studio() {
     opRecsRef.current.clear();
     seenPeersRef.current.clear();
     knownMarkersRef.current.clear();
+    knownChordsRef.current.clear();
+    pendingChordsRef.current.clear();
     setListenTogether(null);
     setInviteCode(null);
     collabLiveStore.set({ meKey: null, recs: {} });
@@ -4822,6 +4976,17 @@ function Studio() {
     if (!s) return;
     collabRef.current?.client.setPresence({ st: s.catchingUp || s.pending > 2 || !!s.upload ? 'late' : 'ok' });
   }, [collabStatus]);
+
+  // Piste d'accords (V20) : les accords posés / changés / retirés ici partent chez les autres.
+  useEffect(() => {
+    const c = collabRef.current;
+    if (!c) return;
+    const { upsert, remove } = chordChanges(knownChordsRef.current, state.chords || []);
+    if (!upsert.length && !remove.length) return;
+    upsert.forEach(x => { knownChordsRef.current.set(x.id, chordSig(x)); pendingChordsRef.current.add(x.id); });
+    remove.forEach(id => { knownChordsRef.current.delete(id); pendingChordsRef.current.add(id); });
+    c.client.queue('chords', 'chords', { upsert: upsert.map(x => ({ ...x, by: x.by || c.name })), remove });
+  }, [state.chords, collab]);
 
   // Repères : ceux posés / déplacés / supprimés ici partent chez les autres (avec mon nom).
   useEffect(() => {
@@ -6481,7 +6646,7 @@ function Studio() {
         <div className="fixed top-3 inset-x-0 z-[999] flex justify-center px-4 pointer-events-none">
           <div role="status" className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-amber-400/40 bg-[#14161a] px-4 py-3 text-[13px] text-amber-100 shadow-2xl">
             <span>{landingNotice}</span>
-            <button type="button" aria-label="Fermer" onClick={() => setLandingNotice(null)} className="w-8 h-8 shrink-0 rounded-lg bg-white/10 text-white">✕</button>
+            <button type="button" aria-label="Fermer" onClick={() => setLandingNotice(null)} className="nova-hit w-8 h-8 shrink-0 rounded-lg bg-white/10 text-white">✕</button>
           </div>
         </div>
       )}
@@ -6593,6 +6758,7 @@ function Studio() {
           {!isMobile && (
             <>
               {shownView === 'ARRANGEMENT' && (
+                <StructureTracksContext.Provider value={state.tracks}>
                 <ArrangementView
                    tracks={state.tracks} isLoopActive={state.isLoopActive} loopStart={state.loopStart} loopEnd={state.loopEnd}
                    onSetLoop={onSetLoopStable}
@@ -6611,7 +6777,9 @@ function Studio() {
                    punch={state.punch} onUpdatePunch={handleUpdatePunch} editCommands={editCommands} takeLanes={takeLanesApi}
                    markers={state.markers} onAddMarker={handleAddMarker}
                    onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker} onAddRegion={handleAddRegion}
+                   chordLane={chordLane}
                 />
+                </StructureTracksContext.Provider>
               )}
 
               {shownView === 'MIXER' && (
@@ -6624,6 +6792,7 @@ function Studio() {
                     onCopyPluginToTrack={handleCopyPluginToTrack} onReorderPlugins={handleReorderPlugins}
                     trackGroups={state.trackGroups} onCreateGroup={handleCreateGroup}
                     onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup}
+                    sendViewSlot={sendViewSlot}
                  /></Suspense>
               )}
 
@@ -6642,6 +6811,11 @@ function Studio() {
           {!isMobile && (
             <div data-nova-dock className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-28 border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
               <div className="flex shrink-0 items-center gap-2">
+                <button type="button" data-testid="dock-track-list" onClick={() => setStructurePanel(p => (p === 'tracks' ? null : 'tracks'))} aria-pressed={structurePanel === 'tracks'}
+                  title="Liste des pistes (Pro Tools « Track List ») : afficher / masquer, activer, dossiers, VCA"
+                  className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${structurePanel === 'tracks' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
+                  <i className="fas fa-list mr-1.5 text-[10px]" />Pistes{state.tracks.some(t => t.isHidden) ? ` · ${state.tracks.filter(t => t.isHidden).length} masquée${state.tracks.filter(t => t.isHidden).length > 1 ? 's' : ''}` : ''}
+                </button>
                 <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen}
                   title="Collaborer à distance : artiste, ingé son, beatmaker"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${collabOpen ? 'border-violet-400 bg-violet-500/25 text-white' : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'}`}>
@@ -6674,11 +6848,18 @@ function Studio() {
           )}
 
           {/* Mode Mobile - Nouveau système de pages */}
+          {isMobile && state.tracks.some(t => t.isHidden) && (activeMobileTab === 'TRACKS' || activeMobileTab === 'MIXER' || activeMobileTab === 'ARRANGEMENT') && (
+            <button type="button" data-testid="mobile-hidden-tracks" onClick={() => setStructurePanel('hidden')}
+              title="Pistes masquées : les révéler (et les activer)"
+              className="absolute right-2 top-2 z-[60] h-9 rounded-full border border-nv-line bg-nv-raised/95 px-3 text-[11px] font-bold text-nv-ink shadow">
+              <i className="fas fa-eye-slash mr-1.5 text-[10px] text-nv-muted" />Pistes masquées ({state.tracks.filter(t => t.isHidden).length})
+            </button>
+          )}
           {isMobile && (
             <>
               {activeMobileTab === 'TRACKS' && (
                 <MobileTracksPage
-                  tracks={state.tracks}
+                  tracks={mobileTracks}
                   currentTime={state.currentTime}
                   isPlaying={state.isPlaying}
                   isRecording={state.isRecording}
@@ -6696,7 +6877,7 @@ function Studio() {
 
               {activeMobileTab === 'ARRANGEMENT' && (
                 <MobileArrangementPage
-                  tracks={state.tracks}
+                  tracks={mobileTracks}
                   isRecording={state.isRecording}
                   recStartTime={state.recStartTime}
                   currentTime={state.currentTime}
@@ -6726,7 +6907,7 @@ function Studio() {
 
               {activeMobileTab === 'MIXER' && (
                 <MobileMixerPage
-                  tracks={state.tracks}
+                  tracks={mobileTracks}
                   selectedTrackId={state.selectedTrackId}
                   onSelectTrack={id => setState(p => ({ ...p, selectedTrackId: id }))}
                   onUpdateTrack={handleUpdateTrack}
@@ -6756,6 +6937,15 @@ function Studio() {
                 />
               )}
             </>
+          )}
+          {structurePanel && (
+            <Suspense fallback={null}>
+              {structurePanel === 'buses'
+                ? <BusPanel tracks={state.tracks} onClose={() => setStructurePanel(null)}
+                    className={isMobile ? 'fixed inset-x-2 bottom-2 top-16 z-[700]' : 'absolute left-2 top-2 bottom-2 z-[650] w-[380px] max-w-[calc(100%-16px)]'} />
+                : <TrackListPanel tracks={state.tracks} mode={isMobile || structurePanel === 'hidden' ? 'hidden' : 'full'} onClose={() => setStructurePanel(null)}
+                    className={isMobile ? 'fixed inset-x-2 bottom-2 top-16 z-[700]' : 'absolute left-2 top-2 bottom-2 z-[650] w-[340px] max-w-[calc(100%-16px)]'} />}
+            </Suspense>
           )}
         </main>
       </div>
@@ -6805,8 +6995,9 @@ function Studio() {
         open={vocalToolsOpen}
         onClose={() => setVocalToolsOpen(false)}
         currentStyleId={state.vocalMixStyle}
-        onApplyStyle={(id: string) => { if (handleApplyMixStyle(id) !== false) breathsAfterMixStyle(); }}
+        onApplyStyle={(id: string) => { handleApplyMixStyle(id); }}
         breathMixOption={<BreathMixOption />}
+        humTools={<HumQuickButtons onOpen={() => setVocalToolsOpen(false)} />}
         breathTools={<BreathPanelTools canTreat={state.tracks.some(t => t.type === TrackType.AUDIO && t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0)}
           projectAuto={state.breathAuto} onProjectAutoChange={(on) => setState(prev => ({ ...prev, breathAuto: on }))} />}
         canClean={!!getTargetVoiceTrack()?.clips.length}
@@ -6840,7 +7031,7 @@ function Studio() {
       />
 
       <WelcomeSteps
-        open={welcomeOpen}
+        open={welcomeOpen && !proGate && !collabArrival && !collabOpen}
         beatLoaded={!!state.tracks.find(t => t.id === 'instrumental')?.clips.length}
         beatLoading={externalImportNotice?.startsWith('Chargement') ? externalImportNotice.replace(/^Chargement\s*:\s*/, '').replace(/\.{3}$/, '') : null}
         isMobile={isMobile}
@@ -6904,7 +7095,7 @@ function Studio() {
         <div className="fixed inset-0 z-[600] flex items-end sm:items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="casque-titre">
           <div className="w-full max-w-sm rounded-3xl bg-[#14161a] border border-white/10 p-6 text-center shadow-2xl">
             <div className="text-5xl mb-3">🎧</div>
-            <h2 id="casque-titre" className="text-lg font-black text-white mb-2">Tu as un casque ou des écouteurs ?</h2>
+            <h2 id="casque-titre" className="text-lg font-black text-white mb-2">Tu as un casque ou des écouteurs{' '}?</h2>
             <p className="text-sm text-slate-300 mb-5">
               Avec un casque, tu entends ta voix pendant que tu enregistres. Sans casque, on coupe ce retour
               pour éviter le larsen : tu entends seulement le beat.
@@ -6949,7 +7140,7 @@ function Studio() {
           />
         </Suspense>
       )}
-      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={() => { setIsExportMenuOpen(false); setShareOpen(true); }}
+      {isExportMenuOpen && <ExportModal isOpen={isExportMenuOpen} onClose={() => setIsExportMenuOpen(false)} projectState={state} projectKey={state.id} ownedInstrumentIds={user?.owned_instruments || []} onOpenShare={(auto) => { setIsExportMenuOpen(false); setShareAuto(auto || null); setShareOpen(true); }}
         onExported={() => setTimeout(() => showNextStepRef.current('export'), 1800)} />}
       <DrumMachinePanel
         open={drumsOpen}
@@ -6989,9 +7180,10 @@ function Studio() {
       <ProToolsWindows tracks={state.tracks} markers={state.markers} bpm={state.bpm} setState={setState} onEditClip={handleEditClip}
         onSeek={handleSeek} onAddMarker={handleAddMarker} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
         getPlayhead={() => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime)}
-        onOpenShortcuts={() => setShortcutsOpen(true)} projectKey={state.projectKey} projectScale={state.projectScale} />
+        onOpenShortcuts={() => setShortcutsOpen(true)} projectKey={state.projectKey} projectScale={state.projectScale} beatsPerBar={state.timeSignature?.numerator} />
       {/* Respirations : fenêtre, traitement en un clic, mode auto après chaque prise (components/BreathTools). */}
-      <BreathHost tracks={state.tracks} setState={setState} undo={undo} breakHistory={breakHistory} projectAuto={state.breathAuto} isMobile={isMobile} />
+      <BreathHost tracks={state.tracks} setState={setState} undo={undo} breakHistory={breakHistory} projectAuto={state.breathAuto} isMobile={isMobile}
+        onFrozenTreated={refreezeAfterEdit} onUnfreeze={(id) => { void handleFreezeTrack(id); }} />
       <TakeHomeModal
         open={takeHomeOpen}
         onClose={() => setTakeHomeOpen(false)}
@@ -7134,7 +7326,7 @@ function Studio() {
       )}
       {masterNovaOpen && <MasterAssistantPanel tracks={state.tracks} isPlaying={state.isPlaying} onTogglePlay={handleTogglePlay}
         onApply={applyMasterNova} onRemove={removeMasterNova} onSetBypass={bypassMasterNova} onClose={() => setMasterNovaOpen(false)} />}
-      <ShareClipModal open={shareOpen} onClose={() => setShareOpen(false)} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
+      <ShareClipModal open={shareOpen} autoRun={shareAuto} onClose={() => { setShareOpen(false); setShareAuto(null); }} state={state} onBuyBeat={() => openBuyBeat(stateRef.current.tracks)} />
       {(() => {
         const st = synthPanelTrackId ? state.tracks.find(t => t.id === synthPanelTrackId && t.type === TrackType.MIDI && !t.bass808) : undefined;
         if (!st) return null;
@@ -7151,6 +7343,7 @@ function Studio() {
       {addPluginMenu && <ContextMenu x={addPluginMenu.x} y={addPluginMenu.y} onClose={() => setAddPluginMenu(null)} items={AVAILABLE_FX_MENU.map(fx => ({ label: fx.name, icon: fx.icon, onClick: () => handleAddPluginFromContext(addPluginMenu.trackId, fx.id as PluginType, {}, { openUI: true }) }))} />}
       {automationMenu && <ContextMenu x={automationMenu.x} y={automationMenu.y} onClose={() => setAutomationMenu(null)} items={[{ label: `Automate: ${automationMenu.paramName}`, icon: 'fa-wave-square', onClick: handleCreateAutomationLane }]} />}
       
+      <MidiHost state={state} getState={getStateForMidi} setState={setState} pianoRoll={midiEditorOpen} />
       {midiEditorOpen && state.tracks.find(t => t.id === midiEditorOpen.trackId) && (
           <div data-nova-transport="" className="fixed inset-0 z-[250] bg-[#0c0d10] flex flex-col animate-in slide-in-from-bottom-10 duration-200">
              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]"><i className="fas fa-circle-notch fa-spin mr-2"></i>Chargement de l'éditeur…</div>}>

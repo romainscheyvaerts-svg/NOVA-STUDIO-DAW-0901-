@@ -127,8 +127,8 @@ const SideBrowser2: React.FC<SideBrowser2Props> = ({ user, onAddPlugin, onPurcha
 
 const TabButton: React.FC<{ icon: string, label: string, isActive: boolean, onClick: () => void }> = ({ icon, label, isActive, onClick }) => (
   <button 
-    onClick={onClick} 
-    className={`py-3 text-[9px] font-black uppercase rounded-lg transition-all flex flex-col items-center space-y-1 ${isActive ? 'bg-white/10 text-cyan-400' : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'}`}
+    onClick={onClick} aria-pressed={isActive}
+    className={`py-3 text-[9px] font-black uppercase rounded-lg transition-all flex flex-col items-center space-y-1 ${isActive ? 'bg-cyan-500/15 [[data-theme=light]_&]:bg-nv-surface text-cyan-400' : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'}`}
   >
     <i className={`fas ${icon} text-sm`}></i>
     <span>{label}</span>

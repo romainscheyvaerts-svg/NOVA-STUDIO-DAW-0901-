@@ -213,3 +213,30 @@ export function guessKey(notes: PitchNote[]): { root: number; scale: 'MINOR' | '
   }
   return best;
 }
+
+/**
+ * Courbe de hauteur pour l'AFFICHAGE : aux bords d'un passage chanté (juste
+ * avant ou après un blanc), la fenêtre d'analyse chevauche le silence et la
+ * hauteur mesurée fait un petit pic (un demi-ton sur une trame). On masque ces
+ * trames de bord (jusqu'à 2 de chaque côté) quand elles s'écartent de la
+ * tendance des trames voisines. Le son n'est pas concerné : la correction ne
+ * dépend pas de ces trames.
+ */
+export function displayPitchCurve(v: Float32Array, maxJump = 0.3, edge = 2): Float32Array {
+  const out = Float32Array.from(v);
+  const ok = (i: number) => i >= 0 && i < out.length && !Number.isNaN(out[i]);
+  for (let i = 0; i < out.length; i++) {
+    if (!ok(i) || (ok(i - 1) && ok(i + 1))) continue;
+    // Bord d'un passage : on remonte vers l'intérieur (dir = +1 depuis le début, −1 depuis la fin).
+    const dir = ok(i + 1) ? 1 : ok(i - 1) ? -1 : 0;
+    if (!dir) continue;
+    for (let k = 0; k < edge; k++) {
+      const j = i + dir * k, a = j + dir, b = j + 2 * dir;
+      if (!ok(j) || !ok(a) || !ok(b)) break;
+      const pred = out[a] + (out[a] - out[b]);
+      if (Math.abs(out[j] - pred) <= maxJump) break;
+      out[j] = NaN;
+    }
+  }
+  return out;
+}

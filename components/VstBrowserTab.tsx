@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ARA_BADGE_TOOLTIP, araPluginKey } from '../utils/araEdit';
 import { PluginType } from '../types';
 import { novaBridge, BridgePlugin } from '../services/NovaBridge';
 import { useBridgeState } from '../hooks/useNovaBridge';
@@ -91,6 +92,16 @@ const VstBrowserTab: React.FC<{
   };
 
   const add = (p: BridgePlugin) => {
+    // Melodyne / VocAlign (ARA) : en insert ils ne font rien (Melodyne laisse passer le son,
+    // VocAlign rend du silence). Ils s'ouvrent sur un clip, comme dans Pro Tools.
+    const ara = araPluginKey(p.path || p.name);
+    if (ara) {
+      const msg = ara === 'melodyne'
+        ? '🎛️ Melodyne s’utilise sur un clip : clic droit sur ta voix → « Ouvrir dans Melodyne (ARA) ».'
+        : '🎙️ VocAlign s’utilise sur les clips : clic droit sur un double → « Aligner avec VocAlign… ».';
+      try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: msg })); } catch { /* hors navigateur */ }
+      return;
+    }
     onAddPlugin(selectedTrackId || 'track-rec-main', 'VST3', vstMetadata(p), { openUI: true });
   };
 
@@ -144,8 +155,10 @@ const VstBrowserTab: React.FC<{
         >
           <div className="w-8 h-8 rounded-md bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/20 text-xs shrink-0"><i className="fas fa-plug"></i></div>
           <div className="min-w-0">
-            <div className="text-xs font-bold text-white truncate">{p.name}</div>
-            <div className="text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}{p.category === 'Instrument' ? ' · instrument' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}</div>
+            <div className="text-xs font-bold text-white truncate">{p.name}{araPluginKey(p.path || p.name) && (
+              <span title={ARA_BADGE_TOOLTIP} data-testid="ara-badge" className="ml-1.5 rounded border border-fuchsia-400/50 bg-fuchsia-500/15 px-1 py-px align-middle text-[9px] font-black tracking-wider text-fuchsia-200">ARA</span>
+            )}</div>
+            <div className="text-[9px] text-slate-500 truncate">{p.vendor || 'VST3'}{p.category === 'Instrument' ? ' · instrument' : ''}{araPluginKey(p.path || p.name) ? ' · sur un clip (clic droit)' : ''}{p.license === 'nag' ? ' · fenêtre de licence à chaque ouverture' : (p.license || p.scanStatus === 'activation') ? ' · activation de licence à faire' : ''}</div>
           </div>
         </div>
       ))}

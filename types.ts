@@ -100,7 +100,7 @@ export interface PendingUpload {
 
 export type AuthStage = 'LOGIN' | 'REGISTER' | 'VERIFY_EMAIL' | 'FORGOT_PASSWORD';
 
-export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
+export type PluginType = 'REVERB' | 'DELAY' | 'CHORUS' | 'FLANGER' | 'DOUBLER' | 'STEREOSPREADER' | 'COMPRESSOR' | 'AUTOTUNE' | 'DEESSER' | 'DENOISER' | 'PROEQ12' | 'VOCALSATURATOR' | 'MASTERSYNC' | 'LIMITER' | 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX' | 'VST3' | 'SAMPLER' | 'DRUM_SAMPLER' | 'MELODIC_SAMPLER' | 'DRUM_RACK_UI';
 
 export interface PluginMetadata {
   id: string;
@@ -117,9 +117,21 @@ export interface PluginInstance {
   id: string;
   name: string;
   type: PluginType;
+  /**
+   * BYPASS (Pro Tools : Ctrl+clic) : faux = le son passe sans traitement, mais
+   * l'effet reste chargé et sa latence reste compensée (alignement gardé).
+   */
   isEnabled: boolean;
   params: Record<string, any>;
   latency: number; 
+  /**
+   * INACTIF (Pro Tools « Make Inactive », Ctrl+Démarrer+clic ; dans NOVA
+   * Ctrl+Alt+clic ou le menu de l'effet) : l'effet est retiré du graphe audio,
+   * ne consomme rien et n'a plus de latence (PDC recalculée). Ses réglages
+   * (params, stateB64 d'un VST) sont gardés pour le recharger à l'identique.
+   * Absent : actif (anciens projets). Indépendant du bypass. Voir utils/trackStructure.
+   */
+  isInactive?: boolean;
 }
 
 export interface TrackSend {
@@ -131,15 +143,74 @@ export interface TrackSend {
    * avant le fader et le pan de la piste. Absent : post-fader (comme avant).
    */
   preFader?: boolean;
+  /**
+   * Pan propre de l'envoi (-1 … 1), Pro Tools « FMP » éteint. Absent : l'envoi
+   * suit le pan de la piste (comme avant).
+   */
+  pan?: number;
+  /** Mute de l'envoi (Pro Tools) : coupé mais routé (PDC et câblage gardés). */
+  isMuted?: boolean;
+  /** Position de l'envoi dans la piste : 0 = a … 9 = j (Pro Tools : 10 envois). Absent : ordre du tableau. */
+  slot?: number;
+}
+
+/** Bus interne nommé (I/O Setup de Pro Tools) : « LEAD A », « VOX ALL », « RV »… */
+export interface NamedBus {
+  id: string;
+  name: string;
+  /** Mono (1) ou stéréo (2, par défaut). Informatif. */
+  channels?: 1 | 2;
+}
+
+/** Dossier de pistes (Pro Tools 2020.3+). */
+export interface TrackFolder {
+  /** routing = « Routing Folder » (c'est un bus : les enfants y sont routés) ; basic = « Basic Folder » (range seulement). */
+  kind: 'routing' | 'basic';
+  /** Déplié (enfants visibles). Absent : déplié. */
+  isOpen?: boolean;
 }
 
 export interface MidiNote {
   id: string;
-  pitch: number; 
+  pitch: number;
   start: number; 
   duration: number; 
   velocity: number; 
   isSelected?: boolean;
+  /**
+   * Batterie importée d'un .mid (V25) : note General MIDI d'origine (40 = caisse
+   * claire électrique, 44 = charley au pied…). Plusieurs notes GM partagent un pad
+   * de la boîte à rythmes ; à l'export, la note revient à sa valeur d'origine tant
+   * qu'elle n'a pas changé de pad.
+   */
+  gm?: number;
+}
+
+/** Groove (V25, utils/groove) : décalage et vélocité par case de grille, comme le Groove Pool de Live. */
+export interface GrooveTemplate {
+  id: string;
+  name: string;
+  /** Cases par temps : 2 = croches, 4 = doubles-croches. */
+  stepsPerBeat: number;
+  /** Longueur du motif en temps (4 = une mesure en 4/4). */
+  lengthBeats: number;
+  /** Décalage de chaque case, en fraction de case (+ = en retard). */
+  timing: number[];
+  /** Multiplicateur de vélocité de chaque case. */
+  velocity: number[];
+}
+
+/** Groove posé sur un clip MIDI, réglable tant qu'il n'est pas appliqué (Commit Groove). */
+export interface ClipGroove {
+  template: GrooveTemplate;
+  /** Intensité du décalage (0-1, comme Timing dans Live). */
+  amount: number;
+  /** Effet sur la vélocité (0-1). */
+  velocity: number;
+  /** Calage sur la grille avant le groove (0-1, comme Quantize dans Live). */
+  quantize?: number;
+  /** Notes d'origine (sans groove). */
+  source: MidiNote[];
 }
 
 // Crossfade curve types (inspired by Pro Tools)
@@ -247,6 +318,48 @@ export interface Clip {
    * avec le clip (collaboration). Absent : rien de traité.
    */
   breaths?: BreathEdit[];
+  /**
+   * Groove / swing en cours de réglage (V25, utils/groove) : `notes` contient
+   * déjà le résultat (une ancienne version joue donc le clip groové) ; la
+   * source sert à changer de réglage. Absent : pas de groove.
+   */
+  groove?: ClipGroove;
+  /**
+   * Retouche par un plugin ARA (Melodyne, VocAlign) : ce clip joue le son rendu
+   * par le plugin. La prise d'origine et l'état du plugin (archive ARA, les
+   * retouches de Melodyne) sont gardés pour rouvrir, retoucher ou revenir à
+   * l'original. Une ancienne version ignore ce champ et joue le son rendu.
+   * Voir utils/araEdit.
+   */
+  araEdit?: AraEditInfo;
+}
+
+/** Plugin ARA connu de NOVA. */
+export type AraPluginKey = 'melodyne' | 'vocalign';
+
+/** Ce que garde un clip retouché par un plugin ARA. */
+export interface AraEditInfo {
+  version: 1;
+  plugin: AraPluginKey;
+  /** Nom et version du plugin au moment de la retouche (« Melodyne 5.4.2 »). */
+  pluginName?: string;
+  /** Comment le son a été obtenu : ARA (Melodyne), capture (VocAlign), ou alignement NOVA (sans plugin). */
+  mode: 'ara' | 'capture' | 'nova';
+  /** Son d'origine (registre audio). Absent ou introuvable : on ne peut que garder le son rendu. */
+  sourceBufferId?: string;
+  /** Fichier du son d'origine dans un projet sauvegardé (le temps de la sauvegarde). */
+  sourceRef?: string;
+  /** Instant du son d'origine qui correspond au début du son rendu (s). */
+  regionStart: number;
+  /** Identifiant stable du son confié au plugin (relie l'archive au bon son). */
+  persistentId: string;
+  /** État ARA du plugin (base64) : les retouches de Melodyne, pour rouvrir et retoucher. */
+  archive?: string;
+  /** VocAlign : le guide (la lead) sur lequel ce clip a été calé. */
+  guide?: { trackId?: string; clipId?: string; name?: string };
+  sourceWarp?: WarpSettings;
+  sourceName?: string;
+  at?: number;
 }
 
 /** Retouche d'une note (justesse), rangée par instant (secondes dans le son d'origine). */
@@ -318,6 +431,8 @@ export interface FreezeRef {
    * découpes. Sert au journal des éditions pré-effet (utils/preFxEdits).
    */
   srcClipId?: string;
+  /** Respirations traitées (Clip.breaths) déjà contenues dans le rendu. */
+  breaths?: BreathEdit[];
 }
 
 /** Clip tel qu'il était au moment du gel (référence des éditions pré-effet). */
@@ -432,6 +547,8 @@ export interface DrumPad {
 
 export interface Track {
   id: string;
+  /** Canal MIDI d'un .mid importé (V25) : 10 = batterie General MIDI gardée en notes brutes. */
+  midiChannel?: number;
   name: string;
   type: TrackType;
   color: string;
@@ -554,6 +671,28 @@ export interface Track {
    * ancienne version l'ignore et joue simplement le comp. Voir utils/playlists.
    */
   takeMeta?: TakeMeta[];
+
+  // ─── Structure façon Pro Tools (utils/trackStructure.ts) ───────────────────
+  /** Piste masquée (liste des pistes de Pro Tools) : elle joue quand même si elle est active. */
+  isHidden?: boolean;
+  /** Piste inactive (Pro Tools « Make Inactive ») : aucun traitement, aucune voix, routage gardé. */
+  isInactive?: boolean;
+  /** La piste est un dossier (routage ou simple). */
+  folder?: TrackFolder;
+  /** Dossier parent (id de la piste dossier). */
+  parentFolderId?: string;
+  /** La piste est un VCA Master : pas de son, son fader pilote les membres (dB relatifs). */
+  isVca?: boolean;
+  /** VCA qui pilote cette piste (choisi à la main). */
+  vcaId?: string;
+  /** VCA : groupe dont les pistes sont membres (en plus des pistes choisies à la main). */
+  vcaGroupId?: string;
+  /** Entrée : bus interne nommé écouté par cette piste (aux / bus). */
+  inputBusId?: string;
+  /** Sortie : bus interne nommé (prioritaire sur outputTrackId, résolu vers la piste qui l'écoute). */
+  outputBusId?: string;
+  /** Bus nommés de la session (I/O Setup) : rangés sur la piste master seulement. */
+  ioBuses?: NamedBus[];
 }
 
 /** Infos d'un couloir de prise (Track.takeMeta). */
@@ -701,6 +840,12 @@ export interface DAWState {
   punch: PunchSettings;           // NEW
   /** Mode d'édition Pro Tools (Shuffle, Slip, Spot, Grid) et grille : utils/editModes. */
   editMode?: import('./utils/editModes').EditModeSettings;
+  /**
+   * Piste d'accords (V20, Chord Track de Logic) : accords posés à la main ou
+   * détectés sur le beat (utils/chordTrack). Absent : pas d'accords (anciens
+   * projets) ; une ancienne version l'ignore sans rien casser.
+   */
+  chords?: import('./utils/chordDetect').ChordEvent[];
 }
 
 export interface ContextMenuItem {

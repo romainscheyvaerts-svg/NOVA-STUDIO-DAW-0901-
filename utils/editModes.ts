@@ -10,7 +10,8 @@ import { GRID_OPTIONS, gridStepSeconds, snapToGrid } from './grid';
  * - GRID absolu : le début du clip (ou son point de synchro), les bords, la
  *   plage et le curseur se calent sur la grille.
  * - GRID relatif : le clip avance par pas de grille en gardant son décalage
- *   d'origine (une prise un peu en avance reste un peu en avance).
+ *   d'origine (une prise un peu en avance reste un peu en avance) ; un bord
+ *   rogné aussi (Pro Tools : Relative Grid), voir trimEdgeTime.
  * - SHUFFLE : les clips se collent les uns aux autres (utils/shuffle).
  * - SPOT : un clic sur un clip ouvre « Position exacte » (components/SpotDialog).
  *
@@ -240,6 +241,23 @@ export function moveClipStart(a: MoveArgs): number {
     return Math.max(0, res);
   }
   return Math.max(0, toSample(a.rawStart, a.sr));
+}
+
+/**
+ * Bord rogné (début ou fin d'un clip) : Grid absolu → sur la grille ; Grid
+ * relatif → le bord avance par pas de grille en GARDANT son décalage
+ * d'origine (Pro Tools : « Trimming clips while in Relative Grid mode will
+ * trim the clips in grid increments while maintaining their relative offset
+ * from the grid ») ; Slip / Spot / Shuffle → à l'échantillon près.
+ */
+export function trimEdgeTime(a: { settings: Pick<EditModeSettings, 'mode' | 'gridKind' | 'gridSize'>; invert?: boolean; bpm: number; origEdge: number; rawEdge: number; sr?: number }): number {
+  const eff = effectiveMode(a.settings, a.invert);
+  if (eff === 'GRID_ABS') return snapToGrid(a.rawEdge, a.bpm, a.settings.gridSize, true);
+  if (eff === 'GRID_REL') {
+    const step = gridStepSeconds(a.settings.gridSize, a.bpm);
+    return a.origEdge + Math.round((a.rawEdge - a.origEdge) / step) * step;
+  }
+  return toSample(a.rawEdge, a.sr);
 }
 
 /** Pas de la grille courante en secondes. */

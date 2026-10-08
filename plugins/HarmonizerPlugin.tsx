@@ -3,6 +3,8 @@ import { DEFAULT_HARMONIZER, HARMONIZER_PRESETS, HARMONIZER_SPECS, HARMONY_INTER
 import { createHarmonyMath } from '../engine/psolaCore';
 import { NOTE_NAMES_FR, SCALE_CHOICES, noteNameFr, scaleIntervals } from '../utils/scales';
 import { V21Presets, V21Shell, V21Slider, V21Toggle, useV21Meters, useV21Params } from './v21Ui';
+import { useProjectChords } from '../utils/chordTrack';
+import { chordNameFr, chordOfCode, chordSymbol } from '../utils/chordDetect';
 
 /**
  * Fenêtre de l'Harmoniseur NOVA (V21) : 1 à 4 voix d'harmonie dans la gamme
@@ -19,7 +21,13 @@ export const NovaHarmonizerUI: React.FC<{ node: any; initialParams: any; onParam
   const sung: number = m?.pitch?.note || 0;
   const scale = scaleIntervals(p.scale);
   const chromatic = (p.scale || 'CHROMATIC').toUpperCase() === 'CHROMATIC';
-  const harmonyOf = (deg: number) => (sung > 0 ? noteNameFr(sung + math.shiftFor(sung, p.rootKey, scale, deg)) : '—');
+  // Piste d'accords : les voix se calent sur l'accord en cours (lecture et export).
+  const chords = useProjectChords();
+  const hasChords = chords.length > 0;
+  const follow = p.followChords === undefined || +p.followChords >= 0.5;
+  const chordNow: number = follow && hasChords ? (+m?.chord || 0) : 0;
+  const chordNowTxt = (() => { const c = chordOfCode(chordNow); return c ? `${chordSymbol(c.root, c.quality)} (${chordNameFr(c.root, c.quality)})` : ''; })();
+  const harmonyOf = (deg: number) => (sung > 0 ? noteNameFr(sung + math.shiftFor(sung, p.rootKey, scale, deg, chordNow)) : '—');
 
   return (
     <V21Shell type="HARMONIZER" title="Harmoniseur" accent="text-fuchsia-400" node={node} gradient="bg-gradient-to-b from-[#1a1020] to-[#0d0b10]"
@@ -46,7 +54,22 @@ export const NovaHarmonizerUI: React.FC<{ node: any; initialParams: any; onParam
           Note chantée<br /><b className="text-[13px] font-mono text-fuchsia-300" data-nova-harmonizer="note">{sung > 0 ? noteNameFr(sung) : '—'}</b>
         </div>
       </div>
-      {chromatic && <p className="mb-3 text-[10px] text-amber-300">Tonalité inconnue : les intervalles sont fixes (tierce majeure, quinte…). Choisis la gamme du morceau pour des harmonies toujours justes.</p>}
+      {/* Piste d'accords */}
+      <label className={`mb-3 flex items-start gap-2 rounded-xl border p-2.5 ${hasChords ? 'border-fuchsia-400/30 bg-fuchsia-400/[0.06] cursor-pointer' : 'border-white/10 bg-white/[0.03] opacity-70'}`}
+        title="Les voix se calent sur les notes de l'accord en cours (couloir d'accords de l'arrangement) au lieu de la gamme seule : sur un La chanté en La mineur, la tierce donne Do, la quinte Mi ; sur Fa majeur, la voix passe sur les notes de Fa. Le changement d'accord tombe pile sur le temps, en lecture comme à l'export.">
+        <input type="checkbox" className="mt-0.5 accent-fuchsia-400" aria-label="Suivre la piste d'accords" data-nova-harmonizer="follow-chords"
+          checked={follow} onChange={e => set({ followChords: e.target.checked ? 1 : 0 })} />
+        <span className="min-w-0">
+          <span className="block text-[11px] font-bold text-slate-100">Suivre la piste d'accords</span>
+          <span className="block text-[10px] text-slate-400 leading-snug">
+            {!hasChords ? "Aucun accord dans le projet : pose-les dans le couloir d'accords (sous la règle) ou détecte-les sur le beat, les voix les suivront."
+              : !follow ? 'Désactivé : les voix suivent la gamme seule.'
+              : chordNowTxt ? <>Accord en cours : <b className="font-mono text-fuchsia-200" data-nova-harmonizer="chord">{chordNowTxt}</b> — les voix se calent sur ses notes.</>
+              : `${chords.length} accord${chords.length > 1 ? 's' : ''} dans le projet : les voix se calent sur l'accord en cours (lance la lecture pour l'entendre).`}
+          </span>
+        </span>
+      </label>
+      {chromatic && !(follow && hasChords) && <p className="mb-3 text-[10px] text-amber-300">Tonalité inconnue : les intervalles sont fixes (tierce majeure, quinte…). Choisis la gamme du morceau, ou pose les accords, pour des harmonies toujours justes.</p>}
 
       {/* Voix */}
       <div className="mb-2 flex items-center gap-2" title={spec('voices').hint}>

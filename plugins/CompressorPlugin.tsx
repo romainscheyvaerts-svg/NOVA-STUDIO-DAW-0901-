@@ -841,8 +841,8 @@ export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, init
         <CompressorKnob label="Seuil" defaultValue={-18} value={params.threshold} min={-60} max={0} suffix="dB" color="#f97316" onChange={(v) => updateParam('threshold', v)} displayVal={Math.round(params.threshold)} />
         <CompressorKnob label="Ratio" defaultValue={4} value={params.ratio} min={1} max={20} suffix=":1" color="#f97316" onChange={(v) => updateParam('ratio', v)} displayVal={numFr(params.ratio)} />
         <CompressorKnob label="Genou" defaultValue={12} value={params.knee} min={0} max={40} suffix="dB" color="#f97316" onChange={(v) => updateParam('knee', v)} displayVal={Math.round(params.knee)} />
-        <CompressorKnob label="Attack" defaultValue={0.003} value={params.attack} min={0.0001} max={0.1} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('attack', v)} displayVal={numFr(params.attack * 1000)} />
-        <CompressorKnob label="Release" defaultValue={0.25} value={params.release} min={0.01} max={1.0} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('release', v)} displayVal={Math.round(params.release * 1000)} />
+        <CompressorKnob label="Attaque" defaultValue={0.003} value={params.attack} min={0.0001} max={0.1} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('attack', v)} displayVal={numFr(params.attack * 1000)} />
+        <CompressorKnob label="Relâche" defaultValue={0.25} value={params.release} min={0.01} max={1.0} factor={1000} suffix="ms" color="#fff" onChange={(v) => updateParam('release', v)} displayVal={Math.round(params.release * 1000)} />
         <CompressorKnob label="Gain de sortie" defaultValue={1.6} value={params.makeupGain} min={0.25} max={4} factor={1} suffix="" color="#fff" onChange={(v) => updateParam('makeupGain', v)} displayVal={params.autoMakeup ? 'auto' : gainDbFr(params.makeupGain)} disabled={params.autoMakeup} />
       </div>
 

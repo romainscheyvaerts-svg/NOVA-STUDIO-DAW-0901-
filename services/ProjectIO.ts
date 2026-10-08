@@ -90,6 +90,20 @@ export class ProjectIO {
                 }
                 delete sClip.pitchEdit.sourceBufferId;
             }
+            // Melodyne / VocAlign (ARA) : la prise d'origine voyage aussi (l'archive ARA est dans le JSON).
+            const araSrcId = clip.araEdit?.sourceBufferId;
+            if (araSrcId && sClip.araEdit) {
+                const srcBuf = audioBufferRegistry.get(araSrcId);
+                if (srcBuf && !isUnlicensedStoreBeat) {
+                    const filename = `${araSrcId}.wav`;
+                    if (!written.has(filename)) {
+                        written.add(filename);
+                        if (audioFolder) audioFolder.file(filename, wavOf(srcBuf));
+                    }
+                    sClip.araEdit.sourceRef = `audio/${filename}`;
+                }
+                delete sClip.araEdit.sourceBufferId;
+            }
         }
 
         // Samples perso des pads de batterie (V16) : un WAV par sample.
@@ -225,6 +239,24 @@ export class ProjectIO {
                 }
                 // Nettoyage de la ref interne
                 delete clip.audioRef;
+            }
+            // Prise d'origine d'un clip retouché par Melodyne / VocAlign (ARA).
+            const ae = clip.araEdit;
+            if (ae?.sourceRef) {
+                const ref = ae.sourceRef;
+                delete ae.sourceRef;
+                const already = decoded.get(ref);
+                const srcFile = zip.file(ref);
+                if (already) ae.sourceBufferId = already;
+                else if (srcFile) {
+                    try {
+                        const srcBuf = await audioEngine.ctx!.decodeAudioData(await srcFile.async("arraybuffer"));
+                        ae.sourceBufferId = audioBufferRegistry.register(srcBuf, `${clip.id}-ara-origine`);
+                        decoded.set(ref, ae.sourceBufferId);
+                    } catch (e) {
+                        console.warn(`[ProjectIO] Prise d'origine illisible : ${ref}`, e);
+                    }
+                }
             }
             // Prise d'origine d'un clip corrigé en justesse (V19).
             const pe = clip.pitchEdit;

@@ -92,7 +92,7 @@ const ProGateModal: React.FC<Props> = ({ open, reason, onDone }) => {
           </div>
         )}
         {logged && (
-          <button type="button" disabled={!!busy} onClick={subscribe} className={`${btn} bg-violet-500 text-white`}>
+          <button type="button" disabled={!!busy} onClick={subscribe} className={`${btn} bg-violet-600 text-white`}>
             {busy || "M'abonner : 5 € / mois (Stripe, résiliable)"}
           </button>
         )}

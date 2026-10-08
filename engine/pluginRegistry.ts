@@ -17,6 +17,7 @@ import { NovaHarmonizerUI } from '../plugins/HarmonizerPlugin';
 import { NovaVoiceShifterUI } from '../plugins/VoiceShifterPlugin';
 import { NovaTimeFxUI } from '../plugins/TimeFxPlugin';
 import { NovaDjFilterUI, NovaLofiUI } from '../plugins/FilterPlugin';
+import { NovaGateFxUI } from '../plugins/GateFxPlugin';
 
 export interface RegisteredPlugin {
   type: PluginType;
@@ -91,6 +92,18 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     create: (ctx, plugin, bpm) => new V21EffectNode(ctx, 'TIMEFX', plugin.params || {}, bpm),
     ui: NovaTimeFxUI as any,
     automatable: v21Automatable('TIMEFX'),
+  },
+  {
+    type: 'GATEFX',
+    name: 'Gate rythmique',
+    category: 'Effets trap',
+    icon: 'fa-grip-lines-vertical',
+    color: '#e879f9',
+    description: 'Motif de 16 pas calé sur le tempo qui hache le son : stutter, half, triolets, pompe ; profondeur, attaque et relâchement automatisables (comme Gross Beat, le Trance Gate ou ShaperBox).',
+    defaultParams: V21_DEFAULTS.GATEFX,
+    create: (ctx, plugin, bpm) => new V21EffectNode(ctx, 'GATEFX', plugin.params || {}, bpm),
+    ui: NovaGateFxUI as any,
+    automatable: v21Automatable('GATEFX'),
   },
   {
     type: 'DJFILTER',

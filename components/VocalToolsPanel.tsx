@@ -18,6 +18,8 @@ interface VocalToolsPanelProps {
   /** Respirations (components/BreathTools) : bloc des outils voix et case du Mix auto. */
   breathTools?: React.ReactNode;
   breathMixOption?: React.ReactNode;
+  /** « Fredonne → 808 / piano » (V20, components/AudioToMidiDialog). */
+  humTools?: React.ReactNode;
   countIn: boolean;
   onCountInChange: (on: boolean) => void;
   monitoring: boolean;
@@ -53,10 +55,11 @@ const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={label}
       onClick={() => onChange(!checked)}
-      className={`mt-0.5 relative shrink-0 w-11 h-6 rounded-full transition-colors ${checked ? 'bg-cyan-500' : 'bg-white/15'}`}
+      className={`nova-hit mt-0.5 relative shrink-0 w-11 h-6 rounded-full transition-colors ${checked ? 'bg-cyan-500' : 'bg-white/15'}`}
     >
-      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
+      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white [[data-theme=light]_&]:bg-nv-surface shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
     </button>
     <span className="min-w-0" onClick={() => onChange(!checked)}>
       <span className="block text-[13px] font-semibold text-white">{label}</span>
@@ -253,6 +256,7 @@ const VocalToolsPanel: React.FC<VocalToolsPanelProps> = (p) => {
             </button>
             {!p.canClean && <p className="text-[11px] text-slate-500 mt-1">Enregistre d'abord une prise.</p>}
             {p.breathTools}
+            {p.humTools && <div className="mt-2">{p.humTools}</div>}
             <div className="mt-2 divide-y divide-white/5">
               <Toggle
                 checked={p.autoClean}

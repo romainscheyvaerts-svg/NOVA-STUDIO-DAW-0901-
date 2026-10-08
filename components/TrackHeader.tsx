@@ -34,6 +34,7 @@ import { openSynthPanel } from '../utils/synthPanelStore';
 import MonitorControl from './MonitorControl';
 import { PluginName } from './PluginName';
 import TrackInsertStrip from './TrackInsertStrip';
+import { TrackStructureBadge, TrackStructureInline } from './TrackStructure';
 import AutomationModeSelector from './AutomationModeSelector';
 import { automationRecorder } from '../services/AutomationManager';
 import { useLiveParam } from '../utils/automationLiveStore';
@@ -431,6 +432,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
       className={`group border-b border-white/[0.06] px-3 py-2 flex flex-col h-full relative transition-all ${isSelected ? 'bg-white/[0.08]' : 'bg-transparent'} ${isDragOverFX ? 'ring-2 ring-cyan-500 bg-cyan-500/10' : ''} ${frozen ? 'bg-cyan-500/[0.03]' : ''}${isDraggingOver ? 'border-t-2 border-t-cyan-500 bg-cyan-500/5' : ''}`}
       style={{ borderLeft: `3px solid ${track.color}`, boxShadow: isSelected ? `inset 6px 0 14px -10px ${track.color}` : undefined, scrollMarginTop: 44, scrollMarginBottom: 8 }}
     >
+      <TrackStructureBadge track={track} />
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center truncate flex-1 pr-2">
           <div 
@@ -485,6 +487,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 {freezeStale && <i className="fas fa-exclamation-triangle text-[8px] ml-1 text-amber-400" title="Les prises ont changé depuis le rendu : il sera refait à la prochaine sauvegarde sur PC (pont VST)."></i>}
               </span>
             )}
+            {!isRenaming && <TrackStructureInline track={track} />}
             {/* Feat à distance : propriétaire (son nom, sa couleur) et pastille REC quand il enregistre (piste verrouillée). */}
             {!isRenaming && recBy && (
               <span data-testid={`collab-rec-${track.id}`} role="status" title={`${recBy} enregistre sur cette piste : elle est verrouillée pour les autres`}
@@ -507,7 +510,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                 onClick={(e) => { e.stopPropagation(); openSynthPanel(track.id); }}
                 title={`Synthé NOVA : ${track.novaSynth?.name || 'synthé simple'} (ouvrir les sons et réglages)`}
                 aria-label={`Ouvrir le synthé de ${track.name}`}
-                className="shrink-0 w-6 h-6 rounded-md border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
+                className="nova-hit-tactile shrink-0 w-6 h-6 rounded-md border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
                 <i className="fas fa-sliders-h text-[9px]"></i>
               </button>
             )}
@@ -719,7 +722,7 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
                   <div className="flex-1 h-8 relative border-r border-cyan-500/20 hover:bg-white/5 transition-colors">
                       <div className="absolute inset-0 flex flex-col justify-center px-2 pointer-events-none">
                           <span className="text-[9px] font-black uppercase text-cyan-100 truncate">
-                              {instrumentPlugin.type === 'DRUM_RACK_UI' ? 'Drum Rack 30' : (instrumentPlugin.type === 'DRUM_SAMPLER' ? 'Single Drum' : 'Melodic Sampler')}
+                              {instrumentPlugin.type === 'DRUM_RACK_UI' ? 'Batterie 30 pads' : (instrumentPlugin.type === 'DRUM_SAMPLER' ? 'Échantillon de batterie' : 'Échantillonneur mélodique')}
                           </span>
                           <span className="text-[7px] text-slate-500 font-mono">Instrument</span>
                       </div>

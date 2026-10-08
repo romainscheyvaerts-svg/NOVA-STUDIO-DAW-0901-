@@ -22,7 +22,7 @@ export interface V21ParamSpec {
 
 export interface V21Preset { id: string; name: string; hint: string; params: Record<string, number | string> }
 
-export type V21Type = 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI';
+export type V21Type = 'HARMONIZER' | 'VOICESHIFT' | 'TIMEFX' | 'DJFILTER' | 'LOFI' | 'GATEFX';
 
 // ---------------------------------------------------------------------------
 // Harmoniseur
@@ -64,6 +64,8 @@ export const DEFAULT_HARMONIZER = {
   voices: 2, v1Deg: 2, v1Level: -4, v1Pan: -0.35, v2Deg: 4, v2Level: -5, v2Pan: 0.35,
   v3Deg: -3, v3Level: -6, v3Pan: -0.6, v4Deg: 7, v4Level: -8, v4Pan: 0.6,
   dry: 0, humanize: 0.35, formant: 0, preserve: 1, rootKey: 0, scale: 'CHROMATIC', isEnabled: true,
+  /** Suivre la piste d'accords (1 = oui, par défaut ; sans accord posé, la gamme seule). */
+  followChords: 1,
 };
 
 export const HARMONIZER_PRESETS: V21Preset[] = [
@@ -180,18 +182,63 @@ export const LOFI_PRESETS: V21Preset[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Gate rythmique (Gross Beat / Trance Gate / ShaperBox)
+// ---------------------------------------------------------------------------
+
+export const GATE_STEPS = 16;
+const stepIds = Array.from({ length: GATE_STEPS }, (_, i) => `s${i + 1}`);
+/** Motif (16 niveaux) → réglages s1…s16. */
+export const gatePattern = (levels: number[]): Record<string, number> =>
+  Object.fromEntries(stepIds.map((id, i) => [id, Math.max(0, Math.min(1, levels[i % levels.length] ?? 1))]));
+/** Réglages → motif (16 niveaux). */
+export const gateSteps = (p: Record<string, any>): number[] => stepIds.map(id => (Number.isFinite(+p[id]) ? +p[id] : 1));
+
+/** Divisions proposées (pas par temps). */
+export const GATE_RATES: { rate: number; label: string; hint: string }[] = [
+  { rate: 2, label: '1/8', hint: 'Croches : 2 pas par temps, 16 pas = 2 mesures.' },
+  { rate: 3, label: '1/8 T', hint: 'Croches en triolets : 3 pas par temps (12 pas = une mesure).' },
+  { rate: 4, label: '1/16', hint: 'Doubles croches : 4 pas par temps, 16 pas = une mesure (le plus courant).' },
+  { rate: 6, label: '1/16 T', hint: 'Doubles croches en triolets : 6 pas par temps, les rolls trap.' },
+  { rate: 8, label: '1/32', hint: 'Triples croches : 8 pas par temps, 16 pas = 2 temps (stutter rapide).' },
+];
+export const gateRateLabel = (rate: number) => GATE_RATES.find(r => r.rate === Math.round(rate))?.label || `${Math.round(rate)} pas/temps`;
+
+export const GATEFX_SPECS: V21ParamSpec[] = [
+  { id: 'rate', label: 'Division', min: 1, max: 8, step: 1, unit: 'pas', hint: 'Durée d’un pas, calée sur le tempo du projet : 1/16 = double croche (Step size de Gross Beat / ShaperBox).' },
+  { id: 'length', label: 'Longueur du motif', min: 1, max: 16, step: 1, unit: 'pas', hint: 'Nombre de pas avant que le motif recommence : 12 pour une mesure en triolets de croches, 16 pour une mesure en doubles croches.' },
+  { id: 'depth', label: 'Profondeur', min: 0, max: 1, step: 0.01, unit: '%', hint: '100 % = un pas fermé est muet ; 50 % = il est seulement baissé (effet de pompe doux).' },
+  { id: 'attack', label: 'Attaque', min: 0, max: 50, step: 0.5, unit: 'ms', hint: 'Temps d’ouverture au début d’un pas ouvert : 1 à 3 ms = coupe nette sans clic, plus long = attaque adoucie.' },
+  { id: 'release', label: 'Relâchement', min: 1, max: 300, step: 1, unit: 'ms', hint: 'Temps de fermeture à la fin d’un pas : court = hachage sec (stutter), long = effet de pompe façon sidechain.' },
+  ...stepIds.map((id, i) => ({ id, label: `Pas ${i + 1}`, min: 0, max: 1, step: 0.05, unit: '%', hint: `Niveau du pas ${i + 1} : 0 = fermé, 100 % = ouvert. Automatisable pour faire évoluer le motif.` })),
+];
+
+const OPEN = Array(16).fill(1);
+export const DEFAULT_GATEFX = { rate: 4, length: 16, depth: 1, attack: 2, release: 20, ...gatePattern([1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1]), isEnabled: true };
+
+export const GATEFX_PRESETS: V21Preset[] = [
+  { id: 'trance-16', name: 'Trance gate 1/16', hint: 'Le hachage classique en doubles croches, comme le Trance Gate.', params: { rate: 4, length: 16, depth: 1, attack: 2, release: 20, ...gatePattern([1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1]) } },
+  { id: 'stutter-32', name: 'Stutter 1/32', hint: 'Hachage très rapide en triples croches : l’effet « stutter » des transitions trap.', params: { rate: 8, length: 16, depth: 1, attack: 0.5, release: 4, ...gatePattern([1, 0]) } },
+  { id: 'stutter-16', name: 'Stutter 1/16', hint: 'Une double croche sur deux : roulement haché régulier.', params: { rate: 4, length: 16, depth: 1, attack: 1, release: 8, ...gatePattern([1, 0]) } },
+  { id: 'half', name: 'Half (un temps sur deux)', hint: 'Le son ne passe qu’un temps sur deux : sensation de demi-temps, à poser avant le drop.', params: { rate: 4, length: 8, depth: 1, attack: 2, release: 25, ...gatePattern([1, 1, 1, 1, 0, 0, 0, 0]) } },
+  { id: 'triolets', name: 'Triolets', hint: 'Deux triolets de croches sur trois : le flow en triolets (« Migos »).', params: { rate: 3, length: 12, depth: 1, attack: 2, release: 18, ...gatePattern([1, 1, 0]) } },
+  { id: 'rolls', name: 'Rolls 1/16 T', hint: 'Doubles croches en triolets, deux sur trois : comme un roll de charley trap.', params: { rate: 6, length: 12, depth: 1, attack: 1, release: 10, ...gatePattern([1, 1, 0]) } },
+  { id: 'pompe', name: 'Pompe (sidechain)', hint: 'Le son se creuse sur chaque temps puis remonte : la pompe d’un sidechain sur le kick, sans kick.', params: { rate: 4, length: 4, depth: 0.85, attack: 40, release: 60, ...gatePattern([0, 1, 1, 1]) } },
+  { id: 'ouvert', name: 'Ouvert (neutre)', hint: 'Tous les pas ouverts : aucun effet. Point de départ pour dessiner ton motif.', params: { rate: 4, length: 16, depth: 1, attack: 2, release: 20, ...gatePattern(OPEN) } },
+];
+
+// ---------------------------------------------------------------------------
 
 export const V21_SPECS: Record<V21Type, V21ParamSpec[]> = {
-  HARMONIZER: HARMONIZER_SPECS, VOICESHIFT: VOICESHIFT_SPECS, TIMEFX: TIMEFX_SPECS, DJFILTER: DJFILTER_SPECS, LOFI: LOFI_SPECS,
+  HARMONIZER: HARMONIZER_SPECS, VOICESHIFT: VOICESHIFT_SPECS, TIMEFX: TIMEFX_SPECS, DJFILTER: DJFILTER_SPECS, LOFI: LOFI_SPECS, GATEFX: GATEFX_SPECS,
 };
 
 export const V21_PRESETS: Record<V21Type, V21Preset[]> = {
-  HARMONIZER: HARMONIZER_PRESETS, VOICESHIFT: VOICESHIFT_PRESETS, TIMEFX: TIMEFX_PRESETS, DJFILTER: DJFILTER_PRESETS, LOFI: LOFI_PRESETS,
+  HARMONIZER: HARMONIZER_PRESETS, VOICESHIFT: VOICESHIFT_PRESETS, TIMEFX: TIMEFX_PRESETS, DJFILTER: DJFILTER_PRESETS, LOFI: LOFI_PRESETS, GATEFX: GATEFX_PRESETS,
 };
 
 export const V21_DEFAULTS: Record<V21Type, () => Record<string, any>> = {
   HARMONIZER: () => ({ ...DEFAULT_HARMONIZER }), VOICESHIFT: () => ({ ...DEFAULT_VOICESHIFT }), TIMEFX: () => ({ ...DEFAULT_TIMEFX }),
-  DJFILTER: () => ({ ...DEFAULT_DJFILTER }), LOFI: () => ({ ...DEFAULT_LOFI }),
+  DJFILTER: () => ({ ...DEFAULT_DJFILTER }), LOFI: () => ({ ...DEFAULT_LOFI }), GATEFX: () => ({ ...DEFAULT_GATEFX }),
 };
 
 /** Ramène des réglages reçus (fenêtre, automation, projet ancien) dans leurs bornes. Les clés inconnues passent telles quelles. */

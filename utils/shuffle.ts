@@ -265,3 +265,70 @@ export function closeRange(clips: Clip[], s: number, e: number, o: ShuffleOption
   touchingAt(out, s, touched);
   return recrossfade(out, touched, o);
 }
+
+/** Piste vue par un déplacement Shuffle de groupe (ordre de l'arrangement). */
+export interface ShuffleTrackIn {
+  id: string;
+  /** Genre de piste : un clip ne change de piste que vers une piste du même genre (audio / MIDI). */
+  kind: string;
+  clips: Clip[];
+}
+
+/**
+ * Déplace TOUTE une sélection en Shuffle, comme Pro Tools : les clips choisis
+ * quittent leurs pistes (chaque piste se recolle), puis s'insèrent ensemble au
+ * bord le plus proche sur la piste d'arrivée (la suite avance), en gardant
+ * leurs écarts. `trackShift` : nombre de pistes vers le bas (négatif : vers le
+ * haut) ; refusé (0) si une piste d'arrivée manque ou n'est pas du même genre.
+ * Toujours calculé depuis l'état du DÉBUT du glissement. Renvoie les nouvelles
+ * listes des pistes touchées : à appliquer en UN setState (une annulation).
+ */
+export function shuffleMoveGroup(
+  tracks: ShuffleTrackIn[], ids: string[], anchorId: string, rawStart: number, trackShift = 0, o: ShuffleOptions = {},
+): { tracks: Map<string, Clip[]>; start: number; trackShift: number } | null {
+  const wanted = new Set(ids);
+  wanted.add(anchorId);
+  const ai = tracks.findIndex(t => t.clips.some(c => c.id === anchorId));
+  if (ai < 0) return null;
+  const sources = tracks.map((t, i) => ({ i, sel: t.clips.filter(c => wanted.has(c.id)) })).filter(s => s.sel.length);
+  // Piste d'arrivée valable pour chaque piste de départ ? Sinon, on reste sur place.
+  const ok = (sh: number) => sources.every(s => { const d = tracks[s.i + sh]; return !!d && d.kind === tracks[s.i].kind; });
+  const shift = trackShift && ok(trackShift) ? trackShift : 0;
+
+  // 1. Retrait : crossfades défaits, clips sortis, chaque piste se recolle.
+  const work = new Map<string, Clip[]>();
+  const moved = new Map<number, Clip[]>();
+  for (const s of sources) {
+    let out = tracks[s.i].clips;
+    for (const c of s.sel) out = detachCrossfades(out, c.id);
+    const sel = out.filter(c => wanted.has(c.id));
+    for (const r of [...sel].sort((a, b) => b.start - a.start)) {
+      out = out.filter(c => c.id !== r.id);
+      out = shiftFrom(out, endOf(r), -r.duration);
+    }
+    work.set(tracks[s.i].id, out);
+    moved.set(s.i, sel);
+  }
+  const all = Array.from(moved.values()).flat();
+  const blockStart = Math.min(...all.map(c => c.start));
+  const anchor = all.find(c => c.id === anchorId)!;
+  const anchorOff = anchor.start - blockStart;
+
+  // 2. Point d'insertion : bord le plus proche sur la piste d'arrivée du clip saisi
+  //    (ou sa place d'origine, ou le début du morceau sur une piste vide).
+  const dest = tracks[ai + shift];
+  const destClips = work.get(dest.id) ?? dest.clips;
+  const candidates = [blockStart, ...shuffleBoundaries(destClips), ...(destClips.some(c => !c.isMuted) ? [] : [0])];
+  const want = rawStart - anchorOff;
+  let at = candidates[0], best = Infinity;
+  for (const b of candidates) { const d = Math.abs(b - want); if (d < best - 1e-9) { best = d; at = b; } }
+
+  // 3. Insertion : chaque piste reçoit ses clips, mêmes écarts que dans la sélection.
+  for (const s of sources) {
+    const d = tracks[s.i + shift];
+    const base = work.get(d.id) ?? d.clips;
+    const placed = moved.get(s.i)!.map(c => ({ ...c, start: at + (c.start - blockStart) }));
+    work.set(d.id, shuffleInsert(base, placed, at, o));
+  }
+  return { tracks: work, start: at + anchorOff, trackShift: shift };
+}

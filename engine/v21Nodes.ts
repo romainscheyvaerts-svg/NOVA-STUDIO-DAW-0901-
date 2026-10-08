@@ -10,6 +10,7 @@
 import { createPsolaCore, createHarmonyMath, psolaLatencySamples } from './psolaCore';
 import { createTimeFxCore } from './timeFxCore';
 import { createDjFilterCore, createLofiCore } from './colorFxCore';
+import { createGateCore } from './gateCore';
 import { loadWorkletModule } from '../plugins/vocalDspUtils';
 import { V21Type, V21_DEFAULTS, V21_SPECS, sanitizeV21 } from './v21Params';
 import { scaleIntervals } from '../utils/scales';
@@ -25,12 +26,21 @@ import { scaleIntervals } from '../utils/scales';
  * autres réglages (gamme, tempo) passent par message. `toCore` (autonome,
  * sérialisé) traduit les réglages de l'effet pour le cœur.
  */
-const processorCode = (name: string, defs: string, make: string, toCore: string, descriptors: { name: string; defaultValue: number; minValue: number; maxValue: number }[]) => `
+type Desc = { name: string; defaultValue: number; minValue: number; maxValue: number; int?: boolean };
+/**
+ * `chord` (Harmoniseur seulement) : AudioParam a-rate « accord en cours »
+ * (codé tonique × 4096 + masque, 0 = aucun), programmé d'avance par le moteur
+ * sur la piste d'accords, en lecture comme à l'export : lu à l'échantillon
+ * près et remis au cœur (`chordIn`), qui le range avec l'entrée.
+ */
+const processorCode = (name: string, defs: string, make: string, toCore: string, descriptors: Desc[], chord = false) => `
 ${defs}
 const __make = (${make});
 const __toCore = (${toCore});
-const __desc = ${JSON.stringify(descriptors.map(d => ({ ...d, automationRate: 'k-rate' })))};
-const __names = __desc.map(d => d.name);
+const __desc = ${JSON.stringify([...descriptors.map(d => ({ ...d, automationRate: 'k-rate' })), ...(chord ? [{ name: 'chord', defaultValue: 0, minValue: 0, maxValue: 49151, automationRate: 'a-rate' }] : [])])};
+const __names = __desc.filter(d => d.name !== 'chord').map(d => d.name);
+// Réglages à pas entier (interrupteurs, division…) : arrondis comme sanitizeV21, même quand une voie les fait glisser.
+const __ints = __desc.filter(d => d.name !== 'chord').map(d => !!d.int);
 class NovaV21Processor extends AudioWorkletProcessor {
   static get parameterDescriptors() { return __desc; }
   constructor(options) {
@@ -51,11 +61,14 @@ class NovaV21Processor extends AudioWorkletProcessor {
     };
   }
   process(inputs, outputs, parameters) {
+    // Effets calés sur le morceau (gate) : position dans le morceau au début du bloc.
+    if (this.core.setClock && parameters.originHi) this.core.setClock(currentTime - (parameters.originHi[0] + parameters.originLo[0]));
     for (let i = 0; i < __names.length; i++) {
       const a = parameters[__names[i]];
-      if (a && a.length) { const v = a[0]; if (this.ep[__names[i]] !== v) { this.ep[__names[i]] = v; this.dirty = true; } }
+      if (a && a.length) { const v = __ints[i] ? Math.round(a[0]) : a[0]; if (this.ep[__names[i]] !== v) { this.ep[__names[i]] = v; this.dirty = true; } }
     }
     if (this.dirty) { this.dirty = false; this.core.setParams(__toCore(this.ep, sampleRate)); }
+    if (this.core.chordIn && parameters.chord) this.core.chordIn(parameters.chord);
     const out = outputs[0];
     if (!out || !out[0]) return true;
     const n = out[0].length;
@@ -72,7 +85,7 @@ try { registerProcessor('${name}', NovaV21Processor); } catch (e) {}
 `;
 
 const PSOLA_DEFS = `const createHarmonyMath = (${createHarmonyMath.toString()});\nconst createPsolaCore = (${createPsolaCore.toString()});`;
-const PSOLA_MAKE = `(sr) => { const c = createPsolaCore(sr, createHarmonyMath()); c.meters = () => ({ pitch: c.pitch() }); return c; }`;
+const PSOLA_MAKE = `(sr) => { const c = createPsolaCore(sr, createHarmonyMath()); c.meters = () => ({ pitch: c.pitch(), chord: c.chord() }); return c; }`;
 
 /**
  * Réglages de l'harmoniseur → voix du cœur PSOLA. Autonome (sérialisé dans
@@ -96,7 +109,9 @@ export function harmonizerToCore(p: Record<string, any>) {
     };
   });
   const scale = Array.isArray(p._scale) && p._scale.length ? p._scale : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-  return { voices, dry: db(p.dry === undefined ? 0 : p.dry), root: ((Math.round(+p.rootKey || 0) % 12) + 12) % 12, scale, stereo: false };
+  // Suivre la piste d'accords : coché par défaut (sans accord posé, la gamme seule).
+  const follow = p.followChords === undefined ? true : (+p.followChords >= 0.5 || p.followChords === true);
+  return { voices, dry: db(p.dry === undefined ? 0 : p.dry), root: ((Math.round(+p.rootKey || 0) % 12) + 12) % 12, scale, stereo: false, follow };
 }
 
 /** Réglages de « Voix grave / aiguë » → une voix stéréo du cœur PSOLA (autonome). */
@@ -117,6 +132,12 @@ export function timeFxToCore(p: Record<string, any>) {
 export function djFilterToCore(p: Record<string, any>) {
   return { filter: +p.filter || 0, resonance: p.resonance === undefined ? 0.25 : +p.resonance, slope: +p.slope >= 18 ? 24 : 12, output: +p.output || 0 };
 }
+/** Réglages du gate rythmique → cœur (autonome : s1…s16 → motif). */
+export function gateToCore(p: Record<string, any>) {
+  const steps: number[] = [];
+  for (let i = 1; i <= 16; i++) { const v = +p['s' + i]; steps.push(Number.isFinite(v) ? v : 1); }
+  return { steps, rate: +p.rate || 4, length: +p.length || 16, depth: p.depth === undefined ? 1 : +p.depth, attack: p.attack === undefined ? 2 : +p.attack, release: p.release === undefined ? 20 : +p.release, bpm: +p.bpm || 120 };
+}
 export function lofiToCore(p: Record<string, any>) {
   return { bits: +p.bits || 16, rate: +p.rate || 48000, lowCut: +p.lowCut || 20, highCut: +p.highCut || 20000, drive: +p.drive || 0, noise: +p.noise || 0, mix: p.mix === undefined ? 1 : +p.mix, output: +p.output || 0 };
 }
@@ -129,26 +150,46 @@ interface WorkletSpec {
   audioParams: string[];
   /** Latence (échantillons) ; 0 par défaut. */
   latencySamples?: (sr: number) => number;
+  /** Calé sur la ligne de temps du morceau (originHi / originLo). */
+  timeline?: boolean;
+  /** AudioParam « chord » (accord en cours, piste d'accords). */
+  chord?: boolean;
 }
 
 const descriptorsOf = (type: V21Type) => {
   const d = V21_DEFAULTS[type]();
-  return V21_SPECS[type].map(s => ({ name: s.id, defaultValue: typeof d[s.id] === 'number' ? d[s.id] : s.min, minValue: s.min, maxValue: s.max }));
+  return V21_SPECS[type].map(s => ({ name: s.id, defaultValue: typeof d[s.id] === 'number' ? d[s.id] : s.min, minValue: s.min, maxValue: s.max, ...(s.step >= 1 ? { int: true } : {}) }));
 };
 
-const makeSpec = (type: V21Type, processor: string, defs: string, make: string, toCore: (p: Record<string, any>) => any, latencySamples?: (sr: number) => number): WorkletSpec => {
+/**
+ * Origine de la ligne de temps (instant du contexte où le morceau commence), en
+ * deux AudioParam (partie entière + reste) : un seul float32 perdrait la
+ * précision après quelques heures de contexte.
+ */
+const TIMELINE_DESC = [
+  { name: 'originHi', defaultValue: 0, minValue: -1e9, maxValue: 1e9 },
+  { name: 'originLo', defaultValue: 0, minValue: -2, maxValue: 2 },
+];
+
+const makeSpec = (type: V21Type, processor: string, defs: string, make: string, toCore: (p: Record<string, any>) => any, latencySamples?: (sr: number) => number, opts: { timeline?: boolean; chord?: boolean } = {}): WorkletSpec => {
   const desc = descriptorsOf(type);
-  return { key: `${processor}-2`, processor, code: processorCode(processor, defs, make, toCore.toString(), desc), audioParams: desc.map(d => d.name), latencySamples };
+  const timeline = !!opts.timeline, chord = !!opts.chord;
+  const all = timeline ? [...desc, ...TIMELINE_DESC] : desc;
+  // Clé (et nom du processeur) versionnée : un module déjà chargé sous l'ancien code n'est pas réutilisé.
+  const proc = chord ? `${processor}-c` : processor;
+  return { key: `${proc}-2`, processor: proc, code: processorCode(proc, defs, make, toCore.toString(), all, chord), audioParams: desc.map(d => d.name), latencySamples, timeline, chord };
 };
 
 let SPECS: Record<V21Type, WorkletSpec> | null = null;
 const specs = (): Record<V21Type, WorkletSpec> => {
   if (!SPECS) SPECS = {
-    HARMONIZER: makeSpec('HARMONIZER', 'nova-v21-harmonizer', PSOLA_DEFS, PSOLA_MAKE, harmonizerToCore, psolaLatencySamples),
+    HARMONIZER: makeSpec('HARMONIZER', 'nova-v21-harmonizer', PSOLA_DEFS, PSOLA_MAKE, harmonizerToCore, psolaLatencySamples, { chord: true }),
     VOICESHIFT: makeSpec('VOICESHIFT', 'nova-v21-voiceshift', PSOLA_DEFS, PSOLA_MAKE, voiceShiftToCore, psolaLatencySamples),
     TIMEFX: makeSpec('TIMEFX', 'nova-v21-timefx', `const createTimeFxCore = (${createTimeFxCore.toString()});`, `(sr) => { const c = createTimeFxCore(sr); c.meters = () => c.state(); return c; }`, timeFxToCore),
     DJFILTER: makeSpec('DJFILTER', 'nova-v21-djfilter', `const createDjFilterCore = (${createDjFilterCore.toString()});`, `(sr) => { const c = createDjFilterCore(sr); c.meters = () => ({ cutoff: c.cutoffHz() }); return c; }`, djFilterToCore),
     LOFI: makeSpec('LOFI', 'nova-v21-lofi', `const createLofiCore = (${createLofiCore.toString()});`, `(sr) => createLofiCore(sr)`, lofiToCore),
+    // Aucune latence (gain par échantillon) ; motif calé sur la ligne de temps du morceau.
+    GATEFX: makeSpec('GATEFX', 'nova-v21-gate', `const createGateCore = (${createGateCore.toString()});`, `(sr) => createGateCore(sr)`, gateToCore, undefined, { timeline: true }),
   };
   return SPECS;
 };
@@ -165,6 +206,8 @@ export class V21EffectNode {
   private meters: any = {};
   private metersAt = 0;
   private failed = false;
+  /** Instant du contexte où le morceau commence (effets calés sur la ligne de temps). */
+  private origin = 0;
 
   constructor(ctx: BaseAudioContext, type: V21Type, params?: Record<string, any>, bpm?: number) {
     this.ctx = ctx;
@@ -183,6 +226,7 @@ export class V21EffectNode {
       await loadWorkletModule(this.ctx, this.spec.key, this.spec.code);
       const parameterData: Record<string, number> = {};
       for (const k of this.spec.audioParams) if (Number.isFinite(+this.params[k])) parameterData[k] = +this.params[k];
+      if (this.spec.timeline) { const hi = Math.floor(this.origin); parameterData.originHi = hi; parameterData.originLo = this.origin - hi; }
       this.worklet = new AudioWorkletNode(this.ctx, this.spec.processor, {
         numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
         channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
@@ -221,6 +265,32 @@ export class V21EffectNode {
     if (Object.keys(msg).length) this.worklet.port.postMessage({ params: msg });
   }
 
+  /** AudioParam d'un réglage automatisable (lecture et export y programment la voie d'avance), sinon null. */
+  public automationParam(key: string): AudioParam | null {
+    if (!this.worklet || !this.spec.audioParams.includes(key)) return null;
+    return (this.worklet.parameters as any).get(key) ?? null;
+  }
+
+  /** Effet calé sur le morceau (gate rythmique) ? */
+  public get followsTimeline(): boolean { return !!this.spec.timeline; }
+
+  /**
+   * Cale l'effet sur la ligne de temps : `origin` = instant du contexte qui
+   * correspond au début du morceau, MOINS l'avance de compensation de latence
+   * des effets qui suivent (le son arrive ici en avance d'autant). Appelé au
+   * départ de la lecture, au bouclage (`when` = instant du saut) et au début
+   * de l'export (mêmes motifs aux deux).
+   */
+  public syncTimeline(origin: number, when?: number) {
+    if (!this.spec.timeline || !Number.isFinite(origin)) return;
+    this.origin = origin;
+    if (!this.worklet) return;
+    const hi = Math.floor(origin);
+    const at = Math.max(this.ctx.currentTime, when ?? 0);
+    const P = this.worklet.parameters as any;
+    try { P.get('originHi').setValueAtTime(hi, at); P.get('originLo').setValueAtTime(origin - hi, at); } catch { /* contexte fermé */ }
+  }
+
   /** La gamme (texte) est traduite ici en intervalles pour le cœur. */
   private withScale(p: Record<string, any>) {
     if (this.type === 'HARMONIZER') p._scale = scaleIntervals(p.scale);
@@ -228,6 +298,22 @@ export class V21EffectNode {
   }
 
   public getParams() { const { _scale, ...rest } = this.params; return rest; }
+
+  /**
+   * AudioParam « accord en cours » (Harmoniseur ; null sinon ou tant que
+   * l'AudioWorklet n'est pas prêt). Le moteur y programme la piste d'accords
+   * d'avance (encodeChord), en avance de la latence comme l'automation.
+   */
+  public chordParam(): AudioParam | null {
+    if (!this.spec.chord || !this.worklet) return null;
+    return ((this.worklet.parameters as any).get('chord') as AudioParam | undefined) || null;
+  }
+
+  /** Vrai : l'harmoniseur suit la piste d'accords (réglage « Suivre la piste d'accords », coché par défaut). */
+  public followsChords(): boolean {
+    const f = this.params.followChords;
+    return this.spec.chord === true && (f === undefined || f === true || +f >= 0.5);
+  }
 
   /** Mesures récentes (hauteur détectée, vitesse de bande, coupure) ; vides après 0,5 s sans nouvelles. */
   public getMeters(): any { return Date.now() - this.metersAt > 500 ? {} : this.meters; }

@@ -268,7 +268,8 @@ describe('fiche (Pro Tools relevé) → modèle NOVA', () => {
     expect(template.session.tracks[3].type).toBe(TrackType.SEND);
     expect(template.session.tracks[2].type).toBe(TrackType.BUS);
     const master = template.session.tracks[6];
-    expect(master.plugins.map(p => [p.params.templateSpec.plugin, p.isEnabled])).toEqual([['Pro-Q 4', true], ['Pro-L 2', false]]);
+    // « désactivé » dans Pro Tools = INACTIF (retiré du graphe), pas bypass (utils/trackStructure).
+    expect(master.plugins.map(p => [p.params.templateSpec.plugin, p.isInactive ? 'inactive' : p.isEnabled ? 'active' : 'bypass'])).toEqual([['Pro-Q 4', 'active'], ['Pro-L 2', 'inactive']]);
     expect(template.privateTo).toBe('romain');
     expect(template.session).toMatchObject({ bpm: 140, projectKey: 6, projectScale: 'MINOR' });
     expect(report.mixRules).toEqual([]);
@@ -301,38 +302,33 @@ describe('fiche (Pro Tools relevé) → modèle NOVA', () => {
     expect(report.mixRules.join('\n')).toMatch(/un seul étage/);
   });
 
-  it('structure Pro Tools : états actif / bypass / inactif, piste masquée, dossier, VCA, envoi coupé', () => {
+  it('relevé LENNON : slot, réduction visée, état d’origine gardés même avec « activer tous les effets »', () => {
     const spec: TemplateSpec = {
       format: 'nova-template-spec', version: 1, name: 'structure',
       tracks: [
         {
-          name: 'LEAD A', kind: 'audio', hidden: false, inactive: false, folder: { kind: 'basic', name: 'COUPLET' }, vca: 'PRE ALL VOX', input: 'MIC 1',
-          output: 'LEAD A BUS',
+          name: 'LEAD A', kind: 'audio', channels: 'mono', output: 'LEAD A BUS',
           inserts: [
             { vendor: 'Softube', plugin: 'Tube-Tech CL 1B mk II', slot: 'b', state: 'active', targetGainReductionDb: 5 },
             { vendor: 'Antares', plugin: 'Auto-Tune Pro', slot: 'f', state: 'bypass' },
-            { vendor: 'Kazrog', plugin: 'True Iron', slot: 'g', state: 'inactive' },
+            { vendor: 'Kazrog', plugin: 'True Iron', slot: 'g', state: 'inactive', readings: { Strength: '5.00' } },
           ],
-          sends: [{ to: 'RV', slot: 'a', levelDb: -10, pan: '<30', mute: true, pre: true }],
         },
-        { name: 'LEAD A BUS', kind: 'bus', hidden: true, inactive: true, folder: { kind: 'basic', name: 'COUPLET' } },
-        { name: 'RV', kind: 'aux' },
+        { name: 'LEAD A BUS', kind: 'bus', hidden: true, inactive: true },
         { name: 'Master', kind: 'master' },
       ],
     };
     const { template } = buildTemplateFromSpec(spec, { plugins: [] });
-    const [lead, bus] = template.session.tracks as any[];
-    expect(lead.plugins.map((p: PluginInstance) => p.isEnabled)).toEqual([true, false, false]);
-    expect(lead.plugins.map((p: PluginInstance) => p.params.templateSpec.state)).toEqual(['active', 'bypass', 'inactive']);
+    const lead = template.session.tracks[0];
+    expect(lead.plugins.map(p => p.params.templateSpec.state)).toEqual(['active', 'bypass', 'inactive']);
+    expect(lead.plugins.map(p => p.params.templateSpec.slot)).toEqual(['b', 'f', 'g']);
     expect(lead.plugins[0].params.templateSpec.targetGainReductionDb).toBe(5);
     expect(lead.plugins[2].params.templateSpec.wasInactiveInProTools).toBe(true);
     expect(lead.plugins[1].params.templateSpec.wasInactiveInProTools).toBeUndefined();
-    expect(lead.proTools).toEqual({ folder: { kind: 'basic', name: 'COUPLET' }, vca: 'PRE ALL VOX', input: 'MIC 1' });
-    expect(bus.proTools).toMatchObject({ hidden: true, inactive: true });
-    expect(lead.sends[0]).toMatchObject({ isEnabled: false, preFader: true, pan: -0.3, proTools: { slot: 'a', mute: true } });
-    const all = buildTemplateFromSpec(spec, { plugins: [], activateAll: true }).template;
-    expect(all.session.tracks[0].plugins.every(p => p.isEnabled)).toBe(true);
-    expect(all.session.tracks[0].plugins[2].params.templateSpec.wasInactiveInProTools).toBe(true);
+    expect(lead.plugins[2].isInactive).toBe(true);
+    const all = buildTemplateFromSpec(spec, { plugins: [], activateAll: true }).template.session.tracks[0];
+    expect(all.plugins[2].isInactive).toBeFalsy();
+    expect(all.plugins[2].params.templateSpec.wasInactiveInProTools).toBe(true);
   });
 
   it('« fidèle à la session Pro Tools » : SSL / Slate gardés et résolus, avec avertissement', () => {

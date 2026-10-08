@@ -7,7 +7,7 @@ import { audioEngine } from '../engine/AudioEngine';
 import { Clip, CollabRole, Track } from '../types';
 import { CollabOutbox, CollabOutboxOptions, CollabOutboxStore } from '../utils/collabOutbox';
 import { CollabStatus, initialCollabStatus } from '../utils/collabStatus';
-import { mergeQueuedOps } from '../utils/collabMerge';
+import { mergeQueuedOps, structureOf } from '../utils/collabMerge';
 import { isVocalTrack as isVocalTrackPure, ownsContent as ownsContentPure } from '../utils/collabPeers';
 
 /**
@@ -56,6 +56,16 @@ export const collabDeviceId = (): string => {
   } catch { return `tmp${Math.random().toString(36).slice(2, 10)}`; }
 };
 
+/**
+ * Chargement de page en cours : l'état en mémoire vient d'UN instantané (plus
+ * ce qui a été fait depuis, sur cette page). Nos opérations envoyées par une
+ * page précédente (avant un rechargement) n'y sont pas : elles doivent être
+ * rejouées, comme celles des autres (avant : ignorées, l'ingé qui rechargeait
+ * perdait ses derniers changements, ex. un accord posé, pendant que les autres
+ * les gardaient).
+ */
+export const collabPageId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
 const newOpId = (): string => {
   try { if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return (crypto as Crypto).randomUUID(); } catch { /* */ }
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
@@ -95,6 +105,8 @@ export class CollabClient {
   memberKey = '';
   lastSeq = 0;
   readonly deviceId = collabDeviceId();
+  /** Page (chargement) qui a envoyé l'opération : voir collabPageId. */
+  readonly pageId = collabPageId;
   readonly outbox: CollabOutbox;
   private channel: ReturnType<typeof catalogSupabase.channel> | null = null;
   /** Rattrapage en cours : un second appel attend la fin de celui-ci. */
@@ -269,7 +281,7 @@ export class CollabClient {
    * répond pas : préférer `queue` (file d'envoi) pour ce qui ne doit pas se perdre.
    */
   async send(kind: string, op: unknown): Promise<number> {
-    const body = { ...(op as Record<string, unknown>), _id: (op as any)?._id || newOpId(), _d: this.deviceId };
+    const body = { ...(op as Record<string, unknown>), _id: (op as any)?._id || newOpId(), _d: this.deviceId, _p: this.pageId };
     remember(this.seenIds, body._id as string); // notre écho n'est jamais rejoué
     let r: { seq: number; role: CollabRole; author_name: string; member_key: string; created_at: string };
     try {
@@ -313,10 +325,15 @@ export class CollabClient {
   /** Opérations dont l'application a échoué (audio non téléchargé…) : réessayées. */
   private failed = new Map<number, { o: CollabOp; tries: number }>();
 
-  /** Opération envoyée par cet appareil (ou, pour les anciennes, par notre clé de membre). */
+  /**
+   * Opération envoyée par cette page (ou, pour les anciennes, par cet appareil,
+   * ou encore avant par notre clé de membre). Une opération de cet appareil
+   * envoyée avant un rechargement n'est PAS dans l'état chargé : elle est rejouée.
+   */
   private isMine(o: CollabOp): boolean {
     const d = o.op && typeof o.op === 'object' ? o.op._d : undefined;
-    if (typeof d === 'string') return d === this.deviceId;
+    const pg = o.op && typeof o.op === 'object' ? o.op._p : undefined;
+    if (typeof d === 'string') return d === this.deviceId && (typeof pg !== 'string' || pg === this.pageId);
     return o.member_key === this.memberKey;
   }
 
@@ -538,6 +555,8 @@ export const contentBufferIds = (t: Track): string[] => Array.from(new Set([
 export const mixOf = (t: Track) => ({
   volume: t.volumeLock ? undefined : t.volume, pan: t.pan, isMuted: t.isMuted,
   sends: t.sends, plugins: t.plugins, outputTrackId: t.outputTrackId,
+  // Structure Pro Tools (masquée, inactive, dossier, VCA, bus) : ignorée par les anciennes versions.
+  structure: structureOf(t),
 });
 
 export const sigOf = (v: unknown): string => {

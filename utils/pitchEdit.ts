@@ -12,7 +12,7 @@
  * prise d'origine reste chez celui qui a corrigé : chez l'autre, l'éditeur
  * repart du son corrigé.
  */
-import type { Clip, PitchEditInfo, StoredNoteEdit } from '../types';
+import type { BreathEdit, Clip, PitchEditInfo, StoredNoteEdit } from '../types';
 import { analyzePitch, monoOf, segmentNotes, PitchNote, PitchTrack } from './pitchAnalysis';
 import { correctionCurve, CorrectStyle, NoteEdit, isNeutral } from './pitchCorrect';
 import { renderPitch } from './pitchRender';
@@ -80,6 +80,21 @@ export function storeEdits(notes: PitchNote[], edits: (NoteEdit | undefined)[], 
   return out;
 }
 
+/**
+ * Respirations traitées (Clip.breaths, en secondes du son joué) quand le clip
+ * change de son : le son corrigé est le même audio, échantillon pour
+ * échantillon, décalé de `delta` secondes (nouvel offset − ancien offset).
+ * Les zones restent donc au même endroit du morceau ; celles qui tombent
+ * avant le début du nouveau son sont retirées.
+ */
+export function shiftBreaths(breaths: BreathEdit[] | undefined, delta: number): BreathEdit[] | undefined {
+  if (!breaths?.length) return undefined;
+  if (Math.abs(delta) < 1e-9) return breaths;
+  const r = (v: number) => Math.round(v * 1e5) / 1e5;
+  const out = breaths.filter(e => e.end + delta > 0).map(e => ({ ...e, start: r(Math.max(0, e.start + delta)), end: r(e.end + delta) }));
+  return out.length ? out : undefined;
+}
+
 /** Changements du clip quand on applique la correction (nouveau son déjà enregistré sous `newBufferId`). */
 export function correctedClipPatch(clip: Clip, opts: {
   newBufferId: string; sourceBufferId?: string; sourceOffset: number; regionStart: number;
@@ -98,10 +113,13 @@ export function correctedClipPatch(clip: Clip, opts: {
     sourceName: baseName,
     at: opts.at,
   };
+  const offset = Math.max(0, opts.sourceOffset - opts.regionStart);
   return {
     bufferId: opts.newBufferId,
     // Le son corrigé commence à `regionStart` dans le son d'origine.
-    offset: Math.max(0, opts.sourceOffset - opts.regionStart),
+    offset,
+    // Respirations : même endroit du morceau dans le nouveau son.
+    ...(clip.breaths?.length ? { breaths: shiftBreaths(clip.breaths, offset - (clip.offset || 0)) } : {}),
     // Un calage sur le tempo repartirait du son d'origine et perdrait la correction.
     warp: undefined,
     name: /justesse/i.test(baseName) ? baseName : `${baseName} (justesse)`,
@@ -116,6 +134,7 @@ export function revertClipPatch(clip: Clip, hasBuffer: (id: string) => boolean):
   return {
     bufferId: pe.sourceBufferId,
     offset: (clip.offset || 0) + pe.regionStart,
+    ...(clip.breaths?.length ? { breaths: shiftBreaths(clip.breaths, pe.regionStart) } : {}),
     warp: pe.sourceWarp,
     name: pe.sourceName ?? clip.name.replace(/\s*\(justesse\)$/, ''),
     pitchEdit: undefined,

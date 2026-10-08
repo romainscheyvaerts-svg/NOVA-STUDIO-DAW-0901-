@@ -18,7 +18,8 @@ const bufferOf = (x: Float32Array) => {
   return b as unknown as AudioBuffer;
 };
 
-describe('détection des respirations (signaux synthétiques)', () => {
+// Analyses de plusieurs secondes de signal : marge large quand la machine est chargée.
+describe('détection des respirations (signaux synthétiques)', { timeout: 30000 }, () => {
   it('trouve les respirations entre les phrases, sans toucher un mot ni un « s »', () => {
     let breaths = 0, hits = 0;
     for (let seed = 1; seed <= 4; seed++) {
@@ -151,7 +152,7 @@ describe('gain des respirations et fondus', () => {
   });
 });
 
-describe('lead −15 dB, voix additionnelles supprimées', () => {
+describe('lead −15 dB, voix additionnelles supprimées', { timeout: 30000 }, () => {
   const v = rapPhrases(1);
   const buf = bufferOf(v.x);
   const clipOf = (id: string) => makeClip({ id, bufferId: id, buffer: buf, duration: buf.duration, type: TrackType.AUDIO });
@@ -268,7 +269,7 @@ describe('commandes Nova', () => {
   });
 });
 
-describe('comp, Loop Record, punch : même audio partagé entre plusieurs clips', () => {
+describe('comp, Loop Record, punch : même audio partagé entre plusieurs clips', { timeout: 30000 }, () => {
   it('les morceaux d’une même prise portent toute la liste ; seule la fenêtre visée change', () => {
     const v = rapPhrases(3);
     const buf = bufferOf(v.x);

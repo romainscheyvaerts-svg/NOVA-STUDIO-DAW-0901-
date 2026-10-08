@@ -8,10 +8,12 @@ import { playheadStore } from '../utils/playheadStore';
 import { formatMesures, nomTonaliteCourt } from '../utils/musicKey';
 import { useSimpleMode, simpleModeStore } from '../utils/simpleMode';
 import ThemeSwitch from './ThemeSwitch';
+import { ChordLaneMenuToggle } from './ChordLane';
 import SimpleModeToggle from './SimpleModeToggle';
 import PunchControls from './PunchControls';
 import { PunchSettings } from '../types';
 import { openFeedback } from '../services/feedback';
+import { MidiFileMenu, MidiMobileMenuItems } from './MidiFileMenu';
 
 interface TransportProps {
   /** Ouvre « Master Nova » (mastering en un clic, V15). */
@@ -212,7 +214,12 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
 
   const handleBpmMouseDown = (e: React.MouseEvent) => {
     if (e.detail === 2) { 
-      setIsEditingBpm(true);
+      // Champ prérempli avec le tempo ACTUEL : il gardait celui de l'ouverture du studio (120), et le
+      // quitter sans rien taper remettait le morceau à 120 BPM (mélodie à 94 → 120).
+      // preventDefault : sinon ce même appui (sur un bloc non focalisable) retirait aussitôt le focus
+      // du champ qui venait de s'ouvrir, et il se refermait : « double-clic pour saisir » ne marchait pas.
+      e.preventDefault();
+      setTempBpm(String(bpm)); setIsEditingBpm(true);
       return;
     }
     const startY = e.clientY;
@@ -330,6 +337,8 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                         />
                     </>
                 )}
+                {/* Fichiers .mid et Capture MIDI (V25) */}
+                {!simple && <MidiFileMenu />}
              </div>
              
              {/* SHARE (Only if logged in) */}
@@ -407,7 +416,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
             type="button"
             onClick={() => openFeedback()}
             data-nova-action="feedback"
-            className="w-9 h-9 rounded-full hidden sm:flex items-center justify-center border transition-all text-slate-400 hover:text-white hover:bg-white/10"
+            className="nova-hit-tactile w-9 h-9 rounded-full hidden sm:flex items-center justify-center border transition-all text-slate-400 hover:text-white hover:bg-white/10"
             title="Signaler un bug ou proposer une idée (Ctrl+Maj+B)"
             aria-label="Signaler un bug ou proposer une idée"
             style={{ backgroundColor: 'var(--bg-item)', borderColor: 'var(--border-dim)' }}
@@ -487,6 +496,9 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                 était tout en bas du menu (hors de l'écran sur téléphone). */}
             <ThemeSwitch />
 
+            {/* Affichage : piste d'accords (V20). Pas sur téléphone (version simple). */}
+            {!isMobileLayout && <ChordLaneMenuToggle onDone={() => setIsMobileMenuOpen(false)} />}
+
             {/* VIEW SWITCHER (inutile en mise en page téléphone : on navigue par onglets) */}
             {!isMobileLayout && !simple && (
             <div className="space-y-2">
@@ -559,6 +571,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <i className="w-5 text-center text-purple-400 fas fa-compact-disc"></i>
                   <span>Exporter</span>
                 </button>
+                <MidiMobileMenuItems onDone={() => setIsMobileMenuOpen(false)} />
                 {onOpenTakeHome && (
                   <button onClick={() => { onOpenTakeHome(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
                     <i className="w-5 text-center text-cyan-300 fas fa-cloud-arrow-up"></i>
@@ -611,7 +624,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                     className="w-20 bg-white/10 border border-cyan-500/50 rounded text-center text-2xl font-black text-white outline-none"
                   />
                 ) : (
-                  <div onClick={() => setIsEditingBpm(true)} className="text-3xl font-black text-cyan-400 cursor-pointer">{bpm}</div>
+                  <div onClick={() => { setTempBpm(String(bpm)); setIsEditingBpm(true); }} className="text-3xl font-black text-cyan-400 cursor-pointer">{bpm}</div>
                 )}
                 <button onClick={() => onBpmChange(Math.min(999, bpm + 1))} aria-label="Tempo +1" className="w-10 h-10 rounded-lg bg-white/10 text-white font-bold">+</button>
               </div>
