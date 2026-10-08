@@ -5,7 +5,7 @@ import { audioEngine } from '../engine/AudioEngine';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { shouldPersistFrozen } from './VstFreeze';
 import { novaBridge } from './NovaBridge';
-import { isTrackFrozen } from '../utils/freeze';
+import { isTrackFrozen, FREEZE_SAME_SOUND, FREEZE_OTHER_SOUND } from '../utils/freeze';
 import { getEditAuthor, SESSION_SCHEMA_VERSION, stampJournal } from '../utils/preFxEdits';
 import { padSampleFiles, restorePadSamples } from '../utils/drumSamples';
 
@@ -51,6 +51,11 @@ export class ProjectIO {
             
             if (buffer) {
                 const filename = `${clip.bufferId || clip.id}.wav`;
+                // Rendu gelé : le son rendu est-il celui du clip ? Les identifiants des sons
+                // changent à la réouverture : on garde seulement « même son » / « autre son ».
+                if (sClip.freezeRef && typeof sClip.freezeRef.buf === 'string') {
+                    sClip.freezeRef.buf = sClip.freezeRef.buf === clip.bufferId ? FREEZE_SAME_SOUND : FREEZE_OTHER_SOUND;
+                }
                 
                 // On met à jour la référence dans le JSON quoi qu'il arrive
                 // (Comme ça la structure du projet reste intacte)
@@ -239,6 +244,10 @@ export class ProjectIO {
                 }
                 // Nettoyage de la ref interne
                 delete clip.audioRef;
+            }
+            // Rendu gelé : « même son » retrouve l'identifiant du son rechargé.
+            if (clip.freezeRef?.buf === FREEZE_SAME_SOUND) {
+                if (clip.bufferId) clip.freezeRef.buf = clip.bufferId; else delete clip.freezeRef.buf;
             }
             // Prise d'origine d'un clip retouché par Melodyne / VocAlign (ARA).
             const ae = clip.araEdit;

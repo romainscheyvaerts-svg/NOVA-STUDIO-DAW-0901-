@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   anchorClipsToRender, canBakeTrack, coveredClipIds, freezeIndex, freezeSignature, frozenPlayback, hasVst,
   isFreezeStale, isPluginBaked, isTrackFrozen, lastVstIndex, needsRerender, pluginsSignature, postFreezePlugins,
-  preFreezePlugins, uncoveredClips, FREEZE_SLICE_TAIL,
+  preFreezePlugins, uncoveredClips, FREEZE_SLICE_TAIL, clipContentSig,
 } from '../utils/freeze';
 import { Clip, PluginInstance, PluginType, Track } from '../types';
 import { makeClip, makeTrack } from './helpers/fixtures';
@@ -127,7 +127,8 @@ describe('clips ancrés et lecture d\'une piste gelée', () => {
     ], 'fz');
     expect(Array.from(m.keys())).toEqual(['a']);
     // srcClipId : le clip d'origine, gardé par les découpes (journal des éditions pré-effet).
-    expect(m.get('a')).toEqual({ renderId: 'fz', anchor: 2, from: 1, to: 3, fadeIn: 0.1, fadeOut: 0, gain: 0.8, srcClipId: 'a' });
+    // content : empreinte du son rendu (rendu gelé périmé si elle change).
+    expect(m.get('a')).toEqual({ renderId: 'fz', anchor: 2, from: 1, to: 3, fadeIn: 0.1, fadeOut: 0, gain: 0.8, srcClipId: 'a', buf: 'b', content: clipContentSig(makeClip({ id: 'a', bufferId: 'b' })) });
   });
 
   function anchored(edit: Partial<Clip> = {}, src: Partial<Clip> = {}): Track {
