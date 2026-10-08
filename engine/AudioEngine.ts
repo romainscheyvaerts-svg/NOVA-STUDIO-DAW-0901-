@@ -47,6 +47,7 @@ import { computePdc, PdcNode, PDC_MAX_SECONDS } from '../utils/pdc';
 import { applyGainEvents, clipGainEvents } from '../utils/fades';
 import { breathSig } from '../utils/breathEnvelope';
 import { auditionClips } from '../utils/playlists';
+import { ChordEvent, chordSteps } from '../utils/chordDetect';
 
 interface TrackDSP {
   input: GainNode;          
@@ -855,6 +856,8 @@ export class AudioEngine {
 
     // --- 5c. Automation des paramètres d'effets : mêmes valeurs qu'en lecture.
     if (!options.preFader) this.scheduleOfflinePluginAutomation(offlineCtx, tracks, rendered, totalDuration, startOffset);
+    // --- 5d. Piste d'accords suivie par l'Harmoniseur (gel compris : elle fait partie du son de la piste).
+    this.scheduleOfflineChords(tracks, rendered, totalDuration, startOffset);
 
     if (onProgress) onProgress(85);
 
@@ -1545,6 +1548,7 @@ export class AudioEngine {
         this.scheduleMidi(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
         this.midiRunStart = null;
         this.scheduleAutomation(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
+        this.scheduleChordFollow(projectTimeStart, projectTimeEnd, this.nextScheduleTime);
         this.nextScheduleTime += windowSec;
       }
 
@@ -1958,7 +1962,9 @@ export class AudioEngine {
    * partent en avance de la latence de la chaîne : à l'instant t, l'entrée de
    * cet effet reçoit le son du projet à t + avance. Son automation doit donc
    * lire la voie à t + avance pour tomber pile sur la musique (sinon, mesuré,
-   * le limiteur appliquait son plafond 3,6 ms trop tard).
+   * le limiteur appliquait son plafond 3,6 ms trop tard). La latence en aval
+   * de la piste (bus latent : les clips partent aussi en avance d'autant)
+   * s'y ajoute.
    */
   private pluginLead(trackId: string, pluginId: string): number {
     if (this.pdcSuspended) return 0;
@@ -1966,12 +1972,90 @@ export class AudioEngine {
     const ids = dsp?.chainIds || [];
     const i = ids.indexOf(pluginId);
     if (!dsp || i < 0) return 0;
-    let lead = 0;
+    let lead = dsp.downLatency || 0;
     for (let k = i; k < ids.length; k++) {
       const l = dsp.pluginChain.get(ids[k])?.instance?.latency;
       if (typeof l === 'number' && l > 0 && l < 0.5) lead += l;
     }
     return lead;
+  }
+
+  // -------------------------------------------------------------------------
+  // Piste d'accords suivie par l'Harmoniseur
+  // -------------------------------------------------------------------------
+
+  /** Accords du projet (piste d'accords), publiés par l'application. */
+  private chords: ChordEvent[] = [];
+  public setChords(list: ChordEvent[] | undefined) { this.chords = Array.isArray(list) ? list : []; }
+  public getChords() { return this.chords; }
+
+  /**
+   * Lecture : programme d'avance, sur l'AudioParam « chord » de chaque
+   * Harmoniseur, l'accord que reçoit son entrée pendant la fenêtre
+   * [when, when + (end − start)[. Comme les clips (partis en avance de la
+   * latence) et l'automation des effets (pluginLead) : à l'instant τ,
+   * l'entrée de l'effet reçoit le son du projet à τ − when + start + avance,
+   * avance = latence de l'effet et des effets suivants + latence en aval de
+   * la piste (bus). La fenêtre lit donc la piste d'accords sur
+   * [start + avance, end + avance[ : tout est dans le futur, rien n'est
+   * sauté même quand la latence dépasse l'avance du planificateur (mesuré :
+   * sinon le changement d'accord arrivait jusqu'à 11 ms trop tard en
+   * lecture). Chaque fenêtre efface ce qui suivait (arrêt, saut, boucle).
+   */
+  private scheduleChordFollow(start: number, end: number, when: number) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    this.tracksDSP.forEach((dsp, trackId) => {
+      dsp.pluginChain.forEach((entry, pluginId) => {
+        const inst = entry.instance;
+        if (!inst || typeof inst.chordParam !== 'function') return;
+        const ap: AudioParam | null = inst.chordParam();
+        if (!ap) return;
+        const lead = this.pluginLead(trackId, pluginId);
+        const from = Math.max(now, when);
+        const steps = chordSteps(inst.followsChords() ? this.chords : [], start + lead, end + lead);
+        try {
+          ap.cancelScheduledValues(from);
+          ap.setValueAtTime(steps[0].code, from);
+          for (let k = 1; k < steps.length; k++) {
+            const at = when + (steps[k].t - lead - start);
+            if (at >= from) ap.setValueAtTime(steps[k].code, at);
+          }
+        } catch { /* effet en cours de reconstruction */ }
+      });
+    });
+  }
+
+  /**
+   * Export : la piste d'accords est programmée d'avance sur l'AudioParam
+   * « chord » de chaque Harmoniseur du rendu (temps du contexte = temps du
+   * projet − startOffset − avance), sans pause du rendu.
+   */
+  private scheduleOfflineChords(tracks: Track[], rendered: Map<string, { pluginNodes?: Map<string, any>; down?: number }>, totalDuration: number, startOffset: number) {
+    for (const track of tracks) {
+      const rt = rendered.get(track.id);
+      const nodes = rt?.pluginNodes;
+      if (!nodes) continue;
+      let acc = 0;
+      const lead = new Map<string, number>();
+      for (const [id, n] of [...nodes.entries()].reverse()) {
+        const l = n?.latency;
+        if (typeof l === 'number' && l > 0 && l < 0.5) acc += l;
+        lead.set(id, acc);
+      }
+      nodes.forEach((node, id) => {
+        if (!node || typeof node.chordParam !== 'function') return;
+        const ap: AudioParam | null = node.chordParam();
+        if (!ap) return;
+        const from = startOffset + (lead.get(id) || 0) + (rt?.down || 0);
+        const steps = chordSteps(node.followsChords() ? this.chords : [], from, from + totalDuration);
+        try {
+          ap.cancelScheduledValues(0);
+          ap.setValueAtTime(steps[0].code, 0);
+          for (let k = 1; k < steps.length; k++) ap.setValueAtTime(steps[k].code, steps[k].t - from);
+        } catch { /* */ }
+      });
+    }
   }
 
   private schedulePluginAutomation(trackId: string, param: string, points: AutomationPoint[], start: number, when: number) {
@@ -1995,7 +2079,7 @@ export class AudioEngine {
    */
   private scheduleOfflinePluginAutomation(
     offlineCtx: OfflineAudioContext, tracks: Track[],
-    rendered: Map<string, { pluginNodes?: Map<string, any> }>, totalDuration: number, startOffset: number
+    rendered: Map<string, { pluginNodes?: Map<string, any>; down?: number }>, totalDuration: number, startOffset: number
   ) {
     const STEP = 0.02;
     const quantum = 128 / offlineCtx.sampleRate;
@@ -2017,7 +2101,7 @@ export class AudioEngine {
         const node = p && nodes.get(p.pluginId);
         if (!p || !lane.points.length || !node || typeof node.updateParams !== 'function' || node instanceof VSTPluginNode) continue;
         const pts = this.sortedOf(lane.points);
-        const from = startOffset + (lead.get(p.pluginId) || 0);
+        const from = startOffset + (lead.get(p.pluginId) || 0) + (rendered.get(track.id)?.down || 0);
         // Réglage exposé en AudioParam (limiteur) : toute la voie est programmée
         // d'avance sur le paramètre, sans pause du rendu (rampes exactes, au bloc près).
         const ap: AudioParam | null = typeof node.automationParam === 'function' ? node.automationParam(p.key) : null;

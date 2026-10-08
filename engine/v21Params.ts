@@ -64,6 +64,8 @@ export const DEFAULT_HARMONIZER = {
   voices: 2, v1Deg: 2, v1Level: -4, v1Pan: -0.35, v2Deg: 4, v2Level: -5, v2Pan: 0.35,
   v3Deg: -3, v3Level: -6, v3Pan: -0.6, v4Deg: 7, v4Level: -8, v4Pan: 0.6,
   dry: 0, humanize: 0.35, formant: 0, preserve: 1, rootKey: 0, scale: 'CHROMATIC', isEnabled: true,
+  /** Suivre la piste d'accords (1 = oui, par défaut ; sans accord posé, la gamme seule). */
+  followChords: 1,
 };
 
 export const HARMONIZER_PRESETS: V21Preset[] = [

@@ -359,3 +359,51 @@ export function chordAt<T extends { start: number; end: number }>(list: T[] | un
   for (const c of list) if (t >= c.start - 1e-9 && t < c.end - 1e-9) return c;
   return null;
 }
+
+/**
+ * Accord codé pour le moteur audio (AudioParam « chord » de l'Harmoniseur) :
+ * `fondamentale × 4096 + masque` (bit i = classe de note i). 0 = aucun accord.
+ * Un seul nombre exact en Float32 : pas de table à envoyer, rien ne peut
+ * arriver en retard pendant un rendu hors ligne.
+ */
+export function encodeChord(c: { root: number; quality: ChordQuality } | null | undefined): number {
+  if (!c) return 0;
+  let mask = 0;
+  for (const t of chordTones(c.root, c.quality)) mask |= 1 << t;
+  return mask ? pc(c.root) * 4096 + mask : 0;
+}
+
+/** Inverse d'`encodeChord` : fondamentale et classes de notes (null : aucun accord). */
+export function decodeChord(code: number): { root: number; tones: number[] } | null {
+  const v = Math.round(+code || 0);
+  if (v <= 0) return null;
+  const mask = v & 4095;
+  const tones: number[] = [];
+  for (let i = 0; i < 12; i++) if (mask & (1 << i)) tones.push(i);
+  return tones.length ? { root: Math.floor(v / 4096) % 12, tones } : null;
+}
+
+/**
+ * Paliers de l'accord en cours sur [from, to[ (temps du projet, s) :
+ * `[{ t, code }]`, le premier à `from`, puis un par changement (début ou fin
+ * d'accord). Sert au moteur pour programmer l'AudioParam d'avance.
+ */
+export function chordSteps(list: ChordEvent[] | undefined, from: number, to: number): { t: number; code: number }[] {
+  const out = [{ t: from, code: encodeChord(chordAt(list, from)) }];
+  if (!list?.length) return out;
+  const edges = new Set<number>();
+  for (const c of list) { if (c.start > from && c.start < to) edges.add(c.start); if (c.end > from && c.end < to) edges.add(c.end); }
+  for (const t of [...edges].sort((a, b) => a - b)) {
+    const code = encodeChord(chordAt(list, t));
+    if (code !== out[out.length - 1].code) out.push({ t, code });
+  }
+  return out;
+}
+
+/** Accord (fondamentale + qualité) d'un code d'`encodeChord` (null : aucun ou inconnu). */
+export function chordOfCode(code: number): { root: number; quality: ChordQuality } | null {
+  const d = decodeChord(code);
+  if (!d) return null;
+  const q = CHORD_QUALITIES.find(k => encodeChord({ root: d.root, quality: k }) === Math.round(code));
+  return q ? { root: d.root, quality: q } : null;
+}
