@@ -89,7 +89,7 @@ const Keys: React.FC<{ from: number; count: number; root: number; onOn: (p: numb
     onPointerCancel: (e: React.PointerEvent) => lift(e.pointerId),
   });
   return (
-    <div className="relative h-20 select-none touch-none" role="group" aria-label="Clavier d'essai du sampler" data-testid="sampler-keys">
+    <div className="relative h-20 select-none touch-none" role="group" aria-label="Clavier d'essai du sampler" data-testid="sampler-keys" data-own-longpress="">
       <div className="absolute inset-0 flex">
         {whites.map(p => (
           <button key={p} type="button" aria-label={`Note ${noteName(p)}`} {...handlers(p)}

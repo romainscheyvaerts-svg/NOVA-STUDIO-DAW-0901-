@@ -342,7 +342,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                     <div key={r.id} className="flex items-center gap-1 mb-1">
                       {narrow ? (
                         <button type="button" onClick={() => { p.onAudition(ri); setSelPad(ri); if (soundMenu !== null) setSoundMenu(ri); }}
-                          onPointerDown={() => startRepeat(ri)} onPointerUp={stopRepeat} onPointerLeave={stopRepeat} onPointerCancel={stopRepeat}
+                          onPointerDown={() => startRepeat(ri)} onPointerUp={stopRepeat} onPointerLeave={stopRepeat} onPointerCancel={stopRepeat} data-own-longpress=""
                           aria-label={`Écouter ${r.name}`} aria-pressed={selPad === ri} title="Écouter et choisir ce pad"
                           className={`shrink-0 w-10 h-10 rounded-lg px-0.5 text-[9px] leading-[10px] font-bold text-center break-words overflow-hidden ${flash === ri ? 'bg-cyan-400 text-black' : selPad === ri ? 'bg-cyan-500/20 text-white ring-1 ring-cyan-400/60' : 'bg-white/5 text-slate-200'}`}>
                           <span className={r.muted ? 'line-through opacity-50' : ''}>{r.name}</span>
@@ -351,7 +351,7 @@ const DrumMachinePanel: React.FC<DrumMachinePanelProps> = (p) => {
                       ) : (
                       <div className="sticky left-0 z-10 bg-nv-surface pr-1 flex items-center gap-1 w-[150px] shrink-0">
                         <button type="button" onClick={() => { p.onAudition(ri); setSelPad(ri); }}
-                          onPointerDown={() => startRepeat(ri)} onPointerUp={stopRepeat} onPointerLeave={stopRepeat} onPointerCancel={stopRepeat}
+                          onPointerDown={() => startRepeat(ri)} onPointerUp={stopRepeat} onPointerLeave={stopRepeat} onPointerCancel={stopRepeat} data-own-longpress=""
                           aria-pressed={selPad === ri}
                           title={`${r.name} : écouter le son et le choisir pour le graphe${keyOf(ri) ? ` (touche ${keyOf(ri)})` : ''}. Glisse un fichier audio ici pour mettre TON son sur ce pad.`}
                           onDragOver={allowDrop} onDrop={e => onDropFiles(e, ri)}

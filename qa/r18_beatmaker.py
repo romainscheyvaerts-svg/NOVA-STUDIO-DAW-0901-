@@ -226,7 +226,12 @@ def step_sampler(pg):
       const buf = await window.__qa.render([tr], 5.2, 0);
       const Q = window.__qa;
       const res = notes.map(n => { const target = 440 * Math.pow(2, (n.pitch - 69) / 12); const f = Q.pitch(Q.mono(buf, n.start + 0.1, n.start + 0.6), buf.sampleRate, target); return { note: M.noteName(n.pitch), cible_Hz: Math.round(target * 100) / 100, mesure_Hz: Math.round(f * 100) / 100, ecart_cents: Q.cents(f, target) }; });
-      return { trackId, racine: M.noteName(tr.melodicSampler.rootKey), rootKey: tr.melodicSampler.rootKey, accord_fin_cents: tr.melodicSampler.fineTune, auto: !!tr.melodicSampler.rootAuto, notes: res };
+      // Pitch bend (R16) : A4 tenu, molette à fond (+2 demi-tons) à 0,5 s → B4 à l'export.
+      const bendClip = { ...tr.clips[0], id: 'qa-bend', start: 0, duration: 1.5, notes: [{ id: 'b', pitch: 69, start: 0, duration: 1.4, velocity: 0.9 }], cc: { pb: [{ t: 0, v: 8192 }, { t: 0.5, v: 16383 }] } };
+      const bb = await window.__qa.render([{ ...tr, clips: [bendClip] }], 1.5, 0);
+      const fBefore = Q.pitch(Q.mono(bb, 0.1, 0.45), bb.sampleRate, 440), fAfter = Q.pitch(Q.mono(bb, 0.6, 1.2), bb.sampleRate, 493.88);
+      const bend = { avant_Hz: Math.round(fBefore * 100) / 100, apres_Hz: Math.round(fAfter * 100) / 100, ecart_cents: Q.cents(fAfter, 440 * Math.pow(2, 2 / 12)) };
+      return { trackId, racine: M.noteName(tr.melodicSampler.rootKey), rootKey: tr.melodicSampler.rootKey, accord_fin_cents: tr.melodicSampler.fineTune, auto: !!tr.melodicSampler.rootAuto, notes: res, bend };
     }""")
     RES["mesures"]["sampler"] = m
     import math
@@ -235,6 +240,7 @@ def step_sampler(pg):
        {"racine": m["racine"], "accord_fin": m["accord_fin_cents"], "attendu": exp_fine})
     worst = max(abs(n["ecart_cents"]) for n in m["notes"])
     ok("notes du sampler à la bonne hauteur à l'export (±5 cents)", worst <= 5, {"pire_cents": worst, "notes": m["notes"]})
+    ok("pitch bend (R16) suivi par le sampler à l'export (A4 → B4)", abs(m["bend"]["ecart_cents"]) <= 5 and abs(m["bend"]["avant_Hz"] - 440) < 0.5, m["bend"])
     # Écran du sampler (interface).
     pg.evaluate("async (id) => { const S = await window.__novaAppModule('/utils/samplerPanelStore.ts'); S.openSamplerPanel(id); }", m["trackId"])
     pg.wait_for_timeout(1200)
