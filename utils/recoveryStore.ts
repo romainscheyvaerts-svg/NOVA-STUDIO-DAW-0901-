@@ -53,9 +53,19 @@ export interface VersionMeta {
   hasLyrics: boolean;
   /** Le beat du catalogue n'est pas gardé (licence) : il est rechargé depuis le catalogue. */
   needsCatalogBeat: boolean;
+  /**
+   * R21 · Version nommée (« Enregistrer comme nouvelle version », Pro Tools :
+   * Save As New Version) : numéro (v2, v3…) et commentaire. Jamais effacée par
+   * le ménage automatique (20 dernières + une par heure).
+   */
+  versionNumber?: number;
+  comment?: string;
 }
 export interface VersionRecord extends VersionMeta { json: string; audioIds: string[] }
-export type VersionReason = 'auto' | 'take' | 'close' | 'manual' | 'restore' | 'recovered';
+export type VersionReason = 'auto' | 'take' | 'close' | 'manual' | 'restore' | 'recovered' | 'named';
+
+/** Version nommée par l'utilisateur (gardée pour toujours). */
+export const isNamedVersion = (v: Pick<VersionMeta, 'reason' | 'versionNumber'>) => v.reason === 'named' || !!v.versionNumber;
 
 export interface TakeMetaRecord {
   takeId: string;
@@ -203,6 +213,9 @@ export interface SnapshotInput {
   hasLyrics: boolean;
   needsCatalogBeat: boolean;
   reason: VersionReason;
+  /** R21 · version nommée : numéro et commentaire. */
+  versionNumber?: number;
+  comment?: string;
 }
 
 export interface SaveResult { versionId: number; audioWritten: number; audioBytes: number; pruned: number; ms: number }
@@ -255,6 +268,8 @@ export class RecoveryStore {
     const rec: VersionRecord = {
       id, projectId: input.projectId, name: input.name, savedAt: id, reason: input.reason, tracks: input.tracks, takes: input.takes,
       beatTitle: input.beatTitle, hasLyrics: input.hasLyrics, needsCatalogBeat: input.needsCatalogBeat, json: input.json, audioIds: stored,
+      ...(input.versionNumber ? { versionNumber: input.versionNumber } : {}),
+      ...(input.comment ? { comment: input.comment } : {}),
     };
     await this.db.put(VERSIONS, id, rec, { durable: true });
     // Les prises terminées AVANT cette version y sont : leurs morceaux ne servent plus.
@@ -275,6 +290,15 @@ export class RecoveryStore {
       out.push(meta);
     }
     return out.sort((a, b) => b.savedAt - a.savedAt);
+  }
+
+  /** Change le commentaire d'une version nommée (ou en fait une version nommée). */
+  async annotate(id: number, patch: { comment?: string; versionNumber?: number }): Promise<boolean> {
+    const v = await this.db.get<VersionRecord>(VERSIONS, id);
+    if (!v) return false;
+    const next: VersionRecord = { ...v, ...(patch.comment !== undefined ? { comment: patch.comment } : {}), ...(patch.versionNumber ? { versionNumber: patch.versionNumber, reason: 'named' as const } : {}) };
+    await this.db.put(VERSIONS, id, next, { durable: true });
+    return true;
   }
 
   async latest(projectId?: string): Promise<VersionMeta | null> {
@@ -299,9 +323,16 @@ export class RecoveryStore {
     const keys = (await this.db.keys(VERSIONS)) as number[];
     const metas = keys.map(k => ({ id: k, savedAt: k }));
     const drop = versionsToPrune(metas, this.now());
-    for (const id of drop) await this.db.delete(VERSIONS, id);
-    if (drop.length) await this.collectAudio();
-    return drop.length;
+    let n = 0;
+    for (const id of drop) {
+      // Version nommée (R21) : gardée pour toujours.
+      const v = await this.db.get<VersionRecord>(VERSIONS, id);
+      if (v && isNamedVersion(v)) continue;
+      await this.db.delete(VERSIONS, id);
+      n++;
+    }
+    if (n) await this.collectAudio();
+    return n;
   }
 
   private async collectAudio() {
