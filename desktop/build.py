@@ -153,6 +153,11 @@ def ara_host() -> None:
     """Hôte ARA2 (Melodyne, VocAlign) : NovaARAHost.exe, construit depuis nova-ara-host/ s'il
     manque (MSVC + CMake + sources JUCE / ARA SDK). Facultatif : sans lui, l'appli marche,
     seules les commandes Melodyne / VocAlign restent grisées (« Mets à jour Nova Studio »)."""
+    # Opt-in : JUCE est utilisé sous AGPLv3 ; tant que Romain n'a pas tranché la licence
+    # (publier les sources de l'hôte ou licence JUCE), l'installateur public ne l'embarque pas.
+    if os.environ.get("NOVA_INCLUDE_ARA") != "1":
+        print("    hôte ARA : non inclus (NOVA_INCLUDE_ARA=1 pour l'inclure, licence JUCE à trancher)")
+        return
     if os.path.isfile(ARA_HOST_EXE) and "--rebuild-ara" not in sys.argv:
         print(f"    hôte ARA : {os.path.relpath(ARA_HOST_EXE, REPO)} (déjà construit)")
         return

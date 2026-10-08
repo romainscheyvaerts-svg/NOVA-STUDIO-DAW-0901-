@@ -26,7 +26,7 @@ hiddenimports += collect_submodules('websockets')
 # (JUCE sous AGPLv3 : sources dans nova-ara-host/, voir LICENCES.md). Facultatif.
 hiddenimports += ['ara_host', 'ara_service']
 _ara = '../nova-ara-host/build/NovaARAHost_artefacts/Release/NovaARAHost.exe'
-if os.path.isfile(_ara):
+if os.environ.get('NOVA_INCLUDE_ARA') == '1' and os.path.isfile(_ara):  # opt-in (licence JUCE AGPLv3)
     binaries += [(_ara, '.')]
     datas += [('../nova-ara-host/LICENCES.md', 'ara-host')]
 
