@@ -94,7 +94,10 @@ class Space:
         if path[0] == "dets":
             dv = d2["dets"][path[1]]
             i = DET_IDX[path[2]]
-            return dv[i] if i < len(dv) else 0.0
+            v = dv[i] if i < len(dv) else 0.0
+            if path[2] == "cap" and v <= 0.0:
+                return 79.0   # 0 = pas de plafond -> borne haute
+            return v
         if path[0] == "comps":
             c = d2["comps"][path[1]]
             i = COMP_IDX[path[2]]
@@ -154,6 +157,8 @@ class Space:
         for dv in d2.get("dets", []):
             if dv[2] < 2e-5:
                 dv[2] = 0.0
+            if len(dv) > 6 and dv[6] >= 78.0:
+                dv[6] = 0.0
         if d2.get("hold_ms", 0.0) and d2["hold_ms"] < 0.06:
             d2["hold_ms"] = 0.0
         return d2
@@ -211,10 +216,29 @@ GROUPS = {
 }
 
 
+CAP = [(("dets", 0, "cap"), 5.0, 80.0, "lin"), (("dets", 1, "cap"), 5.0, 80.0, "lin")]
 LWARP = [(("lwarp", 0), -12.0, 12.0, "lin"), (("lwarp", 1), -0.4, 0.4, "lin"), (("lwarp", 2), -1.0, 1.0, "lin"), (("lwarp", 3), -0.3, 0.3, "lin")]
 for _g in ("cl1b_fm", "cl1b_man", "fet76", "voxbox", "la2a"):
-    GROUPS[_g + "_h"] = dict(GROUPS[_g], paths=list(GROUPS[_g].get("paths", [])) + LWARP + [(("trim_db",), -1.0, 1.0, "lin")],
-                             w_corpus=3.0)
+    GROUPS[_g + "_h"] = dict(GROUPS[_g], paths=list(GROUPS[_g].get("paths", [])) + LWARP + [(("trim_db",), -1.0, 1.0, "lin")]
+                             + (CAP if _g.startswith("cl1b_fm") else CAP[1:]), w_corpus=3.0)
+GROUPS["cl1b_fm_h"]["corpus"] = GROUPS["cl1b_fm"]["corpus"] + [("fm_haut", 1.0)]
+GROUPS["cl1b_man_h"]["corpus"] = GROUPS["cl1b_man"]["corpus"] + [("man_haut", 1.0)]
+
+# Variantes finales : poids du corpus 1 (la voix prime), corpus chaud inclus, loi interne / trim / plafond libres
+for _g in ("cl1b_fm", "cl1b_man"):
+    GROUPS[_g + "_f"] = dict(GROUPS[_g + "_h"], w_corpus=1.0)
+# FET 76 et Vox Strip : cellule du tour 2 (détecteur instantané) recalée en multi-objectifs (voix + batterie + statique)
+_C3 = [(("comps", k, n), lo, hi, kd) for k in range(3) for (n, lo, hi, kd) in COMP_SPEC]
+for _g in ("fet76", "voxbox"):
+    GROUPS[_g + "_t"] = dict(GROUPS[_g], free_dets=[], free_comps=[], w_corpus=1.0,
+                             extra=[("ant", 0.0, 3.0, "lin"), ("thr_db", -8.0, 8.0, "lin")] + [e for e in GROUPS[_g]["extra"] if e[0][:3] in ("sa_", "sr_")],
+                             paths=_C3 + LWARP + [(("trim_db",), -1.0, 1.0, "lin")])
+
+GROUPS["fet76_ts"] = dict(GROUPS["fet76_t"], w_stat=3.0, stat=[("stat_r4:1_in-24", "stat_1k"), ("stat_r4:1_in-12", "stat_1k"),
+                                                                ("stat_r8:1_in-24", "stat_1k"), ("stat_r4:1_in0", "stat_1k")])
+GROUPS["la2a_t"] = dict(GROUPS["la2a"], free_dets=[], free_comps=[], w_corpus=1.0, w_drum=3.0, w_stat=1.0,
+                        extra=[("ant", 0.0, 3.0, "lin"), ("thr_db", -8.0, 8.0, "lin"), ("hold_ms", 0.05, 500.0, "log")],
+                        paths=_C3 + LWARP + [(("trim_db",), -1.0, 1.0, "lin")])
 
 # ── Étape 2 : vitesses par position de bouton (la dynamique de l'étape 1 est figée) ──
 CL1B_KN = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0]
@@ -255,6 +279,20 @@ GROUPS["voxbox_k"] = {"banc": "voxbox", "prof": "modeles.voxbox_profil", "key": 
                       "real_from_sets": ["romain_voix", "aFast_rFast", "aSlow_rSlow", "aFast_rSlow", "aSlow_rFast", "aMedFast_rMedSlow", "batterie"],
                       "real_extra": _jobs("voxbox", ["voix5"]), "w_drum": 2.0,
                       "paths": _EXP + [(("scale", w, i), 0.003, 300.0, "log") for w in ("att", "rel") for i in (0, 1, 3, 4)]}
+
+
+GROUPS["cl1b_fm_kb"] = dict(GROUPS["cl1b_fm_k"], w_drum=3.0, paths=list(GROUPS["cl1b_fm_k"]["paths"]) + LWARP,
+                           corpus=[(f"mfm_{t}", 0.3) for t in ("a1r1", "a2r2", "a4r4", "a6r6", "a8r8")] + [("fm_romain", 0.5)])
+
+
+# Raffinement final : null BRUT (NOVA_RAW=1), autres positions de boutons dans le coût (pas de régression)
+GROUPS["fet76_r"] = dict(GROUPS["fet76_ts"], real_from_sets=GROUPS["fet76_ts"]["real_from_sets"] + ["voix_r8", "a1r1", "a7r7", "slo", "r20", "r2_a4r2"])
+GROUPS["voxbox_r"] = dict(GROUPS["voxbox_t"], real_from_sets=GROUPS["voxbox_t"]["real_from_sets"] + ["aFast_rFast", "aSlow_rSlow", "aFast_rSlow", "aSlow_rFast", "aMedFast_rMedSlow"])
+GROUPS["la2a_r"] = dict(GROUPS["la2a_t"], real_from_sets=GROUPS["la2a_t"]["real_from_sets"] + ["pr40", "pr75"])
+
+
+GROUPS["cl1b_fm_r"] = dict(GROUPS["cl1b_fm_k"], w_drum=2.0, paths=list(GROUPS["cl1b_fm_k"]["paths"]) + LWARP,
+                          corpus=[("fm_romain", 0.5), ("fm5", 0.5), ("mfm_a1r1", 0.3), ("mfm_a6r6", 0.3)])
 
 
 def stage2_base(gname, start):
