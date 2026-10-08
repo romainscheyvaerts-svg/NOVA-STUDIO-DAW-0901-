@@ -274,3 +274,16 @@ describe('échelle à l’écran et raccourcis', () => {
     expect(linToDb(1)).toBe(0);
   });
 });
+
+describe('piste gelée : la ligne déjà rendue n’est pas appliquée deux fois', () => {
+  it('tranche du rendu : rien si la ligne est celle du gel, sinon l’écart seulement', async () => {
+    const { sliceGainPoints } = await import('../utils/freeze');
+    const pts: ClipGainPoint[] = [{ t: 1, db: 0 }, { t: 2, db: -6 }];
+    const ref = { renderId: 'r', anchor: 10, from: 0, to: 4, fadeIn: 0, fadeOut: 0, gain: 1, gainPoints: pts };
+    expect(sliceGainPoints({ gainPoints: pts }, ref)).toBeUndefined();
+    const changed = sliceGainPoints({ gainPoints: [{ t: 1, db: 0 }, { t: 2, db: -12 }] }, ref)!;
+    expect(envelopeDbAt(changed, 12)).toBeCloseTo(-6, 9);     // temps du rendu = ancrage + temps source
+    expect(envelopeDbAt(changed, 11)).toBeCloseTo(0, 9);
+    expect(envelopeDbAt(sliceGainPoints({ gainPoints: undefined }, ref)!, 12)).toBeCloseTo(6, 9);   // ligne retirée : on remonte
+  });
+});

@@ -304,6 +304,12 @@ def scenario_pc(page, res):
     res["gain_apres_nudge_db"] = round(20 * math.log10(clip_state(page, "lead")[0]["gain"]), 3)
     page.keyboard.press("Control+Alt+Shift+ArrowDown"); page.wait_for_timeout(150)
     res["gain_apres_nudge_fin_db"] = round(20 * math.log10(clip_state(page, "lead")[0]["gain"]), 3)
+    # Gain sur la plage (Pro Tools : Clip Gain sur la sélection) : 9,0 → 9,5 s, Ctrl+Maj+↓ ×2 = −1 dB.
+    page.evaluate("() => window.__novaEdit.selectRange(9.0, 9.5, ['lead'])"); page.wait_for_timeout(150)
+    for _ in range(2):
+        page.keyboard.press("Control+Shift+ArrowDown"); page.wait_for_timeout(150)
+    page.evaluate("() => window.__novaEdit.clearSelection()"); page.wait_for_timeout(150)
+    res["gain_sur_la_plage"] = [p for p in clip_state(page, "lead")[0]["pts"] if p[0] >= 7.9]
     shot(page, "pc_04_infos_de_gain")
     # --- Export mesuré
     m = page.evaluate(MEASURE_JS, ["lead", 11.0])
@@ -402,6 +408,7 @@ def scenario_pc(page, res):
         "crayon_clip": len(res["apres_crayon_triangle"]) > len(res["points_poses"]) + 4,
         "crayon_automation": res["automation_crayon"]["points"] >= 3 and res["automation_crayon"]["premier"][1] > 1.0 and 0.02 < res["automation_crayon"]["dernier"][1] < 0.2,
         "nudge": abs(res["gain_apres_nudge_db"] - 1.0) < 1e-3 and abs(res["gain_apres_nudge_fin_db"] - 0.9) < 1e-3,
+        "gain_sur_la_plage": [p[1] for p in res["gain_sur_la_plage"]] == [0, -1.0, -1.0, 0] and [p[0] for p in res["gain_sur_la_plage"]] == [7.995, 8.0, 8.5, 8.505],
         "points_a_0_1_dB": all(abs(p["ecart_db"]) <= 0.1 for p in e["points"]) and len(e["points"]) > 0,
         "gain_partout_0_1_dB": e["ecart_max_partout_db"] <= 0.1,
         "pas_de_clic": e["pas_de_gain_max_par_echantillon"] < 0.01 and e["pire_rapport_sauts_aux_points"] <= 1.05,

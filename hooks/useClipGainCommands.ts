@@ -25,19 +25,22 @@ const isAudio = (c: Clip) => c.type !== TrackType.MIDI && !!(c.bufferId || c.buf
 const st = (): DAWState | null => getEditCommands()?.getState() || null;
 const notify = (text: string) => getEditCommands()?.notify(text);
 
-/** Clips visés : la sélection de clips, sinon ceux de la plage, sinon celui sous la tête de lecture. */
+/**
+ * Clips visés : la plage de temps (Pro Tools : le gain ne change que sur la
+ * sélection), sinon les clips sélectionnés, sinon celui sous la tête de lecture.
+ */
 export function gainTargets(state: DAWState): { list: Target[]; range: { start: number; end: number } | null } {
   const sel = editSelectionStore.get();
   const ids = new Set(sel.clipIds);
   const all = (state.tracks || []).flatMap(t => t.clips.map(clip => ({ trackId: t.id, clip })));
-  if (ids.size) return { list: all.filter(x => ids.has(x.clip.id) && isAudio(x.clip)), range: null };
-  if (sel.time) {
+  if (sel.time && sel.time.end - sel.time.start > 1e-4) {
     const s = sel.time;
     return {
       list: all.filter(x => s.trackIds.includes(x.trackId) && isAudio(x.clip) && x.clip.start < s.end && x.clip.start + x.clip.duration > s.start),
       range: { start: s.start, end: s.end },
     };
   }
+  if (ids.size) return { list: all.filter(x => ids.has(x.clip.id) && isAudio(x.clip)), range: null };
   const t = playheadStore.get();
   const track = state.tracks.find(x => x.id === sel.focusTrackId);
   return { list: (track?.clips || []).filter(c => isAudio(c) && t >= c.start && t < c.start + c.duration).map(clip => ({ trackId: track!.id, clip })), range: null };
