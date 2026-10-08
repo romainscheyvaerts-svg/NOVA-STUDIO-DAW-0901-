@@ -578,8 +578,31 @@ interface VocalCompressorUIProps {
   onParamsChange?: (p: CompressorParams) => void;
 }
 
+/** Réglages par défaut de la fenêtre (mêmes valeurs de repli que le moteur). */
+const UI_DEFAULTS: CompressorParams = {
+  threshold: -18, ratio: 4, knee: 12, attack: 0.003, release: 0.25, makeupGain: 1, mix: 1,
+  scHpFreq: 80, lookahead: 0, autoMakeup: false, mode: 'CLEAN', isEnabled: true,
+};
+
+/**
+ * Réglages incomplets (projet ancien ou réparé, effet ajouté par Nova) : chaque
+ * valeur manquante prend sa valeur par défaut. Avant, la fenêtre plantait
+ * (« Cannot read properties of undefined (reading 'toFixed') ») — trouvé par
+ * les pannes injectées (qa/pannes_injectees.py, 08/10/2026).
+ */
+export const withCompressorDefaults = (p: Partial<CompressorParams> | null | undefined): CompressorParams => {
+  const out: any = { ...UI_DEFAULTS };
+  for (const [k, v] of Object.entries(p || {})) {
+    const d = (UI_DEFAULTS as any)[k];
+    if (v === undefined || v === null) continue;
+    if (typeof d === 'number' && !(typeof v === 'number' && Number.isFinite(v))) continue;
+    out[k] = v;
+  }
+  return out as CompressorParams;
+};
+
 export const VocalCompressorUI: React.FC<VocalCompressorUIProps> = ({ node, initialParams, onParamsChange }) => {
-  const [params, setParams] = useState<CompressorParams>(initialParams);
+  const [params, setParams] = useState<CompressorParams>(() => withCompressorDefaults(initialParams));
   const [reduction, setReduction] = useState(0);
   const [inputLevel, setInputLevel] = useState(-100);
   const [outputLevel, setOutputLevel] = useState(-100);
