@@ -551,6 +551,9 @@ def run():
         step("Export du mix chez Lina et chez Max (même son)", exports, conv=False)
 
         # ------------------------------------------------------------ bilan
+        res["journal_mix_voix"] = [{"seq": o["seq"], "par": o["author_name"], "id": (o["op"] or {}).get("_id", "")[:8], "champs": (o["op"] or {}).get("fields")}
+                                   for o in cloud.ops if o["kind"] == "mix" and (o["op"] or {}).get("trackId") == "voix"][-12:]
+        res["journal_appels_E"] = [x for x in cloud.log if x[0] == "E"][-40:]
         res["journal_ops"] = {}
         for o in cloud.ops:
             res["journal_ops"][o["kind"]] = res["journal_ops"].get(o["kind"], 0) + 1

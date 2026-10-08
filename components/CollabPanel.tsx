@@ -182,6 +182,12 @@ const CollabPanel: React.FC<Props> = (p) => {
   const [codeErr, setCodeErr] = useState<string | null>(null);
   const [markerName, setMarkerName] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Panneau ouvert : les notifications d'export passent à gauche (elles recouvraient son bouton principal).
+  useEffect(() => {
+    if (!p.open) return;
+    document.body.classList.add('nova-collab-open');
+    return () => { document.body.classList.remove('nova-collab-open'); };
+  }, [p.open]);
   // Nouveau message : on descend jusqu'à lui (pas à l'ouverture : les réglages restent en haut).
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [p.messages.length]);
   if (!p.open) return null;

@@ -280,6 +280,12 @@ def export_wav(page, dest: Path, label):
         got[0].save_as(str(dest))
     finally:
         page.wait_for_timeout(800)
+        # Notification « Prêt : … » fermée (comme l'utilisateur) : elle recouvre le bas de l'écran.
+        try:
+            for b in page.get_by_role("button", name="Fermer la notification").locator("visible=true").all():
+                b.click(timeout=2000)
+        except Exception:
+            pass
         for _ in range(3):
             close = page.get_by_role("button", name=re.compile("^(Fermer|Close)$")).locator("visible=true")
             try:
