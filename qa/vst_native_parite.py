@@ -278,6 +278,12 @@ def run_engine(engine, pid, out, foreign=None, only_foreign=False):
                 dt = time.perf_counter() - t
                 res["stream_block_us"] = round(dt / (n / vst_host.BLOCK) * 1e6, 1)
                 np.save(os.path.join(out, tag + ".stream.npy"), np.concatenate(blocks, axis=1))
+                # 2e flux sur une instance neuve (même état) : le plugin est-il déterministe ?
+                s4 = vst_host.Slot("p2", path, name, SR, juce)
+                s4.load(state)
+                b2 = [s4.process_block(sig[:, a:a + vst_host.BLOCK]) for a in range(0, n, vst_host.BLOCK)]
+                np.save(os.path.join(out, tag + ".stream2.npy"), np.concatenate(b2, axis=1))
+                s4.unload()
             plug = slot.plugin
             if engine == "native":
                 res["host_mem_mb"] = mem_mb(plug.host_pid)
@@ -333,16 +339,27 @@ def run_engine(engine, pid, out, foreign=None, only_foreign=False):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def null_db(a, b):
+    """Crête de la différence (dB FS) et, pour un plugin non déterministe, l'écart d'enveloppe :
+    niveau RMS par fenêtres de 50 ms, écart maximal en dB (fenêtres au-dessus de −50 dB FS)."""
     import numpy as np
     if a is None or b is None:
         return None
     n = min(a.shape[1], b.shape[1])
     if a.shape[1] != b.shape[1]:
         return {"len": [int(a.shape[1]), int(b.shape[1])]}
-    d = np.abs(a[:, :n].astype(np.float64) - b[:, :n].astype(np.float64))
+    a64, b64 = a[:, :n].astype(np.float64), b[:, :n].astype(np.float64)
+    d = np.abs(a64 - b64)
     peak = float(d.max()) if d.size else 0.0
+    w = SR // 20
+    env = 0.0
+    for i in range(0, n - w, w):
+        ra, rb = np.sqrt(np.mean(a64[:, i:i + w] ** 2)), np.sqrt(np.mean(b64[:, i:i + w] ** 2))
+        if max(ra, rb) > 10 ** (-50 / 20):
+            env = max(env, abs(20 * np.log10((ra + 1e-12) / (rb + 1e-12))))
+    idx = np.nonzero(d.max(axis=0) > 0)[0]
     return {"identical": peak == 0.0, "peak_db": None if peak == 0 else round(20 * np.log10(peak), 1),
-            "level_db": round(20 * np.log10(float(np.abs(a).max()) + 1e-30), 1)}
+            "level_db": round(20 * np.log10(float(np.abs(a).max()) + 1e-30), 1), "env_db": round(env, 2),
+            "first_diff": int(idx[0]) if idx.size else None}
 
 
 def load_np(path):
@@ -408,6 +425,8 @@ def compare(out, pid):
     rep["render_pb_self"] = null_db(rp1, rp2)
     rep["render_native_self"] = null_db(rn1, rn2)
     rep["stream"] = null_db(load_np(os.path.join(out, P + ".stream.npy")), load_np(os.path.join(out, N + ".stream.npy")))
+    rep["stream_pb_self"] = null_db(load_np(os.path.join(out, P + ".stream.npy")), load_np(os.path.join(out, P + ".stream2.npy")))
+    rep["stream_native_self"] = null_db(load_np(os.path.join(out, N + ".stream.npy")), load_np(os.path.join(out, N + ".stream2.npy")))
     # États croisés : natif rend avec l'état de pedalboard, pedalboard avec celui du natif
     rep["state_pb_to_native"] = null_db(rp1, load_np(os.path.join(out, N + ".foreign_render.npy")))
     rep["state_native_to_pb"] = null_db(rn1, load_np(os.path.join(out, f"{pid}.pedalboard.foreign.render.npy")))
@@ -427,7 +446,9 @@ def verdict_null(r, self_a=None, self_b=None):
         return f"longueurs {r['len']}"
     if r["identical"]:
         return "identique"
-    return f"{r['peak_db']} dB"
+    if r.get("peak_db") is not None and r["peak_db"] <= -100:
+        return f"{r['peak_db']} dB"
+    return f"{r['peak_db']} dB (enveloppe {r.get('env_db')} dB)"
 
 
 def write_report(out, reps):
@@ -436,7 +457,7 @@ def write_report(out, reps):
              "rendus par le vrai pont (vst_host : Slot, set_parameters, render_offline) dans un processus par moteur.",
              "Null test : crête de (pedalboard − natif) en dB FS ; « identique » = différence nulle à l'échantillon près. "
              "Auto-contrôle : chaque moteur comparé à lui-même (2e rendu sur la même instance hors ligne, réutilisée comme dans le pont).", "",
-             "| Plugin | Rendu hors ligne | Flux 128 éch. | pb↔pb | natif↔natif | Réglages (clés / champs) | apply_param identiques | État pb→natif | État natif→pb | Latence pb / natif |",
+             "| Plugin | Rendu hors ligne | Flux 128 éch. | pb↔pb (rendu réutilisé / flux neuf) | natif↔natif (idem) | Réglages (clés / champs) | apply_param identiques | État pb→natif | État natif→pb | Latence pb / natif |",
              "|---|---|---|---|---|---|---|---|---|---|"]
     for r in reps:
         if not r.get("pb", {}).get("ok") or not r.get("native", {}).get("ok"):
@@ -445,8 +466,9 @@ def write_report(out, reps):
         p0 = r["params0"]
         ap = r.get("apply") or {}
         lines.append("| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
-            r["label"], verdict_null(r["render"]), verdict_null(r["stream"]), verdict_null(r["render_pb_self"]),
-            verdict_null(r["render_native_self"]),
+            r["label"], verdict_null(r["render"]), verdict_null(r["stream"]),
+            verdict_null(r["render_pb_self"]) + " / " + verdict_null(r.get("stream_pb_self")),
+            verdict_null(r["render_native_self"]) + " / " + verdict_null(r.get("stream_native_self")),
             ("identiques" if p0["ok"] else f"{p0['n_diffs']} écart(s)") + f" ({p0['count']})",
             f"{ap.get('identical')}/{ap.get('items')}" if ap.get("same_items") else "listes différentes",
             verdict_null(r["state_pb_to_native"]) + (" · textes ok" if r["state_params_pb_to_native"]["ok"] else " · textes ≠"),
@@ -490,6 +512,7 @@ def spawn(args, timeout=4 * 3600):
 
 
 REUSE_PB = False
+RERUN_PB: set = set()
 
 
 def run_all(out, only):
@@ -498,7 +521,7 @@ def run_all(out, only):
     for pid in only:
         print(f"== {pid}", flush=True)
         prev = load_json(os.path.join(out, f"{pid}.pedalboard.result.json")) or {}
-        if REUSE_PB and prev.get("ok"):
+        if REUSE_PB and prev.get("ok") and pid not in RERUN_PB:
             print("  pedalboard : résultats déjà là (pedalboard est très lent sur cette machine)", flush=True)
         else:
             print("  pedalboard", spawn(["run", "--engine", "pedalboard", "--plugin", pid, "--out", out]), flush=True)
@@ -526,9 +549,11 @@ def main():
     ap.add_argument("--only-foreign", action="store_true")
     ap.add_argument("--only")
     ap.add_argument("--reuse-pb", action="store_true")
+    ap.add_argument("--rerun-pb", help="plugins dont pedalboard est relancé malgré --reuse-pb")
     a = ap.parse_args()
-    global REUSE_PB
+    global REUSE_PB, RERUN_PB
     REUSE_PB = a.reuse_pb
+    RERUN_PB = set((a.rerun_pb or "").split(","))
     below_normal()
     if a.cmd == "run":
         run_engine(a.engine, a.plugin, a.out, a.foreign, a.only_foreign)

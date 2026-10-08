@@ -148,11 +148,14 @@ class TestRealPlugin(unittest.TestCase):
             st = p.raw_state
             p.raw_state = st
             self.assertEqual(p.parameters["ratio"].string_value, "2.00:1")
-            # Clé de side-chain et réglage à l'échantillon près
-            y2 = p.process(x, 48000, buffer_size=128, reset=False, key=x,
-                           changes=[("output_level", 1000, 0.0)])
-            self.assertEqual(y2.shape, (2, 4800))
-            self.assertLess(float(np.abs(y2[:, 1100:]).max()), 1e-6)   # sortie coupée dès l'échantillon 1000
+            # Réglage à l'échantillon près : identique jusqu'à l'échantillon 1000, différent ensuite
+            ref = p.process(x, 48000, buffer_size=128, reset=True)
+            y2 = p.process(x, 48000, buffer_size=128, reset=True, changes=[("output_level", 1000, 0.0)])
+            d = np.nonzero(np.abs(y2 - ref).max(axis=0) > 0)[0]
+            self.assertTrue(1000 <= int(d[0]) <= 1001, int(d[0]))
+            # Clé de side-chain : bus auxiliaire alimenté
+            y3 = p.process(x, 48000, buffer_size=128, reset=False, key=x)
+            self.assertEqual(y3.shape, (2, 4800))
         finally:
             p.close()
 

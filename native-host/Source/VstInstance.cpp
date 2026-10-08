@@ -170,6 +170,14 @@ namespace nova
 
     VstInstance::~VstInstance()
     {
+        teardownInstance();
+        // Le module reste chargé jusqu'à la fin du processus : certains plugins plantent en se déchargeant.
+        if (module) new VST3::Hosting::Module::Ptr (module);
+        module.reset();
+    }
+
+    void VstInstance::teardownInstance()
+    {
         {
             std::lock_guard<std::mutex> l (processLock);
             deactivate();
@@ -192,9 +200,7 @@ namespace nova
         if (component) component->terminate();
         component = nullptr;
         handler = nullptr;
-        // Le module reste chargé jusqu'à la fin du processus : certains plugins plantent en se déchargeant.
-        if (module) new VST3::Hosting::Module::Ptr (module);
-        module.reset();
+        singleComponent = false;
     }
 
     int VstInstance::indexOf (ParamID id) const
@@ -245,7 +251,18 @@ namespace nova
         // Comme JUCE (PluginDescription::isInstrument) : sous-catégories contenant « Instrument ».
         instrument = lowerAscii (subCategories).find ("instrument") != std::string::npos;
 
-        component = factory.createInstance<IComponent> (chosen->ID());
+        chosenId = chosen->ID();
+        createInstance();
+        readBuses();
+        refreshParamInfo();
+        refreshValuesFromController();
+        cachedLatency = std::max (0, (int) processor->getLatencySamples());
+    }
+
+    void VstInstance::createInstance()
+    {
+        const auto& factory = module->getFactory();
+        component = factory.createInstance<IComponent> (chosenId);
         if (! component) throw std::runtime_error ("Chargement impossible : le plugin refuse de créer son composant");
         if (component->initialize (hostContext.get()) != kResultOk)
             throw std::runtime_error ("Chargement impossible : initialisation du composant refusée");
@@ -297,10 +314,6 @@ namespace nova
             midiMapping = U::cast<IMidiMapping> (controller);
         }
         updateMidiMappings();
-        readBuses();
-        refreshParamInfo();
-        refreshValuesFromController();
-        cachedLatency = std::max (0, (int) processor->getLatencySamples());
     }
 
     //==========================================================================
@@ -470,6 +483,8 @@ namespace nova
                     return arr;
                 }
                 if (! textFor (index, (double) cache[(size_t) index].load(), t)) t = fallbackText (v);
+                // pedalboard remet la valeur d'origine après chaque lecture (try / finally).
+                guard::call ([&] { setValue (index, original); });
             }
             else if (! textFor (index, (double) v, t))
                 t = fallbackText (v);
@@ -483,7 +498,6 @@ namespace nova
                 havePrev = true;
             }
         }
-        if (slow) guard::call ([&] { setValue (index, original); });
         return arr;
     }
 
@@ -978,6 +992,79 @@ namespace nova
         h.outFrames = (uint32_t) nframes;
         h.outChannelsWritten = (uint32_t) mainOutChannels();
         h.processUs = us;
+    }
+
+    //==========================================================================
+    void VstInstance::reinstantiate()
+    {
+        std::vector<uint8_t> comp, ctrl;
+        bool hasCtrl = false;
+        const bool hasComp = getState (comp, ctrl, hasCtrl);
+        std::vector<std::pair<ParamID, float>> values;
+        for (size_t i = 0; i < params.size(); ++i) values.emplace_back (params[i].id, cache[i].load());
+        const bool was = prepared;
+        const double sr = currentRate;
+        const int mb = maxBlockSize, ch = preparedChannels;
+        const bool off = offlineMode, sc = sidechainOn;
+        teardownInstance();
+        createInstance();
+        readBuses();
+        refreshParamInfo();
+        refreshValuesFromController();
+        setState (hasComp ? &comp : nullptr, hasCtrl ? &ctrl : nullptr);
+        // Deux passes (comme pedalboard) : un réglage peut dépendre d'un autre.
+        for (int pass = 0; pass < 2; ++pass)
+            for (auto& [id, v] : values)
+                if (const int idx = indexOf (id); idx >= 0) setValue (idx, v);
+        cachedLatency = std::max (0, (int) processor->getLatencySamples());
+        if (was)
+        {
+            prepare (sr, mb, off, ch, sc);
+            reset();
+        }
+    }
+
+    void VstInstance::runSilenceOrNoise (int channels, int frames, bool noise, float& magnitude)
+    {
+        auto h = std::make_unique<shm::Header>();
+        std::memset (h.get(), 0, sizeof (shm::Header));
+        std::vector<float> in ((size_t) shm::kMaxChannels * shm::kMaxFrames, 0.0f),
+                           out ((size_t) shm::kMaxChannels * shm::kMaxFrames, 0.0f), key ((size_t) 2 * shm::kMaxFrames, 0.0f);
+        static uint32_t seed = 12345u;
+        if (noise)
+            for (int c = 0; c < channels; ++c)
+                for (int i = 0; i < frames; ++i)
+                {
+                    seed = seed * 1664525u + 1013904223u;
+                    in[(size_t) c * shm::kMaxFrames + (size_t) i] = (float) ((seed >> 8) & 0xFFFF) / 32768.0f - 1.0f;
+                }
+        h->nframes = (uint32_t) frames;
+        h->inChannels = (uint32_t) channels;
+        h->outChannels = (uint32_t) channels;
+        h->blockSize = (uint32_t) frames;
+        processRequest (*h, in.data(), key.data(), out.data());
+        magnitude = 0.0f;
+        for (int c = 0; c < channels; ++c)
+            for (int i = 0; i < frames; ++i)
+                magnitude = std::max (magnitude, std::abs (out[(size_t) c * shm::kMaxFrames + (size_t) i]));
+    }
+
+    bool VstInstance::persistsAudioOnReset()
+    {
+        const int ch = mainInChannels();
+        if (ch == 0) return true;      // instrument : comportement inconnu, recréé à chaque remise à zéro
+        float floor = 0, loud = 0, after = 0;
+        release();
+        prepare (44100.0, 512, true, ch == 1 ? 1 : 2, false);
+        for (int i = 0; i < 5; ++i) runSilenceOrNoise (ch, 512, false, floor);
+        release();
+        prepare (44100.0, 512, true, ch == 1 ? 1 : 2, false);
+        for (int i = 0; i < 5; ++i) runSilenceOrNoise (ch, 512, true, loud);
+        release();
+        prepare (44100.0, 512, true, ch == 1 ? 1 : 2, false);
+        runSilenceOrNoise (ch, 512, false, after);
+        release();
+        return after > floor * 5.0f;
     }
 
     //==========================================================================

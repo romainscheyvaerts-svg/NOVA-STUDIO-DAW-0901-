@@ -354,6 +354,24 @@ namespace nova
                 });
                 reply (id, res);
             }
+            else if (cmd == "reinstantiate")
+            {
+                auto& inst = need();
+                guarded ("remise à neuf", [&] { inst.reinstantiate(); });
+                auto o = Value::object();
+                o.set ("latency", inst.latency());
+                o.set ("buses", inst.busesJson());
+                reply (id, o);
+            }
+            else if (cmd == "detect_reload")
+            {
+                auto& inst = need();
+                bool persists = true;
+                guarded ("test de remise à zéro", [&] { persists = inst.persistsAudioOnReset(); });
+                auto o = Value::object();
+                o.set ("persists", persists);
+                reply (id, o);
+            }
             else if (cmd == "release") { auto& inst = need(); guarded ("arrêt", [&] { inst.release(); }); reply (id, Value::object()); }
             else if (cmd == "reset") { auto& inst = need(); guarded ("remise à zéro", [&] { inst.reset(); }); reply (id, Value::object()); }
             else if (cmd == "params")

@@ -632,10 +632,9 @@ class NativeCppParam:
         self.step_count = int(info.get("steps") or 0)
         self.default_raw_value = f32(float(info.get("default") or 0.0))
         self.num_steps = DEFAULT_NUM_STEPS if self.step_count == 0 else self.step_count + 1
-        # Constaté avec pedalboard 0.9.23 (Pro-C 3, Pro-Q 4…) : toujours vrai, même pour un
-        # réglage continu ; et jamais « booléen » pour un VST3.
-        self.is_discrete = True
-        self.is_boolean = False
+        # Règle de JUCE (FabFilter annonce 2 147 483 646 pas pour ses réglages continus : « discret »).
+        self.is_discrete = self.num_steps != DEFAULT_NUM_STEPS
+        self.is_boolean = False          # jamais « booléen » pour un VST3 (comme pedalboard)
         self.is_automatable = bool(self.flags & K_CAN_AUTOMATE)
         self.is_meta_parameter = False
         self.is_orientation_inverted = False
@@ -871,6 +870,7 @@ class NativePlugin:
         _s(self, "on_edit", None)
         _s(self, "_latency", int(info.get("latency") or 0))
         _s(self, "_spec", None)           # (fréquence, bloc, canaux, side-chain) préparés
+        _s(self, "_reload_persists", None)  # garde du son après arrêt / redémarrage ? (test fait une fois)
         _s(self, "_provided", 0)          # échantillons fournis depuis la dernière remise à zéro
         _s(self, "_transport", None)
         _s(self, "_editor_open", threading.Event())
@@ -1095,10 +1095,27 @@ class NativePlugin:
                                                     "playing": bool(playing), "sig": (int(sig[0]), int(sig[1]))})
 
     def reset(self):
-        """Comme pedalboard : le plugin est arrêté ; il repart à neuf (voix, queues de réverbe,
-        latence relue) au traitement suivant."""
+        """Comme pedalboard : le plugin repart à neuf (voix, queues de réverbe, latence relue) au
+        traitement suivant. Un plugin qui garde du son après un arrêt / redémarrage (test de
+        pedalboard, fait une fois) et tout instrument sont recréés (même classe, état et réglages
+        restaurés) ; les autres sont simplement arrêtés."""
         with self._lock:
-            if self._spec is not None:
+            if self._reload_persists is None:
+                try:
+                    persists = bool(self._host.request("detect_reload").get("persists"))
+                except HostError:
+                    persists = False
+                object.__setattr__(self, "_reload_persists", persists)
+                object.__setattr__(self, "_spec", None)       # le test a préparé l'hôte à 44,1 kHz
+            if self._reload_persists:
+                res = self._host.request("reinstantiate", timeout=LOAD_TIMEOUT_S)
+                object.__setattr__(self, "buses", res.get("buses") or self.buses)
+                self._host.request("release")
+                self._refresh_values()
+                if self._spec is not None:
+                    sr, _bs, ch, sc = self._spec
+                    object.__setattr__(self, "_spec", (sr, 0, ch, sc))
+            elif self._spec is not None:
                 self._host.request("release")
                 sr, _bs, ch, sc = self._spec
                 object.__setattr__(self, "_spec", (sr, 0, ch, sc))

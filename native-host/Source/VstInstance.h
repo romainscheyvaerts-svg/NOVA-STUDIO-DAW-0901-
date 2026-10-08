@@ -125,6 +125,14 @@ namespace nova
         void refreshParamInfo();
         void flushToController();        // réglages renvoyés par le processeur → contrôleur
 
+        // ---- remise à neuf (comme pedalboard pour un plugin qui garde du son après setActive off/on)
+        // Instance recréée (même classe), état et valeurs des réglages restaurés (deux passes), préparée
+        // de nouveau si elle l'était.
+        void reinstantiate();
+        // Test de pedalboard (detectReloadType) : du bruit, une remise à zéro, du silence ; vrai si le
+        // silence qui suit sort plus fort que 5 × le bruit de fond. Instrument (pas d'entrée) : vrai.
+        bool persistsAudioOnReset();
+
         // ---- état
         bool getState (std::vector<uint8_t>& component, std::vector<uint8_t>& controller, bool& hasController);
         void setState (const std::vector<uint8_t>* component, const std::vector<uint8_t>* controller);
@@ -148,6 +156,9 @@ namespace nova
         friend class ComponentHandler;
 
         void readBuses();
+        void createInstance();
+        void teardownInstance();
+        void runSilenceOrNoise (int channels, int frames, bool noise, float& magnitude);
         bool applyArrangements (int channels, bool sidechain);
         void deactivate();
         void handleRestart (int32_t flags);
@@ -162,6 +173,7 @@ namespace nova
         Steinberg::IPtr<Steinberg::Vst::IConnectionPoint> componentCP, controllerCP;
         Steinberg::IPtr<Steinberg::Vst::IComponentHandler> handler;
         bool singleComponent = false;
+        VST3::UID chosenId;
 
         std::unique_ptr<std::atomic<float>[]> cache;
         std::unordered_map<Steinberg::Vst::ParamID, int> idToIndex;
