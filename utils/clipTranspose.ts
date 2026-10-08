@@ -230,6 +230,36 @@ export interface ElasticJob {
   semitones: number;
   formants: boolean;
   algo: 'auto' | 'voice' | 'poly';
+  /**
+   * R23 : chaque attaque devient une ancre de l'étirement (morceaux coupés sur
+   * les attaques) : elle tombe à l'échantillon près à sa nouvelle place. La
+   * fonction du temps ne change pas.
+   */
+  attacks?: boolean;
+}
+
+/**
+ * Coupe les morceaux sur les attaques (`onsets`, échantillons de la région),
+ * sans changer la fonction du temps : chaque attaque commence un morceau, donc
+ * le vocodeur la pose exactement là où la fonction du temps l'attend. Les
+ * attaques à moins de `minGap` d'un bord ou d'une autre sont laissées.
+ */
+export function splitAtOnsets(segs: ElasticSegment[], onsets: number[], minGap: number): ElasticSegment[] {
+  const out: ElasticSegment[] = [];
+  const sorted = [...onsets].sort((a, b) => a - b);
+  for (const g of segs) {
+    let cur = g.s0, curD = g.d0;
+    const k = (g.d1 - g.d0) / Math.max(1, g.s1 - g.s0);
+    for (const o of sorted) {
+      if (o <= cur + minGap || o >= g.s1 - minGap) continue;
+      const d = Math.round(g.d0 + (o - g.s0) * k);
+      if (d <= curD) continue;
+      out.push({ s0: cur, s1: o, d0: curD, d1: d });
+      cur = o; curD = d;
+    }
+    out.push({ s0: cur, s1: g.s1, d0: curD, d1: g.d1 });
+  }
+  return out;
 }
 
 export interface ElasticResult { channels: Float32Array[]; used: 'voice' | 'poly' }
@@ -306,13 +336,14 @@ function stretchSegments(chs: Float32Array[], segs: ElasticSegment[], pitch: num
 
 /** Rend un clip : transposition (`semitones`) + étirement / warp (`segments`). */
 export function renderElastic(job: ElasticJob): ElasticResult {
-  const { channels, sr, segments } = job;
-  const outLen = segments.length ? segments[segments.length - 1].d1 : 0;
+  const { channels, sr } = job;
+  const outLen = job.segments.length ? job.segments[job.segments.length - 1].d1 : 0;
   const mono = monoMix(channels);
   const used = job.algo === 'auto' ? detectMaterial(mono, sr).kind : job.algo;
   const st = clampSt(job.semitones);
   const p = Math.pow(2, st / 12);
   const onsets = detectTransients(mono, sr).map(t => Math.round(t * sr));
+  const segments = job.attacks ? splitAtOnsets(job.segments, onsets, Math.round(0.06 * sr)) : job.segments;
 
   if (used === 'voice' && job.formants && Math.abs(st) >= 0.005) {
     // Voix : étirement (s'il y en a) puis PSOLA à durée constante.

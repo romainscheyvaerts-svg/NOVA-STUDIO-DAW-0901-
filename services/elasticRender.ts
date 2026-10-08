@@ -36,7 +36,7 @@ export async function renderElasticClip(clip: Clip, info: ElasticInfo): Promise<
   const n = plan.segments[plan.segments.length - 1].s1;
   const channels: Float32Array[] = [];
   for (let c = 0; c < src.numberOfChannels; c++) channels.push(src.getChannelData(c).slice(a0, a0 + n));
-  const res = await renderElasticAsync({ channels, sr, segments: plan.segments, semitones: info.semitones, formants: info.formants, algo: info.algo });
+  const res = await renderElasticAsync({ channels, sr, segments: plan.segments, semitones: info.semitones, formants: info.formants, algo: info.algo, attacks: !!info.attacks });
   const out = new AudioBuffer({ length: Math.max(1, res.channels[0].length), numberOfChannels: res.channels.length, sampleRate: sr });
   res.channels.forEach((c, i) => out.copyToChannel(c as Float32Array<ArrayBuffer>, i));
   const id = `elastic-${clip.id}-${Date.now().toString(36)}`;
