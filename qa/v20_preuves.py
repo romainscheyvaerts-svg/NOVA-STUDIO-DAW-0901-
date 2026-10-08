@@ -98,12 +98,12 @@ def st(page, expr):
 
 def canvas_box(page):
     return page.evaluate("""() => { const c = document.querySelectorAll('.nova-grille canvas')[1]; const r = c.getBoundingClientRect();
-      const sc = document.querySelector('.nova-grille .custom-scroll'); return { x: r.left, y: r.top, w: r.width, h: r.height, sl: sc ? sc.scrollLeft : 0, st: sc ? sc.scrollTop : 0 }; }""")
+      const sc = document.querySelector('.nova-grille .custom-scroll'); return { x: r.left, y: r.top, w: r.width, h: r.height, sl: sc ? sc.scrollLeft : 0, st: sc ? sc.scrollTop : 0, tt: +(c.dataset.tracksTop || 40) }; }""")
 
 
 def clip_point(page, track_index, t):
     box = canvas_box(page)
-    return box["x"] + t * 40 - box["sl"], box["y"] + 40 + track_index * 120 + 60 - box["st"]
+    return box["x"] + t * 40 - box["sl"], box["y"] + box.get("tt", 40) + track_index * 120 + 60 - box["st"]
 
 
 def track_index(page, tid):

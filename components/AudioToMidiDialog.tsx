@@ -19,6 +19,7 @@ import { plan808 } from '../utils/bass808';
 import { guessKey } from '../utils/pitchCorrect';
 import { chordColor } from './ChordLane';
 import { openNovaWindow } from '../utils/novaWindows';
+import { audioEngine } from '../engine/AudioEngine';
 
 /**
  * Audio → MIDI (V20) : « Convert Melody / Drums / Harmony to MIDI »
@@ -165,60 +166,42 @@ function usePreview() {
 }
 
 // ---------------------------------------------------------------------------
-// Prise au micro (décompte d'une mesure, clic au tempo)
+// Prise au micro : une mesure de décompte, puis la voix, sur le beat ou au clic
 // ---------------------------------------------------------------------------
 
+const ON_BEAT_KEY = 'nova_hum_on_beat';
+const readOnBeat = () => { try { return localStorage.getItem(ON_BEAT_KEY) !== '0'; } catch { return true; } };
+
+/**
+ * Prise au micro par le moteur (AudioEngine.startHumTake) : « Fredonner sur
+ * le beat » fait jouer le morceau pendant le décompte et la prise ; la voix
+ * est captée par l'enregistreur calé et replacée comme une prise normale
+ * (latence d'entrée / sortie compensée, réglage « Calage des prises »).
+ */
 function useMicHum(bpm: number, beatsPerBar: number) {
-  const ref = useRef<{ ctx: AudioContext; stream: MediaStream; proc: ScriptProcessorNode; chunks: Float32Array[]; startAt: number; timer: number } | null>(null);
-  const start = useCallback(async (onPhase: (s: 'countin' | 'recording') => void) => {
+  const active = useRef(false);
+  const start = useCallback(async (onPhase: (s: 'countin' | 'recording') => void, tracks: Track[], from: number, onBeat: boolean) => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-    const ctx = new AudioContext();
-    await ctx.resume();
-    const src = ctx.createMediaStreamSource(stream);
-    const proc = ctx.createScriptProcessor(4096, 1, 1);
-    const beat = 60 / Math.max(20, bpm);
-    const startAt = ctx.currentTime + 0.15 + beat * beatsPerBar; // après une mesure de décompte
-    const chunks: Float32Array[] = [];
-    proc.onaudioprocess = (e) => {
-      const at = e.playbackTime;
-      const data = e.inputBuffer.getChannelData(0);
-      const skip = Math.max(0, Math.round((startAt - at) * ctx.sampleRate));
-      if (skip < data.length) chunks.push(data.slice(skip));
-    };
-    src.connect(proc); proc.connect(ctx.destination);
-    // Clic : décompte puis tempo (plus aigu sur le 1er temps).
-    let next = ctx.currentTime + 0.15, k = 0;
-    const tick = () => {
-      while (next < ctx.currentTime + 0.5) {
-        const o = ctx.createOscillator(), g = ctx.createGain();
-        o.frequency.value = k % beatsPerBar === 0 ? 1600 : 1100;
-        g.gain.setValueAtTime(k < beatsPerBar ? 0.35 : 0.15, next); g.gain.exponentialRampToValueAtTime(0.001, next + 0.05);
-        o.connect(g); g.connect(ctx.destination); o.start(next); o.stop(next + 0.06);
-        next += beat; k++;
-      }
-    };
-    tick();
-    const timer = window.setInterval(tick, 100);
-    ref.current = { ctx, stream, proc, chunks, startAt, timer };
+    // Lecture en cours : l'appli l'arrête (et remet son bouton Lecture) avant la prise.
+    try { window.dispatchEvent(new CustomEvent('nova:transport-pause')); } catch { /* hors navigateur */ }
+    const { recordAt } = await audioEngine.startHumTake(stream, tracks, from, bpm, beatsPerBar, onBeat);
+    active.current = true;
     onPhase('countin');
-    window.setTimeout(() => { if (ref.current?.ctx === ctx) onPhase('recording'); }, Math.max(0, (startAt - ctx.currentTime) * 1000));
+    const now = audioEngine.ctx?.currentTime ?? 0;
+    window.setTimeout(() => { if (active.current) onPhase('recording'); }, Math.max(0, (recordAt - now) * 1000));
   }, [bpm, beatsPerBar]);
-  const stop = useCallback((): { data: Float32Array; sr: number } | null => {
-    const r = ref.current;
-    if (!r) return null;
-    ref.current = null;
-    window.clearInterval(r.timer);
-    try { r.proc.disconnect(); } catch { /* */ }
-    r.stream.getTracks().forEach(t => t.stop());
-    const n = r.chunks.reduce((a, c) => a + c.length, 0);
-    const data = new Float32Array(n);
-    let o = 0; for (const c of r.chunks) { data.set(c, o); o += c.length; }
-    const sr = r.ctx.sampleRate;
-    void r.ctx.close().catch(() => {});
-    return { data, sr };
+  const stop = useCallback(async () => {
+    if (!active.current) return null;
+    active.current = false;
+    return audioEngine.stopHumTake();
   }, []);
-  useEffect(() => () => { stop(); }, [stop]);
-  return { start, stop };
+  const cancel = useCallback(() => {
+    if (!active.current) return;
+    active.current = false;
+    audioEngine.cancelHumTake();
+  }, []);
+  useEffect(() => () => cancel(), [cancel]);
+  return useMemo(() => ({ start, stop, cancel }), [start, stop, cancel]);
 }
 
 /** Faux AudioBuffer mono (prise au micro) pour l'analyse. */
@@ -262,6 +245,9 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
   const preview = usePreview();
   const mic = useMicHum(bpm, beatsPerBar);
   const micStartRef = useRef(0);
+  // « Fredonner sur le beat » : coché par défaut, retenu d'une fois sur l'autre.
+  const [onBeat, setOnBeatState] = useState(readOnBeat);
+  const setOnBeat = (v: boolean) => { setOnBeatState(v); try { localStorage.setItem(ON_BEAT_KEY, v ? '1' : '0'); } catch { /* */ } };
 
   const sourceClip = source && source !== 'mic' ? tracks.find(t => t.id === source.trackId)?.clips.find(c => c.id === source.clipId) : undefined;
   const sourceTrack = source && source !== 'mic' ? tracks.find(t => t.id === source.trackId) : undefined;
@@ -277,7 +263,7 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
     else setSource(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request]);
-  useEffect(() => { if (!open) { preview.stop(); mic.stop(); } }, [open, preview, mic]);
+  useEffect(() => { if (!open) { preview.stop(); mic.cancel(); } }, [open, preview, mic]);
 
   // Analyse du clip choisi.
   useEffect(() => {
@@ -339,20 +325,21 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
     preview.stop();
     micStartRef.current = Math.max(0, Math.round(playheadStore.get() / bar) * bar);
     try {
-      await mic.start(phase => setStatus(phase));
+      await mic.start(phase => setStatus(phase), tracks, micStartRef.current, onBeat);
     } catch (e: any) {
       setStatus('error');
       setError(e?.name === 'NotAllowedError' ? 'Micro refusé : autorise le micro pour NOVA (icône du cadenas dans la barre d’adresse), puis réessaie.' : `Micro indisponible : ${e?.message || e}`);
     }
   };
   const stopMic = async () => {
-    const r = mic.stop();
-    if (!r || r.data.length < r.sr * 0.3) { setStatus('empty'); return; }
     setStatus('analyzing');
+    const r = await mic.stop();
+    if (!r || r.data.length < r.sr * 0.3) { setStatus('empty'); return; }
     try {
       const buf = monoBuffer(r.data, r.sr);
       const analysis = await analyzeRegion(buf, 0, buf.duration);
-      setMelody({ analysis, timeOffset: micStartRef.current, audio: { buffer: buf, offset: 0, duration: buf.duration } });
+      // Début de la voix sur la timeline : latence compensée (≈ la tête de lecture arrondie à la mesure).
+      setMelody({ analysis, timeOffset: r.start, audio: { buffer: buf, offset: 0, duration: buf.duration } });
       setStatus(analysis.notes.length ? 'ready' : 'empty');
     } catch (e: any) { setStatus('error'); setError(`Analyse impossible : ${e?.message || e}`); }
   };
@@ -474,10 +461,19 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
         {source === 'mic' && (status === 'idle' || status === 'countin' || status === 'recording') && (
           <div className="mb-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-center">
             {status === 'idle' && <>
-              <p className="text-[12px] text-slate-300 mb-3">Une mesure de décompte au clic ({Math.round(bpm)} BPM), puis chante ou fredonne ta mélodie. Elle se place à la tête de lecture.</p>
-              <button type="button" onClick={startMic} data-testid="hum-record" className="h-12 px-6 rounded-full bg-rose-500 text-white font-black text-[14px]"><i className="fas fa-circle mr-2" />Chanter</button>
+              <p className="text-[12px] text-slate-300 mb-3">
+                {onBeat ? <>Le morceau part une mesure avant la tête de lecture (décompte au clic, {Math.round(bpm)} BPM), puis chante ou fredonne ta mélodie sur le beat.</>
+                  : <>Une mesure de décompte au clic ({Math.round(bpm)} BPM), puis chante ou fredonne ta mélodie sur le clic.</>} Elle se place à la tête de lecture.
+              </p>
+              <label className="mb-3 inline-flex items-center gap-2 text-[12px] font-bold text-slate-200 cursor-pointer"
+                title="Entendre le morceau (le beat et les autres pistes) pendant que tu chantes, et pas seulement le clic. La voix est recalée comme une prise normale (latence compensée). Mets un casque : sinon le micro entend aussi le beat.">
+                <input type="checkbox" className="accent-cyan-400 w-4 h-4" checked={onBeat} onChange={e => setOnBeat(e.target.checked)} data-testid="hum-on-beat" />
+                Fredonner sur le beat
+              </label>
+              {onBeat && <p className="-mt-2 mb-3 text-[10px] text-slate-500"><i className="fas fa-headphones mr-1" />Avec un casque : le micro ne doit entendre que ta voix.</p>}
+              <div><button type="button" onClick={startMic} data-testid="hum-record" className="h-12 px-6 rounded-full bg-rose-500 text-white font-black text-[14px]"><i className="fas fa-circle mr-2" />Chanter</button></div>
             </>}
-            {status === 'countin' && <p className="text-[14px] font-black text-amber-300" aria-live="polite">Décompte… prépare-toi</p>}
+            {status === 'countin' && <p className="text-[14px] font-black text-amber-300" aria-live="polite">Décompte… prépare-toi{onBeat ? ' (le morceau joue)' : ''}</p>}
             {status === 'recording' && <>
               <p className="text-[14px] font-black text-rose-300 mb-3" aria-live="polite"><i className="fas fa-circle animate-pulse mr-2" />Je t’écoute…</p>
               <button type="button" onClick={stopMic} data-testid="hum-stop" className="h-12 px-6 rounded-full bg-white text-black font-black text-[14px]"><i className="fas fa-stop mr-2" />Terminé</button>
@@ -488,7 +484,7 @@ const AudioToMidiDialog: React.FC<Props> = ({ request, tracks, bpm, beatsPerBar 
         {status === 'analyzing' && <p className="my-6 text-center text-[13px] text-slate-300" aria-live="polite"><i className="fas fa-circle-notch fa-spin mr-2" />J’écoute{mode === 'melody' ? ' ta mélodie' : mode === 'drums' ? ' la batterie' : ' les accords'}…</p>}
         {status === 'error' && <p className="my-4 rounded-lg border border-rose-400/40 bg-rose-500/10 p-3 text-[12px] text-rose-200">{error}</p>}
         {status === 'empty' && <p className="my-4 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-[12px] text-amber-200">
-          {mode === 'melody' ? 'Je n’entends pas de mélodie claire : chante plus près du micro, des notes tenues (« la la la », « mmm »), sans le beat derrière.'
+          {mode === 'melody' ? 'Je n’entends pas de mélodie claire : chante plus près du micro, des notes tenues (« la la la », « mmm »), sans le beat dans le micro (mets un casque si tu chantes sur le beat).'
             : mode === 'drums' ? 'Je ne trouve pas d’attaques de batterie : monte la sensibilité, ou choisis une boucle de batterie seule.'
             : 'Pas d’accords clairs ici (batterie seule ?). Pose-les à la main dans la piste d’accords.'}
         </p>}

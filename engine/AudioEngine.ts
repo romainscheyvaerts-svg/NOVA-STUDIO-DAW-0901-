@@ -39,6 +39,7 @@ import { DrumPadFxBank } from './DrumPadFx';
 import { Bass808Node, planOfClips } from './Bass808Node';
 import { events808 } from '../utils/bass808';
 import { NovaRecorderSession, ensureRecorderModule, encodeWav24 } from './NovaRecorder';
+import { placeHumTake } from './humTake';
 import { VSTPluginNode } from './VSTPluginNode';
 import { isTrackFrozen, preFreezePlugins, postFreezePlugins, uncoveredClips, freezeIndex, frozenPlayback, isFrozenBus, isFeedCovered, busFrozenSlices } from '../utils/freeze';
 import { PRE_VOLUME } from '../utils/preFxEdits';
@@ -47,6 +48,7 @@ import { computePdc, PdcNode, PDC_MAX_SECONDS } from '../utils/pdc';
 import { applyGainEvents, clipGainEvents } from '../utils/fades';
 import { breathSig } from '../utils/breathEnvelope';
 import { auditionClips } from '../utils/playlists';
+import { ChordEvent, chordSteps } from '../utils/chordDetect';
 
 interface TrackDSP {
   input: GainNode;          
@@ -394,10 +396,10 @@ export class AudioEngine {
    * l'artiste entend la lecture + retard de sa voix jusqu'à l'enregistreur.
    * C'est de cette durée qu'une prise arrive en retard sur la grille.
    */
-  public measureRecordLatency(): { total: number; mode: 'asio' | 'navigateur' } {
+  public measureRecordLatency(stream?: MediaStream | null): { total: number; mode: 'asio' | 'navigateur' } {
     if (!this.ctx) return { total: 0, mode: 'navigateur' };
     const sr = this.ctx.sampleRate;
-    if (this.isUsingASIOInput() && this.asioStreamActive) {
+    if (!stream && this.isUsingASIOInput() && this.asioStreamActive) {
       // pilote (entrée + sortie) + file de sortie du pont + tampon d'envoi (2 × 256)
       // + tampon d'entrée de Nova + réseau local
       const fill = this.asioInput?.fillSec ?? 0.03;
@@ -407,7 +409,7 @@ export class AudioEngine {
     const out = (this.ctx.baseLatency || 0) + ((this.ctx as any).outputLatency || 0);
     let inp = 0.01;
     try {
-      const s = this.activeMonitorStream?.getAudioTracks()[0]?.getSettings() as any;
+      const s = (stream || this.activeMonitorStream)?.getAudioTracks()[0]?.getSettings() as any;
       if (s && typeof s.latency === 'number' && s.latency > 0) inp = s.latency;
     } catch { /* défaut 10 ms */ }
     return { total: Math.min(0.5, out + inp), mode: 'navigateur' };
@@ -453,6 +455,109 @@ export class AudioEngine {
     this.loopStart = start;
     this.loopEnd = end;
   }
+
+  // -------------------------------------------------------------------------
+  // « Fredonne → MIDI » au micro (V20, components/AudioToMidiDialog)
+  // -------------------------------------------------------------------------
+
+  private humTake: {
+    stream: MediaStream; src: MediaStreamAudioSourceNode; session: NovaRecorderSession; playStart: number; from: number;
+    withBeat: boolean; timer: number; clicks: GainNode; loop: [boolean, number, number];
+  } | null = null;
+
+  /**
+   * Démarre une prise « Fredonne → MIDI » : une mesure de décompte au clic,
+   * puis la voix est captée par l'enregistreur calé (comme une prise
+   * normale). `withBeat` (« Fredonner sur le beat ») : le MORCEAU joue,
+   * depuis une mesure avant `from` (décompte sur le beat) et pendant toute la
+   * prise ; sinon le clic continue seul. La boucle est suspendue le temps de
+   * la prise. Renvoie l'instant (horloge) où commence la prise.
+   */
+  public async startHumTake(stream: MediaStream, tracks: Track[], from: number, bpm: number, beatsPerBar: number, withBeat: boolean): Promise<{ recordAt: number }> {
+    await this.init();
+    await this.resume();
+    const ctx = this.ctx!;
+    this.cancelHumTake();
+    if (this.isPlaying) this.stopAll();
+    await ensureRecorderModule(ctx);
+    const src = ctx.createMediaStreamSource(stream);
+    const session = new NovaRecorderSession(ctx, src);
+    const beat = 60 / Math.max(20, bpm || 120);
+    const bars = Math.max(1, Math.round(beatsPerBar || 4));
+    const preRoll = beat * bars;
+    const loop: [boolean, number, number] = [this.isLoopActive, this.loopStart, this.loopEnd];
+    this.isLoopActive = false;
+    let countInAt: number, playStart: number;
+    if (withBeat) {
+      // Pistes pas encore câblées (moteur jamais lancé) : on les câble, sinon la lecture serait muette.
+      tracks.forEach(t => { if (!this.tracksDSP.has(t.id)) this.updateTrack(t, tracks); });
+      this.startPlayback(from - preRoll, tracks);
+      playStart = this.playbackStartTime;
+      countInAt = playStart + from - preRoll;
+    } else {
+      countInAt = ctx.currentTime + 0.15;
+      playStart = countInAt - (from - preRoll);
+    }
+    const clicks = ctx.createGain();
+    clicks.connect(ctx.destination);
+    // Clic : la mesure de décompte (plus aigu sur le 1er temps), puis seul s'il n'y a pas le beat.
+    let k = 0;
+    const tick = () => {
+      const until = ctx.currentTime + 0.5;
+      for (let guard = 0; guard < 64; guard++, k++) {
+        const at = countInAt + k * beat;
+        const countIn = k < bars;
+        if (at >= until || (!countIn && withBeat)) break;
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.value = k % bars === 0 ? 1600 : 1100;
+        g.gain.setValueAtTime(countIn ? 0.35 : 0.15, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.05);
+        o.connect(g); g.connect(clicks); o.start(at); o.stop(at + 0.06);
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 100);
+    this.humTake = { stream, src, session, playStart, from, withBeat, timer, clicks, loop };
+    return { recordAt: countInAt + preRoll };
+  }
+
+  /**
+   * Fin de la prise « Fredonne → MIDI » : la voix est replacée comme une prise
+   * normale (latence de sortie + d'entrée mesurée + réglage fin « Calage des
+   * prises ») et rendue à partir de `from`. null : rien de capté.
+   */
+  public async stopHumTake(): Promise<{ data: Float32Array; sr: number; start: number; latency: number } | null> {
+    const h = this.humTake;
+    if (!h || !this.ctx) return null;
+    this.humTake = null;
+    const ctx = this.ctx;
+    const latency = this.measureRecordLatency(h.stream).total + this.recOffsetMs / 1000;
+    window.clearInterval(h.timer);
+    if (h.withBeat) this.stopAll();
+    [this.isLoopActive, this.loopStart, this.loopEnd] = h.loop;
+    try { h.clicks.disconnect(); } catch { /* */ }
+    const { samples, firstFrame } = await h.session.stop(h.src);
+    try { h.src.disconnect(); } catch { /* */ }
+    h.stream.getTracks().forEach(t => t.stop());
+    if (!samples.length || firstFrame < 0) return null;
+    const p = placeHumTake(samples, ctx.sampleRate, firstFrame, h.playStart, latency, h.from);
+    console.log(`[AudioEngine] Fredonne → MIDI : prise replacée de ${Math.round(latency * 1000)} ms${h.withBeat ? ' (sur le beat)' : ''}`);
+    return { data: p.data, sr: ctx.sampleRate, start: p.start, latency };
+  }
+
+  /** Abandon de la prise « Fredonne → MIDI » (fenêtre fermée). */
+  public cancelHumTake() {
+    const h = this.humTake;
+    if (!h) return;
+    this.humTake = null;
+    window.clearInterval(h.timer);
+    if (h.withBeat) this.stopAll();
+    [this.isLoopActive, this.loopStart, this.loopEnd] = h.loop;
+    try { h.clicks.disconnect(); } catch { /* */ }
+    void h.session.stop(h.src).catch(() => {});
+    h.stream.getTracks().forEach(t => t.stop());
+  }
+
+  public isHumTakeActive() { return !!this.humTake; }
   
   public playTestTone() { /* ... */ }
 
@@ -857,6 +962,8 @@ export class AudioEngine {
 
     // --- 5c. Automation des paramètres d'effets : mêmes valeurs qu'en lecture.
     if (!options.preFader) this.scheduleOfflinePluginAutomation(offlineCtx, tracks, rendered, totalDuration, startOffset);
+    // --- 5d. Piste d'accords suivie par l'Harmoniseur (gel compris : elle fait partie du son de la piste).
+    this.scheduleOfflineChords(tracks, rendered, totalDuration, startOffset);
 
     if (onProgress) onProgress(85);
 
@@ -1587,6 +1694,7 @@ export class AudioEngine {
         this.scheduleMidi(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
         this.midiRunStart = null;
         this.scheduleAutomation(tracks, projectTimeStart, projectTimeEnd, this.nextScheduleTime);
+        this.scheduleChordFollow(projectTimeStart, projectTimeEnd, this.nextScheduleTime);
         this.nextScheduleTime += windowSec;
       }
 
@@ -2009,7 +2117,9 @@ export class AudioEngine {
    * partent en avance de la latence de la chaîne : à l'instant t, l'entrée de
    * cet effet reçoit le son du projet à t + avance. Son automation doit donc
    * lire la voie à t + avance pour tomber pile sur la musique (sinon, mesuré,
-   * le limiteur appliquait son plafond 3,6 ms trop tard).
+   * le limiteur appliquait son plafond 3,6 ms trop tard). La latence en aval
+   * de la piste (bus latent : les clips partent aussi en avance d'autant)
+   * s'y ajoute.
    */
   private pluginLead(trackId: string, pluginId: string): number {
     if (this.pdcSuspended) return 0;
@@ -2017,12 +2127,90 @@ export class AudioEngine {
     const ids = dsp?.chainIds || [];
     const i = ids.indexOf(pluginId);
     if (!dsp || i < 0) return 0;
-    let lead = 0;
+    let lead = dsp.downLatency || 0;
     for (let k = i; k < ids.length; k++) {
       const l = dsp.pluginChain.get(ids[k])?.instance?.latency;
       if (typeof l === 'number' && l > 0 && l < 0.5) lead += l;
     }
     return lead;
+  }
+
+  // -------------------------------------------------------------------------
+  // Piste d'accords suivie par l'Harmoniseur
+  // -------------------------------------------------------------------------
+
+  /** Accords du projet (piste d'accords), publiés par l'application. */
+  private chords: ChordEvent[] = [];
+  public setChords(list: ChordEvent[] | undefined) { this.chords = Array.isArray(list) ? list : []; }
+  public getChords() { return this.chords; }
+
+  /**
+   * Lecture : programme d'avance, sur l'AudioParam « chord » de chaque
+   * Harmoniseur, l'accord que reçoit son entrée pendant la fenêtre
+   * [when, when + (end − start)[. Comme les clips (partis en avance de la
+   * latence) et l'automation des effets (pluginLead) : à l'instant τ,
+   * l'entrée de l'effet reçoit le son du projet à τ − when + start + avance,
+   * avance = latence de l'effet et des effets suivants + latence en aval de
+   * la piste (bus). La fenêtre lit donc la piste d'accords sur
+   * [start + avance, end + avance[ : tout est dans le futur, rien n'est
+   * sauté même quand la latence dépasse l'avance du planificateur (mesuré :
+   * sinon le changement d'accord arrivait jusqu'à 11 ms trop tard en
+   * lecture). Chaque fenêtre efface ce qui suivait (arrêt, saut, boucle).
+   */
+  private scheduleChordFollow(start: number, end: number, when: number) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    this.tracksDSP.forEach((dsp, trackId) => {
+      dsp.pluginChain.forEach((entry, pluginId) => {
+        const inst = entry.instance;
+        if (!inst || typeof inst.chordParam !== 'function') return;
+        const ap: AudioParam | null = inst.chordParam();
+        if (!ap) return;
+        const lead = this.pluginLead(trackId, pluginId);
+        const from = Math.max(now, when);
+        const steps = chordSteps(inst.followsChords() ? this.chords : [], start + lead, end + lead);
+        try {
+          ap.cancelScheduledValues(from);
+          ap.setValueAtTime(steps[0].code, from);
+          for (let k = 1; k < steps.length; k++) {
+            const at = when + (steps[k].t - lead - start);
+            if (at >= from) ap.setValueAtTime(steps[k].code, at);
+          }
+        } catch { /* effet en cours de reconstruction */ }
+      });
+    });
+  }
+
+  /**
+   * Export : la piste d'accords est programmée d'avance sur l'AudioParam
+   * « chord » de chaque Harmoniseur du rendu (temps du contexte = temps du
+   * projet − startOffset − avance), sans pause du rendu.
+   */
+  private scheduleOfflineChords(tracks: Track[], rendered: Map<string, { pluginNodes?: Map<string, any>; down?: number }>, totalDuration: number, startOffset: number) {
+    for (const track of tracks) {
+      const rt = rendered.get(track.id);
+      const nodes = rt?.pluginNodes;
+      if (!nodes) continue;
+      let acc = 0;
+      const lead = new Map<string, number>();
+      for (const [id, n] of [...nodes.entries()].reverse()) {
+        const l = n?.latency;
+        if (typeof l === 'number' && l > 0 && l < 0.5) acc += l;
+        lead.set(id, acc);
+      }
+      nodes.forEach((node, id) => {
+        if (!node || typeof node.chordParam !== 'function') return;
+        const ap: AudioParam | null = node.chordParam();
+        if (!ap) return;
+        const from = startOffset + (lead.get(id) || 0) + (rt?.down || 0);
+        const steps = chordSteps(node.followsChords() ? this.chords : [], from, from + totalDuration);
+        try {
+          ap.cancelScheduledValues(0);
+          ap.setValueAtTime(steps[0].code, 0);
+          for (let k = 1; k < steps.length; k++) ap.setValueAtTime(steps[k].code, steps[k].t - from);
+        } catch { /* */ }
+      });
+    }
   }
 
   /** AudioParam d'un réglage d'effet automatisable (limiteur, effets V21), et son avance PDC. */
@@ -2093,7 +2281,7 @@ export class AudioEngine {
    */
   private scheduleOfflinePluginAutomation(
     offlineCtx: OfflineAudioContext, tracks: Track[],
-    rendered: Map<string, { pluginNodes?: Map<string, any> }>, totalDuration: number, startOffset: number
+    rendered: Map<string, { pluginNodes?: Map<string, any>; down?: number }>, totalDuration: number, startOffset: number
   ) {
     const STEP = 0.02;
     const quantum = 128 / offlineCtx.sampleRate;
@@ -2115,7 +2303,7 @@ export class AudioEngine {
         const node = p && nodes.get(p.pluginId);
         if (!p || !lane.points.length || !node || typeof node.updateParams !== 'function' || node instanceof VSTPluginNode) continue;
         const pts = this.sortedOf(lane.points);
-        const from = startOffset + (lead.get(p.pluginId) || 0);
+        const from = startOffset + (lead.get(p.pluginId) || 0) + (rendered.get(track.id)?.down || 0);
         // Réglage exposé en AudioParam (limiteur) : toute la voie est programmée
         // d'avance sur le paramètre, sans pause du rendu (rampes exactes, au bloc près).
         const ap: AudioParam | null = typeof node.automationParam === 'function' ? node.automationParam(p.key) : null;

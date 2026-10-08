@@ -74,7 +74,7 @@ DROP_JS = """async ({ b64, name, x, y }) => {
 
 def canvas_box(pg):
     return pg.evaluate("""() => { const cs = document.querySelectorAll('.nova-grille canvas'); const c = cs[1] || cs[0]; const r = c.getBoundingClientRect();
-      const sc = document.querySelector('.nova-grille .custom-scroll'); return { x: r.left, y: r.top, w: r.width, h: r.height, sl: sc ? sc.scrollLeft : 0, st: sc ? sc.scrollTop : 0 }; }""")
+      const sc = document.querySelector('.nova-grille .custom-scroll'); return { x: r.left, y: r.top, w: r.width, h: r.height, sl: sc ? sc.scrollLeft : 0, st: sc ? sc.scrollTop : 0, tt: +(c.dataset.tracksTop || 40) }; }""")
 
 
 def find_clip_menu(pg, t, want="Exporter le clip en .mid"):
@@ -82,7 +82,7 @@ def find_clip_menu(pg, t, want="Exporter le clip en .mid"):
     box = canvas_box(pg)
     for row in range(0, 14):
         for yoff in (60, 30):
-            y = box["y"] + 40 + row * 120 + yoff - box["st"]
+            y = box["y"] + box.get("tt", 40) + row * 120 + yoff - box["st"]
             if y > box["y"] + box["h"] - 5: return False
             pg.mouse.click(box["x"] + t * 40 - box["sl"], y, button="right"); pg.wait_for_timeout(250)
             item = pg.get_by_role("button", name=re.compile(re.escape(want))).or_(pg.get_by_text(want, exact=False))

@@ -899,6 +899,12 @@ function Studio() {
     playheadStore.set(t);
     setVisualState({ isPlaying: false, currentTime: t });
   }, [setVisualState]);
+  // Une fenêtre qui prend la main sur le moteur (Fredonne → MIDI sur le beat) demande l'arrêt de la lecture.
+  useEffect(() => {
+    const onPause = () => { if (stateRef.current.isPlaying) pausePlayback(); };
+    window.addEventListener('nova:transport-pause', onPause);
+    return () => window.removeEventListener('nova:transport-pause', onPause);
+  }, [pausePlayback]);
 
   const [activePlugin, setActivePlugin] = useState<{trackId: string, plugin: PluginInstance} | null>(null);
   const [externalImportNotice, setExternalImportNotice] = useState<string | null>(null);
@@ -3663,7 +3669,8 @@ function Studio() {
   // Piste d'accords (V20) : couloir de l'arrangement (absent quand il est masqué) ; accords publiés pour le piano roll.
   const chordLane = useChordLaneProp({ chords: state.chords, tracks: state.tracks, bpm: state.bpm, beatsPerBar: state.timeSignature?.numerator,
     projectKey: state.projectKey, projectScale: state.projectScale, setState });
-  useEffect(() => { chordsStore.set(state.chords); }, [state.chords]);
+  // …et au moteur : l'Harmoniseur suit la piste d'accords (lecture et export).
+  useEffect(() => { chordsStore.set(state.chords); audioEngine.setChords(state.chords); }, [state.chords]);
 
   // Punch-in / punch-out (utils/punch) : points indépendants de la boucle, posés
   // dans la règle ou depuis la sélection ; pré/post-roll réglables ; QuickPunch.

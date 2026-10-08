@@ -56,11 +56,25 @@ export interface PsolaCoreParams {
   dry: number;
   /** Vrai : chaque canal est transposé séparément (stéréo) ; faux : voix en mono puis panoramique. */
   stereo: boolean;
+  /**
+   * Vrai : les voix à degrés suivent l'accord reçu par `chordIn` (piste
+   * d'accords) ; sans accord à cet instant, la gamme seule.
+   */
+  follow?: boolean;
 }
 
 export interface PsolaCore {
   setParams(p: Partial<PsolaCoreParams>): void;
   process(inL: Float32Array, inR: Float32Array | null, outL: Float32Array, outR: Float32Array | null, n: number): void;
+  /**
+   * Accord (codé `tonique × 4096 + masque`, 0 = aucun) des échantillons du
+   * PROCHAIN bloc d'entrée : une valeur par échantillon, ou une seule pour le
+   * bloc. Chaque voix lit l'accord à l'instant de la voix d'origine qu'elle
+   * transpose : le changement d'accord tombe pile, latence comprise.
+   */
+  chordIn(c: ArrayLike<number> | number): void;
+  /** Accord (codé) du dernier échantillon reçu. */
+  chord(): number;
   latencySamples(): number;
   /** Dernière hauteur détectée (note MIDI décimale, 0 = rien de chanté) et note retenue. */
   pitch(): { midi: number; note: number };
@@ -104,9 +118,10 @@ export function createHarmonyMath() {
    *  - pentatonique, blues : note de la gamme la plus proche de l'intervalle.
    * L'octave (7 degrés) vaut toujours 12 demi-tons.
    */
-  const shiftFor = (note: number, root: number, scale: number[], degree: number): number => {
+  const shiftFor = (note: number, root: number, scale: number[], degree: number, chord?: number): number => {
     const deg = Math.round(degree);
     if (!deg) return 0;
+    if (chord && chord > 0) return chordShift(note, root, scale, deg, chord);
     const pcs = pitchClasses(root, scale);
     const base = snap(note, pcs);
     const sign = deg < 0 ? -1 : 1;
@@ -135,12 +150,49 @@ export function createHarmonyMath() {
     // Décalage depuis la note chantée : la voix d'harmonie tombe toujours dans la gamme.
     return base + sign * (semis + 12 * oct) - Math.round(note);
   };
-  return { shiftFor, snap, pitchClasses, inScale };
+  /** Hauteurs (0-11) d'un accord codé `tonique × 4096 + masque` (bit i = hauteur i). */
+  const chordPcs = (chord: number): number[] => {
+    const mask = Math.round(chord) & 4095;
+    const out: number[] = [];
+    for (let i = 0; i < 12; i++) if (mask & (1 << i)) out.push(i);
+    return out;
+  };
+  /**
+   * Piste d'accords suivie : la voix se cale sur une note de l'accord en
+   * cours, celle qui est la plus proche de l'intervalle demandé, du bon côté
+   * de la note chantée (sur un La chanté en La mineur : tierce = Do, la tierce
+   * de l'accord ; quinte = Mi). La note chantée est ramenée sur la gamme +
+   * l'accord (une note de l'accord hors gamme reste juste). L'octave reste
+   * l'octave. À égale distance : l'intervalle le plus serré.
+   */
+  const chordShift = (note: number, root: number, scale: number[], deg: number, chord: number): number => {
+    const tones = chordPcs(chord);
+    if (!tones.length) return 0;
+    const pcs = pitchClasses(root, scale);
+    for (let i = 0; i < tones.length; i++) if (pcs.indexOf(tones[i]) < 0) pcs.push(tones[i]);
+    const base = snap(note, pcs);
+    const sign = deg < 0 ? -1 : 1;
+    const oct = Math.trunc(Math.abs(deg) / 7);
+    const rem = Math.abs(deg) % 7;
+    let semis = 0;
+    if (rem) {
+      const want = NOMINAL[rem];
+      let best = -1, bestD = 1e9;
+      for (let d = 1; d < 12; d++) {
+        if (tones.indexOf(mod12(base + sign * d)) < 0) continue;
+        const dist = Math.abs(d - want);
+        if (dist < bestD - 1e-9) { best = d; bestD = dist; }
+      }
+      semis = best > 0 ? best : 0;
+    }
+    return base + sign * (semis + 12 * oct) - Math.round(note);
+  };
+  return { shiftFor, snap, pitchClasses, inScale, chordPcs };
 }
 
 export type HarmonyMath = ReturnType<typeof createHarmonyMath>;
 
-export function createPsolaCore(sampleRate: number, math: { shiftFor: (note: number, root: number, scale: number[], degree: number) => number }): PsolaCore {
+export function createPsolaCore(sampleRate: number, math: { shiftFor: (note: number, root: number, scale: number[], degree: number, chord?: number) => number }): PsolaCore {
   const sr = sampleRate;
   // --- Constantes de détection -------------------------------------------------
   const F0_MIN = 70, F0_MAX = 1000;
@@ -169,6 +221,10 @@ export function createPsolaCore(sampleRate: number, math: { shiftFor: (note: num
   // Anneaux d'entrée (gauche, droite, mono) et de sortie (accumulateurs).
   const inL = new Float32Array(N), inR = new Float32Array(N), inM = new Float32Array(N);
   const accL = new Float32Array(N), accR = new Float32Array(N);
+  // Accord en cours à chaque échantillon d'entrée (piste d'accords suivie).
+  const chordRing = new Float32Array(N);
+  let chordNext: ArrayLike<number> | number = 0;
+  let chordLast = 0;
   const dec = new Float32Array(ND);
   const yinD = new Float64Array(TAU_MAX + 2);
   const dvBuf = new Float64Array(4 * D + 8);
@@ -363,7 +419,7 @@ export function createPsolaCore(sampleRate: number, math: { shiftFor: (note: num
         const tSec = vS[v] / sr;
         if (voiced) {
           let semis = vp.semis;
-          if (vp.degree !== null && vp.degree !== undefined && Number.isFinite(vp.degree)) semis = math.shiftFor(mkNote[i], P.root, P.scale, vp.degree);
+          if (vp.degree !== null && vp.degree !== undefined && Number.isFinite(vp.degree)) semis = math.shiftFor(mkNote[i], P.root, P.scale, vp.degree, P.follow ? chordRing[Math.floor(a - T * 0.5) & MASK] : 0);
           const drift = vp.drift ? vp.drift * (0.6 * Math.sin(2 * Math.PI * 0.37 * tSec + v * 1.7) + 0.4 * Math.sin(2 * Math.PI * 0.83 * tSec + v * 2.9)) : 0;
           r = Math.pow(2, (semis + (vp.detune + drift) / 100) / 12);
           vLastR[v] = r;
@@ -386,6 +442,7 @@ export function createPsolaCore(sampleRate: number, math: { shiftFor: (note: num
       const r = iR ? iR[j] : l;
       const idx = (nIn + j) & MASK;
       inL[idx] = l; inR[idx] = r;
+      chordRing[idx] = typeof chordNext === 'number' ? chordNext : (chordNext.length > j ? chordNext[j] : chordNext.length ? chordNext[chordNext.length - 1] : 0);
       const m = 0.5 * (l + r);
       inM[idx] = m;
       // Filtre + sous-échantillonnage pour l'analyse.
@@ -399,6 +456,7 @@ export function createPsolaCore(sampleRate: number, math: { shiftFor: (note: num
       }
     }
     nIn += n;
+    chordLast = chordRing[(nIn - 1) & MASK];
     makeMarks();
     synthVoices(nOut);
     const dry = P.dry;
@@ -428,7 +486,7 @@ export function createPsolaCore(sampleRate: number, math: { shiftFor: (note: num
   };
 
   const reset = () => {
-    inL.fill(0); inR.fill(0); inM.fill(0); accL.fill(0); accR.fill(0); dec.fill(0);
+    inL.fill(0); inR.fill(0); inM.fill(0); accL.fill(0); accR.fill(0); dec.fill(0); chordRing.fill(0);
     nIn = 0; nDec = 0; lastFrameDec = 0; frCount = 0; frCursor = 0; mkCount = 0; heldNote = -1; lastMidi = 0; late = 0;
     z11 = z12 = z21 = z22 = 0;
     vStarted.fill(0); vLastR.fill(0);
@@ -437,6 +495,8 @@ export function createPsolaCore(sampleRate: number, math: { shiftFor: (note: num
   return {
     setParams,
     process,
+    chordIn: (c: ArrayLike<number> | number) => { chordNext = c; },
+    chord: () => chordLast,
     latencySamples: () => LAT,
     pitch: () => ({ midi: lastMidi, note: lastMidi > 0 ? heldNote : 0 }),
     lateSamples: () => late,

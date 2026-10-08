@@ -73,6 +73,10 @@ def new_page(browser, vp="pc", log=None, touch=None, storage=None):
         return route.continue_()
 
     ctx.route("**/*", guard)
+    # QA_CHORD_LANE=1 : couloir d'accords affiché (sous la règle) dans tous les modes,
+    # pour rejouer les gestes de l'arrangement avec le couloir.
+    if os.environ.get("QA_CHORD_LANE") == "1":
+        ctx.add_init_script("try { localStorage.setItem('nova_chord_lane', '1'); } catch (e) {}")
     page = ctx.new_page()
     page.set_default_timeout(15000)
     if log is not None:

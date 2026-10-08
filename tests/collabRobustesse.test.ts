@@ -274,6 +274,23 @@ describe('Opérations en double, dans le désordre, en retard', () => {
     expect(onOp.mock.calls.map(x => x[0].seq)).toEqual([1020]);
   });
 
+  it('page rechargée : nos opérations d\'AVANT le rechargement sont rejouées (pas dans l\'instantané chargé), notre écho non', async () => {
+    const onOp = vi.fn();
+    const c = client(onOp);
+    await c.join(0);
+    // Même appareil, page précédente (avant un rechargement) : par exemple un accord posé.
+    h.server.ops.push({ ...other(1040, { _d: c.deviceId, _p: 'page-precedente' }, { kind: 'chords' }), member_key: 'u:moi' });
+    await c.catchUp();
+    // Cette page : écho de notre propre envoi, jamais rejoué.
+    const seq = await c.send('chords', { upsert: [] });
+    h.server.ops.push(...h.server.ops.filter(o => o.seq === seq).map(o => ({ ...o })));
+    h.channels[0].broadcast({ ...other(1099, { _d: c.deviceId, _p: c.pageId }), member_key: 'u:moi' });
+    await c.catchUp();
+    await settle(c);
+    expect(onOp.mock.calls.map(x => x[0].seq)).toEqual([1040]);
+    expect(h.server.calls.find(x => x.action === 'op')!.body.op).toMatchObject({ _d: c.deviceId, _p: c.pageId });
+  });
+
   it('historique (avant notre arrivée) marqué replay : une demande ancienne n\'est pas retraitée', async () => {
     h.server.ops.push(other(990, {}, { kind: 'vst_param' }));
     const got: CollabOp[] = [];
