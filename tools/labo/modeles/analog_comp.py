@@ -54,14 +54,20 @@ P_ATT2 = 30        # 2e étage de la cellule : coefficient (0 = un seul étage)
 P_REL2_FOLLOW = 31 # 2e étage : coefficient en descente (0 = même que P_ATT2)
 P_EQ = 32          # 4 biquads de couleur en sortie : (b0,b1,b2,a1,a2) x 4 ; b0 = 0 -> biquad ignoré
 N_EQ = 4
-NP = 56
+P_DRIVE = 52       # gain avant l'étage de sortie (0 = 1) ; P_MAKEUP s'applique après
+P_IN_BIAS = 53     # asymétrie des saturations (tanh(y/sat + biais) - tanh(biais))
+P_OUT_BIAS = 54
+P_FAST_ATT = 55    # cellule rapide en parallèle (mode deux temps) : coefficient de montée (0 = absente)
+P_FAST_REL = 56    # cellule rapide : pente de relâchement (A par échantillon)
+P_FAST_DET_REL = 57  # cellule rapide : descente de son détecteur crête
+NP = 64
 
 
 @njit(cache=True)
-def _shape(x, a2, a3, sat):
+def _shape(x, a2, a3, sat, bias):
     y = x + a2 * x * x + a3 * x * x * x
     if sat > 0.0:
-        y = sat * math.tanh(y / sat)
+        y = sat * (math.tanh(y / sat + bias) - math.tanh(bias))
     return y
 
 
@@ -94,11 +100,14 @@ def process(x, P, l0, dl, tab):
     eqs = np.zeros((2, N_EQ, 4))
     above = np.zeros(2)
     slow_ok = np.zeros(2)
+    envf = np.zeros(2)
+    Af = np.ones(2)
+    lvf = np.zeros(2)
     for i in range(n):
         lv = np.zeros(2)
         xin = np.zeros(2)
         for c in range(2):
-            xi = _shape(x[c, i] * P[P_PRE], P[P_IN_A2], P[P_IN_A3], P[P_IN_SAT])
+            xi = _shape(x[c, i] * P[P_PRE], P[P_IN_A2], P[P_IN_A3], P[P_IN_SAT], P[P_IN_BIAS])
             xin[c] = xi
             s = yprev[c] if P[P_FB] > 0.5 else xi
             if P[P_HP_B0] != 0.0:
@@ -121,12 +130,23 @@ def process(x, P, l0, dl, tab):
             else:
                 e = r if P[P_DET_REL] <= 0.0 else e + (r - e) * P[P_DET_REL]
             sm[c] = e
+            if P[P_FAST_ATT] > 0.0:
+                ef = envf[c]
+                if r > ef:
+                    ef = r
+                else:
+                    ef = ef + (r - ef) * P[P_FAST_DET_REL]
+                envf[c] = ef
+                lvf[c] = ef
             r = e
             lv[c] = r
         if P[P_LINK] > 0.5:
             m = lv[0] if lv[0] > lv[1] else lv[1]
             lv[0] = m
             lv[1] = m
+            m = lvf[0] if lvf[0] > lvf[1] else lvf[1]
+            lvf[0] = m
+            lvf[1] = m
         for c in range(2):
             r = lv[c]
             L = 20.0 * math.log10(r if r > 1e-9 else 1e-9)
@@ -171,6 +191,21 @@ def process(x, P, l0, dl, tab):
                     b += (a - b) * (P[P_REL2_FOLLOW] if P[P_REL2_FOLLOW] > 0.0 else P[P_ATT2])
                 A2[c] = b
                 a = b
+            # cellule rapide en parallèle : la réduction suit la plus forte des deux
+            if P[P_FAST_ATT] > 0.0:
+                rf = lvf[c]
+                Atf = 10.0 ** (_table(20.0 * math.log10(rf if rf > 1e-9 else 1e-9), l0, dl, tab) / 20.0)
+                f = Af[c]
+                if Atf > f:
+                    f += (Atf - f) * P[P_FAST_ATT]
+                else:
+                    df = P[P_FAST_REL]
+                    if df > f - Atf:
+                        df = f - Atf
+                    f -= df
+                Af[c] = f
+                if f > a:
+                    a = f
             # mémoire opto (état lent qui retient la réduction)
             if P[P_MEM] > 0.0:
                 if a > mem[c]:
@@ -183,7 +218,8 @@ def process(x, P, l0, dl, tab):
             g = 1.0 / ae
             yc = xin[c] * g
             yprev[c] = yc
-            yo = _shape(yc, P[P_OUT_A2], P[P_OUT_A3], P[P_OUT_SAT]) * P[P_MAKEUP]
+            drv = P[P_DRIVE] if P[P_DRIVE] != 0.0 else 1.0
+            yo = _shape(yc * drv, P[P_OUT_A2], P[P_OUT_A3], P[P_OUT_SAT], P[P_OUT_BIAS]) * P[P_MAKEUP]
             for q in range(N_EQ):
                 o0 = P_EQ + 5 * q
                 if P[o0] != 0.0:

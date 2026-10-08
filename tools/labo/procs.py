@@ -58,6 +58,7 @@ class NodeCoreProc:
 
     def __init__(self, kind: str, base: Optional[Dict[str, Any]] = None, repo: Optional[str] = None):
         self.kind = kind
+        self.name = kind + "-node"
         self.base = dict(base or {})
         self.settings: Dict[str, Any] = dict(self.base)
         self.repo = repo or os.path.abspath(os.path.join(HERE, "..", ".."))

@@ -1,0 +1,128 @@
+/**
+ * Traduction des boutons des compresseurs analogiques NOVA en paramètres
+ * internes du cœur (engine/analogCompCore.ts), à partir du profil mesuré de
+ * chaque appareil (engine/analogProfiles.ts, généré par le labo).
+ *
+ * Fonction PURE et autonome (sérialisée par `toString()` dans l'AudioWorklet) :
+ * aucune référence extérieure. Miroir exact de tools/labo/modeles/*_profil.py.
+ */
+import type { AnalogCompInternal } from './analogCompCore';
+
+export type AnalogKind = 'OPTO_VINTAGE' | 'FET76' | 'LEVELER2A' | 'VOXSTRIP';
+
+export function buildAnalogInternal(kind: string, p: Record<string, number>, prof: any, sampleRate: number): AnalogCompInternal {
+  var SR = sampleRate > 0 ? sampleRate : 48000;
+  var P = new Float64Array(64);
+  function num(v: any, d: number) { var x = +v; return x === x && isFinite(x) ? x : d; }
+  function interp(x: number, xs: number[], ys: number[]) {
+    var n = xs.length;
+    if (x <= xs[0]) return ys[0];
+    if (x >= xs[n - 1]) return ys[n - 1];
+    for (var i = 1; i < n; i++) {
+      if (x <= xs[i]) { var t = (x - xs[i - 1]) / (xs[i] - xs[i - 1]); return ys[i - 1] + (ys[i] - ys[i - 1]) * t; }
+    }
+    return ys[n - 1];
+  }
+  function interpLog(x: number, xs: number[], ys: number[]) {
+    var ls: number[] = [];
+    for (var i = 0; i < ys.length; i++) ls.push(Math.log(Math.max(ys[i], 1e-9)));
+    return Math.exp(interp(x, xs, ls));
+  }
+  function coef(ms: number) { return ms <= 0 ? 1 : 1 - Math.exp(-1 / (ms * 0.001 * SR)); }
+  function biquad(kindB: string, fc: number, q: number, gainDb: number): number[] {
+    var w0 = 2 * Math.PI * fc / SR, cw = Math.cos(w0), sw = Math.sin(w0), al = sw / (2 * q), A = Math.pow(10, gainDb / 40);
+    var b: number[], a: number[];
+    if (kindB === 'hp') { b = [(1 + cw) / 2, -(1 + cw), (1 + cw) / 2]; a = [1 + al, -2 * cw, 1 - al]; }
+    else if (kindB === 'lp') { b = [(1 - cw) / 2, 1 - cw, (1 - cw) / 2]; a = [1 + al, -2 * cw, 1 - al]; }
+    else if (kindB === 'peak') { b = [1 + al * A, -2 * cw, 1 - al * A]; a = [1 + al / A, -2 * cw, 1 - al / A]; }
+    else if (kindB === 'lowshelf') {
+      var sa = 2 * Math.sqrt(A) * al;
+      b = [A * ((A + 1) - (A - 1) * cw + sa), 2 * A * ((A - 1) - (A + 1) * cw), A * ((A + 1) - (A - 1) * cw - sa)];
+      a = [(A + 1) + (A - 1) * cw + sa, -2 * ((A - 1) + (A + 1) * cw), (A + 1) + (A - 1) * cw - sa];
+    } else if (kindB === 'highshelf') {
+      var sb = 2 * Math.sqrt(A) * al;
+      b = [A * ((A + 1) + (A - 1) * cw + sb), -2 * A * ((A - 1) + (A + 1) * cw), A * ((A + 1) + (A - 1) * cw - sb)];
+      a = [(A + 1) - (A - 1) * cw + sb, 2 * ((A - 1) - (A + 1) * cw), (A + 1) - (A - 1) * cw - sb];
+    } else return [0, 0, 0, 0, 0];
+    return [b[0] / a[0], b[1] / a[0], b[2] / a[0], a[1] / a[0], a[2] / a[0]];
+  }
+  function setEq(slot: number, bq: number[]) { for (var k = 0; k < 5; k++) P[32 + 5 * slot + k] = bq[k]; }
+  function setHp(bq: number[]) { for (var k = 0; k < 5; k++) P[20 + k] = bq[k]; }
+  /** Table G(L) interpolée entre les courbes mesurées les plus proches du bouton. */
+  function tableFor(x: number, knobs: number[], tables: number[][]) {
+    var n = knobs.length;
+    if (x <= knobs[0]) return tables[0].slice();
+    if (x >= knobs[n - 1]) return tables[n - 1].slice();
+    var j = 1;
+    while (j < n && knobs[j] < x) j++;
+    var t = (x - knobs[j - 1]) / (knobs[j] - knobs[j - 1]);
+    var out: number[] = [];
+    for (var i = 0; i < tables[j].length; i++) out.push(tables[j - 1][i] * (1 - t) + tables[j][i] * t);
+    return out;
+  }
+
+  P[0] = 1; P[5] = 1; P[18] = 1; P[19] = 1; P[1] = 1e6;
+  var tab: number[] = [0, 0];
+
+  if (kind === 'OPTO_VINTAGE') {
+    var thr = num(p.threshold, 99);
+    if (thr < 50) {
+      // bouton -> niveau (dBFS) où la réduction atteint 1 dB au taux 4:1
+      var tk: number[] = prof.thrKnob.slice().reverse(), tv: number[] = prof.thr1db.slice().reverse();
+      var onset = interp(thr, tk, tv);
+      if (thr > prof.thrKnob[0]) onset = tv[tv.length - 1] + (thr - prof.thrKnob[0]) * 1.35;
+      P[1] = Math.pow(10, onset / 20);
+    }
+    var ratio = Math.min(10, Math.max(2, num(p.ratio, 4)));
+    tab = tableFor(ratio, prof.ratioKnob, prof.tables);
+    P[2] = 0;
+    P[3] = prof.rectHalf ? 1 : 0;
+    P[29] = prof.detRelMs > 0 ? coef(prof.detRelMs) : 0;
+    var mode = Math.round(num(p.mode, 2));
+    if (mode === 0 && prof.fixDetRelMs) P[29] = coef(prof.fixDetRelMs);
+    var knob = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    var att = num(p.attack, 5), rel = num(p.release, 5);
+    var relSlew = interpLog(rel, knob, prof.relSlew);
+    if (mode === 2) {
+      var ca = coef(interpLog(att, prof.attKnob, prof.attMs));
+      P[5] = ca; P[30] = ca;
+      P[6] = interpLog(att, prof.attKnob, prof.attSlew) / SR;
+      P[7] = relSlew / SR;
+      P[10] = -1;
+    } else if (mode === 0) {
+      P[5] = coef(prof.fixAttMs); P[30] = P[5];
+      P[7] = prof.fixRelSlew / SR;
+      P[10] = -1;
+    } else {
+      // FIX./MAN. : cellule lente (ATTACK = temps de charge, RELEASE manuel) en
+      // parallèle d'une cellule rapide fixe ; la réduction suit la plus forte.
+      var cf = coef(interpLog(att, prof.fmKnob, prof.fmAttMs));
+      P[5] = cf; P[30] = 0; P[6] = 0;
+      P[29] = coef(prof.fastDetRelMs);
+      P[7] = relSlew / SR;
+      P[10] = -1;
+      P[55] = coef(prof.fastAttMs);
+      P[56] = prof.fastRelSlew / SR;
+      P[57] = coef(prof.fastDetRelMs);
+    }
+    P[31] = coef(prof.cellRelFollowMs);
+    var out = num(p.output, 0);
+    P[18] = out > -60 ? Math.pow(10, interp(out, prof.outKnob, prof.outDb) / 20) : 0;
+    if (num(p.vintage, 0) >= 0.5 && prof.vintageEq) {
+      P[18] *= Math.pow(10, prof.vintageGainDb / 20);
+      for (var q = 0; q < prof.vintageEq.length && q < 4; q++) {
+        var v = prof.vintageEq[q];
+        setEq(q, biquad(v[0], v[1], v[2], v[3]));
+      }
+    }
+    P[19] = Math.min(1, Math.max(0, num(p.mix, 100) / 100));
+    var sc = Math.round(num(p.scLowCut, 0));
+    if (sc > 0) {
+      var f = prof.scFilters && prof.scFilters[String(sc)];
+      setHp(f ? biquad('hp', f[0], f[1], 0) : biquad('hp', sc, 0.7071, 0));
+    }
+    P[25] = 0;
+    return { P: P, tab: tab, l0: prof.l0, dl: prof.dl };
+  }
+  return { P: P, tab: tab, l0: -12, dl: 1 };
+}

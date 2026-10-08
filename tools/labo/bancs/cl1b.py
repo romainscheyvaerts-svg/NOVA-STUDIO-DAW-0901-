@@ -149,3 +149,11 @@ CARTO += [
     {"name": "c_vintage", "settings": {"threshold_db": "Off", "cl1b_generation": "Vintage mk I"}, "tests": [
         {"type": "freq_response", "name": "fr_-20", "level_db": -20}]},
 ]
+
+CARTO += [
+    {"name": f"c_fm_att{a}", "settings": {"threshold_db": -30.0, "ratio": "4:1", "attack": float(a), "release": 7.0,
+                                         "select_attack_release": "F/M"},
+     "tests": [{"type": "step_response", "name": f"h{h}", "base_db": -45, "step_db": 25, "hold": h / 1000.0,
+                "rel_obs": 2.0} for h in [2, 5, 10, 20, 40, 80, 160, 320]]}
+    for a in [0, 2, 3, 4, 5, 6, 7, 8, 10]
+]

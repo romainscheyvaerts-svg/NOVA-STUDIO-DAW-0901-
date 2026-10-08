@@ -119,12 +119,19 @@ def nova_to_internal(p, fit):
         P[ac.P_REL_SLEW] = fit["fix_rel_slew"] / SR
         P[ac.P_HOLD] = -1.0
     else:
-        P[ac.P_ATT] = ac.coef_from_ms(fit["fix_att_ms"])
-        P[ac.P_ATT2] = P[ac.P_ATT]
+        # FIX./MAN. : cellule lente (bouton ATTACK = temps de charge, RELEASE manuel)
+        # en parallèle d'une cellule rapide fixe ; la réduction suit la plus forte.
+        fk = fit.get("fm_knob", knob)
+        ca = ac.coef_from_ms(_interp_log(fk, fit.get("fm_att_ms", [1.0] * len(fk)), att))
+        P[ac.P_ATT] = ca
+        P[ac.P_ATT2] = 0.0
+        P[ac.P_ATT_SLEW] = 0.0
+        P[ac.P_DET_REL] = ac.coef_from_ms(fit.get("fast_det_rel_ms", 2.0))
         P[ac.P_REL_SLEW] = rel_slew / SR
-        P[ac.P_REL_EXP] = ac.coef_from_ms(rel_exp) if rel_exp > 0 else 0.0
-        P[ac.P_REL2_SLEW] = fit["fix_rel_slew"] / SR
-        P[ac.P_HOLD] = _interp_log(knob, fit["fm_delay_ms"], att) * 0.001 * SR
+        P[ac.P_HOLD] = -1.0
+        P[ac.P_FAST_ATT] = ac.coef_from_ms(fit.get("fast_att_ms", 0.5))
+        P[ac.P_FAST_REL] = fit.get("fast_rel_slew", 3000.0) / SR
+        P[ac.P_FAST_DET_REL] = ac.coef_from_ms(fit.get("fast_det_rel_ms", 2.0))
     P[ac.P_REL2_FOLLOW] = ac.coef_from_ms(fit.get("cell_rel_follow_ms", 0.5))
     out = p.get("output", 0.0)
     P[ac.P_MAKEUP] = 10 ** (float(np.interp(out, OUT_KNOB, OUT_DB)) / 20.0) if out > -60 else 0.0
