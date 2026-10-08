@@ -36,6 +36,7 @@ import ViewModeSwitcher from './components/ViewModeSwitcher';
 import ContextMenu from './components/ContextMenu';
 import TouchInteractionManager from './components/TouchInteractionManager';
 import TrackCreationBar from './components/TrackCreationBar';
+import { dockItem, useDockFit } from './utils/dockFit';
 import SamplerHost from './components/SamplerHost';
 import { openSamplerPanel } from './utils/samplerPanelStore';
 import { requestSampler } from './utils/samplerPanelStore';
@@ -4780,6 +4781,9 @@ function Studio() {
 
   const COLLAB_ACTIVE_KEY = 'nova_collab_active';
   const [collabOpen, setCollabOpen] = useState(false);
+  // Bandeau du bas : libellés repliés en icônes selon la place réelle (utils/dockFit).
+  const [dockEl, setDockEl] = useState<HTMLDivElement | null>(null);
+  useDockFit(dockEl);
   const collabOpenRef = useRef(false);
   collabOpenRef.current = collabOpen;
   /** host : a démarré la session (écrit l'instantané, guide « Écouter ensemble ») ; key : la personne (« u:<compte> ») ; color : sa couleur. */
@@ -7738,38 +7742,38 @@ function Studio() {
               les gestes voix (Piste voix, Paroles, Mix auto). Il prend sa propre place
               sous la grille : plus rien ne flotte sur les clips ni sur le catalogue. */}
           {!isMobile && (
-            <div data-nova-dock className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-28 border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
+            <div data-nova-dock ref={setDockEl} className="shrink-0 h-16 flex items-center gap-3 pl-3 pr-28 border-t" style={{ borderColor: 'var(--border-dim)', backgroundColor: 'var(--bg-surface)' }}>
               <div className="flex shrink-0 items-center gap-2">
-                <button type="button" data-testid="dock-track-list" onClick={() => setStructurePanel(p => (p === 'tracks' ? null : 'tracks'))} aria-pressed={structurePanel === 'tracks'}
+                <button type="button" data-testid="dock-track-list" {...dockItem(3)} aria-label="Liste des pistes" onClick={() => setStructurePanel(p => (p === 'tracks' ? null : 'tracks'))} aria-pressed={structurePanel === 'tracks'}
                   title="Liste des pistes (Pro Tools « Track List ») : afficher / masquer, activer, dossiers, VCA"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${structurePanel === 'tracks' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
-                  <i className="fas fa-list mr-1.5 text-[10px]" />Pistes{state.tracks.some(t => t.isHidden) ? ` · ${state.tracks.filter(t => t.isHidden).length} masquée${state.tracks.filter(t => t.isHidden).length > 1 ? 's' : ''}` : ''}
+                  <i data-dock-icon className="fas fa-list mr-1.5 text-[10px]" /><span data-dock-label>Pistes{state.tracks.some(t => t.isHidden) ? ` · ${state.tracks.filter(t => t.isHidden).length} masquée${state.tracks.filter(t => t.isHidden).length > 1 ? 's' : ''}` : ''}</span>
                 </button>
-                <button type="button" data-testid="dock-groups" onClick={() => setR12Panel(p => (p?.panel === 'groups' ? null : { panel: 'groups' }))} aria-pressed={r12Panel?.panel === 'groups'}
+                <button type="button" data-testid="dock-groups" {...dockItem(2)} aria-label="Groupes" onClick={() => setR12Panel(p => (p?.panel === 'groups' ? null : { panel: 'groups' }))} aria-pressed={r12Panel?.panel === 'groups'}
                   title="Groupes (Pro Tools « Groups List ») : édition et mix liés, <TOUT>, suspendre (Ctrl+Maj+G), créer (Ctrl+G)"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${r12Panel?.panel === 'groups' ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
-                  <i className="fas fa-object-group mr-1.5 text-[10px]" />Groupes{state.trackGroups.length ? ` · ${state.trackGroups.length}` : ''}{state.groupSettings?.suspended ? ' ⏸' : ''}
+                  <i data-dock-icon className="fas fa-object-group mr-1.5 text-[10px]" /><span data-dock-label>Groupes{state.trackGroups.length ? ` · ${state.trackGroups.length}` : ''}{state.groupSettings?.suspended ? ' ⏸' : ''}</span>
                 </button>
-                <button type="button" data-testid="dock-time" onClick={() => openR12Panel('time', { preset: (() => { const sel = editSelectionStore.get().time; return sel ? { mode: 'insert' as const, at: sel.start, length: sel.end - sel.start, trackIds: sel.trackIds } : { mode: 'insert' as const, at: playheadStore.get() }; })() })}
+                <button type="button" data-testid="dock-time" {...dockItem(1)} aria-label="Insérer ou supprimer du temps" onClick={() => openR12Panel('time', { preset: (() => { const sel = editSelectionStore.get().time; return sel ? { mode: 'insert' as const, at: sel.start, length: sel.end - sel.start, trackIds: sel.trackIds } : { mode: 'insert' as const, at: playheadStore.get() }; })() })}
                   title="Insérer / supprimer du temps (Pro Tools : Insert Silence, Insert Time, Cut Time) — Ctrl+Alt+I"
                   className="h-10 rounded-full border border-nv-line bg-nv-well px-3 text-[11px] font-bold whitespace-nowrap text-nv-muted hover:text-nv-ink">
-                  <i className="fas fa-arrows-alt-h mr-1.5 text-[10px]" />Temps
+                  <i data-dock-icon className="fas fa-arrows-alt-h mr-1.5 text-[10px]" /><span data-dock-label>Temps</span>
                 </button>
-                <button type="button" data-testid="dock-session" onClick={() => openSessionPanel(sessionTab ? null : 'notes')} aria-pressed={!!sessionTab}
+                <button type="button" data-testid="dock-session" {...dockItem(1)} aria-label="Session : notes, clips, arrangements, versions" onClick={() => openSessionPanel(sessionTab ? null : 'notes')} aria-pressed={!!sessionTab}
                   title="Session : notes et commentaires (Pro Tools : Comments), liste des clips (Clips List), arrangements, versions (Save As New Version), importer depuis une session (Import Session Data, Alt+Maj+I)"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${sessionTab ? 'border-nv-accent bg-nv-accent/20 text-nv-ink' : 'border-nv-line bg-nv-well text-nv-muted hover:text-nv-ink'}`}>
-                  <i className="fas fa-folder-open text-[10px] xl:mr-1.5" aria-hidden="true" /><span className="hidden xl:inline">Session{notesCount(state) ? ` · 📝${notesCount(state)}` : ''}</span><span className="sr-only xl:hidden">Session</span>
+                  <i data-dock-icon className="fas fa-folder-open text-[10px] mr-1.5" aria-hidden="true" /><span data-dock-label>Session{notesCount(state) ? ` · 📝${notesCount(state)}` : ''}</span>
                 </button>
-                <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen}
+                <button type="button" onClick={() => setCollabOpen(o => !o)} aria-pressed={collabOpen} {...dockItem(4)} aria-label="Collaborer"
                   title="Collaborer à distance : artiste, ingé son, beatmaker"
                   className={`h-10 rounded-full border px-3 text-[11px] font-bold whitespace-nowrap transition-colors ${collabOpen ? 'border-violet-400 bg-violet-500/25 text-white' : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'}`}>
-                  {remote.active ? `🎧 Ingé à distance${remote.peerName ? ' · en ligne' : ''}` : `👥 ${collab ? `${collabOnline.length || 1} en ligne · Chat` : 'Collaborer'}`}
+                  <span data-dock-icon className="mr-1">{remote.active ? '🎧' : '👥'}</span><span data-dock-label>{remote.active ? `Ingé à distance${remote.peerName ? ' · en ligne' : ''}` : (collab ? `${collabOnline.length || 1} en ligne · Chat` : 'Collaborer')}</span>
                 </button>
                 {isCloudProject && (
-                  <button type="button" onClick={() => setTakeHomeOpen(true)}
+                  <button type="button" onClick={() => setTakeHomeOpen(true)} {...dockItem(2)} aria-label="Session en ligne"
                     title="Session en ligne : lien, QR code, compte client"
                     className="h-10 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-3 text-[11px] font-bold text-cyan-200 whitespace-nowrap">
-                    ☁️ En ligne · {cloudSession?.syncedAt ? formatAgo(cloudSession.syncedAt) : 'à envoyer'}
+                    <span data-dock-icon className="mr-1">☁️</span><span data-dock-label>En ligne · {cloudSession?.syncedAt ? formatAgo(cloudSession.syncedAt) : 'à envoyer'}</span>
                   </button>
                 )}
               </div>

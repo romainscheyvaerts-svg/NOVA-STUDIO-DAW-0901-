@@ -206,7 +206,10 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
     <>
       {mounted && (
-        <div aria-hidden={showGate || undefined} style={showGate ? { visibility: 'hidden' } : undefined}>
+        // Hauteur de l'écran transmise au studio : sans elle, la colonne du studio prenait la
+        // hauteur de son contenu (catalogue de 3 000 px) dans Nova Studio, et le bandeau du bas
+        // (Piste voix, Mix auto, Pistes, Groupes…) et les pistes du bas sortaient de l'écran.
+        <div className="flex h-full min-h-0 flex-1 flex-col" aria-hidden={showGate || undefined} style={showGate ? { visibility: 'hidden' } : undefined}>
           {children}
         </div>
       )}

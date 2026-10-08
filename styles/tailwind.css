@@ -5,3 +5,8 @@
 /* Barre du haut : éléments repliés faute de place (utils/barFit.ts) ; le menu ☰ les reprend. */
 [data-bar-folded] { display: none !important; }
 [data-bar-menu] .nova-bar-menu { display: flex !important; }
+/* Bandeau du bas : libellés repliés en icônes faute de place (utils/dockFit.ts). */
+[data-dock-compact] [data-dock-label] { display: none !important; }
+[data-dock-compact] [data-dock-icon] { margin-right: 0 !important; }
+/* Pas d'animation de la largeur : la mesure du repli doit voir la taille finale tout de suite. */
+[data-nova-dock] [data-dock-prio] { transition-property: color, background-color, border-color, box-shadow, transform !important; }
