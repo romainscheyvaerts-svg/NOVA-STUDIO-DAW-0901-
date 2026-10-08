@@ -50,13 +50,15 @@ const WelcomeSteps: React.FC<WelcomeStepsProps> = ({ open, beatLoaded: loadedNow
           ))}
         </ol>
         <p className="mt-4 text-[12px] text-slate-400">🎧 Conseil : des écouteurs filaires. Ta session se sauvegarde toute seule sur cet appareil.</p>
+        {/* Découvrir sans lire de documentation : une seule touche à retenir. */}
+        {!isMobile && <p className="mt-2 text-[12px] text-slate-400">⌨️ Une action introuvable ? <kbd className="rounded border border-white/15 px-1 font-mono text-[11px] text-slate-200">Ctrl+K</kbd> et tape son nom (exporter, tempo, bus, reverb…). <kbd className="rounded border border-white/15 px-1 font-mono text-[11px] text-slate-200">?</kbd> montre tous les raccourcis.</p>}
         <div className="mt-5 flex flex-col sm:flex-row gap-2">
           {!beatLoaded && (
             <button type="button" onClick={onPickBeat} className="h-12 shrink-0 sm:flex-1 rounded-xl bg-cyan-500 text-black font-black">
               Choisir un beat
             </button>
           )}
-          <button type="button" onClick={onClose} className={`h-12 shrink-0 sm:flex-1 rounded-xl font-bold ${beatLoaded ? 'bg-cyan-500 text-black font-black' : 'bg-white/10 text-white'}`}>
+          <button type="button" onClick={onClose} title="Fermer (Échap)" className={`h-12 shrink-0 sm:flex-1 rounded-xl font-bold ${beatLoaded ? 'bg-cyan-500 text-black font-black' : 'bg-white/10 text-white'}`}>
             {beatLoaded ? "C'est parti" : 'Plus tard'}
           </button>
         </div>

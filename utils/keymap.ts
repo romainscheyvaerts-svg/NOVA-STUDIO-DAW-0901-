@@ -77,12 +77,13 @@ export const KEYMAP: ShortcutDef[] = [
   // En AZERTY « ; » et « : » sont sur les touches voisines : ils servent aussi. Maj = un temps au lieu d'une mesure.
   nova({ id: 'nova.barPrev', keys: [',', ';'], label: 'Mesure précédente (avec Maj : temps précédent)', pt: 'Pavé 1 (Rewind)', category: 'Navigation' }),
   nova({ id: 'nova.barNext', keys: ['.', ':'], label: 'Mesure suivante (avec Maj : temps suivant)', pt: 'Pavé 2 (Fast Forward)', category: 'Navigation' }),
-  nova({ id: 'nova.loop', keys: ['l'], label: 'Boucle on / off', pt: 'Ctrl+Maj+L (Loop Playback)', category: 'Transport' }),
+  nova({ id: 'nova.loop', keys: ['l'], label: 'Boucle on / off (avec une plage sélectionnée : boucler cette plage)', pt: 'Ctrl+Maj+L (Loop Playback)', category: 'Transport' }),
   nova({ id: 'nova.capture', keys: ['shift+r'], label: 'Capturer la dernière prise (ce que tu as joué sans enregistrer)', pt: 'Pas dans Pro Tools : Capture as Recording de Logic', category: 'Transport' }),
   nova({ id: 'nova.guide', keys: ['g'], label: 'Couper / rallumer la piste guide', category: 'Transport' }),
   nova({ id: 'nova.marker', keys: ['k'], label: 'Poser un repère à la tête de lecture', pt: 'Entrée du pavé', category: 'Repères' }),
   nova({ id: 'nova.tap', keys: ['t'], label: 'Tap tempo (tape au rythme, appliqué après la dernière tape)', pt: 'T dans le champ tempo', category: 'Transport' }),
   nova({ id: 'nova.help', keys: ['?', 'shift+/'], label: 'Afficher / masquer l’aide des raccourcis', category: 'Fenêtres' }),
+  nova({ id: 'nova.palette', keys: ['ctrl+k'], label: 'Palette de commandes : chercher n’importe quelle action par son nom (exporter, tempo, bus, Strip Silence…)', pt: 'Pas dans Pro Tools : Commandes rapides de Logic, Ctrl+K de Live 12', category: 'Fenêtres' }),
   // Géré par components/FeedbackModal (FeedbackHost), même sur la page d'accueil.
   nova({ id: 'nova.feedback', keys: ['ctrl+shift+b'], label: 'Signaler un bug / proposer une idée', category: 'Fenêtres' }),
   nova({ id: 'nova.undo', keys: ['ctrl+z'], label: 'Annuler', pt: 'Ctrl+Z', category: 'Édition' }),

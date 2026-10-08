@@ -45,16 +45,37 @@ const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }) => {
     };
   }, [onClose]);
 
+  // Clavier, comme un menu de Pro Tools : Échap ferme (avant : Échap passait au transport
+  // et le menu restait ouvert), ↑ ↓ parcourent les entrées, Entrée lance.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = menuRef.current;
+      if (!el) return;
+      if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); onClose(); return; }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      const btns = Array.from(el.querySelectorAll<HTMLButtonElement>('button[role=menuitem]:not(:disabled)'));
+      if (!btns.length) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      const i = btns.indexOf(document.activeElement as HTMLButtonElement);
+      const next = e.key === 'ArrowDown' ? (i + 1) % btns.length : (i <= 0 ? btns.length - 1 : i - 1);
+      btns[next].focus();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
   return (
     <div 
       ref={menuRef}
-      className="fixed z-[9999] min-w-[200px] bg-[#1a1c22] border border-white/10 shadow-[0_10px_40px_rgba(0,0,0,0.8)] rounded-lg py-1.5 animate-in fade-in zoom-in duration-75 text-[#e2e8f0]"
+      role="menu"
+      aria-label="Menu contextuel"
+      className="fixed z-[9999] min-w-[200px] rounded-xl border border-nv-line/15 bg-nv-raised p-1 shadow-2xl animate-in fade-in zoom-in duration-75 text-nv-ink"
       style={{ left: position.x, top: position.y, maxHeight: 'calc(100vh - 8px)', overflowY: 'auto' }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {items.map((item, idx) => {
         if (item === 'separator') {
-            return <div key={`sep-${idx}`} className="h-px bg-white/10 my-1 mx-2"></div>;
+            return <div key={`sep-${idx}`} className="h-px bg-nv-line/10 my-1 mx-2"></div>;
         }
 
         return (
@@ -69,26 +90,28 @@ const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }) => {
               }}
               disabled={item.disabled}
               title={item.title}
-              className={`w-full px-4 py-2 flex items-center justify-between text-[11px] font-medium transition-colors group ${
-                  item.disabled 
-                  ? 'opacity-40 cursor-not-allowed' 
-                  : item.danger 
-                    ? 'hover:bg-red-500/20 text-red-400 hover:text-red-300' 
-                    : 'hover:bg-[#00f2ff] hover:text-black'
+              role="menuitem"
+              // Même style que les menus de piste (TrackStructure.FloatingMenu) : un seul look de menu.
+              className={`w-full rounded-lg px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 flex items-center justify-between text-left text-[12px] font-semibold transition-colors group outline-none ${
+                  item.disabled
+                  ? 'opacity-40 cursor-not-allowed'
+                  : item.danger
+                    ? 'text-red-400 hover:bg-red-500/10 focus-visible:bg-red-500/10'
+                    : 'hover:bg-nv-accent/10 focus-visible:bg-nv-accent/10'
               }`}
             >
               <div className="flex items-center space-x-3">
-                 {item.icon && <i className={`fas ${item.icon} w-4 text-center ${item.danger ? '' : 'text-slate-400 group-hover:text-black'}`}></i>}
+                 {item.icon && <i className={`fas ${item.icon} w-4 text-center text-[10px] ${item.danger ? '' : 'text-nv-muted'}`}></i>}
                  <span>{item.label}</span>
               </div>
               {item.shortcut && (
-                  <span className={`text-[9px] font-mono ml-4 ${item.disabled ? '' : 'text-slate-500 group-hover:text-black/60'}`}>
+                  <span className="text-[10px] font-mono ml-4 text-nv-muted">
                       {item.shortcut}
                   </span>
               )}
             </button>
             {item.component && (
-                <div className="px-2 pb-2 pt-1 border-b border-white/5 mb-1 bg-black/20">
+                <div className="px-2 pb-2 pt-1 border-b border-nv-line/10 mb-1">
                     {item.component}
                 </div>
             )}
