@@ -301,7 +301,9 @@ ok("WAV : BWF bext (description, loudness), acid 120 BPM, repères, INFO ISRC", 
 i = sfinfo(files["mono"]); ok("mono-somme : 1 canal", i["ch"] == 1, i)
 mg, _ = sf.read(str(files["mono_g"]), dtype="int32", always_2d=True)
 w24, _ = sf.read(str(files["wav24"]), dtype="int32", always_2d=True)
-ok("mono (canal gauche) : 1 canal, identique au gauche du WAV 24 bits stéréo", mg.shape[1] == 1 and mg.shape[0] == w24.shape[0] and np.array_equal(mg[:, 0], w24[:, 0]), {"frames": mg.shape[0]})
+# Deux rendus séparés : identiques au dernier bit près (moteur hors ligne R6 : chaînes actives tout le rendu ; écart mesuré ≈ −138 dB).
+_dmono = int(np.abs(mg[:, 0].astype(np.int64) - w24[:, 0].astype(np.int64)).max()) if mg.shape[0] == w24.shape[0] else None
+ok("mono (canal gauche) : 1 canal, identique au gauche du WAV 24 bits stéréo (±2 LSB)", mg.shape[1] == 1 and _dmono is not None and _dmono <= 2 * 256, {"frames": mg.shape[0], "ecart_max_lsb24": None if _dmono is None else _dmono / 256})
 z = zipfile.ZipFile(files["dualmono"]); names = [n for n in z.namelist() if n.endswith(".wav")]
 chs = [sf.info(io.BytesIO(z.read(n))).channels for n in names]
 ok("double mono : 2 fichiers mono .L / .R", len(names) == 2 and chs == [1, 1] and any(".L." in n for n in names) and any(".R." in n for n in names), names)
