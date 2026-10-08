@@ -16,6 +16,7 @@ const MixerView = lazyWithPreload(() => import('./components/MixerView').then(m 
 // Charge a la demande : PluginEditor tire les 13 interfaces de plugins,
 // soit plus de 8000 lignes qui ne servent qu'a l'ouverture d'un effet.
 import { lazyWithPreload, MountWhenOpened, preloadWhenIdle } from './utils/lazyPreload';
+import { detectHeadphones } from './utils/headphoneDetect';
 const loadPluginEditor = () => import('./components/PluginEditor');
 const PluginEditor = lazyWithPreload(loadPluginEditor);
 const SynthPanel = lazy(() => import('./components/SynthPanel'));
@@ -2460,7 +2461,19 @@ function Studio() {
     // Première prise : question casque (la prise repart après la réponse).
     let headphonesAsked = false;
     try { headphonesAsked = localStorage.getItem('nova_headphones') !== null; } catch { headphonesAsked = true; }
-    if (!headphonesAsked) { setHeadphonePromptOpen(true); return; }
+    if (!headphonesAsked) {
+      // Détection d'abord (utils/headphoneDetect) : nom de la sortie audio, ou carte son du pont
+      // ASIO (studio : retour au casque). Trouvé : réponse gardée, la prise part sans question.
+      const found = audioEngine.isUsingASIOInput() ? { guess: 'casque' as const, label: 'carte son du studio' } : await detectHeadphones();
+      if (!found) { setHeadphonePromptOpen(true); return; }
+      const casque = found.guess === 'casque';
+      try { localStorage.setItem('nova_headphones', casque ? '1' : '0'); localStorage.setItem('nova_headphones_auto', found.label); } catch { /* stockage indisponible */ }
+      audioEngine.setInputMonitoring(casque);
+      setInputMonitoringState(casque);
+      setAiNotification(casque
+        ? `🎧 Casque détecté (${found.label}) : tu entends ta voix pendant la prise. Sur haut-parleurs, coupe « Retour casque » sur ta piste.`
+        : `🔈 Haut-parleurs détectés (${found.label}) : ton retour micro reste coupé (pas de larsen). Avec un casque, allume « Retour casque » sur ta piste.`);
+    }
 
     // Décompte (désactivable).
     let countIn = true;
@@ -8346,7 +8359,7 @@ function Studio() {
               <MicLevelMeter trackId={state.tracks.find(t => t.isTrackArmed)?.id || null} />
             </div>
             <div className="flex flex-col gap-2">
-              <button type="button" onClick={() => answerHeadphones(true)} className="h-12 rounded-xl bg-cyan-500 text-black font-black">
+              <button type="button" autoFocus onClick={() => answerHeadphones(true)} className="h-12 rounded-xl bg-cyan-500 text-black font-black">
                 Oui, j'ai un casque
               </button>
               <button type="button" onClick={() => answerHeadphones(false)} className="h-12 rounded-xl bg-white/10 text-white font-bold">
