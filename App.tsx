@@ -7672,7 +7672,7 @@ function Studio() {
       a('Mix', 'pal.cue', 'Mixes casque (cue) des artistes', () => setCueMixesOpen(true), { keywords: 'casque cue retour headphone' }),
       a('Mix', 'pal.plugins', 'Gestionnaire de plugins (VST)', () => setIsPluginManagerOpen(true), { pt: 'Plug-In Manager', keywords: 'vst plugins effets' }),
       // Beat
-      a('Beat', 'pal.drums', 'Boîte à rythmes', () => setDrumsOpen(true), { keywords: 'batterie drums beat pas step' }),
+      a('Beat', 'pal.drums', 'Batterie (boîte à rythmes, pas à pas)', () => setDrumsOpen(true), { keywords: 'batterie drums beat pas step' }),
       a('Beat', 'pal.808', 'Basse 808 (piano roll accordé)', () => handleOpen808(), { keywords: '808 basse bass' }),
       a('Beat', 'pal.midi', 'Nouvelle piste MIDI et son piano roll', () => handleNewMidiTrack(), { pt: 'New Instrument Track', keywords: 'midi piano roll synthé instrument' }),
       a('Beat', 'pal.sampler', 'Nouvelle piste Sampler', () => requestSampler({ kind: 'new' }), { keywords: 'sampler sample chop' }),

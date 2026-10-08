@@ -897,7 +897,10 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
   return (
     <div data-nova-pianoroll="" className="w-full h-full flex flex-col bg-[#14161a] select-none text-white font-inter">
        {/* TOOLBAR (Enhanced with Quantize and Actions) */}
-       <div className="h-14 border-b border-white/10 flex items-center justify-between gap-4 px-4 bg-[#0c0d10] shrink-0 overflow-x-auto no-scrollbar">
+       {/* Barre d'outils : la partie centrale défile si elle manque de place, mais le bouton
+           Fermer reste toujours visible à droite (avant, il sortait de l'écran dès 1600 px). */}
+       <div className="h-14 border-b border-white/10 flex items-center gap-2 px-4 bg-[#0c0d10] shrink-0">
+       <div className="flex-1 min-w-0 h-full flex items-center justify-between gap-4 overflow-x-auto no-scrollbar">
           <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="md:hidden shrink-0 w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center"><i className="fas fa-times"></i></button>
           <div className="flex items-center space-x-4 shrink-0">
              <div className="flex items-center space-x-2">
@@ -1043,7 +1046,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
                   className={`h-8 ${TAP} px-3 rounded text-[10px] font-bold ${selectedNoteIds.size > 0 ? 'text-slate-300 hover:bg-white/10' : 'text-slate-600'}`}
                   title="Rendre muettes (ou réactiver) les notes sélectionnées, sans les effacer (Ctrl+M, ou Alt+clic sur une note ; Pro Tools : Mute Notes, FL : outil Muet)" aria-label="Rendre muettes les notes sélectionnées"
                 >
-                  <i className="fas fa-volume-mute mr-1"></i>Muet
+                  <i className="fas fa-volume-mute min-[1800px]:mr-1"></i><span className="hidden min-[1800px]:inline">Muet</span>
                 </button>
                 <button
                   type="button" data-nova-roll="pas-a-pas"
@@ -1058,20 +1061,20 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
              {/* Outils MIDI, groove, capture (V25) */}
              <div className="h-8 w-px bg-white/10"></div>
              <div className="flex items-center gap-1.5 shrink-0">
-                <button type="button" data-nova-roll="outils" aria-haspopup="dialog" aria-expanded={toolsAnchor !== false}
+                <button type="button" data-nova-roll="outils" aria-label="Outils MIDI" aria-haspopup="dialog" aria-expanded={toolsAnchor !== false}
                   onClick={e => { if (toolsAnchor !== false) { setToolsAnchor(false); return; } const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setToolsAnchor(window.innerWidth < 640 ? null : { x: r.left, y: r.bottom + 6 }); }}
                   title="Outils : strum, arpège, roll de hi-hats, chop, flam, courbe de vélocité, aléatoire, legato… sur la sélection ou tout le clip (comme les MIDI Transformations de Live 12 et les outils du piano roll de FL Studio)"
                   className={`hidden sm:flex h-8 ${TAP} px-2.5 rounded-lg border items-center gap-1.5 text-[10px] font-bold ${toolsAnchor !== false ? 'bg-cyan-400 border-cyan-300 text-black' : 'bg-white/5 border-white/10 text-slate-300 hover:text-white'}`}>
-                  <i className="fas fa-toolbox text-[9px]"></i><span>Outils</span>
+                  <i className="fas fa-toolbox text-[9px]"></i><span className="hidden min-[1800px]:inline">Outils</span>
                 </button>
-                <button type="button" data-nova-roll="groove" onClick={() => midiBus.emit({ type: 'groove', trackId: track.id, clipId })} aria-pressed={!!clip.groove}
+                <button type="button" data-nova-roll="groove" aria-label="Swing et groove du clip" onClick={() => midiBus.emit({ type: 'groove', trackId: track.id, clipId })} aria-pressed={!!clip.groove}
                   title="Swing et groove de ce clip : 50 à 75 %, grooves MPC et trap, groove extrait d’une boucle (Groove Pool de Live, swing de FL Studio)"
                   className={`h-8 ${TAP} px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${clip.groove ? 'bg-amber-400 border-amber-300 text-black' : 'bg-white/5 border-white/10 text-amber-300 hover:text-white'}`}>
-                  <i className="fas fa-drum text-[9px]"></i><span>Swing</span>
+                  <i className="fas fa-drum text-[9px]"></i><span className="hidden min-[1800px]:inline">Swing</span>
                 </button>
-                <button type="button" data-nova-roll="capturer" onClick={() => midiBus.emit({ type: 'capture', trackId: track.id })} title={CAPTURE_HINT}
+                <button type="button" data-nova-roll="capturer" aria-label="Capturer ce que je viens de jouer" onClick={() => midiBus.emit({ type: 'capture', trackId: track.id })} title={CAPTURE_HINT}
                   className={`relative h-8 ${TAP} px-2.5 rounded-lg border flex items-center gap-1.5 text-[10px] font-bold ${captureCount > 0 ? 'bg-red-500/15 border-red-400/50 text-red-200' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}>
-                  <i className="fas fa-hand-sparkles text-[9px]"></i><span>Capturer</span>
+                  <i className="fas fa-hand-sparkles text-[9px]"></i><span className="hidden min-[1800px]:inline">Capturer</span>
                   {captureCount > 0 && <span className="ml-0.5 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black leading-4 text-center">{captureCount > 99 ? '99+' : captureCount}</span>}
                 </button>
              </div>
@@ -1096,8 +1099,9 @@ const PianoRoll: React.FC<PianoRollProps> = ({ track, clipId, bpm: projectBpm, o
                   className="w-20 accent-cyan-500"
                 />
              </div>
-             <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="hidden md:flex w-8 h-8 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-full bg-white/5 text-slate-400 hover:text-white hover:bg-red-500/20 flex items-center justify-center"><i className="fas fa-times"></i></button>
           </div>
+       </div>
+          <button aria-label="Fermer" title="Fermer (Échap)" onClick={onClose} className="hidden md:flex shrink-0 w-8 h-8 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 rounded-full bg-white/5 text-slate-400 hover:text-white hover:bg-red-500/20 items-center justify-center"><i className="fas fa-times"></i></button>
        </div>
 
        {/* Saisie pas à pas (R16) */}

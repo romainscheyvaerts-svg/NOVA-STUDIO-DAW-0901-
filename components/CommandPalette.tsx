@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { keymapActions, rememberAction, recentActions, searchActions, type PaletteAction } from '../utils/commandPalette';
 import { useKeymap } from '../utils/keymapStore';
 
@@ -17,11 +17,12 @@ const CommandPalette: React.FC<{ open: boolean; onClose: () => void; actions: Pa
   // Action grisée choisie : on dit pourquoi au lieu de ne rien faire.
   const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Focus posé AVANT l'affichage (useLayoutEffect) : une saisie rapide juste après Ctrl+K
+  // partait sinon vers le studio (« r » = enregistrer, « t » = tap tempo…).
+  useLayoutEffect(() => {
     if (!open) return;
     setQuery(''); setIndex(0); setRecent(recentActions()); setNotice(null);
-    const t = window.setTimeout(() => inputRef.current?.focus(), 0);
-    return () => window.clearTimeout(t);
+    inputRef.current?.focus();
   }, [open]);
 
   const all = useMemo(() => {
@@ -65,7 +66,7 @@ const CommandPalette: React.FC<{ open: boolean; onClose: () => void; actions: Pa
         onMouseDown={e => e.stopPropagation()} onKeyDown={onKeyDown}>
         <div className="flex items-center gap-2 border-b border-nv-line/10 px-3">
           <i className="fas fa-search text-[13px] text-nv-muted" aria-hidden="true" />
-          <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
+          <input ref={inputRef} autoFocus value={query} onChange={e => setQuery(e.target.value)}
             placeholder="Chercher une action : exporter, tempo, voix, séparer, Strip Silence…"
             aria-label="Chercher une action" data-testid="palette-input" role="combobox" aria-expanded="true" aria-controls="palette-list"
             aria-activedescendant={found[index] ? `palette-${found[index].id}` : undefined}
