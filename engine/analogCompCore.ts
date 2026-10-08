@@ -32,7 +32,8 @@ export const AC = {
   HOLD: 10, MEM: 11, MEM_CH: 12, MEM_DIS: 13, IN_A2: 14, IN_A3: 15, OUT_A2: 16, OUT_A3: 17, MAKEUP: 18, MIX: 19,
   HP_B0: 20, HP_B1: 21, HP_B2: 22, HP_A1: 23, HP_A2: 24, LINK: 25, REL_DUCK: 26, IN_SAT: 27, OUT_SAT: 28,
   DET_REL: 29, ATT2: 30, REL2_FOLLOW: 31, EQ: 32, N_EQ: 4, DRIVE: 52, IN_BIAS: 53, OUT_BIAS: 54,
-  FAST_ATT: 55, FAST_REL: 56, FAST_DET_REL: 57, NP: 64,
+  FAST_ATT: 55, FAST_REL: 56, FAST_DET_REL: 57, FET_A2: 58, FINAL_SAT: 59, FINAL_BIAS: 60,
+  SLOW_FRAC: 61, SLOW_ATT: 62, SLOW_REL: 63, OUT_AB: 64, IN_AB: 65, NP: 72,
 } as const;
 
 export interface AnalogCompInternal {
@@ -57,7 +58,7 @@ export interface AnalogCompCore {
 export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   var SR = sampleRate > 0 ? sampleRate : 48000;
   void SR;
-  var NP = 64, NEQ = 4, PEQ = 32;
+  var NP = 72, NEQ = 4, PEQ = 32;
   var P = new Float64Array(NP);
   var tab = new Float64Array([0, 0]);
   var l0 = -12, dl = 1;
@@ -70,21 +71,21 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
   var hp = new Float64Array(8); // par canal : x1, x2, y1, y2
   var eqs = new Float64Array(2 * NEQ * 4);
   var lv = new Float64Array(2), xin = new Float64Array(2);
-  var envf = new Float64Array(2), Af = new Float64Array(2), lvf = new Float64Array(2);
-  var mGrA = 1, mIn = 0, mOut = 0;
+  var envf = new Float64Array(2), Af = new Float64Array(2), lvf = new Float64Array(2), As = new Float64Array(2);
+  var mGrA = 1, mIn = 0, mOut = 0, curAe = 1;
 
   function reset() {
     A[0] = A[1] = 1; A2[0] = A2[1] = 1; env[0] = env[1] = 0; mem[0] = mem[1] = 0;
     yprev[0] = yprev[1] = 0; above[0] = above[1] = 0; slowOk[0] = slowOk[1] = 0;
-    envf[0] = envf[1] = 0; Af[0] = Af[1] = 1; lvf[0] = lvf[1] = 0;
+    envf[0] = envf[1] = 0; Af[0] = Af[1] = 1; lvf[0] = lvf[1] = 0; As[0] = As[1] = 1;
     hp.fill(0); eqs.fill(0);
-    mGrA = 1; mIn = 0; mOut = 0;
+    mGrA = 1; mIn = 0; mOut = 0; curAe = 1;
   }
   reset();
 
-  function shape(x: number, a2: number, a3: number, sat: number, bias: number) {
-    var y = x + a2 * x * x + a3 * x * x * x;
-    if (sat > 0) y = sat * (Math.tanh(y / sat + bias) - Math.tanh(bias));
+  function shape(x: number, a2: number, a3: number, sat: number, bias: number, ab: number) {
+    var y = x + a2 * x * x + a3 * x * x * x + ab * x * (x < 0 ? -x : x);
+    if (sat > 0) { var tb = Math.tanh(bias); y = sat * (Math.tanh(y / sat + bias) - tb) / (1 - tb * tb); }
     return y;
   }
 
@@ -113,7 +114,7 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
         var x0 = c === 0 ? inL[i] : right[i];
         var ax = x0 < 0 ? -x0 : x0;
         if (ax > mIn) mIn = ax;
-        var xi = shape(x0 * P[0], P[14], P[15], P[27], P[53]);
+        var xi = shape(x0 * P[0], P[14], P[15], P[27], P[53], P[65]);
         xin[c] = xi;
         var s = P[2] > 0.5 ? yprev[c] : xi;
         if (P[20] !== 0) {
@@ -144,6 +145,15 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
         var rr = lv[c2];
         var L = 20 * Math.log10(rr > 1e-9 ? rr : 1e-9);
         var Gt = table(L);
+        if (P[61] > 0) {
+          var Gs = Gt * P[61];
+          Gt = Gt - Gs;
+          var Ats = Math.pow(10, Gs / 20);
+          var sv = As[c2];
+          if (Ats > sv) sv += (Ats - sv) * P[62];
+          else sv -= (sv - Ats) * P[63];
+          As[c2] = sv;
+        }
         var At = Math.pow(10, Gt / 20);
         var a = A[c2];
         if (Gt > 0.05) above[c2] += 1;
@@ -191,10 +201,15 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
           else mem[c2] += (a - mem[c2]) * P[13];
           if (mem[c2] > a) ae = a + P[11] * (mem[c2] - a);
         }
-        if (c2 === 0 && ae > mGrA) mGrA = ae;
-        var yc = xin[c2] / ae;
+        if (P[61] > 0) ae = ae * As[c2];
+        if (c2 === 0) { curAe = ae; if (ae > mGrA) mGrA = ae; }
+        var gg = 1 / ae;
+        var xv = xin[c2];
+        if (P[58] !== 0) xv = xv + P[58] * (1 - gg) * xv * xv;
+        var yc = xv * gg;
         yprev[c2] = yc;
-        var yo = shape(yc * drv, P[16], P[17], P[28], P[54]) * P[18];
+        var yo = shape(yc * drv, P[16], P[17], P[28], P[54], P[64]) * P[18];
+        if (P[59] > 0) yo = shape(yo, 0, 0, P[59], P[60], 0);
         for (var q = 0; q < NEQ; q++) {
           var o0 = PEQ + 5 * q;
           if (P[o0] !== 0) {
@@ -217,7 +232,7 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
     setInternal: setInternal,
     process: process,
     takeMeters: function () {
-      var cur = A2[0] > 1 && P[30] > 0 ? A2[0] : A[0];
+      var cur = curAe;
       var r = {
         grDb: 20 * Math.log10(Math.max(1, mGrA)),
         grNowDb: 20 * Math.log10(Math.max(1, cur)),
@@ -227,7 +242,7 @@ export function createAnalogCompCore(sampleRate: number): AnalogCompCore {
       mGrA = 1; mIn = 0; mOut = 0;
       return r;
     },
-    attenuation: function () { return P[30] > 0 ? A2[0] : A[0]; },
+    attenuation: function () { return curAe; },
     reset: reset,
   };
 }

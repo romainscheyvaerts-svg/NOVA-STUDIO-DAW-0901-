@@ -60,14 +60,23 @@ P_OUT_BIAS = 54
 P_FAST_ATT = 55    # cellule rapide en parallèle (mode deux temps) : coefficient de montée (0 = absente)
 P_FAST_REL = 56    # cellule rapide : pente de relâchement (A par échantillon)
 P_FAST_DET_REL = 57  # cellule rapide : descente de son détecteur crête
-NP = 64
+P_FET_A2 = 58      # distorsion de l'élément de gain (FET) : H2 proportionnel à la réduction
+P_FINAL_SAT = 59   # étage final (après le gain de sortie) : saturation douce (0 = aucune)
+P_FINAL_BIAS = 60
+P_SLOW_FRAC = 61   # part de la réduction portée par une cellule lente EN SÉRIE (0 = aucune)
+P_SLOW_ATT = 62    # cellule lente en série : coefficient de charge
+P_SLOW_REL = 63    # cellule lente en série : coefficient de relâchement (exponentiel)
+P_OUT_AB = 64      # étage de sortie : terme x|x| (H3, H5 qui montent de 1 dB par dB, comme un FET)
+P_IN_AB = 65       # étage d'entrée : terme x|x|
+NP = 72
 
 
 @njit(cache=True)
-def _shape(x, a2, a3, sat, bias):
-    y = x + a2 * x * x + a3 * x * x * x
+def _shape(x, a2, a3, sat, bias, ab):
+    y = x + a2 * x * x + a3 * x * x * x + ab * x * abs(x)
     if sat > 0.0:
-        y = sat * (math.tanh(y / sat + bias) - math.tanh(bias))
+        tb = math.tanh(bias)
+        y = sat * (math.tanh(y / sat + bias) - tb) / (1.0 - tb * tb)
     return y
 
 
@@ -101,13 +110,14 @@ def process(x, P, l0, dl, tab):
     above = np.zeros(2)
     slow_ok = np.zeros(2)
     envf = np.zeros(2)
+    As = np.ones(2)
     Af = np.ones(2)
     lvf = np.zeros(2)
     for i in range(n):
         lv = np.zeros(2)
         xin = np.zeros(2)
         for c in range(2):
-            xi = _shape(x[c, i] * P[P_PRE], P[P_IN_A2], P[P_IN_A3], P[P_IN_SAT], P[P_IN_BIAS])
+            xi = _shape(x[c, i] * P[P_PRE], P[P_IN_A2], P[P_IN_A3], P[P_IN_SAT], P[P_IN_BIAS], P[P_IN_AB])
             xin[c] = xi
             s = yprev[c] if P[P_FB] > 0.5 else xi
             if P[P_HP_B0] != 0.0:
@@ -151,6 +161,16 @@ def process(x, P, l0, dl, tab):
             r = lv[c]
             L = 20.0 * math.log10(r if r > 1e-9 else 1e-9)
             Gt = _table(L, l0, dl, tab)
+            if P[P_SLOW_FRAC] > 0.0:
+                Gs = Gt * P[P_SLOW_FRAC]
+                Gt = Gt - Gs
+                Ats = 10.0 ** (Gs / 20.0)
+                s_ = As[c]
+                if Ats > s_:
+                    s_ += (Ats - s_) * P[P_SLOW_ATT]
+                else:
+                    s_ -= (s_ - Ats) * P[P_SLOW_REL]
+                As[c] = s_
             At = 10.0 ** (Gt / 20.0)
             a = A[c]
             if Gt > 0.05:
@@ -215,11 +235,18 @@ def process(x, P, l0, dl, tab):
                 ae = a + P[P_MEM] * (mem[c] - a) if mem[c] > a else a
             else:
                 ae = a
+            if P[P_SLOW_FRAC] > 0.0:
+                ae = ae * As[c]
             g = 1.0 / ae
-            yc = xin[c] * g
+            xv = xin[c]
+            if P[P_FET_A2] != 0.0:
+                xv = xv + P[P_FET_A2] * (1.0 - g) * xv * xv
+            yc = xv * g
             yprev[c] = yc
             drv = P[P_DRIVE] if P[P_DRIVE] != 0.0 else 1.0
-            yo = _shape(yc * drv, P[P_OUT_A2], P[P_OUT_A3], P[P_OUT_SAT], P[P_OUT_BIAS]) * P[P_MAKEUP]
+            yo = _shape(yc * drv, P[P_OUT_A2], P[P_OUT_A3], P[P_OUT_SAT], P[P_OUT_BIAS], P[P_OUT_AB]) * P[P_MAKEUP]
+            if P[P_FINAL_SAT] > 0.0:
+                yo = _shape(yo, 0.0, 0.0, P[P_FINAL_SAT], P[P_FINAL_BIAS], 0.0)
             for q in range(N_EQ):
                 o0 = P_EQ + 5 * q
                 if P[o0] != 0.0:

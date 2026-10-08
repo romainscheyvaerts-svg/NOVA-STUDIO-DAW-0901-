@@ -79,8 +79,42 @@ export const OPTO_VINTAGE: AnalogKindSpec = {
   ],
 };
 
+export const FET76: AnalogKindSpec = {
+  kind: 'FET76',
+  name: 'FET 76',
+  driveParam: 'input',
+  driveSense: 1,
+  targetGrDb: 5,
+  specs: [
+    { id: 'input', label: 'Entrée', min: -60, max: 0, step: 0.1, unit: 'pos', auto: true,
+      hint: "Le seuil est fixe : tourne l'entrée pour pousser le son dans la compression (et dans la couleur des transistors). « Caler sur ma voix » la règle pour toi." },
+    { id: 'output', label: 'Sortie', min: -60, max: 0, step: 0.1, unit: 'pos', auto: true,
+      hint: 'Volume de sortie après la compression : remonte-le pour rattraper ce que la compression a enlevé.' },
+    { id: 'attack', label: 'Attaque', min: 1, max: 7, step: 0.1, unit: 'pos', auto: true,
+      hint: "7 = la plus rapide (~0,1 ms, écrase les attaques), 1 = la plus lente (~2,5 ms, laisse passer le claquant)." },
+    { id: 'release', label: 'Relâchement', min: 1, max: 7, step: 0.1, unit: 'pos', auto: true,
+      hint: "7 = le plus rapide (~80 ms, son plus fort et plus agressif), 1 = le plus lent (~1 s, plus doux)." },
+    { id: 'ratio', label: 'Taux', min: 0, max: 24, step: 1, unit: '', auto: false,
+      hint: "Plus le taux est haut, plus le seuil monte et plus la compression est ferme. « Écrasé » (4+20) : le son de bus agressif.",
+      choices: [{ v: 2, label: '2:1' }, { v: 4, label: '4:1' }, { v: 8, label: '8:1' }, { v: 20, label: '20:1' }, { v: 24, label: 'Écrasé', hint: '4:1 + 20:1 enfoncés ensemble' }] },
+    { id: 'slo', label: 'Attaque lente (SLO)', min: 0, max: 1, step: 1, unit: '', auto: false,
+      hint: "Attaque d'environ 10 ms : laisse passer les transitoires (batterie, consonnes) tout en tenant le niveau.",
+      choices: [{ v: 0, label: 'Non' }, { v: 1, label: 'Oui' }] },
+    { id: 'mix', label: 'Mélange (parallèle)', min: 0, max: 100, step: 1, unit: '%', auto: true,
+      hint: "100 % = tout compressé ; moins = compression parallèle (« New York »)." },
+  ],
+  defaults: { input: -28, output: -15, attack: 5, release: 6, ratio: 4, slo: 0, mix: 100 },
+  presets: [
+    { id: 'bus-voix', name: 'Bus voix (règle maison)', hint: '4:1, attaque 5, relâchement 6 : le réglage de ta session. Clique ensuite « Caler sur ma voix » (5 dB max au VU).', params: { ratio: 4, attack: 5, release: 6, slo: 0, mix: 100 } },
+    { id: 'voix-devant', name: 'Voix devant', hint: '4:1, attaque moyenne, relâchement rapide : la voix colle au haut-parleur.', params: { ratio: 4, attack: 3, release: 7, slo: 0, mix: 100 } },
+    { id: 'batterie-ecrasee', name: 'Batterie écrasée', hint: 'Mode écrasé en parallèle : énorme et vivant.', params: { ratio: 24, attack: 7, release: 7, slo: 0, mix: 40 } },
+    { id: 'basse', name: 'Basse', hint: '8:1, attaque lente : la basse reste ronde et régulière.', params: { ratio: 8, attack: 2, release: 4, slo: 0, mix: 100 } },
+  ],
+};
+
 export const ANALOG_SPECS: Record<string, AnalogKindSpec> = {
   OPTO_VINTAGE,
+  FET76,
 };
 
 export const analogSpec = (kind: string): AnalogKindSpec | undefined => ANALOG_SPECS[kind];

@@ -34,7 +34,9 @@ export function formatAnalog(kind: string, spec: AnalogParamSpec, v: number): st
     case ':1': return `${fr(v)}:1`;
     case '%': return `${Math.round(v)} %`;
     case 'pos': {
-      const knob = spec.id === 'attack' ? prof.attKnob : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+      if (spec.id === 'input' && prof.inGainDb) return `${fr(v)} · gain ${signed(interp(v, prof.inKnob, prof.inGainDb))} dB`;
+      if (spec.id === 'output' && prof.outGainDb) return `${fr(v)} · ${signed(interp(v, prof.outKnob, prof.outGainDb))} dB`;
+      const knob = spec.id === 'attack' ? prof.attKnob : (prof.relKnob || [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
       const t = spec.id === 'attack' ? prof.attT63Ms : spec.id === 'release' ? prof.relT63Ms : null;
       const ms = t ? interp(v, knob, t) : NaN;
       return Number.isFinite(ms) ? `${fr(v)} · ≈ ${msText(ms)}` : fr(v);

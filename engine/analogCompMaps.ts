@@ -12,7 +12,7 @@ export type AnalogKind = 'OPTO_VINTAGE' | 'FET76' | 'LEVELER2A' | 'VOXSTRIP';
 
 export function buildAnalogInternal(kind: string, p: Record<string, number>, prof: any, sampleRate: number): AnalogCompInternal {
   var SR = sampleRate > 0 ? sampleRate : 48000;
-  var P = new Float64Array(64);
+  var P = new Float64Array(72);
   function num(v: any, d: number) { var x = +v; return x === x && isFinite(x) ? x : d; }
   function interp(x: number, xs: number[], ys: number[]) {
     var n = xs.length;
@@ -114,6 +114,34 @@ export function buildAnalogInternal(kind: string, p: Record<string, number>, pro
       var f = prof.scFilters && prof.scFilters[String(sc)];
       setHp(f ? biquad('hp', f[0], f[1], 0) : biquad('hp', sc, 0.7071, 0));
     }
+    P[25] = 0;
+    return { P: P, tab: tab, l0: prof.l0, dl: prof.dl };
+  }
+  if (kind === 'FET76') {
+    // Bouton ENTRÉE (gain mesuré, non linéaire) -> niveau interne ; seuil interne fixe
+    P[0] = Math.pow(10, interp(num(p.input, -24), prof.inKnob, prof.inGainDb) / 20);
+    P[1] = Math.pow(10, prof.tRefDb / 20);
+    var r = num(p.ratio, 4);
+    if (r < 1) { tab = []; for (var z = 0; z < prof.tables[0].length; z++) tab.push(0); }
+    else {
+      var bj = 0;
+      for (var k2 = 1; k2 < prof.ratios.length; k2++) if (Math.abs(r - prof.ratios[k2]) < Math.abs(r - prof.ratios[bj])) bj = k2;
+      tab = prof.tables[bj].slice();
+    }
+    P[3] = prof.rectHalf ? 1 : 0;
+    P[29] = prof.detRelMs > 0 ? coef(prof.detRelMs) : 0;
+    var relK = num(p.release, 4);
+    var fa = num(p.slo, 0) >= 0.5 ? prof.sloAttMs : interpLog(num(p.attack, 4), prof.attKnob, prof.attMs);
+    P[5] = coef(fa);
+    var relMs = interpLog(relK, prof.relKnob, prof.relMs);
+    P[7] = 0; P[8] = coef(relMs); P[10] = -1;
+    P[61] = prof.slowFrac; P[62] = coef(prof.slowAttMs); P[63] = coef(relMs * prof.slowRelK);
+    P[16] = prof.outA2; P[17] = prof.outA3; P[28] = prof.outSat; P[54] = prof.outBias; P[64] = prof.outAb;
+    P[58] = prof.fetA2;
+    P[18] = Math.pow(10, interp(num(p.output, -24), prof.outKnob, prof.outGainDb) / 20);
+    P[59] = prof.finalSat || 0;
+    for (var q2 = 0; q2 < prof.eq.length && q2 < 4; q2++) { var e = prof.eq[q2]; setEq(q2, biquad(e[0], e[1], e[2], e[3])); }
+    P[19] = Math.min(1, Math.max(0, num(p.mix, 100) / 100));
     P[25] = 0;
     return { P: P, tab: tab, l0: prof.l0, dl: prof.dl };
   }

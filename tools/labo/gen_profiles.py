@@ -12,7 +12,7 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 
 def r6(x):
     if isinstance(x, float):
-        return float(f"{x:.6g}")
+        return float(f"{x:.10g}")
     if isinstance(x, list):
         return [r6(v) for v in x]
     if isinstance(x, dict):
@@ -45,7 +45,26 @@ def opto_vintage():
     }
 
 
-GENERATORS = {"OPTO_VINTAGE": opto_vintage}
+def fet76():
+    from modeles import fet76_profil as prof
+    f = prof.load_fit()
+    return {
+        "source": "Mesures labo NOVA de l'UADx 1176AE, 08/10/2026",
+        "l0": prof.L0, "dl": prof.DL, "ratios": prof.RATIOS, "tables": f["tables"],
+        "inKnob": f["in_knob"], "inGainDb": f["in_gain_db"], "outKnob": f["out_knob"], "outGainDb": f["out_gain_db"],
+        "tRefDb": f["t_ref_db"], "rectHalf": int(f["rect_half"]), "detRelMs": f["det_rel_ms"],
+        "attKnob": f["att_knob"], "attMs": f["att_ms"], "sloAttMs": f["slo_att_ms"],
+        "relKnob": f["rel_knob"], "relMs": f["rel_ms"],
+        "slowFrac": f.get("slow_frac", 0.0), "slowAttMs": f.get("slow_att_ms", 300.0), "slowRelK": f.get("slow_rel_k", 1.0),
+        "outA2": f["out_a2"], "outA3": f["out_a3"], "outSat": f["out_sat"], "outBias": f["out_bias"], "outAb": f.get("out_ab", 0.0),
+        "fetA2": f["fet_a2"], "finalSat": f.get("final_sat", 0.0), "eq": f.get("eq", []),
+        # temps mesurés (t63, saut de 40 dB à 2 kHz / 1 kHz) : affichage seulement
+        "attT63Ms": [2.54, 2.2, 1.94, 1.75, 1.52, 1.3, 1.04, 0.9, 0.69, 0.55, 0.4, 0.25, 0.12], "sloT63Ms": 10.6,
+        "relT63Ms": [1061, 1030, 1002, 900, 798, 690, 587, 470, 357, 220, 95, 85, 77],
+    }
+
+
+GENERATORS = {"OPTO_VINTAGE": opto_vintage, "FET76": fet76}
 
 
 def main():

@@ -3,6 +3,7 @@
 ID = "ua_1176"
 PLUGIN = "uaudio_ua_1176ae.vst3"
 NOVA_KIND = "FET76"
+PY_PROFILE = "modeles.fet76_profil"
 
 VOIX = r"D:\1 WORK\CONTENU\nova-autotune\micro_sec_12s.wav"
 BATTERIE = r"D:\1 WORK\CONTENU\nova-v20\materiaux\B_boucle_batterie.wav"
@@ -19,9 +20,10 @@ def to_nova(s):
     m = dict(BASE)
     m.update(s)
     att = m["attack"]
+    rmap = {"None": 0.0, "2:1": 2.0, "4:1": 4.0, "8:1": 8.0, "20:1": 20.0, "4:1+20:1": 24.0}
     return {"input": float(m["input"]), "output": float(m["output"]),
-            "attack": 0.0 if str(att) == "SLO" else float(att), "slo": 1 if str(att) == "SLO" else 0,
-            "release": float(m["release"]), "ratio": str(m["ratio"]), "mix": float(m["mix"]),
+            "attack": 1.0 if str(att) == "SLO" else float(att), "slo": 1 if str(att) == "SLO" else 0,
+            "release": float(m["release"]), "ratio": rmap.get(str(m["ratio"]), 4.0), "mix": float(m["mix"]),
             "scFilter": 1 if m["sc_filter"] in (True, "True") else 0, "headroom": float(m["headroom"])}
 
 
@@ -91,4 +93,28 @@ CASES = [
     {"name": "melange", "settings": {"ratio": "8:1", "input": -16.0, "mix": 50.0}, "tests": [
         {"type": "tone_levels", "name": "stat_1k", "freq": 1000, "levels": LEVELS[::2], "dur": 1.5},
         {"type": "freq_response", "name": "fr_-40", "level_db": -40}]},
+]
+
+# ── Cartographie fine (calage du profil FET 76) ─────────────────────────────
+CARTO_LEVELS = [-60, -50, -45, -42, -40, -38, -36, -34, -32, -30, -28, -26, -24, -22, -20, -18, -16, -14, -12, -10,
+                -8, -6, -4, -2, 0]
+CARTO = [
+    *[{"name": f"c_in{i}", "settings": {"ratio": "None", "input": float(i), "output": -24.0}, "tests": [
+        {"type": "tone_levels", "name": "g", "freq": 1000, "levels": [-60, -50], "dur": 0.3}]}
+      for i in range(-60, 1, 3)],
+    *[{"name": f"c_out{o}", "settings": {"ratio": "None", "input": -24.0, "output": float(o)}, "tests": [
+        {"type": "tone_levels", "name": "g", "freq": 1000, "levels": [-60, -50], "dur": 0.3}]}
+      for o in range(-60, 1, 3)],
+    *[{"name": f"c_ratio{r}", "settings": {"ratio": r, "input": -24.0}, "tests": [
+        {"type": "tone_levels", "name": "stat_1k", "freq": 1000, "levels": CARTO_LEVELS, "dur": 1.5}]}
+      for r in ["2:1", "4:1", "8:1", "20:1", "4:1+20:1"]],
+    *[{"name": f"c_att{a}", "settings": {"ratio": "4:1", "input": -24.0, "attack": a, "release": 4.0}, "tests": [
+        {"type": "step_response", "name": "s30", "freq": 2000, "base_db": -55, "step_db": 40, "hold": 0.3, "rel_obs": 2.0},
+        {"type": "step_response", "name": "s20", "freq": 2000, "base_db": -55, "step_db": 30, "hold": 0.3, "rel_obs": 2.0}]}
+      for a in ["SLO", 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0]],
+    *[{"name": f"c_rel{r}", "settings": {"ratio": "4:1", "input": -24.0, "attack": 4.0, "release": r}, "tests": [
+        {"type": "step_response", "name": "s30", "base_db": -55, "step_db": 40, "hold": 1.0, "rel_obs": 3.0},
+        {"type": "step_response", "name": "s20", "base_db": -55, "step_db": 30, "hold": 1.0, "rel_obs": 3.0},
+        {"type": "step_response", "name": "s30h01", "base_db": -55, "step_db": 40, "hold": 0.1, "rel_obs": 3.0}]}
+      for r in [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0]],
 ]

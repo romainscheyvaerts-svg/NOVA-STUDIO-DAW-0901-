@@ -20,7 +20,7 @@ import { NovaDjFilterUI, NovaLofiUI } from '../plugins/FilterPlugin';
 import { NovaGateFxUI } from '../plugins/GateFxPlugin';
 import { AnalogCompNode } from './AnalogCompNode';
 import { analogAutomatable, analogDefaults } from './analogCompParams';
-import { NovaOptoVintageUI } from '../plugins/AnalogCompPlugin';
+import { NovaOptoVintageUI, NovaFet76UI } from '../plugins/AnalogCompPlugin';
 
 export interface RegisteredPlugin {
   type: PluginType;
@@ -144,6 +144,18 @@ export const PLUGIN_REGISTRY: RegisteredPlugin[] = [
     create: (ctx, plugin) => new AnalogCompNode(ctx, 'OPTO_VINTAGE', plugin.params || {}),
     ui: NovaOptoVintageUI as any,
     automatable: analogAutomatable('OPTO_VINTAGE'),
+  },
+  {
+    type: 'FET76',
+    name: 'FET 76',
+    category: 'Compresseurs vintage',
+    icon: 'fa-bolt',
+    color: '#e4e4e7',
+    description: 'Compresseur à transistor FET inspiré d’un limiteur américain classique : attaque ultra-rapide, du mordant et de la couleur. « Caler sur ma voix » règle l’entrée pour 5 dB max au VU.',
+    defaultParams: analogDefaults('FET76'),
+    create: (ctx, plugin) => new AnalogCompNode(ctx, 'FET76', plugin.params || {}),
+    ui: NovaFet76UI as any,
+    automatable: analogAutomatable('FET76'),
   },
 ];
 
