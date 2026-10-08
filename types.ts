@@ -280,6 +280,42 @@ export interface Clip {
    * source sert à changer de réglage. Absent : pas de groove.
    */
   groove?: ClipGroove;
+  /**
+   * Retouche par un plugin ARA (Melodyne, VocAlign) : ce clip joue le son rendu
+   * par le plugin. La prise d'origine et l'état du plugin (archive ARA, les
+   * retouches de Melodyne) sont gardés pour rouvrir, retoucher ou revenir à
+   * l'original. Une ancienne version ignore ce champ et joue le son rendu.
+   * Voir utils/araEdit.
+   */
+  araEdit?: AraEditInfo;
+}
+
+/** Plugin ARA connu de NOVA. */
+export type AraPluginKey = 'melodyne' | 'vocalign';
+
+/** Ce que garde un clip retouché par un plugin ARA. */
+export interface AraEditInfo {
+  version: 1;
+  plugin: AraPluginKey;
+  /** Nom et version du plugin au moment de la retouche (« Melodyne 5.4.2 »). */
+  pluginName?: string;
+  /** Comment le son a été obtenu : ARA (Melodyne), capture (VocAlign), ou alignement NOVA (sans plugin). */
+  mode: 'ara' | 'capture' | 'nova';
+  /** Son d'origine (registre audio). Absent ou introuvable : on ne peut que garder le son rendu. */
+  sourceBufferId?: string;
+  /** Fichier du son d'origine dans un projet sauvegardé (le temps de la sauvegarde). */
+  sourceRef?: string;
+  /** Instant du son d'origine qui correspond au début du son rendu (s). */
+  regionStart: number;
+  /** Identifiant stable du son confié au plugin (relie l'archive au bon son). */
+  persistentId: string;
+  /** État ARA du plugin (base64) : les retouches de Melodyne, pour rouvrir et retoucher. */
+  archive?: string;
+  /** VocAlign : le guide (la lead) sur lequel ce clip a été calé. */
+  guide?: { trackId?: string; clipId?: string; name?: string };
+  sourceWarp?: WarpSettings;
+  sourceName?: string;
+  at?: number;
 }
 
 /** Retouche d'une note (justesse), rangée par instant (secondes dans le son d'origine). */

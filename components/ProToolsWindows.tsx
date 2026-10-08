@@ -8,6 +8,7 @@ import StripSilenceDialog from './StripSilenceDialog';
 import ClipPropsDialog from './ClipPropsDialog';
 import PitchEditor from './PitchEditor';
 import AudioToMidiDialog, { AudioToMidiRequest } from './AudioToMidiDialog';
+import AraDialog, { AraApply } from './AraDialog';
 
 interface Props {
   tracks: Track[];
@@ -40,6 +41,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
   const [props, setProps] = useState<NovaWindowDetail | null>(null);
   const [pitch, setPitch] = useState<NovaWindowDetail | null>(null);
   const [convert, setConvert] = useState<AudioToMidiRequest | null>(null);
+  const [ara, setAra] = useState<NovaWindowDetail | null>(null);
   const focus = useKeyboardFocus();
 
   useEffect(() => {
@@ -53,6 +55,7 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       else if (d.name === 'pitch-editor' && d.targets?.length) setPitch(d);
       // Audio → MIDI (V20) : mélodie, batterie, harmonie.
       else if (d.name === 'audio-to-midi' && d.convert) setConvert({ ...d.convert, trackId: d.targets?.[0]?.trackId, clipId: d.targets?.[0]?.clipId });
+      else if ((d.name === 'ara-melodyne' || d.name === 'ara-vocalign') && d.targets?.length) setAra(d);
     };
     window.addEventListener(NOVA_WINDOW_EVENT, onOpen);
     return () => window.removeEventListener(NOVA_WINDOW_EVENT, onOpen);
@@ -76,6 +79,20 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
       if (!c) return;
       for (const [k, v] of Object.entries(patch)) {
         if (v === undefined) delete (c as any)[k]; else (c as any)[k] = v;
+      }
+    }));
+    try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: message })); } catch { /* hors navigateur */ }
+  }, [setState]);
+
+  // Melodyne / VocAlign (ARA) : tous les clips changés en une seule étape d'annulation.
+  const applyAra = useCallback((changes: AraApply[], message: string) => {
+    setState(prev => produce(prev, (draft: DAWState) => {
+      for (const ch of changes) {
+        const c = draft.tracks.find(x => x.id === ch.trackId)?.clips.find(x => x.id === ch.clipId);
+        if (!c) continue;
+        for (const [k, v] of Object.entries(ch.patch)) {
+          if (v === undefined) delete (c as any)[k]; else (c as any)[k] = v;
+        }
       }
     }));
     try { window.dispatchEvent(new CustomEvent('nova:notify', { detail: message })); } catch { /* hors navigateur */ }
@@ -124,6 +141,8 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
         projectKey={projectKey} projectScale={projectScale} onApply={applyPitch} onClose={() => setPitch(null)} />
       <AudioToMidiDialog request={convert} tracks={tracks} bpm={bpm} beatsPerBar={beatsPerBar} projectKey={projectKey} projectScale={projectScale}
         setState={setState} onClose={() => setConvert(null)} />
+      <AraDialog open={!!ara} plugin={ara?.name === 'ara-vocalign' ? 'vocalign' : 'melodyne'} trackId={ara?.targets?.[0]?.trackId}
+        clipId={ara?.targets?.[0]?.clipId} tracks={tracks} bpm={bpm} onApply={applyAra} onClose={() => setAra(null)} />
       {focus && (
         <button type="button" onClick={() => setKeyboardFocus(false)} data-testid="keyboard-focus-badge"
           title="Commands Keyboard Focus actif : une touche = une commande (A, S, D, G, R, T…). Clic ou Ctrl+Alt+1 pour l'arrêter. Ctrl+Espace enregistre."
