@@ -104,6 +104,13 @@ def open_with_project(page, zpath):
     close_welcome(page)
     wait_text_gone(page, "Chargement", 60)
     page.wait_for_timeout(800)
+    # La fenêtre d'accueil s'ouvre 1,2 s après l'arrivée dans le studio : sur une machine chargée
+    # elle arrive APRÈS le premier close_welcome et recouvre le menu (téléphone). On la referme.
+    try:
+        page.get_by_role("button", name="C'est parti", exact=True).locator("visible=true").first.wait_for(timeout=2500)
+    except Exception:
+        pass
+    close_welcome(page)
     b = page.get_by_role("button", name="Ouvrir un projet").locator("visible=true")
     if b.count() == 0:
         page.get_by_role("button", name=re.compile("Ouvrir le menu")).first.click(); page.wait_for_timeout(400)

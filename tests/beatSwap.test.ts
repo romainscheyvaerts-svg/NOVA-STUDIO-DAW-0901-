@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  analyzeBeatGrid, applySwap, attackNear, audioClipsToRender, doneText, effectiveTempo, hasVoicesToKeep, keyName, mapChords, planSummary, planSwap,
+  analyzeBeatGrid, applyBeatSwapOp, applySwap, attackNear, audioClipsToRender, doneText, effectiveTempo, hasVoicesToKeep, keyName, mapChords, planSummary, planSwap,
   relativeMinorRoot, semitoneChoices, swapTime, BeatInfo,
 } from '../utils/beatSwap';
 import { estimateTempo, renderElastic, renderPlan, splitAtOnsets, editingElastic, withDuration, withSemitones, monoMix } from '../utils/clipTranspose';
@@ -196,5 +196,45 @@ describe('attaques ancrées (R23) : la voix tombe sur la grille', () => {
     }
     cents.sort((a, b) => a - b);
     expect(Math.abs(cents[cents.length >> 1] - 200)).toBeLessThan(5);
+  });
+});
+
+describe('collaboration : le changement de beat arrive en une opération', () => {
+  it('l’invité reçoit les voix recalées, le beat, le tempo, les repères, les accords et la tonalité', () => {
+    const local = {
+      id: 'p', bpm: 94, projectKey: 7, projectScale: 'MINOR', markers: [{ id: 'm', name: 'Couplet', time: 3, type: 'MARKER', color: '#fff' }], chords: [],
+      tracks: [
+        { ...makeTrack({ id: 'instrumental', clips: [makeClip({ id: 'old' })] }), instrumentId: 4 },
+        makeTrack({ id: 'voix', clips: [makeClip({ id: 'v1', start: 3 })], isFrozen: true, frozenClip: makeClip({ id: 'fz' }) } as any),
+        makeTrack({ id: 'autre', clips: [makeClip({ id: 'x' })] }),
+      ],
+    } as unknown as DAWState;
+    const op = {
+      id: 'bs-1', bpm: 100, summary: '94 → 100 BPM', markers: [{ id: 'm', name: 'Couplet', time: 2.5, type: 'MARKER', color: '#fff' }],
+      chords: [{ id: 'c', start: 2.5, end: 4, root: 9, quality: 'min' }], projectKey: 9, projectScale: 'MINOR', beatTitle: 'Beat B',
+      tracks: [
+        { id: 'instrumental', clips: [makeClip({ id: 'new-beat', bufferId: 'nb' })], instrumentId: null },
+        { id: 'voix', clips: [makeClip({ id: 'v1', start: 2.5, bufferId: 'rendu' })] },
+        { id: 'inconnue', clips: [makeClip({ id: 'z' })] },
+      ],
+    } as any;
+    let cleaned = 0;
+    const s = applyBeatSwapOp(local, op, c => { cleaned++; return c; });
+    expect(s.bpm).toBe(100);
+    expect(s.projectKey).toBe(9);
+    expect(s.beatTitle).toBe('Beat B');
+    expect(s.markers[0].time).toBe(2.5);
+    expect(s.chords![0].root).toBe(9);
+    const beat = s.tracks.find(t => t.id === 'instrumental')!;
+    expect(beat.clips[0].id).toBe('new-beat');
+    expect((beat as any).instrumentId).toBeUndefined();
+    const v = s.tracks.find(t => t.id === 'voix')!;
+    expect(v.clips[0]).toMatchObject({ start: 2.5, bufferId: 'rendu' });
+    expect(v.isFrozen).toBe(false);
+    expect(s.tracks.find(t => t.id === 'autre')).toBe(local.tracks[2]);
+    expect(s.tracks.some(t => t.id === 'inconnue')).toBe(false);
+    expect(cleaned).toBe(2);
+    // Opération abîmée : rien ne change.
+    expect(applyBeatSwapOp(local, { ...op, bpm: 0 })).toBe(local);
   });
 });
