@@ -5054,6 +5054,23 @@ function Studio() {
     if (t.frozenClip) knownFreezeRef.current.set(t.id, t.frozenClip.id);
   };
 
+  /**
+   * Même réglage de la session (tempo, groupes, ordre, tonalité, repères, accords) modifié ici
+   * et en route vers le serveur : on ne sait pas encore qui est le plus récent. L'opération
+   * reçue est mise de côté et rejouée quand notre numéro du journal est connu (onSent) — la
+   * plus récente gagne chez tous. Avant : chacun gardait la sienne si nos envois se croisaient.
+   */
+  const deferredOpsRef = useRef(new Map<string, CollabOp[]>());
+  const deferIfMineInFlight = (outKey: string, o: CollabOp): boolean => {
+    const c = collabRef.current;
+    if (!c || o.replay || !c.client.outbox.has(outKey)) return false;
+    // Plusieurs reçues entre-temps : toutes gardées, rejouées dans l'ordre du journal.
+    const list = deferredOpsRef.current.get(outKey) || [];
+    if (!list.some(x => x.seq === o.seq)) list.push(o);
+    deferredOpsRef.current.set(outKey, list);
+    return true;
+  };
+
   /** Applique une opération reçue d'un collaborateur. */
   /**
    * Opérations reçues : l'état de référence (stateRef) est mis à jour TOUT DE SUITE, pas au
@@ -5339,6 +5356,7 @@ function Studio() {
         break;
       }
       case 'order': {
+        if (deferIfMineInFlight('order', o)) break;
         // Ordre des pistes : la dernière liste du journal gagne ; même résultat chez tous.
         if (!lwwRef.current.accept('order', o.seq)) break;
         const ids: string[] = Array.isArray(p.ids) ? p.ids.filter((x: unknown): x is string => typeof x === 'string').slice(0, 500) : [];
@@ -5351,6 +5369,7 @@ function Studio() {
         break;
       }
       case 'song': {
+        if (deferIfMineInFlight('song', o)) break;
         // Tonalité, gamme, arrangements, paroles : champ par champ, le plus récent du journal gagne ;
         // un champ changé ici et pas encore parti n'est pas écrasé.
         const fields = p.fields && typeof p.fields === 'object' ? p.fields as Record<string, unknown> : {};
@@ -5427,6 +5446,7 @@ function Studio() {
         break;
       }
       case 'markers': {
+        if (deferIfMineInFlight('markers', o)) break;
         // Repères partagés : le plus récent du journal gagne, repère par repère.
         const accept = (id: string) => lwwRef.current.accept(`marker:${id}`, o.seq);
         const by = o.author_name;
@@ -5447,6 +5467,7 @@ function Studio() {
         break;
       }
       case 'chords': {
+        if (deferIfMineInFlight('chords', o)) break;
         // Piste d'accords (V20) : le plus récent du journal gagne, accord par accord ;
         // nos accords pas encore enregistrés restent (ils partiront après et gagneront partout).
         const accept = (id: string) => lwwRef.current.accept(`chord:${id}`, o.seq);
@@ -5462,6 +5483,7 @@ function Studio() {
         break;
       }
       case 'tempo': {
+        if (deferIfMineInFlight('tempo', o)) break;
         // Tempo / mesure / piste tempo d'un autre membre (R2) : le plus récent du journal gagne.
         if (!lwwRef.current.accept('tempo', o.seq)) break;
         const op = sanitizeTempoOp(p);
@@ -5479,6 +5501,7 @@ function Studio() {
         break;
       }
       case 'groups': {
+        if (deferIfMineInFlight('groups', o)) break;
         // Groupes (R12) : toute la liste en une opération ; le plus récent du journal gagne.
         if (!lwwRef.current.accept('groups', o.seq)) break;
         const op = sanitizeGroupsOp(p);
@@ -5893,6 +5916,13 @@ function Studio() {
           }
         }
         else if (kind === 'track_del') lwwRef.current.note(`track:${tid}`, seq);
+        // Opérations reçues pendant que la nôtre (même réglage) partait : rejouées maintenant, la plus
+        // récente du journal l'emporte (les plus anciennes que la nôtre seront écartées par l'horloge).
+        if (['order', 'song', 'markers', 'chords', 'tempo', 'groups'].includes(kind)) {
+          const waiting = deferredOpsRef.current.get(kind) || [];
+          deferredOpsRef.current.delete(kind);
+          if (waiting.length) setTimeout(() => { [...waiting].sort((a, b) => a.seq - b.seq).forEach(w => { void applyCollabOp(w); }); }, 0);
+        }
         else if (kind === 'order') lwwRef.current.note('order', seq);
         else if (kind === 'song' && op.fields && typeof op.fields === 'object') Object.keys(op.fields).forEach(f => lwwRef.current.note(`song:${f}`, seq));
         else if (kind === 'own' && Array.isArray(op.trackIds)) (op.trackIds as string[]).forEach(id => { if (claimSeqRef.current.get(id) === Infinity) claimSeqRef.current.set(id, seq); });
@@ -6021,6 +6051,7 @@ function Studio() {
     pendingChordsRef.current.clear();
     knownContentRef.current.clear();
     deferredMixRef.current.clear();
+    deferredOpsRef.current.clear();
     deferredClipRef.current.clear();
     knownOrderRef.current = null;
     lastOrderListRef.current = null;
@@ -6185,6 +6216,7 @@ function Studio() {
   const fpMissRef = useRef(new Map<string, number>());
   /** Dernière réparation automatique par piste (au plus une toutes les 30 s). */
   const healRef = useRef(new Map<string, number>());
+  const healStableRef = useRef(new Map<string, { pair: string; n: number }>());
   const peerLatencyRef = useRef(peerLatency);
   peerLatencyRef.current = peerLatency;
   const peerSyncRef = useRef(peerSync);
@@ -6225,7 +6257,16 @@ function Studio() {
       const engineerOnline = collabOnlineRef.current.some(m => m.role === 'engineer');
       const healed: string[] = [];
       for (const t of stateRef.current.tracks) {
-        if (theirs[t.id] === undefined || mine.tracks.find(x => x.id === t.id)?.sig === theirs[t.id]) continue;
+        const mySig = mine.tracks.find(x => x.id === t.id)?.sig;
+        if (theirs[t.id] === undefined || mySig === theirs[t.id]) continue;
+        // Seulement un écart IMMOBILE (mêmes deux versions à 3 vérifications de suite) : personne n'est
+        // en train de modifier cette piste ; sinon on écraserait une modification en route.
+        const pair = `${mySig}|${theirs[t.id]}`;
+        const sk = `${who}:${t.id}`;
+        const prevStable = healStableRef.current.get(sk);
+        const n2 = prevStable && prevStable.pair === pair ? prevStable.n + 1 : 1;
+        healStableRef.current.set(sk, { pair, n: n2 });
+        if (n2 < 3) continue;
         const iAmRef = t.collabOwnerKey ? t.collabOwnerKey === c.key
           : ownerRoleOf(t) === null ? (c.role === 'engineer' || (!engineerOnline && c.host)) : ownerRoleOf(t) === c.role;
         if (!iAmRef || healRef.current.get(t.id)! > Date.now() - 30000) continue;

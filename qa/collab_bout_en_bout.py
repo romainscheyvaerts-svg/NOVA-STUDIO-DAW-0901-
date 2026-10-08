@@ -555,6 +555,10 @@ def run():
         # ------------------------------------------------------------ bilan
         res["journal_mix_voix"] = [{"seq": o["seq"], "par": o["author_name"], "id": (o["op"] or {}).get("_id", "")[:8], "champs": (o["op"] or {}).get("fields")}
                                    for o in cloud.ops if o["kind"] == "mix" and (o["op"] or {}).get("trackId") == "voix"][-12:]
+        res["journal_contenu_voix"] = [{"seq": o["seq"], "par": o["author_name"], "changed": (o["op"] or {}).get("changed"), "removed": (o["op"] or {}).get("removed"),
+                                        "full": (o["op"] or {}).get("full"), "p2": next((c.get("start") for c in ((o["op"] or {}).get("content") or {}).get("clips", []) if c.get("id") == "p2"), None),
+                                        "p3_gain": next((c.get("gain") for c in ((o["op"] or {}).get("content") or {}).get("clips", []) if c.get("id") == "p3"), None)}
+                                       for o in cloud.ops if o["kind"] == "content" and (o["op"] or {}).get("trackId") == "voix"]
         res["journal_appels_E"] = [x for x in cloud.log if x[0] == "E"][-40:]
         res["journal_ops"] = {}
         for o in cloud.ops:
