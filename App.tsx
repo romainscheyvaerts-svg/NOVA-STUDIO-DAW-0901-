@@ -5461,10 +5461,13 @@ function Studio() {
         // (mêmes identifiants) ; rien n'est renvoyé en écho (contenu, repères, accords, tempo connus).
         const op = sanitizeTimeOp(p);
         if (!op) break;
+        // Déjà dans ce projet (instantané pris après l'avoir reçue en direct) : jamais deux fois.
+        if ((stateRef.current.collabTimeOps || []).includes(op.id)) break;
         const cur = stateRef.current;
         const r = runTimeOpOn(cur, op);
+        const mark = (s: DAWState): DAWState => ({ ...s, collabTimeOps: [...(s.collabTimeOps || []).filter(x => x !== op.id).slice(-199), op.id] });
         rememberTimeOp(r.state);
-        setState(prev => (prev === cur ? r.state : runTimeOpOn(prev, op).state));
+        setState(prev => mark(prev === cur ? r.state : runTimeOpOn(prev, op).state));
         if (!o.replay) setAiNotification(`⏱️ ${o.author_name} : ${r.report.summary}.`);
         if (!o.replay) noteHistoryRef.current?.({ seq: o.seq, who: o.author_name, role: o.role, text: r.report.summary });
         break;
@@ -5511,6 +5514,8 @@ function Studio() {
     try {
       await c.client.send('content', {
         trackId, content, audio, cv: CONTENT_FORMAT, changed: delta.changed, removed: delta.removed, meta: delta.meta,
+        // Rien de connu (piste neuve, ou réparation d'un écart) : cette version fait foi en entier.
+        ...(known ? {} : { full: true }),
         ...(isNew ? { mix: mixOf(t), mixFields: mixFieldsOf(t) } : {}),
       });
     } catch (e: any) {
@@ -6074,6 +6079,8 @@ function Studio() {
   const [peerLatency, setPeerLatency] = useState<Record<string, number>>({});
   const [peerSync, setPeerSync] = useState<Record<string, { ok: boolean; at: number; diff?: string[] }>>({});
   const fpMissRef = useRef(new Map<string, number>());
+  /** Dernière réparation automatique par piste (au plus une toutes les 30 s). */
+  const healRef = useRef(new Map<string, number>());
   const peerLatencyRef = useRef(peerLatency);
   peerLatencyRef.current = peerLatency;
   const peerSyncRef = useRef(peerSync);
@@ -6108,6 +6115,26 @@ function Studio() {
       const diff = mine.tracks.filter(t => theirs[t.id] !== t.sig).map(t => t.name).slice(0, 6);
       for (const [k, v] of Object.entries(payload.song && typeof payload.song === 'object' ? payload.song : {})) if (mine.song[k] !== v) diff.push(k === 'order' ? 'ordre des pistes' : k);
       setPeerSync(prev => ({ ...prev, [who]: { ok: false, at: Date.now(), diff } }));
+      // Réparation automatique : pour chaque piste qui diffère, UNE seule personne fait foi et
+      // renvoie tout (mix + clips) — son propriétaire ; une piste partagée : l'ingé (sinon l'hôte).
+      // Tout le monde converge vers sa version (règle « dernière écriture gagne »).
+      const engineerOnline = collabOnlineRef.current.some(m => m.role === 'engineer');
+      const healed: string[] = [];
+      for (const t of stateRef.current.tracks) {
+        if (theirs[t.id] === undefined || mine.tracks.find(x => x.id === t.id)?.sig === theirs[t.id]) continue;
+        const iAmRef = t.collabOwnerKey ? t.collabOwnerKey === c.key
+          : ownerRoleOf(t) === null ? (c.role === 'engineer' || (!engineerOnline && c.host)) : ownerRoleOf(t) === c.role;
+        if (!iAmRef || healRef.current.get(t.id)! > Date.now() - 30000) continue;
+        healRef.current.set(t.id, Date.now());
+        knownFieldsRef.current.delete(t.id);
+        knownContentRef.current.delete(t.id);
+        healed.push(t.name);
+      }
+      if (healed.length) {
+        fpMissRef.current.set(who, 0);
+        setSilently(prev => ({ ...prev, tracks: [...prev.tracks] })); // la détection renvoie tout
+        setAiNotification(`🩹 Écart avec ${payload.name || 'un collaborateur'} sur ${healed.map(n => `« ${n} »`).join(', ')} : ta version (qui fait foi) est renvoyée à tous.`);
+      }
       return;
     }
     if (ev === 'rtc') { void rtcRef.current?.handle(payload as RtcSignal); }
@@ -6124,7 +6151,7 @@ function Studio() {
       const st = c.client.getStatus();
       if (st.realtime !== 'live' || st.pending > 0 || st.catchingUp || stateRef.current.isRecording) return;
       const print = sessionPrint(stateRef.current);
-      c.client.broadcast('fp', { from: c.client.memberKey, sig: print.sig, h: c.client.horizon, p: st.pending + contentDirtyRef.current.size,
+      c.client.broadcast('fp', { from: c.client.memberKey, name: c.name, sig: print.sig, h: c.client.horizon, p: st.pending + contentDirtyRef.current.size,
         tr: Object.fromEntries(print.tracks.map(t => [t.id, t.sig])), song: print.song });
     }, 8000);
     return () => { window.clearInterval(ping); window.clearInterval(fp); };
@@ -6373,6 +6400,7 @@ function Studio() {
     const c = collabRef.current;
     if (!c) return;
     rememberTimeOp(next);
+    setSilently(prev => ({ ...prev, collabTimeOps: [...(prev.collabTimeOps || []).filter(x => x !== op.id).slice(-199), op.id] }));
     c.client.queue(`timeop:${op.id}`, 'timeop', op as unknown as Record<string, unknown>);
   };
 

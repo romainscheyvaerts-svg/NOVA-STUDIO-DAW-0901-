@@ -70,11 +70,13 @@ export function pendingClipIds(known: KnownContent | undefined, clips: Clip[]): 
  *  - pending : clips modifiés ici, pas encore partis (gardés tels quels).
  * Renvoie les clips de la piste et ce qui a été pris (pour mettre à jour « ce que tout le monde a »).
  */
-export function mergeClips(local: Clip[], incoming: Clip[], delta: { changed?: unknown; removed?: unknown }, accept: (clipId: string) => boolean, pending: Set<string>):
+export function mergeClips(local: Clip[], incoming: Clip[], delta: { changed?: unknown; removed?: unknown; full?: unknown }, accept: (clipId: string) => boolean, pending: Set<string>):
   { clips: Clip[]; taken: Clip[]; dropped: string[] } {
   const changed = new Set((Array.isArray(delta.changed) ? delta.changed : []).filter((x): x is string => typeof x === 'string'));
   const removed = (Array.isArray(delta.removed) ? delta.removed : []).filter((x): x is string => typeof x === 'string');
   const byId = new Map((incoming || []).filter(c => c && typeof c.id === 'string').map(c => [c.id, c]));
+  // Version complète qui fait foi (réparation d'un écart) : nos clips absents chez elle sont retirés.
+  if (delta.full === true) for (const c of local || []) if (!byId.has(c.id) && !removed.includes(c.id)) removed.push(c.id);
   const out = [...(local || [])];
   const taken: Clip[] = [];
   const dropped: string[] = [];

@@ -1129,6 +1129,12 @@ export interface DAWState {
   projectMode?: 'VOCAL' | 'BEATMAKING';
   /** Collaboration : dernière opération du journal incluse dans cet instantané. */
   collabSeq?: number;
+  /**
+   * Collaboration : opérations sur le temps (R12) déjà appliquées à ce projet (leurs identifiants, les
+   * 200 dernières). L'instantané en ligne peut contenir une opération reçue en direct que le journal
+   * rejoue ensuite à celui qui arrive : sans cette liste, le temps était inséré deux fois.
+   */
+  collabTimeOps?: string[];
   /** Mode « Ingé à distance » : lien avec la session de l'autre (artiste / ingé). */
   remoteInge?: RemoteIngeLinkInfo;
   /** Genre du beat du catalogue (sert à proposer le style de mix adapté). */

@@ -247,3 +247,17 @@ describe('session : champs vérifiés', () => {
     expect(sanitizeSongField('lyrics', null)).toBeNull();
   });
 });
+
+describe('réparation d’un écart (version complète qui fait foi)', () => {
+  it('le propriétaire renvoie tout : l’autre retire le clip en trop et reprend les valeurs', () => {
+    const owner = [clip('a', 0, { gain: 0.5 }), clip('b', 2)];
+    const other = [clip('a', 0, { gain: 0.9 }), clip('b', 2), clip('fantome', 4)];
+    const lww = new LwwClock();
+    const r = mergeClips(other, owner, { changed: ['a', 'b'], removed: [], full: true }, id => lww.accept(id, 50), new Set());
+    expect(r.clips.map(c => c.id).sort()).toEqual(['a', 'b']);
+    expect(r.clips.find(c => c.id === 'a')!.gain).toBe(0.5);
+    // Un clip modifié ici et pas encore parti n'est jamais retiré.
+    const r2 = mergeClips(other, owner, { changed: ['a'], full: true }, () => true, new Set(['fantome']));
+    expect(r2.clips.some(c => c.id === 'fantome')).toBe(true);
+  });
+});

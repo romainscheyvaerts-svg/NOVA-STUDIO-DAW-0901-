@@ -394,7 +394,9 @@ def run():
                     lat(f"chat ({who}→{nm})", (time.time() - t0) * 1000)
                     open_panel(o)
                     try:
-                        wait_for(o, lambda: txt in o.locator("[aria-labelledby='collab-title']").first.inner_text(), 10, step=200, what="message affiché")
+                        # « à 0:08 » s'affiche en bouton « ▶ 0:08 » (il place la tête de lecture) : on cherche le début.
+                        wait_for(o, lambda: txt.split(" à ")[0] in o.locator("[aria-labelledby='collab-title']").first.inner_text()
+                                 and o.locator("[aria-labelledby='collab-title'] button[aria-label='Aller à 0:08']").count() > 0, 10, step=200, what="message affiché")
                         check(f"chat : message de {who} affiché chez {nm}", True)
                     except AssertionError:
                         check(f"chat : message de {who} affiché chez {nm}", False)
