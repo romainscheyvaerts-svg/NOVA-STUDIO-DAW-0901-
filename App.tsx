@@ -161,6 +161,8 @@ import { placeTake, trimToPlan } from './utils/multiTake';
 import { compTakeGroup, keepTakeGroup, deleteTakeGroup, takeGroupLinked } from './utils/takeGroups';
 import type { TakeResult } from './engine/AudioEngine';
 import { useR21 } from './hooks/useR21';
+import { useProToolsUtiles } from './hooks/useProToolsUtiles';
+import { clipLockNotices, enforceClipLocks, isTrustedUpdate, trustedUpdate } from './utils/clipLock';
 import { useR23 } from './hooks/useR23';
 import { BeatSwapDialog, BeatSwapResultCard } from './components/BeatSwapDialog';
 import { RedoSpotsSheet, RepunchCompareCard, R23VoiceTools } from './components/RepunchUI';
@@ -557,8 +559,16 @@ const useUndoRedo = (initialState: DAWState) => {
     const maintenant = Date.now();
 
     setHistory(curr => {
-      const newState = typeof updater === 'function' ? updater(curr.present) : updater;
+      let newState = typeof updater === 'function' ? updater(curr.present) : updater;
       if (newState === curr.present) return curr;
+      // Clips verrouillés (utils/clipLock) : une modification locale qui les toucherait est
+      // refusée pour leur piste. Pas pour un projet ouvert (objet), une opération reçue,
+      // ni pendant une prise (rien ne doit gêner l'enregistrement).
+      if (typeof updater === 'function' && !isTrustedUpdate(updater) && newState.tracks !== curr.present.tracks
+          && !curr.present.isRecording && !newState.isRecording) {
+        const g = enforceClipLocks(curr.present.tracks, newState.tracks);
+        if (g.refused.length) { newState = { ...newState, tracks: g.tracks }; clipLockNotices.report(g.refused); }
+      }
 
       // L'historique ne retient que les modifications reelles du projet.
       // Auparavant, selectionner une piste ou changer de vue creait une entree :
@@ -1075,7 +1085,7 @@ function Studio() {
     // jouées (actives), avec Muet / Solo de dossier, VCA et bus nommés résolus.
     const played = engineView(state.tracks);
     const routing = played.tracks.map(t =>
-      `${t.id}>${t.outputTrackId || ''}|${t.isSolo ? 1 : 0}|${t.isFrozen ? 1 : 0}|${(t.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}:${sd.level}`).join(',')}`
+      `${t.id}>${t.outputTrackId || ''}|${t.isSolo ? 1 : 0}${t.soloSafe ? 's' : ''}|${t.isFrozen ? 1 : 0}|${(t.sends || []).map(sd => `${sd.id}:${sd.isEnabled ? 1 : 0}:${sd.level}`).join(',')}`
     ).join(';') + `#${[...played.excluded].join(',')}`;
     const previous = engineTracksRef.current;
     const full = !previous || routing !== engineRoutingRef.current;
@@ -5032,6 +5042,13 @@ function Studio() {
   });
   r21Ref.current = r21;
 
+  // --- Commandes Pro Tools du quotidien (hooks/useProToolsUtiles) : solos / mutes (Alt+clic, Maj+S, Maj+M),
+  // solo safe (Ctrl+clic), diodes de saturation (Alt+C), verrou de clip (Ctrl+L, Alt+Maj+L).
+  useProToolsUtiles({
+    stateRef, setState, selectedTrackIds,
+    notify: (msg) => { setAiNotification(msg); setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), 6000); },
+  });
+
   // --- R23 · Changer de beat en gardant les voix, repunch intelligent (hooks/useR23).
   const r23 = useR23(state, {
     stateRef, setState, setSilently, breakHistory, undo, redo,
@@ -5269,7 +5286,8 @@ function Studio() {
    * Avant : une piste créée puis supprimée dans le même rattrapage (rechargement) restait,
    * la suppression ne la trouvant pas encore.
    */
-  const remoteSet = (fn: (s: DAWState) => DAWState) => { stateRef.current = fn(stateRef.current); setState(fn); };
+  // Opération reçue : appliquée telle quelle, verrous de clip compris (utils/clipLock).
+  const remoteSet = (fn: (s: DAWState) => DAWState) => { stateRef.current = fn(stateRef.current); setState(trustedUpdate(fn)); };
   const remoteSetSilently = (fn: (s: DAWState) => DAWState) => { stateRef.current = fn(stateRef.current); setSilently(fn); };
   const applyCollabOp = useCallback(async (o: CollabOp) => {
     const c = collabRef.current;

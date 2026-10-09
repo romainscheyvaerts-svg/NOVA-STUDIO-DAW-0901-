@@ -1,5 +1,6 @@
 
 import { getRegisteredPlugin, isTruePeakLimiter } from './pluginRegistry';
+import { soloSilencedIds } from '../utils/soloMute';
 import { Track, Clip, PluginInstance, TrackType, TrackSend, AutomationLane, PluginParameter, PluginType, MidiNote, DrumPad, AutomationPoint } from '../types';
 import { getASIOBridge, ASIOBridgeClient, ASIOConfig, AudioDevice, ASIOStats } from '../services/ASIOBridge';
 import { ASIOInput } from './ASIOInput';
@@ -3699,21 +3700,9 @@ export class AudioEngine {
    * piste audio couperait le bus par lequel elle passe.
    */
   private computeSoloSilencedIds(tracks: Track[]): Set<string> {
-    const audible = new Set(tracks.filter(t => t.isSolo).map(t => t.id));
-    if (audible.size === 0) return new Set();
-
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const t of tracks) {
-        if (audible.has(t.id)) continue;
-        const feedsAudible =
-          (!!t.outputTrackId && audible.has(t.outputTrackId)) ||
-          (t.sends || []).some(sd => sd.isEnabled && !sd.isMuted && sd.level > 0 && audible.has(sd.id));
-        if (feedsAudible) { audible.add(t.id); changed = true; }
-      }
-    }
-    return new Set(tracks.filter(t => this.isSourceTrackType(t) && !audible.has(t.id)).map(t => t.id));
+    // Règle pure (utils/soloMute) : pistes soloées + tout ce qui les alimente audibles ;
+    // bus et retours jamais coupés ; pistes solo safe jamais coupées.
+    return soloSilencedIds(tracks, t => this.isSourceTrackType(t));
   }
 
   /** Tout ce qui impose de recabler le graphe de la piste. */

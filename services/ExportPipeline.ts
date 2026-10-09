@@ -19,6 +19,7 @@ import { encodeWav, encodeAiff, applyLayout, applyTpdfDither, buildId3v2, makeRn
 import { encodeFlac } from '../utils/flac';
 import { resampleChannels } from '../utils/resample';
 import { exportSpan, finalLength, applyTail, type TailSettings } from '../utils/exportTail';
+import { withoutSoloSafe } from '../utils/soloMute';
 import { planStems, withoutGuides, type StemGrouping, type ReturnsMode, MASTER } from '../utils/stemPlan';
 import { extensionOf, stemFileNames } from '../utils/exportNaming';
 import { integratedLufs, truePeakDb, MP3_TRUE_PEAK_CEILING } from '../utils/loudness';
@@ -217,12 +218,12 @@ export async function runExport(allTracks: Track[], s: ExportSettings, projectMa
       const voix = sansBeat.filter(t => (t.type === 'AUDIO' || t.type === 'DRUM_RACK' || !!t.bass808) && !t.isMuted && t.clips.some(c => !c.isMuted));
       if (!voix.length) throw new Error('Aucune de tes pistes (voix, batterie) à exporter.');
       const voixIds = new Set(voix.map(t => t.id));
-      refTracks = sansBeat.map(t => ({ ...t, isSolo: voixIds.has(t.id), ...(voixIds.has(t.id) ? { isMuted: false } : {}) }));
+      refTracks = sansBeat.map(withoutSoloSafe).map(t => ({ ...t, isSolo: voixIds.has(t.id), ...(voixIds.has(t.id) ? { isMuted: false } : {}) }));
       parts = voix.map(track => ({
         label: `${track.name}${s.vocalsDry ? ' (brut)' : ''}`,
         tracks: s.vocalsDry
           ? [{ ...track, isSolo: false, isFrozen: false, frozenClip: undefined, plugins: [], sends: [], outputTrackId: 'master', automationLanes: [] }, ...sansBeat.filter(t => t.id === MASTER).map(t => ({ ...t, plugins: [] }))]
-          : sansBeat.map(t => (t.id === track.id ? { ...t, isMuted: false, isSolo: true } : { ...t, isSolo: false })),
+          : sansBeat.map(withoutSoloSafe).map(t => (t.id === track.id ? { ...t, isMuted: false, isSolo: true } : { ...t, isSolo: false })),
       }));
     }
     // Longueur commune : d'après le mix de ces pistes (queue auto), rendu une fois.

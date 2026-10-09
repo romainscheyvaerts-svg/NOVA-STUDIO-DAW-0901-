@@ -20,6 +20,9 @@ import StripHead from './meters/StripHead';
 import { loudnessPanel } from './meters/LoudnessPanel';
 import { MASTER_OUT } from '../engine/meters/meterBank';
 import { withTrackComment } from '../utils/sessionNotes';
+import { muteClickKind, soloClickKind } from '../utils/soloMute';
+import { runEditCommand } from '../utils/editCommands';
+import SoloMuteIndicators from './SoloMuteIndicators';
 
 /**
  * R21 · Commentaire de la tranche (Pro Tools : vue Commentaires de la console) :
@@ -418,8 +421,9 @@ const ChannelStrip: React.FC<{
           </button>
         )}
         <div className="mt-2 flex space-x-2">
-           <button onClick={() => onUpdate({...track, isMuted: !track.isMuted})} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title="Couper le son de cette tranche">Muet</button>
-           <button onClick={() => onUpdate({...track, isSolo: !track.isSolo})} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title="N'écouter que cette tranche">Solo</button>
+           {/* Alt+clic = toutes les tranches, Ctrl+clic sur Solo = solo safe (Pro Tools, utils/soloMute). */}
+           <button onClick={(e) => { if (!isMaster && muteClickKind(e) === 'all') { runEditCommand('muteAll', { on: !track.isMuted }); return; } onUpdate({...track, isMuted: !track.isMuted}); }} aria-pressed={!!track.isMuted} aria-label={`Muet : ${track.name}`} className={`nova-hit-tactile flex-1 h-8 rounded text-[9px] font-black border ${track.isMuted ? 'bg-amber-500 text-black border-amber-400' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title={isMaster ? 'Couper le son de cette tranche' : 'Couper le son de cette tranche — Alt+clic : toutes les tranches'}>Muet</button>
+           <button onClick={(e) => { const k = isMaster ? 'toggle' : soloClickKind(e); if (k === 'all') { runEditCommand('soloAll', { on: !track.isSolo }); return; } if (k === 'safe') { runEditCommand('soloSafe', { trackIds: [track.id] }); return; } onUpdate({...track, isSolo: !track.isSolo}); }} aria-pressed={!!track.isSolo} aria-label={`Solo : ${track.name}${track.soloSafe ? ' (solo safe)' : ''}`} data-solo-safe={track.soloSafe ? '1' : undefined} className={`nova-hit-tactile relative flex-1 h-8 rounded text-[9px] font-black border ${track.isSolo ? 'bg-cyan-500 text-black border-cyan-400' : track.soloSafe ? 'bg-white/[0.06] border-dashed border-cyan-400/70 text-cyan-300' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`} title={isMaster ? "N'écouter que cette tranche" : `${track.soloSafe ? 'Solo safe : reste audible quand une autre tranche est en solo. ' : ''}N'écouter que cette tranche — Alt+clic : tous les solos ; Ctrl+clic : solo safe`}>{track.soloSafe && <i className="fas fa-shield-alt mr-0.5 text-[8px]" aria-hidden="true" />}Solo</button>
         </div>
         
         <div className={`mt-3 h-10 rounded-lg flex items-center px-2 text-[9px] font-black uppercase border truncate relative ${track.type === TrackType.BUS ? 'bg-amber-500/10 border-transparent text-amber-400' : 'bg-white/[0.05] border-transparent text-white'}`}>
@@ -736,6 +740,7 @@ const MixerView: React.FC<{
          </button>
          <span className="text-[10px] font-bold text-amber-500 whitespace-nowrap">+ Bus</span>
          <MixerStructureButtons tracks={tracks} />
+         <SoloMuteIndicators tracks={tracks} vertical />
          <SendViewPicker slot={sendViewSlot} />
          
          {/* Create Group Button (inspired by Pro Tools) */}

@@ -21,6 +21,7 @@
  * sur la même plage : ils démarrent à 0 et ont la même longueur.
  */
 import { Track, TrackType } from '../types';
+import { withoutSoloSafe } from './soloMute';
 import { engineView, VOID_OUTPUT } from './trackStructure';
 import { isVoiceTrack } from './vocalRoles';
 
@@ -104,7 +105,8 @@ const sendsTo = (t: Track, ids: Set<string>) => (t.sends || []).filter(s => !ids
 /** Liste de rendu d'un stem : solo des membres, retours / master selon les options. */
 function renderTracksFor(tracks: Track[], memberIds: Set<string>, opts: StemPlanOptions, returnIds: Set<string>): Track[] {
   return tracks.map(t => {
-    let x: Track = { ...t, isSolo: memberIds.has(t.id) };
+    // Solo safe retiré (utils/soloMute) : un stem ne contient que ses pistes.
+    let x: Track = { ...withoutSoloSafe(t), isSolo: memberIds.has(t.id) };
     if (memberIds.has(t.id)) x.isMuted = false;
     if (opts.returns !== 'in-stems' && returnIds.size) x = { ...x, sends: sendsTo(x, returnIds) };
     if (t.id === MASTER && !opts.withMasterFx) x = { ...x, plugins: [] };

@@ -418,7 +418,17 @@ export interface Clip {
    * l'original. Une ancienne version ignore ce champ et joue le son rendu.
    */
   elastic?: ElasticInfo;
+  /**
+   * Verrou du clip (Pro Tools : Clip › Verrouiller, utils/clipLock) :
+   * « edit » = ni déplacé, ni rogné, ni coupé, ni supprimé, ni retouché
+   * (Edit Lock) ; « time » = ne bouge pas dans le temps, mais se rogne et se
+   * retouche (Time Lock). Voyage avec le clip (collaboration, sauvegarde) ;
+   * une ancienne version l'ignore. Absent : clip libre.
+   */
+  lock?: ClipLock;
 }
+
+export type ClipLock = 'edit' | 'time';
 
 /**
  * Marqueur de warp (R13, Elastic Audio de Pro Tools, Flex Time de Logic) :
@@ -965,6 +975,13 @@ export interface Track {
    * dans la console et l'en-tête ; voyage en collaboration (utils/sessionNotes).
    */
   comment?: string;
+  /**
+   * Solo safe (Pro Tools : Ctrl+clic sur Solo, utils/soloMute) : la piste reste
+   * audible quand d'autres sont en solo (retour de réverbe, clic, piste guide…).
+   * Réglage d'écoute : sauvegardé avec le projet, mais local en collaboration,
+   * comme le solo lui-même. Absent : piste normale.
+   */
+  soloSafe?: boolean;
 }
 
 /** R14 · Entrée physique d'une piste (0 = entrée 1 de la carte / du micro). */

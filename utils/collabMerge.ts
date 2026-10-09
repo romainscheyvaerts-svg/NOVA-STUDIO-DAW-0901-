@@ -291,9 +291,11 @@ export function sanitizeClipGainFields<T extends Record<string, any>>(c: T): T {
       out.elastic = { ...e, markers: markers.length || Array.isArray(e.markers) ? markers : undefined };
     }
   }
+  // Verrou du clip (utils/clipLock) : « edit » ou « time », sinon retiré (clip libre).
+  if ('lock' in out && out.lock !== 'edit' && out.lock !== 'time') delete out.lock;
   return out as T;
 }
 
-/** Clips reçus d'un collaborateur : champs R5 vérifiés (les autres passent tels quels). */
+/** Clips reçus d'un collaborateur : champs R5 (et verrou) vérifiés (les autres passent tels quels). */
 export const sanitizeIncomingClips = <T extends Record<string, any>>(clips: T[]): T[] =>
-  clips.map(c => (c && ('gainPoints' in c || 'loop' in c || 'gainRender' in c || 'elastic' in c) ? sanitizeClipGainFields(c) : c));
+  clips.map(c => (c && ('gainPoints' in c || 'loop' in c || 'gainRender' in c || 'elastic' in c || 'lock' in c) ? sanitizeClipGainFields(c) : c));

@@ -34,6 +34,16 @@ export interface ArrangementCommandContext {
   scrollTo?: (left: number) => void;
 }
 
+/** Pistes visées par « tous les clips de la piste » : celles des clips sélectionnés, sinon la piste active. */
+export function tracksOfSelection(tracks: Track[], selectedClipIds: Set<string>, selectedTrackId: string | null | undefined): string[] {
+  if (selectedClipIds.size) return tracks.filter(t => t.clips.some(c => selectedClipIds.has(c.id))).map(t => t.id);
+  return selectedTrackId ? [selectedTrackId] : [];
+}
+
+/** Ids de tous les clips de ces pistes. */
+export const selectTrackClipIds = (tracks: Track[], trackIds: string[]): Set<string> =>
+  new Set(tracks.filter(t => trackIds.includes(t.id)).flatMap(t => t.clips.map(c => c.id)));
+
 const ZOOM_MIN = 10, ZOOM_MAX = 300;
 const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
 
@@ -129,6 +139,20 @@ export function useArrangementCommands(ctx: ArrangementCommandContext) {
         const ids = new Set(c().tracks.filter(t => t.type !== TrackType.SEND && t.id !== 'master').flatMap(t => t.clips.map(cl => cl.id)));
         c().setSelectedClipIds(ids);
         return ids.size > 0;
+      },
+      // Tous les clips de la piste (pistes des clips sélectionnés, sinon la piste active) :
+      // Pro Tools, triple-clic dans la piste avec le Sélecteur. Ctrl+Alt+A, menu de la piste.
+      selectTrackClips: (arg?: { trackId?: string }) => {
+        const { tracks, selectedTrackId, selectedClipIds } = c();
+        const trackIds = arg?.trackId ? [arg.trackId] : tracksOfSelection(tracks, selectedClipIds, selectedTrackId);
+        const ids = selectTrackClipIds(tracks, trackIds);
+        const say = (detail: string) => window.dispatchEvent(new CustomEvent('nova:notify', { detail }));
+        if (!trackIds.length) { say('Sélectionne d’abord une piste (clic sur son nom).'); return true; }
+        if (!ids.size) { say('Cette piste n’a encore aucun clip.'); return true; }
+        c().setSelectedClipIds(ids);
+        const names = tracks.filter(t => trackIds.includes(t.id)).map(t => `« ${t.name} »`).join(', ');
+        say(`${ids.size} clip${ids.size > 1 ? 's' : ''} sélectionné${ids.size > 1 ? 's' : ''} sur ${names}.`);
+        return true;
       },
       zoomIn: () => { c().setZoomH(clampZoom(c().zoomH * 1.5)); },
       zoomOut: () => { c().setZoomH(clampZoom(c().zoomH / 1.5)); },
