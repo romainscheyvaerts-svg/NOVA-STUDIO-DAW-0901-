@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Marker } from '../types';
 import { barsBeats, markerNumbers, minSec } from '../utils/memoryLocations';
+import { isSelectionMarker } from '../utils/selectionMarkers';
 
 const COLORS = ['#00f2ff', '#f97316', '#22c55e', '#a855f7', '#ef4444', '#eab308', '#ec4899', '#3b82f6'];
 
@@ -10,6 +11,8 @@ interface Props {
   markers: Marker[];
   bpm: number;
   onGoTo: (time: number) => void;
+  /** Rappel d'un repère (un repère de sélection resélectionne sa plage). Absent : onGoTo. */
+  onRecall?: (m: Marker) => void;
   onAdd: () => void;
   onUpdate: (m: Marker) => void;
   onDelete: (id: string) => void;
@@ -19,7 +22,7 @@ interface Props {
  * Liste des repères (Pro Tools : Memory Locations, Ctrl+5). Fenêtre flottante :
  * la lecture continue de répondre à la barre d'espace pendant qu'elle est ouverte.
  */
-const MemoryLocations: React.FC<Props> = ({ open, onClose, markers, bpm, onGoTo, onAdd, onUpdate, onDelete }) => {
+const MemoryLocations: React.FC<Props> = ({ open, onClose, markers, bpm, onGoTo, onRecall, onAdd, onUpdate, onDelete }) => {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -76,6 +79,7 @@ const MemoryLocations: React.FC<Props> = ({ open, onClose, markers, bpm, onGoTo,
           <p className="px-3 py-6 text-center text-[12px] text-slate-400">
             Aucun repère pour l’instant. Appuie sur <kbd className="rounded border border-white/15 px-1">K</kbd> ou sur
             <kbd className="mx-1 rounded border border-white/15 px-1">Entrée</kbd>du pavé pendant la lecture pour marquer un couplet, un refrain…
+            Avec une plage sélectionnée, le repère la garde : le rappeler la resélectionne.
           </p>
         )}
         {markers.length > 0 && list.length === 0 && <p className="px-3 py-4 text-center text-[12px] text-slate-400">Aucun repère ne correspond à « {query} ».</p>}
@@ -92,10 +96,12 @@ const MemoryLocations: React.FC<Props> = ({ open, onClose, markers, bpm, onGoTo,
                   onKeyDown={e => { if (e.key === 'Enter') commitName(m); if (e.key === 'Escape') { e.stopPropagation(); setEditing(null); } }}
                   className="min-w-0 flex-1 rounded border border-cyan-500/50 bg-black/60 px-1.5 py-0.5 text-[12px] text-white outline-none" />
               ) : (
-                <button type="button" onClick={() => onGoTo(m.time)} onDoubleClick={() => { setEditing(m.id); setDraft(m.name); }}
-                  title="Clic : aller au repère · double-clic : renommer"
+                <button type="button" onClick={() => (onRecall ? onRecall(m) : onGoTo(m.time))} onDoubleClick={() => { setEditing(m.id); setDraft(m.name); }}
+                  title={isSelectionMarker(m) ? 'Clic : resélectionner la plage gardée · double-clic : renommer' : 'Clic : aller au repère · double-clic : renommer'}
+                  data-selection-marker={isSelectionMarker(m) ? '' : undefined}
                   className="min-w-0 flex-1 truncate text-left text-[12px] font-semibold text-white">
                   {m.name}{m.type === 'REGION' && <span className="ml-1 text-[10px] font-normal text-slate-500">(partie)</span>}
+                  {isSelectionMarker(m) && <span className="ml-1 rounded bg-sky-500/15 px-1 text-[10px] font-bold text-sky-300">plage {barsBeats(m.time, bpm)} → {barsBeats(m.selection.end, bpm)}</span>}
                 </button>
               )}
               <span className="shrink-0 font-mono text-[10px] text-slate-400" title={minSec(m.time)}>{barsBeats(m.time, bpm)}</span>
@@ -107,7 +113,7 @@ const MemoryLocations: React.FC<Props> = ({ open, onClose, markers, bpm, onGoTo,
           ))}
         </ul>
       </div>
-      <p className="border-t border-white/5 px-4 py-2 text-[10px] text-slate-500">Pavé numérique : « . 3 . » va au repère 3 · Entrée du pavé en crée un.</p>
+      <p className="border-t border-white/5 px-4 py-2 text-[10px] text-slate-500">Pavé numérique : « . 3 . » va au repère 3 · Entrée du pavé en crée un (avec une plage sélectionnée : il garde la plage) · Ctrl+Alt+Z : sélection précédente.</p>
     </div>
   );
 };

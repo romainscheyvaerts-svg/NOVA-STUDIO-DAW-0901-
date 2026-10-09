@@ -15,6 +15,7 @@ import { closeRange, openGapAt, ShuffleOptions } from '../utils/shuffle';
 import { bounceTracks, canCommit } from '../utils/commit';
 import { DEFAULT_TAIL, renderCommitClip } from '../services/Bounce';
 import { AutomationClipboard, clearAutomationRange, copyAutomationRange, moveAutomationWithClips, pasteAutomationRange } from '../utils/automationEdit';
+import { fmtDb, trimVolumeRange } from '../utils/automationRange';
 
 /**
  * Commandes d'édition « façon Pro Tools » appelables de partout (clavier,
@@ -91,6 +92,12 @@ export interface EditCommands {
   pasteAutomation: () => boolean;
   /** Y a-t-il de l'automation copiée ? */
   hasAutomationClipboard: () => boolean;
+  /**
+   * Volume de la plage : la courbe de volume des pistes de la plage monte / baisse
+   * de `db` (rampes de 10 ms aux bords), voie créée et dépliée s'il le faut.
+   * Pro Tools : Trim sur la sélection en vue volume / Write to Selection. Une étape d'annulation.
+   */
+  volumeRange: (db: number) => boolean;
 }
 
 export interface EditCommandDeps {
@@ -164,7 +171,7 @@ async function renderPieces(pieces: ConsolidatePiece[], length: number): Promise
 }
 
 type RangeCommandKeys = 'getTimeSelection' | 'selectRange' | 'clearSelection' | 'editableTrackIds' | 'copySelection' | 'cutSelection' | 'pasteRange' | 'hasRangeClipboard'
-  | 'copyAutomation' | 'pasteAutomation' | 'hasAutomationClipboard'
+  | 'copyAutomation' | 'pasteAutomation' | 'hasAutomationClipboard' | 'volumeRange'
   | 'markClipClipboard' | 'deleteSelection' | 'duplicateSelection' | 'separate' | 'consolidateSelection' | 'fadesFromSelection'
   | 'loopSelection' | 'punchSelection' | 'exportSelection';
 
@@ -311,6 +318,18 @@ function rangeCommands(
       return true;
     },
     hasAutomationClipboard: () => !!autoClipboard,
+    volumeRange: (dbv: number) => {
+      const s = need(); if (!s) return false;
+      if (!Number.isFinite(dbv) || Math.abs(dbv) < 1e-9) return false;
+      const ids = new Set(s.trackIds);
+      const targets = st().tracks.filter(t => ids.has(t.id) && t.type !== TrackType.SEND);
+      if (!targets.length) return false;
+      const names = targets.map(t => t.name);
+      const clamped = targets.some(t => trimVolumeRange(t, s.start, s.end, dbv).clamped);
+      d().setState(prev => ({ ...prev, tracks: prev.tracks.map(t => (ids.has(t.id) && t.type !== TrackType.SEND ? trimVolumeRange(t, s.start, s.end, dbv).track : t)) }));
+      d().notify(`🔊 Volume ${fmtDb(dbv)} sur ${what(s)} (${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}) : courbe de volume écrite, rampes de 10 ms aux bords.${clamped ? ' Plafonnée à +3,5 dB (maximum de la courbe).' : ''} Ctrl+Z pour annuler.`);
+      return true;
+    },
     markClipClipboard: () => { lastClipboard = 'clip'; },
 
     deleteSelection: () => {

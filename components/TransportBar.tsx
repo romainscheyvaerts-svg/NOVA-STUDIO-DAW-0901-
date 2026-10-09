@@ -94,6 +94,8 @@ interface TransportProps {
   onToggleDelayComp?: () => void;
 
   onUndo?: () => void;
+  /** « Revenir à la version enregistrée » (avec confirmation). */
+  onRevertToSaved?: () => void;
   onRedo?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
@@ -215,7 +217,7 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
   timeSignature, projectKey, projectScale,
   currentView, onChangeView, noArmedTrackError, statusMessage, currentTheme, onToggleTheme,
   onOpenSaveMenu, onOpenLoadMenu, onOpenCollab, collabLabel, onOpenTakeHome, takeHomeLabel, onExportMix, onOpenMasterNova, onShareProject, onOpenAudioEngine, isDelayCompEnabled, onToggleDelayComp,
-  onUndo, onRedo, canUndo, canRedo,
+  onUndo, onRedo, canUndo, canRedo, onRevertToSaved,
   user, onOpenAuth, onLogout,
   isSidebarOpen, onToggleSidebar, isMobileLayout = false,
   onImportAudio,
@@ -629,6 +631,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
               <button onClick={() => { onExportMix?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
                 <i className="w-5 text-center text-purple-400 fas fa-compact-disc" aria-hidden="true"></i><span>Exporter</span>
               </button>
+              {/* Master Nova remonté avec les fichiers (avant : dans la 2e moitié du menu, sous
+                  l'historique, hors de l'écran sur tablette) : on masterise juste avant d'exporter. */}
+              {onOpenMasterNova && (
+                <button onClick={() => { onOpenMasterNova(); setIsMobileMenuOpen(false); }} data-testid="menu-master-nova" className="col-span-2 w-full min-h-12 px-3 py-2 rounded-xl bg-amber-400/10 border border-amber-400/30 hover:bg-amber-400/20 text-amber-100 text-[12px] font-semibold transition-colors flex items-center gap-2 text-left">
+                  <i className="w-5 text-center text-amber-300 fas fa-crown" aria-hidden="true"></i><span className="flex-1">Master Nova</span><span className="text-[10px] font-normal text-amber-200/70">mastering en un clic</span>
+                </button>
+              )}
             </div>
 
             {/* Téléphone : métronome et boucle (masqués dans la barre sous 768 px) */}
@@ -709,6 +718,13 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <i className="fas fa-redo mr-2"></i>Refaire
                 </button>
               </div>
+              {onRevertToSaved && (
+                <button onClick={() => { setIsMobileMenuOpen(false); onRevertToSaved(); }} data-testid="menu-revert-saved"
+                  title="Le projet revient à sa dernière sauvegarde (Pro Tools : Revert to Saved). Ta version actuelle est gardée dans « Versions de la session »."
+                  className="w-full min-h-11 px-4 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 text-[12px] font-semibold transition-colors flex items-center gap-3">
+                  <i className="w-5 text-center text-amber-300 fas fa-clock-rotate-left" aria-hidden="true"></i><span>Revenir à la version enregistrée…</span>
+                </button>
+              )}
             </div>
 
             {/* FILE ACTIONS */}
@@ -719,12 +735,6 @@ const TransportBar: React.FC<PropsWithChildren<TransportProps>> = ({
                   <button onClick={() => { onShareProject?.(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
                     <i className="w-5 text-center text-blue-400 fas fa-share-alt"></i>
                     <span>Partager</span>
-                  </button>
-                )}
-                {onOpenMasterNova && (
-                  <button onClick={() => { onOpenMasterNova(); setIsMobileMenuOpen(false); }} className="w-full min-h-12 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-100 font-semibold transition-colors flex items-center gap-3">
-                    <i className="w-5 text-center text-amber-300 fas fa-crown"></i>
-                    <span>Master Nova</span>
                   </button>
                 )}
                 <MidiMobileMenuItems onDone={() => setIsMobileMenuOpen(false)} />

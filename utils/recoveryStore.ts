@@ -1,3 +1,4 @@
+import { savedVersionsToKeep } from './revertToSaved';
 /**
  * Sauvegarde automatique incrémentale, historique des versions et récupération
  * après plantage (onglet tué, appli fermée de force, coupure de courant).
@@ -332,11 +333,15 @@ export class RecoveryStore {
     const keys = (await this.db.keys(VERSIONS)) as number[];
     const metas = keys.map(k => ({ id: k, savedAt: k }));
     const drop = versionsToPrune(metas, this.now());
+    // Dernière version ENREGISTRÉE de chaque projet : cible de « Revenir à la version enregistrée ».
+    const all: VersionRecord[] = [];
+    if (drop.length) for (const k of keys) { const v = await this.db.get<VersionRecord>(VERSIONS, k); if (v) all.push(v); }
+    const saved = savedVersionsToKeep(all);
     let n = 0;
     for (const id of drop) {
       // Version nommée (R21) : gardée pour toujours.
       const v = await this.db.get<VersionRecord>(VERSIONS, id);
-      if (v && isNamedVersion(v)) continue;
+      if (v && (isNamedVersion(v) || saved.has(v.id))) continue;
       await this.db.delete(VERSIONS, id);
       n++;
     }

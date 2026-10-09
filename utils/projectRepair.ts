@@ -1,3 +1,4 @@
+import { cleanMarkerSelection } from './selectionMarkers';
 /**
  * Validation et réparation d'un projet NOVA (project.json d'un .novaproj.zip,
  * sauvegarde automatique, session en ligne).
@@ -170,6 +171,8 @@ export function repairProject(raw: any, opts: RepairOptions = {}): RepairResult 
   if (Array.isArray(state.markers)) {
     const before = state.markers.length;
     state.markers = state.markers.filter((m: any) => isObj(m) && finite(m.time) && m.time >= 0);
+    // Repère de sélection (Memory Location « Selection ») : plage abîmée retirée, le repère reste.
+    state.markers.forEach((m: any) => cleanMarkerSelection(m));
     if (state.markers.length !== before) for (let k = before - state.markers.length; k > 0; k--) bump('markerDropped');
   }
   if (state.trackGroups !== undefined && !Array.isArray(state.trackGroups)) { state.trackGroups = []; bump('trackGroups'); }

@@ -128,11 +128,13 @@ export function useArrangementCommands(ctx: ArrangementCommandContext) {
         openNovaWindow('strip-silence', { targets: l.map(x => ({ trackId: x.trackId, clipId: x.clip.id })) });
         return true;
       },
-      // Respirations (Ctrl+Alt+R) : clips sélectionnés, sinon la piste sélectionnée, sinon toutes les voix.
+      // Respirations (Ctrl+Alt+R) : clips sélectionnés, sinon TOUTES les voix de la séance (lead
+      // baissée, backs supprimées, piste par piste dans la fenêtre). Avant : la piste « active »,
+      // c'est-à-dire souvent la dernière importée : l'ingé devait recommencer piste par piste.
       breaths: () => {
         const l = targets().filter(({ clip }) => clip.type !== TrackType.MIDI);
         if (l.length) requestBreaths({ mode: 'dialog', clipIds: l.map(x => x.clip.id), trackIds: Array.from(new Set(l.map(x => x.trackId))), reason: 'shortcut' });
-        else requestBreaths({ mode: 'dialog', trackIds: c().selectedTrackId ? [c().selectedTrackId!] : undefined, reason: 'shortcut' });
+        else requestBreaths({ mode: 'dialog', reason: 'shortcut' });
         return true;
       },
       selectAllClips: () => {

@@ -1069,6 +1069,11 @@ export interface Marker {
   number?: number;
   /** Collaboration : qui a posé ce repère (affiché aux autres). */
   by?: string;
+  /**
+   * Repère de SÉLECTION (Pro Tools : Memory Location « Selection ») : la plage
+   * gardée (fin et pistes). Le rappeler resélectionne la plage (utils/selectionMemory).
+   */
+  selection?: { end: number; trackIds: string[] };
 }
 
 // Metronome settings

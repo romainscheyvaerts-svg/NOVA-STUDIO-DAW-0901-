@@ -48,4 +48,20 @@ describe('gestes au doigt : un seul arbitre par zone', () => {
     click(b, 100, 200);
     expect(onClick).toHaveBeenCalledTimes(2);
   });
+
+  it('la souris émulée du lever (mousedown) ne referme pas le menu que l’appui long vient d’ouvrir', () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<button id="s">S</button>';
+    const b = document.getElementById('s')!;
+    const outside = vi.fn();
+    window.addEventListener('mousedown', outside);   // comme FloatingMenu : « clic en dehors » = fermer
+    swallowReleaseClick(100, 200);
+    window.dispatchEvent(new Event('pointerup'));
+    b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: 101, clientY: 200 }));
+    expect(outside).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(450);
+    b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: 101, clientY: 200 }));
+    expect(outside).toHaveBeenCalledTimes(1);          // un vrai clic ensuite ferme bien le menu
+    window.removeEventListener('mousedown', outside);
+  });
 });

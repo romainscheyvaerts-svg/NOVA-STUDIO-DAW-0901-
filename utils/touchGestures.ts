@@ -28,21 +28,36 @@ export const ownsLongPress = (target: EventTarget | null): boolean => {
  */
 export function swallowReleaseClick(x: number, y: number): void {
   let safety = 0;
+  let released = false;
   const done = () => {
     window.removeEventListener('click', onClick, true);
+    window.removeEventListener('mousedown', onCompatMouse, true);
+    window.removeEventListener('mouseup', onCompatMouse, true);
     window.removeEventListener('pointerup', onUp, true);
     window.removeEventListener('pointercancel', onUp, true);
     window.clearTimeout(safety);
   };
-  const onUp = () => { window.clearTimeout(safety); safety = window.setTimeout(done, 400); };
+  const onUp = () => { released = true; window.clearTimeout(safety); safety = window.setTimeout(done, 400); };
+  const near = (e: MouseEvent) => Math.hypot(e.clientX - x, e.clientY - y) <= 40;
   const onClick = (e: MouseEvent) => {
-    if (Math.hypot(e.clientX - x, e.clientY - y) > 40) return;
+    if (!near(e)) return;
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
     done();
   };
+  // Souris émulée juste après le lever du doigt (mousedown / mouseup au même endroit) :
+  // avalée aussi, sinon le mousedown émulé refermait aussitôt le menu ouvert (« clic en
+  // dehors »). Seulement après le lever et dans les 400 ms : un vrai geste suivant passe.
+  const onCompatMouse = (e: MouseEvent) => {
+    if (!released || !near(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+  };
   window.addEventListener('click', onClick, true);
+  window.addEventListener('mousedown', onCompatMouse, true);
+  window.addEventListener('mouseup', onCompatMouse, true);
   window.addEventListener('pointerup', onUp, true);
   window.addEventListener('pointercancel', onUp, true);
   // Doigt jamais levé (pointerup perdu) : on ne garde pas l'écouteur indéfiniment.

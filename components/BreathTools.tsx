@@ -201,10 +201,12 @@ export const BreathHost: React.FC<HostProps> = ({ tracks, setState, undo, breakH
         <BreathDialog request={dialog} tracks={tracks} targetIds={targetTracks(dialog)} isMobile={!!isMobile && window.innerWidth < 700 || window.innerWidth < 600}
           onApply={applyDialog} onClose={() => setDialog(null)} />
       )}
-      {/* Téléphone : en haut, sous le transport (en bas, il couvrait « Mix auto » et « Piste voix »), et sous les fenêtres (il ne cache plus leur bouton Fermer). */}
+      {/* Téléphone : en haut, sous le transport (en bas, il couvrait « Mix auto » et « Piste voix »), et sous les fenêtres (il ne cache plus leur bouton Fermer).
+          Le texte laisse passer les clics (pointer-events-none) : sur un portable 1366 × 768, il est posé sur les
+          clips des pistes du bas pendant 10 s, et un clic droit sur un clip tombait dessus. Les boutons restent cliquables. */}
       {toast && (
         <div role="status" aria-live="polite" data-testid="breath-toast"
-          className="fixed top-28 sm:top-auto sm:bottom-24 left-1/2 z-[400] sm:z-[720] flex w-[92vw] sm:w-auto sm:max-w-[640px] -translate-x-1/2 items-center gap-3 rounded-2xl border border-violet-400/40 bg-[#17131f]/95 px-4 py-3 text-[12.5px] text-violet-50 shadow-2xl">
+          className="pointer-events-none [&_button]:pointer-events-auto fixed top-28 sm:top-auto sm:bottom-24 left-1/2 z-[400] sm:z-[720] flex w-[92vw] sm:w-auto sm:max-w-[640px] -translate-x-1/2 items-center gap-3 rounded-2xl border border-violet-400/40 bg-[#17131f]/95 px-4 py-3 text-[12.5px] text-violet-50 shadow-2xl">
           {toast.busy && <i className="fas fa-circle-notch fa-spin text-violet-300" aria-hidden />}
           <span className="min-w-0 leading-snug">{toast.text}</span>
           {toast.action && (

@@ -288,7 +288,7 @@ export const withPosition = (text: string, sec: number): string => {
 
 // --- Repères partagés --------------------------------------------------------------------------
 
-export const markerSig = (m: Marker): string => JSON.stringify([m.name, Math.round(m.time * 1000), m.type, m.endTime ?? null, m.color, m.number ?? null]);
+export const markerSig = (m: Marker): string => JSON.stringify([m.name, Math.round(m.time * 1000), m.type, m.endTime ?? null, m.color, m.number ?? null, m.selection ? [Math.round(m.selection.end * 1000), m.selection.trackIds] : null]);
 
 /** Repères ajoutés / modifiés / supprimés ici depuis la dernière synchronisation. */
 export function markerChanges(known: Map<string, string>, markers: Marker[]): { upsert: Marker[]; remove: string[] } {

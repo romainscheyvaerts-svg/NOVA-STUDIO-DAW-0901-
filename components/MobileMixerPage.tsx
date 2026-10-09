@@ -6,6 +6,7 @@ import TrackMeter from './meters/TrackMeter';
 import StripHead from './meters/StripHead';
 import { loudnessPanel } from './meters/LoudnessPanel';
 import { MASTER_OUT } from '../engine/meters/meterBank';
+import { MobileSoloMuteBar, MobileSoloMuteButtons } from './MobileSoloMute';
 
 interface MobileMixerPageProps {
   tracks: Track[];
@@ -126,6 +127,8 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
   return (
     <MobileContainer title="Mixer">
       <div className="space-y-5 pb-24">
+        {/* Solos et mutes en cours : compteurs, un toucher efface tout (comme les indicateurs S / M du PC). */}
+        <MobileSoloMuteBar tracks={tracks} />
         {/* === Tranches === */}
         <div className="-mx-6 overflow-x-auto overscroll-x-contain snap-x snap-proximity">
           <div className="flex gap-2 px-6 pb-2 w-max">
@@ -205,28 +208,8 @@ const MobileMixerPage: React.FC<MobileMixerPageProps> = ({
                     {toDb(t.volume)} dB
                   </button>
 
-                  <div className="flex gap-1.5 w-full">
-                    <button
-                      type="button"
-                      aria-pressed={t.isMuted}
-                      aria-label={`Mute ${t.name}`}
-                      onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...t, isMuted: !t.isMuted }); }}
-                      className={`nova-hit flex-1 h-10 rounded-lg text-xs font-black ${t.isMuted ? 'bg-orange-500 text-white' : 'bg-white/5 text-slate-300'}`}
-                    >
-                      M
-                    </button>
-                    {!isMaster && (
-                      <button
-                        type="button"
-                        aria-pressed={t.isSolo}
-                        aria-label={`Solo ${t.name}`}
-                        onClick={(e) => { e.stopPropagation(); onUpdateTrack({ ...t, isSolo: !t.isSolo }); }}
-                        className={`nova-hit flex-1 h-10 rounded-lg text-xs font-black ${t.isSolo ? 'bg-yellow-500 text-black' : 'bg-white/5 text-slate-300'}`}
-                      >
-                        S
-                      </button>
-                    )}
-                  </div>
+                  {/* Toucher / appui long / Alt+clic / Ctrl+clic, comme la console PC (components/MobileSoloMute). */}
+                  <MobileSoloMuteButtons track={t} tracks={tracks} onUpdateTrack={onUpdateTrack} />
                   {t.plugins.length > 0 && (
                     <div className="text-[10px] text-slate-400">
                       <i className="fas fa-plug mr-1"></i>{t.plugins.length} FX

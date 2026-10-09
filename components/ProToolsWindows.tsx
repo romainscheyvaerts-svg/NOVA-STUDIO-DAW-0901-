@@ -4,6 +4,7 @@ import type { Clip, DAWState, Marker, Track } from '../types';
 import { NOVA_WINDOW_EVENT, NovaWindowDetail } from '../utils/novaWindows';
 import { setKeyboardFocus, useKeyboardFocus } from '../utils/keyboardFocus';
 import MemoryLocations from './MemoryLocations';
+import { applySelection, selectionFromMarker } from '../utils/selectionMemory';
 import ClipPropsDialog from './ClipPropsDialog';
 import type { AudioToMidiRequest } from './AudioToMidiDialog';
 import AraDialog, { AraApply } from './AraDialog';
@@ -247,7 +248,8 @@ const ProToolsWindows: React.FC<Props> = ({ tracks, markers, bpm, setState, onEd
   return (
     <>
       <MemoryLocations open={memoryOpen} onClose={() => setMemoryOpen(false)} markers={markers} bpm={bpm}
-        onGoTo={onSeek} onAdd={() => onAddMarker(getPlayhead())} onUpdate={onUpdateMarker} onDelete={onDeleteMarker} />
+        onGoTo={onSeek} onRecall={(m) => { const sel = selectionFromMarker(m, tracksRef.current.map(t => t.id)); if (sel) applySelection({ time: sel, clipIds: [] }); onSeek(m.time); }}
+        onAdd={() => onAddMarker(getPlayhead())} onUpdate={onUpdateMarker} onDelete={onDeleteMarker} />
       <MountWhenOpened when={!!strip}><StripSilenceDialog open={!!strip} tracks={tracks} targets={strip?.targets || []} onApply={applyStrip} onClose={() => setStrip(null)} /></MountWhenOpened>
       {propsView}
       <MountWhenOpened when={!!pitch}><PitchEditor open={!!pitch} trackId={pitch?.targets?.[0]?.trackId} clipId={pitch?.targets?.[0]?.clipId} tracks={tracks}

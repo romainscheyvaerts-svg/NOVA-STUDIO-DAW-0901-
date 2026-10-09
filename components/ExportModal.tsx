@@ -60,6 +60,9 @@ interface ExportModalProps {
   onExported?: (info: { source: 'vocals' | 'full' | 'stems'; paid: boolean }) => void;
 }
 
+/** Demande de garder la fenêtre d'export ouverte (Ctrl+Maj+E alors qu'elle est déjà là). */
+export const EXPORT_KEEP_OPEN_EVENT = 'nova:export-keep-open';
+
 const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState: timelineState, ownedInstrumentIds = [], onOpenShare, projectKey, onExported }) => {
   // R21 · Arrangement exporté (« Clean », « Radio edit »…) : le projet joué est
   // celui de l'arrangement (sections dans son ordre, passages coupés). Vide : la timeline.
@@ -107,6 +110,21 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
   const [vocalsDry, setVocalsDry] = useState(false);
   // Admin confirmé après l'ouverture : mix complet proposé (sauf choix déjà fait).
   const sourceTouched = React.useRef(false);
+  // Fermeture différée après un export : annulée si la fenêtre est déjà fermée (Échap) —
+  // sinon le minuteur de l'export d'avant refermait la fenêtre rouverte juste après
+  // (Ctrl+Maj+E pour les stems aussitôt après le bounce : elle disparaissait).
+  const closeTimer = React.useRef<number | null>(null);
+  React.useEffect(() => () => { if (closeTimer.current !== null) window.clearTimeout(closeTimer.current); }, []);
+  // Ctrl+Maj+E (ou « Exporter ») pendant la fermeture automatique : la fenêtre reste ouverte.
+  React.useEffect(() => {
+    const keep = () => { if (closeTimer.current !== null) { window.clearTimeout(closeTimer.current); closeTimer.current = null; } };
+    window.addEventListener(EXPORT_KEEP_OPEN_EVENT, keep);
+    return () => window.removeEventListener(EXPORT_KEEP_OPEN_EVENT, keep);
+  }, []);
+  const closeLater = (ms: number, then?: () => void) => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => { closeTimer.current = null; onClose(); then?.(); }, ms);
+  };
   useEffect(() => {
     if (admin && !sourceTouched.current) setSource('MASTER');
   }, [admin]);
@@ -318,7 +336,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
     track('export_queued', { source: kind, format: settings.format, queued: queueOnly });
     if (queueOnly) {
       setStatusText('➕ Ajouté à la file : tu peux continuer, une notification te prévient à la fin.');
-      setTimeout(onClose, 900);
+      closeLater(900);
       return;
     }
     // Export direct : la fenêtre suit l'avancement, puis se ferme.
@@ -337,7 +355,10 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, projectState
       setStatusText(done.saved ? '✅ Export terminé !' : '✅ Export prêt : touche « Télécharger » dans la notification.');
       track('export_done', { source: kind, paid: paidExport, admin, format: settings.format });
       onExported?.({ source: kind, paid: paidExport });
-      setTimeout(() => { onClose(); setIsRendering(false); }, 1500);
+      // Fini : la fenêtre redevient utilisable tout de suite (Échap, ✕, un 2e export : stems après le
+      // bounce) ; elle se ferme seule 1,5 s plus tard, sauf si on la rappelle (Ctrl+Maj+E).
+      setIsRendering(false);
+      closeLater(1500);
     } else {
       setStatusText(`❌ Export impossible : ${done.error || 'erreur'}`);
       setIsRendering(false);

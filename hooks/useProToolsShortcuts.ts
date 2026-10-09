@@ -10,6 +10,7 @@ import { runEditCommand } from '../utils/editCommands';
 import { isKeyboardFocus, toggleKeyboardFocus } from '../utils/keyboardFocus';
 import { tempoMapStore, timeToPosition, barToTime } from '../utils/tempoMap';
 import { MarkerRecallBuffer, markerByNumber } from '../utils/memoryLocations';
+import { applySelection, restoreLastSelection, selectionFromMarker, startSelectionHistory } from '../utils/selectionMemory';
 import { openNovaWindow } from '../utils/novaWindows';
 import { gridStepSeconds } from '../utils/grid';
 import { recordAction } from '../utils/feedbackLog';
@@ -63,6 +64,8 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
   const ref = useRef(deps);
   ref.current = deps;
 
+  // « Restaurer la dernière sélection » : l'historique des sélections suit la sélection partagée.
+  useEffect(() => startSelectionHistory(), []);
   useEffect(() => {
     const recall = new MarkerRecallBuffer();
     // Shuttle Lock (Pro Tools : Démarrer+1–9 ; ici Ctrl+Alt+pavé 1–9).
@@ -102,6 +105,13 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
         case 'pt.newMarker': d.addMarker(d.getTime()); return;
         case 'pt.recallMarker': recall.dot(); return;
         case 'pt.memoryWindow': openNovaWindow('memory-locations'); return;
+        case 'pt.restoreSelection': {
+          const st = d.stateRef.current;
+          const tracks = new Set(st.tracks.map(t => t.id));
+          const clips = new Set(st.tracks.flatMap(t => t.clips.map(c => c.id)));
+          d.notify(restoreLastSelection({ track: id => tracks.has(id), clip: id => clips.has(id) }));
+          return;
+        }
         case 'pt.trackUp': case 'kf.prevTrack': moveTrack(-1); return;
         case 'pt.trackDown': case 'kf.nextTrack': moveTrack(1); return;
         case 'kf.undo': d.undo(); return;
@@ -181,7 +191,11 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
           e.preventDefault(); e.stopPropagation();
           const n = recall.close();
           if (n === null) return;
-          const m = markerByNumber(ref.current.stateRef.current.markers, n);
+          const st = ref.current.stateRef.current;
+          const m = markerByNumber(st.markers, n);
+          // Repère de sélection : la plage revient sélectionnée (Pro Tools : Memory Location « Selection »).
+          const sel = m ? selectionFromMarker(m, st.tracks.map(t => t.id)) : null;
+          if (sel) { applySelection({ time: sel, clipIds: [] }); ref.current.notify(`📍 ${m!.name} : plage resélectionnée.`); }
           if (m) ref.current.seek(m.time);
           else ref.current.notify(`Pas de repère n° ${n}. Ouvre la liste des repères (Ctrl+5).`);
           return;

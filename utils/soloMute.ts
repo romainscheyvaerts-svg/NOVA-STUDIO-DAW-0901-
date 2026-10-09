@@ -148,3 +148,34 @@ export function withoutSoloSafe<T extends Track>(t: T): T {
 
 /** Libellé court d'un indicateur (« 2 pistes en solo »). */
 export const countLabel = (n: number, one: string, many: string) => `${n} ${n > 1 ? many : one}`;
+
+/**
+ * Appui long sur un S ou un M au doigt (téléphone, tablette) : l'équivalent
+ * d'Alt+clic et de Ctrl+clic, avec des libellés au lieu d'une touche cachée.
+ * Renvoie les entrées du menu, dans l'ordre, avec la commande à lancer (le titre du
+ * menu nomme la piste : les libellés restent courts, lisibles sur un téléphone).
+ */
+export type SoloMuteMenuAction =
+  | { kind: 'soloAll'; on: boolean; label: string }
+  | { kind: 'muteAll'; on: boolean; label: string }
+  | { kind: 'soloSafe'; on: boolean; label: string };
+
+export function soloMuteMenu(tracks: Track[], trackId: string, button: 'solo' | 'mute'): SoloMuteMenuAction[] {
+  const st = soloMuteStatus(tracks);
+  const list = tracks.filter(soloable);
+  const t = list.find(x => x.id === trackId);
+  if (!t) return [];
+  const out: SoloMuteMenuAction[] = [];
+  if (button === 'solo') {
+    const candidates = list.filter(x => !x.soloSafe);
+    if (candidates.some(x => !x.isSolo)) out.push({ kind: 'soloAll', on: true, label: 'Toutes les pistes en solo' });
+    if (st.soloed.length) out.push({ kind: 'soloAll', on: false, label: `Effacer tous les solos (${countLabel(st.soloed.length, 'piste', 'pistes')})` });
+    out.push(t.soloSafe
+      ? { kind: 'soloSafe', on: false, label: 'Retirer le solo safe' }
+      : { kind: 'soloSafe', on: true, label: 'Solo safe : toujours audible' });
+  } else {
+    if (list.some(x => !x.isMuted)) out.push({ kind: 'muteAll', on: true, label: 'Couper toutes les pistes' });
+    if (st.muted.length) out.push({ kind: 'muteAll', on: false, label: `Rendre le son à toutes les pistes (${countLabel(st.muted.length, 'muette', 'muettes')})` });
+  }
+  return out;
+}

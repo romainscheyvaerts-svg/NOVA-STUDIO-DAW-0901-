@@ -37,6 +37,7 @@ import { PunchSettings } from '../types';
 import { hasPunchZone, movePunchPoint } from '../utils/punch';
 import { crossfadeZones, fadeInShape, fadeOutShape, FADE_CURVES, FADE_CURVE_INFO, junctionNear, makeCrossfade, handlesOf, NUDGE_UNITS, NudgeUnit } from '../utils/fades';
 import { editSelectionStore, editPrefsStore, useEditPrefs, useEditSelection } from '../utils/editSelection';
+import { SELECT_CLIPS_EVENT } from '../utils/selectionMemory';
 import { makeSelection, tracksBetween } from '../utils/timeSelection';
 import RangeActionsBar from './RangeActionsBar';
 import type { EditCommands } from '../hooks/useEditCommands';
@@ -302,7 +303,15 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       editSelectionStore.set({ time: null });
     };
     window.addEventListener(SELECT_CLIP_EVENT, onSelect);
-    return () => window.removeEventListener(SELECT_CLIP_EVENT, onSelect);
+    // Ctrl+Alt+Z (utils/selectionMemory) : les clips de la sélection d'avant reviennent.
+    const onSelectMany = (ev: Event) => {
+      const ids = new Set(((ev as CustomEvent<{ clipIds: string[] }>).detail?.clipIds) || []);
+      const first = tracks.flatMap(t => t.clips.filter(c => ids.has(c.id)).map(c => ({ trackId: t.id, clip: c })))[0] || null;
+      setSelectedClipIds(ids);
+      setSelectedClip(first);
+    };
+    window.addEventListener(SELECT_CLIPS_EVENT, onSelectMany);
+    return () => { window.removeEventListener(SELECT_CLIP_EVENT, onSelect); window.removeEventListener(SELECT_CLIPS_EVENT, onSelectMany); };
   }, [tracks]);
   const [marquee, setMarquee] = useState<{x0:number,y0:number,x1:number,y1:number} | null>(null);
   const marqueeOriginRef = useRef<{x:number,y:number} | null>(null);
@@ -768,9 +777,11 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
           // Plusieurs fichiers : un par piste, à partir de celle visée (comme dans les autres DAW).
           const startIdx = Math.max(0, visibleTracks.findIndex(t => t.id === targetTrackId));
           const targets = visibleTracks.slice(startIdx).filter(t => t.type === TrackType.AUDIO);
-          // Au-delà des pistes existantes : une nouvelle piste par fichier (id vide).
+          // Au-delà des pistes existantes : une nouvelle piste par fichier, sous la dernière visée
+          // et dans son circuit (bus, effets, envois : utils/importPlacement).
+          const lastTarget = targets.length ? targets[Math.min(targets.length, audio.length) - 1].id : targetTrackId!;
           audio.forEach((file, i) => {
-              const tid = targets[i]?.id || (i === 0 ? targetTrackId! : '');
+              const tid = targets[i]?.id || (i === 0 ? targetTrackId! : `new-after:${lastTarget}`);
               onAudioDrop(tid, URL.createObjectURL(file), file.name, dropTime);
           });
           const notes: string[] = [];

@@ -87,7 +87,14 @@ const PianoRoll = lazyWithPreload(() => import('./components/PianoRoll'));
 import MidiHost from './components/MidiHost'; // V25 : .mid, groove, capture MIDI
 import MidiInputHost from './components/MidiInputHost'; // R16 : clavier de l'ordinateur, fenêtre MIDI, MIDI Learn
 import { midiManager } from './services/MidiManager';
-import { splitClipAt } from './utils/timeSelection';
+import { splitClipAt, selLength } from './utils/timeSelection';
+import { selectionMarker } from './utils/selectionMarkers';
+import { restoreLastSelection } from './utils/selectionMemory';
+import { useRevertToSaved } from './hooks/useRevertToSaved';
+import { circuitFrom, insertIndexAfter, pickAudioFile, trackNameFromFile } from './utils/importPlacement';
+import { initialSidebarOpen, rememberSidebar } from './utils/sidebarPref';
+import { savedAgo } from './utils/revertToSaved';
+const RevertToSavedDialog = lazy(() => import('./components/RevertToSavedDialog'));
 import { midiInput } from './services/MidiInput';
 import { isMidiRecordTrack, applyMidiTake, applyLoopTake, MODE_LABELS } from './utils/midiRecord';
 import { midiLearn, LearnHit } from './utils/midiLearn';
@@ -215,7 +222,7 @@ const KeymapEditor = lazyWithPreload(() => import('./components/KeymapEditor'));
 const WindowLayoutsPanel = lazyWithPreload(() => import('./components/WindowLayoutsPanel'));
 
 /** Raccourcis gérés par le gestionnaire clavier d'App (table active : utils/keymapStore). */
-const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
+const APP_SHORTCUT_IDS = ['nova.play', 'nova.undo', 'nova.redo', 'nova.save', 'nova.export', 'nova.importAudio', 'nova.capture', 'nova.record', 'nova.guide', 'nova.loop', 'nova.home', 'nova.end',
   'nova.barPrev', 'nova.barNext', 'nova.tap', 'nova.marker', 'nova.help', 'nova.stop', 'nova.metronome', 'view.mixEdit', 'view.arrangement', 'view.mixer', 'view.browser', 'nova.palette'] as const;
 import { useAutomationWrite } from './hooks/useAutomationWrite';
 import { useProToolsShortcuts } from './hooks/useProToolsShortcuts';
@@ -233,6 +240,8 @@ import { loadDrumSound } from './utils/drumSounds';
 import { loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './utils/sessionStore';
 import { recoveryStore, markSessionOpen, markSessionClosed, previousSessionCrashed, VersionMeta, VersionReason, RecoveredTake } from './utils/recoveryStore';
 import { snapshotOf, stateFromVersion, addRecoveredTakes, trackAudioIds } from './utils/recoverySnapshot';
+import { UNDO_LIMIT, isProjectSwitch } from './utils/undoHistory';
+import { projectSignature, sameSignature, hasWorthKeeping, keepSessionFlagOnClose } from './utils/autosavePolicy';
 import { BufferSweeper } from './utils/bufferSweeper';
 import { repairProject } from './utils/projectRepair';
 import type { SessionTemplate, TemplateLoadReport } from './utils/sessionTemplate';
@@ -529,7 +538,7 @@ const useUndoRedo = (initialState: DAWState) => {
   // lastChangeAt : heure de la dernière modification RÉELLE du projet (pas une
   // sélection ni un changement de vue), pour l'anti-rebond des entrées.
   const [history, setHistory] = useState<{ past: DAWState[]; present: DAWState; future: DAWState[]; lastChangeAt?: number }>({ past: [], present: initialState, future: [] });
-  const MAX_HISTORY = 100;
+  const MAX_HISTORY = UNDO_LIMIT; // utils/undoHistory (256 étapes)
   const HISTORY_DEBOUNCE_MS = 300; // Debounce 300ms pour éviter trop d'entrées
 
   const cleanStateForHistory = (stateToClean: DAWState): DAWState => {
@@ -597,6 +606,8 @@ const useUndoRedo = (initialState: DAWState) => {
         newState.beatTitle !== curr.present.beatTitle;
 
       if (!modificationReelle) return { ...curr, present: newState };
+      // Autre projet ouvert : historique vidé (Ctrl+Z ne ramène plus le projet d'avant, utils/undoHistory).
+      if (isProjectSwitch(curr.present, newState)) return { past: [], present: newState, future: [], lastChangeAt: maintenant };
 
       // Changements rapproches : on met a jour le present sans nouvelle entree.
       const antiRebond = maintenant - (curr.lastChangeAt || 0) < HISTORY_DEBOUNCE_MS;
@@ -915,7 +926,7 @@ function Studio() {
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [masterNovaOpen, setMasterNovaOpen] = useState(false);
   const [midiEditorOpen, setMidiEditorOpen] = useState<{trackId: string, clipId: string} | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(initialSidebarOpen);
   const [activeSideBrowserTab, setActiveSideBrowserTab] = useState<'STORE' | 'FX' | 'BRIDGE'>('STORE');
 
   useEffect(() => {
@@ -1048,7 +1059,7 @@ function Studio() {
   const { theme } = useTheme();
   const toggleTheme = () => themeStore.toggle();
 
-  const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
+  const toggleSidebar = () => setIsSidebarOpen(prev => { rememberSidebar(!prev); return !prev; });
     // Bridge VST (ws://localhost) plus connecté automatiquement : l'onglet
     // Bridge est retiré (le DAW sert aux voix). La fenêtre VST, si un projet
     // en contient une, se connecte elle-même.
@@ -1350,6 +1361,8 @@ function Studio() {
       // le meme projet au lieu d'en creer un nouveau a chaque fois.
       setState(prev => ({ ...prev, name: projectName, id: saved?.id || prev.id }));
       setAiNotification(`✅ Projet "${projectName}" sauvegardé dans le cloud`);
+      // Version « enregistrée » gardée sur l'appareil : cible de « Revenir à la version enregistrée ».
+      setTimeout(() => { void autosaveNowRef.current?.('manual', true); }, 0);
     } catch (e: any) {
       console.error('[Cloud Save Error]', e);
       setAiNotification(`❌ Erreur: ${e.message}`);
@@ -1403,6 +1416,7 @@ function Studio() {
       setSaveState(s => ({ ...s, progress: 100, message: '✅ Téléchargé !' }));
       setAiNotification(`✅ Projet "${n}" exporté avec les audios`);
       hasUnsavedChangesRef.current = false;
+      void autosaveNowRef.current?.('manual', true);
     } catch (e: any) {
       console.error('[Local Save Error]', e);
       setAiNotification(`❌ Erreur: ${e.message}`);
@@ -1492,6 +1506,8 @@ function Studio() {
       setVisualState({ id });
       stateRef.current = { ...stateRef.current, id };
     }
+    // Déjà ouverte (export qui vient de finir, fermeture automatique en cours) : elle reste.
+    window.dispatchEvent(new CustomEvent('nova:export-keep-open'));
     setIsExportMenuOpen(true);
   };
 
@@ -3115,7 +3131,7 @@ function Studio() {
         const trackId = `track-${Date.now()}`;
         const newTrack: Track = {
           id: trackId,
-          name: file.name.substring(0, 20),
+          name: trackNameFromFile(file.name),
           type: TrackType.AUDIO,
           color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
           isMuted: false,
@@ -3712,6 +3728,22 @@ function Studio() {
     }));
   }, [setState]);
 
+  // Repère avec une plage sélectionnée : il garde la plage (Pro Tools : Memory Location
+  // « Selection », proposée d'office quand il y a une sélection). Sans plage : repère simple.
+  const handleAddMarkerHere = useCallback((time: number) => {
+    const sel = editSelectionStore.get().time;
+    if (!sel || selLength(sel) < 0.01) { handleAddMarker(time); return; }
+    let label = '';
+    setState(produce((draft: DAWState) => {
+      const number = nextMarkerNumber(draft.markers);
+      const m = selectionMarker(sel, { id: `mk-${Date.now()}-${draft.markers.length}`, number, color: MARKER_COLORS[draft.markers.length % MARKER_COLORS.length] });
+      label = `${m.name} (n° ${number})`;
+      draft.markers.push(m);
+      draft.markers.sort((a, b) => a.time - b.time);
+    }));
+    setTimeout(() => setAiNotification(`📍 ${label || 'Repère'} : la plage est mémorisée. Rappel : pavé . N . ou la liste des repères (Ctrl+5) — la plage revient sélectionnée.`), 0);
+  }, [setState, handleAddMarker, setAiNotification]);
+
   const handleUpdateMarker = useCallback((marker: Marker) => {
     setState(produce((draft: DAWState) => {
       const idx = draft.markers.findIndex(m => m.id === marker.id);
@@ -3898,6 +3930,8 @@ function Studio() {
         case 'nova.save': e.preventDefault(); setIsSaveMenuOpen(true); return;
         // Exporter (Logic : « Exporter… » ; l'ingé n'a plus à passer par le menu).
         case 'nova.export': e.preventDefault(); void handleExportMix(); return;
+        // Importer un son (Pro Tools : Ctrl+Maj+I, Import Audio) : le sélecteur de fichiers du PC.
+        case 'nova.importAudio': e.preventDefault(); pickAudioFile(f => { void handleNewAudioImport(f); }); return;
         // Capturer la dernière prise (Logic : Capture as Recording).
         case 'nova.capture': e.preventDefault(); void captureRef.current(); return;
         case 'nova.record': e.preventDefault(); handleToggleRecord(); return;
@@ -3942,7 +3976,7 @@ function Studio() {
         }
         // Tap tempo (Pro Tools : T dans le champ tempo). En Keyboard Focus, T reste le zoom.
         case 'nova.tap': if (isKeyboardFocus()) return; e.preventDefault(); if (!e.repeat) handleTap(); return;
-        case 'nova.marker': e.preventDefault(); handleAddMarker(now()); return;
+        case 'nova.marker': e.preventDefault(); handleAddMarkerHere(now()); return;
         case 'nova.help': e.preventDefault(); setShortcutsOpen(v => !v); return;
         case 'nova.palette': e.preventDefault(); setPaletteOpen(v => !v); return;
         case 'nova.stop': if (!stateRef.current.isPlaying) return; e.preventDefault(); handleStop(); return;
@@ -3950,14 +3984,14 @@ function Studio() {
         case 'view.mixEdit': e.preventDefault(); setState(s => ({ ...s, currentView: s.currentView === 'MIXER' ? 'ARRANGEMENT' : 'MIXER' })); return;
         case 'view.arrangement': e.preventDefault(); setState(s => ({ ...s, currentView: 'ARRANGEMENT' })); return;
         case 'view.mixer': e.preventDefault(); setState(s => ({ ...s, currentView: 'MIXER' })); return;
-        case 'view.browser': e.preventDefault(); setIsSidebarOpen(v => !v); return;
+        case 'view.browser': e.preventDefault(); setIsSidebarOpen(v => { rememberSidebar(!v); return !v; }); return;
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
-  }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, handleAddMarker, undo, redo, setState, handleTap, handleToggleMetronome]);
+  }, [handleTogglePlay, handleToggleRecord, handleStop, handleSeek, handleAddMarker, handleAddMarkerHere, undo, redo, setState, handleTap, handleToggleMetronome]);
 
   // Raccourcis Pro Tools (utils/keymap) : pavé numérique, Ctrl+E, Keyboard Focus…
   useProToolsShortcuts({
@@ -3968,7 +4002,7 @@ function Studio() {
     seek: handleSeek,
     toggleLoop: () => setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive })),
     toggleMetronome: () => { void handleToggleMetronome(); },
-    addMarker: (t) => handleAddMarker(t),
+    addMarker: (t) => handleAddMarkerHere(t),
     selectTrack: (id) => setVisualState({ selectedTrackId: id }),
     undo,
     notify: setAiNotification,
@@ -4009,7 +4043,7 @@ function Studio() {
    *        lui, rien ne relie le beat charge a l'achat et l'export ne peut pas
    *        etre conditionne.
    */
-  const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number, sourceBpm?: number, instrumentId?: string | number) => {
+  const handleUniversalAudioImport = useCallback(async (source: string | File, name: string, forcedTrackId?: string, startTime?: number, sourceBpm?: number, instrumentId?: string | number, placement?: { afterTrackId?: string }) => {
       // Fichier de l'utilisateur (pas le catalogue) : Nova Pro.
       if (instrumentId === undefined && (source instanceof File || String(source).startsWith('blob:'))) {
         if (!(await requireProRef.current('Importer un son de ton ordinateur (une instru venue d\'ailleurs) fait partie de Nova Pro.'))) return null as any;
@@ -4098,16 +4132,19 @@ function Studio() {
               }
 
               if (isNewTrackNeeded) {
+                  // Dépôt de plusieurs fichiers : sous la piste visée, dans son circuit (utils/importPlacement).
+                  const model = placement?.afterTrackId ? draft.tracks.find(t => t.id === placement.afterTrackId) : undefined;
                   const newTrack: Track = {
                       id: targetTrackId!,
-                      name: name.substring(0, 20),
+                      name: trackNameFromFile(name),
                       type: TrackType.AUDIO,
                       color: UI_CONFIG.TRACK_COLORS[draft.tracks.length % UI_CONFIG.TRACK_COLORS.length],
                       isMuted: false, isSolo: false, isTrackArmed: false, isFrozen: false,
-                      volume: 1.0, pan: 0, outputTrackId: 'master',
-                      sends: [], clips: [newClip], plugins: [], automationLanes: [], totalLatency: 0
+                      volume: 1.0, pan: 0,
+                      ...circuitFrom(model ? JSON.parse(JSON.stringify(model)) : undefined),
+                      clips: [newClip], automationLanes: [], totalLatency: 0
                   };
-                  draft.tracks.splice(1, 0, newTrack);
+                  draft.tracks.splice(insertIndexAfter(draft.tracks, placement?.afterTrackId), 0, newTrack);
                   draft.selectedTrackId = targetTrackId;
               } else {
                   const track = draft.tracks.find(t => t.id === targetTrackId);
@@ -4616,13 +4653,15 @@ function Studio() {
     if (named) { for (let i = 0; i < 100 && autosaveBusy.current; i++) await new Promise(r => setTimeout(r, 50)); }
     if (autosaveBusy.current) { autosavePending.current = reason; return false; }
     const st = named ? named.state : stateRef.current;
-    if (st.isRecording) return false; // la prise est déjà écrite au fil de l'eau
-    const sig = [st.tracks, st.lyrics, st.bpm, st.name, st.markers, st.chords, st.timeSignature, st.projectNotes, st.arrangements, st.clipBin];
+    // Pendant une prise aussi (utils/autosavePolicy) : le projet en mémoire ne contient pas la prise en
+    // cours (écrite au fil de l'eau par son journal), seulement ce qui a changé (rien écrit sinon).
+    const sig = projectSignature(st);
     const last = lastSavedSigRef.current;
-    if (!force && !named && last && sig.every((v, i) => v === last[i])) return false;
+    if (!force && !named && sameSignature(sig, last)) return false;
     // Rien à garder (projet vierge, beat seul) : on n'écrase pas une session précédente.
-    const hasContent = st.tracks.some(t => t.id !== 'instrumental' && !t.instrumentId && t.clips.length > 0) || !!(st.lyrics || '').trim();
-    if (!hasContent && !named) return false;
+    const hasContent = hasWorthKeeping(st);
+    // 'restore' : l'état quitté par « Revenir à la version enregistrée » est toujours gardé.
+    if (!hasContent && !named && reason !== 'restore') return false;
     autosaveBusy.current = true;
     try {
       const t0 = performance.now();
@@ -4642,7 +4681,8 @@ function Studio() {
       if (purgeTakesAfterSaveRef.current) { purgeTakesAfterSaveRef.current = false; await recoveryStore().purgeTakes(); }
       if (!autosaveNotified.current) {
         autosaveNotified.current = true;
-        if (!named) setAiNotification("💾 Ta session est sauvegardée automatiquement sur cet appareil, prises comprises (même pendant l'enregistrement) : tu la retrouveras en revenant, même après un plantage.");
+        // Une ligne (avant : trois, posées sur les clips des pistes du bas pendant la séance).
+        if (!named) setAiNotification("💾 Sauvegarde automatique active sur cet appareil, prises comprises : rien n'est perdu, même après un plantage.");
       }
       return !!r;
     } catch (e) {
@@ -4656,6 +4696,13 @@ function Studio() {
   }, [user]);
   const autosaveNowRef = useRef<((reason?: VersionReason, force?: boolean) => Promise<boolean>) | null>(null);
   autosaveNowRef.current = autosaveNow;
+  // « Revenir à la version enregistrée » (Pro Tools : Revert to Saved), avec confirmation.
+  const revertToSaved = useRevertToSaved({
+    projectId: () => stateRef.current.id,
+    keepCurrent: () => autosaveNowRef.current?.('restore', true),
+    restore: v => recoverSession(v.id, { takes: false, label: `Version enregistrée ${savedAgo(v.savedAt)} rouverte (ta version d'avant est gardée dans « Versions de la session »)` }),
+    notify: setAiNotification,
+  });
   useEffect(() => {
     if (showLanding) return;
     const id = window.setInterval(() => { void autosaveNowRef.current?.('auto'); }, 15000);
@@ -4667,6 +4714,13 @@ function Studio() {
     if (wasRecordingRef.current && !state.isRecording && !showLanding) {
       const t = window.setTimeout(() => { void autosaveNowRef.current?.('take', true); }, 300);
       wasRecordingRef.current = false;
+      return () => window.clearTimeout(t);
+    }
+    // Début de prise : les éditions et le mix d'avant REC partent tout de suite dans une version
+    // (un plantage pendant la prise ne les perd plus ; inchangés, rien n'est écrit).
+    if (!wasRecordingRef.current && state.isRecording && !showLanding) {
+      wasRecordingRef.current = true;
+      const t = window.setTimeout(() => { void autosaveNowRef.current?.('auto'); }, 400);
       return () => window.clearTimeout(t);
     }
     wasRecordingRef.current = state.isRecording;
@@ -4684,7 +4738,9 @@ function Studio() {
     markSessionOpen(state.id, state.isRecording);
   }, [showLanding, state.id, state.isRecording]);
   useEffect(() => {
-    const onClose = () => markSessionClosed();
+    // Onglet fermé en pleine prise ou avec des changements pas encore écrits : le drapeau reste,
+    // la réouverture propose de récupérer (utils/autosavePolicy).
+    const onClose = () => { if (!keepSessionFlagOnClose(stateRef.current, lastSavedSigRef.current)) markSessionClosed(); };
     window.addEventListener('pagehide', onClose);
     return () => window.removeEventListener('pagehide', onClose);
   }, []);
@@ -8512,7 +8568,9 @@ function Studio() {
       r23Ref.current?.openSwap({ kind: 'file', url, name });
       return;
     }
-    // Id vide = nouvelle piste (fichiers en trop d'un dépôt multiple).
+    // « new-after:<piste> » = nouvelle piste sous cette piste (fichiers en trop d'un dépôt multiple).
+    const after = /^new-after:(.+)$/.exec(trackId || '');
+    if (after) return handleUniversalAudioImport(url, name, undefined, time, undefined, undefined, { afterTrackId: after[1] });
     return handleUniversalAudioImport(url, name, trackId || undefined, time);
   });
 
@@ -8571,6 +8629,9 @@ function Studio() {
   showNextStepRef.current = (trigger) => {
     // En collaboration, pas de carte « Faire mixer par un pro / studio » : l'ingé (ou l'autre artiste) est déjà là.
     if (collabRef.current || remoteRef.current?.active) return;
+    // Mode avancé (ingé, pro) : pas d'offre « Faire mixer par un pro / Enregistrer au studio »
+    // après son bounce ; elle couvrait le coin de la fenêtre d'édition.
+    if (!simpleModeStore.get().simple) return;
     if (nextStepSeenRef.current.has(trigger)) return;
     nextStepSeenRef.current.add(trigger);
     setNextStep(trigger);
@@ -8660,12 +8721,7 @@ function Studio() {
     const needClip = clipTargets.length ? undefined : 'Sélectionne d’abord un clip (clic dessus).';
     const needTrack = selTrack ? undefined : 'Sélectionne d’abord une piste.';
     const k = (id: string) => shortcutHint(id) || undefined;
-    const importAudio = () => {
-      const input = document.createElement('input');
-      input.type = 'file'; input.accept = 'audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a';
-      input.onchange = () => { const f = input.files?.[0]; if (f) void handleNewAudioImport(f); };
-      input.click();
-    };
+    const importAudio = () => pickAudioFile(f => { void handleNewAudioImport(f); });
     const simpleNow = simpleModeStore.get().simple;
     const a = (group: string, id: string, label: string, run: () => void, extra: Partial<PaletteAction> = {}): PaletteAction => ({ id, label, group, run, ...extra });
     return [
@@ -8678,6 +8734,8 @@ function Studio() {
       a('Fichier', 'pal.importAudio', 'Importer un fichier audio (beat, prise, sample)', importAudio, { pt: 'Import Audio (Ctrl+Maj+I)', keywords: 'beat instru wav mp3 importer charger' }),
       a('Fichier', 'nova.importSession', 'Importer depuis une session (pistes, effets, envois)', () => openImportSession(), { keys: k('nova.importSession'), pt: 'Import Session Data (Alt+Maj+I)' }),
       a('Fichier', 'pal.versions', 'Versions de la session', () => openSessionPanel('versions'), { pt: 'Save As New Version', keywords: 'version historique' }),
+      a('Fichier', 'pal.revertSaved', 'Revenir à la version enregistrée…', () => { void revertToSaved.ask(); }, { pt: 'Revert to Saved', keywords: 'annuler tout retour sauvegarde revert dernière sauvegarde' }),
+      a('Édition', 'pt.restoreSelection', 'Restaurer la dernière sélection', () => { const st = stateRef.current; const tr = new Set(st.tracks.map(t => t.id)); const cl = new Set(st.tracks.flatMap(t => t.clips.map(c => c.id))); setAiNotification(restoreLastSelection({ track: id => tr.has(id), clip: id => cl.has(id) })); }, { keys: 'Ctrl+Alt+Z', pt: 'Restore Last Selection (Opt+Cmd+Z)', keywords: 'sélection précédente plage reprendre' }),
       a('Fichier', 'pal.notes', 'Notes et commentaires de session', () => openSessionPanel('notes'), { pt: 'Comments', keywords: 'notes commentaires' }),
       a('Fichier', 'pal.clips', 'Liste des clips', () => openSessionPanel('clips'), { pt: 'Clips List', keywords: 'clips region' }),
       a('Fichier', 'pal.arrangements', 'Arrangements alternatifs du morceau (version radio, couplet en plus…)', () => openSessionPanel('arrangements'), { keywords: 'arrangement playlist' }),
@@ -8763,7 +8821,7 @@ function Studio() {
           onOpenSaveMenu={() => setIsSaveMenuOpen(true)} onOpenLoadMenu={() => setIsLoadMenuOpen(true)}
           onExportMix={handleExportMix} onShareProject={() => setShareOpen(true)} onOpenMasterNova={() => setMasterNovaOpen(true)}
           onOpenAudioEngine={() => setIsAudioSettingsOpen(true)} isDelayCompEnabled={state.isDelayCompEnabled}
-          onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo}
+          onToggleDelayComp={handleToggleDelayComp} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} onRevertToSaved={() => { void revertToSaved.ask(); }}
           user={user} onOpenAuth={() => setIsAuthOpen(true)} onLogout={handleLogout}
           isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar}
           onImportAudio={handleNewAudioImport}
@@ -9283,6 +9341,7 @@ function Studio() {
       )}
 
       <Suspense fallback={null}>
+      {revertToSaved.target && <Suspense fallback={null}><RevertToSavedDialog version={revertToSaved.target} busy={revertToSaved.busy} onConfirm={() => { void revertToSaved.confirm(); }} onCancel={revertToSaved.cancel} /></Suspense>}
       {isSaveMenuOpen && <SaveProjectModal isOpen={isSaveMenuOpen} onClose={() => setIsSaveMenuOpen(false)} currentName={state.name} user={user && user.id !== 'guest' ? user : null} onSaveCloud={handleSaveCloud} onSaveLocal={handleSaveLocal} onSaveAsCopy={handleSaveAsCopy} onOpenAuth={() => setIsAuthOpen(true)} onTakeHome={() => setTakeHomeOpen(true)} onSaveAsTemplate={() => { setIsSaveMenuOpen(false); setTemplatesModal('save'); }} onOpenVersions={() => { setIsSaveMenuOpen(false); setVersionsOpen(true); }}
         onSaveNewVersion={comment => void r21.saveNewVersion(comment)} nextVersionLabel={versionName(state.name, nextVersionNumber(state))} />}
       <VersionsDialog open={versionsOpen} busy={recovering} projectId={state.id} onClose={() => setVersionsOpen(false)}
@@ -9380,7 +9439,7 @@ function Studio() {
       {layoutsOpen && <Suspense fallback={null}><WindowLayoutsPanel onClose={() => setLayoutsOpen(false)} notify={setAiNotification} /></Suspense>}
       <PanelBoundary name="les fenêtres d'édition" overlay>
       <ProToolsWindows tracks={state.tracks} markers={state.markers} bpm={state.bpm} setState={setState} onEditClip={handleEditClip}
-        onSeek={handleSeek} onAddMarker={handleAddMarker} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
+        onSeek={handleSeek} onAddMarker={handleAddMarkerHere} onUpdateMarker={handleUpdateMarker} onDeleteMarker={handleDeleteMarker}
         getPlayhead={() => (audioEngine.getIsPlaying() ? audioEngine.getCurrentTime() : stateRef.current.currentTime)}
         onOpenShortcuts={() => setShortcutsOpen(true)} projectKey={state.projectKey} projectScale={state.projectScale} beatsPerBar={state.timeSignature?.numerator} />
       </PanelBoundary>
