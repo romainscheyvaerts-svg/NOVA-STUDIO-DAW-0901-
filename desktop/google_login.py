@@ -32,6 +32,8 @@ import secrets
 import socketserver
 import threading
 import time
+import urllib.error
+import urllib.request
 from urllib.parse import parse_qs, urlparse
 
 # Port fixe (avec repli) : 48817 à 48821, puis un port libre choisi par Windows.
@@ -351,6 +353,35 @@ def parse_page_message(raw) -> "dict | None":
     return msg
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **kw):  # la redirection vers Google suffit : on ne la suit pas
+        return None
+
+
+def probe_auth_service(url: str, timeout: float = 6.0) -> "str | None":
+    """Sonde le service de connexion AVANT d'ouvrir le navigateur (pas de CORS côté Python).
+
+    Le 09/10/2026, le projet Supabase restreint (quota dépassé) répondait 402 avec un JSON brut :
+    le navigateur affichait une page noire « Service for this project is restricted… ».
+    Renvoie None si le service répond normalement (redirection vers Google), sinon « auth_down »
+    (402, erreur 5xx, nom introuvable, connexion refusée ou délai dépassé). Une seule requête GET,
+    redirection non suivie (flux implicite : rien n'est créé côté serveur)."""
+    opener = urllib.request.build_opener(_NoRedirect)
+    req = urllib.request.Request(url, method="GET", headers={"User-Agent": "NovaStudio-sonde"})
+    try:
+        with opener.open(req, timeout=timeout) as r:
+            status = r.status
+    except urllib.error.HTTPError as e:
+        status = e.code
+        try:
+            e.close()
+        except Exception:
+            pass
+    except (urllib.error.URLError, OSError, ValueError):
+        return "auth_down"
+    return "auth_down" if status == 402 or status >= 500 else None
+
+
 def is_expected_auth_url(url, redirect_to: str, prefix: str = AUTH_PREFIX) -> bool:
     """L'URL à ouvrir est bien l'autorisation Google de Supabase, avec NOTRE adresse de retour."""
     if not isinstance(url, str) or not url.startswith(prefix) or len(url) > 4096:
@@ -364,12 +395,17 @@ class GoogleLoginBridge:
 
     post(dict)    : envoie un message à la page (doit être sûr depuis n'importe quel fil) ;
     open_url(str) : ouvre une adresse dans le navigateur par défaut ;
-    focus()       : ramène la fenêtre de Nova Studio au premier plan."""
+    focus()       : ramène la fenêtre de Nova Studio au premier plan.
+    probe(url)    : sonde le service de connexion avant d'ouvrir le navigateur (None = disponible,
+                    « auth_down » = restreint ou injoignable : message clair dans Nova, pas de page noire) ;
+    background    : sonde dans un fil à part (jamais sur le fil de l'interface)."""
 
     def __init__(self, post, open_url, focus=lambda: None, timeout: float = TIMEOUT_S, ports=PORTS,
-                 auth_prefix: str = AUTH_PREFIX, log=lambda m: None):
+                 auth_prefix: str = AUTH_PREFIX, log=lambda m: None, probe=probe_auth_service, background=True):
         self.post, self.open_url, self.focus = post, open_url, focus
         self.timeout, self.ports, self.auth_prefix, self.log = timeout, ports, auth_prefix, log
+        self.probe, self.background = probe, background
+        self._probed = set()
         self.login = None
         self.attempt = None
         self._lock = threading.Lock()
@@ -435,7 +471,30 @@ class GoogleLoginBridge:
             self.post({"type": MSG_RESULT, "attempt": attempt, "ok": False, "error": "bad_url", "message": ""})
             login.cancel()
             return
-        self.open_url(url)
+        if attempt in self._probed or self.probe is None:   # « Rouvrir la page Google » : déjà sondé
+            self.open_url(url)
+            return
+
+        def go():
+            err = None
+            try:
+                err = self.probe(url)
+            except Exception:
+                err = "auth_down"
+            if self._current(attempt) is not login:
+                return  # annulé pendant la sonde
+            if err:
+                self.log("connexion Google : service de connexion indisponible (sonde)")
+                self.post({"type": MSG_RESULT, "attempt": attempt, "ok": False, "error": err, "message": ""})
+                login.cancel()
+                return
+            self._probed.add(attempt)
+            self.open_url(url)
+
+        if self.background:
+            threading.Thread(target=go, name="google-login-sonde", daemon=True).start()
+        else:
+            go()
 
     def _cancel(self, attempt: str):
         login = self._current(attempt)

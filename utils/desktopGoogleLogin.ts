@@ -17,6 +17,8 @@
  * aucune « Redirect URL » à ajouter. Sur le web, rien de tout ça : la porte n'existe pas.
  */
 
+import { AUTH_DOWN_MESSAGE } from './authStatus';
+
 export const GOOGLE_MSG = {
   prepare: 'nova-google:prepare',
   ready: 'nova-google:ready',
@@ -105,6 +107,10 @@ export function googleLoginErrorMessage(code: string | undefined, description?: 
       return 'Adresse de connexion inattendue : connexion Google arrêtée par sécurité. Réessaie.';
     case 'network':
       return 'Pas de connexion Internet : vérifie le Wi-Fi et réessaie.';
+    case 'auth_down':
+      // Sonde de l'appli (desktop/google_login.py) : 402 du projet restreint, 5xx ou injoignable.
+      // Avant : le navigateur s'ouvrait sur une page noire avec le JSON brut du 402.
+      return AUTH_DOWN_MESSAGE;
     case 'session':
       return 'Google a bien répondu, mais ta session n’a pas pu être ouverte. Réessaie dans un instant.';
     default: {

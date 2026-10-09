@@ -108,7 +108,7 @@ const Gate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true); setError(null); setInfo(null);
-    try { await fn(); } catch (e: any) { setError(friendlyAuthError(e?.message || String(e))); }
+    try { await fn(); } catch (e: any) { setError(friendlyAuthError(e)); }
     setBusy(false);
   };
 

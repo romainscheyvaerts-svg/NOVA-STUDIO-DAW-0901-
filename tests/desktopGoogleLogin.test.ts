@@ -89,6 +89,8 @@ describe('jetons et erreurs', () => {
     expect(googleLoginErrorMessage('timeout')).toMatch(/5 minutes.*Continuer avec Google/);
     expect(googleLoginErrorMessage('state')).toMatch(/refusé/);
     expect(googleLoginErrorMessage('port')).toMatch(/Redémarre Nova Studio/);
+    // Sonde de l'appli : service restreint (402) ou injoignable → message clair, plus de page noire.
+    expect(googleLoginErrorMessage('auth_down')).toMatch(/service de connexion est momentanément indisponible.*projets locaux/);
     expect(googleLoginErrorMessage('no_app')).toMatch(/mets-la à jour/);
     expect(googleLoginErrorMessage('oauth_error', 'Unverified email')).toMatch(/Unverified email/);
     expect(googleLoginErrorMessage(undefined)).toMatch(/Réessaie/);

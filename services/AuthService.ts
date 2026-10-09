@@ -2,6 +2,10 @@
 import { User } from "../types";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { supabaseManager } from "./SupabaseManager";
+import { authServiceMessage } from "../utils/authStatus";
+
+/** Erreur de connexion : message clair si le SERVICE est restreint / injoignable (402, 5xx, DNS). */
+const authMessage = (error: any, fallback?: string) => authServiceMessage(error) || error?.message || fallback || "Erreur de connexion";
 
 const DELAY_MS = 1500; // Pour le mode simulation
 
@@ -65,7 +69,7 @@ class AuthService {
         });
 
         if (error) {
-            return { success: false, message: error.message };
+            return { success: false, message: authMessage(error) };
         }
 
         // Si auto-confirm est OFF, l'utilisateur doit vérifier son email
@@ -123,8 +127,13 @@ class AuthService {
   public async login(email: string, password: string, rememberMe: boolean = false): Promise<{ success: boolean; user?: User; message?: string }> {
     // --- MODE RÉEL ---
     if (isSupabaseConfigured() && supabase) {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) return { success: false, message: error.message };
+        let data: any, error: any;
+        try {
+            ({ data, error } = await supabase.auth.signInWithPassword({ email, password }));
+        } catch (e: any) {
+            return { success: false, message: authMessage(e) };
+        }
+        if (error) return { success: false, message: authMessage(error) };
 
         if (data.user) {
             this.currentUser = this.mapSupabaseUser(data.user);
@@ -202,7 +211,7 @@ class AuthService {
             await supabaseManager.resetPasswordForEmail(email);
             return { success: true, message: "Lien envoyé. Vérifiez vos emails." };
         } catch (e: any) {
-            return { success: false, message: e.message || "Erreur d'envoi." };
+            return { success: false, message: authMessage(e, "Erreur d'envoi.") };
         }
     }
 

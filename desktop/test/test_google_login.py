@@ -195,8 +195,9 @@ def t_bridge():
         ev.set()
 
     prefix = gl.AUTH_PREFIX
+    # Sonde du service de connexion remplacée : aucun appel réseau (jamais vers Supabase).
     br = gl.GoogleLoginBridge(post, opened.append, lambda: focused.append(1), timeout=30, ports=TEST_PORTS,
-                              log=logs.append)
+                              log=logs.append, probe=lambda url: None, background=False)
     check("message étranger ignoré", gl.parse_page_message("nova-desktop:apply-update") is None
           and gl.parse_page_message('{"type":"autre"}') is None)
     msg = gl.parse_page_message(json.dumps({"type": gl.MSG_PREPARE, "attempt": "e1"}))
@@ -253,8 +254,58 @@ def t_bridge():
     check("fermeture de l'appli : aucun port ouvert", l5.wait_closed(3) and _wait(lambda: port_closed(l5.port)))
 
 
+def t_probe():
+    """Sonde du service de connexion (402 du projet restreint, 5xx, injoignable) : serveur local factice."""
+    print("sonde du service de connexion (avant d'ouvrir le navigateur)")
+    import http.server as hs
+
+    class H(hs.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            code = int(self.path.split("code=")[1].split("&")[0])
+            body = b'{"message":"Service for this project is restricted due to the following violations: exceed_egress_quota"}'
+            self.send_response(code)
+            if code in (301, 302, 303):
+                self.send_header("Location", "https://accounts.google.com/o/oauth2/v2/auth?x=1")
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    srv = hs.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}/auth/v1/authorize?provider=google&code="
+    try:
+        check("302 vers Google : service disponible", gl.probe_auth_service(base + "302") is None)
+        check("402 (projet restreint, quota) : indisponible", gl.probe_auth_service(base + "402") == "auth_down")
+        check("503 : indisponible", gl.probe_auth_service(base + "503") == "auth_down")
+        check("400 : laissé au navigateur (pas une panne)", gl.probe_auth_service(base + "400") is None)
+    finally:
+        srv.shutdown(); srv.server_close()
+    with socket.socket() as so:
+        so.bind(("127.0.0.1", 0)); dead = so.getsockname()[1]
+    check("injoignable (connexion refusée) : indisponible",
+          gl.probe_auth_service(f"http://127.0.0.1:{dead}/auth/v1/authorize", timeout=2) == "auth_down")
+    check("nom introuvable (DNS) : indisponible",
+          gl.probe_auth_service("http://nova-sonde-introuvable.invalid/auth/v1/authorize", timeout=3) == "auth_down")
+
+    # Pont : service restreint → rien n'ouvert dans le navigateur, erreur claire, serveur fermé.
+    posted, opened = [], []
+    br = gl.GoogleLoginBridge(posted.append, opened.append, timeout=30, ports=TEST_PORTS,
+                              probe=lambda url: "auth_down", background=False)
+    br.handle({"type": gl.MSG_PREPARE, "attempt": "p1"})
+    login = br.login
+    good = gl.AUTH_PREFIX + "provider=google&redirect_to=" + quote(login.redirect_to, safe="")
+    br.handle({"type": gl.MSG_OPEN, "attempt": "p1", "url": good})
+    check("service restreint : navigateur PAS ouvert (plus de page noire), erreur auth_down postée, serveur fermé",
+          opened == [] and posted[-1].get("error") == "auth_down" and login.wait_closed(3), posted[-1])
+    br.shutdown()
+
+
 def main():
-    for t in (t_parse, t_server_success, t_server_replay, t_timeout_cancel, t_port_fallback, t_bridge):
+    for t in (t_parse, t_server_success, t_server_replay, t_timeout_cancel, t_port_fallback, t_bridge, t_probe):
         t()
     ko = [n for n, ok in results if not ok]
     print(f"\n{len(results) - len(ko)}/{len(results)} vérifications OK")

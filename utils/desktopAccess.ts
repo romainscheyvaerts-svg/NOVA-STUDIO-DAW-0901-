@@ -10,6 +10,8 @@
  * si la dernière vérification en ligne date de moins de 7 jours.
  */
 
+import { AUTH_DOWN_MESSAGE, NO_INTERNET_MESSAGE, authServiceMessage, isAuthServiceDown } from './authStatus';
+
 export const OFFLINE_GRACE_MS = 7 * 24 * 3600_000;
 export const ACCESS_CACHE_KEY = 'nova_desktop_access_v1';
 
@@ -70,14 +72,21 @@ export function isNetworkError(e: unknown): boolean {
     || (e as any)?.status === 0;
 }
 
-/** Messages d'erreur Supabase traduits en français clair. */
-export function friendlyAuthError(msg: string): string {
+/** Messages d'erreur Supabase traduits en français clair (erreur ou son message). */
+export function friendlyAuthError(err: unknown): string {
+  const msg = typeof err === 'string' ? err : String((err as any)?.message || err || '');
+  // Service de connexion restreint (402, quota) ou en panne : jamais le JSON brut ni l'anglais.
+  if (typeof err !== 'string' && isAuthServiceDown(err)) return AUTH_DOWN_MESSAGE;
   const m = (msg || '').toLowerCase();
   if (m.includes('invalid login credentials')) return 'E-mail ou mot de passe incorrect.';
   if (m.includes('email not confirmed')) return "Ton e-mail n'est pas encore confirmé : clique sur le lien reçu par mail, puis reconnecte-toi.";
   if (m.includes('already registered') || m.includes('already been registered')) return 'Un compte existe déjà avec cet e-mail : connecte-toi.';
   if (m.includes('password should be') || m.includes('at least 6')) return 'Mot de passe trop court (6 caractères minimum).';
   if (m.includes('rate limit') || m.includes('too many')) return 'Trop de tentatives : patiente une minute et réessaie.';
-  if (isNetworkError({ message: msg })) return "Pas de connexion Internet : vérifie le Wi-Fi et réessaie.";
+  const service = authServiceMessage(typeof err === 'string' ? { message: msg } : err);
+  if (service) return service;
+  if (isNetworkError({ message: msg })) return NO_INTERNET_MESSAGE;
+  // Corps brut (JSON) d'une réponse inattendue : jamais affiché tel quel.
+  if (/^\s*[{[]/.test(msg)) return AUTH_DOWN_MESSAGE;
   return msg || 'Une erreur est survenue, réessaie.';
 }

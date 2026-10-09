@@ -66,7 +66,18 @@ describe('messages', () => {
     expect(friendlyAuthError('Invalid login credentials')).toMatch(/incorrect/);
     expect(friendlyAuthError('Email not confirmed')).toMatch(/confirmé/);
     expect(friendlyAuthError('User already registered')).toMatch(/existe déjà/);
+    // Réseau en échec alors que l'appareil est en ligne : c'est le service (DNS, panne), pas le Wi-Fi.
+    expect(friendlyAuthError('Failed to fetch')).toMatch(/service de connexion est momentanément indisponible/);
+    const off = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     expect(friendlyAuthError('Failed to fetch')).toMatch(/Internet/);
+    off.mockRestore();
+  });
+  it('service de connexion restreint (402 du quota Supabase) : message clair, jamais le JSON brut', () => {
+    const e402 = Object.assign(new Error('Service for this project is restricted due to the following violations: exceed_egress_quota'), { status: 402 });
+    expect(friendlyAuthError(e402)).toBe('Le service de connexion est momentanément indisponible. Réessaie dans quelques minutes ; tes projets locaux restent accessibles.');
+    expect(friendlyAuthError(Object.assign(new Error('upstream'), { status: 503 }))).toMatch(/momentanément indisponible/);
+    expect(friendlyAuthError('{"message":"Service for this project is restricted"}')).toMatch(/momentanément indisponible/);
+    expect(friendlyAuthError(Object.assign(new Error('Invalid login credentials'), { status: 400 }))).toMatch(/incorrect/);
   });
   it('erreur réseau reconnue', () => {
     expect(isNetworkError({ name: 'AuthRetryableFetchError', message: '' })).toBe(true);
