@@ -18,6 +18,7 @@ Usage : serveur `npx vite --port 3486 --strictPort --host 127.0.0.1` dans le wor
   NOVA_URL=http://127.0.0.1:3486/ PYTHONIOENCODING=utf-8 python qa/protools_utiles.py [pc-sombre] [pc-clair] [tab-sombre] [tab-clair]
 Sorties : D:\\1 WORK\\CONTENU\\nova-protools-utiles\\ (protools_utiles.json + captures)
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import io, json, os, re, sys, time, wave, zipfile
 from pathlib import Path
 

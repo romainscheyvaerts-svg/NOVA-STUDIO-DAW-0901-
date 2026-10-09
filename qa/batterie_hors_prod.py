@@ -27,6 +27,7 @@ BATTERIE = [
     ("r16_midi", []), ("r21_session_pro", []), ("r14_r15_multipiste", []), ("r18_beatmaker", []),
     ("r23_beat_repunch", []), ("r7_sidechain", []), ("r8_automation", []), ("inserts_visibles", []),
     ("pdc_preuve", []), ("pdc_audio_lecture", []),
+    ("protools_utiles", []), ("r17_raccourcis_scrub", []), ("catalogue_indisponible", []),
 ]
 
 

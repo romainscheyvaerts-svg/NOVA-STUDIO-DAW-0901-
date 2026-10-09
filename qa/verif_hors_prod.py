@@ -7,6 +7,7 @@ new_context échapperaient au catalogue simulé et pourraient joindre la product
   python qa/verif_hors_prod.py     → liste les scripts non couverts (code 1 s'il y en a)
 """
 import ast
+import json
 import sys
 import warnings
 from pathlib import Path
@@ -58,5 +59,40 @@ def main() -> int:
     return 0
 
 
+def navigateur() -> int:
+    """Preuve en vrai : même si un scénario enregistre APRÈS coup une route « tout laisser passer »
+    (route.continue_, contexte ou page), aucune requête *.supabase.co n'atteint le réseau."""
+    import os
+    os.environ.setdefault("NOVA_URL", "http://127.0.0.1:9/")
+    sys.path.insert(0, str(QA))
+    import qa_hors_prod as hp
+    import qalib
+    from playwright.sync_api import sync_playwright
+    hp.reset_stats()
+    out = {}
+    with sync_playwright() as p:
+        b = qalib.launch(p)
+        log = qalib.Log("verif_hors_prod")
+        ctx, pg = qalib.new_page(b, "pc", log)
+        ctx.route("**/*", lambda r, q: r.continue_())     # « laisser passer » enregistrée en DERNIER (contexte)
+        pg.route("**/*", lambda r, q: r.continue_())      # … et au niveau de la page
+        pg.goto("data:text/html,<title>verif</title>")
+        out = pg.evaluate("""async () => {
+          const r1 = await fetch('https://mxdrxpzxbgybchzzvpkf.supabase.co/rest/v1/instrumentals?select=title&title=eq.NOCTAMBULE');
+          const r2 = await fetch('https://mxdrxpzxbgybchzzvpkf.supabase.co/functions/v1/stream-instrumental?fileId=x', { headers: { Range: 'bytes=0-9' } });
+          let r3 = 'ok'; try { await fetch('https://sqduhfckgvyezdiubeei.supabase.co/functions/v1/inconnue'); } catch (e) { r3 = 'bloquée'; }
+          return { liste: await r1.json(), stream: r2.status, inconnue: r3 };
+        }""")
+        ctx.close(); b.close()
+    s = hp.summary()
+    ok = (out.get("liste") == [{"title": "NOCTAMBULE"}] and s["requetes_prod"] == 0 and s["filet_dns"] == 0
+          and out.get("inconnue") == "bloquée" and s["requetes_bloquees"] == 1)
+    print(json.dumps({"reponses": out, "simulees": s["requetes_simulees"], "bloquees": s["requetes_bloquees"],
+                      "filet_dns": s["filet_dns"], "vers_la_prod": s["requetes_prod"]}, ensure_ascii=False))
+    print("OK : l'interception reste prioritaire (0 requête vers la production)." if ok else "ÉCHEC")
+    hp.reset_stats()   # le blocage volontaire de ce test ne doit pas faire échouer le processus
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(navigateur() if "--navigateur" in sys.argv else main())
