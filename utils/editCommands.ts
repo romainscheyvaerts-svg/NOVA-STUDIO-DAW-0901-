@@ -27,7 +27,9 @@ export type EditCommandId =
   // Gain de clip, Heal, boucle (R5, components/ClipGainTools) : ligne de gain, nudge du gain, Heal Separation, Répéter, boucler.
   | 'clipGainLine' | 'clipGainNudge' | 'heal' | 'repeatClips' | 'loopClips'
   // Groupes et temps (R12, hooks/useR12) : créer un groupe, suspendre les groupes, insérer / supprimer du temps.
-  | 'groupCreate' | 'groupsSuspend' | 'insertTime';
+  | 'groupCreate' | 'groupsSuspend' | 'insertTime'
+  // Solo / muet, diodes, verrou de clip, sélection de piste (hooks/useProToolsUtiles, hooks/useArrangementCommands).
+  | 'soloAll' | 'muteAll' | 'soloSafe' | 'soloSelected' | 'muteSelected' | 'clearClipIndicators' | 'clipLock' | 'selectTrackClips';
 
 export type EditCommandHandler = (arg?: any) => boolean | void;
 

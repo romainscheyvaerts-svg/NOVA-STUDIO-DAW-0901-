@@ -1,6 +1,8 @@
 
 import React, { useState, useRef, useEffect, useContext } from 'react';
 import { openSessionPanel } from '../utils/r21Bus';
+import { muteClickKind, soloClickKind } from '../utils/soloMute';
+import { runEditCommand } from '../utils/editCommands';
 import TrackMeter from './meters/TrackMeter';
 import { AutotuneBadge } from './AutotuneVstPanel';
 import { useCollabRole, requestVolumeLock, useCollabLive } from '../utils/collabStore';
@@ -384,8 +386,19 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
     return map[type] || type.substring(0, 4);
   };
 
-  const handleMuteToggle = (e: React.MouseEvent | React.TouchEvent) => { e.stopPropagation(); onUpdate({ ...track, isMuted: !track.isMuted }); };
-  const handleSoloToggle = (e: React.MouseEvent | React.TouchEvent) => { e.stopPropagation(); onUpdate({ ...track, isSolo: !track.isSolo }); };
+  // Pro Tools (utils/soloMute) : Alt+clic = toutes les pistes, Ctrl+clic sur S = solo safe.
+  const handleMuteToggle = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    if (muteClickKind(e) === 'all') { runEditCommand('muteAll', { on: !track.isMuted }); return; }
+    onUpdate({ ...track, isMuted: !track.isMuted });
+  };
+  const handleSoloToggle = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    const kind = soloClickKind(e);
+    if (kind === 'all') { runEditCommand('soloAll', { on: !track.isSolo }); return; }
+    if (kind === 'safe') { runEditCommand('soloSafe', { trackIds: [track.id] }); return; }
+    onUpdate({ ...track, isSolo: !track.isSolo });
+  };
 
   const canHaveSends = (track.type === TrackType.AUDIO || track.type === TrackType.BUS || track.type === TrackType.MIDI || track.type === TrackType.SAMPLER || track.type === TrackType.DRUM_RACK) && track.id !== 'instrumental' && track.id !== 'master';
   const isMidiOrSampler = track.type === TrackType.MIDI || track.type === TrackType.SAMPLER || track.type === TrackType.DRUM_RACK;
@@ -658,13 +671,15 @@ const TrackHeader: React.FC<TrackHeaderProps> = ({
             <span className="text-[11px] font-bold">M</span>
           </button>
           <button
-            title={track.isSolo ? "Réentendre toutes les pistes" : "N'écouter que cette piste"}
-            aria-label={`Solo : ${track.name}`}
+            title={`${track.soloSafe ? 'Solo safe : reste audible quand une autre piste est en solo. ' : ''}${track.isSolo ? 'Réentendre toutes les pistes' : "N'écouter que cette piste"} — Alt+clic : tous les solos ; Ctrl+clic : solo safe`}
+            aria-label={`Solo : ${track.name}${track.soloSafe ? ' (solo safe)' : ''}`}
             aria-pressed={!!track.isSolo}
+            data-solo-safe={track.soloSafe ? '1' : undefined}
             onClick={handleSoloToggle}
-            className={`nova-hit-tactile w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
+            className={`nova-hit-tactile relative w-7 h-7 rounded-md flex items-center justify-center transition-all border ${track.isSolo ? 'bg-amber-400 border-amber-300 text-black shadow-[0_0_8px_rgba(251,191,36,0.4)]' : track.soloSafe ? 'bg-white/[0.06] border-dashed border-amber-400/70 text-amber-300' : 'bg-white/[0.06] border-transparent text-slate-400 hover:text-white'}`}
           >
             <span className="text-[11px] font-bold">S</span>
+            {track.soloSafe && <i className="fas fa-shield-alt absolute -top-1 -right-1 text-[8px] text-amber-300 drop-shadow" aria-hidden="true" />}
           </button>
 
           {canHaveSends && !simple && (

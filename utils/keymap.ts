@@ -27,7 +27,7 @@ import type { EditCommandId } from './editCommands';
  * Deux raccourcis n'entrent en conflit que dans un même contexte.
  */
 export type ShortcutContext = 'global' | 'focus' | 'midi' | 'pianoroll';
-export type ShortcutCategory = 'Transport' | 'Scrub et shuttle' | 'Édition' | 'Outils' | 'Modes d’édition' | 'Navigation' | 'Zoom et affichage' | 'Repères' | 'Fenêtres' | 'Dispositions' | 'Keyboard Focus' | 'Piano roll' | 'Clavier MIDI';
+export type ShortcutCategory = 'Transport' | 'Scrub et shuttle' | 'Édition' | 'Mix' | 'Outils' | 'Modes d’édition' | 'Navigation' | 'Zoom et affichage' | 'Repères' | 'Fenêtres' | 'Dispositions' | 'Keyboard Focus' | 'Piano roll' | 'Clavier MIDI';
 
 export interface ShortcutDef {
   id: string;
@@ -116,6 +116,17 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.split', keys: ['ctrl+e'], label: 'Séparer le clip à la tête de lecture', pt: 'Ctrl+E (Separate Clip at Selection)', category: 'Édition', command: 'split' }),
   g({ id: 'pt.quickFades', keys: ['ctrl+alt+f'], label: 'Fondus rapides (10 ms) sur les clips sélectionnés, contre les clics', pt: 'Ctrl+F (Fades) / Batch Fades', category: 'Édition', command: 'quickFades' }),
   g({ id: 'pt.selectAll', keys: ['ctrl+a'], label: 'Sélectionner tous les clips', pt: 'Ctrl+A', category: 'Édition', command: 'selectAllClips' }),
+  g({ id: 'pt.selectTrackClips', keys: ['ctrl+alt+a'], label: 'Sélectionner tous les clips de la piste (pistes sélectionnées)', pt: 'Triple-clic dans la piste avec le Sélecteur', category: 'Édition', command: 'selectTrackClips' }),
+  // Verrou de clip (utils/clipLock, hooks/useProToolsUtiles).
+  g({ id: 'pt.clipLock', keys: ['ctrl+l'], label: 'Verrouiller / déverrouiller les clips sélectionnés (ni déplacés, ni rognés, ni coupés, ni supprimés)', pt: 'Clip › Verrouiller/Déverrouiller l’édition (Edit Lock)', category: 'Édition', command: 'clipLock', arg: { kind: 'edit' } }),
+  g({ id: 'pt.clipTimeLock', keys: ['alt+shift+l'], label: 'Verrouiller / libérer la position des clips sélectionnés (ils se rognent, mais restent calés dans le temps)', pt: 'Alt+Démarrer+L (Time Lock) : la touche Démarrer est réservée à Windows', category: 'Édition', command: 'clipLock', arg: { kind: 'time' } }),
+  // Solo et muet (utils/soloMute, hooks/useProToolsUtiles) : Alt+clic sur un S ou un M, Ctrl+clic sur un S = solo safe.
+  g({ id: 'pt.soloSelected', keys: ['shift+s'], label: 'Solo des pistes sélectionnées (on / off)', pt: 'Maj+S (Solo Selected Tracks)', category: 'Mix', command: 'soloSelected' }),
+  g({ id: 'pt.muteSelected', keys: ['shift+m'], label: 'Muet des pistes sélectionnées (on / off)', pt: 'Maj+M (Mute Selected Tracks)', category: 'Mix', command: 'muteSelected' }),
+  g({ id: 'pt.clearSolos', keys: ['alt+shift+s'], label: 'Effacer tous les solos (tout le morceau se réentend)', pt: 'Alt+clic sur un Solo allumé', category: 'Mix', command: 'soloAll', arg: { on: false } }),
+  g({ id: 'pt.clearMutes', keys: ['alt+shift+m'], label: 'Effacer tous les mutes (rendre le son à toutes les pistes)', pt: 'Alt+clic sur un Mute allumé', category: 'Mix', command: 'muteAll', arg: { on: false } }),
+  g({ id: 'pt.soloSafe', keys: [], label: 'Solo safe de la piste sélectionnée : elle reste audible quand une autre est en solo (retour de réverbe, clic, guide)', pt: 'Ctrl+clic sur un Solo (Solo Safe)', category: 'Mix', command: 'soloSafe' }),
+  g({ id: 'pt.clearClipIndicators', keys: ['alt+c'], label: 'Effacer les diodes de saturation (indicateurs d’écrêtage) de toutes les pistes et du master', pt: 'Alt+C (Clear All Clip Indicators)', category: 'Mix', command: 'clearClipIndicators' }),
   g({ id: 'pt.rename', keys: ['ctrl+shift+r'], label: 'Renommer le clip', pt: 'Ctrl+Maj+R (Rename Clip)', category: 'Édition', command: 'renameClip' }),
   g({ id: 'pt.stripSilence', keys: ['ctrl+u'], label: 'Supprimer les silences (Strip Silence) : retirer les blancs (fenêtre)', pt: 'Ctrl+U', category: 'Édition', command: 'stripSilence' }),
   g({ id: 'nova.breaths', keys: ['ctrl+alt+r'], label: 'Respirations : baisser la lead, supprimer sur les backs (fenêtre)', pt: 'Pas dans Pro Tools : comme Breath Control de Waves / De-breath de RX', category: 'Édition', command: 'breaths' }),
@@ -373,7 +384,7 @@ export const chordLabel = (chord: string): string =>
 
 export const shortcutKeysLabel = (s: ShortcutDef): string => s.keys.map(chordLabel).join(' · ');
 
-export const SHORTCUT_CATEGORIES: ShortcutCategory[] = ['Transport', 'Scrub et shuttle', 'Édition', 'Outils', 'Modes d’édition', 'Navigation', 'Zoom et affichage', 'Repères', 'Fenêtres', 'Dispositions', 'Keyboard Focus', 'Piano roll', 'Clavier MIDI'];
+export const SHORTCUT_CATEGORIES: ShortcutCategory[] = ['Transport', 'Scrub et shuttle', 'Édition', 'Mix', 'Outils', 'Modes d’édition', 'Navigation', 'Zoom et affichage', 'Repères', 'Fenêtres', 'Dispositions', 'Keyboard Focus', 'Piano roll', 'Clavier MIDI'];
 
 /** Recherche dans l'aide : libellé, touches, équivalent Pro Tools (sans accents ni casse). */
 export const searchShortcuts = (query: string, map: ShortcutDef[] = runtime.map()): ShortcutDef[] => {

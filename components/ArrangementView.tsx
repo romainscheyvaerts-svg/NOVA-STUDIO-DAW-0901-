@@ -61,6 +61,9 @@ import { registerLayoutPart } from '../utils/windowLayouts';
 import { editGroupsStore, invertFromEvent, mateFade, mateGain, MateSnap, mateTrimEnd, mateTrimStart, snapMates } from '../utils/editGroups';
 import { r23Bus } from '../utils/r23Store';
 import { RedoSpotsOverlay } from './RepunchUI';
+import SoloMuteIndicators from './SoloMuteIndicators';
+import { dragRefusal, explainLockedDrag } from '../utils/clipLock';
+import { runEditCommand } from '../utils/editCommands';
 
 // En-tetes de piste memoises : ils ne se re-rendent plus a chaque rendu de
 // l'arrangement (defilement, selection...), seulement quand leur piste change.
@@ -874,6 +877,13 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
       title: 'Voix témoin (démo du topliner, yaourt, ancienne prise) : entendue pendant la prise à son propre niveau, jamais exportée, mixée ni masterisée (Pro Tools : piste guide inactive au bounce).',
       onClick: () => onUpdateTrack(target.isGuide ? { ...target, isGuide: false, guideMuted: false } : { ...target, isGuide: true, guideMuted: false, guideLevel: target.guideLevel ?? 0.7 }),
     });
+    // Pro Tools : tous les clips de la piste (triple-clic au Sélecteur) et solo safe (Ctrl+clic sur S).
+    if (target && target.clips.length) menuItems.push({ label: 'Sélectionner tous les clips de la piste', icon: 'fa-object-group', shortcut: 'Ctrl+Alt+A', onClick: () => { setContextMenu(null); runEditCommand('selectTrackClips', { trackId }); } });
+    if (target && target.id !== 'master') menuItems.push({
+      label: target.soloSafe ? 'Retirer le solo safe' : 'Solo safe (reste audible pendant les solos)', icon: 'fa-shield-alt', shortcut: 'Ctrl+clic sur S',
+      title: 'La piste ne se coupe jamais quand une autre est en solo : retour de réverbe, clic, piste guide, beat de référence (Pro Tools : Solo Safe).',
+      onClick: () => { setContextMenu(null); runEditCommand('soloSafe', { trackIds: [trackId] }); },
+    });
     if (trackId !== 'track-rec-main') menuItems.push({ label: 'Supprimer la piste', danger: true, onClick: () => onDeleteTrack?.(trackId), icon: 'fa-trash' });
     if (!simple || target?.isFrozen) menuItems.push({
       label: target?.isFrozen ? 'Dégeler la piste' : 'Geler la piste (freeze)',
@@ -1144,6 +1154,9 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 // d'un glissement (déplacement, rognage, fondu, gain) n'était alors
                 // plus annulable.
                 if (selectedTrackId !== t.id) onSelectTrack(t.id);
+                // Clip verrouillé (utils/clipLock) : il se sélectionne, mais ne se tire pas (message au 1er mouvement).
+                const lockWhy = activeTool === 'RANGE' ? null : dragRefusal(clip, 'edit');
+                if (lockWhy) { explainLockedDrag(e.clientX, e.clientY, lockWhy); setActiveClip(null); setDragAction(null); return; }
                 // Ligne de gain (points, Alt+clic), crayon, Loop Trim : avant les autres zones du clip.
                 if (clipGainEdit.onClipDown(e, { trackId: t.id, clip, x, relY: y - currentY, laneH: zoomV, tool: activeTool, edgePx: Math.min(10, Math.max(4, clip.duration * zoomH * 0.15)) })) { setActiveClip(null); return; }
 
@@ -1168,7 +1181,8 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
 
                 // Alt+glisser : on laisse une copie sur place et on deplace
                 // l'original, comme dans les DAW.
-                if (e.altKey) {
+                const timeLockWhy = dragRefusal(clip, 'move');
+                if (e.altKey && !timeLockWhy) {
                     onEditClip?.(t.id, clip.id, 'DUPLICATE', { start: clip.start });
                     setDragAction('MOVE');
                     return;
@@ -1214,6 +1228,7 @@ const ArrangementView: React.FC<ArrangementViewProps> = ({
                 }
                 else if (x - clipStartX < edge) setDragAction('TRIM_START');
                 else if (clipEndX - x < edge) setDragAction('TRIM_END');
+                else if (timeLockWhy) { explainLockedDrag(e.clientX, e.clientY, timeLockWhy); setActiveClip(null); setDragAction(null); }
                 else setDragAction('MOVE');
                 return;
             }
@@ -1847,6 +1862,23 @@ const drawClip = (ctx: CanvasRenderingContext2D, clip: Clip, trackColor: string,
         ctx.fillText(clip.name, x + 9, y + 14, w - 18);
     }
 
+    // Verrou (utils/clipLock) : cadenas (édition) ou punaise (position), en haut à droite.
+    if (clip.lock && w > 22) {
+        const bx = x + w - 19, by = y + 3;
+        ctx.save();
+        ctx.fillStyle = clip.lock === 'edit' ? 'rgba(239,68,68,0.92)' : 'rgba(245,158,11,0.92)';
+        ctx.beginPath(); ctx.roundRect(bx, by, 15, 15, 3); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.fillStyle = '#fff'; ctx.lineWidth = 1.5;
+        if (clip.lock === 'edit') {
+            ctx.beginPath(); ctx.arc(bx + 7.5, by + 6.5, 2.6, Math.PI, 0); ctx.stroke();
+            ctx.fillRect(bx + 3.5, by + 6.5, 8, 5.5);
+        } else {
+            ctx.beginPath(); ctx.arc(bx + 7.5, by + 5.5, 2.8, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(bx + 7.5, by + 8); ctx.lineTo(bx + 7.5, by + 12.5); ctx.stroke();
+        }
+        ctx.restore();
+    }
+
     // Poignée de gain de clip
     // (Ligne de gain affichée : c'est elle qu'on tire, components/ClipGainTools.)
     if (clip.bufferId && w > 16 && h > 30 && !clipGainEdit.view.line) {
@@ -2326,6 +2358,13 @@ useEffect(() => {
     const edition = group('Édition', 'fa-pen-to-square', [
       { label: 'Renommer…', icon: 'fa-i-cursor', shortcut: 'Ctrl+Maj+R', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }], focus: 'name' }); close(); }},
       { label: 'Couleur du clip…', icon: 'fa-palette', onClick: () => { openNovaWindow('clip-props', { targets: [{ trackId: cm.trackId, clipId: cm.clip.id }], focus: 'color' }); close(); }},
+      // Verrou (Pro Tools : Clip › Verrouiller) : sur la sélection si ce clip en fait partie.
+      { label: cm.clip.lock === 'edit' ? 'Déverrouiller le clip' : 'Verrouiller le clip', icon: cm.clip.lock === 'edit' ? 'fa-lock-open' : 'fa-lock', shortcut: 'Ctrl+L',
+        title: 'Verrouillé, le clip ne se déplace plus, ne se rogne plus, ne se coupe plus et ne se supprime plus (Pro Tools : Edit Lock).',
+        onClick: () => { close(); runEditCommand('clipLock', { kind: 'edit', clipIds: selTargets().map(x => x.clipId) }); }},
+      { label: cm.clip.lock === 'time' ? 'Libérer la position' : 'Verrouiller la position', icon: 'fa-thumbtack', shortcut: 'Alt+Maj+L',
+        title: 'Le clip reste calé à cet endroit du morceau : il se rogne, se retouche et se règle, mais ne se déplace plus (Pro Tools : Time Lock).',
+        onClick: () => { close(); runEditCommand('clipLock', { kind: 'time', clipIds: selTargets().map(x => x.clipId) }); }},
       'separator',
       // Modes d'édition Pro Tools : Spot (position exacte) et point de synchro.
       { label: simple ? 'Position exacte…' : 'Position exacte (Spot)…', icon: 'fa-crosshairs', shortcut: 'F3 + clic', title: 'Placer le clip au tick, à la milliseconde ou à l’échantillon près, par son début, sa fin ou son point de synchro (Pro Tools : Spot, F3 puis clic)', onClick: () => { setSpotTarget({ trackId: cm.trackId, clipId: cm.clip.id }); close(); }},
@@ -2699,8 +2738,10 @@ useEffect(() => {
                   borderRight: '1px solid var(--border-dim)'
               }}
           >
-            {/* Règle + couloir d'accords */}
-            <div style={{ height: tracksTop, flexShrink: 0, backgroundColor: 'var(--bg-surface)' }} />
+            {/* Règle + couloir d'accords ; en haut, les indicateurs de solo / muet (un appui efface). */}
+            <div style={{ height: tracksTop, flexShrink: 0, backgroundColor: 'var(--bg-surface)' }} className="flex items-start justify-end px-1.5 pt-1 overflow-hidden">
+              <SoloMuteIndicators tracks={tracks} />
+            </div>
             {/* Track Headers */}
             {visibleTracks.map((track) => (
               <div key={track.id} style={{ flexShrink: 0, position: 'relative' }}>
