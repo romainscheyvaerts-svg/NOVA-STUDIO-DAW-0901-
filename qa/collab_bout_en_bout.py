@@ -103,7 +103,12 @@ def diff(a, b):
 def upd(page, js_body):
     """Modification faite comme l'interface (setState → détection → collaboration).
     js_body : corps d'une fonction (d) => {…} ; elle ne lève jamais d'erreur (l'appli resterait figée)."""
-    page.evaluate(f"() => window.__novaTest.update((d) => {{ try {{ {js_body} }} catch (e) {{ console.warn('qa', e); }} }})")
+    # On attend que la modification soit appliquée (setState de React est asynchrone) : sinon la
+    # vérification de convergence qui suit comparait les empreintes AVANT la modification (toutes
+    # identiques) et passait à 0 s, et la vérification suivante lisait un état pas encore reçu.
+    page.evaluate(f"""async () => {{ const before = window.__novaTest.getState();
+        window.__novaTest.update((d) => {{ try {{ {js_body} }} catch (e) {{ console.warn('qa', e); }} }});
+        for (let i = 0; i < 100 && window.__novaTest.getState() === before; i++) await new Promise(r => setTimeout(r, 20)); }}""")
 
 
 def st(page, expr):
@@ -367,6 +372,7 @@ def run():
             ok = st(A, "(() => { const t = d.tracks.find(x => x.id === 'voix'); const p3 = t.clips.find(c => c.id === 'p3'); return !!(p3 && p3.gain === 0.6); })()")
             ok2 = st(E, "(() => { const t = d.tracks.find(x => x.id === 'voix'); const p2 = t.clips.find(c => c.id === 'p2'); return !!(p2 && p2.start === 2.5); })()") if False else st(E, "(() => { const t = d.tracks.find(x => x.id === 'voix'); const p2 = t.clips.find(c => c.id === 'p2'); return p2 ? p2.start : null; })()")
             check("conflit sur deux clips : la baisse de Max est gardée chez Lina", ok)
+            check("conflit sur deux clips : le déplacement de Lina est gardé chez Max", ok2 is not None and abs(ok2 - 4.5) < 1e-6)
             return {"gain_p3_chez_lina": ok, "debut_p2_chez_max": ok2}
         step("Vérification : les deux éditions sont gardées partout", both_kept, conv=False)
 
