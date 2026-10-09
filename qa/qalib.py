@@ -20,6 +20,7 @@ FAKE_WAV = r"D:\1 WORK\CONTENU\nova-promo-2026-10-04\micro_fake.wav"
 
 VIEWPORTS = {
     "pc": {"width": 1600, "height": 900},
+    "pc1366": {"width": 1366, "height": 768},
     "tel": {"width": 432, "height": 768},
     "tab": {"width": 1024, "height": 768},
 }
@@ -44,6 +45,12 @@ window.__novaAppModule = async (path) => {
   return import(/* @vite-ignore */ best || path);
 };
 """
+
+
+SORTIE_AUDIO_INIT = r"""(() => { const label = %s; const md = navigator.mediaDevices; if (!md || !md.enumerateDevices) return;
+  const orig = md.enumerateDevices.bind(md);
+  md.enumerateDevices = async () => { const l = await orig();
+    return [...l.filter(d => d.kind !== 'audiooutput'), { deviceId: 'default', kind: 'audiooutput', label: 'Par défaut - ' + label, groupId: 'qa', toJSON() { return this; } }]; }; })();"""
 
 
 class Log:
@@ -110,6 +117,14 @@ def new_page(browser, vp="pc", log=None, touch=None, storage=None):
     if os.environ.get("QA_CHORD_LANE") == "1":
         ctx.add_init_script("try { localStorage.setItem('nova_chord_lane', '1'); } catch (e) {}")
     ctx.add_init_script(APP_MODULE_INIT)
+    # Sortie audio nommée, comme Chrome la donne sur un vrai PC une fois le micro autorisé
+    # (headless : aucune sortie nommée, la question « Tu as un casque ? » bloquait les séances).
+    # Le VRAI chemin de l'appli est suivi (utils/headphoneDetect lit le nom de la sortie) : rien
+    # n'est pré-répondu dans le stockage. QA_SORTIE_AUDIO=aucune : pas de sortie simulée (la
+    # question revient, comme sur un navigateur muet) ; qa/casque_rec.py simule ses propres sorties.
+    sortie = os.environ.get("QA_SORTIE_AUDIO", "Casque (Realtek(R) Audio)")
+    if sortie and sortie.lower() != "aucune":
+        ctx.add_init_script(SORTIE_AUDIO_INIT % json.dumps(sortie))
     page = ctx.new_page()
     page.set_default_timeout(15000)
     if log is not None:

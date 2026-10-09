@@ -28,6 +28,8 @@ BATTERIE = [
     ("r23_beat_repunch", []), ("r7_sidechain", []), ("r8_automation", []), ("inserts_visibles", []),
     ("pdc_preuve", []), ("pdc_audio_lecture", []),
     ("protools_utiles", []), ("r17_raccourcis_scrub", []), ("catalogue_indisponible", []),
+    # Tour 3 (utilisable et pro) : séance d'ingé complète, restes du tour 2, console du téléphone.
+    ("seance_inge", []), ("restes_pro3", []), ("console_telephone", []),
 ]
 
 
