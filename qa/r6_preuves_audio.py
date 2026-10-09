@@ -15,6 +15,7 @@ rendus du même son sont identiques, sans aucun artifice dans le test.
 NOVA_URL=http://127.0.0.1:3444/ PYTHONIOENCODING=utf-8 python qa/r6_preuves_audio.py
 Sortie : D:\\1 WORK\\CONTENU\\nova-r4-r6\\r6_preuves_audio.json
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import json, os
 from pathlib import Path
 from playwright.sync_api import sync_playwright

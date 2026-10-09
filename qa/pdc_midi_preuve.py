@@ -6,6 +6,7 @@ au même endroit avec ou sans les plugins (la latence est compensée).
 Lecture : on espionne triggerTrackAttack pendant une vraie lecture et on vérifie
 que la note est programmée 50 ms plus tôt que sans latence.
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import json, sys
 from playwright.sync_api import sync_playwright
 

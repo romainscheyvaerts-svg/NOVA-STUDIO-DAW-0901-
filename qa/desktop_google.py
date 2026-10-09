@@ -14,6 +14,7 @@ Usage (après `npx vite build`) :
   setSession est espionné côté réseau (GET /auth/v1/user avec le faux jeton) et par la
   session enregistrée dans le stockage local.
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import base64
 import http.server
 import json
@@ -101,7 +102,9 @@ class Harness:
         self.to_page = queue.Queue()
         self.opened, self.focused, self.logs = [], [], []
         self.bridge = gl.GoogleLoginBridge(self.to_page.put, self.opened.append, lambda: self.focused.append(time.time()),
-                                           timeout=60, ports=PORTS, log=self.logs.append)
+                                           timeout=60, ports=PORTS, log=self.logs.append,
+                                           probe=lambda url: self.probe_result, background=False)
+        self.probe_result = None   # sonde du service de connexion simulée (« auth_down » = 402 simulé)
         self.auth_calls = []
 
     def from_page(self, raw):
@@ -308,6 +311,46 @@ def scenario_ancienne_appli(browser, base, res):
         ctx.close()
 
 
+RESTRICTED = '{"message":"Service for this project is restricted due to the following violations: exceed_egress_quota, exceed_cached_egress_quota."}'
+AUTH_DOWN = "Le service de connexion est momentanément indisponible"
+
+
+def scenario_service_restreint(browser, base, res):
+    print("Scénario 4 : service de connexion restreint (402 simulé) : message clair, pas de page noire")
+    h = Harness()
+    h.probe_result = "auth_down"   # la sonde Python voit le 402 du projet restreint
+    ctx, page, errors = new_app_page(browser, base, h)
+    # Supabase simulé RESTREINT : toutes les requêtes Auth répondent 402 (JSON brut du 09/10/2026).
+    page.route("https://*.supabase.co/**", lambda r, q: r.fulfill(status=402, content_type="application/json", body=RESTRICTED))
+    try:
+        def google():
+            page.goto(base, wait_until="domcontentloaded")
+            page.get_by_role("button", name="Continuer avec Google").click(timeout=30000)
+            h.pump(page, until=lambda: page.get_by_text(AUTH_DOWN).count() > 0, timeout=10)
+            page.get_by_text(AUTH_DOWN).first.wait_for(timeout=5000)
+            assert not h.opened, f"navigateur ouvert malgré le service restreint : {h.opened}"
+            assert "exceed_egress_quota" not in page.inner_text("body") and "restricted" not in page.inner_text("body")
+            assert h.bridge.login is None or h.bridge.login.wait_closed(3), "port resté ouvert"
+            page.get_by_label("E-mail").wait_for()
+            shot(page, "g7_google_service_restreint")
+        step(res, "Google + service restreint : message clair dans Nova, navigateur pas ouvert (plus de page noire)", google)
+
+        def email():
+            page.get_by_label("E-mail").fill("artiste@example.com")
+            page.locator("input[type=password]").first.fill("motdepasse123")
+            page.get_by_role("button", name="Se connecter").first.click()
+            page.get_by_text(AUTH_DOWN).first.wait_for(timeout=10000)
+            t = page.inner_text("body")
+            assert "restricted" not in t and "{" not in t.split(AUTH_DOWN)[0][-5:], t[:300]
+            assert "projets locaux restent accessibles" in t
+            shot(page, "g8_email_service_restreint")
+        step(res, "e-mail + service restreint (402) : même message clair, aucun JSON", email)
+        assert not errors, errors
+    finally:
+        h.bridge.shutdown()
+        ctx.close()
+
+
 def main():
     if not (DIST / "index.html").exists():
         print("dist/ absent : lance d'abord `npx vite build`.")
@@ -317,7 +360,7 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, executable_path=CHROME)
         try:
-            for sc in (scenario_succes, scenario_refus_annulation, scenario_ancienne_appli):
+            for sc in (scenario_succes, scenario_refus_annulation, scenario_ancienne_appli, scenario_service_restreint):
                 try:
                     sc(browser, base, res)
                 except Exception:

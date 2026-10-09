@@ -1,12 +1,16 @@
 """Outils communs aux scénarios QA de NOVA (Playwright headless, aucune fenêtre).
 
-- Bloque toute écriture vers Supabase / services externes (POST, PATCH, PUT, DELETE)
-  pour ne JAMAIS toucher la base de production pendant les tests.
+- QA 100 % hors production (qa_hors_prod) : toute requête *.supabase.co est servie
+  par un catalogue SIMULÉ (beats, pochettes, fonctions, écritures) ; une requête non
+  simulée est bloquée et fait échouer le test. Aucune requête ne part vers la prod.
+- Bloque toute écriture vers les autres services externes (POST, PATCH, PUT, DELETE).
 - Journalise erreurs console, exceptions de page et requêtes en échec.
 """
-import json, os, time, re
+import json, os, sys, time, re
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import qa_hors_prod  # noqa: E402  (avant tout navigateur : Supabase simulé, production bloquée)
+from playwright.sync_api import sync_playwright  # noqa: E402
 
 BASE = os.environ.get("NOVA_URL", "http://127.0.0.1:3300/")
 OUT = Path(os.environ.get("QA_OUT", r"D:\1 WORK\CONTENU\qa-nova-2026-10-04"))
@@ -90,6 +94,8 @@ def new_page(browser, vp="pc", log=None, touch=None, storage=None):
 
     def guard(route, request):
         url = request.url
+        if qa_hors_prod.is_supabase(url):
+            return route.fallback()  # le simulateur répond (écritures comprises), jamais la production
         external = not url.startswith(BASE.rstrip("/")) and not url.startswith("data:") and not url.startswith("blob:")
         if request.method in WRITE_METHODS and external:
             blocked.append(f"{request.method} {url[:140]}")
@@ -98,6 +104,7 @@ def new_page(browser, vp="pc", log=None, touch=None, storage=None):
         return route.continue_()
 
     ctx.route("**/*", guard)
+    qa_hors_prod.install(ctx, log)
     # QA_CHORD_LANE=1 : couloir d'accords affiché (sous la règle) dans tous les modes,
     # pour rejouer les gestes de l'arrangement avec le couloir.
     if os.environ.get("QA_CHORD_LANE") == "1":

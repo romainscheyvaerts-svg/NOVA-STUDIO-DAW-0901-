@@ -7,6 +7,7 @@ reparation_projets.json, collab_coupure_30s.json, surcharge_cpu.json.
 
   PYTHONIOENCODING=utf-8 python qa/rapport_stabilite.py
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import html, json, os
 from pathlib import Path
 

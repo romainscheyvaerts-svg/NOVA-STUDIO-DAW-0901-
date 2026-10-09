@@ -9,6 +9,7 @@ Crête vraie mesurée par deux arbitres : ×4 / 48 coefficients (façon BS.1770)
 et ×8 / 64 coefficients. Elle ne doit JAMAIS dépasser le plafond.
 Usage : python qa/limiteur_preuve.py [url]   (défaut http://localhost:3417/)
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import json, sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright

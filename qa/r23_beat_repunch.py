@@ -33,7 +33,14 @@ from playwright.sync_api import sync_playwright  # noqa
 FFMPEG = "ffmpeg"
 SR = 44100
 STEMS = Path(r"D:\1 WORK\CONTENU\nova-v18-stems\sorties-pont\Test stems\Silence blanc (extrait) 2026-10-07 22-59-22")
-RES = {"name": "r23_beat_repunch", "ok": True, "etapes": {}}
+if not STEMS.exists():
+    # Le dossier d'origine a été nettoyé : un autre rendu des mêmes stems (« Silence blanc (extrait) »,
+    # séparation Voix / Instru du pont) fait l'affaire.
+    _alt = sorted((d for d in Path(r"D:\1 WORK\CONTENU").glob("*/**/Test stems/Silence blanc (extrait) *")
+                   if (d / "Voix.wav").exists() and (d / "Instru.wav").exists()), key=lambda d: d.name)
+    if _alt:
+        STEMS = _alt[0]
+RES ={"name": "r23_beat_repunch", "ok": True, "etapes": {}}
 
 A_BPM, A_ROOT, A_DB = 94, 55, 0.35      # Sol mineur
 B_BPM, B_ROOT, B_DB = 100, 57, 0.12     # La mineur

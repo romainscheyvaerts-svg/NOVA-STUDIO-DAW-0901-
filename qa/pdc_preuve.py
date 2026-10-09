@@ -6,6 +6,7 @@ Faux plugins à latence exacte (DelayNode, comme un VST qui annonce sa latence) 
   beat → master (sans effet)
 Un clic à 1,000 s sur la voix et sur le beat : chaque chemin doit tomber à 1,000 s.
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import json, os
 from playwright.sync_api import sync_playwright
 

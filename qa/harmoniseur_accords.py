@@ -15,6 +15,7 @@ Sorties : D:\\1 WORK\\CONTENU\\nova-finitions-accords\\ (harmoniseur_accords.jso
 
 Usage : NOVA_URL=http://127.0.0.1:3437/ python qa/harmoniseur_accords.py
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import base64, json, os, sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright

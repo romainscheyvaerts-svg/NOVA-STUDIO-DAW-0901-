@@ -9,6 +9,7 @@
 NOVA_URL=http://127.0.0.1:3444/ PYTHONIOENCODING=utf-8 python qa/r4_preset_vst.py
 Sortie : D:\\1 WORK\\CONTENU\\nova-r4-r6\\r4_preset_vst.json
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import json, os, sys
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))

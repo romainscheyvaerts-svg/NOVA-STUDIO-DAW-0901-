@@ -1,6 +1,7 @@
 """Captures (headless, sans fenêtre) des fenêtres des compresseurs analogiques NOVA,
 en thème clair et en thème sombre, PC et téléphone, + contrôle des débordements.
 Usage : NOVA_URL=http://127.0.0.1:3440/ python qa/analog_fenetres.py"""
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import json, os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 from playwright.sync_api import sync_playwright  # noqa: E402

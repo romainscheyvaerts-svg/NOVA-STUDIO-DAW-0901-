@@ -10,6 +10,7 @@
 Usage : python qa/synth_v24_preuve.py [URL]   (par défaut http://localhost:3422/)
 Sorties : D:\\1 WORK\\CONTENU\\nova-v24\\
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import base64, json, sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright

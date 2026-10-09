@@ -20,6 +20,7 @@ Usage : serveur `npx vite --port 3447 --strictPort`, puis
   set NOVA_URL=http://127.0.0.1:3447/ && python qa/r7_sidechain.py
 Sortie : D:\\1 WORK\\CONTENU\\nova-r7-r8\\r7_sidechain.json
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import json, os, sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright

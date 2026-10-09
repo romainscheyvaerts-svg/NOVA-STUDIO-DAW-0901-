@@ -51,7 +51,8 @@ Ce qu'il faut (mode réel) :
 
 Usage :
   python qa/collab_reel.py --simule
-  python qa/collab_reel.py --reel --je-confirme-ecriture-en-production
+  QA_ALLOW_PROD=1 python qa/collab_reel.py --reel --je-confirme-ecriture-en-production
+  (sans QA_ALLOW_PROD=1, qa_hors_prod bloque toute requête vers *.supabase.co)
   python qa/collab_reel.py --nettoyer <id.secret> [...]   (sessions restées en ligne)
 """
 import argparse, json, os, re, sys, time, urllib.request
@@ -389,6 +390,12 @@ if __name__ == "__main__":
     g.add_argument("--nettoyer", nargs="+", metavar="ID.SECRET", help="supprime des sessions de test restées en ligne")
     ap.add_argument("--je-confirme-ecriture-en-production", dest="confirm", action="store_true")
     a = ap.parse_args()
+    # QA hors production (qa_hors_prod) : la production n'est joignable qu'avec QA_ALLOW_PROD=1,
+    # et seulement pour --reel / --nettoyer, qui exigent déjà un GO explicite.
+    if (a.reel or a.nettoyer) and os.environ.get("QA_ALLOW_PROD") != "1":
+        raise SystemExit("Production bloquée par défaut (quota d'egress Supabase) : relance avec QA_ALLOW_PROD=1, après le GO de Romain.")
+    if a.simule and os.environ.get("QA_ALLOW_PROD") == "1":
+        raise SystemExit("--simule se joue hors production : retire QA_ALLOW_PROD=1.")
     if a.nettoyer:
         tok = login(os.environ["NOVA_TEST_ARTISTE_EMAIL"], os.environ["NOVA_TEST_ARTISTE_MDP"])["access_token"]
         for link in a.nettoyer:

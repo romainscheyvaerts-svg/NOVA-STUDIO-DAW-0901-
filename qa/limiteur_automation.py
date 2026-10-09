@@ -19,6 +19,7 @@ Lecture réelle : scénario A capté à la sortie du master (AudioWorklet témoi
 Usage : NOVA_URL=http://127.0.0.1:3431/ python qa/limiteur_automation.py [etiquette]
 Sortie : D:\\1 WORK\\CONTENU\\nova-limiteur-automation\\mesures_<etiquette>.json
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__))); import qa_hors_prod  # noqa: E401,E402,F401  QA hors production : Supabase simulé, prod bloquée
 import json, os, sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright
