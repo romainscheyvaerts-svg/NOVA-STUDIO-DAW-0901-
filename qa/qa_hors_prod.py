@@ -508,9 +508,10 @@ def handle(method: str, url: str, headers: dict, body: bytes | None) -> Resp | N
             return Resp(200, cors, [])
         return None
 
-    # ---------------- Realtime : diffusion HTTP (canal non rejoint) → refusée comme avant (pas de relais)
+    # ---------------- Realtime : diffusion HTTP (canal non rejoint) → coupée comme avant (écriture
+    #                  externe refusée par qalib), sans relais : status 0 = connexion coupée.
     if path.startswith("/realtime/v1/"):
-        return Resp(503, cors, {"error": "Diffusion Realtime indisponible (QA hors production)."})
+        return Resp(0, cors, b"")
 
     # ---------------- Auth (aucun compte : chaque scénario connecté pose ses propres routes)
     if path.startswith("/auth/v1/"):
@@ -573,6 +574,8 @@ def _route_handler(route, request):
     _record(request.method, url, resp, logs)
     if resp is None:
         return _ORIG["route_abort"](route, "blockedbyclient")
+    if resp.status == 0:
+        return _ORIG["route_abort"](route, "failed")
     return _ORIG["route_fulfill"](route, status=resp.status, headers=resp.headers, body=resp.body)
 
 
@@ -798,6 +801,8 @@ def start_server():
             _record(self.command, url, resp)
             if resp is None:
                 resp = Resp(451, _cors(self.headers.get("origin")), {"error": "requête prod bloquée (QA hors production)"})
+            elif resp.status == 0:
+                resp = Resp(503, resp.headers, b"")
             self.send_response(resp.status)
             for k, v in resp.headers.items():
                 if k not in ("content-length", "connection", "transfer-encoding"):

@@ -71,7 +71,7 @@ def run_one(name, args, phase, url, timeout):
 def table(rows, phase, url):
     L = [f"# Batterie de non-régression hors production ({phase})", "",
          f"Serveur : {url} · {time.strftime('%Y-%m-%d %H:%M')} · Supabase simulé (qa/qa_hors_prod.py)", "",
-         "| Scénario | Résultat | Durée | Requêtes Supabase simulées (qa_hors_prod) | + simulées par le scénario | Octets servis | Bloquées | Filet DNS | Vers la prod |",
+         "| Scénario | Résultat | Durée | Requêtes Supabase simulées (qa_hors_prod) | + servies hors simulateur central (simulateurs du scénario, pré-vols CORS) | Octets servis | Bloquées | Filet DNS | Vers la prod |",
          "|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         L.append(f"| {r['scenario']} | {'✅' if r['ok'] else '❌ (code ' + str(r['code']) + ')'} | {r['secs']} s | "
@@ -80,7 +80,7 @@ def table(rows, phase, url):
                  f"{r.get('filet_dns', '—')} | {r['prod'] if r['prod'] is not None else '—'} |")
     tot_req = sum(r["simulees"] or 0 for r in rows)
     L += ["", f"**Total : {sum(r['ok'] for r in rows)}/{len(rows)} scénarios verts · {tot_req} requêtes Supabase simulées · "
-              f"{sum(r.get('simulees_scenario') or 0 for r in rows)} servies par les simulateurs des scénarios · "
+              f"{sum(r.get('simulees_scenario') or 0 for r in rows)} servies par les simulateurs des scénarios ou pré-vols CORS · "
               f"{sum(r['bloquees'] or 0 for r in rows)} bloquées · {sum(r.get('filet_dns') or 0 for r in rows)} arrêtées par le filet DNS · "
               f"{sum(r['prod'] or 0 for r in rows)} vers la production.**"]
     return "\n".join(L) + "\n"
