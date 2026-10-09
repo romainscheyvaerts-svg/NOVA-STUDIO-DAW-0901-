@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { CollabRtc, musicOpusSdp, RtcSignal } from '../services/CollabRtc';
+import { describe, expect, it, vi } from 'vitest';
+import { CollabRtc, musicOpusSdp, OFFER_TIMEOUT_MS, RtcSignal } from '../services/CollabRtc';
 
 /** Audio en direct (talkback, mix de l'ingé) : SDP musique et signalisation adressée. */
 
@@ -56,5 +56,89 @@ describe('signalisation', () => {
     expect(Object.keys(rtc.connectionStates()).sort()).toEqual(['u:lina:pc', 'u:sam:tel']);
     rtc.close();
     expect(FakePc.all.every(p => p.closed)).toBe(true);
+  });
+});
+
+/** Connexion simulée avec les états de signalisation (offre en attente, retour arrière). */
+class SigPc extends FakePc {
+  offers: any[] = [];
+  remoteDescription: any = null;
+  receivers: any[] = [];
+  async createOffer(opts?: any) { this.offers.push(opts || null); return { type: 'offer', sdp: 'a=rtpmap:111 opus/48000/2\r\n' }; }
+  async setLocalDescription(d: any) {
+    if (d.type === 'rollback') { this.signalingState = 'stable'; this.localDescription = null; return; }
+    this.localDescription = d;
+    this.signalingState = d.type === 'offer' ? 'have-local-offer' : 'stable';
+  }
+  async setRemoteDescription(d: any) { this.remoteDescription = d; this.signalingState = d.type === 'offer' ? 'have-remote-offer' : 'stable'; }
+  async createAnswer() { return { type: 'answer', sdp: 'a=rtpmap:111 opus/48000/2\r\n' }; }
+  getReceivers() { return this.receivers; }
+}
+
+describe('mix en direct robuste', () => {
+  const mic = () => { const track = { kind: 'audio', enabled: true, id: 't1' }; return { id: 'mix1', getAudioTracks: () => [track], getTracks: () => [track] } as any; };
+
+  it('offre sans réponse (message égaré) : renvoyée avec redémarrage ICE, puis plus rien une fois la réponse reçue', async () => {
+    vi.useFakeTimers();
+    try {
+      const pcs: SigPc[] = [];
+      const sent: RtcSignal[] = [];
+      const rtc = new CollabRtc({ me: 'u:max:pc', send: s => { sent.push(s); return true; }, onRemote: () => {}, createPc: () => { const p = new SigPc(); pcs.push(p); return p as any; } });
+      rtc.setLocal('mix', mic(), ['u:lina:pc']);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(sent.filter(s => s.type === 'offer')).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(OFFER_TIMEOUT_MS + 10);
+      const offers = sent.filter(s => s.type === 'offer');
+      expect(offers).toHaveLength(2);
+      expect(pcs[0].offers[1]).toEqual({ iceRestart: true });
+      expect(offers[1].kinds).toEqual({ mix1: 'mix' });
+      await rtc.handle({ from: 'u:lina:pc', to: 'u:max:pc', type: 'answer', sdp: 'x' });
+      expect(pcs[0].signalingState).toBe('stable');
+      // Réponse en double (après un renvoi) : ignorée sans erreur.
+      await rtc.handle({ from: 'u:lina:pc', to: 'u:max:pc', type: 'answer', sdp: 'x' });
+      await vi.advanceTimersByTimeAsync(OFFER_TIMEOUT_MS * 3);
+      expect(sent.filter(s => s.type === 'offer')).toHaveLength(2);
+      rtc.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('reprise demandée par l’artiste : l’ingé renvoie une offre neuve (redémarrage ICE)', async () => {
+    const pcs: SigPc[] = [];
+    const sent: RtcSignal[] = [];
+    const rtc = new CollabRtc({ me: 'u:max:pc', send: s => { sent.push(s); return true; }, onRemote: () => {}, createPc: () => { const p = new SigPc(); pcs.push(p); return p as any; } });
+    rtc.setLocal('mix', mic(), ['u:lina:pc']);
+    await new Promise(r => setTimeout(r, 10));
+    await rtc.handle({ from: 'u:lina:pc', to: 'u:max:pc', type: 'answer', sdp: 'x' });
+    await rtc.handle({ from: 'u:lina:pc', to: 'u:max:pc', type: 'resync' });
+    const offers = sent.filter(s => s.type === 'offer');
+    expect(offers).toHaveLength(2);
+    expect(pcs[0].offers[1]).toEqual({ iceRestart: true });
+    // Côté artiste : la demande part vers l'ingé.
+    const asked: RtcSignal[] = [];
+    const lina = new CollabRtc({ me: 'u:lina:pc', send: s => { asked.push(s); return true; }, onRemote: () => {}, createPc: () => new SigPc() as any });
+    lina.requestResync('u:max:pc');
+    expect(asked).toEqual([{ from: 'u:lina:pc', to: 'u:max:pc', type: 'resync' }]);
+    rtc.close(); lina.close();
+  });
+
+  it('ce qui arrive : son, silence (lecture à l’arrêt) ou rien (aucun paquet)', async () => {
+    const pc = new SigPc();
+    let remoteOnTrack: any = null;
+    const rtc = new CollabRtc({ me: 'u:lina:pc', send: () => true, onRemote: () => {}, createPc: () => pc as any });
+    await rtc.handle({ from: 'u:max:pc', to: 'u:lina:pc', type: 'offer', sdp: 'x', kinds: { mixS: 'mix' } });
+    remoteOnTrack = pc.ontrack;
+    const track = { id: 'rt', kind: 'audio', muted: false };
+    const stream = { id: 'mixS', getTracks: () => [track], getAudioTracks: () => [track] } as any;
+    remoteOnTrack({ streams: [stream], track });
+    const st = { packetsReceived: 0, bytesReceived: 0, totalAudioEnergy: 0 };
+    pc.receivers = [{ track, getStats: async () => new Map([['in', { type: 'inbound-rtp', ...st }]]) }];
+    expect(await rtc.health('u:max:pc', 'mix')).toBe('attente');
+    st.packetsReceived = 100; st.bytesReceived = 300;   // ~3 octets par paquet : du silence
+    expect(await rtc.health('u:max:pc', 'mix')).toBe('silence');
+    st.packetsReceived = 200; st.bytesReceived = 15300; st.totalAudioEnergy = 0.02;
+    expect(await rtc.health('u:max:pc', 'mix')).toBe('son');
+    expect(await rtc.health('u:max:pc', 'mix')).toBe('rien');   // plus aucun paquet
+    expect(await rtc.health('u:sam:tel', 'mix')).toBe('rien');  // personne inconnue
+    rtc.close();
   });
 });

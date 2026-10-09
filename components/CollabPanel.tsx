@@ -29,6 +29,12 @@ export interface LiveAudioView {
   remoteMixFrom: string | null;
   listening: boolean;
   onToggleListen: () => void;
+  /**
+   * Pendant l'écoute : ce qui arrive vraiment (mesuré) — en écoute, liaison OK
+   * mais rien ne joue, connexion en cours, ou pas de son reçu (repli sur sa version).
+   */
+  mixStatus?: 'connexion' | 'ecoute' | 'silence' | 'echec';
+  onRetryMix?: () => void;
   /** Qui me parle en ce moment (talkback reçu). */
   talking: string[];
 }
@@ -431,8 +437,9 @@ const CollabPanel: React.FC<Props> = (p) => {
             <div className="p-4 space-y-2 border-b border-white/5" data-testid="collab-audio">
               <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Audio en direct</p>
               <button type="button" data-testid="collab-talk"
-                onPointerDown={(e) => { e.preventDefault(); p.audio!.onTalk(true); }}
-                onPointerUp={() => p.audio!.onTalk(false)} onPointerLeave={() => { if (p.audio!.talkOn) p.audio!.onTalk(false); }} onPointerCancel={() => p.audio!.onTalk(false)}
+                onPointerDown={(e) => { e.preventDefault(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* */ } p.audio!.onTalk(true); }}
+                onPointerUp={() => p.audio!.onTalk(false)} onPointerCancel={() => p.audio!.onTalk(false)}
+                onLostPointerCapture={() => { if (p.audio!.talkOn) p.audio!.onTalk(false); }}
                 onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && !p.audio!.talkOn) { e.preventDefault(); p.audio!.onTalk(true); } }}
                 onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') p.audio!.onTalk(false); }}
                 aria-pressed={p.audio.talkOn}
@@ -451,6 +458,23 @@ const CollabPanel: React.FC<Props> = (p) => {
                   className={`${btn} h-11 w-full ${p.audio.listening ? 'bg-sky-400 text-black' : 'bg-white/10 text-white'}`}>
                   🎧 Écouter le mix de {p.audio.remoteMixFrom} : {p.audio.listening ? 'en cours' : 'non'}
                 </button>
+              )}
+              {p.audio.remoteMixFrom && p.audio.listening && p.audio.mixStatus && (
+                <div role="status" data-testid="collab-mix-status" data-state={p.audio.mixStatus}
+                  className={`rounded-xl px-3 py-2 text-[12px] font-bold ${p.audio.mixStatus === 'ecoute' ? 'bg-emerald-500/15 text-emerald-200'
+                    : p.audio.mixStatus === 'echec' ? 'bg-red-500/15 text-red-200' : 'bg-white/5 text-slate-300'}`}>
+                  {p.audio.mixStatus === 'ecoute' && <>🟢 Mix de {p.audio.remoteMixFrom} : en écoute</>}
+                  {p.audio.mixStatus === 'silence' && <>⏸️ Mix de {p.audio.remoteMixFrom} : bien relié, mais rien ne joue en ce moment (lecture à l’arrêt ou passage silencieux)</>}
+                  {p.audio.mixStatus === 'connexion' && <>⏳ Mix de {p.audio.remoteMixFrom} : connexion…</>}
+                  {p.audio.mixStatus === 'echec' && (
+                    <span className="flex items-center justify-between gap-2">
+                      <span>⚠️ Pas de son reçu : tu réentends ta propre version.</span>
+                      {p.audio.onRetryMix && (
+                        <button type="button" data-testid="collab-mix-retry" onClick={p.audio.onRetryMix} className={`${btn} h-9 px-3 bg-white text-black shrink-0`}>Réessayer</button>
+                      )}
+                    </span>
+                  )}
+                </div>
               )}
               <p className="text-[11px] text-slate-500">
                 {p.audio.remoteMixFrom

@@ -6601,6 +6601,15 @@ function Studio() {
   const mixOutOnRef = useRef(mixOutOn);
   mixOutOnRef.current = mixOutOn;
   const audioElsRef = useRef(new Map<string, HTMLAudioElement>());
+  /** Connexion (clé de membre) dont vient le mix qu'on peut écouter. */
+  const mixPeerRef = useRef<string | null>(null);
+  /** Écoute du mix de l'ingé : ce qui arrive vraiment (getStats) — en écoute, silence, connexion, échec. */
+  const [mixStatus, setMixStatus] = useState<'connexion' | 'ecoute' | 'silence' | 'echec'>('connexion');
+  const mixWatchRef = useRef({ none: 0, fallback: false });
+  const participantName = (peerKey: string) => collabOnlineRef.current.find(m => m.member_key === peerKey)?.display_name || "L'ingé";
+  const setMixElsMuted = (muted: boolean) => {
+    audioElsRef.current.forEach((el, id) => { if (id.endsWith(':mix')) { el.muted = muted; if (!muted) void el.play().catch(() => { /* */ }); } });
+  };
   const rtcPlay = (id: string, stream: MediaStream | null, muted: boolean) => {
     let el = audioElsRef.current.get(id);
     if (!stream) { if (el) { el.pause(); el.srcObject = null; el.remove(); audioElsRef.current.delete(id); } return; }
@@ -6620,6 +6629,19 @@ function Studio() {
         setRemoteAudio(prev => ({ ...prev, [who]: { ...prev[who], [kind]: !!stream } }));
         // Talkback coupé pendant une prise (il ne doit pas finir dans le micro) ; mix : seulement si on l'écoute.
         rtcPlay(`${peer}:${kind}`, stream, kind === 'talk' ? !!stateRef.current.isRecording : !listenRemoteMixRef.current);
+        if (kind === 'mix') {
+          if (stream) mixPeerRef.current = peer;
+          else if (mixPeerRef.current === peer) {
+            mixPeerRef.current = null;
+            // L'ingé arrête de diffuser (ou part) pendant qu'on l'écoute : on rend sa propre sortie,
+            // sinon l'artiste restait sans aucun son (sa sortie coupée, plus de mix reçu).
+            if (listenRemoteMixRef.current) {
+              setListenRemoteMix(false);
+              audioEngine.setCollabOutputMuted(false);
+              setAiNotification(`🎧 ${participantName(peer)} a arrêté de diffuser son mix : tu réentends ta propre version.`);
+            }
+          }
+        }
       },
     });
     rtcRef.current = rtc;
@@ -6629,7 +6651,7 @@ function Studio() {
       audioElsRef.current.forEach((_el, id) => rtcPlay(id, null, true));
       micStreamRef.current?.getTracks().forEach(t => t.stop());
       micStreamRef.current = null;
-      setTalkOn(false); setMixOutOn(false); setRemoteAudio({}); setListenRemoteMix(false);
+      setTalkOn(false); setMixOutOn(false); setRemoteAudio({}); setListenRemoteMix(false); mixPeerRef.current = null;
       audioEngine.setCollabOutputMuted(false);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -6654,22 +6676,33 @@ function Studio() {
     setAiNotification("🎧 Prise en cours : l'écoute du mix de l'ingé est coupée, tu entends ton propre retour.");
   }, [state.isRecording]);
   /** Talkback : maintenir pour parler (le micro reste ouvert, coupé entre deux appuis). */
+  const talkWantedRef = useRef(false);
+  const micPendingRef = useRef<Promise<MediaStream | null> | null>(null);
   const setTalk = useCallback(async (on: boolean) => {
     const c = collabRef.current;
     const rtc = rtcRef.current;
     if (!c || !rtc) return;
+    talkWantedRef.current = on;
     if (on && !micStreamRef.current) {
-      try {
-        micStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-      } catch {
+      // Un seul accès au micro à la fois (appuis rapprochés).
+      micPendingRef.current = micPendingRef.current || navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+        .catch(() => null).finally(() => { micPendingRef.current = null; });
+      const mic = await micPendingRef.current;
+      if (!mic) {
         setAiNotification("🎙️ Talkback : le micro n'est pas disponible (autorise-le dans le navigateur).");
         return;
       }
-      rtc.setLocal('talk', micStreamRef.current, collabOnlineRef.current.map(m => m.member_key));
+      if (!micStreamRef.current) {
+        micStreamRef.current = mic;
+        mic.getAudioTracks().forEach(t => { t.enabled = false; });
+        rtc.setLocal('talk', mic, collabOnlineRef.current.map(m => m.member_key));
+      }
     }
-    micStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = on; });
-    setTalkOn(on);
-    c.client.setPresence({ talk: on });
+    // Relâché pendant l'ouverture du micro : il ne reste pas ouvert.
+    const want = talkWantedRef.current;
+    micStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = want; });
+    setTalkOn(want);
+    c.client.setPresence({ talk: want });
   }, []);
   /** Ingé : diffuser son mix en direct à l'artiste (comme Audiomovers). */
   const toggleMixOut = useCallback(async () => {
@@ -6688,6 +6721,59 @@ function Studio() {
     setAiNotification(on
       ? '📡 Ton mix part en direct (Opus stéréo haut débit) : les autres peuvent l’écouter dans Collaboration, en suivant ta lecture.'
       : '📡 Diffusion du mix arrêtée.');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /**
+   * Pendant l'écoute du mix de l'ingé : ce qui arrive vraiment (getStats, toutes les secondes).
+   * Rien ne passe pendant 3 s : reprise demandée à l'ingé (offre neuve) ; encore rien à 10 s :
+   * repli, l'artiste réentend sa propre version (et un bouton « Réessayer »).
+   */
+  useEffect(() => {
+    mixWatchRef.current = { none: 0, fallback: false };
+    setMixStatus('connexion');
+    if (!listenRemoteMix) return;
+    let alive = true;
+    const tick = async () => {
+      const rtc = rtcRef.current;
+      const peer = mixPeerRef.current;
+      if (!rtc || !peer) return;
+      const h = await rtc.health(peer, 'mix');
+      if (!alive || h === 'attente') return;
+      const w = mixWatchRef.current;
+      if (h === 'son' || h === 'silence') {
+        w.none = 0;
+        if (w.fallback) {
+          w.fallback = false;
+          audioEngine.setCollabOutputMuted(true);
+          setMixElsMuted(false);
+          setAiNotification(`🎧 Le mix de ${participantName(peer)} est revenu : tu l'écoutes de nouveau.`);
+        }
+        setMixStatus(h === 'son' ? 'ecoute' : 'silence');
+        return;
+      }
+      w.none++;
+      if (w.fallback) return;
+      if (w.none === 3 || w.none === 7) rtc.requestResync(peer);
+      if (w.none >= 10) {
+        w.fallback = true;
+        audioEngine.setCollabOutputMuted(false);
+        setMixElsMuted(true);
+        setMixStatus('echec');
+        setAiNotification(`🎧 Pas de son reçu du mix de ${participantName(peer)} : tu réentends ta propre version. Touche « Réessayer » dans Collaboration.`);
+      } else setMixStatus('connexion');
+    };
+    const id = window.setInterval(() => { void tick(); }, 1000);
+    void tick();
+    return () => { alive = false; window.clearInterval(id); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listenRemoteMix]);
+  const retryRemoteMix = useCallback(() => {
+    const peer = mixPeerRef.current;
+    mixWatchRef.current = { none: 0, fallback: false };
+    audioEngine.setCollabOutputMuted(true);
+    setMixElsMuted(false); // dans le geste : la lecture est autorisée
+    if (peer) rtcRef.current?.requestResync(peer);
+    setMixStatus('connexion');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const toggleListenRemoteMix = useCallback(() => {
@@ -7060,6 +7146,9 @@ function Studio() {
       messages: () => collabMessagesRef.current.map(m => ({ from: m.from, text: m.text, mine: !!m.mine, pending: !!m.pending })),
       history: () => collabHistoryRef.current.map(h => ({ who: h.who, text: h.text, undo: !!h.undo, undone: !!h.undone })),
       audio: () => ({ rtc: rtcRef.current?.connectionStates() || {}, remote: remoteAudioRef.current, talkOn: talkOnRef.current, mixOut: mixOutOnRef.current }),
+      /** Ce qui passe vraiment en WebRTC (octets, paquets, niveau) et le journal de signalisation. */
+      rtcStats: () => rtcRef.current?.stats() ?? Promise.resolve({}),
+      rtcTrace: () => rtcRef.current?.traceLog() ?? [],
       latency: () => ({ server: collabRef.current?.client.getStatus().rttMs ?? null, peers: peerLatencyRef.current, sync: peerSyncRef.current, horizon: collabRef.current?.client.horizon ?? null }),
       track: (idOrName: string) => {
         const t = stateRef.current.tracks.find(x => x.id === idOrName || x.name === idOrName);
@@ -9528,6 +9617,7 @@ function Studio() {
             talkOn, onTalk: (on: boolean) => { void setTalk(on); },
             canMixOut: collab.role === 'engineer', mixOutOn, onToggleMixOut: () => { void toggleMixOut(); },
             remoteMixFrom: mixFrom ? nameOf(mixFrom) : null, listening: listenRemoteMix, onToggleListen: toggleListenRemoteMix,
+            mixStatus, onRetryMix: retryRemoteMix,
             talking: collabOnline.filter(m => m.talk && remoteAudio[participantOf(m.member_key)]?.talk && participantOf(m.member_key) !== collab.key).map(m => m.display_name),
           };
         })() : null}

@@ -48,6 +48,16 @@ def launch_rtc(p):
     ])
 
 
+def rtc_diag(page):
+    """Diagnostic WebRTC : getStats (octets, paquets, niveau) par personne, journal de signalisation, éléments audio, moteur."""
+    return page.evaluate("""async () => { const c = window.__novaCollab; if (!c || !c.rtcStats) return null;
+        const stats = await c.rtcStats();
+        const els = [...document.querySelectorAll('audio[data-collab-audio]')].map(el => ({ id: el.getAttribute('data-collab-audio'), paused: el.paused, muted: el.muted,
+            readyState: el.readyState, tracks: el.srcObject ? el.srcObject.getAudioTracks().map(t => ({ id: t.id, state: t.readyState, muted: t.muted, enabled: t.enabled })) : null }));
+        let engine = null; try { const m = await window.__novaAppModule('/engine/AudioEngine.ts'); const ctx = m.audioEngine.ctx; engine = ctx ? { state: ctx.state, t: +ctx.currentTime.toFixed(2) } : null; } catch (e) { engine = String(e); }
+        return { stats, trace: c.rtcTrace().slice(-40).map(x => ({ ...x, t: x.t % 100000 })), elements: els, engine, audio: c.audio() }; }""")
+
+
 def fp(page):
     return page.evaluate("() => window.__novaCollab && window.__novaCollab.fingerprint ? window.__novaCollab.fingerprint() : null")
 
@@ -452,21 +462,48 @@ def run():
             check("talkback : Lina reçoit la voix de Max (niveau > -60 dB)", lvl is not None and lvl > -60)
             # Mix de l'ingé en direct (comme Audiomovers).
             E.get_by_test_id("collab-mix-out").click()
-            E.evaluate("() => window.__novaEdit && window.__novaEdit.getState && 0")
             E.keyboard.press("Escape")
-            E.evaluate("async () => { const m = await window.__novaAppModule('/utils/playheadStore.ts'); m.playheadStore.set(0); }")
-            E.get_by_role("button", name=re.compile(r"^(Lecture|Lire)")).locator("visible=true").first.click()
             open_panel(A)
             wait_for(A, lambda: A.get_by_test_id("collab-mix-listen").count() > 0, 25, step=100, what="« Écouter le mix de Max » chez Lina")
+            diag = {"avant_ecoute": {"E": rtc_diag(E), "A": rtc_diag(A)}}
             A.get_by_test_id("collab-mix-listen").click()
+            mix_state = lambda: A.locator("[data-testid=collab-mix-status]").first.get_attribute("data-state") if A.get_by_test_id("collab-mix-status").count() else None  # noqa
+            # Max est à l'arrêt : la liaison marche, mais rien ne joue — Lina le voit (pas « connexion… » sans fin).
+            try:
+                arret_s = wait_for(A, lambda: mix_state() == "silence", 20, step=200, what="« rien ne joue » chez Lina (Max à l'arrêt)")
+            except AssertionError:
+                arret_s = None
+            check("écoute du mix : Lina voit « bien relié, rien ne joue » tant que Max est à l'arrêt", arret_s is not None)
+            shot(A, "A9a_ecoute_max_a_l_arret")
+            diag["max_a_l_arret"] = {"E": rtc_diag(E), "A": rtc_diag(A), "etat_lina": mix_state()}
+            # Max lance la lecture là où son mix a du son. La phrase 1 (1-3 s) a été coupée plus haut
+            # (clip muet) : son mix est silencieux de 0 à 3,95 s (début de la prise 2 de Lina). Partir de 0
+            # avec une mesure de 4 s ratait souvent tout le son : sous la charge de 3 navigateurs, l'horloge
+            # audio headless de Max avance moins vite (mesuré : 3,35 s chez Max pendant 4,57 s chez Lina) ;
+            # getStats le prouvait : paquets du mix à ~3 octets (silence Opus), liaison WebRTC saine.
+            # (Avant : playheadStore.set(0), qui ne déplace pas le départ de la lecture ; on passe par la commande du DAW.)
+            E.evaluate("() => window.DAW_CONTROL.seek(3.9)"); E.wait_for_timeout(300)
+            t_play = time.time()
+            E.get_by_role("button", name=re.compile(r"^(Lecture|Lire)")).locator("visible=true").first.click()
             mix = A.evaluate("""async () => { const el = document.querySelector('audio[data-collab-audio$=":mix"]'); if (!el || !el.srcObject) return null;
                 const ctx = new AudioContext(); const src = ctx.createMediaStreamSource(el.srcObject); const an = ctx.createAnalyser(); an.fftSize = 2048; src.connect(an);
-                const buf = new Float32Array(2048); let best = -200;
-                for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 100)); an.getFloatTimeDomainData(buf); let s = 0; for (const v of buf) s += v * v; best = Math.max(best, 10 * Math.log10(s / buf.length + 1e-12)); }
-                ctx.close(); return { best_db: +best.toFixed(1), canaux: el.srcObject.getAudioTracks()[0]?.getSettings?.().channelCount || null }; }""")
+                const buf = new Float32Array(2048); let best = -200, first = null; const t0 = performance.now();
+                for (let i = 0; i < 120; i++) { await new Promise(r => setTimeout(r, 100)); an.getFloatTimeDomainData(buf); let s = 0; for (const v of buf) s += v * v;
+                  const db = 10 * Math.log10(s / buf.length + 1e-12); best = Math.max(best, db);
+                  if (db > -60 && first === null) first = Math.round(performance.now() - t0);
+                  if (first !== null && performance.now() - t0 > first + 1500) break; }
+                ctx.close(); return { best_db: +best.toFixed(1), premier_son_ms: first, canaux: el.srcObject.getAudioTracks()[0]?.getSettings?.().channelCount || null }; }""")
+            try:
+                ecoute_s = wait_for(A, lambda: mix_state() == "ecoute", 15, step=200, what="« en écoute » chez Lina")
+            except AssertionError:
+                ecoute_s = None
+            lat("mix de l'ingé : lecture chez Max → son mesuré chez Lina", (time.time() - t_play) * 1000 if mix and mix.get("premier_son_ms") is not None else -1)
+            diag["apres_ecoute"] = {"E": rtc_diag(E), "A": rtc_diag(A), "etat_lina": mix_state()}
+            res["diag_mix_direct"] = diag
             shot(A, "A9_ecoute_mix_de_max"); shot(E, "E5_diffuse_son_mix")
             E.keyboard.press("Space")
             check("mix de l'ingé reçu en direct chez Lina (niveau > -60 dB)", mix is not None and mix["best_db"] > -60)
+            check("écoute du mix : Lina voit « en écoute » quand le son arrive", ecoute_s is not None)
             st_audio = collab(A, "c.audio()")
             A.get_by_test_id("collab-mix-listen").click()
             for pg in (A, E):
