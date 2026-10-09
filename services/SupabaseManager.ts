@@ -6,16 +6,45 @@ import { audioEngine } from '../engine/AudioEngine';
 import { SessionSerializer } from './SessionSerializer';
 import { audioBufferRegistry } from '../utils/audioBufferRegistry';
 import { shouldPersistFrozen } from './VstFreeze';
+import { catalogStatus } from '../utils/catalogStatus';
+import { fetchAudio, noteAudioVersion } from '../utils/audioCache';
 
 // Copie locale du catalogue (fiches seulement, quelques dizaines de Ko) : sans
 // réseau, les beats déjà écoutés restent accessibles (audio en cache).
+// Elle sert aussi à économiser l'egress du projet Supabase : récente (< 10 min),
+// aucune requête ; plus ancienne, une vérification légère (nombre de fiches +
+// dernière modification, quelques octets) avant de retélécharger la liste (≈ 60 Ko).
 const CATALOG_COPY_KEY = 'nova_catalog_copy';
-const saveCatalogCopy = (list: Instrumental[]) => {
-  try { localStorage.setItem(CATALOG_COPY_KEY, JSON.stringify(list)); } catch { /* stockage plein */ }
+const CATALOG_META_KEY = 'nova_catalog_copy_meta';
+export const CATALOG_FRESH_MS = 10 * 60_000;
+export const CATALOG_MAX_AGE_MS = 24 * 3600_000;
+const catalogSignature = (count: number | null | undefined, lastUpdate: string | null | undefined) => `${count ?? '?'}|${lastUpdate ?? ''}`;
+const lastUpdateOf = (list: Instrumental[]) => list.reduce<string>((m, i) => (i.updated_at && i.updated_at > m ? i.updated_at : m), '');
+const saveCatalogCopy = (list: Instrumental[], sig?: string) => {
+  try {
+    localStorage.setItem(CATALOG_COPY_KEY, JSON.stringify(list));
+    localStorage.setItem(CATALOG_META_KEY, JSON.stringify({ savedAt: Date.now(), sig: sig ?? catalogSignature(list.length, lastUpdateOf(list)) }));
+  } catch { /* stockage plein */ }
 };
 const readCatalogCopy = (): Instrumental[] => {
   try { return JSON.parse(localStorage.getItem(CATALOG_COPY_KEY) || '[]'); } catch { return []; }
 };
+const readCatalogMeta = (): { savedAt: number; sig: string | null } => {
+  try {
+    const m = JSON.parse(localStorage.getItem(CATALOG_META_KEY) || 'null');
+    return { savedAt: Number(m?.savedAt) || 0, sig: typeof m?.sig === 'string' ? m.sig : null };
+  } catch { return { savedAt: 0, sig: null }; }
+};
+/** Erreur Supabase avec son code HTTP (402 = projet restreint, quota dépassé). */
+const withStatus = (error: any, status?: number) => {
+  const e: any = new Error(error?.message || (status ? `HTTP ${status}` : 'Catalogue injoignable'));
+  e.status = status ?? error?.status;
+  return e as Error & { status?: number };
+};
+/** Plus de requête vers le catalogue pendant le délai d'attente (quota dépassé, panne). */
+export class CatalogUnavailableError extends Error {
+  constructor() { super('Catalogue momentanément indisponible'); this.name = 'CatalogUnavailableError'; }
+}
 
 export class SupabaseManager {
   private static instance: SupabaseManager;
@@ -652,11 +681,8 @@ export class SupabaseManager {
           // 1. Hydrate Clips
           track.clips.forEach(clip => {
               if (clip.audioRef && !clip.buffer) {
-                  const p = fetch(clip.audioRef)
-                      .then(res => {
-                          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                          return res.arrayBuffer();
-                      })
+                  // Beat du catalogue : cache durable (jamais retéléchargé à chaque ouverture).
+                  const p = fetchAudio(clip.audioRef)
                       .then(arrayBuffer => audioEngine.ctx!.decodeAudioData(arrayBuffer))
                       .then(audioBuffer => {
                           clip.buffer = audioBuffer;
@@ -847,15 +873,32 @@ export class SupabaseManager {
   /** Un seul beat / mélodie (arrivée depuis le site) : pas tout le catalogue. */
   public async getActiveInstrumental(id: string): Promise<Instrumental | null> {
     if (!catalogSupabase) return null;
+    const known = readCatalogCopy().find(i => String(i.id) === String(id));
+    // Fiche déjà connue et copie récente : aucune requête.
+    if (known && Date.now() - readCatalogMeta().savedAt < CATALOG_FRESH_MS) { this.noteVersions([known]); return known; }
+    if (!catalogStatus.canTry()) {
+      if (known) return known;
+      throw new CatalogUnavailableError();
+    }
     try {
-      const { data, error } = await catalogSupabase.from('instrumentals').select('*').eq('id', id).eq('is_active', true).maybeSingle();
-      if (error) throw new Error(error.message || "Catalogue injoignable");
+      const { data, error, status } = await catalogSupabase.from('instrumentals').select('*').eq('id', id).eq('is_active', true).maybeSingle();
+      if (error) throw withStatus(error, status);
+      catalogStatus.ok();
+      if (data) this.noteVersions([data as Instrumental]);
       return (data as Instrumental) || null;
-    } catch (e) {
+    } catch (e: any) {
+      catalogStatus.fail(e, e?.status);
       // Hors ligne : la fiche vient de la dernière copie du catalogue.
-      const offline = readCatalogCopy().find(i => String(i.id) === String(id));
-      if (offline) return offline;
+      if (known) return known;
       throw e;
+    }
+  }
+
+  /** Versions des fichiers audio (date de modification de la fiche) : le cache audio s'y fie. */
+  private noteVersions(list: Instrumental[]) {
+    for (const i of list) {
+      const url = i.preview_url ? this.getPublicInstrumentUrl(i.preview_url) : i.drive_file_id ? this.getDrivePreviewUrl(i.drive_file_id) : '';
+      noteAudioVersion(url, (i as any).drive_modified_at || i.updated_at);
     }
   }
 
@@ -873,35 +916,61 @@ export class SupabaseManager {
   }
 
   private async fetchActiveInstrumentals(): Promise<Instrumental[]> {
-    console.log("[SupabaseManager] getActiveInstrumentals() - catalogSupabase:", !!catalogSupabase);
     if (!catalogSupabase) {
       console.error("[SupabaseManager] catalogSupabase non initialisé!");
       return [];
     }
-    
+    const copy = readCatalogCopy();
+    const meta = readCatalogMeta();
+    const age = Date.now() - meta.savedAt;
+    // 1. Copie récente : aucune requête.
+    if (copy.length && age < CATALOG_FRESH_MS) { this.noteVersions(copy); return copy; }
+    // 2. Catalogue restreint (quota) ou injoignable : délai croissant, aucune requête
+    //    pendant l'attente (chaque essai consommerait encore du quota).
+    if (!catalogStatus.canTry()) {
+      if (copy.length) { this.noteVersions(copy); return copy; }
+      throw new CatalogUnavailableError();
+    }
     try {
-      const { data, error } = await catalogSupabase
+      // 3. Vérification légère : nombre de fiches actives + dernière modification.
+      if (copy.length && meta.sig && age < CATALOG_MAX_AGE_MS) {
+        const { data, error, status, count } = await catalogSupabase
+          .from('instrumentals')
+          .select('updated_at', { count: 'exact' })
+          .eq('is_active', true)
+          .order('updated_at', { ascending: false })
+          .limit(1);
+        if (error) throw withStatus(error, status);
+        if (catalogSignature(count, (data as any)?.[0]?.updated_at) === meta.sig) {
+          saveCatalogCopy(copy, meta.sig);
+          catalogStatus.ok();
+          this.noteVersions(copy);
+          return copy;
+        }
+      }
+      // 4. Liste complète.
+      const { data, error, status } = await catalogSupabase
         .from('instrumentals')
         .select('*')
         .eq('is_active', true)
         .order('created_at', { ascending: false });
-      
-      console.log("[SupabaseManager] getActiveInstrumentals() - data:", data?.length, "error:", error);
-      
-      if (error) { 
-        console.error("Erreur lecture instrumentals actifs:", error); 
+      if (error) {
+        console.warn("Lecture du catalogue impossible :", status, error?.message || error);
         // On propage : un echec reseau doit etre distingue d'un catalogue vide,
         // sinon l'utilisateur hors ligne lit "Aucun instrumental disponible".
-        throw new Error(error.message || "Catalogue injoignable");
+        throw withStatus(error, status);
       }
-      saveCatalogCopy((data || []) as Instrumental[]);
-      return (data || []) as Instrumental[];
+      const list = (data || []) as Instrumental[];
+      saveCatalogCopy(list);
+      catalogStatus.ok();
+      this.noteVersions(list);
+      return list;
     } catch (e: any) {
-      console.error("[SupabaseManager] Exception getActiveInstrumentals:", e);
+      console.warn("[SupabaseManager] Catalogue indisponible :", e?.message || e);
+      catalogStatus.fail(e, e?.status);
       // Hors ligne : dernière copie du catalogue (les beats déjà écoutés jouent
       // depuis le cache audio).
-      const offline = readCatalogCopy();
-      if (offline.length) return offline;
+      if (copy.length) { this.noteVersions(copy); return copy; }
       throw e instanceof Error ? e : new Error("Catalogue injoignable");
     }
   }

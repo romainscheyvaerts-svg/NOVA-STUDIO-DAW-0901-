@@ -1030,9 +1030,9 @@ export class AudioEngine {
       if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed') await this.ctx.resume(); 
       this.stopPreview(); 
       try { 
-          const response = await fetch(url);
-          if (!response.ok) throw new Error(`HTTP: ${response.status}`);
-          const arrayBuffer = await response.arrayBuffer();
+          // Extrait seulement (début du fichier, plage HTTP), ou le fichier entier s'il est en cache.
+          const { fetchAudioPreview } = await import('../utils/audioCache');
+          const { data: arrayBuffer } = await fetchAudioPreview(url);
           const audioBuffer = await this.ctx!.decodeAudioData(arrayBuffer); 
           this.previewSource = this.ctx!.createBufferSource(); 
           this.previewSource.buffer = audioBuffer; 

@@ -11,6 +11,10 @@ import { SavedSessionMeta, formatAgo } from '../utils/sessionStore';
 import { DESKTOP_APP_DOWNLOAD_URL, getNovaDesktop, isNovaDesktop } from '../utils/desktopApp';
 import { tonaliteFr } from '../utils/keyName';
 import { ThemeToggleButton } from './ThemeSwitch';
+import CachedImage from './CachedImage';
+import CatalogUnavailable from './CatalogUnavailable';
+import { fetchAudioPreview } from '../utils/audioCache';
+import { catalogStatus, isQuotaError } from '../utils/catalogStatus';
 
 interface LandingPageProps {
   user: User | null;
@@ -70,23 +74,31 @@ const LandingPage: React.FC<LandingPageProps> = ({
     return beats.find(b => String(b.id) === id) || null;
   }, [instrumentals]);
 
-  // Charger le catalogue d'instrumentaux
+  // Charger le catalogue d'instrumentaux. En cas d'échec (quota Supabase dépassé,
+  // hors ligne) : message clair et nouvel essai automatique avec un délai croissant
+  // (jamais de boucle), sans recharger la page.
+  const [catalogTry, setCatalogTry] = useState(0);
   useEffect(() => {
+    let alive = true;
     const fetchInstrumentals = async () => {
-      setLoading(true);
-      setCatalogError(null);
+      setLoading(prev => prev || instrumentals.length === 0);
       try {
         const data = await supabaseManager.getActiveInstrumentals();
+        if (!alive) return;
         setInstrumentals(data);
+        setCatalogError(null);
       } catch (error: any) {
-        console.error('Failed to load instrumentals:', error);
+        if (!alive) return;
+        console.warn('Catalogue indisponible :', error?.message || error);
         setCatalogError(error?.message || 'Connexion au catalogue impossible');
       } finally {
-        setLoading(false);
+        if (alive) setLoading(false);
       }
     };
     fetchInstrumentals();
-  }, []);
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogTry]);
 
   // Charger les projets cloud si connecté
   useEffect(() => {
@@ -107,13 +119,19 @@ const LandingPage: React.FC<LandingPageProps> = ({
     }
   };
 
+  // Extrait en cours de chargement (le clic suivant l'annule) et son adresse blob:.
+  const previewSeq = useRef(0);
+  const previewBlobUrl = useRef<string | null>(null);
+
   // Stopper la lecture
   const stopPlayback = () => {
+    previewSeq.current++;
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
       audioRef.current = null;
     }
+    if (previewBlobUrl.current) { URL.revokeObjectURL(previewBlobUrl.current); previewBlobUrl.current = null; }
     audioEngine.stopPreview();
     setPlayingId(null);
     setLoadingPreviewId(null);
@@ -148,7 +166,27 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
     setPreviewError(null);
     setLoadingPreviewId(inst.id);
+    const seq = ++previewSeq.current;
 
+    // Écoute = le début du fichier seulement (plage HTTP, ~30 s), gardé en cache :
+    // avant, chaque écoute téléchargeait le beat entier depuis le catalogue.
+    fetchAudioPreview(url).then(({ data, mime }) => {
+      if (seq !== previewSeq.current) return; // annulé (re-clic, autre beat)
+      const blobUrl = URL.createObjectURL(new Blob([data], { type: mime }));
+      previewBlobUrl.current = blobUrl;
+      startPreviewAudio(inst, blobUrl);
+    }).catch((err: any) => {
+      if (seq !== previewSeq.current || err?.name === 'AbortError') return;
+      setLoadingPreviewId(null);
+      setPlayingId(null);
+      setPreviewError(isQuotaError(err?.status, err?.message) || catalogStatus.get()?.kind === 'quota'
+        ? 'Écoute momentanément indisponible : le catalogue est restreint. Tu peux travailler avec tes propres fichiers.'
+        : `Lecture impossible : « ${inst.title} » est injoignable`);
+      setTimeout(() => setPreviewError(null), 4500);
+    });
+  };
+
+  const startPreviewAudio = (inst: Instrumental, url: string) => {
     const audio = new Audio(url);
     audio.volume = 0.8;
     audioRef.current = audio;
@@ -344,7 +382,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-amber-400/15 to-pink-500/15 border border-pink-400/40 rounded-xl hover:border-pink-400/70 transition-all group"
               >
                 <div className="w-12 h-12 rounded-xl overflow-hidden bg-pink-500/20 flex items-center justify-center shrink-0">
-                  {challenge.cover_image_url ? <img src={challenge.cover_image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-xl">🎯</span>}
+                  {challenge.cover_image_url ? <CachedImage src={challenge.cover_image_url} fallback={getCoverImage({ ...challenge, cover_image_url: null })} alt="" className="w-full h-full object-cover" /> : <span className="text-xl">🎯</span>}
                 </div>
                 <div className="text-left min-w-0">
                   <p className="text-[10px] font-black uppercase tracking-widest text-amber-300">🎯 Défi du jour</p>
@@ -468,22 +506,22 @@ const LandingPage: React.FC<LandingPageProps> = ({
           </div>
 
           <div className="flex-1 overflow-y-auto p-4">
+            {!loading && instrumentals.length > 0 && (
+              <CatalogUnavailable compact onRetry={() => setCatalogTry(n => n + 1)} />
+            )}
             {loading ? (
               <div className="flex items-center justify-center h-full">
                 <div className="w-8 h-8 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
               </div>
-            ) : catalogError ? (
-              <div className="flex flex-col items-center justify-center h-full text-slate-500">
-                <i className="fas fa-plug-circle-xmark text-4xl mb-4 text-red-500/60"></i>
-                <p className="text-sm text-slate-400">Catalogue injoignable</p>
-                <p className="text-xs mt-1 text-slate-600">{catalogError}</p>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="mt-4 px-4 py-2 rounded-lg text-xs font-bold bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10"
-                >
-                  Réessayer
-                </button>
-              </div>
+            ) : catalogError && instrumentals.length === 0 ? (
+              <CatalogUnavailable
+                onRetry={() => setCatalogTry(n => n + 1)}
+                actions={[
+                  { label: 'Nouveau projet vierge', icon: 'fa-plus', onClick: onEnterStudio },
+                  { label: 'Ouvrir un projet de cet appareil', icon: 'fa-folder-open', onClick: () => setShowLoadModal(true) },
+                  { label: 'Importer ton instru (MP3, WAV…)', icon: 'fa-file-audio', onClick: handleOpenAudioFile },
+                ]}
+              />
             ) : shown.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-500">
                 <i className="fas fa-music text-4xl mb-4 text-slate-700"></i>
@@ -505,8 +543,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
                   >
                     {/* Cover */}
                     <div className="relative aspect-square">
-                      <img
-                        src={getCoverImage(inst)}
+                      <CachedImage
+                        src={inst.cover_image_url}
+                        fallback={getCoverImage({ ...inst, cover_image_url: null })}
                         alt={inst.title}
                         className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                       />

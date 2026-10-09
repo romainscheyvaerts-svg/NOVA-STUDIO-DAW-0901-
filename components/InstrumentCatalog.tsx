@@ -9,6 +9,9 @@ const AdminPanel = React.lazy(() => import('./AdminPanel'));
 import { audioEngine } from '../engine/AudioEngine';
 import { setDraggedBeat } from '../utils/beatDrag';
 import { tonaliteFr } from '../utils/keyName';
+import CachedImage from './CachedImage';
+import CatalogUnavailable from './CatalogUnavailable';
+import { fetchAudioPreview } from '../utils/audioCache';
 
 interface InstrumentCatalogProps {
   user: User | null;
@@ -36,6 +39,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
     try { localStorage.setItem('nova_store_shelf', s); } catch { /* */ }
   };
   const [loading, setLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -66,14 +70,16 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
   }, []);
 
   const fetchInstrumentals = async () => {
-    setLoading(true);
+    setLoading(prev => prev || allInstrumentals.length === 0);
     try {
       // Récupère uniquement les instrumentaux actifs (is_active = true)
       const data = await supabaseManager.getActiveInstrumentals();
-      console.log("[InstrumentCatalog] Données actives reçues:", data.length, "instruments");
       setAllInstrumentals(data);
+      setCatalogError(null);
     } catch (error: any) {
-      console.error("Failed to load catalog", error.message || error);
+      // Quota Supabase dépassé, hors ligne… : message clair (CatalogUnavailable), pas de boucle.
+      console.warn("Catalogue indisponible :", error?.message || error);
+      setCatalogError(error?.message || 'Catalogue indisponible');
     } finally {
       setLoading(false);
     }
@@ -91,7 +97,13 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
     stopAllPlayback();
   }, [audioMode]);
 
+  // Extrait en cours de chargement (annulé par le clic suivant) et son adresse blob:.
+  const previewSeq = useRef(0);
+  const previewBlobUrl = useRef<string | null>(null);
+
   const stopAllPlayback = () => {
+    previewSeq.current++;
+    if (previewBlobUrl.current) { const u = previewBlobUrl.current; previewBlobUrl.current = null; setTimeout(() => URL.revokeObjectURL(u), 0); }
     if (audioRef.current) {
         const audio = audioRef.current;
         if (playPromiseRef.current) {
@@ -147,9 +159,22 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
     setPlayingId(beat.id);
 
     if (audioMode === 'STANDARD') {
-        const audio = new Audio(url);
+        // Écoute = le début du fichier (plage HTTP, ~30 s), gardé en cache : plus le beat entier.
+        const seq = ++previewSeq.current;
+        let src = url;
+        try {
+            const { data, mime } = await fetchAudioPreview(url);
+            if (seq !== previewSeq.current) return; // annulé entre-temps
+            src = URL.createObjectURL(new Blob([data], { type: mime }));
+            previewBlobUrl.current = src;
+        } catch (err: any) {
+            if (seq !== previewSeq.current || err?.name === 'AbortError') return;
+            console.warn("Extrait indisponible :", err?.message || err);
+            setPlayingId(null);
+            return;
+        }
+        const audio = new Audio(src);
         audio.volume = 0.8;
-        audio.crossOrigin = "anonymous"; 
         audioRef.current = audio;
         audio.onended = () => setPlayingId(null);
         
@@ -353,10 +378,15 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
 
       {/* List View Compact */}
       <div className="flex-1 overflow-y-auto custom-scroll">
+        {!loading && allInstrumentals.length > 0 && (
+          <div className="px-3 pt-3"><CatalogUnavailable compact onRetry={fetchInstrumentals} /></div>
+        )}
         {loading ? (
           <div className="flex justify-center items-center py-10">
              <div className="w-4 h-4 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
           </div>
+        ) : catalogError && allInstrumentals.length === 0 ? (
+          <div className="py-8"><CatalogUnavailable onRetry={fetchInstrumentals} /></div>
         ) : (
           <div className="flex flex-col">
             {displayedInstrumentals.map((inst) => (
@@ -368,7 +398,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
               >
                 {/* Cover & Play */}
                 <div className="relative w-10 h-10 shrink-0 mr-3">
-                    <img src={getCoverImage(inst)} alt={inst.title} className="w-full h-full object-cover rounded-md opacity-80 group-hover:opacity-100" />
+                    <CachedImage src={inst.cover_image_url} fallback={getCoverImage({ ...inst, cover_image_url: null })} alt={inst.title} className="w-full h-full object-cover rounded-md opacity-80 group-hover:opacity-100" />
                     <button 
                         onClick={(e) => togglePlay(inst, e)}
                         aria-label={playingId === inst.id ? `Pause ${inst.title}` : `Écouter ${inst.title}`}
@@ -463,7 +493,7 @@ const InstrumentCatalog: React.FC<InstrumentCatalogProps> = ({ user, onPurchase,
                     </button>
                     
                     <div className="w-full md:w-1/3 bg-nv-bg p-6 flex flex-col items-center justify-center text-center">
-                        <img src={getCoverImage(selectedBeat)} className="w-32 h-32 rounded-lg shadow-lg mb-4" />
+                        <CachedImage src={selectedBeat.cover_image_url} fallback={getCoverImage({ ...selectedBeat, cover_image_url: null })} alt="" className="w-32 h-32 rounded-lg shadow-lg mb-4" />
                         <h2 className="text-lg font-black text-white uppercase">{selectedBeat.title}</h2>
                         <p className="text-[10px] text-slate-500 mb-4">{selectedBeat.bpm || '?'} BPM • {tonaliteFr(selectedBeat.key) || 'tonalité inconnue'}</p>
                     </div>
