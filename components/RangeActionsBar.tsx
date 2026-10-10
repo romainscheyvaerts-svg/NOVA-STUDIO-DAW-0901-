@@ -26,6 +26,22 @@ const RangeActionsBar: React.FC<{ commands: EditCommands; insetLeft?: number }> 
   const [volText, setVolText] = useState('+1');
   const inputRef = useRef<HTMLInputElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  // Pendant un geste commencé ailleurs (glisser une plage, déplacer un clip), la barre
+  // s'efface et laisse passer le pointeur : posée en bas, elle ne doit pas arrêter un
+  // glisser qui passe dessous (la plage s'arrêtait au bord de la barre).
+  const [passive, setPassive] = useState(false);
+  useEffect(() => {
+    const down = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (t && (barRef.current?.contains(t) || (t as HTMLElement).closest?.('[data-testid="range-volume"]'))) return;
+      setPassive(true);
+    };
+    const up = () => setPassive(false);
+    window.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    return () => { window.removeEventListener('pointerdown', down, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true); };
+  }, []);
   useEffect(() => { if (!time) setVolOpen(false); }, [time]);
   useEffect(() => { if (volOpen) setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 0); }, [volOpen]);
   if (!time) return null;
@@ -51,8 +67,9 @@ const RangeActionsBar: React.FC<{ commands: EditCommands; insetLeft?: number }> 
   return (
     <>
     <div ref={barRef} role="toolbar" aria-label="Actions sur la sélection de plage" data-nova-target="range-actions"
-      style={{ left: insetLeft + 12, maxWidth: `calc(100% - ${insetLeft + 24}px)` }}
-      className="absolute bottom-3 z-40 overflow-x-auto flex flex-nowrap items-center gap-1 px-1.5 py-0.5 rounded-xl border border-sky-400/30 bg-nv-surface/95 shadow-2xl backdrop-blur">
+      data-passive={passive ? '1' : '0'}
+      style={{ left: insetLeft + 12, maxWidth: `calc(100% - ${insetLeft + 24}px)`, ...(passive ? { pointerEvents: 'none', opacity: 0.25 } : {}) }}
+      className="absolute bottom-3 z-40 transition-opacity duration-150 overflow-x-auto flex flex-nowrap items-center gap-1 px-1.5 py-0.5 rounded-xl border border-sky-400/30 bg-nv-surface/95 shadow-2xl backdrop-blur">
       <span className="px-2 text-[10px] font-black text-sky-300 whitespace-nowrap" title="Plage sélectionnée (Sélecteur de Pro Tools)">
         Plage {fmt(selLength(time))} · {time.trackIds.length} piste{time.trackIds.length > 1 ? 's' : ''}
       </span>
