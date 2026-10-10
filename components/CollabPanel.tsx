@@ -34,6 +34,8 @@ export interface LiveAudioView {
    * mais rien ne joue, connexion en cours, ou pas de son reçu (repli sur sa version).
    */
   mixStatus?: 'connexion' | 'ecoute' | 'silence' | 'echec';
+  /** Qualité réelle du mix reçu (« stéréo · 509 kb/s ») ; warn : il arrive en mono. */
+  mixQuality?: { text: string; warn: boolean } | null;
   onRetryMix?: () => void;
   /** Qui me parle en ce moment (talkback reçu). */
   talking: string[];
@@ -463,7 +465,10 @@ const CollabPanel: React.FC<Props> = (p) => {
                 <div role="status" data-testid="collab-mix-status" data-state={p.audio.mixStatus}
                   className={`rounded-xl px-3 py-2 text-[12px] font-bold ${p.audio.mixStatus === 'ecoute' ? 'bg-emerald-500/15 text-emerald-200'
                     : p.audio.mixStatus === 'echec' ? 'bg-red-500/15 text-red-200' : 'bg-white/5 text-slate-300'}`}>
-                  {p.audio.mixStatus === 'ecoute' && <>🟢 Mix de {p.audio.remoteMixFrom} : en écoute</>}
+                  {p.audio.mixStatus === 'ecoute' && <>🟢 Mix de {p.audio.remoteMixFrom} : en écoute{p.audio.mixQuality && (
+                    <span data-testid="collab-mix-quality" data-warn={p.audio.mixQuality.warn ? '1' : '0'}
+                      className={`ml-1 font-mono ${p.audio.mixQuality.warn ? 'text-amber-300' : 'text-emerald-300/80'}`}>· {p.audio.mixQuality.text}</span>
+                  )}{p.audio.mixQuality?.warn && <span className="block text-[11px] font-semibold text-amber-200">Il arrive en mono : demande à {p.audio.remoteMixFrom} d’arrêter puis de relancer « Diffuser mon mix ».</span>}</>}
                   {p.audio.mixStatus === 'silence' && <>⏸️ Mix de {p.audio.remoteMixFrom} : bien relié, mais rien ne joue en ce moment (lecture à l’arrêt ou passage silencieux)</>}
                   {p.audio.mixStatus === 'connexion' && <>⏳ Mix de {p.audio.remoteMixFrom} : connexion…</>}
                   {p.audio.mixStatus === 'echec' && (

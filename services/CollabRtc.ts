@@ -21,6 +21,8 @@
  * (prises, gels) et le chat. Rien ne transite par nos serveurs.
  */
 
+import { opusUseFor, streamsByMid, tuneOpusSdp } from '../utils/opusSdp';
+
 export type RtcKind = 'talk' | 'mix';
 
 export interface RtcSignal {
@@ -72,22 +74,15 @@ export const DEFAULT_ICE: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:193
 
 /**
  * Opus en stéréo haut débit pour la musique (le navigateur part sur de la voix
- * mono ~32 kb/s). On garde la correction d'erreurs (FEC) et 10 ms de trame.
+ * mono ~32 kb/s), dans CHAQUE section audio du SDP (utils/opusSdp). On garde la
+ * correction d'erreurs (FEC) et 10 ms de trame.
  */
 export function musicOpusSdp(sdp: string): string {
-  const m = /a=rtpmap:(\d+) opus\/48000\/2/i.exec(sdp);
-  if (!m) return sdp;
-  const pt = m[1];
-  const want = 'stereo=1;sprop-stereo=1;maxaveragebitrate=510000;useinbandfec=1;minptime=10';
-  const re = new RegExp(`a=fmtp:${pt} ([^\\r\\n]*)`);
-  if (re.test(sdp)) {
-    return sdp.replace(re, (_all, params: string) => {
-      const keep = params.split(';').map(s => s.trim()).filter(s => s && !/^(stereo|sprop-stereo|maxaveragebitrate|useinbandfec|minptime)=/i.test(s));
-      return `a=fmtp:${pt} ${[...keep, want].join(';')}`;
-    });
-  }
-  return sdp.replace(m[0], `${m[0]}\r\na=fmtp:${pt} ${want}`);
+  return tuneOpusSdp(sdp);
 }
+
+/** Qualité réelle d'un flux reçu (getStats) : stéréo ou mono, débit. */
+export interface RtcQuality { stereo: boolean | null; kbps: number | null }
 
 interface Peer {
   pc: RTCPeerConnection;
@@ -102,7 +97,9 @@ interface Peer {
   offerTimer: ReturnType<typeof setTimeout> | null;
   offerTries: number;
   /** Dernière mesure reçue, par nature de flux (pour health). */
-  last: Map<RtcKind, { packets: number; energy: number; bytes: number }>;
+  last: Map<RtcKind, { packets: number; energy: number; bytes: number; ts: number }>;
+  /** Qualité mesurée au dernier health (stéréo / mono, débit). */
+  quality: Map<RtcKind, RtcQuality>;
 }
 
 export class CollabRtc {
@@ -180,7 +177,7 @@ export class CollabRtc {
     if (p) return p;
     const make = this.o.createPc || ((cfg: RTCConfiguration) => new RTCPeerConnection(cfg));
     const pc = make({ iceServers: this.o.iceServers || DEFAULT_ICE });
-    p = { pc, polite: this.o.me < key, makingOffer: false, ignoreOffer: false, kinds: {}, senders: new Map(), remote: new Map(), offerTimer: null, offerTries: 0, last: new Map() };
+    p = { pc, polite: this.o.me < key, makingOffer: false, ignoreOffer: false, kinds: {}, senders: new Map(), remote: new Map(), offerTimer: null, offerTries: 0, last: new Map(), quality: new Map() };
     const peer = p;
     this.peers.set(key, p);
     this.trace(key, 'connexion créée');
@@ -217,7 +214,7 @@ export class CollabRtc {
       peer.makingOffer = true;
       const offer = await pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
       if (pc.signalingState !== 'stable') return;
-      await pc.setLocalDescription({ type: 'offer', sdp: musicOpusSdp(offer.sdp || '') });
+      await pc.setLocalDescription({ type: 'offer', sdp: this.tuneSdp(peer, offer.sdp || '') });
       const ok = this.o.send({ from: this.o.me, to: key, type: 'offer', sdp: pc.localDescription?.sdp, kinds: this.localKinds() });
       this.trace(key, `offre envoyée${iceRestart ? ' (reprise)' : ''}${ok ? '' : ' (direct coupé)'} ${JSON.stringify(this.localKinds())}`);
       this.armOfferWatch(key, peer);
@@ -260,27 +257,53 @@ export class CollabRtc {
     if (!p) return 'rien';
     const ids = new Set<string>();
     p.remote.forEach((st, id) => { if ((p.kinds[id] || 'talk') === kind) st.getTracks().forEach(t => ids.add(t.id)); });
-    let packets = 0, energy = 0, bytes = 0, found = false;
+    let packets = 0, energy = 0, bytes = 0, found = false, ts = 0;
+    let stereo: boolean | null = null;
     try {
       for (const r of p.pc.getReceivers()) {
         if (!r.track || !ids.has(r.track.id)) continue;
+        try { const ch = Number((r.track.getSettings() as any)?.channelCount); if (ch > 0) stereo = ch >= 2; } catch { /* */ }
         const rep = await r.getStats();
+        const codecs = new Map<string, any>();
+        rep.forEach((x: any) => { if (x.type === 'codec') codecs.set(x.id, x); });
         rep.forEach((x: any) => {
           if (x.type !== 'inbound-rtp') return;
           found = true;
           packets += x.packetsReceived || 0; bytes += x.bytesReceived || 0; energy += x.totalAudioEnergy || 0;
+          ts = Math.max(ts, x.timestamp || 0);
+          // Sans réglage de la piste : la ligne fmtp négociée dit si le décodeur est stéréo.
+          const fmtp = String(codecs.get(x.codecId)?.sdpFmtpLine || '');
+          if (stereo === null && fmtp) stereo = /(^|;)\s*stereo=1/.test(fmtp);
         });
       }
     } catch { return 'rien'; }
     if (!found) return 'rien';
     const prev = p.last.get(kind);
-    p.last.set(kind, { packets, energy, bytes });
-    if (!prev) return 'attente';
+    p.last.set(kind, { packets, energy, bytes, ts });
+    if (!prev) { p.quality.set(kind, { stereo, kbps: null }); return 'attente'; }
+    const dt = ts - prev.ts;
+    p.quality.set(kind, { stereo, kbps: dt > 0 ? Math.round((bytes - prev.bytes) * 8 / dt) : null });
     const dp = packets - prev.packets;
     if (dp <= 0) return 'rien';
     // Silence Opus : ~3 octets par paquet ; de la musique : bien plus.
     const perPacket = (bytes - prev.bytes) / dp;
     return energy - prev.energy > 1e-7 || perPacket > 12 ? 'son' : 'silence';
+  }
+
+  /**
+   * Opus réglé section par section : le mix en stéréo 510 kb/s, le talkback en voix.
+   * Le mix peut arriver sur la 2e ou 3e section audio (talkback ouvert avant) : avant,
+   * seule la 1re était réglée et le mix arrivait en MONO chez l'artiste.
+   */
+  private tuneSdp(p: Peer, sdp: string): string {
+    const local = this.localKinds();
+    const remote = streamsByMid(p.pc.remoteDescription?.sdp);
+    return tuneOpusSdp(sdp, (sec) => opusUseFor(sec, local, p.kinds, remote));
+  }
+
+  /** Qualité du flux reçu de `peer` (stéréo / mono, débit), mesurée au dernier `health`. */
+  quality(peer: string, kind: RtcKind): RtcQuality | null {
+    return this.peers.get(peer)?.quality.get(kind) ?? null;
   }
 
   private localKinds(): Record<string, RtcKind> {
@@ -302,6 +325,8 @@ export class CollabRtc {
       if (old.track === track) return;
       try { p.pc.removeTrack(old); } catch { /* */ }
     }
+    // Indice pour le navigateur : de la musique (mix) ou de la parole (talkback).
+    try { if ('contentHint' in track && !track.contentHint) track.contentHint = kind === 'mix' ? 'music' : 'speech'; } catch { /* */ }
     const sender = p.pc.addTrack(track, stream);
     p.senders.set(kind, sender);
     if (kind === 'mix') {
@@ -344,7 +369,7 @@ export class CollabRtc {
           // On envoie aussi ce qu'on a (talkback ouvert de notre côté).
           this.local.forEach((_s, k) => this.attach(p, k));
           const answer = await p.pc.createAnswer();
-          await p.pc.setLocalDescription({ type: 'answer', sdp: musicOpusSdp(answer.sdp || '') });
+          await p.pc.setLocalDescription({ type: 'answer', sdp: this.tuneSdp(p, answer.sdp || '') });
           this.o.send({ from: this.o.me, to: sig.from, type: 'answer', sdp: p.pc.localDescription?.sdp, kinds: this.localKinds() });
         }
       } else if (sig.type === 'ice') {

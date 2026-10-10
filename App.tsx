@@ -184,7 +184,8 @@ import ArrangeLane, { ARRANGE_LANE_H, useArrangeLaneShown } from './components/A
 import { StructureTracksContext } from './components/TrackStructure';
 import { applyMixFields, touchesPlugins, touchesAutomation, changedFields, fieldSig, fieldSigsOf, legacyMixToFields, LwwClock, MixFields, mixFieldsOf, sanitizeIncomingClips } from './utils/collabMerge';
 import { CollabStatus, collabStatusView } from './utils/collabStatus';
-import { CollabRtc, RtcSignal } from './services/CollabRtc';
+import { CollabRtc, RtcSignal, RtcQuality } from './services/CollabRtc';
+import { mixQualityLabel } from './utils/opusSdp';
 import { sessionPrint, trackParts } from './utils/collabFingerprint';
 import {
   CONTENT_FORMAT, KnownContent, canSendContent, canSendMix, canonicalOrder, contentAllowed, contentDelta, deleteAllowed, isEmptyDelta,
@@ -6605,6 +6606,8 @@ function Studio() {
   const mixPeerRef = useRef<string | null>(null);
   /** Écoute du mix de l'ingé : ce qui arrive vraiment (getStats) — en écoute, silence, connexion, échec. */
   const [mixStatus, setMixStatus] = useState<'connexion' | 'ecoute' | 'silence' | 'echec'>('connexion');
+  /** Qualité réelle du mix reçu (stéréo / mono, débit), lue avec l'état ci-dessus. */
+  const [mixQuality, setMixQuality] = useState<RtcQuality | null>(null);
   const mixWatchRef = useRef({ none: 0, fallback: false });
   const participantName = (peerKey: string) => collabOnlineRef.current.find(m => m.member_key === peerKey)?.display_name || "L'ingé";
   const setMixElsMuted = (muted: boolean) => {
@@ -6731,6 +6734,7 @@ function Studio() {
   useEffect(() => {
     mixWatchRef.current = { none: 0, fallback: false };
     setMixStatus('connexion');
+    setMixQuality(null);
     if (!listenRemoteMix) return;
     let alive = true;
     const tick = async () => {
@@ -6738,7 +6742,9 @@ function Studio() {
       const peer = mixPeerRef.current;
       if (!rtc || !peer) return;
       const h = await rtc.health(peer, 'mix');
-      if (!alive || h === 'attente') return;
+      if (!alive) return;
+      setMixQuality(rtc.quality(peer, 'mix'));
+      if (h === 'attente') return;
       const w = mixWatchRef.current;
       if (h === 'son' || h === 'silence') {
         w.none = 0;
@@ -9617,7 +9623,7 @@ function Studio() {
             talkOn, onTalk: (on: boolean) => { void setTalk(on); },
             canMixOut: collab.role === 'engineer', mixOutOn, onToggleMixOut: () => { void toggleMixOut(); },
             remoteMixFrom: mixFrom ? nameOf(mixFrom) : null, listening: listenRemoteMix, onToggleListen: toggleListenRemoteMix,
-            mixStatus, onRetryMix: retryRemoteMix,
+            mixStatus, onRetryMix: retryRemoteMix, mixQuality: mixQualityLabel(mixQuality),
             talking: collabOnline.filter(m => m.talk && remoteAudio[participantOf(m.member_key)]?.talk && participantOf(m.member_key) !== collab.key).map(m => m.display_name),
           };
         })() : null}

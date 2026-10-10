@@ -509,6 +509,9 @@ def run():
             shot(A, "A9_ecoute_mix_de_max"); shot(E, "E5_diffuse_son_mix")
             E.keyboard.press("Space")
             check("mix de l'ingé reçu en direct chez Lina (niveau > -60 dB)", mix is not None and mix["best_db"] > -60)
+            # Talkback ouvert AVANT le mix (ci-dessus) : le mix part sur une 2e section audio, qui doit
+            # être réglée en Opus stéréo elle aussi (mesure complète : qa/mix_direct_stereo.py).
+            check("mix de l'ingé reçu en STÉRÉO chez Lina (piste à 2 canaux)", mix is not None and mix.get("canaux") == 2)
             check("écoute du mix : Lina voit « en écoute » quand le son arrive", ecoute_s is not None)
             st_audio = collab(A, "c.audio()")
             A.get_by_test_id("collab-mix-listen").click()
