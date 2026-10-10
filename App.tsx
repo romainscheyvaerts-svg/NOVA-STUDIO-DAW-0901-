@@ -93,6 +93,7 @@ import { restoreLastSelection } from './utils/selectionMemory';
 import { useRevertToSaved } from './hooks/useRevertToSaved';
 import { circuitFrom, insertIndexAfter, pickAudioFile, trackNameFromFile } from './utils/importPlacement';
 import { initialSidebarOpen, rememberSidebar } from './utils/sidebarPref';
+import { useSidebarFollowsMode } from './hooks/useSidebarFollowsMode';
 import { savedAgo } from './utils/revertToSaved';
 const RevertToSavedDialog = lazy(() => import('./components/RevertToSavedDialog'));
 import { midiInput } from './services/MidiInput';
@@ -255,10 +256,12 @@ import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 import { setFeedbackAppState } from './utils/feedbackContext';
 import { setFeedbackUserEmail } from './services/feedback';
 import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds } from './utils/punch';
-import { splitLoopPasses, keptLoopPasses, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
+import { splitLoopPasses, keptLoopPasses, droppedPassNote, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
 import { compSwipe, compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
 import AutoCompCard, { AutoCompProposal } from './components/AutoCompCard';
+import ImportTempoCard from './components/ImportTempoCard';
+import { useImportTempo } from './hooks/useImportTempo';
 import { autoComp, SpanReader } from './utils/autoComp';
 import { editSelectionStore } from './utils/editSelection';
 import { useEditCommands } from './hooks/useEditCommands';
@@ -928,6 +931,8 @@ function Studio() {
   const [masterNovaOpen, setMasterNovaOpen] = useState(false);
   const [midiEditorOpen, setMidiEditorOpen] = useState<{trackId: string, clipId: string} | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(initialSidebarOpen);
+  // Passage en mode avancé après l’ouverture (ingé son, mode instru) : le store se replie si rien n’a été choisi.
+  useSidebarFollowsMode(setIsSidebarOpen);
   const [activeSideBrowserTab, setActiveSideBrowserTab] = useState<'STORE' | 'FX' | 'BRIDGE'>('STORE');
 
   useEffect(() => {
@@ -1959,7 +1964,7 @@ function Studio() {
     const names = (ids: string[]) => ids.map(id => `« ${stateRef.current.tracks.find(t => t.id === id)?.name || id} »`).join(', ');
     if (p0.loopCount) {
       setTakeLanesOpen(prev => ({ ...prev, ...Object.fromEntries(trackIds.map(id => [id, true])) }));
-      setAiNotification(`🔁 ${p0.loopCount} prises enregistrées en boucle (Prise ${p0.firstTake} à ${p0.firstTake + p0.loopCount - 1})${multi ? ` sur ${trackIds.length} pistes (${names(trackIds)}), groupées par tour` : ''} — tu entends la Prise ${p0.activeTake}. Balaie un passage dans un couloir pour le garder${multi ? ' (les autres pistes suivent)' : ''}. Annuler pour revenir.`);
+      setAiNotification(`🔁 ${p0.loopCount} prises enregistrées en boucle (Prise ${p0.firstTake} à ${p0.firstTake + p0.loopCount - 1})${multi ? ` sur ${trackIds.length} pistes (${names(trackIds)}), groupées par tour` : ''} — tu entends la Prise ${p0.activeTake}.${droppedPassNote(p0.droppedPass)} Balaie un passage dans un couloir pour le garder${multi ? ' (les autres pistes suivent)' : ''}. Annuler pour revenir.`);
       return first;
     }
     const mutedOld = [...placed.values()].reduce((s, p) => s + p.mutedOld, 0);
@@ -1971,6 +1976,7 @@ function Studio() {
     if (cleaned) parts.push(`${cleaned.removedSec.toFixed(1)} s de blanc retirées`);
     if (takeGainDb) parts.push(`niveau ajusté (${takeGainDb > 0 ? '+' : ''}${Math.round(takeGainDb)} dB)`);
     if (mutedOld) parts.push(punch ? 'passage remplacé dans l\'ancienne prise' : `l'ancienne prise est coupée`);
+    if (p0.droppedPass) parts.push(droppedPassNote(p0.droppedPass).trim());
     parts.push('▶ pour l\'écouter · Annuler pour revenir');
     setAiNotification(parts.join(' — '));
     // QuickPunch : la lecture continue, pas de carte de coaching au milieu (ni en multipiste).
@@ -3080,6 +3086,15 @@ function Studio() {
 
   // ANCIEN SYSTÈME D'IMPORT SUPPRIMÉ - Remplacé par handleNewAudioImport
 
+  // Beat importé du PC : tempo et tonalité détectés, proposés en un geste (hooks/useImportTempo).
+  const importTempo = useImportTempo({
+    getProject: () => stateRef.current,
+    applyBpm: (bpm) => handleUpdateBpm(bpm),
+    applyKey: (rootKey, scale) => applyProjectKey(rootKey, scale),
+    notify: (text) => setAiNotification(text),
+    keyName: (rootKey, scale) => nomTonalite(rootKey, scale),
+  });
+
   // ✨ NOUVEAU SYSTÈME D'IMPORT AUDIO - Simple et fiable
   const handleNewAudioImport = useCallback(async (file: File) => {
     if (!(await requireProRef.current('Importer un son de ton ordinateur (une instru venue d\'ailleurs) fait partie de Nova Pro.'))) return false;
@@ -3120,6 +3135,7 @@ function Studio() {
       };
 
       // 6. Créer une nouvelle piste audio et ajouter le clip
+      const toBeatTrack = stateRef.current.tracks.some(t => t.id === 'instrumental' && t.type === TrackType.AUDIO && !(t.clips || []).length);
       setState(produce((draft: DAWState) => {
         // 1er son importé dans un projet neuf ou un modèle : la piste « Beat » vide le reçoit
         // (avant, une piste de plus apparaissait et « Beat » restait vide, avec ses réglages).
@@ -3156,6 +3172,7 @@ function Studio() {
 
       console.log(`✅ [Import] Fichier importé: ${file.name} (${audioBuffer.duration.toFixed(2)}s)`);
       setAiNotification(`✅ Importé : ${file.name}`);
+      void importTempo.offer(audioBuffer, file.name, toBeatTrack);
 
     } catch (error: any) {
       console.error('❌ [Import Error]', error);
@@ -4002,6 +4019,7 @@ function Studio() {
     toggleRecord: () => { void handleToggleRecord(); },
     seek: handleSeek,
     toggleLoop: () => setState(prev => ({ ...prev, isLoopActive: !prev.isLoopActive })),
+    setLoop: (on, loopStart, loopEnd) => setState(prev => ({ ...prev, isLoopActive: on, loopStart, loopEnd })),
     toggleMetronome: () => { void handleToggleMetronome(); },
     addMarker: (t) => handleAddMarkerHere(t),
     selectTrack: (id) => setVisualState({ selectedTrackId: id }),
@@ -4086,6 +4104,9 @@ function Studio() {
           const clipDuration = audioBuffer.duration;
           const clipStart = startTime ?? playheadStore.get();
           const clipColor = UI_CONFIG.TRACK_COLORS[stateRef.current.tracks.length % UI_CONFIG.TRACK_COLORS.length];
+          // Fichier du PC posé sur la piste « Beat » (ou nommé comme un beat) : tempo proposé (useImportTempo).
+          const userFileToBeat = source instanceof File && instrumentId === undefined && !(sourceBpm && sourceBpm > 0)
+              && (forcedTrackId ? forcedTrackId === 'instrumental' : stateRef.current.tracks.some(t => t.id === 'instrumental' && !t.clips.length));
 
           setState(produce((draft: DAWState) => {
               let targetTrackId: string | null = null;
@@ -4157,6 +4178,7 @@ function Studio() {
           }));
 
           setExternalImportNotice(`✅ Importé : ${clipName}`);
+          if (source instanceof File && instrumentId === undefined && !(sourceBpm && sourceBpm > 0)) void importTempo.offer(audioBuffer, name, userFileToBeat);
           console.log(`[AudioImport] Successfully imported: ${clipName} (bufferId: ${bufferId})`);
           // Rendu pour l'appelant (analyse du beat : tonalité, BPM).
           return audioBuffer;
@@ -9297,6 +9319,8 @@ function Studio() {
       <BeatSwapResultCard api={r23} compact={isMobile} />
       <RepunchCompareCard api={r23} compact={isMobile} />
       {isMobile && !r23.compare && <RedoSpotsSheet />}
+      <ImportTempoCard proposal={importTempo.proposal} detecting={importTempo.detecting} keyName={nomTonalite}
+        onAccept={importTempo.accept} onDismiss={importTempo.dismiss} />
       <AutoCompCard proposal={autoCompProposal}
         onKeep={() => { autoCompBeforeRef.current = null; setAutoCompProposal(null); setAiNotification("✓ Comp de l'IA gardé — tu peux encore le retoucher en balayant dans les couloirs."); }}
         onRevert={handleAutoCompRevert}

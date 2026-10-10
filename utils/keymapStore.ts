@@ -53,7 +53,8 @@ const PROTOOLS: KeymapPreset = {
     'nova.tap': [],
     'pt.quickPunch': ['ctrl+shift+p'],
     'pt.numPlay': ['num0'], 'pt.numRew': ['num1'], 'pt.numFf': ['num2'], 'pt.numLoop': ['num4'],
-    'pt.numLoopRec': ['num5'], 'pt.numQuickPunch': ['num6'], 'pt.numClick': ['num7'], 'pt.numCountoff': ['num8'], 'pt.numMidiMerge': ['num9'],
+    // Loop Record : Alt+L dans Pro Tools Windows (dans NOVA, Alt+L est le shuttle avant).
+    'pt.numLoopRec': ['num5', 'alt+l'], 'shuttle.fwd': [], 'pt.numQuickPunch': ['num6'], 'pt.numClick': ['num7'], 'pt.numCountoff': ['num8'], 'pt.numMidiMerge': ['num9'],
     // Repères
     'nova.marker': [],
     'pt.newMarker': ['numenter'],

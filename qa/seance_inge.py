@@ -282,9 +282,20 @@ def run(page, log, ch, files):
 
     # 3. Tempo ---------------------------------------------------------------------------------
     ch.start("Préparer", "Tempo du beat (140 BPM)", protools="Double-clic sur le tempo + saisie + Entrée (1 clic, 4 touches)")
+    # Tempo détecté à l'import : une carte propose de régler le projet en un geste (sans l'imposer).
+    card = page.locator("[data-testid=import-tempo-apply]:visible")
+    try: card.first.wait_for(timeout=8000)
+    except Exception: pass
+    res["tempo_propose"] = page.locator("[data-testid=import-tempo-bpm]").first.inner_text() if page.locator("[data-testid=import-tempo-bpm]").count() else None
     if abs((app_state(page, "s => s.bpm") or 0) - BPM) < 0.01:
         ch.cur["chemin"].append("déjà à 140 (tempo détecté à l'import)")
+    elif card.count() and res["tempo_propose"] and abs(float(res["tempo_propose"].split()[0].replace(",", ".")) - BPM) < 0.6:
+        page.screenshot(path=str(OUT / "02b_tempo_propose.png"))
+        ch.click(card.first, f"Régler le projet à {res['tempo_propose']} (carte du beat importé)")
+        ch.wait_js(f"() => Math.abs(window.__novaEdit.getState().bpm - {BPM}) < 0.6", 5000, "tempo 140")
     else:
+        if res["tempo_propose"] is None: ch.friction("le tempo du beat importé n'est pas détecté (rien n'est proposé)")
+        else: ch.friction(f"tempo proposé faux : {res['tempo_propose']} au lieu de {BPM}")
         b = reachable(ch, "[data-testid=open-tempo]", "Tempo")
         if b: ch.click(b, "Tempo")
         elif not open_by_palette(ch, "tempo", "pal.tempo"): ch.fail("fenêtre Tempo introuvable")
@@ -311,11 +322,17 @@ def run(page, log, ch, files):
     ch.drag(time_x(page, REFRAIN[0]), y, time_x(page, REFRAIN[1]), y, "plage du refrain (4 mesures)")
     sel = page.evaluate("async () => { const m = await window.__novaAppModule('/utils/editSelection.ts'); const t = m.editSelectionStore.get().time; return t && [t.start, t.end]; }")
     res["selection_refrain"] = sel
-    ch.press("Alt+l")  # Loop Record (Pro Tools : Alt+L)
+    # Loop Record : Alt+L dans le préréglage clavier « Pro Tools » (comme Pro Tools Windows) ; dans le
+    # préréglage NOVA (par défaut), Alt+L est le shuttle avant et L boucle la plage (qa/r17_raccourcis_scrub
+    # vérifie les deux) : la séance prend la touche du préréglage actif.
+    preset = page.evaluate("async () => (await window.__novaAppModule('/utils/keymapStore.ts')).keymapStore.get().preset")
+    res["preset_clavier"] = preset
+    loop_key = "Alt+l" if preset == "protools" else "l"
+    ch.press(loop_key)  # Loop Record
     lr = app_state(page, "s => ({ loop: s.isLoopActive, a: s.loopStart, b: s.loopEnd, lr: !!s.loopRecord })")
     res["loop_record"] = lr
     if lr and not lr["loop"]:
-        ch.friction("Alt+L n'allume pas la boucle sur la plage (Loop Record)"); ch.press("l")
+        ch.friction(f"{loop_key} n'allume pas la boucle sur la plage (Loop Record, préréglage {preset})"); ch.press("l")
         lr = app_state(page, "s => ({ loop: s.isLoopActive, a: s.loopStart, b: s.loopEnd, lr: !!s.loopRecord })")
     if lr and abs((lr["b"] - lr["a"]) - 4 * BAR) > 0.3: ch.friction(f"la boucle ne suit pas la plage sélectionnée ({lr['a']:.2f}→{lr['b']:.2f} s)")
     ch.press("5")  # Smart Tool
@@ -339,6 +356,8 @@ def run(page, log, ch, files):
     lanes = page.evaluate("""async () => { const P = await window.__novaAppModule('/utils/playlists.ts'); const s = window.__novaEdit.getState();
       const t = s.tracks.find(x => x.id === 'voix-lead'); return P.listLanes(t).map(l => ({ n: l.n, label: l.label, start: +l.start.toFixed(2), end: +l.end.toFixed(2), used: +l.used.toFixed(2) })); }""")
     res["prises_lead"] = lanes
+    courtes = [l for l in (lanes or []) if l["end"] - l["start"] < 0.5 * 4 * BAR]
+    if courtes: ch.friction("un tour de boucle commencé juste avant l'arrêt laisse une prise courte (" + ", ".join(f"{l['label']}" for l in courtes) + ")")
     page.mouse.move(5, 5)
     page.screenshot(path=str(OUT / "04_prises_lead.png"))
     tst = toast_text(page)
@@ -514,6 +533,15 @@ def run(page, log, ch, files):
     ch.press("4")
     clear_way(ch, time_x(page, REFRAIN[0]), y, "début de la plage du refrain")
     ch.drag(time_x(page, REFRAIN[0]), y, time_x(page, REFRAIN[1]), y, "plage du refrain sur la lead")
+    # La barre des actions de la plage ne doit cacher ni la règle (40 px en haut de la grille) ni sortir de l'écran.
+    res["barre_plage"] = page.evaluate("""() => { const b = document.querySelector('[data-nova-target=range-actions]'); const g = document.querySelector('.nova-grille .custom-scroll');
+      if (!b || !g) return null; const r = b.getBoundingClientRect(), z = g.getBoundingClientRect();
+      const regle = { top: z.top, bottom: z.top + 40, left: z.left, right: z.right };
+      const sur_regle = r.bottom > regle.top && r.top < regle.bottom && r.right > regle.left && r.left < regle.right;
+      return { haut: Math.round(r.top), bas: Math.round(r.bottom), gauche: Math.round(r.left), droite: Math.round(r.right), sur_la_regle: sur_regle,
+               dans_l_ecran: r.left >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1 && r.top >= 0 }; }""")
+    if res["barre_plage"] and res["barre_plage"]["sur_la_regle"]: ch.friction("la barre d'actions de la plage recouvre la règle")
+    if res["barre_plage"] and not res["barre_plage"]["dans_l_ecran"]: ch.friction("la barre d'actions de la plage sort de l'écran")
     vol = visible_first(page, "[data-nova-target=range-actions] button[aria-label^='Volume']")
     if vol:
         ch.click(vol, "Volume de la plage")

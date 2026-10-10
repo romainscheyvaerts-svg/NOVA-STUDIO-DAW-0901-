@@ -222,3 +222,25 @@ describe('R17 · tous les gestionnaires lisent la table active', () => {
     expect(presetById('inconnu').id).toBe('nova');
   });
 });
+
+describe('Loop Record (Alt+L de Pro Tools)', () => {
+  it('préréglage Pro Tools : Alt+L = Loop Record ; préréglage NOVA : Alt+L reste le shuttle avant', async () => {
+    const { keymapStore } = await import('../utils/keymapStore');
+    const { keysOf } = await import('../utils/keymap');
+    const before = keymapStore.get().preset;
+    keymapStore.setPreset('protools');
+    expect(keysOf('pt.numLoopRec')).toEqual(expect.arrayContaining(['num5', 'alt+l']));
+    expect(keysOf('shuttle.fwd')).not.toContain('alt+l');
+    keymapStore.setPreset('nova');
+    expect(keysOf('shuttle.fwd')).toContain('alt+l');
+    expect(keysOf('pt.numLoopRec')).not.toContain('alt+l');
+    keymapStore.setPreset(before);
+  });
+  it('avec une plage : la boucle se pose sur la plage ; déjà dessus : elle s’éteint ; sans plage : on / off', async () => {
+    const { loopRecordToggle } = await import('../utils/loopRecordKey');
+    const off = { isLoopActive: false, loopStart: 0, loopEnd: 8 };
+    expect(loopRecordToggle({ start: 6.86, end: 13.71 }, off)).toEqual({ on: true, start: 6.86, end: 13.71, onSelection: true });
+    expect(loopRecordToggle({ start: 6.86, end: 13.71 }, { isLoopActive: true, loopStart: 6.86, loopEnd: 13.71 }).on).toBe(false);
+    expect(loopRecordToggle(null, off)).toEqual({ on: true, start: 0, end: 8, onSelection: false });
+  });
+});

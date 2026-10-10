@@ -14,6 +14,7 @@ import { applySelection, restoreLastSelection, selectionFromMarker, startSelecti
 import { openNovaWindow } from '../utils/novaWindows';
 import { gridStepSeconds } from '../utils/grid';
 import { recordAction } from '../utils/feedbackLog';
+import { loopRecordToggle } from '../utils/loopRecordKey';
 
 /**
  * Raccourcis Pro Tools (table utils/keymap). Écoute en phase de capture : un
@@ -27,6 +28,8 @@ export interface ProToolsShortcutDeps {
   toggleRecord: () => void;
   seek: (time: number) => void;
   toggleLoop: () => void;
+  /** Boucle posée (Loop Record sur la plage) ; sans elle, Loop Record ne fait qu'allumer / éteindre. */
+  setLoop?: (on: boolean, start: number, end: number) => void;
   toggleMetronome: () => void;
   addMarker: (time: number) => void;
   selectTrack: (trackId: string) => void;
@@ -115,7 +118,16 @@ export function useProToolsShortcuts(deps: ProToolsShortcutDeps) {
         case 'pt.trackUp': case 'kf.prevTrack': moveTrack(-1); return;
         case 'pt.trackDown': case 'kf.nextTrack': moveTrack(1); return;
         case 'kf.undo': d.undo(); return;
-        case 'pt.numLoopRec': d.toggleLoop(); d.notify(d.stateRef.current.isLoopActive ? 'Enregistrement en boucle arrêté.' : '🔁 Enregistrement en boucle : chaque tour devient une prise (couloirs de prises).'); return;
+        case 'pt.numLoopRec': {
+          // Pro Tools : Loop Record (Alt+L dans le préréglage Pro Tools, pavé 5) boucle la plage sélectionnée.
+          const st = d.stateRef.current;
+          const plan = loopRecordToggle(editSelectionStore.get().time, st);
+          if (d.setLoop) d.setLoop(plan.on, plan.start, plan.end); else d.toggleLoop();
+          const span = `${plan.start.toFixed(2).replace('.', ',')} s → ${plan.end.toFixed(2).replace('.', ',')} s`;
+          d.notify(!plan.on ? 'Enregistrement en boucle arrêté.'
+            : `🔁 Enregistrement en boucle${plan.onSelection ? ` sur la plage (${span})` : ''} : chaque tour devient une prise (couloirs de prises).`);
+          return;
+        }
         case 'pt.numQuickPunch': case 'pt.quickPunch': d.toggleQuickPunch?.(); return;
         case 'pt.numCountoff': d.toggleCountIn?.(); return;
         case 'pt.numMidiMerge': d.toggleMidiMerge?.(); return;

@@ -244,16 +244,34 @@ export function splitLoopPasses(take: Pick<Clip, 'start' | 'duration' | 'offset'
   return out;
 }
 
+/** Au-delà, un bout de tour n'est plus « commencé par accident » (s). */
+export const ACCIDENTAL_PASS_MAX_SEC = 4;
+
+/**
+ * Durée minimale du dernier tour inachevé pour qu'il devienne une prise : la
+ * moitié de la boucle (au plus 4 s, au moins 1 s). En dessous, c'est un tour
+ * commencé juste avant l'arrêt (le temps de réagir quand la boucle repart) : il
+ * est jeté. Avant : gardé dès 1 s (séance d'ingé : « Prise 4 · 0:02 » en trop).
+ */
+export function minLastPassSec(loopLen: number): number {
+  return Math.max(MIN_LOOP_PASS_SEC, Math.min(ACCIDENTAL_PASS_MAX_SEC, (loopLen > 0 ? loopLen : 0) * 0.5));
+}
+
 /**
  * Les tours gardés : les tours complets, plus le dernier tour inachevé s'il
- * dure au moins MIN_LOOP_PASS_SEC. Le dernier tour complet est celui qu'on
- * entend (comme dans Pro Tools : la dernière prise est active).
+ * dure au moins minLastPassSec(longueur de boucle). Le dernier tour complet est
+ * celui qu'on entend (comme dans Pro Tools : la dernière prise est active).
+ * `dropped` : le bout de tour jeté (pour le dire à l'artiste).
  */
-export function keptLoopPasses(passes: LoopPass[]): { kept: LoopPass[]; active: number } {
-  const kept = passes.filter((p, i) => p.complete || (i === passes.length - 1 && p.duration >= MIN_LOOP_PASS_SEC) || passes.length === 1);
+export function keptLoopPasses(passes: LoopPass[], loopLen?: number): { kept: LoopPass[]; active: number; dropped?: LoopPass } {
+  const len = loopLen ?? Math.max(0, ...passes.filter(p => p.pass > 1 && p.complete).map(p => p.duration));
+  const min = len > 0 ? minLastPassSec(len) : MIN_LOOP_PASS_SEC;
+  const kept = passes.filter((p, i) => p.complete || (i === passes.length - 1 && p.duration >= min) || passes.length === 1);
+  const last = passes[passes.length - 1];
+  const dropped = passes.length > 1 && last && !kept.includes(last) ? last : undefined;
   const complete = kept.filter(p => p.complete);
   const active = (complete.length ? complete[complete.length - 1] : kept[kept.length - 1])?.pass ?? 1;
-  return { kept, active };
+  return { kept, active, ...(dropped ? { dropped } : {}) };
 }
 
 // ---------------------------------------------------------------------- Punch
@@ -298,4 +316,10 @@ export function mergeIncomingTakeMeta(local: TakeMeta[] | undefined, incoming: u
     if (m.score && typeof m.score.total === 'number') x.score = m.score;
     return x;
   });
+}
+
+/** « Le 4e tour, commencé juste avant l'arrêt (2,2 s), n'est pas gardé. » (vide sans tour jeté). */
+export function droppedPassNote(d: { pass: number; sec: number } | undefined | null): string {
+  if (!d) return '';
+  return ` Le ${d.pass}e tour, commencé juste avant l'arrêt (${d.sec.toFixed(1).replace('.', ',')} s), n'est pas gardé.`;
 }

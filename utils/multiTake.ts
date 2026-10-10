@@ -45,6 +45,8 @@ export interface PlacedTake {
   loopCount: number;
   /** Tour entendu (Loop Record). */
   activeTake?: number;
+  /** Loop Record : bout de tour commencé juste avant l'arrêt, jeté (n° du tour, durée en s). */
+  droppedPass?: { pass: number; sec: number };
   newClipIds: string[];
 }
 
@@ -79,8 +81,12 @@ export function placeTake(track: Pick<Track, 'clips' | 'takeMeta'>, clip: Clip, 
   // Loop Record : un clip par tour gardé (même audio, offsets différents).
   let loopTakes: { clip: Clip; pass: number; active: boolean; wall: number }[] = [];
   let takeName = named.name!;
+  let droppedPass: { pass: number; sec: number } | undefined;
   if (rec?.loop) {
-    const { kept, active } = keptLoopPasses(splitLoopPasses(named, rec.loop.start, rec.loop.end));
+    const { kept, active, dropped } = keptLoopPasses(splitLoopPasses(named, rec.loop.start, rec.loop.end), rec.loop.end - rec.loop.start);
+    if (dropped) droppedPass = { pass: dropped.pass, sec: dropped.duration };
+    // Un seul tour gardé (le bout suivant jeté) : la prise s'arrête à la fin de la boucle.
+    if (kept.length === 1 && dropped) named.duration = kept[0].duration;
     if (kept.length > 1) {
       const off0 = named.offset || 0;
       loopTakes = kept.map((ps, i) => ({
@@ -141,5 +147,6 @@ export function placeTake(track: Pick<Track, 'clips' | 'takeMeta'>, clip: Clip, 
   return {
     clips, takeMeta: meta, mutedOld, firstTake: takeNumber, takeName,
     loopCount: loopTakes.length, ...(act ? { activeTake: act.clip.takeNumber } : {}), newClipIds,
+    ...(droppedPass ? { droppedPass } : {}),
   };
 }

@@ -2892,7 +2892,7 @@ useEffect(() => {
           />
         );
       })()}
-      {editCommands && <RangeActionsBar commands={editCommands} />}
+      {editCommands && <RangeActionsBar commands={editCommands} insetLeft={headerWidth} />}
       {clipGainEdit.overlay}
       <ClipToolsHost />
       {spotTarget && (() => {

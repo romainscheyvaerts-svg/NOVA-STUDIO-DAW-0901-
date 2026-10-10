@@ -290,6 +290,21 @@ def run_pc(b):
         pt["Ctrl+= = console / édition"] = v1 == "MIXER" and v2 == "ARRANGEMENT"
         q0 = st(pg)["qp"]; press(pg, "Control+Shift+p"); q1 = st(pg)["qp"]; press(pg, "Numpad6"); q2 = st(pg)["qp"]
         pt["Ctrl+Maj+P et pavé 6 = QuickPunch"] = q1 != q0 and q2 == q0
+        # Alt+L = Loop Record (Pro Tools Windows) : avec une plage sélectionnée, la boucle s'y pose ;
+        # un 2e appui l'éteint. (Préréglage NOVA : Alt+L reste le shuttle avant, vérifié plus bas.)
+        if st(pg)["loop"]: press(pg, "Control+Shift+l")
+        hb, zoom = lane_geom(pg)
+        press(pg, "F7")
+        yy = hb["y"] + hb["height"] * 0.5
+        pg.mouse.move(hb["x"] + hb["width"] + 1 * zoom, yy); pg.mouse.down()
+        pg.mouse.move(hb["x"] + hb["width"] + 3 * zoom, yy, steps=8); pg.mouse.up(); pg.wait_for_timeout(300)
+        press(pg, "Alt+l", 500)
+        lr = pg.evaluate("() => { const s = window.DAW_CONTROL.getState(); return { on: s.isLoopActive, a: s.loopStart, b: s.loopEnd }; }")
+        press(pg, "Alt+l", 400)
+        lr_off = st(pg)["loop"]
+        RES["mesures"]["alt_l_protools"] = {"boucle": lr, "apres_2e_appui": lr_off}
+        pt["Alt+L = Loop Record sur la plage (2e appui : arrêt)"] = bool(lr["on"]) and abs(lr["a"] - 1) < 0.3 and abs(lr["b"] - 3) < 0.3 and not lr_off
+        shot(pg, "r17_06b_alt_l_loop_record")
         press(pg, "r", 600); pt["R n'enregistre plus (comme Pro Tools)"] = not st(pg)["rec"]
         # Ctrl+M = muter le clip (sélection de la piste : le clip sous la tête de lecture).
         hb, zoom = lane_geom(pg)
@@ -333,6 +348,8 @@ def run_pc(b):
         ok("PC · Ctrl+glisser avec le Sélecteur = scrub", g1 > g0 + 5, {"grains": g1 - g0})
 
         # --- 4. Shuttle au clavier ---------------------------------------------------------------
+        # Alt+L est le shuttle avant du préréglage NOVA (dans le préréglage Pro Tools : Loop Record).
+        pg.evaluate("async () => (await window.__novaAppModule('/utils/keymapStore.ts')).keymapStore.setPreset('nova')"); pg.wait_for_timeout(200)
         pg.evaluate("() => window.DAW_CONTROL.seek(0)"); pg.wait_for_timeout(300)
         # Touches envoyées DANS la page, minutées par performance.now() (sans le délai de Playwright).
         shres = pg.evaluate(r"""async () => {
@@ -346,9 +363,10 @@ def run_pc(b):
           return { pre, mid, s: window.__qaStats(R.stop(), R.ctx.sampleRate, 0.2, 0.6), elapsed: el, audioElapsed: audioEl, t: window.DAW_CONTROL.getState().currentTime };
         }""")
         sh = shres["s"]; t_sh = shres["t"]
+        pg.evaluate("async () => (await window.__novaAppModule('/utils/keymapStore.ts')).keymapStore.setPreset('protools')"); pg.wait_for_timeout(200)
         RES["mesures"]["shuttle"] = {"position": t_sh, "duree_reelle": shres["elapsed"], "duree_horloge_audio": shres["audioElapsed"], "avant": shres["pre"], "milieu": shres["mid"], **sh}
         # Référence : l'horloge AUDIO (en headless, le faux périphérique de sortie peut tourner plus vite que la montre).
-        ok("PC · shuttle Alt+L (×1) puis Alt+K : la tête avance au temps réel, son à 440 Hz",
+        ok("PC · préréglage NOVA : shuttle Alt+L (×1) puis Alt+K : la tête avance au temps réel, son à 440 Hz",
            abs(t_sh - shres["audioElapsed"]) < 0.15 and abs(sh["freq"] - 440) < 30 and sh["clickRatio"] < 0.35,
            {"t": round(t_sh, 3), "duree_audio": round(shres["audioElapsed"], 3), "duree_montre": round(shres["elapsed"], 3), "freq": round(sh["freq"], 1), "clic": round(sh["clickRatio"], 3)})
 

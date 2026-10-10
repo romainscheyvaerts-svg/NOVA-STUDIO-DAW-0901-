@@ -13,9 +13,15 @@ import { fmtDb, parseDb } from '../utils/automationRange';
  */
 const fmt = (s: number) => (s >= 1 ? `${s.toFixed(2).replace('.', ',')} s` : `${Math.round(s * 1000)} ms`);
 
-const RangeActionsBar: React.FC<{ commands: EditCommands }> = ({ commands }) => {
+/**
+ * Barre des actions sur la plage, posée EN BAS de la fenêtre d'édition, à gauche
+ * de la timeline (après les en-têtes de pistes) : avant, elle était en haut à
+ * droite, sur la règle (mesures 9 à 16 cachées, clics de positionnement perdus).
+ * insetLeft : largeur des en-têtes de pistes.
+ */
+const RangeActionsBar: React.FC<{ commands: EditCommands; insetLeft?: number }> = ({ commands, insetLeft = 0 }) => {
   const { time } = useEditSelection();
-  // « Volume de la plage » : petite fenêtre de saisie en dB, sous la barre.
+  // « Volume de la plage » : petite fenêtre de saisie en dB, au-dessus de la barre.
   const [volOpen, setVolOpen] = useState(false);
   const [volText, setVolText] = useState('+1');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -45,7 +51,8 @@ const RangeActionsBar: React.FC<{ commands: EditCommands }> = ({ commands }) => 
   return (
     <>
     <div ref={barRef} role="toolbar" aria-label="Actions sur la sélection de plage" data-nova-target="range-actions"
-      className="absolute right-3 top-[50px] z-40 max-w-[calc(100%-24px)] overflow-x-auto flex flex-nowrap items-center gap-1 px-1.5 py-0.5 rounded-xl border border-sky-400/30 bg-nv-surface/95 shadow-2xl backdrop-blur">
+      style={{ left: insetLeft + 12, maxWidth: `calc(100% - ${insetLeft + 24}px)` }}
+      className="absolute bottom-3 z-40 overflow-x-auto flex flex-nowrap items-center gap-1 px-1.5 py-0.5 rounded-xl border border-sky-400/30 bg-nv-surface/95 shadow-2xl backdrop-blur">
       <span className="px-2 text-[10px] font-black text-sky-300 whitespace-nowrap" title="Plage sélectionnée (Sélecteur de Pro Tools)">
         Plage {fmt(selLength(time))} · {time.trackIds.length} piste{time.trackIds.length > 1 ? 's' : ''}
       </span>
@@ -63,8 +70,8 @@ const RangeActionsBar: React.FC<{ commands: EditCommands }> = ({ commands }) => 
     </div>
       {volOpen && createPortal(
         <div role="dialog" aria-label="Volume de la plage" data-testid="range-volume"
-          className="fixed z-[650] mt-1 flex items-center gap-1.5 rounded-xl border border-sky-400/30 bg-nv-surface p-2 shadow-2xl"
-          style={(() => { const r = barRef.current?.getBoundingClientRect(); return r ? { top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) } : {}; })()}
+          className="fixed z-[650] flex items-center gap-1.5 rounded-xl border border-sky-400/30 bg-nv-surface p-2 shadow-2xl"
+          style={(() => { const r = barRef.current?.getBoundingClientRect(); return r ? { bottom: Math.max(8, window.innerHeight - r.top + 4), left: Math.max(8, r.left) } : {}; })()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setVolOpen(false); } }}>
           <span className="px-1 text-[11px] font-bold text-sky-200 whitespace-nowrap">Volume de la plage</span>
           <button type="button" onClick={() => bump(-1)} aria-label="−1 dB" className="nova-hit-tactile h-8 w-9 rounded-lg bg-white/5 text-[12px] font-bold text-slate-200 hover:bg-white/10">−1</button>

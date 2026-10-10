@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  auditionClips, clipAtTime, deleteTake, duplicateTake, keepTake, keptLoopPasses, listLanes, mainRowClips,
+  auditionClips, clipAtTime, deleteTake, droppedPassNote, duplicateTake, keepTake, keptLoopPasses, minLastPassSec, listLanes, mainRowClips,
   mergeIncomingTakeMeta, nextTakeNumber, patchMeta, punchedPassages, renameTake, splitLoopPasses, takeCount, takeLabel,
 } from '../utils/playlists';
 import { compSwipe, readComp, takeSpans } from '../utils/comping';
@@ -114,7 +114,32 @@ describe('Loop Record : un couloir par tour de boucle', () => {
       [1, 3.995, 4.005, 0.2, true], [2, 4, 4, 4.205, true], [3, 4, 4, 8.205, true], [4, 4, 1.5, 12.205, false],
     ]);
     expect(keptLoopPasses(passes)).toMatchObject({ active: 3 });
-    expect(keptLoopPasses(passes).kept).toHaveLength(4);
+    // 1,5 s sur une boucle de 4 s : moins de la moitié, tour commencé juste avant l'arrêt → jeté.
+    expect(keptLoopPasses(passes, 4).kept).toHaveLength(3);
+    expect(keptLoopPasses(passes, 4).dropped).toMatchObject({ pass: 4, duration: 1.5 });
+  });
+
+  it("séance d'ingé : 3 tours de 4 mesures à 140 + 2,2 s d'un 4e tour → 3 prises, la 3e entendue", () => {
+    const len = 4 * 4 * 60 / 140; // 6,86 s
+    const passes = splitLoopPasses({ start: 6.86, duration: 3 * len + 2.24, offset: 0 }, 6.86, 6.86 + len);
+    const k = keptLoopPasses(passes, len);
+    expect(k.kept.map(p => p.pass)).toEqual([1, 2, 3]);
+    expect(k.active).toBe(3);
+    expect(k.dropped!.pass).toBe(4);
+    expect(droppedPassNote({ pass: 4, sec: 2.24 })).toBe(" Le 4e tour, commencé juste avant l'arrêt (2,2 s), n'est pas gardé.");
+    expect(droppedPassNote(undefined)).toBe('');
+  });
+
+  it('un dernier tour voulu (au moins la moitié de la boucle, ou 4 s sur une longue boucle) reste une prise, non entendue', () => {
+    const passes = splitLoopPasses({ start: 4, duration: 4 + 2.5, offset: 0 }, 4, 8);
+    expect(keptLoopPasses(passes, 4)).toMatchObject({ active: 1 });
+    expect(keptLoopPasses(passes, 4).kept.map(p => p.pass)).toEqual([1, 2]);
+    expect(keptLoopPasses(passes, 4).dropped).toBeUndefined();
+    // Boucle de 30 s : 5 s d'un nouveau tour = une vraie phrase, gardée.
+    const long = splitLoopPasses({ start: 0, duration: 30 + 5, offset: 0 }, 0, 30);
+    expect(keptLoopPasses(long, 30).kept.map(p => p.pass)).toEqual([1, 2]);
+    expect(minLastPassSec(30)).toBe(4);
+    expect(minLastPassSec(1)).toBe(1);
   });
 
   it('un bout de tour trop court est jeté ; arrêt pendant le 1er tour = une prise normale', () => {
