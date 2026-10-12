@@ -74,6 +74,17 @@ Protocole (WebSocket ws://127.0.0.1:8765)
                                   stems, seconds, device, outdir | error, code: not_installed|cancelled|error}.
     (v9) Plugins ARA2 (Melodyne, VocAlign) par l'hôte natif NovaARAHost.exe : voir ara_service.py
     (ARA_STATUS, ARA_OPEN, ARA_ALIGN, ARA_COMMIT, ARA_SHOW, ARA_TRANSPORT, ARA_CLOSE, ARA_EVENT).
+    (v13) Projets sur le DISQUE (Nova Studio, voir project_store.py) : chaque version de la
+      sauvegarde automatique est aussi écrite dans Documents/Nova Studio/Projets/<nom>/
+      (écriture atomique, 20 dernières versions + une par jour) :
+      PROJECT_STATUS                         → root
+      PROJECT_AUDIO_MISSING project_id name audio_ids → missing (sons pas encore sur le disque)
+      trame binaire PROJECT_AUDIO_PUT (project_id, name, audio_id, sample_rate, nch, nframes,
+        planar=true : canaux l'un après l'autre) → réponse JSON success
+      PROJECT_SAVE_VERSION project_id name version{id, json, audioIds, …} → folder, version_id, pruned
+      PROJECT_LIST                           → projects [{project_id, name, folder, versions, latest}]
+      PROJECT_LOAD project_id [version_id]   → trames PROJECT_AUDIO (une par son, planar) puis
+        trame finale PROJECT_LOAD {record, missing}
     (v12) Melodyne / VocAlign en INSERT sur une piste, comme Pro Tools : voir ara_insert.py
     (LOAD_PLUGIN ara=…, ARA_INSERT_SOURCE / DOC / STATE / EDITOR / SELECT / RENDER / PARAM(S)) ;
     trames type 1 : flags & 4 (TIMELINE) → f64 position du morceau (échantillons, -1 = arrêt) juste
@@ -166,9 +177,10 @@ import vst_host
 import vst_sidechain
 import vst_probe
 import plugin_guard
+import project_store
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events, calibrate_gr_offline
 
-VERSION = 12
+VERSION = 13
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
@@ -282,6 +294,9 @@ class NovaBridgeServer:
         # Séparation de stems (module optionnel installé à la demande)
         self.stems = stems_service.StemsService()
         self.stems_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stems")
+        # (v13) Projets sur le disque : un seul fil d'écriture (versions dans l'ordre).
+        self.projects = project_store.ProjectStore()
+        self.project_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="projects")
 
     # --- démarrage ---------------------------------------------------------
 
@@ -543,7 +558,9 @@ class NovaBridgeServer:
                               "sidechain": vst_sidechain.host_feeds_sidechain(), "sidechain_protocol": True,
                               "ara": bool(ara_service.ara_host.find_host_exe()),
                               # (v12) Melodyne / VocAlign en insert sur une piste, comme Pro Tools
-                              "ara_insert": bool(ara_service.ara_host.find_host_exe())})
+                              "ara_insert": bool(ara_service.ara_host.find_host_exe()),
+                              # (v13) sauvegarde automatique aussi sur le disque (Documents/Nova Studio/Projets)
+                              "projects": True})
 
     async def _a_get_plugin_list(self, ws, req):
         if req.get("rescan"):
@@ -998,6 +1015,9 @@ class NovaBridgeServer:
             if meta.get("action") == "STEMS_SEPARATE":
                 await self._stems_separate(ws, meta, data)
                 return
+            if meta.get("action") == "PROJECT_AUDIO_PUT":
+                await self._project_audio_put(ws, meta, data)
+                return
             if meta.get("action") == "ARA_OPEN":
                 await self._ara_open(ws, meta, data)
                 return
@@ -1151,6 +1171,80 @@ def _stems_server_methods():
 
 
 _stems_server_methods()
+
+
+def _project_server_methods():
+    """(v13) Projets sur le disque (ajoutés à NovaBridgeServer). Toute écriture passe par
+    project_pool (un seul fil) : jamais deux versions écrites en même temps."""
+
+    def ids(req):
+        return str(req.get("project_id") or ""), str(req.get("name") or "Projet")
+
+    async def _a_project_status(self, ws, req):
+        self._reply(ws, req, {"success": True, "root": str(self.projects.root)})
+
+    async def _a_project_audio_missing(self, ws, req):
+        pid, name = ids(req)
+        wanted = [str(a) for a in (req.get("audio_ids") or [])][:5000]
+        missing = await self.loop.run_in_executor(self.project_pool, self.projects.missing_audio, pid, name, wanted)
+        self._reply(ws, req, {"success": True, "missing": missing})
+
+    async def _project_audio_put(self, ws, meta: dict, data):
+        reply = {"action": "PROJECT_AUDIO_PUT", "req_id": meta.get("req_id")}
+        try:
+            pid, name = ids(meta)
+            nch = max(1, min(32, int(meta.get("nch") or 1)))
+            nframes = int(meta.get("nframes") or 0)
+            if data.size < nch * nframes:
+                raise project_store.ProjectStoreError("Son incomplet reçu")
+            flat = data[: nch * nframes]
+            audio = flat.reshape(nch, nframes) if meta.get("planar") else flat.reshape(nframes, nch).T
+            sr = int(meta.get("sample_rate") or 48000)
+            await self.loop.run_in_executor(self.project_pool, self.projects.put_audio, pid, name,
+                                            str(meta.get("audio_id") or ""), audio, sr)
+            await self._send(ws, {**reply, "success": True})
+        except Exception as e:
+            logger.error(f"PROJECT_AUDIO_PUT : {e}")
+            await self._send(ws, {**reply, "success": False, "error": str(e)})
+
+    async def _a_project_save_version(self, ws, req):
+        pid, name = ids(req)
+        rec = req.get("version")
+        if not isinstance(rec, dict):
+            raise project_store.ProjectStoreError("Version manquante")
+        t = time.time()
+        res = await self.loop.run_in_executor(self.project_pool, self.projects.save_version, pid, name, rec)
+        logger.info(f"💾 Projet « {name} » : version {res['version_id']} écrite sur le disque en {1000 * (time.time() - t):.0f} ms")
+        self._reply(ws, req, {"success": True, **res})
+
+    async def _a_project_list(self, ws, req):
+        projects = await self.loop.run_in_executor(self.project_pool, self.projects.list_projects)
+        self._reply(ws, req, {"success": True, "root": str(self.projects.root), "projects": projects})
+
+    async def _a_project_load(self, ws, req):
+        req_id = req.get("req_id")
+        pid = str(req.get("project_id") or "")
+        vid = req.get("version_id")
+        try:
+            rec, audio, missing = await self.loop.run_in_executor(
+                self.project_pool, self.projects.load_version, pid, int(vid) if vid else None)
+        except Exception as e:
+            await self._send(ws, build_render_frame({"action": "PROJECT_LOAD", "req_id": req_id, "success": False,
+                                                     "error": str(e), "nch": 0, "nframes": 0}, None))
+            return
+        for i, (aid, data, sr) in enumerate(audio):
+            head = {"action": "PROJECT_AUDIO", "req_id": req_id, "audio_id": aid, "index": i, "count": len(audio),
+                    "nch": int(data.shape[0]), "nframes": int(data.shape[1]), "sample_rate": int(sr), "planar": True}
+            await self._send(ws, build_render_frame(head, data.reshape(-1)))
+        await self._send(ws, build_render_frame({"action": "PROJECT_LOAD", "req_id": req_id, "success": True,
+                                                 "record": rec, "missing": missing, "nch": 0, "nframes": 0}, None))
+
+    for fn in (_a_project_status, _a_project_audio_missing, _project_audio_put, _a_project_save_version,
+               _a_project_list, _a_project_load):
+        setattr(NovaBridgeServer, fn.__name__, fn)
+
+
+_project_server_methods()
 ara_service.install(NovaBridgeServer, build_render_frame)
 ara_insert.install(NovaBridgeServer, build_render_frame, parse_render_frame)
 
