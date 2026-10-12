@@ -85,6 +85,11 @@ Protocole (WebSocket ws://127.0.0.1:8765)
       PROJECT_LIST                           → projects [{project_id, name, folder, versions, latest}]
       PROJECT_LOAD project_id [version_id]   → trames PROJECT_AUDIO (une par son, planar) puis
         trame finale PROJECT_LOAD {record, missing}
+    (v14) Pont Pro Tools (voir protools_files.py) : les prises de l'artiste, en BWF horodaté,
+      écrites dans le dossier choisi par l'ingé (import Spot dans Pro Tools) :
+      PT_STATUS [folder]                     → default_folder, folder, writable, error?
+      trame binaire PT_WRITE_FILE (folder, name, size) + octets du WAV (bourrage 4)
+                                             → path, renamed (original verrouillé : « (2) »)
     (v12) Melodyne / VocAlign en INSERT sur une piste, comme Pro Tools : voir ara_insert.py
     (LOAD_PLUGIN ara=…, ARA_INSERT_SOURCE / DOC / STATE / EDITOR / SELECT / RENDER / PARAM(S)) ;
     trames type 1 : flags & 4 (TIMELINE) → f64 position du morceau (échantillons, -1 = arrêt) juste
@@ -178,9 +183,10 @@ import vst_sidechain
 import vst_probe
 import plugin_guard
 import project_store
+import protools_files
 from vst_host import JuceThread, Slot, scan_vst3, render_offline, render_instrument_offline, midi_events, calibrate_gr_offline
 
-VERSION = 13
+VERSION = 14
 MAIN_SCRIPT = os.path.abspath(__file__)   # relancé avec --probe-vst3 (hors exécutable)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("NOVA_BRIDGE_PORT", "8765"))
@@ -563,7 +569,9 @@ class NovaBridgeServer:
                               # (hôte natif), comme l'instance de l'export
                               "stream_reset": vst_host.ENGINE == "native",
                               # (v13) sauvegarde automatique aussi sur le disque (Documents/Nova Studio/Projets)
-                              "projects": True})
+                              "projects": True,
+                              # (v14) pont Pro Tools : prises BWF horodatées dans le dossier de l'ingé
+                              "protools": True})
 
     async def _a_get_plugin_list(self, ws, req):
         if req.get("rescan"):
@@ -1030,6 +1038,9 @@ class NovaBridgeServer:
             if meta.get("action") == "PROJECT_AUDIO_PUT":
                 await self._project_audio_put(ws, meta, data)
                 return
+            if meta.get("action") == "PT_WRITE_FILE":
+                await self._pt_write_file(ws, meta, buf)
+                return
             if meta.get("action") == "ARA_OPEN":
                 await self._ara_open(ws, meta, data)
                 return
@@ -1257,6 +1268,47 @@ def _project_server_methods():
 
 
 _project_server_methods()
+
+
+def _protools_server_methods():
+    """(v14) Pont Pro Tools (ajouté à NovaBridgeServer) : les prises de l'artiste, encodées en
+    BWF horodaté par la page (utils/bwf.ts), écrites dans le dossier choisi par l'ingé. Un fil
+    à part (jamais derrière une sauvegarde de projet) : la prise est sur le disque en moins
+    de 3 s après être posée chez l'ingé."""
+
+    def pool(self):
+        p = getattr(self, "pt_pool", None)
+        if p is None:
+            p = self.pt_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nova-pt")
+        return p
+
+    async def _a_pt_status(self, ws, req):
+        st = await self.loop.run_in_executor(pool(self), protools_files.folder_status, req.get("folder"))
+        self._reply(ws, req, {"success": True, **st})
+
+    async def _pt_write_file(self, ws, meta: dict, buf: bytes):
+        reply = {"action": "PT_WRITE_FILE", "req_id": meta.get("req_id")}
+        try:
+            (jlen,) = struct.unpack_from("<I", buf, 4)
+            off = _align4(8 + jlen)
+            size = int(meta.get("size") or 0)
+            if size <= 0 or off + size > len(buf):
+                raise protools_files.ProToolsFileError("Prise incomplète reçue")
+            data = bytes(buf[off:off + size])
+            t = time.time()
+            path, renamed = await self.loop.run_in_executor(
+                pool(self), protools_files.write_take, str(meta.get("folder") or ""), str(meta.get("name") or ""), data)
+            logger.info(f"🎚️ Pro Tools : {path.name} écrit en {1000 * (time.time() - t):.0f} ms{' (renommé : original ouvert)' if renamed else ''}")
+            await self._send(ws, {**reply, "success": True, "path": str(path), "renamed": renamed})
+        except Exception as e:
+            logger.error(f"PT_WRITE_FILE : {e}")
+            await self._send(ws, {**reply, "success": False, "error": str(e)})
+
+    for fn in (_a_pt_status, _pt_write_file):
+        setattr(NovaBridgeServer, fn.__name__, fn)
+
+
+_protools_server_methods()
 ara_service.install(NovaBridgeServer, build_render_frame)
 ara_insert.install(NovaBridgeServer, build_render_frame, parse_render_frame)
 
