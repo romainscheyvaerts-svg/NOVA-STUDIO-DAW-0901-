@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { paramFr, termHelp } from '../utils/pluginUi';
 
@@ -39,7 +40,8 @@ export interface ChorusParams {
 // Voice structure for multi-voice chorus
 interface ChorusVoice {
   delay: DelayNode;
-  lfo: OscillatorNode;
+  /** LFO calé sur le morceau (même phase en lecture et à l'export). */
+  lfo: TimelineLfo;
   depthGain: GainNode;
   feedbackGain: GainNode;
   panner: StereoPannerNode;
@@ -88,9 +90,8 @@ export class ChorusNode {
     this.dryGain = ctx.createGain();
     this.wetGain = ctx.createGain();
     
-    // Initialize with zero gain and ramp up to avoid click on creation
-    this.output.gain.setValueAtTime(0, ctx.currentTime);
-    this.output.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
+    // Fondu d'apparition (anti-clic) en direct ; aucun à l'export (le rendu démarre sur le son).
+    fadeInOnInsert(this.output.gain, ctx);
     
     // Filters
     this.lowCutFilter = ctx.createBiquadFilter();
@@ -123,15 +124,12 @@ export class ChorusNode {
     const panPositions = [-0.8, 0.8, -0.4, 0.4];
     
     for (let i = 0; i < this.maxVoices; i++) {
-      const delay = this.ctx.createDelay(0.1);
+      const delay = this.ctx.createDelay(0.03); // tampon court : position de lecture interpolée plus précise (lecture = export)
       delay.delayTime.value = 0.007 + i * 0.003; // Slightly offset base delays
-      
-      const lfo = this.ctx.createOscillator();
-      lfo.type = 'sine';
-      lfo.frequency.value = 1.2;
       
       const depthGain = this.ctx.createGain();
       depthGain.gain.value = 0.002;
+      const lfo = new TimelineLfo(this.ctx, depthGain, 1.2 * (1 + i * 0.03));
       
       const feedbackGain = this.ctx.createGain();
       feedbackGain.gain.value = 0;
@@ -139,13 +137,8 @@ export class ChorusNode {
       const panner = this.ctx.createStereoPanner();
       panner.pan.value = panPositions[i];
       
-      // Connect LFO to delay time
-      lfo.connect(depthGain);
+      // LFO -> profondeur -> temps de retard
       depthGain.connect(delay.delayTime);
-      
-      // Start LFO with phase offset
-      const startTime = this.ctx.currentTime;
-      lfo.start(startTime);
       
       this.voices.push({
         delay,
@@ -218,7 +211,7 @@ export class ChorusNode {
     };
     
     for (const voice of this.voices) {
-      voice.lfo.type = shapeMap[this.params.lfoShape];
+      voice.lfo.setShape(shapeMap[this.params.lfoShape] === 'triangle' ? 'triangle' : 'sine');
     }
   }
 
@@ -261,22 +254,22 @@ export class ChorusNode {
     const { rate, depth, spread, mix, feedback, lowCut, highCut, voices, mode, isEnabled } = this.params;
 
     // Filters
-    this.lowCutFilter.frequency.setTargetAtTime(safe(lowCut, 100), now, 0.02);
-    this.highCutFilter.frequency.setTargetAtTime(safe(highCut, 12000), now, 0.02);
+    smoothSet(this.lowCutFilter.frequency, safe(lowCut, 100), this.ctx, 0.02);
+    smoothSet(this.highCutFilter.frequency, safe(highCut, 12000), this.ctx, 0.02);
 
     if (isEnabled) {
       // Mix (use equal-power crossfade for vibrato mode)
       const sMix = safe(mix, 0.4);
       if (mode === 'VIBRATO') {
-        this.dryGain.gain.setTargetAtTime(0, now, 0.02);
-        this.wetGain.gain.setTargetAtTime(1, now, 0.02);
+        smoothSet(this.dryGain.gain, 0, this.ctx, 0.02);
+        smoothSet(this.wetGain.gain, 1, this.ctx, 0.02);
       } else {
-        this.dryGain.gain.setTargetAtTime(Math.cos(sMix * Math.PI * 0.5), now, 0.02);
-        this.wetGain.gain.setTargetAtTime(Math.sin(sMix * Math.PI * 0.5), now, 0.02);
+        smoothSet(this.dryGain.gain, Math.cos(sMix * Math.PI * 0.5), this.ctx, 0.02);
+        smoothSet(this.wetGain.gain, Math.sin(sMix * Math.PI * 0.5), this.ctx, 0.02);
       }
     } else {
-      this.dryGain.gain.setTargetAtTime(1, now, 0.02);
-      this.wetGain.gain.setTargetAtTime(0, now, 0.02);
+      smoothSet(this.dryGain.gain, 1, this.ctx, 0.02);
+      smoothSet(this.wetGain.gain, 0, this.ctx, 0.02);
     }
 
     // Voice parameters
@@ -299,24 +292,24 @@ export class ChorusNode {
       
       // Rate with slight detuning between voices for richness
       const voiceRate = sRate * (1 + i * 0.03);
-      voice.lfo.frequency.setTargetAtTime(voiceRate, now, 0.02);
+      voice.lfo.setFrequency(voiceRate);
       
       // Depth - calculate based on mode
       let voiceDepth = sDepth * 0.003; // Base depth in seconds
       if (mode === 'ENSEMBLE') {
         voiceDepth *= (1 + i * 0.2); // More depth variation for ensemble
       }
-      voice.depthGain.gain.setTargetAtTime(isActive ? voiceDepth : 0, now, 0.02);
+      smoothSet(voice.depthGain.gain, isActive ? voiceDepth : 0, this.ctx, 0.02);
       
       // Base delay time (slightly different for each voice)
       const baseDelay = 0.007 + i * 0.003;
-      voice.delay.delayTime.setTargetAtTime(baseDelay, now, 0.02);
+      smoothSet(voice.delay.delayTime, baseDelay, this.ctx, 0.02);
       
       // Feedback
-      voice.feedbackGain.gain.setTargetAtTime(isActive ? sFeedback : 0, now, 0.02);
+      smoothSet(voice.feedbackGain.gain, isActive ? sFeedback : 0, this.ctx, 0.02);
       
       // Panning
-      voice.panner.pan.setTargetAtTime(isActive ? panPositions[i] : 0, now, 0.02);
+      smoothSet(voice.panner.pan, isActive ? panPositions[i] : 0, this.ctx, 0.02);
     }
   }
 
@@ -338,6 +331,10 @@ export class ChorusNode {
     return positions;
   }
 
+  /** Modulation calée sur la ligne de temps du morceau (le moteur appelle syncTimeline). */
+  public get followsTimeline(): boolean { return true; }
+  public syncTimeline(origin: number, at?: number) { this.voices.forEach(v => v.lfo.sync(origin, at)); }
+
   public getStatus() {
     return { ...this.params };
   }
@@ -349,11 +346,7 @@ export class ChorusNode {
 
   public destroy() {
     for (const voice of this.voices) {
-      try {
-        voice.lfo.stop();
-      } catch (e) {
-        // LFO may already be stopped
-      }
+      voice.lfo.stop();
     }
   }
 }

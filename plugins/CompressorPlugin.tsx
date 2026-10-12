@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { PluginParameter } from '../types';
-import { makeCurve, loadWorkletModule } from './vocalDspUtils';
+import { makeCurve, loadWorkletModule, fadeInOnInsert, isOfflineContext } from './vocalDspUtils';
 import { retireWorkletNode } from '../engine/workletGuard';
 import { gainDbFr, numFr, termHelp } from '../utils/pluginUi';
 import { AutomationSet, MappedParam } from '../engine/automationParams';
@@ -77,7 +77,9 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
       { name: 'mode', defaultValue: 0, minValue: 0, maxValue: 3, automationRate: 'k-rate' },
       // Side-chain (R7) : détection sur l'entrée 2 (clé externe), écoute de la clé.
       { name: 'keyOn', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
-      { name: 'keyListen', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' }
+      { name: 'keyListen', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+      // Départ de lecture : compteur programmé au bloc du départ, l'état repart à neuf (comme l'export).
+      { name: 'resetGen', defaultValue: 0, minValue: 0, maxValue: 1e9, automationRate: 'k-rate' }
     ];
   }
   constructor() {
@@ -90,6 +92,12 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     this.lastFc = -1;
     this.ms = 0; this.y1 = 0; this.yL = 0; this.charge = 0;
     this.msg = 0; this.grPeak = 0;
+    this.gen = 0; this.fresh = true;
+  }
+  reset() {
+    this.bufL.fill(0); this.bufR.fill(0); this.w = 0;
+    this.xf = 0; this.s.fill(0); this.ms = 0; this.y1 = 0; this.yL = 0; this.charge = 0; this.grPeak = 0;
+    this.fresh = true;
   }
   setHighpass(fc) {
     const w0 = 2 * Math.PI * Math.min(fc, sampleRate * 0.45) / sampleRate;
@@ -116,6 +124,7 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     const kL = useKey ? (key && key[0] ? key[0] : this.zk) : null;
     const kR = useKey ? (key && key[1] ? key[1] : kL) : null;
     const listen = useKey && p.keyListen[0] >= 0.5;
+    if (p.resetGen && p.resetGen[0] !== this.gen) { this.gen = p.resetGen[0]; this.reset(); }
     if (p.scHpFreq[0] !== this.lastFc) this.setHighpass(p.scHpFreq[0]);
     const T = p.threshold[0];
     const R = Math.max(1, p.ratio[0]);
@@ -132,6 +141,8 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     const aRms = Math.exp(-1 / ((mode === 2 ? 0.01 : 0.004) * sampleRate));
     const aQup = Math.exp(-1 / sampleRate), aQdn = Math.exp(-1 / (2.5 * sampleRate));
     const laT = Math.min(this.SIZE - 2, Math.max(0, Math.round(p.lookahead[0] * sampleRate)));
+    // Instance neuve / remise à zéro : pré-lecture posée d'emblée (pas de fondu depuis 0).
+    if (this.fresh) { this.fresh = false; this.la = laT; this.laOld = laT; }
     if (laT !== this.la && this.xf <= 0) { this.laOld = this.la; this.la = laT; this.xf = 256; }
     const b0 = this.b0, b1 = this.b1, b2 = this.b2, a1 = this.a1, a2 = this.a2;
     const s = this.s, M = this.MASK, bL = this.bufL, bR = this.bufR;
@@ -194,7 +205,7 @@ class VocalCompressorProcessor extends AudioWorkletProcessor {
     return true;
   }
 }
-try { registerProcessor('vocal-compressor-processor', VocalCompressorProcessor); } catch (e) {}
+try { registerProcessor('vocal-compressor-processor-r', VocalCompressorProcessor); } catch (e) {}
 `;
 
 const MODE_INDEX: Record<CompressorParams['mode'], number> = { CLEAN: 0, VCA: 1, OPTO: 2, FET: 3 };
@@ -337,9 +348,9 @@ export class CompressorNode {
 
   private async initWorklet() {
     try {
-      await loadWorkletModule(this.ctx, 'vocal-compressor', COMP_WORKLET_CODE);
+      await loadWorkletModule(this.ctx, 'vocal-compressor-r', COMP_WORKLET_CODE);
       if (this.disposed) return;
-      this.worklet = new AudioWorkletNode(this.ctx, 'vocal-compressor-processor', {
+      this.worklet = new AudioWorkletNode(this.ctx, 'vocal-compressor-processor-r', {
         numberOfInputs: 2,
         numberOfOutputs: 1,
         outputChannelCount: [2]
@@ -363,10 +374,16 @@ export class CompressorNode {
       this.auto.add('ratio', new MappedParam(this.ctx, [{ param: this.compressor.ratio }], { min: 1, max: 20, value: 4, affine: true }));
     }
     this.applyParams(true, true);
-    const t = this.ctx.currentTime;
-    this.output.gain.cancelScheduledValues(t);
-    this.output.gain.setValueAtTime(0, t);
-    this.output.gain.linearRampToValueAtTime(1, t + 0.02);
+    // Fondu d'apparition en direct seulement : à l'export, le rendu démarre sur le son.
+    fadeInOnInsert(this.output.gain, this.ctx);
+  }
+
+  private resetCount = 0;
+  /** Départ de la lecture à `at` (début d'un bloc) : détecteur, pré-lecture et charge repartent à neuf. */
+  public resetAt(at: number) {
+    const ap = this.worklet?.parameters.get('resetGen');
+    if (!ap) return;
+    try { ap.setValueAtTime(++this.resetCount, Math.max(this.ctx.currentTime, at - 0.5 / this.ctx.sampleRate)); } catch { /* */ }
   }
 
   /** Retard ajoute par le plugin, en secondes (0 sauf pre-lecture choisie). */
@@ -463,6 +480,8 @@ export class CompressorNode {
   private stateKey = '';
   private applyParams(immediate = false, force = false) {
     const now = this.ctx.currentTime;
+    // Export (contexte hors ligne) : réglages posés tels quels, sans glissement depuis les valeurs par défaut.
+    if (isOfflineContext(this.ctx)) immediate = true;
     const safe = (val: number, def: number) => Number.isFinite(val) ? val : def;
     const set = (prm: AudioParam | undefined, v: number, tau = 0.01) => {
       if (!prm || !Number.isFinite(v)) return;

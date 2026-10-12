@@ -3,7 +3,7 @@ import { AutomationSet, MappedParam, mixDry, mixWet, mixFromWet } from '../engin
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { paramFr, termHelp } from '../utils/pluginUi';
 import { PluginParameter } from '../types';
-import { EnvelopeDucker, SMOOTH, setParamSmooth } from './vocalDspUtils';
+import { EnvelopeDucker, SMOOTH, setParamSmooth, TimelineLfo } from './vocalDspUtils';
 
 /**
  * PROFESSIONAL REVERB ENGINE v5.0
@@ -207,7 +207,8 @@ export class ReverbNode {
 
   // Modulation legere de la queue (evite le cote statique d'une convolution)
   private modDelay: DelayNode;
-  private modLFO: OscillatorNode;
+  /** LFO calé sur le morceau (même phase en lecture, d'où qu'on parte, et à l'export). */
+  private modLFO: TimelineLfo;
   private modDepthGain: GainNode;
 
   // EQ on wet signal
@@ -310,15 +311,11 @@ export class ReverbNode {
     this.convGainB.gain.value = 0;
 
     // Modulation
-    this.modDelay = ctx.createDelay(0.05);
+    this.modDelay = ctx.createDelay(0.01); // tampon court : position de lecture interpolée plus précise (lecture = export)
     this.modDelay.delayTime.value = 0.005;
-    this.modLFO = ctx.createOscillator();
-    this.modLFO.type = 'sine';
-    this.modLFO.frequency.value = 0.5;
     this.modDepthGain = ctx.createGain();
     this.modDepthGain.gain.value = 0;
-    this.modLFO.connect(this.modDepthGain);
-    this.modLFO.start();
+    this.modLFO = new TimelineLfo(ctx, this.modDepthGain, 0.5);
 
     // EQ filters
     this.lowCutFilter = ctx.createBiquadFilter();
@@ -638,7 +635,8 @@ export class ReverbNode {
     // Modulation : ~0 a 3 ms de balayage, quelques cents au plus
     const rate = clamp(safeNum(p.modRate, 0.5), 0.05, 5);
     const depth = clamp(safeNum(p.modDepth, 0.1), 0, 1);
-    this.setP(this.modLFO.frequency, rate, 0.05);
+    // Fréquence fixe (pas de glissement) : la phase reste une fonction exacte de la position.
+    this.modLFO.setFrequency(rate);
     this.setP(this.modDepthGain.gain, depth * 0.0015, 0.05);
 
     // Largeur : 0 = mono, 1 = stereo, 2 = elargi
@@ -678,6 +676,11 @@ export class ReverbNode {
   }
   /** Lecture arrêtée : les réglages automatisés reviennent à leur valeur fixe. */
   public restoreStatic() { this.auto.restoreStatic(); }
+
+  /** Modulation calée sur la ligne de temps du morceau (le moteur appelle syncTimeline). */
+  public get followsTimeline(): boolean { return true; }
+  /** `origin` = instant du contexte où le morceau commence ; `at` = départ de la lecture / bouclage. */
+  public syncTimeline(origin: number, at?: number) { this.modLFO.sync(origin, at); }
 
   public updateParams(p: Partial<ReverbParams>) {
     this.params = { ...this.params, ...p };
@@ -753,11 +756,11 @@ export class ReverbNode {
       if (this.irTimer) { clearTimeout(this.irTimer); this.irTimer = null; }
       if (this.releaseTimer) { clearTimeout(this.releaseTimer); this.releaseTimer = null; }
       for (const l of Object.values(this.links)) if (l.timer) { clearTimeout(l.timer); l.timer = null; }
-      try { this.modLFO.stop(); } catch (e) {}
+      this.modLFO.stop();
       this.ducker.disconnect();
       const nodes: AudioNode[] = [
         this.input, this.output, this.dryGain, this.wetGain, this.preDelayNode,
-        this.convA, this.convB, this.convGainA, this.convGainB, this.modDelay, this.modLFO,
+        this.convA, this.convB, this.convGainA, this.convGainB, this.modDelay,
         this.modDepthGain, this.bassBoostFilter, this.lowCutFilter, this.highCutFilter,
         this.widthSplitter, this.widthMerger, this.wLL, this.wLR, this.wRL, this.wRR,
         this.duckGain, this.inputAnalyzer, this.outputAnalyzer, this.erMix,

@@ -106,7 +106,9 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
       { name: 'rootKey', defaultValue: 0, minValue: 0, maxValue: 11 },
       { name: 'scaleType', defaultValue: 0, minValue: 0, maxValue: 4 },
       { name: 'bypass', defaultValue: 0, minValue: 0, maxValue: 1 },
-      { name: 'lowLatency', defaultValue: 0, minValue: 0, maxValue: 1 }
+      { name: 'lowLatency', defaultValue: 0, minValue: 0, maxValue: 1 },
+      // Départ de lecture : compteur programmé au bloc du départ, l'analyse repart à neuf (comme l'export).
+      { name: 'resetGen', defaultValue: 0, minValue: 0, maxValue: 1e9, automationRate: 'k-rate' }
     ];
   }
 
@@ -372,6 +374,7 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs, outputs, parameters) {
+    if (parameters.resetGen && parameters.resetGen[0] !== (this.gen || 0)) { this.gen = parameters.resetGen[0]; this.reset(); }
     const input = inputs[0];
     const output = outputs[0];
     if (!output || !output[0]) return true;
@@ -479,7 +482,7 @@ class AutoTuneProcessor extends AudioWorkletProcessor {
 }
 // Deux AutoTune dans le meme contexte chargent deux fois le module : le second
 // enregistrement leverait une erreur et ferait passer l'instance en bypass.
-try { registerProcessor('auto-tune-processor', AutoTuneProcessor); } catch (e) {}
+try { registerProcessor('auto-tune-processor-r', AutoTuneProcessor); } catch (e) {}
 `;
 
 // Un seul chargement du module par contexte audio (temps reel ou offline).
@@ -577,12 +580,20 @@ export class AutoTuneNode {
     this.ready = this.initWorklet();
   }
 
+  private resetCount = 0;
+  /** Départ de la lecture à `at` (début d'un bloc de rendu) : détection et resynthèse repartent à neuf. */
+  public resetAt(at: number) {
+    const ap = this.worklet?.parameters.get('resetGen');
+    if (!ap) return;
+    try { ap.setValueAtTime(++this.resetCount, Math.max(this.ctx.currentTime, at - 0.5 / this.ctx.sampleRate)); } catch { /* */ }
+  }
+
   private async initWorklet() {
     try {
       await loadAutoTuneModule(this.ctx);
       if (this.disposed) return;
 
-      this.worklet = new AudioWorkletNode(this.ctx, 'auto-tune-processor', {
+      this.worklet = new AudioWorkletNode(this.ctx, 'auto-tune-processor-r', {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         parameterData: {

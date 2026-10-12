@@ -51,7 +51,9 @@ export function createNoiseGateCore(sr: number) {
     setParams,
     /** Clé externe du bloc suivant (null = détection sur le son), écoute de la clé. */
     setKey(l: Float32Array | null, r: Float32Array | null, on: boolean, lis: boolean) { kL = l; kR = r || l; keyOn = !!on && !!l; listen = keyOn && !!lis; },
-    reset() { g = 1; env = 0; open = false; holdLeft = 0; },
+    // État de repos = porte FERMÉE (celui qu'on retrouve après un silence) : un export qui
+    // démarre sur du son s'ouvre avec la même attaque qu'en lecture (avant : ouverte d'emblée).
+    reset() { g = floor; env = 0; open = false; holdLeft = 0; },
     process(iL: Float32Array, iR: Float32Array, oL: Float32Array, oR: Float32Array | null, n: number) {
       const dL = keyOn && kL ? kL : iL, dR = keyOn && kR ? kR : iR;
       for (let i = 0; i < n; i++) {

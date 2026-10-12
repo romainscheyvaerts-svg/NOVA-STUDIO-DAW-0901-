@@ -53,7 +53,7 @@ const createLimiterCore = (${createLimiterCore.toString()});
 const __ap = ${JSON.stringify(LIMITER_AUDIO_PARAMS.map(a => ({ name: a.name, core: a.core })))};
 class NovaLimiterProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
-    return ${JSON.stringify(LIMITER_AUDIO_PARAMS.map(({ core: _c, ...d }) => ({ ...d, automationRate: 'k-rate' })))};
+    return ${JSON.stringify(LIMITER_AUDIO_PARAMS.map(({ core: _c, ...d }) => ({ ...d, automationRate: 'k-rate' })))}.concat([{ name: '__resetGen', minValue: 0, maxValue: 1e9, defaultValue: 0, automationRate: 'k-rate' }]);
   }
   constructor(options) {
     super();
@@ -73,6 +73,8 @@ class NovaLimiterProcessor extends AudioWorkletProcessor {
     };
   }
   process(inputs, outputs, parameters) {
+    // Départ de lecture : compteur programmé au bloc du départ, le cœur repart à neuf (comme l'export).
+    if (parameters.__resetGen && parameters.__resetGen[0] !== (this.gen || 0)) { this.gen = parameters.__resetGen[0]; this.core.reset(); }
     // Réglages automatisables : lus au bloc près (lecture ET export).
     let changed = false;
     for (let i = 0; i < __ap.length; i++) {
@@ -96,7 +98,7 @@ class NovaLimiterProcessor extends AudioWorkletProcessor {
     return true;
   }
 }
-try { registerProcessor('nova-limiter-processor-v3', NovaLimiterProcessor); } catch (e) {}
+try { registerProcessor('nova-limiter-processor-v4', NovaLimiterProcessor); } catch (e) {}
 `;
 
 const toCore = (p: LimiterParams) => ({
@@ -106,6 +108,14 @@ const toCore = (p: LimiterParams) => ({
 const structuralToCore = (p: LimiterParams) => ({ lookaheadMs: p.lookahead, oversample: p.oversample });
 
 export class LimiterNode {
+
+  private resetCount = 0;
+  /** Départ de la lecture à `at` (début d'un bloc de rendu) : le cœur repart de l'état d'une instance neuve. */
+  public resetAt(at: number) {
+    const ap = this.worklet ? ((this.worklet.parameters as any).get('__resetGen') as AudioParam | undefined) : undefined;
+    if (!ap) return;
+    try { ap.setValueAtTime(++this.resetCount, Math.max(this.ctx.currentTime, at - 0.5 / this.ctx.sampleRate)); } catch { /* */ }
+  }
   public input: GainNode;
   public output: GainNode;
   public readonly ready: Promise<void>;
@@ -129,11 +139,11 @@ export class LimiterNode {
 
   private async init() {
     try {
-      await loadWorkletModule(this.ctx, 'nova-limiter-v3', WORKLET_CODE);
+      await loadWorkletModule(this.ctx, 'nova-limiter-v4', WORKLET_CODE);
       if (this.disposed) return;
       const parameterData: Record<string, number> = {};
       for (const a of LIMITER_AUDIO_PARAMS) parameterData[a.name] = this.params[a.name];
-      this.worklet = new AudioWorkletNode(this.ctx, 'nova-limiter-processor-v3', {
+      this.worklet = new AudioWorkletNode(this.ctx, 'nova-limiter-processor-v4', {
         numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
         channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
         parameterData,

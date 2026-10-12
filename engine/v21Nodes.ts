@@ -39,10 +39,10 @@ const processorCode = (name: string, defs: string, make: string, toCore: string,
 ${defs}
 const __make = (${make});
 const __toCore = (${toCore});
-const __desc = ${JSON.stringify([...descriptors.map(d => ({ ...d, automationRate: 'k-rate' })), ...(chord ? [{ name: 'chord', defaultValue: 0, minValue: 0, maxValue: 49151, automationRate: 'a-rate' }] : []), ...(key ? KEY_DESC.map(d => ({ ...d, automationRate: 'k-rate' })) : [])])};
-const __names = __desc.filter(d => d.name !== 'chord' && d.name !== 'keyOn' && d.name !== 'keyListen').map(d => d.name);
+const __desc = ${JSON.stringify([...descriptors.map(d => ({ ...d, automationRate: 'k-rate' })), ...(chord ? [{ name: 'chord', defaultValue: 0, minValue: 0, maxValue: 49151, automationRate: 'a-rate' }] : []), ...(key ? KEY_DESC.map(d => ({ ...d, automationRate: 'k-rate' })) : []), RESET_DESC])};
+const __names = __desc.filter(d => d.name !== 'chord' && d.name !== 'keyOn' && d.name !== 'keyListen' && d.name !== 'resetGen').map(d => d.name);
 // Réglages à pas entier (interrupteurs, division…) : arrondis comme sanitizeV21, même quand une voie les fait glisser.
-const __ints = __desc.filter(d => d.name !== 'chord' && d.name !== 'keyOn' && d.name !== 'keyListen').map(d => !!d.int);
+const __ints = __desc.filter(d => d.name !== 'chord' && d.name !== 'keyOn' && d.name !== 'keyListen' && d.name !== 'resetGen').map(d => !!d.int);
 class NovaV21Processor extends AudioWorkletProcessor {
   static get parameterDescriptors() { return __desc; }
   constructor(options) {
@@ -53,6 +53,9 @@ class NovaV21Processor extends AudioWorkletProcessor {
     const init = options && options.processorOptions && options.processorOptions.params;
     this.ep = Object.assign({}, init || {});
     this.core.setParams(__toCore(this.ep, sampleRate));
+    // État de départ = état après remise à zéro (instance neuve de l'export = départ de lecture).
+    if (this.core.reset) this.core.reset();
+    this.resetGen = 0;
     this.dirty = false;
     this.zero = new Float32Array(128);
     this.blocks = 0;
@@ -63,6 +66,8 @@ class NovaV21Processor extends AudioWorkletProcessor {
     };
   }
   process(inputs, outputs, parameters) {
+    // Départ de lecture (resetGen programmé au bloc du départ) : le cœur repart à neuf.
+    if (parameters.resetGen && parameters.resetGen[0] !== this.resetGen) { this.resetGen = parameters.resetGen[0]; this.dirty = true; if (this.core.reset) this.core.reset(); }
     // Effets calés sur le morceau (gate) : position dans le morceau au début du bloc.
     if (this.core.setClock && parameters.originHi) this.core.setClock(currentTime - (parameters.originHi[0] + parameters.originLo[0]));
     for (let i = 0; i < __names.length; i++) {
@@ -155,6 +160,9 @@ export function lofiToCore(p: Record<string, any>) {
   return { bits: +p.bits || 16, rate: +p.rate || 48000, lowCut: +p.lowCut || 20, highCut: +p.highCut || 20000, drive: +p.drive || 0, noise: +p.noise || 0, mix: p.mix === undefined ? 1 : +p.mix, output: +p.output || 0 };
 }
 
+/** Remise à zéro au départ de la lecture : compteur programmé à l'instant du départ (AudioParam : au bloc près). */
+const RESET_DESC = { name: 'resetGen', defaultValue: 0, minValue: 0, maxValue: 1e9, automationRate: 'k-rate' };
+
 /** Side-chain (R7) : clé branchée (keyOn) et écoute de la clé (keyListen). */
 const KEY_DESC = [
   { name: 'keyOn', defaultValue: 0, minValue: 0, maxValue: 1 },
@@ -203,7 +211,7 @@ const makeSpec = (type: V21Type, processor: string, defs: string, make: string, 
   const all = timeline ? [...desc, ...TIMELINE_DESC] : desc;
   // Clé (et nom du processeur) versionnée : un module déjà chargé sous l'ancien code n'est pas réutilisé.
   const proc = chord ? `${processor}-c` : key ? `${processor}-k` : processor;
-  return { key: `${proc}-2`, processor: proc, code: processorCode(proc, defs, make, toCore.toString(), all, chord, key), audioParams: desc.map(d => d.name), latencySamples, timeline, chord, sidechain: key };
+  return { key: `${proc}-3`, processor: `${proc}-r`, code: processorCode(`${proc}-r`, defs, make, toCore.toString(), all, chord, key), audioParams: desc.map(d => d.name), latencySamples, timeline, chord, sidechain: key };
 };
 
 let SPECS: Record<V21Type, WorkletSpec> | null = null;
@@ -332,6 +340,18 @@ export class V21EffectNode {
   public automationParam(key: string): AudioParam | null {
     if (!this.worklet || !this.spec.audioParams.includes(key)) return null;
     return (this.worklet.parameters as any).get(key) ?? null;
+  }
+
+  private resetCount = 0;
+  /**
+   * Départ de la lecture à l'instant `at` (début d'un bloc de rendu) : le cœur DSP repart de
+   * l'état d'une instance neuve, comme à l'export. Programmé sur un AudioParam (au bloc près,
+   * jamais en retard comme un message).
+   */
+  public resetAt(at: number) {
+    const ap = this.worklet ? ((this.worklet.parameters as any).get('resetGen') as AudioParam | undefined) : undefined;
+    if (!ap) return;
+    try { ap.setValueAtTime(++this.resetCount, Math.max(this.ctx.currentTime, at - 0.5 / this.ctx.sampleRate)); } catch { /* contexte fermé */ }
   }
 
   /** Effet calé sur le morceau (gate rythmique) ? */
