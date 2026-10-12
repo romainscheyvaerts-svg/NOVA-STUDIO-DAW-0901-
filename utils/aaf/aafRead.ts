@@ -447,8 +447,11 @@ function pairStereo(tracks: AafTrack[], stats: AafSession['stats'], warnings: st
     if (b && sameBase && a.channels === 1 && b.channels === 1) {
       const same = a.clips.length === b.clips.length && a.clips.every((c, k) => c.position === b.clips[k].position && c.length === b.clips[k].length);
       if (same) {
+        // Pan d'une paire : L à gauche et R à droite = centre ; décalés ensemble = pan de la piste stéréo.
+        const pan = a.pan !== null && b.pan !== null ? (a.pan + b.pan) / 2 : a.pan ?? b.pan;
         out.push({
-          ...a, name: ma![1].trim(), channels: 2,
+          ...a, name: ma![1].trim(), channels: 2, pan: pan === null ? null : Math.abs(pan) < 1e-9 ? 0 : pan,
+          volume: a.volume ?? b.volume, volumeAutomated: a.volumeAutomated || b.volumeAutomated, panAutomated: a.panAutomated || b.panAutomated,
           clips: a.clips.map((c, k) => ({ ...c, name: c.name.replace(/[._\s-]*[LR]$/i, ''), sources: [...c.sources, ...b.clips[k].sources] })),
         });
         stats.stereoPairs++;

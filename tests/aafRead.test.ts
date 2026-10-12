@@ -81,3 +81,26 @@ describe('readAaf · gain, fondus, volume, pan, stéréo', () => {
     expect(aafSummary(s, { missingMedia: 1 })).toMatch(/^47 clips importés, 6 pistes, \d+ fondus? approchés?, 1 son introuvable$/);
   });
 });
+
+describe('readAaf · bouts « Sample accurate edit » de Pro Tools', () => {
+  it('recollés au clip suivant (position, décalage et longueur à l’échantillon)', async () => {
+    const { writeAaf } = await import('../utils/aaf/aafWrite');
+    const tone = (n: number) => Float32Array.from({ length: n }, (_, i) => Math.sin(i / 10) * 0.3);
+    const out = await writeAaf({
+      name: 'SAE', sampleRate: 48000, embed: false, trackVolumePan: false, random: (() => { let x = 5; return (n: number) => Uint8Array.from({ length: n }, () => (x = (x * 1103515245 + 12345) >>> 0) >>> 24); })(),
+      media: [
+        { id: 'sae', name: 'Sample accurate edit', channels: [tone(920)], sampleRate: 48000, timeReference: 0 },
+        { id: 'v', name: 'Voix', channels: [tone(96000)], sampleRate: 48000, timeReference: 0 },
+      ],
+      tracks: [{ name: 'Voix', channels: 1, clips: [
+        { name: 'SAE', position: 1000, length: 920, mediaId: 'sae', offset: 0, gain: 1 },
+        { name: 'Voix', position: 1920, length: 48000, mediaId: 'v', offset: 5000, gain: 1 },
+      ] }],
+    });
+    const s = readAaf(out.aaf);
+    const c = s.tracks[0].clips;
+    expect(c.length).toBe(1);
+    expect([c[0].position, c[0].length, c[0].sources[0].offset]).toEqual([1000, 48920, 4080]);
+    expect(s.stats.sampleAccurateMerged).toBe(1);
+  });
+});

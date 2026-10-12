@@ -47,6 +47,7 @@ export function planNovaExport(state: DAWState, getAudio: (bufferId: string) => 
   const tracks: AafExportTrack[] = [];
   const S = (sec: number) => Math.round(sec * sr);
   let curvesApprox = 0, breaths = 0, stretched = 0;
+  const firstUse = new Map<string, number>();
 
   const mediaFor = (key: string, name: string, make: () => AudioData | null): AafExportMedia | null => {
     const got = media.get(key);
@@ -100,7 +101,9 @@ export function planNovaExport(state: DAWState, getAudio: (bufferId: string) => 
       const position = S(c.start);
       const length = Math.max(1, S(c.duration));
       const off = Math.round(offset);
-      m.timeReference = Math.min(m.timeReference, Math.max(0, position - Math.round(off * sr / m.sampleRate)));
+      // Horodatage du fichier (Pro Tools : Original Time Stamp) : celui du 1er clip qui l'utilise sur la timeline.
+      const first = firstUse.get(m.id);
+      if (first === undefined || position < first) { firstUse.set(m.id, position); m.timeReference = Math.max(0, position - Math.round(off * sr / m.sampleRate)); }
       const clip: AafExportClip = {
         name: c.name || t.name, position, length, mediaId: m.id, offset: off, gain: c.gain ?? 1,
         fadeIn: c.fadeIn > 0 ? { length: S(c.fadeIn), shape: c.fadeInCurve || DEFAULT_CURVE } : undefined,
