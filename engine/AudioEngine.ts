@@ -600,6 +600,9 @@ export class AudioEngine {
     this.masterLimiter = null; this.masterAnalyzer = null; this.masterSplitter = null;
     this.masterAnalyzerL = this.masterAnalyzerR = null;
     this.activeSources.clear();
+    // Horloge du nouveau contexte repartie de 0 : les fins de sources de l'ancien n'ont plus de sens (veille).
+    this.lastSourceEnd.clear();
+    this.sharedKeepAlive = null;
     this.scrubbingSources.clear();
     this.reversedBufferCache.clear();
     this.clipSigs.clear();
@@ -873,6 +876,7 @@ export class AudioEngine {
   /** Pistes en veille, éligibles, compteurs (QA, indicateur de charge). */
   public getSleepStats(): SleepStats | null { return this.effectSleep ? this.effectSleep.stats() : null; }
   public isTrackAsleep(trackId: string): boolean { return !!this.effectSleep?.isAsleep(trackId); }
+  public getSleepDebug() { return this.effectSleep ? this.effectSleep.debug() : null; }
 
   public setLatencyMode(mode: 'low' | 'balanced' | 'high') {
       if (mode === 'low') { this.LOOKAHEAD_MS = 15.0; this.SCHEDULE_AHEAD_SEC = 0.04; } 

@@ -94,7 +94,10 @@ async ({ rate, veille, fx }) => {
     e.startPlayback(0, tracks, { at });
     const origin = e.playbackStartTime;
     const c0 = e.ctx.currentTime, w0 = performance.now(); let maxAsleep = 0;
-    while (e.ctx.currentTime - c0 < DUR + 0.6 && performance.now() - w0 < 90000) { await new Promise(r => setTimeout(r, 50)); const st = e.getSleepStats ? e.getSleepStats() : null; if (st) maxAsleep = Math.max(maxAsleep, st.asleep); }
+    const dbg = [];
+    while (e.ctx.currentTime - c0 < DUR + 0.6 && performance.now() - w0 < 90000) { await new Promise(r => setTimeout(r, 50)); const st = e.getSleepStats ? e.getSleepStats() : null; if (st) maxAsleep = Math.max(maxAsleep, st.asleep);
+      if (e.getSleepDebug && dbg.length < 40 && (dbg.length === 0 || performance.now() - dbg[dbg.length - 1].w > 500)) dbg.push({ w: performance.now(), ...e.getSleepDebug() }); }
+    window.__veilleDbg = dbg;
     const s1 = (e.getSleepStats && e.getSleepStats()) || { sleeps: 0, wakes: 0 };
     e.stopAll();
     await new Promise(r => setTimeout(r, 200));
@@ -130,6 +133,10 @@ def main():
                 r = page.evaluate(JS, {"rate": rate, "veille": veille, "fx": FX})
                 ok = r["ecart_max_lsb16"] <= SEUIL and r["echantillons"] >= r["attendus"] * 0.999 and (not veille or r["mises_en_veille"] > 0)
                 r["ok"] = ok
+                if os.environ.get("VEILLE_DEBUG") and veille:
+                    dbg = page.evaluate("() => window.__veilleDbg || []")
+                    for d in dbg[::3]:
+                        print("  dbg", d.get("moduleOk"), d.get("banks"), round(d.get("now", 0), 2), [(t["id"], t["asleep"], t["slot"], t["quietFor"], t["eligible"], t["busyFor"], round(t["next"], 2) if isinstance(t["next"], (int, float)) else t["next"], t["rest"]) for t in d.get("tracks", []) if t["id"].startswith("v")][:2])
                 res["ok"] &= ok
                 res["mesures"].append(r)
                 print(f"{rate} veille {'ACTIVE' if veille else 'coupée'} : écart {r['ecart_max_lsb16']} LSB16 ({r['ecart_max_dbfs']} dBFS), mises en veille {r['mises_en_veille']}, réveils {r['reveils']}, max en veille {r['pistes_en_veille_max']} — {'OK' if ok else 'ÉCHEC'}", flush=True)

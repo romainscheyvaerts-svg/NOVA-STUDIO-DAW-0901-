@@ -294,6 +294,18 @@ export class EffectSleepManager {
     }
   }
 
+  /** Diagnostic (QA) : pourquoi chaque piste dort ou non. */
+  debug() {
+    const ctx = this.host.ctx();
+    const now = ctx ? ctx.currentTime : 0;
+    return { moduleOk: this.moduleOk, banks: this.banks.length, now, tracks: this.host.trackIds().map(id => {
+      const s = this.state.get(id); const c = this.host.chainOf(id);
+      return { id, asleep: !!s?.asleep, slot: !!s?.slot, quietFor: s?.quietSince != null ? +(now - s.quietSince).toFixed(2) : null,
+        eligible: this.host.eligible(id), busyFor: +(now - this.host.inputBusyUntil(id)).toFixed(2), next: this.host.nextActivityIn(id),
+        rest: c ? c.instances.map(i => typeof i?.isAtRest === 'function' ? i.isAtRest() : null) : null };
+    }) };
+  }
+
   stats(): SleepStats {
     let eligible = 0, asleep = 0;
     const asleepIds: string[] = [];
