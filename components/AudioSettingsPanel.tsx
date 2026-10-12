@@ -7,6 +7,7 @@ import DesktopAppDownload from './DesktopAppDownload';
 import { isNovaDesktop } from '../utils/desktopApp';
 import { useSimpleMode } from '../utils/simpleMode';
 import SimpleModeToggle from './SimpleModeToggle';
+import StorageProtectionCard from './StorageProtectionCard';
 import { armExclusivePref, channelOffsets, setArmExclusivePref, setChannelOffsets } from '../utils/multiRecord';
 import { rateLabel } from '../utils/projectRate';
 
@@ -420,6 +421,7 @@ const AudioSettingsPanel: React.FC<AudioSettingsPanelProps> = ({ onClose }) => {
             {/* BODY */}
             <div className="p-8 space-y-8 bg-nv-bg overflow-y-auto">
                 <SimpleModeToggle />
+                <StorageProtectionCard />
                 
                 {/* AUDIO I/O - Hidden when ASIO is active with a device selected */}
                 {!(asioConnected && selectedAsioDevice) && (

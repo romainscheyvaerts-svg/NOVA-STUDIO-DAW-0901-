@@ -12,7 +12,7 @@ datas = []
 binaries = []
 hiddenimports = collect_submodules('websockets')
 
-hiddenimports += ['vst_host', 'vst_probe', 'license_watch', 'stems_service', 'stems_install', 'vst_automation', 'vst_sidechain']
+hiddenimports += ['vst_host', 'vst_probe', 'license_watch', 'stems_service', 'stems_install', 'vst_automation', 'vst_sidechain', 'project_store']
 datas += [('stems_worker.py', '.')]  # séparation de stems : moteur lancé dans le module optionnel
 # Hôte VST3 natif (moteur par défaut, MIT, sans JUCE) : voir ../native-host/LICENCES.md
 import glob, os

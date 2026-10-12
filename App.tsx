@@ -248,7 +248,11 @@ import { loadSession, getSessionMeta, SavedSessionMeta, formatAgo } from './util
 import { recoveryStore, markSessionOpen, markSessionClosed, previousSessionCrashed, VersionMeta, VersionReason, RecoveredTake } from './utils/recoveryStore';
 import { snapshotOf, stateFromVersion, addRecoveredTakes, trackAudioIds } from './utils/recoverySnapshot';
 import { UNDO_LIMIT, isProjectSwitch } from './utils/undoHistory';
-import { projectSignature, sameSignature, hasWorthKeeping, keepSessionFlagOnClose } from './utils/autosavePolicy';
+import { projectSignature, sameSignature, hasWorthKeeping, keepSessionFlagOnClose, needsUnloadWarning } from './utils/autosavePolicy';
+import { DiskMirror, bridgeDiskBackend, latestOnDisk, pickMostRecent, importFromDisk, audioFrom, type RecoverySource } from './services/DiskProjectStore';
+import { requestPersistence, refreshStorageStatus, isQuotaError, QUOTA_FULL_MESSAGE, markLocalSaves, evictionSuspected, EVICTED_WEB_MESSAGE, EVICTED_DESKTOP_MESSAGE } from './utils/storageProtection';
+import { projectTabLock, type TabLockInfo } from './utils/tabLock';
+import { registerSaveBeforeLeave } from './utils/saveBeforeLeave';
 import { BufferSweeper } from './utils/bufferSweeper';
 import { repairProject } from './utils/projectRepair';
 import type { SessionTemplate, TemplateLoadReport } from './utils/sessionTemplate';
@@ -780,6 +784,12 @@ function Studio() {
   // Versions gardées sur l'appareil (utils/recoveryStore) ; l'ancienne sauvegarde .zip
   // (utils/sessionStore) reste lisible pour les sessions d'avant.
   const latestVersionRef = useRef<VersionMeta | null>(null);
+  // Nova Studio : d'où vient la version proposée (« disque » : relue par le pont, remise
+  // sur l'appareil au moment de la rouvrir).
+  const latestSourceRef = useRef<RecoverySource>('appareil');
+  const diskBackendRef = useRef(bridgeDiskBackend());
+  const diskMirrorRef = useRef<DiskMirror>(null as unknown as DiskMirror);
+  if (!diskMirrorRef.current) diskMirrorRef.current = new DiskMirror(diskBackendRef.current);
   // Séance précédente coupée (plantage, appli fermée de force, coupure de courant).
   const [crashRecovery, setCrashRecovery] = useState<null | { version: VersionMeta | null; takes: { seconds: number; trackName: string }[]; recording: boolean }>(null);
   const [versionsOpen, setVersionsOpen] = useState(false);
@@ -788,13 +798,33 @@ function Studio() {
     let live = true;
     (async () => {
       const crashed = previousSessionCrashed();
-      let latest: VersionMeta | null = null;
-      try { latest = await recoveryStore().latest(); } catch { /* stockage indisponible */ }
+      let device: VersionMeta | null = null;
+      try { device = await recoveryStore().latest(); } catch { /* stockage indisponible */ }
+      // Nova Studio : la sauvegarde est aussi sur le disque. On propose la plus récente des deux
+      // (le stockage de l'appli a pu être vidé ; ou la dernière version n'a été écrite qu'ici).
+      let latest = device;
+      if (isNovaDesktop()) {
+        try {
+          for (let i = 0; i < 40 && !novaBridge.projectsOnDisk(); i++) {
+            if (!live) return;
+            await new Promise(r => setTimeout(r, 250));
+          }
+          const pick = pickMostRecent(device, await latestOnDisk(diskBackendRef.current));
+          if (pick) { latest = pick.meta; latestSourceRef.current = pick.source; }
+          if (!device && pick?.source === 'disque') setLandingNotice(EVICTED_DESKTOP_MESSAGE);
+        } catch (e) { console.warn('[Disque] Lecture des projets impossible', e); }
+      } else if (evictionSuspected(!!device)) {
+        // Il y avait des sauvegardes ici, le navigateur les a effacées : on le dit clairement.
+        setLandingNotice(EVICTED_WEB_MESSAGE);
+      }
       if (!live) return;
       latestVersionRef.current = latest;
       if (latest) setSavedSessionMeta({ savedAt: latest.savedAt, beatTitle: latest.beatTitle, takes: latest.takes, hasLyrics: latest.hasLyrics });
       else getSessionMeta().then(m => { if (live) setSavedSessionMeta(m); }).catch(() => {});
       if (!crashed) return;
+      // Drapeau posé par un AUTRE onglet encore ouvert sur ce projet : pas un plantage.
+      if (crashed.projectId && await projectTabLock().isOpenElsewhere(crashed.projectId)) return;
+      if (!live) return;
       let takes: RecoveredTake[] = [];
       try { takes = await recoveryStore().takesToRecover(); } catch { /* */ }
       if (!live) return;
@@ -820,6 +850,14 @@ function Studio() {
       const store = recoveryStore();
       const report: string[] = [];
       let project: DAWState | null = null;
+      // Version retrouvée sur le disque (Nova Studio) : relue par le pont et remise sur l'appareil.
+      const fromDisk = latestSourceRef.current === 'disque' ? latestVersionRef.current : null;
+      if (versionId !== null && fromDisk && fromDisk.id === versionId && !(await store.getRecord(versionId))) {
+        const r = await importFromDisk(diskBackendRef.current, store, fromDisk.projectId, versionId);
+        if (r.missing.length) report.push(`${r.missing.length} son(s) introuvable(s) sur le disque`);
+        report.push('retrouvée sur le disque');
+        latestSourceRef.current = 'appareil';
+      }
       if (versionId !== null) {
         const v = await store.loadVersion(versionId);
         if (v) {
@@ -3976,14 +4014,17 @@ function Studio() {
 
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (!hasUnsavedChangesRef.current) return;
+      const st = stateRef.current;
+      // Rien de modifié depuis l'ouverture / la dernière sauvegarde (hors prise en cours) : on part.
+      if (!hasUnsavedChangesRef.current && !st.isRecording) return;
       // On n'ennuie pas l'utilisateur si le projet est encore vide. Les pistes de
       // depart (SEND) portent des effets par defaut : elles ne comptent pas comme
       // du travail utilisateur.
-      const hasContent = stateRef.current.tracks.some(t =>
+      const hasUserContent = st.tracks.some(t =>
         t.clips.length > 0 || (t.type !== TrackType.SEND && t.plugins.length > 0)
       );
-      if (!hasContent) return;
+      // Déjà écrit par la sauvegarde automatique : pas de fenêtre (utils/autosavePolicy).
+      if (!needsUnloadWarning(st, lastSavedSigRef.current, { hasUserContent })) return;
       e.preventDefault();
       e.returnValue = '';
     };
@@ -4786,6 +4827,43 @@ function Studio() {
   // 20 dernières versions + une par heure. La prise en cours, elle, est écrite au fil de
   // l'eau par le journal de prise (moteur audio).
   const autosaveNotified = useRef(false);
+  const quotaNotifiedAtRef = useRef(0);
+  const storageCheckedAtRef = useRef(0);
+  const storageLevelRef = useRef<string>('unknown');
+  /**
+   * Après chaque version écrite sur l'appareil :
+   *  - la 1re fois : persistance du stockage demandée au navigateur (utils/storageProtection),
+   *    et marque « il y a des sauvegardes ici » (un effacement par le navigateur sera signalé) ;
+   *  - au plus une fois par minute : place restante, alerte avant saturation ;
+   *  - Nova Studio : copie de la version sur le disque par le pont (services/DiskProjectStore),
+   *    sans attendre et sans bloquer l'interface.
+   */
+  const afterVersionSaved = (versionId: number) => {
+    markLocalSaves();
+    void requestPersistence();
+    if (Date.now() - storageCheckedAtRef.current > 60_000) {
+      storageCheckedAtRef.current = Date.now();
+      void refreshStorageStatus().then(st => {
+        if ((st.level === 'warn' || st.level === 'full') && storageLevelRef.current !== st.level) {
+          setAiNotification(st.level === 'full' ? QUOTA_FULL_MESSAGE
+            : '💾 Le stockage de NOVA sur cet appareil est presque plein. Exporte tes projets terminés en .zip (Sauvegarder › Fichier sur cet appareil) et libère de la place sur le disque de l’ordinateur (détails : Réglages audio › Sauvegardes).');
+        }
+        storageLevelRef.current = st.level;
+      });
+    }
+    const mirror = diskMirrorRef.current;
+    if (isNovaDesktop() && mirror.available()) {
+      void (async () => {
+        const store = recoveryStore();
+        const rec = await store.getRecord(versionId);
+        if (!rec) return;
+        await mirror.mirror(rec, audioFrom(id => {
+          const b = audioBufferRegistry.get(id);
+          return b ? { sampleRate: b.sampleRate, channels: Array.from({ length: b.numberOfChannels }, (_, i) => b.getChannelData(i)) } : null;
+        }, id => store.getAudio(id)));
+      })().catch(e => console.warn('[Disque] Copie impossible', e));
+    }
+  };
   const autosaveBusy = useRef(false);
   const autosavePending = useRef<VersionReason | null>(null);
   const lastSavedSigRef = useRef<unknown[] | null>(null);
@@ -4793,6 +4871,8 @@ function Studio() {
   // Dernière version écrite (diagnostic) : une ref, pas un état (pas de rendu de tout le studio toutes les 15 s).
   const lastAutosaveRef = useRef<{ at: number; ms: number; syncMs: number; audioWritten: number } | null>(null);
   const autosaveNow = useCallback(async (reason: VersionReason = 'auto', force = false, named?: { versionNumber: number; comment?: string; state: DAWState }): Promise<boolean> => {
+    // Même projet ouvert dans un autre onglet qui a la main : cet onglet n'écrit rien (utils/tabLock).
+    if (!projectTabLock().canSave()) return false;
     // R21 · Version nommée : attend la sauvegarde en cours, puis s'écrit (jamais sautée).
     if (named) { for (let i = 0; i < 100 && autosaveBusy.current; i++) await new Promise(r => setTimeout(r, 50)); }
     if (autosaveBusy.current) { autosavePending.current = reason; return false; }
@@ -4823,6 +4903,7 @@ function Studio() {
       lastSavedSigRef.current = sig;
       if (r) lastAutosaveRef.current = { at: r.versionId, ms: r.ms, syncMs, audioWritten: r.audioWritten };
       if (purgeTakesAfterSaveRef.current) { purgeTakesAfterSaveRef.current = false; await recoveryStore().purgeTakes(); }
+      if (r) afterVersionSaved(r.versionId);
       if (!autosaveNotified.current) {
         autosaveNotified.current = true;
         // Une ligne (avant : trois, posées sur les clips des pistes du bas pendant la séance).
@@ -4831,6 +4912,11 @@ function Studio() {
       return !!r;
     } catch (e) {
       console.warn('[Session] Sauvegarde auto impossible', e);
+      if (isQuotaError(e)) {
+        // Stockage plein : la sauvegarde n'a PAS eu lieu. Message actionnable (au plus une fois par minute).
+        void refreshStorageStatus();
+        if (Date.now() - quotaNotifiedAtRef.current > 60_000) { quotaNotifiedAtRef.current = Date.now(); setAiNotification(QUOTA_FULL_MESSAGE); }
+      }
       return false;
     } finally {
       autosaveBusy.current = false;
@@ -4840,6 +4926,20 @@ function Studio() {
   }, [user]);
   const autosaveNowRef = useRef<((reason?: VersionReason, force?: boolean) => Promise<boolean>) | null>(null);
   autosaveNowRef.current = autosaveNow;
+  // Avant de quitter la page (paiement Stripe, portail d'abonnement) : sauvegarde d'abord
+  // (utils/saveBeforeLeave). Rien à garder : on peut partir ; échec : la page reste.
+  useEffect(() => {
+    registerSaveBeforeLeave(async () => {
+      const st = stateRef.current;
+      if (st.isRecording) return false;
+      if (!hasWorthKeeping(st)) return true;
+      if (!projectTabLock().canSave()) return false;
+      for (let i = 0; i < 100 && autosaveBusy.current; i++) await new Promise(r => setTimeout(r, 50));
+      const ok = await autosaveNow('close', true);
+      return ok || sameSignature(projectSignature(st), lastSavedSigRef.current);
+    });
+    return () => registerSaveBeforeLeave(null);
+  }, [autosaveNow]);
   // « Revenir à la version enregistrée » (Pro Tools : Revert to Saved), avec confirmation.
   const revertToSaved = useRevertToSaved({
     projectId: () => stateRef.current.id,
@@ -4881,6 +4981,18 @@ function Studio() {
     if (showLanding) return;
     markSessionOpen(state.id, state.isRecording);
   }, [showLanding, state.id, state.isRecording]);
+  // Même projet ouvert dans un 2e onglet : un seul sauvegarde (utils/tabLock), l'autre le dit.
+  const [tabLock, setTabLock] = useState<TabLockInfo>(() => projectTabLock().state);
+  useEffect(() => projectTabLock().onChange(setTabLock), []);
+  useEffect(() => {
+    if (showLanding) { projectTabLock().close(); return; }
+    projectTabLock().open(state.id);
+  }, [showLanding, state.id]);
+  useEffect(() => {
+    const bye = () => projectTabLock().close();
+    window.addEventListener('pagehide', bye);
+    return () => window.removeEventListener('pagehide', bye);
+  }, []);
   useEffect(() => {
     // Onglet fermé en pleine prise ou avec des changements pas encore écrits : le drapeau reste,
     // la réouverture propose de récupérer (utils/autosavePolicy).
@@ -7733,6 +7845,8 @@ function Studio() {
     (window as any).__novaBeforeClose = async () => {
       try { if (novaBridge.isConnected()) await bakeVstBeforeSave(); } catch (e) { console.warn('[Fermeture] gel', e); }
       try { await autosaveNow('close', true); } catch { /* */ }
+      // Nova Studio : la dernière version part aussi sur le disque avant la fermeture.
+      try { await diskMirrorRef.current.idle(); } catch { /* */ }
       markSessionClosed();
       if (cloudRef.current && stateRef.current.id === cloudProjectId(cloudRef.current.id)) {
         // Une synchro déjà en cours : on attend qu'elle finisse, puis on renvoie.
@@ -7964,6 +8078,9 @@ function Studio() {
         clips: stateRef.current.tracks.reduce((s, t) => s + t.clips.length, 0),
         // Dernière sauvegarde automatique : heure et durée (ms) — elle ne doit jamais geler l'interface.
         autosave: lastAutosaveRef.current,
+        // Nova Studio : dernière version copiée sur le disque (durée, sons envoyés, erreur).
+        disk: diskMirrorRef.current.status,
+        tabLock: projectTabLock().state,
       }),
     };
     // Dépôt d'un fichier ou d'un beat sur l'en-tête d'une piste (TrackHeader) :
@@ -9214,7 +9331,7 @@ function Studio() {
       // Réglages
       a('Réglages', 'pal.tempo', 'Tempo, mesure et tonalité', () => openTempoDialog(null), { pt: 'Tempo / Meter', keywords: 'bpm tempo mesure tonalité gamme key' }),
       a('Réglages', 'pal.metronome', 'Clic et décompte', () => { void ensureAudioEngine(); setMetronomeDialogOpen(true); }, { pt: 'Click / Countoff', keywords: 'clic métronome décompte count' }),
-      a('Réglages', 'pal.audio', 'Réglages audio (carte son, latence, entrées)', () => setIsAudioSettingsOpen(true), { pt: 'Playback Engine / I/O Setup', keywords: 'asio carte son latence buffer entrée' }),
+      a('Réglages', 'pal.audio', 'Réglages audio (carte son, latence, entrées)', () => setIsAudioSettingsOpen(true), { pt: 'Playback Engine / I/O Setup', keywords: 'asio carte son latence buffer entrée sauvegardes stockage protection disque' }),
       a('Réglages', 'pal.theme', `Thème ${theme === 'light' ? 'sombre' : 'clair'}`, () => toggleTheme(), { keywords: 'thème clair sombre dark light' }),
       a('Réglages', 'pal.simple', simpleNow ? 'Passer en mode avancé (console, routage, automation)' : 'Passer en mode simple', () => simpleModeStore.setPref(!simpleNow), { keywords: 'mode simple avancé' }),
       // Vues
@@ -9280,6 +9397,29 @@ function Studio() {
         </PanelBoundary>
       </div>
       
+      {/* Même projet ouvert dans un autre onglet : cet onglet ne sauvegarde pas (utils/tabLock). */}
+      {tabLock.role === 'guest' && tabLock.projectId === state.id && (
+        <div className="fixed inset-x-0 top-3 z-[670] flex justify-center px-4 pointer-events-none" role="alert" data-testid="tab-lock-banner">
+          <div className="pointer-events-auto w-full max-w-xl rounded-2xl border border-amber-400/50 bg-nv-surface px-4 py-3 shadow-2xl">
+            <p className="text-[13px] font-bold text-amber-100">
+              {tabLock.ownerGone
+                ? "L'autre onglet sur ce projet est fermé."
+                : tabLock.reason === 'taken-over'
+                  ? 'Ce projet a été repris dans un autre onglet.'
+                  : 'Ce projet est déjà ouvert dans un autre onglet.'}
+            </p>
+            <p className="mt-1 text-[12px] text-slate-300">
+              Pour qu'un onglet n'écrase pas le travail de l'autre, <b>cet onglet ne sauvegarde pas</b>
+              {tabLock.ownerGone ? '. Clique « Travailler ici » pour reprendre les sauvegardes.' : ". Continue dans l'autre onglet, ou travaille ici (l'autre arrêtera de sauvegarder)."}
+            </p>
+            <div className="mt-2 flex justify-end">
+              <button type="button" data-testid="tab-lock-take" onClick={() => { projectTabLock().takeOver(); setAiNotification('✅ Cet onglet sauvegarde à nouveau ce projet.'); void autosaveNowRef.current?.('auto', true); }}
+                className="min-h-10 px-4 rounded-xl bg-amber-400 text-black text-[12px] font-black">Travailler ici</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Admin Template Button - Visible uniquement pour l'admin */}
       {user && user.email.toLowerCase() === 'romain.scheyvaerts@gmail.com' && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100]">
