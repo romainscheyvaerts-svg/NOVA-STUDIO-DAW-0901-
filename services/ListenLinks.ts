@@ -24,6 +24,8 @@ async function invoke<T>(body: Record<string, unknown>): Promise<T> {
     try { payload = await (error as any).context?.json?.(); } catch { /* corps illisible */ }
     const status = (error as any).context?.status;
     const net = typeof status !== 'number';
+    // 404 sans réponse de daw-listen = fonction pas encore mise en ligne (pas un lien inconnu).
+    if (status === 404 && !payload?.error) throw new ListenError("Le lien d'écoute client n'est pas encore activé sur le serveur : il arrive avec la prochaine mise en ligne.", 404, 'not_deployed');
     throw new ListenError(payload?.error || (net ? 'Pas de connexion au serveur' : error.message) || 'Erreur', status, payload?.code || (net ? 'network' : undefined), payload || undefined);
   }
   return data as T;
