@@ -5,7 +5,7 @@
  *   Windows) : aucun essai automatique sur un appareil qui n'a jamais vu le pont
  *   (téléphones, PC sans pont). Ensuite, reconnexion automatique (voir v10).
  * - Contrôle (JSON, requêtes numérotées) sur ce thread ; l'audio temps réel passe
- *   par un Worker dédié (public/worklets/vst-bridge-worker-v5.js) relié à chaque
+ *   par un Worker dédié (public/worklets/vst-bridge-worker-v6.js) relié à chaque
  *   AudioWorklet d'effet VST3.
  * - Rendu hors temps réel (RENDER) en trame binaire pour le gel / l'export.
  * - v5 : instruments VST3 (RENDER_INSTRUMENT : notes -> audio, mode instru).
@@ -1172,7 +1172,7 @@ class NovaBridgeService {
 
   private ensureWorker() {
     if (!this.worker) {
-      this.worker = new Worker(`${import.meta.env.BASE_URL}worklets/vst-bridge-worker-v5.js`);
+      this.worker = new Worker(`${import.meta.env.BASE_URL}worklets/vst-bridge-worker-v6.js`);
     }
     this.worker.postMessage({ type: 'init', url: this.url });
   }

@@ -86,6 +86,9 @@ export class AraInsertNode extends VSTPluginNode {
   /** Effet calé sur le morceau : le moteur lui donne l'origine de la lecture. */
   public get followsTimeline(): boolean { return true; }
 
+  /** Insert ARA : le plugin rejoue les clips à la position du morceau ; pas de remise à zéro du flux. */
+  public resetAt(_at: number) { /* rien */ }
+
   /**
    * `origin` = instant du contexte qui correspond au début du morceau, MOINS l'avance de
    * compensation des effets qui suivent ; `at` = instant d'un bouclage (sinon : départ).

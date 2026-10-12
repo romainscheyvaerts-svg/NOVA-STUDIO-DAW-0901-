@@ -367,7 +367,9 @@ namespace nova
             {
                 auto& inst = need();
                 bool persists = true;
-                guarded ("test de remise à zéro", [&] { persists = inst.persistsAudioOnReset(); });
+                // Fréquence du projet (pont récent) ; sinon celle de la dernière préparation, sinon 44,1 kHz.
+                const double sr = req["sample_rate"].asDouble (inst.preparedRate());
+                guarded ("test de remise à zéro", [&] { persists = inst.persistsAudioOnReset (sr); });
                 auto o = Value::object();
                 o.set ("persists", persists);
                 reply (id, o);
@@ -375,8 +377,19 @@ namespace nova
             else if (cmd == "warm_up")
             {
                 auto& inst = need();
-                guarded ("mise en route", [&] { inst.warmUp (req["seconds"].asDouble (10.0)); });
+                const double sr = req["sample_rate"].asDouble (inst.preparedRate());
+                guarded ("mise en route", [&] { inst.warmUp (req["seconds"].asDouble (10.0), sr); });
                 reply (id, Value::object());
+            }
+            else if (cmd == "flush_params")
+            {
+                // Réglages en attente remis au processeur sans audio (process à 0 échantillon).
+                auto& inst = need();
+                bool done = false;
+                guarded ("réglages vers le processeur", [&] { done = inst.flushParams(); });
+                auto o = Value::object();
+                o.set ("flushed", done);
+                reply (id, o);
             }
             else if (cmd == "sync_values")
             {

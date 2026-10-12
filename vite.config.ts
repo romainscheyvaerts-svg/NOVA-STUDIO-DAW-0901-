@@ -91,7 +91,8 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
         // F11 : reconstruire l'installateur Windows (desktop/dist) faisait tomber le
         // serveur de dev (EPERM sur les fichiers temporaires de l'installateur).
-        watch: { ignored: ['**/desktop/dist/**', '**/public/downloads/**', '**/desktop/node_modules/**'] },
+        // Idem pour la construction des hôtes natifs (CMake : EBUSY sur ses exécutables de test).
+        watch: { ignored: ['**/desktop/dist/**', '**/public/downloads/**', '**/desktop/node_modules/**', '**/native-host/build/**', '**/nova-ara-host/build/**', '**/nova-vst-host/build/**'] },
       },
       plugins: [react(), devApiPlugin(), {
         // Date de construction dans la page : l'application Windows ne se met à

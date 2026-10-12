@@ -45,7 +45,9 @@ class NovaAnalogCompProcessor extends AudioWorkletProcessor {
     return __allAp.map(d => ({ name: d.name, minValue: -1e4, maxValue: 1e4, defaultValue: d.defaultValue, automationRate: 'k-rate' }))
       // Side-chain (R7) : détection sur l'entrée 2 (clé externe), écoute de la clé.
       .concat([{ name: '__keyOn', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' },
-        { name: '__keyListen', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' }]);
+        { name: '__keyListen', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' },
+        // Départ de lecture : compteur programmé au bloc du départ, le cœur repart à neuf (comme l'export).
+        { name: '__resetGen', minValue: 0, maxValue: 1e9, defaultValue: 0, automationRate: 'k-rate' }]);
   }
   constructor(options) {
     super();
@@ -59,6 +61,7 @@ class NovaAnalogCompProcessor extends AudioWorkletProcessor {
     this.dirty = true;
     this.zero = new Float32Array(128);
     this.blocks = 0;
+    this.gen = 0;
     this.port.onmessage = (e) => {
       const d = e.data || {};
       if (d.params) { Object.assign(this.params, d.params); this.dirty = true; }
@@ -66,6 +69,7 @@ class NovaAnalogCompProcessor extends AudioWorkletProcessor {
     };
   }
   process(inputs, outputs, parameters) {
+    if (parameters.__resetGen && parameters.__resetGen[0] !== this.gen) { this.gen = parameters.__resetGen[0]; this.core.reset(); }
     for (let i = 0; i < this.ap.length; i++) {
       const a = parameters[this.ap[i]];
       const v = a && a.length ? a[0] : NaN;
@@ -97,7 +101,7 @@ class NovaAnalogCompProcessor extends AudioWorkletProcessor {
     return true;
   }
 }
-try { registerProcessor('nova-analog-comp-v1', NovaAnalogCompProcessor); } catch (e) {}
+try { registerProcessor('nova-analog-comp-v2', NovaAnalogCompProcessor); } catch (e) {}
 `;
 
 export interface AnalogMeters { grDb: number; grNowDb: number; inPeakDb: number; outPeakDb: number }
@@ -143,11 +147,11 @@ export class AnalogCompNode {
 
   private async init() {
     try {
-      await loadWorkletModule(this.ctx, 'nova-analog-comp-v1', WORKLET_CODE);
+      await loadWorkletModule(this.ctx, 'nova-analog-comp-v2', WORKLET_CODE);
       if (this.disposed) return;
       const parameterData: Record<string, number> = {};
       for (const s of AUDIO_PARAMS(this.kind)) parameterData[s.id] = +(this.params[s.id] as number);
-      this.worklet = new AudioWorkletNode(this.ctx, 'nova-analog-comp-v1', {
+      this.worklet = new AudioWorkletNode(this.ctx, 'nova-analog-comp-v2', {
         numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [2],
         channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
         parameterData,
@@ -197,6 +201,14 @@ export class AnalogCompNode {
   }
 
   public getParams() { return { ...this.params }; }
+
+  private resetCount = 0;
+  /** Départ de la lecture à `at` (début d'un bloc de rendu) : le cœur repart de l'état d'une instance neuve. */
+  public resetAt(at: number) {
+    const ap = this.worklet ? ((this.worklet.parameters as any).get('__resetGen') as AudioParam | undefined) : undefined;
+    if (!ap) return;
+    try { ap.setValueAtTime(++this.resetCount, Math.max(this.ctx.currentTime, at - 0.5 / this.ctx.sampleRate)); } catch { /* */ }
+  }
 
   /** Clé externe branchée (R7) : la détection écoute `sidechainInput`. */
   public setSidechainActive(on: boolean) {

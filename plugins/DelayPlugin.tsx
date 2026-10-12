@@ -3,7 +3,7 @@ import { AutomationSet, MappedParam, mixDry, mixWet, mixFromWet } from '../engin
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 import { paramFr, termHelp } from '../utils/pluginUi';
 import { PluginParameter } from '../types';
-import { EnvelopeDucker, makeCurve, SMOOTH, setParamSmooth } from './vocalDspUtils';
+import { EnvelopeDucker, makeCurve, SMOOTH, setParamSmooth, fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
 
 /**
  * PROFESSIONAL TAPE DELAY ENGINE v3.0
@@ -117,8 +117,9 @@ export class SyncDelayNode {
   private analogFilter: BiquadFilterNode;  // Adds analog warmth (hors boucle)
 
   // Modulation (wow/flutter)
-  private modLFO1: OscillatorNode;
-  private modLFO2: OscillatorNode;  // Secondary for complex modulation
+  // LFO calés sur le morceau (même phase en lecture et à l'export)
+  private modLFO1: TimelineLfo;
+  private modLFO2: TimelineLfo;  // Secondary for complex modulation
   private modGain1: GainNode;
   private modGain2: GainNode;
 
@@ -167,9 +168,8 @@ export class SyncDelayNode {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
 
-    // Initialize with zero gain and ramp up to avoid click on creation
-    this.output.gain.setValueAtTime(0, ctx.currentTime);
-    this.output.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
+    // Fondu d'apparition (anti-clic) en direct ; aucun à l'export (le rendu démarre sur le son).
+    fadeInOnInsert(this.output.gain, ctx);
 
     // Entrees : on force la stereo (une source mono est recopiee sur G et D,
     // sinon le separateur laisserait le canal droit muet).
@@ -216,22 +216,12 @@ export class SyncDelayNode {
     this.analogFilter.gain.value = 0;
 
     // Modulation LFOs
-    this.modLFO1 = ctx.createOscillator();
-    this.modLFO1.type = 'sine';
-    this.modLFO1.frequency.value = 0.3;  // Slower default rate
     this.modGain1 = ctx.createGain();
     this.modGain1.gain.value = 0;  // Start at 0 to avoid initial "wou" sound
-
-    this.modLFO2 = ctx.createOscillator();
-    this.modLFO2.type = 'triangle';
-    this.modLFO2.frequency.value = 0.17;  // Much slower secondary
     this.modGain2 = ctx.createGain();
     this.modGain2.gain.value = 0;  // Start at 0
-
-    this.modLFO1.connect(this.modGain1);
-    this.modLFO2.connect(this.modGain2);
-    this.modLFO1.start();
-    this.modLFO2.start();
+    this.modLFO1 = new TimelineLfo(ctx, this.modGain1, 0.3, 0, 'sine');       // Slower default rate
+    this.modLFO2 = new TimelineLfo(ctx, this.modGain2, 0.17, 0, 'triangle');  // Much slower secondary
 
     // Ducking
     this.duckingGain = ctx.createGain();
@@ -464,8 +454,8 @@ export class SyncDelayNode {
       // Modulation - reduced values to prevent "wou wou" artifacts
       const modEnabled = this.params.mode === 'TAPE' || this.params.mode === 'ANALOG';
       const modDepth = modEnabled ? safe(this.params.modDepth, 0.05) : 0;  // Default reduced from 0.15 to 0.05
-      this.setP(this.modLFO1.frequency, Math.max(0.1, safe(this.params.modRate, 0.3)), 0.05);
-      this.setP(this.modLFO2.frequency, Math.max(0.05, safe(this.params.modRate, 0.3) * 0.5), 0.05);
+      this.modLFO1.setFrequency(Math.max(0.1, safe(this.params.modRate, 0.3)));
+      this.modLFO2.setFrequency(Math.max(0.05, safe(this.params.modRate, 0.3) * 0.5));
       // Much smaller modulation depth values to avoid pitch wobble
       this.setP(this.modGain1.gain, modDepth * 0.0003, 0.1);  // Reduced from 0.002
       this.setP(this.modGain2.gain, modDepth * 0.0001, 0.1);  // Reduced from 0.0008
@@ -485,6 +475,10 @@ export class SyncDelayNode {
       this.auto.get('mix')!.setStatic(0, st);
     }
   }
+
+  /** Modulation calée sur la ligne de temps du morceau (le moteur appelle syncTimeline). */
+  public get followsTimeline(): boolean { return true; }
+  public syncTimeline(origin: number, at?: number) { this.modLFO1.sync(origin, at); this.modLFO2.sync(origin, at); }
 
   public getParameters(): PluginParameter[] {
     return [
@@ -506,14 +500,8 @@ export class SyncDelayNode {
 
   public dispose() {
     try {
-      if (this.modLFO1) {
-        this.modLFO1.stop();
-        this.modLFO1.disconnect();
-      }
-      if (this.modLFO2) {
-        this.modLFO2.stop();
-        this.modLFO2.disconnect();
-      }
+      this.modLFO1?.stop();
+      this.modLFO2?.stop();
       this.ducker.disconnect();
     } catch (e) {
       // Oscillators may already be stopped

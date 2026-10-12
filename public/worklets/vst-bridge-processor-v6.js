@@ -1,5 +1,5 @@
 /**
- * VST Bridge Processor v5
+ * VST Bridge Processor v6
  *
  * Nom de fichier versionné : le service worker garde les worklets en cache
  * (même nom = même contenu) ; une nouvelle version du protocole = un nouveau nom.
@@ -26,6 +26,9 @@
  *     (paliers), au plus MAX_PER_BLOCK par réglage.
  * v5 (R10) — side-chain : 2e entrée = clé ; si la clé est active, le bloc
  * part en 4 canaux (principal G/D puis clé G/D).
+ * v6 — départ de lecture : message { type: 'reset' } → le bloc suivant part avec le drapeau
+ * RESET (même s'il est silencieux) : le pont remet le plugin à zéro juste avant lui, comme
+ * l'instance hors ligne de l'export (Pro-C 3 gardait une mémoire d'une écoute à l'autre).
  * v5 (insert ARA, pont v12) — position du morceau : en mode « ara », chaque bloc part avec
  * la position du morceau de son ENTRÉE (échantillons ; -1 = transport arrêté) : la sortie à
  * l'instant t du contexte = morceau t − origine ; le bloc envoyé à f ressort à f + latence.
@@ -76,6 +79,8 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     this.tlPlaying = false;
     this.tlSentPlaying = false;
     this.tlMuteBefore = -1;
+    this.resetPending = false;
+    this.resetsSent = 0;
 
     this.port.onmessage = (e) => {
       const m = e.data || {};
@@ -108,6 +113,8 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
         this.tlPlaying = false;
         // Arrêt net (comme Pro Tools) : la fin déjà en route dans le pré-tampon n'est pas jouée.
         this.tlMuteBefore = this.seq;
+      } else if (m.type === 'reset') {
+        this.resetPending = true;
       } else if (m.type === 'tllatency') {
         this.tlLatency = m.latency || 0;
       }
@@ -210,7 +217,10 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     // Insert ARA : à l'arrêt, rien à jouer (silence sans solliciter le pont) ; en lecture, tout part.
     // Le premier bloc après l'arrêt part quand même (position -1) : le plugin apprend l'arrêt
     // (sinon Melodyne rejoue un bout de l'ancienne position à la relance).
-    const gate = this.ara ? (tl < 0 && pc === 0 && !this.tlSentPlaying) : (pc === 0 && this.silentIn > this.delayBlocks + 64 && (this.lastRecvSeq - this.lastLoudSeq) > 64);
+    const reset = this.resetPending;
+    this.resetPending = false;
+    if (reset) this.resetsSent++;
+    const gate = !reset && (this.ara ? (tl < 0 && pc === 0 && !this.tlSentPlaying) : (pc === 0 && this.silentIn > this.delayBlocks + 64 && (this.lastRecvSeq - this.lastLoudSeq) > 64));
     if (this.ara && !gate) this.tlSentPlaying = tl >= 0;
     if (gate) {
       this.ring[this.seq % RING] = { seq: this.seq, data: null };
@@ -218,9 +228,9 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
       const params = this.pbuf.slice(0, pc * 3);
       this.paramsSent += pc;
       this.paramBlocks++;
-      this.bridge.postMessage(this.ara ? { seq: this.seq, data, nch, params, tl } : { seq: this.seq, data, nch, params }, [data.buffer, params.buffer]);
+      this.bridge.postMessage(this.ara ? { seq: this.seq, data, nch, params, tl, reset } : { seq: this.seq, data, nch, params, reset }, [data.buffer, params.buffer]);
     } else {
-      this.bridge.postMessage(this.ara ? { seq: this.seq, data, nch, tl } : { seq: this.seq, data, nch }, [data.buffer]);
+      this.bridge.postMessage(this.ara ? { seq: this.seq, data, nch, tl, reset } : { seq: this.seq, data, nch, reset }, [data.buffer]);
     }
 
     // 2) Sortie : le bloc traité d'il y a delayBlocks
@@ -240,10 +250,10 @@ class VSTBridgeProcessor extends AudioWorkletProcessor {
     this.seq++;
     if (this.seq - this.statsAt >= 375) { // ≈ toutes les secondes
       this.statsAt = this.seq;
-      this.port.postMessage({ type: 'stats', underruns: this.underruns, received: this.received, seq: this.seq, paramsSent: this.paramsSent, paramBlocks: this.paramBlocks });
+      this.port.postMessage({ type: 'stats', underruns: this.underruns, received: this.received, seq: this.seq, paramsSent: this.paramsSent, paramBlocks: this.paramBlocks, resets: this.resetsSent });
     }
     return true;
   }
 }
 
-registerProcessor('vst-bridge-processor-v5', VSTBridgeProcessor);
+registerProcessor('vst-bridge-processor-v6', VSTBridgeProcessor);

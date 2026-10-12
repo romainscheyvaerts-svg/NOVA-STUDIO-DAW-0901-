@@ -102,7 +102,9 @@ interface TrackDSP {
   panner: StereoPannerNode; 
   gain: GainNode;           
   analyzer: AnalyserNode;
-  inputAnalyzer?: AnalyserNode; 
+  inputAnalyzer?: AnalyserNode;
+  /** Source muette (0) branchée en permanence sur l'entrée : la chaîne d'effets reste « active » (comme à l'export). */
+  keepAlive?: ConstantSourceNode;
   /** crashed : son worklet a planté (processorerror) ; l'effet est contourné et sera recréé s'il est réactivé. */
   pluginChain: Map<string, { input: AudioNode; output: AudioNode; instance: any; connectedTo?: AudioNode; bypassDelay?: DelayNode; crashed?: boolean }>;
   /** Pan propre des envois (TrackSend.pan, Pro Tools « FMP » éteint). */
@@ -2124,6 +2126,19 @@ export class AudioEngine {
     });
   }
 
+  /**
+   * Départ de la lecture : les effets qui savent repartir d'un état connu (`resetAt`) le font
+   * à l'instant `at` (début d'un bloc de rendu) : cœurs DSP des worklets NOVA (compresseurs,
+   * gates, filtres, harmoniseur…), VST3 (le pont remet le plugin à zéro juste avant le bloc).
+   * À l'export, chaque effet est neuf à l'instant 0 du rendu : même point de départ.
+   */
+  private resetEffectsAt(at: number) {
+    this.tracksDSP.forEach(d => d.pluginChain.forEach(entry => {
+      const n = entry.instance as any;
+      if (n && typeof n.resetAt === 'function') { try { n.resetAt(at); } catch { /* effet libéré */ } }
+    }));
+  }
+
   private resyncTimelineEffects() {
     if (!this.isPlaying || !this.ctx) return;
     const w = this.pendingLoopWrap;
@@ -2749,7 +2764,11 @@ export class AudioEngine {
     this.pendingLoopWrap = null;
     this.pausedAt = startOffset;
     this.pluginAutoSent.clear();
-    this.nextScheduleTime = Math.max(this.ctx.currentTime + 0.01, opts.at ?? 0);
+    // Départ calé sur le début d'un bloc de rendu (128 échantillons, ≤ 2,9 ms plus tard) : les
+    // effets repartent d'un état connu à CET instant (remise à zéro au bloc près, voir
+    // resetEffectsAt) et découpent le son en blocs exactement comme l'export (bloc 0 = départ).
+    const quantum = 128 / this.ctx.sampleRate;
+    this.nextScheduleTime = Math.ceil(Math.max(this.ctx.currentTime + 0.01, opts.at ?? 0) / quantum - 1e-6) * quantum;
     // Le point de départ tombe pile au début de la 1re fenêtre : une note posée
     // exactement là (1er kick de la batterie, 1re 808) était sautée.
     this.playbackStartTime = this.nextScheduleTime - startOffset;
@@ -2757,8 +2776,12 @@ export class AudioEngine {
     this.flashbackRunStart(this.nextScheduleTime, this.playbackStartTime);
     // Synthé NOVA : chorus calé sur le temps du morceau (identique à l'export).
     this.tracksDSP.forEach(d => { if (d.synth instanceof NovaSynthNode) d.synth.syncTimeline(this.playbackStartTime, this.nextScheduleTime); });
-    // Gate rythmique : motif calé sur la grille du morceau (même calcul qu'à l'export).
-    this.resyncTimelineEffects();
+    // Gate rythmique, LFO des reverbs / chorus / flanger / délai : calés sur la grille du
+    // morceau (même calcul qu'à l'export), à partir de l'instant exact du départ.
+    this.syncTimelineEffects(this.playbackStartTime, this.nextScheduleTime);
+    // Départ depuis l'arrêt : chaque effet repart de l'état de l'instance neuve de l'export
+    // (cœurs des worklets NOVA remis à zéro au bloc du départ, VST3 remis à zéro par le pont).
+    this.resetEffectsAt(this.nextScheduleTime);
     if (this.recSession && this.recPlayStart === null) { this.recPlayStart = this.playbackStartTime; this.annotateLead(); } 
 
     // Valeur correcte au demarrage : sans ca, une piste dont tous les points
@@ -4022,6 +4045,18 @@ export class AudioEngine {
     dsp.input.channelCount = 2;
     dsp.input.channelCountMode = 'explicit';
     dsp.input.channelInterpretation = 'speakers';
+    // Même règle qu'à l'export (renderProject) : une source muette garde la chaîne « active ».
+    // Sans elle, Chrome arrête un filtre (EQ 12 bandes, de-esser…) quand plus rien n'y entre
+    // (fin du dernier clip) et coupe sa résonance sous un seuil : la queue des filtres juste
+    // après la fin d'un clip s'arrêtait net en lecture et pas à l'export (6 LSB 16 bits,
+    // −74 dBFS, mesuré aux trois fréquences), et l'état gelé du filtre ressortait à l'écoute suivante.
+    try {
+      const ka = this.ctx.createConstantSource();
+      ka.offset.value = 0;
+      ka.connect(dsp.input);
+      ka.start();
+      dsp.keepAlive = ka;
+    } catch (e) { /* contexte sans ConstantSource : ancien comportement */ }
 
     this.tracksDSP.set(track.id, dsp);
     return dsp;
@@ -4072,6 +4107,8 @@ export class AudioEngine {
     try { dsp.sampler?.stopAll(); } catch (e) {}
     try { dsp.drumSampler?.stop(); } catch (e) {}
     try { dsp.melodicSampler?.stopAll(); } catch (e) {}
+    try { dsp.keepAlive?.stop(); dsp.keepAlive?.disconnect(); } catch (e) {}
+    dsp.keepAlive = undefined;
 
     dsp.pluginChain.forEach(entry => {
       try { entry.input.disconnect(); entry.output.disconnect(); } catch (e) {}

@@ -87,7 +87,8 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
     return __ap.map(d => ({ name: d.name, minValue: d.min, maxValue: d.max, defaultValue: d.def, automationRate: 'k-rate' }))
       // Écoute externe (R7) : détection sur l'entrée 2 (clé), écoute de la clé.
       .concat([{ name: '__keyOn', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' },
-        { name: '__keyListen', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' }]);
+        { name: '__keyListen', minValue: 0, maxValue: 1, defaultValue: 0, automationRate: 'k-rate' },
+        { name: '__resetGen', minValue: 0, maxValue: 1e9, defaultValue: 0, automationRate: 'k-rate' }]);
   }
   constructor(options) {
     super();
@@ -105,6 +106,8 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
     };
   }
   process(inputs, outputs, parameters) {
+    // Départ de lecture : compteur programmé au bloc du départ, le cœur repart à neuf (comme l'export).
+    if (parameters.__resetGen && parameters.__resetGen[0] !== (this.gen || 0)) { this.gen = parameters.__resetGen[0]; this.core.reset(); }
     // Réglages automatisables : l'AudioParam fait foi (automation programmée au bloc près).
     for (let i = 0; i < __ap.length; i++) {
       const a = parameters[__ap[i].name];
@@ -134,13 +137,21 @@ class NovaDeesserProcessor extends AudioWorkletProcessor {
     return true;
   }
 }
-try { registerProcessor('nova-deesser-v3', NovaDeesserProcessor); } catch (e) {}
+try { registerProcessor('nova-deesser-v4', NovaDeesserProcessor); } catch (e) {}
 `;
 
 export interface DeEsserMeters { grDb: number; grNowDb: number; detDb: number }
 
 export class DeEsserNode {
   private ctx: BaseAudioContext;
+
+  private resetCount = 0;
+  /** Départ de la lecture à `at` (début d'un bloc de rendu) : le cœur repart de l'état d'une instance neuve. */
+  public resetAt(at: number) {
+    const ap = this.worklet ? ((this.worklet.parameters as any).get('__resetGen') as AudioParam | undefined) : undefined;
+    if (!ap) return;
+    try { ap.setValueAtTime(++this.resetCount, Math.max(this.ctx.currentTime, at - 0.5 / this.ctx.sampleRate)); } catch { /* */ }
+  }
   public input: GainNode;
   public output: GainNode;
   /** Entrée de l'écoute externe (side-chain, R7), câblée par le moteur (engine/sidechain.ts). */
@@ -177,9 +188,9 @@ export class DeEsserNode {
 
   private async init() {
     try {
-      await loadWorkletModule(this.ctx, 'nova-deesser-v3', WORKLET_CODE);
+      await loadWorkletModule(this.ctx, 'nova-deesser-v4', WORKLET_CODE);
       if (this.disposed) return;
-      this.worklet = new AudioWorkletNode(this.ctx, 'nova-deesser-v3', {
+      this.worklet = new AudioWorkletNode(this.ctx, 'nova-deesser-v4', {
         numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [2],
         channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
         parameterData: this.apValues(),

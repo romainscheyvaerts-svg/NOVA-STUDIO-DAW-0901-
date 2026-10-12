@@ -866,10 +866,14 @@ class NativePlugin:
             "path", "plugin_name", "offline", "has_shared_container", "on_edit"}
 
     def __init__(self, path: str, plugin_name: Optional[str] = None, *, cid: Optional[str] = None,
-                 host_exe: Optional[str] = None, offline: Optional[bool] = None, priority: Optional[int] = None):
+                 host_exe: Optional[str] = None, offline: Optional[bool] = None, priority: Optional[int] = None,
+                 sample_rate: Optional[float] = None):
         if not os.path.exists(path):
             raise FileNotFoundError(f"Plugin introuvable : {path}")
         _s = object.__setattr__
+        # Fréquence du projet : sondes du chargement (test de remise à zéro, mise en route d'un
+        # instrument) faites à CETTE fréquence (avant : 44,1 kHz codé en dur, comme pedalboard).
+        _s(self, "_rate_hint", float(sample_rate) if sample_rate else None)
         _s(self, "_host", HostProcess(host_exe, priority))
         _s(self, "_lock", threading.RLock())
         try:
@@ -910,23 +914,32 @@ class NativePlugin:
         self._load_params()
         self._detect_reload_type()
 
+    def _probe_rate(self) -> float:
+        """Fréquence des sondes : celle de la préparation en cours, sinon celle du projet, sinon 44,1 kHz."""
+        spec = getattr(self, "_spec", None)
+        if spec is not None and spec[0]:
+            return float(spec[0])
+        return float(self._rate_hint or 44100.0)
+
     def _warm_up(self):
-        """Instrument : mise en route comme pedalboard (une note jouée jusqu'au son, puis coupée)."""
+        """Instrument : mise en route comme pedalboard (une note jouée jusqu'au son, puis coupée),
+        à la fréquence du projet."""
         try:
-            self._host.request("warm_up", timeout=60.0, seconds=10.0)
+            self._host.request("warm_up", timeout=60.0, seconds=10.0, sample_rate=self._probe_rate())
         except HostError as e:
             logger.debug(f"mise en route : {e}")
 
     def _detect_reload_type(self):
         """Comme pedalboard au chargement : un effet passe le test « garde-t-il du son après un
-        arrêt / redémarrage ? » (44,1 kHz, avant toute préparation réelle) ; s'il en garde, il est
-        recréé à neuf tout de suite, puis à chaque remise à zéro. Un instrument est toujours recréé."""
+        arrêt / redémarrage ? » (à la fréquence du projet, avant toute préparation réelle) ; s'il en
+        garde, il est recréé à neuf tout de suite, puis à chaque remise à zéro. Un instrument est
+        toujours recréé."""
         if self.main_input_channels == 0:
             object.__setattr__(self, "_reload_persists", True)
             self._warm_up()
             return
         try:
-            persists = bool(self._host.request("detect_reload").get("persists"))
+            persists = bool(self._host.request("detect_reload", sample_rate=self._probe_rate()).get("persists"))
         except HostError:
             persists = False
         object.__setattr__(self, "_reload_persists", persists)
@@ -967,6 +980,17 @@ class NativePlugin:
         if self._values_dirty:
             self._refresh_values()
         return float(self._values[index])
+
+    def flush_params(self) -> bool:
+        """Réglages posés (pont, fenêtre du plugin) remis au processeur TOUT DE SUITE, sans audio
+        (process à 0 échantillon dans l'hôte). Sûr pendant la lecture : aucun échantillon n'est
+        ajouté au flux. Hôte ancien (commande inconnue) : faux."""
+        with self._lock:
+            try:
+                return bool(self._host.request("flush_params").get("flushed"))
+            except HostError as e:
+                logger.debug(f"flush_params : {e}")
+                return False
 
     def _set_values(self, items: Sequence[Tuple[int, float]]):
         items = [(int(i), f32(v)) for i, v in items]
@@ -1212,9 +1236,12 @@ class NativePlugin:
         return out
 
     def _run(self, x: Optional[np.ndarray], n: int, block: int, out_ch: int, key: Optional[np.ndarray] = None,
-             changes: Sequence[Tuple[int, int, float]] = (), events: Sequence[Tuple[int, bytes]] = ()) -> np.ndarray:
+             changes: Sequence[Tuple[int, int, float]] = (), events: Sequence[Tuple[int, bytes]] = (),
+             reset_first: bool = False) -> np.ndarray:
         """Traite n échantillons (entrée x (nch, n) ou silence pour un instrument), en sous-blocs
-        de `block` comptés depuis le début de l'appel (comme pedalboard)."""
+        de `block` comptés depuis le début de l'appel (comme pedalboard). reset_first : remise à
+        zéro du plugin (réglages en attente, puis setActive off/on) juste avant le 1er échantillon,
+        dans le même appel : le flux ne perd ni ne gagne aucun échantillon."""
         host = self._host
         cap = max(block, (host.max_frames // block) * block) if block <= host.max_frames else host.max_frames
         out = np.zeros((out_ch, n), np.float32)
@@ -1267,7 +1294,7 @@ class NativePlugin:
                 h.blockSize = block
                 h.nChanges = k
                 h.nEvents = e
-                flags = 0
+                flags = FLAG_RESET_FIRST if (reset_first and pos == 0) else 0
                 if tr is not None:
                     flags |= FLAG_TRANSPORT | (FLAG_PLAYING if tr["playing"] else 0)
                     h.projectTimeSamples = tr["pos"]
@@ -1295,10 +1322,12 @@ class NativePlugin:
         return out
 
     def process(self, input_array: np.ndarray, sample_rate: float, buffer_size: int = 8192, reset: bool = True,
-                *, key: Optional[np.ndarray] = None, changes: Any = None) -> np.ndarray:
+                *, key: Optional[np.ndarray] = None, changes: Any = None, reset_first: bool = False) -> np.ndarray:
         """Comme pedalboard : (canaux, n) → (canaux, n - latence restant à retenir) ; le début du
         flux (la latence du plugin) est retenu après une remise à zéro. key : clé de side-chain
-        (canaux, n) ; changes : réglages à l'échantillon près [(clé | index, décalage, valeur 0–1)]."""
+        (canaux, n) ; changes : réglages à l'échantillon près [(clé | index, décalage, valeur 0–1)].
+        reset_first (flux temps réel, départ de lecture) : plugin remis à zéro dans l'hôte juste
+        avant ce son, SANS toucher à l'alignement du flux (rien n'est retenu en plus)."""
         x = np.asarray(input_array, dtype=np.float32)
         if x.ndim == 1:
             x = x[None, :]
@@ -1323,14 +1352,15 @@ class NativePlugin:
                     k = k[None, :]
                 if k.shape[1] < n:
                     k = np.concatenate([k, np.zeros((k.shape[0], n - k.shape[1]), np.float32)], axis=1)
-            out = self._run(np.ascontiguousarray(x), n, bs, nch, key=k, changes=self._map_changes(changes))
+            out = self._run(np.ascontiguousarray(x), n, bs, nch, key=k, changes=self._map_changes(changes),
+                            reset_first=bool(reset_first) and not reset)
             before = self._provided
             object.__setattr__(self, "_provided", before + n)
             drop = max(0, min(n, int(self._latency) - before))
             return out[:, drop:] if drop else out
 
     def process_keyed(self, main: np.ndarray, key: Optional[np.ndarray], changes: Any = None,
-                      sample_rate: Optional[float] = None, buffer_size: int = 128) -> np.ndarray:
+                      sample_rate: Optional[float] = None, buffer_size: int = 128, reset_first: bool = False) -> np.ndarray:
         """(Contrat vst_sidechain) main (2, n) + clé (2, n) sur le bus side-chain, réglages
         [(clé | index | poignée, décalage, valeur 0–1)] par IParameterChanges ; sortie de même
         longueur, latence du plugin NON retenue (le flux continue celui de process())."""
@@ -1345,7 +1375,8 @@ class NativePlugin:
                 k = np.asarray(key, dtype=np.float32)
                 if k.ndim == 1:
                     k = k[None, :]
-            out = self._run(np.ascontiguousarray(x), n, bs, int(x.shape[0]), key=k, changes=self._map_changes(changes))
+            out = self._run(np.ascontiguousarray(x), n, bs, int(x.shape[0]), key=k, changes=self._map_changes(changes),
+                            reset_first=reset_first)
             object.__setattr__(self, "_provided", self._provided + n)
             return out
 
@@ -1457,7 +1488,7 @@ def load_plugin(path: str, plugin_name: Optional[str] = None, **kw) -> NativePlu
 def load_prepared(path: str, plugin_name: Optional[str], state_b64: Optional[str], sample_rate: int,
                   max_block: int, offline: bool) -> NativePlugin:
     """(Contrat vst_sidechain.load) Instance chargée, état restauré, préparée et remise à zéro."""
-    p = NativePlugin(path, plugin_name, offline=offline)
+    p = NativePlugin(path, plugin_name, offline=offline, sample_rate=sample_rate)
     try:
         if state_b64:
             p.raw_state = base64.b64decode(state_b64)

@@ -4,7 +4,7 @@ import { interpolateCurve, parsePluginParam, playedLanes, sortedPoints } from '.
 /**
  * Automation des VST du PC (R9) — côté rendu hors ligne (gel, export, Commit).
  *
- * En lecture, le worklet du pont (vst-bridge-processor-v5) envoie avec chaque
+ * En lecture, le worklet du pont (vst-bridge-processor-v6) envoie avec chaque
  * bloc de 128 échantillons :
  *   - la valeur au début du bloc si elle a bougé de plus de VST_AUTO_TOL, au plus
  *     une fois tous les VST_AUTO_RAMP_BLOCKS blocs (débit des rampes limité) ;

@@ -33,6 +33,11 @@ import numpy as np
 
 FLAG_PARAMS = 0x01
 FLAG_SIDECHAIN = 0x02
+# (0x04 : position du morceau, insert ARA — ara_insert.FLAG_TIMELINE)
+# Départ de lecture depuis l'arrêt : le plugin repart d'un état connu juste avant ce bloc
+# (hôte natif : réglages en attente puis setActive off/on), comme l'instance de l'export.
+# Aucun octet en plus dans la trame.
+FLAG_RESET = 0x08
 
 PARAM_REC = struct.Struct("<HHf")
 PARAM_HEAD = struct.Struct("<HH")

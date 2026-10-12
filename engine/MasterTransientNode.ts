@@ -26,7 +26,7 @@ const mtToCore = (${mtToCore.toString()});
 const __ap = ${JSON.stringify(AP)};
 class NovaMasterTransientProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
-    return __ap.map(d => ({ name: d.name, minValue: -1e4, maxValue: 1e4, defaultValue: d.defaultValue, automationRate: 'k-rate' }));
+    return __ap.map(d => ({ name: d.name, minValue: -1e4, maxValue: 1e4, defaultValue: d.defaultValue, automationRate: 'k-rate' })).concat([{ name: '__resetGen', minValue: 0, maxValue: 1e9, defaultValue: 0, automationRate: 'k-rate' }]);
   }
   constructor(options) {
     super();
@@ -44,6 +44,8 @@ class NovaMasterTransientProcessor extends AudioWorkletProcessor {
     };
   }
   process(inputs, outputs, parameters) {
+    // Départ de lecture : compteur programmé au bloc du départ, le cœur repart à neuf (comme l'export).
+    if (parameters.__resetGen && parameters.__resetGen[0] !== (this.gen || 0)) { this.gen = parameters.__resetGen[0]; this.core.reset(); }
     for (let i = 0; i < __ap.length; i++) {
       const a = parameters[__ap[i].name];
       const v = a && a.length ? a[0] : NaN;
@@ -62,7 +64,7 @@ class NovaMasterTransientProcessor extends AudioWorkletProcessor {
     return true;
   }
 }
-try { registerProcessor('nova-master-transient-v1', NovaMasterTransientProcessor); } catch (e) {}
+try { registerProcessor('nova-master-transient-v2', NovaMasterTransientProcessor); } catch (e) {}
 `;
 
 export interface MtMeters { emphDb: number; grDb: number; inPeakDb: number; outPeakDb: number; bandEmphDb: number[]; bandGrDb: number[] }
@@ -76,6 +78,14 @@ export function masterTransientLatencySamples(sampleRate: number): number {
 }
 
 export class MasterTransientNode {
+
+  private resetCount = 0;
+  /** Départ de la lecture à `at` (début d'un bloc de rendu) : le cœur repart de l'état d'une instance neuve. */
+  public resetAt(at: number) {
+    const ap = this.worklet ? ((this.worklet.parameters as any).get('__resetGen') as AudioParam | undefined) : undefined;
+    if (!ap) return;
+    try { ap.setValueAtTime(++this.resetCount, Math.max(this.ctx.currentTime, at - 0.5 / this.ctx.sampleRate)); } catch { /* */ }
+  }
   public input: GainNode;
   public output: GainNode;
   public readonly ready: Promise<void>;
@@ -101,11 +111,11 @@ export class MasterTransientNode {
 
   private async init() {
     try {
-      await loadWorkletModule(this.ctx, 'nova-master-transient-v1', WORKLET_CODE);
+      await loadWorkletModule(this.ctx, 'nova-master-transient-v2', WORKLET_CODE);
       if (this.disposed) return;
       const parameterData: Record<string, number> = {};
       for (const a of AP) parameterData[a.name] = +this.params[a.name];
-      this.worklet = new AudioWorkletNode(this.ctx, 'nova-master-transient-v1', {
+      this.worklet = new AudioWorkletNode(this.ctx, 'nova-master-transient-v2', {
         numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
         channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
         parameterData,

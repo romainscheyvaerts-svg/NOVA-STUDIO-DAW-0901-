@@ -2,7 +2,7 @@
 import { AutomationSet, MappedParam } from '../engine/automationParams';
 import React, { useEffect, useRef, useState } from 'react';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
-import { setParamSmooth } from './vocalDspUtils';
+import { setParamSmooth, fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
 import { termHelp } from '../utils/pluginUi';
 
 /**
@@ -32,8 +32,13 @@ interface DoubleVoice {
   lp: BiquadFilterNode;
   gain: GainNode;
   panner: StereoPannerNode;
-  lfoSlow: OscillatorNode;
-  lfoFast: OscillatorNode;
+  /** LFO calés sur le morceau (même phase en lecture et à l'export). */
+  /** Partie fixe du retard, en échantillons entiers (copie exacte) ; le retard modulé reste court. */
+  pre: DelayNode;
+  lfoSlow: TimelineLfo;
+  lfoFast: TimelineLfo;
+  slowHz: number;
+  fastHz: number;
   depthSlow: GainNode;
   depthFast: GainNode;
 }
@@ -69,9 +74,8 @@ export class VocalDoublerNode {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     
-    // Initialize with zero gain and ramp up to avoid click on creation
-    this.output.gain.setValueAtTime(0, ctx.currentTime);
-    this.output.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
+    // Fondu d'apparition (anti-clic) en direct ; aucun à l'export (le rendu démarre sur le son).
+    fadeInOnInsert(this.output.gain, ctx);
     
     this.dryGain = ctx.createGain();
     // Temps de base et vitesses differents a gauche et a droite : les deux
@@ -84,8 +88,15 @@ export class VocalDoublerNode {
 
   private createVoice(baseDelay: number, slowHz: number, fastHz: number): DoubleVoice {
     const ctx = this.ctx;
-    const delay = ctx.createDelay(0.1);
-    delay.delayTime.value = baseDelay;
+    // Retard de base en deux étages : une partie fixe en échantillons entiers (exacte), puis un
+    // retard modulé à tampon court (12 ms) : position de lecture interpolée plus précise, la
+    // lecture retombe sur l'export à moins d'1 LSB 16 bits (avant : jusqu'à 1,1 LSB à 44,1 kHz).
+    const pre = ctx.createDelay(0.05);
+    const preSec = Math.floor((baseDelay - 0.005) * ctx.sampleRate) / ctx.sampleRate;
+    pre.delayTime.value = preSec;
+    const delay = ctx.createDelay(0.012);
+    delay.delayTime.value = baseDelay - preSec;
+    pre.connect(delay);
     // Doublure allegee dans le grave (pas d'empatement ni d'annulation de
     // phase dans le bas) et un peu plus douce dans l'aigu : elle reste
     // derriere la voix principale.
@@ -100,23 +111,15 @@ export class VocalDoublerNode {
     const gain = ctx.createGain();
     gain.gain.value = 0;
     const panner = ctx.createStereoPanner();
-    const lfoSlow = ctx.createOscillator();
-    lfoSlow.type = 'sine';
-    lfoSlow.frequency.value = slowHz;
-    const lfoFast = ctx.createOscillator();
-    lfoFast.type = 'triangle';
-    lfoFast.frequency.value = fastHz;
     const depthSlow = ctx.createGain();
     depthSlow.gain.value = 0;
     const depthFast = ctx.createGain();
     depthFast.gain.value = 0;
-    lfoSlow.connect(depthSlow);
-    lfoFast.connect(depthFast);
+    const lfoSlow = new TimelineLfo(ctx, depthSlow, slowHz, 0, 'sine');
+    const lfoFast = new TimelineLfo(ctx, depthFast, fastHz, 0, 'triangle');
     depthSlow.connect(delay.delayTime);
     depthFast.connect(delay.delayTime);
-    lfoSlow.start();
-    lfoFast.start();
-    return { delay, hp, lp, gain, panner, lfoSlow, lfoFast, depthSlow, depthFast };
+    return { pre, delay, hp, lp, gain, panner, lfoSlow, lfoFast, depthSlow, depthFast, slowHz, fastHz };
   }
 
   private setupGraph() {
@@ -126,7 +129,7 @@ export class VocalDoublerNode {
 
     // 2. Doublures gauche et droite
     for (const v of [this.voiceL, this.voiceR]) {
-      this.input.connect(v.delay);
+      this.input.connect(v.pre);
       v.delay.connect(v.hp);
       v.hp.connect(v.lp);
       v.lp.connect(v.gain);
@@ -172,8 +175,8 @@ export class VocalDoublerNode {
       // 4 cents au maximum, alors que l'interface affiche 15).
       const d = Math.max(0, Math.min(1, safe(detune)));
       for (const v of [this.voiceL, this.voiceR]) {
-        const slowA = (d * 0.0065) / (2 * Math.PI * v.lfoSlow.frequency.value);
-        const fastA = (d * 0.0022) / (2 * Math.PI * v.lfoFast.frequency.value);
+        const slowA = (d * 0.0065) / (2 * Math.PI * v.slowHz);
+        const fastA = (d * 0.0022) / (2 * Math.PI * v.fastHz);
         this.setP(v.depthSlow.gain, slowA, 0.1);
         this.setP(v.depthFast.gain, fastA, 0.1);
       }
@@ -184,14 +187,20 @@ export class VocalDoublerNode {
     }
   }
 
+  /** Modulation calée sur la ligne de temps du morceau (le moteur appelle syncTimeline). */
+  public get followsTimeline(): boolean { return true; }
+  public syncTimeline(origin: number, at?: number) {
+    for (const v of [this.voiceL, this.voiceR]) { v.lfoSlow.sync(origin, at); v.lfoFast.sync(origin, at); }
+  }
+
   public getStatus() {
     return { ...this.params };
   }
 
   public dispose() {
     for (const v of [this.voiceL, this.voiceR]) {
-      try { v.lfoSlow.stop(); v.lfoFast.stop(); } catch (e) {}
-      for (const n of [v.delay, v.hp, v.lp, v.gain, v.panner, v.lfoSlow, v.lfoFast, v.depthSlow, v.depthFast]) {
+      v.lfoSlow.stop(); v.lfoFast.stop();
+      for (const n of [v.pre, v.delay, v.hp, v.lp, v.gain, v.panner, v.depthSlow, v.depthFast]) {
         try { n.disconnect(); } catch (e) {}
       }
     }

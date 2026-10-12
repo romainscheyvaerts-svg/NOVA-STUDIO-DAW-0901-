@@ -1,5 +1,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
+import { fadeInOnInsert, smoothSet, TimelineLfo } from './vocalDspUtils';
 import { paramFr, termHelp } from '../utils/pluginUi';
 import { useKnobInteraction } from '../hooks/useKnobInteraction';
 
@@ -26,7 +27,8 @@ export class FlangerNode {
   public output: GainNode;
   
   private delayNode: DelayNode;
-  private lfo: OscillatorNode;
+  /** LFO calé sur le morceau (même phase en lecture et à l'export). */
+  private lfo!: TimelineLfo;
   private depthGain: GainNode;
   private feedbackGain: GainNode;
   private dryGain: GainNode;
@@ -47,12 +49,10 @@ export class FlangerNode {
     this.input = ctx.createGain();
     this.output = ctx.createGain();
     
-    // Initialize with zero gain and ramp up to avoid click on creation
-    this.output.gain.setValueAtTime(0, ctx.currentTime);
-    this.output.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
+    // Fondu d'apparition (anti-clic) en direct ; aucun à l'export (le rendu démarre sur le son).
+    fadeInOnInsert(this.output.gain, ctx);
     
-    this.delayNode = ctx.createDelay(0.1);
-    this.lfo = ctx.createOscillator();
+    this.delayNode = ctx.createDelay(0.021); // tampon court : position de lecture interpolée plus précise (lecture = export)
     this.depthGain = ctx.createGain();
     this.feedbackGain = ctx.createGain();
     this.dryGain = ctx.createGain();
@@ -76,10 +76,8 @@ export class FlangerNode {
     this.feedbackGain.connect(this.delayNode);
 
     // Modulation
-    this.lfo.type = 'sine';
-    this.lfo.connect(this.depthGain);
+    this.lfo = new TimelineLfo(this.ctx, this.depthGain, Number.isFinite(this.params.rate) ? this.params.rate : 0.5);
     this.depthGain.connect(this.delayNode.delayTime);
-    this.lfo.start();
 
     this.applyParams();
   }
@@ -103,21 +101,25 @@ export class FlangerNode {
 
     if (isEnabled) {
       const baseDelay = 0.001 + (manual * 0.014); // 1ms to 15ms
-      this.delayNode.delayTime.setTargetAtTime(baseDelay, now, 0.03);
-      this.lfo.frequency.setTargetAtTime(rate, now, 0.03);
-      this.depthGain.gain.setTargetAtTime(0.005 * depth, now, 0.03);
+      smoothSet(this.delayNode.delayTime, baseDelay, this.ctx, 0.03);
+      this.lfo.setFrequency(rate);
+      smoothSet(this.depthGain.gain, 0.005 * depth, this.ctx, 0.03);
       
       const fbValue = invertPhase ? -feedback : feedback;
-      this.feedbackGain.gain.setTargetAtTime(fbValue, now, 0.03);
+      smoothSet(this.feedbackGain.gain, fbValue, this.ctx, 0.03);
       
-      this.dryGain.gain.setTargetAtTime(1 - mix * 0.5, now, 0.02);
-      this.wetGain.gain.setTargetAtTime(mix, now, 0.02);
+      smoothSet(this.dryGain.gain, 1 - mix * 0.5, this.ctx, 0.02);
+      smoothSet(this.wetGain.gain, mix, this.ctx, 0.02);
     } else {
-      this.dryGain.gain.setTargetAtTime(1, now, 0.02);
-      this.wetGain.gain.setTargetAtTime(0, now, 0.02);
-      this.feedbackGain.gain.setTargetAtTime(0, now, 0.02);
+      smoothSet(this.dryGain.gain, 1, this.ctx, 0.02);
+      smoothSet(this.wetGain.gain, 0, this.ctx, 0.02);
+      smoothSet(this.feedbackGain.gain, 0, this.ctx, 0.02);
     }
   }
+
+  /** Modulation calée sur la ligne de temps du morceau (le moteur appelle syncTimeline). */
+  public get followsTimeline(): boolean { return true; }
+  public syncTimeline(origin: number, at?: number) { this.lfo.sync(origin, at); }
 
   public getStatus() {
     return { ...this.params };
@@ -126,7 +128,6 @@ export class FlangerNode {
   public dispose() {
     try {
       this.lfo.stop();
-      this.lfo.disconnect();
     } catch (e) {
       // LFO may already be stopped
     }

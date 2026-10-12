@@ -185,13 +185,13 @@ def scan_vst3(extra_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
 # INSTANCES
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _open_plugin(path: str, plugin_name: Optional[str] = None):
+def _open_plugin(path: str, plugin_name: Optional[str] = None, sample_rate: Optional[int] = None):
     if vst_sidechain.is_debug_plugin(path):
         return vst_sidechain.DebugDucker()   # effet à clé de référence (tests, NOVA_BRIDGE_DEBUG=1)
     if NATIVE:
         # Hôte natif : un processus par plugin, chargé par nom de classe (shells Waves
-        # compris), dossier UADx compris.
-        return vst_native.load_plugin(path, plugin_name)
+        # compris), dossier UADx compris. Sondes du chargement à la fréquence du projet.
+        return vst_native.load_plugin(path, plugin_name, sample_rate=sample_rate)
     if not HAS_PEDALBOARD:
         raise RuntimeError("pedalboard n'est pas installé")
     if not os.path.exists(path):
@@ -449,7 +449,7 @@ def prepare_plugin(path: str, plugin_name: Optional[str], state_b64: Optional[st
     """(Thread JUCE) Charge, restaure l'état, prépare à (fréquence, bloc) puis
     remet à zéro. Après ce reset, pedalboard rend un flux ALIGNÉ sur l'entrée
     en retenant au début l'équivalent de la latence du plugin."""
-    plugin = _open_plugin(path, plugin_name)
+    plugin = _open_plugin(path, plugin_name, sample_rate)
     restored = _set_state(plugin, state_b64)
     if _is_instrument(plugin):
         # Un instrument refuse l'audio en entrée : on le prépare avec du MIDI vide.
@@ -1221,6 +1221,10 @@ class Slot:
         # plugin : son état (GET_STATE, rendus hors ligne) ne les contient pas encore.
         self._params_dirty = False
         self._last_block_t = 0.0
+        # Départ de lecture depuis l'arrêt (trame drapeau RESET) : le plugin repart d'un état
+        # connu juste avant le bloc suivant, comme l'instance hors ligne de l'export.
+        self._reset_next = False
+        self.stream_resets = 0
         self.sidechain_inputs: Optional[int] = None
         self.key_blocks = 0
 
@@ -1292,15 +1296,19 @@ class Slot:
             # (R10) Clé de side-chain : seulement pour un plugin dont l'hôte alimente l'entrée clé.
             use_key = key is not None and vst_sidechain.keyed(plugin)
             native = isinstance(plugin, vst_native.NativePlugin)
+            reset_first, self._reset_next = self._reset_next, False
             try:
                 if native:
                     # Hôte natif : réglages posés à l'échantillon près par IParameterChanges et clé
                     # sur le bus side-chain, en un seul appel (aucune découpe du bloc).
                     if use_key:
                         self.key_blocks += 1
+                    if reset_first:
+                        self.stream_resets += 1
                     out = process(plugin, _to_stereo(block), self.sample_rate, BLOCK,
                                   key=_to_stereo(key) if use_key else None,
-                                  changes=self._native_changes(changes) if changes else None)
+                                  changes=self._native_changes(changes) if changes else None,
+                                  reset_first=True if reset_first else None)
                 elif changes or use_key:
                     stereo = _to_stereo(block)
                     full = np.vstack([stereo, _to_stereo(key)]) if use_key else stereo
@@ -1512,6 +1520,15 @@ class Slot:
             return out
         return self._on_message_thread(now)
 
+    def reset_stream(self):
+        """(Thread du slot, dans l'ordre des blocs) Départ de lecture depuis l'arrêt : le plugin
+        sera remis à zéro (réglages en attente puis setActive off/on, dans l'hôte natif) juste
+        avant le prochain bloc, sans décaler le flux. Il repart ainsi de l'état de l'instance hors
+        ligne de l'export : la 2e écoute = la 1re = l'export (Pro-C 3 gardait une mémoire d'une
+        écoute à l'autre). pedalboard : rien (sa remise à zéro décalerait le flux de sa latence)."""
+        if isinstance(self.plugin, vst_native.NativePlugin) and not self.failed:
+            self._reset_next = True
+
     def render_midi(self, events: List[tuple], duration: float) -> np.ndarray:
         """Instrument : rendu des notes avec le son réglé dans cette instance
         (fenêtre du plugin ouverte ou non)."""
@@ -1532,8 +1549,15 @@ class Slot:
     def _flush_params(self):
         """(Sous self.lock) Un VST3 ne reçoit les réglages posés par l'hôte qu'au
         traitement suivant : sans audio depuis (lecture arrêtée), son état les
-        ignorait (rendu d'export fait avec les anciens réglages). Un bloc de
-        silence les lui fait passer — seulement quand aucun bloc ne circule."""
+        ignorait (rendu d'export fait avec les anciens réglages).
+        Hôte natif : remis au processeur sans audio (process à 0 échantillon), TOUJOURS,
+        même juste après un bloc et même pour un réglage bougé dans la fenêtre du plugin
+        (avant : rien si un bloc était passé dans les 250 ms : l'export relisait l'ancien état).
+        pedalboard : un bloc de silence, seulement quand aucun bloc ne circule."""
+        if isinstance(self.plugin, vst_native.NativePlugin):
+            self.plugin.flush_params()
+            self._params_dirty = False
+            return
         if not self._params_dirty or self.is_instrument or time.monotonic() - self._last_block_t < 0.25:
             return
         try:

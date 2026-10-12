@@ -35,7 +35,10 @@ export interface GateCoreParams {
 export function createGateCore(sr: number) {
   let P: GateCoreParams = { steps: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], rate: 4, length: 16, depth: 1, attack: 2, release: 20, bpm: 120 };
   let g = 1;
-  let clock = 0;
+  // Position dans le morceau en ÉCHANTILLONS entiers : les bords de pas tombent sur le même
+  // échantillon en lecture et à l'export (à 44,1 kHz, un pas de 1/16 = 5 512,5 échantillons :
+  // en secondes flottantes, l'arrondi dépendait de l'heure du contexte).
+  let clockN = 0;
   let step = 0;
   let aC = 1, rC = 1;
   // Clé externe (side-chain, R7) : enveloppe crête (relâchement 10 ms), hystérésis 4 dB.
@@ -66,7 +69,7 @@ export function createGateCore(sr: number) {
   return {
     setParams,
     /** Position (s dans le morceau) du premier échantillon du prochain bloc. */
-    setClock(t: number) { if (Number.isFinite(t)) clock = t; },
+    setClock(t: number) { if (Number.isFinite(t)) clockN = Math.round(t * sr); },
     reset() { g = 1; kEnv = 0; kOpen = false; },
     /** Clé externe du bloc suivant (null = motif), écoute de la clé. */
     setKey(l: Float32Array | null, r: Float32Array | null, on: boolean, lis: boolean) { kL = l; kR = r || l; keyOn = !!on && !!l; listen = keyOn && !!lis; },
@@ -81,7 +84,7 @@ export function createGateCore(sr: number) {
       const len = P.length, depth = P.depth, steps = P.steps;
       const dt = 1 / sr;
       for (let i = 0; i < n; i++) {
-        const t = clock + i * dt;
+        const t = (clockN + i) * dt;
         const k = Math.floor(t / per + 1e-9);
         const s = ((k % len) + len) % len;
         let target: number;
@@ -100,7 +103,7 @@ export function createGateCore(sr: number) {
         else { oL[i] = iL[i] * g; if (oR) oR[i] = iR[i] * g; }
         if (i === 0) step = s;
       }
-      clock += n * dt;
+      clockN += n;
     },
     meters() { return { step: keyOn ? -1 : step, gain: g, keyOn }; },
   };
