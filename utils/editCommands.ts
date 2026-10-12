@@ -32,7 +32,7 @@ export type EditCommandId =
   | 'soloAll' | 'muteAll' | 'soloSafe' | 'soloSelected' | 'muteSelected' | 'clearClipIndicators' | 'clipLock' | 'selectTrackClips'
   // Écarts Pro Tools (hooks/useProToolsEcarts) : playlists de piste, écrire l'automation sur la sélection, mode de solo, Commit / gel en lot.
   | 'playlistNew' | 'playlistStep' | 'playlistRecent' | 'playlistSwitch' | 'playlistRename' | 'playlistDelete'
-  | 'writeAutomation' | 'soloMode' | 'batchRender';
+  | 'writeAutomation' | 'soloMode' | 'batchRender' | 'ioSetup';
 
 export type EditCommandHandler = (arg?: any) => boolean | void;
 

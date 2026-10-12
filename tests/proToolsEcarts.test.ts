@@ -234,3 +234,19 @@ describe('raccourcis : Pro Tools dans son préréglage, NOVA intact, tout dans C
     expect(findConflicts(nova)).toEqual([]);
   });
 });
+
+describe('entrées nommées (I/O Setup simplifié)', () => {
+  it('nom par entrée, paire stéréo, libellés courts et longs ; sans nom, le libellé d’origine', async () => {
+    const { inputName, namedInputLabel, sanitizeNames } = await import('../utils/ioNames');
+    const map = sanitizeNames({ 0: ' Micro cabine ', 1: 'Talkback', 2: 'OH', 3: 'OH', 40: 'trop loin', x: 'non', 5: '' });
+    expect(map).toEqual({ 0: 'Micro cabine', 1: 'Talkback', 2: 'OH', 3: 'OH' });
+    expect(inputName({ ch: 0 }, map)).toBe('Micro cabine');
+    expect(inputName({ ch: 2, stereo: true }, map)).toBe('OH');
+    expect(inputName({ ch: 0, stereo: true }, map)).toBe('Micro cabine + Talkback');
+    expect(inputName({ ch: 6 }, map)).toBeNull();
+    expect(namedInputLabel({ ch: 0 }, false, map)).toBe('Entrée 1 · Micro cabine');
+    expect(namedInputLabel({ ch: 0 }, true, map)).toBe('Micro cabine');
+    expect(namedInputLabel({ ch: 6 }, true, map)).toBe('In 7');
+    expect(namedInputLabel(null, false, map)).toBe('Entrée des réglages');
+  });
+});

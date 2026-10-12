@@ -90,6 +90,8 @@ export const PlaylistChip: React.FC<{ track: Track }> = ({ track }) => {
   const { list, activeId } = playlistsOf(track);
   const name = list.find(p => p.id === activeId)?.name || track.name;
   const i = list.findIndex(p => p.id === activeId);
+  // Court, pour ne pas manger le nom de la piste : « .01 », sinon « 1/3 » pour l'originale, sinon le nom choisi.
+  const short = name === track.name ? `${i + 1}/${list.length}` : name.startsWith(`${track.name}.`) ? name.slice(track.name.length) : name;
   return (
     <>
       <button type="button" data-testid={`playlist-chip-${track.id}`}
@@ -97,8 +99,8 @@ export const PlaylistChip: React.FC<{ track: Track }> = ({ track }) => {
         onMouseDown={e => e.stopPropagation()}
         title={`Playlist « ${name} » (${i + 1} / ${list.length}) : clic pour changer de version, en créer ou en dupliquer (Pro Tools : sélecteur de playlist)`}
         aria-label={`Playlist ${name}, ${i + 1} sur ${list.length}`}
-        className="nova-hit-tactile h-5 max-w-[110px] rounded-md border border-cyan-400/50 bg-cyan-500/10 px-1.5 text-[9px] font-black text-cyan-300 flex items-center gap-1">
-        <i className="fas fa-list text-[8px]" /><span className="truncate">{name}</span><i className="fas fa-caret-down text-[8px]" />
+        className="nova-hit-tactile h-5 max-w-[72px] shrink-0 rounded-md border border-cyan-400/50 bg-cyan-500/10 px-1 text-[9px] font-black text-cyan-300 [[data-theme=light]_&]:text-cyan-700 flex items-center gap-0.5">
+        <i className="fas fa-list text-[8px]" /><span className="truncate">{short}</span><i className="fas fa-caret-down text-[8px]" />
       </button>
       {menu && <PlaylistMenu track={track} anchor={menu} onClose={() => setMenu(null)} />}
     </>

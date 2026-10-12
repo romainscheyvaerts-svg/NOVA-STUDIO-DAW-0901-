@@ -169,6 +169,9 @@ export function useProToolsEcarts(d: ProToolsEcartsDeps) {
         return true;
       },
 
+      // ── Entrées nommées (I/O Setup simplifié) ───────────────────────────
+      ioSetup: () => { openNovaWindow('io-names'); return true; },
+
       // ── Commit / gel en lot ─────────────────────────────────────────────
       batchRender: (arg?: { kind?: BatchKind; trackIds?: string[] }) => {
         if (!arg?.kind) { openNovaWindow('batch-render', { trackIds: dd().selectedTrackIds(st()) } as any); return true; }
@@ -188,7 +191,13 @@ export function useProToolsEcarts(d: ProToolsEcartsDeps) {
               dd().notify(`${kind === 'commit' ? '✅ Commit' : kind === 'freeze' ? '❄️ Gel' : '🔥 Dégel'} ${done + 1} / ${plan.todo.length} : « ${t.name} »…`);
               try {
                 if (kind === 'commit') { if (await commitOne(dd(), id)) done++; else failed.push(t.name); }
-                else { await dd().freezeTrack(id); const now = st().tracks.find(x => x.id === id); if (now && !!now.isFrozen === (kind === 'freeze')) done++; else failed.push(t.name); }
+                else {
+                  await dd().freezeTrack(id);
+                  // L'état suit au rendu suivant : on attend qu'il le montre (au plus 2 s).
+                  const want = kind === 'freeze';
+                  for (let i = 0; i < 40 && !!st().tracks.find(x => x.id === id)?.isFrozen !== want; i++) await new Promise(r => setTimeout(r, 50));
+                  if (!!st().tracks.find(x => x.id === id)?.isFrozen === want) done++; else failed.push(t.name);
+                }
               } catch { failed.push(t.name); }
             }
           } finally { busy = false; }

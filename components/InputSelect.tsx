@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import type { Track } from '../types';
 import { audioEngine } from '../engine/AudioEngine';
 import { applyTracks } from '../utils/structureBus';
-import { channelsOf, decodeInput, encodeInput, inputLabel, inputOptions } from '../utils/multiRecord';
+import { channelsOf, decodeInput, encodeInput, inputOptions } from '../utils/multiRecord';
+import { namedInputLabel as inputLabel, useIoNames } from '../utils/ioNames';
+import { openNovaWindow } from '../utils/novaWindows';
 
 /**
  * R14 · Sélecteur d'entrée physique d'une piste (Pro Tools : Input) : « Entrée 3 »
@@ -11,6 +13,8 @@ import { channelsOf, decodeInput, encodeInput, inputLabel, inputOptions } from '
  */
 const InputSelect: React.FC<{ track: Track; compact?: boolean }> = ({ track, compact }) => {
   const [info, setInfo] = useState(() => audioEngine.getInputInfo());
+  // Entrées nommées (I/O Setup) : le sélecteur se redessine quand on les renomme.
+  const names = useIoNames();
   useEffect(() => {
     const refresh = () => setInfo(audioEngine.getInputInfo());
     const evs = ['nova:asio-stream', 'nova:input-missing', 'nova:latency'];
@@ -34,6 +38,7 @@ const InputSelect: React.FC<{ track: Track; compact?: boolean }> = ({ track, com
       <i className="fas fa-caret-down text-[8px] text-slate-600" />
       <select aria-label={`Entrée enregistrée par ${track.name}`} className="absolute inset-0 opacity-0 cursor-pointer" value={encodeInput(spec)}
         onChange={e => {
+          if (e.target.value === '__names') { openNovaWindow('io-names'); return; }
           const next = decodeInput(e.target.value);
           applyTracks(ts => ts.map(t => (t.id === track.id ? { ...t, recordInput: next } : t)), `🎤 « ${track.name} » enregistre : ${inputLabel(next)}`);
         }}>
@@ -41,10 +46,13 @@ const InputSelect: React.FC<{ track: Track; compact?: boolean }> = ({ track, com
           {inputOptions(count).filter(o => o.group === 'auto').map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </optgroup>
         <optgroup label="Mono">
-          {inputOptions(count).filter(o => o.group === 'mono').map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {inputOptions(count).filter(o => o.group === 'mono').map(o => <option key={o.value} value={o.value}>{names[Number(o.value.slice(2))] ? `${o.label} · ${names[Number(o.value.slice(2))]}` : o.label}</option>)}
         </optgroup>
         <optgroup label="Stéréo">
-          {inputOptions(count).filter(o => o.group === 'stereo').map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {inputOptions(count).filter(o => o.group === 'stereo').map(o => { const n = inputLabel(decodeInput(o.value), true); return <option key={o.value} value={o.value}>{/^\d/.test(n) ? o.label : `${o.label} · ${n}`}</option>; })}
+        </optgroup>
+        <optgroup label="Réglage">
+          <option value="__names">Nommer les entrées… (I/O Setup)</option>
         </optgroup>
       </select>
     </label>

@@ -188,6 +188,7 @@ export const KEYMAP: ShortcutDef[] = [
   g({ id: 'pt.soloLatch', keys: [], label: 'Mode de solo Verrouiller : les solos s’ajoutent', pt: 'Options › Mode Solo › Verrouiller (Latch)', category: 'Mix', command: 'soloMode', arg: { mode: 'latch' } }),
   g({ id: 'pt.batchRender', keys: ['alt+shift+c'], label: 'Commit / geler plusieurs pistes d’un coup (fenêtre : coche les pistes)', pt: 'Alt+Maj+C (Commit Track)', category: 'Édition', command: 'batchRender' }),
   g({ id: 'pt.freezeSelected', keys: [], label: 'Geler les pistes sélectionnées (effets rendus, processeur libéré)', pt: 'Piste › Figer (Freeze)', category: 'Édition', command: 'batchRender', arg: { kind: 'freeze' } }),
+  g({ id: 'pt.ioSetup', keys: [], label: 'Nommer les entrées de la carte son (Micro cabine, Guitare DI…)', pt: 'Configuration › E/S (I/O Setup)', category: 'Fenêtres', command: 'ioSetup' }),
   g({ id: 'pt.unfreezeSelected', keys: [], label: 'Dégeler les pistes sélectionnées', pt: 'Piste › Figer (Unfreeze)', category: 'Édition', command: 'batchRender', arg: { kind: 'unfreeze' } }),
   // Groupes et temps (R12, hooks/useR12).
   g({ id: 'pt.groupCreate', keys: ['ctrl+g'], label: 'Créer un groupe avec les pistes sélectionnées (édition et mix)', pt: 'Ctrl+G (Group)', category: 'Édition', command: 'groupCreate' }),

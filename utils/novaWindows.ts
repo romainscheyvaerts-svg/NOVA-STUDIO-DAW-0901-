@@ -10,7 +10,9 @@ export type NovaWindowName = 'memory-locations' | 'strip-silence' | 'clip-props'
   // R13 : transposer / étirer, marqueurs de warp, Trim TCE (bord tiré).
   | 'transpose' | 'warp' | 'elastic-tce'
   // Commit / gel de plusieurs pistes (hooks/useProToolsEcarts).
-  | 'batch-render';
+  | 'batch-render'
+  // Entrées nommées (I/O Setup simplifié, utils/ioNames).
+  | 'io-names';
 
 export interface NovaWindowDetail {
   name: NovaWindowName;
