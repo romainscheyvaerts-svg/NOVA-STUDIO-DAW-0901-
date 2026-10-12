@@ -243,7 +243,7 @@ const TrackPresetDialog: React.FC<Props> = ({ open, trackId, tracks, setState, o
           {!simple && (
             <div className="flex justify-between">
               <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} className={`${btn} text-nv-muted hover:bg-nv-accent/10`}><i className="fas fa-file-import mr-1" />Importer un {CHAIN_EXT}…</button>
-              <span className="self-center text-[10px] text-nv-muted" title="Pas encore de stockage en ligne pour les modèles et les presets : exporte-les pour les emporter.">Rangés sur cet appareil</span>
+              <span className="self-center text-[10px] text-nv-muted" title="Gardés sur cet appareil (hors ligne compris) et synchronisés avec ton compte Make Music quand tu es connecté : l’état est en haut de la fenêtre. Exporter : pour les donner à quelqu’un.">Sur cet appareil · synchro : voir en haut</span>
               <input ref={fileRef} type="file" accept={`${CHAIN_EXT},application/json`} className="hidden" onChange={e => void onImport(e.target.files?.[0])} />
             </div>
           )}
