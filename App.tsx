@@ -156,7 +156,7 @@ import TakeHomeModal from './components/TakeHomeModal';
 import { CrashRecoveryDialog, VersionsDialog } from './components/RecoveryDialogs';
 import ProGateModal from './components/ProGateModal';
 import CollabPanel, { CollabMessage } from './components/CollabPanel';
-import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
+import { CollabClient, CollabMember, CollabOp, ROLE_LABEL, ensureBuffers, uploadBuffers, uploadParts, signPart, putPart, contentOf, contentBufferIds, mixOf, sigOf, ownsContent } from './services/Collab';
 import { collabRoleStore, collabLiveStore, CollabPeerMark } from './utils/collabStore';
 import {
   applyMarkerOps, claimWins, contentVerdict, followTarget, isSessionFull, markerChanges, markerSig, myRecordTarget, myTrackName, needsResync,
@@ -167,10 +167,15 @@ import { engineView, shownTrackIds, withPluginState } from './utils/trackStructu
 import { structureBus, StructurePanel } from './utils/structureBus';
 import { useR12, linkedMixUpdates, selectedTrackIds, runTimeOpOn } from './hooks/useR12';
 import { createGroup, updateGroup, deleteGroup, newGroupId, groupsOpOf, groupsSig, sanitizeGroupsOp, applyGroupsOp, editGroupsStore } from './utils/editGroups';
-import { armAlone, takeArmShift, recordTargets, inputsMessage, linkedRecordMates } from './utils/multiRecord';
+import { armAlone, takeArmShift, recordTargets, inputsMessage, linkedRecordMates, inputWidth } from './utils/multiRecord';
 import { placeTake, trimToPlan } from './utils/multiTake';
 import { compTakeGroup, keepTakeGroup, deleteTakeGroup, takeGroupLinked } from './utils/takeGroups';
-import type { TakeResult } from './engine/AudioEngine';
+import type { TakeResult, TakeJournalMeta, TakeJournalLike } from './engine/AudioEngine';
+import { LiveRef, LiveTakeAssembly, LiveTakeSender, LT_SEGMENT_SEC, SegmentCutter, nextOrder, sanitizeLiveRef, withoutLive } from './utils/liveTake';
+import { encodeSegment, takeSum } from './utils/liveTakeCodec';
+import { LiveTakePendingError, LiveTakeReceiver, ltIdbStore, ltPlacements, ltRefsStore } from './services/LiveTake';
+import { runNetTest } from './services/NetTest';
+import { NetTestCard, ReceptionCard, SendStatus } from './components/LiveTakeUI';
 import { useR21 } from './hooks/useR21';
 import { useProToolsUtiles } from './hooks/useProToolsUtiles';
 import { clipLockNotices, enforceClipLocks, isTrustedUpdate, trustedUpdate } from './utils/clipLock';
@@ -223,7 +228,7 @@ import { handleNovaVstAction, VST_ACTIONS } from './services/NovaVstMix';
 import { novaVstEvents, vstParamEvents } from './engine/VSTPluginNode';
 import {
   pushSession, pullSession, parseLink, createCloudSession, cloudProjectId, CloudConflictError, LocalCloudSession,
-  getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, sessionUrl, signInAccount, call as callCloud,
+  getLocalCloudSession, setLocalCloudSession, CloudLink, adoptSiteSession, sessionUrl, signInAccount, call as callCloud, sha1 as sha1Cloud,
 } from './services/SessionCloud';
 // Boîte à rythmes : chargée à la 1re ouverture (préchargée au repos), absente du démarrage.
 const DrumMachinePanel = lazyWithPreload(() => import('./components/DrumMachinePanel'));
@@ -2082,6 +2087,8 @@ function Studio() {
     // La boucle avait été suspendue pendant le punch : on la remet.
     if (rec?.isPunch) { const st = stateRef.current; audioEngine.setLoop(st.isLoopActive, st.loopStart, st.loopEnd); }
     const kept = results.filter(r => r.clip.buffer && trimToPlan(r.clip, rec, xfade));
+    // B3 : la fin de chaque prise envoyée en direct part juste après son dernier morceau.
+    if (!captured) { try { ltFinishRef.current?.(results, kept); } catch (e) { console.warn('[Prise en direct] fin', e); } }
     if (rec && results.length && !kept.length) {
       setState(produce(draft => { draft.isRecording = false; draft.recStartTime = null; }));
       setAiNotification(rec.isPunch ? 'Punch : rien n\'a été enregistré dans la zone (la prise s\'est arrêtée avant).' : 'Rien n\'a été enregistré après le pré-roll.');
@@ -2131,6 +2138,20 @@ function Studio() {
         placed.set(r.trackId, p);
       }
     }));
+    // B3 : clips des prises envoyées en direct, gardés sur l'appareil jusqu'à ce que leur contenu
+    // parte (onglet fermé avant : ils reviennent dans la piste à la réouverture).
+    if (!captured && collabRef.current) {
+      const sid = collabRef.current.client.link.id;
+      const live = kept.filter(r => ltRefsRef.current.has(r.clip.id));
+      if (live.length) setTimeout(() => {
+        for (const r of live) {
+          const ref = ltRefsRef.current.get(r.clip.id)!;
+          const t = stateRef.current.tracks.find(x => x.id === r.trackId);
+          const clips = (t?.clips || []).filter(c => c.bufferId === r.clip.id).map(c => { const { buffer: _b, ...x } = c as Clip & { buffer?: AudioBuffer }; return x; });
+          if (clips.length) ltPlacements.add(sid, { trackId: r.trackId, take: ref.t, b: r.clip.id, clips, at: Date.now() });
+        }
+      }, 0);
+    }
     if (!kept.length || !placed.size) return first || null;
     // R23 : « Refaire ce passage » attend la prise pour comparer avant / après.
     try { window.dispatchEvent(new CustomEvent('nova:take-placed', { detail: { trackIds: [...placed.keys()], isPunch: !!punch, in: rec?.in ?? null, out: rec?.out ?? null } })); } catch { /* hors navigateur */ }
@@ -5086,13 +5107,15 @@ function Studio() {
     audioEngine.setTakeJournalFactory(m => {
       const st = stateRef.current;
       const t = st.tracks.find(x => x.id === m.trackId);
-      return recoveryStore().beginTake({
+      // B3 : en collaboration, la prise part aussi en direct, par morceaux (utils/liveTake).
+      const base = recoveryStore().beginTake({
         takeId: `take-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         projectId: st.id, trackId: m.trackId, trackName: t?.name || 'Prise',
         sampleRate: m.sampleRate, recordedAt: m.recordedAt, latency: m.latency,
         // R14 : prise multipiste (groupe) et entrée stéréo (2 canaux entrelacés).
         ...(m.group ? { group: m.group } : {}), ...(m.channels && m.channels > 1 ? { channels: m.channels } : {}),
       }, m.channels && m.channels > 1 ? Math.round(m.sampleRate / 2) * m.channels : undefined);
+      return ltTeeRef.current ? ltTeeRef.current(m, base) : base;
     });
     return () => { audioEngine.setTakeJournalFactory(null); audioEngine.setTakeContext(null); };
   }, []);
@@ -5356,6 +5379,191 @@ function Studio() {
   const opRecsRef = useRef(new Map<string, PeerRec>());
   const collabOnlineRef = useRef<CollabMember[]>([]);
   collabOnlineRef.current = collabOnline;
+
+  // --- B3 · Prise envoyée pendant l'enregistrement (utils/liveTake, services/LiveTake) -----
+  // Avant : la prise partait après le STOP, d'un bloc (WAV 16 bits, 35 Mo pour 3 min en stéréo).
+  // Ici elle part par morceaux de 3 s pendant qu'elle est enregistrée, sans perte (24 bits) ;
+  // au STOP il ne reste que le dernier morceau. Une ancienne version de NOVA (sans « lt » dans
+  // sa présence) reçoit en plus la prise entière comme avant.
+  /** QA : simule une ancienne version de NOVA (ni envoi en direct, ni réception). */
+  const ltOff = useMemo(() => { try { return localStorage.getItem('nova_lt_off') === '1'; } catch { return false; } }, []);
+  const ltOffRef = useRef(ltOff);
+  /** bufferId → prise en direct (les miennes et celles reçues) : jamais renvoyée en entier. */
+  const ltRefsRef = useRef(new Map<string, LiveRef>());
+  /** Prises en cours d'enregistrement : piste → découpeur. */
+  const ltWritersRef = useRef(new Map<string, { take: string; cutter: SegmentCutter; session: string; trackId: string; ch: number; sr: number }>());
+  const ltAckedRef = useRef(new Set<string>());
+  /** Prises dont l'envoi classique (WAV) est déjà parti pour une ancienne version. */
+  const ltLegacyDoneRef = useRef(new Set<string>());
+  const [, setLtTick] = useState(0);
+  const ltSenderRef = useRef<LiveTakeSender | null>(null);
+  if (!ltSenderRef.current) {
+    ltSenderRef.current = new LiveTakeSender(ltIdbStore(), {
+      session: () => { const c = collabRef.current; return c && c.client.memberKey ? c.client.link.id : null; },
+      hash: (b) => sha1Cloud(b),
+      upload: async (parts) => { const c = collabRef.current; if (!c) throw new Error('hors collaboration'); await uploadParts(c.client.link, parts); },
+      sign: async (h) => { const c = collabRef.current; if (!c) throw new Error('hors collaboration'); return signPart(c.client.link, h); },
+      put: (_h, bytes, ticket) => putPart(ticket as { path: string; token: string }, bytes),
+      send: async (kind, op) => { const c = collabRef.current; if (!c) throw new Error('hors collaboration'); await c.client.send(kind, op); },
+    }, { keepSent: true });
+  }
+  const ltReceiverRef = useRef<LiveTakeReceiver | null>(null);
+  if (!ltReceiverRef.current) {
+    ltReceiverRef.current = new LiveTakeReceiver({
+      link: () => collabRef.current?.client.link || null,
+      onReady: (_take, b, ref) => {
+        ltRefsRef.current.set(b, ref);
+        const c = collabRef.current;
+        if (c) ltRefsStore.save(c.client.link.id, ltRefsRef.current);
+        // L'opération qui pose la prise attendait le son : réessayée tout de suite.
+        void c?.client.catchUp();
+      },
+      onBroken: (take, b) => {
+        // Somme fausse : la prise entière est redemandée par l'envoi classique (rien ne se perd).
+        collabRef.current?.client.queue(`ltneed:${take}`, 'take_need', { t: take, ...(b ? { b } : {}) });
+      },
+    });
+  }
+  useEffect(() => {
+    const a = ltSenderRef.current!.onChange(() => setLtTick(x => x + 1));
+    const b = ltReceiverRef.current!.subscribe(() => setLtTick(x => x + 1));
+    const id = window.setInterval(() => ltReceiverRef.current?.prune(), 3000);
+    const online = () => { ltSenderRef.current?.kick(); ltReceiverRef.current?.kick(); };
+    window.addEventListener('online', online);
+    return () => { a(); b(); window.clearInterval(id); window.removeEventListener('online', online); };
+  }, []);
+  /** Quelqu'un en ligne n'a pas la prise en direct (ancienne version) : il lui faut la prise entière. */
+  const ltNeedsLegacy = () => {
+    const c = collabRef.current;
+    if (!c) return false;
+    return collabOnlineRef.current.some(m => participantOf(m.member_key) !== c.key && !m.lt);
+  };
+  /** Journal de prise doublé : chaque morceau capté part aussi en direct. */
+  const ltTeeRef = useRef<((m: TakeJournalMeta, base: TakeJournalLike | null) => TakeJournalLike | null) | null>(null);
+  const ltCancel = (w: { take: string; session: string; trackId: string }) => {
+    if (ltWritersRef.current.get(w.trackId)?.take === w.take) ltWritersRef.current.delete(w.trackId);
+    ltSenderRef.current!.dropUnsent(w.take);
+    ltSenderRef.current!.purge(w.take);
+    ltSenderRef.current!.enqueue({ key: `${w.take}:cancel`, session: w.session, take: w.take, trackId: w.trackId, kind: 'cancel', order: nextOrder() });
+  };
+  ltTeeRef.current = (m, base) => {
+    const c = collabRef.current;
+    if (ltOffRef.current || !c || !c.client.memberKey) return base;
+    const t = stateRef.current.tracks.find(x => x.id === m.trackId);
+    if (!t || !canSendContent(t as Track, { role: c.role, key: c.key })) return base;
+    const ch = m.channels && m.channels > 1 ? m.channels : 1;
+    const session = c.client.link.id;
+    const take = `lt${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+    const sender = ltSenderRef.current!;
+    const cutter = new SegmentCutter(ch, Math.round(m.sampleRate * LT_SEGMENT_SEC), (i, ints) => {
+      try {
+        const bytes = encodeSegment(ints);
+        sender.enqueue({ key: `${take}:${i}`, session, take, trackId: m.trackId, kind: 'seg', order: nextOrder(), i, bytes, frames: ints[0].length, ch, sr: m.sampleRate });
+      } catch (e) { console.warn('[Prise en direct] morceau', e); }
+    });
+    const w = { take, cutter, session, trackId: m.trackId, ch, sr: m.sampleRate };
+    ltWritersRef.current.set(m.trackId, w);
+    return {
+      push: (chunk: Float32Array) => { base?.push(chunk); try { cutter.push(chunk); } catch (e) { console.warn('[Prise en direct]', e); } },
+      annotate: (patch: Parameters<NonNullable<TakeJournalLike['annotate']>>[0]) => base?.annotate?.(patch),
+      finish: async () => { try { cutter.flush(); } catch { /* */ } await base?.finish(); },
+      discard: async () => { ltCancel(w); await base?.discard(); },
+    };
+  };
+  /** STOP : la fin de chaque prise part après son dernier morceau (passage gardé, somme de contrôle). */
+  const ltFinishRef = useRef<((results: TakeResult[], kept: TakeResult[]) => void) | null>(null);
+  ltFinishRef.current = (results, kept) => {
+    const writers = ltWritersRef.current;
+    if (!writers.size) return;
+    for (const r of results) {
+      const w = writers.get(r.trackId);
+      if (!w) continue;
+      writers.delete(r.trackId);
+      const buf = r.clip.buffer;
+      // Prise jetée, son venu du pont, ou flux incomplet : envoi classique (WAV) comme avant.
+      if (!kept.includes(r) || !r.stream || !buf || buf.numberOfChannels !== w.ch || w.cutter.total !== r.stream.from + buf.length) { ltCancel(w); continue; }
+      const chans = Array.from({ length: buf.numberOfChannels }, (_, k) => buf.getChannelData(k));
+      const ref: LiveRef = { t: w.take, n: w.cutter.index, from: r.stream.from, frames: buf.length, ch: w.ch, sr: w.sr, sum: takeSum(chans) };
+      ltRefsRef.current.set(r.clip.id, ref);
+      ltRefsStore.save(w.session, ltRefsRef.current);
+      ltSenderRef.current!.enqueue({ key: `${w.take}:end`, session: w.session, take: w.take, trackId: r.trackId, kind: 'end', order: nextOrder(), ref: { ...ref, b: r.clip.id } });
+    }
+    for (const w of [...writers.values()]) ltCancel(w);
+    writers.clear();
+  };
+  /**
+   * Ancienne version de NOVA en ligne : la prise entière (WAV, comme avant) part en plus, puis
+   * le contenu est renvoyé avec son audio (`again` : ignoré par les versions qui ont la prise en direct).
+   */
+  const ltLegacySend = async (trackId: string, bufferIds: string[]) => {
+    const c = collabRef.current;
+    const ids = bufferIds.filter(b => !ltLegacyDoneRef.current.has(b));
+    if (!c || !ids.length) return;
+    ids.forEach(b => ltLegacyDoneRef.current.add(b));
+    try {
+      const audio = await uploadBuffers(c.client.link, ids, (sent, total) => c.client.reportUpload(sent, total));
+      const t = stateRef.current.tracks.find(x => x.id === trackId);
+      if (!t) return;
+      const changed = (t.clips || []).filter(cl => cl.bufferId && ids.includes(cl.bufferId)).map(cl => cl.id);
+      if (!changed.length) return;
+      await c.client.send('content', { trackId, content: contentOf(t), audio, cv: CONTENT_FORMAT, changed, removed: [], meta: false, again: 1 });
+    } catch (e) {
+      console.warn('[Prise en direct] envoi pour une ancienne version', e);
+      ids.forEach(b => ltLegacyDoneRef.current.delete(b));
+    }
+  };
+  /** Un collaborateur a reçu une prise abîmée : on lui envoie la prise entière (WAV). */
+  const ltProvideWav = async (take: string, b: string | null) => {
+    const c = collabRef.current;
+    if (!c) return;
+    const bid = b || [...ltRefsRef.current.entries()].find(([, r]) => r.t === take)?.[0];
+    if (!bid || !audioBufferRegistry.has(bid)) return;
+    const audio = await uploadBuffers(c.client.link, [bid], (sent, total) => c.client.reportUpload(sent, total));
+    c.client.queue(`ltwav:${take}`, 'take_wav', { t: take, b: bid, audio });
+  };
+  /**
+   * Réouverture après un onglet fermé : la séance peut revenir du serveur sans la dernière prise.
+   * Les clips gardés reviennent dans la piste ; le son est recollé depuis l'appareil (morceaux
+   * gardés), sinon depuis le serveur (journal) ; le contenu repart ensuite tout seul.
+   */
+  const ltRestore = async (sid: string) => {
+    const recs = ltPlacements.list(sid);
+    for (const rec of recs) {
+      const ref = ltRefsRef.current.get(rec.b);
+      if (ref && !audioBufferRegistry.has(rec.b)) {
+        try {
+          const items = await ltSenderRef.current!.storedSegments(rec.take);
+          const asm = new LiveTakeAssembly(rec.take, rec.trackId, 'moi');
+          for (const it of items) { if (it.i === undefined || !it.bytes) continue; asm.addMeta({ i: it.i, h: '', n: it.frames || 0 }); try { asm.addBytes(it.i, it.bytes); } catch { /* morceau abîmé : le serveur le redonnera */ } }
+          asm.setEnd(ref);
+          const out = asm.assemble();
+          if (out) {
+            await audioEngine.init();
+            const buf = audioEngine.ctx!.createBuffer(out.channels.length, ref.frames, ref.sr);
+            out.channels.forEach((ch, k) => buf.copyToChannel(ch, k));
+            audioBufferRegistry.register(buf, rec.b);
+          }
+        } catch (e) { console.warn('[Prise en direct] reprise', e); }
+      }
+      const t = stateRef.current.tracks.find(x => x.id === rec.trackId);
+      if (!t) continue;
+      const missing = (rec.clips as Clip[]).filter(c => !(t.clips || []).some(x => x.id === c.id));
+      if (!missing.length) continue;
+      setState(produce((d: DAWState) => {
+        const tt = d.tracks.find(x => x.id === rec.trackId);
+        if (!tt) return;
+        for (const c of missing) if (!tt.clips.some(x => x.id === c.id)) (tt.clips as Clip[]).push({ ...c });
+      }));
+    }
+  };
+  const ltRestoreRef = useRef(ltRestore);
+  ltRestoreRef.current = ltRestore;
+  const ltProvideWavRef = useRef(ltProvideWav);
+  ltProvideWavRef.current = ltProvideWav;
+  const ltNeedsLegacyRef = useRef(ltNeedsLegacy);
+  ltNeedsLegacyRef.current = ltNeedsLegacy;
+  const ltLegacySendRef = useRef(ltLegacySend);
+  ltLegacySendRef.current = ltLegacySend;
   /** Revendications de pistes (« own ») : numéro retenu par piste (la première gagne). */
   const claimSeqRef = useRef(new Map<string, number>());
   const knownMarkersRef = useRef(new Map<string, string>());
@@ -5804,8 +6012,35 @@ function Studio() {
         if (delSeq !== undefined && delSeq > o.seq) break;
         // Format clip par clip (cv:2, utils/collabContent) ; sinon version complète (ancienne version de NOVA).
         const clipWise = Number(p.cv) >= CONTENT_FORMAT;
+        // B3 : prises envoyées en direct. Renvoi « again » = pour les anciennes versions seulement.
+        const liveIn: Record<string, LiveRef> = {};
+        let audioIn = p.audio;
+        if (!ltOffRef.current) {
+          if (p.again) break;
+          if (p.live && typeof p.live === 'object') for (const [b, x] of Object.entries(p.live).slice(0, 2000)) { const r = sanitizeLiveRef(x); if (r) liveIn[b] = r; }
+          const rcv = ltReceiverRef.current!;
+          const waiting: string[] = [];
+          for (const [b, r] of Object.entries(liveIn)) {
+            if (audioBufferRegistry.has(b)) continue;
+            // Prise abîmée en route et envoyée aussi en entier : on prend l'envoi classique.
+            if (rcv.stateOf(r.t) === 'erreur' && p.audio && p.audio[b]) continue;
+            rcv.setEnd(r.t, { ...r, b }, o.author_name || '?', tid);
+            waiting.push(r.t);
+          }
+          // L'ingé ne pose la prise qu'une fois complète et vérifiée : l'opération attend (sans échec).
+          if (waiting.length) throw new LiveTakePendingError(waiting[0]);
+          audioIn = withoutLive(p.audio, Object.fromEntries(Object.entries(liveIn).filter(([b]) => audioBufferRegistry.has(b))));
+        }
+        const ackLive = () => {
+          for (const [b, r] of Object.entries(liveIn)) {
+            if (!audioBufferRegistry.has(b) || ltAckedRef.current.has(r.t) || !ltReceiverRef.current!.has(r.t)) continue;
+            ltAckedRef.current.add(r.t);
+            ltReceiverRef.current!.markPlaced(r.t);
+            c.client.queue(`ltok:${r.t}`, 'take_ok', { t: r.t, b });
+          }
+        };
         if (!clipWise && !lwwRef.current.accept(`content:${tid}`, o.seq)) break;
-        await ensureBuffers(c.client.link, p.audio);
+        await ensureBuffers(c.client.link, audioIn);
         // Propriétaire : celui que dit le contenu, sinon l'auteur (ancienne version de NOVA).
         const owner = ownerFromContent(p.content, { role: o.role, memberKey: o.member_key, name: o.author_name || '' });
         const isNewTrack = !stateRef.current.tracks.some(x => x.id === tid);
@@ -5835,7 +6070,7 @@ function Studio() {
           const metaOk = !!p.meta && !localMetaPending && lwwRef.current.accept(`cmeta:${tid}`, o.seq);
           plan = { metaOk, upsert: r.taken, remove: r.dropped };
           knownContentRef.current.set(tid, noteMerged(known, r.taken, r.dropped, metaOk ? metaSigOf(ct) : undefined));
-          if (!metaOk && !r.taken.length && !r.dropped.length) break;
+          if (!metaOk && !r.taken.length && !r.dropped.length) { ackLive(); break; }
           if (r.taken.length || r.dropped.length) noteClipHistoryRef.current?.(o, cur as Track, r.taken, r.dropped);
         } else {
           touch(tid);
@@ -5925,6 +6160,47 @@ function Studio() {
           const posed = plan ? plan.upsert : (Array.isArray(ct.clips) ? sanitizeIncomingClips(ct.clips) : []) as Clip[];
           proToolsSink().noteIncoming(takesBatchOf(tid, ct.name || stateRef.current.tracks.find(x => x.id === tid)?.name || 'Piste', owner?.name || o.author_name, posed, stateRef.current.name));
         }
+        ackLive();
+        break;
+      }
+      // B3 · Prise envoyée pendant l'enregistrement (ignorées par les anciennes versions de NOVA).
+      case 'take_seg': {
+        if (ltOffRef.current) break;
+        const rcv = ltReceiverRef.current!;
+        const take = String(p.t || '');
+        // Mes propres morceaux (page précédente de cet appareil) : seulement si je n'ai plus la prise.
+        if (p._d === c.client.deviceId && [...ltRefsRef.current.entries()].some(([b, r]) => r.t === take && audioBufferRegistry.has(b))) break;
+        rcv.addSegs(p, o.author_name || '?');
+        // Tant que la prise n'est pas complète, l'opération n'est pas « appliquée » : après un
+        // rechargement, les morceaux déjà reçus sont relus du journal (rien ne manque).
+        if (rcv.stateOf(take) === 'reception' || rcv.stateOf(take) === 'verification') throw new LiveTakePendingError(take);
+        break;
+      }
+      case 'take_end': {
+        if (ltOffRef.current) break;
+        const take = String(p.t || '');
+        if (p._d === c.client.deviceId && [...ltRefsRef.current.entries()].some(([b, r]) => r.t === take && audioBufferRegistry.has(b))) break;
+        if (p.cancel) { ltReceiverRef.current!.cancel(take); break; }
+        const r = sanitizeLiveRef(p);
+        if (!r) break;
+        ltReceiverRef.current!.setEnd(r.t, { ...r, ...(typeof p.b === 'string' ? { b: p.b.slice(0, 160) } : {}) }, o.author_name || '?', String(p.trackId || ''));
+        break;
+      }
+      case 'take_ok': {
+        const take = String(p.t || '');
+        if (ltSenderRef.current!.takeProgress(take)) ltSenderRef.current!.markReceived(take, o.author_name || '?');
+        break;
+      }
+      case 'take_need': {
+        if (ltOffRef.current || o.replay) break;
+        void ltProvideWavRef.current(String(p.t || ''), typeof p.b === 'string' ? p.b : null);
+        break;
+      }
+      case 'take_wav': {
+        if (ltOffRef.current) break;
+        if (ltReceiverRef.current!.stateOf(String(p.t || '')) !== 'erreur') break;
+        await ensureBuffers(c.client.link, p.audio);
+        void c.client.catchUp();
         break;
       }
       case 'track_del': {
@@ -6172,11 +6448,17 @@ function Studio() {
     const known = knownContentRef.current.get(t.id);
     const delta = contentDelta(known, metaSig, t.clips || []);
     if (known && isEmptyDelta(delta)) return;
-    const audio = await uploadBuffers(c.client.link, contentBufferIds(t), (sent, total) => c.client.reportUpload(sent, total));
+    // B3 : une prise envoyée en direct ne repart pas en entier (sa référence suffit : morceaux en ligne).
+    const ids = contentBufferIds(t);
+    const live: Record<string, LiveRef> = {};
+    if (!ltOffRef.current) for (const id of ids) { const r = ltRefsRef.current.get(id); if (r) live[id] = r; }
+    const liveIds = Object.keys(live);
+    const audio = await uploadBuffers(c.client.link, ids.filter(id => !(id in live)), (sent, total) => c.client.reportUpload(sent, total));
     const isNew = !knownFieldsRef.current.has(t.id);
     try {
       await c.client.send('content', {
         trackId, content, audio, cv: CONTENT_FORMAT, changed: delta.changed, removed: delta.removed, meta: delta.meta,
+        ...(liveIds.length ? { live } : {}),
         // Rien de connu (piste neuve, ou réparation d'un écart) : cette version fait foi en entier.
         ...(known ? {} : { full: true }),
         ...(isNew ? { mix: mixOf(t), mixFields: mixFieldsOf(t) } : {}),
@@ -6196,6 +6478,9 @@ function Studio() {
     knownSigRef.current.set('content:' + t.id, sigOf(content));
     knownContentRef.current.set(t.id, noteSent(known, { meta: metaSig, clips: t.clips || [], changed: delta.changed, removed: delta.removed }));
     if (isNew) knownFieldsRef.current.set(t.id, fieldSigsOf(mixFieldsOf(t)));
+    if (liveIds.length) ltPlacements.sent(c.client.link.id, t.id, new Set((content.clips || []).map((x: Clip) => x.id))).forEach(take => ltSenderRef.current!.purge(take));
+    // Ancienne version de NOVA en ligne : elle reçoit en plus la prise entière, comme avant.
+    if (liveIds.length && ltNeedsLegacyRef.current()) void ltLegacySendRef.current(t.id, liveIds);
     if (c.role === 'artist' && previewWantedRef.current.has(t.id) && hasArtistVst(t)) previewSchedRef.current?.request(t.id);
   }, []);
 
@@ -6586,8 +6871,23 @@ function Studio() {
       setCollab({ client, role, name, host, key: myKey, color: myColor });
       collabRef.current = { client, role, name, host, key: myKey, color: myColor };
       collabRoleStore.set(role);
-      client.setPresence({ color: myColor, ...(host ? { host: true } : {}) });
+      client.setPresence({ color: myColor, ...(host ? { host: true } : {}), ...(ltOffRef.current ? {} : { lt: 1 }) });
+      if (!ltOffRef.current) {
+        // B3 : prises envoyées en direct connues de cet appareil (rechargement, onglet rouvert).
+        ltRefsStore.load(cs.id).forEach((r, b) => { if (!ltRefsRef.current.has(b)) ltRefsRef.current.set(b, r); });
+      }
       const members = await client.join(stateRef.current.collabSeq || 0);
+      if (!ltOffRef.current) {
+        // Onglet fermé avant la fin de l'envoi : les morceaux gardés sur l'appareil repartent,
+        // et le contenu de la piste (la prise posée) est renvoyé s'il n'était pas parti.
+        // Les clips de ces prises ne sont pas « connus de tous » : ils repartent (seulement eux).
+        for (const rec of ltPlacements.list(cs.id)) {
+          const k = knownContentRef.current.get(rec.trackId);
+          if (k) (rec.clips as Clip[]).forEach(c => k.clips.delete(c.id));
+        }
+        void ltSenderRef.current!.load().then(() => { ltSenderRef.current!.kick(); void ltRestoreRef.current(cs.id); });
+        ltReceiverRef.current!.kick();
+      }
       setCollabMemberKey(client.memberKey || null);
       (members || []).forEach(m => {
         const k = participantOf(m.member_key);
@@ -6693,6 +6993,8 @@ function Studio() {
     setListenTogether(null);
     setInviteCode(null);
     collabLiveStore.set({ meKey: null, recs: {} });
+    ltReceiverRef.current?.clear();
+    ltAckedRef.current.clear();
     leaveLivePreviewRef.current?.();
     if (!opts.keepResume) { try { localStorage.removeItem(COLLAB_ACTIVE_KEY); } catch { /* */ } }
     if (c) await c.client.leave();
@@ -7590,6 +7892,34 @@ function Studio() {
       rtcStats: () => rtcRef.current?.stats() ?? Promise.resolve({}),
       rtcTrace: () => rtcRef.current?.traceLog() ?? [],
       latency: () => ({ server: collabRef.current?.client.getStatus().rttMs ?? null, peers: peerLatencyRef.current, sync: peerSyncRef.current, horizon: collabRef.current?.client.horizon ?? null }),
+      /** B3 : prises envoyées en direct (envoi, file gardée sur l'appareil, réception). */
+      liveTake: () => ({
+        off: ltOffRef.current,
+        send: ltSenderRef.current!.allProgress(),
+        queued: ltSenderRef.current!.pending().map(x => ({ key: x.key, kind: x.kind, bytes: x.bytes?.length || 0 })),
+        recv: ltReceiverRef.current!.views().map(v => ({ ...v, peaks: v.peaks.length })),
+        refs: Object.fromEntries(ltRefsRef.current),
+      }),
+      hasBuffer: (id: string) => audioBufferRegistry.has(id),
+      /** Somme de contrôle (CRC-32 du PCM 24 bits, comme la prise) et SHA-256 du même PCM d'un son du registre. */
+      bufferSum: async (id: string) => {
+        const b = audioBufferRegistry.get(id);
+        if (!b) return null;
+        const chans = Array.from({ length: b.numberOfChannels }, (_, k) => b.getChannelData(k));
+        const n = b.length, nc = chans.length;
+        const bytes = new Uint8Array(n * nc * 3);
+        let o = 0;
+        for (let i = 0; i < n; i++) for (let k = 0; k < nc; k++) {
+          const x = Math.max(-1, Math.min(1, chans[k][i] || 0));
+          const v = Math.round(x < 0 ? x * 0x800000 : x * 0x7fffff);
+          bytes[o] = v & 0xff; bytes[o + 1] = (v >> 8) & 0xff; bytes[o + 2] = (v >> 16) & 0xff; o += 3;
+        }
+        const d = await crypto.subtle.digest('SHA-256', bytes);
+        // Précision du son : part des échantillons exactement sur 16 bits (micro 16 bits, sans traitement).
+        let exact16 = 0;
+        for (let i = 0; i < n; i += 7) if (Number.isInteger(chans[0][i] * 32768)) exact16++;
+        return { frames: n, channels: nc, sr: b.sampleRate, crc: takeSum(chans), sha256: Array.from(new Uint8Array(d)).map(x => x.toString(16).padStart(2, '0')).join(''), exact16: Math.round((1000 * exact16) / Math.max(1, Math.ceil(n / 7))) / 10 };
+      },
       track: (idOrName: string) => {
         const t = stateRef.current.tracks.find(x => x.id === idOrName || x.name === idOrName);
         return t ? {
@@ -9264,6 +9594,25 @@ function Studio() {
   };
   const guestEngineerView = collabPeerViews.find(v => v.role === 'engineer' && !v.me) || null;
 
+  // B3 : envoi de ma dernière prise, prises reçues en direct, test de connexion.
+  const ltLastSend = (() => { const all = collab ? ltSenderRef.current!.allProgress().filter(p => !p.cancelled) : []; return all[all.length - 1] || null; })();
+  const ltTo = guestMode
+    ? (guestEngineerView?.name || state.collabHost?.name || "l'ingé")
+    : (collabOnline.filter(m => collab && participantOf(m.member_key) !== collab.key).map(m => m.display_name).filter(Boolean).join(' et ') || 'les autres');
+  const ltSendNode = collab ? <SendStatus progress={ltLastSend} recording={state.isRecording} to={ltTo} /> : null;
+  const ltRunNetTest = async () => {
+    const c = collabRef.current;
+    if (!c) throw new Error('Rejoins d’abord la séance.');
+    const tr = guestTrack || stateRef.current.tracks.find(t => t.isTrackArmed) || null;
+    const sr = audioEngine.ctx?.sampleRate || (stateRef.current as any).sampleRate || 48000;
+    // Débit réel de mes prises déjà envoyées (codage sans perte) : la prédiction suit ma voix.
+    const done = ltSenderRef.current!.allProgress().filter(p => p.framesSent > 0);
+    const bytes = done.reduce((n, p) => n + p.sent, 0), secs = done.reduce((n, p) => n + p.framesSent / (p.sr || 48000), 0);
+    return runNetTest(c.client.link, { sampleRate: sr, channels: inputWidth(tr?.recordInput ?? null), streamKbps: secs > 5 ? (bytes * 8) / secs / 1000 : undefined });
+  };
+  const ltNetNode = collab ? <NetTestCard run={ltRunNetTest} big={guestMode} who={guestMode ? ltTo : undefined} /> : null;
+  const ltRecordingNames = collabOnline.filter(m => m.rec && collab && participantOf(m.member_key) !== collab.key).map(m => m.display_name);
+
   // Auth temporairement désactivée pour éviter écran noir
   // if (!user) { return <AuthScreen onAuthenticated={(u) => { setUser(u); setIsAuthOpen(false); }} />; }
 
@@ -10117,7 +10466,15 @@ function Studio() {
       />
       <RemoteIngePanel open={collabOpen && (remote.active || !!(remote.connecting && !collab))} onClose={() => setCollabOpen(false)} remote={remote} />
       <PanelBoundary name="le panneau de collaboration" overlay onClose={() => setCollabOpen(false)}>
+      {collab && !guestMode && (
+        <div className="pointer-events-none fixed bottom-24 left-3 z-[540] w-[min(340px,calc(100vw-24px))] space-y-2">
+          {!collabOpen && ltSendNode}
+          <ReceptionCard views={ltReceiverRef.current!.views()} recordingNames={ltRecordingNames} trackName={(id) => state.tracks.find(t => t.id === id)?.name || 'piste'} />
+        </div>
+      )}
       <CollabPanel
+        takeSend={ltSendNode}
+        netTest={ltNetNode}
         open={collabOpen && !remote.active && !(remote.connecting && !collab)}
         onClose={() => { setCollabOpen(false); if (!collab) { collabPayCancelRef.current = true; setCollabBusy(null); } }}
         active={!!collab}
@@ -10291,6 +10648,8 @@ function Studio() {
           messages={collabMessages}
           onSend={sendChat}
           notice={aiNotice}
+          takeSend={ltSendNode}
+          netTest={ltNetNode}
           onLeave={() => {
             const eng = guestEngineerView?.name || state.collabHost?.name || "l'ingé";
             setGuestLeft({ sessionName: cloudSession?.name || state.name || 'Séance', engineer: eng, name: collab.name });
