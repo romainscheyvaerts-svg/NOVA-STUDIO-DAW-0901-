@@ -8,8 +8,9 @@
  *    IndexedDB), donc tout marche hors ligne ; la synchronisation n'est qu'un
  *    échange en plus, jamais un passage obligé ;
  *  - table `nova_presets` (supabase/migrations/20261012200000_nova_presets.sql,
- *    RLS : chacun ses lignes). Tant qu'elle n'existe pas en ligne : état
- *    « bientôt disponible », redemandé au plus toutes les 6 h ; aucune erreur
+ *    RLS : chacun ses lignes). Interrupteur config/presetCloud (éteint jusqu'au
+ *    GO) : éteint, état « bientôt disponible » sans aucune requête ; allumé mais
+ *    table absente, même état, redemandé au plus toutes les 6 h ; aucune erreur
  *    ne remonte à l'interface ;
  *  - egress léger : on ne relit que les lignes changées depuis le dernier
  *    passage (curseur updated_at, 200 par page, 10 pages au plus) ; pas de
@@ -27,6 +28,7 @@
  */
 import type { AnyPreset } from '../utils/presets';
 import { CHAIN_FORMAT } from '../utils/presets';
+import { presetCloudEnabled } from '../config/presetCloud';
 
 export interface CloudRow {
   user_id?: string;
@@ -121,7 +123,7 @@ export function presetFromRow(r: CloudRow): AnyPreset | null {
   return out as AnyPreset;
 }
 
-export function createPresetSync(o: { api: PresetCloudApi; local: LocalPresets; meta: MetaStore; now?: () => number; deviceId?: string }) {
+export function createPresetSync(o: { api: PresetCloudApi; local: LocalPresets; meta: MetaStore; now?: () => number; deviceId?: string; enabled?: () => boolean }) {
   const now = o.now || (() => Date.now());
   const device = o.deviceId || '';
   const m = o.meta;
@@ -162,6 +164,8 @@ export function createPresetSync(o: { api: PresetCloudApi; local: LocalPresets; 
     let uid: string | null = null;
     try { uid = await o.api.userId(); } catch { uid = null; }
     if (!uid) { setStatus({ state: 'off' }); return status; }
+    // Serveur pas encore ouvert (config/presetCloud) : aucune requête.
+    if (o.enabled && !o.enabled()) { setStatus({ state: 'soon' }); return status; }
     const missingAt = Number(m.get(K_MISSING) || 0);
     if (!force && missingAt && now() - missingAt < MISSING_RETRY_MS) { setStatus({ state: 'soon' }); return status; }
     const pauseUntil = Number(m.get(K_PAUSE) || 0);
@@ -338,6 +342,7 @@ export function presetCloud(): PresetSync {
       api: supabasePresetApi(),
       meta: lsMeta,
       deviceId: presetDeviceId(),
+      enabled: presetCloudEnabled,
       local: {
         all: async () => (await import('./PresetStore')).listUserPresets(),
         put: async p => (await import('./PresetStore')).putFromCloud(p),

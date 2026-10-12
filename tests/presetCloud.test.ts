@@ -153,6 +153,23 @@ describe('presets synchronisés entre postes', () => {
     expect((await A.sync.sync()).state).toBe('ok');
   });
 
+  it('interrupteur éteint (avant le GO) : « bientôt disponible », aucune requête, rien de perdu', async () => {
+    const srv = fakeServer();
+    const store = new Map<string, AnyPreset>();
+    const meta = new Map<string, string>();
+    const s = createPresetSync({
+      api: srv.api('u1'), enabled: () => false,
+      local: { all: async () => [...store.values()], put: async p => { store.set(p.id, p); }, remove: async id => { store.delete(id); } },
+      meta: { get: k => meta.get(k) ?? null, set: (k, v) => { if (v) meta.set(k, v); else meta.delete(k); } },
+    });
+    store.set('p', plugin('p', 'Voix'));
+    s.markChanged('p', 5);
+    const st = await s.sync({ force: true });
+    expect(st.state).toBe('soon');
+    expect(srv.calls).toEqual({ pull: 0, push: 0 });
+    expect(store.has('p')).toBe(true);
+  });
+
   it('non connecté : état « off », aucune requête', async () => {
     const srv = fakeServer();
     const A = device(srv.api(null));

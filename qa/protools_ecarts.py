@@ -835,8 +835,11 @@ def run_tel(browser, theme, zpath):
 CLOUD_PROJECT = "mxdrxpzxbgybchzzvpkf"
 
 
-def cloud_context(browser, vp, theme, session):
+def cloud_context(browser, vp, theme, session, live=True):
     ctx, page = new_page(browser, vp, theme)
+    if live:
+        # Interrupteur config/presetCloud : éteint jusqu'au GO ; allumé ici pour le test.
+        ctx.add_init_script("try { localStorage.setItem('nova_presets_cloud_test', '1'); } catch (e) {}")
     if session:
         ctx.add_init_script(f"try {{ localStorage.setItem('sb-{CLOUD_PROJECT}-auth-token', {json.dumps(json.dumps(session))}); }} catch (e) {{}}")
     reqs = []
@@ -952,6 +955,16 @@ def run_cloud(browser, zpath):
         ok("C_une_seule_requete", len(pc._reqs) == 1, pc._reqs)
         ok("C_aucune_erreur", not pc._errs, pc._errs[:3])
         pc.screenshot(path=str(OUT / "cloud_poste_C_bientot.png"))
+        # ── Poste D : la NOVA publiée aujourd'hui (interrupteur éteint) : 0 requête, même état clair. ──
+        D, pd = cloud_context(browser, "tab", "dark", sess2, live=False)
+        try:
+            open_project(pd, zpath, "dark")
+            preset_dialog(pd, True)
+            s, txt = wait_cloud(pd, ("soon",))
+            pd.wait_for_timeout(4500)   # la 1re synchro du démarrage est passée
+            ok("D_interrupteur_eteint_zero_requete", s == "soon" and not pd._reqs and not pd._errs, {"etat": s, "requetes": pd._reqs, "erreurs": pd._errs[:2]})
+        finally:
+            D.close()
     except Exception as e:
         ok("run_cloud_exception", False, str(e)[:300])
     finally:
@@ -1320,7 +1333,7 @@ COUVERTURE = [
     ("Side-chain", ["cv_sidechain"]), ("Mètres crête", ["cv_metres"]), ("Mixes casque", ["cv_casque"]),
     ("Freeze d'une piste", ["lot_geler", "lot_degeler"]), ("Commit d'une piste", ["lot_commit"]), ("Commit / Freeze en lot", ["lot_precoche", "lot_geler", "lot_commit"]),
     ("Track Presets", ["presets_sans_compte", "B_retrouve_modele_de_piste"]),
-    ("Presets synchronisés", ["A_envoye_au_compte", "B_retrouve_modele_de_piste", "B_retrouve_preset_effet", "A_suppression_recue", "C_bientot_disponible", "C_une_seule_requete", "requetes_legeres"]),
+    ("Presets synchronisés", ["A_envoye_au_compte", "B_retrouve_modele_de_piste", "B_retrouve_preset_effet", "A_suppression_recue", "C_bientot_disponible", "C_une_seule_requete", "requetes_legeres", "D_interrupteur_eteint_zero_requete"]),
     ("Plusieurs pistes armées", ["cv_armer"]), ("Punch, QuickPunch", ["cv_punch"]), ("Préréglage de raccourcis", ["cv_raccourcis"]),
     ("Palette Ctrl+K", ["palette_francais"]),
 ]
