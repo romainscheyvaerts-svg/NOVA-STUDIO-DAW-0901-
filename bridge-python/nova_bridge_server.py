@@ -202,6 +202,44 @@ class LicenseRequired(RuntimeError):
     """Chargement discret (quiet) interrompu par une fenêtre de licence / démo."""
 
 
+class TestSlowdown:
+    """OPTION DE TEST (C6), JAMAIS active par défaut : pont artificiellement en retard.
+
+    Chaque bloc audio traité repart vers le DAW `ms` millisecondes plus tard, plus un retard
+    aléatoire entre 0 et `jitter_ms` (gigue). Le débit n'est PAS réduit : les blocs sont
+    traités au fil de l'eau, seul leur retour est différé (call_later), comme un pont qui
+    répond en retard. Sert à prouver l'alerte et le tampon adaptatif du DAW
+    (qa/silence_pont_vst.py).
+
+    Activation : variables d'environnement NOVA_TEST_SLOW_MS / NOVA_TEST_SLOW_JITTER_MS au
+    lancement, ou action DEBUG_SLOW { ms, jitter_ms } avec NOVA_BRIDGE_DEBUG=1 seulement.
+    """
+
+    def __init__(self, ms: float = 0.0, jitter_ms: float = 0.0, seed: Optional[int] = None):
+        import random
+        self.ms = max(0.0, float(ms or 0))
+        self.jitter_ms = max(0.0, float(jitter_ms or 0))
+        self._rng = random.Random(seed)
+
+    @classmethod
+    def from_env(cls) -> "TestSlowdown":
+        def num(name):
+            try:
+                return float(os.environ.get(name) or 0)
+            except ValueError:
+                return 0.0
+        return cls(num("NOVA_TEST_SLOW_MS"), num("NOVA_TEST_SLOW_JITTER_MS"))
+
+    @property
+    def active(self) -> bool:
+        return self.ms > 0 or self.jitter_ms > 0
+
+    def delay_s(self) -> float:
+        if not self.active:
+            return 0.0
+        return (self.ms + (self._rng.random() * self.jitter_ms if self.jitter_ms else 0.0)) / 1000.0
+
+
 def allowed_origins() -> List[Any]:
     origins: List[Any] = [
         None,  # clients hors navigateur (outils locaux, tests) : pas d'en-tête Origin
@@ -303,6 +341,10 @@ class NovaBridgeServer:
         # (v13) Projets sur le disque : un seul fil d'écriture (versions dans l'ordre).
         self.projects = project_store.ProjectStore()
         self.project_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="projects")
+        # (C6) Option de test : retour des blocs différé (jamais active par défaut).
+        self.slow = TestSlowdown.from_env()
+        if self.slow.active:
+            logger.warning(f"⚠ OPTION DE TEST : pont ralenti ({self.slow.ms:g} ms + gigue {self.slow.jitter_ms:g} ms)")
 
     # --- démarrage ---------------------------------------------------------
 
@@ -711,6 +753,14 @@ class NovaBridgeServer:
         self.loop.call_later(1.0, w.end)
         self._reply(ws, req, {"success": True})
 
+    async def _a_debug_slow(self, ws, req):
+        """(C6) Test : pont ralenti à la demande ({ ms, jitter_ms } ; 0 = normal)."""
+        if os.environ.get("NOVA_BRIDGE_DEBUG") != "1":
+            raise RuntimeError("Action de test désactivée")
+        self.slow = TestSlowdown(req.get("ms") or 0, req.get("jitter_ms") or 0, req.get("seed"))
+        logger.warning(f"⚠ OPTION DE TEST : pont ralenti ({self.slow.ms:g} ms + gigue {self.slow.jitter_ms:g} ms)")
+        self._reply(ws, req, {"success": True, "ms": self.slow.ms, "jitter_ms": self.slow.jitter_ms})
+
     async def _a_debug_windows(self, ws, req):
         if os.environ.get("NOVA_BRIDGE_DEBUG") != "1":
             raise RuntimeError("Action de test désactivée")
@@ -955,7 +1005,7 @@ class NovaBridgeServer:
                 if slot.failed and not slot.crash_reported:
                     self._report_crash(slot)
                 if kind == "bin":
-                    await self._send(ws, build_audio_frame(slot.slot_id, seq, out))
+                    await self._send_audio(ws, build_audio_frame(slot.slot_id, seq, out))
                 else:
                     await self._send(ws, {"action": "AUDIO_PROCESSED", "slot_id": slot.slot_id,
                                           "channels": out.tolist()})
@@ -970,6 +1020,15 @@ class NovaBridgeServer:
             except Exception as e:
                 # Jamais de worker mort : un slot sans consommateur rendait du silence à vie.
                 logger.error(f"[{slot.name}] bloc perdu : {e}")
+
+    async def _send_audio(self, ws, frame: bytes):
+        """Bloc traité renvoyé au DAW ; différé si l'option de test « pont ralenti » est active."""
+        slow = getattr(self, "slow", None)
+        d = slow.delay_s() if slow is not None else 0.0
+        if d <= 0:
+            await self._send(ws, frame)
+            return
+        self.loop.call_later(d, lambda: asyncio.ensure_future(self._send(ws, frame)))
 
     def _report_crash(self, slot: Slot):
         """PLUGIN_CRASHED, une fois, à la connexion propriétaire du slot."""
