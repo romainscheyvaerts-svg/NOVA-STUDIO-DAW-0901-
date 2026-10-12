@@ -175,7 +175,15 @@ export interface TakeJournalMeta { trackId: string; recordedAt: number; latency:
  * C1 : `bridgeFile` = fichier écrit par le pont ASIO (la prise vient de lui) ; `note` = message
  * pour l'ingé (blocs perdus, ou prise du navigateur gardée faute de fichier du pont).
  */
-export interface TakeResult { clip: Clip; trackId: string; group?: string; bridgeFile?: string; note?: string }
+export interface TakeResult {
+  clip: Clip; trackId: string; group?: string; bridgeFile?: string; note?: string;
+  /**
+   * B3 · Prise envoyée pendant l'enregistrement : la prise = les échantillons passés au
+   * journal de prise, à partir de l'image `from` (décompte, latence retirés), sur toute la
+   * longueur du buffer. Absent : le son vient d'ailleurs (fichier du pont) — envoi classique.
+   */
+  stream?: { from: number };
+}
 
 /** Référence au fichier du pont, gardée dans le journal de prise (récupération après plantage). */
 export interface BridgeTakeRef {
@@ -2560,7 +2568,7 @@ export class AudioEngine {
       out.push({
         trackId: l.trackId,
         ...(group ? { group } : {}),
-        ...(br ? { bridgeFile: br.path } : {}),
+        ...(br ? { bridgeFile: br.path } : { stream: { from } }),
         clip: {
           id: k ? `rec-${stamp}-t${k}` : `rec-${stamp}`,
           name: `Vocal Take ${new Date().toLocaleTimeString()}`,
