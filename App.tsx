@@ -200,6 +200,9 @@ import { DEFAULT_GUEST_RIGHTS, GUEST_RIGHTS_KIND, GuestRights, guestCanDelete, g
 import GuestStudio from './components/GuestStudio';
 import RemoteIngePanel from './components/RemoteIngePanel';
 import LiveVstRemotePanel from './components/LiveVstRemotePanel';
+// Pont Pro Tools (chantier 9) : prises BWF horodatées + mix d'une entrée système diffusé.
+import ProToolsPanel, { MixSourcePicker } from './components/ProToolsPanel';
+import { mixSource, proToolsSink, takesBatchOf, writtenMessage } from './services/ProToolsBridge';
 import { useRemoteInge } from './hooks/useRemoteInge';
 import { parseRemoteLink } from './utils/remoteInge';
 import { applyRemoteVstParams, catalogOf, LIVE_VST_KINDS, LiveVstDeps, readRemoteVstParams, VstCatalogEntry, VstParamAck, VstParamsReply, VstRemoteRequests } from './services/LiveVstRemote';
@@ -5917,6 +5920,11 @@ function Studio() {
             t.clips = Array.isArray(ct.clips) ? sanitizeIncomingClips(ct.clips) : t.clips;
           }
         }));
+        // Pont Pro Tools : chaque prise de l'artiste posée chez l'ingé part aussi en BWF horodaté.
+        if (c.role === 'engineer' && o.role === 'artist' && !o.replay) {
+          const posed = plan ? plan.upsert : (Array.isArray(ct.clips) ? sanitizeIncomingClips(ct.clips) : []) as Clip[];
+          proToolsSink().noteIncoming(takesBatchOf(tid, ct.name || stateRef.current.tracks.find(x => x.id === tid)?.name || 'Piste', owner?.name || o.author_name, posed, stateRef.current.name));
+        }
         break;
       }
       case 'track_del': {
@@ -7055,8 +7063,13 @@ function Studio() {
     const on = !rtc.isSending('mix');
     if (on) {
       await ensureAudioEngine();
-      const stream = audioEngine.getCollabMixStream();
-      if (!stream) { setAiNotification("🎧 Le moteur audio n'est pas prêt : lance la lecture une fois, puis réessaie."); return; }
+      // Source choisie (pont Pro Tools) : le master de NOVA, ou une entrée système (sortie de Pro Tools).
+      const fromInput = mixSource().kind === 'input';
+      const stream = await mixSource().stream(() => audioEngine.getCollabMixStream());
+      if (!stream) {
+        setAiNotification(fromInput ? `🎧 ${mixSource().view?.error || "L'entrée choisie ne s'ouvre pas : choisis-en une autre dans Collaboration › Pont Pro Tools."}` : "🎧 Le moteur audio n'est pas prêt : lance la lecture une fois, puis réessaie.");
+        return;
+      }
       rtc.setLocal('mix', stream, collabOnlineRef.current.map(m => m.member_key));
     } else rtc.setLocal('mix', null, []);
     setMixOutOn(on);
@@ -7066,6 +7079,16 @@ function Studio() {
       : '📡 Diffusion du mix arrêtée.');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Pont Pro Tools : source du mix changée pendant la diffusion → le nouveau flux part tout de suite.
+  useEffect(() => mixSource().onChange(() => {
+    const rtc = rtcRef.current;
+    if (!rtc || !rtc.isSending('mix')) return;
+    void mixSource().stream(() => audioEngine.getCollabMixStream()).then(stream => {
+      if (stream && rtcRef.current?.isSending('mix')) rtcRef.current.setLocal('mix', stream, collabOnlineRef.current.map(m => m.member_key));
+    });
+  }), []);
+  // Pont Pro Tools : retour visuel à chaque prise écrite.
+  useEffect(() => { proToolsSink().onWritten = (e) => setAiNotification(writtenMessage(e)); return () => { proToolsSink().onWritten = undefined; }; }, []);
   // Fréquence du projet changée (contexte audio recréé) pendant la diffusion du mix :
   // le flux est repris sur le nouveau contexte (l'ancien est fermé, il ne porterait plus rien).
   useEffect(() => {
@@ -10160,6 +10183,7 @@ function Studio() {
           return {
             talkOn, onTalk: (on: boolean) => { void setTalk(on); },
             canMixOut: collab.role === 'engineer', mixOutOn, onToggleMixOut: () => { void toggleMixOut(); },
+            mixSource: collab.role === 'engineer' ? <MixSourcePicker mixOutOn={mixOutOn} /> : undefined,
             remoteMixFrom: mixFrom ? nameOf(mixFrom) : null, listening: listenRemoteMix, onToggleListen: toggleListenRemoteMix,
             mixStatus, onRetryMix: retryRemoteMix, mixQuality: mixQualityLabel(mixQuality),
             talking: collabOnline.filter(m => m.talk && remoteAudio[participantOf(m.member_key)]?.talk && participantOf(m.member_key) !== collab.key).map(m => m.display_name),
@@ -10171,6 +10195,13 @@ function Studio() {
         remoteError={remote.error}
         remoteLinkFromUrl={remoteLinkFromUrl}
         savedRemote={state.remoteInge ? { role: state.remoteInge.role } : null}
+        proTools={collab?.role === 'engineer' ? (
+          <PanelBoundary name="le pont Pro Tools" compact>
+            <ProToolsPanel existing={() => stateRef.current.tracks
+              .filter(t => t.collabOwner === 'artist' || (t.clips || []).some(k => k.takeNumber))
+              .map(t => takesBatchOf(t.id, t.name, t.collabOwnerName || 'Artiste', t.clips || [], stateRef.current.name))} />
+          </PanelBoundary>
+        ) : null}
         liveVst={collab?.role === 'engineer' ? (
           <PanelBoundary name="les VST de l'artiste" compact>
           <LiveVstRemotePanel
