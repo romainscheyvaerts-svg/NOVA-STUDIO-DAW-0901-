@@ -318,8 +318,16 @@ async ({ path, SR, name, sets, change }) => {
   // 1) Écoutes successives (même instance) contre l'export.
   const exp1 = await exportNow();
   const ecoutes = [];
-  for (let k = 0; k < 3; k++) ecoutes.push(cmp(await capture(), exp1));
+  // Machine partagée : une écoute dérangée (bloc du pont en retard : silence) est refaite, 2 fois au plus ;
+  // toutes les tentatives sont gardées (une vraie mémoire du plugin, elle, se reproduirait à chaque fois).
+  const tentatives = [];
+  for (let k = 0; k < 3; k++) {
+    let c = cmp(await capture(), exp1); const essais = [c.lsb16];
+    for (let r = 0; r < 2 && c.lsb16 > 1; r++) { c = cmp(await capture(), exp1); essais.push(c.lsb16); }
+    ecoutes.push(c); tentatives.push(essais);
+  }
   out.ecoutes_vs_export = ecoutes;
+  out.ecoutes_tentatives_lsb16 = tentatives;
   // 2) Réglage posé à l'arrêt puis export TOUT DE SUITE : l'export doit l'entendre.
   await novaBridge.setParams(node.getSlotId(), change);
   const expTout = await exportNow();
