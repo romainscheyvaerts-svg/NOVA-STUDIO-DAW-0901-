@@ -10,6 +10,7 @@ import { CollabOutbox, CollabOutboxOptions, CollabOutboxStore } from '../utils/c
 import { CollabStatus, initialCollabStatus } from '../utils/collabStatus';
 import { mergeQueuedOps, structureOf } from '../utils/collabMerge';
 import { isVocalTrack as isVocalTrackPure, ownsContent as ownsContentPure } from '../utils/collabPeers';
+import { inactivePlaylistClips, playlistsForWire } from '../utils/trackPlaylists';
 
 /**
  * Collaboration à distance (artiste, ingé son, beatmaker) sur une session en
@@ -641,6 +642,8 @@ export const contentOf = (t: Track) => ({
   // ignore ce champ et joue le comp. Absent (piste sans prise) : rien
   // d'envoyé, le contenu reste identique à celui d'une ancienne version.
   takeMeta: t.takeMeta && t.takeMeta.length ? t.takeMeta : undefined,
+  // Playlists de la piste (utils/trackPlaylists) : champ ajouté, absent sans playlist ; une ancienne version joue l'active.
+  ...(t.playlists?.length ? { playlists: playlistsForWire(t, clipForWire) } : {}),
   // Respirations (rôle de la piste pour le traitement auto) : champ ajouté, ignoré des anciennes versions.
   ...(t.breathKind ? { breathKind: t.breathKind } : {}),
   // Instrument VST du PC : le rendu des notes voyage avec la piste (sans
@@ -655,6 +658,8 @@ export const contentOf = (t: Track) => ({
 export const contentBufferIds = (t: Track): string[] => Array.from(new Set([
   // Jamais le son d'un beat non acheté.
   ...(t.clips || []).filter(c => !c.isUnlicensed).map(c => c.bufferId),
+  // Playlists rangées : leur son voyage aussi (l'autre peut basculer dessus).
+  ...inactivePlaylistClips(t).filter(c => !c.isUnlicensed).flatMap(c => [c.bufferId, c.pitchEdit?.sourceBufferId, c.araEdit?.sourceBufferId, c.audioSuite?.sourceBufferId, c.elastic?.sourceBufferId]),
   // Son d'origine des clips retouchés (justesse, Melodyne / VocAlign, AudioSuite,
   // transposition) : l'autre peut revenir à la prise d'origine ou retoucher à
   // nouveau. Déjà en ligne la plupart du temps (c'était la prise) : rien de plus à envoyer.

@@ -24,6 +24,9 @@ import { muteClickKind, soloClickKind } from '../utils/soloMute';
 import { runEditCommand } from '../utils/editCommands';
 import SoloMuteIndicators from './SoloMuteIndicators';
 import { useSoloMuteLongPress } from './MobileSoloMute';
+import { dropModeOf, INSERT_MIME, insertCopyMenuItems, SEND_MIME, transferInsert, transferSend } from '../utils/insertCopy';
+import { keymapStore } from '../utils/keymapStore';
+import { applyTracks } from '../utils/structureBus';
 
 /**
  * R21 · Commentaire de la tranche (Pro Tools : vue Commentaires de la console) :
@@ -61,6 +64,35 @@ const GROUP_COLORS = [
 // AudioWorklet (components/meters/TrackMeter.tsx).
 
 /** Même envoi : même destination ET même emplacement (Pro Tools : deux envois a et d vers RV PLATE). */
+/**
+ * Dépôt d'un insert ou d'un envoi venu d'une autre tranche (utils/insertCopy) :
+ * déplacé (Pro Tools) ou copié (Alt, préréglage NOVA). Vrai s'il a été traité.
+ */
+function dropFromStrip(e: React.DragEvent, dest: Track, index: number | undefined): boolean {
+  const mode = dropModeOf(e.altKey, keymapStore.get().preset);
+  const ins = e.dataTransfer.getData(INSERT_MIME);
+  if (ins) {
+    let d: { trackId?: string; pluginId?: string } = {};
+    try { d = JSON.parse(ins); } catch { return false; }
+    if (!d.trackId || !d.pluginId || d.trackId === dest.id) return false;
+    const src = d.trackId, pid = d.pluginId;
+    applyTracks(ts => transferInsert(ts, src, pid, dest.id, { index, move: mode === 'move' }).tracks,
+      `${mode === 'move' ? 'Effet déplacé' : 'Effet copié (réglages compris)'} sur « ${dest.name} »${mode === 'move' ? ' — Alt+glisser pour le copier' : ''}`);
+    return true;
+  }
+  const snd = e.dataTransfer.getData(SEND_MIME);
+  if (snd) {
+    let d: { trackId?: string; sendId?: string; slot?: number } = {};
+    try { d = JSON.parse(snd); } catch { return false; }
+    if (!d.trackId || !d.sendId || d.trackId === dest.id) return false;
+    const src = d.trackId, sid = d.sendId, slot = d.slot;
+    applyTracks(ts => transferSend(ts, src, sid, dest.id, { slot, move: mode === 'move' }).tracks,
+      `${mode === 'move' ? 'Envoi déplacé' : 'Envoi copié'} sur « ${dest.name} »${mode === 'move' ? ' — Alt+glisser pour le copier' : ''}`);
+    return true;
+  }
+  return false;
+}
+
 const sameSend = (a: TrackSend, b: TrackSend) => a.id === b.id && (a.slot ?? null) === (b.slot ?? null);
 
 const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], onUpdate: (t: Track) => void }> = ({ send, track, allTracks, onUpdate }) => {
@@ -96,6 +128,11 @@ const SendKnob: React.FC<{ send: TrackSend, track: Track, allTracks: Track[], on
           title={send.preFader ? 'Pré-fader : l’envoi part avant le fader (le fader ne le change pas). Touche pour repasser en post-fader.' : 'Post-fader : l’envoi suit le fader de la piste. Touche pour le passer en pré-fader.'}
           className={`mt-0.5 px-1 rounded text-[7px] font-black leading-[12px] tracking-wider ${send.preFader ? 'bg-amber-400/90 text-black' : 'text-slate-600 hover:text-slate-300'}`}
        >{send.preFader ? 'PRÉ' : 'POST'}</button>
+       {/* Glisser sur une autre tranche : déplace l'envoi (Pro Tools) ; Alt+glisser : le copie. */}
+       <span draggable data-send-grip={send.id}
+          onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData(SEND_MIME, JSON.stringify({ trackId: track.id, sendId: send.id, slot: send.slot })); e.dataTransfer.effectAllowed = 'copyMove'; }}
+          title={`Glisser sur une autre tranche : ${keymapStore.get().preset === 'protools' ? 'déplace' : 'copie'} cet envoi (niveau, pré / post) ; Alt+glisser : le copie`}
+          className="[@media(pointer:coarse)]:hidden cursor-grab text-[8px] leading-[10px] text-slate-600 hover:text-cyan-300 select-none" aria-hidden="true">⠿</span>
     </div>
   );
 };
@@ -221,6 +258,11 @@ const ChannelStrip: React.FC<{
         setIsDragOver(true);
         e.dataTransfer.dropEffect = 'copy';
     }
+    // Insert ou envoi d'une autre tranche (Pro Tools : glisser = déplacer, Alt+glisser = copier).
+    if (e.dataTransfer.types.includes(INSERT_MIME) || e.dataTransfer.types.includes(SEND_MIME)) {
+        setIsDragOver(true);
+        e.dataTransfer.dropEffect = dropModeOf(e.altKey, keymapStore.get().preset);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -228,6 +270,7 @@ const ChannelStrip: React.FC<{
     e.stopPropagation();
     setIsDragOver(false);
     
+    if (dropFromStrip(e, track, undefined)) return;
     const pluginType = e.dataTransfer.getData('pluginType') as PluginType;
     if (pluginType && onDropPlugin) {
         onDropPlugin(track.id, pluginType);
@@ -276,6 +319,7 @@ const ChannelStrip: React.FC<{
               e.dataTransfer.setData('pluginData', JSON.stringify(p));
               e.dataTransfer.setData('sourceTrackId', track.id);
               e.dataTransfer.setData('pluginIndex', String(idx));
+              e.dataTransfer.setData(INSERT_MIME, JSON.stringify({ trackId: track.id, pluginId: p.id }));
               e.dataTransfer.effectAllowed = 'copyMove';
             }}
             onDragOver={(e) => {
@@ -304,8 +348,8 @@ const ChannelStrip: React.FC<{
                 if (sourceTrackId === track.id && onReorderPlugins) {
                   onReorderPlugins(track.id, fromIndex, idx);
                 } 
-                // Different track = copy
-                else if (sourceTrackId !== track.id && onCopyPluginToTrack) {
+                // Autre tranche : déplacer (Pro Tools) ou copier (Alt, préréglage NOVA), à cette place.
+                else if (sourceTrackId !== track.id && !dropFromStrip(e, track, idx) && onCopyPluginToTrack) {
                   onCopyPluginToTrack(sourceTrackId, pluginData, track.id);
                 }
               }
@@ -366,7 +410,7 @@ const ChannelStrip: React.FC<{
         )}
         {fxMenu && (
           <FloatingMenu x={fxMenu.x} y={fxMenu.y} title={fxMenu.p.name || fxMenu.p.type} onClose={() => setFxMenu(null)}
-            items={pluginStateMenuItems(track.id, fxMenu.p, () => onOpenPlugin?.(track.id, fxMenu.p))} />
+            items={[...pluginStateMenuItems(track.id, fxMenu.p, () => onOpenPlugin?.(track.id, fxMenu.p)), 'separator', ...insertCopyMenuItems(track, fxMenu.p, allTracks, (fn, label) => applyTracks(fn, label))]} />
         )}
         {insertList && (
           <InsertListPopover anchor={insertList} title={`Effets de ${track.name}`} plugins={track.plugins}

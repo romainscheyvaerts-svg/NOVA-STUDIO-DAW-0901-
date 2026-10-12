@@ -6,6 +6,7 @@ import { playheadStore } from '../utils/playheadStore';
 import { countLabel, setAllMute, setAllSolo, soloMuteStatus, toggleField, toggleSoloSafe } from '../utils/soloMute';
 import { clipLockNotices, toggleClipLock } from '../utils/clipLock';
 import { meterBank } from '../engine/meters/meterBank';
+import { exclusiveSolo, soloModeStore } from '../utils/soloModes';
 
 /**
  * Commandes Pro Tools du quotidien (ingé voix / mix), branchées sur le bus des
@@ -109,7 +110,11 @@ export function useProToolsUtiles(d: ProToolsUtilesDeps) {
       if (!ids.length) { dd().notify('Sélectionne d’abord une piste (clic sur son nom).'); return true; }
       const r = toggleField(s0.tracks, ids, field);
       if (!r.count) { dd().notify('Le master n’a ni solo ni muet de piste.'); return true; }
-      apply(s => ({ ...s, tracks: toggleField(s.tracks, ids, field).tracks }));
+      apply(s => {
+        const tracks = toggleField(s.tracks, ids, field).tracks;
+        // Solo X-OR (utils/soloModes) : le solo de la sélection annule les autres.
+        return { ...s, tracks: field === 'isSolo' && r.on && soloModeStore.get() === 'xor' ? exclusiveSolo(tracks, ids) : tracks };
+      });
       const names = s0.tracks.filter(t => ids.includes(t.id) && t.id !== 'master').map(t => `« ${t.name} »`).join(', ');
       dd().notify(field === 'isSolo'
         ? (r.on ? `🎧 Solo : ${names}. Maj+S pour réentendre tout, Alt+Maj+S efface tous les solos.` : `Solo retiré : ${names}.`)

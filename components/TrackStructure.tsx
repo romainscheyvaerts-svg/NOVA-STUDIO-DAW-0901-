@@ -18,6 +18,9 @@ import { openNovaWindow } from '../utils/novaWindows';
 import { canCommit, canPrintBus, canRestore, commitLabel, restoreCommitted } from '../utils/commit';
 import { OWN_LONG_PRESS_ATTR, swallowReleaseClick } from '../utils/touchGestures';
 import { isAraInsert } from '../utils/araInsert';
+import { canHavePlaylists, playlistsOf } from '../utils/trackPlaylists';
+import { runEditCommand } from '../utils/editCommands';
+import { PlaylistChip } from './TrackPlaylistMenu';
 
 /**
  * Morceaux d'interface de la structure façon Pro Tools (voir utils/trackStructure) :
@@ -167,6 +170,17 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
     title: 'Enregistrer ou rappeler toute la chaîne de la piste : effets, envois, volume, pan, sortie (Pro Tools : Track Presets · Logic : Patches · Ableton : Rack · FL : état de piste)',
     onClick: () => openNovaWindow('track-preset', { trackId: id }),
   });
+  // Playlists de piste (Pro Tools : New / Duplicate Playlist, sélecteur de playlist).
+  if (canHavePlaylists(target)) {
+    const { list, activeId } = playlistsOf(target);
+    items.push({ label: 'Nouvelle playlist (vide)', icon: 'fa-plus', title: 'Pro Tools « New Playlist » : une version vide de la piste ; l’actuelle est gardée',
+      onClick: () => runEditCommand('playlistNew', { trackIds: [id] }) });
+    items.push({ label: 'Dupliquer la playlist', icon: 'fa-clone', title: 'Pro Tools « Duplicate Playlist » : copie de travail (avant un nettoyage, une version clean…)',
+      onClick: () => runEditCommand('playlistNew', { trackIds: [id], duplicate: true }) });
+    if (list.length > 1) list.filter(p => p.id !== activeId).slice(0, 6).forEach(p => items.push({
+      label: `Écouter la playlist « ${p.name} »`, icon: 'fa-list', onClick: () => runEditCommand('playlistSwitch', { trackId: id, id: p.id }),
+    }));
+  }
   // R6 : Commit, impression de bus, restauration.
   if (canCommit(target) && (target.clips || []).length) items.push({
     label: 'Commit (rendre avec les effets)…', icon: 'fa-check-double',
@@ -178,6 +192,8 @@ export const structureMenuItems = (target: Track | undefined, tracks: Track[]): 
     title: 'Le son exact du bus, aligné à l’échantillon, sur une piste audio (Pro Tools : enregistrer un bus · Logic : Bounce in Place d’un aux · Ableton : Resample)',
     onClick: () => openNovaWindow('print-bus', { trackId: id }),
   });
+  items.push({ label: 'Commit / geler plusieurs pistes…', icon: 'fa-layer-group', shortcut: 'Alt+Maj+C',
+    title: 'Coche les pistes à rendre d’un coup (Commit, geler, dégeler)', onClick: () => openNovaWindow('batch-render', { trackIds: [id] }) });
   if (canRestore(target, tracks)) items.push({
     label: 'Restaurer la piste d’origine', icon: 'fa-rotate-left',
     title: `${commitLabel(target, tracks)} : la piste rendue est retirée, l’originale revient telle qu’elle était (Ctrl+Z pour annuler)`,
@@ -263,7 +279,8 @@ export const TrackStructureBadge: React.FC<{ track: Track }> = ({ track }) => {
 /** Pastille dossier / VCA à côté du nom de la piste (clic : replier / déplier le dossier). */
 export const TrackStructureInline: React.FC<{ track: Track }> = ({ track }) => {
   const all = useStructureTracks();
-  if (!track.folder && !track.isVca) return null;
+  // Playlists de la piste (plusieurs versions) : pastille avec le nom de celle qu'on entend.
+  if (!track.folder && !track.isVca) return (track.playlists?.length || 0) > 1 ? <PlaylistChip track={track} /> : null;
   const members = track.isVca && all ? vcaMembers(track, all).length : 0;
   const kids = track.folder && all ? all.filter(t => t.parentFolderId === track.id).length : 0;
   return (

@@ -258,6 +258,9 @@ import { simpleModeStore, useSimpleMode } from './utils/simpleMode';
 import { setFeedbackAppState } from './utils/feedbackContext';
 import { setFeedbackUserEmail } from './services/feedback';
 import { planRecording, trimTake, cutAroundPunch, punchXfadeSec, punchFromRange, quickPunchStopDelay, hasPunchZone, barSeconds } from './utils/punch';
+import { applyIncomingPlaylists, sanitizeIncomingPlaylists } from './utils/trackPlaylists';
+import { useProToolsEcarts } from './hooks/useProToolsEcarts';
+import { soloModeStore } from './utils/soloModes';
 import { splitLoopPasses, keptLoopPasses, droppedPassNote, punchedPassages, patchMeta, nextTakeNumber, listLanes, deleteTake, duplicateTake, renameTake, keepTake, takeCount, mergeIncomingTakeMeta } from './utils/playlists';
 import { compSwipe, compTapRange } from './utils/comping';
 import type { TakeLanesApi } from './components/PlaylistLanes';
@@ -1821,6 +1824,10 @@ function Studio() {
         const trackIndex = draft.tracks.findIndex(t => t.id === updatedTrack.id);
         if (trackIndex !== -1) {
             draft.tracks[trackIndex] = updatedTrack;
+        }
+        // Solo X-OR (utils/soloModes) : ce solo annule les précédents (pas les membres d'un groupe lié).
+        if (previousTrack && !previousTrack.isSolo && updatedTrack.isSolo && !groupLinkingRef.current && soloModeStore.get() === 'xor') {
+            draft.tracks.forEach(t => { if (t.id !== updatedTrack.id && t.id !== 'master' && t.isSolo) t.isSolo = false; });
         }
     }));
     // Groupes de mix (R12) : volume, muet, solo… suivent sur les autres membres.
@@ -5138,6 +5145,11 @@ function Studio() {
     stateRef, setState, selectedTrackIds,
     notify: (msg) => { setAiNotification(msg); setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), 6000); },
   });
+  // Écarts Pro Tools restants (playlists de piste, écrire l'automation sur la sélection, solo X-OR, Commit / gel en lot).
+  useProToolsEcarts({
+    stateRef, setState, selectedTrackIds, freezeTrack: handleFreezeTrack,
+    notify: (msg) => { setAiNotification(msg); setTimeout(() => setAiNotice(n => (n?.text === msg ? null : n)), 7000); },
+  });
 
   // --- R23 · Changer de beat en gardant les voix, repunch intelligent (hooks/useR23).
   const r23 = useR23(state, {
@@ -5628,6 +5640,8 @@ function Studio() {
             else if (clipWise) delete t.breathKind;
             // Couloirs de prises (champ ajouté) : absent = envoyé par une ancienne version, on garde les noms locaux.
             t.takeMeta = mergeIncomingTakeMeta(t.takeMeta as TakeMeta[] | undefined, ct.takeMeta);
+            // Playlists de la piste (champ ajouté ; absent = ancienne version ou piste sans playlist : les nôtres restent).
+            applyIncomingPlaylists(t as Track, sanitizeIncomingPlaylists(ct.playlists));
             // Instrument VST du beatmaker : on reçoit le rendu de ses notes.
             if (ct.vstInstrument) {
               const keep = t.vstInstrument?.path === ct.vstInstrument.path ? t.vstInstrument.stateB64 : undefined;

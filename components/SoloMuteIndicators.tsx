@@ -2,6 +2,7 @@ import React from 'react';
 import type { Track } from '../types';
 import { runEditCommand } from '../utils/editCommands';
 import { countLabel, soloMuteStatus } from '../utils/soloMute';
+import { useSoloMode } from '../utils/soloModes';
 
 /**
  * Indicateurs globaux de solo et de muet (Pro Tools 2023.6 : « Solo / Mute
@@ -11,6 +12,7 @@ import { countLabel, soloMuteStatus } from '../utils/soloMute';
  */
 const SoloMuteIndicators: React.FC<{ tracks: Track[]; vertical?: boolean; className?: string }> = ({ tracks, vertical, className = '' }) => {
   const st = soloMuteStatus(tracks);
+  const mode = useSoloMode();
   if (!st.soloed.length && !st.muted.length) return null;
   const names = (l: Track[]) => l.slice(0, 6).map(t => t.name).join(', ') + (l.length > 6 ? '…' : '');
   const chip = 'nova-hit-tactile inline-flex items-center gap-1 h-6 [@media(pointer:coarse)]:h-8 px-2 rounded-md text-[10px] font-black border transition-colors whitespace-nowrap';
@@ -18,10 +20,10 @@ const SoloMuteIndicators: React.FC<{ tracks: Track[]; vertical?: boolean; classN
     <div className={`flex ${vertical ? 'flex-col items-stretch' : 'items-center'} gap-1 ${className}`} data-testid="solo-mute-indicators" role="group" aria-label="Solos et mutes en cours">
       {st.soloed.length > 0 && (
         <button type="button" data-testid="clear-solos" onClick={(e) => { e.stopPropagation(); runEditCommand('soloAll', { on: false }); }}
-          title={`En solo : ${names(st.soloed)}. Appuie pour effacer tous les solos (Alt+Maj+S, ou Alt+clic sur un S).`}
+          title={`En solo : ${names(st.soloed)}. Appuie pour effacer tous les solos (Alt+Maj+S, ou Alt+clic sur un S).${mode === 'xor' ? ' Mode X-OR : un nouveau solo annule les précédents.' : ''}`}
           aria-label={`Effacer les solos : ${countLabel(st.soloed.length, 'piste', 'pistes')} en solo`}
           className={`${chip} bg-amber-400 text-black border-amber-300 hover:bg-amber-300`}>
-          S<span className="tabular-nums">{st.soloed.length}</span><i className="fas fa-times text-[8px] opacity-70" aria-hidden="true" />
+          S<span className="tabular-nums">{st.soloed.length}</span>{mode === 'xor' && <span data-testid="solo-xor-badge" className="rounded bg-black/20 px-1 text-[8px]">X-OR</span>}<i className="fas fa-times text-[8px] opacity-70" aria-hidden="true" />
         </button>
       )}
       {st.muted.length > 0 && (

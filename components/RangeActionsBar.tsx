@@ -5,6 +5,8 @@ import { useEditSelection } from '../utils/editSelection';
 import { selLength } from '../utils/timeSelection';
 import { openNovaWindow } from '../utils/novaWindows';
 import { fmtDb, parseDb } from '../utils/automationRange';
+import { runEditCommand } from '../utils/editCommands';
+import { chordLabel, keysOf } from '../utils/keymap';
 
 /**
  * Barre d'actions de la sélection de plage (Sélecteur / Smart Tool) : tout ce
@@ -24,6 +26,8 @@ const RangeActionsBar: React.FC<{ commands: EditCommands; insetLeft?: number }> 
   // « Volume de la plage » : petite fenêtre de saisie en dB, au-dessus de la barre.
   const [volOpen, setVolOpen] = useState(false);
   const [volText, setVolText] = useState('+1');
+  // « Écrire sur la plage » (Pro Tools : Write to Current / All Enabled) : la valeur actuelle du fader.
+  const [writeOpen, setWriteOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   // Pendant un geste commencé ailleurs (glisser une plage, déplacer un clip), la barre
@@ -33,7 +37,7 @@ const RangeActionsBar: React.FC<{ commands: EditCommands; insetLeft?: number }> 
   useEffect(() => {
     const down = (e: PointerEvent) => {
       const t = e.target as Node | null;
-      if (t && (barRef.current?.contains(t) || (t as HTMLElement).closest?.('[data-testid="range-volume"]'))) return;
+      if (t && (barRef.current?.contains(t) || (t as HTMLElement).closest?.('[data-testid="range-volume"], [data-testid="range-write"]'))) return;
       setPassive(true);
     };
     const up = () => setPassive(false);
@@ -42,7 +46,7 @@ const RangeActionsBar: React.FC<{ commands: EditCommands; insetLeft?: number }> 
     window.addEventListener('pointercancel', up, true);
     return () => { window.removeEventListener('pointerdown', down, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true); };
   }, []);
-  useEffect(() => { if (!time) setVolOpen(false); }, [time]);
+  useEffect(() => { if (!time) { setVolOpen(false); setWriteOpen(false); } }, [time]);
   useEffect(() => { if (volOpen) setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 0); }, [volOpen]);
   if (!time) return null;
   const volDb = parseDb(volText);
@@ -59,6 +63,7 @@ const RangeActionsBar: React.FC<{ commands: EditCommands; insetLeft?: number }> 
     { label: 'Boucler', icon: 'fa-sync-alt', title: 'Boucler la lecture sur la plage (« Loop Playback » sur la sélection)', run: commands.loopSelection },
     { label: 'Punch', icon: 'fa-bullseye', title: 'La plage devient la zone de punch : REC ne remplacera qu\'elle (Punch-in / punch-out de Pro Tools)', run: commands.punchSelection },
     { label: 'Volume', icon: 'fa-volume-high', title: 'Volume de la plage : monter ou baisser la courbe de volume des pistes sélectionnées de N dB (refrain +2 dB…), rampes de 10 ms aux bords (Pro Tools : Trim sur la sélection en vue volume, « Write to Selection »)', run: () => setVolOpen(v => !v) },
+    { label: 'Écrire', icon: 'fa-pen-nib', title: 'Écrire la valeur ACTUELLE du fader (ou du pan, ou de tous les réglages) sur toute la plage : règle à l’oreille, puis écris (Pro Tools : Write Automation to Current, Ctrl+/ ; to All Enabled, Ctrl+Alt+/)', run: () => { setVolOpen(false); setWriteOpen(v => !v); } },
     { label: 'Copier l’automation', icon: 'fa-wave-square', title: 'Copier l’automation de la plage : volume, pan, muet, envois et réglages d’effets de chaque piste (« Copy Special > Automation » de Pro Tools)', run: commands.copyAutomation },
     ...(commands.hasAutomationClipboard() ? [{ label: 'Coller l’automation', icon: 'fa-paste', title: 'Coller l’automation copiée au début de la plage, sur les mêmes réglages (« Paste Special > Merge » de Pro Tools) ; un réglage d’effet absent de la piste est ignoré', run: commands.pasteAutomation }] : []),
     { label: 'Exporter', icon: 'fa-compact-disc', title: 'Exporter seulement la plage (« Bounce » de la sélection dans Pro Tools)', run: commands.exportSelection },
@@ -99,6 +104,26 @@ const RangeActionsBar: React.FC<{ commands: EditCommands; insetLeft?: number }> 
           <button type="button" onClick={() => bump(1)} aria-label="+1 dB" className="nova-hit-tactile h-8 w-9 rounded-lg bg-white/5 text-[12px] font-bold text-slate-200 hover:bg-white/10">+1</button>
           <button type="button" onClick={() => applyVol()} disabled={volDb === null || Math.abs(volDb) < 1e-9} data-testid="range-volume-apply"
             className="h-8 rounded-lg bg-sky-500 px-3 text-[11px] font-black text-black disabled:opacity-40">{volDb === null ? 'dB ?' : `Appliquer ${fmtDb(volDb)}`}</button>
+        </div>
+      , document.body)}
+      {writeOpen && createPortal(
+        <div role="menu" aria-label="Écrire l’automation sur la plage" data-testid="range-write"
+          className="fixed z-[650] flex flex-col gap-0.5 rounded-xl border border-sky-400/30 bg-nv-surface p-1.5 shadow-2xl min-w-[260px]"
+          style={(() => { const r = barRef.current?.getBoundingClientRect(); return r ? { bottom: Math.max(8, window.innerHeight - r.top + 4), left: Math.max(8, r.left) } : {}; })()}
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setWriteOpen(false); } }}>
+          <span className="px-2 pt-0.5 pb-1 text-[10px] font-bold uppercase tracking-wide text-sky-200">Écrire la valeur actuelle sur la plage</span>
+          {([
+            { id: 'pt.writeCurrent', label: 'Volume (position du fader)', arg: {} },
+            { id: 'pt.writePan', label: 'Pan', arg: { param: 'pan' } },
+            { id: 'pt.writeAll', label: 'Tous les réglages automatisés', arg: { all: true } },
+          ]).map(o => (
+            <button key={o.id} type="button" role="menuitem" data-testid={`range-${o.id}`}
+              onClick={() => { runEditCommand('writeAutomation', o.arg); setWriteOpen(false); }}
+              className="nova-hit-tactile flex min-h-[34px] [@media(pointer:coarse)]:min-h-[44px] items-center gap-2 rounded-lg px-2 text-left text-[12px] font-semibold text-slate-100 hover:bg-white/10">
+              <span className="flex-1">{o.label}</span>
+              <span className="text-[10px] text-slate-400">{keysOf(o.id)[0] ? chordLabel(keysOf(o.id)[0]) : ''}</span>
+            </button>
+          ))}
         </div>
       , document.body)}
     </>

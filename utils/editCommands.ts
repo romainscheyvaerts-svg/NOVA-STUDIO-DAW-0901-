@@ -29,7 +29,10 @@ export type EditCommandId =
   // Groupes et temps (R12, hooks/useR12) : créer un groupe, suspendre les groupes, insérer / supprimer du temps.
   | 'groupCreate' | 'groupsSuspend' | 'insertTime'
   // Solo / muet, diodes, verrou de clip, sélection de piste (hooks/useProToolsUtiles, hooks/useArrangementCommands).
-  | 'soloAll' | 'muteAll' | 'soloSafe' | 'soloSelected' | 'muteSelected' | 'clearClipIndicators' | 'clipLock' | 'selectTrackClips';
+  | 'soloAll' | 'muteAll' | 'soloSafe' | 'soloSelected' | 'muteSelected' | 'clearClipIndicators' | 'clipLock' | 'selectTrackClips'
+  // Écarts Pro Tools (hooks/useProToolsEcarts) : playlists de piste, écrire l'automation sur la sélection, mode de solo, Commit / gel en lot.
+  | 'playlistNew' | 'playlistStep' | 'playlistRecent' | 'playlistSwitch' | 'playlistRename' | 'playlistDelete'
+  | 'writeAutomation' | 'soloMode' | 'batchRender' | 'ioSetup';
 
 export type EditCommandHandler = (arg?: any) => boolean | void;
 
