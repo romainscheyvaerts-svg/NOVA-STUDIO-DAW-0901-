@@ -219,7 +219,7 @@ export function vstLateMessage(name: string, st: VstLateState, sampleRate: numbe
   const ms = Math.round((st.prebufferFrames / (sampleRate || 48000)) * 1000);
   const head = `Le plugin ${name} a pris du retard : ${coupures(st.dropouts10s)} en 10 s.`;
   if (!st.adaptive) return `${head} Ferme les programmes inutiles ou gèle la piste.`;
-  if (st.atMax) return `${head} Tampon déjà au maximum (${ms} ms) : gèle la piste pour ne plus dépendre du pont.`;
+  if (st.atMax) return `${head} Tampon agrandi au maximum (${ms} ms), retard compensé. Si ça coupe encore, gèle la piste.`;
   if (st.grown) return `${head} Tampon agrandi à ${ms} ms, retard compensé : la piste reste calée.`;
   return head;
 }

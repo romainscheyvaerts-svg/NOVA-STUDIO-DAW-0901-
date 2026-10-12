@@ -231,6 +231,6 @@ describe('C6 · thread principal : coupures sur 10 s, descente, alerte', () => {
     expect(vstLateMessage('Pro-C 3', c.state(2000), 48000))
       .toBe('Le plugin Pro-C 3 a pris du retard : 12 coupures en 10 s. Tampon agrandi à 128 ms, retard compensé : la piste reste calée.');
     c.onGrow(8192);
-    expect(vstLateMessage('Pro-C 3', c.state(2000), 48000)).toMatch(/Tampon déjà au maximum \(171 ms\) : gèle la piste/);
+    expect(vstLateMessage('Pro-C 3', c.state(2000), 48000)).toContain('Tampon agrandi au maximum (171 ms), retard compensé. Si ça coupe encore, gèle la piste.');
   });
 });

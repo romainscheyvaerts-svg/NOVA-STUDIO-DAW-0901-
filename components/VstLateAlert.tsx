@@ -66,7 +66,7 @@ const VstLateAlert: React.FC<Props> = ({ tracks, onFreezeTrack }) => {
         {!alert.adaptive
           ? <span className="text-slate-300">Ferme les programmes inutiles, ou gèle la piste.</span>
           : atMax
-            ? <span className="text-amber-200">Tampon déjà au maximum ({ms} ms). Gèle la piste pour ne plus dépendre du pont.</span>
+            ? <span className="text-amber-200">NOVA a agrandi son tampon au maximum ({ms} ms) : retard compensé, tes pistes restent calées. Si ça coupe encore, gèle la piste pour ne plus dépendre du pont.</span>
             : grown
               ? <span className="text-emerald-200">NOVA a agrandi son tampon à {ms} ms : le son ne coupe plus. Ce retard est compensé, tes pistes restent calées.</span>
               : <span className="text-slate-300">NOVA agrandit son tampon si ça continue (retard compensé).</span>}
