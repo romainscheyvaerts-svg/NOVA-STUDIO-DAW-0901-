@@ -15,9 +15,10 @@ export const BAR_MENU = 'data-bar-menu';
 export const barItem = (item: string, prio: number) => ({ 'data-bar-item': item, 'data-bar-prio': prio });
 
 const overflowing = (bar: HTMLElement): boolean => {
-  if (bar.scrollWidth > bar.clientWidth + 1) return true;
+  // Strict : 1 px de trop suffit à faire défiler la barre et à rogner le BPM.
+  if (bar.scrollWidth > bar.clientWidth) return true;
   for (const g of Array.from(bar.children) as HTMLElement[]) {
-    if (g.scrollWidth > g.clientWidth + 1) return true;
+    if (g.scrollWidth > g.clientWidth) return true;
   }
   return false;
 };
