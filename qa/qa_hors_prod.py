@@ -595,6 +595,22 @@ def _ws_handler(ws):
     ws.on_message(lambda m: None)
 
 
+_INIT_SANS_PONT_APPLI = r"""(() => {
+  const W = window.WebSocket;
+  if (!W || W.__qaSansPontAppli) return;
+  function QAWebSocket(url, protocols) {
+    try {
+      const u = new URL(String(url), location.href);
+      if (['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname) && (u.port === '8765' || u.port === '8766')) url = 'ws://127.0.0.1:9/';
+    } catch (e) { /* adresse illisible : laissée telle quelle */ }
+    return protocols === undefined ? new W(url) : new W(url, protocols);
+  }
+  QAWebSocket.prototype = W.prototype;
+  Object.assign(QAWebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3, __qaSansPontAppli: true });
+  window.WebSocket = QAWebSocket;
+})();"""
+
+
 def install(context, log=None):
     """Branche le catalogue simulé sur un contexte (une seule fois par contexte)."""
     if log is not None:
@@ -610,6 +626,12 @@ def install(context, log=None):
     if ALLOW_PROD or _SERVER_MODE or getattr(context, "_qa_hors_prod", False):
         return context
     context._qa_hors_prod = True
+    if os.environ.get("QA_PONT_APPLI") != "1":
+        # Jamais le pont de l'appli installée (8765/8766) : la page le voit absent (port fermé).
+        try:
+            context.add_init_script(_INIT_SANS_PONT_APPLI)
+        except Exception:
+            pass
     _ORIG["ctx_route"](context, SUPA_URL_RX, _route_handler)
     try:
         _ORIG["ctx_route_ws"](context, re.compile(r"^wss?://[a-z0-9-]+\.supabase\.co/", re.I), _ws_handler)

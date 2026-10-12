@@ -30,6 +30,10 @@ BATTERIE = [
     ("protools_utiles", []), ("r17_raccourcis_scrub", []), ("catalogue_indisponible", []),
     # Tour 3 (utilisable et pro) : séance d'ingé complète, restes du tour 2, console du téléphone.
     ("seance_inge", []), ("restes_pro3", []), ("console_telephone", []),
+    # 1.4.6-1.4.7 : fréquence par projet, artiste invité, collaboration (prise en direct, commentaires, lien d'écoute).
+    ("frequence_preuve", []), ("collab_artiste", []), ("prise_directe", []), ("commentaires_versions", []), ("lien_ecoute", []),
+    # Scénarios avec un pont de test (ports fixes) : à lancer avec --jobs 1 (phase séparée).
+    ("sauvegarde_persistante", []), ("prise_pont", []), ("fidelite_export", []), ("pont_protools", []), ("silence_pont_vst", []),
 ]
 
 
