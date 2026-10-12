@@ -137,6 +137,13 @@ def client_page(b, cloud, rt, fl, tag, log):
     return ctx, pg
 
 
+def created_link(E, label):
+    """Lien tout juste créé (ligne « label », partage ouvert) : son adresse et son identifiant."""
+    row = E.locator("[data-testid=listen-link]").filter(has=E.locator("p", has_text=label))
+    wait_for(E, lambda: row.count() > 0 and row.first.get_by_test_id("listen-link-url").count() > 0, 20, what=f"lien « {label} » créé")
+    return row.first.get_by_test_id("listen-link-url").input_value(), row.first.get_attribute("data-link-id")
+
+
 def run():
     res = {"name": "lien_ecoute", "passe": PASSE, "ok": True, "steps": [], "verifications": {}, "mesures": {},
            "note": "Serveur NOVA, daw-listen et Supabase Realtime SIMULÉS ; WebRTC réel entre deux pages headless ; aucune requête vers la production."}
@@ -203,11 +210,9 @@ def run():
                 cb = E.get_by_test_id(f"listen-opt-{k}")
                 if not cb.is_checked(): cb.check()
             E.get_by_test_id("listen-create").click()
-            wait_for(E, lambda: E.get_by_test_id("listen-link-url").count() > 0, 20, what="lien créé")
-            url = E.get_by_test_id("listen-link-url").input_value()
+            url, st["link_id"] = created_link(E, "Label Nina")
             st["url"] = url
             st["token"] = url.split("#t=")[-1]
-            st["link_id"] = E.get_by_test_id("listen-link").first.get_attribute("data-link-id")
             E.get_by_test_id("listen-copy").click()
             wait_for(E, lambda: "copié" in E.get_by_test_id("listen-copy").inner_text(), 5, what="« Lien copié »")
             wait_for(E, lambda: E.get_by_test_id("listen-qr").count() > 0, 10, what="QR code")
@@ -348,9 +353,7 @@ def run():
             E.get_by_test_id("listen-label").fill("Manager")
             E.get_by_test_id("listen-ttl-24").click()
             E.get_by_test_id("listen-create").click()
-            wait_for(E, lambda: E.get_by_test_id("listen-link-url").count() > 0, 20, what="2e lien créé")
-            url = E.get_by_test_id("listen-link-url").input_value()
-            lid = E.get_by_test_id("listen-link").first.get_attribute("data-link-id")
+            url, lid = created_link(E, "Manager")
             fl.expire(lid)
             ctx2, C2 = client_page(b, cloud, rt, fl, "C2", logs["C2"])
             pages["C2"] = C2
@@ -370,8 +373,7 @@ def run():
             E.get_by_test_id("listen-label").fill("Artiste")
             E.get_by_test_id("listen-password-new").fill("nina2026")
             E.get_by_test_id("listen-create").click()
-            wait_for(E, lambda: E.get_by_test_id("listen-link-url").count() > 0, 20, what="lien protégé créé")
-            url = E.get_by_test_id("listen-link-url").input_value()
+            url, _ = created_link(E, "Artiste")
             ctx3, C3 = client_page(b, cloud, rt, fl, "C3", logs["C3"])
             pages["C3"] = C3
             C3.goto(url, wait_until="domcontentloaded")
