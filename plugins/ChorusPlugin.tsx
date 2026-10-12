@@ -124,7 +124,7 @@ export class ChorusNode {
     const panPositions = [-0.8, 0.8, -0.4, 0.4];
     
     for (let i = 0; i < this.maxVoices; i++) {
-      const delay = this.ctx.createDelay(0.03); // tampon court : position de lecture interpolée plus précise (lecture = export)
+      const delay = this.ctx.createDelay(0.022); // tampon court : position de lecture interpolée plus précise (lecture = export)
       delay.delayTime.value = 0.007 + i * 0.003; // Slightly offset base delays
       
       const depthGain = this.ctx.createGain();
