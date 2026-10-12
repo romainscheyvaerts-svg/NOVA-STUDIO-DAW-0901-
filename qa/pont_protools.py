@@ -376,7 +376,7 @@ def one_rate(p, sr, res, step, check, pages):
         return {
             "prise": new, "fichier": str(path), "delai_pose_fichier_s": round(t_file - t_pose, 3), "delai_interne_ms": entry and entry.get("ms"),
             "entree": entry, "bext": {k: info[k] for k in ("sample_rate", "channels", "bits", "float", "time_reference", "description", "originator", "bext_version", "coding_history", "frames")},
-            "ixml_extrait": (info["ixml"] or "")[:600], "timereference_attendu": exp_tr, "ecart_echantillons": info["time_reference"] - exp_tr,
+            "ixml": info["ixml"] or "", "timereference_attendu": exp_tr, "ecart_echantillons": info["time_reference"] - exp_tr,
             "position_nova_echantillons": round(new["start"] * sr), "position_nova_s": new["start"], "identique_au_bit_pres": same,
             "frequences": {"projet": region["projet_sr"], "contexte": region["contexte_sr"], "son": region["sr"]},
             "longueur_nova": region["len"], "longueur_fichier": info["frames"],
@@ -394,8 +394,9 @@ def one_rate(p, sr, res, step, check, pages):
         check(f"[{tag}] {fmt} : fréquence du fichier = projet = moteur ({o['frequences']})", o["bext"]["sample_rate"] == sr and o["frequences"]["projet"] == sr and o["frequences"]["contexte"] == sr)
         check(f"[{tag}] {fmt} : échantillons identiques au bit près au son de la prise chez Max ({o['longueur_fichier']} images)", o["identique_au_bit_pres"])
         check(f"[{tag}] {fmt} : format ({'32 bits flottants' if fmt == '32f' else '24 bits entiers'}) et iXML (SCENE, TAKE, horodatage)",
-              o["bext"]["bits"] == (32 if fmt == "32f" else 24) and o["bext"]["float"] == (fmt == "32f") and "<SCENE>Voix lead</SCENE>" in o["ixml_extrait"]
-              and f"<TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_LO>{o['bext']['time_reference'] % 2 ** 32}<" in o["ixml_extrait"])
+              o["bext"]["bits"] == (32 if fmt == "32f" else 24) and o["bext"]["float"] == (fmt == "32f") and "<SCENE>Voix lead</SCENE>" in o["ixml"]
+              and f"<TAKE>{o['prise']['takeNumber']}</TAKE>" in o["ixml"]
+              and f"<TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_LO>{o['bext']['time_reference'] % 2 ** 32}<" in o["ixml"])
         check(f"[{tag}] {fmt} : retour visuel chez Max (« Envoyée vers Pro Tools · Spot à … » + message)", "Envoyée vers Pro Tools" in o["ui"] and o["message_visible"])
 
     if sr == 48000:

@@ -15,8 +15,6 @@ import {
 interface Props {
   /** Prises déjà dans la séance (pour « Envoyer aussi les prises déjà là »). */
   existing: () => TakesBatch[];
-  /** Diffusion du mix en cours (la source choisie part tout de suite). */
-  mixOutOn: boolean;
 }
 
 const btn = 'h-10 rounded-xl px-3 text-[12px] font-black transition-colors disabled:opacity-40';
@@ -40,18 +38,22 @@ function EntryRow({ e, fps }: { e: PtEntry; fps: TimecodeFps }) {
     <li data-testid="pt-entry" data-status={e.status} data-file={e.file} className="rounded-xl bg-white/[0.03] px-2.5 py-2 text-[12px] leading-snug">
       <span className="font-bold text-slate-100">{icon} {e.file}</span>
       <span className="block text-[11px] text-slate-400">
-        {e.status === 'ok' && <>Envoyée vers Pro Tools{e.updated ? ' (mise à jour)' : ''} · Spot à {positionLabel(e.position, e.sampleRate)} · TC {tc}{typeof e.ms === 'number' ? ` · ${(e.ms / 1000).toFixed(1).replace('.', ',')} s` : ''}</>}
+        {e.status === 'ok' && <>Envoyée vers Pro Tools{e.updated ? ' (mise à jour)' : ''} · Spot à {positionLabel(e.position, e.sampleRate)} · TC {tc}</>}
         {e.status === 'envoi' && <>Écriture…</>}
         {e.status === 'attente' && <>{e.error} : clique « Autoriser le dossier ».</>}
         {e.status === 'erreur' && <span className="text-red-300">{e.error}</span>}
       </span>
       {e.renamed && <span className="block text-[11px] text-amber-200">L’original est ouvert dans Pro Tools : nouvelle version écrite à côté.</span>}
-      {e.status === 'ok' && e.path && e.target === 'bridge' && <span className="block truncate text-[10px] text-slate-500" title={e.path}>{e.path}</span>}
+      {e.status === 'ok' && (
+        <span className="block truncate text-[10px] text-slate-500" title={e.path}>
+          {typeof e.ms === 'number' ? `Écrite en ${(e.ms / 1000).toFixed(1).replace('.', ',')} s` : 'Écrite'}{e.target === 'bridge' && e.path ? ` · ${e.path}` : e.target === 'download' ? ' · Téléchargements' : ''}
+        </span>
+      )}
     </li>
   );
 }
 
-export const ProToolsPanel: React.FC<Props> = ({ existing, mixOutOn }) => {
+export const ProToolsPanel: React.FC<Props> = ({ existing }) => {
   const sink = useSink();
   const s = sink.getSettings();
   const [target, setTarget] = useState<PtTarget>('download');
@@ -169,13 +171,12 @@ export const ProToolsPanel: React.FC<Props> = ({ existing, mixOutOn }) => {
           )}
         </div>
       )}
-      <MixSourcePicker mixOutOn={mixOutOn} />
     </div>
   );
 };
 
 /** Source du mix diffusé à l'artiste : NOVA, ou une entrée système (sortie de Pro Tools). */
-const MixSourcePicker: React.FC<{ mixOutOn: boolean }> = ({ mixOutOn }) => {
+export const MixSourcePicker: React.FC<{ mixOutOn: boolean }> = ({ mixOutOn }) => {
   const ctl = mixSource();
   const [, force] = useState(0);
   useEffect(() => ctl.subscribe(() => force(n => n + 1)), [ctl]);

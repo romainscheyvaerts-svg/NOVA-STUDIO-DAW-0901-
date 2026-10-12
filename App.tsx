@@ -201,7 +201,7 @@ import GuestStudio from './components/GuestStudio';
 import RemoteIngePanel from './components/RemoteIngePanel';
 import LiveVstRemotePanel from './components/LiveVstRemotePanel';
 // Pont Pro Tools (chantier 9) : prises BWF horodatées + mix d'une entrée système diffusé.
-import ProToolsPanel from './components/ProToolsPanel';
+import ProToolsPanel, { MixSourcePicker } from './components/ProToolsPanel';
 import { mixSource, proToolsSink, takesBatchOf, writtenMessage } from './services/ProToolsBridge';
 import { useRemoteInge } from './hooks/useRemoteInge';
 import { parseRemoteLink } from './utils/remoteInge';
@@ -10183,6 +10183,7 @@ function Studio() {
           return {
             talkOn, onTalk: (on: boolean) => { void setTalk(on); },
             canMixOut: collab.role === 'engineer', mixOutOn, onToggleMixOut: () => { void toggleMixOut(); },
+            mixSource: collab.role === 'engineer' ? <MixSourcePicker mixOutOn={mixOutOn} /> : undefined,
             remoteMixFrom: mixFrom ? nameOf(mixFrom) : null, listening: listenRemoteMix, onToggleListen: toggleListenRemoteMix,
             mixStatus, onRetryMix: retryRemoteMix, mixQuality: mixQualityLabel(mixQuality),
             talking: collabOnline.filter(m => m.talk && remoteAudio[participantOf(m.member_key)]?.talk && participantOf(m.member_key) !== collab.key).map(m => m.display_name),
@@ -10196,7 +10197,7 @@ function Studio() {
         savedRemote={state.remoteInge ? { role: state.remoteInge.role } : null}
         proTools={collab?.role === 'engineer' ? (
           <PanelBoundary name="le pont Pro Tools" compact>
-            <ProToolsPanel mixOutOn={mixOutOn} existing={() => stateRef.current.tracks
+            <ProToolsPanel existing={() => stateRef.current.tracks
               .filter(t => t.collabOwner === 'artist' || (t.clips || []).some(k => k.takeNumber))
               .map(t => takesBatchOf(t.id, t.name, t.collabOwnerName || 'Artiste', t.clips || [], stateRef.current.name))} />
           </PanelBoundary>
