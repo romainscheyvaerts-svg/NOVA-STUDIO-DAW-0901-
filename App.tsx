@@ -5416,9 +5416,13 @@ function Studio() {
       step('envoi du son…');
       const refs = await uploadBuffers(c.client.link, [id], (sent, total) => { c.client.reportUpload(sent, total); step(`envoi du son… ${Math.round((sent / Math.max(1, total)) * 100)} %`); });
       const ref = refs[id];
+      // Envoyé : plus besoin de le garder en mémoire (réécoute = téléchargé à nouveau, jamais renvoyé).
+      audioBufferRegistry.remove(id);
       return ref ? { bufferId: id, parts: ref.parts, size: ref.size, duration: Math.round(r.buffer.duration * 1000) / 1000 } : null;
     },
     fetchAudio: async (ref) => {
+      // Une seule version en mémoire à la fois (≈ 30 Mo par minute de mix) : les autres sont relâchées.
+      (stateRef.current.mixVersions || []).forEach(v => { if (v.audio && v.audio.bufferId !== ref.bufferId && audioBufferRegistry.has(v.audio.bufferId)) audioBufferRegistry.remove(v.audio.bufferId); });
       if (!audioBufferRegistry.has(ref.bufferId)) {
         const c = collabRef.current;
         if (!c) return null;

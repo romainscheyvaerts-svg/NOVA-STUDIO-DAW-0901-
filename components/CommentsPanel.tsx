@@ -157,15 +157,20 @@ const Composer: React.FC<{ api: TimelineCommentsApi; position: () => number; sel
   const [error, setError] = useState<string | null>(null);
   // Position de lecture reprise tant qu'on n'a rien écrit (le commentaire tombe là où on a mis pause).
   const touched = useRef(false);
+  // Lus par référence : l'intervalle n'est pas relancé à chaque rendu du studio.
+  const posRef = useRef(position);
+  posRef.current = position;
+  const selRef = useRef(selection);
+  selRef.current = selection;
   useEffect(() => {
     const id = window.setInterval(() => {
       if (touched.current) return;
-      setTimeTxt(fmtTime(position()).replace(',', '.'));
-      const sel = selection?.() || null;
+      setTimeTxt(fmtTime(posRef.current()).replace(',', '.'));
+      const sel = selRef.current?.() || null;
       setRange(sel && sel.end - sel.start > 0.05 ? sel : null);
     }, 400);
     return () => window.clearInterval(id);
-  }, [position, selection]);
+  }, []);
   const submit = () => {
     const t = range ? range.start : parseTime(timeTxt);
     if (t === null) { setError('Heure illisible : écris par exemple 1:12.'); return; }
