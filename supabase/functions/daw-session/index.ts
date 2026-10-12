@@ -20,6 +20,13 @@ const MAX_SESSION_BYTES = 1500 * 1024 * 1024; // 1,5 Go par session
 const MAX_MANIFEST_CHARS = 4_000_000;
 const MAX_PARTS_PER_CALL = 200;
 const STALE_DAYS = 180; // sessions oubliées : supprimées à la création d'une nouvelle
+// Collaboration (journal d'opérations) : l'activité repousse le ménage des 180 jours.
+// Au plus une écriture par heure et par session (pas une par opération).
+const ACTIVITY_REFRESH_MS = 3600_000;
+// Invitation par code (« Feat à distance ») : 6 caractères sans ambiguïté, valable 24 h.
+const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const INVITE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/;
+const INVITE_TTL_MS = 24 * 3600_000;
 
 const ALLOWED_ORIGINS = [
   "https://nova-studio-daw-0901-9kzo.vercel.app",
@@ -89,6 +96,28 @@ async function authorize(id: unknown, secret: unknown, user: { id: string } | nu
 
 const linkOf = (row: Pick<Row, "id" | "secret">) => (row.secret ? `${row.id}.${row.secret}` : null);
 
+/**
+ * Une session où l'on collabore (opérations, connexions) est active : avant,
+ * seul un « commit » de l'instantané mettait updated_at à jour, et une session
+ * de collaboration (ou un lien « Ingé à distance », qui n'a jamais
+ * d'instantané) pouvait être supprimée au bout de 180 jours en pleine
+ * utilisation. updated_at est rafraîchi au plus une fois par heure.
+ */
+async function touchActivity(row: Pick<Row, "id" | "updated_at">) {
+  const last = Date.parse(row.updated_at || "") || 0;
+  if (Date.now() - last < ACTIVITY_REFRESH_MS) return;
+  const { error } = await supabase.from("daw_sessions").update({ updated_at: new Date().toISOString() }).eq("id", row.id);
+  if (error) console.warn("[daw-session] activité", row.id, error.message);
+}
+
+/** Collaboration : abonnement 5 €/mois pour chaque compte qui collabore (le studio en est dispensé). */
+async function requireCollabPlan(userId: string) {
+  if (await isAdmin(userId)) return;
+  const { data: subs } = await supabase.from("nova_subscriptions").select("status, current_period_end")
+    .eq("user_id", userId).eq("plan", "collab").in("status", ["active", "trialing", "past_due"]);
+  if (!subs?.length) throw new HttpError(402, "Abonnement collaboration requis (5 €/mois)");
+}
+
 /** Morceaux référencés par un manifeste : { files: { chemin: { parts: [sha1…] } } }. */
 const partsOf = (manifest: any): string[] => {
   const out = new Set<string>();
@@ -124,6 +153,22 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
       .eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(100);
     if (error) throw new HttpError(500, error.message);
     return { sessions: (data || []).map((r: any) => ({ id: r.id, link: linkOf(r), name: r.name, version: r.version, total_bytes: r.total_bytes, updated_at: r.updated_at, updated_from: r.updated_from, created_at: r.created_at })) };
+  }
+
+  if (action === "resolve_code") {
+    // Code d'invitation (6 caractères) → lien de la session. Compte connecté ET abonné
+    // (comme pour rejoindre) : un code deviné ne suffit pas à ouvrir une session.
+    if (!user) throw new HttpError(401, "Connecte-toi à ton compte Make Music pour collaborer");
+    await requireCollabPlan(user.id);
+    const code = String(body?.code || "").toUpperCase().replace(/[\s\-_.]/g, "");
+    const fail = async () => { await new Promise(r => setTimeout(r, 400)); throw new HttpError(404, "Code introuvable ou expiré"); };
+    if (!INVITE_RE.test(code)) return await fail();
+    const { data: inv } = await supabase.from("daw_session_invites").select("session_id, expires_at").eq("code", code).maybeSingle();
+    if (!inv || Date.parse(inv.expires_at) < Date.now()) return await fail();
+    const { data: s } = await supabase.from("daw_sessions").select("id, secret, name").eq("id", inv.session_id).maybeSingle();
+    const link = s ? linkOf(s as Pick<Row, "id" | "secret">) : null;
+    if (!link) return await fail();
+    return { link, name: (s as any).name };
   }
 
   if (action === "create") {
@@ -232,18 +277,22 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
 
   // --- Collaboration (artiste / ingé son / beatmaker) -------------------------
   const ROLES = ["artist", "engineer", "beatmaker"];
-  const memberKeyOf = () => (user ? `u:${user.id}` : `d:${String(body?.device_id || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40)}`);
+  const deviceOf = () => String(body?.device_id || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
+  // Une clé par APPAREIL : le même compte peut être artiste sur son PC et ingé sur sa
+  // tablette (avant : « u:<compte> », la 2e connexion écrasait le rôle de la 1re).
+  // Sans identifiant d'appareil (ancien client) : l'ancienne clé, comme avant.
+  const memberKeyOf = () => {
+    const dev = deviceOf();
+    if (user) return dev ? `u:${user.id}:${dev}` : `u:${user.id}`;
+    return `d:${dev}`;
+  };
 
   if (action === "join") {
     const role = String(body?.role || "");
     if (!ROLES.includes(role)) throw new HttpError(400, "Rôle inconnu");
     // Collaboration = abonnement 5 €/mois pour chaque compte qui collabore (le studio en est dispensé).
     if (!user) throw new HttpError(401, "Connecte-toi à ton compte Make Music pour collaborer");
-    if (!(await isAdmin(user.id))) {
-      const { data: subs } = await supabase.from("nova_subscriptions").select("status, current_period_end")
-        .eq("user_id", user.id).eq("plan", "collab").in("status", ["active", "trialing", "past_due"]);
-      if (!subs?.length) throw new HttpError(402, "Abonnement collaboration requis (5 €/mois)");
-    }
+    await requireCollabPlan(user.id);
     const key = memberKeyOf();
     if (key === "d:") throw new HttpError(400, "Appareil inconnu");
     const name = String(body?.name || user?.email?.split("@")[0] || "Invité").slice(0, 40);
@@ -251,6 +300,7 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
       session_id: row.id, member_key: key, user_id: user?.id || null, role, display_name: name, last_seen: new Date().toISOString(),
     });
     if (error) throw new HttpError(500, error.message);
+    await touchActivity(row);
     const { data: last } = await supabase.from("daw_session_ops").select("seq").eq("session_id", row.id).order("seq", { ascending: false }).limit(1);
     const { data: members } = await supabase.from("daw_session_members").select("member_key, role, display_name, last_seen").eq("session_id", row.id);
     return { member_key: key, last_seq: last?.[0]?.seq || 0, members: members || [], channel: `nova-collab-${row.id}-${(await sha256(row.secret_hash)).slice(0, 16)}` };
@@ -262,15 +312,45 @@ async function handle(body: any, user: { id: string; email?: string } | null) {
     const op = body?.op;
     if (!op || typeof op !== "object") throw new HttpError(400, "Opération vide");
     if (JSON.stringify(op).length > 1_500_000) throw new HttpError(413, "Opération trop grosse");
-    const key = memberKeyOf();
-    const { data: m } = await supabase.from("daw_session_members").select("role, display_name").eq("session_id", row.id).eq("member_key", key).maybeSingle();
+    let key = memberKeyOf();
+    let { data: m } = await supabase.from("daw_session_members").select("role, display_name").eq("session_id", row.id).eq("member_key", key).maybeSingle();
+    if (!m && user && key !== `u:${user.id}`) {
+      // Rejoint avant la clé par appareil (fonction mise à jour en pleine session) : son ancienne clé.
+      const legacy = `u:${user.id}`;
+      const r2 = await supabase.from("daw_session_members").select("role, display_name").eq("session_id", row.id).eq("member_key", legacy).maybeSingle();
+      if (r2.data) { m = r2.data; key = legacy; }
+    }
     if (!m) throw new HttpError(403, "Rejoins d'abord la session");
     const { data, error } = await supabase.from("daw_session_ops").insert({
       session_id: row.id, member_key: key, role: m.role, author_name: m.display_name, kind, op,
     }).select("seq, created_at").single();
     if (error) throw new HttpError(500, error.message);
     await supabase.from("daw_session_members").update({ last_seen: new Date().toISOString() }).eq("session_id", row.id).eq("member_key", key);
+    await touchActivity(row);
     return { seq: data.seq, created_at: data.created_at, role: m.role, author_name: m.display_name, member_key: key };
+  }
+
+  if (action === "invite_code") {
+    // Code à 6 caractères pour inviter (dicté au téléphone, écrit sur un mur…) : le même
+    // pendant 24 h pour une session, un nouveau ensuite.
+    if (!user) throw new HttpError(401, "Connecte-toi à ton compte Make Music pour inviter");
+    if (!linkOf(row)) throw new HttpError(409, "Cette session n'a pas de lien partageable");
+    const now = Date.now();
+    const { data: cur } = await supabase.from("daw_session_invites").select("code, expires_at").eq("session_id", row.id)
+      .gt("expires_at", new Date(now + 3600_000).toISOString()).order("expires_at", { ascending: false }).limit(1);
+    if (cur?.[0]) return { code: cur[0].code, expires_at: cur[0].expires_at };
+    const expires_at = new Date(now + INVITE_TTL_MS).toISOString();
+    for (let i = 0; i < 6; i++) {
+      const code = randomToken(6, INVITE_ALPHABET);
+      const { error } = await supabase.from("daw_session_invites").insert({ code, session_id: row.id, created_by: user.id, expires_at });
+      if (!error) {
+        // Ménage : codes expirés depuis plus d'un jour.
+        await supabase.from("daw_session_invites").delete().lt("expires_at", new Date(now - 86400_000).toISOString());
+        return { code, expires_at };
+      }
+      if (!/duplicate|unique/i.test(error.message)) throw new HttpError(500, error.message);
+    }
+    throw new HttpError(503, "Code indisponible pour l'instant : envoie le lien");
   }
 
   if (action === "ops_since") {
